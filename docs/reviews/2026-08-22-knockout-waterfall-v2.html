@@ -1,0 +1,3457 @@
+<title>Knockout Waterfall v2</title>
+<style>
+:root{
+  --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+  --line:#262C35; --line-strong:#59647A;
+  --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+  --ice:#56D9EC; --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --tier-1st:#2dd4bf;
+  --sans:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+  --cond:'Barlow Condensed','Archivo Narrow','Arial Narrow',var(--sans);
+  --mono:'IBM Plex Mono','SFMono-Regular',Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ink-0);color:var(--chalk);
+  font-family:var(--sans);font-size:14px;line-height:1.5;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding:32px 16px 96px}
+h1{font-family:var(--cond);font-weight:700;font-size:32px;line-height:34px;
+  text-transform:uppercase;letter-spacing:.02em;margin:0 0 8px}
+h2{font-family:var(--cond);font-weight:600;font-size:22px;line-height:26px;
+  text-transform:uppercase;letter-spacing:.03em;margin:48px 0 12px;
+  padding-bottom:8px;border-bottom:1px solid var(--line)}
+h3{font-family:var(--cond);font-weight:600;font-size:22px;line-height:26px;
+  text-transform:uppercase;letter-spacing:.03em;margin:0 0 12px;
+  display:flex;align-items:center;gap:8px}
+.sub{color:var(--chalk-dim);font-size:13px;line-height:18px;margin:0 0 4px}
+.lede{color:var(--chalk-dim);max-width:74ch}
+p{max-width:78ch}
+code{font-family:var(--mono);font-size:12.5px;font-weight:500;
+  background:var(--ink-2);padding:1px 5px;border-radius:2px;color:var(--chalk)}
+.banner{background:var(--ink-1);border:1px solid var(--line);border-left:3px solid var(--flare);
+  border-radius:4px;padding:12px 16px;margin:16px 0 24px}
+.banner strong{color:var(--chalk)}
+.banner p{margin:0;color:var(--chalk-dim);font-size:13px;line-height:19px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+  gap:8px;margin:24px 0}
+.kpi{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+.kpi .k{display:block;font-family:var(--sans);font-weight:600;font-size:11px;
+  line-height:14px;text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim)}
+.kpi .v{display:block;font-family:var(--mono);font-weight:600;font-size:22px;
+  line-height:26px;font-variant-numeric:tabular-nums;margin-top:4px}
+.scroll{overflow-x:auto;border:1px solid var(--line);border-radius:8px;
+  background:var(--ink-1);margin:12px 0 8px}
+table{border-collapse:collapse;width:100%;min-width:640px}
+th{font-family:var(--sans);font-weight:600;font-size:11px;line-height:14px;
+  text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim);
+  text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);
+  background:var(--ink-2);position:sticky;top:0;white-space:nowrap}
+td{padding:8px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover{background:var(--ink-2)}
+.num{font-family:var(--mono);font-weight:500;font-size:13px;line-height:18px;
+  font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+th.num{text-align:right}
+.strong{font-weight:600;color:var(--chalk)}
+.dim{color:var(--chalk-dim)}
+.na{color:var(--chalk-faint)}
+.ix{font-family:var(--mono);font-size:12px;color:var(--chalk-faint);text-align:right}
+.rule{min-width:190px}
+.rule .what{display:block;color:var(--chalk-dim);font-size:12.5px;
+  line-height:17px;margin-top:3px;max-width:52ch}
+.bar{display:block;height:3px;background:var(--ink-3);border-radius:2px;
+  margin-top:5px;overflow:hidden}
+.bar .fill{display:block;height:100%}
+tr.dead td{color:var(--chalk-dim)}
+tr.dead .rule code{color:var(--chalk-dim)}
+tr.live .rule code{color:var(--ice)}
+tr.surv td{background:var(--ink-2);border-top:1px solid var(--line-strong)}
+.chip{display:inline-block;font-family:var(--mono);font-size:11px;font-weight:600;
+  line-height:14px;padding:2px 6px;border-radius:2px;border:1px solid var(--c);
+  color:var(--c);margin-right:4px;white-space:nowrap}
+.dot{width:10px;height:10px;border-radius:2px;display:inline-block}
+.arms{white-space:nowrap}
+.arrow{color:var(--chalk-faint)}
+.dir{white-space:nowrap;font-size:13px}
+.sh{font-family:var(--mono);font-size:12px;color:var(--chalk-dim)}
+.side{font-size:13px;line-height:18px;min-width:180px}
+.verd{white-space:nowrap;font-size:12.5px}
+.lean{font-family:var(--mono);font-size:12px;text-transform:lowercase}
+.lean-receive{color:var(--pos)}
+.lean-give{color:var(--neg)}
+.lean-even{color:var(--chalk-dim)}
+.arm{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+  padding:16px;margin:16px 0}
+.arm .scroll{background:var(--ink-0)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));
+  gap:8px;margin-bottom:12px}
+.stats>div{background:var(--ink-2);border-radius:4px;padding:8px 10px}
+.stats .k{display:block;font-size:11px;line-height:14px;text-transform:uppercase;
+  letter-spacing:.08em;color:var(--chalk-dim);font-weight:600}
+.stats .v{display:block;font-family:var(--mono);font-weight:600;font-size:16px;
+  line-height:22px;font-variant-numeric:tabular-nums;margin-top:2px}
+table.pairs{min-width:420px}
+.note{color:var(--chalk-dim);font-size:12.5px;line-height:18px;margin:6px 0 0}
+.foot{margin-top:48px;padding-top:16px;border-top:1px solid var(--line);
+  color:var(--chalk-faint);font-size:12.5px;line-height:18px}
+.label{font-size:11px;line-height:14px;text-transform:uppercase;letter-spacing:.08em;
+  font-weight:600;color:var(--chalk-dim);display:flex;align-items:center;gap:6px;
+  margin:24px 0 6px}
+.label::before{content:"";width:3px;height:12px;background:var(--ice);
+  border-radius:2px;display:inline-block}
+</style>
+<div class="wrap">
+<h1>Knockout waterfall v2</h1>
+<p class="sub">2026-08-22 &middot; league 1312140920132497408 &middot; three managers, six ordered pairs,
+three rostered arms &middot; engine <code>941a36d</code> &middot; snapshot 2026-08-22</p>
+
+<div class="banner">
+  <p><strong>This supersedes nothing.</strong> It is a second measurement at a second engine
+  state, not a correction of the 2026-08-19 run. Roughly thirty commits sit between the two,
+  including a package-pricing change that moves the value bar itself.
+  <code>git diff origin/main -- backend/ config/ mobile/ web/</code> is empty; no engine line was changed.</p>
+</div>
+
+<div class="kpis">
+  <div class="kpi"><span class="k">candidates</span><span class="v">1,052,513</span></div>
+  <div class="kpi"><span class="k">survived every gate</span><span class="v">266</span></div>
+  <div class="kpi"><span class="k">survival rate</span><span class="v">0.025%</span></div>
+  <div class="kpi"><span class="k">cards emitted</span><span class="v">48</span></div>
+  <div class="kpi"><span class="k">mean gap, all</span><span class="v">4,284</span></div>
+  <div class="kpi"><span class="k">mean gap, survivors</span><span class="v">1,499</span></div>
+</div>
+
+<h2>Combined waterfall</h2>
+<p class="lede">First-kill is the rule that actually stopped the trade, in real execution order.
+Only-kills counts the trades that rule was the <em>sole</em> reason for. A big first-kill
+column with an empty only-kill column means the rule is standing where the traffic is,
+not doing work of its own. Rules whose kills are more than half independent are marked in ice;
+rules that kill nothing uniquely are dimmed.</p>
+<div class="scroll"><table>
+<thead><tr><th>rule</th><th class="num">first kills</th><th class="num">% of universe</th>
+<th class="num">only-kills</th><th class="num">independent</th><th class="num">mean gap</th>
+<th>arms</th></tr></thead>
+<tbody><tr>
+  <td class="rule"><code>gap_max</code><span class="what">Won't pair two headliners more than 250 board points apart.</span></td>
+  <td class="num">508,132<span class="bar"><span class="fill" style="width:48.278%;background:var(--chalk-faint)"></span></span></td>
+  <td class="num">48.278%</td>
+  <td class="num strong">12</td>
+  <td class="num">0.0%</td>
+  <td class="num">5,019</td>
+  <td class="arms"><span class="chip" style="--c:var(--ice)">current</span><span class="chip" style="--c:var(--flare)">challenger</span></td>
+</tr><tr>
+  <td class="rule"><code>R0_141_filler</code><span class="what">Every extra piece must be worth at least a quarter of its side's best player.</span></td>
+  <td class="num">480,197<span class="bar"><span class="fill" style="width:45.624%;background:var(--chalk-faint)"></span></span></td>
+  <td class="num">45.624%</td>
+  <td class="num strong">12,543</td>
+  <td class="num">2.6%</td>
+  <td class="num">3,414</td>
+  <td class="arms"><span class="chip" style="--c:var(--ice)">current</span><span class="chip" style="--c:var(--flare)">challenger</span></td>
+</tr><tr>
+  <td class="rule"><code>S3a_141_filler</code><span class="what">The same junk-filler rule, inside gen_v2's pipeline.</span></td>
+  <td class="num">46,227<span class="bar"><span class="fill" style="width:4.392%;background:var(--chalk-faint)"></span></span></td>
+  <td class="num">4.392%</td>
+  <td class="num strong">1,286</td>
+  <td class="num">2.8%</td>
+  <td class="num">5,091</td>
+  <td class="arms"><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+</tr><tr>
+  <td class="rule"><code>G6_R1_overpay</code><span class="what">Kills clearly lopsided deals: 500+ value AND 25%+ more one way.</span></td>
+  <td class="num">9,832<span class="bar"><span class="fill" style="width:0.934%;background:var(--chalk-faint)"></span></span></td>
+  <td class="num">0.934%</td>
+  <td class="num strong">118</td>
+  <td class="num">1.2%</td>
+  <td class="num">5,149</td>
+  <td class="arms"><span class="chip" style="--c:var(--ice)">current</span><span class="chip" style="--c:var(--flare)">challenger</span></td>
+</tr><tr>
+  <td class="rule"><code>S3c_dual_eps_opp</code><span class="what">The partner has to gain on their own board.</span></td>
+  <td class="num">1,544<span class="bar"><span class="fill" style="width:0.350%;background:var(--chalk-faint)"></span></span></td>
+  <td class="num">0.147%</td>
+  <td class="num strong">31</td>
+  <td class="num">2.0%</td>
+  <td class="num">7,955</td>
+  <td class="arms"><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+</tr><tr class="live">
+  <td class="rule"><code>min_side_surplus</code><span class="what">Both managers must gain at least 60 on their own rankings.</span></td>
+  <td class="num">1,241<span class="bar"><span class="fill" style="width:0.350%;background:var(--chalk-faint)"></span></span></td>
+  <td class="num">0.118%</td>
+  <td class="num strong">1,142</td>
+  <td class="num">92.0%</td>
+  <td class="num">742</td>
+  <td class="arms"><span class="chip" style="--c:var(--ice)">current</span><span class="chip" style="--c:var(--flare)">challenger</span></td>
+</tr><tr>
+  <td class="rule"><code>S3a_net_cap</code><span class="what">No more than a one-player net swing at any position.</span></td>
+  <td class="num">1,130<span class="bar"><span class="fill" style="width:0.350%;background:var(--chalk-faint)"></span></span></td>
+  <td class="num">0.107%</td>
+  <td class="num strong">15</td>
+  <td class="num">1.3%</td>
+  <td class="num">9,819</td>
+  <td class="arms"><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+</tr><tr class="dead">
+  <td class="rule"><code>R0_227_pickswap</code><span class="what">A pick-for-pick swap moves nothing for anyone.</span></td>
+  <td class="num">819<span class="bar"><span class="fill" style="width:0.350%;background:var(--chalk-faint)"></span></span></td>
+  <td class="num">0.078%</td>
+  <td class="num strong">0</td>
+  <td class="num">0.0%</td>
+  <td class="num">663</td>
+  <td class="arms"><span class="chip" style="--c:var(--ice)">current</span><span class="chip" style="--c:var(--flare)">challenger</span></td>
+</tr><tr>
+  <td class="rule"><code>G6_R5_need</code><span class="what">Contenders must receive an actual roster need.</span></td>
+  <td class="num">648<span class="bar"><span class="fill" style="width:0.350%;background:var(--chalk-faint)"></span></span></td>
+  <td class="num">0.062%</td>
+  <td class="num strong">106</td>
+  <td class="num">16.4%</td>
+  <td class="num">1,019</td>
+  <td class="arms"><span class="chip" style="--c:var(--ice)">current</span><span class="chip" style="--c:var(--flare)">challenger</span></td>
+</tr><tr>
+  <td class="rule"><code>S3c_dual_eps_user</code><span class="what">You have to gain on your own board.</span></td>
+  <td class="num">590<span class="bar"><span class="fill" style="width:0.350%;background:var(--chalk-faint)"></span></span></td>
+  <td class="num">0.056%</td>
+  <td class="num strong">88</td>
+  <td class="num">14.9%</td>
+  <td class="num">3,930</td>
+  <td class="arms"><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+</tr><tr>
+  <td class="rule"><code>G6_R2_posnet</code><span class="what">The live engine's positional net cap.</span></td>
+  <td class="num">587<span class="bar"><span class="fill" style="width:0.350%;background:var(--chalk-faint)"></span></span></td>
+  <td class="num">0.056%</td>
+  <td class="num strong">6</td>
+  <td class="num">1.0%</td>
+  <td class="num">694</td>
+  <td class="arms"><span class="chip" style="--c:var(--ice)">current</span><span class="chip" style="--c:var(--flare)">challenger</span></td>
+</tr><tr>
+  <td class="rule"><code>R0_108_1for1</code><span class="what">Never send a player you rank above the one coming back, one-for-one.</span></td>
+  <td class="num">399<span class="bar"><span class="fill" style="width:0.350%;background:var(--chalk-faint)"></span></span></td>
+  <td class="num">0.038%</td>
+  <td class="num strong">4</td>
+  <td class="num">1.0%</td>
+  <td class="num">754</td>
+  <td class="arms"><span class="chip" style="--c:var(--ice)">current</span><span class="chip" style="--c:var(--flare)">challenger</span></td>
+</tr><tr class="live">
+  <td class="rule"><code>S3d_fairness_band</code><span class="what">gen_v2's market-value band — a ratio, not an absolute.</span></td>
+  <td class="num">346<span class="bar"><span class="fill" style="width:0.350%;background:var(--chalk-faint)"></span></span></td>
+  <td class="num">0.033%</td>
+  <td class="num strong">346</td>
+  <td class="num">100.0%</td>
+  <td class="num">5,877</td>
+  <td class="arms"><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+</tr><tr>
+  <td class="rule"><code>S3a_pick_band</code><span class="what">A pick used as the exact filler papering over a large gap.</span></td>
+  <td class="num">173<span class="bar"><span class="fill" style="width:0.350%;background:var(--chalk-faint)"></span></span></td>
+  <td class="num">0.016%</td>
+  <td class="num strong">14</td>
+  <td class="num">8.1%</td>
+  <td class="num">2,162</td>
+  <td class="arms"><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+</tr><tr>
+  <td class="rule"><code>S3b_feasibility</code><span class="what">Starting-lineup check inside gen_v2.</span></td>
+  <td class="num">132<span class="bar"><span class="fill" style="width:0.350%;background:var(--chalk-faint)"></span></span></td>
+  <td class="num">0.013%</td>
+  <td class="num strong">14</td>
+  <td class="num">10.6%</td>
+  <td class="num">5,238</td>
+  <td class="arms"><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+</tr><tr>
+  <td class="rule"><code>G6_R3_pickgap</code><span class="what">The live engine's pick-as-filler rule.</span></td>
+  <td class="num">94<span class="bar"><span class="fill" style="width:0.350%;background:var(--chalk-faint)"></span></span></td>
+  <td class="num">0.009%</td>
+  <td class="num strong">18</td>
+  <td class="num">19.1%</td>
+  <td class="num">2,046</td>
+  <td class="arms"><span class="chip" style="--c:var(--ice)">current</span><span class="chip" style="--c:var(--flare)">challenger</span></td>
+</tr><tr class="live">
+  <td class="rule"><code>feasibility</code><span class="what">Both teams must still field a legal lineup.</span></td>
+  <td class="num">83<span class="bar"><span class="fill" style="width:0.350%;background:var(--chalk-faint)"></span></span></td>
+  <td class="num">0.008%</td>
+  <td class="num strong">47</td>
+  <td class="num">56.6%</td>
+  <td class="num">3,062</td>
+  <td class="arms"><span class="chip" style="--c:var(--ice)">current</span><span class="chip" style="--c:var(--flare)">challenger</span></td>
+</tr><tr class="live">
+  <td class="rule"><code>fairness</code><span class="what">The live engine's market-fairness gate. The last gate before a card exists.</span></td>
+  <td class="num">73<span class="bar"><span class="fill" style="width:0.350%;background:var(--chalk-faint)"></span></span></td>
+  <td class="num">0.007%</td>
+  <td class="num strong">73</td>
+  <td class="num">100.0%</td>
+  <td class="num">3,426</td>
+  <td class="arms"><span class="chip" style="--c:var(--ice)">current</span><span class="chip" style="--c:var(--flare)">challenger</span></td>
+</tr><tr>
+  <td class="rule"><code>S3a_227_pickswap</code><span class="what">Pick-for-pick churn inside gen_v2.</span></td>
+  <td class="num">0<span class="bar"><span class="fill" style="width:0.350%;background:var(--chalk-faint)"></span></span></td>
+  <td class="num">0.000%</td>
+  <td class="num strong">0</td>
+  <td class="num">—</td>
+  <td class="num">—</td>
+  <td class="arms"><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+</tr>
+<tr class="surv"><td class="rule"><strong>SURVIVED ALL RULES</strong></td>
+<td class="num strong">266</td><td class="num">0.025%</td>
+<td class="num">—</td><td class="num">—</td>
+<td class="num strong">1,499</td>
+<td></td></tr>
+</tbody></table></div>
+<p class="note"><code>gap_max</code> and <code>R0_141_filler</code> first-kill 988,329 of
+1,052,513 candidates &mdash; 94% of every death &mdash; while between them accounting for
+12,555 independent kills. The four rules that carry real independent weight
+(<code>min_side_surplus</code>, <code>fairness</code>, <code>S3d_fairness_band</code>,
+<code>feasibility</code>) stop 1,608 trades in total: 0.15% of the universe.</p>
+
+<h2>Per arm</h2>
+<p class="lede">The arms do not share a taxonomy and are not forced into one.
+<code>current</code> and <code>challenger</code> run the same eleven-rung ladder at
+different knob values; <code>gen_v2</code> runs its own eight stages. The
+<code>S3*</code> rules exist only in <code>gen_v2</code>.</p>
+
+<section class="arm">
+  <h3><span class="dot" style="background:var(--ice)"></span>current</h3>
+  <div class="stats">
+    <div><span class="k">candidates</span><span class="v">501,144</span></div>
+    <div><span class="k">survived</span><span class="v">133</span></div>
+    <div><span class="k">survival rate</span><span class="v">0.027%</span></div>
+    <div><span class="k">cards emitted</span><span class="v">17</span></div>
+    <div><span class="k">mean gap, all</span><span class="v">4,151</span></div>
+    <div><span class="k">mean gap, survivors</span><span class="v">1,228</span></div>
+  </div>
+  <table class="wf">
+    <thead><tr><th></th><th>rule</th><th class="num">first kills</th><th class="num">% arm</th>
+    <th class="num">co-kills</th><th class="num">only-kills</th><th class="num">independent</th>
+    <th class="num">mean gap</th><th>leans</th></tr></thead>
+    <tbody><tr>
+  <td class="ix">1</td><td class="rule"><code>gap_max</code></td>
+  <td class="num">250,695<span class="bar"><span class="fill" style="width:50.025%;background:var(--ice)"></span></span></td>
+  <td class="num">50.025%</td>
+  <td class="num dim">250,695</td>
+  <td class="num strong">0</td>
+  <td class="num">0.0%</td>
+  <td class="num">5162.5</td>
+  <td class="lean lean-receive">receive</td>
+</tr><tr>
+  <td class="ix">2</td><td class="rule"><code>R0_108_1for1</code></td>
+  <td class="num">218<span class="bar"><span class="fill" style="width:0.350%;background:var(--ice)"></span></span></td>
+  <td class="num">0.044%</td>
+  <td class="num dim">464</td>
+  <td class="num strong">3</td>
+  <td class="num">1.4%</td>
+  <td class="num">695.5</td>
+  <td class="lean lean-give">give</td>
+</tr><tr>
+  <td class="ix">3</td><td class="rule"><code>R0_227_pickswap</code></td>
+  <td class="num">411<span class="bar"><span class="fill" style="width:0.350%;background:var(--ice)"></span></span></td>
+  <td class="num">0.082%</td>
+  <td class="num dim">538</td>
+  <td class="num strong">0</td>
+  <td class="num">0.0%</td>
+  <td class="num">733.4</td>
+  <td class="lean lean-give">give</td>
+</tr><tr>
+  <td class="ix">4</td><td class="rule"><code>R0_141_filler</code></td>
+  <td class="num">242,066<span class="bar"><span class="fill" style="width:48.303%;background:var(--ice)"></span></span></td>
+  <td class="num">48.303%</td>
+  <td class="num dim">489,609</td>
+  <td class="num strong">8,047</td>
+  <td class="num">3.3%</td>
+  <td class="num">3137.4</td>
+  <td class="lean lean-receive">receive</td>
+</tr><tr>
+  <td class="ix">5</td><td class="rule"><code>G6_R1_overpay</code></td>
+  <td class="num">5,836<span class="bar"><span class="fill" style="width:1.165%;background:var(--ice)"></span></span></td>
+  <td class="num">1.165%</td>
+  <td class="num dim">420,684</td>
+  <td class="num strong">52</td>
+  <td class="num">0.9%</td>
+  <td class="num">4196.6</td>
+  <td class="lean lean-receive">receive</td>
+</tr><tr>
+  <td class="ix">6</td><td class="rule"><code>G6_R2_posnet</code></td>
+  <td class="num">487<span class="bar"><span class="fill" style="width:0.350%;background:var(--ice)"></span></span></td>
+  <td class="num">0.097%</td>
+  <td class="num dim">186,578</td>
+  <td class="num strong">5</td>
+  <td class="num">1.0%</td>
+  <td class="num">561.9</td>
+  <td class="lean lean-receive">receive</td>
+</tr><tr>
+  <td class="ix">7</td><td class="rule"><code>G6_R3_pickgap</code></td>
+  <td class="num">54<span class="bar"><span class="fill" style="width:0.350%;background:var(--ice)"></span></span></td>
+  <td class="num">0.011%</td>
+  <td class="num dim">58,924</td>
+  <td class="num strong">14</td>
+  <td class="num">25.9%</td>
+  <td class="num">1891.8</td>
+  <td class="lean lean-receive">receive</td>
+</tr><tr>
+  <td class="ix">8</td><td class="rule"><code>G6_R5_need</code></td>
+  <td class="num">648<span class="bar"><span class="fill" style="width:0.350%;background:var(--ice)"></span></span></td>
+  <td class="num">0.129%</td>
+  <td class="num dim">169,661</td>
+  <td class="num strong">106</td>
+  <td class="num">16.4%</td>
+  <td class="num">1019.1</td>
+  <td class="lean lean-receive">receive</td>
+</tr><tr>
+  <td class="ix">9</td><td class="rule"><code>feasibility</code></td>
+  <td class="num">6<span class="bar"><span class="fill" style="width:0.350%;background:var(--ice)"></span></span></td>
+  <td class="num">0.001%</td>
+  <td class="num dim">19,423</td>
+  <td class="num strong">1</td>
+  <td class="num">16.7%</td>
+  <td class="num">5159.9</td>
+  <td class="lean lean-receive">receive</td>
+</tr><tr>
+  <td class="ix">10</td><td class="rule"><code>min_side_surplus</code></td>
+  <td class="num">538<span class="bar"><span class="fill" style="width:0.350%;background:var(--ice)"></span></span></td>
+  <td class="num">0.107%</td>
+  <td class="num dim">409,825</td>
+  <td class="num strong">513</td>
+  <td class="num">95.4%</td>
+  <td class="num">540.2</td>
+  <td class="lean lean-receive">receive</td>
+</tr><tr>
+  <td class="ix">11</td><td class="rule"><code>fairness</code></td>
+  <td class="num">52<span class="bar"><span class="fill" style="width:0.350%;background:var(--ice)"></span></span></td>
+  <td class="num">0.010%</td>
+  <td class="num dim">397,345</td>
+  <td class="num strong">52</td>
+  <td class="num">100.0%</td>
+  <td class="num">3154.8</td>
+  <td class="lean lean-receive">receive</td>
+</tr><tr class="surv">
+  <td class="ix">—</td><td class="rule"><strong>SURVIVED</strong></td>
+  <td class="num">133</td>
+  <td class="num">0.027%</td>
+  <td class="num dim">—</td><td class="num">—</td><td class="num">—</td>
+  <td class="num strong">1228.5</td>
+  <td class="lean">give 21 · receive 109 · even 3</td>
+</tr></tbody>
+  </table>
+  <table class="pairs">
+    <thead><tr><th>direction (deck generated for the left manager)</th>
+    <th class="num">candidates</th><th class="num">survivors</th></tr></thead>
+    <tbody><tr><td>gdubs10 <span class='arrow'>&rarr;</span> jonbonjourvi</td><td class='num dim'>83,524</td><td class='num strong'>10</td></tr><tr><td>gdubs10 <span class='arrow'>&rarr;</span> mattmurf77</td><td class='num dim'>83,524</td><td class='num strong'>4</td></tr><tr><td>jonbonjourvi <span class='arrow'>&rarr;</span> gdubs10</td><td class='num dim'>83,524</td><td class='num strong'>101</td></tr><tr><td>jonbonjourvi <span class='arrow'>&rarr;</span> mattmurf77</td><td class='num dim'>83,524</td><td class='num strong'>3</td></tr><tr><td>mattmurf77 <span class='arrow'>&rarr;</span> gdubs10</td><td class='num dim'>83,524</td><td class='num strong'>1</td></tr><tr><td>mattmurf77 <span class='arrow'>&rarr;</span> jonbonjourvi</td><td class='num dim'>83,524</td><td class='num strong'>14</td></tr></tbody>
+  </table>
+</section>
+<section class="arm">
+  <h3><span class="dot" style="background:var(--flare)"></span>challenger</h3>
+  <div class="stats">
+    <div><span class="k">candidates</span><span class="v">501,144</span></div>
+    <div><span class="k">survived</span><span class="v">50</span></div>
+    <div><span class="k">survival rate</span><span class="v">0.010%</span></div>
+    <div><span class="k">cards emitted</span><span class="v">11</span></div>
+    <div><span class="k">mean gap, all</span><span class="v">4,318</span></div>
+    <div><span class="k">mean gap, survivors</span><span class="v">2,349</span></div>
+  </div>
+  <table class="wf">
+    <thead><tr><th></th><th>rule</th><th class="num">first kills</th><th class="num">% arm</th>
+    <th class="num">co-kills</th><th class="num">only-kills</th><th class="num">independent</th>
+    <th class="num">mean gap</th><th>leans</th></tr></thead>
+    <tbody><tr>
+  <td class="ix">1</td><td class="rule"><code>gap_max</code></td>
+  <td class="num">257,437<span class="bar"><span class="fill" style="width:51.370%;background:var(--flare)"></span></span></td>
+  <td class="num">51.370%</td>
+  <td class="num dim">257,437</td>
+  <td class="num strong">12</td>
+  <td class="num">0.0%</td>
+  <td class="num">4880.2</td>
+  <td class="lean lean-receive">receive</td>
+</tr><tr>
+  <td class="ix">2</td><td class="rule"><code>R0_108_1for1</code></td>
+  <td class="num">181<span class="bar"><span class="fill" style="width:0.350%;background:var(--flare)"></span></span></td>
+  <td class="num">0.036%</td>
+  <td class="num dim">390</td>
+  <td class="num strong">1</td>
+  <td class="num">0.6%</td>
+  <td class="num">824.7</td>
+  <td class="lean lean-give">give</td>
+</tr><tr>
+  <td class="ix">3</td><td class="rule"><code>R0_227_pickswap</code></td>
+  <td class="num">408<span class="bar"><span class="fill" style="width:0.350%;background:var(--flare)"></span></span></td>
+  <td class="num">0.081%</td>
+  <td class="num dim">538</td>
+  <td class="num strong">0</td>
+  <td class="num">0.0%</td>
+  <td class="num">591.9</td>
+  <td class="lean lean-give">give</td>
+</tr><tr>
+  <td class="ix">4</td><td class="rule"><code>R0_141_filler</code></td>
+  <td class="num">238,131<span class="bar"><span class="fill" style="width:47.517%;background:var(--flare)"></span></span></td>
+  <td class="num">47.517%</td>
+  <td class="num dim">492,582</td>
+  <td class="num strong">4,496</td>
+  <td class="num">1.9%</td>
+  <td class="num">3694.5</td>
+  <td class="lean lean-give">give</td>
+</tr><tr>
+  <td class="ix">5</td><td class="rule"><code>G6_R1_overpay</code></td>
+  <td class="num">3,996<span class="bar"><span class="fill" style="width:0.797%;background:var(--flare)"></span></span></td>
+  <td class="num">0.797%</td>
+  <td class="num dim">421,102</td>
+  <td class="num strong">66</td>
+  <td class="num">1.7%</td>
+  <td class="num">6539.9</td>
+  <td class="lean lean-give">give</td>
+</tr><tr>
+  <td class="ix">6</td><td class="rule"><code>G6_R2_posnet</code></td>
+  <td class="num">100<span class="bar"><span class="fill" style="width:0.350%;background:var(--flare)"></span></span></td>
+  <td class="num">0.020%</td>
+  <td class="num dim">182,084</td>
+  <td class="num strong">1</td>
+  <td class="num">1.0%</td>
+  <td class="num">1337.3</td>
+  <td class="lean lean-give">give</td>
+</tr><tr>
+  <td class="ix">7</td><td class="rule"><code>G6_R3_pickgap</code></td>
+  <td class="num">40<span class="bar"><span class="fill" style="width:0.350%;background:var(--flare)"></span></span></td>
+  <td class="num">0.008%</td>
+  <td class="num dim">53,720</td>
+  <td class="num strong">4</td>
+  <td class="num">10.0%</td>
+  <td class="num">2254.1</td>
+  <td class="lean lean-receive">receive</td>
+</tr><tr>
+  <td class="ix">8</td><td class="rule"><code>G6_R5_need</code></td>
+  <td class="num">0<span class="bar"><span class="fill" style="width:0.350%;background:var(--flare)"></span></span></td>
+  <td class="num">0.000%</td>
+  <td class="num dim">0</td>
+  <td class="num strong">0</td>
+  <td class="num">—</td>
+  <td class="num">—</td>
+  <td class="lean lean-—">—</td>
+</tr><tr>
+  <td class="ix">9</td><td class="rule"><code>feasibility</code></td>
+  <td class="num">77<span class="bar"><span class="fill" style="width:0.350%;background:var(--flare)"></span></span></td>
+  <td class="num">0.015%</td>
+  <td class="num dim">21,798</td>
+  <td class="num strong">46</td>
+  <td class="num">59.7%</td>
+  <td class="num">2898.9</td>
+  <td class="lean lean-receive">receive</td>
+</tr><tr>
+  <td class="ix">10</td><td class="rule"><code>min_side_surplus</code></td>
+  <td class="num">703<span class="bar"><span class="fill" style="width:0.350%;background:var(--flare)"></span></span></td>
+  <td class="num">0.140%</td>
+  <td class="num dim">409,779</td>
+  <td class="num strong">629</td>
+  <td class="num">89.5%</td>
+  <td class="num">895.8</td>
+  <td class="lean lean-receive">receive</td>
+</tr><tr>
+  <td class="ix">11</td><td class="rule"><code>fairness</code></td>
+  <td class="num">21<span class="bar"><span class="fill" style="width:0.350%;background:var(--flare)"></span></span></td>
+  <td class="num">0.004%</td>
+  <td class="num dim">398,172</td>
+  <td class="num strong">21</td>
+  <td class="num">100.0%</td>
+  <td class="num">4097.9</td>
+  <td class="lean lean-receive">receive</td>
+</tr><tr class="surv">
+  <td class="ix">—</td><td class="rule"><strong>SURVIVED</strong></td>
+  <td class="num">50</td>
+  <td class="num">0.010%</td>
+  <td class="num dim">—</td><td class="num">—</td><td class="num">—</td>
+  <td class="num strong">2349.0</td>
+  <td class="lean">receive 20 · give 30</td>
+</tr></tbody>
+  </table>
+  <table class="pairs">
+    <thead><tr><th>direction (deck generated for the left manager)</th>
+    <th class="num">candidates</th><th class="num">survivors</th></tr></thead>
+    <tbody><tr><td>gdubs10 <span class='arrow'>&rarr;</span> jonbonjourvi</td><td class='num dim'>83,524</td><td class='num strong'>0</td></tr><tr><td>gdubs10 <span class='arrow'>&rarr;</span> mattmurf77</td><td class='num dim'>83,524</td><td class='num strong'>4</td></tr><tr><td>jonbonjourvi <span class='arrow'>&rarr;</span> gdubs10</td><td class='num dim'>83,524</td><td class='num strong'>0</td></tr><tr><td>jonbonjourvi <span class='arrow'>&rarr;</span> mattmurf77</td><td class='num dim'>83,524</td><td class='num strong'>15</td></tr><tr><td>mattmurf77 <span class='arrow'>&rarr;</span> gdubs10</td><td class='num dim'>83,524</td><td class='num strong'>0</td></tr><tr><td>mattmurf77 <span class='arrow'>&rarr;</span> jonbonjourvi</td><td class='num dim'>83,524</td><td class='num strong'>31</td></tr></tbody>
+  </table>
+</section>
+<section class="arm">
+  <h3><span class="dot" style="background:var(--tier-1st)"></span>gen_v2</h3>
+  <div class="stats">
+    <div><span class="k">candidates</span><span class="v">50,225</span></div>
+    <div><span class="k">survived</span><span class="v">83</span></div>
+    <div><span class="k">survival rate</span><span class="v">0.165%</span></div>
+    <div><span class="k">cards emitted</span><span class="v">20</span></div>
+    <div><span class="k">mean gap, all</span><span class="v">5,261</span></div>
+    <div><span class="k">mean gap, survivors</span><span class="v">1,420</span></div>
+  </div>
+  <table class="wf">
+    <thead><tr><th></th><th>rule</th><th class="num">first kills</th><th class="num">% arm</th>
+    <th class="num">co-kills</th><th class="num">only-kills</th><th class="num">independent</th>
+    <th class="num">mean gap</th><th>leans</th></tr></thead>
+    <tbody><tr>
+  <td class="ix">1</td><td class="rule"><code>S3a_141_filler</code></td>
+  <td class="num">46,227<span class="bar"><span class="fill" style="width:92.040%;background:var(--tier-1st)"></span></span></td>
+  <td class="num">92.040%</td>
+  <td class="num dim">46,227</td>
+  <td class="num strong">1,286</td>
+  <td class="num">2.8%</td>
+  <td class="num">5090.7</td>
+  <td class="lean lean-receive">receive</td>
+</tr><tr>
+  <td class="ix">2</td><td class="rule"><code>S3a_227_pickswap</code></td>
+  <td class="num">0<span class="bar"><span class="fill" style="width:0.350%;background:var(--tier-1st)"></span></span></td>
+  <td class="num">0.000%</td>
+  <td class="num dim">0</td>
+  <td class="num strong">0</td>
+  <td class="num">—</td>
+  <td class="num">—</td>
+  <td class="lean lean-—">—</td>
+</tr><tr>
+  <td class="ix">3</td><td class="rule"><code>S3a_net_cap</code></td>
+  <td class="num">1,130<span class="bar"><span class="fill" style="width:2.250%;background:var(--tier-1st)"></span></span></td>
+  <td class="num">2.250%</td>
+  <td class="num dim">22,588</td>
+  <td class="num strong">15</td>
+  <td class="num">1.3%</td>
+  <td class="num">9819.3</td>
+  <td class="lean lean-receive">receive</td>
+</tr><tr>
+  <td class="ix">4</td><td class="rule"><code>S3a_pick_band</code></td>
+  <td class="num">173<span class="bar"><span class="fill" style="width:0.350%;background:var(--tier-1st)"></span></span></td>
+  <td class="num">0.344%</td>
+  <td class="num dim">1,931</td>
+  <td class="num strong">14</td>
+  <td class="num">8.1%</td>
+  <td class="num">2162.0</td>
+  <td class="lean lean-give">give</td>
+</tr><tr>
+  <td class="ix">5</td><td class="rule"><code>S3b_feasibility</code></td>
+  <td class="num">132<span class="bar"><span class="fill" style="width:0.350%;background:var(--tier-1st)"></span></span></td>
+  <td class="num">0.263%</td>
+  <td class="num dim">4,214</td>
+  <td class="num strong">14</td>
+  <td class="num">10.6%</td>
+  <td class="num">5238.4</td>
+  <td class="lean lean-receive">receive</td>
+</tr><tr>
+  <td class="ix">6</td><td class="rule"><code>S3c_dual_eps_user</code></td>
+  <td class="num">590<span class="bar"><span class="fill" style="width:1.175%;background:var(--tier-1st)"></span></span></td>
+  <td class="num">1.175%</td>
+  <td class="num dim">15,314</td>
+  <td class="num strong">88</td>
+  <td class="num">14.9%</td>
+  <td class="num">3930.0</td>
+  <td class="lean lean-give">give</td>
+</tr><tr>
+  <td class="ix">7</td><td class="rule"><code>S3c_dual_eps_opp</code></td>
+  <td class="num">1,544<span class="bar"><span class="fill" style="width:3.074%;background:var(--tier-1st)"></span></span></td>
+  <td class="num">3.074%</td>
+  <td class="num dim">25,711</td>
+  <td class="num strong">31</td>
+  <td class="num">2.0%</td>
+  <td class="num">7954.9</td>
+  <td class="lean lean-receive">receive</td>
+</tr><tr>
+  <td class="ix">8</td><td class="rule"><code>S3d_fairness_band</code></td>
+  <td class="num">346<span class="bar"><span class="fill" style="width:0.689%;background:var(--tier-1st)"></span></span></td>
+  <td class="num">0.689%</td>
+  <td class="num dim">44,503</td>
+  <td class="num strong">346</td>
+  <td class="num">100.0%</td>
+  <td class="num">5877.1</td>
+  <td class="lean lean-receive">receive</td>
+</tr><tr class="surv">
+  <td class="ix">—</td><td class="rule"><strong>SURVIVED</strong></td>
+  <td class="num">83</td>
+  <td class="num">0.165%</td>
+  <td class="num dim">—</td><td class="num">—</td><td class="num">—</td>
+  <td class="num strong">1419.8</td>
+  <td class="lean">receive 31 · even 34 · give 18</td>
+</tr></tbody>
+  </table>
+  <table class="pairs">
+    <thead><tr><th>direction (deck generated for the left manager)</th>
+    <th class="num">candidates</th><th class="num">survivors</th></tr></thead>
+    <tbody><tr><td>gdubs10 <span class='arrow'>&rarr;</span> jonbonjourvi</td><td class='num dim'>2,100</td><td class='num strong'>0</td></tr><tr><td>gdubs10 <span class='arrow'>&rarr;</span> mattmurf77</td><td class='num dim'>9,625</td><td class='num strong'>5</td></tr><tr><td>jonbonjourvi <span class='arrow'>&rarr;</span> gdubs10</td><td class='num dim'>9,625</td><td class='num strong'>25</td></tr><tr><td>jonbonjourvi <span class='arrow'>&rarr;</span> mattmurf77</td><td class='num dim'>9,625</td><td class='num strong'>44</td></tr><tr><td>mattmurf77 <span class='arrow'>&rarr;</span> gdubs10</td><td class='num dim'>9,625</td><td class='num strong'>9</td></tr><tr><td>mattmurf77 <span class='arrow'>&rarr;</span> jonbonjourvi</td><td class='num dim'>9,625</td><td class='num strong'>0</td></tr></tbody>
+  </table>
+</section>
+
+<h2>The value bar</h2>
+<p class="lede">Units are <strong>consensus package value</strong> in
+<code>elo_to_value</code> space &mdash; <code>_consensus_packages(give, recv, seed_value)</code>,
+the identical call all three arms stamp on <code>TradeCard.give_value</code>. The
+<strong>gap is absolute and unsigned</strong>
+(<code>round(abs(receive_value - give_value), 1)</code>, exactly
+<code>server._value_verdict_payload</code>); direction is carried by <code>favors</code>.
+This is what <code>TradeValueBar</code> renders, not a lookalike.</p>
+
+<div class="label">mean gap on the trades each rule killed</div>
+<div class="scroll"><table>
+<thead><tr><th>rule</th><th class="num">current</th><th class="num">challenger</th><th class="num">gen_v2</th></tr></thead>
+<tbody><tr><td class="rule"><code>gap_max</code></td><td class="num">5,162</td><td class="num">4,880</td><td class="num na">&mdash;</td></tr><tr><td class="rule"><code>R0_108_1for1</code></td><td class="num">696</td><td class="num">825</td><td class="num na">&mdash;</td></tr><tr><td class="rule"><code>R0_227_pickswap</code></td><td class="num">733</td><td class="num">592</td><td class="num na">&mdash;</td></tr><tr><td class="rule"><code>R0_141_filler</code></td><td class="num">3,137</td><td class="num">3,694</td><td class="num na">&mdash;</td></tr><tr><td class="rule"><code>G6_R1_overpay</code></td><td class="num">4,197</td><td class="num">6,540</td><td class="num na">&mdash;</td></tr><tr><td class="rule"><code>G6_R2_posnet</code></td><td class="num">562</td><td class="num">1,337</td><td class="num na">&mdash;</td></tr><tr><td class="rule"><code>G6_R3_pickgap</code></td><td class="num">1,892</td><td class="num">2,254</td><td class="num na">&mdash;</td></tr><tr><td class="rule"><code>G6_R5_need</code></td><td class="num">1,019</td><td class="num na">never fires</td><td class="num na">&mdash;</td></tr><tr><td class="rule"><code>feasibility</code></td><td class="num">5,160</td><td class="num">2,899</td><td class="num na">&mdash;</td></tr><tr><td class="rule"><code>min_side_surplus</code></td><td class="num">540</td><td class="num">896</td><td class="num na">&mdash;</td></tr><tr><td class="rule"><code>fairness</code></td><td class="num">3,155</td><td class="num">4,098</td><td class="num na">&mdash;</td></tr><tr><td class="rule"><code>S3a_141_filler</code></td><td class="num na">&mdash;</td><td class="num na">&mdash;</td><td class="num">5,091</td></tr><tr><td class="rule"><code>S3a_227_pickswap</code></td><td class="num na">&mdash;</td><td class="num na">&mdash;</td><td class="num na">never fires</td></tr><tr><td class="rule"><code>S3a_net_cap</code></td><td class="num na">&mdash;</td><td class="num na">&mdash;</td><td class="num">9,819</td></tr><tr><td class="rule"><code>S3a_pick_band</code></td><td class="num na">&mdash;</td><td class="num na">&mdash;</td><td class="num">2,162</td></tr><tr><td class="rule"><code>S3b_feasibility</code></td><td class="num na">&mdash;</td><td class="num na">&mdash;</td><td class="num">5,238</td></tr><tr><td class="rule"><code>S3c_dual_eps_user</code></td><td class="num na">&mdash;</td><td class="num na">&mdash;</td><td class="num">3,930</td></tr><tr><td class="rule"><code>S3c_dual_eps_opp</code></td><td class="num na">&mdash;</td><td class="num na">&mdash;</td><td class="num">7,955</td></tr><tr><td class="rule"><code>S3d_fairness_band</code></td><td class="num na">&mdash;</td><td class="num na">&mdash;</td><td class="num">5,877</td></tr><tr class="surv"><td class="rule"><strong>all candidates</strong></td><td class="num strong">4,151</td><td class="num strong">4,318</td><td class="num strong">5,261</td></tr><tr class="surv"><td class="rule"><strong>survivors</strong></td><td class="num strong">1,228</td><td class="num strong">2,349</td><td class="num strong">1,420</td></tr></tbody></table></div>
+
+<div class="label">which way the survivors lean</div>
+<div class="scroll"><table style="min-width:520px">
+<thead><tr><th>arm</th><th class="num">survivors</th><th class="num">favours you</th>
+<th class="num">favours them</th><th class="num">even</th></tr></thead>
+<tbody><tr><td><span class="chip" style="--c:var(--ice)">current</span></td><td class="num">133</td><td class="num">109 <span class="dim">(82%)</span></td><td class="num">21 <span class="dim">(16%)</span></td><td class="num">3 <span class="dim">(2%)</span></td></tr><tr><td><span class="chip" style="--c:var(--flare)">challenger</span></td><td class="num">50</td><td class="num">20 <span class="dim">(40%)</span></td><td class="num">30 <span class="dim">(60%)</span></td><td class="num">0 <span class="dim">(0%)</span></td></tr><tr><td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td><td class="num">83</td><td class="num">31 <span class="dim">(37%)</span></td><td class="num">18 <span class="dim">(22%)</span></td><td class="num">34 <span class="dim">(41%)</span></td></tr></tbody></table></div>
+<p class="note"><code>current</code>'s board is 82% trades where the user receives more consensus
+value than they send. Removing the user-board shrink does not make the deck more even &mdash; it
+points 60% of it the other way, at nearly double the absolute gap (2,349 against 1,229).
+<code>gen_v2</code> is the only arm whose modal survivor is <em>even</em>.</p>
+
+<h2>The cards each arm actually emits</h2>
+<p class="lede">Survivor gap is measured on the candidate as enumerated. The 2026-08-21 gap
+auto-sweetener then runs on emitted cards and rebalances anything above 1,539 by adding the
+smallest sufficient equalizer. These are the post-sweetener numbers &mdash; the ones a user
+would see.</p>
+<div class="scroll"><table style="min-width:1000px">
+<thead><tr><th>arm</th><th>direction</th><th>shape</th><th>gives</th><th>receives</th>
+<th class="num">give val</th><th class="num">recv val</th><th class="num">gap</th>
+<th>favours</th><th class="num">sweetened</th></tr></thead>
+<tbody><tr>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">4x2</td>
+  <td class="side">Marvin Harrison + 2026 1.05 (from Bcork) + 2026 1.03 (from bsharp3) + Colston Loveland</td>
+  <td class="side">Drake London + Ashton Jeanty</td>
+  <td class="num">7,163</td>
+  <td class="num">12,253</td>
+  <td class="num strong">5,090</td>
+  <td class="lean lean-receive">receive</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">4x2</td>
+  <td class="side">Rome Odunze + 2026 1.05 (from Bcork) + 2026 1.03 (from bsharp3) + Colston Loveland</td>
+  <td class="side">Drake London + Ashton Jeanty</td>
+  <td class="num">7,517</td>
+  <td class="num">12,253</td>
+  <td class="num strong">4,736</td>
+  <td class="lean lean-receive">receive</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">2x3</td>
+  <td class="side">Drake London + Emeka Egbuka</td>
+  <td class="side">Marvin Harrison + Rome Odunze + 2027 1st (from gdubs10)</td>
+  <td class="num">11,547</td>
+  <td class="num">7,287</td>
+  <td class="num strong">4,260</td>
+  <td class="lean lean-give">give</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">gdubs10 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">2x3</td>
+  <td class="side">Malik Nabers + Kyle Pitts</td>
+  <td class="side">2027 1st (from gdubs10) + 2027 1st + 2026 1.03 (from bsharp3)</td>
+  <td class="num">9,128</td>
+  <td class="num">6,170</td>
+  <td class="num strong">2,958</td>
+  <td class="lean lean-give">give</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x1</td>
+  <td class="side">2026 1.05 (from Bcork) + 2026 1.03 (from bsharp3)</td>
+  <td class="side">Drake London</td>
+  <td class="num">3,936</td>
+  <td class="num">6,810</td>
+  <td class="num strong">2,873</td>
+  <td class="lean lean-receive">receive</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">1x2</td>
+  <td class="side">Drake London</td>
+  <td class="side">2027 1st (from gdubs10) + 2026 1.05 (from Bcork)</td>
+  <td class="num">6,248</td>
+  <td class="num">3,556</td>
+  <td class="num strong">2,692</td>
+  <td class="lean lean-give">give</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">gdubs10 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">1x2</td>
+  <td class="side">Malik Nabers</td>
+  <td class="side">2026 1.05 (from Bcork) + 2026 1.03 (from bsharp3)</td>
+  <td class="num">7,355</td>
+  <td class="num">5,933</td>
+  <td class="num strong">1,422</td>
+  <td class="lean lean-give">give</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">gdubs10 <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x1</td>
+  <td class="side">Jaxson Dart + Tyler Warren + 2026 1.09</td>
+  <td class="side">Drake London</td>
+  <td class="num">5,116</td>
+  <td class="num">6,531</td>
+  <td class="num strong">1,416</td>
+  <td class="lean lean-receive">receive</td>
+  <td class="num">yes</td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">2x4</td>
+  <td class="side">Drake Maye + Emeka Egbuka</td>
+  <td class="side">2027 1st (from gdubs10) + 2027 1st + 2026 1.05 (from Bcork) + 2028 1st</td>
+  <td class="num">6,946</td>
+  <td class="num">6,006</td>
+  <td class="num strong">940</td>
+  <td class="lean lean-give">give</td>
+  <td class="num">yes</td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> gdubs10</td>
+  <td class="sh">3x3</td>
+  <td class="side">2028 1st + 2027 1st (from gdubs10) + 2026 1.05 (from Bcork)</td>
+  <td class="side">Tee Higgins + 2028 1st + 2026 1.09</td>
+  <td class="num">3,669</td>
+  <td class="num">4,453</td>
+  <td class="num strong">784</td>
+  <td class="lean lean-receive">receive</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">1x3</td>
+  <td class="side">Emeka Egbuka</td>
+  <td class="side">2028 1st + 2026 1.05 (from Bcork) + 2027 1st (from gdubs10)</td>
+  <td class="num">5,374</td>
+  <td class="num">4,706</td>
+  <td class="num strong">667</td>
+  <td class="lean lean-give">give</td>
+  <td class="num">yes</td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> gdubs10</td>
+  <td class="sh">3x3</td>
+  <td class="side">2028 1st + 2027 1st + Isaiah Likely</td>
+  <td class="side">2028 1st + Derrick Henry + 2026 1.09</td>
+  <td class="num">3,471</td>
+  <td class="num">3,908</td>
+  <td class="num strong">437</td>
+  <td class="lean lean-receive">receive</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> gdubs10</td>
+  <td class="sh">3x2</td>
+  <td class="side">2027 1st (from gdubs10) + 2027 1st + 2026 1.05 (from Bcork)</td>
+  <td class="side">Tee Higgins + Derrick Henry</td>
+  <td class="num">3,916</td>
+  <td class="num">4,308</td>
+  <td class="num strong">392</td>
+  <td class="lean lean-receive">receive</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> gdubs10</td>
+  <td class="sh">3x2</td>
+  <td class="side">Dylan Sampson + 2027 1st (from gdubs10) + Isaiah Likely</td>
+  <td class="side">Derrick Henry + 2026 1.09</td>
+  <td class="num">2,436</td>
+  <td class="num">2,792</td>
+  <td class="num strong">356</td>
+  <td class="lean lean-receive">receive</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">2x1</td>
+  <td class="side">Drake Maye + Davante Adams</td>
+  <td class="side">2026 1.05 (from Bcork)</td>
+  <td class="num">2,482</td>
+  <td class="num">2,832</td>
+  <td class="num strong">350</td>
+  <td class="lean lean-receive">receive</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> gdubs10</td>
+  <td class="sh">1x2</td>
+  <td class="side">Ashton Jeanty</td>
+  <td class="side">Malik Nabers + Jaxson Dart</td>
+  <td class="num">7,973</td>
+  <td class="num">7,685</td>
+  <td class="num strong">288</td>
+  <td class="lean lean-even">even</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">1x1</td>
+  <td class="side">Jordan Watkins</td>
+  <td class="side">2028 2nd</td>
+  <td class="num">226</td>
+  <td class="num">358</td>
+  <td class="num strong">133</td>
+  <td class="lean lean-receive">receive</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">2x3</td>
+  <td class="side">Trey McBride + Emeka Egbuka</td>
+  <td class="side">Rome Odunze + 2027 1st (from gdubs10) + 2026 1.05 (from Bcork)</td>
+  <td class="num">10,752</td>
+  <td class="num">7,015</td>
+  <td class="num strong">3,737</td>
+  <td class="lean lean-give">give</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x2</td>
+  <td class="side">Rome Odunze + 2026 1.05 (from Bcork) + Isaiah Likely</td>
+  <td class="side">Drake London + Drake Maye</td>
+  <td class="num">3,516</td>
+  <td class="num">6,992</td>
+  <td class="num strong">3,476</td>
+  <td class="lean lean-receive">receive</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">2x3</td>
+  <td class="side">Drake London + Drake Maye</td>
+  <td class="side">2028 1st + 2027 1st (from gdubs10) + 2026 1.05 (from Bcork)</td>
+  <td class="num">7,824</td>
+  <td class="num">4,569</td>
+  <td class="num strong">3,255</td>
+  <td class="lean lean-give">give</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x2</td>
+  <td class="side">Rome Odunze + 2027 1st (from gdubs10) + 2026 1.05 (from Bcork)</td>
+  <td class="side">Drake London + Drake Maye</td>
+  <td class="num">3,759</td>
+  <td class="num">6,992</td>
+  <td class="num strong">3,233</td>
+  <td class="lean lean-receive">receive</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Rome Odunze + Isaiah Likely + 2027 1st (from gdubs10)</td>
+  <td class="side">Davante Adams + Drake Maye + Emeka Egbuka</td>
+  <td class="num">3,190</td>
+  <td class="num">6,210</td>
+  <td class="num strong">3,020</td>
+  <td class="lean lean-receive">receive</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x2</td>
+  <td class="side">Marvin Harrison + Isaiah Likely + 2026 1.05 (from Bcork)</td>
+  <td class="side">Drake Maye + Emeka Egbuka</td>
+  <td class="num">3,462</td>
+  <td class="num">6,228</td>
+  <td class="num strong">2,766</td>
+  <td class="lean lean-receive">receive</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">2x3</td>
+  <td class="side">Drake London + Drake Maye</td>
+  <td class="side">Rome Odunze + Isaiah Likely + 2027 1st</td>
+  <td class="num">7,934</td>
+  <td class="num">5,254</td>
+  <td class="num strong">2,680</td>
+  <td class="lean lean-give">give</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">1x2</td>
+  <td class="side">Emeka Egbuka</td>
+  <td class="side">Marvin Harrison + Isaiah Likely</td>
+  <td class="num">5,374</td>
+  <td class="num">3,647</td>
+  <td class="num strong">1,727</td>
+  <td class="lean lean-give">give</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">gdubs10 <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x1</td>
+  <td class="side">Tyler Warren + Jaxson Dart + 2026 1.09</td>
+  <td class="side">Drake London</td>
+  <td class="num">5,116</td>
+  <td class="num">6,531</td>
+  <td class="num strong">1,416</td>
+  <td class="lean lean-receive">receive</td>
+  <td class="num">yes</td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">2x3</td>
+  <td class="side">Drake Maye + Emeka Egbuka</td>
+  <td class="side">Marvin Harrison + 2026 1.05 (from Bcork) + Isaiah Likely</td>
+  <td class="num">6,946</td>
+  <td class="num">6,013</td>
+  <td class="num strong">932</td>
+  <td class="lean lean-give">give</td>
+  <td class="num">yes</td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">1x1</td>
+  <td class="side">Jordan Watkins</td>
+  <td class="side">2028 2nd</td>
+  <td class="num">226</td>
+  <td class="num">358</td>
+  <td class="num strong">133</td>
+  <td class="lean lean-receive">receive</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x2</td>
+  <td class="side">Marvin Harrison + Rome Odunze + 2026 1.03 (from bsharp3)</td>
+  <td class="side">Emeka Egbuka + Drake London</td>
+  <td class="num">6,445</td>
+  <td class="num">10,726</td>
+  <td class="num strong">4,281</td>
+  <td class="lean lean-receive">receive</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x1</td>
+  <td class="side">Marvin Harrison + 2026 1.05 (from Bcork)</td>
+  <td class="side">Drake London</td>
+  <td class="num">2,812</td>
+  <td class="num">6,810</td>
+  <td class="num strong">3,998</td>
+  <td class="lean lean-receive">receive</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x1</td>
+  <td class="side">Rome Odunze + 2027 1st (from gdubs10) + 2027 1st</td>
+  <td class="side">Drake London</td>
+  <td class="num">3,062</td>
+  <td class="num">6,810</td>
+  <td class="num strong">3,748</td>
+  <td class="lean lean-receive">receive</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> gdubs10</td>
+  <td class="sh">3x1</td>
+  <td class="side">Dylan Sampson + 2027 1st (from gdubs10) + 2027 1st</td>
+  <td class="side">Tyler Warren</td>
+  <td class="num">1,421</td>
+  <td class="num">4,443</td>
+  <td class="num strong">3,023</td>
+  <td class="lean lean-receive">receive</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x1</td>
+  <td class="side">Rome Odunze + Isaiah Likely + 2027 1st (from gdubs10)</td>
+  <td class="side">Emeka Egbuka</td>
+  <td class="num">3,190</td>
+  <td class="num">5,951</td>
+  <td class="num strong">2,761</td>
+  <td class="lean lean-receive">receive</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x1</td>
+  <td class="side">2026 1.03 (from bsharp3) + 2027 1st (from gdubs10)</td>
+  <td class="side">Emeka Egbuka</td>
+  <td class="num">3,715</td>
+  <td class="num">5,951</td>
+  <td class="num strong">2,236</td>
+  <td class="lean lean-receive">receive</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x2</td>
+  <td class="side">Rome Odunze + Bijan Robinson</td>
+  <td class="side">Drake London + Emeka Egbuka</td>
+  <td class="num">9,650</td>
+  <td class="num">7,541</td>
+  <td class="num strong">2,109</td>
+  <td class="lean lean-give">give</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> gdubs10</td>
+  <td class="sh">3x2</td>
+  <td class="side">2026 1.05 (from Bcork) + 2027 1st (from gdubs10) + 2028 1st</td>
+  <td class="side">Tyler Warren + Derrick Henry</td>
+  <td class="num">2,962</td>
+  <td class="num">4,952</td>
+  <td class="num strong">1,990</td>
+  <td class="lean lean-receive">receive</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x2</td>
+  <td class="side">Marvin Harrison + Isaiah Likely + Bijan Robinson</td>
+  <td class="side">Drake London + Emeka Egbuka</td>
+  <td class="num">9,554</td>
+  <td class="num">7,573</td>
+  <td class="num strong">1,981</td>
+  <td class="lean lean-give">give</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> gdubs10</td>
+  <td class="sh">2x1</td>
+  <td class="side">2026 1.05 (from Bcork) + 2027 1st</td>
+  <td class="side">Tyler Warren</td>
+  <td class="num">2,480</td>
+  <td class="num">4,443</td>
+  <td class="num strong">1,963</td>
+  <td class="lean lean-receive">receive</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> gdubs10</td>
+  <td class="sh">1x2</td>
+  <td class="side">Jaxon Smith-Njigba</td>
+  <td class="side">Tyler Warren + Malik Nabers</td>
+  <td class="num">8,243</td>
+  <td class="num">10,078</td>
+  <td class="num strong">1,835</td>
+  <td class="lean lean-receive">receive</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> gdubs10</td>
+  <td class="sh">2x3</td>
+  <td class="side">Bijan Robinson + 2026 1.05 (from Bcork)</td>
+  <td class="side">Tyler Warren + Malik Nabers + Derrick Henry</td>
+  <td class="num">9,496</td>
+  <td class="num">7,847</td>
+  <td class="num strong">1,649</td>
+  <td class="lean lean-give">give</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> gdubs10</td>
+  <td class="sh">1x1</td>
+  <td class="side">Drake London</td>
+  <td class="side">Malik Nabers</td>
+  <td class="num">6,444</td>
+  <td class="num">7,255</td>
+  <td class="num strong">811</td>
+  <td class="lean lean-receive">receive</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> gdubs10</td>
+  <td class="sh">2x1</td>
+  <td class="side">Dylan Sampson + 2028 1st</td>
+  <td class="side">Derrick Henry</td>
+  <td class="num">1,214</td>
+  <td class="num">1,865</td>
+  <td class="num strong">651</td>
+  <td class="lean lean-receive">receive</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">gdubs10 <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x1</td>
+  <td class="side">Tyler Warren + 2028 1st</td>
+  <td class="side">Emeka Egbuka</td>
+  <td class="num">4,836</td>
+  <td class="num">5,374</td>
+  <td class="num strong">537</td>
+  <td class="lean lean-receive">receive</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x2</td>
+  <td class="side">Marvin Harrison + Bijan Robinson + 2026 1.03 (from bsharp3)</td>
+  <td class="side">Ashton Jeanty + Drake London</td>
+  <td class="num">11,340</td>
+  <td class="num">10,983</td>
+  <td class="num strong">357</td>
+  <td class="lean lean-even">even</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> gdubs10</td>
+  <td class="sh">1x2</td>
+  <td class="side">Ashton Jeanty</td>
+  <td class="side">Jaxson Dart + Malik Nabers</td>
+  <td class="num">7,973</td>
+  <td class="num">7,685</td>
+  <td class="num strong">288</td>
+  <td class="lean lean-even">even</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">gdubs10 <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x1</td>
+  <td class="side">Jaxson Dart + Tyler Warren + 2026 1.09</td>
+  <td class="side">Emeka Egbuka</td>
+  <td class="num">5,281</td>
+  <td class="num">5,374</td>
+  <td class="num strong">92</td>
+  <td class="lean lean-even">even</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> gdubs10</td>
+  <td class="sh">3x2</td>
+  <td class="side">2026 1.03 (from bsharp3) + 2026 1.05 (from Bcork) + 2028 1st</td>
+  <td class="side">Tee Higgins + Tyler Warren</td>
+  <td class="num">6,452</td>
+  <td class="num">6,497</td>
+  <td class="num strong">45</td>
+  <td class="lean lean-even">even</td>
+  <td class="num"></td>
+</tr><tr>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> gdubs10</td>
+  <td class="sh">1x2</td>
+  <td class="side">2026 1.03 (from bsharp3)</td>
+  <td class="side">Tyler Warren + Derrick Henry</td>
+  <td class="num">4,609</td>
+  <td class="num">4,625</td>
+  <td class="num strong">16</td>
+  <td class="lean lean-even">even</td>
+  <td class="num"></td>
+</tr></tbody></table></div>
+
+<h2>Top 100 &mdash; give side most exceeds receive</h2>
+<p class="lede">Sorted by <code>give_value &minus; receive_value</code>, descending. Every one of
+these is a trade where the user would send far more consensus value than they get back.
+All 100 are killed; 91 of them by <code>gap_max</code>, the rule that almost never kills
+anything uniquely.</p>
+<div class="scroll"><table style="min-width:1080px">
+<thead><tr><th></th><th>arm</th><th>direction</th><th>shape</th><th>gives</th><th>receives</th>
+<th class="num">give val</th><th class="num">recv val</th><th class="num">gap</th>
+<th>verdict</th></tr></thead>
+<tbody><tr>
+  <td class="ix">1</td>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> gdubs10</td>
+  <td class="sh">3x1</td>
+  <td class="side">Ashton Jeanty + Drake London + Jaxon Smith-Njigba</td>
+  <td class="side">Tua Tagovailoa</td>
+  <td class="num">21,229</td>
+  <td class="num">239</td>
+  <td class="num strong">20,990</td>
+  <td class="verd"><code>S3a_net_cap</code></td>
+</tr><tr>
+  <td class="ix">2</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">James Conner + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">338</td>
+  <td class="num strong">20,891</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">3</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">James Conner + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">338</td>
+  <td class="num strong">20,891</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">4</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">James Conner + Elijah Arroyo</td>
+  <td class="num">21,229</td>
+  <td class="num">345</td>
+  <td class="num strong">20,884</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">5</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">James Conner + Elijah Arroyo</td>
+  <td class="num">21,229</td>
+  <td class="num">345</td>
+  <td class="num strong">20,884</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">6</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Elijah Arroyo + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">373</td>
+  <td class="num strong">20,856</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">7</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Elijah Arroyo + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">373</td>
+  <td class="num strong">20,856</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">8</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">James Conner + 2028 2nd</td>
+  <td class="num">21,229</td>
+  <td class="num">388</td>
+  <td class="num strong">20,841</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">9</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">James Conner + 2028 2nd</td>
+  <td class="num">21,229</td>
+  <td class="num">388</td>
+  <td class="num strong">20,841</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">10</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">James Conner + Dylan Sampson</td>
+  <td class="num">21,229</td>
+  <td class="num">404</td>
+  <td class="num strong">20,825</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">11</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">James Conner + Dylan Sampson</td>
+  <td class="num">21,229</td>
+  <td class="num">404</td>
+  <td class="num strong">20,825</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">12</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">2028 2nd + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">416</td>
+  <td class="num strong">20,813</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">13</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">2028 2nd + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">416</td>
+  <td class="num strong">20,813</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">14</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">2028 2nd + Elijah Arroyo</td>
+  <td class="num">21,229</td>
+  <td class="num">423</td>
+  <td class="num strong">20,806</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">15</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Elijah Arroyo + 2028 2nd</td>
+  <td class="num">21,229</td>
+  <td class="num">423</td>
+  <td class="num strong">20,806</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">16</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Dylan Sampson + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">432</td>
+  <td class="num strong">20,797</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">17</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Dylan Sampson + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">432</td>
+  <td class="num strong">20,797</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">18</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Dylan Sampson + Elijah Arroyo</td>
+  <td class="num">21,229</td>
+  <td class="num">439</td>
+  <td class="num strong">20,790</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">19</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Dylan Sampson + Elijah Arroyo</td>
+  <td class="num">21,229</td>
+  <td class="num">439</td>
+  <td class="num strong">20,790</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">20</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Dylan Sampson + 2028 2nd</td>
+  <td class="num">21,229</td>
+  <td class="num">482</td>
+  <td class="num strong">20,747</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">21</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Dylan Sampson + 2028 2nd</td>
+  <td class="num">21,229</td>
+  <td class="num">482</td>
+  <td class="num strong">20,747</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">22</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">James Conner + Elijah Arroyo + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">528</td>
+  <td class="num strong">20,702</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">23</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">James Conner + Elijah Arroyo + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">528</td>
+  <td class="num strong">20,702</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">24</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">James Conner + 2028 2nd + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">571</td>
+  <td class="num strong">20,658</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">25</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">James Conner + 2028 2nd + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">571</td>
+  <td class="num strong">20,658</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">26</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">James Conner + 2028 2nd + Elijah Arroyo</td>
+  <td class="num">21,229</td>
+  <td class="num">578</td>
+  <td class="num strong">20,651</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">27</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">James Conner + Elijah Arroyo + 2028 2nd</td>
+  <td class="num">21,229</td>
+  <td class="num">578</td>
+  <td class="num strong">20,651</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">28</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">James Conner + Dylan Sampson + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">587</td>
+  <td class="num strong">20,642</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">29</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">James Conner + Dylan Sampson + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">587</td>
+  <td class="num strong">20,642</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">30</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">James Conner + Dylan Sampson + Elijah Arroyo</td>
+  <td class="num">21,229</td>
+  <td class="num">594</td>
+  <td class="num strong">20,635</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">31</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">James Conner + Dylan Sampson + Elijah Arroyo</td>
+  <td class="num">21,229</td>
+  <td class="num">594</td>
+  <td class="num strong">20,635</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">32</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">2028 2nd + Elijah Arroyo + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">606</td>
+  <td class="num strong">20,624</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">33</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Elijah Arroyo + 2028 2nd + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">606</td>
+  <td class="num strong">20,624</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">34</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Dylan Sampson + Elijah Arroyo + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">622</td>
+  <td class="num strong">20,607</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">35</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Dylan Sampson + Elijah Arroyo + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">622</td>
+  <td class="num strong">20,607</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">36</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">James Conner + Dylan Sampson + 2028 2nd</td>
+  <td class="num">21,229</td>
+  <td class="num">637</td>
+  <td class="num strong">20,592</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">37</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">James Conner + Dylan Sampson + 2028 2nd</td>
+  <td class="num">21,229</td>
+  <td class="num">637</td>
+  <td class="num strong">20,592</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">38</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Dylan Sampson + 2028 2nd + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">665</td>
+  <td class="num strong">20,564</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">39</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Dylan Sampson + 2028 2nd + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">665</td>
+  <td class="num strong">20,564</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">40</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Dylan Sampson + 2028 2nd + Elijah Arroyo</td>
+  <td class="num">21,229</td>
+  <td class="num">672</td>
+  <td class="num strong">20,557</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">41</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Dylan Sampson + Elijah Arroyo + 2028 2nd</td>
+  <td class="num">21,229</td>
+  <td class="num">672</td>
+  <td class="num strong">20,557</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">42</td>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> gdubs10</td>
+  <td class="sh">3x2</td>
+  <td class="side">Ashton Jeanty + Drake London + Jaxon Smith-Njigba</td>
+  <td class="side">Tua Tagovailoa + Jaxson Dart</td>
+  <td class="num">21,229</td>
+  <td class="num">688</td>
+  <td class="num strong">20,541</td>
+  <td class="verd"><code>S3a_141_filler</code></td>
+</tr><tr>
+  <td class="ix">43</td>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> gdubs10</td>
+  <td class="sh">3x2</td>
+  <td class="side">Ashton Jeanty + Drake London + Jaxon Smith-Njigba</td>
+  <td class="side">Jaxson Dart + Tua Tagovailoa</td>
+  <td class="num">21,229</td>
+  <td class="num">688</td>
+  <td class="num strong">20,541</td>
+  <td class="verd"><code>S3a_141_filler</code></td>
+</tr><tr>
+  <td class="ix">44</td>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> gdubs10</td>
+  <td class="sh">3x2</td>
+  <td class="side">Ashton Jeanty + Drake London + Jaxon Smith-Njigba</td>
+  <td class="side">Tua Tagovailoa + Jaylen Warren</td>
+  <td class="num">21,229</td>
+  <td class="num">746</td>
+  <td class="num strong">20,483</td>
+  <td class="verd"><code>S3a_141_filler</code></td>
+</tr><tr>
+  <td class="ix">45</td>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> gdubs10</td>
+  <td class="sh">3x2</td>
+  <td class="side">Ashton Jeanty + Drake London + Jaxon Smith-Njigba</td>
+  <td class="side">Jaylen Warren + Tua Tagovailoa</td>
+  <td class="num">21,229</td>
+  <td class="num">746</td>
+  <td class="num strong">20,483</td>
+  <td class="verd"><code>S3a_141_filler</code></td>
+</tr><tr>
+  <td class="ix">46</td>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> gdubs10</td>
+  <td class="sh">3x1</td>
+  <td class="side">Ashton Jeanty + Drake London + Jaxon Smith-Njigba</td>
+  <td class="side">Jaxson Dart</td>
+  <td class="num">21,229</td>
+  <td class="num">819</td>
+  <td class="num strong">20,410</td>
+  <td class="verd"><code>S3a_net_cap</code></td>
+</tr><tr>
+  <td class="ix">47</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Isaiah Likely + James Conner</td>
+  <td class="num">21,229</td>
+  <td class="num">895</td>
+  <td class="num strong">20,334</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">48</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">James Conner + Isaiah Likely</td>
+  <td class="num">21,229</td>
+  <td class="num">895</td>
+  <td class="num strong">20,334</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">49</td>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> gdubs10</td>
+  <td class="sh">3x1</td>
+  <td class="side">Ashton Jeanty + Drake London + Jaxon Smith-Njigba</td>
+  <td class="side">Jaylen Warren</td>
+  <td class="num">21,229</td>
+  <td class="num">908</td>
+  <td class="num strong">20,321</td>
+  <td class="verd"><code>S3a_net_cap</code></td>
+</tr><tr>
+  <td class="ix">50</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Isaiah Likely + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">923</td>
+  <td class="num strong">20,306</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">51</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Isaiah Likely + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">923</td>
+  <td class="num strong">20,306</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">52</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Isaiah Likely + Elijah Arroyo</td>
+  <td class="num">21,229</td>
+  <td class="num">930</td>
+  <td class="num strong">20,299</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">53</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Isaiah Likely + Elijah Arroyo</td>
+  <td class="num">21,229</td>
+  <td class="num">930</td>
+  <td class="num strong">20,299</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">54</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Isaiah Likely + 2028 2nd</td>
+  <td class="num">21,229</td>
+  <td class="num">973</td>
+  <td class="num strong">20,256</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">55</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Isaiah Likely + 2028 2nd</td>
+  <td class="num">21,229</td>
+  <td class="num">973</td>
+  <td class="num strong">20,256</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">56</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Isaiah Likely + Dylan Sampson</td>
+  <td class="num">21,229</td>
+  <td class="num">989</td>
+  <td class="num strong">20,240</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">57</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Dylan Sampson + Isaiah Likely</td>
+  <td class="num">21,229</td>
+  <td class="num">989</td>
+  <td class="num strong">20,240</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">58</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Isaiah Likely + James Conner + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">1,078</td>
+  <td class="num strong">20,151</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">59</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">James Conner + Isaiah Likely + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">1,078</td>
+  <td class="num strong">20,151</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">60</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Isaiah Likely + James Conner + Elijah Arroyo</td>
+  <td class="num">21,229</td>
+  <td class="num">1,085</td>
+  <td class="num strong">20,144</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">61</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">James Conner + Isaiah Likely + Elijah Arroyo</td>
+  <td class="num">21,229</td>
+  <td class="num">1,085</td>
+  <td class="num strong">20,144</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">62</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Ashton Jeanty + Jaxon Smith-Njigba + Trey McBride</td>
+  <td class="side">James Conner + MarShawn Lloyd</td>
+  <td class="num">20,472</td>
+  <td class="num">338</td>
+  <td class="num strong">20,135</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">63</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Ashton Jeanty + Jaxon Smith-Njigba + Trey McBride</td>
+  <td class="side">James Conner + MarShawn Lloyd</td>
+  <td class="num">20,472</td>
+  <td class="num">338</td>
+  <td class="num strong">20,135</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">64</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Ashton Jeanty + Jaxon Smith-Njigba + Emeka Egbuka</td>
+  <td class="side">James Conner + MarShawn Lloyd</td>
+  <td class="num">20,467</td>
+  <td class="num">338</td>
+  <td class="num strong">20,129</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">65</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Ashton Jeanty + Jaxon Smith-Njigba + Emeka Egbuka</td>
+  <td class="side">James Conner + MarShawn Lloyd</td>
+  <td class="num">20,467</td>
+  <td class="num">338</td>
+  <td class="num strong">20,129</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">66</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Ashton Jeanty + Jaxon Smith-Njigba + Trey McBride</td>
+  <td class="side">James Conner + Elijah Arroyo</td>
+  <td class="num">20,472</td>
+  <td class="num">345</td>
+  <td class="num strong">20,128</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">67</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Ashton Jeanty + Jaxon Smith-Njigba + Trey McBride</td>
+  <td class="side">James Conner + Elijah Arroyo</td>
+  <td class="num">20,472</td>
+  <td class="num">345</td>
+  <td class="num strong">20,128</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">68</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">James Conner + 2028 1st</td>
+  <td class="num">21,229</td>
+  <td class="num">1,104</td>
+  <td class="num strong">20,126</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">69</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">James Conner + 2028 1st</td>
+  <td class="num">21,229</td>
+  <td class="num">1,104</td>
+  <td class="num strong">20,126</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">70</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Ashton Jeanty + Jaxon Smith-Njigba + Emeka Egbuka</td>
+  <td class="side">James Conner + Elijah Arroyo</td>
+  <td class="num">20,467</td>
+  <td class="num">345</td>
+  <td class="num strong">20,122</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">71</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Ashton Jeanty + Jaxon Smith-Njigba + Emeka Egbuka</td>
+  <td class="side">James Conner + Elijah Arroyo</td>
+  <td class="num">20,467</td>
+  <td class="num">345</td>
+  <td class="num strong">20,122</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">72</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Isaiah Likely + Elijah Arroyo + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">1,112</td>
+  <td class="num strong">20,116</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">73</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Isaiah Likely + Elijah Arroyo + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">1,112</td>
+  <td class="num strong">20,116</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">74</td>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> gdubs10</td>
+  <td class="sh">3x2</td>
+  <td class="side">Ashton Jeanty + Drake London + Jaxon Smith-Njigba</td>
+  <td class="side">Jaylen Warren + Jaxson Dart</td>
+  <td class="num">21,229</td>
+  <td class="num">1,123</td>
+  <td class="num strong">20,106</td>
+  <td class="verd"><code>S3a_net_cap</code></td>
+</tr><tr>
+  <td class="ix">75</td>
+  <td><span class="chip" style="--c:var(--tier-1st)">gen_v2</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> gdubs10</td>
+  <td class="sh">3x2</td>
+  <td class="side">Ashton Jeanty + Drake London + Jaxon Smith-Njigba</td>
+  <td class="side">Jaxson Dart + Jaylen Warren</td>
+  <td class="num">21,229</td>
+  <td class="num">1,123</td>
+  <td class="num strong">20,106</td>
+  <td class="verd"><code>S3a_net_cap</code></td>
+</tr><tr>
+  <td class="ix">76</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Isaiah Likely + James Conner + 2028 2nd</td>
+  <td class="num">21,229</td>
+  <td class="num">1,128</td>
+  <td class="num strong">20,101</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">77</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">James Conner + Isaiah Likely + 2028 2nd</td>
+  <td class="num">21,229</td>
+  <td class="num">1,128</td>
+  <td class="num strong">20,101</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">78</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Ashton Jeanty + Jaxon Smith-Njigba + Trey McBride</td>
+  <td class="side">Elijah Arroyo + MarShawn Lloyd</td>
+  <td class="num">20,472</td>
+  <td class="num">373</td>
+  <td class="num strong">20,100</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">79</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Ashton Jeanty + Jaxon Smith-Njigba + Trey McBride</td>
+  <td class="side">Elijah Arroyo + MarShawn Lloyd</td>
+  <td class="num">20,472</td>
+  <td class="num">373</td>
+  <td class="num strong">20,100</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">80</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">MarShawn Lloyd + 2028 1st</td>
+  <td class="num">21,229</td>
+  <td class="num">1,131</td>
+  <td class="num strong">20,098</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">81</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">MarShawn Lloyd + 2028 1st</td>
+  <td class="num">21,229</td>
+  <td class="num">1,131</td>
+  <td class="num strong">20,098</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">82</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Ashton Jeanty + Jaxon Smith-Njigba + Emeka Egbuka</td>
+  <td class="side">Elijah Arroyo + MarShawn Lloyd</td>
+  <td class="num">20,467</td>
+  <td class="num">373</td>
+  <td class="num strong">20,094</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">83</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Ashton Jeanty + Jaxon Smith-Njigba + Emeka Egbuka</td>
+  <td class="side">Elijah Arroyo + MarShawn Lloyd</td>
+  <td class="num">20,467</td>
+  <td class="num">373</td>
+  <td class="num strong">20,094</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">84</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Elijah Arroyo + 2028 1st</td>
+  <td class="num">21,229</td>
+  <td class="num">1,138</td>
+  <td class="num strong">20,091</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">85</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Elijah Arroyo + 2028 1st</td>
+  <td class="num">21,229</td>
+  <td class="num">1,138</td>
+  <td class="num strong">20,091</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">86</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">James Conner + Dylan Sampson + Isaiah Likely</td>
+  <td class="num">21,229</td>
+  <td class="num">1,144</td>
+  <td class="num strong">20,085</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">87</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Isaiah Likely + James Conner + Dylan Sampson</td>
+  <td class="num">21,229</td>
+  <td class="num">1,144</td>
+  <td class="num strong">20,085</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">88</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Ashton Jeanty + Jaxon Smith-Njigba + Trey McBride</td>
+  <td class="side">James Conner + 2028 2nd</td>
+  <td class="num">20,472</td>
+  <td class="num">388</td>
+  <td class="num strong">20,085</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">89</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Ashton Jeanty + Jaxon Smith-Njigba + Trey McBride</td>
+  <td class="side">James Conner + 2028 2nd</td>
+  <td class="num">20,472</td>
+  <td class="num">388</td>
+  <td class="num strong">20,085</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">90</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Ashton Jeanty + Jaxon Smith-Njigba + Emeka Egbuka</td>
+  <td class="side">James Conner + 2028 2nd</td>
+  <td class="num">20,467</td>
+  <td class="num">388</td>
+  <td class="num strong">20,079</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">91</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Ashton Jeanty + Jaxon Smith-Njigba + Emeka Egbuka</td>
+  <td class="side">James Conner + 2028 2nd</td>
+  <td class="num">20,467</td>
+  <td class="num">388</td>
+  <td class="num strong">20,079</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">92</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Isaiah Likely + 2028 2nd + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">1,156</td>
+  <td class="num strong">20,073</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">93</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Isaiah Likely + 2028 2nd + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">1,156</td>
+  <td class="num strong">20,073</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">94</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Ashton Jeanty + Jaxon Smith-Njigba + Trey McBride</td>
+  <td class="side">James Conner + Dylan Sampson</td>
+  <td class="num">20,472</td>
+  <td class="num">404</td>
+  <td class="num strong">20,068</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">95</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Ashton Jeanty + Jaxon Smith-Njigba + Trey McBride</td>
+  <td class="side">James Conner + Dylan Sampson</td>
+  <td class="num">20,472</td>
+  <td class="num">404</td>
+  <td class="num strong">20,068</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">96</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Isaiah Likely + 2028 2nd + Elijah Arroyo</td>
+  <td class="num">21,229</td>
+  <td class="num">1,163</td>
+  <td class="num strong">20,066</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">97</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Isaiah Likely + Elijah Arroyo + 2028 2nd</td>
+  <td class="num">21,229</td>
+  <td class="num">1,163</td>
+  <td class="num strong">20,066</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">98</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Ashton Jeanty + Jaxon Smith-Njigba + Emeka Egbuka</td>
+  <td class="side">James Conner + Dylan Sampson</td>
+  <td class="num">20,467</td>
+  <td class="num">404</td>
+  <td class="num strong">20,062</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">99</td>
+  <td><span class="chip" style="--c:var(--ice)">current</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x2</td>
+  <td class="side">Ashton Jeanty + Jaxon Smith-Njigba + Emeka Egbuka</td>
+  <td class="side">James Conner + Dylan Sampson</td>
+  <td class="num">20,467</td>
+  <td class="num">404</td>
+  <td class="num strong">20,062</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">100</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">mattmurf77 <span class="arrow">&rarr;</span> jonbonjourvi</td>
+  <td class="sh">3x3</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="side">Isaiah Likely + Dylan Sampson + MarShawn Lloyd</td>
+  <td class="num">21,229</td>
+  <td class="num">1,172</td>
+  <td class="num strong">20,057</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr></tbody></table></div>
+
+<h2>Top 100 &mdash; receive side most exceeds give</h2>
+<p class="lede">Sorted by <code>receive_value &minus; give_value</code>, descending.
+<strong>All 100 are <code>challenger</code> rows</strong>, all for jonbonjourvi, all killed by
+<code>gap_max</code>. <code>current</code>'s widest candidate in this direction is a gap of
+13,899; the challenger reaches 18,958. Removing the user-board shrink opens a tail the shrunk
+board never proposes at that magnitude.</p>
+<div class="scroll"><table style="min-width:1080px">
+<thead><tr><th></th><th>arm</th><th>direction</th><th>shape</th><th>gives</th><th>receives</th>
+<th class="num">give val</th><th class="num">recv val</th><th class="num">gap</th>
+<th>verdict</th></tr></thead>
+<tbody><tr>
+  <td class="ix">1</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">James Conner + MarShawn Lloyd</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">80</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,958</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">2</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">James Conner + Elijah Arroyo</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">82</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,956</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">3</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">Elijah Arroyo + MarShawn Lloyd</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">89</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,949</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">4</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">James Conner + 2028 2nd</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">94</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,945</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">5</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">James Conner + Dylan Sampson</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">98</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,941</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">6</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">2028 2nd + MarShawn Lloyd</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">100</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,938</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">7</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">2028 2nd + Elijah Arroyo</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">102</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,936</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">8</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">Dylan Sampson + MarShawn Lloyd</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">105</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,934</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">9</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">Dylan Sampson + Elijah Arroyo</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">106</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,932</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">10</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">Dylan Sampson + 2028 2nd</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">118</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,921</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">11</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">James Conner + Elijah Arroyo + MarShawn Lloyd</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">126</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,913</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">12</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">James Conner + 2028 2nd + MarShawn Lloyd</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">137</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,902</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">13</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">James Conner + 2028 2nd + Elijah Arroyo</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">139</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,900</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">14</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">James Conner + Dylan Sampson + MarShawn Lloyd</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">141</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,897</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">15</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">James Conner + Dylan Sampson + Elijah Arroyo</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">143</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,895</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">16</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">2028 2nd + Elijah Arroyo + MarShawn Lloyd</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">146</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,893</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">17</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Dylan Sampson + Elijah Arroyo + MarShawn Lloyd</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">150</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,888</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">18</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">James Conner + Dylan Sampson + 2028 2nd</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">154</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,884</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">19</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Dylan Sampson + 2028 2nd + MarShawn Lloyd</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">161</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,877</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">20</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Dylan Sampson + 2028 2nd + Elijah Arroyo</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">163</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,876</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">21</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">Isaiah Likely + James Conner</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">262</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,776</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">22</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">Isaiah Likely + MarShawn Lloyd</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">269</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,770</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">23</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">Isaiah Likely + Elijah Arroyo</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">271</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,768</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">24</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">Isaiah Likely + 2028 2nd</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">281</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,757</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">25</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">Isaiah Likely + Dylan Sampson</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">286</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,753</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">26</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Isaiah Likely + James Conner + MarShawn Lloyd</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">303</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,736</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">27</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Isaiah Likely + James Conner + Elijah Arroyo</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">304</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,734</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">28</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Isaiah Likely + Elijah Arroyo + MarShawn Lloyd</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">311</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,727</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">29</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Isaiah Likely + James Conner + 2028 2nd</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">316</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,723</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">30</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Isaiah Likely + James Conner + Dylan Sampson</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">320</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,719</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">31</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Isaiah Likely + 2028 2nd + MarShawn Lloyd</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">322</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,716</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">32</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Isaiah Likely + 2028 2nd + Elijah Arroyo</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">324</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,714</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">33</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Isaiah Likely + Dylan Sampson + MarShawn Lloyd</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">327</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,712</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">34</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Isaiah Likely + Dylan Sampson + Elijah Arroyo</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">328</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,710</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">35</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Isaiah Likely + Dylan Sampson + 2028 2nd</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">340</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,699</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">36</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">James Conner + 2028 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">358</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,681</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">37</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">MarShawn Lloyd + 2028 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">364</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,674</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">38</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">Elijah Arroyo + 2028 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">366</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,672</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">39</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">2028 2nd + 2028 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">377</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,662</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">40</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">Dylan Sampson + 2028 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">381</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,658</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">41</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">James Conner + MarShawn Lloyd + 2028 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">395</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,644</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">42</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">James Conner + Elijah Arroyo + 2028 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">397</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,642</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">43</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Elijah Arroyo + MarShawn Lloyd + 2028 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">404</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,635</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">44</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">James Conner + 2028 2nd + 2028 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">408</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,631</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">45</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">James Conner + Dylan Sampson + 2028 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">412</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,626</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">46</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">2028 2nd + MarShawn Lloyd + 2028 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">415</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,624</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">47</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">2028 2nd + Elijah Arroyo + 2028 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">417</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,622</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">48</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Dylan Sampson + MarShawn Lloyd + 2028 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">419</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,620</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">49</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Dylan Sampson + Elijah Arroyo + 2028 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">421</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,618</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">50</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Dylan Sampson + 2028 2nd + 2028 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">432</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,607</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">51</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">James Conner + 2027 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">461</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,578</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">52</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">James Conner + 2027 1st (from gdubs10)</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">461</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,578</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">53</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">MarShawn Lloyd + 2027 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">467</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,571</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">54</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">MarShawn Lloyd + 2027 1st (from gdubs10)</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">467</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,571</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">55</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">Elijah Arroyo + 2027 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">469</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,570</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">56</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">Elijah Arroyo + 2027 1st (from gdubs10)</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">469</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,570</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">57</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">2028 2nd + 2027 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">479</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,559</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">58</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">2028 2nd + 2027 1st (from gdubs10)</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">479</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,559</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">59</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">Dylan Sampson + 2027 1st (from gdubs10)</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">483</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,555</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">60</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">Dylan Sampson + 2027 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">483</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,555</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">61</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">James Conner + MarShawn Lloyd + 2027 1st (from gdubs10)</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">494</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,545</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">62</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">James Conner + MarShawn Lloyd + 2027 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">494</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,545</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">63</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">James Conner + Elijah Arroyo + 2027 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">496</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,543</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">64</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">James Conner + Elijah Arroyo + 2027 1st (from gdubs10)</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">496</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,543</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">65</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Elijah Arroyo + MarShawn Lloyd + 2027 1st (from gdubs10)</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">502</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,536</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">66</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Elijah Arroyo + MarShawn Lloyd + 2027 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">502</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,536</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">67</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">James Conner + 2028 2nd + 2027 1st (from gdubs10)</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">507</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,532</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">68</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">James Conner + 2028 2nd + 2027 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">507</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,532</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">69</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">James Conner + Dylan Sampson + 2027 1st (from gdubs10)</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">511</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,528</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">70</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">James Conner + Dylan Sampson + 2027 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">511</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,528</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">71</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">2028 2nd + MarShawn Lloyd + 2027 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">514</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,525</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">72</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">2028 2nd + MarShawn Lloyd + 2027 1st (from gdubs10)</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">514</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,525</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">73</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">2028 2nd + Elijah Arroyo + 2027 1st (from gdubs10)</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">515</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,523</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">74</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">2028 2nd + Elijah Arroyo + 2027 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">515</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,523</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">75</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Dylan Sampson + MarShawn Lloyd + 2027 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">518</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,521</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">76</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Dylan Sampson + MarShawn Lloyd + 2027 1st (from gdubs10)</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">518</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,521</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">77</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Dylan Sampson + Elijah Arroyo + 2027 1st (from gdubs10)</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">520</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,519</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">78</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Dylan Sampson + Elijah Arroyo + 2027 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">520</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,519</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">79</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Dylan Sampson + 2028 2nd + 2027 1st (from gdubs10)</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">531</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,508</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">80</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Dylan Sampson + 2028 2nd + 2027 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">531</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,508</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">81</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">Isaiah Likely + 2028 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">538</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,501</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">82</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Isaiah Likely + James Conner + 2028 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">573</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,465</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">83</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Isaiah Likely + MarShawn Lloyd + 2028 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">580</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,458</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">84</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Isaiah Likely + Elijah Arroyo + 2028 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">582</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,456</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">85</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Isaiah Likely + 2028 2nd + 2028 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">593</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,445</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">86</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Isaiah Likely + Dylan Sampson + 2028 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">598</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,441</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">87</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">Isaiah Likely + 2027 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">638</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,400</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">88</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">Isaiah Likely + 2027 1st (from gdubs10)</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">638</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,400</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">89</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Isaiah Likely + James Conner + 2027 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">672</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,366</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">90</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Isaiah Likely + James Conner + 2027 1st (from gdubs10)</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">672</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,366</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">91</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Isaiah Likely + MarShawn Lloyd + 2027 1st (from gdubs10)</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">679</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,360</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">92</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Isaiah Likely + MarShawn Lloyd + 2027 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">679</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,360</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">93</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Isaiah Likely + Elijah Arroyo + 2027 1st (from gdubs10)</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">681</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,358</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">94</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Isaiah Likely + Elijah Arroyo + 2027 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">681</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,358</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">95</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Isaiah Likely + 2028 2nd + 2027 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">692</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,347</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">96</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Isaiah Likely + 2028 2nd + 2027 1st (from gdubs10)</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">692</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,347</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">97</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Isaiah Likely + Dylan Sampson + 2027 1st (from gdubs10)</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">696</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,342</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">98</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">3x3</td>
+  <td class="side">Isaiah Likely + Dylan Sampson + 2027 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">696</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,342</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">99</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">2028 1st + 2027 1st</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">729</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,310</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr><tr>
+  <td class="ix">100</td>
+  <td><span class="chip" style="--c:var(--flare)">challenger</span></td>
+  <td class="dir">jonbonjourvi <span class="arrow">&rarr;</span> mattmurf77</td>
+  <td class="sh">2x3</td>
+  <td class="side">2028 1st + 2027 1st (from gdubs10)</td>
+  <td class="side">Drake London + Ashton Jeanty + Jaxon Smith-Njigba</td>
+  <td class="num">729</td>
+  <td class="num">19,039</td>
+  <td class="num strong">18,310</td>
+  <td class="verd"><code>gap_max</code></td>
+</tr></tbody></table></div>
+
+<div class="foot">
+<p>Measurement only. Replay counts, not production serving counts: one league, six boards,
+one snapshot. The consensus generator &mdash; 84.5% of live serving, and the path three of the
+challenger's nine profile keys are written for &mdash; is structurally unreachable on a slice
+where every manager has a published board, so nothing here forms a view on the challenger as a
+whole. Full memo: <code>docs/reviews/2026-08-22-knockout-waterfall-v2.md</code>.
+CSVs: <code>~/Desktop/ftf-knockout-three-managers-v2/</code>.</p>
+</div>
+</div>
