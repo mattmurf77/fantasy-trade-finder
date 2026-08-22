@@ -352,6 +352,7 @@ Registered under the `_comment_teardown` block in `config/features.json`; source
 
 | Flag | Default | Gates (source PRD) |
 |---|---|---|
+| `calc.merged_layout` | false | #384 merged calculator layout on the In-league page: collapsible outlook + Change, league/team side-by-side dropdowns (#333), the two rosters as two columns, an in-frame action row (Find a Trade / Include players / Clear / confirm), and the "Show me around" tour re-entry. OFF = the shipped stacked layout byte-identical. Client presentation only — no route, payload, engine input or analytics change in either state. |
 | `ux.sheet_guard` | false | Unsaved-input protection on sheet dismiss — FeedbackSheet draft persist/confirm, EspnLinkSheet keeps step + fields across close (01/prd-01). |
 | `ux.rank_tab_destination` | false | Rank tab-press navigates to the preferred/last-used rank surface instead of opening the 7-row menu; in-screen mode switcher; RankHome back header; chevron removed (01/prd-02). |
 | `ux.retap_active_tab` | false | Focused-tab re-tap pops the tab's stack to root / scrolls the primary list to top on Trades, Matches, League (01/prd-05). |

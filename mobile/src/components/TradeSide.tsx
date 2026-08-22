@@ -31,24 +31,35 @@ interface Props {
    *  pick on this side. Only the In-league mount passes it; without it the
    *  marker has no correction target and renders nothing. */
   leagueId?: string | null;
+  /** #384 — column mode. The merged calculator layout stands the two sides
+   *  side by side, which halves the available width to roughly 165pt on a
+   *  375pt screen. The stacked row (44pt chip slot + name + tier + a 32pt
+   *  remove target) does not fit in that, so column mode re-flows each row
+   *  to two lines and drops the fixed chip slot.
+   *
+   *  It does NOT shrink type: the Chalkline 11pt floor holds, and the 32pt
+   *  remove control keeps its hit area (it gains `hitSlop` rather than
+   *  losing size). Only layout changes — no row is removed, no value is
+   *  hidden, and `MemberEnteredMarker` still renders. */
+  compact?: boolean;
 }
 
 // One side of a hand-built trade (You send / You receive) for the Trade
 // Calculator: selected players with their pick-value tier + an add button.
-export default function TradeSide({ title, teamName, players, valueOf, tierOf, accent, onAdd, onRemove, addTestID, leagueId }: Props) {
+export default function TradeSide({ title, teamName, players, valueOf, tierOf, accent, onAdd, onRemove, addTestID, leagueId, compact }: Props) {
   return (
     <Card>
       <View style={styles.inner}>
-        <View style={styles.header}>
+        <View style={[styles.header, compact && styles.headerCompact]}>
           <TickLabel color={accent}>{title}</TickLabel>
-          <Text style={type.bodySm}>{teamName}</Text>
+          <Text style={type.bodySm} numberOfLines={1}>{teamName}</Text>
         </View>
 
         {players.length === 0 ? (
           <Text style={styles.empty}>No players yet — add someone to start the trade.</Text>
         ) : (
           players.map((p) => (
-            <View key={p.id} style={styles.row}>
+            <View key={p.id} style={[styles.row, compact && styles.rowCompact]}>
               {/* #320 — fixed-width chip slot: PICK (4 chars) is wider than
                   QB/RB/WR/TE, so a self-sized chip pushed pick rows' names
                   right. The slot pins one name x-position for every row.
@@ -56,14 +67,41 @@ export default function TradeSide({ title, teamName, players, valueOf, tierOf, a
                   Tiers/Trades/Matches (no drive-by). Same 44pt constant as
                   PlayerPickerModal's chipCol; keep the two in lockstep
                   (mobile/tests/check-picker-chip-alignment.js). */}
-              <View style={styles.chipCol}>
-                <PositionChip position={p.pos} size="sm" />
-              </View>
+              {compact ? null : (
+                <View style={styles.chipCol}>
+                  <PositionChip position={p.pos} size="sm" />
+                </View>
+              )}
               <View style={styles.info}>
-                <Text style={type.title}>{p.name}</Text>
-                <Text style={type.bodySm}>
-                  {p.pick ? 'Draft capital' : `${p.nflTeam} · ${p.age} yrs`}
-                </Text>
+                {compact ? (
+                  <View style={styles.compactTopLine}>
+                    <PositionChip position={p.pos} size="sm" />
+                    <Text style={[type.title, styles.compactName]} numberOfLines={1}>
+                      {p.name}
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={type.title}>{p.name}</Text>
+                )}
+                <View style={compact ? styles.compactMetaLine : undefined}>
+                  <Text style={type.bodySm} numberOfLines={1}>
+                    {p.pick ? 'Draft capital' : `${p.nflTeam} · ${p.age} yrs`}
+                  </Text>
+                  {/* Column mode has no room for a trailing value column, so
+                      the tier/value rides the meta line. It is MOVED, never
+                      dropped — a narrower row that silently stops pricing an
+                      asset would be worse than a wrapped one. */}
+                  {compact
+                    ? (() => {
+                        const t = tierOf?.(p);
+                        return t ? (
+                          <TierBadge tier={t} />
+                        ) : (
+                          <Text style={type.data}>{valueOf(p).toLocaleString()}</Text>
+                        );
+                      })()
+                    : null}
+                </View>
                 {/* D17 — priced surface 4 of 5: the calculator's pick rows.
                     UNCONDITIONAL by design; the marker self-gates on the
                     flag AND `source === 'user'`, so wrapping this in a
@@ -77,7 +115,7 @@ export default function TradeSide({ title, teamName, players, valueOf, tierOf, a
                   testID={`calc.member-entered.${p.id}`}
                 />
               </View>
-              {(() => {
+              {compact ? null : (() => {
                 const t = tierOf?.(p);
                 return t ? (
                   // TierBadge hardcodes alignSelf:'flex-start' (fine in its
@@ -93,7 +131,9 @@ export default function TradeSide({ title, teamName, players, valueOf, tierOf, a
               })()}
               <Pressable
                 onPress={() => onRemove(p.id)}
-                hitSlop={6}
+                // Column mode narrows the row, not the target: the control
+                // keeps its 32pt box and gains slop instead of shrinking.
+                hitSlop={compact ? 12 : 6}
                 style={({ pressed }) => [styles.remove, pressed && styles.removePressed]}
                 accessibilityRole="button"
                 accessibilityLabel={`Remove ${p.name}`}
@@ -141,4 +181,16 @@ const styles = StyleSheet.create({
   removePressed: { backgroundColor: ink.ink3 },
   addBtn: { marginTop: space.xs },
   tierSlot: { alignSelf: 'center' },
+  // #384 column mode. Type sizes are untouched (Chalkline 11pt floor); only
+  // the row's flow changes — chip+name on line 1, meta+value on line 2.
+  headerCompact: { flexDirection: 'column', alignItems: 'flex-start', gap: 2 },
+  rowCompact: { alignItems: 'flex-start', gap: space.xs },
+  compactTopLine: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
+  compactName: { flexShrink: 1 },
+  compactMetaLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space.xs,
+  },
 });

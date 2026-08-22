@@ -280,6 +280,7 @@ FLAG_KEYS: tuple[str, ...] = (
     # Unflagged-by-design exceptions: league-prefs authz fix (security),
     # first_match/new_match dedup, AASA route (inert without the mobile
     # entitlement), Apple token revocation on deletion.
+    "calc.merged_layout",
     "ux.sheet_guard",
     "ux.rank_tab_destination",
     "ux.retap_active_tab",

@@ -578,6 +578,20 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
             initialOpponentId={prefill?.opponentUserId}
             initialGiveIds={prefill?.giveIds}
             initialReceiveIds={prefill?.receiveIds}
+            // #384 — the merged layout's own controls. The component owns
+            // the canvas; the SCREEN owns navigation, so the finder hand-off
+            // and the tour re-entry are passed in rather than reached for.
+            onFindATrade={({ includePlayers, giveIds, receiveIds }) =>
+              navigation.navigate('TradesHome', {
+                // Ruling 2 (#384): ON ⇒ the search must INCLUDE the canvas
+                // assets. OFF ⇒ unconstrained, and we deliberately send no
+                // ids at all rather than empty arrays the finder would have
+                // to distinguish from "cleared".
+                ...(includePlayers && (giveIds.length || receiveIds.length)
+                  ? { requireAssets: { giveIds, receiveIds } }
+                  : {}),
+              })
+            }
           />
         ) : (
         <>

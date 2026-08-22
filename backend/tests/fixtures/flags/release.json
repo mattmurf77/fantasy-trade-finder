@@ -119,6 +119,7 @@
   "ranks.source.dynasty_nerds": true,
   "ranks.source.dlf": false,
   "_comment_teardown": "2026-07-19 app-teardown remediation (branch teardown-remediation; PRDs in gitignored app-teardown-review/). ALL dark until operator review. Exceptions shipped unflagged by design: the league-prefs authz fix (security), doc/legal-copy corrections, and inert accessibility annotations (labels/roles/traits). Flag-per-behavior below; rollout notes live in each PRD.",
+  "calc.merged_layout": false,
   "ux.sheet_guard": true,
   "ux.rank_tab_destination": true,
   "ux.retap_active_tab": true,
