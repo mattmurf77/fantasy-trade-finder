@@ -2,7 +2,7 @@
 
 | tip sha | branch | worktree |
 |---|---|---|
-| `a12c8b7` (ship tip `304f55a`; `a12c8b7` = +1 docs commit re-landed as #173) | `claude/manual-calculator-e2e-review-39a467` | `.claude/worktrees/tweet-product-gap-review-266ff1` (this session's review worktree; removed after the EAS build it hosted finished) |
+| `a12c8b7` (ship tip `304f55a`; `a12c8b7` = +1 docs commit re-landed as #173) | `claude/manual-calculator-e2e-review-39a467` | `.claude/worktrees/tweet-product-gap-review-266ff1` (this session's review worktree and cwd — it cannot remove itself; **next session: `git worktree remove` it and `git branch -D` the local branch**) |
 | `54e9e7e` | `docs/384-ship-writeback` (cherry-pick of `a12c8b7` onto main) | scratch `wt-docs` |
 | `7399e18` | `feat/calc-finder-merge` (W0–W4 as originally built; superseded — every commit was carried forward on the review branch) | `.claude/worktrees/new-user-feedback-d4c47d` (**another session's worktree — sweep when idle**, not removed here) |
 
