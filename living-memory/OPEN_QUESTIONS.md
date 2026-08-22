@@ -39,14 +39,30 @@
 
 **CLOSED 2026-08-22 by [D-151](DECISIONS.md).** Operator: *"I'm fine with it as its own tab for now."* The two-tab form (In league | Real values) as built is the answer; #310's league-free reachability stands; n10 keeps its target. Revisit when Find a Trade is absorbed.
 
-### Q-029 — The ✓ like/queue cell has no contract: what does "queue this trade for the other manager" call?
+### Q-029 — The ✓ like/queue cell has no contract: what does "queue this trade for the other manager" call? — **✓ HALF CLOSED 2026-08-22; receive-side half STILL OPEN**
 
-- **Why it matters:** the merged action row's ✓ (`calc.action.confirm`) is a **permanently disabled control**. `InLeagueCalculator.tsx` has `disabled={!onLikeTrade || !bothSides}`, and no caller passes `onLikeTrade` — `TradeCalculatorScreen` mounts the component without it. Tour beat **n15** spotlights it (*"The check queues this trade for the other manager, if it fits their preferences"*), [D-150](DECISIONS.md) Decision 3 and `status.md` both presented it as built, and the first TestFlight checklist told the operator to tap it and VoiceOver it. A user who follows the tour reaches a 40 %-opacity button that does nothing.
+- **RESOLUTION — the ✓ half, 2026-08-22 (W6-A, [D-152]).** The operator approved building the
+  contract; option (b), a new endpoint, is what shipped as **`POST /api/trades/queue`**. The
+  reading that made it small: the operator's sentence names two systems that already exist —
+  "queue this trade" IS the deck's like (same `trade_decisions` row, same `_reconstruct_swipe_card`
+  → `record_decision` path) and "shows up in their suggested trades" IS the likes-you injector,
+  which reads exactly those rows. So the route mints no new object; a **deterministic** `calcq_`
+  trade_id derived from the package solves the "a canvas has no server-minted id" problem the
+  paragraph below treats as fatal. And because every gate the injector applies is a pure function
+  of state the request already holds, the route evaluates "meets their preferences" **up front**
+  and refuses with a named reason, recording nothing — which is what the operator's *if* actually
+  demands. Contract, evidence and the honest limits of `queued: true`:
+  [`status.md` § W6-A](../docs/feedback/items/384-calc-finder-merge/status.md). Beat n15's copy
+  needed no change, and its placeholder `adoptionEvent` is now `calc_trade_queued`.
+- **STILL OPEN:** the second half below — receive-side `pinned_receive_mode:'all'` and the
+  `picks_pool_cap` pin rejection. Unchanged, still a bright-line API change, still owned by the
+  operator.
+- **Why it mattered (original entry, kept):** the merged action row's ✓ (`calc.action.confirm`) was a **permanently disabled control**. `InLeagueCalculator.tsx` has `disabled={!onLikeTrade || !bothSides}`, and no caller passes `onLikeTrade` — `TradeCalculatorScreen` mounts the component without it. Tour beat **n15** spotlights it (*"The check queues this trade for the other manager, if it fits their preferences"*), [D-150](DECISIONS.md) Decision 3 and `status.md` both presented it as built, and the first TestFlight checklist told the operator to tap it and VoiceOver it. A user who follows the tour reaches a 40 %-opacity button that does nothing.
 - **Why it cannot just be wired:** there is no backend route that queues a **hand-built** package for a counterparty. The deck's like path (`trade_queue` / the likes surface) needs a **server-minted `trade_id`**, which only the generator produces; a calculator canvas has no card and therefore no id. This is an **API contract decision**, not an omission — the bright line CLAUDE.md draws.
 - **The options:** (a) mint via the existing share-package route (`POST /api/trades/share-package` returns a package id) and then like that id — cheapest, but a share-package row is not a trade card and the likes surface would need to render one; (b) a new "submit package as like" endpoint that mints and queues in one call — cleanest contract, most work, and it needs a mutual-match story (what does the counterparty *see*?); (c) **cut the cell and beat n15** until (a) or (b) exists, and correct D-150 / status / checklist — the option that makes the shipped surface honest today.
 - **Second half of the same decision — receive-side "must include".** Ruling 2 says Include-players ON ⇒ the search must include the canvas. The give side honours it (`trade_optimizer.py` `pinned_give_mode:'all'` — every pin required); the receive side requires only that the served card **intersect** the pinned set, in all three enumerators. Making it symmetric means adding `pinned_receive_mode:'all'` through `api/trades.ts` → `server.py` → the enumerators — again an API change. Related: a canvas pick outside `picks_pool_cap` (default 6) is never on `user_roster`, so `pinned_all` rejects every subset and the user gets zero cards behind a misleading "try turning fairness off" message.
-- **Workaround in the meantime:** the cell renders disabled with an honest a11y state, and the TestFlight checklist now tests that it *is* disabled rather than telling the operator to tap it. Nothing lies except beat n15, which still describes it as working.
-- **Owner:** operator (mechanism), then whoever builds W6.
+- ~~**Workaround in the meantime:** the cell renders disabled with an honest a11y state, and the TestFlight checklist now tests that it *is* disabled rather than telling the operator to tap it.~~ **Superseded 2026-08-22** — the cell is live, and checklist steps 13 / 13a / 13b test the queue and both refusal paths instead.
+- **Owner:** ✓ mechanism — **closed**. Receive-side all-mode — operator.
 
 ## 2026-08-19 — Open Items (team review)
 

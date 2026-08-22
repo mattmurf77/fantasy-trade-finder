@@ -444,6 +444,59 @@ export async function flagBadTrade(
   });
 }
 
+// ── #384 ✓ cell — queue a hand-built package for the counterparty ────
+//
+// D-152. The merged calculator's confirm control. The server records the
+// package as the caller's LIKE (the same row a deck swipe writes) ONLY when
+// the likes-you injector would actually mirror it into the counterparty's
+// deck — so a `queued: false` means nothing was recorded and the reason says
+// why. Idempotent per (user, league, opponent, give set, receive set): a
+// second identical call answers `already_queued: true` and moves no Elo.
+//
+// The reason vocabulary is a cross-client invariant
+// (docs/cross-client-invariants.md § Trade-queue refusal reasons) — the
+// server's `CALC_QUEUE_REASONS`. `detail` is diagnostic free text; never
+// switch UI on it.
+export type CalcQueueReason =
+  | 'likes_you_off'
+  | 'not_league_member'
+  | 'assets_not_on_roster'
+  | 'opponent_untouchable'
+  | 'opponent_not_interested'
+  | 'fails_fairness_floor';
+
+export interface CalcQueueResult {
+  queued: boolean;
+  /** true when this exact package was already queued (no second record). */
+  already_queued?: boolean;
+  trade_id?: string;
+  reason?: CalcQueueReason;
+  detail?: string;
+}
+
+// POST /api/trades/queue  {league_id, opponent_user_id, give_player_ids,
+//                          receive_player_ids}
+export async function queueTradeForOpponent(args: {
+  leagueId: string;
+  opponentUserId: string;
+  giveIds: string[];
+  receiveIds: string[];
+}): Promise<CalcQueueResult> {
+  const res = await api.post<any>('/api/trades/queue', {
+    league_id:          args.leagueId,
+    opponent_user_id:   args.opponentUserId,
+    give_player_ids:    args.giveIds,
+    receive_player_ids: args.receiveIds,
+  });
+  return {
+    queued:         !!res?.queued,
+    already_queued: !!res?.already_queued,
+    trade_id:       typeof res?.trade_id === 'string' ? res.trade_id : undefined,
+    reason:         typeof res?.reason === 'string' ? (res.reason as CalcQueueReason) : undefined,
+    detail:         typeof res?.detail === 'string' ? res.detail : undefined,
+  };
+}
+
 // ── Trade-match normalizer ───────────────────────────────────────────
 // Backend (database.py:load_matches + server.py enrichment) returns:
 //   { match_id (int), league_id, league_name?, partner_id, partner_name,

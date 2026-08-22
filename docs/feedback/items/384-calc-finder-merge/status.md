@@ -1,6 +1,6 @@
 # Status — #384 Manual calculator becomes the merged trade surface
 
-**Status:** **BUILT DARK — W5 landed, checklist ready to run (2026-08-22)** — waves W0–W5 on `claude/manual-calculator-e2e-review-39a467`, `calc.merged_layout` **false**, not merged, not pushed. TestFlight checklist rewritten against current behaviour and **still UNRUN**. The [E2E review](review-2026-08-22-e2e.md)'s 5 P0 and most P1s are fixed — see the W5 section at the bottom for what was fixed, what is still open, and the **five flag prerequisites**. **Do not flip without reading those prerequisites: `onboarding.guide_v2` is `false` today, and flipping `calc.merged_layout` alone ships the merged layout with no tour.** Scope block (retrospective, gate 1 was skipped): [`scope.md`](scope.md).
+**Status:** **BUILT DARK — W6-A landed, checklist ready to run (2026-08-22)** — waves W0–W5 on `claude/manual-calculator-e2e-review-39a467`, `calc.merged_layout` **false**, not merged, not pushed. TestFlight checklist rewritten against current behaviour and **still UNRUN**. The [E2E review](review-2026-08-22-e2e.md)'s 5 P0 and most P1s are fixed — see the W5 section at the bottom for what was fixed, what is still open, and the **five flag prerequisites**. **Do not flip without reading those prerequisites: `onboarding.guide_v2` is `false` today, and flipping `calc.merged_layout` alone ships the merged layout with no tour.** Scope block (retrospective, gate 1 was skipped): [`scope.md`](scope.md).
 **Date:** 2026-08-22
 **Covered feedback IDs:** #384 canonical. Folds in **#310** (don't lock the manual calc behind trades; simplify nav), **#379** (filters back in-page, minimized default), **#380** (clicking a partner minimizes that section and raises the calculator). Touches **#333** (league/team as side-by-side dropdowns under the fold).
 **Reported:** `mattmurf77`, screen `TradesHome`, v1.15.0, filed 2026-08-22T03:04Z
@@ -151,14 +151,12 @@ pytest 4128 passed / 1 skipped.
 
 ### Still open
 
-1. **The ✓ like/queue cell is UNWIRED — the W2 row above is wrong about this.**
-   `InLeagueCalculator.tsx` `disabled={!onLikeTrade || !bothSides}`; nothing passes `onLikeTrade`.
-   There is no route that queues a hand-built package for a counterparty — the deck's like needs a
-   server-minted `trade_id` and a canvas has no card. The cell renders disabled with an honest
-   accessibility state; **beat n15 still describes it as working**, and
-   [D-150](../../../living-memory/DECISIONS.md) Decision 3 has been amended to say so. Bright line —
-   **Q-029**.
-2. **Receive-side "must include" is any-one, not all.** The give side requires every pin
+1. ~~**The ✓ like/queue cell is UNWIRED**~~ — **BUILT, W6-A (see the section below).** The
+   operator ruled the contract; `POST /api/trades/queue` is live behind the same flag, beat n15's
+   copy turned out to be accurate as written, and its placeholder `adoptionEvent` is now
+   `calc_trade_queued`. The Q-029 half about the ✓ is **CLOSED**.
+2. **Receive-side "must include" is any-one, not all.** *(Still open — this is what remains of
+   Q-029.)* The give side requires every pin
    (`pinned_give_mode:'all'`); the receive side only requires the served card to *intersect* the
    pinned set, in all three enumerators. Symmetry means `pinned_receive_mode:'all'` through
    `api/trades.ts` → `server.py` → the enumerators — an **API change**. Related: a canvas pick outside
@@ -181,3 +179,111 @@ The action row is still **inside** the page `ScrollView` rather than pinned as a
 outlook row is a receipt, not a disclosure. The mode row still renders a single lonely chip for a
 league-less user (review P2 #14). `lineupHeadText` remains `fontSize: 10`, a pre-existing Chalkline
 floor breach from #297, not introduced and not fixed here.
+
+---
+
+## W6-A — 2026-08-22: the ✓ cell has a contract, and it refuses out loud
+
+Nothing above this line is rewritten except the two "Still open" rows W6-A actually closes. The
+W0–W5 record stands, including where it was wrong about this cell.
+
+**What the operator asked for, verbatim:** *"queue this trade for the other manager — it shows up
+in their suggested trades if it meets their preferences."*
+
+**The reading that made it buildable.** That sentence names two systems that already exist and
+adds no third one:
+
+| The words | The system |
+|---|---|
+| "queue this trade" | the deck's **like** — a `trade_decisions` row, written by `_reconstruct_swipe_card` → `record_decision` → `save_trade_decision` / `save_trade_swipes`, the exact path `POST /api/trades/swipe` uses |
+| "shows up in their suggested trades" | the **likes-you injector** (`server._inject_likes_you_cards_impl`, flag `trade.likes_you`), which reads precisely those rows and mirrors them into a league-mate's deck |
+| "if it meets their preferences" | that injector's own skip conditions — untouchables (#95), not-interested (#163), roster actionability, and the **D-096 quality ladder** (gate level, user-gain floor, directional `overpay_ok`, `filler_ok`) |
+
+So the route mints nothing. Its only original content is a deterministic card id and one
+predicate function.
+
+**The decision that shaped it: up front, not at mirror time.** Every gate the injector applies is
+a pure function of state the request already holds — league membership, both rosters, the
+counterparty's two preference lists, the consensus seed board, and the live `model_config` knobs.
+None of it needs the counterparty's session. So the route **evaluates the predicate before
+recording anything**, and a refusal writes **nothing at all**: no `trade_decisions` row, no Elo.
+The alternative — record the like and let the mirror silently drop it — would have moved the
+caller's board and parked the trade in their "Awaiting them" list for an offer the other manager
+was never going to see. The operator's "if" is load-bearing, and this is what honouring it costs:
+one extra predicate, and a named reason instead of a shrug.
+
+**What `queued: true` promises, and what it does not.** It promises *eligible* — every stable
+precondition is met. It cannot promise *served*: the mirror also has to win one of three
+`_LIKES_YOU_CAP` slots on their next deck, clear the R4 live-pipeline dedup, not already have been
+swiped, and land inside the 90-day window, and none of those exist until they generate. That
+distinction is written into the route docstring, `api-reference.md` and the checklist rather than
+left for someone to discover.
+
+### The contract
+
+`POST /api/trades/queue` · `@_gate_unverified_write` · flag `calc.merged_layout` (404
+`feature_disabled` when off, checked before any session work)
+
+Body `{league_id, opponent_user_id, give_player_ids[], receive_player_ids[]}` — all required, both
+arrays non-empty.
+
+- `200 {queued: true, already_queued: bool, trade_id}`
+- `200 {queued: false, reason, detail?}` — a refusal is a 200 because the request was well formed
+  and the answer is a product answer
+- `reason` ∈ `likes_you_off` · `not_league_member` · `assets_not_on_roster` ·
+  `opponent_untouchable` · `opponent_not_interested` · `fails_fairness_floor` — closed and
+  cross-client ([invariants](../../cross-client-invariants.md#trade-queue-refusal-reasons-post-apitradesqueue))
+- `400` `missing_field` · `league_mismatch` (another league's members, rosters and seed board are
+  not on this session, so the predicate is unanswerable rather than refusable)
+- **Idempotency key:** `calcq_<sha1(user|league|opponent|sorted give|sorted receive)[:16]>`. Asset
+  order is irrelevant; side order is not. The probe (`database.find_live_trade_like`) runs **before**
+  `record_trade_signal` — deliberately unlike `swipe_trade`, whose G-049 / D-073 note leaves the
+  in-memory signal ungated because a deck swipe cannot be re-fired at will and a ✓ tap can.
+  A #318 retraction re-opens the package.
+
+**Mutual-match detection is deliberately not run here.** The queued like reaches the counterparty
+as a likes-you card and *their* swipe fires `check_for_match` through the shipped path, so a match
+is still minted in exactly one place. The cost is that a package the counterparty had *already*
+liked matches one deck-generation later instead of instantly; the benefit is that the 110-line
+match/notify/push block is not duplicated into a second route.
+
+### Files
+
+| File | Change |
+|---|---|
+| `backend/server.py` | `CALC_QUEUE_REASONS`, `_calc_queue_denied`, `_calc_queue_trade_id`, `_calc_queue_mirror_reason`, and the route — inserted after `swipe_trade`, whose like branch it reuses line for line |
+| `backend/database.py` | `find_live_trade_like` — read-only, over the existing `trade_decisions` table. **No schema change** |
+| `backend/analytics_taxonomy.py` | `calc_trade_queued` in `ALLOWED_CLIENT_EVENTS` + `CLIENT_EVENT_PROPS` (`{queued, reason}`) |
+| `backend/analytics_queries.py` | classified **INTENT** by documented exclusion from `NON_INTENT_EVENTS` — the tap is the user's decision to offer the trade, and it cannot open a DAU seam because a filled canvas already fired `calc_asset_added` |
+| `mobile/src/api/trades.ts` | `queueTradeForOpponent` + the `CalcQueueReason` union |
+| `mobile/src/components/InLeagueCalculator.tsx` | `onLikeTrade` gains `opponent`; the cell owns a `queueing` in-flight lock; `disabled` becomes `!onLikeTrade \|\| !bothSides \|\| !opponent \|\| queueing` |
+| `mobile/src/screens/TradeCalculatorScreen.tsx` | the handler (request → one `calc_trade_queued` → toast → haptic) and `queueRefusalLine`, one line per reason |
+| `mobile/src/components/analystScript.ts` | n15's `adoptionEvent` placeholder → `calc_trade_queued`. **Copy unchanged** — it turned out to describe the built mechanism exactly |
+
+### Evidence
+
+- **`backend/tests/test_calc_trade_queue.py` — 26 tests.** The flag gate; the happy path down to
+  the row and the Elo signal; **the recorded like surfacing through `_inject_likes_you_cards` when
+  the counterparty's deck generates** (the test that makes `queued: true` mean something); all six
+  refusal reasons, each asserting nothing was recorded and the board did not move; idempotency (no
+  second row, no second `swipe_decisions` row, no doubled in-memory signal); the id's set
+  semantics; the 400s; and the taxonomy + INTENT classification.
+- **Five backend sabotages, all red, all reverted:** idempotency probe forced to miss · mirror
+  predicate forced to pass · refusal branch bypassed · flag gate opened · preference lists read for
+  the CALLER instead of the counterparty.
+- **`mobile/tests/check-calc-merged-behavior.js` +12 assertions (18–19d).** Four mobile sabotages,
+  all red, all reverted: drop `onLikeTrade` from the screen (the literal Q-029 regression) ·
+  `disabled={true}` · a generic refusal toast · the in-flight lock never released.
+- **No new testIDs** — the cell already had `calc.action.confirm`; it only stopped being inert.
+- **Runtime: still none** (D-056). Checklist steps **13 / 13a / 13b** are new and 13a is the one
+  worth the setup cost: it needs a second account to prove the route reads *their* preferences,
+  which is exactly the half no structural test can reach.
+
+**Gates:** `pytest backend/tests` **4154 passed / 1 skipped** (was 4128/1; +26) · `npx tsc --noEmit`
+clean · `bash mobile/scripts/testid-lint.sh` OK · **76/76** `check-*.js` guards.
+
+### Still open after W6-A
+
+The other four items in the list above are untouched. Q-029's **receive-side `pinned_receive_mode:'all'`**
+half is still open and is still a bright-line API change; Q-028 (§6b) is unanswered; the overlay
+scope and the rollout shape are still operator calls.

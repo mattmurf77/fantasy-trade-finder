@@ -11,6 +11,22 @@
 
 ---
 
+## 2026-08-22h — #384 W6-A: the ✓ cell is wired — `POST /api/trades/queue` (D-152); D-151 closes §6b (still dark, not pushed)
+
+Operator rulings: §6b → the merged calculator keeps its own tab ([D-151](DECISIONS.md), Q-028 closed);
+the ✓ like/queue contract approved and built as **W6-A** ([D-152](DECISIONS.md)). One Opus build
+package, lead-reviewed: the route records the deck's own like through `_reconstruct_swipe_card` →
+`record_decision` with a deterministic `calcq_` id (idempotent, one Elo signal), evaluates the
+counterparty's likes-you gates **up front** and refuses with a closed six-reason enum recording
+nothing; `find_live_trade_like` is a read-only helper (no schema change). Mobile: `onLikeTrade` →
+`queueTradeForOpponent`, per-reason toasts, in-flight lock; `calc_trade_queued {queued, reason}`
+registered (INTENT). 26 backend tests incl. "the queued like reaches the opponent's deck"; pytest
+**4154**; 76/76 guards; docs (api-reference, cross-client-invariants reasons enum, architecture,
+LLD, glossary, scope, status W6-A, checklist 13/13a/13b). Next: **W6-B** — Find a Trade with a
+filled canvas becomes a fairness-only package search (asset-ideas engine generalised), empty canvas
+keeps the modeled deck, the Include-players toggle is removed, the tour is reshaped to end in the
+modeled cards, and the calculator `ScrollView` announces scroll so spotlights track.
+
 ## 2026-08-22g — #384 W5: the journey works on paper again (three Opus build packages, lead-reviewed; still dark, not pushed)
 
 Built on the review below, same branch. `fcf3413` **W5-B** — 13 calculator/tour/deck events +

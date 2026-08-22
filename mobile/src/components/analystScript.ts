@@ -415,9 +415,11 @@ export const S = {
     degradeLine: 'Confirming queues a trade for the other manager, if it fits their preferences.',
     maxDisplayCount: 3,
     retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
-    // The ✓ is unwired pending its contract (Q-029): there is no event a user
-    // could fire by adopting it. The tour's own start stands in until then.
-    adoptionEvent: 'calc_tour_started',
+    // #384 W6-A / D-152 — the ✓ is wired (POST /api/trades/queue), so the beat
+    // has its own adoption event at last. The copy above is unchanged because
+    // the built mechanism is exactly what it already described: the like is
+    // recorded only when the counterparty's likes-you gates would surface it.
+    adoptionEvent: 'calc_trade_queued',
   }),
 
   n16: (): GuideStep => ({

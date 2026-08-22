@@ -560,6 +560,18 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # they are meaningless on the deck's emitter and would hollow out its
     # two-prop row. INTENT: the conversion moment of the whole merge.
     "calc_find_a_trade_tapped",
+    # `calc_trade_queued` — #384 W6-A / D-152, the merged calculator's ✓ cell
+    # (testID calc.action.confirm). Fires once per TAP, on both outcomes.
+    # INTENT, and deliberately absent from NON_INTENT_EVENTS: the tap IS the
+    # user's decision to offer this trade — the calculator's equivalent of a
+    # deck `like`, which is already INTENT via `trade_proposed`. The server
+    # may REFUSE to record it (the counterparty's preferences), but a refusal
+    # is the system's answer to a decision the user made, not something shown
+    # to them unbidden — the `sleeper_send_attempted` class, not the
+    # `prompt_deferred` one. It also cannot open a DAU seam: it can only be
+    # reached from a filled canvas, which required `calc_asset_added` (INTENT)
+    # on the same screen the same day.
+    "calc_trade_queued",
     # Deck (screen 'Trades'). Both are INTENT and deliberately absent from
     # NON_INTENT_EVENTS. `deck_back_to_calculator` is the end-of-deck return
     # to editing — the `trade_edit_in_calculator_tapped` peer, not
@@ -1402,6 +1414,16 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     "calc_find_a_trade_tapped":    frozenset({"include_players",
                                               "give_count", "receive_count",
                                               "has_partner"}),
+    # The ✓ cell's outcome (#384 W6-A / D-152). `queued` is a BOOLEAN — did
+    # the server record the package as a like. `reason` is present ONLY on
+    # `queued: false` and is a LOW-CARDINALITY enum: the six server refusal
+    # codes (`server.CALC_QUEUE_REASONS`, mirrored in
+    # docs/cross-client-invariants.md and mobile/src/api/trades.ts) plus the
+    # client-only value `error` for a request that never got an answer. NO
+    # player ids, NO opponent id, and NOT the server's `detail` string —
+    # detail is free text for the server log, and admitting it here would put
+    # unbounded cardinality (and player names) into a props column.
+    "calc_trade_queued":           frozenset({"queued", "reason"}),
     # `pin_count` (int >= 0) on both deck rows: how many assets were pinned
     # when the user backed out / retried. It is the ONLY number that
     # separates "the finder returns nothing with three pins" from "the user

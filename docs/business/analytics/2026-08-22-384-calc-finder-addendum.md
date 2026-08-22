@@ -1,6 +1,6 @@
 # Tracking-plan addendum — #384 merged calculator + finder
 
-**Date:** 2026-08-22 · **Status:** adopted with the #384 registration commit
+**Date:** 2026-08-22 (amended same day for W6-A) · **Status:** adopted with the #384 registration commit; `calc_trade_queued` adopted with the W6-A route commit
 **Parent:** [2026-07-17-tracking-plan-v2.md](2026-07-17-tracking-plan-v2.md) §S3
 **Origin:** [../../feedback/items/384-calc-finder-merge/review-2026-08-22-e2e.md](../../feedback/items/384-calc-finder-merge/review-2026-08-22-e2e.md) § Analytics · plan [../../feedback/items/384-calc-finder-merge/plan.md](../../feedback/items/384-calc-finder-merge/plan.md) W2/W4
 **Registries touched:** `backend/analytics_taxonomy.py` (`ALLOWED_CLIENT_EVENTS`, `CLIENT_EVENT_PROPS`) and `backend/analytics_queries.py` (`NON_INTENT_EVENTS`). **Not** `FUNNEL_CRITICAL`, **not** `SERVER_FIRED_EVENTS` — both omissions argued below.
@@ -39,6 +39,7 @@ neither surface has the merged calculator or the deck.
 | `trade_pass_overlay_opened` | Trades | **non-intent** (exposure) | the #384-local decline-reason **overlay** is presented |
 | `trade_pass_overlay_dismissed` | Trades | **non-intent** (dismissal) | that overlay is dismissed |
 | `prompt_deferred` | any | **non-intent** (system refusal) | the interrupt arbiter refuses a surface the slot — once per deferral episode |
+| `calc_trade_queued` **(W6-A, added 2026-08-22)** | TradeCalculator | **intent** | the merged action row's ✓ answers — recorded, already recorded, or refused |
 
 ### Props
 
@@ -58,6 +59,8 @@ neither surface has the merged calculator or the deck.
 | `trade_pass_overlay_dismissed` | `banked` | bool | Dismissed-with-a-reason-banked vs dismissed-having-said-nothing. It is the **only** measure of whether the overlay presentation costs reasons the inline tiles were getting. Never the free text (it lives on the `trade_pass_reasons` row, SPEC §3.4) and never a reason code — that is `trade_pass_layer1.reason`'s job, and duplicating it would let the two disagree. |
 | `prompt_deferred` | `surface` | `InterruptSurface` enum | Identical to `prompt_shown.surface` — the granted and refused halves must slice the same way. |
 | | `blocked_by` | the literal `tour`, else the holding `InterruptSurface` | "The tour ate my prompt" is legible instead of looking like ordinary slot contention. |
+| `calc_trade_queued` | `queued` | bool | Did the server record the package as a like. The **refusal rate is the point**: a merged calculator whose ✓ mostly refuses is a canvas users are building against preferences the app never showed them. |
+| | `reason` | present **only** on `queued: false` — `likes_you_off` \| `not_league_member` \| `assets_not_on_roster` \| `opponent_untouchable` \| `opponent_not_interested` \| `fails_fairness_floor`, plus the client-only `error` | The six are `server.CALC_QUEUE_REASONS`, a closed cross-client enum. `error` is the client's own value for a request that never got an answer, and it exists so a network failure cannot masquerade as a product refusal. **NOT the server's `detail` string** — that is free text and can name player ids; admitting it would put unbounded cardinality and player names into a props column. |
 
 **No `platform` prop anywhere in this batch.** Device platform is a
 `user_events` **column** derived server-side at ingest (the NULL-`platform`
@@ -105,6 +108,15 @@ actions reachable only from a deck the user asked for
 None opens a DAU seam: each fires behind an intent event that already counts
 the user that day.
 
+**W6-A adds an eighth intent name, `calc_trade_queued`.** It is the one that
+looks like it might belong in the deny-list, because it fires on a refusal too
+— so, explicitly: the **tap** is the user's decision to offer the trade (the
+`sleeper_send_attempted` class), and the server's `queued: false` is the answer
+to that decision, not something shown to them unbidden (which is what makes
+`prompt_deferred` non-intent). It also cannot open a DAU seam: the ✓ is
+unreachable without a filled canvas, so `calc_asset_added` has already counted
+the user that day.
+
 ## Deliberate omissions
 
 - **`FUNNEL_CRITICAL` is unchanged.** That set is the SDK's drop-**last**
@@ -124,6 +136,10 @@ the user that day.
 - **No `calc_opened`.** Tracking plan v2 §S3 reserved that name and nothing
   ever fired it; `screen_viewed{screen: TradeCalculator}` already covers the
   mount, and minting a second one would be the #208/#248/#293 bug class.
+- **`calc_trade_queued` carries no `opponent_user_id` and no asset ids.** The
+  question the event answers is "does the ✓ work, and when it does not, whose
+  preference stopped it" — a six-value enum answers that. Who and what would
+  make it a per-trade log, which is what `trade_decisions` already is.
 - **The tour's per-beat `adoptionEvent`s** (`analystScript.ts`) point at
   registered names only. The pre-#384 script referenced `trade_card_swap`,
   `send_attempted` and `trade_disposition`, none of which exist in any

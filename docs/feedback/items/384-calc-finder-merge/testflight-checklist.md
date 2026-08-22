@@ -1,4 +1,4 @@
-# TestFlight checklist — #384 merged calculator (W0–W5)
+# TestFlight checklist — #384 merged calculator (W0–W6-A)
 
 **Under [D-056](../../../living-memory/DECISIONS.md) this is the ONLY runtime evidence any of
 this can get.** Everything below is structurally verified and has never run on a device.
@@ -13,11 +13,19 @@ button that is permanently disabled, expected the reason sheet to close on the f
 expected "Back to calculator" to land somewhere it does not. Steps 7, 12, 13, 15, 16, 18, 19, 21,
 22, 24, 25, 26 and 27 all changed.
 
+**Amended 2026-08-22 for W6-A ([D-152]).** The ✓ cell is no longer a disabled control — it queues
+the package for the counterparty through `POST /api/trades/queue`. Step 13 is rewritten from
+"confirm it is dead" to the happy path, and **13a / 13b are new**: the two refusal paths. 13a
+needs a second account or a cooperative league-mate, because the whole contract is that the route
+reads *their* preferences — and that is exactly the half no structural test can prove. Steps 7a
+and 37 also changed.
+
 | | |
 |---|---|
-| Build | first EAS build containing `a52c91e` or later |
+| Build | first EAS build containing the W6-A commit (the ✓ queue) or later |
 | Flag | `calc.merged_layout` — **false at ship**. Flip in `config/features.json`, push, Render redeploys (no rebuild); the client picks it up from `/api/feature-flags` |
-| Prereq | a Sleeper league with ≥2 other managers, **and** a second league (step 33), **and** a way to sign in as a user with **zero** leagues (step 31) |
+| Prereq | a Sleeper league with ≥2 other managers, **and** a second league (step 33), **and** a way to sign in as a user with **zero** leagues (step 31), **and** — for steps 13a/13b — a second account (or a cooperative league-mate) in the same league who can set an untouchable |
+| Flags for the ✓ | `trade.likes_you` must be ON, or every ✓ answers `likes_you_off` by design. `trade.preference_lists` must be ON for step 13a |
 
 ---
 
@@ -61,6 +69,10 @@ results will be misleading:
    there is **no "Show me around" link** anywhere on the page. *(The auto-start is gated on
    `calc.merged_layout`; a tour narrating the stacked page would point at controls that do not
    exist.)* ☐
+7a. **The queue route does not exist either.** The stacked page has no ✓ cell at all, so there is
+   nothing to tap — but the ROUTE is flag-gated too (`POST /api/trades/queue` → 404
+   `feature_disabled`). Nothing to do by hand here; noted so that a build which somehow shows a
+   ✓ flag-off is understood as a gating defect, not a cosmetic one. ☐
 
 **If any of 1–7 fails, stop.** Flag-off is meant to be byte-identical; a difference here is a
 defect in the gating, not in the feature.
@@ -88,11 +100,28 @@ defect in the gating, not in the feature.
 12. **The 15% cells.** The bottom row reads **Find a Trade · Include players · ✕ · ✓**. Tap the
     **✕** — it must be comfortably tappable one-handed. **This is the operator-flagged risk:**
     at ~53pt wide these are the tightest targets in the app. ☐
-13. **The ✓ is DISABLED — confirm that it is, and that it says so.** Fill both sides of the
-    canvas. The ✓ stays dimmed (~40% opacity) and **nothing happens when you tap it**. Turn on
-    VoiceOver and focus it: it must announce **"Queue this trade for the other manager"** *and*
-    be reported as **dimmed / unavailable**. **A ✓ that reacts to a tap is the bug here**, not
-    the other way round — the queue mechanism does not exist (see Q-029). ☐
+13. **The ✓ QUEUES the trade (W6-A, [D-152]) — the happy path.** With **no partner** picked, or
+    with only one side filled, the ✓ is dimmed (~40%) and inert — that part is unchanged. Now
+    pick a partner in the **Team** dropdown and fill **both** sides with a trade where **you are
+    the one giving up more value** (check the verdict bar: it should read in their favour). Tap
+    the ✓. Within a second a toast reads **"Queued for @name — it'll show in their suggestions."**
+    and you get a success haptic. **Tap it a second time**: the toast now reads **"Already queued
+    for @name."** — the same trade must never be queued twice. Turn on VoiceOver and focus the
+    control: it announces **"Queue this trade for the other manager"**, and is reported dimmed
+    only when there is no partner or the trade is half-built. ☐
+13a. **The ✓ REFUSES honestly — the untouchable case.** This one needs a second account, or a
+    league-mate willing to help, because it tests **their** preference list.
+    **Setup:** on the counterparty's device/account, in this league, long-press one of THEIR
+    players and mark them **untouchable** (`trade.preference_lists` is on).
+    **Test:** back on your device, build a trade that **asks for that player** and tap ✓. The
+    toast must name them and say why: **"@name has someone in this trade marked untouchable."**
+    Nothing is queued — check your **Awaiting them** list and confirm the trade is NOT there.
+    *(This is the whole point of the contract: a refusal is specific, and it records nothing.
+    A generic "couldn't queue that", or a success toast for a trade their own settings would
+    have swallowed, is the defect.)* ☐
+13b. **The ✓ refuses a trade that loses THEM value.** Build the reverse of step 13 — you take
+    their best player for one of your cheap ones — and tap ✓. The toast reads **"@name's board
+    reads this as a loss for them, so it won't surface."** Again: nothing in **Awaiting them**. ☐
 14. **VoiceOver on the ✕.** Still with VoiceOver on: the ✕ announces **"Clear the trade"** and,
     with an empty canvas, is reported dimmed. Icon-only controls are unusable without this. ☐
 15. **No utility row and no three-tab subnav** anywhere on this page. ☐
@@ -186,8 +215,10 @@ defect in the gating, not in the feature.
 37. **Complete the calculator half.** Run it through: outlook → canvas → Find a Trade → ✓ → add a
     player → Clear → Include players → "Now tap Find a Trade". Each spotlight lands on the
     control the line names. **Two things to watch:** the "Set outlook" button on beat 2 must
-    actually **open the Trade DNA sheet** (not just dismiss), and the ✓ beat spotlights a control
-    that is disabled — expected today, but note it. ☐
+    actually **open the Trade DNA sheet** (not just dismiss), and the ✓ beat (n15) says *"The
+    check queues this trade for the other manager, if it fits their preferences"* — since W6-A
+    that is literally true, so the control it spotlights should be **live** whenever a partner is
+    picked and both sides are filled. A dimmed ✓ under those conditions is now a defect. ☐
 38. **Nothing interrupts it — including between beats.** Run the whole tour without dismissing
     it. No quick-set prompt, no outlook banner, no Apple prompt, no push primer, no diff banner,
     no adaptation moment appears at any point — **especially in the gaps between beats**, which is
@@ -235,8 +266,13 @@ defect in the gating, not in the feature.
 - **The action row is inside the page ScrollView**, not pinned. With 3+ assets per column it
   scrolls out of frame — against the report's one "important" ("fits in the frame"). Steps 10 and
   18 will show this; it is a known gap, not a new defect.
-- **The ✓ does nothing and beat n15 says it does.** Step 13 tests the disabled state; the beat's
-  copy is still wrong until Q-029 is ruled.
+- **The ✓ now works (W6-A) and beat n15 is finally accurate**, but its two REFUSAL paths
+  (steps 13a/13b) have never run against a real second account — the predicate is proven only by
+  `backend/tests/test_calc_trade_queue.py`. Steps 13a/13b are the ones worth the setup cost.
+- **`queued: true` means eligible, not guaranteed.** The mirror also has to win one of three
+  likes-you slots on the counterparty's next deck, survive the R4 live-pipeline dedup, and not
+  have been swiped already — none of which the up-front answer can promise. If the counterparty
+  never sees the card despite a green toast, check those before calling it a bug.
 - The **two-column layout on a small screen** and the **spotlight geometry** are the least-proven
   parts. Column width, the wrapped value line, the two 15% cells and where each bubble lands are
   all sized by reasoning, not by looking at them.

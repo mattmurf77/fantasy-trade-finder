@@ -232,6 +232,73 @@ assert(/autoRunOrigin === ['"]calculator['"]/.test(trades),
     '17b. it dispatches through the existing #330 choke point, not a new mutate site');
 }
 
+// ── #384 W6-A (D-151): the confirm cell queues the package ───────────────
+//
+// The cell shipped W1–W5 as a PERMANENTLY disabled control: nothing passed
+// `onLikeTrade`, so `disabled={!onLikeTrade || ...}` was always true while
+// beat n15 and the checklist described it as working (Q-029, review #5).
+// These assertions exist so that state cannot return silently.
+const calc = read('components/InLeagueCalculator.tsx');
+const api = read('api/trades.ts');
+
+// 18 — the SCREEN passes the handler. This is the whole regression: drop the
+// prop and the cell is dead again, with every other assertion still green.
+assert(/onLikeTrade=\{async \(\{ giveIds, receiveIds, opponent \}\) => \{/.test(screen),
+  '18. the screen passes onLikeTrade to InLeagueCalculator',
+  'without a handler the confirm cell is permanently disabled — the Q-029 state');
+{
+  const at = screen.indexOf('onLikeTrade={async (');
+  const seg = screen.slice(at, at + 2200);
+  assert(/queueTradeForOpponent\(\{/.test(seg),
+    '18a. the handler calls the queue route, not a local no-op');
+  assert(/opponentUserId: opponent\.userId/.test(seg),
+    '18b. it addresses the partner the canvas chose',
+    'the route is per-counterparty; a missing opponent id cannot be defaulted');
+  assert(/track\(\s*['"]calc_trade_queued['"]/.test(seg),
+    '18c. one calc_trade_queued event is emitted');
+  assert(/queued: false, reason: res\?\.reason \?\? ['"]error['"]/.test(seg),
+    '18d. a refusal carries its reason, and a dead request carries `error`',
+    'an event with no reason cannot tell a refusal from a network failure');
+  assert(/queueRefusalLine\(res\?\.reason, opponent\.name\)/.test(seg),
+    '18e. the refusal toast is reason-specific',
+    'a generic failure line is the dishonest state the disabled cell stood in for');
+}
+// 18f — every server reason has a line. The enum is a cross-client invariant;
+// a reason with no case falls to the generic default and the user learns
+// nothing.
+for (const r of ['likes_you_off', 'not_league_member', 'assets_not_on_roster',
+                 'opponent_untouchable', 'opponent_not_interested',
+                 'fails_fairness_floor']) {
+  assert(new RegExp(`case '${r}':`).test(screen),
+    `18f. queueRefusalLine handles '${r}'`);
+  assert(new RegExp(`'${r}'`).test(api),
+    `18g. CalcQueueReason declares '${r}'`);
+}
+
+// 19 — the disabled rule. Anchored to the whole expression: an unconditional
+// `disabled` (or an `|| true`, or dropping the `onLikeTrade` term so a
+// handler-less mount looks enabled) all fail here.
+{
+  const at = calc.indexOf('testID="calc.action.confirm"');
+  assert(at > -1, '19. the confirm cell still exists');
+  const seg = calc.slice(at, at + 900);
+  assert(/disabled=\{!onLikeTrade \|\| !bothSides \|\| !opponent \|\| queueing\}/.test(seg),
+    '19a. the confirm cell is disabled exactly for: no handler, half a trade, no partner, in flight',
+    'a broader rule re-creates the permanently-dead control (Q-029)');
+  assert(/onLikeTrade\(\{\s*giveIds,\s*receiveIds,\s*opponent: \{ userId: opponent\.user_id/
+    .test(seg),
+    '19b. the press hands the opponent up — the screen has no other source for it');
+  assert(/setQueueing\(true\)/.test(seg) && /\.finally\(\(\) => setQueueing\(false\)\)/.test(seg),
+    '19c. the in-flight lock is set before the call and released after it',
+    'without the release a single tap disables the cell for the life of the mount');
+}
+// 19d — the queue is NOT a second like-recording path on the client either:
+// the calculator must not reach for swipeTrade.
+assert(!/swipeTrade\(/.test(calc) && !/swipeTrade\(/.test(screen),
+  '19d. the calculator does not fake a swipe to record the like',
+  'the queue route owns the record path; a client-side swipe would skip the '
+  + 'counterparty-preference check entirely');
+
 console.log(failures === 0
   ? 'check-calc-merged-behavior: all assertions passed'
   : `check-calc-merged-behavior: ${failures} FAILED`);

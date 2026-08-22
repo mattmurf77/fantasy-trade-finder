@@ -38,6 +38,7 @@ import { resolveShareUrl } from '../utils/shareLinks';
 import { chalk, fonts, ice, ink, radii, semantic, space, type } from '../theme/chalkline';
 import { useSession } from '../state/useSession';
 import { useFinderTargets } from '../state/useFinderTargets';
+import { queueTradeForOpponent, type CalcQueueReason } from '../api/trades';
 import {
   calcTourHandOffToDeck,
   calcTourScreenBlurred,
@@ -91,6 +92,30 @@ function useDebounced<T>(value: T, ms: number): T {
     return () => clearTimeout(t);
   }, [value, ms]);
   return v;
+}
+
+// #384 W6-A — the ✓ cell's refusal copy, one line per server reason
+// (D-152; the enum is a cross-client invariant). Every line names WHOSE
+// preference refused it and why, because the alternative — a generic
+// "couldn't queue that" — is the dishonest state the cell was disabled to
+// avoid. `name` is the counterparty's username, already @-less.
+function queueRefusalLine(reason: CalcQueueReason | undefined, name: string): string {
+  switch (reason) {
+    case 'opponent_untouchable':
+      return `@${name} has someone in this trade marked untouchable.`;
+    case 'opponent_not_interested':
+      return `@${name} isn't interested in one of the players you're offering.`;
+    case 'fails_fairness_floor':
+      return `@${name}'s board reads this as a loss for them, so it won't surface.`;
+    case 'assets_not_on_roster':
+      return 'Those assets are no longer on the rosters this trade needs.';
+    case 'not_league_member':
+      return `@${name} isn't in this league.`;
+    case 'likes_you_off':
+      return 'Queueing trades for other managers is turned off right now.';
+    default:
+      return "Couldn't queue that. Try again.";
+  }
 }
 
 // #384 ruling 2 — the canvas speaks CalcPlayer; the finder's pin store
@@ -152,7 +177,9 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
   // S3 PRD-03 — "Clear trade" snapshot + Undo toast.
   const [toast, setToast] = useState<{
     msg: string;
-    tone?: 'success' | 'warn';
+    // 'error' added by #384 W6-A for a failed queue POST — Toast has always
+    // supported the tone; only this local union was narrower.
+    tone?: 'success' | 'warn' | 'error';
     holdMs?: number;
     action?: { label: string; onPress: () => void };
   } | null>(null);
@@ -686,6 +713,49 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
                 : undefined
             }
             outlookOpenerRef={outlookOpenerRef}
+            // #384 W6-A (D-152) — the ✓ cell. POST /api/trades/queue records
+            // the package as the caller's LIKE only when the likes-you
+            // injector would actually mirror it into @partner's deck, so the
+            // toast can be specific about who refused and why instead of the
+            // generic failure the disabled cell used to stand in for.
+            // The SCREEN owns the request, the toast and the analytics; the
+            // component owns the canvas and the in-flight lock.
+            onLikeTrade={async ({ giveIds, receiveIds, opponent }) => {
+              let res: Awaited<ReturnType<typeof queueTradeForOpponent>> | null = null;
+              try {
+                res = await queueTradeForOpponent({
+                  leagueId: league.league_id,
+                  opponentUserId: opponent.userId,
+                  giveIds,
+                  receiveIds,
+                });
+              } catch {
+                res = null;
+              }
+              const queued = !!res?.queued;
+              // ONE event, both outcomes. `reason` is absent on a success —
+              // the taxonomy allows the prop, the emitter omits it.
+              track(
+                'calc_trade_queued',
+                queued ? { queued: true } : { queued: false, reason: res?.reason ?? 'error' },
+                'TradeCalculator',
+              );
+              if (queued) {
+                haptics.success();
+                setToast({
+                  msg: res?.already_queued
+                    ? `Already queued for @${opponent.name}.`
+                    : `Queued for @${opponent.name} — it'll show in their suggestions.`,
+                  tone: 'success',
+                });
+              } else {
+                haptics.warning();
+                setToast({
+                  msg: queueRefusalLine(res?.reason, opponent.name),
+                  tone: res ? 'warn' : 'error',
+                });
+              }
+            }}
             // #384 — the merged layout's own controls. The component owns
             // the canvas; the SCREEN owns navigation, so the finder hand-off
             // and the tour re-entry are passed in rather than reached for.

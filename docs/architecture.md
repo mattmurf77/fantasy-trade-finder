@@ -212,7 +212,12 @@ Throwaway eval workspaces and packaged `.skill` bundles are archived in `archive
 
 ## Request lifecycle (trade match)
 
-1. Either user `POST /api/trades/swipe` with `like`.
+1. Either user `POST /api/trades/swipe` with `like` — **or**, behind `calc.merged_layout`,
+   `POST /api/trades/queue` (#384 ✓ cell, [D-152]), which records a HAND-BUILT package as a like
+   through the same `_reconstruct_swipe_card` → `record_decision` → `save_trade_decision` path.
+   The queue route does **not** run step 2: it refuses up front unless the likes-you injector's
+   own gates would mirror the like into the counterparty's deck, and the match is then minted by
+   *their* swipe on that mirrored card — one place, not two.
 2. `server.py` checks for a mirrored existing like from the other side (`database.check_for_match`). With flag `trade.fuzzy_match`, a near-mirror also matches: Jaccard ≥ `fuzzy_match_tau` (0.8) per side, and only low-value players (`search_rank ≥ 120`) may differ.
 3. If found: insert `trade_matches` row (status `pending`), insert two `notifications` rows, dispatch typed push for both users.
 4. Either user `POST /api/trades/matches/<id>/disposition` with `accept` or `decline`. Updates `user_a_decision` / `user_b_decision`; rolls `status` → `accepted` / `declined` once both have decided (or any user declines).

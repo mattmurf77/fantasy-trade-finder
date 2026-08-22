@@ -131,7 +131,7 @@ See [`../docs/api-reference.md`](../docs/api-reference.md) for full route detail
 
 - **Session/Auth:** `POST /api/session/init`, `GET /api/session/ping`
 - **Ranking:** `GET /api/trio`, `POST /api/rank3`, `POST /api/rankings/submit`
-- **Trades:** `POST /api/trades/generate`, `GET /api/trades`, `POST /api/trades/swipe`, `GET /api/trades/liked`
+- **Trades:** `POST /api/trades/generate`, `GET /api/trades`, `POST /api/trades/swipe`, `POST /api/trades/queue` (flag `calc.merged_layout`; the #384 ✓ cell — a hand-built package recorded as a like through the swipe route's own path, refused up front when the likes-you mirror would not fire), `GET /api/trades/liked`
 - **Trade matching:** `GET /api/trades/matches`, `POST /api/trades/matches/<id>/disposition`
 - **Notifications:** `GET/POST /api/notifications`, `POST /api/notifications/read-all`
 - **Admin:** `GET/PUT /api/admin/config/<key>`

@@ -301,12 +301,19 @@ NON_INTENT_EVENTS = frozenset({
     #
     # Deliberately NOT here, i.e. deliberately INTENT: calc_mode_switched,
     # calc_include_players_toggled, calc_asset_added, calc_cleared,
-    # calc_find_a_trade_tapped, deck_back_to_calculator, deck_unpin_retry —
-    # all seven are real user decisions (configuration changes, the core
-    # add-an-asset gesture, a deliberate clear, the hand-off tap, and two
-    # deck actions reachable only from a deck the user asked for). Every one
-    # of them fires behind an INTENT event that already counts the user that
-    # day, so none opens a DAU seam.
+    # calc_find_a_trade_tapped, calc_trade_queued, deck_back_to_calculator,
+    # deck_unpin_retry — all eight are real user decisions (configuration
+    # changes, the core add-an-asset gesture, a deliberate clear, the hand-off
+    # tap, the ✓ queue tap, and two deck actions reachable only from a deck
+    # the user asked for). Every one of them fires behind an INTENT event that
+    # already counts the user that day, so none opens a DAU seam.
+    #
+    # `calc_trade_queued` (#384 W6-A / D-152) is the one worth spelling out,
+    # because it fires on a REFUSAL too. The tap is the user's decision to
+    # offer the trade; the server's `queued: false` is the answer to that
+    # decision, not an unbidden impression — the `sleeper_send_attempted`
+    # class, not `prompt_deferred`. And it is unreachable without a filled
+    # canvas, so `calc_asset_added` has already counted the user-day.
     "calc_tour_started",
     "calc_tour_ended",
     "calc_tour_beat_missing",

@@ -81,10 +81,18 @@ interface Props {
    *  to reach it. A ref rather than a callback prop so the screen can hand
    *  the same opener to the runner without re-rendering this component. */
   outlookOpenerRef?: React.MutableRefObject<(() => void) | null>;
-  /** #384 — the action row's confirm control. Queues the built trade for
-   *  the counterparty's suggestions. Absent ⇒ rendered disabled (W1 ships
-   *  the layout; the queue behaviour lands in W2). */
-  onLikeTrade?: (args: { giveIds: string[]; receiveIds: string[] }) => void;
+  /** #384 W6-A — the action row's confirm control. Queues the built trade for
+   *  the counterparty's suggestions (POST /api/trades/queue, D-152). The
+   *  SCREEN owns the request, the toast and the analytics; this component
+   *  owns the canvas and the in-flight lock, so a double tap cannot send the
+   *  package twice. Absent ⇒ the cell renders disabled.
+   *  `opponent` is passed because the route is addressed to a league member
+   *  and only this component holds the Team dropdown's selection. */
+  onLikeTrade?: (args: {
+    giveIds: string[];
+    receiveIds: string[];
+    opponent: { userId: string; name: string };
+  }) => void | Promise<void>;
   initialReceiveIds?: string[];
 }
 
@@ -171,6 +179,12 @@ export default function InLeagueCalculator({
   // built the canvas on purpose — an unconstrained search from a filled
   // canvas silently ignores the work they just did.
   const [includePlayers, setIncludePlayers] = useState(true);
+
+  // #384 W6-A — the confirm cell's in-flight lock. POST /api/trades/queue is
+  // idempotent server-side (D-152), but a second tap would still fire a
+  // second toast and a second analytics row, so the control locks itself for
+  // the length of the round trip.
+  const [queueing, setQueueing] = useState(false);
 
   // #384 W4 — spotlight targets for the calculator beats (n12–n18). Only
   // registered in the merged layout: with the flag off none of these nodes
@@ -1103,21 +1117,34 @@ export default function InLeagueCalculator({
             <Icon name="x" size={18} />
           </Pressable>
 
+          {/* #384 W6-A — the confirm/queue control (D-152). Disabled only for the
+              three reasons a tap could not mean anything: no host handler,
+              an incomplete trade, no partner to queue it FOR, or a request
+              already in flight. The a11y state says which. */}
           <Pressable
             ref={confirmBtnRef}
             testID="calc.action.confirm"
             accessibilityRole="button"
             accessibilityLabel="Queue this trade for the other manager"
-            disabled={!onLikeTrade || !bothSides}
+            accessibilityState={{ disabled: !onLikeTrade || !bothSides || !opponent || queueing }}
+            disabled={!onLikeTrade || !bothSides || !opponent || queueing}
             onPress={() => {
-              if (!onLikeTrade) return;
+              if (!onLikeTrade || !opponent || queueing) return;
               haptics.selection();
-              onLikeTrade({ giveIds, receiveIds });
+              setQueueing(true);
+              Promise.resolve(
+                onLikeTrade({
+                  giveIds,
+                  receiveIds,
+                  opponent: { userId: opponent.user_id, name: opponent.username },
+                }),
+              ).finally(() => setQueueing(false));
             }}
             style={({ pressed }) => [
               styles.actionSmall, styles.actionBtn, styles.actionPrimary,
               pressed && styles.actionBtnPressed,
-              (!onLikeTrade || !bothSides) && styles.actionBtnDisabled,
+              (!onLikeTrade || !bothSides || !opponent || queueing)
+                && styles.actionBtnDisabled,
             ]}
           >
             <Icon name="check" size={18} color={ice.base} />
