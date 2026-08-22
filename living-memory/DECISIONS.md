@@ -1354,3 +1354,13 @@ Five call sites, no sixth — `_roster_eveners`, `_trade_evaluate_impl`, `get_le
 
 **Amended 2026-08-22 (W5)** — two claims in the body above are corrected rather than rewritten, because what they got wrong is the useful part. (1) **Decision 3's ✓ cell is UNWIRED and stays that way.** The action row's confirm button is `disabled={!onLikeTrade || !bothSides}` and nothing passes `onLikeTrade`; there is no route that queues a hand-built package for a counterparty, because the deck's like path needs a server-minted `trade_id` and a canvas has no card. The cell is real, accessible and permanently disabled pending an API contract — logged as **Q-029**, and the checklist now tests that it *is* disabled instead of telling the operator to tap it. Beat n15 still describes it as working. (2) **The ✕→overlay is scoped by ORIGIN, not by the flag.** W2 read `calc.merged_layout` inside `TradeCard`, which gave the overlay to every deck for every user — the opposite of round-2 ruling 1 ("this calculator only"). W5-D made `reasonsAsOverlay` a host-set **prop**, gated on the flag **AND** `deckOrigin === 'calculator'` derived from `FinderHandoff.origin`, cleared on league switch / pins emptied / mode switch. The shipped decks keep their inline tiles. §6b remains open and is now **Q-028**.
 
+
+## D-151 — The Merged Calculator Keeps Its Own Tab; "Replaces the Manual Calc Tab" Is Closed as Built
+
+**Date:** 2026-08-22 · **Status:** decided (operator) · **Closes:** [Q-028](OPEN_QUESTIONS.md)
+
+**Decision:** the merged surface (#384) stays the **In league** tab beside **Real values** — two tabs, as W0–W5 built it — "for now". Round-2 ruling 3 ("replaces the manual calc tab and lives within the league calc") is read as "the merged layout is what the In-league tab now is", not "one calculator page, no tabs".
+
+**Why:** (1) #310 asked for a calculator that needs no league, and **Real values** is that reachability — collapsing to one page would re-answer #310 in the opposite direction. (2) The tour's opening beat n10 ("Tap In league…") is an `action` beat that only advances on the real tab switch; one page means a new opening beat. (3) "For now" — the operator said the eventual direction is still one surface; this is the test of it, not the end state.
+
+**Consequences:** plan §6b is closed; the e2e review's traceability row "§6b still open" is resolved; the one-option mode row for zero-league users (review P2 #14) stays a known gap. Revisit when Find a Trade itself is absorbed (the operator's "eventually will replace it").

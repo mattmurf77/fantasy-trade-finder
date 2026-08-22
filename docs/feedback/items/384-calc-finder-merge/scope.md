@@ -209,7 +209,7 @@ self-select.
    driven by `FinderHandoff.origin === 'calculator'`, cleared on league switch / pins emptied / mode
    switch. Recorded here because the review listed it as open; the alternative (all decks) would
    need an explicit operator reversal.
-4. **§6b — "Manual | In league" two tabs (built) vs "replaces the manual calc tab" (ruled).**
+4. **§6b — "Manual | In league" two tabs (built) vs "replaces the manual calc tab" (ruled).** → **RULED 2026-08-22: own tab for now ([D-151](../../../../living-memory/DECISIONS.md)); Q-028 closed.**
    Round-2 ruling 3 says the new surface *replaces* the manual calc tab; the build kept two tabs and
    defaults to **Real values**. #310 asked for the calculator to be reachable without a league,
    which the two-tab form satisfies and a collapse would break. Logged as **Q-028**.

@@ -168,7 +168,7 @@ pytest 4128 passed / 1 skipped.
    operator wrote it: the shipped decks keep their inline tiles, and the overlay appears only on a
    deck the calculator handed off to. Recorded because the review listed it as open; reversing it to
    "all decks" would need an explicit call.
-4. **§6b — two tabs (built) vs "replaces the manual calc tab" (ruled).** Unanswered since the plan.
+4. ~~**§6b — two tabs (built) vs "replaces the manual calc tab" (ruled).** Unanswered since the plan.~~ **RULED 2026-08-22: own tab for now** — [D-151](../../../living-memory/DECISIONS.md), Q-028 closed. The built two-tab form stands.
    The `Real values` tab *is* #310's league-free calculator, and the tour's opening beat n10 exists
    to carry the user from it to `In league`; collapsing to one page re-answers #310 and needs a new
    opening beat. **Q-028**.

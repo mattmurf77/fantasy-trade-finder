@@ -113,6 +113,8 @@ asserts against demo-mode behavior, and `PlayerPickerModal` / `TradeSide` / `tra
 
 ### 6b. Ruling 3 collides with #310, and with the tour's own first step
 
+> **RULED 2026-08-22 — own tab for now ([D-151](../../../living-memory/DECISIONS.md), closes Q-028).** The working assumption below is the decision: `In league` | `Real values`, two tabs. Kept as written for the reasoning.
+
 `TradesScreen.tsx:4944` states the current architecture's intent outright:
 
 > *"Calculator (manual trade builder, demo data) is always reachable — **it needs no league**."*

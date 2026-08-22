@@ -37,6 +37,8 @@
 - **Discovered by:** the #384 plan (§6b) and re-raised by the [2026-08-22 e2e review](../docs/feedback/items/384-calc-finder-merge/review-2026-08-22-e2e.md) spec-traceability table, which marks §6b **still open**.
 - **Owner:** operator. Not blocking the flag flip — the built form works either way — but it *is* blocking a truthful "#384 is done".
 
+**CLOSED 2026-08-22 by [D-151](DECISIONS.md).** Operator: *"I'm fine with it as its own tab for now."* The two-tab form (In league | Real values) as built is the answer; #310's league-free reachability stands; n10 keeps its target. Revisit when Find a Trade is absorbed.
+
 ### Q-029 — The ✓ like/queue cell has no contract: what does "queue this trade for the other manager" call?
 
 - **Why it matters:** the merged action row's ✓ (`calc.action.confirm`) is a **permanently disabled control**. `InLeagueCalculator.tsx` has `disabled={!onLikeTrade || !bothSides}`, and no caller passes `onLikeTrade` — `TradeCalculatorScreen` mounts the component without it. Tour beat **n15** spotlights it (*"The check queues this trade for the other manager, if it fits their preferences"*), [D-150](DECISIONS.md) Decision 3 and `status.md` both presented it as built, and the first TestFlight checklist told the operator to tap it and VoiceOver it. A user who follows the tour reaches a 40 %-opacity button that does nothing.
