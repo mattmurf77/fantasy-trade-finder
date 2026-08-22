@@ -33,10 +33,11 @@
 
 - [Derived display coordinates: store the ORDER, never the SLOT (2026-08-19, D-090)](#derived-display-coordinates-store-the-order-never-the-slot-2026-08-19-d-090)
 - [Predicting a user's own vocabulary: objection codes, uniform-key stamps, narration-gated payloads (2026-08-21, D-142)](#predicting-a-users-own-vocabulary-objection-codes-uniform-key-stamps-narration-gated-payloads-2026-08-21-d-142)
-- [Consulting a leaf from inside an engine: live module bindings, one kwarg, copy-at-log (2026-08-22, D-147)](#consulting-a-leaf-from-inside-an-engine-live-module-bindings-one-kwarg-copy-at-log-2026-08-22-d-144)
-- [Retiring a per-user setting: 410 the write, fix the read (2026-08-21, D-147)](#retiring-a-per-user-setting-410-the-write-fix-the-read-2026-08-21-d-144)
-- [Pricing waterfalls: resolve once per scope, pass down, fall soft (2026-08-21, D-144)](#pricing-waterfalls-resolve-once-per-scope-pass-down-fall-soft-2026-08-21-d-144)
+- [Consulting a leaf from inside an engine: live module bindings, one kwarg, copy-at-log (2026-08-22, D-147)](#consulting-a-leaf-from-inside-an-engine-live-module-bindings-one-kwarg-copy-at-log-2026-08-22-d-147)
+- [Retiring a per-user setting: 410 the write, fix the read (2026-08-21, D-146)](#retiring-a-per-user-setting-410-the-write-fix-the-read-2026-08-21-d-146)
+- [Pricing waterfalls: resolve once per scope, pass down, fall soft (2026-08-21, D-146)](#pricing-waterfalls-resolve-once-per-scope-pass-down-fall-soft-2026-08-21-d-146)
 - [One number, one seam: aligning surfaces that must agree (2026-08-21, D-148)](#one-number-one-seam-aligning-surfaces-that-must-agree-2026-08-21-d-148)
+- [Append-only, version-stamped measurement tables (2026-08-21, D-144, `receipts_*`)](#append-only-version-stamped-measurement-tables-2026-08-21-d-144-receipts_)
 
 ---
 
@@ -511,7 +512,7 @@ plumbing has to be provably inert when off.
   changes only order. Where the effect is meant to be ordering-only, the multiplication also has to land on the
   correct side of any quantization — inside the rounding that collapses float noise, not after it — or the
   deterministic tie-break loses to the noise the rounding exists to erase.
-## Retiring a per-user setting: 410 the write, fix the read (2026-08-21, D-147)
+## Retiring a per-user setting: 410 the write, fix the read (2026-08-21, D-146)
 
 The operator deleted a setting — pick pricing — rather than changing its default. This repo had **no
 precedent for retiring a route**: `git grep "410" backend/server.py` returned nothing before this change.
@@ -541,7 +542,7 @@ The shape chosen, and the reasoning, so the next one does not have to re-derive 
   loudly instead of quietly restoring a setting the operator removed. The analytics EVENT stays registered
   in the taxonomy so historical rows remain queryable — retire the emitter, never the name.
 
-## Pricing waterfalls: resolve once per scope, pass down, fall soft (2026-08-21, D-144)
+## Pricing waterfalls: resolve once per scope, pass down, fall soft (2026-08-21, D-146)
 
 Per-slot pick pricing needed a per-league fact (the resolved draft order) inside a per-pick function.
 The shape that worked, and generalises to any read-time enrichment:
@@ -573,7 +574,7 @@ The shape that worked, and generalises to any read-time enrichment:
   widened guard that is not also tightened is how a bound quietly becomes decorative.
 ## One number, one seam: aligning surfaces that must agree (2026-08-21, D-148)
 
-D-144 put per-slot pick pricing into the engine and left two league surfaces on the stored column.
+D-146 put per-slot pick pricing into the engine and left two league surfaces on the stored column.
 Live, the app quoted 2117.0 and 4867.1 for the same pick on two screens. Closing that (Q-026) produced
 a convention for any value multiple surfaces must agree on:
 

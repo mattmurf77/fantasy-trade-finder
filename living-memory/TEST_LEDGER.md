@@ -10,6 +10,36 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+## 2026-08-21d — Decision-ID attribution correction (docs only) — `fix/lld-decision-id-attribution`
+
+Docs-only change: 12 wrong decision-ID citations for per-slot pick pricing corrected to **D-146**
+across `LLD.md`, `api-reference`, `config-reference`, `data-dictionary` and `cross-client-invariants`.
+**Zero code, schema, route, flag or analytics files touched** — `git diff --stat origin/main` is six
+`.md` files.
+
+| Gate | Result |
+|---|---|
+| `pytest backend/tests` | **not run — no Python file in the diff.** Nothing to exercise. |
+| `tsc --noEmit` / testid-lint | **not run — no mobile file in the diff.** |
+| CI (all three jobs) | runs on the PR; expected green by construction (no source files) |
+| Simulator gate | **`FTF_SKIP_SIM_GATE=1`** — standing D-056 posture, and doubly moot here: markdown has no runtime. |
+
+**Evidence actually run**, since the failure mode is *wrong prose*, not wrong behavior:
+
+1. **Per-site verification against `DECISIONS.md`** — every one of the 12 sites read against the
+   full text of D-144, D-146, D-147 and D-148 and attributed by *what the decision decided*, not by
+   date or adjacency. D-146's own Status line (*"Renumbered from the draft's D-144"*) is the
+   corroborating record; D-146's body names the LLD section by title.
+2. **Anchor-resolution check over `LLD.md`** — slug every `^## ` heading, assert every `](#…)`
+   target resolves AND equals the slug of its own link text. **Clean**, except a pre-existing
+   `#section-1` inside a fenced markdown *template* block (illustrative, not a link).
+3. **Residual grep** — `git grep D-144 -- living-memory/ docs/ ':!docs/plans'` returns only sites
+   that genuinely mean Receipts, plus the CHANGELOG history of the #168 renumber. `docs/plans/**`
+   drafts intentionally retain the old ID.
+
+**Not evidence:** nothing here was executed. The claim is that the citations now match
+`DECISIONS.md`, and that claim is checkable by re-running items 1–3.
+
 ## 2026-08-22b — negmem SHIPPED to `main` (PR #168) — deployed dark to Render
 
 **Merged:** squash PR [#168](https://github.com/mattmurf77/fantasy-trade-finder/pull/168) → `main` `7b7c314`; branch tip `71f63da` ledgered ([recovery](../docs/recovery/2026-08-22-negmem-ship.md)) before the remote delete.
