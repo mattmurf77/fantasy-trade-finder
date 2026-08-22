@@ -44,7 +44,7 @@
 
 ## 2026-08-22 — #384 merged calculator: E2E review failed, W5 fixed it on `claude/manual-calculator-e2e-review-39a467`; four bright-line calls + a TestFlight pass owed
 
-**SHIPPED 2026-08-22 — PR #172 `80dee42`, flags LIT for all users, app 1.16.0 via EAS (build pending at handoff time). The paragraphs below are the pre-ship state, kept for the trail; still owed: the POST-ship checklist run, the EAS build number in TEST_LEDGER, and the branch/worktree sweep.**
+**SHIPPED 2026-08-22 — PR #172 `80dee42`, flags LIT for all users, app 1.16.0 via EAS — build **126** finished and submitted to App Store Connect 16:57Z (Apple processing → TestFlight). The paragraphs below are the pre-ship state, kept for the trail. Still owed: the POST-ship checklist run against build 126; the worktree sweep (`.claude/worktrees/tweet-product-gap-review-266ff1` is the shipping session's own cwd and could not remove itself — ledgered in `docs/recovery/2026-08-22-384-merged-calculator-ship.md`, remove it next session; `new-user-feedback-d4c47d` belongs to another session).**
 
 **Where (pre-ship):** `claude/manual-calculator-e2e-review-39a467` = `feat/calc-finder-merge` (W0–W4, `7399e18`)
 + the E2E review + G-056 + four W5 commits (`fcf3413` analytics · `9dcd003` deck · `a52c91e` tour ·
