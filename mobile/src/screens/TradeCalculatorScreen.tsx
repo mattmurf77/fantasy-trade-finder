@@ -38,8 +38,12 @@ import { resolveShareUrl } from '../utils/shareLinks';
 import { chalk, fonts, ice, ink, radii, semantic, space, type } from '../theme/chalkline';
 import { useSession } from '../state/useSession';
 import { useFinderTargets } from '../state/useFinderTargets';
-import { startCalcTour, stopCalcTour } from '../utils/calcTour';
-import { guidedAvatarActive } from '../state/useGuide';
+import {
+  calcTourHandOffToDeck,
+  calcTourScreenBlurred,
+  startCalcTour,
+} from '../utils/calcTour';
+import { advanceGuideIfActive, guideV2Active, guidedAvatarActive } from '../state/useGuide';
 import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTargets';
 import { useFlag } from '../state/useFeatureFlags';
 import InLeagueCalculator from '../components/InLeagueCalculator';
@@ -122,19 +126,11 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
     return () => unregisterGuideTarget('calc.mode-tab.league');
   }, []);
 
-  // Entry point 1 (operator): the tour auto-starts the moment the user lands
-  // on the calculator, "since the first step brings them to the league
-  // version". Guarded three ways — the merged layout must be on (the tour
-  // describes controls that only exist there), a prefilled arrival is a
-  // deliberate hand-off from a card and must not be hijacked, and
-  // startCalcTour itself refuses when the guided experience is off.
-  useEffect(() => {
-    if (!calcMergedOn || prefill) return;
-    startCalcTour('auto');
-    // Leaving the screen abandons the run — otherwise the tour hold would
-    // outlive the tour and mute every interstitial app-wide.
-    return () => stopCalcTour();
-  }, [calcMergedOn, prefill]);
+  // #384 W5 — n11's CTA opens the outlook sheet, which lives inside
+  // InLeagueCalculator. The SCREEN starts the tour, so the opener is threaded
+  // up through a ref the component fills on mount rather than the runner
+  // reaching into a component it does not own.
+  const outlookOpenerRef = useRef<(() => void) | null>(null);
   // #166/#167 — default to the LEAGUE's detected scoring format (same rule
   // as InLeagueCalculator); the chips still override per-session, and the
   // saved-draft restore below keeps precedence over this initial value.
@@ -177,6 +173,34 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
     ...(hasLeague ? [{ key: 'league' as CalcMode, label: 'In league' }] : []),
     { key: 'live', label: 'Real values' },
   ];
+
+  // Entry point 1 (operator): the tour auto-starts the moment the user lands
+  // on the calculator, "since the first step brings them to the league
+  // version". Guarded four ways — the merged layout must be on (the tour
+  // describes controls that only exist there), a prefilled arrival is a
+  // deliberate hand-off from a card and must not be hijacked, a user with no
+  // league has no In-league page for the first beat to carry them to, and
+  // startCalcTour itself refuses when the guided experience is off or the
+  // tour has already been completed once.
+  useEffect(() => {
+    if (!calcMergedOn || prefill || !hasLeague) return;
+    startCalcTour('auto', { openOutlook: () => outlookOpenerRef.current?.() });
+    // Leaving the screen abandons the run — otherwise the tour hold would
+    // outlive the tour and mute every interstitial app-wide. NOT an
+    // unconditional stop: Find a Trade unmounts this screen too, and that
+    // departure is the tour continuing onto the deck.
+    return () => calcTourScreenBlurred();
+  }, [calcMergedOn, prefill, hasLeague]);
+
+  // Unmount is not the only way to leave. A push over this screen (or a tab
+  // change) leaves it MOUNTED, and a tour narrating a page nobody is looking
+  // at holds the mute for nothing. Find a Trade is the one departure that is
+  // the tour continuing rather than ending — `calcTourHandOffToDeck()` in
+  // `onFindATrade` is what tells the runner that.
+  useEffect(() => {
+    const unsub = navigation.addListener('blur', () => calcTourScreenBlurred());
+    return unsub;
+  }, [navigation]);
 
   // Restore the persisted draft once; live ids validate lazily as the pool
   // loads (below).
@@ -434,6 +458,12 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
     if (m === mode) return;
     haptics.selection();
     setMode(m);
+    track('calc_mode_switched', { mode: m }, 'TradeCalculator');
+    // n10 is an `advance: 'action'` beat — tap-anywhere is off for it, so the
+    // REAL switch is the only thing that can move it on. Only the switch INTO
+    // league mode counts: that is what the beat asked for, and it is what
+    // mounts the targets n12–n18 point at.
+    if (m === 'league') advanceGuideIfActive('n10', 'action');
   };
 
   const switchFormat = (f: ScoringFormat) => {
@@ -590,13 +620,22 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
             InLeagueCalculator is only ever mounted here, so this is the one
             "Find a trade" entry for the whole create-a-trade feature.
             Chalk-dim text-link tier (the "More ways to rank" precedent),
-            never a button — the calculator's own actions keep primacy. */}
+            never a button — the calculator's own actions keep primacy.
+
+            #384 review §15: the merged In-league page carries its own Find a
+            Trade in the action row, and that one honours Include players.
+            Two entries where one bypasses the canvas is a trap, so this row
+            steps aside there. */}
+        {calcMergedOn && mode === 'league' ? null : (
         <Pressable
           testID="calc.find-a-trade"
           accessibilityRole="button"
           accessibilityLabel="Find a trade"
           accessibilityHint="Opens the trade finder for suggested trades"
-          onPress={() => navigation.navigate('TradesHome')}
+          // popTo, not navigate: `TradesHome` has no `getId`, so a plain
+          // navigate() with no `pop` PUSHES a second copy (routers 7.5.3
+          // StackRouter) and leaves this screen mounted underneath.
+          onPress={() => navigation.popTo('TradesHome')}
           hitSlop={8}
           style={styles.findTradeRow}
         >
@@ -606,16 +645,21 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
             </Text>
           )}
         </Pressable>
+        )}
 
         {mode === 'league' && league && user ? (
           <InLeagueCalculator
             // #190 — remount when a different card is handed off so a
             // second "Edit in calculator" from the deck re-applies its
             // prefill (navigate() to a mounted route only swaps params).
+            // …and remount on a LEAGUE switch too (#384 review §10): the
+            // component holds opponentId/giveIds/receiveIds in local state,
+            // so without this the new league renders the old league's canvas
+            // and evaluates the old opponent id against it.
             key={
               prefill
                 ? `prefill-${prefill.opponentUserId}-${(prefill.giveIds ?? []).join('.')}-${(prefill.receiveIds ?? []).join('.')}`
-                : 'manual'
+                : `manual-${league.league_id}`
             }
             leagueId={league.league_id}
             userId={user.user_id}
@@ -626,13 +670,41 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
             // startCalcTour returns false when the guided experience is off,
             // and the component renders no link without a handler — so the
             // affordance never appears unless it can actually do something.
+            // guideV2Active() as well: with `onboarding.guide_v2` off the
+            // spotlights, caps and degrade lines do not exist and the tour is
+            // incoherent, so the link must not offer it (startCalcTour
+            // refuses on the same pair). Users who tapped "Skip the tour"
+            // (guideDismissed, folded into guidedAvatarActive) still see no
+            // link — whether an explicit "Show me around" should override a
+            // permanent opt-out is an open product question, not decided here.
             onShowMeAround={
-              guidedAvatarActive() ? () => startCalcTour('show_me_around') : undefined
+              guidedAvatarActive() && guideV2Active()
+                ? () =>
+                    startCalcTour('show_me_around', {
+                      openOutlook: () => outlookOpenerRef.current?.(),
+                    })
+                : undefined
             }
+            outlookOpenerRef={outlookOpenerRef}
             // #384 — the merged layout's own controls. The component owns
             // the canvas; the SCREEN owns navigation, so the finder hand-off
             // and the tour re-entry are passed in rather than reached for.
-            onFindATrade={({ includePlayers, give, receive }) => {
+            onFindATrade={({ includePlayers, give, receive, opponent }) => {
+              track(
+                'calc_find_a_trade_tapped',
+                {
+                  include_players: includePlayers,
+                  give_count: give.length,
+                  receive_count: receive.length,
+                  has_partner: !!opponent,
+                },
+                'TradeCalculator',
+              );
+              // n18 ("Now tap Find a Trade") is an action beat: this tap is
+              // the only thing that can move it, and it must move BEFORE the
+              // navigation so the runner parks instead of being blurred out.
+              advanceGuideIfActive('n18', 'action');
+              calcTourHandOffToDeck();
               // Ruling 2 (#384): ON ⇒ the finder MUST include the canvas
               // assets; OFF ⇒ the search is unconstrained by them.
               //
@@ -653,7 +725,23 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
                 // user just switched off.
                 t.clear();
               }
-              navigation.navigate('TradesHome');
+              // #384 review §3/§6 — pins alone do not start a search and are
+              // not scoped to the partner the user chose in the Team
+              // dropdown. The #330 handoff is the path that already
+              // regenerates on arrival; `origin` lets the deck tell a
+              // calculator arrival from a league-rankings one, and it
+              // regenerates on that origin even with no partner — a
+              // partner-less canvas is an unscoped sweep, not "no search".
+              useFinderTargets.getState().setHandoff({
+                opponent: opponent ?? null,
+                autoRun: true,
+                origin: 'calculator',
+                includePlayers,
+              });
+              // popTo, not navigate: without `pop` (and with no `getId` on
+              // TradesHome) routers 7.5.3 PUSHES a second TradesHome, leaving
+              // this screen mounted and the tour hold up behind it.
+              navigation.popTo('TradesHome');
             }}
           />
         ) : (
@@ -692,7 +780,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
               <Card>
                 <View style={styles.loadingRow}>
                   <Text style={[type.bodySm, { flex: 1 }]}>
-                    Couldn't reach the value server. Retry, or switch to the demo league.
+                    Couldn't reach the value server. Retry.
                   </Text>
                   <Button
                     label="Retry"
@@ -846,6 +934,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
               variant="ghost"
               onPress={() => {
                 haptics.warning();
+                track('calc_cleared', { mode }, 'TradeCalculator');
                 // S3 PRD-03 (ux.swipe_undo): snapshot the hand-built trade
                 // and offer a 5s Undo — no server state, pure restore.
                 if (swipeUndoOn) {

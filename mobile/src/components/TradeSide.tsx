@@ -57,7 +57,10 @@ export default function TradeSide({ title, teamName, players, valueOf, tierOf, a
       <View style={styles.inner}>
         <View style={[styles.header, compact && styles.headerCompact]}>
           <TickLabel color={accent}>{title}</TickLabel>
-          <Text style={type.bodySm} numberOfLines={1}>{teamName}</Text>
+          {/* Clamped in COLUMN mode only. The stacked page is unchanged
+              behind the flag: a long "@username" wrapped there before and
+              must keep wrapping, not start ellipsizing. */}
+          <Text style={type.bodySm} numberOfLines={compact ? 1 : undefined}>{teamName}</Text>
         </View>
 
         {players.length === 0 ? (
@@ -89,7 +92,14 @@ export default function TradeSide({ title, teamName, players, valueOf, tierOf, a
                   <Text style={type.title}>{p.name}</Text>
                 )}
                 <View style={compact ? styles.compactMetaLine : undefined}>
-                  <Text style={type.bodySm} numberOfLines={1}>
+                  {/* flexShrink so this line yields before the tier badge:
+                      without it the badge is pushed out of the ~97pt of
+                      info width a 375pt screen leaves, which is the price
+                      silently disappearing again. */}
+                  <Text
+                    style={[type.bodySm, compact && styles.compactMetaText]}
+                    numberOfLines={compact ? 1 : undefined}
+                  >
                     {p.pick ? 'Draft capital' : `${p.nflTeam} · ${p.age} yrs`}
                   </Text>
                   {/* Column mode has no room for a trailing value column, so
@@ -198,6 +208,7 @@ const styles = StyleSheet.create({
   rowCompact: { alignItems: 'flex-start', gap: space.xs },
   compactTopLine: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
   compactName: { flexShrink: 1 },
+  compactMetaText: { flexShrink: 1 },
   compactMetaLine: {
     flexDirection: 'row',
     alignItems: 'center',

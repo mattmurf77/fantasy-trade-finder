@@ -33,6 +33,7 @@ import type { GuideStep } from '../state/useGuide';
 //   import_completed          rankings import — an import landed
 //   league_filter_applied     LeagueSummaryScreen — a position pill tapped
 //   send_attempted            Send-in-{Sleeper,MFL,ESPN}/copy — send tapped
+//   calc_tour_completed       utils/calcTour — the #384 walkthrough finished
 //
 // Each name is ALSO the analytics event where one exists, but the receipt is
 // the local write; the two are recorded independently.
@@ -53,6 +54,10 @@ export const GUIDE_RECEIPTS = {
   importCompleted: 'import_completed',
   leagueFilterApplied: 'league_filter_applied',
   sendAttempted: 'send_attempted',
+  /** #384 — the merged-calculator walkthrough ran to its last beat. Written
+   *  by the runner, not a screen: only it knows the tour finished rather
+   *  than being abandoned. It is what gates the auto-start to first visit. */
+  calcTourCompleted: 'calc_tour_completed',
 } as const;
 
 const R = GUIDE_RECEIPTS;
@@ -443,14 +448,17 @@ export const S = {
     adoptionEvent: 'find_trades_tapped',
   }),
 
+  // The operator's step 11 in full: "the clear button has become the X, the
+  // X records your decision, the check does as before". The calculator's
+  // Clear IS the deck's cross — naming that continuity is the beat's job.
   n19: (): GuideStep => ({
     id: 'n19', screen: 'Trades', pose: 'point', advance: 'tap',
     target: 'trades.pass-btn',
-    line: 'Check accepts. The cross records why you passed, so your next cards fit better.',
-    degradeLine: 'Accept with the check; the cross records why you passed.',
+    line: 'Clear became this cross. It records why you passed; the check still accepts.',
+    degradeLine: 'Clear became the cross — it records why you passed. The check accepts.',
     maxDisplayCount: 3,
     retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
-    adoptionEvent: 'trade_disposition',
+    adoptionEvent: 'trade_pass_layer1',
   }),
 
   // Untargeted on purpose: the swap affordance is per-player-row, so there is
@@ -461,7 +469,7 @@ export const S = {
     line: 'Swap arrows change any player without leaving the card.',
     maxDisplayCount: 3,
     retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
-    adoptionEvent: 'trade_card_swap',
+    adoptionEvent: 'trade_swap_suggest_opened',
   }),
 
   n21: (): GuideStep => ({
@@ -471,7 +479,9 @@ export const S = {
     degradeLine: 'Multi-player deals expand to show every piece.',
     maxDisplayCount: 3,
     retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
-    adoptionEvent: 'trade_disposition',
+    // Toggling the package re-runs generation, so the regeneration IS the
+    // adoption signal — there is no dedicated package-toggle event.
+    adoptionEvent: 'deck_regenerated',
   }),
 
   n22: (): GuideStep => ({
@@ -481,18 +491,39 @@ export const S = {
     degradeLine: 'The fairness meter explains how a trade was judged.',
     maxDisplayCount: 3,
     retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
-    adoptionEvent: 'trade_disposition',
+    // The ⓘ this beat points at fires help_opened{topic:'trade_pricing'}.
+    adoptionEvent: 'help_opened',
   }),
 
   // Untargeted: the send control is platform-resolved (Sleeper / MFL / ESPN),
   // so a fixed target would point at the wrong node — or nothing — for two of
   // the three. No deixis in the line, so nothing to degrade.
+  //
+  // TWO BEATS, one slot. The password sentence is true on Sleeper (the JWT is
+  // captured in a WebView and kept on-device) and FALSE elsewhere: MFL POSTs
+  // the password to /api/mfl/auth-link and ESPN stores espn_s2/SWID
+  // server-side. The operator vouched for the Sleeper claim only, so the
+  // runner picks by `resolveSendPlatform` (utils/calcTour.ts) rather than
+  // shipping one line that is a lie for two platforms.
   n23: (): GuideStep => ({
     id: 'n23', screen: 'Trades', pose: 'neutral', advance: 'tap',
     line: 'Sending goes straight to your league. Passwords never leave your phone.',
     maxDisplayCount: 3,
     retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
-    adoptionEvent: 'send_attempted',
+    adoptionEvent: 'sleeper_send_attempted',
+  }),
+
+  /** Off-Sleeper sibling of `n23` — same slot, no password claim. */
+  n23b: (): GuideStep => ({
+    id: 'n23b', screen: 'Trades', pose: 'neutral', advance: 'tap',
+    line: 'Sending goes straight to your league.',
+    maxDisplayCount: 3,
+    retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
+    // The registered send event is Sleeper's; MFL/ESPN sends fire no client
+    // event yet (P0-7 parity is carried, not landed). Naming the one that
+    // exists keeps the field greppable against the taxonomy — the join for
+    // this beat's platforms lands when their events do.
+    adoptionEvent: 'sleeper_send_attempted',
   }),
 
   n24: (): GuideStep => ({
@@ -500,7 +531,9 @@ export const S = {
     line: 'Take it from here. Decide, and the next trade comes up automatically.',
     maxDisplayCount: 3,
     retireAfter: 'never', // reason: closes the re-runnable walkthrough; capped, not retired.
-    adoptionEvent: 'trade_disposition',
+    // The claim is literally "the next card comes up" — deck_card_viewed is
+    // that card being seen, which is the only honest downstream event here.
+    adoptionEvent: 'deck_card_viewed',
   }),
 } as const;
 

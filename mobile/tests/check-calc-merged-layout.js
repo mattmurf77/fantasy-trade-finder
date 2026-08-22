@@ -32,6 +32,7 @@ function assert(cond, name, detail) {
 const read = (p) => fs.readFileSync(p, 'utf8');
 const calc = read(path.join(SRC, 'components/InLeagueCalculator.tsx'));
 const side = read(path.join(SRC, 'components/TradeSide.tsx'));
+const screen = read(path.join(SRC, 'screens/TradeCalculatorScreen.tsx'));
 
 console.log('check-calc-merged-layout:');
 
@@ -99,6 +100,7 @@ const MERGED_ONLY = [
   'calc.action-row', 'calc.action.find-a-trade', 'calc.action.include-players',
   'calc.action.clear', 'calc.action.confirm', 'calc.league-dropdown',
   'calc.team-dropdown', 'calc.trade-columns', 'calc.team-sheet',
+  'calc.outlook-fallback', 'calc.outlook-fallback.change',
 ];
 for (const id of MERGED_ONLY) {
   assert(calc.includes(`testID="${id}"`) && !flagOffSource.includes(`testID="${id}"`),
@@ -157,6 +159,69 @@ assert(!/[\u{1F300}-\u{1FAFF}\u{2700}-\u{27BF}\u{2B00}-\u{2BFF}\u{2705}\u{274C}]
 assert(/merged \? null : <Button label="Clear trade"/.test(calc),
   '12. the legacy Clear button is suppressed in the merged layout',
   'both the action-row Clear and the ghost Clear would render');
+
+// 13 — the scoring-format control survived the merge. The #166/#167 session
+// override is the one thing on this page that changes what every value MEANS;
+// dropping it silently is a worse regression than any layout shift.
+assert(/calc\.merged-format\./.test(calc) && /setFormatChoice\(f\.key\)/.test(calc),
+  '13. the merged header renders the scoring-format chips',
+  'the merged branch dropped them entirely — no way to override the detected format');
+{
+  const at = calc.indexOf('calc.merged-format.');
+  assert(at >= 0 && !flagOffSource.includes('calc.merged-format.'),
+    '13b. the merged format chips render only behind the flag');
+}
+assert(/values converted to \{FORMAT_LABEL\[format\]\}/.test(calc),
+  '14. the #191 cross-format conversion note is kept in the merged layout',
+  'a converted board presented as a ranked one is a silent honesty defect');
+
+// 15 — the outlook section is never a silent gap. OutlookBiasReceipt renders
+// null under two independent conditions (flag off, or no directional
+// outlook); the merged page mirrors TradesScreen's fallback instead.
+assert(/onHiddenChange=\{setOutlookHidden\}/.test(calc),
+  '15. the merged page learns when the outlook receipt rendered nothing');
+assert(/onHiddenChange\?:/.test(read(path.join(SRC, 'components/OutlookBiasReceipt.tsx'))),
+  '15b. the receipt reports it — and the prop is OPTIONAL, so every other caller is unchanged');
+
+// 16 — column mode's clamping is column-only. `numberOfLines={1}` in BOTH
+// modes reaches the shipped stacked page behind the flag, where a long
+// "@username" used to wrap and would now ellipsize.
+{
+  // The ONE bare clamp left is the compact-only name line — it lives inside
+  // the `compact ? (…) : (…)` branch, so it cannot reach the stacked page.
+  const bare = [...side.matchAll(/numberOfLines=\{1\}/g)].map((m) =>
+    side.slice(Math.max(0, m.index - 120), m.index),
+  );
+  assert(bare.length === 1 && /styles\.compactName/.test(bare[0]),
+    '16. TradeSide adds no line clamp that reaches the stacked page',
+    'flag-off must stay byte-identical — a shared row clamps on `compact` only');
+}
+assert((side.match(/numberOfLines=\{compact \? 1 : undefined\}/g) || []).length === 2,
+  '16b. both clamped lines are gated on compact');
+assert(/compactMetaText: \{ flexShrink: 1 \}/.test(side),
+  '17. the compact meta line yields before the tier badge',
+  'without flexShrink the badge is pushed out of ~97pt of info width — the price disappears');
+
+// 18 — the calculator remounts on a league switch. Its canvas is LOCAL
+// state; without this the new league renders the old league's players and
+// evaluates the old opponent id against it.
+assert(/`manual-\$\{league\.league_id\}`/.test(screen),
+  '18. InLeagueCalculator is keyed on the league');
+
+// 19 — one Find-a-Trade entry on the merged page. The #213 text link
+// navigates without touching pins, so it bypasses Include players.
+assert(/calcMergedOn && mode === 'league' \? null : \(/.test(screen),
+  '19. the #213 link steps aside on the merged In-league page');
+assert(!/navigation\.navigate\('TradesHome'\)/.test(screen),
+  '20. no plain navigate to TradesHome',
+  "without `pop` and with no getId, routers 7.5.3 PUSHES a second TradesHome and leaves this screen mounted");
+assert((screen.match(/navigation\.popTo\('TradesHome'\)/g) || []).length === 2,
+  '20b. both exits use popTo');
+
+// 21 — the re-entry link is a real control, not a 34pt line of text.
+assert(/showMeAroundTap: \{ minHeight: 44/.test(calc),
+  '21. "Show me around" clears the 44pt touch floor',
+  'hitSlop widens the touch area but not the control');
 
 console.log(failures === 0
   ? 'check-calc-merged-layout: all assertions passed'

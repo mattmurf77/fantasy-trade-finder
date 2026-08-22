@@ -84,8 +84,8 @@ const { S, GUIDE_RECEIPTS, nextUnrankedPosition } = shim.exports;
 
 assert(!!S && typeof S === 'object', '0a — the script table loads and executes');
 assert(
-  !!GUIDE_RECEIPTS && Object.keys(GUIDE_RECEIPTS).length === 7,
-  '0b — the client-receipt vocabulary is exported (7 names)',
+  !!GUIDE_RECEIPTS && Object.keys(GUIDE_RECEIPTS).length === 8,
+  '0b — the client-receipt vocabulary is exported (8 names)',
   'screens import these ids; an unexported vocabulary is a naming drift waiting to happen',
 );
 assert(
@@ -142,6 +142,9 @@ const PROBES = {
   n21: { id: 'n21', args: [[]] },
   n22: { id: 'n22', args: [[]] },
   n23: { id: 'n23', args: [[]] },
+  // The off-Sleeper sibling of n23 — same slot in the runner, chosen by
+  // `resolveSendPlatform`. It is a full beat and is held to the full contract.
+  n23b: { id: 'n23b', args: [[]] },
   n24: { id: 'n24', args: [[]] },
 };
 
@@ -357,6 +360,30 @@ assert(
   '8b — the router-less n6.1 variant offers no route it cannot honour',
   'routing into an empty "Awaiting them" one tap after "logged" is the R1 moment',
 );
+
+// ═══ 9 — the n23 pair: one platform claim, two beats ═══════════════════════
+//
+// "Passwords never leave your phone" is true on Sleeper only: MFL POSTs the
+// password to /api/mfl/auth-link and ESPN stores espn_s2/SWID server-side.
+// The operator vouched for the Sleeper claim, so the sentence may exist in
+// exactly one beat and the sibling must carry no password claim at all.
+{
+  const sleeper = S.n23().line;
+  const other = S.n23b().line;
+  assert(
+    /password/i.test(sleeper),
+    '9a — n23 (Sleeper) is the beat that carries the password claim',
+  );
+  assert(
+    !/password/i.test(other),
+    '9b — n23b (off-Sleeper) makes no password claim',
+    `"${other}" — MFL and ESPN both send a credential off the device`,
+  );
+  assert(
+    S.n23().screen === 'Trades' && S.n23b().screen === 'Trades',
+    '9c — both n23 variants declare the deck screen',
+  );
+}
 
 console.log(
   failures === 0

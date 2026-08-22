@@ -37,6 +37,7 @@ import { track } from '../api/events';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
 import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTargets';
+import { advanceGuideIfActive } from '../state/useGuide';
 import { chalk, fonts, ice, ink, radii, semantic, space, type } from '../theme/chalkline';
 import { posColor, type Position } from '../theme/colors';
 import type { CalcPlayer, CalcPos } from '../data/calcTypes';
@@ -66,10 +67,20 @@ interface Props {
      *  hold. Empty arrays are meaningful: "the canvas is empty". */
     give: CalcPlayer[];
     receive: CalcPlayer[];
+    /** #384 review §6 — the Team dropdown's partner, so the finder run is
+     *  SCOPED to the team the user chose instead of sweeping the league.
+     *  Null when no partner is selected: the caller then navigates without
+     *  a handoff rather than inventing one. */
+    opponent: { userId: string; name: string } | null;
   }) => void;
   /** #384 — re-entry for the guided tour ("Show me around", top right).
    *  Absent ⇒ the link is not rendered. */
   onShowMeAround?: () => void;
+  /** #384 W5 — filled on mount with an opener for the outlook sheet. The
+   *  sheet lives here; the tour is started by the SCREEN, and n11's CTA has
+   *  to reach it. A ref rather than a callback prop so the screen can hand
+   *  the same opener to the runner without re-rendering this component. */
+  outlookOpenerRef?: React.MutableRefObject<(() => void) | null>;
   /** #384 — the action row's confirm control. Queues the built trade for
    *  the counterparty's suggestions. Absent ⇒ rendered disabled (W1 ships
    *  the layout; the queue behaviour lands in W2). */
@@ -141,12 +152,18 @@ export default function InLeagueCalculator({
   initialReceiveIds,
   onFindATrade,
   onShowMeAround,
+  outlookOpenerRef,
   onLikeTrade,
 }: Props) {
   // #384 — the merged calculator layout. OFF is byte-identical to the
   // shipped stacked page; every branch below reads this one flag.
   const merged = useFlag('calc.merged_layout');
   const [dnaOpen, setDnaOpen] = useState(false);
+  // #384 review §4 — the receipt renders nothing when `trade.outlook_direction`
+  // is off or no outlook resolves, which left the merged page with no outlook
+  // section and no way into the sheet at all. Mirrors TradesScreen's
+  // `outlookReceiptShown` fallback: one honest row instead of a silent gap.
+  const [outlookHidden, setOutlookHidden] = useState(false);
   const [leagueSwitcherOpen, setLeagueSwitcherOpen] = useState(false);
   const [teamPickerOpen, setTeamPickerOpen] = useState(false);
   // Ruling 2 (#384): ON ⇒ the finder MUST include the assets on the canvas;
@@ -165,6 +182,15 @@ export default function InLeagueCalculator({
   const confirmBtnRef = useRef<View | null>(null);
   const includeBtnRef = useRef<View | null>(null);
   const giveAddRef = useRef<View | null>(null);
+  // n11's CTA has to open the sheet this component owns; the screen holds the
+  // ref and hands the same opener to the tour runner.
+  useEffect(() => {
+    if (!outlookOpenerRef) return;
+    outlookOpenerRef.current = () => setDnaOpen(true);
+    return () => {
+      outlookOpenerRef.current = null;
+    };
+  }, [outlookOpenerRef]);
   useEffect(() => {
     if (!merged) return;
     const pairs: [string, React.RefObject<View | null>][] = [
@@ -614,6 +640,7 @@ export default function InLeagueCalculator({
   const anySide = giveIds.length > 0 || receiveIds.length > 0;
   const clear = () => {
     haptics.warning();
+    track('calc_cleared', { mode: 'league' }, 'TradeCalculator');
     setGiveIds([]);
     setReceiveIds([]);
   };
@@ -659,14 +686,83 @@ export default function InLeagueCalculator({
                   haptics.selection();
                   onShowMeAround();
                 }}
-                style={({ pressed }) => [pressed && styles.linkPressed]}
+                // hitSlop extends the touch area but not the CONTROL: the
+                // 44pt floor is a property of the pressable itself.
+                style={({ pressed }) => [styles.showMeAroundTap, pressed && styles.linkPressed]}
               >
                 <Text style={styles.showMeAround}>Show me around</Text>
               </Pressable>
             </View>
           ) : null}
 
-          <OutlookBiasReceipt onChange={() => setDnaOpen(true)} />
+          <OutlookBiasReceipt
+            onChange={() => setDnaOpen(true)}
+            onHiddenChange={setOutlookHidden}
+          />
+          {outlookHidden ? (
+            // The receipt's own row, minus the claim it cannot make. Same
+            // Change control, same sheet — the page always has an outlook
+            // section and always a way into the editor.
+            <View testID="calc.outlook-fallback" style={styles.outlookFallback}>
+              <Text style={styles.outlookFallbackText} numberOfLines={1}>
+                Outlook · Not set
+              </Text>
+              <Pressable
+                testID="calc.outlook-fallback.change"
+                accessibilityRole="button"
+                accessibilityLabel="Set your outlook"
+                hitSlop={8}
+                onPress={() => {
+                  haptics.selection();
+                  setDnaOpen(true);
+                }}
+              >
+                {({ pressed }) => (
+                  <Text style={[styles.outlookFallbackChange, pressed && styles.linkPressed]}>
+                    Change
+                  </Text>
+                )}
+              </Pressable>
+            </View>
+          ) : null}
+
+          {/* #384 review §11 — the scoring format is the #166/#167 session
+              override, and the merged layout dropped it entirely. Same chips,
+              same handler, same honesty note as the stacked page; only the
+              slot moved. */}
+          <TickLabel>Scoring format</TickLabel>
+          <View style={styles.chipRow}>
+            {FORMATS.map((f) => {
+              const active = format === f.key;
+              return (
+                <Pressable
+                  key={f.key}
+                  testID={`calc.merged-format.${f.key}`}
+                  style={[styles.chip, active && styles.chipActive]}
+                  onPress={() => {
+                    if (f.key !== format) {
+                      haptics.selection();
+                      setFormatChoice(f.key);
+                    }
+                  }}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                >
+                  <Text style={[styles.chipText, active && styles.chipTextActive]}>{f.label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          {opponent && rankStateFor(opponent, format) === 'R*' ? (
+            // #191 — the conversion note is an honesty line, not decoration:
+            // their side of the verdict was value-mapped from another format.
+            <Text style={styles.note}>
+              @{opponent.username} ranked in{' '}
+              {FORMAT_LABEL[(opponent.ranked_formats ?? []).find((f) => f !== format) ?? ''] ??
+                'another format'}{' '}
+              — values converted to {FORMAT_LABEL[format]} for this read.
+            </Text>
+          ) : null}
 
           {/* #333 — league and team as side-by-side dropdowns, beneath the
               collapsible outlook section rather than above it. */}
@@ -943,6 +1039,9 @@ export default function InLeagueCalculator({
                 includePlayers,
                 give: giveIds.map((id) => playerById[id]).filter(Boolean) as CalcPlayer[],
                 receive: receiveIds.map((id) => playerById[id]).filter(Boolean) as CalcPlayer[],
+                opponent: opponent
+                  ? { userId: opponent.user_id, name: opponent.username }
+                  : null,
               });
             }}
             style={({ pressed }) => [
@@ -964,7 +1063,12 @@ export default function InLeagueCalculator({
             accessibilityLabel="Include the players on the canvas in the search"
             onPress={() => {
               haptics.selection();
-              setIncludePlayers((v) => !v);
+              const next = !includePlayers;
+              setIncludePlayers(next);
+              track('calc_include_players_toggled', { on: next }, 'TradeCalculator');
+              // n17 is an action beat — the real toggle is the only thing
+              // that advances it.
+              advanceGuideIfActive('n17', 'action');
             }}
             style={({ pressed }) => [
               styles.actionInclude, styles.actionBtn,
@@ -1233,6 +1337,10 @@ export default function InLeagueCalculator({
         onPick={(p) => {
           haptics.selection();
           setGiveIds((ids) => [...ids, p.id]);
+          track('calc_asset_added', { side: 'give' }, 'TradeCalculator');
+          // n16 ("Add someone you'd move") is an action beat: the pick, not
+          // the picker opening, is what it asked for.
+          advanceGuideIfActive('n16', 'action');
         }}
         onClose={() => setPicker(null)}
       />
@@ -1253,6 +1361,7 @@ export default function InLeagueCalculator({
         onPick={(p) => {
           haptics.selection();
           setReceiveIds((ids) => [...ids, p.id]);
+          track('calc_asset_added', { side: 'receive' }, 'TradeCalculator');
         }}
         onClose={() => setPicker(null)}
       />
@@ -1583,8 +1692,27 @@ const styles = StyleSheet.create({
   // (the two 15%-width buttons in the action row are the tight ones and are
   // sized by minHeight, not by their label).
   mergedTopBar: { flexDirection: 'row', justifyContent: 'flex-end' },
+  // 44pt is the control's own floor; hitSlop widens the touch area but does
+  // not make the control itself reachable-sized.
+  showMeAroundTap: { minHeight: 44, justifyContent: 'center' },
   showMeAround: { ...type.bodySm, color: chalk.dim, fontFamily: fonts.uiSemi },
   linkPressed: { opacity: 0.6 },
+  // Honest empty twin of OutlookBiasReceipt's row: same quiet bar, same
+  // Change control, no lean claim.
+  outlookFallback: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space.sm,
+    minHeight: 44,
+    paddingHorizontal: 10,
+    backgroundColor: ink.ink2,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.sm,
+  },
+  outlookFallbackText: { ...type.bodySm, flex: 1, color: chalk.dim },
+  outlookFallbackChange: { ...type.bodySm, color: ice.base, fontFamily: fonts.uiSemi },
 
   dropdownRow: { flexDirection: 'row', gap: space.sm },
   dropdown: {
