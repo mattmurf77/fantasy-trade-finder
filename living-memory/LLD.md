@@ -38,6 +38,7 @@
 - [Pricing waterfalls: resolve once per scope, pass down, fall soft (2026-08-21, D-146)](#pricing-waterfalls-resolve-once-per-scope-pass-down-fall-soft-2026-08-21-d-146)
 - [One number, one seam: aligning surfaces that must agree (2026-08-21, D-148)](#one-number-one-seam-aligning-surfaces-that-must-agree-2026-08-21-d-148)
 - [Append-only, version-stamped measurement tables (2026-08-21, D-144, `receipts_*`)](#append-only-version-stamped-measurement-tables-2026-08-21-d-144-receipts_)
+- [The opponent sweep is complete; a generation budget is never a deck cap (2026-08-22, D-154, `trade.full_sweep`)](#the-opponent-sweep-is-complete-a-generation-budget-is-never-a-deck-cap-2026-08-22-d-154-tradefull_sweep)
 
 ---
 
@@ -636,3 +637,38 @@ own past output.
   skip rows whose own format has not resolved — *without* consuming the batch cap. Folding
   resolvability into the WHERE is what stops a head-of-queue block of unresolvable rows
   starving every run.
+
+---
+
+## The opponent sweep is complete; a generation budget is never a deck cap (2026-08-22, D-154, `trade.full_sweep`)
+
+Convention for the generation loops in `backend/trade_service.py`, `backend/trade_gen_v2.py`
+and `backend/trade_gen_fit.py`. Plan: [`../docs/plans/full-sweep/`](../docs/plans/full-sweep/plan.md).
+
+- **Every eligible leaguemate is generated against.** Under `trade.full_sweep` the two loops in
+  `trade_service.py` (`_generate_trades_impl` and `_generate_trades_v2`) no longer stop early,
+  and `_dedup_and_sort` — which already sorted the whole collected set — becomes a **global**
+  league rank rather than a rank of whoever came first. The other two arms (`trade_gen_v2`'s
+  `boarded` loop, `trade_gen_fit`'s `eligible` loop) already had no opponent-level exit; that
+  is now pinned, not assumed, by `backend/tests/test_arm_sweep_parity.py`.
+- **`global_target` is a flag-off STOP, never a deck cap.** `max(30, max_per_opponent * 6)` was
+  written as a bound on pathological generation cost and got read as a deck-size setting. It
+  never was one: because it is checked *after* each opponent's whole batch lands and visit order
+  is fixed, its real effect was to silently and *repeatably* exclude the same leaguemates from
+  every refresh. Deck size is bounded by `bakeoff_deck_limit` and `first_session_deck_max`, and
+  those are the dials. **The general rule:** a loop budget must never be the thing that decides
+  what the user sees — if a budget's binding is order-dependent, it is a hidden selection rule.
+- **The per-opponent keep is a knob, not a constant.** `exploration_base_per_opp` (default 5.0,
+  `trade_service._DEFAULT_CFG` + `database._MODEL_CONFIG_DEFAULTS`) replaces the hardcoded
+  `server._EXPLORATION_BASE_PER_OPP`, which stays as the fallback both `_deck_cfg` reads pass so
+  an unseeded DB is byte-identical. That constant is why raising `max_per_opponent` was a no-op
+  on the served deck — `_split_exploration_pool` re-trimmed to 5 per opponent afterwards. A
+  post-generation trim width has to be as tunable as the generation budget it trims, or the two
+  disagree silently.
+- **Removing a stop is not a ranking change.** No new ranking code shipped: the sort, the caps
+  and the streaming callback are untouched, and `global_target` is still computed (not logged — the module has no logger) so
+  the flag-off path stays byte-identical. Visit order survives as **streaming** order only.
+- **Threads were rejected, and the reason is recorded.** The enumeration is pure-Python CPU work;
+  a thread pool buys nothing under the GIL. Latency work (a per-pair result cache keyed on
+  roster/board/knob state, and a fork-safety-reviewed process pool) is a phase-2 plan, not this
+  one — D-154.

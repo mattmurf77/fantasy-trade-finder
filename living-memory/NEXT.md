@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-22 — Full sweep: merge the review PR, then the build, then the operator flips](#2026-08-22-full-sweep-merge-the-review-pr-then-the-build-then-the-operator-flips)
 - [2026-08-22 — negmem: BUILT dark; rollout is two operator flips](#2026-08-22--negmem-built-dark-rollout-is-two-operator-flips)
 - [2026-08-21 — Receipts: the P0 prod read, then grade dark, then the screen](#2026-08-21--receipts-the-p0-prod-read-then-grade-dark-then-the-screen)
 - [2026-08-20 — Fit-challenger: operator decisions, then the W1 re-light](#2026-08-20--fit-challenger-operator-decisions-then-the-w1-re-light)
@@ -31,6 +32,12 @@
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## 2026-08-22 — Full sweep: merge the review PR, then the build, then the operator flips
+
+1. **Rebase + PR `claude/trade-model-restrictiveness-7f3975`** (docs only; owns G-058 / Q-030 that the build cites). Then **PR `claude/full-sweep-0822-a1c3`** — CI green, `FTF_SKIP_SIM_GATE=1`. Merging lights nothing.
+2. **Operator: run the [TestFlight checklist](../docs/plans/full-sweep/scope.md)** (§3, six steps, server-side flag) and log the numbers in TEST_LEDGER — that is what graduates `trade.full_sweep`.
+3. **Knockout programme, in order** ([verdict](../docs/reviews/2026-08-22-knockout-rules-judged.html) §04): R5 dual-need rescue alone → consolidation bundle measured together in the replay harness (`filler_min_frac` sweep 0.15/0.10 with `asset_floor_abs` held; `trade_elo_gap_max` → 0; R1 in `package_value_v2`; `v3_shape_max_delta` knob) → R2 starter-depth predicate → the viewer-must-win form (operator, Q-030a). Audit `waiver_slot_cost` = 425 alongside.
 
 ## 2026-08-22 — negmem: BUILT dark; rollout is two operator flips
 

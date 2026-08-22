@@ -4853,7 +4853,11 @@ _AUDITION_ESTABLISHED = frozenset({"window", "value"})
 
 _EXPLORATION_BASE_PER_OPP = 5   # generate_trades' max_per_opponent default —
                                 # the served-deck per-opponent budget the
-                                # flag-off path has always used.
+                                # flag-off path has always used. Now the
+                                # FALLBACK for the `exploration_base_per_opp`
+                                # model_config knob (both read sites go
+                                # through `_deck_cfg`), so an unseeded DB
+                                # still reproduces this value exactly.
 _EXPLORATION_SLOT_MIN = 4       # PRD: slot fixed mid-deck, positions 4–6
 _EXPLORATION_SLOT_MAX = 6
 
@@ -5727,7 +5731,9 @@ def _run_trade_job(
             _overgen = max(0, int(_deck_cfg("exploration_overgen", 3)))
             if _overgen:
                 gen_kwargs["max_per_opponent"] = (
-                    _EXPLORATION_BASE_PER_OPP + _overgen)
+                    max(1, int(_deck_cfg("exploration_base_per_opp",
+                                         _EXPLORATION_BASE_PER_OPP)))
+                    + _overgen)
 
         # trade.negmem (D-3, LLD §4.2/§6.1) — build the job's negative-results
         # map ONCE, here on the job thread, BEFORE any arm context is entered.
@@ -5853,13 +5859,17 @@ def _run_trade_job(
                 log.warning("fit_diag stamp failed (non-fatal): %s", fd_err)
 
         # F7 — split the over-generated list into the served deck (top
-        # _EXPLORATION_BASE_PER_OPP per opponent — the flag-off membership)
+        # `exploration_base_per_opp` per opponent — the flag-off membership)
         # and the wildcard draw pool, then republish so the trimmed deck
         # replaces the last streaming snapshot (which contained pool cards).
         exploration_pool: list = []
         if explore_active:
             final_cards, exploration_pool = _split_exploration_pool(
-                final_cards, _EXPLORATION_BASE_PER_OPP)
+                final_cards,
+                # max(1, …): a knob of 0 would send the ENTIRE deck into the
+                # wildcard pool and serve nothing.
+                max(1, int(_deck_cfg("exploration_base_per_opp",
+                                     _EXPLORATION_BASE_PER_OPP))))
             if exploration_pool:
                 snapshot = []
                 for c in _served_cards(final_cards, league_id, ghost_on):

@@ -1014,6 +1014,26 @@ FLAG_KEYS: tuple[str, ...] = (
     # is written — decks, scores, order and rows byte-identical to today. The
     # not-allowlisted case is deliberately indistinguishable from OFF.
     "trade.negmem",
+    # ── Full sweep — score every leaguemate, rank globally ───────────
+    # docs/plans/full-sweep/plan.md §3.1. Both opponent loops in
+    # `trade_service` stop as soon as the deck holds `global_target =
+    # max(30, max_per_opponent * 6)` cards, so a 12-team league usually ends
+    # its walk after ~6 partners — and because the visit order is fixed
+    # (boarded members first, then roster order), it is the SAME leaguemates
+    # skipped on every refresh.
+    #
+    # ON ⇒ the early exit is skipped in BOTH `_generate_trades_impl` (v1)
+    # and `_generate_trades_v2` (the served path), so every eligible
+    # leaguemate is scored and `_dedup_and_sort` — which already sorts the
+    # whole collected set by `composite_score` — ranks the league globally.
+    # No new ranking code and no new cap: per-pair budgets, streaming order
+    # and the consensus fallback are untouched, and deck size stays the
+    # operator's `bakeoff_deck_limit` dial.
+    #
+    # OFF (default) ⇒ both breaks fire exactly as today and `global_target`
+    # is still computed — deck, order and rows byte-identical, pinned by
+    # backend/tests/test_full_sweep.py.
+    "trade.full_sweep",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

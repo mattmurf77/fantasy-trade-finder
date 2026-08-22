@@ -2596,6 +2596,13 @@ _MODEL_CONFIG_DEFAULTS = [
     ("negmem_halflife_days", 45.0,  "negmem evidence exponential-decay half-life (days); read horizon = 4x this"),
     ("negmem_sat_k",          3.0,  "negmem evidence-curve saturation pseudo-count (mult = 1 - (1-floor)*n_eff/(n_eff+k))"),
     ("negmem_like_net",       1.0,  "negmem: evidence mass one admitted viewed like nets against every (partner, *) cell"),
+    # ── Full sweep (docs/plans/full-sweep/plan.md §3.3) ──────────────────
+    # Seeded so the per-opponent keep is remotely settable: it was the
+    # hardcoded `server._EXPLORATION_BASE_PER_OPP = 5`, which is what made a
+    # `max_per_opponent` change a no-op on the served deck. Value MATCHES
+    # trade_service._DEFAULT_CFG exactly; seeding is behavior-neutral.
+    ("exploration_base_per_opp", 5.0, "full sweep: served cards kept per opponent — the base exploration_overgen adds to, and the width _split_exploration_pool trims back to. 5.0 reproduces the pre-knob hardcoded constant exactly"),
+    ("full_sweep_budget_s",     30.0, "full sweep: wall-clock seconds of opponent sweep before generation stops starting new pairs, checked BETWEEN opponents. Read only while trade.full_sweep is ON — it replaces the global_target card count as the job's ceiling, because trade_optimizer.generate_pair_trades_v3 carries no deadline of its own. <=0 disables the rail (job then bounded only by _JOB_HARD_TIMEOUT, 60s)"),
 ]
 
 

@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-22 — Full sweep BUILT dark on `claude/full-sweep-0822-a1c3`; review PR merges first, then TestFlight checklist, then the operator flips](#2026-08-22-full-sweep-built-dark-on-claudefull-sweep-0822-a1c3-review-pr-merges-first-then-testflight-checklist-then-the-operator-flips)
 - [2026-08-22 — #384 merged calculator: E2E review failed, W5 fixed it on `claude/manual-calculator-e2e-review-39a467`; four bright-line calls + a TestFlight pass owed](#2026-08-22--384-merged-calculator-e2e-review-failed-w5-fixed-it-on-claudemanual-calculator-e2e-review-39a467-four-bright-line-calls--a-testflight-pass-owed)
 - [2026-08-22 — negmem BUILT dark on `claude/vigilant-spence-8583f5`; TestFlight pass + two rollout flips owed](#2026-08-22--negmem-built-dark-on-claudevigilant-spence-8583f5-testflight-pass--two-rollout-flips-owed)
 - [2026-08-21 — Receipts BUILT dark on `feat/receipts`; not pushed, P0 prod read owed](#2026-08-21--receipts-built-dark-on-featreceipts-not-pushed-p0-prod-read-owed)
@@ -41,6 +42,20 @@
 - [2026-08-11 — Send-in-MFL built + Send-in-ESPN spiked; both on branches, unmerged](#2026-08-11--send-in-mfl-built--send-in-espn-spiked-both-on-branches-unmerged)
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
 
+
+## 2026-08-22 — Full sweep BUILT dark on `claude/full-sweep-0822-a1c3`; review PR merges first, then TestFlight checklist, then the operator flips
+
+**Where things are.** Two branches, both local, neither pushed, both committed:
+- `claude/trade-model-restrictiveness-7f3975` (worktree `.claude/worktrees/trade-model-restrictiveness-7f3975`) — docs-only: three HTML reviews in `docs/reviews/` (restrictiveness, second-read, knockout-rules-judged), Q-030, G-058, CHANGELOG 2026-08-22e. Base `613a34c` → needs a rebase onto `origin/main` (`b6e906a`+) before PR; expect a one-line conflict in `GOTCHAS.md`'s index and the 2026-08-22 section (origin added G-056 there).
+- `claude/full-sweep-0822-a1c3` (worktree `.claude/worktrees/full-sweep-a1c3`) — the build, from fresh `origin/main`. Flag `trade.full_sweep` dark, knobs `exploration_base_per_opp` (5.0) and `full_sweep_budget_s` (30.0), 25 new tests, D-154, docs. 4198 passed. Ledger entry 2026-08-22h.
+
+**Order of operations.** (1) Rebase + PR the review branch first — the build's plan, D-154 and `scope-phase2.md` cite G-058 and Q-030, which only exist there. (2) PR the build; CI green; `FTF_SKIP_SIM_GATE=1` on push. (3) Operator runs the scope §3 TestFlight checklist (server-side flag, no client build): flip, refresh a single-board 12-team league, count partners (expect ≥ 9 of 11), read `gen_ms`, flip back. (4) Operator decides the flip and the deck-size dial (`bakeoff_deck_limit`, prod 60, since `bakeoff_serve_interleaved = 1`).
+
+**Open for the operator (Q-030):** (a) whether the app may suggest a trade the viewer loses slightly — conservative form is a conditional slack at fairness ≥ 0.85, full form is both-ways + 0.75; (b) gen_v2 deck share, graded on match rate and honest-offer likes, not viewer likes; (c) latency is now railed at 30 s, so R1 (this build) supersedes the rotate-order idea.
+
+**Next build after this one:** the knockout programme from [`docs/reviews/2026-08-22-knockout-rules-judged.html`](../docs/reviews/2026-08-22-knockout-rules-judged.html) §04 — R5 dual-need rescue alone first, then the consolidation bundle (`filler_min_frac` 0.25→0.15 with the 450 floor held, `trade_elo_gap_max`→0, R1 repriced in `package_value_v2`, `v3_shape_max_delta` knob at 2) measured together in the replay harness before any flip.
+
+**Watch:** `docs/plans/ram-mascot/brief.md` also proposes D-154; first to land keeps it. `calc_opened` is not dead (3 of 525, 7 taps ever) — the second-read report's retraction stands.
 
 ## 2026-08-22 — #384 merged calculator: E2E review failed, W5 fixed it on `claude/manual-calculator-e2e-review-39a467`; four bright-line calls + a TestFlight pass owed
 
