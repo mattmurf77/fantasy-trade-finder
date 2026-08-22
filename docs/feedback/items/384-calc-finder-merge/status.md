@@ -569,3 +569,67 @@ mobile/scripts/testid-lint.sh` OK. Backend untouched, so `pytest` is unchanged f
   a scroll-into-view, but it has no Next button by design: the user is being asked to tap Find a
   Trade. If the operator finds it hard to reach, the answer is a scroll, not a button.
 - The W6-B carry-forwards are unchanged.
+
+
+## W8 — 2026-08-22: the real cause of "ring but no avatar", found in the simulator
+
+The operator reported build 127 "fully broken at the Set outlook step — box present, avatar and
+dialogue gone". W7's placement diagnosis was **wrong**. The lead built the app for the iOS
+simulator (the first simulator run since D-056; a one-off to debug a live regression, not a
+return to the retired harness) and reproduced it on the **sign-in username beat** — so it was
+never about the calculator, the header, or placement. The invariant across builds 126 and 127:
+*the first beat and every untargeted beat showed; every TARGETED beat that followed another beat
+drew its ring and nothing else.*
+
+**Cause.** `AnalystGuide` returns `null` while a targeted step's spotlight is pending, which
+unmounts the avatar band. The entry spring (`opacity: slide`, `useNativeDriver: true`) was started
+on step ACTIVATION — against the unmounted band. When the band remounted after the measurement it
+initialised from the stale JS-side value (0) and never received another native frame: fully
+transparent, ring intact. A beat that measured fast enough to mount mid-animation got updates and
+showed; the rest did not. Fix (`AnalystGuide.tsx`): the spring is keyed on the band RENDERING
+(`[active?.id, spotlightPending]`, bails while pending) and is JS-driven. Verified in the
+simulator on the username beat, then on n10 → n11 (Set outlook — ring on the outlook row, bubble
+with the CTA above it), n12, n13, n15, n16. Guard `check-guide-spotlight-tracking` §14 (a–f).
+
+**Two more, found in the same session.** (1) The calculator auto-tour did not start on first
+landing: the deck's `s2.wait` bubble followed the user onto the calculator, every beat of the tour
+was refused behind it (`guide_active`), the runner stepped over each refusal and ended the run as
+`finished` with zero beats shown — which RECORDED the first-visit receipt and retired the
+auto-start for that user. Fix (`calcTour.ts`): a starting tour tears down whatever bubble is
+standing (tour beat skipped, any other dismissed as a swipe), and the receipt is recorded only when
+at least one beat was shown. (2) "Show me around" is offered on the In-league tab, but n10 only
+advanced on a real mode switch, so a re-run from that tab could not pass its first beat. Fix
+(`TradeCalculatorScreen.switchMode`): tapping the In-league tab advances n10 even when already
+selected. Also: scroll-into-view now reserves the tab-bar chrome (`BOTTOM_CHROME`), after the
+action row's ring was drawn under the verify strip in the simulator. Guards `check-calc-tour`
+29/41/42.
+
+**Not verified on device:** the deck half (n19–n24) — this simulator session is an unverified
+controller for the operator's account, so generation and outlook writes 403 with
+`verification_required`. Shipped as v1.16.2 (EAS 128); checklist §G applies.
+
+**Also in W8 — the first-landing placement, three causes, all reproduced in the simulator.** (1) The
+auto-start's `InteractionManager.runAfterInteractions` fallback fired before the push transition
+ended and before the native header laid out, so the first frame measured ~44 pt high; it is now a
+1 s timer behind `transitionEnd`. (2) The band's placement latched both SIDE and OFFSET from that
+first frame, so when the ring re-measured correctly the bubble stayed across the In-league tab; the
+side is still latched (no mid-scroll flip) but the offset is live whenever the solver agrees, and
+the latch waits for an on-screen cutout (spotlight guard §7g/§7h). (3) Tearing down the deck's
+stale `s2.wait` bubble let TradesScreen request N2 synchronously before the tour held the floor, so
+N2 took the slot and the calculator tour was refused beat by beat; the hold and the owned-id set now
+go up BEFORE the teardown (calc-tour guard 43). Scroll-into-view also reserves the tab-bar chrome
+(`BOTTOM_CHROME`) after the action row's ring was drawn under the verify strip.
+
+**A fourth, found because the simulator had auto-started the tour more than three times.** n10 and
+n11 carry `maxDisplayCount: 3`, and the runner steps over a refused beat, so the auto-start opened
+on n12 — whose target is not mounted on Real values — and showed its degrade line ("Both rosters
+sit side by side here…") in the bottom band with nothing to tap. A sequence that cannot show its
+first beat is not offered: `startCalcTour('auto')` now refuses up front when n10 is at its cap,
+before the hold or any teardown (guard 44; 44a pins that "Show me around" still resets the caps).
+Consequence for the operator's device, which abandoned the tour on 126 and 127: **build 128 will
+most likely auto-start nothing** — "Show me around" on the In-league tab is the path.
+
+**Verified on the first landing, simulator (release Hermes — see G-057):** Acquire → Manual calc →
+n10 rings the In-league tab, band directly beneath, avatar beside, no deck-beat hijack; tap In
+league → n11 rings the outlook row, bubble above with "Set outlook"; "Show me around" replays from
+n10 correctly.

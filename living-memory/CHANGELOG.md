@@ -11,6 +11,37 @@
 
 ---
 
+## 2026-08-22l — #384 W8: the REAL cause of the blank Analyst bubble, found in the simulator (v1.16.2)
+
+Build 127 was still blank at Set outlook. W7's placement theory was wrong. Lead built for the iOS
+simulator (one-off, D-056 still stands) and reproduced it on the sign-in username beat: **every
+targeted beat after another beat drew its ring and no band.** Cause: the band unmounts while a
+targeted spotlight is pending; the native-driven entry spring started on ACTIVATION ran against the
+unmounted band, and the remounted band initialised from the stale JS value (0) and never updated.
+Fix: spring keyed on the band rendering, JS-driven. Verified in the simulator n10 → n16 incl. the
+failing Set outlook beat. Two more found the same way: the auto-tour died behind the deck's
+`s2.wait` bubble and — worse — recorded the first-visit receipt with zero beats shown (fixed:
+starting tour tears down any standing bubble; receipt only when a beat was shown); "Show me around"
+from the In-league tab could not pass n10 (fixed: the tab tap advances n10 even when selected).
+Scroll-into-view reserves tab-bar chrome. Guards: spotlight §14a–f, calc-tour 29/41/42. Gates: tsc
+· 76/76 · lint. Deck half still unverified on device (unverified simulator session 403s on
+generation).
+
+**Second pass, same branch, before the build was cut.** Three first-landing defects reproduced and
+fixed: the auto-start's `InteractionManager` fallback fired before the header laid out (now a 1 s
+timer behind `transitionEnd`); the band latched its OFFSET from that early frame (side stays
+latched, offset live; latch waits for an on-screen cutout); tearing down the deck's stale bubble let
+TradesScreen request N2 synchronously and take n10's slot (hold + owned ids now go up BEFORE the
+teardown — calc-tour 43). Then a fourth, found because the simulator had auto-started the tour
+more than three times: with n10/n11 at `maxDisplayCount` the runner stepped over them and the
+auto-tour OPENED ON n12's DEGRADE LINE with the page still on Real values — an auto-start now
+refuses up front when n10 is capped (calc-tour 44/44a; "Show me around" still resets). The
+operator's device has abandoned the tour repeatedly, so on 128 expect NO auto-tour — use "Show me
+around". Verified in the simulator on the first landing: n10 rings the In-league tab with the band
+beneath it, n11 rings the outlook row with its CTA. Session cost: a `pod install` re-sync left the
+DEBUG Hermes under a `Release` marker and the app SIGSEGV'd at launch — [G-057](GOTCHAS.md).
+Shipped v1.16.2 / EAS 128.
+
 ## 2026-08-22k — #384 W7: the tour as the operator actually saw it on device — placement, timing, targets, Next buttons (v1.16.1)
 
 First runtime evidence for #384 came from the operator on build 126, six reports. One Opus

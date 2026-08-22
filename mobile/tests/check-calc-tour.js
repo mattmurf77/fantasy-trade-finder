@@ -129,8 +129,12 @@ assert(/startCalcTour\('show_me_around'/.test(screen), '13. re-entry from the li
     "15b. the auto-start waits for the push transition to end",
     'starting from the bare mount effect measures the target mid-slide, and '
     + 'nothing re-measures afterwards — the first-landing spotlight lands wrong');
-  assert(/InteractionManager\.runAfterInteractions\(begin\)/.test(beforeStart + after),
-    '15c. …with an InteractionManager fallback for a presentation that emits no transition',
+  // A TIMER fallback, never InteractionManager: runAfterInteractions fires the
+  // moment no touch is in flight — before the push ends and before the native
+  // header lays out — and the first beat measured ~44 pt high (2026-08-22).
+  assert(/const fallback = setTimeout\(begin, \d+\)/.test(beforeStart + after)
+      && !/runAfterInteractions/.test(beforeStart + after),
+    '15c. …with a TIMER fallback (never InteractionManager) for a presentation that emits no transition',
     'a replace or a cold deep link onto this route fires no transitionEnd');
   assert(/if \(started\) return;/.test(beforeStart + after),
     '15d. …and whichever lands first starts the tour exactly once');
@@ -227,7 +231,7 @@ assert(!/stopCalcTour/.test(tour) && !/stopCalcTour/.test(screen),
   '26b. there is no unconditional stop for the calculator to reach for',
   'one existed and the unmount from Find a Trade used it, ending the tour before the deck half could start');
 assert(/recordGuideReceipt\(GUIDE_RECEIPTS\.calcTourCompleted\)/.test(tour)
-    && /source === 'auto' &&/.test(tour),
+    && /if \(source === 'auto'\) \{[\s\S]*?guideReceipts\[GUIDE_RECEIPTS\.calcTourCompleted\][\s\S]*?return false;/.test(tour),
   '27. a finished run records the receipt, and the auto-start reads it',
   'without the gate the tour restarts on every landing');
 assert(/resetTourDisplayCounts\(\)/.test(tour),
@@ -235,8 +239,15 @@ assert(/resetTourDisplayCounts\(\)/.test(tour),
   'after three landings every beat is refused and the link does nothing');
 {
   const start = tour.slice(tour.indexOf('export function startCalcTour'));
-  assert(/TOUR_IDS\.has\(stale\)\) useGuide\.getState\(\)\.skipStep\(\)/.test(start),
-    '29. re-entry dismisses the bubble a previous run left standing',
+  // A stale bubble of ANY kind is torn down before the new run requests its
+  // first beat: a tour-owned one is skipped (its cap already counted), any
+  // other is dismissed like a swipe. Reproduced 2026-08-22: the deck's
+  // s2.wait bubble followed the user onto the calculator and every beat of
+  // the auto-tour was refused behind it.
+  assert(/const stale = useGuide\.getState\(\)\.active;/.test(start)
+      && /TOUR_IDS\.has\(stale\.id\)\) useGuide\.getState\(\)\.skipStep\(\)/.test(start)
+      && /else useGuide\.getState\(\)\.dismissActiveStep\('swipe'\)/.test(start),
+    '29. re-entry tears down WHATEVER bubble is standing (tour beat skipped, any other dismissed)',
     'one-bubble-at-a-time would otherwise refuse every beat of the new run');
   // "Show me around" RESTARTS. A re-entry that leaves `cursor` where the last
   // run stopped resumes mid-tour — and `requestAt(0)` below would then be the
@@ -387,6 +398,41 @@ assert(/setTourOwnedIds\(TOUR_IDS\)/.test(tour) && /setTourOwnedIds\(new Set<str
     assert(new RegExp(`screen: '${key}'`).test(bodyOf(id)),
       `41c. ${id} declares screen ${key}, which is the scroller key`);
   }
+}
+
+// ── 41: a run that showed nothing is not a completed tour ─────────────────
+assert(/if \(reason === 'finished' && shown > 0\)/.test(tour),
+  '41. the first-visit receipt is recorded only when at least one beat was SHOWN',
+  'a run refused beat-by-beat would otherwise retire the auto-start forever');
+assert(/if \(m === 'league'\) advanceGuideIfActive\('n10', 'action'\);\s*if \(m === mode\) return;/.test(screen),
+  '42. tapping the In-league tab advances n10 even when it is already selected',
+  '"Show me around" is offered on the In-league tab; a re-run must get past its first beat');
+
+// ── 43: the hold goes up BEFORE the stale bubble comes down ──────────────
+{
+  const start = tour.slice(tour.indexOf('export function startCalcTour'));
+  const hold = start.indexOf('beginTourHold()');
+  const own = start.indexOf('setTourOwnedIds(TOUR_IDS)');
+  const tear = start.indexOf('const stale = useGuide.getState().active;');
+  assert(hold >= 0 && own >= 0 && tear >= 0 && hold < tear && own < tear,
+    '43. startCalcTour takes the hold and registers its ids BEFORE tearing down a stale bubble',
+    'dismissing a screen beat lets that screen request its next beat synchronously; without the hold it takes the slot n10 needs');
+}
+
+// ── 44: an auto-start that cannot show n10 is not offered at all ──────────
+// The runner steps over a refused beat, so with n10 at its display cap an
+// auto-start opened on n12's degrade line with the page still on Real values.
+{
+  const start = tour.slice(tour.indexOf('export function startCalcTour'));
+  const gate = start.indexOf("if (source === 'auto') {");
+  const capCheck = /const first = GUIDE\.n10\(\);[\s\S]*?guideDisplayCounts\[first\.id\][\s\S]*?>= first\.maxDisplayCount[\s\S]*?return false;/;
+  const run = start.indexOf('running = true;');
+  const m = capCheck.exec(start);
+  assert(gate >= 0 && m !== null && m.index > gate && m.index < run,
+    '44. an auto-start refuses BEFORE taking the hold when n10 has hit its display cap',
+    'a sequence that cannot show its first beat must not open on a later beat\'s degrade line');
+  assert(/if \(source === 'show_me_around'\) resetTourDisplayCounts\(\);/.test(start),
+    '44a. "Show me around" still resets the caps, so the explicit ask is unaffected by 44');
 }
 
 console.log(failures === 0

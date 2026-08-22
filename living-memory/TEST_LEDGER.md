@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-08-22i — #384 W8 — simulator reproduction + mobile gates, v1.16.2 (EAS 128)
+
+**First simulator evidence since D-056** (one-off debug of a live regression; the harness stays retired). Release build, iPhone 16 / iOS 18.4, against production. Reproduced the blank-band bug on the sign-in username beat on `origin/main` (`d79f9f4`), then on the fix: username beat, n10, n11 (Set outlook), n12, n13, n15, n16 all render ring + avatar + bubble + Next/CTA. Not reached: n18 → deck (session unverified → `verification_required` on generation and outlook writes). `npx tsc --noEmit` clean · 76/76 guards (spotlight §14 a–f, calc-tour 29/41/42 new; sabotage: native driver back on / activation-keyed spring → 3 red) · `testid-lint OK`. Backend untouched.
+
+**Second simulator pass (same branch, pre-build):** after the first-landing fixes (timer fallback, latch-on-cutout + live offset, hold-before-teardown) — launch → Acquire → Manual calc auto-starts n10 with the ring on the In-league tab and the band directly beneath it (no overlap, no deck-beat hijack); tap In league → n11 rings the outlook row, bubble above with "Set outlook"; "Show me around" replays from n10 with ring + band. Found and fixed in the same pass: auto-start with n10 capped opened on n12's degrade line (calc-tour 44/44a). Final gates on the tip: `npx tsc --noEmit` clean · 76/76 guards · `testid-lint OK`. Simulator setup trap recorded as [G-057](GOTCHAS.md) (debug Hermes under a `Release` marker → SIGSEGV at launch).
+
 ## 2026-08-22h — #384 W7 device-feedback fixes — mobile gates, v1.16.1 (EAS 127)
 
 Branch `fix/384-tour-device-feedback`. `npx tsc --noEmit` clean · 76/76 `check-*.js` · `testid-lint OK`. Backend untouched (pytest unchanged from 2026-08-22g). Sabotages red: fixed `top: 54` band, constant ABOVE branch, solver ignoring `insets.top`, a beat back to `advance:'tap'`, n20 losing its target, `trades.send-btn` registration deleted, calculator dropping `onContentSizeChange`, auto-start not listening for `transitionEnd`. **Runtime:** the operator's device report on build 126 IS the evidence this wave answers; checklist section G (steps 50–62) is owed against build 127. The placement *mechanism* (occlusion vs. far-from-ring) is inferred from correlation, not observed — if step 54 still shows a bare ring, suspect native-header z-order.
@@ -2718,6 +2724,7 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-08-22i — #384 W8 — simulator reproduction, v1.16.2 (EAS 128)](#2026-08-22i--384-w8--simulator-reproduction--mobile-gates-v1162-eas-128)
 - [2026-08-22h — #384 W7 device-feedback fixes — v1.16.1 (EAS 127)](#2026-08-22h--384-w7-device-feedback-fixes--mobile-gates-v1161-eas-127)
 - [2026-08-22g — #384 SHIPPED — PR #172, flags LIT, EAS 1.16.0 (126)](#2026-08-22g--384-shipped--pr-172-80dee42-flags-lit-eas-build-1160-126-submitted)
 - [2026-08-22f — #384 W6-A + W6-B — full gates, FLAG DARK, NOT MERGED](#2026-08-22f--384-w6-a--w6-b--full-gates-flag-dark-not-merged-on-claudemanual-calculator-e2e-review-39a467)
