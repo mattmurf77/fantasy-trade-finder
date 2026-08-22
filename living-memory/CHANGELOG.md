@@ -11,6 +11,58 @@
 
 ---
 
+
+## 2026-08-22e — The merged calculator: five waves, BUILT DARK (#384, `feat/calc-finder-merge`, not merged)
+
+The report the cap ate ([D-149](DECISIONS.md)) turned into the build. #384 — canonical for
+#310/#379/#380, touching #333 — specced a merged Find-a-Trade/calculator surface plus a
+fifteen-beat tour. Ten rulings at triage, four at plan review, then "continue through all
+waves". [D-150](DECISIONS.md).
+
+- **W0 `224a830` — the demo CALCULATOR removed** (net −239 lines), and only that. "Demo" names
+  two unrelated systems across sixteen files; the demo **SESSION** (`/api/session/demo`,
+  try-before-you-sync, `onboarding.demo_bridge`) is open-access onboarding and is untouched,
+  verified by an empty `git diff` over its five files. `check-demo-calc-removed.js` is
+  two-sided so a future change cannot delete the wrong one. It also surfaced that
+  `tradeCalcMock.ts` exported two types that were never demo-only, and that
+  `utils/CLAUDE.md` called `tradeCalcMath.ts` "demo mode only" when three components import
+  it — a stale doc that would have justified deleting a live module.
+- **W1 `dfcd532` — the layout**, behind `calc.merged_layout` (**false**). Outlook beat,
+  league/team dropdowns (#333), two vertical columns, the 40/30/15/15 action row. Flag-off is
+  proven by **excising every gated region by brace balancing** and asserting no merged-only
+  testID survives — not by grepping for gates.
+- **W2 `56111a0` — behaviour.** ✕ keeps one button and pops the reasons as an overlay;
+  end-of-deck gains "Back to calculator" and "Search without <player>"; include-players writes
+  the **shipped** `useFinderTargets` pin store rather than a `requireAssets` param nothing
+  would have read. **The send ruling needed no code** — `resolveSendPlatform` already routes
+  Sleeper/MFL/ESPN.
+- **W3 `4ff15f3` — a tour-long HOLD, not a new gate.** The plan priced this as building
+  suppression across six surfaces; `useInterruptCoordinator` already was that gate and is
+  live. The real gap: the slot frees BETWEEN steps, so an interstitial legitimately wins the
+  gap. A hold closes it; `isInterruptBusy()` extends it to the root modals.
+- **W4 `ae605ad` — 15 beats compressed to the CI copy budget** (auto 12 / action 16 / tap 20 /
+  cta 16), every line word-counted before authoring, worst case 14/16. Runner owns sequence
+  and lifecycle; the script stays data. Beats decline behavioural retirement **with the reason
+  written inline**, because no receipt means "understands the calculator".
+
+**Gates every wave:** pytest **4117 passed / 1 skipped**, tsc clean, testid-lint OK,
+structural suites **71 → 76**.
+
+**Five dead assertions found and fixed — all in MY OWN guards, none in the product:** two
+substring anchors that survived their own sabotage (`/isDemo/` matched `isDemoRenamed`,
+`/onDemo/` matched `onDemoStarted`), a backwards proximity search for the flag gate that
+stayed green when the gate it should have read was replaced, a fixed-size window that read the
+next JSX prop's body, and a drift detector that threw instead of failing a named assertion.
+An existing suite also broke honestly (`check-decline-reasons.js` pinned the ✕ condition as a
+literal string); its two legal shapes are now enumerated rather than the pattern loosened —
+verified by sabotage that it still rejects `reasons && false`.
+
+**Nothing is live and nothing has runtime evidence.** `calc.merged_layout` is false, the
+branch is unmerged, and the 27-step TestFlight checklist is unrun. Reported not buried: a
+**pre-existing** Chalkline floor violation (`lineupHeadText` at fontSize 10, on `main` since
+#297), and plan §6b — ruling 3 collides with #310 and with the tour's own first beat, built to
+a stated assumption that still wants a yes/no.
+
 ## 2026-08-22d — A long feedback note stopped vanishing (cap 2000 → 8000, and the three silences around it)
 
 The operator wrote a long in-app note, tapped Save, watched the sheet close normally — and it

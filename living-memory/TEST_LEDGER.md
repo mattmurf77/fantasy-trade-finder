@@ -11,6 +11,55 @@
 
 ---
 
+
+## 2026-08-22d — #384 merged calculator W0–W4 — full gates, FLAG DARK, NOT MERGED, on `feat/calc-finder-merge`
+
+Branch cut from `origin/main` `941a36d`. Five waves, each committed with its own gate run.
+Scope/plan: [docs/feedback/items/384-calc-finder-merge/](../docs/feedback/items/384-calc-finder-merge/plan.md) ·
+Decision: [D-150](DECISIONS.md) · Checklist: [testflight-checklist.md](../docs/feedback/items/384-calc-finder-merge/testflight-checklist.md) (**UNRUN**).
+
+| Gate | Result (identical at every wave boundary) |
+|---|---|
+| `python3 -m pytest backend/tests -q` | **4117 passed, 1 skipped, 0 failed** — unchanged from the branch point; the only backend delta is a flag registration |
+| `cd mobile && ./node_modules/.bin/tsc --noEmit` | clean, exit 0 (`npm ci` in the worktree, never a symlink) |
+| every `mobile/tests/check-*.js` | **76 scripts, 0 failed** (71 at branch point; +5 new) |
+| `mobile/scripts/testid-lint.sh` | **OK** |
+| Sim gate | `FTF_SKIP_SIM_GATE=1`, standing posture under [D-056](DECISIONS.md) |
+
+**New guards, all red-proofed:** `check-demo-calc-removed` (11 sabotages) ·
+`check-calc-merged-layout` (9) · `check-calc-merged-behavior` (8) · `check-tour-suppression`
+(7) · `check-calc-tour` (7). **42 sabotage cycles**, every one watched failing with its
+intended message, every file byte-compared against a saved baseline after restore.
+
+**Two guards do more than grep.** `check-tour-suppression` **executes** the real claim/release
+reducer — assertion 6 runs the exact between-two-steps sequence W3 exists to fix — and guards
+the model with named checks that the source still contains each rule it mirrors, so model and
+implementation cannot drift silently. `check-calc-merged-layout` excises flag-gated regions by
+brace balancing and tests the remainder, which is by construction the flag-off render.
+
+**FIVE DEAD ASSERTIONS FOUND AND FIXED, all mine, none in the product.** This is the finding.
+(1) `/isDemo/` matched `isDemoRenamed`. (2) `/onDemo/` matched `onDemoStarted`. (3) The
+flag-gating check was a backwards proximity search that stayed green when the action row's own
+gate was replaced with `{true ?` — it simply found the header's gate instead. (4) A fixed-size
+character window read the NEXT JSX prop's body and failed on a close that was not its own.
+(5) A drift detector threw an exception instead of failing a named assertion, which is red but
+illegible in CI. Every one was found by sabotage, not by review.
+
+**An existing suite broke honestly and was NOT loosened.** `check-decline-reasons.js` pinned
+the ✕ condition as a literal string; W2's conjunct changed it. Rather than relax to
+`disposition\.reasons[^?]*\?` — which would also accept `disposition.reasons && false ?`, the
+exact defect those assertions exist to catch — the two legal shapes are enumerated. Verified
+by sabotage that the updated matcher still rejects `&& false`.
+
+**Copy budget verified BEFORE authoring, not after.** All 15 tour lines were word-counted
+against their advance class up front (worst case 14/16), so `check-guide-script.js` confirmed
+the budget rather than discovering a violation.
+
+**Runtime evidence: NONE.** No device has run any of this. The two least-proven things are
+named in the checklist's own "known-unverified" section: the two-column layout on a 375pt
+screen (column width, the wrapped value line, and the two ~53pt action cells are all sized by
+reasoning) and tour copy read beside the controls it names.
+
 ## 2026-08-22c — Feedback capture cap (2000 → 8000) + the three silences — full gates, backend SHIPPED, client awaiting a build
 
 **Branch:** `claude/new-user-feedback-d4c47d`, cut from `origin/main` `9e1a8be` (0 ahead / 0 behind at branch time).
@@ -2590,6 +2639,7 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-08-22d — #384 merged calculator W0–W4 — full gates, FLAG DARK, NOT MERGED, on `feat/calc-finder-merge`](#2026-08-22d--384-merged-calculator-w0w4--full-gates-flag-dark-not-merged-on-featcalc-finder-merge)
 - [2026-08-22c — Feedback capture cap (2000 → 8000) + the three silences — full gates, backend SHIPPED, client awaiting a build](#2026-08-22c--feedback-capture-cap-2000--8000--the-three-silences--full-gates-backend-shipped-client-awaiting-a-build)
 - [2026-08-20b — Fit challenger PR-F3 (filters + arm wiring + serve-bit) + W0 offline dry run](#2026-08-20b--fit-challenger-pr-f3-filters--arm-wiring--serve-bit--w0-offline-dry-run-not-merged-worktree-claudetrade-suggestions-review-69c9eb)
 - [2026-08-20a — Team Review defect batch (#364/#367/#368) — full gates](#2026-08-20a--team-review-defect-batch-364367368--full-gates-not-merged-on-claudeteam-outlook-experience-27a7a1)

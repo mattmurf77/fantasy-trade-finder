@@ -1,7 +1,7 @@
 # Plan — #384 the manual calculator becomes the merged trade surface
 
-**Status:** draft for operator review. Nothing built. **All four gating decisions are RULED (§5);**
-**one working assumption in §6b needs a yes/no.**
+**Status:** **ALL FIVE WAVES BUILT** (see [`status.md`](status.md)). Kept as the plan of record;
+§6b's working assumption was built to and still wants a confirming yes/no.
 Rulings and scope: [`status.md`](status.md).
 
 ---

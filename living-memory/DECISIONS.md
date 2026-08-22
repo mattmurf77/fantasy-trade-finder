@@ -1327,3 +1327,28 @@ Five call sites, no sixth — `_roster_eveners`, `_trade_evaluate_impl`, `get_le
 **Rejected: an offline/failed-submit analytics event.** `obs.api_events` is on and `record_inbound` writes failures **unsampled**, with `/api/feedback` absent from `EXCLUDED_ROUTES` — so every `text_too_long` 400 is already captured with a closed error code. A new event would duplicate an existing signal. Note the limit of that consolation: it captures 400s **going forward only**. There is no server-side record of a rejected submission, so how many notes this cap ate historically is **unknowable**.
 
 **Status:** Active — backend shipped; the client half awaits a TestFlight build.
+
+## D-150 — The Merged Calculator Is Built Dark in Five Waves; Three Of Its Rulings Cost Less Than Planned
+
+**Date:** 2026-08-22 ([plan](../docs/feedback/items/384-calc-finder-merge/plan.md), [status](../docs/feedback/items/384-calc-finder-merge/status.md)); entry point feedback #384, canonical for #310/#379/#380, touches #333
+
+**Context.** #384 is the report the 2000-char cap destroyed ([D-149](DECISIONS.md), [G-055](GOTCHAS.md)) — 2,803 characters specifying a merged Find-a-Trade/calculator surface plus a fifteen-beat guided tour. The operator ruled ten open questions at triage and four more at plan review, then said "continue through all waves."
+
+**Decision 1 — the merged layout is one flag, and flag-off is proven, not asserted.** `calc.merged_layout` (default false) gates every new surface. The guard does not grep for gates; it **excises every flag-gated region by brace balancing and asserts no merged-only testID survives in the remainder**. What remains is by construction the flag-off render. An earlier proximity-based version of that check passed while the action row was ungated, which is exactly why it was replaced.
+
+**Decision 2 — "Include players" writes the SHIPPED pin store, not a new parameter.** The first draft passed a `requireAssets` route param. Nothing consumed it: it was a switch that would have silently done nothing. `useFinderTargets` — #186's "build around this side" — already IS the must-include contract the engine honours, and `packageMode` is what makes it literal (2+ give pins ⇒ the served card's give side carries every one). Include-OFF calls `clear()`, because a stale pin re-applies the constraint the user just switched off.
+
+**Decision 3 — column mode MOVES the price, never drops it.** Standing the two rosters side by side halves the row to ~165pt. Dropping the trailing value column is the obvious way to win that width and is silent data loss; the value rides the row's second line instead, and the guard fails if it disappears. No type size was reduced — the Chalkline 11pt floor holds, and the two 15%-width action cells are icon-only (real `check`/`x` icons, never the report's literal ✅, which the design system forbids) with 44pt tap heights and accessibility labels.
+
+**Decision 4 — the tour takes a HOLD, not a per-step claim.** The plan priced ruling 10 as building a suppression gate across six surfaces. `useInterruptCoordinator` already was that gate, live behind `ux.prompt_arbiter`. The genuine gap was narrower: the arbiter's slot is per-surface and frees the instant a step ends, so **in the gap between two tour steps a waiting interstitial legitimately wins it**. A tour-long `tourHold` closes that; `isInterruptBusy()` extends it to the two root modals that self-defer. Four in-flow notices that were never arbiter surfaces take a tour-only mute instead of being enrolled — enrolling them would change ordinary behaviour by making them defer to each other, far beyond what was asked.
+
+**Decision 5 — tour beats decline behavioural retirement, and say why.** Every new beat must declare retirement. There is no client receipt meaning "this person now understands the calculator", so inventing one would be dishonest; the beats decline it with a written reason and are bounded by a display cap of 3. Only n11 retires on a receipt, because setting an outlook is literally what it asks for.
+
+**Two rulings cost nothing, and that is worth recording.** The send-button ruling needed **no code** — `resolveSendPlatform` already routes Sleeper/MFL/ESPN. And "removal and add a player as buttons" was already satisfied by `TradeSide`'s existing add button and per-row remove. Both were verified rather than rebuilt.
+
+**The demo removal is NOT behind this flag** and is unconditional. "Demo" names two unrelated systems across sixteen files: the demo CALCULATOR (deleted) and the demo SESSION — `/api/session/demo`, try-before-you-sync, `onboarding.demo_bridge` — which is open-access onboarding and was left untouched. `check-demo-calc-removed.js` is deliberately two-sided so a future change cannot delete the wrong one.
+
+**Known-unbuilt, and the operator should decide it:** §6b of the plan. The ruling "this replaces the manual calc tab and lives within the league calc" collides with #310 ("we should not lock the manual calculator behind trades") and with the tour's own first beat, which needs a non-league place to start from. Built to the stated assumption — two tabs, `Manual` | `In league`, demo deleted, the rich spec on the league side — with the assumption written down rather than buried.
+
+**Status:** Built dark on `feat/calc-finder-merge`; not merged, not pushed. **No runtime evidence exists** — the 27-step TestFlight checklist is unrun, and under [D-056](DECISIONS.md) it is the only runtime proof this can get.
+

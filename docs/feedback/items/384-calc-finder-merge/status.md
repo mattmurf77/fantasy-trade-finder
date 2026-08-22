@@ -1,6 +1,6 @@
 # Status — #384 Manual calculator becomes the merged trade surface
 
-**Status:** `planned` — rulings captured, plan drafted, **not built**
+**Status:** **BUILT DARK** — all five waves on `feat/calc-finder-merge`, `calc.merged_layout` **false**, not merged, not pushed. TestFlight checklist UNRUN.
 **Date:** 2026-08-22
 **Covered feedback IDs:** #384 canonical. Folds in **#310** (don't lock the manual calc behind trades; simplify nav), **#379** (filters back in-page, minimized default), **#380** (clicking a partner minimizes that section and raises the calculator). Touches **#333** (league/team as side-by-side dropdowns under the fold).
 **Reported:** `mattmurf77`, screen `TradesHome`, v1.15.0, filed 2026-08-22T03:04Z
@@ -72,3 +72,37 @@ need a decision before a build agent starts.
    records the current intent — *"Calculator … is always reachable — it needs no league"* — and
    #310 is the report that asked for it. The plan proceeds on a stated assumption (two tabs,
    `Manual` | `In league`, demo deleted, rich spec on the league side) which needs a yes/no.
+
+
+## Build record — 2026-08-22, waves W0–W4
+
+| Wave | Commit | What |
+|---|---|---|
+| W0 | `224a830` | Demo CALCULATOR removed (net −239 lines). Demo SESSION untouched — verified by empty `git diff` over its five files |
+| W1 | `dfcd532` | Merged layout behind `calc.merged_layout` (OFF): outlook beat, league/team dropdowns, two columns, the 40/30/15/15 action row |
+| W2 | `56111a0` | ✕→overlay reasons, end-of-deck exits, include-players via the finder pin store. Send button: **already platform-aware, no code** |
+| W3 | `4ff15f3` | Tour-long hold on the EXISTING prompt arbiter (it already existed — the plan overpriced this) |
+| W4 | `ae605ad` | 15 tour beats compressed to the CI copy budget + `utils/calcTour.ts` runner + both entry points |
+
+**Gates, every wave:** pytest 4117 passed / 1 skipped · `tsc --noEmit` clean · testid-lint OK ·
+structural suites 71 → **76**. Four new guards, all red-proofed: `check-demo-calc-removed`,
+`check-calc-merged-layout`, `check-calc-merged-behavior`, `check-tour-suppression`,
+`check-calc-tour`.
+
+**Five dead assertions found and fixed while red-proofing** — in my own guards, not in the
+product: two substring anchors that survived their own sabotage (`/isDemo/` matched
+`isDemoRenamed`, `/onDemo/` matched `onDemoStarted`), a backwards proximity search for the
+flag gate that passed when the gate it should have been reading was replaced, a fixed-size
+window that read the next JSX prop's body, and a drift detector that threw instead of failing
+a named assertion.
+
+**Two things the build corrected in the plan:**
+- W3 was priced as "build a suppression gate across six surfaces". `useInterruptCoordinator`
+  already was that gate, live behind `ux.prompt_arbiter`. The real gap was narrower and more
+  interesting: the slot frees BETWEEN steps, so a tour needs a hold, not a per-step claim.
+- The send-button ruling needed no code at all — `resolveSendPlatform` already routes
+  Sleeper/MFL/ESPN.
+
+**Pre-existing defect reported, not absorbed:** `InLeagueCalculator.lineupHeadText` is
+`fontSize: 10`, under the Chalkline 11pt floor, on `origin/main` since #297. Not introduced
+here and not fixed here.
