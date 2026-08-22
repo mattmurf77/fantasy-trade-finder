@@ -44,7 +44,9 @@
 
 ## 2026-08-22 — #384 merged calculator: E2E review failed, W5 fixed it on `claude/manual-calculator-e2e-review-39a467`; four bright-line calls + a TestFlight pass owed
 
-**Where:** `claude/manual-calculator-e2e-review-39a467` = `feat/calc-finder-merge` (W0–W4, `7399e18`)
+**SHIPPED 2026-08-22 — PR #172 `80dee42`, flags LIT for all users, app 1.16.0 via EAS (build pending at handoff time). The paragraphs below are the pre-ship state, kept for the trail; still owed: the POST-ship checklist run, the EAS build number in TEST_LEDGER, and the branch/worktree sweep.**
+
+**Where (pre-ship):** `claude/manual-calculator-e2e-review-39a467` = `feat/calc-finder-merge` (W0–W4, `7399e18`)
 + the E2E review + G-056 + four W5 commits (`fcf3413` analytics · `9dcd003` deck · `a52c91e` tour ·
 `fc062dc` guards/scope/docs). **Not pushed, not merged, `calc.merged_layout` false.** The
 `feat/calc-finder-merge` branch itself is untouched — W5 lives only on the review branch; ship from
