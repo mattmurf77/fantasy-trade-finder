@@ -1020,6 +1020,18 @@ nothing. `mock_started` carries the resolved value as its seventh prop
 
 NULL in the DB reads as `new` everywhere. Labels are emoji-free as of the Chalkline re-skin (ADR-004). Closed statuses (2026-07-04) are defined in `backend/database.py:FEEDBACK_CLOSED_STATUSES` and mirrored in `mobile/src/api/feedback.ts:CLOSED_FEEDBACK_STATUSES` — `/api/feedback/mine` excludes them server-side AND the mobile inbox hides locally-persisted notes whose merged status is closed (or that no longer come back from `/mine` for the signed-in account). If you add or reclassify a status, update both constants and this table.
 
+## Feedback note length cap (2026-08-22)
+
+| Invariant | Value | Where |
+|---|---|---|
+| Max characters in a feedback note's `text` | **8000** (was 2000 until 2026-08-22) | `backend/server.py:FEEDBACK_TEXT_MAX` (authority) · `mobile/src/api/feedback.ts:FEEDBACK_TEXT_MAX` (mirror) |
+| Measured on | the **trimmed** body, in characters — the same string the client counts and the server stores | both |
+| Over-cap response | `400 {"error": "text_too_long", "limit": <the cap>}` | `POST /api/feedback` |
+
+**Why this is an invariant and not just a number.** The two copies ship on different cadences — the server through Render, the client through TestFlight — so a build in the field can hold either value. A client cap **above** the server's turns every long note into a permanent 400 (`retrySync()` re-POSTs it forever and it is never delivered); a client cap **below** the server's silently shortens what testers are able to say. The 2026-08-22 incident was the first of those: no counter, no cap awareness, and a compose sheet that cleared the draft regardless, so a long operator report vanished with no error anywhere.
+
+`mobile/tests/check-feedback-capture.js` pins the two numbers to each other and runs in CI, so a one-sided change fails the build. The storage column is unbounded (`app_feedback.text` is `TEXT`) — this is validation only; see the data dictionary.
+
 ## Premium rankings import (D-058, 2026-08-15)
 
 | Invariant | Value | Where |

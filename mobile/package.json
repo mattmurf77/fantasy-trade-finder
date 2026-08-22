@@ -59,7 +59,8 @@
     "test:team-review-depth": "node tests/check-team-review-depth.js",
     "test:finder-conditions": "node tests/check-finder-conditions-reachable.js",
     "test:breaker-card": "node tests/check-breaker-card.js",
-    "test:receipts": "node tests/check-receipts.js"
+    "test:receipts": "node tests/check-receipts.js",
+    "test:feedback-capture": "node tests/check-feedback-capture.js"
   },
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",

@@ -10,6 +10,49 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+
+## 2026-08-22c — Feedback capture cap (2000 → 8000) + the three silences — full gates, backend SHIPPED, client awaiting a build
+
+**Branch:** `claude/new-user-feedback-d4c47d`, cut from `origin/main` `9e1a8be` (0 ahead / 0 behind at branch time).
+Operator declared **express** on the cap; I flagged the CLAUDE.md bright line (it changes a documented
+API contract) and got a confirming yes for 8000 before proceeding, so **full gates ran anyway**.
+Scope: [docs/plans/feedback-capture-cap/scope.md](../docs/plans/feedback-capture-cap/scope.md) ·
+Decision: [D-149](DECISIONS.md) · Gotcha: [G-055](GOTCHAS.md).
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q` | **4117 passed, 1 skipped, 0 failed** (baseline 4114 on `9e1a8be`; +3 in `test_feedback_text_cap.py`) |
+| `cd mobile && ./node_modules/.bin/tsc --noEmit` | clean, exit 0 (`npm ci` in the worktree — **not** a symlink) |
+| every `mobile/tests/check-*.js` | **71 scripts, 0 failed**, incl. the new `check-feedback-capture.js` (6 assertions) |
+| `mobile/scripts/testid-lint.sh` | **OK** (3 new testIDs: `feedback.char-count`, `feedback.note-error`, `feedback.save-error`) |
+| Sim gate | `FTF_SKIP_SIM_GATE=1`, standing posture under [D-056](DECISIONS.md) |
+
+**Backend sabotage evidence — 3 cycles, each RED with the intended assertion, restored and byte-verified.**
+S1 cap lowered back to 2000 → `test_the_report_the_old_cap_ate_now_lands`. S2 cap check deleted →
+`test_one_character_past_the_cap_is_refused`. **S3 cap made to TRUNCATE at 2000 instead of refusing**
+— this is the one that matters: it returns **`201`**, so every status-code assertion passes and only
+the stored-length check (`len(stored[0]["text"]) == 2001`) catches it. Silent truncation is the same
+data loss wearing a success code, and a boundary suite that only checks status codes would have
+blessed it.
+
+**Client guard red-proofed in BOTH directions.** `check-feedback-capture.js` run against the pristine
+defect tree (`git show 9e1a8be:<path>`): **6 of 6 RED**, each message naming the real defect. Against
+the fixed tree: 6/6 green. Then **20 sabotage cycles**, one per named failure branch — every one fired
+the branch it targeted, every one restored and re-verified. The cross-file assertion (client cap ==
+server cap == the number the 400 reports) **fired for real mid-build** when the two halves were
+briefly out of step.
+
+**Method note worth keeping.** The QA agent did *not* sabotage the live worktree: three agents were
+holding uncommitted work, so `git checkout --` would have destroyed a peer's changes rather than
+restored them. It ran every cycle against isolated file replicas and byte-compared afterwards. I hit
+the same trap first-hand — a `git checkout -- backend/server.py` mid-sabotage reverted my own
+uncommitted fix and I had to re-apply it. **Copy the good file aside before any sabotage cycle on an
+uncommitted tree.**
+
+**Runtime evidence: NONE, and the client half has none available.** Under D-056 the only runtime proof
+mobile can get is an operator TestFlight pass, and these client changes are **in no build**. The
+backend half is verifiable in prod directly (a >2000-char POST now returns 201).
+
 ## 2026-08-21d — Decision-ID attribution correction (docs only) — `fix/lld-decision-id-attribution`
 
 Docs-only change: 12 wrong decision-ID citations for per-slot pick pricing corrected to **D-146**
@@ -2547,6 +2590,7 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-08-22c — Feedback capture cap (2000 → 8000) + the three silences — full gates, backend SHIPPED, client awaiting a build](#2026-08-22c--feedback-capture-cap-2000--8000--the-three-silences--full-gates-backend-shipped-client-awaiting-a-build)
 - [2026-08-20b — Fit challenger PR-F3 (filters + arm wiring + serve-bit) + W0 offline dry run](#2026-08-20b--fit-challenger-pr-f3-filters--arm-wiring--serve-bit--w0-offline-dry-run-not-merged-worktree-claudetrade-suggestions-review-69c9eb)
 - [2026-08-20a — Team Review defect batch (#364/#367/#368) — full gates](#2026-08-20a--team-review-defect-batch-364367368--full-gates-not-merged-on-claudeteam-outlook-experience-27a7a1)
 - [2026-08-20d — #366 position-relative tier bands + RB Handcuff — full gates, NOT MERGED, on `worktree-agent-a4ab94c51456abb78`](#2026-08-20d--366-position-relative-tier-bands--rb-handcuff--full-gates-not-merged-on-worktree-agent-a4ab94c51456abb78)

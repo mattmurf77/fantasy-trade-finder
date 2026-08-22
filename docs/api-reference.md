@@ -754,7 +754,7 @@ All routes in this section require the `X-Cron-Secret` header (see `CRON_SECRET`
   "client_id":         "<mobile local id>",
   "screen":            "Trades",
   "severity":          "bug" | "polish" | "idea",
-  "text":              "free text 1..2000 chars",
+  "text":              "free text 1..8000 chars",
   "client_created_at": "2026-05-21T03:14:15Z"
 }
 ```
@@ -763,6 +763,8 @@ All routes in this section require the `X-Cron-Secret` header (see `CRON_SECRET`
 - `201 Created` — new row inserted; `{ ok, server_id, created_at, duplicate: false }`
 - `200 OK` — `client_id` already exists; `{ ok, server_id, created_at, duplicate: true }`
 - `400` — `{ error: "missing_field" | "invalid_severity" | "text_too_long" }`
+  - `missing_field` carries the offending `field` (`client_id` / `screen` / `text`).
+  - `text_too_long` carries the cap it enforced: `{ "error": "text_too_long", "limit": 8000 }`. Measured on the **trimmed** body, in characters. The client mirrors this number as `FEEDBACK_TEXT_MAX` in `mobile/src/api/feedback.ts`; the two are pinned together by `mobile/tests/check-feedback-capture.js`, so changing one without the other fails CI. **Raised 2000 → 8000 on 2026-08-22** after the old cap silently discarded a long operator report — see [`plans/feedback-capture-cap/scope.md`](plans/feedback-capture-cap/scope.md).
 
 Auth is best-effort. `X-Session-Token`, when present, attributes the row to the matching `user_id` + `username`; when absent the row stores `user_id = null` (anonymous submission allowed).
 
