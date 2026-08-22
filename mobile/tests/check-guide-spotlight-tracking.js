@@ -807,6 +807,94 @@ for (const rel of hostRels) {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 10 — every scrolling guide HOST announces movement
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Assertion 9 checks the hosts that already opted in. This one finds the ones
+// that SHOULD have: any file under src/ that registers a guide target AND owns
+// a ScrollView is a page whose spotlight can go stale under a scroll, and the
+// #384 calculator was exactly that file — it registered six targets, scrolled,
+// and never announced, so every beat below the fold pointed at the wrong place
+// the moment the user moved the page.
+//
+// The rule is deliberately mechanical (register + ScrollView ⇒ notify) rather
+// than a hand-kept list, so a screen added later is covered on the day it is
+// written. Exceptions are ENUMERATED here with a reason, never by weakening
+// the predicate — a rule with a silent hole is worse than no rule.
+
+const SCROLL_HOST_EXCEPTIONS = {
+  // The ONLY ScrollView in this file is inside the team-picker `Modal`
+  // (`calc.team-sheet`) — a bottom sheet with no guide target in it, mounted
+  // over a page that is not scrolling while it is open. The page's own scroll
+  // container lives in TradeCalculatorScreen, which does announce.
+  'src/components/InLeagueCalculator.tsx':
+    'its only ScrollView is inside the team-picker Modal and contains no guide target',
+};
+
+function walkTsFiles(dir) {
+  const out = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const abs = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...walkTsFiles(abs));
+    else if (/\.tsx?$/.test(entry.name)) out.push(abs);
+  }
+  return out;
+}
+
+{
+  const SRC = path.join(ROOT, 'src');
+  const shouldNotify = walkTsFiles(SRC)
+    .map((abs) => path.relative(ROOT, abs))
+    .filter((rel) => {
+      const text = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+      return text.includes('registerGuideTarget(') && text.includes('<ScrollView');
+    });
+
+  assert(
+    shouldNotify.length > 0,
+    '10a — the register+scroll scan found files to check',
+    'a renamed API would make this rule vacuous',
+  );
+
+  for (const rel of shouldNotify) {
+    const excuse = SCROLL_HOST_EXCEPTIONS[rel];
+    const text = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    const notifies = text.includes('notifyGuideTargetsMoved');
+    if (excuse) {
+      assert(
+        !notifies,
+        `10b — ${rel} is listed as an exception and still does not announce`,
+        `it now calls notifyGuideTargetsMoved — delete its exception entry (${excuse})`,
+      );
+      continue;
+    }
+    assert(
+      notifies,
+      `10c — ${rel} registers a guide target, owns a ScrollView, and announces movement`,
+      'the spotlight caches an ABSOLUTE window frame; without an onScroll '
+        + 'notifier every target below the fold is highlighted at its stale '
+        + 'position the moment the page moves. Add onScroll + '
+        + 'scrollEventThrottle, or add a reasoned entry to '
+        + 'SCROLL_HOST_EXCEPTIONS',
+    );
+  }
+
+  // The two shipped hosts must stay in the set — if either stops registering
+  // targets or stops scrolling, this rule quietly covers one file instead of
+  // three and nobody finds out.
+  for (const rel of ['src/screens/TradesScreen.tsx',
+                     'src/screens/LeagueSummaryScreen.tsx',
+                     'src/screens/TradeCalculatorScreen.tsx']) {
+    assert(
+      shouldNotify.includes(rel),
+      `10d — ${rel} is still in scope for the register+scroll rule`,
+      'it no longer registers a guide target or no longer owns a ScrollView — '
+        + 'confirm that is intended before accepting this',
+    );
+  }
+}
+
 console.log('');
 if (failures) {
   console.error(`${failures} check(s) failed.`);

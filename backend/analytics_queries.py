@@ -300,13 +300,15 @@ NON_INTENT_EVENTS = frozenset({
     #     nothing. Its granted twin `prompt_shown` is already here.
     #
     # Deliberately NOT here, i.e. deliberately INTENT: calc_mode_switched,
-    # calc_include_players_toggled, calc_asset_added, calc_cleared,
-    # calc_find_a_trade_tapped, calc_trade_queued, deck_back_to_calculator,
-    # deck_unpin_retry — all eight are real user decisions (configuration
-    # changes, the core add-an-asset gesture, a deliberate clear, the hand-off
-    # tap, the ✓ queue tap, and two deck actions reachable only from a deck
-    # the user asked for). Every one of them fires behind an INTENT event that
-    # already counts the user that day, so none opens a DAU seam.
+    # calc_asset_added, calc_cleared, calc_find_a_trade_tapped,
+    # calc_trade_queued, deck_back_to_calculator, deck_unpin_retry,
+    # deck_search_all_tapped — all eight are real user decisions (a
+    # configuration change, the core add-an-asset gesture, a deliberate clear,
+    # the hand-off tap, the ✓ queue tap, and three deck actions reachable only
+    # from a deck the user asked for). Every one of them fires behind an INTENT
+    # event that already counts the user that day, so none opens a DAU seam.
+    # (`calc_include_players_toggled` was on this list until 2026-08-22; W6-B
+    # / D-153 removed the toggle, so the name is gone from the taxonomy too.)
     #
     # `calc_trade_queued` (#384 W6-A / D-152) is the one worth spelling out,
     # because it fires on a REFUSAL too. The tap is the user's decision to

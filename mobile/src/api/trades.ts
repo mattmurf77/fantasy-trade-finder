@@ -295,6 +295,13 @@ export interface AssetIdea {
   // Undefined on old servers ⇒ the window's TradeValueBar hides.
   favors?: 'give' | 'receive' | 'even' | null;
   gap?: CalcGap | null;
+  // #384 W6-B — set only by POST /api/trades/fair-packages, whose ideas are
+  // DECK CARDS rather than window decoration. `trade_id` is the server's
+  // deterministic `fairpk_…`, which is the row key a swipe / queue / flag on
+  // the card reconstructs under (FB-46); `basis` makes the consensus caveat
+  // render. Asset ideas carry neither, so their cards are unchanged.
+  trade_id?: string;
+  basis?: 'divergence' | 'consensus';
 }
 
 export interface AssetIdeasResponse {
@@ -347,6 +354,14 @@ function normalizeAssetIdea(raw: any): AssetIdea {
       : raw?.gap === null
         ? { gap: null }
         : {}),
+    // #384 W6-B — fair packages only. Validated rather than coerced so an
+    // asset-ideas payload (which carries neither) stays byte-identical.
+    ...(typeof raw?.trade_id === 'string' && raw.trade_id
+      ? { trade_id: raw.trade_id }
+      : {}),
+    ...(raw?.basis === 'consensus' || raw?.basis === 'divergence'
+      ? { basis: raw.basis as 'consensus' | 'divergence' }
+      : {}),
   };
 }
 
@@ -372,6 +387,66 @@ export async function fetchAssetIdeas(body: {
       lateral: norm(g.lateral),
       downgrade: norm(g.downgrade),
     },
+  };
+}
+
+// ── #384 W6-B — fair packages for a hand-built give side ─────────────────
+//
+// D-153, operator: "this type of request shouldn't go through our models. It
+// should be a much simpler set of cards solving for fairness only." So Find a
+// Trade with a FILLED canvas calls this — one synchronous sweep, no job, no
+// polling — and Find a Trade with an EMPTY canvas still runs the model deck.
+//
+// The give side is an ANCHOR: every idea gives away exactly `givePlayerIds`.
+// `receivePlayerIds` is a PREFERENCE — ideas containing all of them sort
+// first, ideas that cannot are still returned, which is what stops a canvas
+// pick outside `picks_pool_cap` from emptying the deck.
+//
+// The ideas are DECK CARDS (`ideas.map(ideaToCard)` → `setDeck`), which is why
+// each carries a server-minted `trade_id`: the deck's swipe / queue / flag
+// routes all reconstruct an unknown card from the echoed context (FB-46) and
+// key the row under that id.
+
+export interface FairPackagesResult {
+  basis: 'consensus';
+  anchor: {
+    give_player_ids: string[];
+    receive_player_ids: string[];
+    opponent_user_id: string | null;
+  };
+  ideas: AssetIdea[];
+  /** #189 — the whole list came from the widened fairness band. */
+  relaxed: boolean;
+  /** Present only alongside an EMPTY list: `give_untouchable` |
+   *  `unknown_asset` | `no_partner` | `unknown_league`. */
+  reason?: string;
+}
+
+export async function getFairPackages(body: {
+  league_id: string;
+  give_player_ids: string[];
+  receive_player_ids?: string[];
+  opponent_user_id?: string;
+  fairness_threshold?: number;
+}): Promise<FairPackagesResult> {
+  const res = await api.post<any>('/api/trades/fair-packages', body);
+  const anchor = res?.anchor ?? {};
+  return {
+    basis: 'consensus',
+    anchor: {
+      give_player_ids: Array.isArray(anchor.give_player_ids)
+        ? anchor.give_player_ids.map(String)
+        : body.give_player_ids,
+      receive_player_ids: Array.isArray(anchor.receive_player_ids)
+        ? anchor.receive_player_ids.map(String)
+        : body.receive_player_ids ?? [],
+      opponent_user_id: anchor.opponent_user_id
+        ? String(anchor.opponent_user_id)
+        : null,
+    },
+    ideas: Array.isArray(res?.ideas) ? res.ideas.map(normalizeAssetIdea) : [],
+    relaxed: res?.relaxed === true,
+    ...(typeof res?.reason === 'string' ? { reason: res.reason } : {}),
   };
 }
 

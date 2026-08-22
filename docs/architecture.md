@@ -206,6 +206,8 @@ Throwaway eval workspaces and packaged `.skill` bundles are archived in `archive
 8. **Impressions logging:** the final served deck is written to `trade_impressions` (one row per card, true positions), once per job.
 9. `trade_narrative.build_narrative()` fills `TradeCard.narrative`; cards served via `GET /api/trades` / job snapshots.
 
+**Fairness-only path** (`calc.merged_layout`, #384 W6-B / [D-153]): `POST /api/trades/fair-packages` → `TradeService.generate_fair_packages` runs BESIDE the pipeline above, not inside it — one synchronous sweep, no job, no streaming, no divergence. The merged calculator's canvas is a fixed give-side ANCHOR and only the return is enumerated; pricing and gates are `trade_service.eval_consensus_package`, the function extracted from `_generate_asset_ideas_impl` so the two consensus surfaces share one gate set instead of two copies. Find a Trade with an EMPTY canvas still runs the pipeline above.
+
 **Tier 3** (`trade_engine.v3`, flag-selectable): `backend/trade_optimizer.py` replaces step 4's enumeration with an exact per-pair package search, adds a sweetener pass for near-miss-fair trades, and (behind `trade.three_team`) 3-team cycle clearing. Off → v2.
 
 **Legacy path** (`trade_engine.v2` off — kill-switch fallback, byte-for-byte unchanged): mismatch (user-Elo gap) and fairness weighted `0.70 / 0.30`, fixed package diminishing weights (`package_value`), flag-gated QB/star/clogger taxes, filters by `min_mismatch_score`, `max_value_ratio`, `trade_elo_gap_max`. Outlook is ignored; positional preferences are the same hard filter.

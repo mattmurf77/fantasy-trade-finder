@@ -134,11 +134,23 @@ assert(flagOffSource.length < calc.length - 2000,
   `only ${calc.length - flagOffSource.length} chars removed — the matcher missed`);
 
 const MERGED_ONLY = [
-  'calc.action-row', 'calc.action.find-a-trade', 'calc.action.include-players',
+  'calc.action-row', 'calc.action.find-a-trade',
   'calc.action.clear', 'calc.action.confirm', 'calc.league-dropdown',
   'calc.team-dropdown', 'calc.trade-columns', 'calc.team-sheet',
   'calc.outlook-fallback', 'calc.outlook-fallback.change',
 ];
+
+// W6-B (D-153) — the Include-players toggle is GONE, not merely flag-gated.
+// The operator's ruling ("C works") made the canvas the permanent anchor, so
+// the only state the control could honestly show was "on". Asserted as an
+// ABSENCE because a flag-gated leftover would still be a control the tour no
+// longer describes and the hand-off no longer reads.
+assert(!calc.includes('calc.action.include-players'),
+  '5b. the Include-players toggle does not exist in either flag state',
+  'the toggle was removed with its ruling, not hidden — a surviving one is a '
+  + 'control with no contract behind it');
+assert(!/actionInclude|setIncludePlayers|includeBtnRef/.test(calc),
+  '5c. …and neither do its state, style or guide ref');
 for (const id of MERGED_ONLY) {
   assert(calc.includes(`testID="${id}"`) && !flagOffSource.includes(`testID="${id}"`),
     `5. ${id} renders only behind the flag`,

@@ -5,7 +5,13 @@ import { Icon, TickLabel } from './chalkline';
 import TradeCardComp from './TradeCard';
 import InLeagueCalculator from './InLeagueCalculator';
 import type { AssetIdea } from '../api/trades';
-import type { TradeCard as TradeCardData } from '../shared/types';
+import { assetIdeaKey, ideaToCard } from '../utils/ideaToCard';
+
+// #384 W6-B — `assetIdeaKey` and `ideaToCard` moved to `utils/ideaToCard.ts`
+// (pure, zero runtime imports) so the fair-package deck can build cards without
+// importing a component. Re-exported here because `AssetIdeasPanel` and
+// `TradesScreen` already import the key from this module.
+export { assetIdeaKey };
 
 // #216/#209 — the FEATURED TRADE window for single-pin find-a-trade
 // (design source-of-truth: mockups/polish-lab-2026-08/asset-ideas-layout-v2
@@ -21,13 +27,6 @@ import type { TradeCard as TradeCardData } from '../shared/types';
 // ANY surface that swaps a trade into the window creates a back target —
 // the host owns the history stack and simply passes `onBack` while history
 // exists; the chip renders only then (no dead reserved space).
-
-// Stable identity for an idea within one sweep — counterparty + exact
-// package. Used for the "In window" tag, history de-dupe and testIDs
-// (domain ids, never list indexes, per the testID grammar).
-export function assetIdeaKey(idea: AssetIdea): string {
-  return `${idea.counterparty_user_id}.${idea.give_player_ids.join('_')}-${idea.receive_player_ids.join('_')}`;
-}
 
 interface Props {
   idea: AssetIdea;
@@ -45,32 +44,6 @@ interface Props {
    *  read-only TradeCard. `userId` is required for the calculator's
    *  rosters query. Omitted (undefined) ⇒ byte-identical read-only path. */
   calc?: { userId: string };
-}
-
-// AssetIdea → the TradeCard shape, presentation-only (never persisted,
-// never swiped). give/receive are already user-perspective for BOTH pin
-// directions. match_score is 0 because no divergence score exists for a
-// consensus idea — the card is mounted with hideMatchStrength. basis stays
-// 'divergence' deliberately: the consensus-note copy ("hasn't ranked yet")
-// isn't verified for idea counterparties, and the approved mock shows no
-// note in the window.
-function ideaToCard(idea: AssetIdea, leagueId: string): TradeCardData {
-  return {
-    trade_id: `asset-idea:${assetIdeaKey(idea)}`,
-    league_id: leagueId,
-    give_players: idea.give,
-    receive_players: idea.receive,
-    give_player_ids: idea.give_player_ids,
-    receive_player_ids: idea.receive_player_ids,
-    opponent_user_id: idea.counterparty_user_id,
-    opponent_username: idea.counterparty_username,
-    match_score: 0,
-    fairness: idea.fairness,
-    give_value: idea.give_value,
-    receive_value: idea.receive_value,
-    favors: idea.favors,
-    gap: idea.gap,
-  };
 }
 
 export default function FeaturedTradeWindow({

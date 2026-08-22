@@ -45,10 +45,14 @@ import {
   startCalcTour,
 } from '../utils/calcTour';
 import { advanceGuideIfActive, guideV2Active, guidedAvatarActive } from '../state/useGuide';
-import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTargets';
+import {
+  notifyGuideTargetsMoved,
+  registerGuideTarget,
+  unregisterGuideTarget,
+} from '../state/guideTargets';
 import { useFlag } from '../state/useFeatureFlags';
 import InLeagueCalculator from '../components/InLeagueCalculator';
-import type { Player, ScoringFormat, Tier } from '../shared/types';
+import type { ScoringFormat, Tier } from '../shared/types';
 
 // Triage undo (S3 PRD-03, flag ux.swipe_undo): how long the cleared-trade
 // snapshot (and its Undo toast) is held. Pure local state — nothing to POST.
@@ -116,20 +120,6 @@ function queueRefusalLine(reason: CalcQueueReason | undefined, name: string): st
     default:
       return "Couldn't queue that. Try again.";
   }
-}
-
-// #384 ruling 2 — the canvas speaks CalcPlayer; the finder's pin store
-// speaks Player. One mapping, here, so the two shapes meet in exactly one
-// place. `pos` → `position` and `nflTeam` → `team` are the only renames;
-// everything the pin store reads downstream is id + name + position.
-function toFinderPlayer(p: CalcPlayer): Player {
-  return {
-    id: p.id,
-    name: p.name,
-    position: p.pos,
-    team: p.nflTeam === '—' ? null : p.nflTeam,
-    age: p.age,
-  };
 }
 
 export default function TradeCalculatorScreen({ route, navigation }: any) {
@@ -618,7 +608,17 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
         action={toast?.action}
         onDismiss={() => setToast(null)}
       />
-      <ScrollView contentContainerStyle={styles.scroll}>
+      {/* B1 — the Analyst spotlight caches an ABSOLUTE window frame, so it
+          goes stale the instant this page scrolls underneath it. Every host
+          that registers a guide target and owns a scroll container announces
+          movement; the tour's own beats (n12–n18) all target nodes below the
+          fold on an SE. Unconditional, and throttled — without the throttle
+          iOS fires onScroll about once per second and the ring lurches. */}
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        onScroll={notifyGuideTargetsMoved}
+        scrollEventThrottle={16}
+      >
         {/* Mode switch: In-league vs league-free real consensus values. */}
         <View style={styles.modeRow}>
           {modeTabs.map((m) => {
@@ -759,11 +759,19 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
             // #384 — the merged layout's own controls. The component owns
             // the canvas; the SCREEN owns navigation, so the finder hand-off
             // and the tour re-entry are passed in rather than reached for.
-            onFindATrade={({ includePlayers, give, receive, opponent }) => {
+            onFindATrade={({ give, receive, opponent }) => {
+              // D-153 — the fork, decided HERE and reported as `path`:
+              // a canvas with a give side is a fairness question about THAT
+              // package; an empty canvas is the model's question. A canvas
+              // with only RECEIVE assets counts as empty: the fair sweep
+              // prices a give side, and there is nothing to price.
+              const giveIds = give.map((p) => p.id);
+              const receiveIds = receive.map((p) => p.id);
+              const fair = giveIds.length > 0;
               track(
                 'calc_find_a_trade_tapped',
                 {
-                  include_players: includePlayers,
+                  path: fair ? 'fair' : 'model',
                   give_count: give.length,
                   receive_count: receive.length,
                   has_partner: !!opponent,
@@ -775,38 +783,23 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
               // navigation so the runner parks instead of being blurred out.
               advanceGuideIfActive('n18', 'action');
               calcTourHandOffToDeck();
-              // Ruling 2 (#384): ON ⇒ the finder MUST include the canvas
-              // assets; OFF ⇒ the search is unconstrained by them.
+              // D-153 — the canvas no longer touches the PIN STORE at all.
+              // W5 wrote it there because the model deck's generate payload
+              // is what reads pins; the fair sweep takes the canvas in its
+              // own request body instead, so writing pins would only leave a
+              // constraint behind for whatever ran next — which is the only
+              // reason W5 had to clear the store again on the other branch.
               //
-              // This writes the canvas into `useFinderTargets` — the SAME
-              // pin store #186's "build around this side" and the deck's
-              // generate payload already read — rather than inventing a
-              // route param nothing consumes. `packageMode` is what makes
-              // the contract literal: with 2+ give pins the served card's
-              // give side must carry EVERY pinned player.
-              const t = useFinderTargets.getState();
-              if (includePlayers && (give.length || receive.length)) {
-                t.setSide('give', give.map(toFinderPlayer));
-                t.setSide('receive', receive.map(toFinderPlayer));
-                t.setPackageMode(true);
-              } else {
-                // Unconstrained means unconstrained: a stale pin from an
-                // earlier run would silently re-apply the constraint the
-                // user just switched off.
-                t.clear();
-              }
-              // #384 review §3/§6 — pins alone do not start a search and are
-              // not scoped to the partner the user chose in the Team
-              // dropdown. The #330 handoff is the path that already
-              // regenerates on arrival; `origin` lets the deck tell a
-              // calculator arrival from a league-rankings one, and it
-              // regenerates on that origin even with no partner — a
-              // partner-less canvas is an unscoped sweep, not "no search".
+              // #384 review §3/§6 — the handoff is still what starts the
+              // search and scopes it to the Team dropdown's partner. `origin`
+              // lets the deck tell a calculator arrival from a
+              // league-rankings one; `fairAnchor` is what forks it onto the
+              // fairness sweep instead of the model auto-run.
               useFinderTargets.getState().setHandoff({
                 opponent: opponent ?? null,
                 autoRun: true,
                 origin: 'calculator',
-                includePlayers,
+                ...(fair ? { fairAnchor: { giveIds, receiveIds } } : {}),
               });
               // popTo, not navigate: without `pop` (and with no `getId` on
               // TradesHome) routers 7.5.3 PUSHES a second TradesHome, leaving

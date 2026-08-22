@@ -37,7 +37,6 @@ import { track } from '../api/events';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
 import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTargets';
-import { advanceGuideIfActive } from '../state/useGuide';
 import { chalk, fonts, ice, ink, radii, semantic, space, type } from '../theme/chalkline';
 import { posColor, type Position } from '../theme/colors';
 import type { CalcPlayer, CalcPos } from '../data/calcTypes';
@@ -61,10 +60,10 @@ interface Props {
   /** #384 — the merged layout's primary action. Absent ⇒ the Find a Trade
    *  button is not rendered (the host owns navigation, not this component). */
   onFindATrade?: (opts: {
-    includePlayers: boolean;
-    /** The resolved canvas assets, not just ids — the caller pins these and
-     *  would otherwise have to re-resolve them against a pool it does not
-     *  hold. Empty arrays are meaningful: "the canvas is empty". */
+    /** The resolved canvas assets, not just ids — the caller sends these to
+     *  the fair-package sweep and would otherwise have to re-resolve them
+     *  against a pool it does not hold. Empty arrays are meaningful: "the
+     *  canvas is empty", which is the MODEL deck's fork (D-153). */
     give: CalcPlayer[];
     receive: CalcPlayer[];
     /** #384 review §6 — the Team dropdown's partner, so the finder run is
@@ -174,12 +173,6 @@ export default function InLeagueCalculator({
   const [outlookHidden, setOutlookHidden] = useState(false);
   const [leagueSwitcherOpen, setLeagueSwitcherOpen] = useState(false);
   const [teamPickerOpen, setTeamPickerOpen] = useState(false);
-  // Ruling 2 (#384): ON ⇒ the finder MUST include the assets on the canvas;
-  // OFF ⇒ the search is unconstrained by them. Defaults ON because the user
-  // built the canvas on purpose — an unconstrained search from a filled
-  // canvas silently ignores the work they just did.
-  const [includePlayers, setIncludePlayers] = useState(true);
-
   // #384 W6-A — the confirm cell's in-flight lock. POST /api/trades/queue is
   // idempotent server-side (D-152), but a second tap would still fire a
   // second toast and a second analytics row, so the control locks itself for
@@ -194,7 +187,6 @@ export default function InLeagueCalculator({
   const findBtnRef = useRef<View | null>(null);
   const clearBtnRef = useRef<View | null>(null);
   const confirmBtnRef = useRef<View | null>(null);
-  const includeBtnRef = useRef<View | null>(null);
   const giveAddRef = useRef<View | null>(null);
   // n11's CTA has to open the sheet this component owns; the screen holds the
   // ref and hands the same opener to the tour runner.
@@ -212,7 +204,6 @@ export default function InLeagueCalculator({
       ['calc.action.find-a-trade', findBtnRef],
       ['calc.action.clear', clearBtnRef],
       ['calc.action.confirm', confirmBtnRef],
-      ['calc.action.include-players', includeBtnRef],
       ['calc.league-give-add', giveAddRef],
     ];
     pairs.forEach(([id, ref]) => registerGuideTarget(id, ref));
@@ -1029,10 +1020,15 @@ export default function InLeagueCalculator({
         );
       })()}
 
-      {/* #384 action row — Find a Trade 40% · Include players 30% ·
-          Clear 15% · confirm 15%, directly beneath the canvas so the two
-          occupy one frame together (the report's "important that this fits
-          in the frame with the entire trade calc section").
+      {/* #384 action row — Find a Trade 70% · Clear 15% · confirm 15%,
+          directly beneath the canvas so the two occupy one frame together
+          (the report's "important that this fits in the frame with the
+          entire trade calc section").
+
+          W6-B (D-153) removed the Include-players toggle and gave its 30% to
+          Find a Trade. The toggle asked a question the operator answered
+          globally — "C works", the canvas is ALWAYS the anchor — so the only
+          honest state it could show was permanently on.
 
           The two 15% cells are icon-only. That is a size decision, not a
           style one: at 15% of a 375pt screen they are ~53pt wide, and any
@@ -1050,7 +1046,6 @@ export default function InLeagueCalculator({
               if (!onFindATrade) return;
               haptics.selection();
               onFindATrade({
-                includePlayers,
                 give: giveIds.map((id) => playerById[id]).filter(Boolean) as CalcPlayer[],
                 receive: receiveIds.map((id) => playerById[id]).filter(Boolean) as CalcPlayer[],
                 opponent: opponent
@@ -1065,37 +1060,6 @@ export default function InLeagueCalculator({
             ]}
           >
             <Text style={styles.actionPrimaryText} numberOfLines={1}>Find a Trade</Text>
-          </Pressable>
-
-          {/* Ruling 2: ON ⇒ the finder must include what is on the canvas.
-              A toggle, so the state is visible without opening anything. */}
-          <Pressable
-            ref={includeBtnRef}
-            testID="calc.action.include-players"
-            accessibilityRole="switch"
-            accessibilityState={{ checked: includePlayers }}
-            accessibilityLabel="Include the players on the canvas in the search"
-            onPress={() => {
-              haptics.selection();
-              const next = !includePlayers;
-              setIncludePlayers(next);
-              track('calc_include_players_toggled', { on: next }, 'TradeCalculator');
-              // n17 is an action beat — the real toggle is the only thing
-              // that advances it.
-              advanceGuideIfActive('n17', 'action');
-            }}
-            style={({ pressed }) => [
-              styles.actionInclude, styles.actionBtn,
-              includePlayers && styles.actionToggleOn,
-              pressed && styles.actionBtnPressed,
-            ]}
-          >
-            <Text
-              style={[styles.actionText, includePlayers && { color: ice.base }]}
-              numberOfLines={1}
-            >
-              Include players
-            </Text>
           </Pressable>
 
           <Pressable
@@ -1365,9 +1329,12 @@ export default function InLeagueCalculator({
           haptics.selection();
           setGiveIds((ids) => [...ids, p.id]);
           track('calc_asset_added', { side: 'give' }, 'TradeCalculator');
-          // n16 ("Add someone you'd move") is an action beat: the pick, not
-          // the picker opening, is what it asked for.
-          advanceGuideIfActive('n16', 'action');
+          // The tour beat n16 is deliberately NOT advanced from here. W6-B
+          // (D-153) made it a TAP beat: it tells the user they CAN add
+          // players ("we'll find trades that include them") rather than
+          // commanding one, because the run has to end on the MODELED deck
+          // with an empty canvas — and a beat that only moves on a real pick
+          // makes an empty canvas impossible.
         }}
         onClose={() => setPicker(null)}
       />
@@ -1770,8 +1737,7 @@ const styles = StyleSheet.create({
   // an icon and an accessibilityLabel rather than a text label — a word
   // would either truncate or breach the 11pt floor.
   actionRow: { flexDirection: 'row', gap: space.xs, alignItems: 'stretch' },
-  actionFind: { flex: 40 },
-  actionInclude: { flex: 30 },
+  actionFind: { flex: 70 },
   actionSmall: { flex: 15 },
   actionBtn: {
     minHeight: 44,
@@ -1786,8 +1752,6 @@ const styles = StyleSheet.create({
   actionBtnDisabled: { opacity: 0.4 },
   actionPrimary: { borderColor: ice.base },
   actionPrimaryText: { ...type.bodySm, fontFamily: fonts.uiSemi, color: ice.base },
-  actionText: { ...type.bodySm, fontFamily: fonts.uiSemi, textAlign: 'center' },
-  actionToggleOn: { borderColor: ice.base, backgroundColor: ink.ink3 },
   teamSheetBackdrop: { flex: 1, backgroundColor: '#0009' },
   teamSheet: {
     maxHeight: '60%',

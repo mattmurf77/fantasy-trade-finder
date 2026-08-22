@@ -11841,6 +11841,215 @@ def asset_trade_ideas():
     })
 
 
+# ---------------------------------------------------------------------------
+# Fair packages for a hand-built give side (#384 W6-B, D-153)
+# docs/feedback/items/384-calc-finder-merge/status.md § W6-B
+# ---------------------------------------------------------------------------
+# The operator's ruling, verbatim: "this type of request shouldn't go through
+# our models. It should be a much simpler set of cards solving for fairness
+# only. Similar to how we determine the consolidate and downgrade suggestions
+# already."
+#
+# So: Find a Trade with a FILLED canvas is not a model run. It is one
+# synchronous fairness sweep around the canvas's give side — no job, no
+# divergence, no streaming, no lanes. Find a Trade with an EMPTY canvas is
+# unchanged and still runs the model deck (the #330 hand-off auto-run).
+
+def _fair_package_trade_id(user_id: str, league_id: str, opponent_user_id: str,
+                           give_ids: list, recv_ids: list) -> str:
+    """Deterministic card id for one fair package.
+
+    Same construction and the same reasoning as `_calc_queue_trade_id`: the
+    SET is the identity, so re-ordering the canvas is the same trade and the
+    same id. It matters here because these cards are never registered by a
+    generator — a swipe on one arrives at `/api/trades/swipe` with an id the
+    in-memory deck has never seen, and `_reconstruct_swipe_card` rebuilds it
+    from the echoed context. A stable id is what makes a re-swipe one row.
+    """
+    payload = "|".join([
+        str(user_id), str(league_id), str(opponent_user_id or ""),
+        ",".join(sorted(str(p) for p in give_ids)),
+        ",".join(sorted(str(p) for p in recv_ids)),
+    ])
+    return "fairpk_" + hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
+
+
+@app.route("/api/trades/fair-packages", methods=["POST"])
+@_gate_unverified_write
+def fair_packages():
+    """POST /api/trades/fair-packages   (flag calc.merged_layout; #384 W6-B)
+
+    Fairness-only ideas around a FIXED give-side anchor — the merged
+    calculator's Find a Trade when the canvas has assets on it.
+
+    Body: {
+      league_id            required — must be the session's active league
+      give_player_ids      required, non-empty — the ANCHOR. Every idea's
+                           give side is exactly this set, in this order.
+      receive_player_ids?  the canvas receive side. A PREFERENCE, not a
+                           constraint: ideas containing all of them sort
+                           first, ideas that cannot are still returned.
+      opponent_user_id?    scope the sweep to one league-mate; omitted ⇒
+                           every league-mate with a roster
+      fairness_threshold?  default 0.50, the same wide net asset-ideas uses
+    }
+
+    Response 200: {
+      basis:   "consensus",
+      anchor:  {give_player_ids, receive_player_ids, opponent_user_id|null},
+      ideas:   [idea],            # flat, capped at model_config
+                                  # `fair_packages_cap` (default 20)
+      relaxed: bool,              # #189 — the whole list came from the
+                                  # widened band because the strict one was empty
+      reason?: str                # only alongside `ideas: []`
+    }
+    idea = the asset-ideas shape (counterparty ids, both id lists and player
+    dicts, give_value/receive_value/difference/fairness, favors/gap, the #189
+    `relaxed` labels) PLUS `trade_id` (deterministic `fairpk_…`) and
+    `basis: "consensus"`, which together are what let a client swipe, queue or
+    flag one of these cards through the shipped routes: they all echo card
+    context and rebuild through `_reconstruct_swipe_card`.
+
+    `reason` vocabulary (200 with an empty list, never a 4xx — the request was
+    well formed and the answer is a product answer):
+      give_untouchable  an anchor asset is on the CALLER's untouchable list
+      unknown_asset     an anchor id is not in the player pool
+      no_partner        `opponent_user_id` is not a league-mate with a roster
+      unknown_league    the league is not loaded on this session
+
+    400: `missing_field` (give_player_ids), `league_mismatch`.
+    404 `feature_disabled` when `calc.merged_layout` is off — checked before
+    any session work, the same convention `/api/trades/queue` uses.
+
+    Gates are `trade_service.eval_consensus_package` — literally the function
+    `_generate_asset_ideas_impl` calls, so a fair package and an asset idea can
+    never price the same trade differently.
+    """
+    if not getattr(FLAGS, "calc_merged_layout", False):
+        return jsonify({"error": "feature_disabled"}), 404
+
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess["user_id"]
+    g_league  = sess.get("league")
+    if not (g_user_id and g_league):
+        return jsonify({"error": "session missing user/league"}), 400
+
+    body = request.get_json(force=True, silent=True) or {}
+
+    give_raw = body.get("give_player_ids")
+    if not isinstance(give_raw, list) or not give_raw:
+        return jsonify({"error": "missing_field", "field": "give_player_ids"}), 400
+    give_ids = [str(p) for p in give_raw]
+    recv_raw = body.get("receive_player_ids")
+    recv_ids = [str(p) for p in recv_raw] if isinstance(recv_raw, list) else []
+
+    league_id = str(body.get("league_id") or "").strip() or g_league.league_id
+    if league_id != g_league.league_id:
+        # The sweep needs THIS league's members, rosters and seed board, all of
+        # which live on the session — another league is unanswerable, not
+        # refusable. Same call as /api/trades/queue.
+        return jsonify({"error": "league_mismatch"}), 400
+
+    opponent_user_id = str(body.get("opponent_user_id") or "").strip() or None
+    fairness_threshold = float(body.get("fairness_threshold", 0.50))
+
+    fmt           = _active_format(sess)
+    services      = sess.get("services") or {}
+    trade_svcs    = sess.get("trade_svcs") or {}
+    service       = services.get(fmt) or sess.get("service")
+    trade_service = trade_svcs.get(fmt) or sess.get("trade_svc")
+    g_user_roster = sess.get("user_roster")
+    g_players     = sess.get("players")
+    if not (service and trade_service and g_user_roster and g_players):
+        return jsonify({"error": "session missing required state"}), 400
+
+    user_rankings = service.get_rankings(position=None)
+    raw_user_elo  = {rp.player.id: rp.elo for rp in user_rankings.rankings}
+    seed_map      = dict(service._seed or {})
+    players_dict  = {p.id: p for p in g_players}
+    user_roster   = list(g_user_roster)
+
+    # Backlog #2 / #163 — the same exclusion lists asset-ideas loads.
+    untouchable_ids: set = set()
+    not_interested_ids: set = set()
+    if FLAGS.trade_preference_lists:
+        try:
+            ap = load_asset_preferences(user_id=g_user_id, league_id=league_id)
+            untouchable_ids = set(ap.get("untouchables", []))
+            not_interested_ids = set(ap.get("not_interested", []))
+        except Exception as ap_err:
+            log.warning("fair-packages: asset prefs load failed: %s", ap_err)
+
+    # #170/#171/#185 — owned-pick injection through the shared helper, so a
+    # canvas pick is priced and returnable exactly as it is everywhere else.
+    if _owned_picks_available(league_id, g_league):
+        try:
+            seed_map, user_roster, _n = _inject_owned_picks(
+                league_id      = league_id,
+                scoring_format = fmt,
+                trade_service  = trade_service,
+                players_dict   = players_dict,
+                seed_map       = seed_map,
+                user_elo       = raw_user_elo,
+                user_id        = g_user_id,
+                user_roster    = user_roster,
+                league         = g_league,
+            )
+        except Exception as pick_err:
+            log.warning("fair-packages: owned-pick injection failed (continuing): %s",
+                        pick_err)
+
+    result = trade_service.generate_fair_packages(
+        user_id            = g_user_id,
+        user_roster        = user_roster,
+        league_id          = league_id,
+        seed_elo           = seed_map,
+        give_player_ids    = give_ids,
+        receive_player_ids = recv_ids,
+        fairness_threshold = fairness_threshold,
+        raw_user_elo       = raw_user_elo,
+        untouchable_ids    = untouchable_ids or None,
+        not_interested_ids = not_interested_ids or None,
+        opponent_user_id   = opponent_user_id,
+    )
+
+    def _idea_row(idea: dict) -> dict:
+        out = dict(idea)
+        out["give"]    = [player_to_dict(players_dict[p])
+                          for p in idea["give_player_ids"] if p in players_dict]
+        out["receive"] = [player_to_dict(players_dict[p])
+                          for p in idea["receive_player_ids"] if p in players_dict]
+        # #216 — the same single-source verdict construction evaluate, the deck
+        # cards and asset-ideas use, so the four surfaces cannot drift.
+        verdict = _value_verdict_payload(
+            float(out.get("give_value") or 0.0),
+            float(out.get("receive_value") or 0.0),
+            even=float(out.get("fairness") or 0.0) >= 0.95,
+        )
+        out["favors"]   = verdict["favors"]
+        out["gap"]      = verdict["gap"]
+        out["basis"]    = "consensus"
+        out["trade_id"] = _fair_package_trade_id(
+            g_user_id, league_id, idea["counterparty_user_id"],
+            idea["give_player_ids"], idea["receive_player_ids"])
+        return out
+
+    payload = {
+        "basis":   "consensus",
+        "anchor":  {
+            "give_player_ids":    give_ids,
+            "receive_player_ids": recv_ids,
+            "opponent_user_id":   opponent_user_id,
+        },
+        "ideas":   [_idea_row(i) for i in result.get("ideas") or []],
+        "relaxed": bool(result.get("relaxed")),
+    }
+    if result.get("reason"):
+        payload["reason"] = result["reason"]
+    return jsonify(payload)
+
+
 @app.route("/api/trades/suppressions/undo", methods=["POST"])
 @_gate_unverified_write
 def undo_deck_suppression():

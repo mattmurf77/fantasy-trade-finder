@@ -12,6 +12,20 @@
 ---
 
 
+## 2026-08-22f — #384 W6-A + W6-B — full gates, FLAG DARK, NOT MERGED, on `claude/manual-calculator-e2e-review-39a467`
+
+W6-A (`d6c54cf`, ✓ queue contract, [D-152](DECISIONS.md)) and W6-B (fairness-only packages +
+tour reshape, [D-153](DECISIONS.md)), each lead-reviewed line by line before commit.
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q` | **4173 passed, 1 skipped** (+26 `test_calc_trade_queue.py`, +19 `test_fair_packages.py`; asset-ideas + bake-off arm-A goldens untouched and green) |
+| `cd mobile && npx tsc --noEmit` | clean |
+| every `mobile/tests/check-*.js` (76, all `npm run`-wired) | 76 / 0 failed — `check-guide-spotlight-tracking` gained rule 10 (scroll announcement mandatory where guide targets sit in a ScrollView) |
+| `bash mobile/scripts/testid-lint.sh` | OK |
+| Sabotages | W6-A: 5 backend + 4 mobile red/restored · W6-B: toggle restored → red; fair anchor also arming the model → red (two guards); calculator `onScroll` dropped → red; idea give side ≠ anchor → red; random ids → red |
+| Runtime | **none** — TestFlight checklist (`docs/feedback/items/384-calc-finder-merge/testflight-checklist.md`, rewritten for W6) UNRUN. Prerequisite flags incl. `onboarding.guide_v2` (false) still gate the tour |
+
 ## 2026-08-22e — #384 merged calculator W5 + guard hardening — full gates, FLAG DARK, NOT MERGED, on `claude/manual-calculator-e2e-review-39a467`
 
 W5 answers the [2026-08-22 e2e review](../docs/feedback/items/384-calc-finder-merge/review-2026-08-22-e2e.md)
@@ -2696,6 +2710,7 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-08-22f — #384 W6-A + W6-B — full gates, FLAG DARK, NOT MERGED](#2026-08-22f--384-w6-a--w6-b--full-gates-flag-dark-not-merged-on-claudemanual-calculator-e2e-review-39a467)
 - [2026-08-22e — #384 merged calculator W5 + guard hardening — full gates, FLAG DARK, NOT MERGED, on `claude/manual-calculator-e2e-review-39a467`](#2026-08-22e--384-merged-calculator-w5--guard-hardening--full-gates-flag-dark-not-merged-on-claudemanual-calculator-e2e-review-39a467)
 - [2026-08-22d — #384 merged calculator W0–W4 — full gates, FLAG DARK, NOT MERGED, on `feat/calc-finder-merge`](#2026-08-22d--384-merged-calculator-w0w4--full-gates-flag-dark-not-merged-on-featcalc-finder-merge)
 - [2026-08-22c — Feedback capture cap (2000 → 8000) + the three silences — full gates, backend SHIPPED, client awaiting a build](#2026-08-22c--feedback-capture-cap-2000--8000--the-three-silences--full-gates-backend-shipped-client-awaiting-a-build)

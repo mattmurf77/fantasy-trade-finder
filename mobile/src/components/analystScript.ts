@@ -338,12 +338,14 @@ export const S = {
 
   // ── #384 W4 — the merged calculator tour (beats n10–n24) ───────────────
   //
-  // The report wrote fifteen prose beats. They could not ship as prose: this
+  // The report wrote fifteen prose beats. THIRTEEN survive: W6-B (D-153)
+  // deleted n14 (Clear) and n17 (Include players) along with the toggle and
+  // the sequencing they existed for. They could not ship as prose: this
   // file is under a CI copy budget (auto 12 / action 16 / tap 20 / cta 16
   // words, enforced by mobile/tests/check-guide-script.js), so the work was
-  // compression, not writing. Its step 11 alone — "the clear button has
-  // become the X, the X records your decision, the check does as before" —
-  // is three beats here (n14, n19), not one paragraph.
+  // compression, not writing. Its step 11 — "the clear button has become the
+  // X, the X records your decision, the check does as before" — is carried by
+  // n19 on the deck.
   //
   // Retirement: every beat below is part of ONE scripted walkthrough that
   // the user either finishes or re-runs deliberately from "Show me around".
@@ -398,16 +400,6 @@ export const S = {
     adoptionEvent: 'calc_find_a_trade_tapped',
   }),
 
-  n14: (): GuideStep => ({
-    id: 'n14', screen: 'TradeCalculator', pose: 'neutral', advance: 'tap',
-    target: 'calc.action.clear',
-    line: 'Clear wipes the canvas.',
-    degradeLine: 'The clear control wipes the canvas.',
-    maxDisplayCount: 3,
-    retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
-    adoptionEvent: 'calc_cleared',
-  }),
-
   n15: (): GuideStep => ({
     id: 'n15', screen: 'TradeCalculator', pose: 'neutral', advance: 'tap',
     target: 'calc.action.confirm',
@@ -422,31 +414,29 @@ export const S = {
     adoptionEvent: 'calc_trade_queued',
   }),
 
+  // W6-B (D-153) — n16 is a TAP beat that INFORMS rather than an action beat
+  // that commands. The operator's reshape: "the tour mentions they can add
+  // players and we'll find trades with those players included, and then the
+  // user is pushed to find a trade with the calc empty." An action beat here
+  // could only advance on a real pick, which is exactly the canvas state the
+  // tour must NOT end in — the run has to reach the modeled deck.
   n16: (): GuideStep => ({
-    id: 'n16', screen: 'TradeCalculator', pose: 'point', advance: 'action',
+    id: 'n16', screen: 'TradeCalculator', pose: 'point', advance: 'tap',
     target: 'calc.league-give-add',
-    line: "Add someone you'd move. Tap Add player on your side.",
-    degradeLine: 'Add someone you would move from your own roster.',
+    line: "Add players you'd move and we'll find trades that include them.",
+    degradeLine: 'Adding players to a side finds trades that include them.',
     maxDisplayCount: 3,
     retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
     adoptionEvent: 'calc_asset_added',
   }),
 
-  n17: (): GuideStep => ({
-    id: 'n17', screen: 'TradeCalculator', pose: 'point', advance: 'action',
-    target: 'calc.action.include-players',
-    line: 'Include players keeps them in the search. Off, we look anywhere.',
-    degradeLine: 'Include players keeps your canvas in the search; off looks anywhere.',
-    maxDisplayCount: 3,
-    retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
-    adoptionEvent: 'calc_include_players_toggled',
-  }),
-
   n18: (): GuideStep => ({
     id: 'n18', screen: 'TradeCalculator', pose: 'point', advance: 'action',
     target: 'calc.action.find-a-trade',
-    line: 'Now tap Find a Trade.',
-    degradeLine: 'Tap Find a Trade when you are ready.',
+    // The second clause is the whole point of the reshape: an empty canvas is
+    // what routes this tap to the MODELED deck, where n19-n24 live.
+    line: 'Now tap Find a Trade — start with the canvas empty.',
+    degradeLine: 'Tap Find a Trade with the canvas empty when you are ready.',
     maxDisplayCount: 3,
     retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
     adoptionEvent: 'find_trades_tapped',

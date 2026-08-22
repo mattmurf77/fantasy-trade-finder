@@ -132,10 +132,8 @@ const PROBES = {
   n11: { id: 'n11', args: [[]] },
   n12: { id: 'n12', args: [[]] },
   n13: { id: 'n13', args: [[]] },
-  n14: { id: 'n14', args: [[]] },
   n15: { id: 'n15', args: [[]] },
   n16: { id: 'n16', args: [[]] },
-  n17: { id: 'n17', args: [[]] },
   n18: { id: 'n18', args: [[]] },
   n19: { id: 'n19', args: [[]] },
   n20: { id: 'n20', args: [[]] },
@@ -322,7 +320,7 @@ for (const { step, args } of rendered) {
   // dependency, not a structural one. A `degradeLine` is the beat's own
   // declaration that it HAS a spotlight to lose; carrying one with no target
   // is a contradiction inside a single object, and every #384 beat carries
-  // one. Verified: removing `target` from n12/n14/n19/n22 was green before
+  // one. Verified: removing `target` from n12/n16/n19/n22 was green before
   // this and is red after.
   assert(
     !step.degradeLine || !!step.target,

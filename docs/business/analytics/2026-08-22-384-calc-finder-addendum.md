@@ -1,6 +1,6 @@
 # Tracking-plan addendum — #384 merged calculator + finder
 
-**Date:** 2026-08-22 (amended same day for W6-A) · **Status:** adopted with the #384 registration commit; `calc_trade_queued` adopted with the W6-A route commit
+**Date:** 2026-08-22 (amended same day for W6-A, then W6-B) · **Status:** adopted with the #384 registration commit; `calc_trade_queued` adopted with the W6-A route commit; the W6-B amendments (D-153) adopted with the fair-packages commit
 **Parent:** [2026-07-17-tracking-plan-v2.md](2026-07-17-tracking-plan-v2.md) §S3
 **Origin:** [../../feedback/items/384-calc-finder-merge/review-2026-08-22-e2e.md](../../feedback/items/384-calc-finder-merge/review-2026-08-22-e2e.md) § Analytics · plan [../../feedback/items/384-calc-finder-merge/plan.md](../../feedback/items/384-calc-finder-merge/plan.md) W2/W4
 **Registries touched:** `backend/analytics_taxonomy.py` (`ALLOWED_CLIENT_EVENTS`, `CLIENT_EVENT_PROPS`) and `backend/analytics_queries.py` (`NON_INTENT_EVENTS`). **Not** `FUNNEL_CRITICAL`, **not** `SERVER_FIRED_EVENTS` — both omissions argued below.
@@ -30,10 +30,10 @@ neither surface has the merged calculator or the deck.
 | `calc_tour_ended` | TradeCalculator | **non-intent** (terminator) | the tour finishes its last beat or is abandoned |
 | `calc_tour_beat_missing` | TradeCalculator | **non-intent** (defect diagnostic) | a scripted beat id no longer resolves to a builder; the tour steps over it |
 | `calc_mode_switched` | TradeCalculator | **intent** | the In-league / live mode chip is tapped |
-| `calc_include_players_toggled` | TradeCalculator | **intent** | the include-players control is toggled |
 | `calc_asset_added` | TradeCalculator | **intent** | an asset is added to either side |
 | `calc_cleared` | TradeCalculator | **intent** | the trade is cleared |
 | `calc_find_a_trade_tapped` | TradeCalculator | **intent** | the calculator's own Find-a-Trade hand-off is tapped |
+| `deck_search_all_tapped` **(W6-B, added 2026-08-22)** | Trades | **intent** | the end of a FAIR deck's "Search all trades" is tapped — drop the canvas anchor, run the model deck for the same partner |
 | `deck_back_to_calculator` | Trades | **intent** | the end-of-deck "back to calculator" return is tapped |
 | `deck_unpin_retry` | Trades | **intent** | "find a trade without `<player>` pinned" is tapped |
 | `trade_pass_overlay_opened` | Trades | **non-intent** (exposure) | the #384-local decline-reason **overlay** is presented |
@@ -50,10 +50,10 @@ neither surface has the merged calculator or the deck.
 | | `beats_shown` | int ≥ 0 | Beats actually rendered at exit — where the tour loses people. The pre-fix emitter zeroed its counter *before* reading it and sent `beats_shown: 0` on every row (the e2e review's finding); it now snapshots first. **A window in which every row reads 0 is that bug returning**, not a tour nobody sees: beat 1 renders before any exit can fire. |
 | `calc_tour_beat_missing` | `beat` | script beat id (`n10`…`n24`) | A hole in the sequence is a script defect; the id says which. Bounded vocabulary owned by `analystScript.ts` — never copy. |
 | `calc_mode_switched` | `mode` | `live` \| `league` | The mode switched **to**. Same vocabulary as `calc_cleared.mode`. |
-| `calc_include_players_toggled` | `on` | bool | The **resulting** state (post-toggle), the `untouchable_toggled.marked` convention. |
 | `calc_asset_added` | `side` | `give` \| `receive` | The `player_menu_opened.side` / `finder_target_pinned.side` vocabulary. |
 | `calc_cleared` | `mode` | `live` \| `league` | Which calculator was cleared. |
-| `calc_find_a_trade_tapped` | `include_players`, `give_count`, `receive_count`, `has_partner` | bool, int, int, bool | The calculator's **shape at hand-off** — the only way to read whether people leave for the finder from an empty calculator or a half-built trade. No player ids, no names. |
+| `calc_find_a_trade_tapped` | `path`, `give_count`, `receive_count`, `has_partner` | `fair` \| `model`, int, int, bool | The calculator's **shape at hand-off** — the only way to read whether people leave for the finder from an empty calculator or a half-built trade. `path` (W6-B) says which fork the tap actually took: `fair` = the canvas had a give side, so the tap ran the synchronous fairness sweep; `model` = the canvas was empty, so it ran the model deck. It **replaced** `include_players`, which named a toggle that no longer exists; the two are not renameable into each other, because the toggle was the user's declaration and `path` is what the system did. No player ids, no names. |
+| `deck_search_all_tapped` | *(none)* | — | Deliberately empty. A fair deck has no pins to count (the anchor rode the request, not the pin store), the partner is on every card the user just saw, and the model run this exit dispatches fires its own `find_trades_tapped` with the source. |
 | `deck_back_to_calculator` / `deck_unpin_retry` | `pin_count` | int ≥ 0 | Separates "the finder returns nothing with three pins" from "the user changed their mind" — the question both affordances exist to answer. |
 | `trade_pass_overlay_opened` | *(none)* | — | Deliberately empty. The card is already identified by `trade_card_viewed` and by the `trade_pass_layer*` rows on the same card; a `trade_id` here would be a third source of truth for one interaction (#208/#248/#293). |
 | `trade_pass_overlay_dismissed` | `banked` | bool | Dismissed-with-a-reason-banked vs dismissed-having-said-nothing. It is the **only** measure of whether the overlay presentation costs reasons the inline tiles were getting. Never the free text (it lives on the `trade_pass_reasons` row, SPEC §3.4) and never a reason code — that is `trade_pass_layer1.reason`'s job, and duplicating it would let the two disagree. |
@@ -96,17 +96,23 @@ commit**:
   `guide_step_suppressed`. Its granted twin `prompt_shown` is already
   non-intent, and the two halves must not straddle the line.
 
-The other seven stay **intent** deliberately: two configuration changes
-(`calc_mode_switched`, `calc_include_players_toggled` — the
-`league_basis_changed` / `stud_tax_mode_changed` peers), the calculator's core
-gesture (`calc_asset_added`), a deliberate destructive action whose undo
-`calc_clear_undone` is already intent (`calc_cleared`), the hand-off tap that
-is the merge's conversion moment (`calc_find_a_trade_tapped`), and two deck
-actions reachable only from a deck the user asked for
-(`deck_back_to_calculator` — the `trade_edit_in_calculator_tapped` peer;
-`deck_unpin_retry` — the `find_trades_tapped{source: deck_error_retry}` peer).
-None opens a DAU seam: each fires behind an intent event that already counts
-the user that day.
+The rest stay **intent** deliberately: a configuration change
+(`calc_mode_switched` — the `league_basis_changed` / `stud_tax_mode_changed`
+peer), the calculator's core gesture (`calc_asset_added`), a deliberate
+destructive action whose undo `calc_clear_undone` is already intent
+(`calc_cleared`), the hand-off tap that is the merge's conversion moment
+(`calc_find_a_trade_tapped`), and three deck actions reachable only from a deck
+the user asked for (`deck_back_to_calculator` — the
+`trade_edit_in_calculator_tapped` peer; `deck_unpin_retry` and
+`deck_search_all_tapped` — the `find_trades_tapped{source: deck_error_retry}`
+peer, one narrowing the search and one widening it). None opens a DAU seam:
+each fires behind an intent event that already counts the user that day.
+
+**W6-B (2026-08-22, D-153) retired `calc_include_players_toggled` from every
+registry.** The operator dropped the Include-players toggle — the canvas is now
+always the anchor — so the name had no emitter, no plan and no question it
+answered. A registration kept "just in case" is a name a future reader has to
+disprove; deleting it is cheaper than explaining it.
 
 **W6-A adds an eighth intent name, `calc_trade_queued`.** It is the one that
 looks like it might belong in the deny-list, because it fires on a refusal too

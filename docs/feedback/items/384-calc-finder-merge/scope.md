@@ -34,10 +34,10 @@ before W5-B every `calc_tour_*` envelope the W4 runner sent was silently discard
 | `calc_tour_ended` | `reason` ∈ `finished` \| `abandoned`; `beats_shown` int ≥ 0 | `endTour` — every exit, including a blur or a park timeout | mobile |
 | `calc_tour_beat_missing` | `beat` (script id `n10`…`n24`) | the runner names a beat `analystScript.ts` cannot build | mobile |
 | `calc_mode_switched` | `mode` ∈ `live` \| `league` (the mode switched TO) | `switchMode` on the calculator's tab row | mobile |
-| `calc_include_players_toggled` | `on` bool (resulting state) | the merged action row's Include-players toggle | mobile |
 | `calc_asset_added` | `side` ∈ `give` \| `receive` | a player/pick is added to the canvas | mobile |
 | `calc_cleared` | `mode` ∈ `live` \| `league` | the canvas is cleared | mobile |
-| `calc_find_a_trade_tapped` | `include_players` bool, `give_count` int, `receive_count` int, `has_partner` bool | the merged action row's Find a Trade — the conversion moment of the whole merge | mobile |
+| `calc_find_a_trade_tapped` | `path` ∈ `fair` \| `model` **(W6-B — replaced `include_players`)**, `give_count` int, `receive_count` int, `has_partner` bool | the merged action row's Find a Trade — the conversion moment of the whole merge. `path` says which fork the tap took: `fair` = the canvas had a give side, so the tap ran the synchronous fairness sweep; `model` = the canvas was empty, so it ran the model deck | mobile |
+| `deck_search_all_tapped` **(W6-B, 2026-08-22)** | *(none — deliberately)* | the end of a FAIR deck's "Search all trades" — drop the canvas anchor, run the model for the same partner | mobile |
 | `deck_back_to_calculator` | `pin_count` int ≥ 0 | end-of-deck "Back to calculator" | mobile |
 | `deck_unpin_retry` | `pin_count` int ≥ 0 | end-of-deck "Search without …" | mobile |
 | `trade_pass_overlay_opened` | *(none — deliberately)* | the ✕ overlay presents on a calculator-origin deck | mobile |
@@ -50,7 +50,7 @@ before W5-B every `calc_tour_*` envelope the W4 runner sent was silently discard
 auto-starts on landing — admitting it promotes every calculator visit to a user-day),
 `calc_tour_ended`, `calc_tour_beat_missing`, `trade_pass_overlay_opened`,
 `trade_pass_overlay_dismissed`, `prompt_deferred`. The other seven are real user decisions and stay
-INTENT deliberately. **W6-A adds an eighth INTENT name, `calc_trade_queued`** — the ✓ tap is the
+INTENT deliberately. **W6-B (D-153) REMOVES `calc_include_players_toggled` from all three registries** — the operator dropped the toggle it named ("C works": the canvas is always the anchor), so the name had no emitter, no plan and no question it answered. It also adds `deck_search_all_tapped` (INTENT, no props) for the fair deck's exit, and swaps `calc_find_a_trade_tapped.include_players` for `path`. **W6-A adds an eighth INTENT name, `calc_trade_queued`** — the ✓ tap is the
 user's decision to offer the trade (the `sleeper_send_attempted` class), it fires on a refusal
 too because a refusal is the answer to that decision, and it cannot open a DAU seam because a
 filled canvas already fired `calc_asset_added`.
@@ -60,8 +60,8 @@ server-side. That is the NULL-`platform` incident's rule, and it is why it is wr
 
 Tracking-plan addendum: `docs/business/analytics/2026-08-22-384-calc-finder-addendum.md`.
 
-**Adoption events — all registered, six of them weak.** Every `adoptionEvent` named by the fifteen
-beats resolves to a registered event: `calc_asset_added`, `outlook_saved`, `find_trades_tapped`,
+**Adoption events — all registered, six of them weak.** Every `adoptionEvent` named by the thirteen
+beats (fifteen through W6-A; W6-B retired n14 and n17) resolves to a registered event: `calc_asset_added`, `outlook_saved`, `find_trades_tapped`,
 `trade_pass_layer1`, `trade_swap_suggest_opened`, `deck_regenerated`, `help_opened`,
 `sleeper_send_attempted`, `deck_card_viewed`, `calc_tour_started`. The review's claim that
 `trade_card_swap` / `send_attempted` / `trade_disposition` were named and missing is stale — no
@@ -101,7 +101,8 @@ Clear, the ✓, the mode tab). **W6-A fixed n15**: the ✓ now has a mechanism a
   gates the auto-start on it) but it is not the feature as specced, and it must be a decision
   rather than a surprise.
 
-- **New env vars / `model_config` keys: none.**
+- **New `model_config` key: one — `fair_packages_cap` (20.0, W6-B/[D-153])**, seeded in `database._MODEL_CONFIG_DEFAULTS` and `trade_service._DEFAULT_CFG`, documented in `docs/config-reference.md`. It caps `POST /api/trades/fair-packages`'s ONE flat swipeable list (asset-ideas' cap is per-group; a deck is not three groups). Disposition for the bake-off knob-drift guard: **EXCLUDED from `MODEL_A_PROFILE`** — it caps a surface, not a generator, and no arm reaches `generate_fair_packages` (`docs/plans/three-model-bakeoff/scope-phase2.md`).
+- **New env vars: none.**
 - **Deploy-free rollback lever:** `calc.merged_layout` → `false` in `config/features.json`, push,
   Render redeploys; clients pick it up from `/api/feature-flags` with no rebuild. The demo-calculator
   removal (W0) is **outside** the flag and is not reversible this way — it was an unconditional
@@ -119,9 +120,9 @@ row is a dead section.
 |---|---|
 | `check-demo-calc-removed.js` | two-sided: the demo CALCULATOR is gone (fixture deleted, no importer, `'demo'` out of the `CalcMode` union, no tab) **and** the demo SESSION is untouched (`isDemo`, `/api/session/demo`, `startDemoSession`, `landing.try_before_sync`, the share-mint refusal, the 400 narrowing, all three demo-bridge anchors). Plus: no demo-calculator instruction copy survives in `TradeCalculatorScreen.tsx` |
 | `check-calc-merged-layout.js` | the flag exists on both sides of the wire; the flag read is the bare statement (no `\|\| true`, no `!`); every merged-only testID is excised by brace-balancing when the flag is off; `compact` comes from the flag at both `TradeSide` mounts; the guide-target registration bails on `!merged` and re-runs on it; the price is moved not dropped; the 11pt type floor and the 44pt tap floor in the 15% cells; format chips + conversion note survive the merge; league-keyed remount; `popTo` not `navigate` |
-| `check-calc-merged-behavior.js` | `reasonsAsOverlay` is a PROP, gated in the host on flag **AND** `deckOrigin === 'calculator'` (statement-anchored); the overlay stays up through layer 2 and commits the deferred advance on a dismiss-after-bank; `includePlayers &&` is IN the pin condition; `packageMode`; both end-of-deck exits in both exhausted branches, for any pin count, regenerating **W6-A** — the screen passes `onLikeTrade` (dropping it is the exact Q-029 regression and turns assertions 18–18e red); the handler calls `queueTradeForOpponent`, addresses the canvas's partner, emits one `calc_trade_queued` and distinguishes a refusal from a dead request; every one of the six reasons has a toast line AND a `CalcQueueReason` member; the disabled rule is exactly `!onLikeTrade || !bothSides || !opponent || queueing`; the in-flight lock is both set and released; and neither file reaches for `swipeTrade` to fake the like |
+| `check-calc-merged-behavior.js` | `reasonsAsOverlay` is a PROP, gated in the host on flag **AND** `deckOrigin === 'calculator'` (statement-anchored); the overlay stays up through layer 2 and commits the deferred advance on a dismiss-after-bank; **W6-B**: no Include-players toggle survives anywhere on the calculator, the hand-off carries `fairAnchor` iff the canvas has a GIVE side (`giveIds.length > 0` — a receive-only canvas is the model's case), `onFindATrade` writes NO pins, the choke point takes the fair fork BEFORE the model gate and RETURNS, `autoRunPendingRef.current = !fair` keeps the two arms mutually exclusive, the fair deck is built through `utils/ideaToCard`, the unpin-retry exit is hidden on a fair deck and "Search all trades" replaces it; both end-of-deck exits in both exhausted branches, for any pin count, regenerating **W6-A** — the screen passes `onLikeTrade` (dropping it is the exact Q-029 regression and turns assertions 18–18e red); the handler calls `queueTradeForOpponent`, addresses the canvas's partner, emits one `calc_trade_queued` and distinguishes a refusal from a dead request; every one of the six reasons has a toast line AND a `CalcQueueReason` member; the disabled rule is exactly `!onLikeTrade || !bothSides || !opponent || queueing`; the in-flight lock is both set and released; and neither file reaches for `swipeTrade` to fake the like |
 | `check-tour-suppression.js` | **transpiles and EXECUTES** `useInterruptCoordinator.ts` (minimal zustand shim) — claim/release/hold, no preemption, the gap between beats, idempotent begin, `isInterruptBusy` from the hold alone. Plus the four in-flow notices' mute and the `blocked_by:'tour'` emitter |
-| `check-calc-tour.js` | 15 beats, argument-free, screen-declared, in order; every `advance:'action'` beat has an `advanceGuideIfActive` call site; one hold-release site; park + 30 s bound + hand-off-aware blur; the first-visit receipt; cap reset on re-entry; cursor reset on restart; the auto-start effect's deps; tour-owned ids registered without a store cycle |
+| `check-calc-tour.js` | **13** beats (W6-B), argument-free, screen-declared, in order — and the two retired ids must be absent from the runner AND their builders deleted, not orphaned; every `advance:'action'` beat has an `advanceGuideIfActive` call site while the TAP beat n16 must have NONE; one hold-release site; park + 30 s bound + hand-off-aware blur; the first-visit receipt; cap reset on re-entry; cursor reset on restart; the auto-start effect's deps; tour-owned ids registered without a store cycle |
 
 `check-guide-script.js` was extended for the 15 new beats (copy budget, retirement, degrade
 contract, the n23/n23b platform pair) — including a new rule that a `degradeLine` may exist only on
@@ -158,23 +159,25 @@ two-column layout at SE width, 53pt tap targets, spotlight geometry, and the bea
 a 15-step tour are exactly the class of thing a structural guard cannot see.
 
 **No new testIDs in W6-A** — the ✓ cell already had `calc.action.confirm`; it only stopped being
-inert. **testIDs added (W0–W5):** `calc.action-row`, `calc.action.find-a-trade`, `calc.action.include-players`,
+inert. **testIDs added (W0–W5):** `calc.action-row`, `calc.action.find-a-trade`,
 `calc.action.clear`, `calc.action.confirm`, `calc.league-dropdown`, `calc.team-dropdown`,
 `calc.trade-columns`, `calc.team-sheet`, `calc.outlook-fallback`, `calc.outlook-fallback.change`,
 `calc.merged-format.<key>`, `calc.mode-tab.<key>`, `calc.league-give-add`,
 `trades.pass-reason-overlay`, `trades.deck-summary.back-to-calc`, `trades.deck-summary.unpin-retry`,
-`trades.deck-exhausted.back-to-calc`, `trades.deck-exhausted.unpin-retry`. `bash
+`trades.deck-exhausted.back-to-calc`, `trades.deck-exhausted.unpin-retry`. **W6-B removes**
+`calc.action.include-players` (the toggle is gone) and **adds** `trades.deck-summary.search-all`
+and `trades.deck-exhausted.search-all`. `bash
 mobile/scripts/testid-lint.sh` passes.
 
 ## 4. Docs scope (MANDATORY — HLD / LLD / API)
 
 | Doc | Updated? | Section / reason n/a |
 |---|---|---|
-| `docs/api-reference.md` (any route added/renamed/removed/contract-changed) | **updated (W6-A)** | W0–W5 added no route. **W6-A adds ONE: `POST /api/trades/queue`** ([D-152]) — the ✓ cell's contract, flag-gated on `calc.merged_layout` (404 off). Full row in `api-reference.md`: body, both 200 shapes, the closed `reason` enum, the idempotency key, and what `queued: true` does and does not promise. Everything else on the merged page still rides `POST /api/trade/evaluate`, the #330 choke point and the shipped pin store verbatim. **§6 item 2 (receive-side all-mode) remains OPEN, not built** |
+| `docs/api-reference.md` (any route added/renamed/removed/contract-changed) | **updated (W6-A)** | W0–W5 added no route. **W6-A adds ONE: `POST /api/trades/queue`** ([D-152]) — the ✓ cell's contract, flag-gated on `calc.merged_layout` (404 off). Full row in `api-reference.md`: body, both 200 shapes, the closed `reason` enum, the idempotency key, and what `queued: true` does and does not promise. Everything else on the merged page still rides `POST /api/trade/evaluate`, the #330 choke point and the shipped pin store verbatim. **W6-B adds a SECOND: `POST /api/trades/fair-packages`** ([D-153]) — the canvas sweep, same flag, same 404-when-off convention. Full row in `api-reference.md`: the anchor contract, the receive-side PREFERENCE semantics, the `eval_consensus_package` shared gate set, the deterministic `fairpk_` card id and why it exists, the cap, and the diagnostic `reason` values (explicitly **not** a cross-client enum — no client branches on them). **§6 item 2 (receive-side all-mode) is now RETIRED rather than open: W6-B answers it by rejecting its premise** |
 | `living-memory/LLD.md` (schema/route/invariant *conventions* shifted) | **updated (W6-A) — route list only** | W6-A adds `POST /api/trades/queue` to the LLD's Trades route list, and `docs/architecture.md`'s trade-match lifecycle step 1 now names it as the second way a like is recorded (and says why it does NOT mint the match itself). No convention shifted (W0–W5): the one new module (`utils/calcTour.ts`) follows the existing `utils/` rule (no React, no store) and the existing guide-store contract; the tour-owned id set is registered INTO `useGuide` rather than imported FROM it, which is the existing no-cycle convention, not a new one |
 | `docs/architecture.md` (module wiring / data flow changed) | **updated (W6-A) — one lifecycle line** | still no backend module added, removed or re-wired: W6-A is one route in `server.py` and one read-only helper in `database.py`. The trade-match lifecycle DID gain a second entry point, so step 1 names it |
 | `living-memory/HLD.md` (architecture genuinely shifted) | **n/a** | no new client, no new service, no new major flow at the system level. The calculator→deck hand-off reuses `useFinderTargets`, which already existed |
-| `docs/cross-client-invariants.md` (shared constants/enums/colors) | **updated (W6-A)** | W0–W5's enums (`calc_tour_started.source`, `calc_tour_ended.reason`, `deckOrigin`, `FinderHandoff.origin`) are mobile-only and stay unlisted. **W6-A's `reason` enum is not**: `POST /api/trades/queue` refuses with one of six codes and the client switches on every one, so a seventh added server-side would fall through to a generic line. New section **Trade-queue refusal reasons**, with the three locations that change together (server tuple, `CalcQueueReason`, `queueRefusalLine`). `calc_trade_queued` also joins the client-event contract section |
+| `docs/cross-client-invariants.md` (shared constants/enums/colors) | **updated (W6-A); n/a for W6-B** | W0–W5's enums (`calc_tour_started.source`, `calc_tour_ended.reason`, `deckOrigin`, `FinderHandoff.origin`) are mobile-only and stay unlisted. **W6-A's `reason` enum is not**: `POST /api/trades/queue` refuses with one of six codes and the client switches on every one, so a seventh added server-side would fall through to a generic line. New section **Trade-queue refusal reasons**, with the three locations that change together (server tuple, `CalcQueueReason`, `queueRefusalLine`). `calc_trade_queued` also joins the client-event contract section. **W6-B adds NO row**, deliberately: `POST /api/trades/fair-packages`'s `reason` values are diagnostic and **no client branches on them** — the deck simply renders empty. Registering an enum nothing reads is the same noise `calc_include_players_toggled` was deleted for. A client that starts switching on it must add the row first, and the api-reference row says so |
 | `docs/glossary.md` (new domain term) | **updated** | "Demo league" (calculator) retired; **Real values**, **In league**, **Show me around**, **Tour hold** added. Canvas is defined under Real values / In league. **W6-A adds "Queue (a trade)"** — the ✓ cell's verb, and the one word that could be mistaken for `useTradeQueue`, the unrelated web-style list of Sleeper propose URLs |
 | ADR or `DECISIONS.md` entry | **updated** | [D-150](../../../living-memory/DECISIONS.md) carries the feature's decisions; amended 2026-08-22 (W5) for the unwired ✓ cell and the calculator-origin overlay scope |
 
@@ -220,12 +223,17 @@ self-select.
    is named rather than silent. Contract, both 200 shapes and the reason enum:
    [`api-reference.md`](../../api-reference.md); enum:
    [`cross-client-invariants.md`](../../cross-client-invariants.md#trade-queue-refusal-reasons-post-apitradesqueue).
-2. **Receive-side "must include" is any-one, not all.** `trade_optimizer.py:522` requires only that
-   the served card's receive side intersect the pinned set; the give side with 2+ pins requires
-   every one. A `pinned_receive_mode:'all'` would be an **API change** through `api/trades.ts` →
-   `server.py` → the three enumerators. Also unresolved: a canvas pick outside `picks_pool_cap`
-   (default 6) is never on `user_roster`, so `pinned_all` rejects every subset and the user gets
-   zero cards with a misleading message.
+2. ~~**Receive-side "must include" is any-one, not all.**~~ **RETIRED BY W6-B, 2026-08-22 ([D-153]) — the concept no
+   longer exists.** This row asked for `pinned_receive_mode:'all'` because ruling 2 said an Include-players ON search *must*
+   include the canvas. The operator then dropped the toggle entirely ("C works") and re-specified the request as a
+   fairness-only sweep, so there is no longer a model job to add a pin mode to: the canvas GIVE side is an exact anchor on
+   `POST /api/trades/fair-packages`, and the receive side is a **ranking preference**, not a filter. That is a decision, not
+   an omission — a hard receive constraint returns an empty deck whenever the canvas names an asset the partner does not own,
+   which is also what dissolves this row's second half (a canvas pick outside `picks_pool_cap` is never on `user_roster`):
+   the anchor is priced from the seed board and never re-checked against the roster, so the cap cannot empty anything. The
+   three enumerators are untouched, and `pinned_give_mode`/`pinned_receive_*` on `POST /api/trades/generate` are exactly as
+   they were for every non-calculator caller.
+
 3. **Overlay scope — RULED and built as calculator-origin.** W5-D made `reasonsAsOverlay` a prop
    driven by `FinderHandoff.origin === 'calculator'`, cleared on league switch / pins emptied / mode
    switch. Recorded here because the review listed it as open; the alternative (all decks) would
@@ -237,5 +245,6 @@ self-select.
 5. **Rollout shape** — a global boolean, or the tester-allowlist experiment path `trades_home_inline`
    used.
 
-Items 1 and 2 were logged as **Q-029**. **Item 1 is CLOSED 2026-08-22 (W6-A).** Item 2 (receive-side
-`pinned_receive_mode:'all'` + the `picks_pool_cap` pin rejection) is still open and is what remains of Q-029.
+Items 1 and 2 were logged as **Q-029**. **Both are CLOSED 2026-08-22** — item 1 by W6-A ([D-152]), item 2 by W6-B
+([D-153]), which retires the receive-side must-include *concept* rather than implementing it. **Q-029 is closed; so is
+Q-028.** The rollout shape (item 5) is the only bright-line decision left.

@@ -39,16 +39,24 @@ import { resolveSendPlatform } from './tradeText';
 import { track } from '../api/events';
 
 /** The walkthrough, in order. Split by the screen each beat belongs to: the
- *  first nine are the calculator, the rest run on the deck after Find a
+ *  first seven are the calculator, the rest run on the deck after Find a
  *  Trade. Ids only — the builders resolve at request time so a beat is never
  *  captured stale.
  *
- *  n14 ("Clear wipes the canvas") sits AFTER n16 ("add someone you'd move")
- *  on purpose: the Clear control is disabled while the canvas is empty, and
- *  spotlighting a 40%-opacity button is the same defect as pointing at
- *  nothing. n16 is what puts an asset on the canvas. */
+ *  W6-B (D-153) reshaped the calculator half to the operator's own ending:
+ *  *"the tour mentions they can add players and we'll find trades with those
+ *  players included, and then the user is pushed to find a trade with the calc
+ *  empty. That way the tour ends with them in the modeled cards."*
+ *
+ *  Two beats left with it. **n17** narrated the Include-players toggle, which
+ *  no longer exists. **n14** ("Clear wipes the canvas") was only ever in this
+ *  list after n16 because Clear is disabled on an empty canvas and n16 used to
+ *  be the beat that filled it — with n16 now a TAP beat that adds nothing, n14
+ *  would spotlight a 40 %-opacity button, which is the same defect as pointing
+ *  at nothing. Both builders were deleted from `analystScript.ts` rather than
+ *  left orphaned. */
 export const CALC_TOUR_CALCULATOR = [
-  'n10', 'n11', 'n12', 'n13', 'n15', 'n16', 'n14', 'n17', 'n18',
+  'n10', 'n11', 'n12', 'n13', 'n15', 'n16', 'n18',
 ] as const;
 export const CALC_TOUR_DECK = [
   'n19', 'n20', 'n21', 'n22', 'n23', 'n24',

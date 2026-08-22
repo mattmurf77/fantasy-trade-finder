@@ -11,6 +11,23 @@
 
 ---
 
+## 2026-08-22i — #384 W6-B: Find a Trade forks on the canvas — fairness-only packages (D-153); still dark, not pushed
+
+Operator re-ruled the contract (no model for a filled canvas; toggle dropped; tour ends in the
+modeled cards). One Opus build package, lead-reviewed. Backend: `POST /api/trades/fair-packages`
+(flag-gated) — give side an exact anchor, 1–3-asset returns, receive side a ranking preference;
+`_generate_asset_ideas_impl._eval` extracted to `trade_service.eval_consensus_package` and shared
+(asset-ideas byte-identical, golden green); `fair_packages_cap` knob (20); deterministic `fairpk_`
+ids that `_reconstruct_swipe_card` accepts (tested end to end). Mobile: handoff `fairAnchor`
+replaces `includePlayers`; TradesScreen forks before the model gate and `setDeck`s
+`ideaToCard` cards (helper moved to `utils/ideaToCard.ts`, pure); toggle removed (row 70/15/15);
+tour `n10 n11 n12 n13 n15 n16 n18 | n19–n24` (n14/n17 builders deleted; n16 a tap beat);
+calculator `ScrollView` announces scroll + guard rule 10 makes it mandatory; "Search all trades"
+exit on fair decks. Analytics: `calc_include_players_toggled` removed, `path` prop,
+`deck_search_all_tapped`. Gates: pytest **4173** · tsc · 76/76 guards · 5 sabotages red.
+Q-029 fully closed (✓ half D-152, receive-side half retired by D-153). Also this session:
+`docs/plans/ram-mascot/brief.md` (own thread, awaiting D1).
+
 ## 2026-08-22h — #384 W6-A: the ✓ cell is wired — `POST /api/trades/queue` (D-152); D-151 closes §6b (still dark, not pushed)
 
 Operator rulings: §6b → the merged calculator keeps its own tab ([D-151](DECISIONS.md), Q-028 closed);

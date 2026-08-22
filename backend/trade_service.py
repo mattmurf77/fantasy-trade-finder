@@ -201,6 +201,12 @@ _DEFAULT_CFG: dict[str, float] = {
     # ------------------------------------------------------------------
     "asset_ideas_lateral_band":   0.10,
     "asset_ideas_group_cap":      6.0,
+    # ------------------------------------------------------------------
+    # #384 W6-B — fairness-only packages around a fixed give-side anchor
+    # (flag: calc.merged_layout; TradeService.generate_fair_packages).
+    # ONE flat, swipeable list rather than three groups, so it gets one cap.
+    # ------------------------------------------------------------------
+    "fair_packages_cap":         20.0,
     # Waiver/roster-slot cost (amendment A3, FantasyCalc-derived ≈ rank-300 value)
     "waiver_slot_cost":    425.0,     # value cost per extra player received
     # Confidence shrinkage + range-overlap fairness (Change 4 + amendment A4)
@@ -1941,6 +1947,61 @@ def filler_ok(give_ids: list[str], recv_ids: list[str],
         if any(v < bar for v in vals[1:]):
             return False
     return True
+
+
+def eval_consensus_package(
+    give_ids: list[str],
+    recv_ids: list[str],
+    *,
+    value_of,
+    raw_value_of,
+    raw_user_elo: dict[str, float] | None,
+    relaxed_thr: float,
+):
+    """The consensus-basis package gate set, in ONE place.
+
+    Prices both sides with `package_value_v2` in the shared value space and
+    applies every non-fairness gate the consensus generator applies, then the
+    WIDENED fairness band. Returns `(fairness, gv, rv)`, or None when any gate
+    refuses.
+
+    Extracted from `_generate_asset_ideas_impl._eval` on 2026-08-22 (#384 W6-B)
+    so the fair-package search (`_generate_fair_packages_impl`) rides the same
+    gates instead of re-stating them — a second copy is how two surfaces that
+    are supposed to price identically start disagreeing. Behaviour is
+    unchanged from the closure it replaces; asset-ideas is byte-identical.
+
+    `value_of` is the CONSENSUS accessor (pid → value); `raw_value_of` is the
+    #141 max-of-boards accessor. `relaxed_thr` is already
+    min(caller threshold, relaxed_fairness_threshold) — the caller decides
+    afterwards whether a pass was strict or relaxed, because that split is a
+    presentation convention (#189), not a gate.
+    """
+    gvals = [value_of(p) for p in give_ids]
+    rvals = [value_of(p) for p in recv_ids]
+    v_max = max(gvals + rvals)
+    gv = package_value_v2(gvals, v_max, n_other=len(recv_ids),
+                          other_values=rvals)
+    rv = package_value_v2(rvals, v_max, n_other=len(give_ids),
+                          other_values=gvals)
+    if gv <= 0 or rv <= 0:
+        return None
+    # #108 — consensus IS the user's board here (never relaxed).
+    if rv - gv < _c("user_gain_epsilon"):
+        return None
+    frac = _c("consolidation_raw_loss_frac")
+    if frac > 0 and len(give_ids) > len(recv_ids):
+        raw_give = sum(gvals)
+        if raw_give - sum(rvals) > frac * raw_give:
+            return None
+    if not user_gain_ok_1for1(give_ids, recv_ids, raw_user_elo):
+        return None
+    if not filler_ok(give_ids, recv_ids, raw_value_of, value_of):
+        return None
+    fairness = min(gv, rv) / max(gv, rv)
+    if fairness < relaxed_thr:
+        return None
+    return fairness, gv, rv
 
 
 def is_pick_asset(p) -> bool:
@@ -4680,32 +4741,16 @@ class TradeService:
 
         def _eval(give_ids: list[str], recv_ids: list[str]):
             """All non-fairness gates + the WIDENED fairness band. Returns
-            (fairness, gv, rv) or None when hard-gated."""
-            gvals = [_v(p) for p in give_ids]
-            rvals = [_v(p) for p in recv_ids]
-            v_max = max(gvals + rvals)
-            gv = package_value_v2(gvals, v_max, n_other=len(recv_ids),
-                                  other_values=rvals)
-            rv = package_value_v2(rvals, v_max, n_other=len(give_ids),
-                                  other_values=gvals)
-            if gv <= 0 or rv <= 0:
-                return None
-            # #108 — consensus IS the user's board here (never relaxed).
-            if rv - gv < _c("user_gain_epsilon"):
-                return None
-            frac = _c("consolidation_raw_loss_frac")
-            if frac > 0 and len(give_ids) > len(recv_ids):
-                raw_give = sum(gvals)
-                if raw_give - sum(rvals) > frac * raw_give:
-                    return None
-            if not user_gain_ok_1for1(give_ids, recv_ids, raw_user_elo):
-                return None
-            if not filler_ok(give_ids, recv_ids, _uval_raw, _v):
-                return None
-            fairness = min(gv, rv) / max(gv, rv)
-            if fairness < relaxed_thr:
-                return None
-            return fairness, gv, rv
+            (fairness, gv, rv) or None when hard-gated. The body lives in
+            `eval_consensus_package` so the #384 fair-package search shares
+            these gates rather than copying them."""
+            return eval_consensus_package(
+                give_ids, recv_ids,
+                value_of      = _v,
+                raw_value_of  = _uval_raw,
+                raw_user_elo  = raw_user_elo,
+                relaxed_thr   = relaxed_thr,
+            )
 
         strict: dict[str, list[dict]] = {"upgrade": [], "lateral": [], "downgrade": []}
         relaxed: dict[str, list[dict]] = {"upgrade": [], "lateral": [], "downgrade": []}
@@ -4946,6 +4991,198 @@ class TradeService:
             key = _down_key if group == "downgrade" else order_key
             out[group] = sorted(chosen, key=key)[:cap]
         return out
+
+    # ------------------------------------------------------------------
+    # #384 W6-B — fairness-only packages around a FIXED give-side anchor
+    # (flag calc.merged_layout; route POST /api/trades/fair-packages)
+    # ------------------------------------------------------------------
+
+    def generate_fair_packages(self, *, user_id: str, **kwargs):
+        """#215 — same stud-tax mode pinning as generate_trades."""
+        mode = pinned_stud_tax_mode() or stud_tax_mode_for_user(user_id)
+        with stud_tax_override(mode):
+            return self._generate_fair_packages_impl(user_id=user_id, **kwargs)
+
+    def _generate_fair_packages_impl(
+        self,
+        *,
+        user_id: str,
+        user_roster: list[str],
+        league_id: str,
+        seed_elo: dict[str, float],
+        give_player_ids: list[str],
+        receive_player_ids: list[str] | None = None,
+        fairness_threshold: float = 0.50,
+        raw_user_elo: dict[str, float] | None = None,
+        untouchable_ids: set | None = None,
+        not_interested_ids: set | None = None,
+        opponent_user_id: str | None = None,
+    ) -> dict:
+        """What can this EXACT package fetch? — the operator's #384 W6-B ask,
+        verbatim: *"a much simpler set of cards solving for fairness only.
+        Similar to how we determine the consolidate and downgrade suggestions
+        already."*
+
+        The give side is an ANCHOR, not a seed: every idea returned gives away
+        exactly `give_player_ids` and nothing else. The search is over the
+        RETURN — 1–3 assets from one league-mate's roster (or from every
+        league-mate's, when no partner is named). No model, no job, no
+        divergence, no position semantics: `asset-ideas`' gate set applied to a
+        fixed left-hand side, which is precisely the Downgrade group's shape
+        generalised from one pinned asset to a package of N.
+
+        Pricing and gating are `eval_consensus_package` — the same function
+        `_generate_asset_ideas_impl` calls, so a fair package and an asset idea
+        can never price the same trade differently.
+
+        RECEIVE-SIDE PREFERENCE, not constraint (this is what retires the
+        second half of Q-029). Assets the user put on the receive side of the
+        canvas are a statement of interest, so ideas containing ALL of them
+        sort first — but an idea that cannot include them is still shown rather
+        than the user being handed an empty deck with a misleading message. A
+        canvas pick outside `picks_pool_cap` therefore costs nothing here: the
+        anchor is priced from `seed_elo`, never re-derived from `user_roster`.
+
+        Returns `{"ideas": [...], "relaxed": bool, "reason": str | None}`.
+        `reason` is set only when the search refused before enumerating:
+        `give_untouchable` (an anchor asset is on the caller's own untouchable
+        list — their rule, so the honest answer is zero ideas and why),
+        `unknown_asset`, or `no_partner` (the named partner is not a
+        league-mate with a roster).
+
+        Ideas carry the AssetIdea shape (counterparty, both id lists, both
+        package values, signed difference, fairness, and the #189 `relaxed`
+        labels), as ONE flat list capped at `fair_packages_cap` — the deck is
+        a swipe stack, not three groups. Deterministic for a fixed league
+        snapshot.
+        """
+        empty = {"ideas": [], "relaxed": False, "reason": None}
+        league = self._leagues.get(league_id)
+        players = self._players
+        if not league:
+            return dict(empty, reason="unknown_league")
+
+        give_anchor = list(dict.fromkeys(str(p) for p in (give_player_ids or [])))
+        if not give_anchor:
+            return dict(empty, reason="unknown_asset")
+        if any(p not in players for p in give_anchor):
+            return dict(empty, reason="unknown_asset")
+        # The caller's OWN rule, so it is a refusal with a name rather than a
+        # silent filter: an untouchable on the give side means the canvas
+        # contradicts the preference list the user set.
+        if untouchable_ids and any(p in untouchable_ids for p in give_anchor):
+            return dict(empty, reason="give_untouchable")
+
+        anchor_set = set(give_anchor)
+        want_recv = [str(p) for p in (receive_player_ids or [])
+                     if p in players and p not in anchor_set]
+        want_set = set(want_recv)
+
+        _vs_cache: dict[str, float] = {}
+
+        def _v(pid: str) -> float:
+            val = _vs_cache.get(pid)
+            if val is None:
+                val = elo_to_value(seed_elo.get(pid, 1500.0))
+                _vs_cache[pid] = val
+            return val
+
+        def _uval_raw(pid: str) -> float:
+            e = raw_user_elo.get(pid) if raw_user_elo else None
+            return elo_to_value(e) if e is not None else _v(pid)
+
+        relaxed_thr = min(fairness_threshold, _c("relaxed_fairness_threshold"))
+
+        def _eval(recv_ids: list[str]):
+            return eval_consensus_package(
+                give_anchor, recv_ids,
+                value_of     = _v,
+                raw_value_of = _uval_raw,
+                raw_user_elo = raw_user_elo,
+                relaxed_thr  = relaxed_thr,
+            )
+
+        opponents = sorted(
+            (m for m in league.members if m.user_id != user_id and m.roster),
+            key=lambda m: m.user_id)
+        if opponent_user_id:
+            opponents = [m for m in opponents if m.user_id == opponent_user_id]
+            if not opponents:
+                return dict(empty, reason="no_partner")
+
+        strict: list[dict] = []
+        relaxed: list[dict] = []
+        seen: set[tuple] = set()
+
+        def _emit(member, recv_ids: list[str], res) -> None:
+            key = (member.user_id, frozenset(recv_ids))
+            if key in seen:
+                return
+            seen.add(key)
+            fairness, gv, rv = res
+            idea = {
+                "counterparty_user_id":  member.user_id,
+                "counterparty_username": member.username,
+                "give_player_ids":       list(give_anchor),
+                "receive_player_ids":    list(recv_ids),
+                "give_value":            round(gv, 1),
+                "receive_value":         round(rv, 1),
+                "difference":            round(rv - gv, 1),
+                "fairness":              round(fairness, 3),
+            }
+            if fairness >= fairness_threshold:
+                strict.append(idea)
+            else:
+                idea["relaxed"] = True
+                idea["relaxed_reason"] = "fairness_band"
+                relaxed.append(idea)
+
+        # Same bound as the asset-ideas package search: 2- and 3-asset returns
+        # are enumerated over the top-_POOL assets by value, which keeps the
+        # sweep at ~300 evaluations per league-mate.
+        _POOL = 12
+
+        for member in opponents:
+            avail = [p for p in sorted(set(member.roster))
+                     if p in players and p not in anchor_set
+                     and not (not_interested_ids and p in not_interested_ids)]
+            avail.sort(key=lambda p: (-_v(p), p))
+            # Canvas receive assets are held at the HEAD of the combination
+            # pool so a value-based truncation can never drop the very assets
+            # the user asked for.
+            wanted_here = [p for p in avail if p in want_set]
+            rest = [p for p in avail if p not in want_set]
+            pool = wanted_here + rest[:max(0, _POOL - len(wanted_here))]
+
+            for c in avail:                       # 1-for-N: the whole roster
+                res = _eval([c])
+                if res:
+                    _emit(member, [c], res)
+            for r in (2, 3):
+                for combo in combinations(pool, r):
+                    res = _eval(list(combo))
+                    if res:
+                        _emit(member, list(combo), res)
+
+        # #189 convention: the widened band surfaces ONLY when the strict band
+        # produced nothing at all, and stays labelled when it does.
+        chosen = strict or relaxed
+        was_relaxed = not strict and bool(relaxed)
+
+        def _key(i):
+            recv = i["receive_player_ids"]
+            # Preference, not constraint: ideas carrying the whole canvas
+            # receive side lead, then the closest deal to even.
+            covers_all = bool(want_set) and want_set.issubset(recv)
+            return (not covers_all, abs(i["difference"]),
+                    i["counterparty_user_id"], tuple(recv))
+
+        cap = max(1, int(_c("fair_packages_cap")))
+        return {
+            "ideas":   sorted(chosen, key=_key)[:cap],
+            "relaxed": was_relaxed,
+            "reason":  None,
+        }
 
     # ------------------------------------------------------------------
     # Trade engine v2 (flag: trade_engine.v2)

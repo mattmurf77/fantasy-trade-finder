@@ -541,14 +541,18 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # would promote every calculator visit to a user-day (the
     # `trio_session_started` mount precedent).
     "calc_tour_started", "calc_tour_ended", "calc_tour_beat_missing",
-    # Calculator interactions — all four are real user decisions and stay
-    # INTENT (deliberately absent from NON_INTENT_EVENTS): a mode switch and
-    # an include-players toggle are configuration changes (the
-    # `league_basis_changed` / `stud_tax_mode_changed` peers), adding an
-    # asset is the calculator's core gesture (the `finder_target_pinned`
-    # peer), and clearing is a deliberate destructive action whose undo
-    # (`calc_clear_undone`) is already INTENT.
-    "calc_mode_switched", "calc_include_players_toggled",
+    # Calculator interactions — all three are real user decisions and stay
+    # INTENT (deliberately absent from NON_INTENT_EVENTS): a mode switch is a
+    # configuration change (the `league_basis_changed` / `stud_tax_mode_changed`
+    # peers), adding an asset is the calculator's core gesture (the
+    # `finder_target_pinned` peer), and clearing is a deliberate destructive
+    # action whose undo (`calc_clear_undone`) is already INTENT.
+    # `calc_include_players_toggled` was registered in W5-B and REMOVED in W6-B
+    # (2026-08-22, D-153) together with its control: the operator dropped the
+    # Include-players toggle — the canvas is now always the anchor — so the
+    # name had no emitter and no plan. A dead registration is noise, not
+    # forward compatibility.
+    "calc_mode_switched",
     "calc_asset_added", "calc_cleared",
     # `calc_find_a_trade_tapped` — the merged calculator's OWN hand-off
     # control (TradeCalculatorScreen, testID calc.find-a-trade). It does NOT
@@ -579,7 +583,13 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # tapping Find a Trade, so it can add no user-day. `deck_unpin_retry` is
     # a retry after an empty/failed deck, the `find_trades_tapped{source:
     # deck_error_retry}` and `suppression_undo_tapped` peer.
-    "deck_back_to_calculator", "deck_unpin_retry",
+    # `deck_search_all_tapped` (#384 W6-B, D-153) joins them on the same
+    # argument: it is the end-of-a-FAIR-deck escape hatch — "search all
+    # trades", which drops the canvas anchor and runs the model deck for the
+    # same partner. INTENT, same class as `deck_unpin_retry` (a deliberate
+    # widening after an exhausted deck), and reachable only from a deck the
+    # user reached by tapping Find a Trade, so it opens no DAU seam.
+    "deck_back_to_calculator", "deck_unpin_retry", "deck_search_all_tapped",
     # The #384-local pass overlay (plan.md W2 — this page only; the shipped
     # deck keeps DeclineReasonPanel's inline tiles). BOTH are NON_INTENT and
     # both land in NON_INTENT_EVENTS in this same commit.
@@ -1401,17 +1411,22 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # bounded vocabulary owned by components/analystScript.ts, never copy.
     "calc_tour_beat_missing":      frozenset({"beat"}),
     "calc_mode_switched":          frozenset({"mode"}),
-    "calc_include_players_toggled": frozenset({"on"}),
     "calc_asset_added":            frozenset({"side"}),
     "calc_cleared":                frozenset({"mode"}),
     # The calculator's hand-off, and the one row here that carries shape.
-    # `include_players` (bool) is the ruling-2 contract; `give_count` /
-    # `receive_count` are small ints (assets per side, the trade_sent
-    # naming); `has_partner` (bool) is whether a trade partner was selected.
-    # NO player ids, NO names, NO league id (that rides the envelope
+    # `path` (#384 W6-B, D-153) is the LOW-CARDINALITY fork the tap took:
+    #   'fair'  — the canvas had a give side, so the tap ran the synchronous
+    #             fairness sweep (POST /api/trades/fair-packages)
+    #   'model' — the canvas was empty, so the tap ran the model deck
+    # It REPLACES `include_players`, which described a toggle that no longer
+    # exists. The two are not renameable into each other: the toggle was the
+    # user's declaration, `path` is what the system actually did.
+    # `give_count` / `receive_count` are small ints (assets per side, the
+    # trade_sent naming); `has_partner` (bool) is whether a trade partner was
+    # selected. NO player ids, NO names, NO league id (that rides the envelope
     # column), and NO device platform — that is a user_events COLUMN
     # derived server-side (the NULL-`platform` incident).
-    "calc_find_a_trade_tapped":    frozenset({"include_players",
+    "calc_find_a_trade_tapped":    frozenset({"path",
                                               "give_count", "receive_count",
                                               "has_partner"}),
     # The ✓ cell's outcome (#384 W6-A / D-152). `queued` is a BOOLEAN — did
@@ -1430,6 +1445,13 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # changed their mind", which is what both affordances exist to answer.
     "deck_back_to_calculator":     frozenset({"pin_count"}),
     "deck_unpin_retry":            frozenset({"pin_count"}),
+    # #384 W6-B — the fair deck's "Search all trades" exit. NO props on
+    # purpose: a fair deck has no pins to count (the anchor rode the request,
+    # not the pin store), the partner is already on every card the user just
+    # saw, and the model run this exit dispatches fires its own
+    # `find_trades_tapped` with the source. A prop here would be a second
+    # source of truth for a fact two other rows already carry.
+    "deck_search_all_tapped":      frozenset(),
     # The overlay pair. `opened` carries NO props on purpose: the card it
     # belongs to is already identified by the trade_pass_layer* rows and by
     # trade_card_viewed on the same card, and a trade_id here would be a

@@ -38,9 +38,14 @@ import type { Player } from '../shared/types';
 //     ruling 1: "this calculator only"). TradesScreen records it as
 //     `deckOrigin` and clears it on league switch, on a pin clear, on a later
 //     handoff with a different origin, and on a finder-mode change.
-//   * `includePlayers` — the state of the calculator's "Include players"
-//     toggle at hand-off time. `false` means the sweep is deliberately
-//     unconstrained by the canvas, so the deck asserts the pins are empty.
+//   * `fairAnchor` — W6-B (D-153). Present iff the canvas had at least one
+//     GIVE asset, and it carries that canvas verbatim. Its presence is what
+//     forks the arrival: with it, the deck runs the synchronous fairness sweep
+//     (`getFairPackages`) and sets its cards directly; without it, the deck
+//     arms today's model auto-run. It REPLACED `includePlayers`, the toggle
+//     the operator dropped — "C works", the canvas is always the anchor — and
+//     it is deliberately not a boolean: the deck needs the ids, because the
+//     canvas no longer travels through the pin store at all.
 // Both absent ⇒ a #330 league-offer handoff, byte-identical to before.
 // `opponent` is nullable ONLY for the calculator origin: its Team dropdown is
 // optional, and the pins alone are a complete search. `null` consumes as
@@ -52,7 +57,10 @@ export interface FinderHandoff {
   opponent: { userId: string; name: string } | null;
   autoRun: true;
   origin?: 'calculator';
-  includePlayers?: boolean;
+  /** #384 W6-B — the calculator canvas, present iff it had a give side.
+   *  `giveIds` is the ANCHOR (every served card gives exactly these);
+   *  `receiveIds` is a preference the sweep sorts by. */
+  fairAnchor?: { giveIds: string[]; receiveIds: string[] };
 }
 
 interface FinderTargetsState {

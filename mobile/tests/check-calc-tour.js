@@ -31,7 +31,18 @@ console.log('check-calc-tour:');
 // ── 1: every beat the runner names exists, and takes no arguments ────────
 const order = [...tour.matchAll(/'(n1\d|n2[0-4])'/g)].map((m) => m[1]);
 const unique = [...new Set(order)];
-assert(unique.length === 15, '1. the runner names 15 beats', `found ${unique.length}: ${unique}`);
+// 13, not 15: W6-B (D-153) deleted n14 (Clear) and n17 (Include players) with
+// the controls and the sequencing they existed for. Their BUILDERS are gone
+// from analystScript.ts too, so a runner that named one would fail assertion 2
+// rather than silently skipping a beat at runtime.
+assert(unique.length === 13, '1. the runner names 13 beats', `found ${unique.length}: ${unique}`);
+assert(!unique.includes('n14') && !unique.includes('n17'),
+  '1a. the retired beats are not named anywhere in the runner',
+  'n14 spotlights a Clear that is disabled on the empty canvas the tour now '
+  + 'ends with; n17 spotlights a toggle that no longer exists');
+assert(!/\bn14:|\bn17:/.test(script),
+  '1b. …and their builders are deleted, not orphaned',
+  'a builder no runner names is dead data the next reader has to disprove');
 for (const id of unique) {
   // Builder present…
   const re = new RegExp(`\\n  ${id}: \\(([^)]*)\\): GuideStep =>`);
@@ -113,7 +124,6 @@ const TARGETS = [
   ['calc.action.find-a-trade', ilc],
   ['calc.action.clear', ilc],
   ['calc.action.confirm', ilc],
-  ['calc.action.include-players', ilc],
   ['calc.league-give-add', ilc],
 ];
 for (const [id, src] of TARGETS) {
@@ -124,7 +134,7 @@ for (const [id, src] of TARGETS) {
 }
 // Every registered ref must be ATTACHED somewhere, or it measures null
 // forever — the exact defect that got script step s7.1 cut.
-for (const refName of ['columnsRef', 'findBtnRef', 'clearBtnRef', 'confirmBtnRef', 'includeBtnRef', 'giveAddRef']) {
+for (const refName of ['columnsRef', 'findBtnRef', 'clearBtnRef', 'confirmBtnRef', 'giveAddRef']) {
   const uses = (ilc.match(new RegExp(`\\b${refName}\\b`, 'g')) || []).length;
   assert(uses >= 3, `18. ${refName} is declared, registered AND attached`,
     `only ${uses} references — an unattached ref measures null forever`);
@@ -136,6 +146,13 @@ for (const refName of ['columnsRef', 'findBtnRef', 'clearBtnRef', 'confirmBtnRef
 // moves only when something calls `advanceGuideIfActive('<id>')`; tap-anywhere
 // is off for it (AnalystGuide). With no call site the bubble sits there until
 // the user ✕-es it, and the tour is over.
+//
+// W6-B (D-153): n16 is now a TAP beat and therefore has NO call site — the
+// loop below only demands one of beats that declare `advance: 'action'`, so it
+// follows the script rather than a hand-kept list. The complementary
+// assertion is 19a: a tap beat must NOT be wired, because a stray
+// `advanceGuideIfActive('n16')` would advance it on the very pick the reshape
+// exists to stop requiring.
 {
   const wired = new Set(
     [...(screen + ilc).matchAll(/advanceGuideIfActive\('(n\d+[a-z]?)'/g)].map((m) => m[1]),
@@ -150,6 +167,10 @@ for (const refName of ['columnsRef', 'findBtnRef', 'clearBtnRef', 'confirmBtnRef
     assert(wired.has(id), `19. ${id} is an action beat and has an advanceGuideIfActive call site`,
       'an action beat with no call site can never advance — the tour stalls on it');
   }
+  assert(!wired.has('n16'),
+    '19a. n16 is a TAP beat and has NO advanceGuideIfActive call site',
+    're-wiring it makes the beat demand a real pick, which is the canvas state '
+    + 'the W6-B reshape exists to avoid — the tour must reach the MODELED deck');
 }
 
 // ── 20: the lifecycle properties the review found missing ────────────────

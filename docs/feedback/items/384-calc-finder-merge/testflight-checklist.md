@@ -1,4 +1,4 @@
-# TestFlight checklist — #384 merged calculator (W0–W6-A)
+# TestFlight checklist — #384 merged calculator (W0–W6-B)
 
 **Under [D-056](../../../living-memory/DECISIONS.md) this is the ONLY runtime evidence any of
 this can get.** Everything below is structurally verified and has never run on a device.
@@ -20,9 +20,19 @@ needs a second account or a cooperative league-mate, because the whole contract 
 reads *their* preferences — and that is exactly the half no structural test can prove. Steps 7a
 and 37 also changed.
 
+**Amended again 2026-08-22 for W6-B ([D-153]).** Three operator rulings landed at once and they
+change what section C tests, not just how. **Find a Trade now forks**: an EMPTY canvas runs the
+modeled deck exactly as before, a canvas with assets on it runs a **fairness-only** package search
+whose every card gives away exactly what you built. The **Include-players toggle is gone** — the
+canvas is always the anchor — so steps 12, 16, 17 and the whole of C changed, and the old steps
+19–22 (include ON / include OFF / receive-side asymmetry) are **replaced** by 19–22b. The **tour is
+seven calculator beats, not nine**, and it deliberately ends with the canvas EMPTY so the run
+finishes in the modeled cards: steps 35, 37 and 39 changed and **37a is new** (spotlight tracking
+under scroll, which no structural check can see).
+
 | | |
 |---|---|
-| Build | first EAS build containing the W6-A commit (the ✓ queue) or later |
+| Build | first EAS build containing the W6-B commit (the fair-package fork) or later |
 | Flag | `calc.merged_layout` — **false at ship**. Flip in `config/features.json`, push, Render redeploys (no rebuild); the client picks it up from `/api/feature-flags` |
 | Prereq | a Sleeper league with ≥2 other managers, **and** a second league (step 33), **and** a way to sign in as a user with **zero** leagues (step 31), **and** — for steps 13a/13b — a second account (or a cooperative league-mate) in the same league who can set an untouchable |
 | Flags for the ✓ | `trade.likes_you` must be ON, or every ✓ answers `likes_you_off` by design. `trade.preference_lists` must be ON for step 13a |
@@ -97,9 +107,10 @@ defect in the gating, not in the feature.
     values converted to Y"** note appears when the chosen format differs from the league's own.
     *(W1 dropped these entirely; W5 put them back. A merged page with no format control is the
     review-§11 regression.)* ☐
-12. **The 15% cells.** The bottom row reads **Find a Trade · Include players · ✕ · ✓**. Tap the
-    **✕** — it must be comfortably tappable one-handed. **This is the operator-flagged risk:**
-    at ~53pt wide these are the tightest targets in the app. ☐
+12. **The 15% cells.** The bottom row reads **Find a Trade · ✕ · ✓** — three cells, 70/15/15.
+    There is **no "Include players" toggle** (W6-B removed it; the canvas is always the anchor).
+    Tap the **✕** — it must be comfortably tappable one-handed. **This is the operator-flagged
+    risk:** at ~53pt wide these are the tightest targets in the app. ☐
 13. **The ✓ QUEUES the trade (W6-A, [D-152]) — the happy path.** With **no partner** picked, or
     with only one side filled, the ✓ is dimmed (~40%) and inert — that part is unchanged. Now
     pick a partner in the **Team** dropdown and fill **both** sides with a trade where **you are
@@ -127,35 +138,57 @@ defect in the gating, not in the feature.
 15. **No utility row and no three-tab subnav** anywhere on this page. ☐
 16. **One Clear only, and one Find-a-Trade only.** The ghost "Clear trade" button is gone — the
     ✕ in the action row is the only clear. The **"Want ideas instead? Find a trade →"** text link
-    is **absent** on the merged In-league page (it bypasses Include players). Switch to Real
+    is **absent** on the merged In-league page (it would bypass the canvas). Switch to Real
     values: the text link **is** there. ☐
 17. **Large Dynamic Type.** Settings → Accessibility → Display & Text Size → Larger Text, push it
-    to a large accessibility size, then reopen the calculator. The "Include players" cell must
-    still be readable (truncation is acceptable, illegibility is not), the two icon cells must
-    stay ≥44pt tall, and **no row may lose its tier badge or value**. ☐
+    to a large accessibility size, then reopen the calculator. The "Find a Trade" label must still
+    be readable (truncation is acceptable, illegibility is not), the two icon cells must stay
+    ≥44pt tall, and **no row may lose its tier badge or value**. ☐
 18. **SE-class width.** Repeat step 10 on the narrowest device you have (375pt, ideally 320pt).
     The two 15% cells are ~53pt / ~41pt wide there. Nothing overlaps, nothing clips, and the
     compact meta line yields before the tier badge rather than pushing it off. ☐
 
 ## C. Behaviour (W2 + W5)
 
-19. **Include players ON, canvas filled (default).** Build a canvas with **one** player on your
-    side, tap **Find a Trade**. The deck generates, and **every served card's give side contains
-    that player**. ☐
-20. **Give side is strict, receive side is not — and that is the current contract.** Put **two**
-    players on your give side and **two** on the receive side. Generate. Every card must carry
-    **both** of your give players. The receive side only has to contain **at least one** of your
-    two — a card offering just one of them is **expected today**, not a bug. *(Symmetry needs an
-    API change; Q-029.)* ☐
-21. **Include players ON with an EMPTY canvas is unconstrained.** Clear the canvas, leave the
-    toggle ON, tap Find a Trade. A normal unconstrained deck generates — no pins, no
+19. **EMPTY canvas → the MODELED deck.** Clear the canvas completely and tap **Find a Trade**.
+    You land on the normal deck: the progress strip ("n/11 opponents searched") appears, cards
+    stream in, and the deck behaves exactly as it does from the Trades tab. **This is the fork's
+    default half and the one the tour ends on** — an empty canvas must never produce a
+    fairness-only deck. ☐
+20. **FILLED canvas → fair packages, and every card gives away YOUR canvas.** Put **one** player
+    on your give side and tap Find a Trade. There is **no progress strip** — the deck arrives in
+    one shot, because this is a synchronous sweep and not a job. Now check the contract on every
+    card you swipe through: **the give side is exactly the player you put on the canvas**, nothing
+    added, nothing dropped. Then repeat with **two** give players: every card's give side carries
+    **both**, always. *(A card giving away something you did not build is the one defect this
+    whole route exists to prevent.)* ☐
+21. **The receive side leads but does not gate.** Add a player from the partner's roster to your
+    **receive** side alongside a give player, then Find a Trade. The **first cards** contain that
+    player. Keep swiping: cards that do **not** contain them still appear further down. That is
+    correct and deliberate — the receive side is a preference, not a filter, so you are never
+    handed an empty deck for asking. ☐
+21a. **A receive-side asset the partner does not own costs nothing.** Pick a specific partner in
+    the **Team** dropdown, then put a player from a **different** team on your receive side. Find
+    a Trade still returns a full deck (nothing sorts first, which is fine). It must **not** show
     "no trades found". ☐
-22. **Include players OFF.** Add a player, toggle it off, tap Find a Trade. Cards may now
-    contain anything, and the deck must **not** still be constrained by the previous run's pins.
-    ☐
-23. **The partner is honoured.** Pick a specific manager in the **Team** dropdown, then Find a
-    Trade. The deck is scoped to that manager. Then clear the partner and Find a Trade again with
-    a filled canvas: it must still generate (an unscoped sweep), **not** sit empty. ☐
+22. **A give-side untouchable refuses out loud.** Long-press one of your own players and mark them
+    **untouchable**, then put that same player on the give side and tap Find a Trade. The deck is
+    empty rather than showing trades that contradict your own list. *(Your rule, your canvas — the
+    honest answer is nothing.)* Unmark them before continuing. ☐
+22a. **The fair cards are real deck cards.** On a fair deck: tap **✕** on a card (the reasons
+    overlay behaves exactly as in section C below), tap **✓** on the next one, and swipe a third.
+    None of them errors, and none of them freezes the card. Then tap ✓ on the **same** card twice
+    — it must not double-record. *(These cards were never minted by the generator; this is the
+    step that proves the reconstruct path works on them.)* ☐
+22b. **Search all trades.** Swipe a fair deck to the end. The end-of-deck card offers **Back to
+    calculator** and **Search all trades** — and **no "Search without …"** button (there are no
+    pins on a fair deck). Tap **Search all trades**: the modeled deck generates for the same
+    partner, with the progress strip, and the cards are no longer limited to your canvas. ☐
+23. **The partner is honoured, on both forks.** Pick a specific manager in the **Team** dropdown,
+    then Find a Trade with a **filled** canvas: every card's counterparty is that manager. Repeat
+    with an **empty** canvas: the modeled deck is scoped to them too. Then clear the partner and
+    Find a Trade again with a filled canvas: it must still generate (an unscoped sweep across the
+    league), **not** sit empty. ☐
 24. **The ✕ overlay — layer 1 does NOT close it.** On a card in this deck, tap ✕. The reasons
     arrive **as a sheet over the page**, not as inline tiles. Tap a tile (**Value / Fit /
     Neither**). **The sheet STAYS UP** and opens layer 2 beneath the tile you tapped. *(Closing
@@ -206,28 +239,40 @@ defect in the gating, not in the feature.
     tab. Note that the page you land on is **Real values**; the beat exists to carry you across.
     ☐
 35. **n10 advances on the real tap.** Tap **In league**. The bubble **advances** — it does not sit
-    there waiting to be ✕-ed. *(Four beats — the tab, add-a-player, Include players, Find a
+    there waiting to be ✕-ed. *(Two action beats — the tab and Find a
     Trade — only move on the real action; a bubble that stalls is the review-§2 P0.)* ☐
 36. **✕-ing the first beat ends the run.** Restart the app, let the tour auto-start, and ✕ the
     first bubble **without** switching tabs. **No further beats appear** — you are still on Real
     values, where none of the later targets is mounted. *(A tour that carries on narrating an
     absent page is the review-P2-14 defect.)* ☐
-37. **Complete the calculator half.** Run it through: outlook → canvas → Find a Trade → ✓ → add a
-    player → Clear → Include players → "Now tap Find a Trade". Each spotlight lands on the
-    control the line names. **Two things to watch:** the "Set outlook" button on beat 2 must
-    actually **open the Trade DNA sheet** (not just dismiss), and the ✓ beat (n15) says *"The
-    check queues this trade for the other manager, if it fits their preferences"* — since W6-A
-    that is literally true, so the control it spotlights should be **live** whenever a partner is
-    picked and both sides are filled. A dimmed ✓ under those conditions is now a defect. ☐
+37. **Complete the calculator half — SEVEN beats, ending on an empty canvas.** Run it through:
+    In-league tab → outlook → canvas → Find a Trade → ✓ → *"Add players you'd move and we'll find
+    trades that include them."* → *"Now tap Find a Trade — start with the canvas empty."* Each
+    spotlight lands on the control the line names. **Four things to watch:** (a) the add-players
+    beat is **informational** — tap anywhere to move past it, and **do not add a player**, which
+    is what the final beat then asks of you; (b) there is **no Clear beat and no Include-players
+    beat** (both retired with W6-B); (c) the "Set outlook" button on the second beat must actually
+    **open the Trade DNA sheet**, not just dismiss; (d) the ✓ beat (n15) says *"The check queues
+    this trade for the other manager, if it fits their preferences"* — since W6-A that is
+    literally true, so the control it spotlights should be **live** whenever a partner is picked
+    and both sides are filled. A dimmed ✓ under those conditions is a defect. ☐
+37a. **The spotlight tracks the page as it scrolls.** On any beat whose target sits below the fold
+    (the canvas, the action row), **scroll the page while the bubble is up**. The highlight ring
+    must move **with** its control, staying locked to it the whole way. A ring that stays put
+    while the page slides underneath is the B1 regression this page's `onScroll` fixes — and it is
+    invisible to every automated check. ☐
 38. **Nothing interrupts it — including between beats.** Run the whole tour without dismissing
     it. No quick-set prompt, no outlook banner, no Apple prompt, no push primer, no diff banner,
     no adaptation moment appears at any point — **especially in the gaps between beats**, which is
     the specific bug the hold exists to fix. ☐
-39. **It crosses to the deck, and waits for a card.** Tap Find a Trade on the last calculator
-    beat. The calculator is **replaced**, not stacked (press Back afterwards and confirm you do
-    not land on a second copy of the deck). The deck's first beat — the ✕ one — must not appear
-    **until a real card is on screen**. If generation takes a while, the tour waits; if it never
-    arrives, the tour gives up after about **30 seconds** and everything un-mutes. ☐
+39. **It crosses to the MODELED deck, and waits for a card.** Tap Find a Trade on the last
+    calculator beat **with the canvas empty**, as the beat asks. You land on the **modeled** deck
+    — the progress strip appears and cards stream in. *(This is the operator's stated goal for the
+    tour: "the tour ends with them in the modeled cards." A fairness-only deck here means the
+    canvas was not empty.)* The calculator is **replaced**, not stacked (press Back afterwards and
+    confirm you do not land on a second copy of the deck). The deck's first beat — the ✕ one —
+    must not appear **until a real card is on screen**. If generation takes a while the tour
+    waits; if it never arrives it gives up after about **30 seconds** and everything un-mutes. ☐
 40. **The deck half runs to the end.** ✕ → swap arrows → package toggle → fairness meter → send →
     the closing beat. Note any beat that spotlights nothing: the package toggle only renders with
     2+ give pins and the fairness help is hidden on a first run, so those two are the likely
@@ -253,7 +298,7 @@ defect in the gating, not in the feature.
     rather than hiding itself (known, review P2 #14) — record whether that looks acceptable. ☐
 46. **`onboarding.guide_v2` OFF.** Set it false, restart. **No tour starts anywhere**, and there
     is **no "Show me around" link** on the merged page. The merged layout itself is unaffected —
-    columns, dropdowns, action row and Include players all still work. *(This is the state the
+    columns, dropdowns and action row all still work. *(This is the state the
     app is in today, and it is the state you ship if you flip `calc.merged_layout` alone.)* ☐
 
 ---

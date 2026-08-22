@@ -39,7 +39,7 @@
 
 **CLOSED 2026-08-22 by [D-151](DECISIONS.md).** Operator: *"I'm fine with it as its own tab for now."* The two-tab form (In league | Real values) as built is the answer; #310's league-free reachability stands; n10 keeps its target. Revisit when Find a Trade is absorbed.
 
-### Q-029 — The ✓ like/queue cell has no contract: what does "queue this trade for the other manager" call? — **✓ HALF CLOSED 2026-08-22; receive-side half STILL OPEN**
+### Q-029 — The ✓ like/queue cell has no contract: what does "queue this trade for the other manager" call? — **CLOSED 2026-08-22 (both halves)**
 
 - **RESOLUTION — the ✓ half, 2026-08-22 (W6-A, [D-152]).** The operator approved building the
   contract; option (b), a new endpoint, is what shipped as **`POST /api/trades/queue`**. The
@@ -54,15 +54,34 @@
   demands. Contract, evidence and the honest limits of `queued: true`:
   [`status.md` § W6-A](../docs/feedback/items/384-calc-finder-merge/status.md). Beat n15's copy
   needed no change, and its placeholder `adoptionEvent` is now `calc_trade_queued`.
-- **STILL OPEN:** the second half below — receive-side `pinned_receive_mode:'all'` and the
-  `picks_pool_cap` pin rejection. Unchanged, still a bright-line API change, still owned by the
-  operator.
+- **RESOLUTION — the receive-side half, 2026-08-22 (W6-B, [D-153]). CLOSED BY RETIREMENT: the
+  concept no longer exists.** The operator re-specified the request rather than answering it.
+  Verbatim: *"I'm thinking that this type of request shouldn't go through our models. It should be
+  a much simpler set of cards solving for fairness only. Similar to how we determine the
+  consolidate and downgrade suggestions already"* — and, on what Include-players OFF should mean,
+  *"C works"*, i.e. the toggle is dropped and the canvas is always the anchor.
+  So there is no longer a pinned model job for `pinned_receive_mode:'all'` to be added to. A
+  filled canvas now runs **`POST /api/trades/fair-packages`**: the canvas GIVE side is an EXACT
+  anchor (every served card gives away precisely that set — stricter than `pinned_give_mode:'all'`
+  ever was, because nothing may be added either), and the receive side is a **ranking preference**
+  — ideas containing all of it sort first, ideas that cannot are still served. That asymmetry is
+  now a decision with a reason rather than an oversight: a hard receive constraint returns an empty
+  deck the moment the canvas names an asset the partner does not own.
+  The **`picks_pool_cap` half dissolves with it.** The anchor is priced from the seed board and is
+  never re-checked against `user_roster`, so a canvas pick outside the cap cannot reject every
+  subset any more — there is no subset search on the give side at all.
+  `POST /api/trades/generate` and its three enumerators are **untouched**: `pinned_give_mode` and
+  the intersect-only receive behaviour are exactly as they were for every non-calculator caller.
+  Contract and evidence: [`status.md` § W6-B](../docs/feedback/items/384-calc-finder-merge/status.md),
+  [`api-reference.md`](../docs/api-reference.md).
 - **Why it mattered (original entry, kept):** the merged action row's ✓ (`calc.action.confirm`) was a **permanently disabled control**. `InLeagueCalculator.tsx` has `disabled={!onLikeTrade || !bothSides}`, and no caller passes `onLikeTrade` — `TradeCalculatorScreen` mounts the component without it. Tour beat **n15** spotlights it (*"The check queues this trade for the other manager, if it fits their preferences"*), [D-150](DECISIONS.md) Decision 3 and `status.md` both presented it as built, and the first TestFlight checklist told the operator to tap it and VoiceOver it. A user who follows the tour reaches a 40 %-opacity button that does nothing.
 - **Why it cannot just be wired:** there is no backend route that queues a **hand-built** package for a counterparty. The deck's like path (`trade_queue` / the likes surface) needs a **server-minted `trade_id`**, which only the generator produces; a calculator canvas has no card and therefore no id. This is an **API contract decision**, not an omission — the bright line CLAUDE.md draws.
 - **The options:** (a) mint via the existing share-package route (`POST /api/trades/share-package` returns a package id) and then like that id — cheapest, but a share-package row is not a trade card and the likes surface would need to render one; (b) a new "submit package as like" endpoint that mints and queues in one call — cleanest contract, most work, and it needs a mutual-match story (what does the counterparty *see*?); (c) **cut the cell and beat n15** until (a) or (b) exists, and correct D-150 / status / checklist — the option that makes the shipped surface honest today.
 - **Second half of the same decision — receive-side "must include".** Ruling 2 says Include-players ON ⇒ the search must include the canvas. The give side honours it (`trade_optimizer.py` `pinned_give_mode:'all'` — every pin required); the receive side requires only that the served card **intersect** the pinned set, in all three enumerators. Making it symmetric means adding `pinned_receive_mode:'all'` through `api/trades.ts` → `server.py` → the enumerators — again an API change. Related: a canvas pick outside `picks_pool_cap` (default 6) is never on `user_roster`, so `pinned_all` rejects every subset and the user gets zero cards behind a misleading "try turning fairness off" message.
 - ~~**Workaround in the meantime:** the cell renders disabled with an honest a11y state, and the TestFlight checklist now tests that it *is* disabled rather than telling the operator to tap it.~~ **Superseded 2026-08-22** — the cell is live, and checklist steps 13 / 13a / 13b test the queue and both refusal paths instead.
-- **Owner:** ✓ mechanism — **closed**. Receive-side all-mode — operator.
+- **Owner:** both halves **closed**. What is left of #384's bright-line list is not this question:
+  the overlay scope (built calculator-origin; reversing it needs an explicit call) and the rollout
+  shape (global boolean vs the `trades_home_inline` tester-allowlist path).
 
 ## 2026-08-19 — Open Items (team review)
 

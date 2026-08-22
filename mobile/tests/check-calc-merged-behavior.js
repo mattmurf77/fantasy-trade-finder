@@ -18,6 +18,8 @@ const read = (r) => fs.readFileSync(path.join(SRC, r), 'utf8');
 const card = read('components/TradeCard.tsx');
 const trades = read('screens/TradesScreen.tsx');
 const screen = read('screens/TradeCalculatorScreen.tsx');
+const calcSrc = read('components/InLeagueCalculator.tsx');
+const featured = read('components/FeaturedTradeWindow.tsx');
 
 console.log('check-calc-merged-behavior:');
 
@@ -185,39 +187,101 @@ assert(/pinCount === 1\s*\?\s*`Search without \$\{[^`]*\}`\s*:\s*'Search without
     '10e. the partner rides along when one is scoped, and the prefill survives without one');
 }
 
-// ── Ruling 2: Include players writes the SHIPPED pin store, not a new param
+// ── D-153 (W6-B): the canvas is ALWAYS the anchor, and it never touches the
+// pin store. The Include-players toggle is gone — the operator ruled "C works"
+// — so the fork is decided by the canvas ITSELF: a give side means the
+// fairness sweep, an empty canvas means the model deck.
 assert(/useFinderTargets/.test(screen),
   '11. the finder hand-off goes through useFinderTargets');
 assert(!/requireAssets/.test(screen),
   '12. no parallel requireAssets route param survives',
   'an invented param nothing reads would silently do nothing');
+assert(!/includePlayers/.test(screen) && !/includePlayers/.test(calcSrc),
+  '12a. no Include-players toggle survives anywhere on the calculator',
+  'the control was REMOVED with its ruling; a leftover would be a switch with '
+  + 'no contract behind it');
 {
   const at = screen.indexOf('onFindATrade={(');
-  // W5 grew this handler (analytics + the tour hand-off + the #330 handoff),
-  // so the window is sized to the whole prop body, not to W2's shape.
   const seg = screen.slice(at, at + 3000);
-  // The TOGGLE has to be inside the pin condition, not merely somewhere in
-  // the handler. `if (give.length || receive.length)` pins the canvas with
-  // Include players switched OFF — the search is then constrained by assets
-  // the user explicitly excluded, and it is the precise case the operator's
-  // ruling 2 and checklist step 13 are about. Verified green against the old
-  // three assertions, which only looked for the calls.
-  assert(/if \(includePlayers && \(give\.length \|\| receive\.length\)\) \{/.test(seg),
-    '13a. `includePlayers` is IN the pin condition, not just in the handler',
-    'the toggle must gate the write; a canvas-only condition pins with Include OFF');
-  assert(/setSide\('give'/.test(seg) && /setSide\('receive'/.test(seg),
-    '13. include-ON pins both sides of the canvas');
-  assert(/setPackageMode\(true\)/.test(seg),
-    '14. include-ON sets packageMode — the contract that makes "must include" literal');
-  assert(/t\.clear\(\)/.test(seg),
-    '15. include-OFF clears stale pins',
-    'a leftover pin would re-apply the constraint the user just switched off');
+  // THE contract. `fairAnchor` present iff the canvas has a GIVE side — the
+  // fair sweep prices a give package, so a receive-only canvas is "empty" and
+  // must fall to the model. `giveIds.length > 0` is the whole predicate;
+  // anything looser (`|| receiveIds.length`) sends an unpriceable anchor.
+  assert(/const fair = giveIds\.length > 0;/.test(seg),
+    '13. the fair fork is decided by the GIVE side alone',
+    'a receive-only canvas has nothing to price — it is the model deck\'s case');
+  assert(/\.\.\.\(fair \? \{ fairAnchor: \{ giveIds, receiveIds \} \} : \{\}\)/.test(seg),
+    '13a. the handoff carries fairAnchor iff the canvas has a give side',
+    'an unconditional fairAnchor routes an empty canvas to a sweep with no '
+    + 'anchor; an absent one silently reverts the whole feature to the model');
+  assert(/path: fair \? 'fair' : 'model'/.test(seg),
+    '13b. the analytics prop reports which fork was actually taken');
+  // The pin-store writes W5 needed are GONE. The anchor travels in the
+  // handoff and then in the request body; writing pins here would leave a
+  // constraint behind for whatever search ran next (which is the only reason
+  // the old `t.clear()` existed).
+  assert(!/setSide\('give'/.test(seg) && !/setSide\('receive'/.test(seg)
+      && !/setPackageMode\(/.test(seg) && !/t\.clear\(\)/.test(seg),
+    '14. onFindATrade writes NO pins',
+    'the canvas no longer rides the pin store — a write here strands a '
+    + 'constraint on the next model search');
 }
-// Review #16 — the deck re-asserts it on consumption. Belt-and-braces: the
-// calculator already clears, but a pin that survived would silently re-apply
-// the constraint the user just switched off.
-assert(/finderHandoff\.includePlayers === false/.test(trades),
-  '16. the deck re-checks the pins are empty on an include-OFF hand-off');
+// The deck side of the same contract: a fairAnchor must NOT arm the model.
+{
+  const at = trades.indexOf('const autoRunOrigin = autoRunOriginRef.current;');
+  const seg = trades.slice(Math.max(0, at - 1200), at);
+  assert(/const fairAnchor = fairAnchorRef\.current;\s*\n\s*if \(fairAnchor\) \{/.test(seg),
+    '15. the choke point takes the fair fork BEFORE the model gate',
+    'reading the anchor after the generate dispatch runs both searches');
+  assert(/runFairPackages\(fairAnchor\);[\s\S]{0,300}?return;/.test(seg),
+    '15a. …and RETURNS, so a fair arrival never dispatches a generate',
+    'falling through to the model gate is the exact sabotage this pins');
+}
+assert(/autoRunPendingRef\.current = !fair;/.test(trades),
+  '16. the model auto-run is armed only when there is no fair anchor',
+  '`= true` makes every calculator arrival run the model as well');
+assert(!/finderHandoff\.includePlayers/.test(trades),
+  '16a. the deck reads no includePlayers field',
+  'the field is gone from FinderHandoff — a read here is a stale contract');
+{
+  // The fair deck's cards are built with the SHARED helper, so they carry the
+  // give/receive ids, the counterparty and the server `fairpk_` trade_id that
+  // `_reconstruct_swipe_card` needs. A hand-rolled card here is how a swipe
+  // starts failing with "Unknown trade_id".
+  assert(/setDeck\(res\.ideas\.map\(\(idea\) => ideaToCard\(idea, leagueId\)\)\)/.test(trades),
+    '16b. the fair deck is built through utils/ideaToCard',
+    'a local card literal drops whatever field the swipe reconstruct needs');
+  assert(/from '\.\.\/utils\/ideaToCard'/.test(trades)
+      && /from '\.\.\/utils\/ideaToCard'/.test(featured),
+    '16c. both the deck and the featured window import the ONE helper');
+}
+{
+  // The fair deck has no pins, so the W5 unpin-retry must not render on it —
+  // it would be a button that unpinned nothing. "Search all trades" is its
+  // replacement, and it runs the MODEL for the same partner.
+  for (const id of ['trades.deck-summary.unpin-retry',
+                    'trades.deck-exhausted.unpin-retry']) {
+    const at = trades.indexOf(`testID="${id}"`);
+    const before = trades.slice(Math.max(0, at - 300), at);
+    assert(/!fairDeck/.test(before), `16d. ${id} does NOT render on a fair deck`,
+      'there are no pins on a fair deck — the anchor rode the request body');
+  }
+  for (const id of ['trades.deck-summary.search-all',
+                    'trades.deck-exhausted.search-all']) {
+    const at = trades.indexOf(`testID="${id}"`);
+    assert(at >= 0, `16e. ${id} exists`);
+    const before = trades.slice(Math.max(0, at - 300), at);
+    assert(/fairDeck/.test(before), `16e. ${id} renders only on a fair deck`);
+  }
+  const at = trades.indexOf('function handleSearchAllTrades()');
+  assert(at >= 0, '16f. handleSearchAllTrades is the single search-all handler');
+  const seg = trades.slice(at, at + 500);
+  assert(/track\(\s*'deck_search_all_tapped'/.test(seg),
+    '16g. the exit emits deck_search_all_tapped');
+  assert(/handleFindTrades\(/.test(seg),
+    '16h. …and dispatches the MODEL search through the shared entry point',
+    'a private dispatch would skip the nudge-clearing and the fairDeck reset');
+}
 // Review #3/#9 — a calculator hand-off has to actually generate, including
 // when no partner was chosen (the Team dropdown is optional there).
 assert(/autoRunOrigin === ['"]calculator['"]/.test(trades),

@@ -59,17 +59,25 @@ calculator/unpin, league-switch canvas, format chips, analytics (13 events were 
 guards that stayed green through real regressions. Gates: tsc · lint · **76/76 guards** (all wired to
 `npm run`) · pytest **4128**.
 
-**Owed by the operator (bright line — Q-028, Q-029, scope.md §6):** (1) the ✓ like/queue contract —
-cell is disabled with an honest a11y state until then; (2) receive-side `pinned_receive_mode:'all'`
-(API change) — today only the give side is must-include; (3) §6b — Manual | In league (built) vs
-"replaces the manual tab" (ruled); (4) rollout shape — global flag vs tester allowlist. **Also owed:**
-the five flag prerequisites in the checklist's table — `onboarding.guide_v2` is **false** and the
-tour does not run without it; `trade.outlook_direction` false ⇒ fallback row.
+**Then the operator ruled, and W6 landed the same day:** §6b → own tab ([D-151](DECISIONS.md));
+the ✓ contract → `POST /api/trades/queue` (**W6-A** `d6c54cf`, [D-152](DECISIONS.md)); Find a
+Trade forks on the canvas — empty ⇒ modeled deck, filled ⇒ fairness-only `POST
+/api/trades/fair-packages`, toggle removed, tour reshaped to end in the modeled cards, calculator
+scroll-tracking fixed (**W6-B**, [D-153](DECISIONS.md)). Q-028 and Q-029 both closed. pytest
+**4173**, 76/76 guards.
 
-**Next session:** run the 46-step checklist (`testflight-checklist.md`) on a build containing
-`fc062dc` or later — section A flag-OFF first; then the operator's four calls; then W6. Partner-
-summary lines in the merged team sheet and the n15 adoption placeholder are known, minor, and noted
-in status.md.
+**Still owed:** (1) rollout shape — global flag vs tester allowlist (scope.md §6); (2) the
+prerequisite flags — `onboarding.guide_v2` is **false** and the tour does not run without it,
+`trade.outlook_direction` false ⇒ the outlook fallback row; (3) the TestFlight checklist, rewritten
+for W6, **UNRUN** — section A flag-OFF first. Known minor: partner-summary lines are not in the
+merged team sheet; the fair sweep inherits the `finderHubOn && finderMode` choke-point posture.
+
+**Parallel thread:** `docs/plans/ram-mascot/brief.md` (ram replaces The Analyst) — a separate
+session is executing it; Part 3 of that brief must not start until this branch's W6-B commit is
+confirmed (it is, as of this handoff).
+
+**Next session:** run the checklist on a build containing the W6-B commit or later; then the
+rollout-shape call; then push/PR.
 
 ## 2026-08-22 — negmem BUILT dark on `claude/vigilant-spence-8583f5`; TestFlight pass + two rollout flips owed
 

@@ -2433,6 +2433,8 @@ _MODEL_CONFIG_DEFAULTS = [
     # ── #172/#189 follow-up — asset-centric trade ideas (trade.asset_ideas) ──
     ("asset_ideas_lateral_band", 0.10,  "asset ideas: ± consensus-value band around the pinned asset classifying a counterpart as Lateral; above=Upgrade, below=Downgrade piece"),
     ("asset_ideas_group_cap",    6.0,   "asset ideas: max ideas returned per group (upgrade/lateral/downgrade), ordered by |difference|"),
+    # ── #384 W6-B — fairness-only packages for a fixed give anchor (calc.merged_layout) ──
+    ("fair_packages_cap",       20.0,   "#384: max fair-package ideas returned by POST /api/trades/fair-packages — ONE flat swipeable deck, so one cap (not per group)"),
     ("bench_credit_qb",          0.10,  "interview: bench credit for QB depth in 1QB formats"),
     ("bench_credit_rb",          0.30,  "interview: bench credit for RB depth (near-startable insurance)"),
     ("bench_credit_wr",          0.30,  "interview: bench credit for WR depth (near-startable insurance)"),

@@ -47,15 +47,18 @@ _PROPS: dict[str, dict] = {
     "calc_tour_beat_missing":       {"beat": "n17"},
     # Calculator interactions.
     "calc_mode_switched":           {"mode": "league"},
-    "calc_include_players_toggled": {"on": True},
     "calc_asset_added":             {"side": "receive"},
     "calc_cleared":                 {"mode": "live"},
-    "calc_find_a_trade_tapped":     {"include_players": True,
+    # W6-B (D-153): `path` replaced `include_players`. The toggle it named is
+    # gone — the canvas is always the anchor — so the prop now reports which
+    # fork the tap actually took (`fair` = canvas anchored, `model` = empty).
+    "calc_find_a_trade_tapped":     {"path": "fair",
                                      "give_count": 2, "receive_count": 1,
                                      "has_partner": False},
     # Deck (screen 'Trades').
     "deck_back_to_calculator":      {"pin_count": 3},
     "deck_unpin_retry":             {"pin_count": 1},
+    "deck_search_all_tapped":       {},
     "trade_pass_overlay_opened":    {},
     "trade_pass_overlay_dismissed": {"banked": True},
     # Pre-existing live emitter, never registered until now
@@ -85,8 +88,6 @@ _NON_INTENT = {
 _INTENT = {
     # a configuration change, the league_basis_changed peer
     "calc_mode_switched",
-    # a configuration toggle, the stud_tax_mode_changed peer
-    "calc_include_players_toggled",
     # the calculator's core gesture, the finder_target_pinned peer
     "calc_asset_added",
     # a deliberate destructive action (its undo calc_clear_undone is INTENT)
@@ -97,6 +98,9 @@ _INTENT = {
     "deck_back_to_calculator",
     # a retry after an empty deck, the suppression_undo_tapped peer
     "deck_unpin_retry",
+    # W6-B: a deliberate widening off an exhausted FAIR deck — the same class
+    # as deck_unpin_retry, and reachable only from a deck the user asked for
+    "deck_search_all_tapped",
 }
 
 assert _NON_INTENT | _INTENT == set(_PROPS), "classify every #384 name"
@@ -308,6 +312,7 @@ def test_384_every_name_lands_with_every_prop(harness):
     client, engine = harness
     screens = {"deck_back_to_calculator": "Trades",
                "deck_unpin_retry": "Trades",
+               "deck_search_all_tapped": "Trades",
                "trade_pass_overlay_opened": "Trades",
                "trade_pass_overlay_dismissed": "Trades"}
     body = _post(client, [
