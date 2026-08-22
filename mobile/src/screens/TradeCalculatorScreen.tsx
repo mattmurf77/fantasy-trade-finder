@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  InteractionManager,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   Pressable,
   ScrollView,
   Share,
@@ -47,7 +50,9 @@ import {
 import { advanceGuideIfActive, guideV2Active, guidedAvatarActive } from '../state/useGuide';
 import {
   notifyGuideTargetsMoved,
+  registerGuideScroller,
   registerGuideTarget,
+  unregisterGuideScroller,
   unregisterGuideTarget,
 } from '../state/guideTargets';
 import { useFlag } from '../state/useFeatureFlags';
@@ -141,6 +146,19 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
     return () => unregisterGuideTarget('calc.mode-tab.league');
   }, []);
 
+  // #384 device feedback (report 5) — the page's scroll handle, so the overlay
+  // can bring a below-the-fold target into view before it rings it. Keyed by
+  // the SCREEN NAME the calculator beats declare (`screen: 'TradeCalculator'`).
+  const pageScrollRef = useRef<ScrollView | null>(null);
+  const pageScrollYRef = useRef(0);
+  useEffect(() => {
+    registerGuideScroller('TradeCalculator', {
+      scrollTo: (y, animated) => pageScrollRef.current?.scrollTo({ y, animated }),
+      getScrollY: () => pageScrollYRef.current,
+    });
+    return () => unregisterGuideScroller('TradeCalculator');
+  }, []);
+
   // #384 W5 — n11's CTA opens the outlook sheet, which lives inside
   // InLeagueCalculator. The SCREEN starts the tour, so the opener is threaded
   // up through a ref the component fills on mount rather than the runner
@@ -199,15 +217,37 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
   // league has no In-league page for the first beat to carry them to, and
   // startCalcTour itself refuses when the guided experience is off or the
   // tour has already been completed once.
+  //
+  // …and it starts AFTER the push transition, not from the bare mount effect.
+  // #384 device feedback (report 1): "Box was in the wrong spot when I first
+  // navigated to the page. When I navigated to the in league page after the
+  // tour and hit 'Show me around', it worked." `measureInWindow` returns
+  // ABSOLUTE window coordinates, and during a native-stack push the screen is
+  // still translated — so a measure taken from the mount effect reports where
+  // the target was mid-slide and nothing re-measures afterwards. Waiting for
+  // `transitionEnd` measures a settled layout. `InteractionManager` is the
+  // fallback for a presentation that emits no transition event (a replace, a
+  // deep link straight onto this route); whichever lands first wins, once.
   useEffect(() => {
     if (!calcMergedOn || prefill || !hasLeague) return;
-    startCalcTour('auto', { openOutlook: () => outlookOpenerRef.current?.() });
+    let started = false;
+    const begin = () => {
+      if (started) return;
+      started = true;
+      startCalcTour('auto', { openOutlook: () => outlookOpenerRef.current?.() });
+    };
+    const unsub = navigation.addListener('transitionEnd', begin);
+    const task = InteractionManager.runAfterInteractions(begin);
     // Leaving the screen abandons the run — otherwise the tour hold would
     // outlive the tour and mute every interstitial app-wide. NOT an
     // unconditional stop: Find a Trade unmounts this screen too, and that
     // departure is the tour continuing onto the deck.
-    return () => calcTourScreenBlurred();
-  }, [calcMergedOn, prefill, hasLeague]);
+    return () => {
+      unsub();
+      task.cancel();
+      calcTourScreenBlurred();
+    };
+  }, [calcMergedOn, prefill, hasLeague, navigation]);
 
   // Unmount is not the only way to leave. A push over this screen (or a tab
   // change) leaves it MOUNTED, and a tour narrating a page nobody is looking
@@ -615,8 +655,19 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
           fold on an SE. Unconditional, and throttled — without the throttle
           iOS fires onScroll about once per second and the ring lurches. */}
       <ScrollView
+        ref={pageScrollRef}
         contentContainerStyle={styles.scroll}
-        onScroll={notifyGuideTargetsMoved}
+        onScroll={(e: NativeSyntheticEvent<NativeScrollEvent>) => {
+          pageScrollYRef.current = e.nativeEvent.contentOffset.y;
+          notifyGuideTargetsMoved();
+        }}
+        // #384 device feedback (report 1) — scroll is not the only way a
+        // target moves. This page's own content GROWS after first paint (the
+        // rosters land, and the outlook receipt swaps with its fallback), which
+        // shifts every target below it without a single scroll event. Both
+        // callbacks are the same one-line announcement.
+        onLayout={notifyGuideTargetsMoved}
+        onContentSizeChange={notifyGuideTargetsMoved}
         scrollEventThrottle={16}
       >
         {/* Mode switch: In-league vs league-free real consensus values. */}

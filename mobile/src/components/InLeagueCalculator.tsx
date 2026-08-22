@@ -188,6 +188,12 @@ export default function InLeagueCalculator({
   const clearBtnRef = useRef<View | null>(null);
   const confirmBtnRef = useRef<View | null>(null);
   const giveAddRef = useRef<View | null>(null);
+  // #384 device feedback (report 2) — n11's spotlight. The outlook section is
+  // TWO mutually exclusive rows (`OutlookBiasReceipt`, or the
+  // `calc.outlook-fallback` twin when the receipt draws nothing), so the
+  // registered node is the wrapper that always contains whichever rendered —
+  // the same hosting pattern TradesScreen uses for `trades.fairness-help`.
+  const outlookRowRef = useRef<View | null>(null);
   // n11's CTA has to open the sheet this component owns; the screen holds the
   // ref and hands the same opener to the tour runner.
   useEffect(() => {
@@ -205,6 +211,7 @@ export default function InLeagueCalculator({
       ['calc.action.clear', clearBtnRef],
       ['calc.action.confirm', confirmBtnRef],
       ['calc.league-give-add', giveAddRef],
+      ['calc.outlook-row', outlookRowRef],
     ];
     pairs.forEach(([id, ref]) => registerGuideTarget(id, ref));
     return () => pairs.forEach(([id]) => unregisterGuideTarget(id));
@@ -700,36 +707,41 @@ export default function InLeagueCalculator({
             </View>
           ) : null}
 
-          <OutlookBiasReceipt
-            onChange={() => setDnaOpen(true)}
-            onHiddenChange={setOutlookHidden}
-          />
-          {outlookHidden ? (
-            // The receipt's own row, minus the claim it cannot make. Same
-            // Change control, same sheet — the page always has an outlook
-            // section and always a way into the editor.
-            <View testID="calc.outlook-fallback" style={styles.outlookFallback}>
-              <Text style={styles.outlookFallbackText} numberOfLines={1}>
-                Outlook · Not set
-              </Text>
-              <Pressable
-                testID="calc.outlook-fallback.change"
-                accessibilityRole="button"
-                accessibilityLabel="Set your outlook"
-                hitSlop={8}
-                onPress={() => {
-                  haptics.selection();
-                  setDnaOpen(true);
-                }}
-              >
-                {({ pressed }) => (
-                  <Text style={[styles.outlookFallbackChange, pressed && styles.linkPressed]}>
-                    Change
-                  </Text>
-                )}
-              </Pressable>
-            </View>
-          ) : null}
+          {/* n11's spotlight target. `collapsable={false}` because a plain
+              wrapper View with no style is flattened away on Android and then
+              measures nothing. */}
+          <View ref={outlookRowRef} collapsable={false} testID="calc.outlook-row">
+            <OutlookBiasReceipt
+              onChange={() => setDnaOpen(true)}
+              onHiddenChange={setOutlookHidden}
+            />
+            {outlookHidden ? (
+              // The receipt's own row, minus the claim it cannot make. Same
+              // Change control, same sheet — the page always has an outlook
+              // section and always a way into the editor.
+              <View testID="calc.outlook-fallback" style={styles.outlookFallback}>
+                <Text style={styles.outlookFallbackText} numberOfLines={1}>
+                  Outlook · Not set
+                </Text>
+                <Pressable
+                  testID="calc.outlook-fallback.change"
+                  accessibilityRole="button"
+                  accessibilityLabel="Set your outlook"
+                  hitSlop={8}
+                  onPress={() => {
+                    haptics.selection();
+                    setDnaOpen(true);
+                  }}
+                >
+                  {({ pressed }) => (
+                    <Text style={[styles.outlookFallbackChange, pressed && styles.linkPressed]}>
+                      Change
+                    </Text>
+                  )}
+                </Pressable>
+              </View>
+            ) : null}
+          </View>
 
           {/* #384 review §11 — the scoring format is the #166/#167 session
               override, and the merged layout dropped it entirely. Same chips,

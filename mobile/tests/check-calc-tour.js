@@ -7,6 +7,16 @@
 // cannot see: the ORDER, the tour hold's lifecycle, and the property that
 // every beat the runner names actually exists and is argument-free.
 //
+// Sections 39–41 were added from the 2026-08-22 device pass (build 1.16.0
+// (126)), which found four beats pointing at nothing and a first-landing
+// spotlight measured mid-transition. They pin: no #384 beat advances on a
+// screen tap (report 6 — and a tap beat's full-screen catcher is what ate the
+// deck's scroll, report 5); n11/n20/n23/n23b carry targets and those targets
+// are registered by the file that owns the node (reports 2/4/5); the
+// auto-start waits for `transitionEnd` (report 1); and both screens the tour
+// runs on register a guide scroller under the exact screen name their beats
+// declare.
+//
 // Run: node tests/check-calc-tour.js
 
 'use strict';
@@ -97,8 +107,8 @@ assert(/startCalcTour\('show_me_around'/.test(screen), '13. re-entry from the li
   assert(/!calcMergedOn \|\| prefill \|\| !hasLeague/.test(before),
     '14. auto-start is gated on the merged flag, a prefilled arrival AND a league',
     'a deck hand-off must not be hijacked, and a league-less user has no In-league page to be carried to');
-  const after = screen.slice(at, at + 800);
-  assert(/return \(\) => calcTourScreenBlurred\(\)/.test(after),
+  const after = screen.slice(at, at + 1200);
+  assert(/return \(\) => \{[\s\S]{0,240}?calcTourScreenBlurred\(\);/.test(after),
     '15. leaving the screen abandons the run — through the hand-off-aware exit',
     'an unconditional stop here kills the parked deck half, because Find a Trade unmounts this screen too');
   // …and the effect has to RE-RUN when its guards resolve. `hasLeague` is
@@ -107,9 +117,23 @@ assert(/startCalcTour\('show_me_around'/.test(screen), '13. re-entry from the li
   // empty dep array means the tour never starts for the users it is for —
   // and never re-evaluates when a prefilled arrival is replaced. Verified
   // green against the old assertions, which only looked for the call.
-  assert(/\}, \[calcMergedOn, prefill, hasLeague\]\);/.test(after),
-    '15a. the auto-start effect declares all three of its guards as deps',
+  assert(/\}, \[calcMergedOn, prefill, hasLeague, navigation\]\);/.test(after),
+    '15a. the auto-start effect declares all its guards as deps',
     'deps `[]` freeze the guards at their first-render values — usually all false');
+  // 2026-08-22 device feedback, report 1: "Box was in the wrong spot when I
+  // first navigated to the page… after the tour, 'Show me around' worked."
+  // `measureInWindow` is ABSOLUTE window coordinates, and a native-stack push
+  // measures mid-slide. The auto-start must wait for a settled layout.
+  const beforeStart = screen.slice(Math.max(0, at - 1000), at);
+  assert(/addListener\('transitionEnd', begin\)/.test(beforeStart + after),
+    "15b. the auto-start waits for the push transition to end",
+    'starting from the bare mount effect measures the target mid-slide, and '
+    + 'nothing re-measures afterwards — the first-landing spotlight lands wrong');
+  assert(/InteractionManager\.runAfterInteractions\(begin\)/.test(beforeStart + after),
+    '15c. …with an InteractionManager fallback for a presentation that emits no transition',
+    'a replace or a cold deep link onto this route fires no transitionEnd');
+  assert(/if \(started\) return;/.test(beforeStart + after),
+    '15d. …and whichever lands first starts the tour exactly once');
 }
 assert(/guidedAvatarActive\(\) && guideV2Active\(\)/.test(screen),
   '16. the "Show me around" handler needs guided-avatar AND guide_v2',
@@ -125,16 +149,22 @@ const TARGETS = [
   ['calc.action.clear', ilc],
   ['calc.action.confirm', ilc],
   ['calc.league-give-add', ilc],
+  // 2026-08-22 device feedback, report 2 — n11 opened the sheet and
+  // highlighted nothing. The wrapper spans the receipt AND its fallback.
+  ['calc.outlook-row', ilc],
 ];
 for (const [id, src] of TARGETS) {
-  assert(new RegExp(`registerGuideTarget\\('${id.replace(/\./g, '\\.')}'`).test(src)
+  // `\b` matters: without it `unregisterGuideTarget('x')` satisfies a check for
+  // `registerGuideTarget('x')`, so deleting the registration reads as green.
+  assert(new RegExp(`\\bregisterGuideTarget\\('${id.replace(/\./g, '\\.')}'`).test(src)
       || new RegExp(`'${id.replace(/\./g, '\\.')}', \\w+Ref`).test(src),
     `17. ${id} is registered as a guide target`,
     'a beat targeting an unregistered node degrades on every run');
 }
 // Every registered ref must be ATTACHED somewhere, or it measures null
 // forever — the exact defect that got script step s7.1 cut.
-for (const refName of ['columnsRef', 'findBtnRef', 'clearBtnRef', 'confirmBtnRef', 'giveAddRef']) {
+for (const refName of ['columnsRef', 'findBtnRef', 'clearBtnRef', 'confirmBtnRef',
+                       'giveAddRef', 'outlookRowRef']) {
   const uses = (ilc.match(new RegExp(`\\b${refName}\\b`, 'g')) || []).length;
   assert(uses >= 3, `18. ${refName} is declared, registered AND attached`,
     `only ${uses} references — an unattached ref measures null forever`);
@@ -274,6 +304,89 @@ assert(/setTourOwnedIds\(TOUR_IDS\)/.test(tour) && /setTourOwnedIds\(new Set<str
   assert(/const hasTopCard = !!topCard;/.test(arrival) && /!hasTopCard \|\| !calcTourRunning\(\)/.test(arrival),
     '38. the deck announces arrival only once a top card exists',
     'announcing on focus alone makes n19 degrade against a ✕ that is not mounted yet');
+}
+
+// ── 39: the 2026-08-22 device pass ───────────────────────────────────────
+//
+// Six operator reports off build 1.16.0 (126). Four of them are properties of
+// THIS tour rather than of the overlay, and none of them is visible to tsc:
+//
+//   report 6  every talk beat carries a Next/Done button. A tap beat also
+//             mounts the overlay's full-screen catcher, which is what ate the
+//             deck's scroll gesture (report 5) — so this one assertion covers
+//             both. `advance: 'tap'` stays legal in the engine for older
+//             beats; no #384 beat may use it.
+//   report 2  n11 (outlook) had no target and highlighted nothing.
+//   report 4  n20 (swap) had no target and the avatar pointed at nothing.
+//   report 5  n23/n23b (send) had no target and the button was below the fold.
+{
+  const trades = read('screens/TradesScreen.tsx');
+  const card = read('components/TradeCard.tsx');
+  const bodyOf = (id) => {
+    const at = script.indexOf(`id: '${id}',`);
+    return at < 0 ? '' : script.slice(at, script.indexOf('\n  }),', at));
+  };
+
+  for (const id of [...unique, 'n23b']) {
+    const body = bodyOf(id);
+    assert(!/advance: 'tap'/.test(body),
+      `39. ${id} does not advance on a screen tap`,
+      "the operator asked for a Next button on every beat they are not expected "
+      + 'to act on, and a tap beat mounts a full-screen catcher that swallows scroll');
+    if (/advance: 'cta'/.test(body)) {
+      assert(/ctas: \[(NEXT|DONE)\]|ctas: \[\{/.test(body),
+        `39a. ${id} is a cta beat and declares its buttons`);
+    }
+  }
+  assert(/ctas: \[DONE\]/.test(bodyOf('n24')),
+    '39b. the closing beat says Done, not Next',
+    'a "Next" on the last beat promises a beat that does not exist');
+
+  // The four beats that shipped pointing at nothing now carry a target, and
+  // the target is registered by the file that owns the node.
+  const NEW_TARGETS = [
+    ['n11', 'calc.outlook-row', ilc, 'InLeagueCalculator'],
+    ['n20', 'trades.swap-first', card, 'TradeCard'],
+    ['n23', 'trades.send-btn', trades, 'TradesScreen'],
+    ['n23b', 'trades.send-btn', trades, 'TradesScreen'],
+  ];
+  for (const [id, target, src, owner] of NEW_TARGETS) {
+    const body = bodyOf(id);
+    assert(new RegExp(`target: '${target.replace(/\./g, '\\.')}'`).test(body),
+      `40. ${id} targets ${target}`,
+      'the device pass found this beat with an avatar and nothing highlighted');
+    assert(/degradeLine:/.test(body),
+      `40a. ${id} carries a degradeLine now that it has a spotlight to lose`);
+    assert(new RegExp(`\\bregisterGuideTarget\\('${target.replace(/\./g, '\\.')}'`).test(src)
+        || new RegExp(`'${target.replace(/\./g, '\\.')}', \\w+Ref`).test(src),
+      `40b. ${target} is registered in ${owner}`,
+      'a beat targeting an unregistered node degrades on every run');
+  }
+  // Both new registrations are SCOPED — an id claimed by more than one mounted
+  // node measures whichever won the race. The deck's top card is the only card
+  // given `disposition`, which is what makes the swap registration singular.
+  assert(/swapFirstMounted = !!disposition/.test(card),
+    '40c. trades.swap-first registers only on a card with a disposition',
+    'every peek/match/featured card would otherwise claim the same id');
+
+  // Scroll-into-view needs a producer on both screens the tour runs on. The
+  // key is the SCREEN NAME the beats declare, so a typo here is a silent
+  // "no scroller registered" — which degrades to today's behaviour.
+  assert(/registerGuideScroller\('TradeCalculator'/.test(screen),
+    '41. the calculator registers a guide scroller under its own screen name');
+  assert(/registerGuideScroller\('Trades'/.test(trades),
+    '41a. the deck registers a guide scroller under its own screen name');
+  for (const [src, name] of [[screen, 'TradeCalculator'], [trades, 'TradesScreen']]) {
+    assert(new RegExp('unregisterGuideScroller\\(').test(src),
+      `41b. ${name} unregisters its scroller on unmount`,
+      'a stale handle points at an unmounted ScrollView for the rest of the session');
+  }
+  // The screen names the scrollers are keyed by must be the ones the beats
+  // actually declare, or the lookup misses and nothing ever scrolls.
+  for (const [id, key] of [['n11', 'TradeCalculator'], ['n23', 'Trades']]) {
+    assert(new RegExp(`screen: '${key}'`).test(bodyOf(id)),
+      `41c. ${id} declares screen ${key}, which is the scroller key`);
+  }
 }
 
 console.log(failures === 0

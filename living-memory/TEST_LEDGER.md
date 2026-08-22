@@ -12,6 +12,10 @@
 ---
 
 
+## 2026-08-22h — #384 W7 device-feedback fixes — mobile gates, v1.16.1 (EAS 127)
+
+Branch `fix/384-tour-device-feedback`. `npx tsc --noEmit` clean · 76/76 `check-*.js` · `testid-lint OK`. Backend untouched (pytest unchanged from 2026-08-22g). Sabotages red: fixed `top: 54` band, constant ABOVE branch, solver ignoring `insets.top`, a beat back to `advance:'tap'`, n20 losing its target, `trades.send-btn` registration deleted, calculator dropping `onContentSizeChange`, auto-start not listening for `transitionEnd`. **Runtime:** the operator's device report on build 126 IS the evidence this wave answers; checklist section G (steps 50–62) is owed against build 127. The placement *mechanism* (occlusion vs. far-from-ring) is inferred from correlation, not observed — if step 54 still shows a bare ring, suspect native-header z-order.
+
 ## 2026-08-22g — #384 SHIPPED — PR #172 `80dee42`, flags LIT, EAS build 1.16.0 (126) submitted
 
 Pre-ship gates at `304f55a` (flags lit, fixture mirrors updated): `pytest backend/tests -q` **4173 passed / 1 skipped** · `npx tsc --noEmit` clean · 76/76 `check-*.js` · `testid-lint OK`. `FTF_SKIP_SIM_GATE=1` on push (D-056 standing posture — the evidence is the structural suite + the rewritten, now POST-ship, TestFlight checklist). CI on `main` run 32585974208: typecheck + testid-lint green; backend job still in progress when this was written. EAS production build **1.16.0 (126)** `01465dd0` finished 16:57Z and auto-submitted to App Store Connect (submission `9a89555f`). **No device run yet** — the checklist in `docs/feedback/items/384-calc-finder-merge/testflight-checklist.md` is owed against build 126.
@@ -2714,6 +2718,7 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-08-22h — #384 W7 device-feedback fixes — v1.16.1 (EAS 127)](#2026-08-22h--384-w7-device-feedback-fixes--mobile-gates-v1161-eas-127)
 - [2026-08-22g — #384 SHIPPED — PR #172, flags LIT, EAS 1.16.0 (126)](#2026-08-22g--384-shipped--pr-172-80dee42-flags-lit-eas-build-1160-126-submitted)
 - [2026-08-22f — #384 W6-A + W6-B — full gates, FLAG DARK, NOT MERGED](#2026-08-22f--384-w6-a--w6-b--full-gates-flag-dark-not-merged-on-claudemanual-calculator-e2e-review-39a467)
 - [2026-08-22e — #384 merged calculator W5 + guard hardening — full gates, FLAG DARK, NOT MERGED, on `claude/manual-calculator-e2e-review-39a467`](#2026-08-22e--384-merged-calculator-w5--guard-hardening--full-gates-flag-dark-not-merged-on-claudemanual-calculator-e2e-review-39a467)

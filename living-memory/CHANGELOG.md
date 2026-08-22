@@ -11,6 +11,24 @@
 
 ---
 
+## 2026-08-22k — #384 W7: the tour as the operator actually saw it on device — placement, timing, targets, Next buttons (v1.16.1)
+
+First runtime evidence for #384 came from the operator on build 126, six reports. One Opus
+package, lead-reviewed. **Cause of the big one:** `AnalystGuide` parked the avatar band at a fixed
+`top: 54` whenever the target sat in the lower 60% of the window — every calculator beat after the
+outlook — on the one screen with a native-stack header; the deck (no header) showed it. Replaced by
+`solveBandPlacement()`: the band sits **adjacent to its ring** (above if it clears `insets.top`,
+else below, floored at the top inset; else the legacy bottom band), height measured by `onLayout`
+and latched per step. **First-landing misplacement** was measure timing: auto-start now waits for
+`transitionEnd` (InteractionManager fallback) and the calculator announces `onLayout` +
+`onContentSizeChange` as well as scroll. **Three new targets:** `calc.outlook-row` (n11),
+`trades.swap-first` (n20), `trades.send-btn` (n23/n23b). **Scroll-into-view:** `guideTargets`
+scroller registry (calculator + deck); a targeted step below the fold is scrolled up once. **Next /
+Done buttons** replace tap-anywhere on all eleven talk beats (the full-screen tap-catcher was what
+broke scrolling); n10/n18 stay action beats. Guard hardening found a pre-existing hole:
+`registerGuideTarget\('id'` matched `unregisterGuideTarget('id')` — now word-bounded. Gates: tsc ·
+76/76 guards · lint (backend untouched). Shipped as v1.16.1 (EAS build 127).
+
 ## 2026-08-22j — #384 SHIPPED: merged calculator LIVE for all users (PR #172 `80dee42`, flags LIT, app 1.16.0)
 
 Operator: *"Merge and ship live. Turn the flags on and make available for all users."* Branch

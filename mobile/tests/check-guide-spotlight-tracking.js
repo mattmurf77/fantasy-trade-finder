@@ -68,6 +68,28 @@
 //      `declineReasonsOn ? … : undefined` pair. File-agnostic over
 //      `src/screens`, so a host added later is covered.
 //
+//  11  **The band is ADJACENT to its cutout, and the solver is RUN.** Added
+//      2026-08-22 from the device pass: the shipped rule put the band at a
+//      fixed `top: 54` whenever the target's bottom edge fell below 60 % of
+//      the window, which is every calculator beat after the outlook — the
+//      operator saw five correct rings with no Analyst beside any of them, and
+//      the avatar reappeared on the header-less deck. `solveBandPlacement` is
+//      lifted out of the source, transpiled and executed over a sweep of ring
+//      positions and band heights; the invariants are that the band never
+//      overlaps its ring and a top-anchored band always clears the top inset.
+//      Sabotage: `{ top: 54 }` in the style, or a solver that ignores
+//      `insets.top` → red. Assertion 7's latch moved with it: it now holds the
+//      whole `{from, offset}` placement, so 7a–7f are RE-POINTED at `place`,
+//      not deleted.
+//  12  The calculator announces movement from `onLayout` and
+//      `onContentSizeChange` as well as `onScroll` — its content grows after
+//      first paint (rosters land, the outlook receipt swaps with its fallback)
+//      and that moves every target below it with no scroll event at all.
+//  13  Scroll-into-view: the `registerGuideScroller` seam exists, the overlay
+//      asks for a scroller from an effect (never during render), and it does
+//      so at most ONCE per step. Sabotage: drop the `scrolledForRef` latch and
+//      the scroll notifies → re-measures → re-scrolls for the life of the step.
+//
 // Structural, not textual: parses the shipped source with the project's own
 // TypeScript and walks the AST, like check-single-pin-actions.js — a grep
 // cannot tell a guarded setter from an unguarded one, and that distinction
@@ -474,28 +496,46 @@ if (!trackImpl) {
 // 7 — the band placement is latched per step
 // ═══════════════════════════════════════════════════════════════════════════
 
-const atTopDecl = declOf(overlay, 'atTop');
+// 2026-08-22 (#384 device report 3): the latched value is no longer a
+// boolean band choice but the whole PLACEMENT — `{from, offset}` — because the
+// band is now sited adjacent to its cutout rather than parked at a fixed
+// `top: 54`. The latch property is unchanged and is what these assertions are
+// for; they are re-pointed at `place`, not deleted.
+const placeDecl = declOf(overlay, 'place');
 
-if (!atTopDecl || !atTopDecl.initializer) {
-  fail('7 — `atTop` is declared in the overlay', 'declaration not found');
-} else {
-  const init = atTopDecl.initializer;
-  const initText = flat(overlay, init);
+{
+  const atTopDecl = declOf(overlay, 'atTop');
   assert(
-    initText !== 'targetInBottomBand',
+    !!atTopDecl && !!atTopDecl.initializer &&
+      flat(overlay, atTopDecl.initializer) !== 'targetInBottomBand',
     '7a — `atTop` is not the bare re-solving predicate',
     'const atTop = targetInBottomBand — this is the pre-fix line: with a ' +
       'tracking frame the avatar and bubble flip bands mid-fling',
   );
+  // The 60 %-of-the-window rule IS the report-3 defect: it is what sent every
+  // calculator beat after the outlook to `top: 54`, on a screen with a native
+  // header, far from the ring it was explaining.
+  assert(
+    !declOf(overlay, 'targetInBottomBand'),
+    '7a2 — the 60 %-of-the-window band predicate is gone entirely',
+    'restoring it re-creates the fixed-band placement the device pass rejected',
+  );
+}
 
-  // The latch itself: a ref read from `atTop`'s initializer.
+if (!placeDecl || !placeDecl.initializer) {
+  fail('7 — `place` is declared in the overlay', 'declaration not found');
+} else {
+  const init = placeDecl.initializer;
+  const initText = flat(overlay, init);
+
+  // The latch itself: a ref read from `place`'s initializer.
   const refRead = findAll(
     init,
     (n) => ts.isPropertyAccessExpression(n) && n.name.text === 'current',
   )[0];
   assert(
     !!refRead,
-    '7b — `atTop` reads a latch ref',
+    '7b — `place` reads a latch ref',
     `saw: ${initText}`,
   );
 
@@ -891,6 +931,278 @@ function walkTsFiles(dir) {
       `10d — ${rel} is still in scope for the register+scroll rule`,
       'it no longer registers a guide target or no longer owns a ScrollView — '
         + 'confirm that is intended before accepting this',
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 11 — the band is ADJACENT to its cutout (#384 device report 3)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// WHY. Operator report, 2026-08-22, build 1.16.0 (126): five consecutive
+// calculator beats drew a correct spotlight ring with no Analyst beside it,
+// and the avatar reappeared the moment the tour reached the deck. The shipped
+// solver parked the band at a fixed `top: 54` whenever the target's bottom
+// edge fell below 60 % of the window — which is every calculator beat after
+// the outlook, on the one screen in the pair that carries a native-stack
+// header. Adjacency deletes the whole class: the band is next to the ring, or
+// it is the bottom band, and it is never in the top inset.
+//
+// The solver is EXECUTED, not described — same posture as section 8, and for
+// the same reason: a shape assertion cannot tell a clamp from a placement.
+// Sabotage: return `{from:'top', offset: 54}` unconditionally → red.
+
+{
+  const fnDecl = findAll(
+    overlay,
+    (n) => ts.isFunctionDeclaration(n) && !!n.name && n.name.text === 'solveBandPlacement',
+  )[0];
+
+  if (!fnDecl) {
+    fail(
+      '11a — the overlay exports a `solveBandPlacement` solver',
+      'the adjacency solver is gone; the band is placed inline again and ' +
+        'nothing here can execute it',
+    );
+  } else {
+    const consts = ['BAND_GAP', 'BAND_EDGE', 'BAND_BOTTOM']
+      .map((name) => {
+        const d = declOf(overlay, name);
+        return d && d.initializer ? `const ${name} = ${d.initializer.getText(overlay)};` : '';
+      })
+      .join('\n');
+    assert(
+      /BAND_GAP/.test(consts) && /BAND_EDGE/.test(consts) && /BAND_BOTTOM/.test(consts),
+      '11b — the solver\'s three constants are module-level and liftable',
+      consts,
+    );
+
+    let solve = null;
+    try {
+      const tsSrc = `${consts}\n${fnDecl.getText(overlay).replace(/^export\s+/, '')}`;
+      const js = ts.transpileModule(tsSrc, {
+        compilerOptions: { module: ts.ModuleKind.None, target: ts.ScriptTarget.ES2019 },
+      }).outputText;
+      // eslint-disable-next-line no-new-func
+      solve = new Function(`${js}\nreturn solveBandPlacement;`)();
+    } catch (e) {
+      fail('11c — the solver is liftable and runnable', String(e && e.message));
+    }
+
+    if (solve) {
+      const H = 844;
+      const INSETS = { top: 59, bottom: 34 };
+      const BAND = 180;
+      const GAP = Number((consts.match(/BAND_GAP = (\d+)/) || [])[1]);
+      const EDGE = Number((consts.match(/BAND_EDGE = (\d+)/) || [])[1]);
+      const BOTTOM = Number((consts.match(/BAND_BOTTOM = (\d+)/) || [])[1]);
+
+      // Preferred: ABOVE the ring, and the band's bottom edge stops one gap
+      // short of it.
+      {
+        const c = { top: 500, height: 80 };
+        const p = solve(c, BAND, H, INSETS);
+        assert(
+          p.from === 'top' && p.offset === c.top - BAND - GAP,
+          '11d — a ring with room above it gets the band directly above',
+          JSON.stringify(p),
+        );
+      }
+      // No room above (a ring near the top): BELOW, one gap under the ring.
+      {
+        const c = { top: 100, height: 60 };
+        const p = solve(c, BAND, H, INSETS);
+        assert(
+          p.from === 'top' && p.offset === c.top + c.height + GAP,
+          '11e — a ring too near the top puts the band below it',
+          JSON.stringify(p),
+        );
+      }
+      // Neither fits (a ring taller than the space around it): the old bottom
+      // band, which is the only honest fallback.
+      {
+        const p = solve({ top: 80, height: 700 }, BAND, H, INSETS);
+        assert(
+          p.from === 'bottom' && p.offset === BOTTOM,
+          '11f — a ring with room on neither side falls back to the bottom band',
+          JSON.stringify(p),
+        );
+      }
+      assert(
+        solve(null, BAND, H, INSETS).from === 'bottom',
+        '11g — an untargeted step (no cutout) uses the bottom band',
+      );
+      assert(
+        solve({ top: 500, height: 80 }, 0, H, INSETS).from === 'bottom',
+        '11h — an UNMEASURED band cannot be placed adjacent and uses the fallback',
+        'placing before onLayout would site the band by a height of zero',
+      );
+
+      // The two invariants, swept over every ring position and a range of band
+      // heights. `top: 54` — the pre-fix constant — violates both.
+      let overlaps = null;
+      let inInset = null;
+      for (let bandH = 80; bandH <= 320; bandH += 40) {
+        for (let top = -40; top <= H + 40; top += 17) {
+          for (const height of [40, 120, 400]) {
+            const c = { top, height };
+            const p = solve(c, bandH, H, INSETS);
+            if (p.from !== 'top') continue;
+            const above = p.offset + bandH <= c.top;
+            const below = p.offset >= c.top + c.height;
+            if (!above && !below) {
+              overlaps = overlaps || { c, bandH, p };
+            }
+            if (p.offset < INSETS.top + EDGE) {
+              inInset = inInset || { c, bandH, p };
+            }
+          }
+        }
+      }
+      assert(
+        overlaps === null,
+        '11i — the band never overlaps the ring it is explaining',
+        `first overlap: ${JSON.stringify(overlaps)}`,
+      );
+      assert(
+        inInset === null,
+        '11j — a top-anchored band always clears the top safe-area inset',
+        `first violation: ${JSON.stringify(inInset)} — a fixed offset (the ` +
+          'shipped `top: 54`) lands under the status bar and, on a sub-screen, ' +
+          'under the native header',
+      );
+    }
+  }
+
+  // The band's own style must READ the solved offset. A numeric literal here
+  // is the exact regression: the placement is computed and then ignored.
+  const litTop = findAll(
+    overlay,
+    (n) =>
+      ts.isConditionalExpression(n) &&
+      ts.isObjectLiteralExpression(n.whenTrue) &&
+      n.whenTrue.properties.some((p) => p.name && p.name.getText(overlay) === 'top'),
+  )[0];
+  assert(
+    !!litTop,
+    '11k — the band style still picks its anchor with a conditional',
+    'the top/bottom conditional is gone; re-point this assertion',
+  );
+  if (litTop) {
+    const topProp = litTop.whenTrue.properties.find(
+      (p) => p.name && p.name.getText(overlay) === 'top',
+    );
+    assert(
+      !!topProp && !ts.isNumericLiteral(topProp.initializer),
+      '11l — the top anchor is the SOLVED offset, not a fixed number',
+      `saw: ${flat(overlay, litTop.whenTrue)} — \`{ top: 54 }\` is the shipped bug`,
+    );
+  }
+
+  // The band's height has to come from a real measurement, or the solver runs
+  // on a guess and every placement is off by the difference.
+  const bandLayout = findAll(overlay, (n) => {
+    if (!isJsxEl(n)) return false;
+    const a = attr(overlay, n, 'onLayout');
+    return !!a && !!a.initializer && referencesIdentifier(overlay, a.initializer, 'setBandH');
+  });
+  assert(
+    bandLayout.length === 1,
+    '11m — the band measures its own height from onLayout',
+    `${bandLayout.length} onLayout handlers write the band height`,
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 12 — a growing page moves targets without ever scrolling (#384 report 1)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The calculator's content GROWS after first paint — the rosters land and the
+// outlook receipt swaps with its fallback — which shifts every target below it
+// with no scroll event at all. `onScroll` alone cannot see that, which is half
+// of why the first-landing spotlight was wrong. Sabotage: drop either
+// callback → red.
+
+{
+  const CALC_REL = 'src/screens/TradeCalculatorScreen.tsx';
+  const calc = parse(CALC_REL);
+  const scroller = findAll(calc, (n) => {
+    if (!isJsxEl(n)) return false;
+    const a = attr(calc, n, 'onScroll');
+    return !!a && !!a.initializer && referencesIdentifier(calc, a.initializer, 'notifyGuideTargetsMoved');
+  })[0];
+
+  if (!scroller) {
+    fail('12a — the calculator page ScrollView announces movement', 'no wired onScroll found');
+  } else {
+    for (const name of ['onLayout', 'onContentSizeChange']) {
+      const a = attr(calc, scroller, name);
+      assert(
+        !!a && !!a.initializer && referencesIdentifier(calc, a.initializer, 'notifyGuideTargetsMoved'),
+        `12b — ${where(calc, scroller)} also announces from ${name}`,
+        'content that grows under a settled scroll offset moves every target ' +
+          'below it and fires no scroll event',
+      );
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 13 — scroll-into-view: the seam, and the once-per-step guard
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The overlay owns no scroll container, so hosts register a handle keyed by
+// the screen name their steps declare. The re-entrancy guard is the load-
+// bearing part: scrolling notifies, the notify re-measures, and a re-measure
+// that re-entered the scroll would chase its own tail for as long as the step
+// is up. Sabotage: drop the `scrolledForRef` guard → red.
+
+{
+  const scrollerFns = ['registerGuideScroller', 'unregisterGuideScroller', 'getGuideScroller'];
+  for (const name of scrollerFns) {
+    assert(
+      exportedFns.has(name),
+      `13a — guideTargets exports ${name}`,
+      'the host↔overlay scroll seam is incomplete',
+    );
+  }
+  const askCalls = callsTo(overlay, 'getGuideScroller');
+  assert(
+    askCalls.length === 1,
+    '13b — the overlay asks for a scroller exactly once',
+    `${askCalls.length} call(s)`,
+  );
+  const scrollEffect = askCalls.length === 1
+    ? enclosing(askCalls[0], (n) => isCallTo(n, 'useEffect'))
+    : null;
+  assert(
+    !!scrollEffect,
+    '13c — the scroll-into-view lives in a useEffect (never in render)',
+    'scrolling a host during render is a side effect in the render phase',
+  );
+  if (scrollEffect) {
+    const fn = scrollEffect.arguments[0];
+    const guard = findAll(fn, (n) => ts.isIfStatement(n)).find(
+      (n) => /scrolledForRef\.current === active\.id/.test(flat(overlay, n.expression)),
+    );
+    assert(
+      !!guard,
+      '13d — a step scrolls its target into view at most ONCE',
+      'without the latch the scroll notifies, the notify re-measures, and the ' +
+        'effect re-enters for the life of the step',
+    );
+    assert(
+      referencesIdentifier(overlay, fn, 'bandMeasured') || referencesIdentifier(overlay, fn, 'bandH'),
+      '13e — the scroll reserves room for the MEASURED band',
+      'scrolling to an edge without accounting for the band lands the target ' +
+        'exactly where the band has to go',
+    );
+    const FORBIDDEN = ['commitShown', 'track', 'dismissActiveStep', 'skipStep'];
+    const seen = FORBIDDEN.filter((id) => referencesIdentifier(overlay, fn, id));
+    assert(
+      seen.length === 0,
+      '13f — the scroll-into-view emits nothing and ends no step',
+      `references ${seen.join(', ')}`,
     );
   }
 }

@@ -9,10 +9,12 @@ import {
   Animated,
   useWindowDimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ink, chalk, ice, space, radii, fonts, type } from '../theme/chalkline';
 import { useGuide } from '../state/useGuide';
 import { useOnboardingFeature } from '../state/useFeatureFlags';
 import {
+  getGuideScroller,
   measureGuideTarget,
   subscribeGuideTargetsMoved,
   type TargetFrame,
@@ -23,14 +25,65 @@ import { AnalystAvatar } from './analyst';
 // Mounted ONCE in RootNav, above the nav tree, below system modals (native
 // sheets/alerts always render above RN views, satisfying "system modals win").
 //
-// Placement rules (operator review 2026-07-19, binding):
-//  • bubble + avatar live in the BOTTOM BAND; bubble never overlaps the
-//    spotlight cutout or a primary CTA — if the target is in the bottom
-//    band, avatar+bubble relocate to the top.
+// Placement rules (operator review 2026-07-19, binding; ADJACENCY added
+// 2026-08-22 from the #384 device report):
+//  • an untargeted step's bubble + avatar live in the BOTTOM BAND.
+//  • a TARGETED step's band sits ADJACENT to its cutout — above it when the
+//    band fits fully above and clear of the top inset, otherwise below it,
+//    otherwise the bottom band. The bubble never overlaps the cutout.
 //  • when a step has CTAs they render INSIDE the bubble.
 // Never-trap: ✕ skips the step; "Skip tour" is the permanent opt-out.
 
 const AVATAR = 96;
+/** Gap between the spotlight ring and the avatar+bubble band. */
+const BAND_GAP = 12;
+/** Minimum clearance between the band and a safe-area edge. */
+const BAND_EDGE = 8;
+/** The legacy bottom band — still the fallback when nothing fits adjacent. */
+const BAND_BOTTOM = 92;
+
+export interface BandPlacement {
+  from: 'top' | 'bottom';
+  offset: number;
+}
+
+/**
+ * #384 device report 3 — place the band ADJACENT to its cutout.
+ *
+ * The shipped solver parked the band at a fixed `top: 54` whenever the
+ * target's bottom edge fell below 60 % of the window. Every calculator beat
+ * after the outlook has a low target, so all five landed there — on a screen
+ * that carries a native-stack header (`subScreenOptions` in TabNav), far from
+ * the ring they were explaining. The operator reported five correct rings with
+ * no Analyst beside any of them, and saw the avatar return on the deck, which
+ * has no header. Adjacency removes the whole class: the band is always next to
+ * the thing it is pointing at, or it is the bottom band.
+ *
+ * Pure, and a function of the cutout + window only, so
+ * `tests/check-guide-spotlight-tracking.js` lifts it out of this file and RUNS
+ * it rather than pinning its shape.
+ */
+export function solveBandPlacement(
+  cutout: { top: number; height: number } | null,
+  bandH: number,
+  winH: number,
+  insets: { top: number; bottom: number },
+): BandPlacement {
+  // No ring, or the band has not been measured yet — nothing to be adjacent
+  // to, so the honest answer is the band an untargeted step would use.
+  if (!cutout || bandH <= 0) return { from: 'bottom', offset: BAND_BOTTOM };
+  // Preferred: ABOVE the ring, but only if the whole band clears the top
+  // inset. Clamping into the inset instead is what put it under the header.
+  const above = cutout.top - bandH - BAND_GAP;
+  if (above >= insets.top + BAND_EDGE) return { from: 'top', offset: above };
+  // Otherwise BELOW the ring, if the whole band fits above the bottom inset.
+  // Floored at the top inset as well: a ring sitting at y=0 (a target the user
+  // has scrolled up past) would otherwise put the band under the status bar,
+  // which is the same defect one screen edge over.
+  const below = Math.max(cutout.top + cutout.height + BAND_GAP, insets.top + BAND_EDGE);
+  if (below <= winH - insets.bottom - bandH) return { from: 'top', offset: below };
+  return { from: 'bottom', offset: BAND_BOTTOM };
+}
 
 export default function AnalystGuide() {
   const active = useGuide((s) => s.active);
@@ -49,12 +102,20 @@ export default function AnalystGuide() {
   const engineFrame = useGuide((s) => s.spotlightFrame);
   const trackSpotlightFrame = useGuide((s) => s.trackSpotlightFrame);
   const { width: winW, height: winH } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
 
   const [localFrame, setLocalFrame] = useState<TargetFrame | null>(null);
   const [reduceMotion, setReduceMotion] = useState(false);
+  // Measured height of the avatar+bubble band. The adjacency solver cannot
+  // place the band above a ring without knowing how tall it is, and the copy
+  // (and the CTA row) make that per-step — so it is measured on layout and
+  // LATCHED for the step, exactly like the placement it feeds.
+  const [bandH, setBandH] = useState(0);
   const slide = useRef(new Animated.Value(0)).current;
-  // B1 — band placement, latched per step (see the solver below).
-  const bandRef = useRef<{ id: string; atTop: boolean } | null>(null);
+  // B1 — band placement, latched per step (see the solver above).
+  const bandRef = useRef<{ id: string; place: BandPlacement } | null>(null);
+  // #384 report 5 — a step scrolls its target into view at most once.
+  const scrolledForRef = useRef<string | null>(null);
 
   // NFR-2 — honor the OS "Reduce Motion" setting for the entry spring.
   useEffect(() => {
@@ -72,6 +133,8 @@ export default function AnalystGuide() {
     let cancelled = false;
     setLocalFrame(null);
     bandRef.current = null;
+    setBandH(0);
+    scrolledForRef.current = null;
     if (!guideV2 && active?.target) {
       measureGuideTarget(active.target).then((f) => {
         if (!cancelled) setLocalFrame(f);
@@ -103,7 +166,11 @@ export default function AnalystGuide() {
   // last good frame rather than degrading, because degrading here would
   // re-fire `guide_step_shown`.
   const spotlightTarget = active?.target;
-  const frameResolved = !!(guideV2 ? engineFrame : localFrame);
+  // The resolved frame, in absolute WINDOW coordinates. Hoisted above the
+  // effects below because both of them need it and hooks cannot live after
+  // the early returns further down.
+  const frame = guideV2 ? engineFrame : localFrame;
+  const frameResolved = !!frame;
   useEffect(() => {
     if (!spotlightTarget || !frameResolved) return;
     let cancelled = false;
@@ -150,6 +217,40 @@ export default function AnalystGuide() {
     };
   }, [spotlightTarget, frameResolved, guideV2, trackSpotlightFrame]);
 
+  // ── Scroll-into-view (#384 device report 5) ──────────────────────────────
+  // A resolved frame can still be off-screen, or so close to an edge that the
+  // adjacency solver has nowhere to put the band — the operator's case was
+  // n23, whose send button sits below the fold with the tour's own overlay
+  // suppressing the scroll that would have reached it. The overlay does not
+  // own any scroll container, so it asks the scroller the ACTIVE STEP'S SCREEN
+  // registered (`state/guideTargets`) to bring the target in, and the host's
+  // existing `onScroll` → `notifyGuideTargetsMoved` path re-measures.
+  //
+  // Exactly ONCE per step: the scroll notifies, the notify re-measures, and a
+  // re-measure that re-entered here would chase its own tail forever.
+  const bandMeasured = bandH > 0;
+  useEffect(() => {
+    if (!active?.target || !frame || !bandMeasured) return;
+    if (scrolledForRef.current === active.id) return;
+    const scroller = getGuideScroller(active.screen);
+    if (!scroller) return;
+    scrolledForRef.current = active.id;
+    // Reserve room for a band ABOVE the target, so a step that scrolls also
+    // arrives with the preferred placement available.
+    const wantTop = insets.top + BAND_EDGE + bandH + BAND_GAP;
+    const wantBottom = winH - insets.bottom - BAND_EDGE;
+    let delta = 0;
+    if (frame.y < wantTop) delta = frame.y - wantTop;
+    else if (frame.y + frame.height > wantBottom) {
+      // Never chase a tall target's BOTTOM past its own top edge — align to
+      // the top instead, which is the most of it we can show.
+      delta = Math.min(frame.y + frame.height - wantBottom, frame.y - wantTop);
+    }
+    if (Math.abs(delta) < 4) return;
+    scroller.scrollTo(Math.max(0, scroller.getScrollY() + delta), true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.id, frame, bandMeasured, bandH, insets.top, insets.bottom, winH]);
+
   // Auto-advance steps (celebrations, pre-modal setup lines).
   useEffect(() => {
     if (!active || active.advance !== 'auto') return;
@@ -189,21 +290,6 @@ export default function AnalystGuide() {
   // `guide_step_shown` emit. Suppress-class steps may be retracted entirely.
   if (spotlightPending) return null;
 
-  const frame = guideV2 ? engineFrame : localFrame;
-
-  // ── Placement solver (simplified per spec) ────────────────────────────
-  const targetInBottomBand = !!frame && frame.y + frame.height > winH * 0.6;
-  // B1 — LATCH the band for the life of the step. This predicate re-solves
-  // every render, so once the frame tracks scroll the avatar+bubble would
-  // flip between {top:54} and {bottom:92} mid-fling. Latched on the first
-  // RESOLVED frame: latching earlier would freeze the pre-measure `false`
-  // and park the bubble on top of a bottom-band cutout.
-  if (frame && bandRef.current?.id !== active.id) {
-    bandRef.current = { id: active.id, atTop: targetInBottomBand };
-  }
-  const atTop = bandRef.current?.id === active.id
-    ? bandRef.current.atTop
-    : targetInBottomBand;
   const side = active.side ?? 'left';
   const pad = 8 + (frame ? 6 : 0);
 
@@ -236,6 +322,23 @@ export default function AnalystGuide() {
         };
       })()
     : null;
+
+  // ── Placement solver — ADJACENT to the cutout (#384 report 3) ─────────
+  // B1 — LATCH the band for the life of the step. The solver re-runs every
+  // render, so once the frame tracks scroll the band would slide (and flip
+  // sides) mid-fling. Latched on the first RESOLVED frame with a MEASURED
+  // band: latching earlier would freeze the pre-measure fallback and park the
+  // bubble in the bottom band for a step whose ring is right there.
+  const solved = solveBandPlacement(cutout, bandH, winH, insets);
+  if (frame && bandH > 0 && bandRef.current?.id !== active.id) {
+    bandRef.current = { id: active.id, place: solved };
+  }
+  const place = bandRef.current?.id === active.id ? bandRef.current.place : solved;
+  const atTop = place.from === 'top';
+  // A targeted step is held invisible for the one frame between mount and the
+  // band's `onLayout`, because placing it needs its height. An untargeted step
+  // (or a degraded one, which has no ring to be adjacent to) shows at once.
+  const bandPending = !!cutout && bandH <= 0;
 
   const tapToAdvance = active.advance === 'tap';
 
@@ -276,9 +379,16 @@ export default function AnalystGuide() {
       {/* Avatar + bubble band */}
       <Animated.View
         pointerEvents="box-none"
+        onLayout={(e) => {
+          // Latched: the copy never changes after render (round-6 rule), so
+          // one measurement per step is the whole story — and re-setting on
+          // every layout would re-solve the placement mid-scroll.
+          const h = e.nativeEvent.layout.height;
+          if (h > 0 && bandH <= 0) setBandH(h);
+        }}
         style={[
           styles.band,
-          atTop ? { top: 54 } : { bottom: 92 },
+          atTop ? { top: place.offset } : { bottom: place.offset },
           {
             opacity: slide,
             transform: [{
@@ -290,7 +400,18 @@ export default function AnalystGuide() {
           },
         ]}
       >
-        <View style={[styles.row, side === 'right' && { flexDirection: 'row-reverse' }]}>
+        {/* The pending hide lives on the ROW, not on the Animated.View: the
+            outer opacity is driven by `slide`, and overriding an animated
+            style prop with a literal for one frame detaches and re-attaches
+            the animated node for nothing. The row still lays out, so the
+            measurement above is unaffected. */}
+        <View
+          style={[
+            styles.row,
+            side === 'right' && { flexDirection: 'row-reverse' },
+            bandPending && styles.bandPending,
+          ]}
+        >
           <View style={{ width: AVATAR }} pointerEvents="none" testID={`guide.avatar.${active.pose}`}>
             <AnalystAvatar pose={active.pose} size={AVATAR} flip={active.flip} />
           </View>
@@ -362,6 +483,10 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
   },
   band: { position: 'absolute', left: 10, right: 10 },
+  // One frame only — the band is laid out (so `onLayout` can measure it) but
+  // not shown, so the user never sees it jump from the fallback band to its
+  // adjacent placement.
+  bandPending: { opacity: 0 },
   row: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
   bubble: {
     flexShrink: 1,

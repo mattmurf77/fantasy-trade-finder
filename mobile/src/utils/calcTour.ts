@@ -51,7 +51,7 @@ import { track } from '../api/events';
  *  Two beats left with it. **n17** narrated the Include-players toggle, which
  *  no longer exists. **n14** ("Clear wipes the canvas") was only ever in this
  *  list after n16 because Clear is disabled on an empty canvas and n16 used to
- *  be the beat that filled it — with n16 now a TAP beat that adds nothing, n14
+ *  be the beat that filled it — with n16 now a TALK beat that adds nothing, n14
  *  would spotlight a 40 %-opacity button, which is the same defect as pointing
  *  at nothing. Both builders were deleted from `analystScript.ts` rather than
  *  left orphaned. */
@@ -189,8 +189,11 @@ function requestAt(i: number): void {
       return;
     }
     shown = useGuide.getState().requestStep(build(), {
-      // n11 is the only cta beat; without a handler its "Set outlook" button
-      // dismisses and opens nothing.
+      // Every talk beat is a cta beat since the 2026-08-22 device pass, but
+      // n11 is the only one whose button DOES something beyond advancing —
+      // without a handler its "Set outlook" opens nothing. The guide's accept
+      // path calls `onAccept?.()` and then advances either way, so passing
+      // `undefined` for the Next/Done buttons is exactly right.
       onAccept: id === 'n11' ? handlers.openOutlook : undefined,
       // Chain on the TERMINAL transition, whatever it was — advancing,
       // skipping and timing out all land here exactly once.
@@ -219,7 +222,12 @@ function onBeatComplete(i: number, slot: BeatId, via: GuideCompletionVia): void 
   // switchMode). Any other terminal transition means the user ✕-ed it and is
   // still on Real values, where none of n12–n18's targets is mounted — so
   // end the run rather than narrate a page that is not there.
-  if (slot === 'n10' && via !== 'advance') {
+  //
+  // `'cta'` counts as progress alongside `'advance'` (2026-08-22 device pass):
+  // an in-bubble button is the user moving the tour on, not abandoning it, and
+  // every talk beat now carries one. n10 itself has no button today, so this
+  // arm is a guard against the abandon rule firing on a future one.
+  if (slot === 'n10' && via !== 'advance' && via !== 'cta') {
     endTour('abandoned');
     return;
   }

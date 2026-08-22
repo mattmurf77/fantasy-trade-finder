@@ -149,7 +149,9 @@ import {
   type GuideCompletionVia,
 } from '../state/useGuide';
 import {
+  registerGuideScroller,
   registerGuideTarget,
+  unregisterGuideScroller,
   unregisterGuideTarget,
   notifyGuideTargetsMoved,
 } from '../state/guideTargets';
@@ -3232,19 +3234,38 @@ export default function TradesScreen({ navigation, route }: any) {
   // has three mutually exclusive mount sites, so a single hosted ref here
   // would point at whichever branch happened to render.
   const fairnessHelpWrapRef = useRef<View | null>(null);
+  // #384 device feedback (report 5) — n23/n23b's target. The send CONTROL is
+  // platform-resolved inside `SendInSleeperButton` (Sleeper / MFL / ESPN /
+  // copy), so no inner id is stable; this wrapper always contains whichever
+  // branch rendered.
+  const sendBtnWrapRef = useRef<View | null>(null);
   useEffect(() => {
     registerGuideTarget('trades.card-body', deckWrapRef);
     registerGuideTarget('trades.provenance-chip', chipWrapRef);
     registerGuideTarget('trades.trio-entry', trioWrapRef);
     registerGuideTarget('trades.outlook-receipt.change', outlookReceiptWrapRef);
     registerGuideTarget('trades.fairness-help', fairnessHelpWrapRef);
+    registerGuideTarget('trades.send-btn', sendBtnWrapRef);
     return () => {
       unregisterGuideTarget('trades.card-body');
       unregisterGuideTarget('trades.provenance-chip');
       unregisterGuideTarget('trades.trio-entry');
       unregisterGuideTarget('trades.outlook-receipt.change');
       unregisterGuideTarget('trades.fairness-help');
+      unregisterGuideTarget('trades.send-btn');
     };
+  }, []);
+
+  // #384 device feedback (report 5) — the deck's scroll handle. n23 points at
+  // the send button, which lives below the fold on the deck; the overlay asks
+  // for it by the screen name the deck beats declare (`screen: 'Trades'`).
+  const guideScrollYRef = useRef(0);
+  useEffect(() => {
+    registerGuideScroller('Trades', {
+      scrollTo: (y, animated) => mainScrollRef.current?.scrollTo({ y, animated }),
+      getScrollY: () => guideScrollYRef.current,
+    });
+    return () => unregisterGuideScroller('Trades');
   }, []);
 
   // #384 (review #3) — the deck half of the tour (n19–n24). The runner in
@@ -4987,6 +5008,10 @@ export default function TradesScreen({ navigation, route }: any) {
           // B1 — a measured spotlight frame is absolute window coordinates,
           // so the guide must re-measure whenever this list moves.
           notifyGuideTargetsMoved();
+          // …and the guide's scroll-into-view needs the CURRENT offset to turn
+          // a window-space delta into an absolute one. Unconditional, unlike
+          // the decline-reason ref below: the guide is not behind that flag.
+          guideScrollYRef.current = e.nativeEvent.contentOffset.y;
           // The decline-reason panel's reveal callback needs the offset to
           // scroll from; the ref write is flag-scoped, the listener is not.
           if (declineReasonsOn) mainScrollYRef.current = e.nativeEvent.contentOffset.y;
@@ -6428,27 +6453,38 @@ export default function TradesScreen({ navigation, route }: any) {
               ) : null}
               {/* Send in Sleeper — flagged beta. Directly proposes THIS found
                   trade to the opponent (skips the mutual-match wait). Hides
-                  itself when trade.send_in_sleeper is off. */}
-              <SendInSleeperButton
-                leagueId={topCard.league_id}
-                theirUserId={topCard.opponent_user_id}
-                givePlayerIds={topCard.give_player_ids}
-                receivePlayerIds={topCard.receive_player_ids}
-                givePlayerNames={topCard.give_players.map((p) => p.name)}
-                receivePlayerNames={topCard.receive_players.map((p) => p.name)}
-                opponentUsername={topCard.opponent_username}
-                surface="deck"
-                impressionId={signalV2On ? rawTopCard?.impression_id : undefined}
-                onSent={
-                  // F10 — deck-done summary "proposed" tally.
-                  replenishmentOn
-                    ? () =>
-                        setSessionTally((t) => ({ ...t, proposed: t.proposed + 1 }))
-                    : undefined
-                }
-                compact
-                style={styles.sendInSleeper}
-              />
+                  itself when trade.send_in_sleeper is off.
+                  The wrapper is n23/n23b's spotlight target (#384 report 5):
+                  the button inside resolves to one of four platform branches,
+                  so the WRAPPER is the only stable node. `collapsable={false}`
+                  keeps it measurable on Android. */}
+              <View
+                ref={sendBtnWrapRef}
+                collapsable={false}
+                style={styles.sendInSleeperWrap}
+                testID="trades.send-btn"
+              >
+                <SendInSleeperButton
+                  leagueId={topCard.league_id}
+                  theirUserId={topCard.opponent_user_id}
+                  givePlayerIds={topCard.give_player_ids}
+                  receivePlayerIds={topCard.receive_player_ids}
+                  givePlayerNames={topCard.give_players.map((p) => p.name)}
+                  receivePlayerNames={topCard.receive_players.map((p) => p.name)}
+                  opponentUsername={topCard.opponent_username}
+                  surface="deck"
+                  impressionId={signalV2On ? rawTopCard?.impression_id : undefined}
+                  onSent={
+                    // F10 — deck-done summary "proposed" tally.
+                    replenishmentOn
+                      ? () =>
+                          setSessionTally((t) => ({ ...t, proposed: t.proposed + 1 }))
+                      : undefined
+                  }
+                  compact
+                  style={styles.sendInSleeper}
+                />
+              </View>
               <Text style={styles.deckHint}>
                 Swipe right to like · Swipe left to pass
               </Text>
@@ -7879,6 +7915,12 @@ const styles = StyleSheet.create({
   sendInSleeper: {
     alignSelf: 'center',
     marginTop: space.sm,
+  },
+  // The guide-target wrapper around the send router. Carries the same
+  // self-alignment the button already had, so it hugs its content and the
+  // layout is unchanged.
+  sendInSleeperWrap: {
+    alignSelf: 'center',
   },
   queueBtn: {
     alignSelf: 'center',
