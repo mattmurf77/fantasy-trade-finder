@@ -10,6 +10,33 @@
 > Companion files: [`HANDOFF.md`](HANDOFF.md) for forward-looking; [`../docs/`](../docs/) for per-feature reference updates.
 
 ---
+## 2026-08-21d — Decision-ID attribution corrected: slot pricing is D-146 everywhere (docs only)
+
+Nine reference-doc sites and three `LLD.md` headings credited the wrong decision for
+per-slot pick pricing. Root cause: the slot-pricing session drafted its decision as
+**D-144**, renumbered only the `DECISIONS.md` entry to **D-146** ([G-048](GOTCHAS.md)),
+and left the draft ID in every doc it had already written. PR #168 then blanket-replaced
+`D-144` → `D-147` across `LLD.md`, turning an already-wrong ID into a differently-wrong
+one; the tell was a heading reading D-147 above an anchor still reading `d-144`.
+Corrected against `DECISIONS.md` **one site at a time, by what each decision actually
+decided** — never by adjacency or date:
+
+- `LLD.md` — "Retiring a per-user setting" and "Pricing waterfalls" → **D-146**;
+  "Append-only… `receipts_*`" stays **D-144** (genuinely Receipts); "Consulting a leaf"
+  stays **D-147** (negmem), anchor healed. All five TOC rows now agree with their
+  headings, and the receipts section got the TOC row #165 never gave it.
+- `api-reference` (retired `/api/settings/pick-pricing`), `config-reference`
+  (`trade.slot_pricing`), `data-dictionary` (`pick_pricing_mode`) and **5** sites in
+  `cross-client-invariants` → **D-146**. Each had been sending readers to Receipts grading.
+- PR #169's day-old D-148 section opened *"D-144 put per-slot pick pricing into the
+  engine"* — inherited from the neighbour it was written beside. Fixed.
+
+`docs/plans/**` drafts keep `D-144` on purpose (historical record of the draft).
+New [G-054](GOTCHAS.md): a heading/anchor mismatch is the fingerprint of a blanket
+replace, with a slug-every-heading detector; **`git grep` the OLD id after any renumber.**
+Also indexed G-049/G-050, which had entries but no index row (so the SessionStart
+injection never surfaced them). Docs only — no code, no schema, no routes.
+
 ## 2026-08-21c — League surfaces now price picks at the engine's waterfall (PR #169, `70ae4f4`)
 
 Closes the disagreement [D-146](DECISIONS.md) knowingly left open: a 2026 1.01 read **2117.0 on

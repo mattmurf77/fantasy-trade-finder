@@ -574,7 +574,7 @@ The shape that worked, and generalises to any read-time enrichment:
   widened guard that is not also tightened is how a bound quietly becomes decorative.
 ## One number, one seam: aligning surfaces that must agree (2026-08-21, D-148)
 
-D-144 put per-slot pick pricing into the engine and left two league surfaces on the stored column.
+D-146 put per-slot pick pricing into the engine and left two league surfaces on the stored column.
 Live, the app quoted 2117.0 and 4867.1 for the same pick on two screens. Closing that (Q-026) produced
 a convention for any value multiple surfaces must agree on:
 
