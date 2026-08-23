@@ -431,6 +431,23 @@ _DEFAULT_CFG: dict[str, float] = {
     "exploration_slot_position":  5.0,   # 1-indexed served slot, clamped to [4, 6]
     "exploration_min_deck":       8.0,   # decks below this get no wildcard
     "exploration_overgen":        3.0,   # extra per-opponent candidates generated for the draw pool
+    # Per-opponent keep — the base the over-generation is added to and the
+    # width `server._split_exploration_pool` trims back to. Was the hardcoded
+    # module constant `server._EXPLORATION_BASE_PER_OPP = 5`, which is what
+    # made a `max_per_opponent` change a no-op on the served deck
+    # (docs/plans/full-sweep/plan.md §3.3). 5.0 reproduces that constant
+    # exactly, so this is behaviour-neutral at the default.
+    "exploration_base_per_opp":   5.0,   # served cards kept per opponent
+    # trade.full_sweep wall-clock safety rail (docs/plans/full-sweep/plan.md
+    # §3.5). Removing the `global_target` exit removes the only practical
+    # ceiling on a job: the CONSENSUS per-pair path carries a 1.0s deadline,
+    # but `trade_optimizer.generate_pair_trades_v3` explicitly has none
+    # ("No deadline, no iteration budget", trade_optimizer.py:231), so a slow
+    # league would otherwise run to `server._JOB_HARD_TIMEOUT` (60s). Checked
+    # per opponent, so the budget bounds when the sweep STOPS starting new
+    # pairs, not the pair already in flight. <= 0 disables the rail.
+    # Read only when the flag is on — flag-off never evaluates it.
+    "full_sweep_budget_s":       30.0,   # seconds of opponent sweep before stop
     "audition_min_views":        30.0,   # viewed impressions before an audition verdict
     "audition_like_rate_frac":    0.5,   # graduate at like-rate ≥ this × global base rate
     "audition_retire_days":      30.0,   # retirement window before a failed archetype re-auditions
@@ -4412,6 +4429,10 @@ class TradeService:
         # complete in one full pass — the cap never trips, but the
         # per-opponent deadline reduction is what saves them.
         global_target = max(30, max_per_opponent * 6)
+        # trade.full_sweep — the wall-clock rail's origin. Taken here in both
+        # paths so the flag-off branch below is unchanged in every other way;
+        # one `monotonic()` per job, never read unless the flag is on.
+        _sweep_t0 = time.monotonic()
 
         for idx, member in enumerate(eligible):
             opp_profile = analyze_roster_strengths(member.roster, self._players, scoring_format)
@@ -4451,7 +4472,21 @@ class TradeService:
             # Global early exit: enough cards collected, stop scanning more
             # opponents. Always lets the LAST opponent's results land first
             # (the "snapshot" above already includes them).
-            if len(new_cards) >= global_target:
+            #
+            # trade.full_sweep (docs/plans/full-sweep/plan.md §3.2) — ON, the
+            # card-count exit is skipped so every eligible leaguemate is
+            # scored and `_dedup_and_sort` below ranks the whole league;
+            # `global_target` is still computed, and OFF the first branch is
+            # today's behaviour exactly (the second short-circuits away).
+            _over_target = len(new_cards) >= global_target
+            if not FLAGS.trade_full_sweep and _over_target:
+                break
+            # …and ON, the count no longer bounds the job, so a wall-clock
+            # rail does instead (§3.5): the v3 pair path has no deadline of
+            # its own, and `_JOB_HARD_TIMEOUT` at 60s is not a ceiling anyone
+            # should be relying on. Checked between opponents; <= 0 disables.
+            if FLAGS.trade_full_sweep and _c("full_sweep_budget_s") > 0 \
+                    and time.monotonic() - _sweep_t0 > _c("full_sweep_budget_s"):
                 break
 
         # Filter out trades the user has already swiped on (within memory window)
@@ -5341,6 +5376,8 @@ class TradeService:
         ))
         total = len(eligible)
         global_target = max(30, max_per_opponent * 6)
+        # trade.full_sweep — see the twin in `_generate_trades_impl`.
+        _sweep_t0 = time.monotonic()
 
         # Backlog #1 — opponent outlook resolution, decoupled (phase 2) into
         # LABEL vs VALUE roles. The label (declared league preference →
@@ -5707,7 +5744,16 @@ class TradeService:
                 except Exception:
                     pass  # callback issues must not derail the loop
 
-            if len(new_cards) >= global_target:
+            # trade.full_sweep (docs/plans/full-sweep/plan.md §3.2/§3.5) —
+            # see the twin site in `_generate_trades_impl`. ON ⇒ no card-count
+            # exit, so the sweep is complete and `_dedup_and_sort` ranks
+            # globally, bounded instead by the wall-clock rail; OFF ⇒ the
+            # first branch is today's behaviour and the second never runs.
+            _over_target = len(new_cards) >= global_target
+            if not FLAGS.trade_full_sweep and _over_target:
+                break
+            if FLAGS.trade_full_sweep and _c("full_sweep_budget_s") > 0 \
+                    and time.monotonic() - _sweep_t0 > _c("full_sweep_budget_s"):
                 break
 
         new_cards = self._dedup_and_sort(new_cards)

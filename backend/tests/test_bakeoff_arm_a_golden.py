@@ -492,6 +492,22 @@ def test_r4_bypass_is_thread_local():
 #: `generate_trades` / `trade_gen_v2` / `generate_pair_trades_v3`, none of which
 #: calls it — so a kill value would falsely assert the knob reaches an arm-A deck.
 #: Same rule as `asset_ideas_group_cap`, its sibling one line up.
+#: 2026-08-22 added two full-sweep knobs (docs/plans/full-sweep/plan.md).
+#: `exploration_base_per_opp` (§3.3) is EXCLUDED from MODEL_A_PROFILE, but NOT
+#: for the "runs after generation" reason its `exploration_*` siblings get —
+#: that reason is FALSE here and saying it would be worse than saying nothing.
+#: Its first read sets `gen_kwargs["max_per_opponent"]`, which IS splatted into
+#: every arm's generate call, so it does reach generators. It is excluded
+#: because an arm pin is structurally UNREACHABLE: both reads happen on the job
+#: thread in `server._run_trade_job`, OUTSIDE every arm's `_cfg_override`
+#: context, so the value is a job-level constant shared identically by all
+#: arms and no profile entry could ever change it. Its default 5.0 is the
+#: pre-knob hardcoded `server._EXPLORATION_BASE_PER_OPP`, so arm A is unmoved.
+#: `full_sweep_budget_s` (§3.5) is EXCLUDED too: it is a job-level wall-clock
+#: safety rail, read ONLY inside `if FLAGS.trade_full_sweep` in the two
+#: opponent loops, so with the flag dark it is never evaluated at all and it
+#: shapes no gate, score or package. A kill value would assert arm A's deck
+#: depends on how long the sweep ran, which is exactly what it must not.
 #: The other five (`negmem_floor`, `negmem_min_evidence`, `negmem_halflife_days`,
 #: `negmem_sat_k`, `negmem_like_net`) are EXCLUDED: at strength 0.0
 #: `negmem.effective_mult` returns exactly 1.0 before any of them is consulted —
@@ -529,7 +545,8 @@ crown_share_floor cycle_edge_min_gain cycle_max_results cycle_min_net
 deck_give_headliner_cap deck_headliner_cap deck_max_per_target
 diversity_penalty diversity_user_cap
 diversity_window_days elo_value_base elo_value_k elo_value_ref
-exploration_min_deck exploration_overgen exploration_rate
+exploration_base_per_opp exploration_min_deck exploration_overgen
+exploration_rate
 exploration_slot_position fairness_floor_divergence fairness_weight fatigue_a
 fatigue_arch_a fatigue_b fatigue_decline_suppress_days
 fatigue_decline_value_band fatigue_floor fatigue_lookback_days
@@ -542,6 +559,7 @@ fit_expand_from fit_junk_floor fit_k_defying_mult fit_k_explained_mult
 fit_max_packages_per_pair fit_min_aggregate fit_min_them fit_pool_cap
 fit_pool_consensus fit_pool_div_opp fit_pool_div_seed fit_premium_max_loss
 fit_r5_mode fit_score_even fit_score_scale fit_w_board fit_w_cons fit_w_div
+full_sweep_budget_s
 fair_packages_cap
 fuzzy_match_tau
 gen2_accept_global_prior gen2_accept_prior_strength gen2_band

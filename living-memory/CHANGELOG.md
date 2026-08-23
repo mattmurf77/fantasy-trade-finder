@@ -11,6 +11,10 @@
 
 ---
 
+## 2026-08-23a — Full sweep SHIPPED and LIT: the deck now scores every leaguemate (`trade.full_sweep`)
+
+The [full-sweep build](../docs/plans/full-sweep/plan.md) ([D-154](DECISIONS.md), ledger [2026-08-22j](TEST_LEDGER.md)) merged to `main` with the flag flipped **true** in the same PR, by operator instruction ("merge and flip it on"). Both opponent loops now skip the `global_target` early exit, so every eligible leaguemate is generated against and `_dedup_and_sort` ranks the league globally; wall-clock rail `full_sweep_budget_s` = 30 s (the v3 pair path has no deadline of its own); per-opponent keep is the knob `exploration_base_per_opp` (5.0, clamped ≥ 1). Expected in FFV3: every deck reaches all 11 partners (was ~6, fixed set in single-board leagues); deck grows toward `bakeoff_deck_limit` (prod 60); `gen_ms` ≈ 2×. **Owed:** the scope §3 post-flip verification (count partners, read `gen_ms`, prove the kill switch). Kill switch: flag → false + `POST /api/feature-flags/reload`. Review PR #181 (three trade-model reports, Q-030/G-058) merged first, same day.
+
 ## 2026-08-22m — Trade-model restrictiveness review, two reads (docs + living-memory only)
 
 Two operator-facing HTML reports in `docs/reviews/`: [`…restrictiveness.html`](../docs/reviews/2026-08-22-trade-model-restrictiveness.html) (three parallel Opus audits + prod telemetry) and [`…second-read.html`](../docs/reviews/2026-08-22-trade-model-second-read.html) (a second model re-verifying the first). **No engine line changed.** Knobs read from prod `model_config`.
