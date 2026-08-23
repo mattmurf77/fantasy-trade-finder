@@ -7,6 +7,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-22 — Open Items (trade-model restrictiveness)](#2026-08-22--open-items-trade-model-restrictiveness)
 - [2026-08-22 — Open Items (#384 merged calculator)](#2026-08-22--open-items-384-merged-calculator)
 - [2026-08-19 — Open Items (team review)](#2026-08-19--open-items-team-review)
 - [2026-08-19 — Open Items (bake-off outlook lane)](#2026-08-19--open-items-bake-off-outlook-lane)
@@ -24,6 +25,18 @@
 - [Conventions](#conventions)
 
 ---
+
+## 2026-08-22 — Open Items (trade-model restrictiveness)
+
+### Q-030 — Three operator calls raised by the restrictiveness review; none are model decisions
+- **Why it matters:** [`docs/reviews/2026-08-22-trade-model-restrictiveness.html`](../docs/reviews/2026-08-22-trade-model-restrictiveness.html) ranks eleven fixes, and three of them are product or budget decisions an agent must not make alone. The review is read-only; no engine line changed.
+- **(a) Is the app allowed to suggest a trade the viewer loses slightly?** Today, on the consensus path (~84.5% of served cards), every card must favour the viewer. Dropping that and raising the fairness floor to 0.75 caps either side's loss at exactly 25% — but ~61% of resulting cards ask the viewer to pay. That is a **different product promise**, and it needs card copy that states it. A gentler middle setting exists (≈+18% deck, 31% viewer-pays). See report R11.
+- **(b) How much deck share should `gen_v2` get, and for how long?** The bake-off is serving in prod (`bakeoff_serve_interleaved = 1`) and `gen_v2` is liked at 57% vs `current` 18% — but n=30, one user supplies two-thirds of the likes, and its cards sit deeper in the deck where like rates are naturally higher. The cheapest high-value action available is more volume, not more code. Costs nothing to run; costs deck quality if the signal is wrong. See report R2.
+- **(c) Which comes first — partner coverage or pool depth?** Generation breaks at `global_target`, so a 12-team deck reaches a median **6 of 11** partners. Raising it (R1) and raising `v3_pool_size` (R5) each roughly double generation time, and the per-opponent loop is a plain serial `for` (`trade_service.py`). **Do one, not both**, until that loop is parallelised. Which one is a latency-budget call.
+- **Second-read addendum (2026-08-22, [`second-read.html`](../docs/reviews/2026-08-22-trade-model-second-read.html)):** (c) now has a zero-cost alternative — rotate the unranked-member visiting order per deck (R0) before spending latency on R1; logged `gen_ms` p90 is already 5.3 s. (b) should be graded on **match rate** (baseline 3.2% of likes) and partner-side likes, not viewer likes — consensus cards are liked 30% vs divergence 19% purely because the viewer wins them. (a) has early evidence: the challenger's consensus cards are liked 45% vs current's 23% (n=20).
+- **Action to unblock:** operator reads the report and answers (a), (b), (c). (b) can start immediately and independently of the other two.
+- **Discovered by:** the 2026-08-22 restrictiveness review (three parallel code audits + read-only prod telemetry over all 10,560 served cards).
+- **Owner:** operator.
 
 ## 2026-08-22 — Open Items (#384 merged calculator)
 
