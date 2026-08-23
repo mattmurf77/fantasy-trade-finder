@@ -12,7 +12,7 @@
 ---
 
 
-## 2026-08-22j — Full sweep (`trade.full_sweep`) — full gates, FLAG DARK, NOT MERGED, on `claude/full-sweep-0822-a1c3`
+## 2026-08-22j — Full sweep (`trade.full_sweep`) — full gates; LIT 2026-08-23 by operator instruction at merge
 
 Plan + scope: [`docs/plans/full-sweep/`](../docs/plans/full-sweep/plan.md) · [D-154](DECISIONS.md). Built by Opus agents A1 (engine/flag/knobs/tests) and A2 (arm parity + docs), adversarially reviewed read-only by A3 (2 blockers, 7 should-fix, 5 nits — all closed before commit), lead-reconciled.
 
@@ -22,7 +22,7 @@ Plan + scope: [`docs/plans/full-sweep/`](../docs/plans/full-sweep/plan.md) · [D
 | `tsc --noEmit` / `check-*.js` / `testid-lint` | unaffected — no client change (no new testID) |
 | Sabotages, `test_full_sweep.py` | unconditional `break` restored at either loop → the matching `[legacy]`/`[v2]` visit test red (loops pinned independently); time rail deleted from either loop → red; `> 0` disable inverted → both budget-0 tests red; flag dropped from the rail → the flag-off leak test red; clamp dropped at either `server.py` site, or either site reverted to the bare constant → the AST pin red. All restored from byte copies (not `git checkout --` — uncommitted branch). |
 | Sabotages, `test_arm_sweep_parity.py` | `trade_gen_v2.py` break after 2 members → 3 red; `trade_gen_fit.py` 2-member break → 2 red. A3 re-ran four of the above independently and reproduced every one. |
-| Runtime | **none** — server-side flag, no client build needed. The [scope §3 TestFlight checklist](../docs/plans/full-sweep/scope.md) (≥ 9 of 11 partners; `gen_ms` recorded; kill switch proven) is UNRUN and is what graduates the flag. |
+| Runtime | **none yet** — server-side flag, no client build needed. Operator lit the flag at merge (2026-08-23), ahead of the [scope §3 TestFlight checklist](../docs/plans/full-sweep/scope.md); the checklist (≥ 9 of 11 partners; `gen_ms` recorded; kill switch proven) is now the **post-flip verification**, still owed here. |
 
 **A3 code-walk — `trade.full_sweep` OFF produces byte-identical output to `origin/main` @ `b6e906a`.** (a) `git grep -n trade_full_sweep -- backend/ config/` → exactly two executable reads, the guarded exits in `_generate_trades_impl` and `_generate_trades_v2`; the guard is `if not FLAGS.trade_full_sweep and len(new_cards) >= global_target: break` — flag off ⇒ the identical shipped test, same position; the time rail is `if FLAGS.trade_full_sweep and …`, never evaluated flag-off. (b) No other read: no `is_enabled("trade.full_sweep")`, no import-time capture; `DEFAULT_FLAGS` derives `false` from `FLAG_KEYS`; `features.json` ships `false`. (c) `_deck_cfg` returns a float, both `server.py` reads wrap `max(1, int(...))`; executed: key present → 5, key absent → fallback constant → 5; `_split_exploration_pool(cards, 5) == split(5.0)` on a 4×9 fixture — identical partitions. (d) `FLAGS` is a process-global `_FlagsProxy` (verified at runtime), so every bake-off arm reads the same value; `model_a()`/`model_challenger()` wrap only the thread-local `_cfg_override`. (e) The one addition on the flag-off path is a single `time.monotonic()` capture per loop entry (`_sweep_t0`) — no behavioural effect; "byte-identical output", not "no added instruction". (f) `git diff origin/main -- backend/trade_service.py backend/server.py` contains nothing beyond plan §3.2/§3.3/§3.5.
 

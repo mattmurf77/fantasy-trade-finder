@@ -45,7 +45,7 @@
 
 ## 2026-08-22 — Full sweep BUILT dark on `claude/full-sweep-0822-a1c3`; review PR merges first, then TestFlight checklist, then the operator flips
 
-**Where things are.** Two branches, both local, neither pushed, both committed:
+**Where things are (updated 2026-08-23).** Review PR #181 MERGED; the build branch is merging with the flag LIT in the same PR (operator: "merge and flip it on"). What remains: the scope §3 post-flip verification in FFV3, the worktree sweep (recovery ledger → remove → delete branches), and the Q-030 calls. Original state for the record:
 - `claude/trade-model-restrictiveness-7f3975` (worktree `.claude/worktrees/trade-model-restrictiveness-7f3975`) — docs-only: three HTML reviews in `docs/reviews/` (restrictiveness, second-read, knockout-rules-judged), Q-030, G-058, CHANGELOG 2026-08-22e. Base `613a34c` → needs a rebase onto `origin/main` (`b6e906a`+) before PR; expect a one-line conflict in `GOTCHAS.md`'s index and the 2026-08-22 section (origin added G-056 there).
 - `claude/full-sweep-0822-a1c3` (worktree `.claude/worktrees/full-sweep-a1c3`) — the build, from fresh `origin/main`. Flag `trade.full_sweep` dark, knobs `exploration_base_per_opp` (5.0) and `full_sweep_budget_s` (30.0), 25 new tests, D-154, docs. 4198 passed. Ledger entry 2026-08-22h.
 
