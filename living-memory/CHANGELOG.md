@@ -11,6 +11,14 @@
 
 ---
 
+## 2026-08-22m — Trade-model restrictiveness review, two reads (docs + living-memory only)
+
+Two operator-facing HTML reports in `docs/reviews/`: [`…restrictiveness.html`](../docs/reviews/2026-08-22-trade-model-restrictiveness.html) (three parallel Opus audits + prod telemetry) and [`…second-read.html`](../docs/reviews/2026-08-22-trade-model-second-read.html) (a second model re-verifying the first). **No engine line changed.** Knobs read from prod `model_config`.
+
+Carry forward: the deck reaches a median **6 of 11** partners (sweep breaks at `global_target`) and in single-board leagues it is the **same six every time** — 5/13 and 7/13 leaguemates never served. The bake-off **is serving** (`bakeoff_serve_interleaved = 1`, contra prior memos): `gen_v2` 57% liked vs `current` 6% on the same basis. **Like rate is a viewer-appeal meter** (consensus 30% vs divergence 19%); two-sided scoreboard: 465 likes → 15 matches → 3 accepted; 1 partial / 0 exact of 127 linked real trades. `consensus_both_ways` delivers ≈+18%, not 2×. (A first-draft "`calc_opened` is dead" claim was retracted: 3 of 525 rows set, 7 taps ever.)
+
+Write-back: [Q-030](OPEN_QUESTIONS.md), [G-058](GOTCHAS.md), `docs/reviews/CLAUDE.md` rows.
+
 ## 2026-08-22l — #384 W8: the REAL cause of the blank Analyst bubble, found in the simulator (v1.16.2)
 
 Build 127 was still blank at Set outlook. W7's placement theory was wrong. Lead built for the iOS

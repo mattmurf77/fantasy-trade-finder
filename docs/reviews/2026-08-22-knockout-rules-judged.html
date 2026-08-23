@@ -1,0 +1,308 @@
+<title>The Knockout Rules, Judged</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+:root{
+  --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+  --line:#262C35; --line-strong:#59647A;
+  --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+  --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013;
+  --flare:#F0508C;
+  --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --r-xs:2px; --r-sm:4px; --r-md:8px;
+  --measure:68ch;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--ink-0); color:var(--chalk);
+  font-family:Archivo,"Helvetica Neue",Arial,sans-serif; font-size:15px; line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1080px; margin:0 auto; padding:0 24px 96px}
+
+/* ---------- type ---------- */
+h1,h2,h3{font-family:"Barlow Condensed","Arial Narrow",sans-serif; text-transform:uppercase; text-wrap:balance; margin:0}
+h1{font-weight:700; font-size:clamp(38px,6.2vw,62px); line-height:1.02; letter-spacing:.02em}
+h2{font-weight:700; font-size:30px; line-height:1.1; letter-spacing:.03em}
+h3{font-weight:600; font-size:21px; line-height:1.2; letter-spacing:.03em; color:var(--chalk)}
+p{margin:0; max-width:var(--measure)}
+.lede{font-size:18px; line-height:1.6; color:var(--chalk-dim); max-width:62ch}
+.label{font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--chalk-dim); margin:0}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace; font-variant-numeric:tabular-nums}
+code{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.86em; background:var(--ink-2); border:1px solid var(--line); border-radius:var(--r-xs); padding:1px 5px; color:var(--chalk)}
+a{color:var(--ice); text-decoration:none; border-bottom:1px solid rgba(86,217,236,.35)}
+a:hover{border-bottom-color:var(--ice)}
+:focus-visible{outline:2px solid var(--ice); outline-offset:2px; border-radius:var(--r-xs)}
+
+/* ---------- masthead ---------- */
+.masthead{border-bottom:1px solid var(--line); padding:64px 0 40px; margin-bottom:56px}
+.eyebrow{display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:24px}
+.tick{display:inline-block; width:3px; height:13px; background:var(--ice); border-radius:var(--r-xs)}
+.masthead h1{margin-bottom:20px; max-width:16ch}
+.meta-row{display:flex; flex-wrap:wrap; gap:0; margin-top:36px; border-top:1px solid var(--line)}
+.meta-cell{flex:1 1 150px; padding:16px 20px 16px 0; border-right:1px solid var(--line)}
+.meta-cell:last-child{border-right:0}
+.meta-cell .label{margin-bottom:6px}
+.meta-cell .v{font-family:"IBM Plex Mono",monospace; font-weight:600; font-size:14px; font-variant-numeric:tabular-nums; color:var(--chalk)}
+
+/* ---------- sections ---------- */
+section{margin-bottom:72px; scroll-margin-top:24px}
+.sec-head{display:flex; align-items:baseline; gap:14px; border-bottom:1px solid var(--line); padding-bottom:12px; margin-bottom:28px}
+.sec-num{font-family:"IBM Plex Mono",monospace; font-size:12px; font-weight:600; color:var(--ice); letter-spacing:.06em; padding-top:4px}
+.stack{display:flex; flex-direction:column; gap:18px}
+.stack-tight{display:flex; flex-direction:column; gap:10px}
+
+/* ---------- verdict ---------- */
+.verdict{background:var(--ink-1); border:1px solid var(--line); border-left:3px solid var(--ice); border-radius:var(--r-md); padding:26px 28px; display:flex; flex-direction:column; gap:16px}
+.verdict p{max-width:64ch}
+.verdict strong{color:var(--chalk); font-weight:600}
+
+/* ---------- cards ---------- */
+.grid{display:grid; gap:16px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+.card{background:var(--ink-1); border:1px solid var(--line); border-radius:var(--r-md); padding:20px 22px; display:flex; flex-direction:column; gap:10px}
+.card p{font-size:14px; line-height:1.55; color:var(--chalk-dim)}
+.stat{font-family:"IBM Plex Mono",monospace; font-weight:600; font-variant-numeric:tabular-nums; font-size:34px; line-height:1; color:var(--chalk); letter-spacing:-.01em}
+.stat.ice{color:var(--ice)} .stat.flare{color:var(--flare)} .stat.neg{color:var(--neg)} .stat.pos{color:var(--pos)} .stat.warn{color:var(--warn)}
+.stat-sub{font-size:13px; color:var(--chalk-faint); line-height:1.45}
+
+/* ---------- charts ---------- */
+.chart{background:var(--ink-1); border:1px solid var(--line); border-radius:var(--r-md); padding:22px 24px}
+.chart-title{font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--chalk-dim); margin-bottom:4px}
+.chart-note{font-size:13px; color:var(--chalk-faint); margin-bottom:20px; max-width:60ch}
+.bars{display:flex; flex-direction:column; gap:7px}
+.bar-row{display:grid; grid-template-columns:96px 1fr 62px; align-items:center; gap:12px}
+.bar-lbl{font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--chalk-dim); text-align:right; font-variant-numeric:tabular-nums}
+.bar-track{display:block; height:16px; background:var(--ink-3); border-radius:var(--r-xs); overflow:hidden}
+.bar-fill{display:block; height:100%; min-width:2px; background:var(--ice); border-radius:var(--r-xs)}
+.bar-fill.dim{background:var(--line-strong)}
+.bar-fill.flare{background:var(--flare)}
+.bar-fill.neg{background:var(--neg)}
+.bar-fill.pos{background:var(--pos)}
+.bar-val{font-family:"IBM Plex Mono",monospace; font-size:12px; font-weight:600; color:var(--chalk); font-variant-numeric:tabular-nums}
+.bar-row.peak .bar-lbl,.bar-row.peak .bar-val{color:var(--ice)}
+
+/* funnel */
+.funnel{display:flex; flex-direction:column; gap:2px; margin-top:6px}
+.fn{display:grid; grid-template-columns:1fr; position:relative; background:var(--ink-3); border-radius:var(--r-xs); overflow:hidden}
+.fn-fill{padding:11px 14px; background:var(--ink-2); border-left:3px solid var(--line-strong); display:flex; justify-content:space-between; gap:14px; align-items:baseline; flex-wrap:wrap}
+.fn-fill.a{border-left-color:var(--chalk-faint)}
+.fn-fill.b{border-left-color:var(--warn)}
+.fn-fill.c{border-left-color:var(--neg)}
+.fn-fill.d{border-left-color:var(--ice)}
+.fn-name{font-size:13.5px; color:var(--chalk)}
+.fn-name span{color:var(--chalk-faint); font-size:12.5px}
+.fn-num{font-family:"IBM Plex Mono",monospace; font-weight:600; font-size:14px; font-variant-numeric:tabular-nums; white-space:nowrap}
+
+/* ---------- tables ---------- */
+.tw{overflow-x:auto; border:1px solid var(--line); border-radius:var(--r-md); background:var(--ink-1)}
+table{border-collapse:collapse; width:100%; min-width:600px; font-size:13.5px}
+th{font-family:"Barlow Condensed",sans-serif; font-weight:600; font-size:14px; letter-spacing:.05em; text-transform:uppercase; text-align:left; color:var(--chalk-dim); padding:12px 16px; border-bottom:1px solid var(--line); white-space:nowrap; background:var(--ink-2)}
+td{padding:12px 16px; border-bottom:1px solid var(--line); vertical-align:top; line-height:1.5; color:var(--chalk-dim)}
+tbody tr:last-child td{border-bottom:0}
+td.k{color:var(--chalk); font-weight:500}
+td .mono{color:var(--chalk); font-size:12.5px}
+td strong{color:var(--chalk); font-weight:600}
+
+/* ---------- pills ---------- */
+.pill{display:inline-block; font-size:10.5px; font-weight:600; letter-spacing:.07em; text-transform:uppercase; padding:3px 8px; border-radius:var(--r-xs); border:1px solid; white-space:nowrap}
+.p-hi{color:var(--neg); border-color:rgba(239,68,68,.5); background:rgba(239,68,68,.09)}
+.p-md{color:var(--warn); border-color:rgba(245,158,11,.5); background:rgba(245,158,11,.09)}
+.p-lo{color:var(--chalk-dim); border-color:var(--line-strong); background:transparent}
+.p-keep{color:var(--pos); border-color:rgba(34,197,94,.5); background:rgba(34,197,94,.09)}
+.p-ice{color:var(--ice); border-color:rgba(86,217,236,.45); background:rgba(86,217,236,.08)}
+
+.p-ok{color:var(--pos); border-color:rgba(34,197,94,.5); background:rgba(34,197,94,.09)}
+.p-sharp{color:var(--ice); border-color:rgba(86,217,236,.45); background:rgba(86,217,236,.08)}
+.p-over{color:var(--warn); border-color:rgba(245,158,11,.5); background:rgba(245,158,11,.09)}
+.p-new{color:var(--flare); border-color:rgba(240,80,140,.5); background:rgba(240,80,140,.09)}
+.cmp{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px}
+.cmp .card{align-items:flex-start}
+.cmp .stat{font-size:28px}
+/* ---------- quotes ---------- */
+.quotes{display:flex; flex-direction:column; gap:12px}
+.q{background:var(--ink-1); border:1px solid var(--line); border-left:3px solid var(--flare); border-radius:var(--r-md); padding:16px 20px}
+.q p{font-size:14.5px; line-height:1.6; color:var(--chalk); max-width:70ch}
+.q .attr{font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--chalk-faint); margin-top:8px; letter-spacing:.03em}
+
+/* ---------- recs ---------- */
+.rec{background:var(--ink-1); border:1px solid var(--line); border-radius:var(--r-md); padding:22px 24px; display:flex; flex-direction:column; gap:12px}
+.rec-top{display:flex; align-items:baseline; gap:12px; flex-wrap:wrap}
+.rec-n{font-family:"IBM Plex Mono",monospace; font-size:12px; font-weight:600; color:var(--ice)}
+.rec h3{flex:1 1 260px}
+.rec dl{display:grid; grid-template-columns:auto 1fr; gap:6px 16px; margin:0; font-size:13.5px}
+.rec dt{font-size:10.5px; font-weight:600; letter-spacing:.07em; text-transform:uppercase; color:var(--chalk-faint); padding-top:4px}
+.rec dd{margin:0; color:var(--chalk-dim); line-height:1.55}
+.rec dd .mono{color:var(--chalk); font-size:12.5px}
+
+.tier-head{display:flex; align-items:center; gap:12px; margin:36px 0 18px}
+.tier-head:first-of-type{margin-top:0}
+.tier-head .label{color:var(--ice)}
+.tier-head .rule{flex:1; height:1px; background:var(--line)}
+
+hr.soft{border:0; border-top:1px solid var(--line); margin:0}
+.footnote{font-size:13px; color:var(--chalk-faint); max-width:66ch; line-height:1.6}
+ul.clean{margin:0; padding-left:20px; display:flex; flex-direction:column; gap:9px}
+ul.clean li{font-size:14px; line-height:1.6; color:var(--chalk-dim); max-width:64ch}
+ul.clean li strong{color:var(--chalk); font-weight:600}
+@media (prefers-reduced-motion:no-preference){
+  .bar-fill{transition:width 400ms ease-out}
+}
+@media (max-width:640px){
+  .bar-row{grid-template-columns:76px 1fr 52px; gap:8px}
+  .meta-cell{border-right:0; border-bottom:1px solid var(--line); flex:1 1 100%}
+  .wrap{padding:0 18px 72px}
+}
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <div class="eyebrow">
+    <span class="tick"></span>
+    <span class="label">Fleeced &middot; Trade Engine Review &middot; Knockout Rules</span>
+    <span class="label" style="color:var(--chalk-faint)">22 August 2026</span>
+  </div>
+  <h1>The knockout rules, judged</h1>
+  <p class="lede">Three independent analysts argued the same replay data from three sides &mdash; one to convict the rules, one to rewrite them, one to defend them. Where they disagree is where the decision actually lives. This is the reconciliation: which rules to refine, which to leave alone, and in what order.</p>
+  <div class="meta-row">
+    <div class="meta-cell"><p class="label">Evidence base</p><div class="v">81,003 replayed trades</div></div>
+    <div class="meta-cell"><p class="label">Rules examined</p><div class="v">13</div></div>
+    <div class="meta-cell"><p class="label">Verdicts</p><div class="v">5 refine &middot; 6 keep &middot; 2 free</div></div>
+    <div class="meta-cell"><p class="label">Engine code changed</p><div class="v">none</div></div>
+  </div>
+</header>
+
+<section id="verdict">
+  <div class="sec-head"><span class="sec-num">01</span><h2>The short answer</h2></div>
+  <div class="stack">
+    <div class="verdict">
+      <p><strong>Nothing should be removed. Five rules should be rewritten, and three of those must be rewritten together.</strong></p>
+      <p><strong>1. One rule is 78% of the problem, and you can&rsquo;t delete it.</strong> The junk-filler rule (#141) accounts for 57,815 of the 74,330 trades that any single rule blocks alone. The prosecution showed it killing real starters &mdash; Travis Kelce, David Njoku &mdash; as &ldquo;filler.&rdquo; The defence showed that 91% of what it blocks carries a body worth under 450, and that if you switch it off, <em>every one of the top 200 cards in the deck becomes a padded package</em>, because stapling bodies onto a trade inflates both sides&rsquo; gain. Both are right. The rule has two halves: a <em>relative</em> bar (every piece must be 25% of the headliner) that is taxing consolidation, and an <em>absolute</em> floor (450) that is doing its job. <strong>Lower the relative bar. Keep the floor.</strong> This overturns the first report&rsquo;s recommendation to lower the 450.</p>
+      <p><strong>2. The need gate is the one change you can make alone.</strong> It&rsquo;s the only rule with under 26% overlap with the others, so its effect is measurable in isolation, and the fix is already measured (one-sidedness 96% &rarr; 89%). Make it a two-sided check instead of a one-sided kill.</p>
+      <p><strong>3. &ldquo;Both teams gain&rdquo; is not enough on its own.</strong> The prosecution&rsquo;s best trades and the defence&rsquo;s worst trades overlap. A padded package shows enormous gain on both boards precisely because the padding manufactures it. That changes the metric question from earlier today: the right test is both sides gain <em>and</em> nothing in the package is clutter.</p>
+      <p style="color:var(--chalk-dim)">Also corrected: the &ldquo;too-similar&rdquo; filter is a selector into 5 slots, not a 91% deleter. Loosening it buys near-duplicates, not trades. The real scarcity is upstream &mdash; the gates leave ~5.4 distinct ideas per partner.</p>
+    </div>
+  </div>
+</section>
+
+<section id="lenses">
+  <div class="sec-head"><span class="sec-num">02</span><h2>Where the three lenses disagreed</h2></div>
+  <div class="stack">
+    <div class="tw">
+      <table>
+        <thead><tr><th>Question</th><th>Prosecution (data)</th><th>Engineer (rewrite)</th><th>Defence (cost of removal)</th><th>Ruling</th></tr></thead>
+        <tbody>
+          <tr><td class="k">The 450 junk floor</td><td>Cap the relative bar; floor not the issue</td><td>Make it roster-relative, or 450&rarr;275</td><td><strong>Keep 450</strong> &mdash; 91% of kills carry a sub-450 body</td><td class="k">Keep 450. Lower the relative bar instead.</td></tr>
+          <tr><td class="k">Overpay ceiling (R1)</td><td>Keep &mdash; its kills are fairness &le; 0.75 by algebra</td><td>Keep the number; reprice in package-adjusted value</td><td>Load-bearing on no-board path (43% under 0.60 fairness, median 1,287 taken from partner)</td><td class="k">Reprice, same number, still two-sided. The defence&rsquo;s fleeces still die in adjusted space.</td></tr>
+          <tr><td class="k">&ldquo;Too similar&rdquo; filter</td><td>Not examined</td><td><strong>It&rsquo;s a selector, not a deleter</strong> &mdash; 5.4 distinct ideas/pair is the supply</td><td>Safe (3% bad) but buys near-duplicates</td><td class="k">Not a volume lever. Withdraw R3.</td></tr>
+          <tr><td class="k">Viewer-must-win gate</td><td>Conditional slack when fairness &ge; 0.85</td><td>both-ways + 0.75 floor (+ one missed line)</td><td>Load-bearing alone &mdash; 45% of cards fall to a 0.50 floor if deleted solo</td><td class="k">Never alone. Operator picks the form (Q-028a).</td></tr>
+          <tr><td class="k">Dual-surplus floor (60)</td><td>Keep &mdash; zero both-gain kills</td><td>Keep; audit <span class="mono">waiver_slot_cost</span></td><td>Keep &mdash; 96% of kills have a side losing</td><td class="k">Unanimous keep.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="rules">
+  <div class="sec-head"><span class="sec-num">03</span><h2>Rule by rule</h2></div>
+  <div class="stack">
+    <p style="color:var(--chalk-dim); font-size:14.5px">&ldquo;Alone&rdquo; = trades this rule blocks that no other rule would. That is the literal set of cards a user would newly see if the rule were removed. &ldquo;Clean&rdquo; = the defence&rsquo;s strictest test: both sides gain, fairness &ge; 0.60, no padding, no clog.</p>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Rule</th><th>Built to stop</th><th>Blocks alone</th><th>Clean share</th><th>Verdict</th><th>The change</th></tr></thead>
+        <tbody>
+          <tr><td class="k">#141 junk filler, relative bar<div class="mono">filler_min_frac = 0.25</div></td><td>Padding both sides with cheap bodies (#141)</td><td class="mono">57,815 (78% of all)</td><td>3.6% clean <em>and</em> no sub-450 body</td><td><span class="pill p-sharp">Refine</span></td><td>0.25 &rarr; 0.15 with the floor held; sweep 0.15/0.10 in the replay harness first. The bar on a Chase package drops from 2,118 to 1,270 &mdash; Kelce stops being &ldquo;junk.&rdquo;</td></tr>
+          <tr><td class="k">#141 junk filler, absolute floor<div class="mono">asset_floor_abs = 450</div></td><td>Roster-clogger bodies (2026-07-17 interview)</td><td>inseparable above</td><td>91% of kills carry a sub-450 body</td><td><span class="pill p-keep">Keep</span></td><td>None. Deleting the rule pushed one-sided offers 87% &rarr; 100% and floats padded cards to the top of the deck. <strong>Overturns the first report&rsquo;s R4.</strong></td></tr>
+          <tr><td class="k">R5 need gate<div class="mono">need_gate_min_value = 500</div></td><td>&ldquo;Works on value, breaks on needs&rdquo; (#304)</td><td class="mono">827 + 1,919</td><td>89% clean on two-board path; 77% of no-board kills are bench adds</td><td><span class="pill p-sharp">Refine</span></td><td>Add a dual-need rescue: pass when the viewer sheds surplus at a position the partner is short at. Measured 96.3% &rarr; 88.7%. The Loveland card still dies. Only 18&ndash;26% overlap &mdash; <strong>do this first, alone.</strong></td></tr>
+          <tr><td class="k">R1 overpay<div class="mono">max_overpay_frac = 0.25</div></td><td>Lopsided cards with fairness off (#340)</td><td class="mono">697 + 2,599</td><td>76% clean (two-board); 0% (no-board)</td><td><span class="pill p-sharp">Refine</span></td><td>Measure the gap in package-adjusted value &mdash; the currency the card shows &mdash; instead of raw sums. Same 25%, still both directions. Its calibration was fit on a 78% one-for-one corpus.</td></tr>
+          <tr><td class="k">Elo-gap guard<div class="mono">trade_elo_gap_max = 250</div></td><td>Nothing on record</td><td class="mono">0</td><td>&mdash;</td><td><span class="pill p-lo">Free</span></td><td>Set to 0 <em>in the same change</em> as the filler bar. It blocks nothing today only because #141 fires first; move #141 alone and it inherits 1.25M kills.</td></tr>
+          <tr><td class="k">R2 position cap<div class="mono">pos_net_cap = 1</div></td><td>2RB-for-2WR wrecking balance (#341)</td><td class="mono">412 + 271 + 92</td><td>84% clean; median gain +2,151 / +2,111</td><td><span class="pill p-sharp">Refine</span></td><td>Allow over-cap only when both rosters stay at starter depth and the shedder was above it. Picks are uncounted today, so the rule is trivially bypassed by adding a pick.</td></tr>
+          <tr><td class="k">Viewer-must-win gate<div class="mono">consensus_both_ways = 0</div></td><td>Viewer paying up to 50% (#108)</td><td class="mono">1,156</td><td>95% honest offers, median 7% loss</td><td><span class="pill p-ice">Operator</span></td><td>Conservative: allow a small loss only when fairness &ge; 0.85 (recovers 1,070). Full: both-ways + 0.75 floor plus the missed line on the 1-for-1 veto. <strong>Never alone</strong> &mdash; 45% of cards fall to a 0.50 floor.</td></tr>
+          <tr><td class="k">3-for-1 shape rule<div class="mono">|give| &minus; |recv| &le; 1</div></td><td>Nothing on record (pre-gate)</td><td>never scored</td><td>&mdash;</td><td><span class="pill p-sharp">Refine</span></td><td>Knob it; ship at 2 with the filler change. +6% search, measured. 3-for-1 is 0.5% of served cards and the operator&rsquo;s own stated style.</td></tr>
+          <tr><td class="k">Dual-surplus floor<div class="mono">min_side_surplus_marginal = 60</div></td><td>&ldquo;True mutual gain&rdquo;</td><td class="mono">5,429</td><td>4% &mdash; 96% have a side losing</td><td><span class="pill p-keep">Keep</span></td><td>None. Its rogues sit at fairness 0.73&ndash;0.87 and rob the viewer on his own board &mdash; the failure fairness can&rsquo;t see. Audit <span class="mono">waiver_slot_cost</span> = 425 instead: it makes the effective floor ~910 on a 3-for-1.</td></tr>
+          <tr><td class="k">Roster feasibility</td><td>Legal lineups</td><td class="mono">557 + 134</td><td>100% clean on value; 100% leave a lineup illegal</td><td><span class="pill p-keep">Keep</span></td><td>Make it FLEX-aware &mdash; it&rsquo;s stricter than a real lineup today and can never produce an illegal one.</td></tr>
+          <tr><td class="k">&ldquo;Too similar&rdquo; filter<div class="mono">v3_diversity_max_overlap = 0.4</div></td><td>Same trade &plusmn; a bench piece (#350)</td><td>selector, not a gate</td><td>dropped set 3% bad</td><td><span class="pill p-keep">Keep</span></td><td>Not a volume lever &mdash; it picks 5 of ~5.4 ideas. Optional: key similarity on headliner + centerpiece so a genuinely different return for the same star survives.</td></tr>
+          <tr><td class="k">R3 pick-gap band</td><td>&ldquo;The pick is the gap&rdquo; (#339)</td><td class="mono">22</td><td>100% clean</td><td><span class="pill p-lo">Free</span></td><td>Safe to loosen; 22 cards system-wide. Not where the deck is.</td></tr>
+          <tr><td class="k">#227 pick churn &middot; #108 1-for-1 veto &middot; no-board fairness floor</td><td>Various</td><td class="mono">255 &middot; 913 &middot; 662</td><td>71% dead-even swaps &middot; modest &middot; 100% under 0.60</td><td><span class="pill p-keep">Keep</span></td><td>None. The fairness floor becomes the only safety rail the moment the viewer-must-win gate moves.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="order">
+  <div class="sec-head"><span class="sec-num">04</span><h2>The order, and why it matters</h2></div>
+  <div class="stack">
+    <p class="lede" style="font-size:16px">97.6% of rejections are made by two or more rules at once. Four of them punish the same shape on three different value scales. Change them one at a time and you will correctly measure &ldquo;no effect&rdquo; &mdash; and draw the wrong conclusion.</p>
+    <div class="stack">
+      <div class="rec">
+        <div class="rec-top"><span class="rec-n">1</span><h3>R5 dual-need rescue &mdash; alone</h3><span class="pill p-ice">Standalone</span></div>
+        <p>The only rule whose effect you can see in isolation. One inserted branch; the inputs already exist at both call sites. Ship, measure one-sidedness and partner coverage, then proceed.</p>
+      </div>
+      <div class="rec">
+        <div class="rec-top"><span class="rec-n">2</span><h3>The consolidation bundle &mdash; one change, one measurement</h3><span class="pill p-hi">Must move together</span></div>
+        <p><span class="mono">filler_min_frac</span> 0.25 &rarr; 0.15 (floor held) + <span class="mono">trade_elo_gap_max</span> &rarr; 0 + R1 repriced in package-adjusted value + <span class="mono">v3_shape_max_delta</span> = 2. These nest: #141 would reject 97% of the universe on its own, the gap guard 50%, R1 83%. Loosen one and the next absorbs its recovery. Run the replay harness at 0.15 and 0.10 before flipping; the harness and its validation already exist.</p>
+      </div>
+      <div class="rec">
+        <div class="rec-top"><span class="rec-n">3</span><h3>R2 &rarr; starter-depth predicate</h3></div>
+        <p>Small absolute numbers (~20 distinct ideas) but the highest mutual gains in the replay. Becomes the next wall once bundle 2 lands.</p>
+      </div>
+      <div class="rec" style="border-left:3px solid var(--flare)">
+        <div class="rec-top"><span class="rec-n">4</span><h3>The viewer-must-win decision</h3><span class="pill p-ice">Operator</span></div>
+        <p>Two forms. Conservative: keep the gate but allow a small loss only when fairness &ge; 0.85 &mdash; recovers 1,070 of 1,156, touches nothing below that bar. Full: both-ways + 0.75 floor, which is a different product promise (61% of cards ask the viewer to pay something) and needs card copy. The challenger arm is already serving the full form and is liked 45% vs 23% on that path &mdash; let it earn the sample rather than deciding in the abstract.</p>
+      </div>
+      <div class="rec">
+        <div class="rec-top"><span class="rec-n">5</span><h3>Housekeeping that matters</h3></div>
+        <p>Audit <span class="mono">waiver_slot_cost</span> (425 per extra body, charged before the surplus floor &mdash; probably double-counting the depth discount). Make feasibility FLEX-aware. Fix <span class="mono">docs/config-reference.md</span>, which still documents the pre-interview filler rule and is wrong about depth-for-depth trades.</p>
+      </div>
+    </div>
+    <div class="verdict" style="border-left-color:var(--warn)">
+      <p><strong>What the &ldquo;remove everything&rdquo; programme would serve:</strong> +71,838 cards, 80% bad by a definition you&rsquo;d agree to, 75% carrying a body under 450. <strong>What the certified-safe programme serves:</strong> +434 cards at 15% bad. The volume is not in deleting rules. It is in the full sweep (already building), the 12-asset shortlist, and the shapes the engine can&rsquo;t build.</p>
+    </div>
+  </div>
+</section>
+
+<section id="overturns">
+  <div class="sec-head"><span class="sec-num">05</span><h2>What this overturns from earlier today</h2></div>
+  <div class="stack">
+    <ul class="clean">
+      <li><strong>First report, R3 (loosen the &ldquo;too similar&rdquo; filter to 0.6):</strong> withdrawn. The pass selects into a fixed 5&ndash;8 slots; loosening it fills the same slots with near-duplicates and recreates #350.</li>
+      <li><strong>First report, R4 (lower the 450 floor to 275):</strong> withdrawn. The floor is the half of #141 doing its job; the relative bar is the half taxing consolidation. Both earlier reports had the halves backwards.</li>
+      <li><strong>First report, rule table:</strong> the diversity pass graded &ldquo;High damage&rdquo; should read &ldquo;not a gate.&rdquo; The 8/19 waterfall&rsquo;s &ldquo;highest-leverage knob&rdquo; label on the dual-surplus floor is contradicted by all three lenses.</li>
+      <li><strong>Second-read, the metric question:</strong> &ldquo;like rate when the opponent gains&rdquo; is still the better compass, but it needs a padding exclusion &mdash; both-gain without it rewards the stapled-on bodies the defence documented.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="trust">
+  <div class="sec-head"><span class="sec-num">06</span><h2>How much to trust this</h2></div>
+  <div class="stack">
+    <div class="grid g2">
+      <div class="card">
+        <h3 style="font-size:17px">Solid</h3>
+        <ul class="clean" style="margin-top:4px">
+          <li>Three analysts worked the same 81,003-row sheet independently and converged on every &ldquo;keep&rdquo; and on the #141 split.</li>
+          <li>The defence&rsquo;s diversity simulation reproduced the engine&rsquo;s 161 to within 2.5%; the prosecution&rsquo;s dedupe reproduced the ladder&rsquo;s 159&ndash;161. Independent validation of both.</li>
+          <li>Every code claim cites the current tree; the 8/19 memo&rsquo;s line numbers have drifted by hundreds.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3 style="font-size:17px">Shakier</h3>
+        <ul class="clean" style="margin-top:4px">
+          <li>One league, six boards, replay not serving. Ratios hold; absolute counts don&rsquo;t extrapolate.</li>
+          <li>&ldquo;Blocks alone&rdquo; is conditional on every other rule at its current value &mdash; which is exactly why the bundles exist.</li>
+          <li>The full 3.07M-row candidate file is not in the repo, so multi-rule co-kills were inferred, not inspected.</li>
+          <li>The 0.15 relative bar is the defence&rsquo;s proposal, not a measured point. Sweep before flipping.</li>
+        </ul>
+      </div>
+    </div>
+    <hr class="soft">
+    <p class="footnote">Method: three Opus agents, read-only, each given the replay data, the code, and a distinct brief (convict / rewrite / defend), run in parallel so none could see the others. Reconciled by the lead against the code. No engine line changed.</p>
+  </div>
+</section>
+
+</div>
