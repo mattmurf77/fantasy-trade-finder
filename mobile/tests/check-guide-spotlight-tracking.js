@@ -1220,29 +1220,40 @@ function walkTsFiles(dir) {
 // The calculator's content GROWS after first paint — the rosters land and the
 // outlook receipt swaps with its fallback — which shifts every target below it
 // with no scroll event at all. `onScroll` alone cannot see that, which is half
-// of why the first-landing spotlight was wrong. Sabotage: drop either
-// callback → red.
+// of why the first-landing spotlight was wrong. #386 added a second host with
+// the same defect class: LeagueSummaryScreen's Season outlook section
+// mounts/toggles after first paint (AsyncStorage hydration, outlook-query
+// resolution, the strip tap), shifting the position pills under an already-
+// measured n5 spotlight. Every host below is asserted independently, and a
+// host whose wired `onScroll` cannot be found fails LOUDLY — it is never
+// skipped, so silently dropping a host from parsing cannot green the suite.
+// Sabotage: drop either callback from either host → red.
 
 {
-  const CALC_REL = 'src/screens/TradeCalculatorScreen.tsx';
-  const calc = parse(CALC_REL);
-  const scroller = findAll(calc, (n) => {
-    if (!isJsxEl(n)) return false;
-    const a = attr(calc, n, 'onScroll');
-    return !!a && !!a.initializer && referencesIdentifier(calc, a.initializer, 'notifyGuideTargetsMoved');
-  })[0];
+  const GROWING_HOSTS_REL = [
+    'src/screens/TradeCalculatorScreen.tsx',
+    'src/screens/LeagueSummaryScreen.tsx', // #386 — outlook section shifts the pills
+  ];
+  for (const rel of GROWING_HOSTS_REL) {
+    const sf = parse(rel);
+    const scroller = findAll(sf, (n) => {
+      if (!isJsxEl(n)) return false;
+      const a = attr(sf, n, 'onScroll');
+      return !!a && !!a.initializer && referencesIdentifier(sf, a.initializer, 'notifyGuideTargetsMoved');
+    })[0];
 
-  if (!scroller) {
-    fail('12a — the calculator page ScrollView announces movement', 'no wired onScroll found');
-  } else {
-    for (const name of ['onLayout', 'onContentSizeChange']) {
-      const a = attr(calc, scroller, name);
-      assert(
-        !!a && !!a.initializer && referencesIdentifier(calc, a.initializer, 'notifyGuideTargetsMoved'),
-        `12b — ${where(calc, scroller)} also announces from ${name}`,
-        'content that grows under a settled scroll offset moves every target ' +
-          'below it and fires no scroll event',
-      );
+    if (!scroller) {
+      fail(`12a — ${rel}'s page ScrollView announces movement`, 'no wired onScroll found');
+    } else {
+      for (const name of ['onLayout', 'onContentSizeChange']) {
+        const a = attr(sf, scroller, name);
+        assert(
+          !!a && !!a.initializer && referencesIdentifier(sf, a.initializer, 'notifyGuideTargetsMoved'),
+          `12b — ${where(sf, scroller)} also announces from ${name}`,
+          `${rel}: content that grows under a settled scroll offset moves ` +
+            'every target below it and fires no scroll event',
+        );
+      }
     }
   }
 }
