@@ -1194,7 +1194,8 @@ def _starter_impact(league_id: str, caller_user_id: str,
     responsibility), so both keys are omitted entirely and the payload is
     byte-identical to pre-#169.
     """
-    from .power_rankings import optimal_starter_slots, optimal_starters
+    from .power_rankings import (align_starter_slots, optimal_starter_slots,
+                                 optimal_starters)
     # #311 — platform-aware template resolution (leagues.platform branch);
     # Sleeper leagues delegate to _sleeper_lineup_slots unchanged. This is
     # the ONLY call site switched: mock draft keeps its own fallback and the
@@ -1279,6 +1280,11 @@ def _starter_impact(league_id: str, caller_user_id: str,
             pool_rows(rosters[str(caller_user_id)]), slots)
         after_ = optimal_starter_slots(
             pool_rows(after(rosters[str(caller_user_id)], give, recv)), slots)
+        # #395 — pairwise-align the two canonical fills so a value-identical
+        # assignment displays the minimum honest set of changed rows (no
+        # phantom "QB: Daniels › Maye" when only the SF slot really moves).
+        # Display-only: totals/deltas above are already computed.
+        before, after_ = align_starter_slots(before, after_)
         # Label duplicate slots by template position (RB → RB1/RB2) so
         # clients render distinct rows; a slot the league has once keeps its
         # bare name.
@@ -14580,6 +14586,15 @@ def draft_board_route():
 
 _MOCK_DEFAULT_LINEUP = ["QB", "RB", "RB", "WR", "WR", "WR", "TE", "FLEX"]
 
+# #396 — the honest standard template `_league_lineup_slots` serves for
+# ESPN/MFL/Fleaflicker leagues (its platform branch is the ONLY user).
+# 2 WR + 2 FLEX instead of the mock's 3 WR: a FLEX label is a claim the app
+# can stand behind (a flex can legally start a WR), whereas "WR3" asserts a
+# dedicated slot most platform leagues don't have. Mock draft keeps
+# _MOCK_DEFAULT_LINEUP above — the constants diverge on purpose (pinned by
+# test_trade_evaluate.test_platform_template_has_no_wr3).
+_PLATFORM_DEFAULT_LINEUP = ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "FLEX"]
+
 #: `mfl:<league>.f<franchise>` — the synthetic member id `_mfl_member_id`
 #: (:20109) mints for every MFL franchise that is not the linked user.
 _MOCK_MFL_MEMBER_RE = re.compile(r"^mfl:.*\.f(?P<fid>\w+)$")
@@ -24127,7 +24142,8 @@ def _league_lineup_slots(league_id: str) -> list[str] | None:
          default_scoring). No leagues row → None (never guess a template
          for an unknown league).
       2. platform in ('espn', 'mfl', 'fleaflicker') → the app's one
-         standard template (`_MOCK_DEFAULT_LINEUP`), plus a trailing
+         standard template (`_PLATFORM_DEFAULT_LINEUP`, #396 — 2 WR +
+         2 FLEX, never a fabricated "WR3"), plus a trailing
          SUPER_FLEX when default_scoring == 'sf_tep' (NULL reads as
          '1qb_ppr', the database.py convention). These platforms expose no
          roster_positions equivalent today; slot-FILLING stays 100%
@@ -24162,7 +24178,7 @@ def _league_lineup_slots(league_id: str) -> list[str] | None:
         return None
     platform = (row.platform or "sleeper").lower()
     if platform in ("espn", "mfl", "fleaflicker"):
-        slots = list(_MOCK_DEFAULT_LINEUP)
+        slots = list(_PLATFORM_DEFAULT_LINEUP)
         if (row.default_scoring or "1qb_ppr") == "sf_tep":
             slots.append("SUPER_FLEX")
         return slots

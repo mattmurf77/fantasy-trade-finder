@@ -24,6 +24,8 @@ import backend.server as server
 from backend.database import metadata
 from backend.pick_values import pick_pool_value, priced_pool_value
 from backend.power_rankings import (
+    LINEUP_SLOT_ELIGIBILITY,
+    align_starter_slots,
     compute_power_rankings,
     optimal_starter_slots,
     optimal_starters,
@@ -358,6 +360,150 @@ def test_starter_slots_ignore_out_of_pool_slots_and_agree_with_starters():
     assert [e["slot"] for e in layout] == ["QB", "RB", "FLEX"]
     assert (sorted(e["player"]["player_id"] for e in layout if e["player"])
             == sorted(optimal_starters(roster, slots)))
+
+
+# ---------------------------------------------------------------------------
+# #395 — align_starter_slots: pairwise-align two optimal_starter_slots
+# outputs so a value-identical lineup change displays the minimum honest set
+# of changed rows. Pure display transform — totals, starter sets, and slot
+# eligibility are invariant; scan order is pinned (before side first, (i, j)
+# ascending, restart on apply) so conforming implementations agree byte-fully.
+# ---------------------------------------------------------------------------
+
+# The #395 repro shape (PRD §1): Daniels (QB 9000) canonically owns the QB
+# slot, Maye (QB 6000) the SUPER_FLEX; the user reads it the other way.
+_395_TEMPLATE = ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "SUPER_FLEX"]
+_395_ROSTER = [
+    _row("daniels", "QB", 9000), _row("maye", "QB", 6000),
+    _row("rb_a", "RB", 2000), _row("rb_b", "RB", 1900),
+    _row("wr_a", "WR", 3600), _row("wr_b", "WR", 3400),
+    _row("wr_c", "WR", 3000),                    # FLEX starter both sides
+    _row("te_top", "TE", 3200),                  # dedicated TE both sides
+    _row("fannin", "TE", 2800),                  # benched until Daniels leaves
+]
+
+
+def _changed(before, after):
+    """Indices whose player_id differs between the two aligned sides."""
+    def pid(e):
+        return e["player"]["player_id"] if e["player"] else None
+    return [k for k, (b, a) in enumerate(zip(before, after))
+            if pid(b) != pid(a)]
+
+
+def test_align_starter_slots_superflex_cascade():
+    before = optimal_starter_slots(_395_ROSTER, _395_TEMPLATE)
+    after = optimal_starter_slots(
+        [r for r in _395_ROSTER if r["player_id"] != "daniels"], _395_TEMPLATE)
+    # Unaligned, the canonical fills cascade: QB daniels→maye AND SF
+    # maye→fannin — the phantom two-row display the user reported.
+    assert len(_changed(before, after)) == 2
+    assert before[0]["player"]["player_id"] == "daniels"
+
+    a_before, a_after = align_starter_slots(before, after)
+    # Aligned before matches the user's mental model: Maye at QB, Daniels
+    # at SUPER_FLEX — so exactly ONE row changes: SF, Daniels → Fannin.
+    assert a_before[0]["slot"] == "QB"
+    assert a_before[0]["player"]["player_id"] == "maye"
+    assert a_before[7]["slot"] == "SUPER_FLEX"
+    assert a_before[7]["player"]["player_id"] == "daniels"
+    assert _changed(a_before, a_after) == [7]
+    assert a_after[7]["player"]["player_id"] == "fannin"
+
+
+def test_align_starter_slots_wr_flex_cascade():
+    roster = [_row("wr_hi", "WR", 900), _row("wr_mid", "WR", 800),
+              _row("wr_low", "WR", 700), _row("wr_bench", "WR", 600)]
+    tmpl = ["WR", "WR", "FLEX"]
+    before = optimal_starter_slots(roster, tmpl)
+    after = optimal_starter_slots(
+        [r for r in roster if r["player_id"] != "wr_hi"], tmpl)
+    # Unaligned every row shifts up one — three changed rows.
+    assert len(_changed(before, after)) == 3
+    a_before, a_after = align_starter_slots(before, after)
+    # Aligned: the two WR rows are byte-equal before/after; the single
+    # changed row is the FLEX (departing wr_hi → backfilling wr_bench).
+    changed = _changed(a_before, a_after)
+    assert changed == [2] and a_before[2]["slot"] == "FLEX"
+    assert a_before[2]["player"]["player_id"] == "wr_hi"
+    assert a_after[2]["player"]["player_id"] == "wr_bench"
+    for k in (0, 1):
+        assert a_before[k] == a_after[k]
+
+
+def test_align_preserves_totals_and_eligibility():
+    def check_invariants(before, after, a_before, a_after):
+        for orig, aligned in ((before, a_before), (after, a_after)):
+            def total(rows):
+                return sum(e["player"]["value"] for e in rows if e["player"])
+
+            def ids(rows):
+                return {e["player"]["player_id"] for e in rows if e["player"]}
+            # Alignment does no arithmetic — totals byte-equal, sets equal.
+            assert total(aligned) == total(orig)
+            assert ids(aligned) == ids(orig)
+            assert [e["slot"] for e in aligned] == [e["slot"] for e in orig]
+            for e in aligned:
+                if e["player"] is not None:
+                    assert (e["player"]["position"]
+                            in LINEUP_SLOT_ELIGIBILITY[e["slot"]])
+
+    # Scenario A: the #395 shape. Scenario B: duplicate FLEX + SUPER_FLEX
+    # slots with a multi-asset trade.
+    dup_tmpl = ["QB", "RB", "WR", "TE", "FLEX", "FLEX",
+                "SUPER_FLEX", "SUPER_FLEX"]
+    dup_roster = _395_ROSTER + [_row("rb_c", "RB", 1500)]
+    scenarios = [
+        (optimal_starter_slots(_395_ROSTER, _395_TEMPLATE),
+         optimal_starter_slots(
+             [r for r in _395_ROSTER if r["player_id"] != "daniels"],
+             _395_TEMPLATE)),
+        (optimal_starter_slots(dup_roster, dup_tmpl),
+         optimal_starter_slots(
+             [r for r in dup_roster
+              if r["player_id"] not in ("daniels", "wr_a")], dup_tmpl)),
+    ]
+    for before, after in scenarios:
+        b_snap = [dict(e) for e in before]
+        a_snap = [dict(e) for e in after]
+        a_before, a_after = align_starter_slots(before, after)
+        check_invariants(before, after, a_before, a_after)
+        # Inputs not mutated; repeated calls byte-identical (pinned order).
+        assert before == b_snap and after == a_snap
+        assert align_starter_slots(before, after) == (a_before, a_after)
+
+    # Pinned mixed-flex fixture (PRD test 3, mandatory): the ONLY
+    # match-improving swaps are eligibility-invalid — before-side
+    # teQ → WRRB_FLEX (TE ∉ {RB,WR}); after-side rbR → REC_FLEX
+    # (RB ∉ {WR,TE}) — so a correct implementation applies nothing and
+    # both changed rows stand.
+    mixed_before = [{"slot": "WRRB_FLEX", "player": _row("wrP", "WR", 500)},
+                    {"slot": "REC_FLEX", "player": _row("teQ", "TE", 400)}]
+    mixed_after = [{"slot": "WRRB_FLEX", "player": _row("rbR", "RB", 450)},
+                   {"slot": "REC_FLEX", "player": _row("wrP", "WR", 500)}]
+    a_before, a_after = align_starter_slots(mixed_before, mixed_after)
+    check_invariants(mixed_before, mixed_after, a_before, a_after)
+    assert a_before == mixed_before and a_after == mixed_after
+    assert _changed(a_before, a_after) == [0, 1]
+
+
+def test_align_forced_change_is_noop():
+    # Trade the ONLY QB; the template has a second TE slot the roster cannot
+    # fill (before TE2 = None). The genuine forced change must survive
+    # exactly: the only zero-or-better swap is the INVALID net-0 QB ↔ TE2
+    # (+1 at QB, −1 at the vacated TE2), so alignment applies nothing.
+    roster = [_row("daniels", "QB", 9000), _row("te_top", "TE", 3200)]
+    tmpl = ["QB", "TE", "TE"]
+    before = optimal_starter_slots(roster, tmpl)
+    after = optimal_starter_slots(
+        [r for r in roster if r["player_id"] != "daniels"], tmpl)
+    assert before[1]["player"]["player_id"] == "te_top"
+    assert before[2]["player"] is None                  # unfillable TE2
+    a_before, a_after = align_starter_slots(before, after)
+    assert a_before == before and a_after == after      # no-op
+    assert _changed(a_before, a_after) == [0]           # exactly {QB}
+    assert a_before[0]["player"]["player_id"] == "daniels"
+    assert a_after[0]["player"] is None
 
 
 def test_derived_starters_follow_personal_basis_values():
