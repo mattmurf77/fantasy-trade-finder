@@ -2886,6 +2886,7 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-08-24 — Onboarding-tour Wave A — full gates green on `feat/tour-wave-a`; runtime evidence owed](#2026-08-24--onboarding-tour-wave-a--full-gates-green-on-feattour-wave-a;-runtime-evidence-owed)
 - [2026-08-23b — `test_stud_tax_pinned_market` flake pinned: breaker wall-clock budget removed from test inputs](#2026-08-23b--test_stud_tax_pinned_market-flake-pinned-breaker-wall-clock-budget-removed-from-test-inputs)
 - [2026-08-23a — main CI red → green: full-sweep fixture mirrors flipped](#2026-08-23a--main-ci-red--green-full-sweep-fixture-mirrors-flipped)
 - [2026-08-22j — Full sweep — full gates; LIT at merge](#2026-08-22j--full-sweep-tradefull_sweep--full-gates-lit-2026-08-23-by-operator-instruction-at-merge)

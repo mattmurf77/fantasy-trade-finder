@@ -102,7 +102,12 @@ const DECK_ARRIVAL_TIMEOUT_MS = 30_000;
  *  because ending is what releases the app-wide interrupt hold; wedging the
  *  park would mute every interstitial for the rest of the session. */
 const IN_LEAGUE_READY_TIMEOUT_MS = 10_000;
-const OUTLOOK_CLOSE_TIMEOUT_MS = 10_000;
+// A HUMAN is editing the sheet this park waits on — reading options, moving a
+// slider — and 10 s is routinely exceeded (review finding A2; the deck park
+// gives a MACHINE 30 s). The bound exists only as hold-safety for a close
+// event that never comes, so it is long: expiry still ends the run rather
+// than wedging the mute.
+const OUTLOOK_CLOSE_TIMEOUT_MS = 60_000;
 
 /** Handlers the SCREEN owns and the runner cannot reach for itself. */
 export interface CalcTourHandlers {
@@ -133,8 +138,14 @@ let outlookParkTimer: ReturnType<typeof setTimeout> | null = null;
  *  that it just arrived. A re-run ("Show me around" on a page whose league
  *  already loaded) completes n10 with this already true and must proceed
  *  immediately rather than park for an announcement that has been and gone.
- *  Cleared when the calculator screen goes away, so the next visit re-earns
- *  it — see `calcTourScreenBlurred`. */
+ *  Cleared when the In-league CONTENT unmounts (`calcTourInLeagueGone`, fired
+ *  by `InLeagueCalculator`'s effect cleanup) — NOT on blur: a tab switch
+ *  blurs the calculator while the content stays mounted, and clearing there
+ *  stranded the next re-run in a park whose announcement had already been
+ *  spent (review finding A1). Unmount is the event that actually invalidates
+ *  the level — a mode switch back to Real values, a league change reload
+ *  (the level FALLS when the queries go back to loading), or the screen
+ *  popping. */
 let inLeagueReady = false;
 /** Set by the Find-a-Trade hand-off so the calculator's blur handler knows
  *  this particular departure is the tour continuing, not the tour ending. */
@@ -365,6 +376,16 @@ export function calcTourInLeagueReady(): void {
   requestAt(at);
 }
 
+/** The In-league content UNMOUNTED (mode switch to Real values, a league
+ *  change putting the queries back into loading, or the screen popping).
+ *  Fired by `InLeagueCalculator`'s ready-effect cleanup — the exact inverse
+ *  of `calcTourInLeagueReady`, so the level tracks the content and never the
+ *  screen's focus (review findings A1/A3). Clears the level only; a park
+ *  already waiting keeps its bounded timer. */
+export function calcTourInLeagueGone(): void {
+  inLeagueReady = false;
+}
+
 /** The outlook sheet closed (v2 note 14). Called by TradeCalculatorScreen from
  *  `InLeagueCalculator`'s `onOutlookClosed`. Unparks n12 so the bubble renders
  *  over the page instead of behind the Modal. A no-op when nothing parked for
@@ -412,11 +433,10 @@ export function calcTourHandOffToDeck(): void {
  *  the tour continuing rather than ending: the deck half is parked, waiting
  *  for `calcTourDeckArrived()`. */
 export function calcTourScreenBlurred(): void {
-  // The In-league readiness LEVEL belongs to a mounted, focused calculator.
-  // Clearing it here — before the guards, and on every departure including the
-  // hand-off — is what stops a later run from treating a stale `true` as
-  // "the content is up" and requesting n11 against an unmounted target again.
-  inLeagueReady = false;
+  // Deliberately does NOT clear `inLeagueReady`: a blur without unmount (a
+  // tab switch) leaves the In-league content mounted and measurable, and the
+  // level says exactly that. The content's own unmount clears it — see
+  // `calcTourInLeagueGone`.
   if (!running || handingOffToDeck) return;
   endTour('abandoned');
 }

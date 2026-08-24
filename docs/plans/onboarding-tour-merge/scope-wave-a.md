@@ -266,3 +266,11 @@ deck's cross, and both now exist under those names. Left verbatim.
 - **TestFlight verification:** checklist written (§3); **not yet run** — it is
   the operator's, and it is the only runtime evidence this wave gets.
 - **Express lane declared by the operator?** No. Full gates.
+
+## Post-review fixes (lead, 2026-08-24)
+
+The Fable review pass found two defects in the park mechanism, both fixed before merge:
+- **A1/A3 — the ready level now tracks the CONTENT, not the screen's focus.** `calcTourScreenBlurred` no longer clears `inLeagueReady` (a tab switch blurs without unmounting, which stranded a re-run in a full-timeout park); the clear moved to `calcTourInLeagueGone`, fired by the ready effect's cleanup on unmount or predicate fall (mode switch, league-change reload). The announce effect fires on rise, retracts on fall — `check-calc-tour` 45e/45e-ii/45n/45n-ii pin the new shape.
+- **A2 — `OUTLOOK_CLOSE_TIMEOUT_MS` 10 s → 60 s.** A human is editing the sheet this park waits on; 10 s routinely expired mid-edit and silently ended the tour. The bound remains (hold safety), pinned ≥ 60 s by 45g-ii.
+- Housekeeping from the same review: `release-300.json` / `release-espn-send-off.json` also flipped to `try_before_sync: false` (unenforced variants, but QA profiles seeded from them booted demo-on); TEST_LEDGER TOC line added.
+

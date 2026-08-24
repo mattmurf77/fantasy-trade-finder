@@ -496,16 +496,22 @@ assert(/if \(m === 'league'\) advanceGuideIfActive\('n10', 'action'\);\s*if \(m 
   assert(/export function calcTourInLeagueReady\(\): void \{\s*inLeagueReady = true;/.test(tour),
     '45d. the ready signal records the LEVEL before it looks for a waiter',
     'setting the flag only when parked makes the re-run case unreachable');
-  // …and the level is cleared when the screen goes away, or a stale `true`
-  // would let the NEXT run request n11 against an unmounted target.
+  // …and the level is cleared when the CONTENT unmounts — NOT on blur. A tab
+  // switch blurs the screen while the In-league content stays mounted and
+  // measurable; clearing there stranded the next re-run in a park whose
+  // announcement had already been spent (review A1). The unmount clear lives
+  // in `calcTourInLeagueGone`, fired by the component effect's cleanup.
   {
     const blur = tour.slice(
       tour.indexOf('export function calcTourScreenBlurred'),
       tour.indexOf('function resetTourDisplayCounts'),
     );
-    assert(/inLeagueReady = false;[\s\S]{0,200}?if \(!running \|\| handingOffToDeck\) return;/.test(blur),
-      '45e. …and cleared on blur/unmount BEFORE the early return',
-      'clearing it after the guard leaves the flag set on the hand-off path');
+    assert(!/inLeagueReady = false;/.test(blur),
+      '45e. blur does NOT clear the level (a tab switch leaves the content mounted)',
+      'clearing on blur re-creates the A1 hang: re-run after a tab switch parks forever');
+    assert(/export function calcTourInLeagueGone\(\): void \{\s*inLeagueReady = false;\s*\}/.test(tour),
+      '45e-ii. the level is cleared by calcTourInLeagueGone, the unmount signal',
+      'without an unmount clear, a stale true requests n11 against an unmounted target (A3)');
   }
 
   // ---- the outlook park (after n11) ----
@@ -516,6 +522,12 @@ assert(/if \(m === 'league'\) advanceGuideIfActive\('n10', 'action'\);\s*if \(m 
   assert(/outlookParkTimer = setTimeout\([\s\S]{0,300}?endTour\('abandoned'\)[\s\S]{0,80}?OUTLOOK_CLOSE_TIMEOUT_MS/.test(complete)
       && /const OUTLOOK_CLOSE_TIMEOUT_MS = /.test(tour),
     '45g. …bounded the same way, ending the run rather than holding the mute');
+  {
+    const m = /const OUTLOOK_CLOSE_TIMEOUT_MS = ([0-9_]+);/.exec(tour);
+    assert(m !== null && Number(m[1].replace(/_/g, '')) >= 60_000,
+      '45g-ii. the outlook bound gives a HUMAN editing time (>= 60 s)',
+      'a 10 s bound ended the tour while the user was using the sheet n11 opened (review A2)');
+  }
   assert(/export function calcTourOutlookClosed\(\): void \{\s*if \(!running \|\| !outlookPark\) return;/.test(tour),
     '45h. the close signal is a no-op when nothing parked for it',
     'the outlook sheet is reachable outside the tour too');
@@ -544,10 +556,14 @@ assert(/if \(m === 'league'\) advanceGuideIfActive\('n10', 'action'\);\s*if \(m 
       && /if \(opponents\.length === 0\)/.test(ilc),
     '45m. …and those two early returns still read exactly those conditions',
     'if a return changes and the predicate does not, 45l is measuring nothing');
-  assert(/readyAnnouncedRef/.test(ilc),
-    '45n. the ready callback fires once per mount, not on every re-render',
-    'the runner treats each call as a resume; repeated calls after a resume '
-    + 'would be harmless only by accident');
+  // Rise announces, fall/unmount retracts — the effect's cleanup is the
+  // retraction, so the pairing is structural: the same effect that calls
+  // ready returns the cleanup that calls gone.
+  assert(/if \(!inLeagueReady\) return;\s*onInLeagueReady\?\.\(\);\s*return \(\) => \{\s*onInLeagueGone\?\.\(\);\s*\};/.test(ilc),
+    '45n. the ready effect announces on RISE and retracts via its own cleanup',
+    'an announce without the paired retraction leaves the level stale after unmount (A1/A3)');
+  assert(/onInLeagueGone=\{calcTourInLeagueGone\}/.test(screen),
+    '45n-ii. the screen wires the retraction to the runner');
 }
 
 console.log(failures === 0

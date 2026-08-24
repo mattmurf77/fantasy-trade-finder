@@ -87,6 +87,11 @@ interface Props {
    *  runner parks between n10 and n11 on this, instead of racing the
    *  "Loading your league…" card with a 150 ms retry. */
   onInLeagueReady?: () => void;
+  /** Inverse of `onInLeagueReady` — fired from the ready effect's CLEANUP
+   *  when the content unmounts or the ready predicate falls (mode switch,
+   *  league-change reload). Keeps the runner's level tracking the content
+   *  rather than the announcement (review A1/A3). */
+  onInLeagueGone?: () => void;
   /** Wave A (v2 note 14) — fired when the outlook sheet closes. n11's CTA both
    *  opens the sheet and advances the beat, and the guide overlay sits below
    *  RN Modals, so the runner parks on this rather than drawing n12 behind a
@@ -173,6 +178,7 @@ export default function InLeagueCalculator({
   onShowMeAround,
   outlookOpenerRef,
   onInLeagueReady,
+  onInLeagueGone,
   onOutlookClosed,
   onLikeTrade,
 }: Props) {
@@ -443,12 +449,18 @@ export default function InLeagueCalculator({
   // runner, which synchronously requests a beat and writes the guide store.
   const inLeagueReady =
     merged && !rostersQ.isLoading && !coverageQ.isLoading && opponents.length > 0;
-  const readyAnnouncedRef = useRef(false);
+  // RISE announces, FALL (and unmount) retracts — the cleanup pairing is what
+  // keeps the runner's level honest across a mode switch back to Real values
+  // or a league change that reloads the queries (review A1/A3): the level
+  // must track the CONTENT, not the announcement. Both callbacks are
+  // module-stable functions, so the deps re-fire only on genuine rises.
   useEffect(() => {
-    if (!inLeagueReady || readyAnnouncedRef.current) return;
-    readyAnnouncedRef.current = true;
+    if (!inLeagueReady) return;
     onInLeagueReady?.();
-  }, [inLeagueReady, onInLeagueReady]);
+    return () => {
+      onInLeagueGone?.();
+    };
+  }, [inLeagueReady, onInLeagueReady, onInLeagueGone]);
 
   // Their roster changed → what you'd receive no longer applies. Skips
   // the mount run (guard ref) so a #190 prefill isn't wiped before it
