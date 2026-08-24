@@ -42,9 +42,10 @@
    (§4.4), multi-platform-landing timing (§4.5). D-158's two assumptions are CONFIRMED
    (2026-08-24). *Why now: Wave A and Wave B0 are both fully specified — each is one operator go
    from build.*
-2. **Wave A on a go:** Next buttons on every onboarding talk beat (the W7 rule, applied to
-   `s0.1`/`s2.1`/`s5.x`/`s8.1`/`n1`/err beats), `landing.try_before_sync` → false, `s0.1` +
-   `s2.1` copy. Full gates; no schema/API surface.
+2. ~~Wave A~~ / ~~Wave B0~~ **SHIPPED 2026-08-24** (PRs #197/#199, EAS 1.16.4 build 130; B0
+   dark behind `calc.inline_home`). Next build: **Wave B, the tour merge** — required BEFORE the
+   flag lights (tour is off under it), and it must re-thread the park signals + outlook opener
+   through the inline mount. Checklists H + I1 owed on 130.
 
 ## 2026-08-22 — Full sweep: merge the review PR, then the build, then the operator flips
 

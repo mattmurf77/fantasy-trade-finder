@@ -68,7 +68,7 @@ import TradeDnaSheet, {
 } from '../components/TradeDnaSheet';
 import TradeHomeUtilityRow from '../components/TradeHomeUtilityRow';
 import TradingWithStrip from '../components/TradingWithStrip';
-import TradeBuildCanvas from '../components/TradeBuildCanvas';
+import TradeBuildCanvas, { type CanvasPrefill } from '../components/TradeBuildCanvas';
 import LeagueSwitcherSheet from '../components/LeagueSwitcherSheet';
 import QueueChip from '../components/QueueChip';
 import SwapPlayerSheet from '../components/SwapPlayerSheet';
@@ -91,6 +91,11 @@ import {
 // featured-trade window uses, so a fair card and a window card can never
 // diverge. Pure, zero runtime imports (utils/ideaToCard.ts).
 import { ideaToCard } from '../utils/ideaToCard';
+// D-158 — the canvas fork and the ✓ queue, shared with TradeCalculatorScreen
+// so the two hosts of the same canvas can never diverge (see each file's
+// header).
+import { anchorSummary, forkCanvasSearch } from '../utils/canvasSearch';
+import { queueCalcTrade } from '../utils/queueCalcTrade';
 import {
   postDeclineReason,
   type Layer1Code,
@@ -648,6 +653,18 @@ export default function TradesScreen({ navigation, route }: any) {
     : homeInlineStripOn
       ? 'strip'
       : 'control';
+  // D-158 (Wave B0, plan docs/plans/onboarding-tour-merge/plan.md §3b) — the
+  // guided landing BECOMES the merged In-league page: the same
+  // `TradeBuildCanvas` the #270 experiment mounts, promoted from a per-unit
+  // variant to the layout and wired with the #384 handlers it lacked, so a
+  // user can build a trade or find one from one surface. Ships DARK.
+  //
+  // PRECEDENCE against the experiment (a unit could hold both): the FLAG path
+  // wins and the canvas mounts exactly ONCE — see `canvasFromFlag` /
+  // `canvasFromExperiment` at the mount below. The experiment's assigned units
+  // keep their variant verbatim while this is off, which is the whole of
+  // "graduates/closes when this lands" (D-158 rollout).
+  const inlineHomeOn = useFlag('calc.inline_home');
 
   // ── FB #156/#246 — finder modes (flag `trades.finder_hub`) ────────────
   // route.params carries which mode this screen is in and (team mode) the
@@ -697,6 +714,33 @@ export default function TradesScreen({ navigation, route }: any) {
   // the W5 unpin-retry is meaningless here and "Search all trades" takes its
   // place. Cleared by every path that starts or invalidates a model search.
   const [fairDeck, setFairDeck] = useState(false);
+  // D-158 — the anchored deck's FILTER RECEIPT. The operator's framing: an
+  // anchored Find a Trade "becomes the same treatment as the existing filters
+  // from the outlook tab", so the anchor is shown as a receipt above the
+  // results rather than as a separate deck world reachable only from an
+  // end-of-deck exit. Set by the inline canvas's own search (the only thing
+  // that can anchor a deck once this flag is on); read together with
+  // `fairDeck`, which every path that starts or invalidates a model search
+  // already clears — so a stale label can never outlive its deck.
+  const [inlineAnchor, setInlineAnchor] = useState<{
+    label: string;
+    giveIds: string[];
+    receiveIds: string[];
+  } | null>(null);
+  // D-158 — a host-driven prefill for the inline canvas, replacing the three
+  // `navigate('TradeCalculator', {prefill})` hand-offs. The SEQ is the
+  // trigger (the same package may legitimately be loaded twice), and the Y is
+  // what lets a load scroll the canvas back into view.
+  const [canvasPrefill, setCanvasPrefill] = useState<CanvasPrefill | null>(null);
+  const [canvasPrefillSeq, setCanvasPrefillSeq] = useState(0);
+  // D-158 — bumping this re-fires the ONE #330 choke point below, which is
+  // also the one place a deck dispatch happens. The inline Find a Trade arms
+  // exactly the refs a calculator hand-off used to arrive with and then bumps
+  // this, so in-place search and pushed-page hand-off share the dispatch
+  // instead of owning two of them. Separate from `autoRunSeq` (that one
+  // carries the STORE's seq and must not be written by anything else).
+  const [canvasRunSeq, setCanvasRunSeq] = useState(0);
+  const canvasY = useRef(0);
   const finderMode: 'guided' | 'team' | 'player' | undefined = finderHubOn
     ? route?.params?.mode
     : undefined;
@@ -789,6 +833,18 @@ export default function TradesScreen({ navigation, route }: any) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route?.params?.editDna]);
+  // D-158 review fix B1 — the Matches tab's "edit in calculator" can't land
+  // on the pushed page any more when the flag is on (its In-league mode is
+  // gone), so MatchesScreen sends the package HERE as a route param and this
+  // consumes it into the inline canvas — same consume-and-clear shape as
+  // `editDna` above. Seq-keyed so a second tap on the same match re-loads.
+  useEffect(() => {
+    const p = route?.params?.canvasPrefill as CanvasPrefill | undefined;
+    if (!inlineHomeOn || !p) return;
+    loadCanvasPrefill(p);
+    navigation?.setParams?.({ canvasPrefill: undefined, canvasPrefillSeq: undefined });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route?.params?.canvasPrefillSeq]);
   const switchFinderMode = useCallback(
     (m: 'guided' | 'team' | 'player') => {
       // #384 — the user re-aiming the finder ends the calculator's ownership
@@ -1360,6 +1416,17 @@ export default function TradesScreen({ navigation, route }: any) {
 
   function handleOpenAssetIdea(idea: AssetIdea) {
     haptics.selection();
+    // D-158 — flag on, the calculator IS this page: load the inline canvas
+    // and scroll to it instead of pushing a screen that no longer has an
+    // In-league mode to land in.
+    if (inlineHomeOn) {
+      loadCanvasPrefill({
+        opponentId: idea.counterparty_user_id,
+        give: idea.give_player_ids,
+        receive: idea.receive_player_ids,
+      });
+      return;
+    }
     navigation?.navigate?.('TradeCalculator', {
       prefill: {
         opponentUserId: idea.counterparty_user_id,
@@ -2544,8 +2611,85 @@ export default function TradesScreen({ navigation, route }: any) {
       setShowPrefsChangedStrip(false);
     }
     finderScopeSeen.current = true;
+    // D-158 — `canvasRunSeq` is the inline canvas's trigger into this SAME
+    // choke point (see `handleInlineFindATrade`). It is only ever bumped with
+    // `calc.inline_home` on, so flag-off this dep is a constant 0 and the
+    // effect fires exactly when it always did.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [finderMode, scopedOpponent, autoRunSeq]);
+  }, [finderMode, scopedOpponent, autoRunSeq, canvasRunSeq]);
+
+  // ── D-158 — the inline canvas's own Find a Trade (no navigation) ────────
+  //
+  // The pushed page's handler wrote a `FinderHandoff` and `popTo`'d here; on
+  // one screen there is nothing to hand off to. So this arms exactly the refs
+  // a calculator arrival used to be consumed into and bumps `canvasRunSeq`,
+  // and the choke point above does the rest — one dispatch site, one fork,
+  // one epoch guard, for both hosts of the canvas.
+  //
+  // The fork itself (fair vs model) and its `calc_find_a_trade_tapped` row
+  // live in `utils/canvasSearch.forkCanvasSearch`, which `TradeCalculatorScreen`
+  // calls too: the two entries can never price the same canvas differently.
+  function handleInlineFindATrade(opts: {
+    give: CalcPlayer[];
+    receive: CalcPlayer[];
+    opponent: { userId: string; name: string } | null;
+  }) {
+    const fork = forkCanvasSearch(opts, 'Trades');
+    // The canvas's Team dropdown is the search scope, exactly as the hand-off
+    // carried it — adopting it here is what `setSheetOpponent(handoff.opponent)`
+    // did on arrival.
+    setSheetOpponent(fork.opponent);
+    // #384 review #7 — this deck came from the calculator, which is what keeps
+    // the ✕→decline-reason OVERLAY and the calculator-first end-of-deck exits
+    // legal on it. The canvas being inline does not change whose deck it is.
+    setDeckOrigin('calculator');
+    const summary = anchorSummary(opts.give);
+    setInlineAnchor(
+      fork.anchor && summary
+        ? { label: summary, giveIds: fork.anchor.giveIds, receiveIds: fork.anchor.receiveIds }
+        : null,
+    );
+    fairAnchorRef.current = fork.anchor;
+    autoRunPendingRef.current = !fork.anchor;
+    autoRunOriginRef.current = 'calculator';
+    pendingScrollToDeckRef.current = true; // #276 — results, not the canvas
+    setCanvasRunSeq((n) => n + 1);
+  }
+
+  // D-158 — the ✓ cell, inline. Same one implementation the pushed page calls
+  // (`utils/queueCalcTrade`, D-152); this screen owns its Toast.
+  async function handleInlineLikeTrade(args: {
+    giveIds: string[];
+    receiveIds: string[];
+    opponent: { userId: string; name: string };
+  }) {
+    if (!leagueId) return;
+    const { toast: t } = await queueCalcTrade({
+      leagueId,
+      opponent: args.opponent,
+      giveIds: args.giveIds,
+      receiveIds: args.receiveIds,
+      screen: 'Trades',
+    });
+    setToast(t);
+  }
+
+  // D-158 — the receipt's "Change": the canvas still HOLDS the assets (this
+  // screen never remounts it on search), so changing the anchor is a scroll,
+  // not a reload.
+  function handleAnchorChange() {
+    haptics.selection();
+    mainScrollRef.current?.scrollTo({ y: canvasY.current, animated: true });
+  }
+
+  // D-158 — load a package into the inline canvas and bring it into view.
+  // Replaces `navigate('TradeCalculator', {prefill})` on this screen's three
+  // hand-off paths when the flag is on.
+  function loadCanvasPrefill(p: CanvasPrefill) {
+    setCanvasPrefill(p);
+    setCanvasPrefillSeq((n) => n + 1);
+    mainScrollRef.current?.scrollTo({ y: canvasY.current, animated: true });
+  }
 
   function handleAddTarget(p: CalcPlayer) {
     const player: Player = {
@@ -2716,6 +2860,18 @@ export default function TradesScreen({ navigation, route }: any) {
   function handleBackToCalculator() {
     haptics.selection();
     track('deck_back_to_calculator', { pin_count: pinCount }, 'Trades');
+    // D-158 — "back to calculator" on the merged landing is a scroll: the
+    // canvas is already on this page and still holds what the user built, so
+    // the prefill only has to re-assert the pins the deck was generated
+    // around. Same event, same pin payload; no push.
+    if (inlineHomeOn) {
+      loadCanvasPrefill({
+        ...(scopedOpponent ? { opponentId: scopedOpponent } : {}),
+        give: pinnedGive.map((p) => p.id),
+        receive: pinnedReceive.map((p) => p.id),
+      });
+      return;
+    }
     // The #190 `prefill` shape is what TradeCalculatorScreen already reads
     // (:111-114): a truthy prefill object forces `mode:'league'` (:114 + the
     // :168-170 re-assert) and suppresses the auto-tour (:132), and
@@ -2790,6 +2946,17 @@ export default function TradesScreen({ navigation, route }: any) {
     // eventual disposition outcome.
     if (signalV2On) engagementRef.current.calcOpened = true;
     track('trade_edit_in_calculator_tapped', undefined, 'Trades');
+    // D-158 — the deck's per-card "full editor" hand-off, in place. This is
+    // also what replaces #270's suggestion rail: the card's own edit action
+    // loads the canvas, so the deck below IS the rail.
+    if (inlineHomeOn) {
+      loadCanvasPrefill({
+        opponentId: card.opponent_user_id,
+        give: card.give_player_ids,
+        receive: card.receive_player_ids,
+      });
+      return;
+    }
     navigation?.navigate?.('TradeCalculator', {
       prefill: {
         opponentUserId: card.opponent_user_id,
@@ -4725,6 +4892,26 @@ export default function TradesScreen({ navigation, route }: any) {
   // (the feature exists at all) AND the origin (this deck is that deck).
   const reasonsAsOverlay = calcMergedOn && deckOrigin === 'calculator';
 
+  // D-158 — who owns the canvas mount, resolved ONCE so the two paths cannot
+  // both render (see the mount below). `'flag'` is the layout; `'experiment'`
+  // is #270's per-unit variant with its original gates intact; `null` is
+  // today's landing, canvas-free.
+  const canvasHost: 'flag' | 'experiment' | null =
+    inlineHomeOn && finderMode === 'guided' && leagueId
+      ? 'flag'
+      : homeInlineVariant === 'canvas' &&
+          finderMode === 'guided' &&
+          !firstRun &&
+          !singlePin &&
+          leagueId
+        ? 'experiment'
+        : null;
+  // The receipt describes THIS deck, so it needs both halves: the deck is a
+  // fair (anchored) deck, and the anchor is one this page built. `fairDeck` is
+  // cleared by every path that starts or invalidates a model search, so a
+  // "Built around" line can never outlive the deck it describes.
+  const inlineAnchorShown = canvasHost === 'flag' && fairDeck && !!inlineAnchor;
+
   // Bad-trade flag (feedback #85): file the engine-quality flag, then move
   // past the card exactly like a pass — flagging implies "not interested",
   // so the pass swipe records the disposition while the flag row records
@@ -6059,17 +6246,83 @@ export default function TradesScreen({ navigation, route }: any) {
             additive). Deliberately additive, not a replacement: the swipe
             deck below still renders untouched — see TradeBuildCanvas's file
             header and the status doc for why. */}
-        {homeInlineVariant === 'canvas' &&
-        finderMode === 'guided' &&
-        !firstRun &&
-        !singlePin &&
-        leagueId ? (
-          <TradeBuildCanvas
-            leagueId={leagueId}
-            userId={userId}
-            opponentUserId={scopedOpponent ?? null}
-            suggestions={deck}
-          />
+        {/* D-158 (Wave B0) — the SAME mount, promoted. Two ways in, and the
+            flag's way WINS so the canvas renders exactly once:
+              • flag path (`calc.inline_home`): the guided landing IS the
+                merged In-league page. No experiment gate, no first-run /
+                single-pin exclusions — those were the experiment's caution
+                about an additive surface, and this is the layout. The
+                suggestion rail is dropped (the deck below is the rail) and
+                the #384 handlers are wired; `onShowMeAround` is deliberately
+                NOT passed — n10 points at the tab this wave deletes, and Wave
+                B rebuilds the tour.
+              • experiment path (#270 `trades_home_inline.canvas`): unchanged,
+                rail and all, for its assigned units — but only when the flag
+                path did not already claim the mount. */}
+        {canvasHost ? (
+          <View
+            onLayout={(e) => { canvasY.current = e.nativeEvent.layout.y; }}
+          >
+            <TradeBuildCanvas
+              leagueId={leagueId!}
+              userId={userId}
+              opponentUserId={scopedOpponent ?? null}
+              suggestions={deck}
+              showSuggestionRail={canvasHost === 'experiment'}
+              onFindATrade={
+                canvasHost === 'flag' ? handleInlineFindATrade : undefined
+              }
+              onLikeTrade={
+                canvasHost === 'flag' ? handleInlineLikeTrade : undefined
+              }
+              prefill={canvasHost === 'flag' ? canvasPrefill : undefined}
+              prefillSeq={canvasHost === 'flag' ? canvasPrefillSeq : undefined}
+            />
+          </View>
+        ) : null}
+
+        {/* D-158 — the anchor as a FILTER RECEIPT, above the results, in the
+            OutlookBiasReceipt visual pattern (flare tick, quiet ink2 bar, ice
+            text-link actions). "Change" scrolls back to the canvas, which
+            still holds the assets; "Clear" is the fair deck's own
+            `handleSearchAllTrades` verbatim — drop the anchor, run the model
+            for the same partner — which is why the end-of-deck "Search all
+            trades" exit steps aside for an inline-anchored deck below. */}
+        {inlineAnchorShown ? (
+          <View testID="trades.anchor-receipt" style={styles.anchorReceipt}>
+            <View style={styles.anchorRow}>
+              <View style={styles.anchorTick} />
+              <Text style={styles.anchorText} numberOfLines={2}>
+                Built around <Text style={styles.anchorStrong}>{inlineAnchor!.label}</Text>.
+              </Text>
+              <Pressable
+                testID="trades.anchor-receipt.change"
+                accessibilityRole="button"
+                accessibilityLabel="Change the players this search is built around"
+                hitSlop={8}
+                onPress={handleAnchorChange}
+              >
+                {({ pressed }) => (
+                  <Text style={[styles.anchorAction, pressed && { color: ice.press }]}>
+                    Change
+                  </Text>
+                )}
+              </Pressable>
+              <Pressable
+                testID="trades.anchor-receipt.clear"
+                accessibilityRole="button"
+                accessibilityLabel="Clear the anchor and search all trades"
+                hitSlop={8}
+                onPress={handleSearchAllTrades}
+              >
+                {({ pressed }) => (
+                  <Text style={[styles.anchorAction, pressed && { color: ice.press }]}>
+                    Clear
+                  </Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
         ) : null}
 
         {/* #216/#209 (flag trade.asset_ideas) — single-pin find-a-trade:
@@ -6689,7 +6942,11 @@ export default function TradesScreen({ navigation, route }: any) {
                       above. A fair deck has NO pins, so unpin-retry would be
                       a button that unpinned nothing; this one drops the
                       canvas anchor and runs the model for the same partner. */}
-                  {calcMergedOn && fairDeck ? (
+                  {/* D-158 — with the anchor shown as a receipt ABOVE the
+                      results, its Clear IS this exit and having both would be
+                      the same action twice on one screen. Flag off (or an
+                      anchored deck this page did not build) ⇒ unchanged. */}
+                  {calcMergedOn && fairDeck && !inlineAnchorShown ? (
                     <Button
                       testID="trades.deck-summary.search-all"
                       label="Search all trades"
@@ -6781,7 +7038,9 @@ export default function TradesScreen({ navigation, route }: any) {
                         onPress={handleUnpinRetry}
                       />
                     ) : null}
-                    {fairDeck ? (
+                    {/* D-158 — same stand-aside as the summary card above:
+                        the receipt's Clear already offers this. */}
+                    {fairDeck && !inlineAnchorShown ? (
                       <Button
                         testID="trades.deck-exhausted.search-all"
                         label="Search all trades"
@@ -7767,10 +8026,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 10,
     paddingVertical: space.sm,
-    backgroundColor: ink.ink2,
-    borderWidth: 1,
-    borderColor: ink.line,
-    borderRadius: radii.sm,
     marginBottom: space.md,
     gap: 2,
   },
@@ -7784,6 +8039,25 @@ const styles = StyleSheet.create({
   outlookFallbackChange: { ...type.bodySm, color: ice.base, fontFamily: fonts.uiSemi },
   outlookFallbackPressed: { opacity: 0.6 },
   outlookFallbackDetails: { ...type.bodySm, color: chalk.dim },
+  // D-158 — the anchor filter receipt, built to OutlookBiasReceipt's spec
+  // (components/OutlookBiasReceipt.tsx): ink2 bar, hairline ink.line border,
+  // radii.sm, a 3×12 flare tick (informational highlight), bodySm dim text
+  // with a chalk.base semibold emphasis, ice text-link actions. Tokens only.
+  anchorReceipt: {
+    backgroundColor: ink.ink2,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.sm,
+    paddingHorizontal: 10,
+    paddingVertical: space.sm,
+    marginBottom: space.md,
+    gap: 2,
+  },
+  anchorRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  anchorTick: { width: 3, height: 12, backgroundColor: flare.base },
+  anchorText: { ...type.bodySm, flex: 1, color: chalk.dim },
+  anchorStrong: { color: chalk.base, fontFamily: fonts.uiSemi },
+  anchorAction: { ...type.bodySm, color: ice.base, fontFamily: fonts.uiSemi },
   progressStrip: {
     marginTop: space.sm,
     paddingHorizontal: space.md,

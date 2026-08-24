@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
 
 import { ink, chalk, ice, space, radii, type, fonts } from '../theme/chalkline';
+import { useFlag } from '../state/useFeatureFlags';
 
 // FB #156 (Trade-Finding Hub, Variant B) — the lateral quick-switch chip row
 // carried at the top of every focused mode. #246 (guided-first landing,
@@ -110,6 +111,14 @@ export default function TradeFinderModeBar({
   showHint = false,
   hideTeamAndPlayer = false,
 }: Props) {
+  // D-158 (Wave B0) — the Calc chip survives RELABELED. With
+  // `calc.inline_home` on, the In-league calculator lives on this very
+  // landing and the pushed page is Real values only, so "Calc" would name
+  // the wrong thing; the chip still pushes `TradeCalculator`, which is
+  // exactly what the new label promises. Flag off ⇒ "Calc", byte-identical.
+  // The label is swapped at RENDER rather than in `CHIPS`, so the array's
+  // object identity and order are unchanged in both states.
+  const inlineHomeOn = useFlag('calc.inline_home');
   const copy = COPY[mode];
   const baseChips = hideTeamAndPlayer
     ? CHIPS.filter((c) => c.key !== 'team' && c.key !== 'player')
@@ -134,13 +143,15 @@ export default function TradeFinderModeBar({
       >
         {chips.map((c) => {
           const active = c.key === mode;
+          const label =
+            c.key === 'calc' && inlineHomeOn ? 'Real values' : c.label;
           return (
             <Pressable
               key={c.key}
               testID={`trades.finder-mode.${c.key}`}
               accessibilityRole="button"
               accessibilityState={{ selected: active }}
-              accessibilityLabel={c.label}
+              accessibilityLabel={label}
               onPress={() =>
                 c.key === 'calc'
                   ? onCalculator()
@@ -159,7 +170,7 @@ export default function TradeFinderModeBar({
               ]}
             >
               <Text style={[styles.chipText, active && styles.chipTextActive]}>
-                {c.label}
+                {label}
               </Text>
             </Pressable>
           );

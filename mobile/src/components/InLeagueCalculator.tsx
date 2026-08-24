@@ -80,6 +80,23 @@ interface Props {
    *  to reach it. A ref rather than a callback prop so the screen can hand
    *  the same opener to the runner without re-rendering this component. */
   outlookOpenerRef?: React.MutableRefObject<(() => void) | null>;
+  /** Wave A (v2 note 12) — fired ONCE per mount, when the league content is
+   *  actually on screen: the roster/coverage queries have resolved, there is
+   *  at least one leaguemate, and the merged layout's outlook row (n11's
+   *  spotlight target `calc.outlook-row`) has therefore rendered. The tour
+   *  runner parks between n10 and n11 on this, instead of racing the
+   *  "Loading your league…" card with a 150 ms retry. */
+  onInLeagueReady?: () => void;
+  /** Inverse of `onInLeagueReady` — fired from the ready effect's CLEANUP
+   *  when the content unmounts or the ready predicate falls (mode switch,
+   *  league-change reload). Keeps the runner's level tracking the content
+   *  rather than the announcement (review A1/A3). */
+  onInLeagueGone?: () => void;
+  /** Wave A (v2 note 14) — fired when the outlook sheet closes. n11's CTA both
+   *  opens the sheet and advances the beat, and the guide overlay sits below
+   *  RN Modals, so the runner parks on this rather than drawing n12 behind a
+   *  sheet the user is still editing. */
+  onOutlookClosed?: () => void;
   /** #384 W6-A — the action row's confirm control. Queues the built trade for
    *  the counterparty's suggestions (POST /api/trades/queue, D-152). The
    *  SCREEN owns the request, the toast and the analytics; this component
@@ -160,6 +177,9 @@ export default function InLeagueCalculator({
   onFindATrade,
   onShowMeAround,
   outlookOpenerRef,
+  onInLeagueReady,
+  onInLeagueGone,
+  onOutlookClosed,
   onLikeTrade,
 }: Props) {
   // #384 — the merged calculator layout. OFF is byte-identical to the
@@ -415,6 +435,32 @@ export default function InLeagueCalculator({
   useEffect(() => {
     if (!opponentId && opponents.length) setOpponentId(opponents[0].user_id);
   }, [opponents, opponentId]);
+
+  // Wave A (v2 note 12) — announce that the league content is MOUNTED.
+  //
+  // The predicate is the negation of the two early returns below, plus the
+  // merged gate: `rostersQ`/`coverageQ` still loading renders "Loading your
+  // league…", and an empty `opponents` renders the no-leaguemates card —
+  // in neither case does the outlook row (n11's target) exist. Derived from
+  // the same expressions the returns use, so the two cannot drift apart
+  // silently; `check-calc-tour.js` pins the pairing.
+  //
+  // Fired from an effect, not from render: the callback resumes the tour
+  // runner, which synchronously requests a beat and writes the guide store.
+  const inLeagueReady =
+    merged && !rostersQ.isLoading && !coverageQ.isLoading && opponents.length > 0;
+  // RISE announces, FALL (and unmount) retracts — the cleanup pairing is what
+  // keeps the runner's level honest across a mode switch back to Real values
+  // or a league change that reloads the queries (review A1/A3): the level
+  // must track the CONTENT, not the announcement. Both callbacks are
+  // module-stable functions, so the deps re-fire only on genuine rises.
+  useEffect(() => {
+    if (!inLeagueReady) return;
+    onInLeagueReady?.();
+    return () => {
+      onInLeagueGone?.();
+    };
+  }, [inLeagueReady, onInLeagueReady, onInLeagueGone]);
 
   // Their roster changed → what you'd receive no longer applies. Skips
   // the mount run (guard ref) so a #190 prefill isn't wiped before it
@@ -1032,7 +1078,7 @@ export default function InLeagueCalculator({
         );
       })()}
 
-      {/* #384 action row — Find a Trade 70% · Clear 15% · confirm 15%,
+      {/* #384 action row — Find a Trade 50% / Clear 30% / confirm 20%,
           directly beneath the canvas so the two occupy one frame together
           (the report's "important that this fits in the frame with the
           entire trade calc section").
@@ -1042,10 +1088,15 @@ export default function InLeagueCalculator({
           globally — "C works", the canvas is ALWAYS the anchor — so the only
           honest state it could show was permanently on.
 
-          The two 15% cells are icon-only. That is a size decision, not a
-          style one: at 15% of a 375pt screen they are ~53pt wide, and any
-          word that fit would have to breach the Chalkline 11pt type floor.
-          Both carry accessibilityLabel, and both keep a 44pt tap height. */}
+          D-157 (2026-08-23, Wave A) amends the split to 50 / 30 / 20:
+          Find a Trade, a LABELLED Clear, then the confirm cell. Segrave read
+          the icon-only cross as the deck's pass control and cleared the canvas
+          mid-tour. The fix is a word, not a hidden control — the tour
+          observes, it never intercepts, so relabelling solves the misread for
+          every user rather than only for tour users. 30% of a 375pt screen is
+          ~106pt, which holds "Clear" at the Chalkline 11pt floor with room to
+          spare; the confirm cell keeps its icon (no one-word label promises
+          less than "queue this for them") and is byte-identical to W6-A's. */}
       {merged ? (
         <View style={styles.actionRow} testID="calc.action-row">
           <Pressable
@@ -1085,12 +1136,12 @@ export default function InLeagueCalculator({
               clear();
             }}
             style={({ pressed }) => [
-              styles.actionSmall, styles.actionBtn,
+              styles.actionClear, styles.actionBtn,
               pressed && styles.actionBtnPressed,
               !anySide && styles.actionBtnDisabled,
             ]}
           >
-            <Icon name="x" size={18} />
+            <Text style={styles.actionClearText} numberOfLines={1}>Clear</Text>
           </Pressable>
 
           {/* #384 W6-A — the confirm/queue control (D-152). Disabled only for the
@@ -1266,7 +1317,17 @@ export default function InLeagueCalculator({
       {/* ── #384 merged-layout pickers ─────────────────────────────────── */}
       {merged ? (
         <>
-          <TradeDnaSheet visible={dnaOpen} onClose={() => setDnaOpen(false)} />
+          {/* Wave A (v2 note 14) — every close route lands here (Done, the
+              backdrop, the hardware/system back), so the host's
+              `onOutlookClosed` is the one signal the tour runner unparks n12
+              on. */}
+          <TradeDnaSheet
+            visible={dnaOpen}
+            onClose={() => {
+              setDnaOpen(false);
+              onOutlookClosed?.();
+            }}
+          />
           <LeagueSwitcherSheet
             visible={leagueSwitcherOpen}
             onClose={() => setLeagueSwitcherOpen(false)}
@@ -1743,14 +1804,19 @@ const styles = StyleSheet.create({
   // actually ellipsize instead of forcing the row wider than the screen.
   column: { flex: 1, flexBasis: 0, minWidth: 0 },
 
-  // The four-control action row, sized to the operator's spec:
-  // Find a Trade 40% · Include players 30% · Clear 15% · confirm 15%.
-  // The two 15% cells are ~53pt on a 375pt screen, which is why they carry
-  // an icon and an accessibilityLabel rather than a text label — a word
-  // would either truncate or breach the 11pt floor.
+  // The action row. D-157 (Wave A): Find a Trade 50 / Clear 30 / confirm 20.
+  //
+  // It was 70/15/15 with both narrow cells icon-only, because at ~53pt no
+  // word fit above the Chalkline 11pt floor. D-157 bought Clear a real label
+  // with Find a Trade's width: at 30% (~106pt on a 375pt screen) "Clear"
+  // renders at the normal bodySm size, and Find a Trade still leads the row
+  // by a clear margin. The confirm cell stays icon-only at 20% (~71pt) — it
+  // has no one-word label that promises less than "queue this for them",
+  // which is what its accessibilityLabel says in full.
   actionRow: { flexDirection: 'row', gap: space.xs, alignItems: 'stretch' },
-  actionFind: { flex: 70 },
-  actionSmall: { flex: 15 },
+  actionFind: { flex: 50 },
+  actionClear: { flex: 30 },
+  actionSmall: { flex: 20 },
   actionBtn: {
     minHeight: 44,
     alignItems: 'center',
@@ -1764,6 +1830,9 @@ const styles = StyleSheet.create({
   actionBtnDisabled: { opacity: 0.4 },
   actionPrimary: { borderColor: ice.base },
   actionPrimaryText: { ...type.bodySm, fontFamily: fonts.uiSemi, color: ice.base },
+  // Clear is destructive and secondary: default ink border (set by actionBtn),
+  // chalk text. Ice is reserved for the row's primary action and the confirm.
+  actionClearText: { ...type.bodySm, fontFamily: fonts.uiSemi, color: chalk.base },
   teamSheetBackdrop: { flex: 1, backgroundColor: '#0009' },
   teamSheet: {
     maxHeight: '60%',

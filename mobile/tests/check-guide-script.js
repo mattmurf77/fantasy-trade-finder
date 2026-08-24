@@ -384,11 +384,39 @@ assert(
   '8a — n6.1 (router form) is lifetime-bounded at 8 s',
   'an unbounded cta bubble holds the interrupt slot across further swipes and starves the Apple ask',
 );
-assert(
-  S.n6_1(false).ctas === undefined,
-  '8b — the router-less n6.1 variant offers no route it cannot honour',
-  'routing into an empty "Awaiting them" one tap after "logged" is the R1 moment',
-);
+// 8b was `ctas === undefined` while the router-less variant was a TAP beat.
+// Wave A (2026-08-24) gave every onboarding talk beat a Next button, so the
+// variant now has a CTA — and the property that actually mattered has to be
+// restated rather than dropped: it may carry the plain Next control and
+// NOTHING that routes. Routing into an empty "Awaiting them" one tap after
+// "logged" is the R1 moment; a button that only advances the bubble is not
+// that. The sabotage this still catches is copying the routable variant's
+// `See it →` onto the arm that has nowhere to send anyone.
+{
+  const plain = S.n6_1(false);
+  const routable = S.n6_1(true);
+  assert(
+    Array.isArray(plain.ctas)
+      && plain.ctas.length === 1
+      && plain.ctas[0].label === 'Next'
+      && plain.ctas[0].action === 'accept',
+    '8b — the router-less n6.1 variant carries exactly one plain Next button',
+    `got ${JSON.stringify(plain.ctas)}`,
+  );
+  const routeLabels = new Set(routable.ctas.map((c) => c.label));
+  assert(
+    plain.ctas.every((c) => !routeLabels.has(c.label)),
+    '8b-i — …and none of the ROUTING variant\'s buttons',
+    'routing into an empty "Awaiting them" one tap after "logged" is the R1 moment',
+  );
+  // The routing variant is the only one with a lifetime bound, because it is
+  // the only one that can hold the slot on a promise it has to keep.
+  assert(
+    plain.lifetimeMs === undefined,
+    '8b-ii — the router-less variant takes no lifetime bound',
+    'the next swipe dismisses it (TradesScreen), which is its bound',
+  );
+}
 
 // ═══ 9 — the n23 pair: one platform claim, two beats ═══════════════════════
 //
@@ -411,6 +439,82 @@ assert(
   assert(
     S.n23().screen === 'Trades' && S.n23b().screen === 'Trades',
     '9c — both n23 variants declare the deck screen',
+  );
+}
+
+// ═══ 10 — Wave A: the onboarding talk beats carry a button ═════════════════
+//
+// Segrave, 2026-08-23 (note 3): "pop-ups only exit via the tiny top-right ✕".
+// True of the onboarding half of the script, which was still tap-advance long
+// after the #384 calculator beats got Next buttons — and a tap beat mounts the
+// overlay's full-screen catcher, which also swallows the deck's scroll.
+//
+// Pinned as a CLOSED SET rather than a checklist: the ten converted beats must
+// be `cta` with buttons, AND the only `advance: 'tap'` beats left in the whole
+// script are the two named exemptions. That second half is what catches a
+// NEW tap beat, which no per-beat list ever would.
+{
+  const CONVERTED = ['s0.1', 's0.err-notfound', 's0.err-down', 's2.1', 's4.1',
+                     's5.0', 's5.1', 's8.1', 'n1', 'n6.1'];
+  const byId = new Map();
+  for (const { step } of rendered) {
+    // n6.1 renders twice (routable + not); the routable arm was already a cta
+    // beat, so keeping the LAST rendering (the router-less one) is what makes
+    // this assertion about the arm Wave A changed.
+    byId.set(step.id, step);
+  }
+  for (const id of CONVERTED) {
+    const step = byId.get(id);
+    assert(!!step, `10a — ${id} still exists to be checked`);
+    if (!step) continue;
+    assert(
+      step.advance === 'cta' && Array.isArray(step.ctas) && step.ctas.length > 0,
+      `10b — ${id} advances on a BUTTON, not a screen tap`,
+      `advance=${step.advance}, ctas=${JSON.stringify(step.ctas)}`,
+    );
+  }
+  // The exemptions, each for a stated reason:
+  //   s2.3  @deprecated, replaced by n1; dies with its call site.
+  //   n9    Matches first visit — outside Wave A's scope (plan §2 item 3 lists
+  //         the SignIn/Trades/QuickSet beats); it is queued, not forgotten.
+  const TAP_EXEMPT = new Set(['s2.3', 'n9']);
+  const stillTap = rendered
+    .filter(({ step }) => step.advance === 'tap')
+    .map(({ step }) => step.id)
+    .filter((id) => !TAP_EXEMPT.has(id));
+  assert(
+    stillTap.length === 0,
+    '10c — no NEW tap-advance beat has appeared (only s2.3 and n9 are exempt)',
+    `tap beats outside the exemption list: ${stillTap.join(', ')}`,
+  );
+}
+
+// ═══ 11 — Wave A: n22 points at the meter, not the first-run-only ⓘ ════════
+//
+// `trades.fairness-help` renders inside `{!firstRun && …}` on TradesScreen, so
+// on a first-run deck — exactly when a new user is toured — n22's target never
+// mounted and the beat degraded to a ringless bubble (v2 note 17, build 128).
+// The registration side is pinned in check-card-disposition.js; here we pin
+// that the SCRIPT no longer names the absent node.
+{
+  const n22 = S.n22();
+  assert(
+    n22.target === 'trades.card-meter',
+    '11a — n22 targets the top card\'s value meter',
+    `target=${n22.target}`,
+  );
+  assert(
+    !/fairness-help/.test(JSON.stringify(n22)),
+    '11b — …and no longer names trades.fairness-help',
+    'that node does not mount on a first-run deck, which is when the tour runs',
+  );
+  // Honesty: the meter's own explainer is its "Why?" disclosure, not a tap on
+  // the bar. Copy that tells the user to tap something inert is the §1.3
+  // failure this retarget would otherwise introduce.
+  assert(
+    /Why\?/.test(n22.line),
+    '11c — n22 names the control the meter actually has (its "Why?" line)',
+    `"${n22.line}"`,
   );
 }
 

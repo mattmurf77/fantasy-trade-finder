@@ -288,6 +288,13 @@ FLAG_KEYS: tuple[str, ...] = (
     # first_match/new_match dedup, AASA route (inert without the mobile
     # entitlement), Apple token revocation on deletion.
     "calc.merged_layout",
+    # D-158 (Wave B0, 2026-08-24) — the guided landing hosts the In-league
+    # canvas inline. CLIENT-ONLY: no route reads this key. The two routes the
+    # inline surface calls (POST /api/trades/fair-packages, POST
+    # /api/trades/queue) stay gated on `calc.merged_layout`, which is
+    # therefore a prerequisite. Registered here so the flag ships through
+    # /api/feature-flags like every other key.
+    "calc.inline_home",
     "ux.sheet_guard",
     "ux.rank_tab_destination",
     "ux.retap_active_tab",

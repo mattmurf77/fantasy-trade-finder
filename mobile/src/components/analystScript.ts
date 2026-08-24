@@ -70,7 +70,17 @@ const R = GUIDE_RECEIPTS;
  *  guessing that a tap anywhere advances, and the overlay stops mounting the
  *  full-screen tap-catcher for these beats — which is what was eating the
  *  scroll gesture on the deck (report 5). `advance: 'tap'` survives in the
- *  engine for older beats; no #384 beat uses it. */
+ *  engine for older beats; no #384 beat uses it.
+ *
+ *  2026-08-24 (Wave A of docs/plans/onboarding-tour-merge/plan.md §2 item 3):
+ *  the same rule now covers the ONBOARDING talk beats, which were still
+ *  tap-advance and therefore still mounting the catcher — Segrave read the ✕
+ *  as the only way out of them. Converted: s0.1, s0.err-notfound, s0.err-down,
+ *  s2.1, s4.1, s5.0, s5.1, s8.1, n1, and the non-routable n6.1. NOT converted:
+ *  the `action` beats (s0.2, s1.1, s2.wait, s2.2, n2a), whose advance IS the
+ *  real thing the user is asked to do; the `auto` beats (s6.1, s6.2), which
+ *  time out on their own; and the deprecated `s2.3` builder, which dies with
+ *  its call site. */
 const NEXT = { label: 'Next', kind: 'primary', action: 'accept' } as const;
 /** The last beat of the walkthrough — the button says so. */
 const DONE = { label: 'Done', kind: 'primary', action: 'accept' } as const;
@@ -85,11 +95,18 @@ const BOARD_RECEIPTS = [
 
 export const S = {
   s0_1: (): GuideStep => ({
-    id: 's0.1', screen: 'SignIn', pose: 'neutral', advance: 'tap', once: true,
-    line: "I'm The Analyst. I model dynasty trades — you bring the roster.",
+    id: 's0.1', screen: 'SignIn', pose: 'neutral', advance: 'cta', once: true,
+    ctas: [NEXT],
+    // Wave A #4 (Segrave note 4): the opener has to PROMISE the walkthrough.
+    // "I model dynasty trades — you bring the roster" described a product; it
+    // never told the user that the next several bubbles are a guided tour, so
+    // the beats that followed read as unexplained pop-ups.
+    line: "I'm The Analyst. Stick with me — I'll walk you through finding your first trade.",
     // D-155 — Fleeced introduces himself in character. Rendered only under
-    // `onboarding.mascot_ram`; flag off keeps the line above verbatim.
-    lineRam: "I'm Fleeced, the ram. Good to see another sheep here for me to take advantage of.",
+    // `onboarding.mascot_ram`; flag off keeps the line above verbatim. It
+    // carries the same walkthrough promise, in his voice: a dark flag whose
+    // copy makes a weaker promise is a regression waiting for the flip.
+    lineRam: "I'm Fleeced, the ram. Stick with me — I'll walk you to your first trade.",
   }),
   s0_2: (): GuideStep => ({
     id: 's0.2', screen: 'SignIn', pose: 'point', flip: true, side: 'right',
@@ -97,11 +114,13 @@ export const S = {
     line: 'Type your Sleeper username. No password needed.',
   }),
   s0_err_notfound: (): GuideStep => ({
-    id: 's0.err-notfound', screen: 'SignIn', pose: 'oops', advance: 'tap',
+    id: 's0.err-notfound', screen: 'SignIn', pose: 'oops', advance: 'cta',
+    ctas: [NEXT],
     line: "No Sleeper account by that name. Check the spelling — caps don't matter.",
   }),
   s0_err_down: (): GuideStep => ({
-    id: 's0.err-down', screen: 'SignIn', pose: 'oops', advance: 'tap',
+    id: 's0.err-down', screen: 'SignIn', pose: 'oops', advance: 'cta',
+    ctas: [NEXT],
     line: "Sleeper isn't answering. Statistically it comes back. Retry in a moment.",
   }),
   s1_1: (): GuideStep => ({
@@ -116,9 +135,17 @@ export const S = {
       : 'Reading the league rosters, scoring candidate trades. First cards land in seconds.',
   }),
   s2_1: (): GuideStep => ({
-    id: 's2.1', screen: 'Trades', pose: 'celebrate', advance: 'tap', once: true,
+    id: 's2.1', screen: 'Trades', pose: 'celebrate', advance: 'cta', once: true,
+    ctas: [NEXT],
     // Softened per PRD §5.2 R1: a market claim, not a warranty on this card.
-    line: 'These are trades both sides should want. Not a wishlist — a market.',
+    //
+    // Wave A #8 (Segrave note 8): the provenance moved UP here. `n1` already
+    // made this claim, but it fires at the THIRD disposition — the first card
+    // a new user ever sees was priced by consensus with nothing saying so.
+    // Claim shape copied from `n1`: prices are the market's, swipes teach
+    // mine. Never board GENERATION (NG-2, guided-avatar-script.md) — teaching
+    // and re-pricing is what the swipes actually do.
+    line: 'Both sides should want these. Priced on consensus now; your swipes teach me your values.',
   }),
   s2_2: (): GuideStep => ({
     id: 's2.2', screen: 'Trades', pose: 'point', advance: 'action',
@@ -156,7 +183,8 @@ export const S = {
     adoptionEvent: 'quickset_completed',
   }),
   s4_1: (): GuideStep => ({
-    id: 's4.1', screen: 'QuickSetTiers', pose: 'point', advance: 'tap', once: true,
+    id: 's4.1', screen: 'QuickSetTiers', pose: 'point', advance: 'cta', once: true,
+    ctas: [NEXT],
     line: 'Tap everyone worth the tier label, then Save. Gut calls beat overthinking.',
     // No `target` today, so this never renders (DELTA §D flagged the
     // mismatch); it ships with the copy so a later pill registration is
@@ -164,7 +192,7 @@ export const S = {
     degradeLine: 'Tap every player worth the tier, then Save. Gut calls beat overthinking.',
   }),
   s5_1: (nNew: number, _pos?: string): GuideStep => ({
-    id: 's5.1', screen: 'Trades', pose: 'celebrate', advance: 'tap',
+    id: 's5.1', screen: 'Trades', pose: 'celebrate', advance: 'cta', ctas: [NEXT],
     // N=1 plural fix (S-43 handoff): the engine can honestly return
     // `fresh === 1`, and "1 new trades" is the tell that nobody read it.
     line: nNew === 1
@@ -172,7 +200,7 @@ export const S = {
       : `${nNew} new trades that exist only because of your numbers.`,
   }),
   s5_0: (pos: string): GuideStep => ({
-    id: 's5.0', screen: 'Trades', pose: 'oops', advance: 'tap',
+    id: 's5.0', screen: 'Trades', pose: 'oops', advance: 'cta', ctas: [NEXT],
     line: `Same trades — your ${pos} board agrees with consensus. More positions, more edge.`,
   }),
   s5_5: (donePos: string, nextPos: string): GuideStep => ({
@@ -211,7 +239,10 @@ export const S = {
   // to the summary card + `n4`; Trios stay a pull surface plus `n8`'s ghost
   // CTA. Revival needs `rank_routing` shipped AND a free boundary.
   s8_1: (): GuideStep => ({
-    id: 's8.1', screen: 'Trades', pose: 'celebrate', advance: 'tap', once: true,
+    id: 's8.1', screen: 'Trades', pose: 'celebrate', advance: 'cta', once: true,
+    // The closing beat of the v1 spine, so its button says Done rather than
+    // promising a next — the same rule n24 follows on the calculator tour.
+    ctas: [DONE],
     line: "That's the tour. I'll surface when the numbers say something worth hearing.",
   }),
 
@@ -220,7 +251,7 @@ export const S = {
   /** N1 — prices, and where yours come from (replaces `s2.3` + `s3.1`).
    *  Calibration-framed: claims teaching, never board generation (NG-2). */
   n1: (): GuideStep => ({
-    id: 'n1', screen: 'Trades', pose: 'neutral', advance: 'tap',
+    id: 'n1', screen: 'Trades', pose: 'neutral', advance: 'cta', ctas: [NEXT],
     target: 'trades.provenance-chip', once: true,
     line: "These prices are the market's. Your swipes are already teaching me yours.",
     degradeLine: 'Card prices are consensus for now. Your swipes are already teaching me your values.',
@@ -302,7 +333,14 @@ export const S = {
           adoptionEvent: 'sleeper_send_attempted',
         }
       : {
-          id: 'n6.1', screen: 'Trades', pose: 'celebrate', advance: 'tap', once: true,
+          // Wave A #3 — a Next button, not the tap-anywhere catcher. It is
+          // deliberately NOT the routable variant's `See it →`: there is no
+          // "Awaiting them" row to route to, which is the whole reason this
+          // variant exists. The next swipe still dismisses it (TradesScreen
+          // :4314), so it cannot hold the interrupt slot the way an
+          // unbounded cta beat otherwise could.
+          id: 'n6.1', screen: 'Trades', pose: 'celebrate', advance: 'cta', once: true,
+          ctas: [NEXT],
           line: "Logged — I'll flag it the moment they like it back.",
           maxDisplayCount: 1,
           retireAfter: { event: R.sendAttempted, count: 1 },
@@ -509,14 +547,37 @@ export const S = {
     adoptionEvent: 'deck_regenerated',
   }),
 
+  // Device feedback 2026-08-23 (v2 note 17, build 128): "bubble pops, no
+  // highlight, no scroll". Root cause was the TARGET, not the machinery:
+  // `trades.fairness-help` is the ⓘ in the "Trade fairness" toggle row, and
+  // that row renders inside `{!firstRun && …}` (TradesScreen) — so on a
+  // first-run deck, which is exactly when a new user tours, the node never
+  // mounts and the beat degrades by design. Retargeted at the thing the note
+  // asked to see highlighted: the top card's own value meter
+  // (`trades.card-meter`, registered in TradeCard on the disposition card
+  // only). Scroll-into-view then works because the node exists.
+  //
+  // `trades.fairness-help` stays registered for its other consumers; this
+  // beat simply no longer names it.
   n22: (): GuideStep => ({
     id: 'n22', screen: 'Trades', pose: 'point', advance: 'cta',
-    ctas: [NEXT], target: 'trades.fairness-help',
-    line: 'Tap the meter to see how we judged this trade fair.',
-    degradeLine: 'The fairness meter explains how a trade was judged.',
+    ctas: [NEXT], target: 'trades.card-meter',
+    // The copy follows the target. "Tap the meter" was true of the ⓘ and is
+    // NOT true of the bar: the meter's own explainer is its "Why?" disclosure
+    // (TradeValueBar, testID `valuebar.why`), which the wrapper this beat
+    // rings contains. Naming the control the user can actually press is the
+    // §1.3 honesty rule, not a style preference.
+    line: 'The meter is the verdict. Tap Why? for how we judged it.',
+    degradeLine: 'The value meter is the verdict — its Why? line explains the judgement.',
     maxDisplayCount: 3,
     retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
-    // The ⓘ this beat points at fires help_opened{topic:'trade_pricing'}.
+    // Imperfect join, stated rather than hidden: the deck's pricing explainer
+    // (`help_opened{topic:'trade_pricing'}`) is the registered event for "the
+    // user went looking for how a trade was judged", and it is still reachable
+    // from the deck's fairness row. The "Why?" disclosure this beat now points
+    // at fires no client event of its own, so naming the event that exists
+    // keeps the field greppable against the taxonomy — the exact join lands
+    // when that control gets an event.
     adoptionEvent: 'help_opened',
   }),
 

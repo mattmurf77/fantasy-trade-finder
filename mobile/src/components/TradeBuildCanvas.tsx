@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { TickLabel } from './chalkline';
 import InLeagueCalculator from './InLeagueCalculator';
 import { chalk, fonts, ice, ink, radii, space, type } from '../theme/chalkline';
 import { haptics } from '../utils/haptics';
+import type { CalcPlayer } from '../data/calcTypes';
 import type { TradeCard } from '../shared/types';
 
 // #270 — inline trades home, experiment `trades_home_inline` variant
@@ -33,6 +34,34 @@ import type { TradeCard } from '../shared/types';
 // delivering the literal ask — hand-built add/remove trading directly on
 // the page — and still uses the deck's cards to feed the rail.
 
+// D-158 (Wave B0) — a SECOND host. With `calc.inline_home` on, `TradesScreen`
+// mounts this canvas as the guided landing's layout rather than as the #270
+// experiment variant, and two things change, both prop-driven so the
+// experiment path is byte-identical:
+//
+//   1. `showSuggestionRail={false}` — the deck below IS the rail there, and a
+//      horizontal strip of the same cards above it is duplication, not
+//      discovery (plan §3b, "Suggestion rail: dies").
+//   2. The #384 handlers (`onFindATrade`, `onLikeTrade`) are threaded through
+//      to `InLeagueCalculator`, which is what turns the canvas from a
+//      read-only build surface into the page's primary action. `onShowMeAround`
+//      is deliberately NOT passed by the flag path: beat n10 points at the
+//      In-league tab this wave deletes, so the tour is off until Wave B
+//      retargets it.
+//
+// The prefill pair (`prefill` + `prefillSeq`) is the same remount-on-prefill
+// technique this file already used for the rail, exposed to the host: the
+// deck's "edit in calculator" actions load the inline canvas in place instead
+// of pushing `TradeCalculator`. A SEQ, not the object, is the trigger — the
+// same package can legitimately be loaded twice (edit → clear → edit again)
+// and value equality would swallow the second load.
+
+export interface CanvasPrefill {
+  opponentId?: string;
+  give: string[];
+  receive: string[];
+}
+
 interface Props {
   leagueId: string;
   userId: string;
@@ -42,6 +71,26 @@ interface Props {
   opponentUserId: string | null;
   /** The guided deck's current cards — feeds the suggestion rail. */
   suggestions: TradeCard[];
+  /** #270's horizontal tap-to-load strip. Defaults to TRUE — today's
+   *  behavior, so the experiment variant is untouched. */
+  showSuggestionRail?: boolean;
+  /** D-158 — the canvas's primary action. Absent ⇒ `InLeagueCalculator`
+   *  renders no Find a Trade button (the host owns what a search does). */
+  onFindATrade?: (opts: {
+    give: CalcPlayer[];
+    receive: CalcPlayer[];
+    opponent: { userId: string; name: string } | null;
+  }) => void;
+  /** D-152 — the action row's ✓ cell. Absent ⇒ the cell renders disabled. */
+  onLikeTrade?: (args: {
+    giveIds: string[];
+    receiveIds: string[];
+    opponent: { userId: string; name: string };
+  }) => void | Promise<void>;
+  /** D-158 — a host-driven prefill (the deck's edit-in-calculator paths).
+   *  Adopted only when `prefillSeq` changes. */
+  prefill?: CanvasPrefill | null;
+  prefillSeq?: number;
 }
 
 function summarizeSwap(card: TradeCard): string {
@@ -57,15 +106,28 @@ export default function TradeBuildCanvas({
   userId,
   opponentUserId,
   suggestions,
+  showSuggestionRail = true,
+  onFindATrade,
+  onLikeTrade,
+  prefill: hostPrefill,
+  prefillSeq,
 }: Props) {
-  // Bumped whenever a suggestion is tapped, forcing InLeagueCalculator to
-  // remount with fresh `initial*` props (see file header).
+  // Bumped whenever a suggestion is tapped (or the host pushes a prefill),
+  // forcing InLeagueCalculator to remount with fresh `initial*` props (see
+  // file header).
   const [canvasKey, setCanvasKey] = useState(0);
-  const [prefill, setPrefill] = useState<{
-    opponentId: string;
-    give: string[];
-    receive: string[];
-  } | null>(null);
+  const [prefill, setPrefill] = useState<CanvasPrefill | null>(null);
+
+  // D-158 — adopt a host prefill on every SEQ change. Absent `prefillSeq`
+  // (the #270 experiment path) ⇒ this effect runs once with `undefined` and
+  // does nothing, so that path is unchanged.
+  useEffect(() => {
+    if (prefillSeq === undefined || !hostPrefill) return;
+    setPrefill(hostPrefill);
+    setCanvasKey((k) => k + 1);
+    // Only the seq may trigger a load — see the file header.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillSeq]);
 
   const effectiveOpponentId = prefill?.opponentId ?? opponentUserId ?? undefined;
 
@@ -89,9 +151,11 @@ export default function TradeBuildCanvas({
         initialOpponentId={effectiveOpponentId}
         initialGiveIds={prefill?.give}
         initialReceiveIds={prefill?.receive}
+        onFindATrade={onFindATrade}
+        onLikeTrade={onLikeTrade}
       />
 
-      {suggestions.length > 0 ? (
+      {showSuggestionRail && suggestions.length > 0 ? (
         <>
           <TickLabel>Or tap a suggestion to load it</TickLabel>
           <ScrollView
