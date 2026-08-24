@@ -30,6 +30,10 @@ Same pattern: `docs/d158-inline-home` (scratch worktree `wt-docs5`) — docs-onl
 Wave B0 spec; CHANGELOG + NEXT refresh; this paragraph). Recoverable from its own PR's squash
 diff. Deleted same day, worktree removed.
 
+Same pattern: `docs/d158-assumptions-confirmed` (scratch worktree `wt-docs6`) — docs-only (D-158
+assumptions marked confirmed; this paragraph). Recoverable from its own PR's squash diff. Deleted
+same day, worktree removed.
+
 Same day: `claude/flaky-stud-tax-budget-pin` (session worktree `trade-decisions-review-6786b1`) —
 the G-059 flake fix (breaker wall-clock budget pinned in `test_trade_breaker.py` + living-memory
 write-back). | `3783f80` | `claude/flaky-stud-tax-budget-pin` |. Safe: squash-merged via PR #192

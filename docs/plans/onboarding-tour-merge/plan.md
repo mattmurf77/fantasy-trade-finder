@@ -99,8 +99,9 @@ disclosure, lineup impact, share, Send-in-Sleeper, outlook row, D-157 action row
 the component does, not because it was re-implemented. The structural guards that pin it
 (`check-calc-merged-behavior.js` 18–19d among others) keep pinning it.
 
-**Open assumptions (flagged in D-158):** an existing deck still shows beneath the canvas on
-arrival; the Calc chip survives relabeled for the Real-values push.
+**Assumptions CONFIRMED (operator, 2026-08-24):** an existing deck shows beneath the canvas on
+arrival, and the Calc chip survives relabeled for the Real-values push. §3b is now fully
+specified — nothing in B0 waits on a decision.
 
 ## 4 · Decisions for the operator (the plan waits on none of them except D1/D2 for build order)
 
