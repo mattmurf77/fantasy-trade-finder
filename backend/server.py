@@ -8695,7 +8695,7 @@ def _record_trends_snapshot(service, user_id, league, fmt, changed_pids) -> None
 @app.route("/api/tiers/save", methods=["POST"])
 @_gate_unverified_write
 def save_tiers_route():
-    """POST /api/tiers/save {position: 'RB', tiers: {first_1: [...ids], ...}, cleared_pids: [...], demoted_pids: [...]}
+    """POST /api/tiers/save {position: 'RB', tiers: {first_1: [...ids], ...}, cleared_pids: [...]}
 
     Converts tier assignments into ELO overrides and marks the position as saved.
 
@@ -8703,11 +8703,11 @@ def save_tiers_route():
     from all tiers (× button → back to pool). Their override is deleted
     so they don't snap back to a previous tier on the next refresh.
 
-    `demoted_pids` (optional, #161): pids the user explicitly passed over
-    in a Quick Set tier save (visible-but-unselected players previously in
-    the saved tier or higher). Pinned below every band (unranked/pending)
-    so they don't silently keep the old higher tier. Skip never demotes —
-    the client only sends this on an explicit save with picks.
+    A save mutates ONLY the assigned and cleared pids (D-160, #346/#381 —
+    supersedes the #161 demote rule): passed-over players HOLD their tier.
+    Old binaries (v1.10.0–v1.16.x) still send a `demoted_pids` key; it is
+    accepted and silently ignored like any unknown body key — never parsed,
+    never pinned, and the response is byte-identical to a request without it.
     """
     sess = _require_initialized_session()
     service   = sess["service"]
@@ -8721,19 +8721,15 @@ def save_tiers_route():
     if not isinstance(cleared_pids, list):
         cleared_pids = []
     cleared_pids = [str(x) for x in cleared_pids if x]
-    demoted_pids = body.get("demoted_pids") or []
-    if not isinstance(demoted_pids, list):
-        demoted_pids = []
-    demoted_pids = [str(x) for x in demoted_pids if x]
 
     if position not in ("QB", "RB", "WR", "TE"):
         return jsonify({"error": f"Invalid position: {position!r}"}), 400
 
-    # Must have at least one player in some tier OR something to clear or
-    # demote. (Pure "clear-only" saves are valid — e.g. user removes their
+    # Must have at least one player in some tier OR something to clear.
+    # (Pure "clear-only" saves are valid — e.g. user removes their
     # last tier-placed RB; we still need to apply the deletion server-side.)
     total_assigned = sum(len(ids) for ids in tiers.values() if isinstance(ids, list))
-    if total_assigned == 0 and not cleared_pids and not demoted_pids:
+    if total_assigned == 0 and not cleared_pids:
         return jsonify({"error": "No players in any tier"}), 400
 
     # M2 — a SCOPED save writes only part of the board. Read behind the flag,
@@ -8759,21 +8755,18 @@ def save_tiers_route():
                 scope_pids=_rookie_scope_ids(sess),
                 scoring_format=fmt,
                 cleared_pids=cleared_pids,
-                demoted_pids=demoted_pids,
             )
         else:
             # apply_tiers assigns ELOs inside each tier's band (see
             # backend/tier_config.json) so on reload the frontend re-buckets
             # players into the same tier they were placed. Bands are
             # position+format-aware. cleared_pids lets the frontend tell us
-            # "this player is back in the pool — drop their override";
-            # demoted_pids pins passed-over players below every band (#161).
+            # "this player is back in the pool — drop their override".
             service.apply_tiers(
                 position=position,
                 tiers=tiers,
                 scoring_format=fmt,
                 cleared_pids=cleared_pids,
-                demoted_pids=demoted_pids,
             )
 
         # Persist the full tier override dict for THIS format so it survives

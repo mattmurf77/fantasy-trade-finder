@@ -302,16 +302,18 @@ def test_m2_07b_scoped_spread_is_over_the_full_list_not_the_subset(db):
     assert svc._elo_overrides["r1"] > svc._elo_overrides["r2"]
 
 
-def test_m2_08_demotion_is_scoped_to_the_visible_subset(db):
-    """T-M2-08 (O4/#161) — a scoped save demotes only rookies that were
-    visible and unselected. An unshown vet is NEVER demoted."""
+def test_m2_08_scoped_save_holds_the_visible_unselected_rookie(db):
+    """T-M2-08 (D-160 hold contract, was O4/#161 demote-scoping) — a scoped
+    save mutates only the assigned (and cleared) scoped pids. A visible-but-
+    unselected rookie HOLDS his value/override state, and an unshown vet is
+    NEVER touched."""
     svc = _service()
     lo, hi = _band(svc)
-    svc._elo_overrides.update({"v1": hi - 5.0})
+    svc._elo_overrides.update({"v1": hi - 5.0, "r5": lo + 15.0})
     svc.apply_tiers_subset(
         position="RB", tiers={"second": ["r1"]}, scope_pids=set(ROOKIES),
-        scoring_format="1qb_ppr", demoted_pids=["r5", "v1", "v2"])
-    assert svc._elo_overrides["r5"] == RankingService.DEMOTED_ELO
+        scoring_format="1qb_ppr")
+    assert svc._elo_overrides["r5"] == lo + 15.0       # visible, unselected: held
     assert svc._elo_overrides["v1"] == hi - 5.0        # untouched
     assert "v2" not in svc._elo_overrides
 
