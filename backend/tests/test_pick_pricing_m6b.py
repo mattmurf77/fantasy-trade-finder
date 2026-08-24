@@ -419,15 +419,30 @@ def test_m6b_05c_future_years_ignore_a_slot_because_dp_publishes_none():
     current class, so `market_pick_slot_value` returns None for a future
     season and the waterfall falls to the round curve by itself. Asserted at
     BOTH levels so a future snapshot that starts publishing 2027 slots fails
-    here loudly rather than silently repricing next year's picks."""
+    here loudly rather than silently repricing next year's picks.
+
+    The "slot is ignored" claim is asserted at the SHIPPED knob setting and
+    again with D-161's round-1 YoY floor off, because it must hold either
+    way. Only the equality with the raw round curve is knob-0-only: the floor
+    is a clamp ON TOP of step 2, so at the default a future first is lifted
+    to the current class's price and comparing it to `market_pick_pool_value`
+    would be asserting step 2 rather than the waterfall. The floored number
+    is pinned in test_pick_yoy_floor.py."""
     for season in (2027, 2028, 2029):
         assert pv.market_pick_slot_value(season, 1, 1, "1qb_ppr") is None, season
-        with_slot = pv.priced_pool_value(_row(season, 1, 999.0),
-                                         scoring_format="1qb_ppr", slot=1)
-        without = pv.priced_pool_value(_row(season, 1, 999.0),
-                                       scoring_format="1qb_ppr")
-        assert with_slot == without
-        assert with_slot == pv.market_pick_pool_value(season, 1, "1qb_ppr")
+        for rate in (1.0, 0.0):                  # shipped default, then off
+            ts._cfg["market_r1_yoy_floor"] = rate
+            try:
+                with_slot = pv.priced_pool_value(_row(season, 1, 999.0),
+                                                 scoring_format="1qb_ppr", slot=1)
+                without = pv.priced_pool_value(_row(season, 1, 999.0),
+                                               scoring_format="1qb_ppr")
+                assert with_slot == without, (season, rate)
+                if rate == 0.0:
+                    assert with_slot == pv.market_pick_pool_value(
+                        season, 1, "1qb_ppr")
+            finally:
+                ts._cfg["market_r1_yoy_floor"] = ts._DEFAULT_CFG["market_r1_yoy_floor"]
 
 
 def test_m6b_05d_per_slot_is_format_aware():
@@ -585,11 +600,25 @@ def test_owned_pick_assets_ladder_reproduces_the_stored_value(monkeypatch):
 
 
 def test_owned_pick_assets_market_reprices_every_row(monkeypatch):
+    """Every injected asset carries the SERVED price, not the stored ladder.
+
+    Derived from `priced_pool_value` — the whole waterfall — rather than from
+    `market_pick_pool_value`, because since D-161 step 2 is not the last word
+    for a future round-1 row: the YoY floor clamps it up. Comparing against
+    step 2 alone would have quietly asserted the pre-floor price here while
+    the engine injected the floored one."""
     _flag_on()
     priced = _assets(monkeypatch, "market_slots")
-    for r in _ROWS:
-        expected = pv.market_pick_pool_value(r["season"], r["round"], "1qb_ppr")
-        assert priced[r["pick_id"]] == pytest.approx(expected, rel=1e-3)
+    with ts.pick_pricing_override("market_slots"):
+        for r in _ROWS:
+            expected = pv.priced_pool_value(dict(r), scoring_format="1qb_ppr",
+                                            slot=None)
+            assert priced[r["pick_id"]] == pytest.approx(expected, rel=1e-3)
+            assert expected != pytest.approx(r["pool_value"], rel=1e-3), \
+                f"{r['pick_id']} priced at its stored ladder value"
+    # the one row the floor moves, stated as a fact rather than left implicit
+    assert (priced["L_2027_1"]
+            > pv.market_pick_pool_value(2027, 1, "1qb_ppr") + 1.0)
 
 
 def test_owned_pick_assets_caps_after_pricing_not_before(monkeypatch):

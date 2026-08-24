@@ -928,6 +928,22 @@ _DEFAULT_CFG: dict[str, float] = {
     "pick_year_decay_r4":         0.85,
 
     # ------------------------------------------------------------------
+    # D-161 (2026-08-24) — the round-1 YoY FLOOR under `market_slots`.
+    # Read ONLY through pick_values.market_r1_yoy_floor(); trade_service
+    # itself never uses it. Same home and same reason as the four rates
+    # above: _c() is what reload_config() refreshes, so a PUT to
+    # /api/admin/config reprices every future first with no deploy.
+    #
+    # A future-season ROUND-1 pick may not price below this fraction of
+    # the CURRENT class's round-1 market price. 1.0 = the D-079 ruling
+    # ("firsts should hold similar value YOY"), re-asserted over DP's own
+    # in-window year discount after the 2026-08-24 operator re-ruling.
+    # 0 = pure market — byte-identical to the pre-D-161 waterfall, and the
+    # deploy-free revert. Rounds 2-4 are untouched at every setting.
+    # ------------------------------------------------------------------
+    "market_r1_yoy_floor":        1.00,
+
+    # ------------------------------------------------------------------
     # D-095 (2026-08-19) — LANDABILITY CHALLENGER (bake-off arm D,
     # docs/plans/landability-challenger/PRD.md §4). Three knobs, every one
     # defaulting to the **live identity**, so the live engine — arm B, what

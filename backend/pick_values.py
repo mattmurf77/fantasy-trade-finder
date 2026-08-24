@@ -523,6 +523,163 @@ def market_pick_slot_value(season: int, round_: int, slot: int,
     return None if elo is None else round(_e2v(elo), 1)
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# D-161 (2026-08-24) — THE ROUND-1 YoY FLOOR. D-079 re-asserted under D-146.
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# THE CONFLICT THIS RESOLVES. D-079 (2026-08-19) is an operator ruling about
+# what THIS app recommends, verbatim: *"firsts should hold similar value YOY.
+# Other picks can degrade the longer away they are."* It shipped as
+# `pick_year_decay_r1 = 1.0` — flat firsts — and it worked, on the ladder.
+# Two days later D-144/D-146 made `market_slots` the only price an owned pick
+# can get, and the market curve carries DynastyProcess's OWN year discount
+# inside DP's published window (see `market_pick_pool_value`, which
+# deliberately does not re-discount it). So the flat-firsts ruling quietly
+# stopped applying to the served price: measured on prod 2026-08-24, a 2027
+# 1st priced 1,751 and a 2028 1st 1,459 against a current-year mid of 2,184.6
+# — a 33 % haircut on an asset the operator had ruled flat. That is exactly
+# the risk Q-018 was raised to watch, and a tester found it (MangoPatti, via
+# the operator: A.J. Brown + depth asked for Isaiah Likely + three future
+# firsts). Operator re-ruling, 2026-08-24: **"The ideal solution is the D-079
+# ruling."** D-079 wins. docs/plans/pick-yoy-floor/plan.md.
+#
+# WHAT IT DOES: one clamp at the step-2 seam of `priced_pool_value`. For
+# round 1 only, and only for a season strictly beyond the market's own
+# current class, the round-curve price may not fall below
+# `market_r1_yoy_floor × market_pick_pool_value(current_season, 1, fmt)`.
+# `max()`, never `min()`: a future first that the market prices ABOVE the
+# current-year mid keeps its market price — this is a floor, not a peg.
+#
+# WHAT IT DELIBERATELY DOES NOT TOUCH, and each is load-bearing:
+#   * **Step 1, the per-slot price.** A resolved slot is a real, published
+#     price for a real, ordered pick, and per #273 a slot only ever resolves
+#     for the CURRENT class — so step 1 is never a future-year pick and the
+#     floor has nothing to say about it.
+#   * **Rounds 2-4.** "Other picks can degrade the longer away they are" is
+#     the other half of the same ruling. A round-2 clamp would overturn it.
+#   * **`tier_ladder`.** Already flat via `pick_year_decay_r1 = 1.0`; the
+#     ladder mode returns the stored value before this code is reached.
+#   * **Step 3, the stored-ladder fallback.** DP unreachable or a season DP
+#     neither publishes nor extrapolates to ⇒ `market_pick_pool_value` is
+#     None and `priced_pool_value` returns `stored` WITHOUT consulting the
+#     floor. The safety net must never become an error path (and the stored
+#     ladder is already flat at 2117.0, so there is nothing to floor).
+#   * **`GENERIC_PICK_SEEDS`, the tier bands, `draft_picks.pool_value`.**
+#     Byte-unchanged, unwritten. Pricing stays read-time. Owned-pick BADGES
+#     move, because a badge reflects the SERVED value (D-320-2).
+#
+# THE CLOCK IS THE MARKET'S OWN, NOT A NEW ONE. `market_anchor_season` reads
+# "now" out of the same DP map the price comes from — the season DP publishes
+# a per-SLOT grid for is by DP's own construction the current class (a slot
+# means nothing before an order exists; see `market_pick_slot_value`). That
+# keeps the floor on exactly one clock with the price it floors, needs no
+# import of `server._CURRENT_SEASON` (which `database.py` could not follow),
+# and makes a monkeypatched slot map a complete, self-contained fixture.
+#
+# ⚠️  THE EXTERNAL EVIDENCE STILL RUNS AGAINST THE FLAT-FIRSTS CALL, and this
+# change widens the divergence rather than narrowing it: DP, FantasyCalc and
+# KeepTradeCut all discount future firsts (0.80 / 0.80 / 0.83 per year), and
+# the floor now overrides DP's discount at the point of sale instead of only
+# in our own ladder. The full argument is in the D-079 block above and in
+# docs/reviews/2026-08-19-pick-year-valuation.md; it has not changed, and the
+# operator has re-ruled against it with the tester report in hand. The knob
+# is how that stays one config write away from being walked back.
+#
+# REVERT WITHOUT A DEPLOY: set `market_r1_yoy_floor` to 0 in `model_config`
+# and POST /api/admin/config (which calls `trade_service.reload_config`). At
+# 0 the clamp returns the market value before any second market lookup
+# happens — byte-identical to the pre-D-161 waterfall, pinned by
+# test_pick_yoy_floor.py::test_knob_zero_is_byte_identical_to_the_raw_market.
+MARKET_R1_YOY_FLOOR_KEY = "market_r1_yoy_floor"
+MARKET_R1_YOY_FLOOR_DEFAULT = 1.0        # the ruling: firsts are flat YoY
+
+
+def market_r1_yoy_floor() -> float:
+    """Live fraction of the CURRENT-season round-1 market price that a
+    FUTURE-season round-1 pick may not price below.
+
+    Read through `trade_service._c` — the same live-config accessor
+    `year_decay` uses, and for the same reason: a PUT to /api/admin/config
+    reprices every pick on the next reload with no deploy.
+
+    Clamped to `[0, 1]`, mirroring `year_decay`'s clamp and for the mirror
+    reason. Above 1 the floor would price a FUTURE first above a CURRENT one
+    and re-open the year arbitrage D-079 closed, pointing the other way.
+    """
+    try:
+        from .trade_service import _c
+        rate = float(_c(MARKET_R1_YOY_FLOOR_KEY))
+    except Exception:
+        rate = MARKET_R1_YOY_FLOOR_DEFAULT
+    return max(0.0, min(1.0, rate))
+
+
+def market_anchor_season(scoring_format: str = "1qb_ppr") -> int | None:
+    """The season the DP map itself treats as the CURRENT draft class, or None.
+
+    Not a new clock — the same `load_pick_slot_values` map every price on this
+    path already comes from. DP publishes a per-SLOT grid ("2026 Pick 1.07")
+    only for the class that has an order, and rung labels ("2027 Mid 1st")
+    for everything past it; the earliest slotted season is therefore DP's own
+    statement of "now". When DP publishes no slot grid at all — the shape a
+    test fixture or a post-draft window can produce — this falls back to the
+    earliest published season, which is the same answer by a weaker route.
+
+    None when the map is empty or carries no parseable season, i.e. exactly
+    the cases where `market_pick_pool_value` also has nothing to say.
+
+    This is deliberately NOT `min(draft_picks.season)`: #228 deletes the
+    current class's rows once a draft completes, so recovering "now" from our
+    own pick rows would silently shift every pick a year closer. The DP map
+    has no such hole — the class it prices per-slot IS the class being drafted.
+    """
+    from .data_loader import load_pick_slot_values
+    slot_map = load_pick_slot_values(scoring_format)
+    slotted: set[int] = set()
+    published: set[int] = set()
+    for label in slot_map:
+        parts = label.split(" ")
+        if not parts[0].isdigit():
+            continue
+        season = int(parts[0])
+        published.add(season)
+        if len(parts) > 1 and parts[1] == "Pick":
+            slotted.add(season)
+    pool = slotted or published
+    return min(pool) if pool else None
+
+
+def _r1_yoy_floored(market: float, season, round_,
+                    scoring_format: str) -> float:
+    """`market`, raised to the D-161 floor when it is a FUTURE round-1 price.
+
+    Returns `market` unchanged for every other case, and — at knob 0 — before
+    any second market lookup is attempted, so the disabled path costs exactly
+    one `_c` dict read over the pre-D-161 waterfall.
+
+    The round is clamped the way `market_pick_pool_value` clamps it, so the
+    floor applies to precisely the picks that were priced off the round-1
+    curve. A round-0 row prices as a 1st there; it is floored as one here.
+    """
+    rate = market_r1_yoy_floor()
+    if rate <= 0.0:
+        return market                       # 0 = pure market (revert path)
+    try:
+        season = int(season)
+        round_ = max(1, min(int(round_), _MARKET_MAX_ROUND))
+    except (TypeError, ValueError):
+        return market
+    if round_ != 1:
+        return market                       # "other picks can degrade"
+    anchor = market_anchor_season(scoring_format)
+    if anchor is None or season <= anchor:
+        return market                       # current class or older: no floor
+    current = market_pick_pool_value(anchor, 1, scoring_format)
+    if current is None:
+        return market                       # floor side unresolvable: no floor
+    return max(market, round(rate * current, 1))
+
+
 def priced_pool_value(row: dict, *, scoring_format: str = "1qb_ppr",
                       mode: str | None = None, slot: int | None = None) -> float:
     """The engine value of ONE owned-pick row.
@@ -539,15 +696,22 @@ def priced_pool_value(row: dict, *, scoring_format: str = "1qb_ppr",
          holds *"real value rather than generic"*. A 2026 1.01 is 4867.1 in
          1QB where the 1.12 is 820.8 — a 5.9x spread the round curve erased.
       2. **no slot, or DP publishes none for it → the ROUND curve**
-         (`market_pick_pool_value`, the mid-tercile basis). This is every
-         future-year pick — DP prices slots only for the current class, so
-         the operator's "future picks stay default for now" falls out of the
-         data rather than out of a branch — and every league whose draft order
-         is unpublished, unsupported, or unresolvable.
+         (`market_pick_pool_value`, the mid-tercile basis), **then the D-161
+         round-1 YoY floor** (`_r1_yoy_floored`). This is every future-year
+         pick — DP prices slots only for the current class, so the operator's
+         "future picks stay default for now" falls out of the data rather than
+         out of a branch — and every league whose draft order is unpublished,
+         unsupported, or unresolvable. The floor re-asserts D-079's flat-firsts
+         ruling over DP's own year discount: a future ROUND-1 price is raised
+         to `market_r1_yoy_floor ×` the current class's round-1 price. Rounds
+         2-4 keep DP's discount ("other picks can degrade"), and at knob 0 the
+         step is byte-identical to the pre-D-161 curve.
       3. **no market price at all → the stored ladder value.** DP unreachable,
          or a season DP neither publishes nor can extrapolate to. This is the
          whole safety net, and it degrades to exactly today's price rather
-         than to a wrong number or an error.
+         than to a wrong number or an error. The D-161 floor is NOT consulted
+         here: step 3 is reached only when there is no market price to floor,
+         and the stored ladder is already flat in round 1 by D-079.
 
     `slot` is PASSED IN, never resolved here. Resolution is D-090's job
     (`server._league_slot_order` → `pick_slots.slot_for`), it costs a DB read
@@ -576,4 +740,7 @@ def priced_pool_value(row: dict, *, scoring_format: str = "1qb_ppr",
             return exact
     market = market_pick_pool_value(row.get("season"), row.get("round"),
                                     scoring_format)
-    return stored if market is None else market
+    if market is None:
+        return stored
+    return _r1_yoy_floored(market, row.get("season"), row.get("round"),
+                           scoring_format)

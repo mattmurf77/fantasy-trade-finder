@@ -14,6 +14,10 @@
 
 
 
+## 2026-08-24 — Future firsts floor at the current-year mid: D-079 re-asserted under market_slots (D-161)
+
+Tester MangoPatti's report (via the operator) that "1sts are still undervalued" was validated and root-caused: D-146's market pricing quietly reinstated the market's future-first discount that D-079 had ruled against (Q-018 warned of exactly this), and the served card had priced future firsts at ≈ 1,171 — the ~93rd asset — against A.J. Brown. Operator re-ruled, verbatim: *"The ideal solution is the D-079 ruling."* One clamp at `priced_pool_value` step 2: future-year round-1 ≥ `market_r1_yoy_floor` × the current-year mid (default 1.0 flat; 0 = pure market, deploy-free). Live curve verified: 2027/2028/2029 firsts now serve at 2,184.6 (1qb) / 2,434.0 (sf); rounds 2–4 keep their decay; slotted current-year picks, the ladder mode and the DP-absent fallback byte-identical. Suite 4,275 green; Q-018 CLOSED as ruled. Adjacent open item, not built: picks are DP-pure while players are 50% KTC-blended.
+
 ## 2026-08-24 — Feedback wave: 5 groups / 11 items built, QA-green, awaiting ship go/no-go (branch `claude/new-user-feedback-55320e`)
 
 Full `/feedback` pipeline run, no express. **A** (#376/#379/#394): TradesHome regains an always-on

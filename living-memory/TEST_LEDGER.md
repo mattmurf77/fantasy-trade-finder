@@ -15,6 +15,21 @@
 
 
 
+## 2026-08-24 — Pick YoY floor (D-161) — full gates, live-curve verified, on `claude/pick-yoy-floor-0824`
+
+Plan: [`docs/plans/pick-yoy-floor/`](../docs/plans/pick-yoy-floor/plan.md). One Opus builder, Fable adversarial review (verdict: approve after two one-line fixes, both applied: the Q-018 closure relocation and a `try/finally` knob restore in `test_pick_pricing_m6b`).
+
+| Gate | Result |
+|---|---|
+| `pytest backend/tests` | **4275 passed, 1 skipped** (builder run 301 s, reviewer run 306 s; +37 `test_pick_yoy_floor.py`) |
+| Sabotages | 8 by the builder (S1–S8, module docstring), 3 re-run independently by the reviewer (S1/S4/S6), all byte-copy restores + `__pycache__` cleared per [G-060](GOTCHAS.md) |
+| Existing-test dispositions | 12 failures judged individually: market-semantics tests pinned at knob 0 (both regimes stay pinned), served-pricing tests now expect the floored value with floor-is-active side assertions, one test overturned by name (its docstring pinned the pre-ruling behavior D-161 reverses), one evener re-fixture verified to reproduce the original geometry to 4 decimals |
+| **Live curve (read-only prod DP)** | 1qb r1: 2027 1,750.7 → **2,184.6** · 2028 1,459.4 → **2,184.6** · 2029 → **2,184.6** · current-year and rounds 2–4 unmoved · sf_tep floors at 2,434.0 |
+| Reference case | The MangoPatti card family (A.J. Brown + depth for a player + three future firsts): the pick side reprices from ≈ 3 × 1,171–1,751 to 3 × 2,184.6 |
+| Runtime | scope §3 checklist owed post-deploy: a served card carrying a 2027/2028 1st displays ≈ a current mid-first |
+
+**Fable code-walk:** knob-0 byte-identity — at `market_r1_yoy_floor = 0`, `_r1_yoy_floored` returns the raw market value before the anchor read and before any second market lookup (loader-call counter pins 1 load at knob 0, 3 at default). Four paths untouched at every knob value: step-1 slotted picks (return before the clamp's path), rounds 2–4 (bail ahead of the anchor read — value and lookup count unchanged), `tier_ladder` (stored value before any DP read), the DP-absent fallback (stored, None-guard proven load-bearing). Anchor = DP's own earliest slotted season; a stale rung-only season cannot steal it (S8); the DP-reader seam guard still asserts the exact reader set both directions. Judgment calls ACCEPTED with reasoning: anchor-lag risk is bounded (floor too high by one year's class drift, transient on DP's 24 h TTL, and under the flat ruling the pick still serves ≈ a current mid); the [0,1] clamp mirrors `year_decay`'s for the mirrored arbitrage.
+
 ## 2026-08-24 — Feedback wave (5 groups, 11 items): full gates green on `claude/new-user-feedback-55320e`; TestFlight checklists owed
 
 Batch: [`docs/feedback/items/346-quickset-tier-drop/plan.md`](../docs/feedback/items/346-quickset-tier-drop/plan.md).
