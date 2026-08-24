@@ -461,6 +461,85 @@ off as already-shipped. Two of these fix a **race** that the simulator hid behin
 78. Nothing else on that screen moved: Apple sign-in, the username field and the not-found copy
     all behave as before. ☐
 
+## I. Wave B0 — the layout merge (`calc.inline_home`, [D-158])
+
+**Added 2026-08-24, branch `feat/inline-home-b0`. Unrun.** This wave moves the In-league
+calculator ONTO the guided landing and trims the pushed page to Real values. `calc.inline_home`
+ships **false**, so **I1 is the pass that matters today** — the whole claim of the wave is that
+with the flag off nothing moved, and once it is lit that before-picture is gone.
+
+`calc.merged_layout` must be **true** for any of I2 to work: the two routes the inline canvas
+calls are gated on it and 404 `feature_disabled` otherwise.
+
+**Known before you start:** with this flag on the calculator tour does **not** run — not the
+auto-start, not "Show me around". Beat n10 says "Tap In league" and this wave deletes that tab;
+Wave B retargets the beats. Its absence is the design, not a bug to report.
+
+### I1. Flag OFF — the regression pass (run FIRST, before any flip)
+
+79. **The Acquire tab looks exactly as it did.** Open Find a Trade. There is **no** calculator
+    canvas above the deck, the chip strip reads **Guided · Team · Player · Calc · Free agents**
+    (with Draft/Today if their flags are on), and the fourth chip says **`Calc`**, not "Real
+    values". ☐
+80. **The pushed calculator still has two tabs.** Tap `Calc`. The mode row shows **In league**
+    and **Real values**, In league is selectable, and the calculator tour still auto-starts on a
+    first visit (or offers "Show me around" on the In-league tab). ☐
+81. **Edit-in-calculator still pushes.** From a deck card, use its edit action. You land on the
+    pushed Calculator screen, in **In league** mode, with both sides preloaded — a PUSH, with a
+    back button, not a scroll on the same page. ☐
+82. **End of deck still offers Search all trades.** Build a canvas with a give side on the pushed
+    page, tap Find a Trade, swipe the fair deck to the end. The summary card shows **Back to
+    calculator** and **Search all trades** (not an unpin-retry). ☐
+83. **The ✓ still queues.** On the pushed In-league page, build a complete trade with a partner
+    and tap ✓. You get the same success or reason-specific refusal toast as before, once. ☐
+
+### I2. Flip `calc.inline_home` to true, reload flags, restart the app
+
+84. **The canvas is on the landing.** Open Find a Trade (guided). The In-league calculator
+    renders **above** the deck under a "Build a trade" label — with its format chips, league and
+    team dropdowns, both roster columns, verdict, eveners, lineup impact, share and Send. Nothing
+    from the In-league page is missing. ☐
+85. **The existing deck is still there, underneath.** If a deck was already generated (pregen or
+    an earlier session), it still shows below the canvas — both entry actions visible at once. ☐
+86. **No suggestion rail.** There is **no** horizontal "Or tap a suggestion to load it" strip
+    between the canvas and the deck. The deck below is the rail. ☐
+87. **No "Show me around" link** on the inline canvas, and no Analyst bubble appears when you
+    open the Acquire tab or the pushed Calculator page. ☐
+88. **Find a Trade with an EMPTY canvas** (pick a partner, add nothing). Results replace the deck
+    below **on this page** — no push, no back button, no second copy of the landing. The cards
+    are ordinary modelled trades and there is **no** "Built around" row. ☐
+89. **Find a Trade with a GIVE side.** Add one of your players, tap Find a Trade. A **"Built
+    around <player>."** receipt appears above the results, and every card gives away exactly
+    that player. Add a second player and re-run: the line reads **"Built around <player> +1."** ☐
+90. **Change.** Tap **Change** on the receipt. The page scrolls back to the canvas and the assets
+    you built are **still there** — nothing was cleared. ☐
+91. **Clear.** Tap **Clear**. The receipt disappears and a normal modelled deck is generated for
+    the same partner. Swipe that deck to the end: the summary offers **Back to calculator**, and
+    — because the receipt is gone — it may offer the unpin-retry, but **not** two ways to do the
+    same thing. ☐
+92. **The receipt replaces the end-of-deck exit.** Re-run an anchored search (step 89), then
+    swipe the fair deck to the end. The summary card must **NOT** show "Search all trades" —
+    that exit is the receipt's Clear now. ☐
+93. **Edit-in-calculator loads the canvas in place.** From a deck card, use its edit action. The
+    page **scrolls up** to the canvas and both sides are loaded with that card's players. No
+    push, no back button. Do it again with a different card: the canvas reloads with the new
+    package (not the first one). ☐
+94. **Back to calculator, in place.** Swipe a pinned deck to the end and tap **Back to
+    calculator**: same scroll-to-canvas behavior, pins loaded. ☐
+95. **The ✓ works from the landing.** Build a complete trade with a partner in the inline canvas
+    and tap ✓. You get the same toast you got on the pushed page in step 83 — success naming the
+    partner, or the reason-specific refusal. Tap it twice: "Already queued for @…", one row. ☐
+96. **The pushed page is Real values only.** Tap the chip strip's fourth chip — it now reads
+    **`Real values`**. The page it pushes has **no mode row** and **no In-league content**: just
+    the scoring-format chips, Side A / Side B, the consensus verdict and its suggestions. The
+    "Want ideas instead? Find a trade →" link is still there. ☐
+97. **No league, no dead end.** With a session that has no active league (or after leaving the
+    league), the guided landing shows **no canvas** and the `Real values` chip still reaches a
+    working calculator. ☐
+98. **Kill switch.** Set `calc.inline_home` back to false, `POST /api/feature-flags/reload`,
+99. **Matches → edit in calculator (review B1):** from the Matches tab, tap a match row's edit-in-calculator. Expect: you land on the GUIDED landing (not the pushed page) with the canvas prefilled — partner, both sides — and scrolled into view. Tap a second match: the canvas reloads with the new package.
+    restart. Re-run steps 95–81: the app is back to the two-tab shape with no canvas. ☐
+
 ---
 
 ## Known-unverified / known-imperfect
@@ -490,3 +569,11 @@ off as already-shipped. Two of these fix a **race** that the simulator hid behin
   all sized by reasoning, not by looking at them.
 - Tour **copy** is budget-compliant but has never been read on a device beside the actual
   controls; a line can be inside 20 words and still be wrong next to the thing it names.
+- **Wave B0 (section I) is entirely unrun.** Its evidence is `mobile/tests/check-inline-home.js`
+  plus a file:line code-walk in
+  [`docs/plans/onboarding-tour-merge/scope-wave-b0.md`](../../../plans/onboarding-tour-merge/scope-wave-b0.md) §3.
+  The two things the guard genuinely cannot see: (1) the **ordering** inside the #330 choke point
+  when the inline search re-fires it — reset, then fork, then dispatch — which is only observable
+  as "the deck actually changed"; (2) the **layout** of a full In-league calculator stacked above
+  a swipe deck on a small screen, which nobody has looked at. Steps 68, 72 and 73 are the ones
+  worth the setup cost.

@@ -14,6 +14,22 @@
 
 
 
+## 2026-08-24 — Wave B0 BUILT dark: the guided landing hosts the In-league canvas (`calc.inline_home`, D-158)
+
+Branch `feat/inline-home-b0`, **not merged, not PR'd**. New flag `calc.inline_home` (**false**;
+mirrored into all three flag fixtures + `backend/feature_flags.py`). ON: `TradeBuildCanvas` is
+promoted from the #270 experiment to the guided layout (flag path outranks the experiment; ONE
+mount), its suggestion rail dies, Find a Trade runs **in place** through the same D-153 fork and
+the same #330 choke point (no navigation, no `FinderHandoff`, no new dispatch site), an anchored
+deck gets a `trades.anchor-receipt` filter row (Change = scroll to the canvas · Clear =
+`handleSearchAllTrades` verbatim, which is why the end-of-deck Search-all steps aside), the three
+edit-in-calculator hand-offs load the canvas, the pushed page becomes **Real values only**, and
+the Calc chip reads `Real values`. OFF = byte-identical (code-walk in the scope block §3).
+**No new events, no schema, no route change** — the fork and the ✓ queue moved to
+`utils/canvasSearch.ts` / `utils/queueCalcTrade.ts`, one implementation each, two callers.
+**The tour is OFF under this flag** (n10 points at the deleted tab) — Wave B rebuilds it.
+Scope: [`docs/plans/onboarding-tour-merge/scope-wave-b0.md`](../docs/plans/onboarding-tour-merge/scope-wave-b0.md).
+
 ## 2026-08-24 — Tour merge Wave A built on `feat/tour-wave-a`: Segrave's notes, minus the merge itself
 
 Plan §7 Wave A ([scope](../docs/plans/onboarding-tour-merge/scope-wave-a.md)) — nine notes, no new

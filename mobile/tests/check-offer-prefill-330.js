@@ -156,13 +156,20 @@ assert(
   'sabotage detected: `autoRunPendingRef.current = true` runs the model deck alongside the fairness sweep',
 );
 
+// D-158 (Wave B0, 2026-08-24) — the choke point gained ONE more trigger,
+// `canvasRunSeq`, which is the inline canvas's in-place Find a Trade routing
+// through this SAME effect instead of opening a second dispatch site (the
+// `generateMutation.mutate(` count assertion below is what keeps that honest).
+// It is only ever bumped with `calc.inline_home` on, so flag-off the dep is a
+// constant 0 and the effect fires exactly when it always did. The three
+// original deps are still required, in order.
 const chokeEffect = region(
   tradesCode,
-  /const finderScopeSeen = useRef\(false\);[\s\S]*?\}, \[finderMode, scopedOpponent, autoRunSeq\]\);/,
+  /const finderScopeSeen = useRef\(false\);[\s\S]*?\}, \[finderMode, scopedOpponent, autoRunSeq(?:, canvasRunSeq)?\]\);/,
   'S-2 the scoped-opponent choke-point effect',
 );
 assert(
-  /\}, \[finderMode, scopedOpponent, autoRunSeq\]\);/.test(chokeEffect),
+  /\}, \[finderMode, scopedOpponent, autoRunSeq(?:, canvasRunSeq)?\]\);/.test(chokeEffect),
   'S-2 the choke-point deps contain autoRunSeq (B-1)',
   'sabotage detected: dropping it — a repeat Offer to the SAME team changes no dep, the second handoff lands its pin on the stale deck silently (the original #330 symptom reborn)',
 );

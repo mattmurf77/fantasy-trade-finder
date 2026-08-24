@@ -117,7 +117,12 @@ assert(/startCalcTour\('show_me_around'/.test(screen), '13. re-entry from the li
   // empty dep array means the tour never starts for the users it is for —
   // and never re-evaluates when a prefilled arrival is replaced. Verified
   // green against the old assertions, which only looked for the call.
-  assert(/\}, \[calcMergedOn, prefill, hasLeague, navigation\]\);/.test(after),
+  // D-158 (Wave B0, 2026-08-24) — a FIFTH guard joined the four: with
+  // `calc.inline_home` on the tour does not run on this screen at all (n10
+  // points at the In-league tab this wave deletes), so `inlineHomeOn` is both
+  // an early-return condition and a dep. Same rule as the others: a guard
+  // that is not a dep is frozen at its first-render value.
+  assert(/\}, \[calcMergedOn, prefill, hasLeague, inlineHomeOn, navigation\]\);/.test(after),
     '15a. the auto-start effect declares all its guards as deps',
     'deps `[]` freeze the guards at their first-render values — usually all false');
   // 2026-08-22 device feedback, report 1: "Box was in the wrong spot when I
