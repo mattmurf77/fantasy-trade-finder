@@ -15,6 +15,30 @@
 
 
 
+## 2026-08-24 — Feedback wave (5 groups, 11 items): full gates green on `claude/new-user-feedback-55320e`; TestFlight checklists owed
+
+Batch: [`docs/feedback/items/346-quickset-tier-drop/plan.md`](../docs/feedback/items/346-quickset-tier-drop/plan.md).
+Groups A (#376/#379/#394 outlook & filters row), B (#397/#398 tour pin), C (#395/#396 lineup impact),
+D (#386/#391 guide layout notify), F (#346/#381 QuickSet HOLD, [D-160](DECISIONS.md)). All fast-track, full gates, no express.
+
+- **Phase 1:** dual-agent plan/author/critique per group; every critique round found real defects
+  (self-satisfying checklist steps in B/D, a blacklist-beatable guard spec in A, two self-satisfying
+  pytest sabotages in C caught by hand-recomputation, 7 contract amendments in F). All resolved, logs in each folder.
+- **Phase 2:** 7 build agents in isolated worktrees, disjoint ownership held; merges clean
+  (one intended status.md both-halves conflict, resolved keep-both).
+- **Phase 3 (round 1, agents A+B independently, commit `c8b0e224`):** both PASS all five groups.
+  `tsc --noEmit` clean · **78/78** `mobile/tests/check-*.js` green · testid-lint OK · full
+  `pytest backend/tests` **4238 passed / 1 skipped** (×3 independent clean runs) · every PRD sabotage
+  mapping re-proven red→green by both agents independently (12 in A, 5+2 probes in B, 6+2 in C, 4 in D, 7+guard-13 in F)
+  · `web/`+`extension/` diff empty · Group F mobile↔backend payload shape verified consistent.
+  One convergent finding (F-1, minor): Group F T-2's sabotage wording overstated (conditional echo only) — PRD tightened, no code change.
+- **Known environment gotcha (recorded):** `test_deck_signal_v2.py::test_flag_on_writes_impressions_in_served_order`
+  fails against a `data/trade_finder.db` left by a previous full sweep in the same tree; fresh data dir passes.
+  Not a code regression (bisected: same commit passes clean).
+- **Version:** mobile 1.16.4 (app.json + Info.plist; `test_app_version_consistency` green).
+- **Owed (the only runtime evidence, D-056):** the five operator TestFlight checklists —
+  consolidated in [`docs/feedback/items/346-quickset-tier-drop/testflight-checklist-batch.md`](../docs/feedback/items/346-quickset-tier-drop/testflight-checklist-batch.md).
+  CI on the pushed sha pending at entry time; ship gate = operator go/no-go.
 ## 2026-08-24c — Waves A + B0 SHIPPED — PRs #197/#199, EAS 1.16.4 (130) submitted
 
 Wave A merged as `7452650` (CI green: backend 9m14s · typecheck · lint) with the Fable review's A1/A2/A4/A6 fixes on top (gates re-run on `274a0ea9`: tsc · 77/77 · lint · pytest 4230/1). Wave B0 rebased over it and merged as `14a4ce4` (CI green) with review fix B1 (MatchesScreen prefill) + the reviewer's doc-conflict resolutions (checklist H→I, steps 79–99); gates on the rebased tip: tsc · 78/78 · lint · pytest 4230/1. `git diff feat/inline-home-b0 origin/main` EMPTY at merge. EAS production **1.16.4 (130)** built and submitted to App Store Connect (submission `a7b08771`). `FTF_SKIP_SIM_GATE=1` on pushes (D-056). **Owed on 130:** checklist section H (63–78; 63–67 on a COLD league load) and I1 (79–83, flag-off regression). `calc.inline_home` stays false until Wave B.

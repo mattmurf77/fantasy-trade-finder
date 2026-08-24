@@ -5254,14 +5254,9 @@ export default function TradesScreen({ navigation, route }: any) {
                     ? () => navigation?.navigate?.('TodaysTrade')
                     : undefined
                 }
-                // #376 — the finder's conditions, back on the surface that
-                // replaced the mode bar. Gated on `consolidateOn` for the same
-                // reason `hideTeamAndPlayer` is: that flag is what makes the
-                // full sheet exist, so passing the handler without it would
-                // open a DNA-only sheet and quietly not be "the filters".
-                onConditions={
-                  consolidateOn ? () => setDnaSheetOpen(true) : undefined
-                }
+                // #379 — no Filters button here: the operator ruled the
+                // top-row placement out. The sheet's in-page entry is the
+                // "Outlook & filters" row below (trades.outlook-fallback).
                 // Receipts (docs/plans/receipts/) — same optional-prop
                 // convention as onTodaysTrade above: the handler's presence IS
                 // the control, so with `receipts.screen` dark this row renders
@@ -5329,6 +5324,67 @@ export default function TradesScreen({ navigation, route }: any) {
                 setDnaSheetOpen(true);
               }}
             />
+            {/* #376/#379/#394 — always-available minimized "Outlook &
+                filters" row: the receipt's quiet bar minus the lean claim,
+                mirroring the calculator's own fallback
+                (InLeagueCalculator.tsx `calc.outlook-fallback`, #384). The
+                gate is the exact complement of the receipt's render
+                predicate under `consolidateOn && !firstRun` (#254 rule):
+                exactly one of {receipt, this row} renders — never both,
+                never neither. It reads NO flag and NO experiment variant,
+                so the control cohort gets a sheet entry too (they had
+                none). Guarded by check-finder-conditions-reachable.js:
+                the condition below must EQUAL the whitelist
+                `consolidateOn && !outlookReceiptShown && !firstRun` —
+                add or drop a conjunct and the guard goes red. Deliberately
+                mortal: Wave B0's inline calculator carries its own outlook
+                surface and deletes this row (prd.md §5). */}
+            {consolidateOn && !outlookReceiptShown && !firstRun ? (
+              <View testID="trades.outlook-fallback" style={styles.outlookFallback}>
+                <View style={styles.outlookFallbackRow}>
+                  <Text style={styles.outlookFallbackText} numberOfLines={1}>
+                    {`Outlook & filters · ${
+                      prefsQuery.data?.team_outlook
+                        ? OUTLOOK_FALLBACK_LABEL[prefsQuery.data.team_outlook]
+                        : 'Not set'
+                    }`}
+                  </Text>
+                  <Pressable
+                    testID="trades.outlook-fallback.change"
+                    accessibilityRole="button"
+                    accessibilityLabel="Change outlook and trade filters"
+                    hitSlop={8}
+                    onPress={() => {
+                      haptics.selection();
+                      setDnaSheetOpen(true);
+                    }}
+                  >
+                    {({ pressed }) => (
+                      <Text
+                        style={[
+                          styles.outlookFallbackChange,
+                          pressed && styles.outlookFallbackPressed,
+                        ]}
+                      >
+                        Change
+                      </Text>
+                    )}
+                  </Pressable>
+                </View>
+                {/* #315 contract — same ≤2-row budget and content rules as
+                    trades.outlook-receipt.details (never team scope or
+                    specific players). Not interactive. */}
+                {receiptDetails ? (
+                  <Text
+                    testID="trades.outlook-fallback.details"
+                    style={styles.outlookFallbackDetails}
+                    numberOfLines={1}
+                  >
+                    {receiptDetails}
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
           </View>
         ) : null}
 
@@ -7638,6 +7694,22 @@ function cap(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+// #376/#394 — display names for the minimized "Outlook & filters" row.
+// The four directional values use OutlookBiasReceipt's LEAN names (#253
+// canonical order) so the row and the receipt share one vocabulary; the
+// map is duplicated here because the receipt keeps LEAN private.
+// `not_sure` IS a declared value (TradeDnaSheet persists it when positions
+// are saved without an outlook pick) — it renders "Not sure", never the
+// cap() literal "Not_sure" and never "Not set". "Not set" is reserved for
+// null/absent, applied at the call site.
+const OUTLOOK_FALLBACK_LABEL: Record<string, string> = {
+  championship: 'All-in',
+  contender: 'Contending',
+  rebuilder: 'Rebuilding',
+  jets: 'Tanking',
+  not_sure: 'Not sure',
+};
+
 // ── Styles — Chalkline (docs/design/design-system.md) ───────────────
 const styles = StyleSheet.create({
   // #182 — explore-row construction (mirrors LeagueScreen's Explore list).
@@ -7944,6 +8016,29 @@ const styles = StyleSheet.create({
   },
   prefsChangedTick: { width: 3, height: 12, backgroundColor: ice.base },
   prefsChangedText: { ...type.bodySm, color: chalk.base, fontFamily: fonts.uiSemi },
+  // #376/#394 — minimized "Outlook & filters" row. The calculator's
+  // `calc.outlook-fallback` styles (InLeagueCalculator.tsx) plus the
+  // receipt's own bottom margin — the wrapper adds no layout, so the row
+  // carries its spacing exactly as the receipt does. Vertical padding +
+  // gap mirror the receipt's two-row composition for the details line.
+  outlookFallback: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: space.sm,
+    marginBottom: space.md,
+    gap: 2,
+  },
+  outlookFallbackRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space.sm,
+  },
+  outlookFallbackText: { ...type.bodySm, flex: 1, color: chalk.dim },
+  outlookFallbackChange: { ...type.bodySm, color: ice.base, fontFamily: fonts.uiSemi },
+  outlookFallbackPressed: { opacity: 0.6 },
+  outlookFallbackDetails: { ...type.bodySm, color: chalk.dim },
   // D-158 — the anchor filter receipt, built to OutlookBiasReceipt's spec
   // (components/OutlookBiasReceipt.tsx): ink2 bar, hairline ink.line border,
   // radii.sm, a 3×12 flare tick (informational highlight), bodySm dim text

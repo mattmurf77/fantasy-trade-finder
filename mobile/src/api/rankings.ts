@@ -322,7 +322,6 @@ export async function saveTiers(
   position: Position,
   tiers: Record<string, string[]>,
   clearedPids: string[] = [],
-  demotedPids: string[] = [],
   // rookie-draft M2: a SCOPED save writes only part of the board. The
   // server answers it with the merged-band rule (merge the scoped pids into
   // the band's current full order, spread over the FULL merged list,
@@ -335,16 +334,15 @@ export async function saveTiers(
   // tag the board-restore procedure keys off.
   opts?: { scope?: RankScopeParam; via?: 'rookie_tiers' | 'rookie_quickset' | 'rookie_anchors' },
 ) {
-  // demoted_pids (#161): players the user explicitly passed over during a
-  // Quick Set tier save — the backend pins them below every tier band
-  // (unranked) instead of letting them silently keep their old tier. Under
-  // scope this is bounded to the VISIBLE subset (operator decision O4): an
-  // unshown vet is never demoted, because it was never on screen to pass over.
+  // HOLD contract (D-160, #346/#381 — supersedes #161): a save touches only
+  // the pids in `tiers` and `cleared_pids`. Players visible but unselected
+  // during a Quick Set rung keep their current tier — the client no longer
+  // computes or sends a demote list, and the backend ignores the legacy
+  // `demoted_pids` key from old binaries (v1.10.0–v1.16.x).
   return api.post<any>('/api/tiers/save', {
     position,
     tiers,
     cleared_pids: clearedPids,
-    demoted_pids: demotedPids,
     ...(opts?.scope ? { scope: opts.scope } : {}),
     ...(opts?.via ? { via: opts.via } : {}),
   });

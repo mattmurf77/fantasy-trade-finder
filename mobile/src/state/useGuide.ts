@@ -96,6 +96,9 @@ export interface GuideStep {
   /** Avatar side; default 'left'. Placement solver may override to avoid
    *  covering the target (script §2). */
   side?: 'left' | 'right';
+  /** Pin the avatar band to the top of the window instead of adjacency
+   *  placement (#397/#398). Inert wherever absent; no other values. */
+  band?: 'top';
   screen: string;                   // for the guide_step_shown event
 
   // ── v2 eligibility contract (inert unless onboarding.guide_v2) ──────────

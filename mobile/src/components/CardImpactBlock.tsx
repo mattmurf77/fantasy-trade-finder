@@ -20,7 +20,9 @@ import type { CalcEvaluationInLeague } from '../api/calc';
 //      MAX_SLOT_ROWS, with an honest "+N more" tail.
 //   2. **No raw value deltas.** The calculator shows the consensus point
 //      swing; the card shows the tier/positional-rank movement, which is the
-//      thing a swiping user can read in a second ("TE31 -> TE2").
+//      thing a swiping user can read in a second ("TE #31 -> TE #2"). The
+//      "#" prefix is R-6 (#395): a bare "WR3" beside the slot labels reads as
+//      a lineup slot; "WR #3" can only be a positional rank.
 //
 // PLACEMENT IS BINDING, NOT AESTHETIC. D-025 (operator, #169 frame decisions)
 // fixed the card's vertical order: the Pass/Like disposition pair sits directly
@@ -152,7 +154,7 @@ export default function CardImpactBlock({
                     ]}
                     numberOfLines={1}
                   >
-                    {`${s.before?.position ?? ''}${beforeRank} → ${s.after?.position ?? ''}${afterRank}`}
+                    {`${s.before?.position ?? ''} #${beforeRank} → ${s.after?.position ?? ''} #${afterRank}`}
                   </Text>
                 ) : null}
               </View>

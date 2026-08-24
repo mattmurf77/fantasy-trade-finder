@@ -1093,6 +1093,30 @@ function walkTsFiles(dir) {
           'shipped `top: 54`) lands under the status bar and, on a sub-screen, ' +
           'under the native header',
       );
+
+      // #397/#398 — the per-step pin: an opt-in 5th argument overrides
+      // adjacency with the top of the window. EXECUTED like 11d–11j; the
+      // 4-arg cases above are the mechanical proof the un-pinned path did
+      // not move.
+      {
+        // The exact tall-ring input 11f bottom-bands — pinned, it tops.
+        const p = solve({ top: 80, height: 700 }, BAND, H, INSETS, 'top');
+        assert(
+          p.from === 'top' && p.offset === INSETS.top + EDGE,
+          "11n — a pinned step ('top') tops the band even when adjacency would bottom-band it",
+          JSON.stringify(p),
+        );
+      }
+      {
+        // The pin PRECEDES the null-cutout/unmeasured early return: a
+        // degraded or not-yet-measured pinned step still honors the ask.
+        const p = solve(null, 0, H, INSETS, 'top');
+        assert(
+          p.from === 'top' && p.offset === INSETS.top + EDGE,
+          '11o — the pin precedes the null-cutout / unmeasured-band early return',
+          JSON.stringify(p),
+        );
+      }
     }
   }
 
@@ -1133,6 +1157,60 @@ function walkTsFiles(dir) {
     '11m — the band measures its own height from onLayout',
     `${bandLayout.length} onLayout handlers write the band height`,
   );
+
+  // #397/#398 — the pin's two structural links. Executing the solver (11n/11o)
+  // proves the pin WORKS; these prove it is WIRED: the s2_2 builder declares
+  // it, and the overlay's solver call actually forwards it.
+  {
+    // 11p — bound to the s2_2 builder's own returned object literal via the
+    // AST: a comment, or `band: 'top'` on any OTHER builder, cannot satisfy it.
+    const scriptSf = parse('src/components/analystScript.ts');
+    const s22Builder = findAll(
+      scriptSf,
+      (n) =>
+        ts.isPropertyAssignment(n) &&
+        n.name.getText(scriptSf) === 's2_2' &&
+        ts.isArrowFunction(n.initializer),
+    )[0];
+    let s22Band = null;
+    if (s22Builder) {
+      const body = s22Builder.initializer.body;
+      const obj = ts.isParenthesizedExpression(body) ? body.expression : body;
+      if (ts.isObjectLiteralExpression(obj)) {
+        s22Band =
+          obj.properties.find(
+            (p) => ts.isPropertyAssignment(p) && p.name.getText(scriptSf) === 'band',
+          ) || null;
+      }
+    }
+    assert(
+      !!s22Band &&
+        ts.isStringLiteral(s22Band.initializer) &&
+        s22Band.initializer.text === 'top',
+      "11p — the s2_2 builder declares `band: 'top'` (the swipe beat pins to the top)",
+      s22Band
+        ? `saw: ${flat(scriptSf, s22Band)}`
+        : 'no `band` property on the s2_2 builder\'s returned object literal',
+    );
+
+    // 11q — the 5th argument INSIDE the solveBandPlacement CallExpression is
+    // `active.band`. The assertion walks the call's own arguments — a bare
+    // `active.band` token elsewhere in the file must not satisfy it.
+    const solveCalls = callsTo(overlay, 'solveBandPlacement');
+    const fifth = solveCalls.length === 1 ? solveCalls[0].arguments[4] : undefined;
+    assert(
+      solveCalls.length === 1 &&
+        !!fifth &&
+        ts.isPropertyAccessExpression(fifth) &&
+        ts.isIdentifier(fifth.expression) &&
+        fifth.expression.text === 'active' &&
+        fifth.name.text === 'band',
+      '11q — the overlay forwards `active.band` as the solver call\'s 5th argument',
+      solveCalls.length === 1
+        ? `call args: ${flat(overlay, solveCalls[0])}`
+        : `${solveCalls.length} call(s) to solveBandPlacement`,
+    );
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1142,29 +1220,40 @@ function walkTsFiles(dir) {
 // The calculator's content GROWS after first paint — the rosters land and the
 // outlook receipt swaps with its fallback — which shifts every target below it
 // with no scroll event at all. `onScroll` alone cannot see that, which is half
-// of why the first-landing spotlight was wrong. Sabotage: drop either
-// callback → red.
+// of why the first-landing spotlight was wrong. #386 added a second host with
+// the same defect class: LeagueSummaryScreen's Season outlook section
+// mounts/toggles after first paint (AsyncStorage hydration, outlook-query
+// resolution, the strip tap), shifting the position pills under an already-
+// measured n5 spotlight. Every host below is asserted independently, and a
+// host whose wired `onScroll` cannot be found fails LOUDLY — it is never
+// skipped, so silently dropping a host from parsing cannot green the suite.
+// Sabotage: drop either callback from either host → red.
 
 {
-  const CALC_REL = 'src/screens/TradeCalculatorScreen.tsx';
-  const calc = parse(CALC_REL);
-  const scroller = findAll(calc, (n) => {
-    if (!isJsxEl(n)) return false;
-    const a = attr(calc, n, 'onScroll');
-    return !!a && !!a.initializer && referencesIdentifier(calc, a.initializer, 'notifyGuideTargetsMoved');
-  })[0];
+  const GROWING_HOSTS_REL = [
+    'src/screens/TradeCalculatorScreen.tsx',
+    'src/screens/LeagueSummaryScreen.tsx', // #386 — outlook section shifts the pills
+  ];
+  for (const rel of GROWING_HOSTS_REL) {
+    const sf = parse(rel);
+    const scroller = findAll(sf, (n) => {
+      if (!isJsxEl(n)) return false;
+      const a = attr(sf, n, 'onScroll');
+      return !!a && !!a.initializer && referencesIdentifier(sf, a.initializer, 'notifyGuideTargetsMoved');
+    })[0];
 
-  if (!scroller) {
-    fail('12a — the calculator page ScrollView announces movement', 'no wired onScroll found');
-  } else {
-    for (const name of ['onLayout', 'onContentSizeChange']) {
-      const a = attr(calc, scroller, name);
-      assert(
-        !!a && !!a.initializer && referencesIdentifier(calc, a.initializer, 'notifyGuideTargetsMoved'),
-        `12b — ${where(calc, scroller)} also announces from ${name}`,
-        'content that grows under a settled scroll offset moves every target ' +
-          'below it and fires no scroll event',
-      );
+    if (!scroller) {
+      fail(`12a — ${rel}'s page ScrollView announces movement`, 'no wired onScroll found');
+    } else {
+      for (const name of ['onLayout', 'onContentSizeChange']) {
+        const a = attr(sf, scroller, name);
+        assert(
+          !!a && !!a.initializer && referencesIdentifier(sf, a.initializer, 'notifyGuideTargetsMoved'),
+          `12b — ${where(sf, scroller)} also announces from ${name}`,
+          `${rel}: content that grows under a settled scroll offset moves ` +
+            'every target below it and fires no scroll event',
+        );
+      }
     }
   }
 }

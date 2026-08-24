@@ -1194,7 +1194,8 @@ def _starter_impact(league_id: str, caller_user_id: str,
     responsibility), so both keys are omitted entirely and the payload is
     byte-identical to pre-#169.
     """
-    from .power_rankings import optimal_starter_slots, optimal_starters
+    from .power_rankings import (align_starter_slots, optimal_starter_slots,
+                                 optimal_starters)
     # #311 — platform-aware template resolution (leagues.platform branch);
     # Sleeper leagues delegate to _sleeper_lineup_slots unchanged. This is
     # the ONLY call site switched: mock draft keeps its own fallback and the
@@ -1279,6 +1280,11 @@ def _starter_impact(league_id: str, caller_user_id: str,
             pool_rows(rosters[str(caller_user_id)]), slots)
         after_ = optimal_starter_slots(
             pool_rows(after(rosters[str(caller_user_id)], give, recv)), slots)
+        # #395 — pairwise-align the two canonical fills so a value-identical
+        # assignment displays the minimum honest set of changed rows (no
+        # phantom "QB: Daniels › Maye" when only the SF slot really moves).
+        # Display-only: totals/deltas above are already computed.
+        before, after_ = align_starter_slots(before, after_)
         # Label duplicate slots by template position (RB → RB1/RB2) so
         # clients render distinct rows; a slot the league has once keeps its
         # bare name.
@@ -8695,7 +8701,7 @@ def _record_trends_snapshot(service, user_id, league, fmt, changed_pids) -> None
 @app.route("/api/tiers/save", methods=["POST"])
 @_gate_unverified_write
 def save_tiers_route():
-    """POST /api/tiers/save {position: 'RB', tiers: {first_1: [...ids], ...}, cleared_pids: [...], demoted_pids: [...]}
+    """POST /api/tiers/save {position: 'RB', tiers: {first_1: [...ids], ...}, cleared_pids: [...]}
 
     Converts tier assignments into ELO overrides and marks the position as saved.
 
@@ -8703,11 +8709,11 @@ def save_tiers_route():
     from all tiers (× button → back to pool). Their override is deleted
     so they don't snap back to a previous tier on the next refresh.
 
-    `demoted_pids` (optional, #161): pids the user explicitly passed over
-    in a Quick Set tier save (visible-but-unselected players previously in
-    the saved tier or higher). Pinned below every band (unranked/pending)
-    so they don't silently keep the old higher tier. Skip never demotes —
-    the client only sends this on an explicit save with picks.
+    A save mutates ONLY the assigned and cleared pids (D-160, #346/#381 —
+    supersedes the #161 demote rule): passed-over players HOLD their tier.
+    Old binaries (v1.10.0–v1.16.x) still send a `demoted_pids` key; it is
+    accepted and silently ignored like any unknown body key — never parsed,
+    never pinned, and the response is byte-identical to a request without it.
     """
     sess = _require_initialized_session()
     service   = sess["service"]
@@ -8721,19 +8727,15 @@ def save_tiers_route():
     if not isinstance(cleared_pids, list):
         cleared_pids = []
     cleared_pids = [str(x) for x in cleared_pids if x]
-    demoted_pids = body.get("demoted_pids") or []
-    if not isinstance(demoted_pids, list):
-        demoted_pids = []
-    demoted_pids = [str(x) for x in demoted_pids if x]
 
     if position not in ("QB", "RB", "WR", "TE"):
         return jsonify({"error": f"Invalid position: {position!r}"}), 400
 
-    # Must have at least one player in some tier OR something to clear or
-    # demote. (Pure "clear-only" saves are valid — e.g. user removes their
+    # Must have at least one player in some tier OR something to clear.
+    # (Pure "clear-only" saves are valid — e.g. user removes their
     # last tier-placed RB; we still need to apply the deletion server-side.)
     total_assigned = sum(len(ids) for ids in tiers.values() if isinstance(ids, list))
-    if total_assigned == 0 and not cleared_pids and not demoted_pids:
+    if total_assigned == 0 and not cleared_pids:
         return jsonify({"error": "No players in any tier"}), 400
 
     # M2 — a SCOPED save writes only part of the board. Read behind the flag,
@@ -8759,21 +8761,18 @@ def save_tiers_route():
                 scope_pids=_rookie_scope_ids(sess),
                 scoring_format=fmt,
                 cleared_pids=cleared_pids,
-                demoted_pids=demoted_pids,
             )
         else:
             # apply_tiers assigns ELOs inside each tier's band (see
             # backend/tier_config.json) so on reload the frontend re-buckets
             # players into the same tier they were placed. Bands are
             # position+format-aware. cleared_pids lets the frontend tell us
-            # "this player is back in the pool — drop their override";
-            # demoted_pids pins passed-over players below every band (#161).
+            # "this player is back in the pool — drop their override".
             service.apply_tiers(
                 position=position,
                 tiers=tiers,
                 scoring_format=fmt,
                 cleared_pids=cleared_pids,
-                demoted_pids=demoted_pids,
             )
 
         # Persist the full tier override dict for THIS format so it survives
@@ -14586,6 +14585,15 @@ def draft_board_route():
 # ---------------------------------------------------------------------------
 
 _MOCK_DEFAULT_LINEUP = ["QB", "RB", "RB", "WR", "WR", "WR", "TE", "FLEX"]
+
+# #396 — the honest standard template `_league_lineup_slots` serves for
+# ESPN/MFL/Fleaflicker leagues (its platform branch is the ONLY user).
+# 2 WR + 2 FLEX instead of the mock's 3 WR: a FLEX label is a claim the app
+# can stand behind (a flex can legally start a WR), whereas "WR3" asserts a
+# dedicated slot most platform leagues don't have. Mock draft keeps
+# _MOCK_DEFAULT_LINEUP above — the constants diverge on purpose (pinned by
+# test_trade_evaluate.test_platform_template_has_no_wr3).
+_PLATFORM_DEFAULT_LINEUP = ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "FLEX"]
 
 #: `mfl:<league>.f<franchise>` — the synthetic member id `_mfl_member_id`
 #: (:20109) mints for every MFL franchise that is not the linked user.
@@ -24134,7 +24142,8 @@ def _league_lineup_slots(league_id: str) -> list[str] | None:
          default_scoring). No leagues row → None (never guess a template
          for an unknown league).
       2. platform in ('espn', 'mfl', 'fleaflicker') → the app's one
-         standard template (`_MOCK_DEFAULT_LINEUP`), plus a trailing
+         standard template (`_PLATFORM_DEFAULT_LINEUP`, #396 — 2 WR +
+         2 FLEX, never a fabricated "WR3"), plus a trailing
          SUPER_FLEX when default_scoring == 'sf_tep' (NULL reads as
          '1qb_ppr', the database.py convention). These platforms expose no
          roster_positions equivalent today; slot-FILLING stays 100%
@@ -24169,7 +24178,7 @@ def _league_lineup_slots(league_id: str) -> list[str] | None:
         return None
     platform = (row.platform or "sleeper").lower()
     if platform in ("espn", "mfl", "fleaflicker"):
-        slots = list(_MOCK_DEFAULT_LINEUP)
+        slots = list(_PLATFORM_DEFAULT_LINEUP)
         if (row.default_scoring or "1qb_ppr") == "sf_tep":
             slots.append("SUPER_FLEX")
         return slots

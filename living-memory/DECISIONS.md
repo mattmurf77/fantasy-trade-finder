@@ -1493,3 +1493,22 @@ It resolves the “I'm Fleeced” problem by not fighting it — the ram says th
 
 **Deliberately not here:** the viewer-must-win gate (Q-030a, operator decision pending), `waiver_slot_cost`, filler code changes, diversity-key work, FLEX-aware feasibility.
 
+## D-160 — Quick Set Saves HOLD Unselected Players (Supersedes #161's Demote Rule)
+
+**Date:** 2026-08-24 · **Trigger:** feedback #381 (+#346), operator ruling · **Spec:** [docs/feedback/items/346-quickset-tier-drop/prd.md](../docs/feedback/items/346-quickset-tier-drop/prd.md)
+
+A Quick Set rung save touches only the selected players. The #161
+auto-demote (visible-but-unselected at/above the rung → pinned to
+`DEMOTED_ELO` 1100) is removed on both sides: the client no longer computes
+or sends `demoted_pids`, and `POST /api/tiers/save` accepts-and-silently-
+ignores the key from old binaries (v1.10.0–v1.16.x), so the backend deploy
+alone fixes every installed build. Explicit demotion survives via the FA
+rung, revisit-deselect (`cleared_pids` → consensus restore; the #161
+demote-beats-clear precedence dies too), and TiersScreen. `DEMOTED_ELO`
+stays for the anchor no-value path and the D-085 goldens. No flag: the old
+behavior is the bug per the operator's ruling, and rollback is a revert —
+a backend revert alone restores demote for binaries ≤ v1.16.x (they still
+send the key), but not for binaries carrying the client half of this fix,
+which would also need a client revert + EAS build.
+No historical 1100-pin repair — indistinguishable from anchor no-value.
+

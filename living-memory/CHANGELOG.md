@@ -14,6 +14,21 @@
 
 
 
+## 2026-08-24 — Feedback wave: 5 groups / 11 items built, QA-green, awaiting ship go/no-go (branch `claude/new-user-feedback-55320e`)
+
+Full `/feedback` pipeline run, no express. **A** (#376/#379/#394): TradesHome regains an always-on
+"Outlook & filters" row → full DNA sheet; top-row Filters button removed (#379); root cause = every
+entry flag-coupled or stranded. **B** (#397/#398): s2.2 swipe beat pinned to top via opt-in
+`GuideStep.band:'top'`. **C** (#395/#396): `align_starter_slots()` kills phantom lineup-cascade rows;
+real platform lineup template replaces the 3-WR mock default; rank chips "WR #3". **D** (#386/#391):
+LeagueSummaryScreen announces layout shifts to the guide (calculator precedent). **F** (#346/#381):
+QuickSet **HOLD** ([D-160](DECISIONS.md), supersedes #161) — server ignores legacy `demoted_pids`,
+client stops sending it. Evidence in TEST_LEDGER same date (tsc, 78/78 guards, pytest 4238 ×3, all
+sabotages re-proven by two independent QA agents, both PASS). v1.16.4 bumped. **Not on `main`,
+nothing deployed** — operator go/no-go pending; runtime evidence owed via the
+[consolidated checklist](../docs/feedback/items/346-quickset-tier-drop/testflight-checklist-batch.md).
+Triage also corrected 16 stale item statuses and backfilled INDEX.md (180/180). Batch docs:
+[`346-quickset-tier-drop/plan.md`](../docs/feedback/items/346-quickset-tier-drop/plan.md).
 ## 2026-08-24c — Waves A + B0 merged and built: 1.16.4 (EAS 130); `calc.inline_home` DARK until Wave B
 
 The two entries below were written on their branches; both are now ON MAIN — Wave A squash PR

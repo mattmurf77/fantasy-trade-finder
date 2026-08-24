@@ -64,6 +64,7 @@
     "test:picks-subset-invariance": "node tests/check-picks-subset-invariance.js",
     "test:premium-import": "node tests/check-premium-import.js",
     "test:presentation-v2": "node tests/check-presentation-v2.js",
+    "test:quickset-hold": "node tests/check-quickset-hold.js",
     "test:rank-nav-exit": "node tests/check-rank-nav-exit.js",
     "test:rank-presets": "node tests/check-rank-presets.js",
     "test:receipts": "node tests/check-receipts.js",
