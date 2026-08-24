@@ -358,6 +358,10 @@ assert(/setTourOwnedIds\(TOUR_IDS\)/.test(tour) && /setTourOwnedIds\(new Set<str
   const NEW_TARGETS = [
     ['n11', 'calc.outlook-row', ilc, 'InLeagueCalculator'],
     ['n20', 'trades.swap-first', card, 'TradeCard'],
+    // Wave A (v2 note 17): n22 moved off `trades.fairness-help`, which lives
+    // inside TradesScreen's `{!firstRun && …}` block and therefore never
+    // mounts for the first-run decks the tour actually runs against.
+    ['n22', 'trades.card-meter', card, 'TradeCard'],
     ['n23', 'trades.send-btn', trades, 'TradesScreen'],
     ['n23b', 'trades.send-btn', trades, 'TradesScreen'],
   ];
@@ -379,6 +383,22 @@ assert(/setTourOwnedIds\(TOUR_IDS\)/.test(tour) && /setTourOwnedIds\(new Set<str
   assert(/swapFirstMounted = !!disposition/.test(card),
     '40c. trades.swap-first registers only on a card with a disposition',
     'every peek/match/featured card would otherwise claim the same id');
+  assert(/cardMeterMounted = !!disposition/.test(card),
+    '40d. trades.card-meter registers only on a card with a disposition',
+    'the deck renders a peek card behind the top one; both would claim the id '
+    + 'and the spotlight would ring whichever registration won');
+  // …and it must NOT be registered while the bar is hidden: an id pointing at
+  // an unmounted node measures null forever, which is the defect the retarget
+  // exists to fix.
+  assert(/cardMeterMounted = !!disposition && hasValueVerdict && !repricing/.test(card),
+    '40e. …and only while the value bar is actually rendered',
+    'the bar hides on a legacy card (no give/receive values) and mid-reprice; '
+    + 'registering there re-creates the "bubble with no ring" bug one file over');
+  // The beat n22 vacated stays wired for its OTHER consumers. Deleting it
+  // would be a drive-by removal of a control's spotlight registration.
+  assert(/registerGuideTarget\('trades\.fairness-help'/.test(trades),
+    '40f. trades.fairness-help is still registered (n22 just no longer uses it)',
+    'the retarget moves one beat; it does not retire the ⓘ');
 
   // Scroll-into-view needs a producer on both screens the tour runs on. The
   // key is the SCREEN NAME the beats declare, so a typo here is a silent
@@ -433,6 +453,117 @@ assert(/if \(m === 'league'\) advanceGuideIfActive\('n10', 'action'\);\s*if \(m 
     'a sequence that cannot show its first beat must not open on a later beat\'s degrade line');
   assert(/if \(source === 'show_me_around'\) resetTourDisplayCounts\(\);/.test(start),
     '44a. "Show me around" still resets the caps, so the explicit ask is unaffected by 44');
+}
+
+// ── 45: Wave A — the two mid-calculator parks ────────────────────────────
+//
+// Both fix a beat that "pops but highlights nothing" on build 128, and both
+// are invisible to tsc and to every other suite here:
+//
+//   n10 → n11  the In-league content is still "Loading your league…" when the
+//              tab tap advances n10, so `calc.outlook-row` does not exist and
+//              the spotlight's single 150 ms retry loses the race. The runner
+//              waits for the content to announce itself instead.
+//   n11 → n12  n11's CTA opens an RN Modal AND advances the beat, and the
+//              guide overlay is mounted below Modals, so n12 drew BEHIND the
+//              sheet the user was still editing.
+//
+// Three properties per park, because each is a way the repair could be worse
+// than the bug: the park exists at the right seam, it is TIME-BOUNDED (an
+// unbounded park holds the interrupt hold and mutes every interstitial
+// app-wide), and the resume is wired end to end — screen prop → runner export.
+{
+  const complete = tour.slice(
+    tour.indexOf('function onBeatComplete'),
+    tour.indexOf('export function calcTourInLeagueReady'),
+  );
+  assert(complete.length > 0, '45. the park block is where the assertions look');
+
+  // ---- the In-league park (after n10) ----
+  assert(/if \(slot === 'n10'\) \{[\s\S]{0,900}?inLeaguePark = \{ at: i \+ 1 \};/.test(complete),
+    '45a. the runner parks after n10 instead of requesting n11 immediately',
+    'requesting n11 in the same turn as the tab tap is the race itself');
+  assert(/inLeagueParkTimer = setTimeout\([\s\S]{0,400}?endTour\('abandoned'\)[\s\S]{0,80}?IN_LEAGUE_READY_TIMEOUT_MS/.test(complete)
+      && /const IN_LEAGUE_READY_TIMEOUT_MS = /.test(tour),
+    '45b. …bounded, and expiry ENDS the tour rather than wedging the hold',
+    'a park with no timer mutes every interstitial app-wide for the session');
+  // LEVEL, not edge. The re-run case ("Show me around" on a page whose league
+  // already loaded) has no announcement still to come; without this check the
+  // park would burn its whole timeout and end a tour the user just asked for.
+  assert(/if \(slot === 'n10'\) \{\s*if \(inLeagueReady\) \{\s*requestAt\(i \+ 1\);\s*return;\s*\}/.test(complete),
+    '45c. …and an ALREADY-ready page proceeds immediately (level, not edge)',
+    'the ready signal is a flag about state, not a one-shot event');
+  assert(/export function calcTourInLeagueReady\(\): void \{\s*inLeagueReady = true;/.test(tour),
+    '45d. the ready signal records the LEVEL before it looks for a waiter',
+    'setting the flag only when parked makes the re-run case unreachable');
+  // …and the level is cleared when the CONTENT unmounts — NOT on blur. A tab
+  // switch blurs the screen while the In-league content stays mounted and
+  // measurable; clearing there stranded the next re-run in a park whose
+  // announcement had already been spent (review A1). The unmount clear lives
+  // in `calcTourInLeagueGone`, fired by the component effect's cleanup.
+  {
+    const blur = tour.slice(
+      tour.indexOf('export function calcTourScreenBlurred'),
+      tour.indexOf('function resetTourDisplayCounts'),
+    );
+    assert(!/inLeagueReady = false;/.test(blur),
+      '45e. blur does NOT clear the level (a tab switch leaves the content mounted)',
+      'clearing on blur re-creates the A1 hang: re-run after a tab switch parks forever');
+    assert(/export function calcTourInLeagueGone\(\): void \{\s*inLeagueReady = false;\s*\}/.test(tour),
+      '45e-ii. the level is cleared by calcTourInLeagueGone, the unmount signal',
+      'without an unmount clear, a stale true requests n11 against an unmounted target (A3)');
+  }
+
+  // ---- the outlook park (after n11) ----
+  assert(/if \(slot === 'n11' && via === 'cta' && !!handlers\.openOutlook\) \{[\s\S]{0,200}?outlookPark = \{ at: i \+ 1 \};/.test(complete),
+    '45f. the runner parks after n11 ONLY when the accept actually opened a sheet',
+    'a ✕, a timeout or a host with no opener leaves no sheet to wait for — '
+    + 'parking there would stall the tour until the timeout');
+  assert(/outlookParkTimer = setTimeout\([\s\S]{0,300}?endTour\('abandoned'\)[\s\S]{0,80}?OUTLOOK_CLOSE_TIMEOUT_MS/.test(complete)
+      && /const OUTLOOK_CLOSE_TIMEOUT_MS = /.test(tour),
+    '45g. …bounded the same way, ending the run rather than holding the mute');
+  {
+    const m = /const OUTLOOK_CLOSE_TIMEOUT_MS = ([0-9_]+);/.exec(tour);
+    assert(m !== null && Number(m[1].replace(/_/g, '')) >= 60_000,
+      '45g-ii. the outlook bound gives a HUMAN editing time (>= 60 s)',
+      'a 10 s bound ended the tour while the user was using the sheet n11 opened (review A2)');
+  }
+  assert(/export function calcTourOutlookClosed\(\): void \{\s*if \(!running \|\| !outlookPark\) return;/.test(tour),
+    '45h. the close signal is a no-op when nothing parked for it',
+    'the outlook sheet is reachable outside the tour too');
+
+  // ---- both timers die with the run ----
+  {
+    const cp = tour.slice(tour.indexOf('function clearPark'), tour.indexOf('/** Take down the bubble'));
+    assert(/inLeagueParkTimer\)/.test(cp) && /outlookParkTimer\)/.test(cp),
+      '45i. clearPark clears BOTH new timers as well as the deck one',
+      'a surviving timer ends a LATER run abandoned out of nowhere');
+  }
+
+  // ---- the wiring, end to end ----
+  assert(/onInLeagueReady=\{calcTourInLeagueReady\}/.test(screen)
+      && /onOutlookClosed=\{calcTourOutlookClosed\}/.test(screen),
+    '45j. the calculator screen hands both signals to the runner',
+    'an export nobody calls is a park that never resumes');
+  assert(/onInLeagueReady\?\.\(\)/.test(ilc) && /onOutlookClosed\?\.\(\)/.test(ilc),
+    '45k. …and InLeagueCalculator actually fires them');
+  // The ready predicate must be the negation of the two early returns, or the
+  // component announces readiness while still rendering the loading card.
+  assert(/const inLeagueReady =\s*merged && !rostersQ\.isLoading && !coverageQ\.isLoading && opponents\.length > 0;/.test(ilc),
+    '45l. "ready" means the loading and no-leaguemates returns are both past',
+    'announcing on mount points the runner at a target that is not there yet');
+  assert(/if \(rostersQ\.isLoading \|\| coverageQ\.isLoading\)/.test(ilc)
+      && /if \(opponents\.length === 0\)/.test(ilc),
+    '45m. …and those two early returns still read exactly those conditions',
+    'if a return changes and the predicate does not, 45l is measuring nothing');
+  // Rise announces, fall/unmount retracts — the effect's cleanup is the
+  // retraction, so the pairing is structural: the same effect that calls
+  // ready returns the cleanup that calls gone.
+  assert(/if \(!inLeagueReady\) return;\s*onInLeagueReady\?\.\(\);\s*return \(\) => \{\s*onInLeagueGone\?\.\(\);\s*\};/.test(ilc),
+    '45n. the ready effect announces on RISE and retracts via its own cleanup',
+    'an announce without the paired retraction leaves the level stale after unmount (A1/A3)');
+  assert(/onInLeagueGone=\{calcTourInLeagueGone\}/.test(screen),
+    '45n-ii. the screen wires the retraction to the runner');
 }
 
 console.log(failures === 0

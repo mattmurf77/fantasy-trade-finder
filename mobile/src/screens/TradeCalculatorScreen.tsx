@@ -43,6 +43,9 @@ import { useFinderTargets } from '../state/useFinderTargets';
 import { queueTradeForOpponent, type CalcQueueReason } from '../api/trades';
 import {
   calcTourHandOffToDeck,
+  calcTourInLeagueReady,
+  calcTourInLeagueGone,
+  calcTourOutlookClosed,
   calcTourScreenBlurred,
   startCalcTour,
 } from '../utils/calcTour';
@@ -770,6 +773,18 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
                 : undefined
             }
             outlookOpenerRef={outlookOpenerRef}
+            // Wave A (v2 note 12) — the In-league content announcing itself.
+            // n10 advances from the tab tap above, but the outlook row n11
+            // spotlights does not exist until this component's league queries
+            // resolve; the runner parks between the two on this signal rather
+            // than racing the load with a 150 ms retry.
+            onInLeagueReady={calcTourInLeagueReady}
+            onInLeagueGone={calcTourInLeagueGone}
+            // Wave A (v2 note 14) — n11's CTA opens the outlook sheet AND
+            // advances the beat, and the guide overlay is mounted below RN
+            // Modals. The runner parks until this fires so n12 lands on the
+            // page instead of behind the sheet.
+            onOutlookClosed={calcTourOutlookClosed}
             // #384 W6-A (D-152) — the ✓ cell. POST /api/trades/queue records
             // the package as the caller's LIKE only when the likes-you
             // injector would actually mirror it into @partner's deck, so the

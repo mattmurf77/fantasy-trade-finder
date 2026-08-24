@@ -14,6 +14,22 @@
 
 
 
+## 2026-08-24 — Tour merge Wave A built on `feat/tour-wave-a`: Segrave's notes, minus the merge itself
+
+Plan §7 Wave A ([scope](../docs/plans/onboarding-tour-merge/scope-wave-a.md)) — nine notes, no new
+surface, route, event or schema. **Demo link off**: `landing.try_before_sync` → false in
+`config/features.json` + the three fixture mirrors (code path intact; flipping the key back is the
+whole revert). **Ten onboarding talk beats get Next buttons** (`s0.1`, both `s0.err-*`, `s2.1`,
+`s4.1`, `s5.0`, `s5.1`, `s8.1`, `n1`, router-less `n6.1`) — a tap beat mounts the full-screen
+catcher that also ate deck scroll. `s0.1` now promises the walkthrough; `s2.1` carries provenance
+(consensus now / your swipes teach me yours). **Two new runner parks** in `calcTour.ts`, both
+bounded at 10 s into `endTour('abandoned')`: after n10 until the In-league content mounts (a
+LEVEL signal, so a warm re-run proceeds instantly) and after n11's accept until the outlook sheet
+closes. Fixes n11's ringless bubble and n12 drawing behind the Modal — a race the simulator hid
+behind a warm cache. **n22 retargeted** off `trades.fairness-help` (never mounts on a first-run
+deck) onto a new `trades.card-meter` on the top card. **D-157**: the action row's ✕ becomes a
+labelled **Clear**, 50/30/20. Outlook sheet gains a safe-area bottom pad. Not merged, not shipped.
+
 ## 2026-08-24 — Knockout refine BUILT + measured: R5 two-sided, R1 currency knob, R2 quality-aware, 3-for-1 knob (D-159)
 
 The four gate refinements from the knockout verdict, on `claude/knockout-refine-0823` (Opus B1/B2 build, Fable adversarial review, lead-merged). Each behind its own `model_config` kill knob; off settings byte-identical to `c321958` (proven mechanically). The read-only prod replay of FFV3 picked the flip values: **filler 0.15 / gap 0 / shape 2 / overpay stays raw** — consolidation-family cards 1 → 8 with junk share flat (18%), while filler 0.10 (junk 27%) and adjusted R1 (kills 2x1s 28→21) were measured and declined. Operator's #341 intent recorded: positional protection is R2's job, now quality-aware (startable depth both sides); the shape rule is a knob. Suite 4230 green. Flips applied post-deploy via admin API; the ledger entry carries the numbers.

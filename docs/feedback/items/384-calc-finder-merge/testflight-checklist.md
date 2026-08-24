@@ -340,7 +340,9 @@ the ONLY runtime proof any of it gets — none of it ran on a device before ship
 58. **The deck beats keep the avatar and hit their targets.** On the deck: the ✕ beat rings the
     card's ✕; the **swap** beat rings the **swap arrow on the first give-side player row** — not
     the whole card, not nothing *(report 4)*; the package beat rings the package toggle; the
-    fairness beat rings the meter's ⓘ. Every one shows the Analyst beside its ring. ☐
+    fairness beat rings **the top card's value meter** (retargeted in Wave A — see step 70; it
+    used to name the ⓘ in the "Trade fairness" row, which does not mount on a first-run deck).
+    Every one shows the Analyst beside its ring. ☐
 59. **The send beat scrolls its button into view.** When the *"Sending goes straight to your
     league"* beat comes up, the **Send** button is **visible on screen** — the page scrolls itself
     to bring it in if it was below the fold — and the ring is on it. *(Report 5b.)* ☐
@@ -356,6 +358,108 @@ the ONLY runtime proof any of it gets — none of it ran on a device before ship
 62. **Regression — the OTHER guided beats still work.** Fresh install, sign in, and let the
     first-run deck tour run (swipe hint / provenance chip / trio entry). Those beats are untouched
     by this wave; confirm none of them lost its avatar or its ring. ☐
+
+---
+
+## H. Wave A — the 2026-08-23 notes (run on the first build after `feat/tour-wave-a`)
+
+Segrave's second pass, off build **128** — i.e. AFTER the W8 fixes, so none of it can be waved
+off as already-shipped. Two of these fix a **race** that the simulator hid behind a warm cache
+(that is exactly how W8 passed while note 12 stayed open), so a cold run is the point:
+
+> **Before steps 63–69, force a cold league load.** Fully quit the app (swipe it out of the app
+> switcher) and relaunch, or switch to a league you have not opened this session. A warm React
+> Query cache resolves the rosters instantly and the race you are testing for cannot happen.
+> Also clear onboarding state — a `calc_tour_completed` receipt retires the auto-start.
+>
+> Requires `calc.merged_layout` = true and `onboarding.guide_v2` = true.
+
+**The parks (notes 12 + 14)**
+
+63. **The outlook beat lands on a COLD page.** Cold-start, go to the calculator, let the tour
+    auto-start on *"Two ways to build a trade…"*, and tap **In league**. The page shows
+    *"Loading your league…"* — and **the Analyst waits**: no bubble, no ring, nothing during the
+    load. When the league content appears, beat 2 (*"Set your outlook first…"*) comes up **with a
+    ring around the Outlook row**. *(Note 12: it used to fire during the load and degrade to a
+    ringless bubble.)* ☐
+64. **…and it does not wait forever.** Repeat step 63 with the device in airplane mode so the
+    league never loads. After ~10 s the tour **ends quietly** — no stuck bubble, no permanently
+    silent app. Turn the network back on, go to any other tab, and confirm the app's normal
+    banners/prompts still appear. *(A wedged park would mute every interstitial for the rest of
+    the session.)* ☐
+65. **A warm re-run does NOT wait.** With the league already loaded and the tour finished, tap
+    **Show me around**, then **In league**. Beat 2 appears **immediately** — no ~10 s pause.
+    *(The ready signal is a level, not a one-shot event; an edge-triggered park would stall here.)* ☐
+66. **The Analyst stays out of the way while you edit the outlook.** On beat 2, tap **Set
+    outlook**. The Trade DNA sheet opens and **no bubble appears** over or behind it — check the
+    edges of the sheet as well as the top and bottom bands. Change something, tap **Done**. Only
+    *then* does beat 3 (*"This is your canvas…"*) appear, on top of the page. *(Note 14: it used
+    to render behind the sheet the moment you tapped the button.)* ☐
+    - Repeat closing the sheet with the **backdrop tap** instead of Done: same result. ☐
+    - Repeat with the **system back gesture**: same result. ☐
+67. **Skipping the outlook does not stall the tour.** Re-run, and on beat 2 tap the small **✕** in
+    the bubble instead of Set outlook. The tour carries straight on to beat 3 — **no ~10 s pause**.
+    *(The park is taken only when the accept actually opened a sheet.)* ☐
+
+**The outlook sheet's bottom margin (note 13)**
+
+68. Open the outlook sheet on a **home-indicator device** (any Face ID iPhone). The bottom-most
+    control is **clear of the home indicator** with visible breathing room below it — the panel no
+    longer looks cut off at the bottom. Scroll the sheet to its end to check. ☐
+    - Same check for the **Untouchables** layer and the **roster picker** inside it. ☐
+
+**The labelled Clear button (note 15 / [D-157](../../../../living-memory/DECISIONS.md))**
+
+69. On the In-league calculator, the action row reads **Find a Trade** · **Clear** · **✓**. Clear
+    is a **word**, not a cross. All three cells sit on one line with no truncation and no text
+    smaller than the rest of the page — check on the **smallest device you have** (SE-class). ☐
+    - Add a player to a side: Clear becomes enabled and clears the canvas. With the canvas empty
+      it is dimmed. ☐
+    - VoiceOver still reads it as "Clear the trade". ☐
+    - Find a Trade is still visibly the **primary** action (ice outline + ice text); Clear is not. ☐
+
+**The fairness beat (note 17)**
+
+70. **The fairness beat rings the meter, on a FIRST-RUN deck.** This needs a genuinely new user —
+    fresh install or cleared onboarding state — because the bug only appeared there. Run the tour
+    to the deck half. The beat *"The meter is the verdict. Tap Why? for how we judged it."* draws
+    a ring **around the value bar on the top card**, and the page **scrolls it into view** if it
+    was below the fold. ☐
+    - Tap **Why?** inside that ring: the verdict explanation expands. The line is telling the
+      truth about a control that exists. ☐
+    - *(It used to point at the ⓘ in the "Trade fairness" row, which does not render for a
+      first-run deck — so the beat popped with no ring and no scroll.)* ☐
+
+**The onboarding beats get buttons (notes 3 + 4 + 8)**
+
+71. **The very first thing a new user sees promises a walkthrough.** Fresh install → sign-in
+    screen. The Analyst says *"I'm The Analyst. Stick with me — I'll walk you through finding
+    your first trade."* and the bubble has a **Next** button. Tapping the page background does
+    **nothing**. ☐
+72. **A wrong username still explains itself, with a button.** Type a username that does not
+    exist. The error beat appears **with a Next button**. ☐
+73. **The first-card beat says where the prices come from.** Finish sign-in and let the first deck
+    land. The beat reads *"Both sides should want these. Priced on consensus now; your swipes
+    teach me your values."* — with a **Next** button. ☐
+74. **Scroll is not swallowed anywhere in onboarding.** With **any** of these onboarding bubbles
+    up, drag the deck. It scrolls. *(A tap-advance beat used to mount an invisible full-screen
+    catcher.)* ☐
+75. **The first like still chains correctly.** Swipe right on a card. The *"Logged…"* beat appears
+    with a **Next** button. Tap it — and the Apple save-moment prompt still follows the way it did
+    before. ☐
+    - Then repeat, and instead of tapping Next, **swipe the next card**. The bubble goes away and
+      the same chain runs. *(This is the beat's real bound now that it has no timer.)* ☐
+    - If you have an "Awaiting them" entry, the other variant of this beat still shows
+      **See it →** / **Later** and *not* a bare Next. ☐
+76. **The tour's last line says Done.** Reach *"That's the tour."* — its button reads **Done**,
+    not Next. ☐
+
+**The demo link (note 2)**
+
+77. Fresh install → sign-in screen. There is **no** "Try the app on a sample league" link, in any
+    state — including after a failed sign-in and after a Sleeper timeout. ☐
+78. Nothing else on that screen moved: Apple sign-in, the username field and the not-found copy
+    all behave as before. ☐
 
 ---
 

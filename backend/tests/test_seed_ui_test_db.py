@@ -819,11 +819,22 @@ def test_onboarding_v2_flags_are_release_plus_the_onboarding_surface():
     # it and its own flag are on.
     assert onboarding["onboarding.v2"] is True
     assert onboarding["onboarding.guided_avatar"] is True
-    # THE LAUNCH PAIRING (config/features.json _comment_onboarding): without
-    # landing.try_before_sync the backend's /api/session/demo 404s and the
-    # landing's demo link is a dead end. True in release as of Phase A.
-    assert release["landing.try_before_sync"] is True
-    assert onboarding["landing.try_before_sync"] is True
+    # THE LAUNCH PAIRING IS OVER (2026-08-24, Wave A of
+    # docs/plans/onboarding-tour-merge/plan.md §2 item 2). It used to read
+    # `is True` here, on the reasoning that /api/session/demo 404s without the
+    # flag and the landing's demo link is then a dead end — which is still
+    # mechanically true, and is now the POINT: the operator asked for the demo
+    # link off the landing surface, so the dead end is removed by not
+    # rendering the link rather than by keeping the route alive.
+    #
+    # Restated rather than deleted, and asserted on BOTH files, because the
+    # property that matters is unchanged: these two fixtures must agree about
+    # this flag, and `onboarding.league_autoskip` must stay the only
+    # divergence between them (asserted above). Flipping one file and not the
+    # other is the drift this catches — it is what broke main CI on
+    # 2026-08-23a.
+    assert release["landing.try_before_sync"] is False
+    assert onboarding["landing.try_before_sync"] is False
 
 
 # ---------------------------------------------------------------------------
