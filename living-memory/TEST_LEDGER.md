@@ -13,6 +13,23 @@
 
 
 
+
+## 2026-08-24 — v1.16.3 (129) to TestFlight: CI green on GitHub, runtime evidence still owed
+
+**CI on the pushed sha (not just local):** `backend-tests` pass 8m58s · `mobile-typecheck` pass 1m2s ·
+`maestro-testid-lint` pass 10s. Merge state `CLEAN` before squash.
+
+**Local, post-merge, after the version bump:** pytest **4198 passed, 1 skipped**; `tsc --noEmit` clean; 77/77
+`check-*.js`; testid-lint OK.
+
+**`test_app_version_consistency` earned its place.** Bumping `app.json` to 1.16.3 without
+`ios/DTFDynastyTradeFinder/Info.plist` failed immediately — exactly the bare-workflow trap D-057 documents.
+
+**Runtime evidence: still ZERO.** The build exists and is processing at Apple, but
+[the checklist](../docs/plans/ram-mascot/testflight-checklist.md) is unrun and cannot be run until the build is
+installed **and** `mascot_ram_rollout` is launched. Until both, the app on TestFlight renders The Analyst — which is
+itself checklist section A, and the first thing to verify.
+
 ## 2026-08-23 — Fleeced mascot swap (`onboarding.mascot_ram`), CI green on `claude/ram-mascot-fleeced`
 
 **Ran, and what each proved.**

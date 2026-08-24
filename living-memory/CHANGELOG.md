@@ -12,6 +12,28 @@
 ---
 
 
+
+## 2026-08-24 — Fleeced SHIPPED to TestFlight in v1.16.3 (129), still dark for everyone
+
+**Merged** as [PR #186](https://github.com/mattmurf77/fantasy-trade-finder/pull/186) (squash, `7ac7869`) with all three
+CI jobs green on GitHub, not just locally. **Built** `900ffa32` (EAS production, iOS) and **submitted** to App Store
+Connect — v1.16.3 build 129, processing at Apple.
+
+**Nobody sees the ram yet, and that is the intended state.** `onboarding.mascot_ram` is `false` globally. The build is
+the *precondition*, not the delivery: the sprites are bundled and there is no EAS Update channel, so the flag could not
+do anything until a binary carrying `assets/mascot/ram/` existed. Now one does. The remaining step is creating and
+launching `mascot_ram_rollout` — two `X-Cron-Secret` POSTs against the production DB
+([experiment.md](../docs/plans/ram-mascot/experiment.md) §4), which is a production write and is **still held**.
+
+**Version bump is two files, and a test enforces it.** `app.json` *and*
+`ios/DTFDynastyTradeFinder/Info.plist` (bare workflow, D-057) —
+`test_app_version_consistency` caught the one-sided bump immediately.
+
+**Merge note for the next session:** `main` moved four commits while this was in review, and
+[#185](https://github.com/mattmurf77/fantasy-trade-finder/pull/185) independently landed the same
+`trade.full_sweep` fixture fix this branch carried. Conflicts were confined to `CHANGELOG.md` and `TEST_LEDGER.md`,
+both append-at-top — resolved by keeping **both** sides' entries, nothing dropped.
+
 ## 2026-08-23 — Fleeced the ram: mascot decided, art built, swap built dark behind `onboarding.mascot_ram`
 
 **Not shipped to anyone.** Built on `claude/ram-mascot-fleeced`, CI green, flag `false`. Reaching the operator needs a

@@ -9,6 +9,40 @@
 ---
 
 
+
+## 2026-08-24 — Fleeced on TestFlight (v1.16.3 build 129), dark; one production write left
+
+**Shipped to TestFlight, visible to nobody.** PR #186 merged (`7ac7869`, CI green on GitHub), EAS build `900ffa32`
+submitted, v1.16.3 (129) processing at Apple. `onboarding.mascot_ram` is `false` globally, so the installed app still
+renders The Analyst.
+
+**The one step left, and it is deliberately not done:** create + launch `mascot_ram_rollout` — two `X-Cron-Secret`
+POSTs against the **production** DB, spec and curl in [`docs/plans/ram-mascot/experiment.md`](../docs/plans/ram-mascot/experiment.md) §4.
+Held for explicit operator confirmation because it is a production write. Once launched, the operator's device picks up
+the overlay on its next flag fetch (boot, or the ≥30-min foreground refetch).
+
+**Why the build had to come first:** the sprites are bundled and `app.json` has `updates: null` — no EAS Update
+channel. The flag can only choose between components that shipped in the binary, so on any build before 1.16.3 it is
+inert. That ordering is not optional.
+
+**Then run [the checklist](../docs/plans/ram-mascot/testflight-checklist.md).** Section A first, *before* launching the
+experiment: the app must still show The Analyst. If it shows a ram with the flag off, the gate is broken and nothing
+below A is worth running. There is **zero runtime evidence** for this change until that pass happens.
+
+**Sharp edges banked this session:**
+- **Version bumps are two files** — `app.json` AND `ios/DTFDynastyTradeFinder/Info.plist` (D-057, bare workflow).
+  `test_app_version_consistency` catches a one-sided bump.
+- **Lighting a flag in `config/features.json` means updating THREE fixtures** (`release`, `onboarding-v2`,
+  `profiles-on`), not one. #182 updated none and left `main` red; fixing only `release.json` then exposed two more
+  tests that assert exact divergence sets. [#185](https://github.com/mattmurf77/fantasy-trade-finder/pull/185) landed
+  the same fix independently.
+- **Squash-merge trap:** merging `origin/main` into a base that has already shipped as a squashed PR produces dozens of
+  add/add conflicts re-introducing shipped work. Branch fresh from `origin/main` and re-apply instead.
+- **`BUBBLE_ANCHOR` is exported and never consumed** — the bubble sits *beside* the avatar in a flex row, not above it
+  with a tail. Documented in `components/analyst/CLAUDE.md`.
+
+**Open (operator):** launch the experiment · run the checklist. Higgsfield credits ~4.35.
+
 ## 2026-08-23 — Fleeced BUILT dark on `claude/ram-mascot-fleeced`; needs a build + an experiment, neither done
 
 **Branch:** `claude/ram-mascot-fleeced`, based on **current `origin/main`** (f89b30e). **Committed, not pushed.** CI green
@@ -46,6 +80,7 @@ move, and the avatar lab's anchor test models the brief's described layout, not 
 **none**, so the bubble reads "The Analyst" above a ram, which is D-155's recorded default). Higgsfield credits ~4.35.
 
 ## Table of Contents
+- [2026-08-24 — Fleeced on TestFlight (v1.16.3 build 129), dark; one production write left](#2026-08-24--fleeced-on-testflight-v1163-build-129-dark-one-production-write-left)
 - [2026-08-23 — Fleeced BUILT dark on `claude/ram-mascot-fleeced`; needs a build + an experiment, neither done](#2026-08-23--fleeced-built-dark-on-clauderam-mascot-fleeced-needs-a-build--an-experiment-neither-done)
 - [2026-08-22 — Full sweep BUILT dark on `claude/full-sweep-0822-a1c3`; review PR merges first, then TestFlight checklist, then the operator flips](#2026-08-22-full-sweep-built-dark-on-claudefull-sweep-0822-a1c3-review-pr-merges-first-then-testflight-checklist-then-the-operator-flips)
 - [2026-08-22 — #384 merged calculator: E2E review failed, W5 fixed it on `claude/manual-calculator-e2e-review-39a467`; four bright-line calls + a TestFlight pass owed](#2026-08-22--384-merged-calculator-e2e-review-failed-w5-fixed-it-on-claudemanual-calculator-e2e-review-39a467-four-bright-line-calls--a-testflight-pass-owed)
