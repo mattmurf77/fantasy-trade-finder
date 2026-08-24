@@ -582,8 +582,21 @@ def test_r5_engine_not_sure_surplus_kill():
     analyze_roster_strengths outputs — a not_sure user stacked 4-deep at
     WR (surplus) is not served another bench WR; unresolved window serves
     it. Catches the call-site needs/surplus swap sabotage (with only WRs
-    rostered, needs = [QB, RB, TE], so swapped inputs stop the kill)."""
+    rostered, needs = [QB, RB, TE], so swapped inputs stop the kill).
+
+    Pinned to the ONE-SIDED R5 body (`need_gate_dual_rescue` 0) on
+    2026-08-23. This test's subject is the call-site's needs/surplus
+    WIRING, and the U-R5 sabotage in the module ledger above is a wiring
+    sabotage; the one-sided kill is only its observable. At the shipped
+    default this exact fixture now PASSES the gate — the user is 4-deep at
+    a surplus WR and the counterparty holds zero startable WRs, which is
+    precisely the dual-need rescue C1 was built for
+    (docs/plans/knockout-refine/plan.md §3). That default-on verdict, on
+    this same shape, is asserted in
+    test_knockout_refine.py::test_dual_need_rescue_engine_per_member —
+    coverage moves, it does not disappear."""
     _set_flags(**{"trade_engine.v2": True, "trade.presentment_rules": True})
+    ts._cfg["need_gate_dual_rescue"] = 0.0
     players = {p: _Player(p, "WR") for p in ("W1", "W2", "W3", "W4", "WN")}
     for p in ("W1", "W2", "W3", "W4"):
         players[p].search_rank = 20      # dynasty_value ⇒ startable ⇒ surplus

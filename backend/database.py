@@ -2486,6 +2486,15 @@ _MODEL_CONFIG_DEFAULTS = [
     ("need_gate_min_value",     500.0,  "G6 R5 #304: min consensus value of the primary received player before the need gate applies (untargeted decks only); <=0 disables the whole gate"),
     ("need_gate_upgrade_margin",  0.0,  "G6 R5 #304: primary must beat the post-give incumbent by this fraction to count as a starter upgrade; 0 = any strict upgrade passes"),
 
+    # ── Knockout refine (2026-08-23) ──────────────────────────────────────
+    # docs/plans/knockout-refine/plan.md §3. Four refinements to the G6
+    # knockouts above; each knob's 0 restores that predicate byte-identically
+    # and is a deploy-free revert via PUT /api/admin/config.
+    ("need_gate_dual_rescue",     1.0,  "Knockout refine C1 (R5 #304): 1 = the need gate judges EVERY non-pick received asset and gains a dual-need rescue (viewer sheds surplus at a position the partner is short at); 0 = the primary-only one-sided kill, byte-identical"),
+    ("overpay_adjusted",          1.0,  "Knockout refine C2 (R1 #340): 1 = price both sides with package_value_v2 (the currency the card shows) before taking the gap; 0 = raw consensus sums, byte-identical. max_overpay_frac/_min_value unchanged; a 1-for-1 is identity under package_value_v2"),
+    ("pos_net_starter_relief",    1.0,  "Knockout refine C3 (R2 #341): 1 = an over-cap position survives when the shedding side was strictly above starter need there before and BOTH rosters stay at/above it after (startable bodies, picks excluded); 0 = the flat |net| <= pos_net_cap kill, byte-identical"),
+    ("v3_shape_max_delta",        1.0,  "Knockout refine C4: max |len(give) - len(recv)| the v3 optimizer will enumerate. 1 = today's rule, byte-identical; 2 unlocks 3-for-1 / 1-for-3 (the post-merge consolidation-bundle flip). Read by trade_optimizer through the trade_service module object (D-098)"),
+
     # Dismiss ("pass") cooldown — docs/plans/pass-cooldown/plan.md, D-067.
     # The UI's "dismiss" is the API's decision='pass'. Deploy-free revert to
     # the pre-fix behavior: set this to 7.0.

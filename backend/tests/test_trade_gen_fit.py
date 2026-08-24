@@ -122,6 +122,14 @@ def _pinned_defaults():
 # ───────────────────────────── K1 — shapes ─────────────────────────────────
 
 def test_k1_shapes():
+    # 2026-08-23 — this test states its packages in RAW consensus sums
+    # (the numbers in the comments below), so it is pinned to R1's raw
+    # body. Knockout-refine C2 lit `overpay_adjusted` by default, which
+    # prices both sides with package_value_v2: the 3-for-1 fixture goes
+    # 12.1% -> 35.9% and R1 takes it, changing K-chain ATTRIBUTION
+    # rather than anything this test is about. C2's own verdicts live in
+    # test_knockout_refine.py (docs/plans/knockout-refine/plan.md §3).
+    ts._cfg["overpay_adjusted"] = 0.0
     # PRD §12.6 (operator, 2026-08-20): every 1–3 × 1–3 shape is legal —
     # the original list's 2-2/3-3 omission was unintended (LLD §8 R-b flag).
     assert tgf._LEGAL_SHAPES == frozenset(
@@ -166,6 +174,14 @@ def test_k2_byte_identical_to_live_c3():
 # ───────────────────────────── K3 — both rosters ───────────────────────────
 
 def test_k3_both_rosters_all_paths():
+    # 2026-08-23 — this test states its packages in RAW consensus sums
+    # (the numbers in the comments below), so it is pinned to R1's raw
+    # body. Knockout-refine C2 lit `overpay_adjusted` by default, which
+    # prices both sides with package_value_v2: the 3-for-1 fixture goes
+    # 12.1% -> 35.9% and R1 takes it, changing K-chain ATTRIBUTION
+    # rather than anything this test is about. C2's own verdicts live in
+    # test_knockout_refine.py (docs/plans/knockout-refine/plan.md §3).
+    ts._cfg["overpay_adjusted"] = 0.0
     # Opponent path: taking or1 leaves the opponent 1 RB < need 2
     # (viewer is fine — gains an RB, gives a spare WR).
     assert tgf._kill(["uw2"], ["or1"], _ctx()) == "K3"
@@ -193,6 +209,14 @@ def test_k3_runs_last_in_kill_order():
 # ───────────────────────── K4 / K5 / K6 — wrapper parity ───────────────────
 
 def test_k4_k5_k6_wrapper_parity():
+    # 2026-08-23 — this test states its packages in RAW consensus sums
+    # (the numbers in the comments below), so it is pinned to R1's raw
+    # body. Knockout-refine C2 lit `overpay_adjusted` by default, which
+    # prices both sides with package_value_v2: the 3-for-1 fixture goes
+    # 12.1% -> 35.9% and R1 takes it, changing K-chain ATTRIBUTION
+    # rather than anything this test is about. C2's own verdicts live in
+    # test_knockout_refine.py (docs/plans/knockout-refine/plan.md §3).
+    ts._cfg["overpay_adjusted"] = 0.0
     ctx = _ctx()
     # K4 — R1 overpay: elite WR (2117.0) for a depth WR (818.7); gap
     # 1298.3 ≥ 500 and 61% ≥ 25%. Fit's verdict is the live predicate's.
@@ -271,6 +295,14 @@ def test_fit_junk_floor_knob():
 # ───────────────────────── T1 — gate binding sabotage ──────────────────────
 
 def test_fit_gate_binding_sabotage(monkeypatch):
+    # 2026-08-23 — this test states its packages in RAW consensus sums
+    # (the numbers in the comments below), so it is pinned to R1's raw
+    # body. Knockout-refine C2 lit `overpay_adjusted` by default, which
+    # prices both sides with package_value_v2: the 3-for-1 fixture goes
+    # 12.1% -> 35.9% and R1 takes it, changing K-chain ATTRIBUTION
+    # rather than anything this test is about. C2's own verdicts live in
+    # test_knockout_refine.py (docs/plans/knockout-refine/plan.md §3).
+    ts._cfg["overpay_adjusted"] = 0.0
     ctx = _ctx()
     g, r = ["uw3", "ur3", "ut2"], ["ow1"]
     # Baseline: a full-chain survivor.

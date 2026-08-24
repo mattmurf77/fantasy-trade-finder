@@ -15,6 +15,22 @@
 
 
 
+## 2026-08-24 — Knockout refine (R5/R1/R2/shape) — full gates, MEASURED on prod FFV3, on `claude/knockout-refine-0823`
+
+Plan: [`docs/plans/knockout-refine/`](../docs/plans/knockout-refine/plan.md) · [D-159](DECISIONS.md). Built by Opus B1/B2, adversarially reviewed by a Fable reviewer (verdict: safe to merge; the D-159 renumber + two doc fixes, all done pre-merge).
+
+| Gate | Result |
+|---|---|
+| Full `pytest backend/tests` | **4230 passed, 1 skipped** (lead run 454 s and reviewer run 442 s, both exit 0; +19 `test_knockout_refine.py`, +13 `test_shape_knob.py`) |
+| Byte-identity at off settings | 210-pair verdict sweeps against predicates vendored from `c321958` (reviewer diffed the vendored copies against `git show` — the true old bodies) |
+| Sabotages | B1: 8 · B2: 3 · reviewer re-ran 3 independently. All byte-copy restores; see [G-060](GOTCHAS.md) for the `.pyc` trap two of these hit |
+| Operator invariants (reviewer, incl. scratch end-to-end) | #341 double-startable-RB strip dies at every knob setting; #304 Loveland dies with the rescue lit; a delta-2 3-for-1 that strips a position below startable depth is emitted by the optimizer and killed by R2 relief |
+| **Measured (read-only prod replay, league `1312140920132497408`, 4 variants)** | baseline 280 cards / 270 ideas / 1 consolidation-family card / 18.1% sub-450 share · **bundle+raw-R1 280 / 267 / 8 / 19.4%** · bundle+adjusted-R1 275 / 260 / 8 / 17.9% · filler-0.10 276 / 263 / 10 / **27.0%** |
+| Flip decision from the measurement | `filler_min_frac` **0.15** (0.10 doubles junk share) · `overpay_adjusted` **0** (adjusted killed ~7 consolidation ideas incl. 2x1s 28→21 for a 1.5pp junk benefit) · `trade_elo_gap_max` **0** · `v3_shape_max_delta` **2**. Applied via admin config API after the deploy seeds the new rows; each individually revertible |
+| Runtime | scope §3 checklist owed post-flip (3-for-1s appear; no card strips a position below startable depth on either side) |
+
+**Reviewer code-walk:** at the off settings every predicate is verdict-identical to origin/main @ c321958 — `overpay_ok` knob<1 takes the untouched raw-sum branch; `pos_net_ok` reduces to the old `all(abs(n)<=cap)` with the relief unread when the knob is 0 or ctx is None; `need_gate_ok` at knob 0 runs the refactored-but-equivalent primary-only checks; the optimizer's `SHAPE_D=int(_c(...))=1` reproduces the literal `>1`. `opp_ctx` is early-bound per member via a lambda default arg; the boarded-branch consensus fallback shares the member-scoped kwargs, so no caller sees another member's context.
+
 ## 2026-08-24 — `mascot_ram_rollout` gate verified on production
 
 `GET /api/feature-flags` × 3, against live production:

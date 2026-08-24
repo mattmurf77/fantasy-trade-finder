@@ -14,6 +14,10 @@
 
 
 
+## 2026-08-24 — Knockout refine BUILT + measured: R5 two-sided, R1 currency knob, R2 quality-aware, 3-for-1 knob (D-159)
+
+The four gate refinements from the knockout verdict, on `claude/knockout-refine-0823` (Opus B1/B2 build, Fable adversarial review, lead-merged). Each behind its own `model_config` kill knob; off settings byte-identical to `c321958` (proven mechanically). The read-only prod replay of FFV3 picked the flip values: **filler 0.15 / gap 0 / shape 2 / overpay stays raw** — consolidation-family cards 1 → 8 with junk share flat (18%), while filler 0.10 (junk 27%) and adjusted R1 (kills 2x1s 28→21) were measured and declined. Operator's #341 intent recorded: positional protection is R2's job, now quality-aware (startable depth both sides); the shape rule is a knob. Suite 4230 green. Flips applied post-deploy via admin API; the ledger entry carries the numbers.
+
 ## 2026-08-23 — CI flake `test_stud_tax_pinned_market` pinned: breaker wall-clock budget was a hidden test input
 
 The 2026-08-23 CI failure on a docs-only PR (run 32681703490) was not pollution or iteration order: `stamp_breaker`

@@ -11,6 +11,7 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-060 | A sabotage-and-restore in the same mtime second at identical size keeps the stale `.pyc` — the test stays red after a byte-clean restore | Python / pytest / bytecode cache |
 | G-059 | A breaker payload test flakes only on a loaded CI runner — the 250 ms wall-clock budget is a hidden test input | Backend tests / breaker / determinism |
 | G-058 | Loosening a trade-engine knob measures "no effect" three different ways, all of them lies | Trade engine / knob tuning |
 | G-055 | A feedback note over the length cap vanishes: no error, draft cleared, retry loops forever | In-app feedback / silent failure |
@@ -542,3 +543,9 @@ Number sequentially. Don't delete entries even if "obviously fixed by now" — f
 - **Repro (deterministic):** skew `trade_breaker.time.monotonic` by +12 ms per call during the second stamp only — the exact CI assertion diff appears every run.
 - **Fix (2026-08-23):** the file's autouse `_env` fixture pins `ts._cfg["breaker_ms_budget"] = 10**9`. Budget rungs stay covered by their own tests, which drive the budget through `_snap_with` knob overrides and fake clocks — the real clock never picks a rung in the suite.
 - **Prevention:** any new test file that stamps the breaker and asserts payload content must pin the budget knob the same way. General shape: a production time-budget that changes output shape makes every downstream golden load-flaky; a test touching such a path must control either the clock or the budget, or its green is a function of machine load.
+
+### G-060 — a byte-clean restore can leave a stale `.pyc` red
+- **Symptom:** sabotage a module, run the test (red), restore the file from a byte copy, re-run — still red, though `diff` says the file is identical to the green state.
+- **Cause:** CPython invalidates bytecode by (mtime, size). A `cp` restore landing in the SAME second as the sabotage write, at identical file size, matches the cached `.pyc`'s stamp — Python keeps executing the sabotaged bytecode. Hit twice during the knockout-refine build (B1's S8, the Fable reviewer's spot-checks).
+- **Fix:** `find backend -name __pycache__ -exec rm -rf {} +` after any restore; then re-run.
+- **Prevention:** every sabotage recipe in a test docstring should end "clear `__pycache__` after restoring". Both knockout-refine test modules now say so.
