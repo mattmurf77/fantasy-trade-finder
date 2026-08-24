@@ -39,13 +39,13 @@ The calc runner is the newer, better machine. The merge is substantially "put th
 ## 2b · Calculator-tour notes (v2, same day) — disposition
 
 Segrave's second pass covers the #384 calculator tour itself. Context that matters for reading it:
-this feedback almost certainly comes from **build 127 or earlier** — W8 (v1.16.2 / EAS 128) fixed
-the blank-band root cause after these runs.
+**the operator confirmed this feedback is from build 128** (2026-08-23), i.e. AFTER the W8
+fixes — so nothing below can be waved off as already-shipped.
 
 | # | Note | What's true in the code | Disposition | Size |
 |---|---|---|---|---|
 | 11 | n10 (switch to In-league) good | — | Nothing to do | — |
-| 12 | n11's Set Outlook button doesn't highlight the outlook section | This was the W7/W8 defect (band entry-spring against an unmounted band). Fixed in v1.16.2; verified in the simulator: n11 rings the outlook row | **Believed fixed on 128** — confirm on device (checklist §G) before building anything | — |
+| 12 | n11's Set Outlook button doesn't highlight the outlook section | **OPEN on 128** (operator-confirmed). Cause: `advanceGuideIfActive('n10')` fires on the tab tap (`TradeCalculatorScreen.tsx:525`) and the runner requests n11 immediately — but `InLeagueCalculator` is still on "Loading your league…" (`InLeagueCalculator.tsx:665`) and the outlook row (`:713`) doesn't exist until the league query resolves; the spotlight's single 150 ms retry (`useGuide.ts:314-320`) loses that race on device, and the beat degrades to the buttoned bubble with no ring. The W8 simulator verification passed because the league was already cached there — a warm-cache false pass | Park the runner between n10 and n11 until the In-league content mounts (an `inLeagueReady` notify from the component, same shape as the deck-arrival park) — NOT a longer retry loop, which would just move the race. Joins Wave A | **S–M** |
 | 13 | Outlook sheet sits too tight to the bottom; needs a bigger bottom margin | `OutlookSheet` layout | Padding polish | **S** |
 | 14 | The Analyst pops out **behind** the sheet while the user is still editing; should wait for Done | Real sequencing gap: n11 `advance:'cta'` — tapping Set Outlook opens the sheet AND advances, so the runner requests n12 immediately; the overlay is mounted below RN Modals, so the bubble renders behind the sheet | Park the runner after n11's accept until the sheet closes (the screen already owns `outlookOpenerRef`; add a close notification the runner resumes on) | **S–M** |
 | 15 | Find a Trade / ✓ beats good; but the ✕ clears the canvas mid-tour. Proposal: narrower Find a Trade, labeled **Clear** button at the bottom | The 70/15/15 action row is a D-153 decision (✕ = Clear, ✓ = queue). Hiding controls mid-tour violates the tour's own rule (the guide observes, never intercepts) — relabeling ✕ → "Clear" solves the misread for everyone, not just tour users | **Operator decision 6** (§4): amend D-153's action row to Find a Trade · Clear (labeled) · ✓ | **S** once decided |
@@ -85,7 +85,7 @@ What this keeps, closes, and leaves alone:
 3. **Auto-dispatching the first search (#7)** spends a model generation for every new guided user without a tap. That is the copy finally telling the truth, but it is also cost + a verification question (unverified sessions 403 on generation today — the auto-run must skip, not error, there).
 4. **The invite moment (#10)** needs `growth.invite_join_link` lit, or it degrades to the share-link. Lighting it is its own small rollout decision.
 5. **Multi-platform landing (#1)** is the largest piece and is separable — everything else in this plan works with today's Sleeper-first landing. Recommend it ships as its own wave.
-6. **The action row's ✕ (v2 note 15):** amend D-153's 70/15/15 row to a narrower Find a Trade plus a **labeled Clear button** instead of the ✕? Recommended over hiding the ✕ mid-tour — hiding controls during a tour breaks the "guide observes, never intercepts" rule, and the mislabel confuses non-tour users too.
+6. ~~The action row's ✕ (v2 note 15)~~ **DECIDED 2026-08-23** ([D-155](../../../living-memory/DECISIONS.md)): narrower Find a Trade + a **labeled Clear button**; nothing hidden mid-tour. Builds in Wave A.
 
 ## 5 · Research answers (from the codebase, not speculation)
 
@@ -112,7 +112,7 @@ The trade engine, the fairness sweep (D-153), the ✓ queue contract (D-152), Te
 
 | Wave | Contents | Size |
 |---|---|---|
-| A — "stop the bleeding" | #2 flag-off · #3 Next buttons on onboarding talk beats · #4 + #8 copy · calc-tour polish #13 (sheet margin), #14 (park until Done), #17 (retarget n22 at the meter) · #15 on a decision-6 yes | S, one PR |
+| A — "stop the bleeding" | #2 flag-off · #3 Next buttons on onboarding talk beats · #4 + #8 copy · calc-tour fixes #12 (park until In-league ready — OPEN on 128), #13 (sheet margin), #14 (park until Done), #17 (retarget n22 at the meter) · #15 per D-155 (labeled Clear button) | S–M, one PR |
 | B — the merge | runner generalization · bridge beat · #7 auto-dispatch · #10 queued-confirmation + invite moment · rewritten `s8.1` | M/L |
 | C — multi-platform landing | #1/#5 per §5.2, its own scope block | L |
 
