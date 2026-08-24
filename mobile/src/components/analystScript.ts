@@ -122,7 +122,9 @@ export const S = {
   }),
   s2_2: (): GuideStep => ({
     id: 's2.2', screen: 'Trades', pose: 'point', advance: 'action',
-    target: 'trades.card-body', once: true,
+    // #397/#398 — the ring is the whole deck card, so adjacency band-flips
+    // per device; pin the band to the top of the window instead.
+    target: 'trades.card-body', once: true, band: 'top',
     line: 'Swipe right to take it, left to pass. Every swipe teaches me.',
   }),
   /** @deprecated REPLACED by `n1` (PRD §5.2). Retained only so the tree

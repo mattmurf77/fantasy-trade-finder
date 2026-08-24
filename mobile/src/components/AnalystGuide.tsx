@@ -72,7 +72,14 @@ export function solveBandPlacement(
   bandH: number,
   winH: number,
   insets: { top: number; bottom: number },
+  pin?: 'top',
 ): BandPlacement {
+  // #397/#398 — a step may PIN the band to the top of the window
+  // (`GuideStep.band: 'top'`). This precedes every other branch, the
+  // null-cutout / unmeasured-band early return included, so a degraded or
+  // not-yet-measured step still honors the ask. With `pin` undefined the
+  // adjacency behavior below is unchanged.
+  if (pin === 'top') return { from: 'top', offset: insets.top + BAND_EDGE };
   // No ring, or the band has not been measured yet — nothing to be adjacent
   // to, so the honest answer is the band an untargeted step would use.
   if (!cutout || bandH <= 0) return { from: 'bottom', offset: BAND_BOTTOM };
@@ -360,7 +367,7 @@ export default function AnalystGuide() {
   // sides) mid-fling. Latched on the first RESOLVED frame with a MEASURED
   // band: latching earlier would freeze the pre-measure fallback and park the
   // bubble in the bottom band for a step whose ring is right there.
-  const solved = solveBandPlacement(cutout, bandH, winH, insets);
+  const solved = solveBandPlacement(cutout, bandH, winH, insets, active.band);
   // Latch only on an ON-SCREEN cutout. The first frame of a step can resolve
   // while the native-stack push is still sliding the screen in — the target
   // measures OFF-screen to the right, `cutout` is null, the solver answers
