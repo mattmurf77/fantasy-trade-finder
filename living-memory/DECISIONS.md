@@ -1475,6 +1475,6 @@ It resolves the “I'm Fleeced” problem by not fighting it — the ram says th
 - The deck's "edit in calculator" prefills the inline canvas in place (the three `navigate('TradeCalculator', {prefill})` call sites retire).
 - The pushed `TradeCalculatorScreen` keeps **only Real values** (the #310 league-free promise); the In-league tab is deleted.
 
-**Assumptions flagged to the operator, not yet confirmed:** (1) a deck that already exists (pregen / earlier session) still shows beneath the canvas on arrival — both entry actions visible at once, no regression to the zero-effort discovery loop the #270 lab warned about; (2) the mode-bar Calc chip survives relabeled (it now means the Real-values page it pushes).
+**Assumptions — CONFIRMED by the operator 2026-08-24 ("1. Yes. 2. Yes."):** (1) a deck that already exists (pregen / earlier session) still shows beneath the canvas on arrival — both entry actions visible at once, no regression to the zero-effort discovery loop the #270 lab warned about; (2) the mode-bar Calc chip survives relabeled (it now means the Real-values page it pushes).
 
 **Rollout:** a real config flag (`calc.inline_home`, ships dark) — `trades_home_inline.canvas` is a per-unit experiment overlay and graduates/closes when this lands. **Ordering:** this layout wave (B0) lands BEFORE the tour merge (Wave B) — beats point at targets, and n10 dies with the tab it points at (plan §4.1's layout-first condition, now satisfied by decision).
