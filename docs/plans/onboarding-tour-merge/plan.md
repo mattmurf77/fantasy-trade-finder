@@ -78,9 +78,33 @@ What this keeps, closes, and leaves alone:
 - **Leave event-driven (not spine):** the ranking pitch (`s3.2`, `s5.x`, `n8`) — it triggers off swipes and board state, and forcing it into a fixed sequence would show it before the user has felt consensus prices be wrong.
 - The bridge answers Segrave's open question the way their own note leans: **stop at the first trade, then offer to continue** — the deck IS the end state; the calculator half is one CTA away, and "Show me around" remains the re-entry forever after.
 
+## 3b · Wave B0 — the guided tab becomes the merged In-league page (D-158, decided 2026-08-23)
+
+The operator ruled decision 1: no separate calculator tab for league play — the guided tab IS the
+merged In-league page. Build detail:
+
+| Piece | From | To |
+|---|---|---|
+| Canvas on the page | `TradeBuildCanvas` (#270 experiment variant `trades_home_inline.canvas`, `TradesScreen.tsx:6011`) mounting `InLeagueCalculator` with **no handlers** | Same mount, promoted to the layout behind a real flag `calc.inline_home`, wired with `onFindATrade` / `onLikeTrade` / `onShowMeAround` (move the handler bodies from `TradeCalculatorScreen`) |
+| Find a Trade | `popTo('TradesHome')` + `FinderHandoff` consume-once + fair/model fork on arrival | In-place: consume canvas → same D-153 fork → results below. No navigation, no handoff store lane, no G-056 exposure, no tour park |
+| Anchored results | `fairDeck` marker + "Search all trades" end-of-deck exit | **Filter receipt** above the results (`OutlookBiasReceipt` pattern): "Built around: <assets> · Change / Clear"; Clear = the old Search-all |
+| Deck → canvas | 3× `navigate('TradeCalculator', {prefill})` (`TradesScreen.tsx:1363/2726/2793`) | Prefill the inline canvas in place (`TradeBuildCanvas` already owns the remount-on-prefill technique) |
+| Suggestion rail | `TradeBuildCanvas`'s horizontal tap-to-load strip duplicating the deck | Dies — the deck below IS the rail; its per-card edit action loads the canvas |
+| Pushed page | Two tabs (In league / Real values) | **Real values only**; In-league tab deleted; a small "No league? Real values →" link near the canvas keeps #310 reachable |
+| Tour | n10 ("Tap In league") opens the calculator half; park/hand-off to the deck | n10 retires; calculator beats retarget to the inline module; the calculator→deck park machinery is deleted, not migrated |
+
+**Functionality-loss guard:** the canvas is `InLeagueCalculator` verbatim — every In-league feature
+(format chips + #191 note, dropdowns, tier-badged columns, verdict, eveners, adjustments
+disclosure, lineup impact, share, Send-in-Sleeper, outlook row, D-157 action row) arrives because
+the component does, not because it was re-implemented. The structural guards that pin it
+(`check-calc-merged-behavior.js` 18–19d among others) keep pinning it.
+
+**Open assumptions (flagged in D-158):** an existing deck still shows beneath the canvas on
+arrival; the Calc chip survives relabeled for the Real-values push.
+
 ## 4 · Decisions for the operator (the plan waits on none of them except D1/D2 for build order)
 
-1. **What does "merge the manual calc with the current trade finder page" mean concretely?** Today the calculator is its own push off TradesHome (D-151: "fine as its own tab for now"). If the calculator is to become an inline region of the trade-finder page, the tour merge should be built *after* that layout lands (beats point at targets; moving targets twice is waste). If D-151 stands for now, the tour merge can be built immediately against the current layout.
+1. ~~What does "merge the manual calc with the current trade finder page" mean?~~ **DECIDED 2026-08-23 ([D-158](../../../living-memory/DECISIONS.md))** — the guided tab becomes the merged In-league page; §3b is the build spec; layout (Wave B0) lands before the tour merge (Wave B).
 2. **Bridge-or-spine:** §3 proposes the tour *stops at the first trade* and offers continuation into the calculator half (Segrave's open question, answered "stop + offer"). The alternative — one mandatory walk through everything — is more cohesive but longer, and every added mandatory beat costs completion rate.
 3. **Auto-dispatching the first search (#7)** spends a model generation for every new guided user without a tap. That is the copy finally telling the truth, but it is also cost + a verification question (unverified sessions 403 on generation today — the auto-run must skip, not error, there).
 4. **The invite moment (#10)** needs `growth.invite_join_link` lit, or it degrades to the share-link. Lighting it is its own small rollout decision.
@@ -113,7 +137,8 @@ The trade engine, the fairness sweep (D-153), the ✓ queue contract (D-152), Te
 | Wave | Contents | Size |
 |---|---|---|
 | A — "stop the bleeding" | #2 flag-off · #3 Next buttons on onboarding talk beats · #4 + #8 copy · calc-tour fixes #12 (park until In-league ready — OPEN on 128), #13 (sheet margin), #14 (park until Done), #17 (retarget n22 at the meter) · #15 per D-157 (labeled Clear button) | S–M, one PR |
-| B — the merge | runner generalization · bridge beat · #7 auto-dispatch · #10 queued-confirmation + invite moment · rewritten `s8.1` | M/L |
+| B0 — the layout merge (D-158) | §3b: promote the inline canvas to the layout (`calc.inline_home`, dark) · in-place Find a Trade · anchor-as-filter receipt · in-place prefill · pushed page → Real values only | **M** |
+| B — the tour merge | runner generalization · bridge beat · #7 auto-dispatch · #10 queued-confirmation + invite moment · rewritten `s8.1` · calculator beats retargeted to the inline module | M/L |
 | C — multi-platform landing | #1/#5 per §5.2, its own scope block | L |
 
 Wave A is shippable this week and fixes everything Segrave could feel in five minutes of use. Wave B is the actual merge. Wave C is separable and should not block A or B.

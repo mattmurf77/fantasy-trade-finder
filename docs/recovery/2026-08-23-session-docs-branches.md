@@ -25,3 +25,7 @@ Same pattern, same day: `docs/segrave-128-d157` (scratch worktree `wt-docs4`) �
 paragraph). Its earlier form `docs/segrave-128-d155` was deleted UNMERGED when its PR #189 hit the
 D-155 collision with the ram-mascot PR #186 — content re-landed here renumbered, nothing lost.
 Recoverable from its own PR's squash diff. Deleted same day, worktree removed.
+
+Same pattern: `docs/d158-inline-home` (scratch worktree `wt-docs5`) — docs-only (D-158; plan §3b
+Wave B0 spec; CHANGELOG + NEXT refresh; this paragraph). Recoverable from its own PR's squash
+diff. Deleted same day, worktree removed.
