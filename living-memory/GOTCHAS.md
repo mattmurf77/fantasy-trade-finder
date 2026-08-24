@@ -11,6 +11,7 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-059 | A breaker payload test flakes only on a loaded CI runner — the 250 ms wall-clock budget is a hidden test input | Backend tests / breaker / determinism |
 | G-058 | Loosening a trade-engine knob measures "no effect" three different ways, all of them lies | Trade engine / knob tuning |
 | G-055 | A feedback note over the length cap vanishes: no error, draft cleared, retry loops forever | In-app feedback / silent failure |
 | G-056 | `navigate('TradesHome')` from a pushed Trades-stack screen PUSHES a second instance — it does not pop back (RN routers 7.5, no `getId`/`pop`) | Mobile navigation / code-walk proofs |
@@ -532,3 +533,12 @@ Number sequentially. Don't delete entries even if "obviously fixed by now" — f
 - **Also:** `user_gain_epsilon` is read by **four** call sites across both served arms, so moving it for a consensus experiment silently loosens the divergence arm too.
 - **Fix:** before trusting a null result, (a) grep for every read of the knob, (b) check for a hardcoded sibling constant downstream, (c) confirm the patch target matches the *calling* namespace, and (d) check the co-kill data in [`../docs/reviews/2026-08-19-knockout-waterfall.md`](../docs/reviews/2026-08-19-knockout-waterfall.md) for a rule that would catch the same trades.
 - **Prevention:** make `_EXPLORATION_BASE_PER_OPP` a `model_config` key; keep quoting *unique* kills, never first-kills, when arguing that a rule matters.
+
+## 2026-08-23
+
+### G-059 — a breaker payload test flakes only on a loaded CI runner: the 250 ms wall-clock budget is a hidden test input
+- **Symptom:** CI 2026-08-23 (run 32681703490, commit `8fd23e2`, a docs-only PR): `test_stud_tax_pinned_market` failed asserting two `stamp_breaker` payloads equal — `'skipped': None` vs `{'classes': [...], 'reason': 'budget'}` — then passed on `gh run rerun --failed` of the same sha, passed in isolation, and passed a local full-suite run. Looks exactly like fixture pollution or dict-order nondeterminism; it is neither.
+- **Cause:** `stamp_breaker` runs under a *real* wall-clock budget (`breaker_ms_budget` = 250 ms) with a pass-2 checkpoint at `breaker_budget_checkpoint_frac` = 0.6 (`trade_breaker.py:929`): past 150 ms elapsed, every pass-2 class stamps as `_skip(code, "budget")` and the payload's `skipped` field goes non-null. Any test that asserts stamped payload content — especially the stamp-twice-and-compare determinism tests — therefore has wall clock as an invisible input. A busy shared runner (plus the breaker's per-stamp live DB read for asset prefs, whose latency varies with whatever DB state earlier tests left) crosses the checkpoint on one stamp and not the other. Suite order only matters as load; nothing was polluted.
+- **Repro (deterministic):** skew `trade_breaker.time.monotonic` by +12 ms per call during the second stamp only — the exact CI assertion diff appears every run.
+- **Fix (2026-08-23):** the file's autouse `_env` fixture pins `ts._cfg["breaker_ms_budget"] = 10**9`. Budget rungs stay covered by their own tests, which drive the budget through `_snap_with` knob overrides and fake clocks — the real clock never picks a rung in the suite.
+- **Prevention:** any new test file that stamps the breaker and asserts payload content must pin the budget knob the same way. General shape: a production time-budget that changes output shape makes every downstream golden load-flaky; a test touching such a path must control either the clock or the budget, or its green is a function of machine load.

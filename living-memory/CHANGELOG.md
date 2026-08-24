@@ -14,6 +14,17 @@
 
 
 
+## 2026-08-23 — CI flake `test_stud_tax_pinned_market` pinned: breaker wall-clock budget was a hidden test input
+
+The 2026-08-23 CI failure on a docs-only PR (run 32681703490) was not pollution or iteration order: `stamp_breaker`
+runs under the real 250 ms `breaker_ms_budget`, and past the 0.6× pass-2 checkpoint the stamped payload changes
+(`skipped: {reason: "budget"}`). The test stamps twice and compares, so a loaded runner that crosses 150 ms on one
+stamp and not the other fails it — reproduced deterministically by skewing the breaker's `monotonic` +12 ms/call on
+the second stamp only. **Fix:** `test_trade_breaker.py`'s autouse `_env` fixture now pins
+`breaker_ms_budget = 10**9`; budget rungs keep their own coverage via `_snap_with` overrides and fake clocks.
+Evidence: 67/67 under a hostile always-slow clock (fails pre-fix); full suite 4198 passed / 1 skipped locally.
+Details: [G-059](GOTCHAS.md), TEST_LEDGER 2026-08-23b.
+
 ## 2026-08-24 — D-158: the guided tab becomes the merged In-league page; canvas anchor = deck filter
 
 Operator worked plan §4 decision 1 live: the guided (Find a Trade) tab IS the merged In-league

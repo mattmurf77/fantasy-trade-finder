@@ -45,6 +45,20 @@ run *before* trusting anything under flag ON.
 installed **and** `mascot_ram_rollout` is launched. Until both, the app on TestFlight renders The Analyst — which is
 itself checklist section A, and the first thing to verify.
 
+## 2026-08-23b — `test_stud_tax_pinned_market` flake pinned: breaker wall-clock budget removed from test inputs
+
+**Diagnosis, with a deterministic repro.** The CI failure on `8fd23e2` (run 32681703490) was the breaker's 250 ms
+`breaker_ms_budget`: past the 0.6× pass-2 checkpoint (`trade_breaker.py:929`) a stamp's payload changes
+(`skipped: {reason: "budget"}`, pass-2 classes emptied), so the stamp-twice-and-compare tests had wall clock as a
+hidden input. Reproduced exactly (same assertion diff) by skewing `trade_breaker.time.monotonic` +12 ms/call during
+the second stamp only — the asymmetry a loaded runner produces. Not fixture pollution, not iteration order. Full
+write-up: [G-059](GOTCHAS.md).
+
+**Fix + evidence.** `_env` autouse fixture in `backend/tests/test_trade_breaker.py` pins
+`breaker_ms_budget = 10**9` (budget rungs keep their own coverage via `_snap_with` / fake clocks). Verified:
+67/67 `test_trade_breaker.py` under a hostile clock (+12 ms on *every* `monotonic()` call — pre-fix this fails);
+full suite `python3 -m pytest backend/tests -q` → **4198 passed, 1 skipped** (6m22s, local).
+
 ## 2026-08-23 — Fleeced mascot swap (`onboarding.mascot_ram`), CI green on `claude/ram-mascot-fleeced`
 
 **Ran, and what each proved.**
@@ -2812,6 +2826,7 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-08-23b — `test_stud_tax_pinned_market` flake pinned: breaker wall-clock budget removed from test inputs](#2026-08-23b--test_stud_tax_pinned_market-flake-pinned-breaker-wall-clock-budget-removed-from-test-inputs)
 - [2026-08-23a — main CI red → green: full-sweep fixture mirrors flipped](#2026-08-23a--main-ci-red--green-full-sweep-fixture-mirrors-flipped)
 - [2026-08-22j — Full sweep — full gates; LIT at merge](#2026-08-22j--full-sweep-tradefull_sweep--full-gates-lit-2026-08-23-by-operator-instruction-at-merge)
 - [2026-08-22i — #384 W8 — simulator reproduction, v1.16.2 (EAS 128)](#2026-08-22i--384-w8--simulator-reproduction--mobile-gates-v1162-eas-128)

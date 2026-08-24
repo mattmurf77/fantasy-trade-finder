@@ -212,6 +212,12 @@ def _env(monkeypatch):
     saved = dict(ts._cfg)
     ts._cfg.clear()
     ts._cfg.update(ts._DEFAULT_CFG)
+    # Wall clock is not an input (NFR-4), but the production 250 ms budget
+    # makes it one: past the 0.6× checkpoint pass 2 stamps as "budget", so a
+    # loaded runner flakes any payload assertion (CI 2026-08-23,
+    # test_stud_tax_pinned_market). Budget rungs are tested via _snap_with /
+    # fake clocks only — the real clock never gets to pick the rung here.
+    ts._cfg["breaker_ms_budget"] = 10 ** 9
     yield
     ts._cfg.clear()
     ts._cfg.update(saved)
