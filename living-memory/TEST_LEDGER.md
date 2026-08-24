@@ -12,6 +12,10 @@
 ---
 
 
+## 2026-08-23a — main CI red → green: full-sweep fixture mirrors flipped
+
+The full-sweep flip (2026-08-22j, LIT at merge) updated `config/features.json` but not the fixture mirrors, so `test_seed_ui_test_db.py::test_release_flags_mirror_features_json` failed on every `main` run after it (first surfaced on docs-only PR #184). Fix: `trade.full_sweep` → `true` in `release.json` / `onboarding-v2.json` / `profiles-on.json` (`all-on`, `release-300`, `release-espn-send-off` never carried the key). `python3 -m pytest backend/tests -q` on the fix branch: **4198 passed, 1 skipped** (5:20). Reminder the mirror rule exists for: flag flips update the fixtures in the SAME commit.
+
 ## 2026-08-22j — Full sweep (`trade.full_sweep`) — full gates; LIT 2026-08-23 by operator instruction at merge
 
 Plan + scope: [`docs/plans/full-sweep/`](../docs/plans/full-sweep/plan.md) · [D-154](DECISIONS.md). Built by Opus agents A1 (engine/flag/knobs/tests) and A2 (arm parity + docs), adversarially reviewed read-only by A3 (2 blockers, 7 should-fix, 5 nits — all closed before commit), lead-reconciled.
@@ -2740,6 +2744,8 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-08-23a — main CI red → green: full-sweep fixture mirrors flipped](#2026-08-23a--main-ci-red--green-full-sweep-fixture-mirrors-flipped)
+- [2026-08-22j — Full sweep — full gates; LIT at merge](#2026-08-22j--full-sweep-tradefull_sweep--full-gates-lit-2026-08-23-by-operator-instruction-at-merge)
 - [2026-08-22i — #384 W8 — simulator reproduction, v1.16.2 (EAS 128)](#2026-08-22i--384-w8--simulator-reproduction--mobile-gates-v1162-eas-128)
 - [2026-08-22h — #384 W7 device-feedback fixes — v1.16.1 (EAS 127)](#2026-08-22h--384-w7-device-feedback-fixes--mobile-gates-v1161-eas-127)
 - [2026-08-22g — #384 SHIPPED — PR #172, flags LIT, EAS 1.16.0 (126)](#2026-08-22g--384-shipped--pr-172-80dee42-flags-lit-eas-build-1160-126-submitted)
