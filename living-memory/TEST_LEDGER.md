@@ -12,6 +12,42 @@
 ---
 
 
+
+## 2026-08-23 — Fleeced mascot swap (`onboarding.mascot_ram`), CI green on `claude/ram-mascot-fleeced`
+
+**Ran, and what each proved.**
+
+| Gate | Result | What it actually proves |
+|---|---|---|
+| `pytest backend/tests` | **4198 passed, 1 skipped** | The new flag key registers cleanly. No server behaviour branches on it |
+| `npx tsc --noEmit` | **clean** | The switch and `RamAvatar` typecheck under `strict` |
+| `for f in tests/check-*.js` | **77/77 pass** | Including the new `check-mascot-ram.js`. No existing guard regressed |
+| `mobile/scripts/testid-lint.sh` | **OK** | No testID moved — the `guide.avatar.<pose>` id is on the wrapper, not the avatar |
+
+**`check-mascot-ram.js` was sabotage-tested, which is the only reason to trust it.** Forcing the gate
+(`useOnboardingFeature(...) || true`) → caught. Re-exporting a sprite trimmed to its bounding box → caught, reporting
+**97.9 % ink against the 70 % target**. Both reverted; guard green. The inset check decodes the PNG alpha channel
+itself (RGBA8 and palette+tRNS) rather than trusting file size — and it caught its own blindness first, failing
+"inset measurable" when it only handled RGBA and the sprites were palette PNGs.
+
+**Copy pass (same day).** `check-guide-script.js` extended so `lineRam` takes the same per-class word cap as `line` — without it the ram variant would have been an uncapped side-door into the copy budget. Sabotage-tested: a 30-word `lineRam` on a `tap` beat (cap 20) → caught. `check-mascot-ram.js` gained six copy assertions; hardcoding `>The Analyst<` back into `AnalystGuide` → caught. Full re-run after the copy work: **4198 passed, 1 skipped**, `tsc` clean, 77/77 guards, testid-lint OK.
+
+**A pre-existing CI failure was fixed, not introduced.** `test_release_flags_mirror_features_json` was **already red on
+`origin/main`**: `trade.full_sweep` was lit in `config/features.json` by #182 without updating
+`backend/tests/fixtures/flags/release.json`. Verified against `origin/main` before touching it — unrelated to this
+feature, but it blocked the "CI green" gate for everyone.
+
+**The drift was wider than one file, and the first fix was incomplete.** Correcting `release.json` alone then broke
+`test_onboarding_v2_flags_are_release_plus_the_onboarding_surface` and `test_profiles_on_flags_turn_on_public_pages_only`,
+because those fixtures assert an exact divergence set from release. #182 had updated **none of the three**. All three
+now carry `trade.full_sweep: true` and the divergence sets are back to their single intended key each. Worth noting for
+the next flag flip: lighting a flag in `config/features.json` means updating **three** fixtures, not one.
+
+**NOT run — owed:** [the TestFlight checklist](../docs/plans/ram-mascot/testflight-checklist.md). It needs a build
+containing `assets/mascot/ram/` (bundled sprites, no OTA channel) and the `mascot_ram_rollout` experiment running. Until
+then there is **zero runtime evidence** for this change — the guard proves shape, `tsc` proves types, neither has seen a
+sprite on a screen.
+
 ## 2026-08-23a — main CI red → green: full-sweep fixture mirrors flipped
 
 The full-sweep flip (2026-08-22j, LIT at merge) updated `config/features.json` but not the fixture mirrors, so `test_seed_ui_test_db.py::test_release_flags_mirror_features_json` failed on every `main` run after it (first surfaced on docs-only PR #184). Fix: `trade.full_sweep` → `true` in `release.json` / `onboarding-v2.json` / `profiles-on.json` (`all-on`, `release-300`, `release-espn-send-off` never carried the key). `python3 -m pytest backend/tests -q` on the fix branch: **4198 passed, 1 skipped** (5:20). Reminder the mirror rule exists for: flag flips update the fixtures in the SAME commit.

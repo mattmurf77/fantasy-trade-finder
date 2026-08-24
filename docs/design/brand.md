@@ -41,7 +41,8 @@ These are the recognizable, ownable details. Use them; don't invent parallel one
 
 - Wordmark: `TRADE FINDER` in Barlow Condensed Bold caps, chalk, with an ice tick before the T. Short form `FTF` for the extension popup and favicons.
 - No gradient, no glow, no icon-in-rounded-square app-store cliché for the web header.
-- Mascot (fumbling RB, name pending Q-009 — Tommy Tumble vs Ricky Rumble) is an **illustration asset, not UI chrome**: allowed in empty states, celebration moments, and the auth page. Never inline with data.
+- Mascot: **the ram** — the character shipping as the app icon, splash, and notification icon ([D-155](../../living-memory/DECISIONS.md), closes Q-009; the earlier "fumbling RB / Tommy Tumble vs Ricky Rumble" concept is retired unbuilt). It is an **illustration asset, not UI chrome**: allowed in the guide bubble, Team Review, empty states, celebration moments, and the auth page. Never inline with data. The character is named **Fleeced**, after the product — the ram wears the fleece, and getting fleeced is what a bad trade feels like. *The Analyst* remains the guide's **role** name ("I model dynasty trades"); which copy uses the character name and which uses the role is settled at build time, and no sentence may leave "Fleeced" ambiguous between the app and the character.
+- The mascot is the **only** exemption to "no gradient, no glow", and only **inside its own box**: painted shading, specular horns and glowing eyes are allowed on the mascot artwork itself. No glow bleeding onto surfaces, no gradient panel behind it, no halo on ink-1 cards. Everything else on this page still holds.
 
 ## Color philosophy
 

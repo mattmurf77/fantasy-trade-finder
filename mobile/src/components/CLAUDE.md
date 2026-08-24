@@ -2,7 +2,7 @@
 
 Stateless / lightly-stateful reusable UI — prop-driven by default. MAP, not a changelog. History: `git log -- <this file>`, `living-memory/CHANGELOG.md`. testID grammar/registry: `docs/plans/mobile-testing/lld.md` Appendix A (checked by `mobile/scripts/testid-lint.sh`). Conventions + how to add one: [README.md](README.md).
 
-Subfolders: [`chalkline/`](chalkline/CLAUDE.md) (design-system primitives — build from these), [`analyst/`](analyst/CLAUDE.md) (mascot poses), `draft/` (Draft Room / Mock rows, listed below).
+Subfolders: [`chalkline/`](chalkline/CLAUDE.md) (design-system primitives — build from these), [`analyst/`](analyst/CLAUDE.md) (The Analyst's poses **and** the `AnalystAvatar` mascot switch), `mascot/ram/` (Fleeced, the painted ram — raster sprites behind `onboarding.mascot_ram`; D-155/D-156), `draft/` (Draft Room / Mock rows, listed below).
 
 | Component | Use |
 |---|---|

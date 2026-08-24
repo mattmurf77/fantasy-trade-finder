@@ -11,6 +11,40 @@
 
 ---
 
+
+## 2026-08-23 — Fleeced the ram: mascot decided, art built, swap built dark behind `onboarding.mascot_ram`
+
+**Not shipped to anyone.** Built on `claude/ram-mascot-fleeced`, CI green, flag `false`. Reaching the operator needs a
+build plus an experiment that has not been created.
+
+**Decided.** [D-155](DECISIONS.md) — the ram is the mascot *and* the guide avatar, **named Fleeced**;
+[Q-009](OPEN_QUESTIONS.md) closed after 15 months as "neither — the ram", its premise having been contradicted by the
+shipped icon all along. The raster rule gains a scoped exception (mascot sprites only, under `mascot/ram/`, ≤60 KB).
+[D-156](DECISIONS.md) — painted at every size, chosen **against** the measured 44 pt legibility evidence and recorded
+that way so nobody later "fixes" it; plus the sizing rule: mascot art is inset to **70 % of box width**, because `size`
+is the width of the *box*, not the character, and the Analyst only ever fills 62–90 pt of its 96 pt box.
+
+**Built.** Six painted poses generated one at a time from one approved hero (`nano_banana_pro` / `nano_banana`), alpha
+cut, exported `@1x/@2x/@3x` as 256-colour PNG-8 — worst sprite **15.6 KB** against a 60 KB budget, whole set 167 KB.
+`AnalystAvatar` becomes a flag switch; all three call sites and the tour script are untouched. New guard
+`check-mascot-ram.js`, sabotage-tested. Three self-contained lab pages under `mockups/avatar-lab/`.
+
+**Two corrections worth carrying forward.** (1) `BUBBLE_ANCHOR` is **exported and never consumed** — `AnalystGuide`
+lays the bubble out *beside* the avatar in a flex row, not above it with a tail. The "anchor moves off-centre" decision
+had nothing to move, and the avatar lab's horn-clash test describes the layout the brief *described*, not the one that
+ships. (2) The ID reservation flagged at D1 was correct and then some: `main` took **D-153** (W6-B) *and* **D-154**
+(`trade.full_sweep`) while this work was in flight, so both entries renumbered on rebase.
+
+**Copy landed too.** The operator wrote the line — *"I'm Fleeced, the ram. Good to see another sheep here for me to take
+advantage of."* — which closed the split D-155 had deferred. The rule: the character name replaces the role name wherever
+the text names **who is speaking**; feature-worded copy stays feature-worded. One module writes the name
+(`utils/mascotCopy.ts`); the ram's introduction rides a `lineRam` field on beat `s0.1` so the script lint caps it like any
+other line.
+
+**Also fixed:** the flag fixtures had drifted from `config/features.json` — `trade.full_sweep` was lit by #182 in
+**none** of the three. `origin/main` was already red on `test_release_flags_mirror_features_json`; fixing only that file
+then exposed two more. All three corrected.
+
 ## 2026-08-23b — Onboarding × calculator tour merge: PLAN written, nothing built
 
 Operator delivered Segrave's onboarding notes and the intent to merge the new-user walkthrough

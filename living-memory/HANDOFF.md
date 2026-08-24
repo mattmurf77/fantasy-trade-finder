@@ -8,7 +8,45 @@
 
 ---
 
+
+## 2026-08-23 — Fleeced BUILT dark on `claude/ram-mascot-fleeced`; needs a build + an experiment, neither done
+
+**Branch:** `claude/ram-mascot-fleeced`, based on **current `origin/main`** (f89b30e). **Committed, not pushed.** CI green
+locally: pytest 4198 pass, `tsc` clean, 77/77 `check-*.js`, testid-lint OK.
+
+**What exists.** The full mascot swap behind `onboarding.mascot_ram` (default **false**): 18 sprites in
+`mobile/assets/mascot/ram/`, `components/mascot/ram/` (Image-backed, flip-aware), `AnalystAvatar` as the one switch,
+guard `check-mascot-ram.js` (sabotage-tested), scope block, experiment spec, TestFlight checklist, docs, D-155/D-156.
+
+**Two things stand between this and the operator seeing it, and neither is a flag flip:**
+1. **A build.** The sprites are BUNDLED and `app.json` has `updates: null` — no EAS Update channel. Flipping the flag on
+   any existing build is inert; `require()` resolves at bundle time. Needs `eas build` → `eas submit` → TestFlight.
+2. **The experiment.** `mascot_ram_rollout` is **specced but NOT created** — creating and launching it are two
+   `X-Cron-Secret` POSTs against the **production** DB, held for explicit confirmation.
+   Spec + curl: `docs/plans/ram-mascot/experiment.md` §4. Order that works: merge → build → install → create → launch.
+
+**The rebase story, because it will bite the next session too.** This work began on `claude/manual-calculator-e2e-review-39a467`
+at f00ee9f. That branch has since **shipped as PR #172** (app 1.16.0 → 1.16.2 via W7/W8). Merging `origin/main` into the
+old base produced **40 add/add conflicts** re-introducing already-shipped #384 work — the squash-merge trap CLAUDE.md
+warns about. Correct move was to branch fresh from `origin/main` and re-apply only my own files. Snapshot of the old
+state: commit `432f807` on `claude/ram-mascot-brief-exec-6bb3b7`.
+
+**ID collision, confirmed.** The D1 reservation was right: `main` took **D-153** (W6-B) and **D-154**
+(`trade.full_sweep`). Both entries renumbered to **D-155/D-156**, all cross-refs swept including the lab HTML.
+
+**Correction carried forward:** `BUBBLE_ANCHOR` is **exported and never consumed** — `AnalystGuide` lays the bubble
+*beside* the avatar in a flex row (`:526`), not above it with a tail. D2's "anchor moves off-centre" had nothing to
+move, and the avatar lab's anchor test models the brief's described layout, not the shipped one. Recorded in
+`components/analyst/CLAUDE.md` so it is not re-derived.
+
+**Fixed in passing:** `test_release_flags_mirror_features_json` was **already red on `origin/main`**
+(`trade.full_sweep` lit by #182, mirror fixture not updated). CI could not be green for anyone.
+
+**Still open (operator):** the copy split — which of the six "The Analyst" strings become "Fleeced" (this build changes
+**none**, so the bubble reads "The Analyst" above a ram, which is D-155's recorded default). Higgsfield credits ~4.35.
+
 ## Table of Contents
+- [2026-08-23 — Fleeced BUILT dark on `claude/ram-mascot-fleeced`; needs a build + an experiment, neither done](#2026-08-23--fleeced-built-dark-on-clauderam-mascot-fleeced-needs-a-build--an-experiment-neither-done)
 - [2026-08-22 — Full sweep BUILT dark on `claude/full-sweep-0822-a1c3`; review PR merges first, then TestFlight checklist, then the operator flips](#2026-08-22-full-sweep-built-dark-on-claudefull-sweep-0822-a1c3-review-pr-merges-first-then-testflight-checklist-then-the-operator-flips)
 - [2026-08-22 — #384 merged calculator: E2E review failed, W5 fixed it on `claude/manual-calculator-e2e-review-39a467`; four bright-line calls + a TestFlight pass owed](#2026-08-22--384-merged-calculator-e2e-review-failed-w5-fixed-it-on-claudemanual-calculator-e2e-review-39a467-four-bright-line-calls--a-testflight-pass-owed)
 - [2026-08-22 — negmem BUILT dark on `claude/vigilant-spence-8583f5`; TestFlight pass + two rollout flips owed](#2026-08-22--negmem-built-dark-on-claudevigilant-spence-8583f5-testflight-pass--two-rollout-flips-owed)

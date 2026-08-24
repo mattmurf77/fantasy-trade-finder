@@ -48,6 +48,7 @@ import { track } from '../api/events';
 import SteerSlider from '../components/SteerSlider';
 import { useSession, type RankMethodPref } from '../state/useSession';
 import { useFlag, useOnboardingFeature } from '../state/useFeatureFlags';
+import { guideToggleTitle, guideToggleDescriptionOff } from '../utils/mascotCopy';
 import { useOnboardingState } from '../state/useOnboardingState';
 import { useGuide } from '../state/useGuide';
 import type { NotificationPrefs } from '../shared/types';
@@ -95,6 +96,8 @@ export default function SettingsScreen({ navigation }: any) {
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
   // ── Teardown wave-2 flags (all dark by default) ────────────────────────
   const settingsV2              = useFlag('account.settings_v2');
+  // D-155 — names the guide bubble's speaker; off keeps "The Analyst".
+  const ramOn                   = useOnboardingFeature('onboarding.mascot_ram');
   const dataExportEnabled       = useFlag('account.data_export');
   const sleeperDisconnectEnabled = useFlag('account.sleeper_disconnect');
   const profileToggleEnabled    = useFlag('profiles.user_toggle');
@@ -919,11 +922,11 @@ export default function SettingsScreen({ navigation }: any) {
       </View>
       <Row
         testID="settings.guided-tour-toggle"
-        title="The Analyst"
+        title={guideToggleTitle(ramOn)}
         sub={
           guideDismissed
             ? 'Off. Turning this on restarts the guided tour from the beginning.'
-            : 'In-app guide bubbles on relevant screens. Turn off to dismiss The Analyst everywhere.'
+            : guideToggleDescriptionOff(ramOn)
         }
         value={!guideDismissed}
         onChange={() => {

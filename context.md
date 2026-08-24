@@ -115,7 +115,7 @@ A large roster of role skills (eng-*, pm-*, mkt-*, an-*, plus `/feedback` and `/
 
 ## Mascot / Branding
 
-Still an open branding question (Q-009, no code dependency). Past candidates: a cartoon running back mid-fumble named "Tommy Tumble" or "Ricky Rumble".
+The mascot is **the ram** — the character shipping as the app icon, splash and notification icon — and it is also the in-app guide avatar ([D-155](living-memory/DECISIONS.md), 2026-08-22; Q-009 closed). The earlier "cartoon running back mid-fumble / Tommy Tumble vs Ricky Rumble" concept is retired unbuilt. The character is named **Fleeced**, after the product; *The Analyst* remains the guide's **role** name.
 
 ## API Routes
 

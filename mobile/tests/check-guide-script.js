@@ -210,6 +210,15 @@ for (const { builder, args, step } of rendered) {
     `2b — ${tag} line is within the ${step.advance} cap (${cap})`,
     `${words(step.line)} words: "${step.line}"`,
   );
+  // D-155 — the Fleeced copy variant is capped exactly like `line`. Without
+  // this, `lineRam` would be an uncapped side-door into the copy budget.
+  if (step.lineRam) {
+    assert(
+      words(step.lineRam) <= cap,
+      `2b-ram — ${tag} lineRam is within the ${step.advance} cap (${cap})`,
+      `${words(step.lineRam)} words: "${step.lineRam}"`,
+    );
+  }
   if (step.degradeLine) {
     assert(
       words(step.degradeLine) <= cap,
