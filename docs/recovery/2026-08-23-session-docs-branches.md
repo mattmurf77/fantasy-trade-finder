@@ -19,3 +19,9 @@ Deleted same day, worktree removed.
 Same pattern, same day: `docs/segrave-v2` (scratch worktree `wt-docs3`) — single-commit,
 docs-only (notes v2 + plan §2b + this paragraph); after its squash-merge it is recoverable from
 its own PR's diff. Deleted same day, worktree removed.
+
+Same pattern, same day: `docs/segrave-128-d157` (scratch worktree `wt-docs4`) — docs-only
+(D-157; plan §2b item 12 reopened as a build-128 defect with the loading-race cause; this
+paragraph). Its earlier form `docs/segrave-128-d155` was deleted UNMERGED when its PR #189 hit the
+D-155 collision with the ram-mascot PR #186 — content re-landed here renumbered, nothing lost.
+Recoverable from its own PR's squash diff. Deleted same day, worktree removed.

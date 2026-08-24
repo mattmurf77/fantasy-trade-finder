@@ -1453,3 +1453,11 @@ It resolves the “I'm Fleeced” problem by not fighting it — the ram says th
 **Consequences:** (1) **The ram renders taller than the Analyst and that is sanctioned** — the operator's words: *"It's fine for it to render taller."* Analyst poses are wider than tall (viewBoxes 150–170 × 150, so height = `size × 0.88–1.00`); the ram's sprites are square, so height = `size`. No aspect-matching work is owed. (2) Sprites shrank as a side effect of the inset — worst `@3x` went 24.9 KB → **15.6 KB**, now 3.8× inside the 60 KB budget. (3) A guard should assert the 70% inset, or the next regenerated sprite silently reverts to oversized.
 
 **Worth knowing for cost:** the entire shipped Analyst — six poses, shared part-kit and switcher — is **15.3 KB of `react-native-svg`**, less than one painted ram sprite at `@3x`, and about 1/17th of the 18-file painted set (~180 KB after the inset). Vector costs the same at every size; raster pays three times over. That did not change the decision, and is recorded so the trade is explicit rather than rediscovered.
+
+## D-157 — The Action Row's ✕ Becomes a Labeled Clear Button; Nothing Is Hidden Mid-Tour
+
+**Date:** 2026-08-23 · **Status:** decided (operator: "I'm aligned on the recc for decision 6") · **Amends:** [D-153](DECISIONS.md)'s 70/15/15 action row · **Built:** not yet — Wave A of [docs/plans/onboarding-tour-merge/plan.md](../docs/plans/onboarding-tour-merge/plan.md)
+
+**Decision:** the merged calculator's in-frame action row changes from Find a Trade (70%) · ✕ icon · ✓ to a **narrower Find a Trade plus a labeled "Clear" button**, with the ✓ unchanged. Segrave's build-128 device pass (notes v2, note 15) showed the bare ✕ reads as "close" and, tapped mid-tour, silently clears the canvas the user just built.
+
+**Why relabel instead of hide:** hiding the ✕ during the tour — the note's first suggestion — was rejected because the tour's standing rule is that the guide *observes and never intercepts* (the scrim's cutout keeps the real control live for exactly this reason), and because the misread is not tour-specific: any user can mistake an unlabeled ✕ for dismiss. A label fixes it for everyone; the tour needs no special case. n19's copy ("Clear became this cross…") keys off this row and is re-checked at build time.
