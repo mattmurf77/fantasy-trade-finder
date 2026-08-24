@@ -113,6 +113,7 @@ move, and the avatar lab's anchor test models the brief's described layout, not 
 **none**, so the bubble reads "The Analyst" above a ram, which is D-155's recorded default). Higgsfield credits ~4.35.
 
 ## Table of Contents
+- [2026-08-24 — Feedback wave (5 groups / 11 items) QA-green on PR #198; operator go/no-go is the gate](#2026-08-24--feedback-wave-5-groups--11-items-qa-green-on-pr-198-operator-gono-go-is-the-gate)
 - [2026-08-24 — Fleeced on TestFlight (v1.16.3 build 129), dark; one production write left](#2026-08-24--fleeced-on-testflight-v1163-build-129-dark-one-production-write-left)
 - [2026-08-23 — Fleeced BUILT dark on `claude/ram-mascot-fleeced`; needs a build + an experiment, neither done](#2026-08-23--fleeced-built-dark-on-clauderam-mascot-fleeced-needs-a-build--an-experiment-neither-done)
 - [2026-08-22 — Full sweep BUILT dark on `claude/full-sweep-0822-a1c3`; review PR merges first, then TestFlight checklist, then the operator flips](#2026-08-22-full-sweep-built-dark-on-claudefull-sweep-0822-a1c3-review-pr-merges-first-then-testflight-checklist-then-the-operator-flips)
