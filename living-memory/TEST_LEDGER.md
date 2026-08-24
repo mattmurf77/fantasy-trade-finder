@@ -15,6 +15,10 @@
 
 
 
+## 2026-08-24c — Waves A + B0 SHIPPED — PRs #197/#199, EAS 1.16.4 (130) submitted
+
+Wave A merged as `7452650` (CI green: backend 9m14s · typecheck · lint) with the Fable review's A1/A2/A4/A6 fixes on top (gates re-run on `274a0ea9`: tsc · 77/77 · lint · pytest 4230/1). Wave B0 rebased over it and merged as `14a4ce4` (CI green) with review fix B1 (MatchesScreen prefill) + the reviewer's doc-conflict resolutions (checklist H→I, steps 79–99); gates on the rebased tip: tsc · 78/78 · lint · pytest 4230/1. `git diff feat/inline-home-b0 origin/main` EMPTY at merge. EAS production **1.16.4 (130)** built and submitted to App Store Connect (submission `a7b08771`). `FTF_SKIP_SIM_GATE=1` on pushes (D-056). **Owed on 130:** checklist section H (63–78; 63–67 on a COLD league load) and I1 (79–83, flag-off regression). `calc.inline_home` stays false until Wave B.
+
 ## 2026-08-24b — Wave B0 the layout merge (`calc.inline_home`) — full gates, FLAG DARK, NOT MERGED, on `feat/inline-home-b0`
 
 Scope: [`docs/plans/onboarding-tour-merge/scope-wave-b0.md`](../docs/plans/onboarding-tour-merge/scope-wave-b0.md) · [D-158](DECISIONS.md) · plan §3b. Branched from `origin/main` @ `ff153a0f`. **No PR, no merge.**
@@ -2909,6 +2913,7 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-08-24c — Waves A + B0 SHIPPED — PRs #197/#199, EAS 1.16.4 (130) submitted](#2026-08-24c--waves-a--b0-shipped--prs-197199-eas-1164-130-submitted)
 - [2026-08-24b — Wave B0 the layout merge (`calc.inline_home`) — full gates, FLAG DARK, NOT MERGED](#2026-08-24b--wave-b0-the-layout-merge-calcinline_home--full-gates-flag-dark-not-merged-on-featinline-home-b0)
 - [2026-08-24 — Onboarding-tour Wave A — full gates green on `feat/tour-wave-a`; runtime evidence owed](#2026-08-24--onboarding-tour-wave-a--full-gates-green-on-feattour-wave-a;-runtime-evidence-owed)
 - [2026-08-23b — `test_stud_tax_pinned_market` flake pinned: breaker wall-clock budget removed from test inputs](#2026-08-23b--test_stud_tax_pinned_market-flake-pinned-breaker-wall-clock-budget-removed-from-test-inputs)
