@@ -15,6 +15,49 @@
 
 
 
+## 2026-08-24 — Onboarding-tour Wave A — full gates green on `feat/tour-wave-a`; runtime evidence owed
+
+Scope block: [`docs/plans/onboarding-tour-merge/scope-wave-a.md`](../docs/plans/onboarding-tour-merge/scope-wave-a.md)
+(§5 carries the file:line code-walk for both new parks). Full gates, **not** express.
+
+| Gate | Result |
+|---|---|
+| `pytest backend/tests` | **4230 passed, 1 skipped**, 333 s, exit 0 |
+| `npx tsc --noEmit` (mobile) | clean, exit 0 |
+| Every `npm run test:*` guard | **77/77 passed** (looped over `package.json`, none skipped) |
+| `mobile/scripts/testid-lint.sh` | OK |
+| Assertion counts on the three extended suites | `check-calc-tour` 168 ✓ · `check-guide-script` 455 PASS · `check-card-disposition` 17 PASS |
+
+**New structural coverage.** `check-calc-tour.js` §45 (a–n) pins both parks three ways each: the
+park is taken at the right seam, it is **time-bounded** and expiry ends the run (an unbounded park
+holds the interrupt hold and mutes every interstitial app-wide), and the resume is wired end to
+end — screen prop → runner export → `requestAt`. 45c/45d/45e pin the **level** semantics of the
+In-league ready signal; 45l/45m pin that the component's `inLeagueReady` predicate stays the
+negation of the two early returns it derives from. §40d–40f cover n22's new target. New in
+`check-card-disposition.js` §4: `trades.card-meter` is an effect registration gated on
+`cardMeterMounted`, unregisters on teardown, and its wrapper is a non-collapsable `View`. New in
+`check-guide-script.js` §10/§11: the ten converted beats are `cta` **with buttons**, and the only
+`advance: 'tap'` beats left in the whole script are the two named exemptions (`s2.3` deprecated,
+`n9` out of Wave A's scope) — the closed-set half is what catches a *new* tap beat.
+
+**Sabotage verified (1).** Deleting the `if (inLeagueReady)` fast path from `calcTour.ts` turned
+45c red; restoring it turned it green. The rest of §45 is regex-on-source and was written against
+already-passing code, so it is pinned but not independently falsified.
+
+**Two guards UPDATED to the new truth, not deleted.**
+`check-guide-script.js` `8b` asserted `S.n6_1(false).ctas === undefined` — a statement about that
+beat being tap-advance. Restated as the property that mattered: the router-less variant carries
+exactly one plain `Next` and **none of the routing variant's buttons** (+ `8b-ii`, no lifetime
+bound). `backend/tests/test_seed_ui_test_db.py::test_onboarding_v2_flags_are_release_plus_the_onboarding_surface`
+asserted `landing.try_before_sync is True` in both flag files; now `is False` in both, with the
+cross-file agreement — the thing that actually broke main CI on 2026-08-23a — left intact.
+
+**Runtime evidence: ZERO, and two items genuinely need it.** New **section H** (steps 63–78) in
+[the #384 checklist](../docs/feedback/items/384-calc-finder-merge/testflight-checklist.md), unrun.
+Steps 63–67 must be run on a **cold** league load: both parks fix a *race*, and a warm React Query
+cache is exactly what made the W8 simulator pass a false green while note 12 stayed open. Step 64
+(airplane mode) is the one that proves a park that never resolves still releases the hold.
+
 ## 2026-08-24 — Knockout refine (R5/R1/R2/shape) — full gates, MEASURED on prod FFV3, on `claude/knockout-refine-0823`
 
 Plan: [`docs/plans/knockout-refine/`](../docs/plans/knockout-refine/plan.md) · [D-159](DECISIONS.md). Built by Opus B1/B2, adversarially reviewed by a Fable reviewer (verdict: safe to merge; the D-159 renumber + two doc fixes, all done pre-merge).

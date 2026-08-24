@@ -23,6 +23,26 @@
 // The run spans two screens. n10–n18 are the calculator; n19–n24 are the
 // deck, and the deck cannot be narrated until it is actually on screen, so
 // the runner PARKS after n18 and waits for `calcTourDeckArrived()`.
+//
+// Wave A (2026-08-24) added two MORE parks, both of the same shape and both
+// fixing a beat that "pops but highlights nothing" on device (build 128):
+//
+//   after n10  →  `calcTourInLeagueReady()`.  n10 advances from the In-league
+//                 TAB TAP, and the runner used to request n11 in that same
+//                 turn — while `InLeagueCalculator` was still rendering
+//                 "Loading your league…". `calc.outlook-row` does not exist
+//                 until the league queries resolve, the spotlight's single
+//                 150 ms retry loses that race on a cold cache, and n11
+//                 degrades to a ringless bubble. A longer retry loop would
+//                 only move the race; waiting for the content to ANNOUNCE
+//                 itself removes it.
+//   after n11  →  `calcTourOutlookClosed()`.  n11's "Set outlook" CTA opens an
+//                 RN Modal AND advances the beat, so n12 used to render behind
+//                 the sheet while the user was still editing.
+//
+// Both are bounded (10 s) and both end the tour 'abandoned' on expiry rather
+// than holding the interrupt mute forever — the same rule the deck park
+// follows, for the same reason.
 
 import {
   useGuide,
@@ -75,6 +95,15 @@ const TOUR_IDS: ReadonlySet<string> = new Set<string>([...CALC_TOUR_ORDER, 'n23b
  *  because the hold mutes every interstitial app-wide until it is released. */
 const DECK_ARRIVAL_TIMEOUT_MS = 30_000;
 
+/** How long the runner waits for the In-league content to mount (after n10),
+ *  and for the outlook sheet to close again (after n11's accept). Shorter
+ *  than the deck's 30 s: neither waits on a model generation — one is a pair
+ *  of local queries, the other is a human tapping Done. Expiry ends the run,
+ *  because ending is what releases the app-wide interrupt hold; wedging the
+ *  park would mute every interstitial for the rest of the session. */
+const IN_LEAGUE_READY_TIMEOUT_MS = 10_000;
+const OUTLOOK_CLOSE_TIMEOUT_MS = 10_000;
+
 /** Handlers the SCREEN owns and the runner cannot reach for itself. */
 export interface CalcTourHandlers {
   /** n11's CTA: open the Trade DNA sheet so "Set outlook" sets an outlook. */
@@ -91,6 +120,22 @@ let cursor = 0;
 let beatsShown = 0;
 let parked = false;
 let parkTimer: ReturnType<typeof setTimeout> | null = null;
+/** Wave A — the two mid-calculator parks. Each holds the index to resume at,
+ *  so a resume never has to re-derive it from `cursor`. Deliberately separate
+ *  from `parked` (which means, and has always meant, "waiting for the deck"):
+ *  the deck-arrival path treats an un-parked runner as a run-ahead, and
+ *  overloading one flag with three meanings is how that path starts lying. */
+let inLeaguePark: { at: number } | null = null;
+let inLeagueParkTimer: ReturnType<typeof setTimeout> | null = null;
+let outlookPark: { at: number } | null = null;
+let outlookParkTimer: ReturnType<typeof setTimeout> | null = null;
+/** LEVEL, not edge: it records that the In-league content IS mounted, not
+ *  that it just arrived. A re-run ("Show me around" on a page whose league
+ *  already loaded) completes n10 with this already true and must proceed
+ *  immediately rather than park for an announcement that has been and gone.
+ *  Cleared when the calculator screen goes away, so the next visit re-earns
+ *  it — see `calcTourScreenBlurred`. */
+let inLeagueReady = false;
 /** Set by the Find-a-Trade hand-off so the calculator's blur handler knows
  *  this particular departure is the tour continuing, not the tour ending. */
 let handingOffToDeck = false;
@@ -116,6 +161,18 @@ function clearPark(): void {
   if (parkTimer) {
     clearTimeout(parkTimer);
     parkTimer = null;
+  }
+  // Every park, not just the deck's: `clearPark` is what endTour calls, and a
+  // timer that outlives the run would end a LATER run 'abandoned'.
+  inLeaguePark = null;
+  if (inLeagueParkTimer) {
+    clearTimeout(inLeagueParkTimer);
+    inLeagueParkTimer = null;
+  }
+  outlookPark = null;
+  if (outlookParkTimer) {
+    clearTimeout(outlookParkTimer);
+    outlookParkTimer = null;
   }
 }
 
@@ -233,6 +290,47 @@ function onBeatComplete(i: number, slot: BeatId, via: GuideCompletionVia): void 
     endTour('abandoned');
     return;
   }
+  // n10 → n11: park until the In-league content is actually mounted.
+  //
+  // The tab tap that advances n10 only STARTS the switch; `InLeagueCalculator`
+  // then renders "Loading your league…" until its roster + coverage queries
+  // resolve, and n11's target (`calc.outlook-row`) does not exist before that.
+  // Requesting n11 in this turn is the race the operator hit on build 128.
+  //
+  // The signal is a LEVEL: if the content is already up (a "Show me around"
+  // re-run on a warm page, or a draft that restored In-league mode), there is
+  // no announcement still to come and parking would just burn the timeout.
+  if (slot === 'n10') {
+    if (inLeagueReady) {
+      requestAt(i + 1);
+      return;
+    }
+    inLeaguePark = { at: i + 1 };
+    inLeagueParkTimer = setTimeout(() => {
+      inLeagueParkTimer = null;
+      // The league never loaded (offline, a failed query, a user who walked
+      // away). Ending releases the hold; staying parked would mute every
+      // interstitial app-wide for the rest of the session.
+      endTour('abandoned');
+    }, IN_LEAGUE_READY_TIMEOUT_MS);
+    return;
+  }
+  // n11 → n12: park while the outlook sheet is OPEN.
+  //
+  // n11 is a `cta` beat whose button both opens the sheet and advances the
+  // beat, and the guide overlay is mounted below RN Modals — so n12 rendered
+  // behind the sheet the user was still editing (v2 note 14). Only the ACCEPT
+  // path opens anything: a ✕, a swipe-away or a timeout leaves no sheet to
+  // wait for, and neither does a run whose host passed no opener, so those
+  // carry straight on rather than parking for a close that cannot come.
+  if (slot === 'n11' && via === 'cta' && !!handlers.openOutlook) {
+    outlookPark = { at: i + 1 };
+    outlookParkTimer = setTimeout(() => {
+      outlookParkTimer = null;
+      endTour('abandoned');
+    }, OUTLOOK_CLOSE_TIMEOUT_MS);
+    return;
+  }
   // n18 is the last calculator beat: "Now tap Find a Trade." The deck half
   // waits for the deck to say it has arrived.
   if (slot === 'n18') {
@@ -247,6 +345,39 @@ function onBeatComplete(i: number, slot: BeatId, via: GuideCompletionVia): void 
     return;
   }
   requestAt(i + 1);
+}
+
+/** The In-league content finished mounting (v2 note 12). Called by
+ *  TradeCalculatorScreen from `InLeagueCalculator`'s `onInLeagueReady`, which
+ *  fires once the outlook row — n11's spotlight target — is on screen.
+ *
+ *  Level, not edge: the flag is recorded whether or not anyone is waiting, so
+ *  an n10 that completes AFTER the content mounted proceeds immediately. */
+export function calcTourInLeagueReady(): void {
+  inLeagueReady = true;
+  if (!running || !inLeaguePark) return;
+  const at = inLeaguePark.at;
+  inLeaguePark = null;
+  if (inLeagueParkTimer) {
+    clearTimeout(inLeagueParkTimer);
+    inLeagueParkTimer = null;
+  }
+  requestAt(at);
+}
+
+/** The outlook sheet closed (v2 note 14). Called by TradeCalculatorScreen from
+ *  `InLeagueCalculator`'s `onOutlookClosed`. Unparks n12 so the bubble renders
+ *  over the page instead of behind the Modal. A no-op when nothing parked for
+ *  it — the sheet is reachable outside the tour too. */
+export function calcTourOutlookClosed(): void {
+  if (!running || !outlookPark) return;
+  const at = outlookPark.at;
+  outlookPark = null;
+  if (outlookParkTimer) {
+    clearTimeout(outlookParkTimer);
+    outlookParkTimer = null;
+  }
+  requestAt(at);
 }
 
 /** The deck screen reached focus while a tour is parked — run the deck half.
@@ -281,6 +412,11 @@ export function calcTourHandOffToDeck(): void {
  *  the tour continuing rather than ending: the deck half is parked, waiting
  *  for `calcTourDeckArrived()`. */
 export function calcTourScreenBlurred(): void {
+  // The In-league readiness LEVEL belongs to a mounted, focused calculator.
+  // Clearing it here — before the guards, and on every departure including the
+  // hand-off — is what stops a later run from treating a stale `true` as
+  // "the content is up" and requesting n11 against an unmounted target again.
+  inLeagueReady = false;
   if (!running || handingOffToDeck) return;
   endTour('abandoned');
 }

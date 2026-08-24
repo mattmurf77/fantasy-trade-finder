@@ -259,6 +259,26 @@ function TradeCardComp({
     registerGuideTarget('trades.swap-first', swapFirstRef);
     return () => unregisterGuideTarget('trades.swap-first');
   }, [swapFirstMounted]);
+  // Device feedback 2026-08-23 (v2 note 17) — n22 ("the fairness meter") used
+  // to target `trades.fairness-help`, the ⓘ in TradesScreen's "Trade fairness"
+  // row. That row renders inside `{!firstRun && …}`, so on a first-run deck —
+  // precisely when a new user is being toured — the node never mounts and the
+  // beat degrades to a bubble with no ring and no scroll. Retargeted at the
+  // meter itself, which is what the note asked to see highlighted.
+  //
+  // Same scoping rule as `trades.pass-btn` and `trades.swap-first` above: only
+  // the deck's top card is given `disposition`, so exactly one node can ever
+  // claim the id — a peek card, a match card or a read-only mount would
+  // otherwise race for it and the spotlight would ring whichever won.
+  // `hasValueVerdict`/`repricing` are the same conditions the bar renders
+  // under; registering while it is hidden would measure null.
+  const cardMeterRef = useRef<View | null>(null);
+  const cardMeterMounted = !!disposition && hasValueVerdict && !repricing;
+  useEffect(() => {
+    if (!cardMeterMounted) return;
+    registerGuideTarget('trades.card-meter', cardMeterRef);
+    return () => unregisterGuideTarget('trades.card-meter');
+  }, [cardMeterMounted]);
 
   // Backdrop / system dismiss of the reason overlay. BEFORE any tile the card
   // is simply left undecided (today's intent). AFTER a tile, the pass is
@@ -811,14 +831,22 @@ function TradeCardComp({
       ) : null}
 
       {hasValueVerdict && !repricing && (
-        <TradeValueBar
-          giveValue={data.give_value as number}
-          receiveValue={data.receive_value as number}
-          favors={data.favors ?? null}
-          gap={data.gap ?? null}
-          youLabel="You"
-          themLabel={`@${data.opponent_username}`}
-        />
+        // n22's spotlight target (see `cardMeterRef` above). The wrapper adds
+        // no layout of its own; `collapsable={false}` keeps Android from
+        // flattening a styleless View away, which would leave the ref
+        // measuring nothing — the same guard `trades.fairness-help` carries.
+        // It spans the WHOLE bar including the "Why?" disclosure the beat's
+        // copy now names, so the ring frames the control it talks about.
+        <View ref={cardMeterRef} collapsable={false} testID="trades.card-meter">
+          <TradeValueBar
+            giveValue={data.give_value as number}
+            receiveValue={data.receive_value as number}
+            favors={data.favors ?? null}
+            gap={data.gap ?? null}
+            youLabel="You"
+            themLabel={`@${data.opponent_username}`}
+          />
+        </View>
       )}
 
       {/* #357 — lineup movement + playoff-odds shift for THIS trade.
