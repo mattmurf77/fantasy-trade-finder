@@ -36,11 +36,12 @@
 
 ## 2026-08-23 — Onboarding × calc tour merge: operator decisions, then Wave A
 
-1. **Operator: work [plan §4](../docs/plans/onboarding-tour-merge/plan.md)** — five decisions:
-   what "merge calc with the trade-finder page" means for D-151, bridge-vs-full-spine, the cost of
-   auto-dispatching the guided first search, lighting `growth.invite_join_link` for the invite
-   moment, and whether the multi-platform landing waits for its own wave. *Why now: Segrave's
-   notes landed while the #384 tour machinery is fresh; Wave A is shippable in one small PR.*
+1. **Operator: remaining [plan §4](../docs/plans/onboarding-tour-merge/plan.md) decisions** —
+   1 and 6 are DECIDED ([D-158](DECISIONS.md) merged page, [D-157](DECISIONS.md) Clear button);
+   still open: bridge-vs-full-spine (§4.2), auto-dispatch cost (§4.3), `growth.invite_join_link`
+   (§4.4), multi-platform-landing timing (§4.5), plus D-158's two flagged assumptions (deck
+   visible beneath the canvas on arrival; Calc chip relabeled). *Why now: Wave A and Wave B0 are
+   both specified and buildable.*
 2. **Wave A on a go:** Next buttons on every onboarding talk beat (the W7 rule, applied to
    `s0.1`/`s2.1`/`s5.x`/`s8.1`/`n1`/err beats), `landing.try_before_sync` → false, `s0.1` +
    `s2.1` copy. Full gates; no schema/API surface.
