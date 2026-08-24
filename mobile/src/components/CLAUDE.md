@@ -85,7 +85,7 @@ Subfolders: [`chalkline/`](chalkline/CLAUDE.md) (design-system primitives — bu
 | `SwapPlayerSheet` | Per-player swap affordance on a suggested trade card (#86) — replaces one player with another from the SAME roster (give side → the user's roster, receive side → the partner's) |
 | `RookieDraftBoardSheet` | Bottom-sheet rookie draft board; owns its own query |
 | `QueueChip` | Chip rendering one queued trade's give/receive summary plus a dequeue button; backed by `state/useTradeQueue` |
-| `TradeHomeUtilityRow` | Inline trades-home utility row — experiment `trades_home_inline`, variant `strip` (#270/#272) |
+| `TradeHomeUtilityRow` | Inline trades-home utility row — experiment `trades_home_inline`, variant `strip` (#270/#272). No Filters button (#379 removed the #376 entry; filters live in TradesScreen's `trades.outlook-fallback` row) |
 | `TradeBuildCanvas` | Inline trades-home manual-calc canvas — same experiment, variant `canvas` (#270) |
 
 ## Sharp edges
