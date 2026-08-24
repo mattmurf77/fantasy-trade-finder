@@ -14,6 +14,19 @@
 
 
 
+## 2026-08-24c — Waves A + B0 merged and built: 1.16.4 (EAS 130); `calc.inline_home` DARK until Wave B
+
+The two entries below were written on their branches; both are now ON MAIN — Wave A squash PR
+[#197](https://github.com/mattmurf77/fantasy-trade-finder/pull/197) → `7452650`, Wave B0
+[#199](https://github.com/mattmurf77/fantasy-trade-finder/pull/199) → `14a4ce4` — after a Fable
+subagent review (verdicts: merge-with-fixes / merge-as-is-dark). Lead landed the review fixes
+before merge: A1/A3 (the In-league ready level now tracks the CONTENT — blur no longer clears it,
+unmount does), A2 (outlook park bound 10 s → 60 s), B1 (MatchesScreen's cross-tab
+edit-in-calculator was a FOURTH prefill site that flag-on silently dropped — now routes to the
+guided landing via a `canvasPrefill` route param, guard 9d–f). EAS **1.16.4 (130)** submitted.
+Checklists H/I1 owed on 130; the tour is OFF under `calc.inline_home` until Wave B re-threads it
+through the inline mount. Ledger: `docs/recovery/2026-08-24-wave-a-b0-ship.md`.
+
 ## 2026-08-24 — Wave B0 BUILT dark: the guided landing hosts the In-league canvas (`calc.inline_home`, D-158)
 
 Branch `feat/inline-home-b0`, **not merged, not PR'd**. New flag `calc.inline_home` (**false**;
