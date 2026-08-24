@@ -1,7 +1,7 @@
 # `mascot_ram_rollout` — allowlist-targeted rollout of Fleeced
 
 **Date:** 2026-08-23 · **Decisions:** [D-155](../../../living-memory/DECISIONS.md), [D-156](../../../living-memory/DECISIONS.md) · **Flag:** `onboarding.mascot_ram`
-**Status:** spec written, **experiment NOT created** — creating it is a production write (see §4).
+**Status:** **RUNNING on production since 2026-08-24** as `mascot_ram_rollout` **v2**, verified reaching the operator's device only (§7).
 
 ---
 
@@ -38,8 +38,8 @@ Miss any one and the client sees the flag absent, which is indistinguishable fro
 
 | Field | Value | Why |
 |---|---|---|
-| key / version | `mascot_ram_rollout` v1 | One key; `/revise` mints later versions |
-| layer | `onboarding` | The mascot *is* the onboarding guide. Reserves in-layer exclusivity |
+| key / version | `mascot_ram_rollout` **v2** | v1 was drafted on `onboarding` and rejected at launch; `/revise` minted v2 on `growth` |
+| layer | ~~`onboarding`~~ → **`growth`** | **Deviation from this spec, forced at launch.** `onboarding` is fully occupied by `onboarding_v2_rollout` v3 — *running*, `targeting: null` (all users), device units, buckets `[0,10000)`. Layers enforce in-layer bucket exclusivity, so there was no room, and stopping a live all-users experiment to make room is not a call to make in passing. `growth` and `engine` were the only free layers; `growth` is the better fit for a brand rollout. **This rollout measures nothing, so it cannot confound a growth test** — but it does hold the growth layer's full range until stopped. See §8 |
 | unit_type | `device` | Mandated for the onboarding layer (FR-34) — pre-auth, stable across sign-in |
 | buckets | `[0, 10000)` | Full layer. **Targeting narrows, never bucketing** — an allowlisted device must not miss on a bucket roll |
 | targeting | `{"is_tester_allowlist": true}` | Missing attr = excluded, so a non-listed unit can never be captured |
@@ -112,3 +112,36 @@ picks up the overlay on its next flag fetch (boot, or the ≥30-min foreground r
    If the face is a ram but the name still says “The Analyst”, the copy gate and the art gate have diverged.
 4. `guide_step_shown` events still carry the same six `pose` values. If they changed, something other than the renderer
    was touched.
+
+## 7. Verified after launch (2026-08-24)
+
+`GET /api/feature-flags` against production, three ways:
+
+| Request | `experiments` | `configs.mascot_ram_rollout.flags` | base `flags["onboarding.mascot_ram"]` |
+|---|---|---|---|
+| `X-Device-Id: dev_loc-mrpy6qog-2t72t6` (allowlisted) | `mascot_ram_rollout: treatment` | `{onboarding.mascot_ram: true}` | `false` |
+| no device header | `{}` | absent | `false` |
+| `X-Device-Id: dev_not-on-the-list-99999` | `{}` | absent | `false` |
+
+The base map staying `false` for the allowlisted device is **correct, not a bug**: the overlay lives in `configs`, and
+`mobile/src/api/flags.ts` merges it over the base map with overlay-wins. Only that device resolves `true` on-device.
+
+## 8. The layer debt this created, and how to clear it
+
+`mascot_ram_rollout` v2 holds **the whole `growth` layer** (`[0,10000)`). Any future growth experiment will collide
+with it exactly as this one collided with `onboarding_v2_rollout`.
+
+**Clear it by stopping this rollout once the TestFlight pass is done** — that is the intended end state anyway; the
+flag graduates or reverts, and either way this delivery mechanism stops being needed:
+
+```bash
+curl -sS -X POST "$FTF_PROD/api/admin/experiments/mascot_ram_rollout/transition" \
+  -H "X-Cron-Secret: $CRON_SECRET" -H 'Content-Type: application/json' \
+  -d '{ "version": 2, "to": "stopped", "reason": "TestFlight pass complete" }'
+```
+
+**The cleaner long-term fix is an operator call, not mine:** `onboarding_v2_rollout` v3 is untargeted and full-range on
+the layer this rollout actually belongs to. Post-Phase-A, the onboarding flags it was built to overlay are the release
+default (see the comment in `test_onboarding_v2_flags_are_release_plus_the_onboarding_surface`), so v3 may now be
+overlaying nothing. **If it is vestigial, stopping it frees the onboarding layer** and this rollout could be re-filed
+where it belongs. That was not verified, so it was not assumed.

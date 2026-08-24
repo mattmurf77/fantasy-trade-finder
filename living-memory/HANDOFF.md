@@ -16,7 +16,9 @@
 submitted, v1.16.3 (129) processing at Apple. `onboarding.mascot_ram` is `false` globally, so the installed app still
 renders The Analyst.
 
-**The one step left, and it is deliberately not done:** create + launch `mascot_ram_rollout` — two `X-Cron-Secret`
+**UPDATE 2026-08-24 — done. The experiment is RUNNING (`mascot_ram_rollout` v2) and verified: the allowlisted device gets the treatment overlay, every other request gets nothing. Fleeced is live for the operator alone, pending only the app updating to v1.16.3. One deviation: it is filed on the **`growth`** layer, not `onboarding`, because `onboarding_v2_rollout` v3 (running, untargeted, full range) occupies that layer and v1 was rejected with `layer_overlap`. It holds the growth layer until stopped — stop it after the TestFlight pass. See `docs/plans/ram-mascot/experiment.md` §7-§8.**
+
+~~**The one step left, and it is deliberately not done:**~~ create + launch `mascot_ram_rollout` — two `X-Cron-Secret`
 POSTs against the **production** DB, spec and curl in [`docs/plans/ram-mascot/experiment.md`](../docs/plans/ram-mascot/experiment.md) §4.
 Held for explicit operator confirmation because it is a production write. Once launched, the operator's device picks up
 the overlay on its next flag fetch (boot, or the ≥30-min foreground refetch).

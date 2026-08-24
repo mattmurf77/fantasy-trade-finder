@@ -13,6 +13,24 @@
 
 
 
+
+## 2026-08-24 — `mascot_ram_rollout` LAUNCHED; Fleeced is live on the operator's device only
+
+Experiment **v2 running on production**, verified three ways: the allowlisted device gets
+`mascot_ram_rollout: treatment` with overlay `{onboarding.mascot_ram: true}`; a request with no device header and one
+with a random device id both get `{}` and the flag stays `false`. The base flag map reads `false` even for the
+allowlisted device — correct, because `api/flags.ts` merges `configs.*.flags` over the base with overlay-wins.
+
+**Filed on the `growth` layer, not `onboarding`, and that is a deviation worth knowing about.** `onboarding` is fully
+occupied by `onboarding_v2_rollout` v3 — running, `targeting: null` (every user), device units, buckets `[0,10000)`.
+Layers enforce bucket exclusivity, so v1 of this rollout was **rejected at launch** with `layer_overlap`. `/revise`
+minted v2 on `growth` (one of only two free layers). This rollout measures nothing so it cannot confound a growth test,
+but **it does hold the growth layer's full range until stopped** — clear that by stopping it after the TestFlight pass
+([experiment.md](../docs/plans/ram-mascot/experiment.md) §8).
+
+**Not verified, so not assumed:** `onboarding_v2_rollout` v3 may be vestigial post-Phase-A — the flags it overlays are
+the release default now. If so, stopping it frees the layer this rollout actually belongs to. That is an operator call.
+
 ## 2026-08-24 — Fleeced SHIPPED to TestFlight in v1.16.3 (129), still dark for everyone
 
 **Merged** as [PR #186](https://github.com/mattmurf77/fantasy-trade-finder/pull/186) (squash, `7ac7869`) with all three

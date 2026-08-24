@@ -14,6 +14,21 @@
 
 
 
+
+## 2026-08-24 — `mascot_ram_rollout` gate verified on production
+
+`GET /api/feature-flags` × 3, against live production:
+
+| Request | `experiments` | overlay | base flag |
+|---|---|---|---|
+| allowlisted device id | `mascot_ram_rollout: treatment` | `{onboarding.mascot_ram: true}` | `false` |
+| no device header | `{}` | absent | `false` |
+| random device id | `{}` | absent | `false` |
+
+**This proves the gate, not the render.** It shows the overlay reaches exactly one unit and no other. It does **not**
+show a ram on a screen — the TestFlight checklist is still unrun, and section A (flag OFF is byte-identical) should be
+run *before* trusting anything under flag ON.
+
 ## 2026-08-24 — v1.16.3 (129) to TestFlight: CI green on GitHub, runtime evidence still owed
 
 **CI on the pushed sha (not just local):** `backend-tests` pass 8m58s · `mobile-typecheck` pass 1m2s ·
