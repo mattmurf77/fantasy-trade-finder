@@ -1495,6 +1495,14 @@ export default function LeagueSummaryScreen() {
         // frame is absolute window coordinates: tell the guide to re-measure
         // so its cutout stays locked to the row it points at while we scroll.
         onScroll={notifyGuideTargetsMoved}
+        // #386 — scroll is not the only way a target moves: the Season
+        // outlook section mounts/toggles after first paint (AsyncStorage
+        // hydration, outlook-query resolution, the strip tap), shifting the
+        // position pills without a scroll event. Same one-line announcement
+        // as the TradeCalculatorScreen precedent (#384 report 1); a no-op
+        // with no tour up — the notifier walks an empty listener set.
+        onLayout={notifyGuideTargetsMoved}
+        onContentSizeChange={notifyGuideTargetsMoved}
         scrollEventThrottle={16}
         refreshControl={
           <RefreshControl
