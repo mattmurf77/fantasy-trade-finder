@@ -757,9 +757,13 @@ def test_starter_impact_slots_numbered_labels_and_null_after(monkeypatch):
     }, _BOARDS, monkeypatch).get_json()
     slots = d["starter_impact"]["slots"]
     assert [s["slot"] for s in slots] == ["RB1", "RB2", "WR"]
-    rb2 = slots[1]
-    assert rb2["before"]["player_id"] == "bench" and rb2["after"] is None
-    assert rb2["delta"] == pytest.approx(-v("bench"), abs=0.15)
+    # #395 alignment: the surviving starter (bench) keeps its row — RB1 is
+    # unchanged and the DEPARTING good shows on the emptied RB2 row.
+    rb1, rb2 = slots[0], slots[1]
+    assert rb1["before"]["player_id"] == "bench"
+    assert rb1["after"]["player_id"] == "bench"
+    assert rb2["before"]["player_id"] == "good" and rb2["after"] is None
+    assert rb2["delta"] == pytest.approx(-v("good"), abs=0.15)
 
 
 # ── Starter impact `slots[].tier`/`rank` (#169, flag trade.position_impact) ──
@@ -852,7 +856,8 @@ def test_starter_impact_slots_null_after_carries_no_tier_or_rank(monkeypatch):
         "league_id": "L1", "opponent_user_id": OPP,
     }, _BOARDS, monkeypatch).get_json()
     rb2 = d["starter_impact"]["slots"][1]
-    assert rb2["before"]["player_id"] == "bench"
+    # #395 alignment pairs the departing good with the emptied RB2 row.
+    assert rb2["before"]["player_id"] == "good"
     assert rb2["before"]["tier"] is not None
     assert rb2["before"]["rank"] is not None
     assert rb2["after"] is None
@@ -885,10 +890,11 @@ def test_values_endpoint_shape_and_etag():
 
 # ── #311 — platform-aware template resolution (_league_lineup_slots) ─────
 # ESPN/MFL/Fleaflicker leagues have NO roster_positions equivalent, so the
-# helper serves the app's one standard template (_MOCK_DEFAULT_LINEUP, plus
-# SUPER_FLEX for sf_tep) keyed off the leagues.platform column — never off
-# id shape (platform league ids are numeric too). Sleeper resolution and
-# the no-row/demo omission are byte-identical to pre-#311.
+# helper serves the app's one standard template (_PLATFORM_DEFAULT_LINEUP
+# since #396 — 2 WR + 2 FLEX, never a fabricated "WR3"; plus SUPER_FLEX for
+# sf_tep) keyed off the leagues.platform column — never off id shape
+# (platform league ids are numeric too). Sleeper resolution and the
+# no-row/demo omission are byte-identical to pre-#311.
 
 from unittest.mock import MagicMock  # noqa: E402
 
@@ -897,7 +903,8 @@ _311_QBS = [
     (_P("qb_two", "Second Signal", "QB", "WAS", 23), 1820.0),
 ]
 
-_STANDARD_1QB_LABELS = ["QB", "RB1", "RB2", "WR1", "WR2", "WR3", "TE", "FLEX"]
+_STANDARD_1QB_LABELS = ["QB", "RB1", "RB2", "WR1", "WR2", "TE",
+                        "FLEX1", "FLEX2"]
 
 
 def _install_league_row(monkeypatch, league_id, *, platform,
@@ -1031,5 +1038,85 @@ def test_numeric_espn_id_never_fetches_sleeper_meta(monkeypatch):
     _, fetch_mock = _install_platform_world(monkeypatch, "777004",
                                             platform="espn")
     slots = srv._league_lineup_slots("777004")
-    assert slots == list(srv._MOCK_DEFAULT_LINEUP)
+    # #396 — the one deliberate expected-value change: platform leagues now
+    # get _PLATFORM_DEFAULT_LINEUP, not the mock-draft constant.
+    assert slots == list(srv._PLATFORM_DEFAULT_LINEUP)
     assert not fetch_mock.called
+
+
+# ── #395/#396 — aligned slot display + honest platform template ──────────
+
+
+def test_starter_impact_slots_aligned_display(monkeypatch):
+    # End-to-end Mode B on the #395 shape: qb_one canonically owns the QB
+    # slot, qb_two the SUPER_FLEX. Trading qb_one away must render exactly
+    # ONE changed row (SUPER_FLEX) — never a phantom QB change — while the
+    # summary deltas stay the optimal_starters totals math.
+    players = (_POOL_PLAYERS + [p for p, _ in _SI_EXTRA]
+               + [p for p, _ in _311_QBS])
+    seed = dict(_SEED)
+    seed.update({p.id: elo for p, elo in _SI_EXTRA})
+    seed.update({p.id: elo for p, elo in _311_QBS})
+    monkeypatch.setitem(
+        srv.g_universal_by_format, "1qb_ppr", {"players": players, "seed": seed})
+    monkeypatch.setattr(srv, "_league_lineup_slots",
+                        lambda league_id: ["QB", "SUPER_FLEX"])
+    monkeypatch.setattr(srv, "load_league_members", lambda league_id: [
+        {"user_id": CALLER, "player_ids": ["qb_one", "qb_two", "te_stud"]},
+        {"user_id": OPP,    "player_ids": ["stud", "mid"]},
+    ])
+    monkeypatch.setattr(srv, "load_draft_picks", lambda *a, **k: [])
+    monkeypatch.setattr(
+        srv, "load_asset_preferences",
+        lambda user_id=None, league_id=None: {"untouchables": [], "targets": [],
+                                              "not_interested": []},
+    )
+    e2v = srv._trade_service_mod.elo_to_value
+    v = lambda pid: e2v(seed[pid])
+    d = _post_authed({
+        "give_player_ids": ["qb_one"], "receive_player_ids": ["mid"],
+        "league_id": "L1", "opponent_user_id": OPP,
+    }, _BOARDS, monkeypatch).get_json()
+    si = d["starter_impact"]
+    slots = si["slots"]
+    assert [s["slot"] for s in slots] == ["QB", "SUPER_FLEX"]
+    changed = [s for s in slots
+               if (s["before"] or {}).get("player_id")
+               != (s["after"] or {}).get("player_id")]
+    # Exactly one changed row, and it is the SUPER_FLEX: qb_one → te_stud.
+    assert [s["slot"] for s in changed] == ["SUPER_FLEX"]
+    assert changed[0]["before"]["player_id"] == "qb_one"
+    assert changed[0]["after"]["player_id"] == "te_stud"
+    # The QB row shows qb_two on BOTH sides (aligned before display).
+    qb = slots[0]
+    assert qb["before"]["player_id"] == "qb_two"
+    assert qb["after"]["player_id"] == "qb_two"
+    # Deltas are still the optimal_starters totals math — alignment moves
+    # rows, never numbers.
+    assert si["your_delta"] == pytest.approx(
+        (v("qb_two") + v("te_stud")) - (v("qb_one") + v("qb_two")), abs=0.15)
+    assert si["their_delta"] == pytest.approx(v("qb_one"), abs=0.15)
+
+
+def test_platform_template_has_no_wr3(monkeypatch):
+    # #396 — a platform league's slot labels carry no fabricated "WR3":
+    # exactly QB RB1 RB2 WR1 WR2 TE FLEX1 FLEX2 (+ SUPER_FLEX for sf_tep).
+    _install_platform_world(monkeypatch, "777010", platform="espn")
+    d = _evaluate_platform(monkeypatch, "777010")
+    labels = [s["slot"] for s in d["starter_impact"]["slots"]]
+    assert labels == ["QB", "RB1", "RB2", "WR1", "WR2", "TE",
+                      "FLEX1", "FLEX2"]
+    assert "WR3" not in labels
+    # sf_tep variant appends SUPER_FLEX.
+    _install_platform_world(monkeypatch, "777011", platform="mfl",
+                            default_scoring="sf_tep")
+    d = _evaluate_platform(monkeypatch, "777011")
+    labels = [s["slot"] for s in d["starter_impact"]["slots"]]
+    assert labels == ["QB", "RB1", "RB2", "WR1", "WR2", "TE",
+                      "FLEX1", "FLEX2", "SUPER_FLEX"]
+    # The mock-draft constant is a DIFFERENT template on purpose — pin its
+    # literal so a swap/aliasing of the two constants fails CI (PRD N-3).
+    assert srv._MOCK_DEFAULT_LINEUP == ["QB", "RB", "RB", "WR", "WR", "WR",
+                                        "TE", "FLEX"]
+    assert srv._PLATFORM_DEFAULT_LINEUP == ["QB", "RB", "RB", "WR", "WR",
+                                            "TE", "FLEX", "FLEX"]
