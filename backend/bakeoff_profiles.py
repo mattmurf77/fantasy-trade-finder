@@ -70,6 +70,12 @@ MODEL_A_PROFILE: dict[str, float] = {
     # G6 presentment rules — 2026-08-16 wave (#340 #341 #339 #304)
     "max_overpay_frac":          0.0,   # R1 off
     "pos_net_cap":               0.0,   # R2 off
+    # Knockout refine C4 (D-159) — pinned at the IDENTITY value, not a kill
+    # value: `> 1` is the pre-wave rule (92c31d5 trade_optimizer.py:507) and
+    # the post-merge bundle moves the LIVE row to 2; an unpinned arm A would
+    # silently enumerate 3-for-1 shapes the pre-wave engine could not build.
+    "v3_shape_max_delta":        1.0,
+
     "pick_gap_frac":             0.0,   # R3 off
     "need_gate_min_value":       0.0,   # R5 off
     # Engine quality — 2026-08-18 wave (docs/plans/engine-quality/scope.md)

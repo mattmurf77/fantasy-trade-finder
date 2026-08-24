@@ -951,6 +951,7 @@ Env var: `VALUE_MODEL_DIR` (default `data/value_model/` — inside the gitignore
 | Key | Default | Meaning |
 |---|---|---|
 | `v3_pool_size` | 12 | Candidate pool size per side for the exact per-pair search |
+| `v3_shape_max_delta` | 1 | **C4, knockout refine 2026-08-23** ([plans/knockout-refine/plan.md](plans/knockout-refine/plan.md) §3) — max \|len(give) − len(receive)\| a package shape may carry in `trade_optimizer.generate_pair_trades_v3`. `1` is the historical literal, byte-identical; `2` unlocks **3-for-1 / 1-for-3**, which the enumeration already builds (`give_subsets`/`recv_subsets` run sizes 1–3) and threw away one line later. Raising it past 2 buys nothing — the subset generator still caps each side at 3, so a 4-a-side package is unreachable at any value (pinned by `backend/tests/test_shape_knob.py`). Read via `trade_service._c` on every call — never bound at import (D-098 / G-058 cause 3), and `_c` is the only reader that honours the `_cfg_override` thread-local, which is how the #189 relaxed pass and the bake-off arm profiles apply knob values. That matters here: arm A pins this knob to 1.0 in `MODEL_A_PROFILE` so the prod flip to 2 cannot leak into the pre-wave arm, and an overlay-blind `_cfg.get` reader would make that pin a silent no-op. In `trade_service._DEFAULT_CFG` and DB-seeded. Prod-flip target of the consolidation bundle below. |
 | `picks_pool_cap` | 6 | **#170/#171** — max owned draft picks per team injected into the suggestion candidate pool (top-N by `pool_value`) when `trade.picks_in_pool` is on. Bounds package enumeration. `0` disables injection. |
 | `sweetener_band` | 0.15 | Fairness shortfall band in which a sweetener pass is attempted |
 | `sweetener_max_cards` | 2 | Max sweetener-balanced cards per deck |
@@ -983,8 +984,10 @@ Env var: `VALUE_MODEL_DIR` (default `data/value_model/` — inside the gitignore
 
 ### Trade presentment rules (flag `trade.presentment_rules`) — `trade_service._DEFAULT_CFG`, DB-seeded
 
-G6 2026-08-16 wave (#304 #336 #339 #340 #341). All seven are DB-seeded and
-live-tunable via `PUT /api/admin/config/<key>` — each is that rule's
+G6 2026-08-16 wave (#304 #336 #339 #340 #341), plus the three **knockout
+refine** knobs added 2026-08-23 (last three rows —
+[plans/knockout-refine/plan.md](plans/knockout-refine/plan.md) §3). All ten are
+DB-seeded and live-tunable via `PUT /api/admin/config/<key>` — each is that rule's
 deploy-free kill switch (R4 has no knob; the flag is its revert). Units:
 raw summed consensus value (`seed_value` per side) — the D-055 Δ currency.
 Measured baselines + acceptance bands:
@@ -999,6 +1002,32 @@ Measured baselines + acceptance bands:
 | `pick_gap_min_value` | 300.0 | R3: consensus gap floor below which the band is never evaluated. |
 | `need_gate_min_value` | 500.0 | R5 #304: minimum consensus value of the primary received player before the need gate applies (sub-floor churn always passes). Untargeted discovery decks only (R-5b bypass). **≤ 0 disables the whole gate.** |
 | `need_gate_upgrade_margin` | 0.0 | R5: the primary must beat the post-give incumbent (S-th best body at P on `roster − give`) by this fraction to count as a starter upgrade. 0 = any strict upgrade passes. |
+| `overpay_adjusted` | **1.0** | **C2, knockout refine** — R1 `overpay_ok` prices each side with `package_value_v2` (the same consolidation-discounted currency the card's own value bar shows) instead of raw summed consensus. The gap test, the `max_overpay_frac` ratio, the two-sided `abs()` and `max_overpay_min_value` are all unchanged — only the currency moves, so R1 and the number on the card can no longer disagree. **0 restores the raw-sum body, byte-identical.** Ships LIT (operator-aligned 2026-08-23): today's raw-sum reading is the defect. |
+| `pos_net_starter_relief` | **1.0** | **C3, knockout refine** — R2 `pos_net_ok` gains starter-depth relief. An over-`pos_net_cap` position P survives only when the shedding side was ABOVE its starter need at P before the trade AND both rosters sit at-or-above starter need at P after it (startable bodies counted, picks excluded as today, `_STARTER_NEED` including the superflex QB2). This is what the operator's #341 intent actually asked for: shipping RB4+RB5 out of an RB-rich roster passes, stripping RB1+RB2 below startable depth still dies — where the bare count rule killed both. Needs the per-member opponent context (plan §2); with no context it is inert. **0 restores today's `abs(net) <= cap` kill.** Ships LIT. |
+| `need_gate_dual_rescue` | **1.0** | **C1, knockout refine** — two changes to R5 `need_gate_ok`, both inert at 0 or without opponent context. (a) *Any-asset*: the hole/upgrade tests judge EVERY non-pick received asset, not only the single highest-value one. (b) *Dual-need rescue*: a candidate passes the contender kill when the give side sends ≥1 non-pick asset at a position where the USER is in `position_surplus` and the OPPONENT's startable count is below their starter need — the trade both sides actually want. Measured on the armb bucket-A replay: one-sidedness 96.3 → 88.7; unique-kill scope 827 + 1,919 candidates. **0 restores today's single-primary gate.** Ships LIT. |
+
+**The consolidation bundle — three prod flips that travel together.** After the
+knockout-refine merge the operator applies `filler_min_frac` 0.25 → **0.15**
+(`asset_floor_abs` **held** at 450), `trade_elo_gap_max` 250 → **0**, and
+`v3_shape_max_delta` 1 → **2** as one change, not three
+([plans/knockout-refine/plan.md](plans/knockout-refine/plan.md) §1 and §6). They are
+bundled because the knockouts **nest**: per [G-058](../living-memory/GOTCHAS.md), the
+gates are conjunctive and heavily redundant — 97.6 % of rejections are made by two or
+more rules at once, and `trade_elo_gap_max` first-kills roughly half the divergence
+universe while uniquely killing **zero** — free only because the `#141` filler gate
+fires first, and the binding wall the moment `#141` moves. Flip any one alone and the next rule
+catches the same trades, so the measurement reads "no effect" and the knob gets wrongly
+exonerated. Each row is still **independently revertible** via
+`PUT /api/admin/config/<key>` — bundling is how they are *applied and measured*, not a
+coupling in the code. Rollback ladder: any single prod knob → any code knob to 0 (all
+deploy-free) → revert the branch.
+
+**One caveat on `v3_shape_max_delta`:** unlike the other two it is a NEW key, and
+`database.set_config` raises `KeyError` for a key with no `model_config` row. Its row
+ships in `_MODEL_CONFIG_DEFAULTS`, which the idempotent migration seeds on the next
+deploy — so the flip becomes available **after** the knockout-refine deploy, not the
+moment the branch merges. Attempting it earlier returns an unknown-key error rather
+than silently doing nothing.
 
 ### Engine quality (2026-08-18 field wave) — `backend/trade_service.py` + `backend/trade_optimizer.py`
 

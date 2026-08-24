@@ -27,8 +27,8 @@ means. Several small private helpers from trade_service are replicated
 here (marked with TODO refactor comments) because they are closures /
 methods that cannot be imported without touching trade_service.py.
 
-Config keys (all read live via trade_service._cfg with inline defaults —
-nothing added to trade_service._DEFAULT_CFG):
+Config keys read live via trade_service._cfg with inline defaults (nothing
+added to trade_service._DEFAULT_CFG for these):
 
     v3_pool_size          12     per-side candidate pool size (3.1 prune)
     sweetener_band        0.15   how far below fairness_threshold a
@@ -38,6 +38,12 @@ nothing added to trade_service._DEFAULT_CFG):
                                  directed edge in the cycle graph
     cycle_min_net         200.0  min per-team net surplus for a 3-cycle
     cycle_max_results     3      max cycles returned
+
+Every other knob this module reads — including C4's ``v3_shape_max_delta``
+(max |len(give) - len(receive)| a package shape may carry; 1 = the
+historical rule, 2 unlocks the 3-for-1 / 1-for-3 subsets the enumeration
+already builds) — goes through ``trade_service._c``, which consults the
+``_cfg_override`` thread-local before the live map.
 """
 
 from __future__ import annotations
@@ -267,6 +273,17 @@ def generate_pair_trades_v3(
     W_MIS    = _c("mismatch_weight")
     W_FAIR   = _c("fairness_weight")
     POOL_P   = int(_ts._cfg.get("v3_pool_size", 12))
+    # C4 (docs/plans/knockout-refine/plan.md §3) — the package-shape rule is
+    # a knob, not a literal. Read at CALL time, never bound at import
+    # (D-098 / G-058 cause 3), and through `_c` rather than `_ts._cfg.get`:
+    # the key lives in `trade_service._DEFAULT_CFG`, so `_c` is what the
+    # sibling knobs above use, and it is the only reader that honours the
+    # `_cfg_override` thread-local. That overlay is not a detail — it is how
+    # the #189 relaxed pass and bake-off arm A's `MODEL_A_PROFILE` pin of
+    # this knob to 1.0 are applied, and `_ts._cfg.get` cannot see it, so an
+    # arm-A pin would silently no-op the moment prod flips the row to 2.
+    # Default 1 is the historical `> 1` rule, byte-identical.
+    SHAPE_D  = int(_c("v3_shape_max_delta"))
     SW_BAND  = float(_ts._cfg.get("sweetener_band", 0.15))
     SW_MAX   = int(_ts._cfg.get("sweetener_max_cards", 2))
     TARGET_BONUS = _c("target_acquire_bonus")   # #2 per-target reward
@@ -521,7 +538,7 @@ def generate_pair_trades_v3(
         for recv_ids in recv_subsets:
             if pinned_recv_set and not (set(recv_ids) & pinned_recv_set):
                 continue
-            if abs(len(give_ids) - len(recv_ids)) > 1:
+            if abs(len(give_ids) - len(recv_ids)) > SHAPE_D:
                 continue
             if not _positions_ok(give_ids, recv_ids):
                 continue

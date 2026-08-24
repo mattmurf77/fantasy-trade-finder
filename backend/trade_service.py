@@ -784,6 +784,46 @@ _DEFAULT_CFG: dict[str, float] = {
     "need_gate_upgrade_margin":   0.0,
 
     # ------------------------------------------------------------------
+    # Knockout refine — 2026-08-23 (docs/plans/knockout-refine/plan.md §3;
+    # verdict + evidence docs/reviews/2026-08-22-knockout-rules-judged.html
+    # §03). Four refinements to the G6 knockouts above, each with its own
+    # kill knob whose 0 restores the predicate byte-identically and is a
+    # deploy-free revert (PUT /api/admin/config/<key>). Same five-
+    # registration discipline as the fit/breaker/negmem blocks below: this
+    # dict, database._MODEL_CONFIG_DEFAULTS, _PINNED_KNOBS in
+    # test_bakeoff_arm_a_golden.py, the scope-phase2.md disposition
+    # sentence, and the config-reference row.
+    # ------------------------------------------------------------------
+    # C1 — R5 two-sided. 1.0 (default, LIT at merge): `need_gate_ok` judges
+    # EVERY non-pick received asset for the hole/upgrade tests, and gains a
+    # dual-need rescue (user sheds surplus at a position the partner is
+    # short at, read off the per-member `opp_ctx`). 0 = the primary-only
+    # one-sided kill. Measured one-sidedness 96.3% → 88.7%.
+    "need_gate_dual_rescue":      1.0,
+    # C2 — R1 in the currency the card shows. 1.0 (default, LIT): price
+    # both sides with `package_value_v2` on the consensus emit path's
+    # argument convention before taking the gap. 0 = raw consensus sums.
+    # `max_overpay_frac` / `max_overpay_min_value` are unchanged by this;
+    # a 1-for-1 is identity under `package_value_v2`, so only multi-asset
+    # packages can move.
+    "overpay_adjusted":           1.0,
+    # C3 — R2 quality-aware. 1.0 (default, LIT): an over-cap position may
+    # survive when the shedding side was strictly above starter need there
+    # before and BOTH rosters stay at/above it after, counted in startable
+    # bodies. 0 = today's flat |net| <= pos_net_cap kill. Needs the
+    # per-member `opp_ctx`; without one the flat kill stands.
+    "pos_net_starter_relief":     1.0,
+    # C4 — the v3 optimizer's package-shape rule, previously the literal
+    # `abs(len(give) - len(recv)) > 1`. 1.0 (default) IS that rule, byte-
+    # identical. Read by trade_optimizer via the module object (D-098). 2
+    # is the post-merge prod-bundle flip that unlocks 3-for-1 / 1-for-3 —
+    # the operator's own stated trade style, and 0.5% of served cards
+    # today. Registered here (not with an inline literal default) so `_c`
+    # resolves it, `_cfg_override` reaches it, and the bake-off arms can
+    # pin it; the sole consumer lives in trade_optimizer.py.
+    "v3_shape_max_delta":         1.0,
+
+    # ------------------------------------------------------------------
     # Engine quality — 2026-08-18 field wave (docs/plans/engine-quality/
     # scope.md). Five independent ranking/gating fixes for the two
     # defects diagnosed from the live corpus: picks buying fairness for
@@ -2135,12 +2175,37 @@ def overpay_ok(give_ids, recv_ids, seed_value) -> bool:
     toggle cannot relax it; this is the operative absolute bound on both
     settings. A *small* relative gap is simply fair — no upper-bound
     counterpart exists (round-1 B1 re-audit). frac <= 0 disables.
+
+    **C2, 2026-08-23** (docs/plans/knockout-refine/plan.md §3) — knob
+    `overpay_adjusted`. At >= 1.0 (the default) each side is priced with
+    `package_value_v2` under the SAME argument convention the consensus
+    emit path uses (`_consensus_package_gates`: trade-wide `v_max`,
+    `n_other` = the other side's asset count, `other_values` = the other
+    side's raw values), so the gap is measured in the currency the
+    fairness bar and the card already show instead of in raw sums. Same
+    0.25 frac, same `max_overpay_min_value` floor, still `abs()`
+    two-sided. R1's 0.25 was calibrated on a 78%-one-for-one corpus,
+    where the two currencies coincide — a single-asset side is identity
+    under `package_value_v2` — so this knob can only move MULTI-asset
+    packages. Knob 0 restores the raw-sum body, byte-identical.
     """
     frac = _c("max_overpay_frac")
     if frac <= 0:
         return True
-    g = sum(seed_value(p) for p in give_ids)
-    r = sum(seed_value(p) for p in recv_ids)
+    if _c("overpay_adjusted") >= 1.0:
+        gvals = [seed_value(p) for p in give_ids]
+        rvals = [seed_value(p) for p in recv_ids]
+        both = gvals + rvals
+        if not both:
+            return True
+        v_max = max(both)
+        g = package_value_v2(gvals, v_max, n_other=len(recv_ids),
+                             other_values=rvals)
+        r = package_value_v2(rvals, v_max, n_other=len(give_ids),
+                             other_values=gvals)
+    else:
+        g = sum(seed_value(p) for p in give_ids)
+        r = sum(seed_value(p) for p in recv_ids)
     big = max(g, r)
     if big <= 0:
         return True
@@ -2148,7 +2213,7 @@ def overpay_ok(give_ids, recv_ids, seed_value) -> bool:
     return not (gap >= _c("max_overpay_min_value") and gap / big >= frac)
 
 
-def pos_net_ok(give_ids, recv_ids, players) -> bool:
+def pos_net_ok(give_ids, recv_ids, players, *, opp_ctx=None) -> bool:
     """R2 #341 — per-position signed net cap.
 
     For each P in {QB, RB, WR, TE}: net_P = count(recv at P) − count(give
@@ -2157,6 +2222,24 @@ def pos_net_ok(give_ids, recv_ids, players) -> bool:
     Players only: pick assets are excluded (a pick is not a positional
     body; picks are R3's domain). Positions outside the four are uncounted
     by design. cap <= 0 disables (filler_min_frac convention).
+
+    **C3, 2026-08-23** (docs/plans/knockout-refine/plan.md §3) — knob
+    `pos_net_starter_relief`, plus `opp_ctx` (`_presentment_ctx`, threaded
+    per league-mate by the job closure). The COUNT rule was only ever a
+    proxy for the operator's #341 intent — "don't ship me two starting RBs
+    and send none back". At >= 1.0, with a ctx present, an over-cap
+    position P survives only when the depth story holds:
+
+      * the SHEDDING side (the user when net_P < 0, the opponent when
+        net_P > 0) was STRICTLY ABOVE its starter need at P before, and
+      * BOTH rosters are still at/above starter need at P after.
+
+    Bodies are counted in `analyze_roster_strengths`' own startable
+    definition (elite|starter bin — `_startable_ok_fn`), so RB4 + RB5 out
+    of an RB-rich roster passes while RB1 + RB2 out of a three-deep one
+    dies. Starter need is `_starters_at` (`_STARTER_NEED`, QB→2 in
+    superflex). Picks stay excluded exactly as today. Knob 0, or no ctx
+    (the fit K-chain, unit callers), ⇒ today's flat kill, byte-identical.
     """
     cap = _c("pos_net_cap")
     if cap <= 0:
@@ -2170,7 +2253,38 @@ def pos_net_ok(give_ids, recv_ids, players) -> bool:
             pos = getattr(p, "position", None)
             if pos in _PRESENTMENT_POSITIONS:
                 net[pos] = net.get(pos, 0) + sign
-    return all(abs(n) <= cap for n in net.values())
+    over = {pos: n for pos, n in net.items() if abs(n) > cap}
+    if not over:
+        return True
+    if opp_ctx is None or _c("pos_net_starter_relief") < 1.0:
+        return False
+    startable_ok = opp_ctx["startable_ok"]
+    user_startable = opp_ctx["user_startable"]
+    opp_startable = opp_ctx["startable"]
+    scoring_format = opp_ctx["scoring_format"]
+
+    def _moved(ids, pos) -> int:
+        """Startable bodies at `pos` inside one side of the package."""
+        n = 0
+        for pid in ids:
+            p = players.get(pid)
+            if p is not None and getattr(p, "position", None) == pos \
+                    and startable_ok(pid, p):
+                n += 1
+        return n
+
+    for pos, n in over.items():
+        need = _starters_at(pos, scoring_format)
+        out_of_user = _moved(give_ids, pos)
+        out_of_opp = _moved(recv_ids, pos)
+        u_before = user_startable.get(pos, 0)
+        o_before = opp_startable.get(pos, 0)
+        u_after = u_before - out_of_user + out_of_opp
+        o_after = o_before - out_of_opp + out_of_user
+        shed_before = u_before if n < 0 else o_before
+        if not (shed_before > need and u_after >= need and o_after >= need):
+            return False
+    return True
 
 
 def pick_gap_ok(give_ids, recv_ids, seed_value, players) -> bool:
@@ -2209,7 +2323,7 @@ def pick_gap_ok(give_ids, recv_ids, seed_value, players) -> bool:
 
 def need_gate_ok(give_ids, recv_ids, *, seed_value, players, user_pos_values,
                  outlook, position_needs, position_surplus,
-                 scoring_format) -> bool:
+                 scoring_format, opp_ctx=None) -> bool:
     """R5 #304 — window-scaled need gate, UNTARGETED discovery decks only
     (the caller skips this predicate entirely when the job is targeted —
     R-5b bypass, derived server-side in _run_trade_job).
@@ -2230,6 +2344,25 @@ def need_gate_ok(give_ids, recv_ids, *, seed_value, players, user_pos_values,
           not_sure                      → KILL only if P in surplus
           rebuilder | jets | unresolved → PASS (gate off — deliberate
                                           fail-open, recorded decision)
+
+    **C1, 2026-08-23** (docs/plans/knockout-refine/plan.md §3) — knob
+    `need_gate_dual_rescue`, two edits, both no-ops at knob 0:
+
+      (a) *any-asset*: the hole/upgrade tests judge EVERY non-pick
+          received asset at its own position, not only the primary. A
+          2-for-1 whose second piece is the one that fills the hole is a
+          real need trade and used to die on the headliner alone.
+      (b) *dual-need rescue*, checked just before the contender kill: pass
+          when the give side ships >= 1 non-pick asset at a position where
+          the USER is in `position_surplus` AND the OPPONENT sits below
+          his starter need (`opp_ctx`, threaded per league-mate). R5 was
+          a one-sided kill with no partner-need term at all; this is the
+          two-sided form the 2026-08-22 replay measured at one-sidedness
+          96.3% → 88.7%.
+
+    The originating #304 complaint is unchanged by both: a received asset
+    that fills no hole and upgrades nobody, with no dual-need fact on the
+    give side, still dies for a contender.
     """
     floor = _c("need_gate_min_value")
     if floor <= 0:
@@ -2258,14 +2391,44 @@ def need_gate_ok(give_ids, recv_ids, *, seed_value, players, user_pos_values,
     # branch already prices that case.
     _ = position_needs
     give_set = set(give_ids)
-    vals = sorted((v for pid, v in user_pos_values.get(primary_pos, ())
-                   if pid not in give_set), reverse=True)
-    starters = _starters_at(primary_pos, scoring_format)
-    if len(vals) < starters:
-        return True                       # fills a starting hole
-    incumbent = vals[starters - 1]
-    if primary_val > incumbent * (1.0 + _c("need_gate_upgrade_margin")):
-        return True                       # strict starter upgrade
+
+    def _clears(pos: str, val: float) -> bool:
+        """Today's two PASS tests, for one received asset at `pos`."""
+        vals = sorted((v for pid, v in user_pos_values.get(pos, ())
+                       if pid not in give_set), reverse=True)
+        starters = _starters_at(pos, scoring_format)
+        if len(vals) < starters:
+            return True                   # fills a starting hole
+        incumbent = vals[starters - 1]
+        return val > incumbent * (1.0 + _c("need_gate_upgrade_margin"))
+
+    if _clears(primary_pos, primary_val):
+        return True                       # hole filled / starter upgrade
+    if _c("need_gate_dual_rescue") >= 1.0:
+        # (a) any-asset — the primary is not the only piece that can be
+        # the point of the trade.
+        for pid in recv_ids:
+            p = players.get(pid)
+            if p is None or is_pick_asset(p):
+                continue
+            pos = getattr(p, "position", None)
+            if pos in _PRESENTMENT_POSITIONS and _clears(pos, seed_value(pid)):
+                return True
+        # (b) dual-need rescue — the user sheds surplus at a position the
+        # partner is short at. Needs the per-member ctx; without it (unit
+        # callers, the fit K-chain) this branch cannot fire.
+        if opp_ctx is not None:
+            surplus = set(position_surplus or ())
+            opp_startable = opp_ctx["startable"]
+            for pid in give_ids:
+                p = players.get(pid)
+                if p is None or is_pick_asset(p):
+                    continue
+                pos = getattr(p, "position", None)
+                if pos in surplus and pos in _PRESENTMENT_POSITIONS \
+                        and opp_startable.get(pos, 0) < _starters_at(
+                            pos, scoring_format):
+                    return True
     if outlook in ("championship", "contender"):
         return False
     if outlook == "not_sure":
@@ -2575,6 +2738,81 @@ def analyze_roster_strengths(
     if want_handcuff:
         out["handcuff_rb"] = handcuff_rb
     return out
+
+
+# ---------------------------------------------------------------------------
+# Knockout refine — per-member presentment context (2026-08-23)
+# docs/plans/knockout-refine/plan.md §2. The G6 predicates were written as a
+# JOB-level closure with no counterparty in scope, which is exactly why R5
+# was a one-sided kill and R2 a blind count. `opp_profile` already exists at
+# the top of the member loop; these two helpers are all it takes to get it
+# into the gates.
+# ---------------------------------------------------------------------------
+
+
+def _startable_ok_fn(players: dict, scoring_format: str):
+    """Build `(pid, player) -> bool`: is this a STARTABLE body at his position?
+
+    The definition is `analyze_roster_strengths`' OWN — a player whose tier
+    bin is `elite` or `starter`, i.e. the two bins that feed its
+    `starter_count` and therefore `position_needs` / `position_surplus`. No
+    second threshold is invented here: both banding modes are mirrored (the
+    `trade.position_tiers` rank-within-position cuts when the flag is on and
+    the pool is deep enough, the absolute `_TIER_STARTER` cut otherwise), so
+    a count built with this predicate always equals
+    `tier_depth[pos]["elite"] + tier_depth[pos]["starter"]` from a profile
+    over the same roster. That equality is pinned, under BOTH flag settings,
+    by test_knockout_refine.py::test_startable_matches_analyze_roster.
+
+    Built ONCE per job (the flag read and the pool scan are not per-candidate
+    work); the returned callable is what the gates call.
+    """
+    from .feature_flags import is_enabled
+    relative = is_enabled("trade.position_tiers")
+    is_superflex = scoring_format.startswith("sf")
+    pos_rank: dict[str, int] = {}
+    basis: dict[str, bool] = {}
+    if relative:
+        depth = _pool_depth_by_position(players)
+        basis = {pos: depth.get(pos, 0) >= _POS_TIER_MIN_POOL
+                 for pos in _POS_TIER_CUTS}
+        if any(basis.values()):
+            pos_rank = _positional_rank_map(players)
+
+    def _ok(pid, player) -> bool:
+        pos = getattr(player, "position", None) if player is not None else None
+        if pos not in _PRESENTMENT_POSITIONS:
+            return False
+        if relative and basis.get(pos):
+            bin_ = _bin_player_relative(pos_rank.get(str(pid)), pos,
+                                        is_superflex)
+        else:
+            bin_ = _bin_player(dynasty_value(player))
+        return bin_ in ("elite", "starter")
+
+    return _ok
+
+
+def _presentment_ctx(opp_profile: dict, user_startable: dict,
+                     startable_ok, scoring_format: str) -> dict:
+    """The per-league-mate context R5's rescue and R2's relief read.
+
+    `startable` is the OPPONENT's startable count per position, taken
+    straight off the `analyze_roster_strengths` profile the member loop has
+    already computed — no second roster pass, no second definition.
+    `user_startable` is the job-level twin (built once from
+    `_user_pos_values`). Passing `opp_ctx=None` anywhere downstream skips
+    every branch that reads this, which is what keeps the knobs' 0 settings
+    byte-identical for callers that hold no counterparty.
+    """
+    td = opp_profile.get("tier_depth", {})
+    return {
+        "startable": {pos: bins.get("elite", 0) + bins.get("starter", 0)
+                      for pos, bins in td.items()},
+        "user_startable": user_startable,
+        "startable_ok": startable_ok,
+        "scoring_format": scoring_format,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -5415,23 +5653,39 @@ class TradeService:
             _r5_needs = list(user_profile.get("position_needs", []))
             _r5_surplus = list(user_profile.get("position_surplus", []))
             _user_pos_values: dict[str, list] = {}
-            if _r5_active:
-                for _pid in user_roster:
-                    _p = self._players.get(_pid)
-                    if _p is None or is_pick_asset(_p):
-                        continue
-                    _pos = getattr(_p, "position", None)
-                    if _pos in _PRESENTMENT_POSITIONS:
-                        _user_pos_values.setdefault(_pos, []).append(
-                            (_pid, _vs(_pid)))
+            # 2026-08-23 (plan §3 C3): built whenever the presentment flag is
+            # on, not only when R5 is active. It is now R2's roster source as
+            # well, and R2 does NOT bypass on targeted jobs — gating this on
+            # `_r5_active` would silently hand targeted decks a strictly
+            # harsher R2 than untargeted ones. No verdict moves for R5: the
+            # only reader of `_user_pos_values` under `_r5_active` False was,
+            # and remains, nothing.
+            for _pid in user_roster:
+                _p = self._players.get(_pid)
+                if _p is None or is_pick_asset(_p):
+                    continue
+                _pos = getattr(_p, "position", None)
+                if _pos in _PRESENTMENT_POSITIONS:
+                    _user_pos_values.setdefault(_pos, []).append(
+                        (_pid, _vs(_pid)))
             _kills = self._presentment_kills
             _players_map = self._players
+            # Startable predicate + the user's startable counts, once per job
+            # (plan §2). Same definition analyze_roster_strengths uses, so
+            # these counts equal user_profile's elite+starter by construction.
+            _startable_ok = _startable_ok_fn(_players_map, scoring_format)
+            _user_startable = {
+                _pos: sum(1 for _pid, _v in _lst
+                          if _startable_ok(_pid, _players_map.get(_pid)))
+                for _pos, _lst in _user_pos_values.items()
+            }
 
-            def _presentment_ok(give_ids, recv_ids):
+            def _presentment_ok(give_ids, recv_ids, opp_ctx=None):
                 if not overpay_ok(give_ids, recv_ids, _vs):
                     _kills["R1"] += 1
                     return False
-                if not pos_net_ok(give_ids, recv_ids, _players_map):
+                if not pos_net_ok(give_ids, recv_ids, _players_map,
+                                  opp_ctx=opp_ctx):
                     _kills["R2"] += 1
                     return False
                 if not pick_gap_ok(give_ids, recv_ids, _vs, _players_map):
@@ -5443,7 +5697,8 @@ class TradeService:
                         user_pos_values=_user_pos_values, outlook=outlook,
                         position_needs=_r5_needs,
                         position_surplus=_r5_surplus,
-                        scoring_format=scoring_format):
+                        scoring_format=scoring_format,
+                        opp_ctx=opp_ctx):
                     _kills["R5"] += 1
                     return False
                 return True
@@ -5451,6 +5706,15 @@ class TradeService:
         for idx, member in enumerate(eligible):
             opp_profile = analyze_roster_strengths(member.roster, self._players, scoring_format)
             match_ctx = build_match_context(user_profile, opp_profile, scoring_format, is_dynasty)
+            # Plan §2 — bind THIS league-mate's context onto the job-level
+            # predicate. The generators keep calling `presentment_ok_fn(g, r)`;
+            # the ctx rides the default argument. Flag off ⇒ still None.
+            _member_presentment = _presentment_ok
+            if _presentment_ok is not None:
+                _member_presentment = (
+                    lambda _g, _r, _ctx=_presentment_ctx(
+                        opp_profile, _user_startable, _startable_ok,
+                        scoring_format): _presentment_ok(_g, _r, _ctx))
 
             alpha_opp = None
             if _infer_outlook:
@@ -5488,7 +5752,7 @@ class TradeService:
                 target_ids           = target_ids,
                 not_interested_ids   = not_interested_ids,
                 raw_user_elo         = user_elo,
-                presentment_ok_fn    = _presentment_ok,
+                presentment_ok_fn    = _member_presentment,
                 scoring_format       = scoring_format,
             )
 
@@ -5524,7 +5788,7 @@ class TradeService:
                         not_interested_ids   = not_interested_ids,
                         raw_user_elo         = user_elo,
                         user_needs           = _user_needs,
-                        presentment_ok_fn    = _presentment_ok,
+                        presentment_ok_fn    = _member_presentment,
                     )
                 else:
                     cards = self._generate_for_pair_v2(
@@ -5550,7 +5814,7 @@ class TradeService:
                         not_interested_ids   = not_interested_ids,
                         raw_user_elo         = user_elo,
                         user_needs           = _user_needs,
-                        presentment_ok_fn    = _presentment_ok,
+                        presentment_ok_fn    = _member_presentment,
                     )
                 # 2026-08-15 field bug (docs/plans/compressed-board-pool/) —
                 # a boarded member whose divergence path yields nothing used

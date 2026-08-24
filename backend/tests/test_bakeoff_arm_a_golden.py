@@ -607,7 +607,64 @@ tier_mult_bench tier_mult_depth tier_mult_elite tier_mult_solid
 tier_mult_starter trade_elo_gap_max user_elo_shrink user_gain_epsilon
 v3_diversity_max_overlap
 v3_pool_size vet_age waiver_baseline_value waiver_slot_cost youth_age
-""".split())
+""".split()) | {
+    # ── knockout refine, 2026-08-23 ────────────────────────────────────────
+    # docs/plans/knockout-refine/plan.md §3. Four knobs, four dispositions.
+    # A `.split()` blob cannot carry a per-key reason, so these are declared
+    # here instead — the disposition is the point, not the membership.
+    #
+    # All four are read by `_c()` (C4 through the `trade_service` module
+    # object, D-098) DURING generation, on the arm's own thread, INSIDE the
+    # `_cfg_override` context `model_a()` opens. Unlike `exploration_base_per_opp`
+    # they are therefore structurally arm-pinnable, so "excluded" below never
+    # means "unreachable" — it means the read never happens under arm A.
+
+    # C1. Read inside `need_gate_ok`, but only AFTER
+    # `if _c("need_gate_min_value") <= 0: return True`. MODEL_A_PROFILE pins
+    # `need_gate_min_value` at 0.0, so R5 returns True on its first line and
+    # this knob is never consulted on an arm-A thread. EXCLUDED, by the
+    # precedent already recorded for `need_gate_upgrade_margin`: "Companion
+    # knobs are deliberately absent — their predicates return early at the
+    # kill value above and never read them."
+    "need_gate_dual_rescue",
+
+    # C2. Read inside `overpay_ok`, after
+    # `if _c("max_overpay_frac") <= 0: return True`. MODEL_A_PROFILE pins
+    # `max_overpay_frac` at 0.0. EXCLUDED, same precedent, same sentence —
+    # this is the exact companion relationship `max_overpay_min_value` has.
+    "overpay_adjusted",
+
+    # C3. Read inside `pos_net_ok`, after
+    # `if _c("pos_net_cap") <= 0: return True`, AND behind a second guard
+    # (`opp_ctx is None`) that no arm can satisfy without the member-loop
+    # binding. MODEL_A_PROFILE pins `pos_net_cap` at 0.0. EXCLUDED, same
+    # precedent.
+    "pos_net_starter_relief",
+
+    # C4. The ONLY one of the four with no sibling kill knob in front of it:
+    # `trade_optimizer` reads it unconditionally in the v3 enumeration, on
+    # every arm's thread, inside the overlay. It is NOT a post-reference-SHA
+    # rule — `abs(len(give_ids) - len(recv_ids)) > 1` is present verbatim at
+    # 92c31d5 (trade_optimizer.py:507) — so arm A's correct value is the
+    # knob's identity value 1.0, not a kill value.
+    #
+    # DECISION: **pin at 1.0 in MODEL_A_PROFILE.** This is the one place the
+    # D-095 exclusion rule ("their defaults ARE the pre-wave engine, so a pin
+    # would change arm A rather than preserve it") must NOT be applied. That
+    # rule is safe only while the LIVE row keeps sitting at the pre-wave
+    # value, and here it demonstrably will not: the post-merge consolidation
+    # bundle flips the prod `model_config` row to 2 (plan §1). `reload_config()`
+    # writes that into `_cfg`, and `_cfg_override` shadows only keys the
+    # profile names — so an unpinned arm A would silently start enumerating
+    # 3-for-1 shapes the pre-wave engine could not build, with no test red.
+    # Pinning the identity value costs nothing today (it equals the default,
+    # so the golden stands un-recaptured) and is exactly the move
+    # `package_bench_trade_wide` made for the same reason one wave earlier.
+    #
+    # The profile edit itself lives in backend/bakeoff_profiles.py, which is
+    # The pin landed in bakeoff_profiles.py in the same tree (C4, D-159).
+    "v3_shape_max_delta",
+}
 
 
 def test_no_generation_knob_was_added_without_an_arm_a_decision():
