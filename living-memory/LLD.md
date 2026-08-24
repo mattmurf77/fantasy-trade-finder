@@ -39,6 +39,7 @@
 - [One number, one seam: aligning surfaces that must agree (2026-08-21, D-148)](#one-number-one-seam-aligning-surfaces-that-must-agree-2026-08-21-d-148)
 - [Append-only, version-stamped measurement tables (2026-08-21, D-144, `receipts_*`)](#append-only-version-stamped-measurement-tables-2026-08-21-d-144-receipts_)
 - [The opponent sweep is complete; a generation budget is never a deck cap (2026-08-22, D-154, `trade.full_sweep`)](#the-opponent-sweep-is-complete-a-generation-budget-is-never-a-deck-cap-2026-08-22-d-154-tradefull_sweep)
+- [Tiers-save route contract shrank: `demoted_pids` is an ignored legacy key (2026-08-24, D-160)](#tiers-save-route-contract-shrank-demoted_pids-is-an-ignored-legacy-key-2026-08-24-d-160)
 
 ---
 
@@ -672,3 +673,14 @@ and `backend/trade_gen_fit.py`. Plan: [`../docs/plans/full-sweep/`](../docs/plan
   a thread pool buys nothing under the GIL. Latency work (a per-pair result cache keyed on
   roster/board/knob state, and a fork-safety-reviewed process pool) is a phase-2 plan, not this
   one — D-154.
+
+## Tiers-save route contract shrank: `demoted_pids` is an ignored legacy key (2026-08-24, D-160)
+
+- The Quick Set save body is `{position, tiers, cleared_pids, scope?, via?}`. Old binaries
+  (v1.10–v1.16) may still send `demoted_pids`; the server accepts and **ignores** it — no pin
+  writes, no echo. Unselected previously-tiered players HOLD their tier (the #161 demote rule
+  is superseded by the operator's #381 ruling; see [D-160](DECISIONS.md)).
+- `DEMOTED_ELO` (1100) stays in `ranking_service.py` — still load-bearing for anchor
+  no-value and the D-085 goldens; only the quickset writer path was removed.
+- Rollback is a code revert, not a flag; and a backend revert cannot restore demote behavior
+  for post-fix clients (they no longer send the key).

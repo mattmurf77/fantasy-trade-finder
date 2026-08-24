@@ -14,6 +14,22 @@
 
 
 
+## 2026-08-24 — Feedback wave: 5 groups / 11 items built, QA-green, awaiting ship go/no-go (branch `claude/new-user-feedback-55320e`)
+
+Full `/feedback` pipeline run, no express. **A** (#376/#379/#394): TradesHome regains an always-on
+"Outlook & filters" row → full DNA sheet; top-row Filters button removed (#379); root cause = every
+entry flag-coupled or stranded. **B** (#397/#398): s2.2 swipe beat pinned to top via opt-in
+`GuideStep.band:'top'`. **C** (#395/#396): `align_starter_slots()` kills phantom lineup-cascade rows;
+real platform lineup template replaces the 3-WR mock default; rank chips "WR #3". **D** (#386/#391):
+LeagueSummaryScreen announces layout shifts to the guide (calculator precedent). **F** (#346/#381):
+QuickSet **HOLD** ([D-160](DECISIONS.md), supersedes #161) — server ignores legacy `demoted_pids`,
+client stops sending it. Evidence in TEST_LEDGER same date (tsc, 78/78 guards, pytest 4238 ×3, all
+sabotages re-proven by two independent QA agents, both PASS). v1.16.4 bumped. **Not on `main`,
+nothing deployed** — operator go/no-go pending; runtime evidence owed via the
+[consolidated checklist](../docs/feedback/items/346-quickset-tier-drop/testflight-checklist-batch.md).
+Triage also corrected 16 stale item statuses and backfilled INDEX.md (180/180). Batch docs:
+[`346-quickset-tier-drop/plan.md`](../docs/feedback/items/346-quickset-tier-drop/plan.md).
+
 ## 2026-08-24 — Knockout refine BUILT + measured: R5 two-sided, R1 currency knob, R2 quality-aware, 3-for-1 knob (D-159)
 
 The four gate refinements from the knockout verdict, on `claude/knockout-refine-0823` (Opus B1/B2 build, Fable adversarial review, lead-merged). Each behind its own `model_config` kill knob; off settings byte-identical to `c321958` (proven mechanically). The read-only prod replay of FFV3 picked the flip values: **filler 0.15 / gap 0 / shape 2 / overpay stays raw** — consolidation-family cards 1 → 8 with junk share flat (18%), while filler 0.10 (junk 27%) and adjusted R1 (kills 2x1s 28→21) were measured and declined. Operator's #341 intent recorded: positional protection is R2's job, now quality-aware (startable depth both sides); the shape rule is a knob. Suite 4230 green. Flips applied post-deploy via admin API; the ledger entry carries the numbers.

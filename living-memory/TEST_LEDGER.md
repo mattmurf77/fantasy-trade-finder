@@ -15,6 +15,31 @@
 
 
 
+## 2026-08-24 — Feedback wave (5 groups, 11 items): full gates green on `claude/new-user-feedback-55320e`; TestFlight checklists owed
+
+Batch: [`docs/feedback/items/346-quickset-tier-drop/plan.md`](../docs/feedback/items/346-quickset-tier-drop/plan.md).
+Groups A (#376/#379/#394 outlook & filters row), B (#397/#398 tour pin), C (#395/#396 lineup impact),
+D (#386/#391 guide layout notify), F (#346/#381 QuickSet HOLD, [D-160](DECISIONS.md)). All fast-track, full gates, no express.
+
+- **Phase 1:** dual-agent plan/author/critique per group; every critique round found real defects
+  (self-satisfying checklist steps in B/D, a blacklist-beatable guard spec in A, two self-satisfying
+  pytest sabotages in C caught by hand-recomputation, 7 contract amendments in F). All resolved, logs in each folder.
+- **Phase 2:** 7 build agents in isolated worktrees, disjoint ownership held; merges clean
+  (one intended status.md both-halves conflict, resolved keep-both).
+- **Phase 3 (round 1, agents A+B independently, commit `c8b0e224`):** both PASS all five groups.
+  `tsc --noEmit` clean · **78/78** `mobile/tests/check-*.js` green · testid-lint OK · full
+  `pytest backend/tests` **4238 passed / 1 skipped** (×3 independent clean runs) · every PRD sabotage
+  mapping re-proven red→green by both agents independently (12 in A, 5+2 probes in B, 6+2 in C, 4 in D, 7+guard-13 in F)
+  · `web/`+`extension/` diff empty · Group F mobile↔backend payload shape verified consistent.
+  One convergent finding (F-1, minor): Group F T-2's sabotage wording overstated (conditional echo only) — PRD tightened, no code change.
+- **Known environment gotcha (recorded):** `test_deck_signal_v2.py::test_flag_on_writes_impressions_in_served_order`
+  fails against a `data/trade_finder.db` left by a previous full sweep in the same tree; fresh data dir passes.
+  Not a code regression (bisected: same commit passes clean).
+- **Version:** mobile 1.16.4 (app.json + Info.plist; `test_app_version_consistency` green).
+- **Owed (the only runtime evidence, D-056):** the five operator TestFlight checklists —
+  consolidated in [`docs/feedback/items/346-quickset-tier-drop/testflight-checklist-batch.md`](../docs/feedback/items/346-quickset-tier-drop/testflight-checklist-batch.md).
+  CI on the pushed sha pending at entry time; ship gate = operator go/no-go.
+
 ## 2026-08-24 — Knockout refine (R5/R1/R2/shape) — full gates, MEASURED on prod FFV3, on `claude/knockout-refine-0823`
 
 Plan: [`docs/plans/knockout-refine/`](../docs/plans/knockout-refine/plan.md) · [D-159](DECISIONS.md). Built by Opus B1/B2, adversarially reviewed by a Fable reviewer (verdict: safe to merge; the D-159 renumber + two doc fixes, all done pre-merge).

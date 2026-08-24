@@ -46,3 +46,17 @@ proof per requirement, and a manual TestFlight checklist for the operator.
 
 Batch ships as one wave (Phase 5): CI green (pytest, tsc, testid-lint),
 TEST_LEDGER entry, docs-sync, then explicit operator go/no-go.
+
+## Final status (2026-08-24, Phase 5 entry)
+
+All five groups QA-green at `c8b0e224` (QA round 1, agents A+B, both PASS; reports
+`qa-round-1-agent-{A,B}.md` in each canonical folder). Version 1.16.4. Awaiting operator
+go/no-go; runtime evidence owed via [testflight-checklist-batch.md](testflight-checklist-batch.md).
+
+| Group | Items | Spec | Build (branch @ sha) | QA |
+|---|---|---|---|---|
+| A | #376 #379 #394 | [prd](../376-finder-filters-regression/prd.md) | `feat/fb376-outlook-filters-row-mobile` @ f449b1ad | PASS×2 |
+| B | #397 #398 | [prd](../397-swipe-tour-placement/prd.md) | `feat/fb397-swipe-tour-mobile` @ d42b2a68 | PASS×2 |
+| C | #395 #396 | [prd](../395-lineup-impact-superflex/prd.md) | `feat/fb395-lineup-impact-backend` @ 3e75494e + `feat/fb395-rank-chip-mobile` @ 71d70153 | PASS×2 |
+| D | #386 #391 | [prd](../386-analyst-playoff-odds/prd.md) | `feat/fb386-guide-layout-notify-mobile` @ f39dc359 | PASS×2 |
+| F | #346 #381 | [prd](prd.md) | `feat/fb346-quickset-hold-backend` @ 259f1e90 + `feat/fb346-quickset-hold-mobile` @ b7742a87 | PASS×2 |
