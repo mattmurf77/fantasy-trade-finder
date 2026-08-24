@@ -27,6 +27,7 @@ Scope block: [`docs/plans/onboarding-tour-merge/scope-wave-a.md`](../docs/plans/
 | Every `npm run test:*` guard | **77/77 passed** (looped over `package.json`, none skipped) |
 | `mobile/scripts/testid-lint.sh` | OK |
 | Assertion counts on the three extended suites | `check-calc-tour` 168 ✓ · `check-guide-script` 455 PASS · `check-card-disposition` 17 PASS |
+| `githooks/pre-push` simulator gate | **skipped** — `FTF_SKIP_SIM_GATE=1`, the standing posture under [D-056](DECISIONS.md). What ran instead is every other row of this table plus the scope block's §5 code-walk; `qa/sim-runs/last-sim-run.json` is deliberately not written |
 
 **New structural coverage.** `check-calc-tour.js` §45 (a–n) pins both parks three ways each: the
 park is taken at the right seam, it is **time-bounded** and expiry ends the run (an unbounded park
