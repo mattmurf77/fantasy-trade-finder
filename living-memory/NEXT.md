@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-23 — Onboarding × calc tour merge: operator decisions, then Wave A](#2026-08-23--onboarding--calc-tour-merge-operator-decisions-then-wave-a)
 - [2026-08-22 — Full sweep: merge the review PR, then the build, then the operator flips](#2026-08-22-full-sweep-merge-the-review-pr-then-the-build-then-the-operator-flips)
 - [2026-08-22 — negmem: BUILT dark; rollout is two operator flips](#2026-08-22--negmem-built-dark-rollout-is-two-operator-flips)
 - [2026-08-21 — Receipts: the P0 prod read, then grade dark, then the screen](#2026-08-21--receipts-the-p0-prod-read-then-grade-dark-then-the-screen)
@@ -32,6 +33,17 @@
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## 2026-08-23 — Onboarding × calc tour merge: operator decisions, then Wave A
+
+1. **Operator: work [plan §4](../docs/plans/onboarding-tour-merge/plan.md)** — five decisions:
+   what "merge calc with the trade-finder page" means for D-151, bridge-vs-full-spine, the cost of
+   auto-dispatching the guided first search, lighting `growth.invite_join_link` for the invite
+   moment, and whether the multi-platform landing waits for its own wave. *Why now: Segrave's
+   notes landed while the #384 tour machinery is fresh; Wave A is shippable in one small PR.*
+2. **Wave A on a go:** Next buttons on every onboarding talk beat (the W7 rule, applied to
+   `s0.1`/`s2.1`/`s5.x`/`s8.1`/`n1`/err beats), `landing.try_before_sync` → false, `s0.1` +
+   `s2.1` copy. Full gates; no schema/API surface.
 
 ## 2026-08-22 — Full sweep: merge the review PR, then the build, then the operator flips
 
