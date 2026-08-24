@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-24 — Quick Set `via` gap PR: operator confirm + merge, then the TestFlight check](#2026-08-24--quick-set-via-gap-pr-operator-confirm--merge-then-the-testflight-check)
 - [2026-08-23 — Onboarding × calc tour merge: operator decisions, then Wave A](#2026-08-23--onboarding--calc-tour-merge-operator-decisions-then-wave-a)
 - [2026-08-22 — Full sweep: merge the review PR, then the build, then the operator flips](#2026-08-22-full-sweep-merge-the-review-pr-then-the-build-then-the-operator-flips)
 - [2026-08-22 — negmem: BUILT dark; rollout is two operator flips](#2026-08-22--negmem-built-dark-rollout-is-two-operator-flips)
@@ -33,6 +34,11 @@
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## 2026-08-24 — Quick Set `via` gap PR: operator confirm + merge, then the TestFlight check
+
+1. **Operator: confirm + merge the `claude/elegant-feynman-c3689e` PR** ([D-160](DECISIONS.md), [scope](../docs/plans/quickset-analytics-via/scope.md), [addendum](../docs/business/analytics/2026-08-24-quickset-via-gap.md)). One mobile emitter change lighting up three dark server reads (`quickset_completed`, `tier_save.via`, point-of-use `ranking_method='quickset'`) + the semantics correction (per tagged commit, never per completed position). Held unmerged because analytics events are a bright-line surface. *Why now: Group F (quickset tier-drop fix) planning surfaced it; every day unmerged is another day the Quick Set funnel reads zero.*
+2. After the next mobile release containing it: run the **TestFlight checklist** in scope §3 and log in TEST_LEDGER; remember the seam — don't trend `rank_quickset` / `tier_save.via` splits across that release.
 
 ## 2026-08-23 — Onboarding × calc tour merge: operator decisions, then Wave A
 

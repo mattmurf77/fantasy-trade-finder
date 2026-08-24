@@ -124,8 +124,12 @@ export default function QuickSetTiersScreen() {
   // Guided Onboarding v2 — `quickset_started {position, source}`: the
   // client-observable INTENT half of the Quick Set funnel, and `N1`'s
   // declared adoption event. Its completion twin (`quickset_completed`) is
-  // SERVER-fired per position and can never be observed here, so the client
-  // receipt written at the end of the walk stands in for it.
+  // SERVER-fired (per via:'quickset'-tagged tier commit — NOT per completed
+  // position; a walk that accepts consensus by tapping through saves
+  // nothing and is server-invisible) and can never be observed here, so the
+  // client receipt written at the end of the walk stands in for it. The
+  // per-position completion read is analysis-side: `quickset_step_advanced`
+  // with tier_index == tier_count - 1.
   //
   // `source` is the guided hand-off vs. an organic entry. `onboardingReturn`
   // is that hand-off's marker today (TradesScreen's `acceptQuicksetPrompt`
@@ -361,13 +365,19 @@ export default function QuickSetTiersScreen() {
               quicksetCompletedPositions: [...donePositions, position],
             });
           }
-          // No client `quickset_completed` here either (2026-08-13): the name
-          // is SERVER-fired (per completed position, on the scoped save) and
-          // the taxonomy's client/server namespaces are disjoint by an
-          // import-time assert, so this call was dropped behind a 200 since
-          // it shipped. Removed rather than renamed — the server row is the
-          // authoritative completion; its lost `onboarding` prop is recorded
-          // as accepted loss in the 2026-08-13 tracking-plan addendum.
+          // No client `quickset_completed` here either (2026-08-13): the
+          // name is SERVER-fired and the taxonomy's client/server namespaces
+          // are disjoint by an import-time assert, so this call was dropped
+          // behind a 200 since it shipped. Removed rather than renamed; its
+          // lost `onboarding` prop is recorded as accepted loss in the
+          // 2026-08-13 tracking-plan addendum. CORRECTION (2026-08-24): the
+          // server row is NOT a per-completed-position signal and never was
+          // — it fires per via:'quickset'-tagged tier commit (dark until
+          // this build, which is the first to send the tag), and a walk
+          // that tap-accepts consensus commits nothing. The authoritative
+          // per-position completion read is `quickset_step_advanced` with
+          // tier_index == tier_count - 1; see
+          // docs/business/analytics/2026-08-24-quickset-via-gap.md.
           //
           // Guided Onboarding v2 (FR-E3) — the CLIENT receipt that stands in
           // for that server-fired name, so `N1`/`s3.2` can actually retire.
@@ -423,9 +433,16 @@ export default function QuickSetTiersScreen() {
         cleared,
         demoted,
         // rookie-draft M2 — merged-band scoped save + the forensic via tag.
+        // Unscoped walks tag via:'quickset' (2026-08-24): the server has
+        // branched on that value since analytics P0 (FR-20
+        // `quickset_completed` per tagged commit, tier_save's `via` prop,
+        // ranking_method written 'quickset' at the point of use) but no
+        // client ever sent it — every mobile Quick Set save landed as plain
+        // 'tiers' and all three reads were dark. See
+        // docs/business/analytics/2026-08-24-quickset-via-gap.md.
         rookieScope.isRookie
           ? { scope: 'rookie', via: 'rookie_quickset' }
-          : undefined,
+          : { via: 'quickset' },
       ),
     onSuccess: (_data, { ids }) => {
       const nextSaved = { ...savedByTier, [tier]: ids };

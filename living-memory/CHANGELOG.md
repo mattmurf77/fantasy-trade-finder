@@ -14,6 +14,10 @@
 
 
 
+## 2026-08-24 — Quick Set `via` gap: the tag no client ever sent (D-160; PR open, HELD for operator)
+
+Found while planning Group F: `POST /api/tiers/save` has branched on `via == "quickset"` since analytics P0 — FR-20 `quickset_completed`, `tier_save.props.via`, P0-1's point-of-use `ranking_method='quickset'` — but **no client ever sent the value** (mobile's `saveTiers` whitelisted only `rookie_*`; web has no Quick Set), so all three reads were dark for every production walk while the 2026-08-13 addendum deleted the client emitter calling the server row "the authoritative completion". Worse, "per completed position" was never implementable: the walk saves rung by rung and a consensus-accepting user saves nothing. Fix on `claude/elegant-feynman-c3689e`: unscoped Quick Set saves now tag `via:'quickset'` (one emitter change, no registry change); semantics corrected everywhere to "per tagged tier commit", per-position completion = `quickset_step_advanced` at the last rung. Guard `check-quickset-via` (sabotage-proven), tsc green. Addendum: `docs/business/analytics/2026-08-24-quickset-via-gap.md`; scope: `docs/plans/quickset-analytics-via/`. Held unmerged — analytics bright line. Seam: do not trend `rank_quickset` / `tier_save.via` across the next mobile release.
+
 ## 2026-08-24 — Knockout refine BUILT + measured: R5 two-sided, R1 currency knob, R2 quality-aware, 3-for-1 knob (D-159)
 
 The four gate refinements from the knockout verdict, on `claude/knockout-refine-0823` (Opus B1/B2 build, Fable adversarial review, lead-merged). Each behind its own `model_config` kill knob; off settings byte-identical to `c321958` (proven mechanically). The read-only prod replay of FFV3 picked the flip values: **filler 0.15 / gap 0 / shape 2 / overpay stays raw** — consolidation-family cards 1 → 8 with junk share flat (18%), while filler 0.10 (junk 27%) and adjusted R1 (kills 2x1s 28→21) were measured and declined. Operator's #341 intent recorded: positional protection is R2's job, now quality-aware (startable depth both sides); the shape rule is a knob. Suite 4230 green. Flips applied post-deploy via admin API; the ledger entry carries the numbers.

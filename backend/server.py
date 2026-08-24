@@ -8868,10 +8868,18 @@ def save_tiers_route():
         except Exception as ev_err:
             log.warning("record_event(tier_save) failed: %s", ev_err)
 
-        # FR-20 (analytics P0, LLD §6.4b): QuickSet completion is a
-        # first-class funnel event — one per position committed through the
-        # QuickSet walk. duration_ms/skipped are client-passed (absent from
-        # old binaries → null).
+        # FR-20 (analytics P0, LLD §6.4b): the QuickSet funnel's server
+        # event. SEMANTICS CORRECTION (2026-08-24): one per via-tagged tier
+        # COMMIT, not per completed position — Quick Set saves rung by rung,
+        # the route cannot tell which commit is the walk's last, and a walk
+        # that tap-accepts consensus commits nothing at all. Dark until the
+        # first mobile build with the 2026-08-24 fix: no client ever sent
+        # via:'quickset' before it (web has no Quick Set), so this branch
+        # had zero production firings.
+        # duration_ms/skipped are client-passed (mobile sends neither →
+        # null). Per-position completion is analysis-side:
+        # `quickset_step_advanced` with tier_index == tier_count - 1. See
+        # docs/business/analytics/2026-08-24-quickset-via-gap.md.
         if via == "quickset":
             try:
                 record_event(

@@ -314,12 +314,18 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # seam date is recorded in the addendum.
     #
     # DELIBERATELY ABSENT: `quickset_completed`. The client emitter in
-    # QuickSetTiersScreen.tsx collided with the server-fired name (the
-    # scoped save fires the authoritative row) — registering it here would
-    # trip the import-time disjointness assert below and take the app down
-    # at boot. The client emitter is REMOVED in this same commit; its
-    # `onboarding` prop (was this walk an onboarding return?) is the one
-    # signal that dies with it, recorded as accepted loss in the addendum.
+    # QuickSetTiersScreen.tsx collided with the server-fired name —
+    # registering it here would trip the import-time disjointness assert
+    # below and take the app down at boot. The client emitter is REMOVED in
+    # this same commit; its `onboarding` prop (was this walk an onboarding
+    # return?) is the one signal that dies with it, recorded as accepted
+    # loss in the addendum. CORRECTION (2026-08-24): the server row was
+    # believed to fire "per completed position on the scoped save" — it
+    # actually fires per via:'quickset'-tagged tier COMMIT, and no client
+    # sent that tag until the 2026-08-24 mobile fix, so the row was dark
+    # the whole time. Per-position completion is derived from the client's
+    # `quickset_step_advanced` (tier_index == tier_count - 1). See
+    # docs/business/analytics/2026-08-24-quickset-via-gap.md.
     #
     # Interrupt arbiter + prompt surfaces (teardown S4 PRD-04,
     # flag ux.prompt_arbiter):

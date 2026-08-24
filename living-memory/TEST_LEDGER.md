@@ -15,6 +15,19 @@
 
 
 
+## 2026-08-24b — Quick Set `via` gap fix — full gates, on `claude/elegant-feynman-c3689e` (D-160; held for operator)
+
+Scope: [`docs/plans/quickset-analytics-via/scope.md`](../docs/plans/quickset-analytics-via/scope.md) · addendum [`2026-08-24-quickset-via-gap.md`](../docs/business/analytics/2026-08-24-quickset-via-gap.md). One emitter change (unscoped mobile Quick Set saves tag `via:'quickset'`); no server code change, no taxonomy registry change.
+
+| Gate | Result |
+|---|---|
+| `pytest backend/tests -k "not calibration_gate"` | **4226 passed, 1 failed, 1 skipped** — the failure (`test_deck_signal_v2.py::test_flag_on_writes_impressions_in_served_order`) reproduces on the **clean origin/main tree** (`git stash` → still fails) under local Python **3.14.4**; the known 3.12-skew class (this file, 2026-08-13). Unrelated to the change; CI on the PR sha is the arbiter |
+| Server branch coverage (pre-existing, all green in the run) | `test_analytics_p0.py::test_quickset_completed_fires_with_props` + `::test_quickset_event_absent_for_plain_tier_save`, `test_rookie_scope.py::test_rookie_via_tags_are_recorded_and_do_not_fire_quickset_completed`, `test_events_api.py` disjointness pins |
+| New structural guard | `mobile/tests/check-quickset-via.js` (`npm run test:quickset-via`) — 13 asserts green. **Sabotage:** non-rookie save arm reverted to `undefined` (the original bug) → guard RED on exactly the pinned assert; restore → green |
+| `tsc --noEmit` (strict) | green |
+| `testid-lint.sh` | OK (no testIDs touched) |
+| Runtime | operator TestFlight checklist in scope §3 — UNRUN, owed after the next mobile release containing this change |
+
 ## 2026-08-24 — Knockout refine (R5/R1/R2/shape) — full gates, MEASURED on prod FFV3, on `claude/knockout-refine-0823`
 
 Plan: [`docs/plans/knockout-refine/`](../docs/plans/knockout-refine/plan.md) · [D-159](DECISIONS.md). Built by Opus B1/B2, adversarially reviewed by a Fable reviewer (verdict: safe to merge; the D-159 renumber + two doc fixes, all done pre-merge).

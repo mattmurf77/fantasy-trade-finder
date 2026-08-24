@@ -1493,3 +1493,15 @@ It resolves the “I'm Fleeced” problem by not fighting it — the ram says th
 
 **Deliberately not here:** the viewer-must-win gate (Q-030a, operator decision pending), `waiver_slot_cost`, filler code changes, diversity-key work, FLEX-aware feasibility.
 
+
+## D-160 — `quickset_completed` Means "Tagged Tier Commit", Because the Save Route Cannot See a Completed Position
+
+**Date:** 2026-08-24 · **Status:** built, held for operator confirmation before merge · **Scope:** [`docs/plans/quickset-analytics-via/scope.md`](../docs/plans/quickset-analytics-via/scope.md) · **Addendum:** [`docs/business/analytics/2026-08-24-quickset-via-gap.md`](../docs/business/analytics/2026-08-24-quickset-via-gap.md)
+
+**Context:** `POST /api/tiers/save` has branched on `via == "quickset"` since analytics P0 (FR-20 `quickset_completed`, `tier_save.props.via`, P0-1's point-of-use `ranking_method` write), but no client ever sent the value — mobile's `saveTiers` only whitelisted the `rookie_*` tags and web has no Quick Set — so all three reads were dark for every production walk. Meanwhile the docs (2026-08-13 addendum, taxonomy comments, cross-client-invariants) called the server row "the authoritative completion, fired per completed position", and the G-031 sweep deleted the client completion emitter on that ground.
+
+**Decision:** Fix the client (unscoped Quick Set saves tag `via:'quickset'`) and correct the recorded semantics to what the route can honestly deliver: **one event per tagged tier COMMIT**. "Per completed position" was never implementable at the save route — Quick Set saves rung by rung, the route cannot tell which commit is last, and the walk's selection starts empty so a consensus-accepting user completes a position with zero saves. The per-position completion read is `quickset_step_advanced` with `tier_index == tier_count - 1` (client, already registered).
+
+**Alternatives considered:** (a) tag only the final rung's save — preserves the documented per-position shape but misses every walk whose last rung is skipped/empty, leaves 7/8 `tier_save` rows mislabeled `'tiers'`, and leaves `ranking_method` mostly wrong; (b) docs-only correction — leaves `FEATURE_VERTICALS["rank_quickset"]` permanently zero and Quick Set with no server signal at all; (c) a new client `quickset_walk_finished` event — the honest per-position signal, but new taxonomy surface, reserved (per the 2026-08-13 addendum) for when the split is actually needed.
+
+**Consequences:** `rank_quickset`, funnel stage 4's own entry, `tier_save.via` splits, and the `quickset` ranking-method label all light up at the next mobile release; do not trend across the seam. `duration_ms`/`skipped` stay null (no honest whole-walk value per commit) so `report_time`'s quickset row stays dark — as it always effectively was. Consensus-accepting walks remain server-invisible. No taxonomy registry change; INTENT classification unchanged.
