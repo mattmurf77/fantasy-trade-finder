@@ -40,7 +40,8 @@ import { resolveShareUrl } from '../utils/shareLinks';
 import { chalk, fonts, ice, ink, radii, semantic, space, type } from '../theme/chalkline';
 import { useSession } from '../state/useSession';
 import { useFinderTargets } from '../state/useFinderTargets';
-import { queueTradeForOpponent, type CalcQueueReason } from '../api/trades';
+import { forkCanvasSearch } from '../utils/canvasSearch';
+import { queueCalcTrade } from '../utils/queueCalcTrade';
 import {
   calcTourHandOffToDeck,
   calcTourInLeagueReady,
@@ -105,29 +106,10 @@ function useDebounced<T>(value: T, ms: number): T {
   return v;
 }
 
-// #384 W6-A — the ✓ cell's refusal copy, one line per server reason
-// (D-152; the enum is a cross-client invariant). Every line names WHOSE
-// preference refused it and why, because the alternative — a generic
-// "couldn't queue that" — is the dishonest state the cell was disabled to
-// avoid. `name` is the counterparty's username, already @-less.
-function queueRefusalLine(reason: CalcQueueReason | undefined, name: string): string {
-  switch (reason) {
-    case 'opponent_untouchable':
-      return `@${name} has someone in this trade marked untouchable.`;
-    case 'opponent_not_interested':
-      return `@${name} isn't interested in one of the players you're offering.`;
-    case 'fails_fairness_floor':
-      return `@${name}'s board reads this as a loss for them, so it won't surface.`;
-    case 'assets_not_on_roster':
-      return 'Those assets are no longer on the rosters this trade needs.';
-    case 'not_league_member':
-      return `@${name} isn't in this league.`;
-    case 'likes_you_off':
-      return 'Queueing trades for other managers is turned off right now.';
-    default:
-      return "Couldn't queue that. Try again.";
-  }
-}
+// #384 W6-A — the ✓ cell's refusal copy (D-152) MOVED to
+// `utils/queueCalcTrade.ts` on 2026-08-24 (D-158): the canvas gained a second
+// host, and one copy table cannot live in one of two hosts. Same six lines,
+// same enum, same behavior — see that file's header.
 
 export default function TradeCalculatorScreen({ route, navigation }: any) {
   // #190 — deck "Edit in calculator": land in In-league mode with the
@@ -137,8 +119,18 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
   const prefill = route?.params?.prefill as
     | { opponentUserId?: string; giveIds?: string[]; receiveIds?: string[] }
     | undefined;
-  const [mode, setMode] = useState<CalcMode>(prefill ? 'league' : 'live');
   const calcMergedOn = useFlag('calc.merged_layout');
+  // D-158 (Wave B0) — with the guided landing hosting the In-league canvas
+  // inline, THIS page is the #310 league-free promise and nothing else: no
+  // mode tabs, no In-league branch, and no calculator tour (beat n10 is
+  // "Tap In league", pointing at a tab that no longer exists — Wave B
+  // rebuilds the tour against the inline module). Flag OFF ⇒ every line
+  // below reads exactly as it did: two tabs, prefill-lands-in-league, the
+  // auto-tour and the "Show me around" re-entry.
+  const inlineHomeOn = useFlag('calc.inline_home');
+  const [mode, setMode] = useState<CalcMode>(
+    prefill && !inlineHomeOn ? 'league' : 'live',
+  );
 
   // #384 W4 — the tour's first beat points at the In-league tab, so it needs
   // a measurable node. Registered here because the tabs live on this screen.
@@ -197,10 +189,12 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
   // #190 — a NEW prefill arriving on an already-mounted screen (deck →
   // edit → back → edit another card) re-asserts In-league mode; the key
   // on InLeagueCalculator below remounts it with the new package.
+  // D-158 — flag on, there is no In-league mode to re-assert; the deck's
+  // edit-in-calculator paths prefill the INLINE canvas and never push here.
   const prefillKey = prefill ? JSON.stringify(prefill) : null;
   useEffect(() => {
-    if (prefillKey) setMode('league');
-  }, [prefillKey]);
+    if (prefillKey && !inlineHomeOn) setMode('league');
+  }, [prefillKey, inlineHomeOn]);
 
   // In-league mode (Mode B) is only offered when a real league is active.
   const league = useSession((s) => s.league);
@@ -230,8 +224,16 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
   // `transitionEnd` measures a settled layout. `InteractionManager` is the
   // fallback for a presentation that emits no transition event (a replace, a
   // deep link straight onto this route); whichever lands first wins, once.
+  //
+  // D-158 — …and a fifth guard: with `calc.inline_home` on the tour is OFF on
+  // this screen entirely. n10 ("Tap In league") is an `action` beat that only
+  // advances on a real tab switch, and this wave deletes the tab; a runner
+  // that cannot clear its first beat would open the auto-tour and stall.
+  // Wave B retargets the calculator beats at the inline module and re-lights
+  // this. Suppressing at the START is the whole suppression — the runner is
+  // never begun, so no hold is taken and no beat is requested.
   useEffect(() => {
-    if (!calcMergedOn || prefill || !hasLeague) return;
+    if (!calcMergedOn || prefill || !hasLeague || inlineHomeOn) return;
     let started = false;
     const begin = () => {
       if (started) return;
@@ -255,7 +257,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
       clearTimeout(fallback);
       calcTourScreenBlurred();
     };
-  }, [calcMergedOn, prefill, hasLeague, navigation]);
+  }, [calcMergedOn, prefill, hasLeague, inlineHomeOn, navigation]);
 
   // Unmount is not the only way to leave. A push over this screen (or a tab
   // change) leaves it MOUNTED, and a tour narrating a page nobody is looking
@@ -679,7 +681,11 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
         onContentSizeChange={notifyGuideTargetsMoved}
         scrollEventThrottle={16}
       >
-        {/* Mode switch: In-league vs league-free real consensus values. */}
+        {/* Mode switch: In-league vs league-free real consensus values.
+            D-158 — flag on, this page IS Real values, so there is nothing to
+            switch between and the row goes away with the In-league branch
+            below it. */}
+        {inlineHomeOn ? null : (
         <View style={styles.modeRow}>
           {modeTabs.map((m) => {
             const active = mode === m.key;
@@ -700,6 +706,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
             );
           })}
         </View>
+        )}
 
         {/* #213 — one quiet path from the hand-built calculator to the
             finder. A single text-link row under the mode tabs covers every
@@ -734,7 +741,13 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
         </Pressable>
         )}
 
-        {mode === 'league' && league && user ? (
+        {/* D-158 — the In-league branch is DELETED under `calc.inline_home`:
+            the guided landing hosts this same component inline, and two live
+            canvases (one here, one there) would be two drafts of the same
+            trade. `mode` can no longer become 'league' flag-on (the tabs are
+            gone and the prefill re-assert is gated), so this reads as a
+            belt-and-braces guard that also makes the deletion structural. */}
+        {!inlineHomeOn && mode === 'league' && league && user ? (
           <InLeagueCalculator
             // #190 — remount when a different card is handed off so a
             // second "Edit in calculator" from the deck re-applies its
@@ -764,8 +777,12 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
             // (guideDismissed, folded into guidedAvatarActive) still see no
             // link — whether an explicit "Show me around" should override a
             // permanent opt-out is an open product question, not decided here.
+            // D-158 — …and never under `calc.inline_home`: the tour's first
+            // beat points at the In-league tab this wave removes, so the
+            // re-entry must not offer a walk it cannot start (the auto-start
+            // effect above is gated on the same flag).
             onShowMeAround={
-              guidedAvatarActive() && guideV2Active()
+              !inlineHomeOn && guidedAvatarActive() && guideV2Active()
                 ? () =>
                     startCalcTour('show_me_around', {
                       openOutlook: () => outlookOpenerRef.current?.(),
@@ -792,64 +809,37 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
             // generic failure the disabled cell used to stand in for.
             // The SCREEN owns the request, the toast and the analytics; the
             // component owns the canvas and the in-flight lock.
+            // D-158 — the body moved to `utils/queueCalcTrade` when the canvas
+            // gained a second host; the request, the one `calc_trade_queued`
+            // row and the reason-specific copy are now ONE implementation both
+            // hosts call. The SCREEN still owns its Toast — it renders the
+            // descriptor the helper returns.
             onLikeTrade={async ({ giveIds, receiveIds, opponent }) => {
-              let res: Awaited<ReturnType<typeof queueTradeForOpponent>> | null = null;
-              try {
-                res = await queueTradeForOpponent({
-                  leagueId: league.league_id,
-                  opponentUserId: opponent.userId,
-                  giveIds,
-                  receiveIds,
-                });
-              } catch {
-                res = null;
-              }
-              const queued = !!res?.queued;
-              // ONE event, both outcomes. `reason` is absent on a success —
-              // the taxonomy allows the prop, the emitter omits it.
-              track(
-                'calc_trade_queued',
-                queued ? { queued: true } : { queued: false, reason: res?.reason ?? 'error' },
-                'TradeCalculator',
-              );
-              if (queued) {
-                haptics.success();
-                setToast({
-                  msg: res?.already_queued
-                    ? `Already queued for @${opponent.name}.`
-                    : `Queued for @${opponent.name} — it'll show in their suggestions.`,
-                  tone: 'success',
-                });
-              } else {
-                haptics.warning();
-                setToast({
-                  msg: queueRefusalLine(res?.reason, opponent.name),
-                  tone: res ? 'warn' : 'error',
-                });
-              }
+              const { toast: t } = await queueCalcTrade({
+                leagueId: league.league_id,
+                opponent,
+                giveIds,
+                receiveIds,
+                screen: 'TradeCalculator',
+              });
+              setToast(t);
             }}
             // #384 — the merged layout's own controls. The component owns
             // the canvas; the SCREEN owns navigation, so the finder hand-off
             // and the tour re-entry are passed in rather than reached for.
             onFindATrade={({ give, receive, opponent }) => {
-              // D-153 — the fork, decided HERE and reported as `path`:
-              // a canvas with a give side is a fairness question about THAT
-              // package; an empty canvas is the model's question. A canvas
-              // with only RECEIVE assets counts as empty: the fair sweep
-              // prices a give side, and there is nothing to price.
-              const giveIds = give.map((p) => p.id);
-              const receiveIds = receive.map((p) => p.id);
-              const fair = giveIds.length > 0;
-              track(
-                'calc_find_a_trade_tapped',
-                {
-                  path: fair ? 'fair' : 'model',
-                  give_count: give.length,
-                  receive_count: receive.length,
-                  has_partner: !!opponent,
-                },
+              // D-153 — the fork: a canvas with a give side is a fairness
+              // question about THAT package; an empty canvas is the model's
+              // question. A canvas with only RECEIVE assets counts as empty:
+              // the fair sweep prices a give side, and there is nothing to
+              // price. D-158 moved the decision AND its
+              // `calc_find_a_trade_tapped` row into `utils/canvasSearch` so
+              // the inline host reaches the same verdict from one function.
+              const fork = forkCanvasSearch(
+                { give, receive, opponent },
                 'TradeCalculator',
               );
+              const { anchor } = fork;
               // n18 ("Now tap Find a Trade") is an action beat: this tap is
               // the only thing that can move it, and it must move BEFORE the
               // navigation so the runner parks instead of being blurred out.
@@ -871,7 +861,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
                 opponent: opponent ?? null,
                 autoRun: true,
                 origin: 'calculator',
-                ...(fair ? { fairAnchor: { giveIds, receiveIds } } : {}),
+                ...(anchor ? { fairAnchor: anchor } : {}),
               });
               // popTo, not navigate: without `pop` (and with no `getId` on
               // TradesHome) routers 7.5.3 PUSHES a second TradesHome, leaving

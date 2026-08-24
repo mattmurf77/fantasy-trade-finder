@@ -15,6 +15,29 @@
 
 
 
+## 2026-08-24b — Wave B0 the layout merge (`calc.inline_home`) — full gates, FLAG DARK, NOT MERGED, on `feat/inline-home-b0`
+
+Scope: [`docs/plans/onboarding-tour-merge/scope-wave-b0.md`](../docs/plans/onboarding-tour-merge/scope-wave-b0.md) · [D-158](DECISIONS.md) · plan §3b. Branched from `origin/main` @ `ff153a0f`. **No PR, no merge.**
+
+| Gate | Result |
+|---|---|
+| `mobile` `tsc --noEmit` | clean, exit 0 |
+| Every `npm run test:*` guard | **78 ran, 0 failed** (77 existing + the new `test:inline-home`) |
+| `bash mobile/scripts/testid-lint.sh` | `testid-lint OK` |
+| `python3 -m pytest backend/tests -q` | **4230 passed, 1 skipped**, 336 s, exit 0 |
+
+**New guard `mobile/tests/check-inline-home.js`** (10 sections, 46 assertions). Pins, in order: the flag ships **false** in `config/features.json` with a D-158/kill-switch comment, is mirrored false into `release.json` / `onboarding-v2.json` / `profiles-on.json`, and is registered in `backend/feature_flags.py`; **exactly one** `<TradeBuildCanvas>` mount, with `canvasHost` resolving the flag path AHEAD of the #270 experiment and the experiment's own `!firstRun && !singlePin` gates intact; the rail dies only on the flag path and `showSuggestionRail` defaults to `true`; no `onShowMeAround` reaches the inline mount; the pushed page's tour is refused at BOTH doors with the guard as an effect dep, and `utils/calcTour.ts` is untouched (Wave A owns it); the fork and the ✓ queue are each **one definition, two callers, no second emitter**; the inline search neither navigates nor writes a handoff, stamps `deckOrigin:'calculator'`, and adds no `generateMutation.mutate` site (count still 8); the receipt's **Clear IS `handleSearchAllTrades`** and both end-of-deck Search-all buttons stand aside for it; all three `navigate('TradeCalculator', {prefill})` calls survive for the flag-off path; `CHIPS` still says `Calc`.
+
+**Existing guards updated to the new truth, none deleted:** `check-calc-merged-behavior.js` 13/13a/13b re-pointed at `utils/canvasSearch.ts` (the fork moved files, the contract did not) plus new 13c–13e; 18a–18f re-pointed at `utils/queueCalcTrade.ts` plus new 18h/18i. `check-offer-prefill-330.js` — the choke-point region/dep pattern now admits the added `canvasRunSeq` trigger, with the three original deps still required in order. `check-calc-tour.js` 15a — the auto-start dep list gained `inlineHomeOn`, the fifth guard.
+
+**Caught by the gates, not by review:** the first full pytest run failed `test_entitlements.test_features_json_keys_known` — a new `config/features.json` key must also be registered in `backend/feature_flags.py` `FLAG_KEYS`. Fixed and re-run clean. (The three-fixture mirror was done up front; only release.json is exact-mirror-tested, but onboarding-v2/profiles-on are what other suites boot from.)
+
+**Code-walk (flag-off byte-identity), full trace in the scope block §3.** Each behavior change is one gated site whose flag-off value is the original expression: `TradesScreen.tsx:4887` `canvasHost` collapses to the old mount condition; `:4901` `inlineAnchorShown` is unconditionally false, which makes the receipt unreachable and restores both end-of-deck conditions; `:1410/:2855/:2940` early-return above untouched `navigate` calls; `:2607`'s added dep `canvasRunSeq` is a frozen `0` (its only writer is inside a handler passed as a prop only on the flag path); `TradeCalculatorScreen.tsx:129/193/233/685/747/782` each reduce to the pre-wave expression; `TradeFinderModeBar.tsx:147` falls back to `c.label` with `CHIPS` untouched; `TradeBuildCanvas.tsx` reads no flag at all — every change is an optional prop with a today-preserving default.
+
+**Runtime evidence: NONE, and that is the known gap.** Section **I** of [`docs/feedback/items/384-calc-finder-merge/testflight-checklist.md`](../docs/feedback/items/384-calc-finder-merge/testflight-checklist.md) is new and **unrun** — I1 is 5 flag-OFF regression steps (79–83, the pass that matters while the flag is dark) and I2 is 15 flag-ON steps (84–98). (Lettered H→I and renumbered at the Wave-A rebase; the content is unchanged.) The two things no structural guard can see: the **ordering** inside the #330 choke point when the inline search re-fires it (reset → fork → dispatch), and the **layout** of a full In-league calculator stacked above a swipe deck on a small screen. Under D-056 that checklist is the only runtime proof this can get.
+
+**Pre-push gate:** `FTF_SKIP_SIM_GATE=1` (D-056 standing posture — the simulator marker `qa/sim-runs/last-sim-run.json` is retired); the evidence run instead is the four gates above plus the new guard.
+
 ## 2026-08-24 — Onboarding-tour Wave A — full gates green on `feat/tour-wave-a`; runtime evidence owed
 
 Scope block: [`docs/plans/onboarding-tour-merge/scope-wave-a.md`](../docs/plans/onboarding-tour-merge/scope-wave-a.md)
@@ -2886,6 +2909,7 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-08-24b — Wave B0 the layout merge (`calc.inline_home`) — full gates, FLAG DARK, NOT MERGED](#2026-08-24b--wave-b0-the-layout-merge-calcinline_home--full-gates-flag-dark-not-merged-on-featinline-home-b0)
 - [2026-08-24 — Onboarding-tour Wave A — full gates green on `feat/tour-wave-a`; runtime evidence owed](#2026-08-24--onboarding-tour-wave-a--full-gates-green-on-feattour-wave-a;-runtime-evidence-owed)
 - [2026-08-23b — `test_stud_tax_pinned_market` flake pinned: breaker wall-clock budget removed from test inputs](#2026-08-23b--test_stud_tax_pinned_market-flake-pinned-breaker-wall-clock-budget-removed-from-test-inputs)
 - [2026-08-23a — main CI red → green: full-sweep fixture mirrors flipped](#2026-08-23a--main-ci-red--green-full-sweep-fixture-mirrors-flipped)

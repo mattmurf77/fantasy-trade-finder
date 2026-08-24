@@ -127,6 +127,7 @@ export default function MatchesScreen() {
   // ── Teardown-remediation flags (all default false — flag off is
   // byte-identical behavior) ──────────────────────────────────────────
   const swipeUndoOn = useFlag('ux.swipe_undo');           // S3 PRD-03
+  const inlineHomeOn = useFlag('calc.inline_home');       // D-158 B1
   const menuOn = useFlag('ux.player_context_menu');       // S3 PRD-02
   // S1 PRD-05 (flag ux.retap_active_tab) — focused Matches re-tap scrolls
   // the active segment's list to top. Only one FlatList is mounted at a
@@ -573,6 +574,24 @@ export default function MatchesScreen() {
         setToast({ msg: 'Could not switch leagues — try again', tone: 'warn' });
         return;
       }
+    }
+    // D-158 review fix B1 — with the inline home on, the pushed page has no
+    // In-league mode to land a prefill in (it silently dropped the package);
+    // the guided landing hosts the canvas now, so the package rides a route
+    // param that TradesScreen consumes into `loadCanvasPrefill`.
+    if (inlineHomeOn) {
+      navigation.navigate('Trades', {
+        screen: 'TradesHome',
+        params: {
+          canvasPrefill: {
+            opponentId: row.counterparty_user_id,
+            give: row.my_side_player_ids,
+            receive: row.their_side_player_ids,
+          },
+          canvasPrefillSeq: Date.now(),
+        },
+      });
+      return;
     }
     // TradeCalculator is registered in the Trades tab's stack — from the
     // Matches tab the navigate must be nested (same pattern as the

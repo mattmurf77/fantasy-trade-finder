@@ -36,6 +36,7 @@
     "test:finder-conditions": "node tests/check-finder-conditions-reachable.js",
     "test:guide-script": "node tests/check-guide-script.js",
     "test:guide-spotlight-tracking": "node tests/check-guide-spotlight-tracking.js",
+    "test:inline-home": "node tests/check-inline-home.js",
     "test:invite-social-proof": "node tests/check-invite-social-proof.js",
     "test:keychain-accessible": "node tests/check-keychain-accessible.js",
     "test:league-candidates-300": "node tests/check-league-candidates-300.js",
