@@ -257,3 +257,12 @@ files. Seeded from history before this skill existed:
   invites the wrong call. The ancestry check caught two branches
   (`wave-calc`, the specs branch) holding content that existed NOWHERE else —
   including a 455-line Phase-1 plan — minutes before deletion.
+- 2026-08-24 [triage] Agent worktrees don't carry `secrets.local.env` (gitignored,
+  lives only in the main checkout) — `fetch_feedback.py` fails before auth. Symlink
+  it from the project root into the worktree (`ln -sf`) rather than asking the
+  operator for the secret.
+- 2026-08-24 [triage] Sixteen open items were already closed in code by non-feedback
+  pipelines (Team Review batch, #355, #384) but never had their DB statuses set —
+  the pipeline only flips statuses for items IT ships. Triage should always propose
+  the fixed/in_progress corrections for work shipped outside this skill, or the
+  open list becomes unreadable (61 rows, ~25 actionable).
