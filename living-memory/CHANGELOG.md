@@ -11,6 +11,33 @@
 
 ---
 
+
+## 2026-08-23 — Fleeced the ram: mascot decided, art built, swap built dark behind `onboarding.mascot_ram`
+
+**Not shipped to anyone.** Built on `claude/ram-mascot-fleeced`, CI green, flag `false`. Reaching the operator needs a
+build plus an experiment that has not been created.
+
+**Decided.** [D-155](DECISIONS.md) — the ram is the mascot *and* the guide avatar, **named Fleeced**;
+[Q-009](OPEN_QUESTIONS.md) closed after 15 months as "neither — the ram", its premise having been contradicted by the
+shipped icon all along. The raster rule gains a scoped exception (mascot sprites only, under `mascot/ram/`, ≤60 KB).
+[D-156](DECISIONS.md) — painted at every size, chosen **against** the measured 44 pt legibility evidence and recorded
+that way so nobody later "fixes" it; plus the sizing rule: mascot art is inset to **70 % of box width**, because `size`
+is the width of the *box*, not the character, and the Analyst only ever fills 62–90 pt of its 96 pt box.
+
+**Built.** Six painted poses generated one at a time from one approved hero (`nano_banana_pro` / `nano_banana`), alpha
+cut, exported `@1x/@2x/@3x` as 256-colour PNG-8 — worst sprite **15.6 KB** against a 60 KB budget, whole set 167 KB.
+`AnalystAvatar` becomes a flag switch; all three call sites and the tour script are untouched. New guard
+`check-mascot-ram.js`, sabotage-tested. Three self-contained lab pages under `mockups/avatar-lab/`.
+
+**Two corrections worth carrying forward.** (1) `BUBBLE_ANCHOR` is **exported and never consumed** — `AnalystGuide`
+lays the bubble out *beside* the avatar in a flex row, not above it with a tail. The "anchor moves off-centre" decision
+had nothing to move, and the avatar lab's horn-clash test describes the layout the brief *described*, not the one that
+ships. (2) The ID reservation flagged at D1 was correct and then some: `main` took **D-153** (W6-B) *and* **D-154**
+(`trade.full_sweep`) while this work was in flight, so both entries renumbered on rebase.
+
+**Also fixed:** `test_release_flags_mirror_features_json` was already failing on `origin/main` (`trade.full_sweep` lit
+without updating the mirror fixture). CI was red for everyone; one value corrected.
+
 ## 2026-08-23a — Full sweep SHIPPED and LIT: the deck now scores every leaguemate (`trade.full_sweep`)
 
 The [full-sweep build](../docs/plans/full-sweep/plan.md) ([D-154](DECISIONS.md), ledger [2026-08-22j](TEST_LEDGER.md)) merged to `main` with the flag flipped **true** in the same PR, by operator instruction ("merge and flip it on"). Both opponent loops now skip the `global_target` early exit, so every eligible leaguemate is generated against and `_dedup_and_sort` ranks the league globally; wall-clock rail `full_sweep_budget_s` = 30 s (the v3 pair path has no deadline of its own); per-opponent keep is the knob `exploration_base_per_opp` (5.0, clamped ≥ 1). Expected in FFV3: every deck reaches all 11 partners (was ~6, fixed set in single-board leagues); deck grows toward `bakeoff_deck_limit` (prod 60); `gen_ms` ≈ 2×. **Owed:** the scope §3 post-flip verification (count partners, read `gen_ms`, prove the kill switch). Kill switch: flag → false + `POST /api/feature-flags/reload`. Review PR #181 (three trade-model reports, Q-030/G-058) merged first, same day.

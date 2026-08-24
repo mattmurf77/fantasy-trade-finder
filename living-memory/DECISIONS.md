@@ -1402,3 +1402,50 @@ Five call sites, no sixth — `_roster_eveners`, `_trade_evaluate_impl`, `get_le
 **Rejected: thread parallelism.** The enumeration is pure-Python CPU work; under the GIL a thread pool buys nothing. Logged `gen_ms` (Aug): median 1.7 s, p90 5.3 s for ~6 partners; full sweep is expected ≈ 2× (p90 ≈ 10 s against a 60 s `_JOB_HARD_TIMEOUT`), and the job streams cards per partner. Only the consensus pair path has a per-pair deadline; the v3 divergence path has none (`trade_optimizer.py:231`), so the flag-on sweep carries its own wall-clock rail, `full_sweep_budget_s` (default 30 s). Real latency levers — a per-pair result cache keyed on roster/board/knob hashes, or a fork-safe process pool — are a separate phase-2 plan, deliberately not bundled here.
 
 **Consequences accepted.** Deck size now grows toward `bakeoff_deck_limit` (code 30, prod 60) when serving is interleaved (prod: `bakeoff_serve_interleaved = 1`) and toward `exploration_base_per_opp` × partners in dark serving, plus `first_session_deck_max`; those caps are the operator's dials, not this change's. `trade.full_sweep` is process-global, so arm A sweeps too when lit — accepted, recorded in `docs/plans/three-model-bakeoff/scope-phase2.md`. The `_comment_compressed_board` "rescued boarded members displace unranked members' consensus cards" consequence is **narrowed**: with the flag on nobody is displaced. Graduation = the scope.md §3 TestFlight checklist (≥ 9 of 11 partners; `gen_ms` recorded; kill switch proven).
+
+## D-155 — The Ram Is the Mascot and the Guide Avatar, and Its Name Is Fleeced; the Fumbling RB Is Retired
+
+**Date:** 2026-08-22 · **Status:** decided (operator) · **Closes:** [Q-009](OPEN_QUESTIONS.md#q-009--mascot-decision-tommy-tumble-vs-ricky-rumble-vs-other) · **Brief:** [docs/plans/ram-mascot/brief.md](../docs/plans/ram-mascot/brief.md) §1
+
+> **ID note:** originally drafted as D-154 while #384 W6-B was still uncommitted. Both reserved numbers were then taken on `main` — **D-153** by W6-B's canvas fork and **D-154** by the `trade.full_sweep` opponent sweep — so this entry and its successor were renumbered to **D-155/D-156** when the work was rebased onto `origin/main`. No gap remains; the sequence is contiguous.
+
+**Decision:** the **ram** — the character already shipping as `mobile/assets/icon.png`, the splash, and the notification icon — is Fleeced's mascot **and** its in-app guide avatar. The "fumbling running back" concept recorded in [`../docs/design/brand.md`](../docs/design/brand.md) and [`BRAND.md`](BRAND.md) is retired unbuilt; **Q-009 closes as "neither — the ram"**, so neither Tommy Tumble nor Ricky Rumble is chosen.
+
+**Why the docs lost, not the product.** Q-009 has been open since 2026-05-21 on the premise that the concept was settled and only the name was missing. It was not settled: an entirely different character shipped to TestFlight, to the App Store icon, and to the notification shade, while both brand docs went on describing a running back mid-fumble. This decision resolves the disagreement in favour of what users can actually see. The operator's reason is the same one: *"that avatar makes more sense to keep the branding together."*
+
+**The character is named Fleeced.** The operator named it at D1 rather than deferring: the mascot takes the product's own name — Fleeced the ram, `Fleeced: Dynasty Trade Finder` the app ([D-057](DECISIONS.md)). The pun is the point: the ram wears the fleece, and getting fleeced is what a bad trade feels like.
+
+Two consequences follow, and **neither is settled by this entry**:
+
+- **The role name and the character name are now different words for the same figure.** The bubble opens *"I'm The Analyst. I model dynasty trades — you bring the roster."* Substituting the noun literally yields *"I'm Fleeced"*, which in ordinary English reads as "I just got ripped off" — the opposite of what a trustworthy guide should say in its first sentence. The brief's §3.2 collapses the six "The Analyst" strings into one `MASCOT_NAME` constant; **which of those six take the character name and which keep the role name is a copy decision deferred to that step**, not assumed here. The likely split is that the ram is *named* Fleeced and *does* the Analyst's job, exactly as Duo is a name and "your language coach" is a role.
+- **Mascot and product now share a token.** No sentence may leave "Fleeced" ambiguous between the app and the character.
+
+The `guide_step_shown{pose}` analytics vocabulary is untouched either way — naming the character changes copy, not the six pose values.
+
+**Medium rule, amended — the one rule this decision actually changes.** A logo-matched ram is painted art: gradients, specular horns, glow. It does not vectorise into clean `react-native-svg` paths, and today's [`../mobile/assets/CLAUDE.md`](../mobile/assets/CLAUDE.md) rule ("Do not add raster UI assets") forbids the honest medium for it. The rule is therefore amended, narrowly:
+
+- The mascot **may** ship as raster pose sprites (`@2x/@3x` PNG with alpha) **when** the approved art is painted. Vector remains the rule for everything else — in-app icons stay `components/chalkline/Icon`, and there is still no bitmap-icon path.
+- The exception is **scoped to one folder**, named in the assets rule, and does not generalise to UI chrome.
+- **"No gradient, no glow" is not repealed.** It governs UI chrome and stands. The mascot is an illustration asset (brand.md already said so) and is exempt **inside its own box only** — no glow bleeding onto surfaces, no gradient background behind it, no halo on ink-1 cards.
+
+**Placement is unchanged:** guide bubble, Team Review, empty states, celebration moments, the auth page. Never inline with data.
+
+**Alternatives considered:** (a) keep the fumbling RB and re-draw the icon to match — rejected, it would discard the shipped brand mark to satisfy a doc nobody built; (b) hold the raster rule and force a flat vectorised ram — not rejected, it is exploration **B** in the brief and stays a live option the lab decides on evidence; (c) defer the character name — **rejected by the operator at D1**, who named it *Fleeced* on the spot; the brief allowed either, and naming it now moves §3.2 from a no-op to six real copy edits.
+
+**Consequences:** six docs change and no code does (the brief listed four; `context.md` and [`GLOSSARY.md`](GLOSSARY.md) carried the same retired claim and were swept with them). Which medium actually ships is **not** settled by this decision — it is settled by the operator's pick in `mockups/avatar-lab/ram-poses.html` (brief §2, decision point D2). The amended rule only makes exploration A *permissible*; if B wins, the raster exception stays on the books unused and scoped to a folder that never gets created.
+
+## D-156 — Fleeced Ships Painted at Every Size, and Is Scaled to the Analyst's Ink Box, Not Its Own
+
+**Date:** 2026-08-23 · **Status:** decided (operator) · **Settles the medium question left open by [D-155](DECISIONS.md)** · **Lab:** [mockups/avatar-lab/ram-decisions.html](../mockups/avatar-lab/ram-decisions.html)
+
+**Decision, part one — one medium, not a mix.** Fleeced ships as **painted raster sprites in every pose, at every size, on every surface**. An earlier reading of the operator's "varied by image and the page it's shown on" was explored as a per-pose painted/flat mapping; the operator resolved it the simpler way — *"I like the Painted version best for all mediums."* D-155's scoped raster exception is therefore **used**, not left dormant, and the flat/Blend exploration is retired to reference art.
+
+**This is chosen against the measured legibility evidence, deliberately.** Resampled to true render size, painted expressions collapse at 44 pt — five Team Review poses reduce to the same pink smudge — where the flat set held its read. The operator saw that comparison and chose likeness over small-size differentiation. Recording it plainly so nobody later "fixes" the 44 pt behaviour as if it were an oversight: **it is a known, accepted cost.** If it ever becomes a real complaint, the flat set in `mockups/avatar-lab/ram-art/poses-flat/` is the ready-made answer.
+
+**Decision, part two — the sizing rule, which is the non-obvious half.** `AnalystAvatar`'s `size` prop is the **rendered width of the box, not of the character**, and the shipped Analyst never fills that box: measured via `getBBox`, its ink occupies **62–90 pt of a 96 pt box** (`neutral` 64.0 × 46.1, `computing` 62.4 × 62.4, `thinking` 89.6 × 67.5), with roughly a third of the height empty above `neutral`'s head. The first ram sprites were trimmed to their bounding box and padded square, so they filled ~100% of the box and rendered visibly oversized beside the Analyst at the same `size`.
+
+**The rule: mascot art is inset so its ink occupies 70% of the box width**, centred. That matches `neutral` (67%) and the median of the six. Fleeced then measures **66.6 pt wide at `size=96`**, inside the Analyst's own 62–90 pt range. Full-fill originals are kept at `poses-alpha-full/` so the inset is reversible.
+
+**Consequences:** (1) **The ram renders taller than the Analyst and that is sanctioned** — the operator's words: *"It's fine for it to render taller."* Analyst poses are wider than tall (viewBoxes 150–170 × 150, so height = `size × 0.88–1.00`); the ram's sprites are square, so height = `size`. No aspect-matching work is owed. (2) Sprites shrank as a side effect of the inset — worst `@3x` went 24.9 KB → **15.6 KB**, now 3.8× inside the 60 KB budget. (3) A guard should assert the 70% inset, or the next regenerated sprite silently reverts to oversized.
+
+**Worth knowing for cost:** the entire shipped Analyst — six poses, shared part-kit and switcher — is **15.3 KB of `react-native-svg`**, less than one painted ram sprite at `@3x`, and about 1/17th of the 18-file painted set (~180 KB after the inset). Vector costs the same at every size; raster pays three times over. That did not change the decision, and is recorded so the trade is explicit rather than rediscovered.

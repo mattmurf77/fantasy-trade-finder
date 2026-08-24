@@ -12,6 +12,34 @@
 ---
 
 
+
+## 2026-08-23 — Fleeced mascot swap (`onboarding.mascot_ram`), CI green on `claude/ram-mascot-fleeced`
+
+**Ran, and what each proved.**
+
+| Gate | Result | What it actually proves |
+|---|---|---|
+| `pytest backend/tests` | **4198 passed, 1 skipped** | The new flag key registers cleanly. No server behaviour branches on it |
+| `npx tsc --noEmit` | **clean** | The switch and `RamAvatar` typecheck under `strict` |
+| `for f in tests/check-*.js` | **77/77 pass** | Including the new `check-mascot-ram.js`. No existing guard regressed |
+| `mobile/scripts/testid-lint.sh` | **OK** | No testID moved — the `guide.avatar.<pose>` id is on the wrapper, not the avatar |
+
+**`check-mascot-ram.js` was sabotage-tested, which is the only reason to trust it.** Forcing the gate
+(`useOnboardingFeature(...) || true`) → caught. Re-exporting a sprite trimmed to its bounding box → caught, reporting
+**97.9 % ink against the 70 % target**. Both reverted; guard green. The inset check decodes the PNG alpha channel
+itself (RGBA8 and palette+tRNS) rather than trusting file size — and it caught its own blindness first, failing
+"inset measurable" when it only handled RGBA and the sprites were palette PNGs.
+
+**A pre-existing CI failure was fixed, not introduced.** `test_release_flags_mirror_features_json` was **already red on
+`origin/main`**: `trade.full_sweep` was lit in `config/features.json` by #182 without updating
+`backend/tests/fixtures/flags/release.json`. Verified against `origin/main` before touching it. One value corrected;
+unrelated to this feature, but it blocked the "CI green" gate for everyone.
+
+**NOT run — owed:** [the TestFlight checklist](../docs/plans/ram-mascot/testflight-checklist.md). It needs a build
+containing `assets/mascot/ram/` (bundled sprites, no OTA channel) and the `mascot_ram_rollout` experiment running. Until
+then there is **zero runtime evidence** for this change — the guard proves shape, `tsc` proves types, neither has seen a
+sprite on a screen.
+
 ## 2026-08-22j — Full sweep (`trade.full_sweep`) — full gates; LIT 2026-08-23 by operator instruction at merge
 
 Plan + scope: [`docs/plans/full-sweep/`](../docs/plans/full-sweep/plan.md) · [D-154](DECISIONS.md). Built by Opus agents A1 (engine/flag/knobs/tests) and A2 (arm parity + docs), adversarially reviewed read-only by A3 (2 blockers, 7 should-fix, 5 nits — all closed before commit), lead-reconciled.

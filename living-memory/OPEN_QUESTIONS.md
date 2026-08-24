@@ -293,16 +293,16 @@
 - **Owner:** operator.
 - **Asked on:** 2026-05-21.
 
-### Q-009 — Mascot decision (Tommy Tumble vs Ricky Rumble vs other)
-- **Why it matters:** branding direction. The mascot concept (running back mid-fumble) is settled; the name isn't. Per [`../context.md`](../context.md): top candidates are "Tommy Tumble" or "Ricky Rumble."
-- **Action to unblock:** pick. Maybe poll a few dynasty friends.
-- **Workaround in the meantime:** no mascot in current UI.
-- **Owner:** operator.
-- **Asked on:** 2026-05-21.
+### ~~Q-009~~ — Mascot decision (Tommy Tumble vs Ricky Rumble vs other) — **RESOLVED 2026-08-22**
+- **Resolution:** **neither — the ram.** The question's premise ("the concept is settled, only the name isn't") was false: the shipped app icon, splash and notification icon are a ram, not a running back mid-fumble. [D-155](DECISIONS.md) makes the ram the mascot and the guide avatar, names it **Fleeced** after the product, and retires the fumbling-RB concept unbuilt. Asked 2026-05-21; open 15 months against a product that had already answered it.
 
 ---
 
 ## Closed Questions (kept for cross-reference)
+
+### Q-009 — Mascot decision (Tommy Tumble vs Ricky Rumble vs other)
+- **Resolution (2026-08-22, [D-155](DECISIONS.md)):** **Neither.** The mascot is the **ram** already shipping as `mobile/assets/icon.png` / splash / notification icon, named **Fleeced** after the product. The fumbling-running-back concept both brand docs described was never built and is retired. Which of the six "The Analyst" copy strings take the character name vs the role name is deferred to build time.
+- **Lesson:** the question tracked a *name* for 15 months while the *concept* it assumed had already been contradicted by the shipped artwork. An open question whose premise cites a doc should be re-checked against the product, not the doc.
 
 ### Q-019 — Rounds 3/4 badge above their round: do we open the seed map?
 - **Resolution (2026-08-19, [D-088](DECISIONS.md)):** **No.** The badge was a wrong inverse, not a price. `GET /api/league/picks` inverted `pool_value` (stored in `elo_to_value` units) with `data_loader.seed_elo_for_value`, which inverts DynastyProcess's raw 0-10000 scale instead. The two maps agree at exactly Elo 1548.0 and diverge either side, inflating every rung below a mid-1st — Mid 3rd 1320 → **1383.5** (+63.4), Mid 4th 1240 → 1339.3 (+99.3) — so 1383.5 cleared D-084's new `second` floor of 1370. The pick's real price is Elo 1320, **45 points inside `third`**. Fixed with `trade_service.value_to_elo`; no seed, band, client mirror or stored price moved. Memo: [docs/reviews/2026-08-19-pick-badge-scale.md](../docs/reviews/2026-08-19-pick-badge-scale.md).

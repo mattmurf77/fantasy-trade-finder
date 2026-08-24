@@ -234,6 +234,13 @@ FLAG_KEYS: tuple[str, ...] = (
     # the config-only rollback lever. NOT `guided_layer` (v2.1 coach marks,
     # still dark) and NOT `guided_avatar` (the v1 tour, already true).
     "onboarding.guide_v2",
+    # D-155/D-156 — onboarding.mascot_ram: swap the guide avatar from The
+    # Analyst to Fleeced, the painted ram, inside AnalystAvatar only. Pose
+    # names, tour script, beats, the three call sites and the
+    # guide_step_shown{pose} analytics prop are all unchanged, so OFF is
+    # byte-identical to today. Ships FALSE; reaches the operator through an
+    # is_tester_allowlist experiment overlay, never a global flip.
+    "onboarding.mascot_ram",
     # ── Monetization platform (docs/plans/monetization/00-platform-foundation.md §1) ──
     # One flag per monetization strategy; everything ships dark. Rollout
     # order per foundation §1: monetize.entitlements ON in observe mode

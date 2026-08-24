@@ -63,7 +63,7 @@ A **dynasty manager's tool, built by a dynasty manager.** The reader (in docs) a
 | **the operator** | The single user / project maintainer |
 | **the player base** | The full Sleeper player roster |
 | **the field** | All entrants in a league |
-| **mascot:** *(pending)* "Tommy Tumble" or "Ricky Rumble" — see Q-009 |
+| **Fleeced** (the ram) | The mascot character — app icon, splash, notification icon, and the guide avatar (D-155). Shares its name with the product; *The Analyst* is the guide's role name, not the character's |
 
 ### Avoid these terms
 
@@ -150,15 +150,17 @@ Things Claude in particular drifts toward; check output for these:
 
 ## Mascot & Visual Branding
 
-- **Concept:** football player avatar mid-fumble. Cartoon-style running back; ball popping out; jersey reads the mascot's name.
-- **Name candidates (pending):**
-  - **Tommy Tumble** — softer, more whimsical.
-  - **Ricky Rumble** — more energetic, alliterative.
-- **Decision pending** — see [`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md) §Q-009.
+- **Concept: the ram.** An anthropomorphic football ram head — pebbled brown leather skin with white laces, two large curled ice-blue horns, small grey ears, hot-pink glowing eyes and grin, on ink-0. It is the character already shipping as `mobile/assets/icon.png`, the splash, and the `expo-notifications` icon.
+- **Name: Fleeced** ([D-155](DECISIONS.md), 2026-08-22) — the mascot takes the product's own name. The ram wears the fleece; getting fleeced is what a bad trade feels like.
+- **Role:** mascot **and** in-app guide avatar. *The Analyst* stays the **role** name ("I model dynasty trades"); Fleeced is who plays it. Which copy strings use the name and which use the role is a build-time call — *"I'm Fleeced"* as an opening line reads as "I got ripped off" and is not assumed.
+- **Ambiguity rule:** mascot and product share a token. Never write a sentence where "Fleeced" could mean either.
+- **Retired:** the earlier "football player avatar mid-fumble" concept and its two candidate names (*Tommy Tumble*, *Ricky Rumble*). Never built; the shipped icon had already contradicted it. [Q-009](OPEN_QUESTIONS.md) closed 2026-08-22 as "neither — the ram".
+- **Placement:** guide bubble, Team Review, empty states, celebration moments, the auth page. Never inline with data.
+- **Medium:** vector (`react-native-svg`) by default; raster pose sprites are permitted for the mascot alone when the approved art is painted — the scoped exception lives in [`../mobile/assets/CLAUDE.md`](../mobile/assets/CLAUDE.md). "No gradient, no glow" still governs UI chrome; the mascot is exempt inside its own box only.
 
 ---
 
 ## Outstanding / Known Gaps
 - No formal review of voice across `docs/` — they were authored over time without a unified voice doc. A sweep would surface drift.
 - App copy is currently sparse; voice guidelines mostly apply to docs + commit messages.
-- Mascot naming pending.
+- Mascot identity and name are settled (D-155: the ram, named Fleeced). Open: the **copy split** — which of the six guide strings say "Fleeced" and which say "The Analyst". Decided at build time, brief §3.2.

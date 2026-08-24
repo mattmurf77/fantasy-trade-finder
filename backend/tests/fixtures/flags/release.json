@@ -96,6 +96,7 @@
   "onboarding.guided_avatar": true,
   "onboarding.keep_warm": false,
   "onboarding.guide_v2": true,
+  "onboarding.mascot_ram": false,
   "_comment_monetization": "Monetization platform (docs/plans/monetization/00-platform-foundation.md). One flag per strategy, ALL dark until operator green-light. Rollout order: monetize.entitlements first (observe mode - logs, never blocks), then monetize.founder + monetize.paywall for the TestFlight window, monetize.pro + monetize.season_pass at launch, growth.* after, ads last. Rankings marketplace flags (ranks.*, marketplace.*) follow their plan's season-aligned phases.",
   "monetize.entitlements": false,
   "monetize.paywall": false,
@@ -216,5 +217,5 @@
   "trade.breaker": false,
   "trade.breaker_narrative": false,
   "trade.negmem": false,
-  "trade.full_sweep": false
+  "trade.full_sweep": true
 }
