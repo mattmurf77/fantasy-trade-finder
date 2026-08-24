@@ -550,10 +550,11 @@ class RankingService:
         stay FROZEN, exactly as before this change:
 
         * **Pins with no band** — `tier_for_elo` returns None below the lowest
-          band (1150 in every cell). That is where `DEMOTED_ELO` (#161, a
-          player explicitly passed over in a Quick Set save) and the anchor
-          wizard's "no value" answer put people. Those are deliberate
-          "unranked, pending placement" markers, not tier placements; a stray
+          band (1150 in every cell). That is where the anchor wizard's
+          "no value" answer and historical Quick Set demotions (`DEMOTED_ELO`,
+          the retired #161 rule — removed 2026-08-24, D-160, but its pins
+          persist un-repaired) put people. Those are deliberate "unranked,
+          pending placement" markers, not tier placements; a stray
           comparison must not drag one back onto the board.
         * **Pins F2 has released** — if `pin_unpin_on_newer_swipe` is turned
           back on, a released pin is *gone*, so the player evolves unclamped.
@@ -1774,11 +1775,13 @@ class RankingService:
                 return tier
         return None
 
-    # #161 — demotion target for players explicitly passed over during a
-    # Quick Set tier save: below every tier band (the waivers floor is 1150
-    # in every format/position cell), so they render UNRANKED — pending
-    # placement — rather than keeping a stale higher tier. Same Elo the
-    # anchor wizard's "no value" answer pins (server.ANCHOR_NO_VALUE_ELO).
+    # The anchor-"no value"/unranked pin value: below every tier band (the
+    # waivers floor is 1150 in every format/position cell), so a pinned
+    # player renders UNRANKED — pending placement. Mirrors
+    # server.ANCHOR_NO_VALUE_ELO (the anchor wizard's "no value" answer).
+    # No longer a Quick Set writer: the #161 demote rule wrote this value
+    # until 2026-08-24 (D-160 removed it); its historical pins persist and
+    # the D-085 tier-bounded-voting goldens read the constant.
     DEMOTED_ELO = 1100.0
 
     def apply_tiers(
@@ -1787,7 +1790,6 @@ class RankingService:
         tiers: dict[str, list[str]],
         scoring_format: str = "1qb_ppr",
         cleared_pids: Optional[list[str]] = None,
-        demoted_pids: Optional[list[str]] = None,
     ) -> None:
         """
         Apply a positional-tier save by setting ELO overrides that fall
@@ -1802,15 +1804,9 @@ class RankingService:
         the player's old override survived and re-bucketed them on the
         next refresh, snapping them right back into their previous tier.
 
-        ``demoted_pids`` (#161) — players the user explicitly passed over
-        in a Quick Set tier save (visible in the step's grid, previously
-        bucketed in the saved tier or higher, left unselected). Their
-        override is pinned to ``DEMOTED_ELO`` — below every band — so they
-        read as unranked until the user places them, instead of silently
-        keeping the old higher tier. Distinct from ``cleared_pids``, which
-        restores the consensus-suggested tier. If a pid appears in both,
-        demotion wins; a pid both demoted and assigned to a tier in the
-        same save takes the tier (the tier loop runs last).
+        A save mutates ONLY the assigned and cleared pids (D-160,
+        #346/#381 — supersedes the #161 demote rule): a player left
+        unselected in a Quick Set save HOLDS his current tier.
         """
         pool_ids = {p.id for p in self._pool(position)}
         bands = self.tier_bands_for(position, scoring_format)
@@ -1826,13 +1822,6 @@ class RankingService:
         if cleared_pids:
             for pid in cleared_pids:
                 self._unpin(pid)
-
-        # Pin demoted pids below every band (after clears, before tier
-        # writes — see the precedence note in the docstring).
-        if demoted_pids:
-            for pid in demoted_pids:
-                if pid in pool_ids:
-                    self._pin(pid, self.DEMOTED_ELO, now)
 
         for tier_name, player_ids in tiers.items():
             band = bands.get(tier_name)
@@ -1858,7 +1847,6 @@ class RankingService:
         scope_pids: set[str],
         scoring_format: str = "1qb_ppr",
         cleared_pids: Optional[list[str]] = None,
-        demoted_pids: Optional[list[str]] = None,
     ) -> dict[str, list[str]]:
         """Scoped tier save — the merged-band rule (rookie-draft plan D2/D3).
 
@@ -1885,9 +1873,9 @@ class RankingService:
         full-band save would give it — the equivalence bar, T-M2-07) and
         no-respread (untouched members' overrides are byte-unchanged, D3/I-3).
 
-        `cleared_pids` / `demoted_pids` (#161) are scoped too: a clear or a
-        demotion for a pid the user could not see is ignored (O4). Demoting an
-        unshown veteran is the one way this can silently damage a board.
+        `cleared_pids` is scoped too: a clear for a pid the user could not
+        see is ignored (O4). Clearing an unshown veteran is the one way this
+        can silently damage a board.
 
         Returns `{tier_name: M}` so the caller can assert the equivalence bar
         without recomputing the merge.
@@ -1910,14 +1898,11 @@ class RankingService:
             one, else their computed Elo."""
             return self._elo_overrides.get(pid, current.get(pid, self.ELO_INITIAL))
 
-        # ── clears and demotions, SCOPED (D3 / #161 / O4) ──────────────────
+        # ── clears, SCOPED (D3 / O4) ────────────────────────────────────────
         now = datetime.now(timezone.utc).isoformat()   # one stamp per save (F2)
         for pid in (cleared_pids or []):
             if pid in scope_pids:            # a clear for an unshown vet is ignored
                 self._unpin(pid)
-        for pid in (demoted_pids or []):
-            if pid in scope_pids and pid in pool_ids:   # visible + scoped only
-                self._pin(pid, self.DEMOTED_ELO, now)
 
         merged_orders: dict[str, list[str]] = {}
         _SLOT = ("SCOPED_SLOT",)
