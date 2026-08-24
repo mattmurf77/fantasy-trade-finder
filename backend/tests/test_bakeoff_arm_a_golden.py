@@ -664,6 +664,51 @@ v3_pool_size vet_age waiver_baseline_value waiver_slot_cost youth_age
     # The profile edit itself lives in backend/bakeoff_profiles.py, which is
     # The pin landed in bakeoff_profiles.py in the same tree (C4, D-159).
     "v3_shape_max_delta",
+
+    # ── pick YoY floor, 2026-08-24 ─────────────────────────────────────────
+    # docs/plans/pick-yoy-floor/plan.md §2 (D-161). One knob, one disposition,
+    # written in the corrected style: WHERE the knob is read, relative to the
+    # arm overlays.
+    #
+    # WHERE IT IS READ: `pick_values.market_r1_yoy_floor()` → `_c`, called
+    # from `pick_values._r1_yoy_floored`, called from `priced_pool_value`
+    # step 2. On the generation path the only route in is
+    # `server._priced_pick_value` (server.py:10909) ← `_owned_pick_assets`
+    # (server.py:10962, the `_priced[...]` loop at :11019) ←
+    # `_inject_owned_picks` (server.py:11063).
+    #
+    # RELATIVE TO THE ARM OVERLAYS: `_inject_owned_picks` is called ONCE per
+    # job, at server.py:5690, on the `_run_trade_job` thread — and
+    # `_bakeoff.run_bakeoff` is not reached until server.py:5824. Every pick
+    # is therefore priced, and this knob read, ~130 lines BEFORE the first
+    # arm's `_cfg_override` is entered; the prices are then frozen into
+    # `players_dict` / `seed_map` and the four arms all score the same
+    # numbers. An arm pin is structurally UNREACHABLE, exactly as it is for
+    # `exploration_base_per_opp` above — and for the same reason, which is
+    # why that entry's wording is reused rather than a new one invented.
+    #
+    # ARM A DOES NOT PIN A PICK-PRICING MODE EITHER. `MODEL_A_PROFILE`
+    # (bakeoff_profiles.py:68-116) names no pick key, and neither
+    # `bakeoff_profiles.py` nor `bakeoff_runner.py` mentions
+    # `pick_pricing_override` at all — so arm A prices picks on
+    # `market_slots`, the process default resolved at server.py:11097-11099,
+    # exactly like arms B/C/D. It does NOT ride `tier_ladder`, and the
+    # tempting "arm A predates market_slots so pin the identity 0.0" is
+    # therefore wrong twice over: the pin could not be honoured (see above),
+    # and it would be describing a mode arm A does not run in.
+    #
+    # DECISION: **EXCLUDED from MODEL_A_PROFILE.** This is the same class as
+    # its four `pick_year_decay_r*` siblings, whose recorded reason —
+    # "they price an ASSET rather than decide which package to build from
+    # priced assets" (docs/config-reference.md, D-079 § Not a generation
+    # knob) — applies verbatim; the unreachability above is the second,
+    # independent reason. The golden stands un-recaptured, and not merely
+    # because it was re-run: the fixture's PICK assets are literal `_Pick`
+    # objects carrying a hardcoded `pick_value = 60.0` (line 121). They are
+    # not `draft_picks` rows, `_owned_pick_assets` is never called, and
+    # `priced_pool_value` is never entered — so no season, no round, and
+    # nothing for a market floor to clamp.
+    "market_r1_yoy_floor",
 }
 
 

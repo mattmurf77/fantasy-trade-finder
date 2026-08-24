@@ -67,6 +67,7 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
   - [Fit-congruence signal weighting (no flag) — `trade_service._DEFAULT_CFG`, DB-seeded](#fit-congruence-signal-weighting-no-flag-trade_service_default_cfg-db-seeded)
   - [Verdict bands (backlog #6 / #27) — `trade_service._DEFAULT_CFG`](#verdict-bands-backlog-6-27-trade_service_default_cfg)
   - [Draft-pick year decay (D-079) — `pick_values.py`, DB-seeded](#draft-pick-year-decay-d-079--pick_valuespy-db-seeded)
+  - [Pick YoY floor (D-161) — `pick_values.py`, DB-seeded](#pick-yoy-floor-d-161--pick_valuespy-db-seeded)
   - [Mock-draft CPU drafters (draft-extensions W2) — `mock_draft_service._DEFAULT_CFG`](#mock-draft-cpu-drafters-draft-extensions-w2-mock_draft_service_default_cfg)
   - [Counterparty breaker (flag `trade.breaker`) — `trade_service._DEFAULT_CFG`, DB-seeded](#counterparty-breaker-flag-tradebreaker--trade_service_default_cfg-db-seeded)
   - [Negative-results memory (flag `trade.negmem`) — `trade_service._DEFAULT_CFG`, DB-seeded](#negative-results-memory-flag-tradenegmem--trade_service_default_cfg-db-seeded)
@@ -1210,6 +1211,8 @@ Four knobs, one per draft round, setting the multiplicative fraction of a pick's
 
 Consumed by `pick_pool_value` (owned-pick `pool_value`), `discount_pick_value` (the #207 year-explicit rungs), `database.compute_pick_value` (the legacy 0–100 scale), and `market_pick_pool_value` **only past DynastyProcess's published horizon** — inside DP's window DP's own year-over-year price is the market's discount and is not re-discounted. See [cross-client-invariants → Draft-pick year decay](cross-client-invariants.md#draft-pick-year-decay-is-per-round--firsts-are-flat-d-079-2026-08-19).
 
+> ⚠️ **Correction (D-161, 2026-08-24) — these four rates no longer decide what a future pick is SERVED at.** Since D-146 made `market_slots` unconditional, every owned pick prices off DP's curve, so "inside DP's window DP's own price is the discount" meant round 1 was quietly *not* flat on the served price (a 2027 1st at 1,751 and a 2028 1st at 1,459 against a 2,184.6 current-year mid, measured on prod 2026-08-24) even though `pick_year_decay_r1` read 1.00. Flat firsts are now re-asserted where the price actually comes from, by [`market_r1_yoy_floor`](#pick-yoy-floor-d-161--pick_valuespy-db-seeded) below. `pick_year_decay_r1` still governs the ladder (`pick_pool_value`, the #207 rungs, `compute_pick_value`) and the market curve's past-horizon tail; the served market price inside DP's window is the floor's job.
+
 | Key | Default | Meaning |
 |---|---|---|
 | `pick_year_decay_r1` | 1.00 | 1st-round picks: **flat**. A 2029 1st prices identically to a 2026 1st (2117.0 in engine value space). Operator direction 2026-08-19 ("firsts should hold similar value YOY"), after two independent tester reports that far-out 1sts were being given away for mid players and swapped for each other. ⚠️ **This is a product call, not a market calibration** — every public source discounts firsts (DynastyProcess publishes a flat 20 %/yr rule; FantasyCalc's 2027→2029 CAGR is 0.80; KTC's is 0.83), and three of four discount firsts *harder* than later rounds. Logged as a known divergence in `living-memory/OPEN_QUESTIONS.md` Q-018. |
@@ -1220,6 +1223,24 @@ Consumed by `pick_pool_value` (owned-pick `pool_value`), `discount_pick_value` (
 > **Deploy-free revert:** set all four to `0.85` — that reproduces the pre-D-079 uniform discount exactly, on both value scales. Pinned by `backend/tests/test_pick_year_decay.py::test_all_rates_at_the_old_constant_reproduce_the_old_behaviour`. Setting `pick_year_decay_r1` alone is the narrow revert of just the round-1 call.
 
 > **Not a generation knob.** These four are deliberately **excluded from `MODEL_A_PROFILE`** (bake-off arm A) — they price an asset rather than decide which package to build from priced assets, and pinning arm A to the old rate would confound generation policy with a repricing. Reason recorded in `docs/plans/three-model-bakeoff/scope-phase2.md` § Excluded.
+
+### Pick YoY floor (D-161) — `pick_values.py`, DB-seeded
+
+One knob. Under `market_slots` — the only price an owned pick can get since D-146 — an owned pick's engine value comes from DynastyProcess's published curve for its absolute season and round, which carries **DP's own year discount**. That silently overrode [D-079](#draft-pick-year-decay-d-079--pick_valuespy-db-seeded)'s flat-firsts ruling for the served price. Operator re-ruling, 2026-08-24, after a tester was shown A.J. Brown + depth asked for Isaiah Likely + three future firsts: *"The ideal solution is the D-079 ruling."*
+
+The floor is **one clamp at step 2** of `priced_pool_value`'s waterfall, for **round 1 only**, and only for a season strictly beyond the current draft class: the round-curve price is raised to at least `market_r1_yoy_floor ×` the current class's round-1 price. `max()`, never `min()` — a future first the market prices *above* the current class keeps its market price. Read live through `pick_values.market_r1_yoy_floor()` → `trade_service._c`, so a `PUT /api/admin/config/<key>` reprices every future first with no deploy. Clamped to `[0, 1]` on read, mirroring `year_decay` and for the mirror reason: above 1 a future first would outprice a current one and re-open the year arbitrage D-079 closed, pointing the other way.
+
+"The current draft class" is read out of DP's own map (`pick_values.market_anchor_season`): DP publishes a per-**slot** grid only for the class that has a draft order, so the earliest slotted season *is* the market's statement of "now". No new clock, and specifically not `min(draft_picks.season)`, which #228 empties once a draft completes.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `market_r1_yoy_floor` | 1.00 | Fraction of the current class's round-1 market price that a **future-season 1st** may not price below. **1.0 = flat firsts** — the ruling. At the 2026-08-24 prod curve: a 2027 1st goes 1,751 → **2,184.6** and a 2028 1st 1,459 → **2,184.6** in 1QB; `sf_tep` inherits the same rule off its own curve (2,434). `0` = pure DP curve, byte-identical to the pre-D-161 waterfall (the clamp returns before any second market lookup). Fractions dial a YoY discount — `0.85` floors a future first at 85 % of the current class's. ⚠️ **Same product-call caveat as `pick_year_decay_r1`, one notch stronger:** every public source discounts future firsts (DP 0.80/yr, FantasyCalc 0.80, KTC 0.83), and this knob now overrides DP's discount at the point of sale rather than only in our own ladder. Q-018 is the standing record of that divergence. |
+
+**What the floor does NOT touch**, all deliberate: **rounds 2–4** (*"other picks can degrade the longer away they are"* — the other half of the same ruling); **step 1**, a pick's own resolved per-slot price, which only ever exists for the current class anyway (#273); **`tier_ladder`** mode, already flat via `pick_year_decay_r1`; and **step 3**, the stored-ladder fallback — when there is no market price there is nothing to floor, and the safety net must never become an error path. `GENERIC_PICK_SEEDS`, the tier bands and `draft_picks.pool_value` are byte-unchanged; owned-pick tier **badges** move, because a badge reflects the served value (D-320-2).
+
+> **Deploy-free revert:** set `market_r1_yoy_floor` to `0` and `POST /api/admin/config`. Pinned by `backend/tests/test_pick_yoy_floor.py::test_knob_zero_is_byte_identical_to_the_raw_market`, which asserts both the number *and* that the disabled path takes no extra market lookup.
+
+> **Not a generation knob.** Excluded from `MODEL_A_PROFILE` for the same reason as its `pick_year_decay_r*` siblings — it prices an asset, not a package — and additionally because an arm pin is structurally unreachable: `server._inject_owned_picks` prices every pick on the job thread *before* the bake-off fan-out, outside every arm's `_cfg_override`. Disposition recorded in `backend/tests/test_bakeoff_arm_a_golden.py` `_PINNED_KNOBS`.
 
 ### Mock-draft CPU drafters (draft-extensions W2) — `mock_draft_service._DEFAULT_CFG`
 

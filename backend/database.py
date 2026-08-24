@@ -2508,6 +2508,12 @@ _MODEL_CONFIG_DEFAULTS = [
     ("pick_year_decay_r2", 0.85, "D-079: per-year value multiplier for a 2nd-round pick (KTC 1QB crowd rate 0.860)"),
     ("pick_year_decay_r3", 0.85, "D-079: per-year value multiplier for a 3rd-round pick (KTC 1QB crowd rate 0.860)"),
     ("pick_year_decay_r4", 0.85, "D-079: per-year value multiplier for a 4th-round pick and deeper (KTC 1QB crowd rate 0.856)"),
+    # ── D-161 round-1 YoY floor (pick_values.market_r1_yoy_floor) ─────────
+    # D-079's flat-firsts ruling re-asserted at the market_slots seam, where
+    # DP's own in-window year discount had been overriding it (2027 1st 1751
+    # / 2028 1st 1459 vs a 2184.6 current-year mid, measured on prod
+    # 2026-08-24). 0 = pure market, the deploy-free revert to pre-D-161.
+    ("market_r1_yoy_floor", 1.00, "D-161: a FUTURE-season 1st-round pick never prices below this fraction of the CURRENT class's round-1 market price (1.0 = firsts hold value YoY, operator re-ruling 2026-08-24). 0 = pure DynastyProcess curve, byte-identical to pre-D-161. Rounds 2-4 untouched"),
     # ── Fit-challenger arm knobs (docs/plans/fit-challenger/LLD.md §4) ────
     # All 17 seeded in PR-M so set_config/PUT never KeyErrors on them (HLD
     # F-1); backend/trade_gen_fit.py consumes them from PR-F1/F2/F3 on.

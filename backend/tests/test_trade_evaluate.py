@@ -12,7 +12,7 @@ import pytest
 
 import backend.server as srv
 import backend.database as db
-from backend.pick_values import market_pick_pool_value
+from backend.pick_values import market_pick_pool_value, priced_pool_value
 
 CALLER = "caller_uid"
 OPP = "opp_uid"
@@ -312,18 +312,28 @@ def test_mode_b_eveners_include_owned_picks(monkeypatch):
 
     The fixture is built so the two answers PROVABLY differ and both are
     in-window, so the assertion cannot pass by accident: the row STORES
-    1005.3 (0.9x gap) and the 2028 round-1 market curve prices it at 1263.0.
-    Ordering by |Δ| holds either way, so the ranking assertion stays a
-    ranking assertion and the value assertion carries the pricing claim."""
-    gap = _consensus_gap(["mid"], ["good"])
-    stored = round(gap * 0.9, 1)                      # 1005.3 — deliberately stale
+    0.9x gap and the engine prices it at ~1.13x gap. Ordering by |Δ| holds
+    either way, so the ranking assertion stays a ranking assertion and the
+    value assertion carries the pricing claim.
+
+    **The gap trade was re-fixtured 2026-08-24 (D-161).** It used to be
+    mid→good (gap 1117.0), sized so the 2028 round-1 curve price of 1263.0
+    sat at 1.13x gap. D-161's round-1 YoY floor lifts that same pick to the
+    current class's price, 1859.5, which falls OUTSIDE the 0.4x-1.5x window
+    and drops it from the list — a fixture that outlived its number, not a
+    behaviour change. bench→good (gap 1644.6) restores the original geometry
+    at the new price: |Δ| = 0.13x gap, third by closeness, between ev_second
+    (0.05) and ev_third (0.20). Every other line here is unchanged, which is
+    the point: nothing about eveners moved."""
+    gap = _consensus_gap(["bench"], ["good"])
+    stored = round(gap * 0.9, 1)                      # 1480.1 — deliberately stale
     pick = {"pick_id": "L1_2028_1_3", "owner_user_id": CALLER, "season": 2028,
             "round": 1, "pool_value": stored, "is_traded": 0,
             "original_username": None}
     _install_evener_world(monkeypatch, CALLER, gap, picks=[pick],
                           untouchables=["ev_untouch"])
     d = _post_authed({
-        "give_player_ids": ["mid"], "receive_player_ids": ["good"],
+        "give_player_ids": ["bench"], "receive_player_ids": ["good"],
         "league_id": "L1", "opponent_user_id": OPP,
     }, _BOARDS, monkeypatch).get_json()
     singles = [e for e in d["eveners"] if not e.get("is_package")]
@@ -333,10 +343,14 @@ def test_mode_b_eveners_include_owned_picks(monkeypatch):
     assert pick_row["is_pick"] is True
     assert pick_row["position"] == "PICK"
     assert pick_row["name"] == "2028 1st"
-    # THE D-148 ASSERTION: the market curve, re-derived from the pricing
-    # function, and NOT the stored column the pre-D-148 line read.
-    expected = market_pick_pool_value(2028, 1, "1qb_ppr")
-    assert expected == 1263.0
+    # THE D-148 ASSERTION: the ENGINE's price, re-derived from the pricing
+    # seam, and NOT the stored column the pre-D-148 line read. Derived from
+    # `priced_pool_value` rather than `market_pick_pool_value` since D-161 —
+    # step 2 is no longer the last word for a future first.
+    expected = priced_pool_value(dict(pick), scoring_format="1qb_ppr",
+                                 slot=None)
+    assert expected == 1859.5
+    assert expected > market_pick_pool_value(2028, 1, "1qb_ppr")   # D-161 floor
     assert pick_row["value"] == pytest.approx(expected, rel=1e-3)
     assert pick_row["value"] != pytest.approx(stored, rel=1e-3)
 
