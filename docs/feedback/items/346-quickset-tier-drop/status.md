@@ -90,3 +90,71 @@ CW-1…CW-3 (mobile) are the mobile agent's half.
   `assigned_pids + cleared_pids` (server.py:8809–8810), exactly as before —
   demotions never fed `elo_history`, so removing them changes no Trends
   behavior (`test_trends_history_writers.py` green in the full sweep).
+
+## Mobile-half build report (2026-08-24, branch `feat/fb346-quickset-hold-mobile`)
+
+**Status: mobile half BUILT** (R-1/R-6/R-7 + the guard row of R-9's ledger).
+Base verified: branched from `396fb9c5` (the Group F backend merge) on
+`claude/new-user-feedback-55320e`. Files touched (Group F mobile ownership
+only): `QuickSetTiersScreen.tsx`, `api/rankings.ts`, `TiersScreen.tsx`,
+`tests/check-quickset-hold.js` (new), `mobile/package.json` (one script line).
+
+- **R-1** — the demote computation, the `demoted` mutation-payload member,
+  and `saveTiers`'s `demotedPids` param + `demoted_pids` body key are gone.
+  All the enumerated #161 comment blocks rewritten to state HOLD, including
+  the trailing #161 clause of the #233 save-button label comment
+  (reconciliation O-6).
+- **R-6** — no code: emergent from R-1 (see CW-3 below). No pre-selection
+  redesign, per the PRD's explicit rejection.
+- **R-7** — the 4 `TiersScreen` call sites drop the 4th positional `[]`
+  (now `saveTiers(position, payload, cleared, scopeOpts)` etc.). Mechanical;
+  no touch near the draggable-flatlist surfaces.
+- **Guard** — `tests/check-quickset-hold.js` (A1/A2/A3 incl. the O-5
+  positive anchor) + `npm run test:quickset-hold`; CI's `check-*.js` glob
+  picks it up automatically.
+
+**Gate results (D-056 static evidence, all green):** `npx tsc --noEmit`
+clean · `node tests/check-quickset-hold.js` 13/13 PASS · full sweep of all
+78 `tests/check-*.js` suites green · `bash scripts/testid-lint.sh` OK.
+
+**Sabotage evidence (apply → RED with named assertion → revert → green):**
+
+| Sabotage | RED assertions |
+|---|---|
+| Pre-fix client restored wholesale (stash of all 3 src files — the "client still computes/sends `demoted_pids`" state) | A1a, A1b, A1c, A1d, A2b, A2e (6 FAIL, exit 1) |
+| Re-add `demoted: []` to the mutate payload | A1a, A1c |
+| Delete the `mutate({ ids, cleared })` call (O-5 vacuity probe) | A1c |
+| Re-add `demoted_pids: []` to the POST body | A2e |
+| Re-add a named `demoted` local at a TiersScreen call site | A3a |
+
+Each sabotage reverted via `git checkout --`; guard re-run green after every
+revert. (TiersScreen positional-arg arity is enforced by `tsc --noEmit`, per
+the PRD — a 5th positional arg to the 4-param `saveTiers` is a type error.)
+
+## Code-walk proof — mobile half (CW-1…CW-3), post-fix line numbers
+
+- **CW-1 — `onSave` builds `{ids, cleared}` only.**
+  `QuickSetTiersScreen.tsx:454` (`ids` = `gridPlayers` ∩ `selected`, in
+  grid/elo-desc order), `:455` (`cleared` = this run's prior saves of the
+  rung minus still-selected), `:468` `saveMutation.mutate({ ids, cleared })`
+  — two members, nothing else computed. The mutationFn (`:423`) destructures
+  exactly `{ ids, cleared }` and calls `saveTiers(position,
+  ids.length > 0 ? { [tier]: ids } : {}, cleared, opts)` (`:424–433`).
+- **CW-2 — the wire payload.** `api/rankings.ts:321` `saveTiers(position,
+  tiers, clearedPids, opts?)`; the POST body (`:342–348`) is exactly
+  `{ position, tiers, cleared_pids }` + conditional `scope`/`via`. No
+  `demoted_pids` key exists anywhere under `mobile/src/` (`git grep` clean;
+  guard A2e pins the body).
+- **CW-3 — R-6 hold-in-grid is emergent.** The grid renders `players` =
+  rankings sorted elo-desc (`QuickSetTiersScreen.tsx:236`), filtered only by
+  this-run claims (`gridPlayers`, `:249`) and the search view. The chip's
+  tier label reads `tierForElo(item.elo, position, fmt)` (`:514`, rendered
+  `:563`; VoiceOver label `:521`). Every input is the player's server elo,
+  which a save that excludes him no longer mutates (CW-1/CW-2 + backend
+  CW-4) — so on later rungs he sits at his held elo position with his held
+  tier chip, selectable by one tap. Nabers stays near the top of "3 1sts"
+  labeled "4+ 1STS".
+
+Runtime proof remains the operator TestFlight checklist (PRD §6d, steps
+1–7 — the Nabers walk, FA-rung demote, ≥2-player revisit-deselect, the #346
+preseeded "1 1st" hold, and the manual re-place cleanup).
