@@ -11,6 +11,21 @@
 
 ---
 
+## 2026-08-23b — Onboarding × calculator tour merge: PLAN written, nothing built
+
+Operator delivered Segrave's onboarding notes and the intent to merge the new-user walkthrough
+with the #384 calculator tour. Captured verbatim + dispositioned in
+[docs/plans/onboarding-tour-merge/](../docs/plans/onboarding-tour-merge/plan.md): roughly a third
+of the notes are already fixed by W7/W8 — but only for calc beats, which IS the disjointedness
+(onboarding talk beats still advance by invisible tap-catcher); a third is small (demo-link
+flag-off, `s0.1`/`s2.1` copy, Next buttons); the rest is real work in three waves — A: buttons +
+copy + `landing.try_before_sync` off; B: generalize the calc-tour runner into one spine that stops
+at the first trade and bridges into n10–n24, auto-dispatch the guided first search, replace
+`n6.1`-routable's Sleeper-send push with a queued-confirmation + invite moment; C: multi-platform
+landing (research answer: ESPN/MFL have NO username lookup — three platform tiles, three different
+inputs). Five operator decisions in plan §4; the plan proposes "stop at first trade + offer to
+continue" for the tour-length question.
+
 ## 2026-08-23a — Full sweep SHIPPED and LIT: the deck now scores every leaguemate (`trade.full_sweep`)
 
 The [full-sweep build](../docs/plans/full-sweep/plan.md) ([D-154](DECISIONS.md), ledger [2026-08-22j](TEST_LEDGER.md)) merged to `main` with the flag flipped **true** in the same PR, by operator instruction ("merge and flip it on"). Both opponent loops now skip the `global_target` early exit, so every eligible leaguemate is generated against and `_dedup_and_sort` ranks the league globally; wall-clock rail `full_sweep_budget_s` = 30 s (the v3 pair path has no deadline of its own); per-opponent keep is the knob `exploration_base_per_opp` (5.0, clamped ≥ 1). Expected in FFV3: every deck reaches all 11 partners (was ~6, fixed set in single-board leagues); deck grows toward `bakeoff_deck_limit` (prod 60); `gen_ms` ≈ 2×. **Owed:** the scope §3 post-flip verification (count partners, read `gen_ms`, prove the kill switch). Kill switch: flag → false + `POST /api/feature-flags/reload`. Review PR #181 (three trade-model reports, Q-030/G-058) merged first, same day.
