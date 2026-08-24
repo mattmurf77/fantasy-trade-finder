@@ -14,6 +14,19 @@
 
 
 
+## 2026-08-24 — D-158: the guided tab becomes the merged In-league page; canvas anchor = deck filter
+
+Operator worked plan §4 decision 1 live: the guided (Find a Trade) tab IS the merged In-league
+calculator page — build manually or find a trade from one surface; an anchored search gets "the
+same treatment as the existing filters from the outlook tab" (a receipt row: Built around · Change
+/ Clear); the pushed Manual Calc stays with the In-league tab deleted (Real values only). Recorded
+as [D-158](DECISIONS.md) (amends D-151), spec in plan §3b, new **Wave B0** ahead of the tour
+merge. Key find: #270's `trades_home_inline.canvas` experiment already mounts `InLeagueCalculator`
+wholesale on the guided tab — B0 is promotion + handler wiring (`calc.inline_home`, dark), and the
+in-place Find a Trade retires the FinderHandoff calculator lane, the G-056 popTo exposure, and the
+tour's park/deck-arrival machinery. Two flagged assumptions await the operator (existing deck
+visible beneath the canvas; Calc chip relabeled). D-157 ruled same day (labeled Clear button).
+
 ## 2026-08-24 — `mascot_ram_rollout` LAUNCHED; Fleeced is live on the operator's device only
 
 Experiment **v2 running on production**, verified three ways: the allowlisted device gets

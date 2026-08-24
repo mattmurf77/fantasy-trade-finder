@@ -1461,3 +1461,20 @@ It resolves the “I'm Fleeced” problem by not fighting it — the ram says th
 **Decision:** the merged calculator's in-frame action row changes from Find a Trade (70%) · ✕ icon · ✓ to a **narrower Find a Trade plus a labeled "Clear" button**, with the ✓ unchanged. Segrave's build-128 device pass (notes v2, note 15) showed the bare ✕ reads as "close" and, tapped mid-tour, silently clears the canvas the user just built.
 
 **Why relabel instead of hide:** hiding the ✕ during the tour — the note's first suggestion — was rejected because the tour's standing rule is that the guide *observes and never intercepts* (the scrim's cutout keeps the real control live for exactly this reason), and because the misread is not tour-specific: any user can mistake an unlabeled ✕ for dismiss. A label fixes it for everyone; the tour needs no special case. n19's copy ("Clear became this cross…") keys off this row and is re-checked at build time.
+
+## D-158 — The Guided Tab Becomes the Merged In-League Page; the Canvas Anchor Is a Deck Filter
+
+**Date:** 2026-08-23 · **Status:** decided (operator) · **Amends:** [D-151](DECISIONS.md) — "own tab for now" ends; this is the "eventually will replace it" arriving · **Builds:** Wave B0 of [docs/plans/onboarding-tour-merge/plan.md](../docs/plans/onboarding-tour-merge/plan.md)
+
+**The ruling, in the operator's words:** the guided (Find a Trade) tab is *"basically the manual calc in league page we've built"* — the user *"can either start building a trade manually from the page or they can find a trade"*, and a Find a Trade with assets already on the canvas *"becomes the same treatment as the existing filters from the outlook tab."* The pushed page: *"Manual Calc stays, without the in league tab."* Explicit constraint: lose no functionality.
+
+**Shape (see plan §3b for the build detail):**
+- TradesHome's guided mode hosts `InLeagueCalculator` **wholesale** — promote #270's `TradeBuildCanvas` mount from experiment variant to the layout, wired with the #384 handlers it currently lacks. Functionality is preserved *by construction*: it is the identical component the In-league tab renders (format chips + #191 note, league/team dropdowns, tier-badged columns, verdict, eveners, adjustments, lineup impact, share, send, outlook row, D-157 action row).
+- **`onFindATrade` stops navigating.** Same screen ⇒ consume the canvas in place → the D-153 fork (fair sweep with a give side, model when empty) → results render below. The `FinderHandoff` store's calculator lane, the consume-once dance, the G-056 `popTo` trap and the tour's park/hand-off/deck-arrival machinery all retire on this path.
+- **The anchor is a visible deck filter**, not a separate deck world: an anchored search renders a receipt row above the results in the `OutlookBiasReceipt` pattern — "Built around: <assets> · Change / Clear" — and clearing it is what "Search all trades" used to be.
+- The deck's "edit in calculator" prefills the inline canvas in place (the three `navigate('TradeCalculator', {prefill})` call sites retire).
+- The pushed `TradeCalculatorScreen` keeps **only Real values** (the #310 league-free promise); the In-league tab is deleted.
+
+**Assumptions flagged to the operator, not yet confirmed:** (1) a deck that already exists (pregen / earlier session) still shows beneath the canvas on arrival — both entry actions visible at once, no regression to the zero-effort discovery loop the #270 lab warned about; (2) the mode-bar Calc chip survives relabeled (it now means the Real-values page it pushes).
+
+**Rollout:** a real config flag (`calc.inline_home`, ships dark) — `trades_home_inline.canvas` is a per-unit experiment overlay and graduates/closes when this lands. **Ordering:** this layout wave (B0) lands BEFORE the tour merge (Wave B) — beats point at targets, and n10 dies with the tab it points at (plan §4.1's layout-first condition, now satisfied by decision).
