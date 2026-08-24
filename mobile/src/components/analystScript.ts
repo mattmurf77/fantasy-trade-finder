@@ -87,6 +87,9 @@ export const S = {
   s0_1: (): GuideStep => ({
     id: 's0.1', screen: 'SignIn', pose: 'neutral', advance: 'tap', once: true,
     line: "I'm The Analyst. I model dynasty trades — you bring the roster.",
+    // D-155 — Fleeced introduces himself in character. Rendered only under
+    // `onboarding.mascot_ram`; flag off keeps the line above verbatim.
+    lineRam: "I'm Fleeced, the ram. Good to see another sheep here for me to take advantage of.",
   }),
   s0_2: (): GuideStep => ({
     id: 's0.2', screen: 'SignIn', pose: 'point', flip: true, side: 'right',

@@ -35,8 +35,15 @@ had nothing to move, and the avatar lab's horn-clash test describes the layout t
 ships. (2) The ID reservation flagged at D1 was correct and then some: `main` took **D-153** (W6-B) *and* **D-154**
 (`trade.full_sweep`) while this work was in flight, so both entries renumbered on rebase.
 
-**Also fixed:** `test_release_flags_mirror_features_json` was already failing on `origin/main` (`trade.full_sweep` lit
-without updating the mirror fixture). CI was red for everyone; one value corrected.
+**Copy landed too.** The operator wrote the line — *"I'm Fleeced, the ram. Good to see another sheep here for me to take
+advantage of."* — which closed the split D-155 had deferred. The rule: the character name replaces the role name wherever
+the text names **who is speaking**; feature-worded copy stays feature-worded. One module writes the name
+(`utils/mascotCopy.ts`); the ram's introduction rides a `lineRam` field on beat `s0.1` so the script lint caps it like any
+other line.
+
+**Also fixed:** the flag fixtures had drifted from `config/features.json` — `trade.full_sweep` was lit by #182 in
+**none** of the three. `origin/main` was already red on `test_release_flags_mirror_features_json`; fixing only that file
+then exposed two more. All three corrected.
 
 ## 2026-08-23a — Full sweep SHIPPED and LIT: the deck now scores every leaguemate (`trade.full_sweep`)
 

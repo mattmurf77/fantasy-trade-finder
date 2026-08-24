@@ -113,6 +113,12 @@ export interface GuideStep {
   adoptionEvent?: string;
   /** FR-E6 — copy to render when the spotlight cannot be measured. */
   degradeLine?: string;
+  /** D-155 — the Fleeced variant of `line`, rendered only when
+   *  `onboarding.mascot_ram` is on. Absent = the mascot swap changes nothing
+   *  about this beat's copy, which is the default for all but one beat.
+   *  Held here rather than resolved at render so `check-guide-script.js` can
+   *  apply the same per-class word cap to it as to `line`. */
+  lineRam?: string;
   /** FR-E6 — purely deictic lines set `'suppress'`: rather than point at
    *  nothing, the step refuses (and is measured as such). */
   degrade?: 'suppress';

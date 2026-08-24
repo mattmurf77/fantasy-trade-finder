@@ -32,7 +32,9 @@ Launch the experiment, then force a flag refetch (cold boot, or background ≥30
 | B2 | Step the whole tour to the end | All six poses appear. Each is recognisably a different expression — **the one to watch is `computing` vs `thinking`**, which must not read as the same face |
 | B3 | A spotlight beat pointing at something on the **right** | Ram faces **right**, toward its target |
 | B4 | A spotlight beat pointing at something on the **left** | Ram faces **left** — the mirrored `point`. A ram facing away from its own spotlight is the failure |
-| B5 | The bubble header | Still reads **"The Analyst"**. Expected: the copy split is deferred (D-155). Not a bug |
+| B5 | The bubble header | Reads **"Fleeced"**, not "The Analyst". A ram labelled "The Analyst" means the copy gate and the art gate diverged |
+| B5b | Sign out → sign in, first tour beat | The introduction reads *“I'm Fleeced, the ram. Good to see another sheep here for me to take advantage of.”* and fits without truncation at the largest Dynamic Type setting |
+| B5c | Settings → Guided tour | Toggle title reads **"Fleeced"**; the banner still reads "Guided tour" and the description is still feature-worded (that is deliberate — "Turn off Fleeced" reads as a billing complaint) |
 | B6 | The ram against the bubble | No dark box or square matte behind it; no pink halo bleeding onto the card |
 | B7 | Ram vs the bubble's bottom edge | Sits on the same bottom line as the bubble. It is **taller** than the Analyst was — expected and sanctioned |
 

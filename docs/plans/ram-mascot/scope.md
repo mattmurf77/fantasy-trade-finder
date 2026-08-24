@@ -3,7 +3,7 @@
 **Date:** 2026-08-23
 **Entry point:** direct ask ("re-write the onboarding experiences using the painted ram and push it live, hidden behind an A/B test only enabled for me")
 **Builder:** Opus session, branch `claude/ram-mascot-fleeced`
-**Operator sign-off on waivers:** **pending** — three waivers below (§1c, §3 partial, §5 TestFlight) and two open decisions in §6
+**Operator sign-off on waivers:** **pending** — three waivers below (§1c, §3 partial, §5 TestFlight). §6's two carried decisions are now both closed
 **Binding docs:** [brief.md](brief.md) §3 · [experiment.md](experiment.md) · [D-155, D-156](../../../living-memory/DECISIONS.md)
 
 ---
@@ -103,9 +103,12 @@ CI could not be green for anyone until it was corrected. One value changed; unre
 
 ## 6. Open decisions carried into the build, stated not assumed
 
-1. **Copy split — unresolved by design.** D-155 deferred which of the six "The Analyst" strings become "Fleeced".
-   **This build changes none of them**, so the bubble still reads "The Analyst" above a ram. That is the recorded
-   default, not an oversight — *"I'm Fleeced"* as an opening line reads as "I got ripped off".
+1. **Copy split — RESOLVED 2026-08-23 by the operator, no longer open.** The line is
+   *“I'm Fleeced, the ram. Good to see another sheep here for me to take advantage of.”* (16 words; the `s0.1` beat is `advance: 'tap'`, cap 20 — it fits).
+   The rule that fell out: **the character name replaces the role name wherever the text names who is speaking**;
+   **feature-worded copy stays feature-worded**. Encoded in `mobile/src/utils/mascotCopy.ts`. The ram line lives on the
+   script beat as `lineRam` rather than being inlined in the host, so `check-guide-script.js` applies the same per-class
+   word cap to it — otherwise it would have been an uncapped side-door into the copy budget.
 2. **Anchor corner — dissolved, and worth recording why.** D2 decided `BUBBLE_ANCHOR` moves off-centre. Reading the
    shipped code, **`BUBBLE_ANCHOR` is exported and never consumed**: `AnalystGuide` lays the bubble out *beside* the
    avatar in a flex row (`:445-455`), not above it with a tail. There was nothing to move. `RAM_BUBBLE_ANCHOR` is
@@ -114,7 +117,7 @@ CI could not be green for anyone until it was corrected. One value changed; unre
 
 ## 7. What this deliberately does not do
 
-- **No tour-script change.** No beat, no copy, no ordering, no `analystScript.ts` edit.
+- **No tour-script *structure* change.** No beat added or removed, no ordering, no targeting, no eligibility field. The one `analystScript.ts` edit is a `lineRam` sibling on `s0.1`, inert while the flag is off.
 - **No change to the three call sites.** The switch is one function, which is what keeps the flag a single lever.
 - **No web or extension mascot** — out of scope per the brief.
 - **No global flag flip.** `onboarding.mascot_ram` ships `false` and is intended to stay false in `features.json`.

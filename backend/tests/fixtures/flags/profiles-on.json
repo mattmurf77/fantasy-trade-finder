@@ -213,5 +213,5 @@
   "trade.breaker": false,
   "trade.breaker_narrative": false,
   "trade.negmem": false,
-  "trade.full_sweep": false
+  "trade.full_sweep": true
 }

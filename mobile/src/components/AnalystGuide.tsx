@@ -20,6 +20,7 @@ import {
   type TargetFrame,
 } from '../state/guideTargets';
 import { AnalystAvatar } from './analyst';
+import { mascotName } from '../utils/mascotCopy';
 
 // The Analyst — guided-tour overlay host (guided-avatar-script.md §2).
 // Mounted ONCE in RootNav, above the nav tree, below system modals (native
@@ -267,7 +268,14 @@ export default function AnalystGuide() {
 
   const spotlightPending = guideV2 && spotlight === 'pending';
   const degraded = guideV2 && spotlight === 'degraded';
-  const displayLine = degraded ? (active?.degradeLine ?? active?.line ?? '') : (active?.line ?? '');
+  // D-155 — the mascot swap also carries copy. `lineRam` exists on exactly one
+  // beat today (s0.1, the introduction); every other beat falls through to
+  // `line`, so flag-off is byte-identical. A degraded step still prefers
+  // `degradeLine` — the spotlight failing outranks which mascot is speaking.
+  const ramOn = useOnboardingFeature('onboarding.mascot_ram');
+  const baseLine = (ramOn ? active?.lineRam : undefined) ?? active?.line ?? '';
+  const displayLine = degraded ? (active?.degradeLine ?? baseLine) : baseLine;
+  const who = mascotName(ramOn);
 
   // Announce the line to screen readers once its final form is known
   // (a degraded step swaps in `degradeLine`, so announcing on activation
@@ -453,7 +461,7 @@ export default function AnalystGuide() {
           </View>
           <View style={[styles.bubble, { maxWidth: winW - AVATAR - 3 * pad }]} testID="guide.bubble">
             <View style={styles.bubbleHead}>
-              <Text style={styles.who}>The Analyst</Text>
+              <Text style={styles.who}>{who}</Text>
               <Pressable
                 onPress={skipStep}
                 hitSlop={10}
@@ -499,7 +507,7 @@ export default function AnalystGuide() {
               style={styles.skip}
               accessibilityRole="button"
               accessibilityLabel="Turn off the guided tour"
-              accessibilityHint="Stops The Analyst from appearing. You can turn it back on in Settings."
+              accessibilityHint={`Stops ${who} from appearing. You can turn it back on in Settings.`}
             >
               <Text style={styles.skipText}>Skip the tour — don't show again</Text>
             </Pressable>

@@ -35,9 +35,12 @@ import { useOnboardingState } from '../../../state/useOnboardingState';
 import { useGuide } from '../../../state/useGuide';
 import { styles } from '../styles';
 import Row from '../Row';
+import { guideToggleTitle, guideToggleDescriptionOff } from '../../../utils/mascotCopy';
 
 export default function GuideSection() {
   const guidedAvatarOn = useOnboardingFeature('onboarding.guided_avatar');
+  // D-155 — names the guide bubble's speaker; off keeps "The Analyst".
+  const ramOn = useOnboardingFeature('onboarding.mascot_ram');
   const guideDismissed = useOnboardingState((s) => s.ob.guideDismissed);
 
   if (!guidedAvatarOn) return null;
@@ -49,11 +52,11 @@ export default function GuideSection() {
       </View>
       <Row
         testID="settings.guided-tour-toggle"
-        title="The Analyst"
+        title={guideToggleTitle(ramOn)}
         sub={
           guideDismissed
             ? 'Off. Turning this on restarts the guided tour from the beginning.'
-            : 'In-app guide bubbles on relevant screens. Turn off to dismiss The Analyst everywhere.'
+            : guideToggleDescriptionOff(ramOn)
         }
         value={!guideDismissed}
         onChange={() => {

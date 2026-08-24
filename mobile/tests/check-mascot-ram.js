@@ -162,6 +162,35 @@ assert(insetChecked > 0,
   'inset measurable on at least one sprite',
   'if this trips, the exporter changed PNG format and the guard went blind');
 
+// ── 4b. the copy swap is flag-gated too (D-155) ─────────────────────────
+// The name follows the artwork or the two disagree — a ram introducing itself
+// as "The Analyst", or worse, "Fleeced" printed over the Analyst's face.
+const guide = read('components/AnalystGuide.tsx');
+const script = read('components/analystScript.ts');
+const copy = read('utils/mascotCopy.ts');
+
+assert(/useOnboardingFeature\(\s*['"]onboarding\.mascot_ram['"]\s*\)/.test(guide),
+  'AnalystGuide gates its copy on the same flag as the artwork',
+  'name and face must never disagree');
+assert(!/>\s*The Analyst\s*</.test(guide),
+  'AnalystGuide has no hardcoded "The Analyst" in rendered copy',
+  'the who-label must come from mascotName()');
+assert(/mascotName\(/.test(guide), 'AnalystGuide names the speaker via mascotName()');
+assert(/lineRam/.test(guide) && /lineRam/.test(script),
+  'the ram opening line lives in the script and is read by the guide',
+  'copy belongs in analystScript.ts, not inlined in the host');
+assert(/MASCOT_NAME_ANALYST\s*=\s*'The Analyst'/.test(copy),
+  'flag-off name is still exactly "The Analyst"',
+  'flag off must be byte-identical, copy included');
+assert(/MASCOT_NAME_RAM\s*=\s*'Fleeced'/.test(copy), 'flag-on name is "Fleeced"');
+for (const f of ['screens/SettingsScreen.tsx', 'screens/settings/sections/GuideSection.tsx']) {
+  const t = read(f);
+  assert(!/title="The Analyst"/.test(t),
+    `${f} does not hardcode the mascot name on the guided-tour toggle`);
+  assert(/guideToggleTitle\(/.test(t),
+    `${f} takes its toggle title from mascotCopy`);
+}
+
 // ── 5. flip survives ────────────────────────────────────────────────────
 const ram = read('components/mascot/ram/index.tsx');
 assert(/flip/.test(ram) && /scaleX:\s*-1/.test(ram),

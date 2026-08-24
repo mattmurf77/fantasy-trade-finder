@@ -1422,6 +1422,10 @@ Two consequences follow, and **neither is settled by this entry**:
 
 The `guide_step_shown{pose}` analytics vocabulary is untouched either way — naming the character changes copy, not the six pose values.
 
+**Amended 2026-08-23 — the copy split is no longer deferred.** The operator wrote the line:
+*“I'm Fleeced, the ram. Good to see another sheep here for me to take advantage of.”*
+It resolves the “I'm Fleeced” problem by not fighting it — the ram says the quiet part, and the product's own name becomes the joke rather than an accident. The split that emerged: **the character name replaces the role name wherever the text names who is speaking** (the bubble's who-label, the introduction, the a11y hint, the Settings toggle title); **feature-worded copy stays feature-worded** (“Guided tour”, “In-app guide bubbles…”), because “Turn off Fleeced” reads as a billing complaint. Encoded in `mobile/src/utils/mascotCopy.ts`, which is the one place the name is written; the six strings all resolve through it. All of it rides `onboarding.mascot_ram`, so flag-off copy is still byte-identical — asserted by `check-mascot-ram.js`.
+
 **Medium rule, amended — the one rule this decision actually changes.** A logo-matched ram is painted art: gradients, specular horns, glow. It does not vectorise into clean `react-native-svg` paths, and today's [`../mobile/assets/CLAUDE.md`](../mobile/assets/CLAUDE.md) rule ("Do not add raster UI assets") forbids the honest medium for it. The rule is therefore amended, narrowly:
 
 - The mascot **may** ship as raster pose sprites (`@2x/@3x` PNG with alpha) **when** the approved art is painted. Vector remains the rule for everything else — in-app icons stay `components/chalkline/Icon`, and there is still no bitmap-icon path.

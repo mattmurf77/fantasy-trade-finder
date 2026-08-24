@@ -107,7 +107,8 @@ picks up the overlay on its next flag fetch (boot, or the ≥30-min foreground r
 1. `GET /api/feature-flags` with `X-Device-Id: <operator device>` → `experiments` contains
    `mascot_ram_rollout: treatment`, and `configs.mascot_ram_rollout.flags["onboarding.mascot_ram"]` is `true`.
 2. The same call **without** that header (or with any other device id) → the key is absent from both.
-3. On device: run the calculator tour (`Show me around`). All six poses render as the ram; the bubble still says
-   "The Analyst" (the copy split is deferred — [D-155](../../../living-memory/DECISIONS.md)).
+3. On device: run the calculator tour (`Show me around`). All six poses render as the ram, **and the bubble header now
+   reads “Fleeced”**. On the SignIn beat the introduction reads *“I'm Fleeced, the ram. Good to see another sheep here for me to take advantage of.”*.
+   If the face is a ram but the name still says “The Analyst”, the copy gate and the art gate have diverged.
 4. `guide_step_shown` events still carry the same six `pose` values. If they changed, something other than the renderer
    was touched.
