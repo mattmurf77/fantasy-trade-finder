@@ -24,7 +24,12 @@ at the first trade and bridges into n10–n24, auto-dispatch the guided first se
 `n6.1`-routable's Sleeper-send push with a queued-confirmation + invite moment; C: multi-platform
 landing (research answer: ESPN/MFL have NO username lookup — three platform tiles, three different
 inputs). Five operator decisions in plan §4; the plan proposes "stop at first trade + offer to
-continue" for the tour-length question.
+continue" for the tour-length question. **v2 same day:** Segrave added the calculator-tour
+section (notes v2) — dispositioned as plan §2b: n11 highlight believed fixed by W8 (confirm on
+128); three new Wave-A items (outlook-sheet margin, park the runner while the sheet is open,
+retarget n22 at the card meter — its current target sits inside `{!firstRun && …}` and never
+mounts for a first-run deck); decision 6 raised (relabel the action row's ✕ to a Clear button
+rather than hiding it mid-tour).
 
 ## 2026-08-23a — Full sweep SHIPPED and LIT: the deck now scores every leaguemate (`trade.full_sweep`)
 

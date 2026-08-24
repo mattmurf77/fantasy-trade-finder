@@ -15,3 +15,7 @@ deleted 2026-08-23. Recovery: `git branch docs/384-w8-ledger 915601d` ·
 The branch carrying THIS file (`docs/recovery-sweep-0823`, scratch worktree `wt-docs2`) is itself
 docs-only and single-commit; after its squash-merge it is recoverable from its own PR's diff.
 Deleted same day, worktree removed.
+
+Same pattern, same day: `docs/segrave-v2` (scratch worktree `wt-docs3`) — single-commit,
+docs-only (notes v2 + plan §2b + this paragraph); after its squash-merge it is recoverable from
+its own PR's diff. Deleted same day, worktree removed.

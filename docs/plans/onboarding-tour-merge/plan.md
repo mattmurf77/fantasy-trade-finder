@@ -36,6 +36,25 @@ The calc runner is the newer, better machine. The merge is substantially "put th
 | 9 | Ending is abrupt ("swipe left or right" … stop); merge with the calculator walkthrough | True: the spine ends at `s8.1` ("That's the tour…") or fizzles at `s2.2`. The "more comprehensive flow on the manual calculator page" is the #384 tour — runner-owned, buttoned, re-runnable, receipt-gated | The centerpiece — proposal in §3, decision in §4 | **M–L** |
 | 10 | After accept: kill the "they haven't seen it — send in Sleeper?" CTA; confirm queued instead; invite if leaguemate absent | The CTA is `n6.1` (routable variant): "Logged — they haven't seen it yet. Send it to them now?" → send surface. **Honesty bound in the code comment:** a one-sided like creates no notification and no row on their side — "queued for their review" must not imply they were pinged | Replace `n6.1`-routable with a queued confirmation ("Logged on your side — they'll see it when they're in the app"), and when the counterparty has no board/account, the invite moment — `inviteSocialProof` already governs invite-CTA honesty on three surfaces. Note: `growth.invite_join_link` is **false** today; the invite moment either lights it or uses the share-link rung | **M** |
 
+## 2b · Calculator-tour notes (v2, same day) — disposition
+
+Segrave's second pass covers the #384 calculator tour itself. Context that matters for reading it:
+this feedback almost certainly comes from **build 127 or earlier** — W8 (v1.16.2 / EAS 128) fixed
+the blank-band root cause after these runs.
+
+| # | Note | What's true in the code | Disposition | Size |
+|---|---|---|---|---|
+| 11 | n10 (switch to In-league) good | — | Nothing to do | — |
+| 12 | n11's Set Outlook button doesn't highlight the outlook section | This was the W7/W8 defect (band entry-spring against an unmounted band). Fixed in v1.16.2; verified in the simulator: n11 rings the outlook row | **Believed fixed on 128** — confirm on device (checklist §G) before building anything | — |
+| 13 | Outlook sheet sits too tight to the bottom; needs a bigger bottom margin | `OutlookSheet` layout | Padding polish | **S** |
+| 14 | The Analyst pops out **behind** the sheet while the user is still editing; should wait for Done | Real sequencing gap: n11 `advance:'cta'` — tapping Set Outlook opens the sheet AND advances, so the runner requests n12 immediately; the overlay is mounted below RN Modals, so the bubble renders behind the sheet | Park the runner after n11's accept until the sheet closes (the screen already owns `outlookOpenerRef`; add a close notification the runner resumes on) | **S–M** |
+| 15 | Find a Trade / ✓ beats good; but the ✕ clears the canvas mid-tour. Proposal: narrower Find a Trade, labeled **Clear** button at the bottom | The 70/15/15 action row is a D-153 decision (✕ = Clear, ✓ = queue). Hiding controls mid-tour violates the tour's own rule (the guide observes, never intercepts) — relabeling ✕ → "Clear" solves the misread for everyone, not just tour users | **Operator decision 6** (§4): amend D-153's action row to Find a Trade · Clear (labeled) · ✓ | **S** once decided |
+| 16 | Add Player beat good | — | Nothing to do | — |
+| 17 | Fairness-meter beat: bubble pops, no highlight, no scroll | **Root cause found:** n22 targets `trades.fairness-help` — the ⓘ in the "Trade fairness" toggle row — and that row renders inside `{!firstRun && …}` (`TradesScreen.tsx:5433`). On a first-run deck the target never mounts → the beat degrades (bubble only, by design). The scroll+ring machinery is fine; the target is absent exactly when a new user tours | Retarget n22 at the top card's **meter itself** (register a wrapper on `TradeValueBar`'s region in the deck card), which is also what the note asks to highlight; scroll-into-view then just works | **S–M** |
+| 18 | Send in Sleeper beat fine; no separate fix if the meter scroll lands first | Matches n23's shipped behavior (`trades.send-btn` wrapper + scroll-into-view, W7) | Nothing to do beyond #17 | — |
+
+Items 13, 14, and 17 are calculator-tour bugfixes independent of the merge — they join **Wave A**.
+
 ## 3 · The merged tour — proposed spine
 
 One runner (generalize `calcTour.ts`'s pattern: ordered beats, park/resume across screens, one interrupt hold, one receipt, refuse-when-capped), one spine:
@@ -66,6 +85,7 @@ What this keeps, closes, and leaves alone:
 3. **Auto-dispatching the first search (#7)** spends a model generation for every new guided user without a tap. That is the copy finally telling the truth, but it is also cost + a verification question (unverified sessions 403 on generation today — the auto-run must skip, not error, there).
 4. **The invite moment (#10)** needs `growth.invite_join_link` lit, or it degrades to the share-link. Lighting it is its own small rollout decision.
 5. **Multi-platform landing (#1)** is the largest piece and is separable — everything else in this plan works with today's Sleeper-first landing. Recommend it ships as its own wave.
+6. **The action row's ✕ (v2 note 15):** amend D-153's 70/15/15 row to a narrower Find a Trade plus a **labeled Clear button** instead of the ✕? Recommended over hiding the ✕ mid-tour — hiding controls during a tour breaks the "guide observes, never intercepts" rule, and the mislabel confuses non-tour users too.
 
 ## 5 · Research answers (from the codebase, not speculation)
 
@@ -92,7 +112,7 @@ The trade engine, the fairness sweep (D-153), the ✓ queue contract (D-152), Te
 
 | Wave | Contents | Size |
 |---|---|---|
-| A — "stop the bleeding" | #2 flag-off · #3 Next buttons on onboarding talk beats · #4 + #8 copy | S, one PR |
+| A — "stop the bleeding" | #2 flag-off · #3 Next buttons on onboarding talk beats · #4 + #8 copy · calc-tour polish #13 (sheet margin), #14 (park until Done), #17 (retarget n22 at the meter) · #15 on a decision-6 yes | S, one PR |
 | B — the merge | runner generalization · bridge beat · #7 auto-dispatch · #10 queued-confirmation + invite moment · rewritten `s8.1` | M/L |
 | C — multi-platform landing | #1/#5 per §5.2, its own scope block | L |
 
