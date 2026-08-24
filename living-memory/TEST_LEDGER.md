@@ -21,7 +21,7 @@ Scope: [`docs/plans/quickset-analytics-via/scope.md`](../docs/plans/quickset-ana
 
 | Gate | Result |
 |---|---|
-| `pytest backend/tests -k "not calibration_gate"` | **4226 passed, 1 failed, 1 skipped** — the failure (`test_deck_signal_v2.py::test_flag_on_writes_impressions_in_served_order`) reproduces on the **clean origin/main tree** (`git stash` → still fails) under local Python **3.14.4**; the known 3.12-skew class (this file, 2026-08-13). Unrelated to the change; CI on the PR sha is the arbiter |
+| `pytest backend/tests -k "not calibration_gate"` | **4226 passed, 1 failed, 1 skipped** — the failure (`test_deck_signal_v2.py::test_flag_on_writes_impressions_in_served_order`) reproduces on the **clean origin/main tree** (`git stash` → still fails) under local Python **3.14.4**; the known 3.12-skew class (this file, 2026-08-13). Unrelated to the change; CI on the PR sha is the arbiter — and PR #196 CI came back **all green** (backend-tests on 3.12 pass, mobile-typecheck pass, testid-lint pass; run 32762214700), confirming the skew diagnosis |
 | Server branch coverage (pre-existing, all green in the run) | `test_analytics_p0.py::test_quickset_completed_fires_with_props` + `::test_quickset_event_absent_for_plain_tier_save`, `test_rookie_scope.py::test_rookie_via_tags_are_recorded_and_do_not_fire_quickset_completed`, `test_events_api.py` disjointness pins |
 | New structural guard | `mobile/tests/check-quickset-via.js` (`npm run test:quickset-via`) — 13 asserts green. **Sabotage:** non-rookie save arm reverted to `undefined` (the original bug) → guard RED on exactly the pinned assert; restore → green |
 | `tsc --noEmit` (strict) | green |
