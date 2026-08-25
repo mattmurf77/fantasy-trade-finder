@@ -156,6 +156,7 @@ Full entries below — grep the ID. Read the entry before acting; this index is 
 - **Fix:** set the version in all three native spots + app.json for sanity: `Info.plist` `CFBundleShortVersionString`, both `MARKETING_VERSION` lines in `project.pbxproj`, and `app.json` `version`. Commit (ios/ is tracked). See commit `e291a09`.
 - **Prevention:** treat `ios/` (and `android/app/build.gradle` `versionName`) as the source of truth for version strings whenever a native dir is committed. NEXT.md #3 half-knew this ("app.json bumps don't apply") but attributed it to `appVersionSource: remote`; the real reason is the committed native project.
 - **History:** hit 2026-07-06 — build 20 auto-submitted as 1.0.0, cancelled mid-flight, version fixed, rebuilt as 1.3.0.
+- **Recurred (partially) 2026-08-25:** the fix list is FOUR spots and gets applied in part. The 1.16.5 bump updated `app.json` + `Info.plist` but left BOTH `MARKETING_VERSION` lines at 1.16.4, so the two native sources silently disagreed for a whole release; caught while cutting 1.16.6 (v1.16.6 sets all three iOS spots). Check `grep -n MARKETING_VERSION ios/*.xcodeproj/project.pbxproj` against `Info.plist` BEFORE every build — agreement between them is the real gate, not the app.json value. `android/app/build.gradle` `versionName` is stale at 1.0.0 and left alone on purpose (Android is not a shipping target).
 
 ---
 
