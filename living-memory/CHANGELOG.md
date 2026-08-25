@@ -14,9 +14,73 @@
 
 
 
-## 2026-08-24 — Quick Set `via` gap: the tag no client ever sent (D-160; PR open, HELD for operator)
+## 2026-08-24 — Quick Set `via` gap: the tag no client ever sent (D-162; PR #196, merged 2026-08-25 on operator confirm)
 
-Found while planning Group F: `POST /api/tiers/save` has branched on `via == "quickset"` since analytics P0 — FR-20 `quickset_completed`, `tier_save.props.via`, P0-1's point-of-use `ranking_method='quickset'` — but **no client ever sent the value** (mobile's `saveTiers` whitelisted only `rookie_*`; web has no Quick Set), so all three reads were dark for every production walk while the 2026-08-13 addendum deleted the client emitter calling the server row "the authoritative completion". Worse, "per completed position" was never implementable: the walk saves rung by rung and a consensus-accepting user saves nothing. Fix on `claude/elegant-feynman-c3689e`: unscoped Quick Set saves now tag `via:'quickset'` (one emitter change, no registry change); semantics corrected everywhere to "per tagged tier commit", per-position completion = `quickset_step_advanced` at the last rung. Guard `check-quickset-via` (sabotage-proven), tsc green. Addendum: `docs/business/analytics/2026-08-24-quickset-via-gap.md`; scope: `docs/plans/quickset-analytics-via/`. Held unmerged — analytics bright line. Seam: do not trend `rank_quickset` / `tier_save.via` across the next mobile release.
+Found while planning Group F: `POST /api/tiers/save` has branched on `via == "quickset"` since analytics P0 — FR-20 `quickset_completed`, `tier_save.props.via`, P0-1's point-of-use `ranking_method='quickset'` — but **no client ever sent the value** (mobile's `saveTiers` whitelisted only `rookie_*`; web has no Quick Set), so all three reads were dark for every production walk while the 2026-08-13 addendum deleted the client emitter calling the server row "the authoritative completion". Worse, "per completed position" was never implementable: the walk saves rung by rung and a consensus-accepting user saves nothing. Fix on `claude/elegant-feynman-c3689e`: unscoped Quick Set saves now tag `via:'quickset'` (one emitter change, no registry change); semantics corrected everywhere to "per tagged tier commit", per-position completion = `quickset_step_advanced` at the last rung. Guard `check-quickset-via` (sabotage-proven), tsc green. Addendum: `docs/business/analytics/2026-08-24-quickset-via-gap.md`; scope: `docs/plans/quickset-analytics-via/`. Held for operator confirm (analytics bright line); merged 2026-08-25. Seam: do not trend `rank_quickset` / `tier_save.via` across the next mobile release.
+
+## 2026-08-24 — Future firsts floor at the current-year mid: D-079 re-asserted under market_slots (D-161)
+
+Tester MangoPatti's report (via the operator) that "1sts are still undervalued" was validated and root-caused: D-146's market pricing quietly reinstated the market's future-first discount that D-079 had ruled against (Q-018 warned of exactly this), and the served card had priced future firsts at ≈ 1,171 — the ~93rd asset — against A.J. Brown. Operator re-ruled, verbatim: *"The ideal solution is the D-079 ruling."* One clamp at `priced_pool_value` step 2: future-year round-1 ≥ `market_r1_yoy_floor` × the current-year mid (default 1.0 flat; 0 = pure market, deploy-free). Live curve verified: 2027/2028/2029 firsts now serve at 2,184.6 (1qb) / 2,434.0 (sf); rounds 2–4 keep their decay; slotted current-year picks, the ladder mode and the DP-absent fallback byte-identical. Suite 4,275 green; Q-018 CLOSED as ruled. Adjacent open item, not built: picks are DP-pure while players are 50% KTC-blended.
+
+## 2026-08-24 — Feedback wave: 5 groups / 11 items built, QA-green, awaiting ship go/no-go (branch `claude/new-user-feedback-55320e`)
+
+Full `/feedback` pipeline run, no express. **A** (#376/#379/#394): TradesHome regains an always-on
+"Outlook & filters" row → full DNA sheet; top-row Filters button removed (#379); root cause = every
+entry flag-coupled or stranded. **B** (#397/#398): s2.2 swipe beat pinned to top via opt-in
+`GuideStep.band:'top'`. **C** (#395/#396): `align_starter_slots()` kills phantom lineup-cascade rows;
+real platform lineup template replaces the 3-WR mock default; rank chips "WR #3". **D** (#386/#391):
+LeagueSummaryScreen announces layout shifts to the guide (calculator precedent). **F** (#346/#381):
+QuickSet **HOLD** ([D-160](DECISIONS.md), supersedes #161) — server ignores legacy `demoted_pids`,
+client stops sending it. Evidence in TEST_LEDGER same date (tsc, 78/78 guards, pytest 4238 ×3, all
+sabotages re-proven by two independent QA agents, both PASS). v1.16.4 bumped. **Not on `main`,
+nothing deployed** — operator go/no-go pending; runtime evidence owed via the
+[consolidated checklist](../docs/feedback/items/346-quickset-tier-drop/testflight-checklist-batch.md).
+Triage also corrected 16 stale item statuses and backfilled INDEX.md (180/180). Batch docs:
+[`346-quickset-tier-drop/plan.md`](../docs/feedback/items/346-quickset-tier-drop/plan.md).
+## 2026-08-24c — Waves A + B0 merged and built: 1.16.4 (EAS 130); `calc.inline_home` DARK until Wave B
+
+The two entries below were written on their branches; both are now ON MAIN — Wave A squash PR
+[#197](https://github.com/mattmurf77/fantasy-trade-finder/pull/197) → `7452650`, Wave B0
+[#199](https://github.com/mattmurf77/fantasy-trade-finder/pull/199) → `14a4ce4` — after a Fable
+subagent review (verdicts: merge-with-fixes / merge-as-is-dark). Lead landed the review fixes
+before merge: A1/A3 (the In-league ready level now tracks the CONTENT — blur no longer clears it,
+unmount does), A2 (outlook park bound 10 s → 60 s), B1 (MatchesScreen's cross-tab
+edit-in-calculator was a FOURTH prefill site that flag-on silently dropped — now routes to the
+guided landing via a `canvasPrefill` route param, guard 9d–f). EAS **1.16.4 (130)** submitted.
+Checklists H/I1 owed on 130; the tour is OFF under `calc.inline_home` until Wave B re-threads it
+through the inline mount. Ledger: `docs/recovery/2026-08-24-wave-a-b0-ship.md`.
+
+## 2026-08-24 — Wave B0 BUILT dark: the guided landing hosts the In-league canvas (`calc.inline_home`, D-158)
+
+Branch `feat/inline-home-b0`, **not merged, not PR'd**. New flag `calc.inline_home` (**false**;
+mirrored into all three flag fixtures + `backend/feature_flags.py`). ON: `TradeBuildCanvas` is
+promoted from the #270 experiment to the guided layout (flag path outranks the experiment; ONE
+mount), its suggestion rail dies, Find a Trade runs **in place** through the same D-153 fork and
+the same #330 choke point (no navigation, no `FinderHandoff`, no new dispatch site), an anchored
+deck gets a `trades.anchor-receipt` filter row (Change = scroll to the canvas · Clear =
+`handleSearchAllTrades` verbatim, which is why the end-of-deck Search-all steps aside), the three
+edit-in-calculator hand-offs load the canvas, the pushed page becomes **Real values only**, and
+the Calc chip reads `Real values`. OFF = byte-identical (code-walk in the scope block §3).
+**No new events, no schema, no route change** — the fork and the ✓ queue moved to
+`utils/canvasSearch.ts` / `utils/queueCalcTrade.ts`, one implementation each, two callers.
+**The tour is OFF under this flag** (n10 points at the deleted tab) — Wave B rebuilds it.
+Scope: [`docs/plans/onboarding-tour-merge/scope-wave-b0.md`](../docs/plans/onboarding-tour-merge/scope-wave-b0.md).
+
+## 2026-08-24 — Tour merge Wave A built on `feat/tour-wave-a`: Segrave's notes, minus the merge itself
+
+Plan §7 Wave A ([scope](../docs/plans/onboarding-tour-merge/scope-wave-a.md)) — nine notes, no new
+surface, route, event or schema. **Demo link off**: `landing.try_before_sync` → false in
+`config/features.json` + the three fixture mirrors (code path intact; flipping the key back is the
+whole revert). **Ten onboarding talk beats get Next buttons** (`s0.1`, both `s0.err-*`, `s2.1`,
+`s4.1`, `s5.0`, `s5.1`, `s8.1`, `n1`, router-less `n6.1`) — a tap beat mounts the full-screen
+catcher that also ate deck scroll. `s0.1` now promises the walkthrough; `s2.1` carries provenance
+(consensus now / your swipes teach me yours). **Two new runner parks** in `calcTour.ts`, both
+bounded at 10 s into `endTour('abandoned')`: after n10 until the In-league content mounts (a
+LEVEL signal, so a warm re-run proceeds instantly) and after n11's accept until the outlook sheet
+closes. Fixes n11's ringless bubble and n12 drawing behind the Modal — a race the simulator hid
+behind a warm cache. **n22 retargeted** off `trades.fairness-help` (never mounts on a first-run
+deck) onto a new `trades.card-meter` on the top card. **D-157**: the action row's ✕ becomes a
+labelled **Clear**, 50/30/20. Outlook sheet gains a safe-area bottom pad. Not merged, not shipped.
 
 ## 2026-08-24 — Knockout refine BUILT + measured: R5 two-sided, R1 currency knob, R2 quality-aware, 3-for-1 knob (D-159)
 

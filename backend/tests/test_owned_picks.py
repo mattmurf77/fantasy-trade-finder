@@ -14,6 +14,7 @@ import backend.server as srv
 import backend.database as db
 import backend.trade_service as ts
 from backend.pick_values import (pick_pool_value, market_pick_pool_value,
+                                 priced_pool_value,
                                  GENERIC_PICK_SEEDS, YEAR_DISCOUNT)
 from backend.draft_status import PICK_HORIZON_CLASSES
 
@@ -538,15 +539,23 @@ def test_evaluate_resolves_league_pick_not_dropped(_eval_env):
     #
     # D-144 (2026-08-21) moved the expectation off `pick_pool_value`: owned
     # picks no longer price on the ladder, so deriving the expectation from
-    # the ladder would assert the wrong contract. It is derived from
-    # `market_pick_pool_value` instead — still derived, never a bare literal,
-    # so a retune of the market path moves this with it. What the fixture
-    # pins as literals is the INPUT (season 2027, round 1, the stored ladder
+    # the ladder would assert the wrong contract. What the fixture pins as
+    # literals is the INPUT (season 2027, round 1, the stored ladder
     # pool_value the sync path really writes).
+    #
+    # D-161 (2026-08-24) moved it one step further along the SAME waterfall:
+    # step 2's round curve is now clamped by the round-1 YoY floor, so this
+    # reads through `priced_pool_value` — the served price — instead of
+    # reproducing step 2 with `market_pick_pool_value`. This test pins what
+    # the ROUTE serves, so it must track the seam, not one of its steps.
     assert "L_2027_1_1" not in d["dropped_player_ids"]
     per = {p["player_id"]: p["value"] for p in d["per_player"]}
-    expected = market_pick_pool_value(2027, 1, "1qb_ppr")
-    assert expected is not None, "the pinned DP snapshot must publish 2027 R1"
+    curve = market_pick_pool_value(2027, 1, "1qb_ppr")
+    assert curve is not None, "the pinned DP snapshot must publish 2027 R1"
+    expected = priced_pool_value(
+        {"season": 2027, "round": 1, "pool_value": pick_pool_value(1, 1)},
+        scoring_format="1qb_ppr", slot=None)
+    assert expected > curve, "D-161: the future first is floored up"
     assert expected < pick_pool_value(1, 1)      # market is cheaper: the change
     assert per["L_2027_1_1"] == pytest.approx(expected, abs=1.0)
     assert d["receive_value"] > 0

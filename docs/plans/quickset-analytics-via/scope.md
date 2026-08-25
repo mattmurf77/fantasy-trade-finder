@@ -3,10 +3,10 @@
 **Date:** 2026-08-24
 **Entry point:** direct ask — analytics gap found while planning Group F (quickset tier-drop fix)
 **Builder:** Claude session (branch `claude/elegant-feynman-c3689e`)
-**Operator sign-off on waivers:** not needed (no waivers) — but the whole change
-is **held for operator confirmation before merge**: it changes what an existing
-analytics event records (bright-line surface; same hold the 2026-08-13
-dropped-emitter addendum used).
+**Operator sign-off on waivers:** not needed (no waivers). The change was held
+for operator confirmation before merge (bright-line analytics surface, per the
+2026-08-13 dropped-emitter addendum's precedent) — **confirmed and merged
+2026-08-25 (PR #196)**.
 
 ---
 

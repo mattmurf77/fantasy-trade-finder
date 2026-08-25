@@ -33,6 +33,7 @@ import backend.draft_board_service as dbs
 import backend.server as server
 from backend.pick_values import (market_pick_slot_value, pick_pool_value,
                                  priced_pool_value)
+import backend.trade_service as ts
 from backend.trade_service import elo_to_value
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -312,7 +313,23 @@ def test_future_seasons_ride_the_round_curve_by_data_not_by_a_branch():
     assert pick_slots.slot_for(ORDER_12, 2027, 1, "r1") is None  # #273 refuses
     row = {"season": 2027, "round": 1, "original_roster_id": "r1",
            "pool_value": pick_pool_value(1, 1, FMT)}
-    assert server._priced_pick_value(row, ORDER_12, FMT) == 1504.6
+    # The round-curve literal is asserted with D-161's round-1 YoY floor
+    # DISABLED, because the claim here is about which STEP handles a future
+    # season, not about the final served number — and 1504.6 is step 2's own
+    # answer. The floor is a clamp on top of step 2, not a fourth step, so
+    # pinning it out is what keeps this literal a statement about the
+    # waterfall. The SERVED number is pinned where it belongs: at each
+    # surface's own file, and in test_pick_yoy_floor.py.
+    prev = ts._cfg.get("market_r1_yoy_floor")
+    ts._cfg["market_r1_yoy_floor"] = 0.0
+    try:
+        assert server._priced_pick_value(row, ORDER_12, FMT) == 1504.6
+    finally:
+        ts._cfg["market_r1_yoy_floor"] = prev
+    # …and at the shipped default the SAME row still rides step 2; it is
+    # simply clamped up to the current class's first (D-161), which is
+    # strictly above the unfloored curve.
+    assert server._priced_pick_value(row, ORDER_12, FMT) > 1504.6
 
 
 # ═══════════════════════════════════════════════════════════════════════════

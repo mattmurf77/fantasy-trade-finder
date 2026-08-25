@@ -1493,8 +1493,38 @@ It resolves the “I'm Fleeced” problem by not fighting it — the ram says th
 
 **Deliberately not here:** the viewer-must-win gate (Q-030a, operator decision pending), `waiver_slot_cost`, filler code changes, diversity-key work, FLEX-aware feasibility.
 
+## D-160 — Quick Set Saves HOLD Unselected Players (Supersedes #161's Demote Rule)
 
-## D-160 — `quickset_completed` Means "Tagged Tier Commit", Because the Save Route Cannot See a Completed Position
+**Date:** 2026-08-24 · **Trigger:** feedback #381 (+#346), operator ruling · **Spec:** [docs/feedback/items/346-quickset-tier-drop/prd.md](../docs/feedback/items/346-quickset-tier-drop/prd.md)
+
+A Quick Set rung save touches only the selected players. The #161
+auto-demote (visible-but-unselected at/above the rung → pinned to
+`DEMOTED_ELO` 1100) is removed on both sides: the client no longer computes
+or sends `demoted_pids`, and `POST /api/tiers/save` accepts-and-silently-
+ignores the key from old binaries (v1.10.0–v1.16.x), so the backend deploy
+alone fixes every installed build. Explicit demotion survives via the FA
+rung, revisit-deselect (`cleared_pids` → consensus restore; the #161
+demote-beats-clear precedence dies too), and TiersScreen. `DEMOTED_ELO`
+stays for the anchor no-value path and the D-085 goldens. No flag: the old
+behavior is the bug per the operator's ruling, and rollback is a revert —
+a backend revert alone restores demote for binaries ≤ v1.16.x (they still
+send the key), but not for binaries carrying the client half of this fix,
+which would also need a client revert + EAS build.
+No historical 1100-pin repair — indistinguishable from anchor no-value.
+
+## D-161 — The D-079 Ruling Wins the Year Axis: Future Firsts Floor at the Current-Year Mid Under `market_slots`
+
+**Date:** 2026-08-24 · **Status:** decided (operator, verbatim: *"I'm aligned. The ideal solution is the D-079 ruling"*) · **Closes:** [Q-018](OPEN_QUESTIONS.md) · **Plan:** [`docs/plans/pick-yoy-floor/`](../docs/plans/pick-yoy-floor/plan.md) · **Trigger:** tester MangoPatti via the operator — a served FFV3 card priced three future firsts ≈ 1,171 each (the ~93rd asset) against A.J. Brown + depth
+
+**What was found.** [D-146](DECISIONS.md)'s `market_slots` pricing quietly overrode [D-079](DECISIONS.md)'s flat-firsts ruling on the year axis: future-year round-1 picks ride DynastyProcess's own future discount (2027 1st 1,751 / 2028 1st 1,459 vs the current-year mid 2,185 in 1qb) — the exact tension Q-018 recorded at D-079 ship time ("we are now deliberately pricing firsts above the market... logged as Q-018"). The served card's ≈ 1,171 sat below even DP's curve; today's injector probe reproduces the correct market values, so that residue is attributed to that boot's degraded DP snapshot — and the floor moots it in either case.
+
+**The ruling applied.** In `priced_pool_value`'s step-2 (round-curve) seam: for round 1, seasons beyond the anchor, `value = max(market, market_r1_yoy_floor × current-year round-1 mid)`. Knob default **1.0** (flat YoY — the D-079 ruling); `0` restores pure market pricing deploy-free; fractions dial a market-style discount if the operator ever re-rules. Rounds 2–4 keep their decay ("other picks can degrade"), slotted current-year picks (step 1), `tier_ladder` mode, and the DP-absent fallback are untouched.
+
+**Q-018 disposition.** The market disagreement Q-018 documents is real and unchanged — every public source discounts future firsts. The operator has now chosen twice, with the market evidence in front of them both times: firsts are the league's currency and hold value YoY. Closed as ruled, not as resolved-by-agreement; the knob preserves the reversal path the question asked for.
+
+**Adjacent, deliberately not built:** picks are DP-pure while player values are 50% KTC-blended — a structural conservatism on picks worth its own measurement before any blend is added.
+
+## D-162 — `quickset_completed` Means "Tagged Tier Commit", Because the Save Route Cannot See a Completed Position
 
 **Date:** 2026-08-24 · **Status:** built, held for operator confirmation before merge · **Scope:** [`docs/plans/quickset-analytics-via/scope.md`](../docs/plans/quickset-analytics-via/scope.md) · **Addendum:** [`docs/business/analytics/2026-08-24-quickset-via-gap.md`](../docs/business/analytics/2026-08-24-quickset-via-gap.md)
 

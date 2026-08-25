@@ -199,6 +199,7 @@
 ---
 
 ## 2026-08-15 — Open Items (compressed-board pool prune)
+- **CLOSED 2026-08-24 (operator re-ruling → [D-161](DECISIONS.md)):** MangoPatti's field report surfaced exactly this seam — `market_slots` had reinstated the market's future-first discount D-079 ruled against. Operator, verbatim: *"The ideal solution is the D-079 ruling."* Future-year round-1 now floors at the current-year mid (`market_r1_yoy_floor`, default 1.0; 0 = pure market). The market-disagreement evidence above stands unrefuted; the call is a product ruling, made twice with that evidence in view.
 
 ### Q-017 — Should the pool prune quantile-match the two boards instead of rescaling them?
 - **Why it matters:** `trade.pool_calibration` ([D-052](DECISIONS.md)) removes a board-wide *offset* with a single multiplicative factor. That is exactly right for the pathological case it was built for, and it is enough to rescue gdubs10 (0 → 5 divergence cards on real prod boards). It is **not** enough for MangoPatti or Bcork, which still yield zero divergence cards and are only covered by the consensus fallback. The reason is structural: a floor-pinned board is closer to `value_u^a` (a < 1) than to `c · value_u`, and no single factor undoes an exponent. Those two members therefore get generic fair-value ideas where a large-enough pool finds real divergence trades (`v3_pool_size = 30` produces 5 divergence cards for each — at 26–102 s per pair, which is why it isn't the fix).

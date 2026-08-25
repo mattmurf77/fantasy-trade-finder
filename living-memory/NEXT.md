@@ -37,7 +37,7 @@
 
 ## 2026-08-24 — Quick Set `via` gap PR: operator confirm + merge, then the TestFlight check
 
-1. **Operator: confirm + merge the `claude/elegant-feynman-c3689e` PR** ([D-160](DECISIONS.md), [scope](../docs/plans/quickset-analytics-via/scope.md), [addendum](../docs/business/analytics/2026-08-24-quickset-via-gap.md)). One mobile emitter change lighting up three dark server reads (`quickset_completed`, `tier_save.via`, point-of-use `ranking_method='quickset'`) + the semantics correction (per tagged commit, never per completed position). Held unmerged because analytics events are a bright-line surface. *Why now: Group F (quickset tier-drop fix) planning surfaced it; every day unmerged is another day the Quick Set funnel reads zero.*
+1. ~~Operator: confirm + merge~~ **MERGED 2026-08-25** (PR #196, operator-confirmed) — [D-162](DECISIONS.md), [scope](../docs/plans/quickset-analytics-via/scope.md), [addendum](../docs/business/analytics/2026-08-24-quickset-via-gap.md). One mobile emitter change lighting up three dark server reads (`quickset_completed`, `tier_save.via`, point-of-use `ranking_method='quickset'`) + the semantics correction (per tagged commit, never per completed position).
 2. After the next mobile release containing it: run the **TestFlight checklist** in scope §3 and log in TEST_LEDGER; remember the seam — don't trend `rank_quickset` / `tier_save.via` splits across that release.
 
 ## 2026-08-23 — Onboarding × calc tour merge: operator decisions, then Wave A
@@ -48,9 +48,10 @@
    (§4.4), multi-platform-landing timing (§4.5). D-158's two assumptions are CONFIRMED
    (2026-08-24). *Why now: Wave A and Wave B0 are both fully specified — each is one operator go
    from build.*
-2. **Wave A on a go:** Next buttons on every onboarding talk beat (the W7 rule, applied to
-   `s0.1`/`s2.1`/`s5.x`/`s8.1`/`n1`/err beats), `landing.try_before_sync` → false, `s0.1` +
-   `s2.1` copy. Full gates; no schema/API surface.
+2. ~~Wave A~~ / ~~Wave B0~~ **SHIPPED 2026-08-24** (PRs #197/#199, EAS 1.16.4 build 130; B0
+   dark behind `calc.inline_home`). Next build: **Wave B, the tour merge** — required BEFORE the
+   flag lights (tour is off under it), and it must re-thread the park signals + outlook opener
+   through the inline mount. Checklists H + I1 owed on 130.
 
 ## 2026-08-22 — Full sweep: merge the review PR, then the build, then the operator flips
 

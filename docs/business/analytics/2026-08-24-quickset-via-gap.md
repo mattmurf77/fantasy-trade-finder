@@ -1,9 +1,9 @@
 # Tracking-plan addendum — the Quick Set `via` gap (2026-08-24)
 
-**Status:** built on branch `claude/elegant-feynman-c3689e`; **awaiting operator
-confirmation before ship** (analytics events are a bright-line surface per root
-CLAUDE.md; the 2026-08-13 addendum set the same hold-for-confirmation
-precedent).
+**Status:** operator-confirmed and merged 2026-08-25 (PR #196; the hold-for-
+confirmation followed the 2026-08-13 addendum's precedent — analytics events
+are a bright-line surface per root CLAUDE.md). Takes effect from the first
+mobile release containing the change.
 
 ## What this is
 

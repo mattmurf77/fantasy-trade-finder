@@ -340,7 +340,9 @@ the ONLY runtime proof any of it gets — none of it ran on a device before ship
 58. **The deck beats keep the avatar and hit their targets.** On the deck: the ✕ beat rings the
     card's ✕; the **swap** beat rings the **swap arrow on the first give-side player row** — not
     the whole card, not nothing *(report 4)*; the package beat rings the package toggle; the
-    fairness beat rings the meter's ⓘ. Every one shows the Analyst beside its ring. ☐
+    fairness beat rings **the top card's value meter** (retargeted in Wave A — see step 70; it
+    used to name the ⓘ in the "Trade fairness" row, which does not mount on a first-run deck).
+    Every one shows the Analyst beside its ring. ☐
 59. **The send beat scrolls its button into view.** When the *"Sending goes straight to your
     league"* beat comes up, the **Send** button is **visible on screen** — the page scrolls itself
     to bring it in if it was below the fold — and the ring is on it. *(Report 5b.)* ☐
@@ -356,6 +358,187 @@ the ONLY runtime proof any of it gets — none of it ran on a device before ship
 62. **Regression — the OTHER guided beats still work.** Fresh install, sign in, and let the
     first-run deck tour run (swipe hint / provenance chip / trio entry). Those beats are untouched
     by this wave; confirm none of them lost its avatar or its ring. ☐
+
+---
+
+## H. Wave A — the 2026-08-23 notes (run on the first build after `feat/tour-wave-a`)
+
+Segrave's second pass, off build **128** — i.e. AFTER the W8 fixes, so none of it can be waved
+off as already-shipped. Two of these fix a **race** that the simulator hid behind a warm cache
+(that is exactly how W8 passed while note 12 stayed open), so a cold run is the point:
+
+> **Before steps 63–69, force a cold league load.** Fully quit the app (swipe it out of the app
+> switcher) and relaunch, or switch to a league you have not opened this session. A warm React
+> Query cache resolves the rosters instantly and the race you are testing for cannot happen.
+> Also clear onboarding state — a `calc_tour_completed` receipt retires the auto-start.
+>
+> Requires `calc.merged_layout` = true and `onboarding.guide_v2` = true.
+
+**The parks (notes 12 + 14)**
+
+63. **The outlook beat lands on a COLD page.** Cold-start, go to the calculator, let the tour
+    auto-start on *"Two ways to build a trade…"*, and tap **In league**. The page shows
+    *"Loading your league…"* — and **the Analyst waits**: no bubble, no ring, nothing during the
+    load. When the league content appears, beat 2 (*"Set your outlook first…"*) comes up **with a
+    ring around the Outlook row**. *(Note 12: it used to fire during the load and degrade to a
+    ringless bubble.)* ☐
+64. **…and it does not wait forever.** Repeat step 63 with the device in airplane mode so the
+    league never loads. After ~10 s the tour **ends quietly** — no stuck bubble, no permanently
+    silent app. Turn the network back on, go to any other tab, and confirm the app's normal
+    banners/prompts still appear. *(A wedged park would mute every interstitial for the rest of
+    the session.)* ☐
+65. **A warm re-run does NOT wait.** With the league already loaded and the tour finished, tap
+    **Show me around**, then **In league**. Beat 2 appears **immediately** — no ~10 s pause.
+    *(The ready signal is a level, not a one-shot event; an edge-triggered park would stall here.)* ☐
+66. **The Analyst stays out of the way while you edit the outlook.** On beat 2, tap **Set
+    outlook**. The Trade DNA sheet opens and **no bubble appears** over or behind it — check the
+    edges of the sheet as well as the top and bottom bands. Change something, tap **Done**. Only
+    *then* does beat 3 (*"This is your canvas…"*) appear, on top of the page. *(Note 14: it used
+    to render behind the sheet the moment you tapped the button.)* ☐
+    - Repeat closing the sheet with the **backdrop tap** instead of Done: same result. ☐
+    - Repeat with the **system back gesture**: same result. ☐
+67. **Skipping the outlook does not stall the tour.** Re-run, and on beat 2 tap the small **✕** in
+    the bubble instead of Set outlook. The tour carries straight on to beat 3 — **no ~10 s pause**.
+    *(The park is taken only when the accept actually opened a sheet.)* ☐
+
+**The outlook sheet's bottom margin (note 13)**
+
+68. Open the outlook sheet on a **home-indicator device** (any Face ID iPhone). The bottom-most
+    control is **clear of the home indicator** with visible breathing room below it — the panel no
+    longer looks cut off at the bottom. Scroll the sheet to its end to check. ☐
+    - Same check for the **Untouchables** layer and the **roster picker** inside it. ☐
+
+**The labelled Clear button (note 15 / [D-157](../../../../living-memory/DECISIONS.md))**
+
+69. On the In-league calculator, the action row reads **Find a Trade** · **Clear** · **✓**. Clear
+    is a **word**, not a cross. All three cells sit on one line with no truncation and no text
+    smaller than the rest of the page — check on the **smallest device you have** (SE-class). ☐
+    - Add a player to a side: Clear becomes enabled and clears the canvas. With the canvas empty
+      it is dimmed. ☐
+    - VoiceOver still reads it as "Clear the trade". ☐
+    - Find a Trade is still visibly the **primary** action (ice outline + ice text); Clear is not. ☐
+
+**The fairness beat (note 17)**
+
+70. **The fairness beat rings the meter, on a FIRST-RUN deck.** This needs a genuinely new user —
+    fresh install or cleared onboarding state — because the bug only appeared there. Run the tour
+    to the deck half. The beat *"The meter is the verdict. Tap Why? for how we judged it."* draws
+    a ring **around the value bar on the top card**, and the page **scrolls it into view** if it
+    was below the fold. ☐
+    - Tap **Why?** inside that ring: the verdict explanation expands. The line is telling the
+      truth about a control that exists. ☐
+    - *(It used to point at the ⓘ in the "Trade fairness" row, which does not render for a
+      first-run deck — so the beat popped with no ring and no scroll.)* ☐
+
+**The onboarding beats get buttons (notes 3 + 4 + 8)**
+
+71. **The very first thing a new user sees promises a walkthrough.** Fresh install → sign-in
+    screen. The Analyst says *"I'm The Analyst. Stick with me — I'll walk you through finding
+    your first trade."* and the bubble has a **Next** button. Tapping the page background does
+    **nothing**. ☐
+72. **A wrong username still explains itself, with a button.** Type a username that does not
+    exist. The error beat appears **with a Next button**. ☐
+73. **The first-card beat says where the prices come from.** Finish sign-in and let the first deck
+    land. The beat reads *"Both sides should want these. Priced on consensus now; your swipes
+    teach me your values."* — with a **Next** button. ☐
+74. **Scroll is not swallowed anywhere in onboarding.** With **any** of these onboarding bubbles
+    up, drag the deck. It scrolls. *(A tap-advance beat used to mount an invisible full-screen
+    catcher.)* ☐
+75. **The first like still chains correctly.** Swipe right on a card. The *"Logged…"* beat appears
+    with a **Next** button. Tap it — and the Apple save-moment prompt still follows the way it did
+    before. ☐
+    - Then repeat, and instead of tapping Next, **swipe the next card**. The bubble goes away and
+      the same chain runs. *(This is the beat's real bound now that it has no timer.)* ☐
+    - If you have an "Awaiting them" entry, the other variant of this beat still shows
+      **See it →** / **Later** and *not* a bare Next. ☐
+76. **The tour's last line says Done.** Reach *"That's the tour."* — its button reads **Done**,
+    not Next. ☐
+
+**The demo link (note 2)**
+
+77. Fresh install → sign-in screen. There is **no** "Try the app on a sample league" link, in any
+    state — including after a failed sign-in and after a Sleeper timeout. ☐
+78. Nothing else on that screen moved: Apple sign-in, the username field and the not-found copy
+    all behave as before. ☐
+
+## I. Wave B0 — the layout merge (`calc.inline_home`, [D-158])
+
+**Added 2026-08-24, branch `feat/inline-home-b0`. Unrun.** This wave moves the In-league
+calculator ONTO the guided landing and trims the pushed page to Real values. `calc.inline_home`
+ships **false**, so **I1 is the pass that matters today** — the whole claim of the wave is that
+with the flag off nothing moved, and once it is lit that before-picture is gone.
+
+`calc.merged_layout` must be **true** for any of I2 to work: the two routes the inline canvas
+calls are gated on it and 404 `feature_disabled` otherwise.
+
+**Known before you start:** with this flag on the calculator tour does **not** run — not the
+auto-start, not "Show me around". Beat n10 says "Tap In league" and this wave deletes that tab;
+Wave B retargets the beats. Its absence is the design, not a bug to report.
+
+### I1. Flag OFF — the regression pass (run FIRST, before any flip)
+
+79. **The Acquire tab looks exactly as it did.** Open Find a Trade. There is **no** calculator
+    canvas above the deck, the chip strip reads **Guided · Team · Player · Calc · Free agents**
+    (with Draft/Today if their flags are on), and the fourth chip says **`Calc`**, not "Real
+    values". ☐
+80. **The pushed calculator still has two tabs.** Tap `Calc`. The mode row shows **In league**
+    and **Real values**, In league is selectable, and the calculator tour still auto-starts on a
+    first visit (or offers "Show me around" on the In-league tab). ☐
+81. **Edit-in-calculator still pushes.** From a deck card, use its edit action. You land on the
+    pushed Calculator screen, in **In league** mode, with both sides preloaded — a PUSH, with a
+    back button, not a scroll on the same page. ☐
+82. **End of deck still offers Search all trades.** Build a canvas with a give side on the pushed
+    page, tap Find a Trade, swipe the fair deck to the end. The summary card shows **Back to
+    calculator** and **Search all trades** (not an unpin-retry). ☐
+83. **The ✓ still queues.** On the pushed In-league page, build a complete trade with a partner
+    and tap ✓. You get the same success or reason-specific refusal toast as before, once. ☐
+
+### I2. Flip `calc.inline_home` to true, reload flags, restart the app
+
+84. **The canvas is on the landing.** Open Find a Trade (guided). The In-league calculator
+    renders **above** the deck under a "Build a trade" label — with its format chips, league and
+    team dropdowns, both roster columns, verdict, eveners, lineup impact, share and Send. Nothing
+    from the In-league page is missing. ☐
+85. **The existing deck is still there, underneath.** If a deck was already generated (pregen or
+    an earlier session), it still shows below the canvas — both entry actions visible at once. ☐
+86. **No suggestion rail.** There is **no** horizontal "Or tap a suggestion to load it" strip
+    between the canvas and the deck. The deck below is the rail. ☐
+87. **No "Show me around" link** on the inline canvas, and no Analyst bubble appears when you
+    open the Acquire tab or the pushed Calculator page. ☐
+88. **Find a Trade with an EMPTY canvas** (pick a partner, add nothing). Results replace the deck
+    below **on this page** — no push, no back button, no second copy of the landing. The cards
+    are ordinary modelled trades and there is **no** "Built around" row. ☐
+89. **Find a Trade with a GIVE side.** Add one of your players, tap Find a Trade. A **"Built
+    around <player>."** receipt appears above the results, and every card gives away exactly
+    that player. Add a second player and re-run: the line reads **"Built around <player> +1."** ☐
+90. **Change.** Tap **Change** on the receipt. The page scrolls back to the canvas and the assets
+    you built are **still there** — nothing was cleared. ☐
+91. **Clear.** Tap **Clear**. The receipt disappears and a normal modelled deck is generated for
+    the same partner. Swipe that deck to the end: the summary offers **Back to calculator**, and
+    — because the receipt is gone — it may offer the unpin-retry, but **not** two ways to do the
+    same thing. ☐
+92. **The receipt replaces the end-of-deck exit.** Re-run an anchored search (step 89), then
+    swipe the fair deck to the end. The summary card must **NOT** show "Search all trades" —
+    that exit is the receipt's Clear now. ☐
+93. **Edit-in-calculator loads the canvas in place.** From a deck card, use its edit action. The
+    page **scrolls up** to the canvas and both sides are loaded with that card's players. No
+    push, no back button. Do it again with a different card: the canvas reloads with the new
+    package (not the first one). ☐
+94. **Back to calculator, in place.** Swipe a pinned deck to the end and tap **Back to
+    calculator**: same scroll-to-canvas behavior, pins loaded. ☐
+95. **The ✓ works from the landing.** Build a complete trade with a partner in the inline canvas
+    and tap ✓. You get the same toast you got on the pushed page in step 83 — success naming the
+    partner, or the reason-specific refusal. Tap it twice: "Already queued for @…", one row. ☐
+96. **The pushed page is Real values only.** Tap the chip strip's fourth chip — it now reads
+    **`Real values`**. The page it pushes has **no mode row** and **no In-league content**: just
+    the scoring-format chips, Side A / Side B, the consensus verdict and its suggestions. The
+    "Want ideas instead? Find a trade →" link is still there. ☐
+97. **No league, no dead end.** With a session that has no active league (or after leaving the
+    league), the guided landing shows **no canvas** and the `Real values` chip still reaches a
+    working calculator. ☐
+98. **Kill switch.** Set `calc.inline_home` back to false, `POST /api/feature-flags/reload`,
+99. **Matches → edit in calculator (review B1):** from the Matches tab, tap a match row's edit-in-calculator. Expect: you land on the GUIDED landing (not the pushed page) with the canvas prefilled — partner, both sides — and scrolled into view. Tap a second match: the canvas reloads with the new package.
+    restart. Re-run steps 95–81: the app is back to the two-tab shape with no canvas. ☐
 
 ---
 
@@ -386,3 +569,11 @@ the ONLY runtime proof any of it gets — none of it ran on a device before ship
   all sized by reasoning, not by looking at them.
 - Tour **copy** is budget-compliant but has never been read on a device beside the actual
   controls; a line can be inside 20 words and still be wrong next to the thing it names.
+- **Wave B0 (section I) is entirely unrun.** Its evidence is `mobile/tests/check-inline-home.js`
+  plus a file:line code-walk in
+  [`docs/plans/onboarding-tour-merge/scope-wave-b0.md`](../../../plans/onboarding-tour-merge/scope-wave-b0.md) §3.
+  The two things the guard genuinely cannot see: (1) the **ordering** inside the #330 choke point
+  when the inline search re-fires it — reset, then fork, then dispatch — which is only observable
+  as "the deck actually changed"; (2) the **layout** of a full In-league calculator stacked above
+  a swipe deck on a small screen, which nobody has looked at. Steps 68, 72 and 73 are the ones
+  worth the setup cost.

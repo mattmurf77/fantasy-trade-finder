@@ -19,7 +19,8 @@ import pytest
 import backend.server as srv
 import backend.trade_service as ts
 import backend.feature_flags as ff
-from backend.pick_values import market_pick_pool_value, pick_pool_value
+from backend.pick_values import (market_pick_pool_value, pick_pool_value,
+                                 priced_pool_value)
 from backend.trade_optimizer import _consensus_packages, _fairness_v3
 from backend.trade_service import League, LeagueMember, TradeService
 
@@ -47,9 +48,14 @@ def _isolate():
 #   * `pool_value` on the row is what the league-wide sync path really WRITES:
 #     the ladder price, `pick_pool_value(rnd, 3)` — R1 2117.0 (flat since
 #     D-079), R2 372.5, R3 249.7.
-#   * what the engine SERVES is now the market price for that absolute
-#     season+round, `market_pick_pool_value(2029, rnd)` — R1 1263.0, R2 303.9,
-#     R3 210.7 (1QB, against the snapshot `conftest.py` pins).
+#   * what the engine SERVES is the market price for that absolute
+#     season+round — `market_pick_pool_value(2029, rnd)`, R2 303.9 / R3 210.7
+#     (1QB, against the snapshot `conftest.py` pins) — with, SINCE D-161
+#     (2026-08-24), the round-1 YoY floor on top of it. A 2029 first no longer
+#     takes DP's year discount: it prices at the CURRENT class's first,
+#     1859.5, re-asserting D-079's flat-firsts ruling at the market seam.
+#     Rounds 2 and 3 are untouched by the floor ("other picks can degrade")
+#     and still ride DP's curve, which is why this fixture keeps all three.
 #
 # The stored column is deliberately left on the ladder, because that is the
 # honest fixture: `priced_pool_value` reprices at READ time and never rewrites
@@ -68,10 +74,18 @@ _PICKS = [
 
 
 def _served(rnd: int) -> float:
-    """What the engine prices a 2029 pick of `rnd` at — the market curve."""
-    v = market_pick_pool_value(2029, rnd, "1qb_ppr")
-    assert v is not None, "the DP snapshot conftest.py pins must reach 2029"
-    return v
+    """What the engine prices a 2029 pick of `rnd` at.
+
+    Reads through `priced_pool_value` — the engine's own seam, with the same
+    `slot=None` every future season gets (#273) — rather than reproducing one
+    step of the waterfall by hand. That was safe while step 2 WAS the answer;
+    since D-161 put the round-1 YoY floor on top of it, reproducing step 2
+    here would quietly assert the pre-floor price at four call sites.
+    """
+    market = market_pick_pool_value(2029, rnd, "1qb_ppr")
+    assert market is not None, "the DP snapshot conftest.py pins must reach 2029"
+    row = next(p for p in _PICKS if p["round"] == rnd)
+    return priced_pool_value(dict(row), scoring_format="1qb_ppr", slot=None)
 
 
 def test_the_served_price_is_the_market_not_the_stored_ladder():
@@ -146,9 +160,11 @@ def test_player_vs_1st_2nd_3rd_differ_materially(monkeypatch):
     identical (the engine's 1500-Elo default)."""
     assets = _pick_assets(monkeypatch)
     # Ward seeded ≈ a 2029 1st — the operator's mental model. DERIVED from the
-    # price the engine actually SERVES a 2029 1st at, which D-144 moved from
-    # the ladder's 2117.0 to the market's 1263.0. Seeding him off the ladder
-    # would quietly turn this into "a stud vs a 1st" and break the premise.
+    # price the engine actually SERVES a 2029 1st at — D-144 moved that off
+    # the ladder's 2117.0 onto the market's 1263.0, and D-161's round-1 floor
+    # moved it again, to the current class's 1859.5. Seeding him off a
+    # hardcoded number would quietly turn this into "a stud vs a 1st" the
+    # next time either curve moves, and break the premise.
     seed_map = {"ward": ts.value_to_elo(_served(1))}
     seed_map.update(srv._pick_asset_elos(assets))
     seed_value = lambda pid: ts.elo_to_value(seed_map.get(pid, 1500.0))
@@ -161,7 +177,8 @@ def test_player_vs_1st_2nd_3rd_differ_materially(monkeypatch):
                                              None, 0.75)
         rvs[rnd] = rv
         verdicts[rnd] = fairness is not None
-    # Materially different values. Post-D-144: R1 ≈ 1263, R2 ≈ 304, R3 ≈ 211.
+    # Materially different values. Post-D-161: R1 ≈ 1859.5 (floored to the
+    # current class), R2 ≈ 304, R3 ≈ 211 (DP's curve, unfloored).
     #
     # THE R2/R3 BOUND MOVED, AND THAT IS A REAL FINDING, NOT A LOOSENED
     # TOLERANCE. On the ladder a 2029 2nd and 3rd sat 122.8 apart; on the
@@ -225,8 +242,10 @@ def test_generated_cards_price_picks_on_pool_scale(monkeypatch):
     league = League(league_id="L185", name="T", platform="sleeper", members=[opp])
     svc.add_league(league)
 
-    # give1 seeded just under a 2029 1st so a 1-for-1 pick return clears the
-    # consensus path's user-gain + fairness gates.
+    # give1 seeded below a 2029 1st so a 1-for-1 pick return clears the
+    # consensus path's user-gain + fairness gates. (It was "just under" while
+    # a 2029 1st served at 1263.0; D-161's floor lifted the pick to 1859.5 and
+    # widened the margin, which loosens this gate rather than tightening it.)
     seed_map = {"ward": 1500.0, "give1": 1540.0, "rb2": 1450.0,
                 "wr1": 1460.0, "wr2": 1440.0, "te1": 1430.0}
     user_elo = dict(seed_map)

@@ -200,22 +200,46 @@ assert(!/includePlayers/.test(screen) && !/includePlayers/.test(calcSrc),
   '12a. no Include-players toggle survives anywhere on the calculator',
   'the control was REMOVED with its ruling; a leftover would be a switch with '
   + 'no contract behind it');
+// D-158 (Wave B0, 2026-08-24) — the fork MOVED. It used to be inline in
+// `TradeCalculatorScreen.onFindATrade`; the canvas now has two hosts (the
+// pushed page and TradesScreen's inline mount), so the decision and its
+// `calc_find_a_trade_tapped` row live in `utils/canvasSearch.forkCanvasSearch`
+// and both hosts call it. The CONTRACT is unchanged and is still pinned here
+// — only the file it is pinned in moved.
+const fork = read('utils/canvasSearch.ts');
 {
-  const at = screen.indexOf('onFindATrade={(');
-  const seg = screen.slice(at, at + 3000);
-  // THE contract. `fairAnchor` present iff the canvas has a GIVE side — the
+  // THE contract. The anchor is present iff the canvas has a GIVE side — the
   // fair sweep prices a give package, so a receive-only canvas is "empty" and
   // must fall to the model. `giveIds.length > 0` is the whole predicate;
   // anything looser (`|| receiveIds.length`) sends an unpriceable anchor.
-  assert(/const fair = giveIds\.length > 0;/.test(seg),
+  assert(/const fair = giveIds\.length > 0;/.test(fork),
     '13. the fair fork is decided by the GIVE side alone',
     'a receive-only canvas has nothing to price — it is the model deck\'s case');
-  assert(/\.\.\.\(fair \? \{ fairAnchor: \{ giveIds, receiveIds \} \} : \{\}\)/.test(seg),
-    '13a. the handoff carries fairAnchor iff the canvas has a give side',
-    'an unconditional fairAnchor routes an empty canvas to a sweep with no '
+  assert(/anchor: fair \? \{ giveIds, receiveIds \} : null,/.test(fork),
+    '13a. the fork carries an anchor iff the canvas has a give side',
+    'an unconditional anchor routes an empty canvas to a sweep with no '
     + 'anchor; an absent one silently reverts the whole feature to the model');
-  assert(/path: fair \? 'fair' : 'model'/.test(seg),
+  assert(/path: fair \? 'fair' : 'model',/.test(fork),
     '13b. the analytics prop reports which fork was actually taken');
+  // 13c — ONE definition, and both hosts go through it. A second inline fork
+  // in either host is how the two entry points start pricing the same canvas
+  // differently, which is the whole reason this was extracted.
+  assert((fork.match(/export function forkCanvasSearch/g) || []).length === 1,
+    '13c. forkCanvasSearch is defined exactly once');
+  assert(/forkCanvasSearch\(/.test(screen) && /forkCanvasSearch\(/.test(trades),
+    '13c-bis. both hosts of the canvas call it',
+    'the pushed page and the inline landing must reach the same verdict');
+  assert((screen.match(/track\(\s*\n?\s*['"]calc_find_a_trade_tapped['"]/g) || []).length === 0
+      && (trades.match(/track\(\s*\n?\s*['"]calc_find_a_trade_tapped['"]/g) || []).length === 0,
+    '13d. neither host emits calc_find_a_trade_tapped itself',
+    'a second emitter is a second fork decision in disguise');
+}
+{
+  const at = screen.indexOf('onFindATrade={(');
+  const seg = screen.slice(at, at + 3000);
+  assert(/\.\.\.\(anchor \? \{ fairAnchor: anchor \} : \{\}\)/.test(seg),
+    '13e. the pushed page\'s handoff carries the fork\'s anchor verbatim',
+    're-deriving the anchor here would re-introduce the second fork');
   // The pin-store writes W5 needed are GONE. The anchor travels in the
   // handoff and then in the request body; writing pins here would leave a
   // constraint behind for whatever search ran next (which is the only reason
@@ -310,22 +334,36 @@ const api = read('api/trades.ts');
 assert(/onLikeTrade=\{async \(\{ giveIds, receiveIds, opponent \}\) => \{/.test(screen),
   '18. the screen passes onLikeTrade to InLeagueCalculator',
   'without a handler the confirm cell is permanently disabled — the Q-029 state');
+// D-158 (Wave B0, 2026-08-24) — the queue body MOVED to
+// `utils/queueCalcTrade.ts` for the same reason the fork did: two hosts, one
+// implementation. The screen still owns its Toast (it renders the descriptor
+// the helper returns), which is why 18e now pins the DESCRIPTOR, not a local
+// `setToast` call.
+const queueUtil = read('utils/queueCalcTrade.ts');
 {
-  const at = screen.indexOf('onLikeTrade={async (');
-  const seg = screen.slice(at, at + 2200);
-  assert(/queueTradeForOpponent\(\{/.test(seg),
-    '18a. the handler calls the queue route, not a local no-op');
-  assert(/opponentUserId: opponent\.userId/.test(seg),
+  assert(/queueTradeForOpponent\(\{/.test(queueUtil),
+    '18a. the shared helper calls the queue route, not a local no-op');
+  assert(/opponentUserId: args\.opponent\.userId/.test(queueUtil),
     '18b. it addresses the partner the canvas chose',
     'the route is per-counterparty; a missing opponent id cannot be defaulted');
-  assert(/track\(\s*['"]calc_trade_queued['"]/.test(seg),
+  assert((queueUtil.match(/track\(\s*\n?\s*['"]calc_trade_queued['"]/g) || []).length === 1,
     '18c. one calc_trade_queued event is emitted');
-  assert(/queued: false, reason: res\?\.reason \?\? ['"]error['"]/.test(seg),
+  assert(/queued: false, reason: res\?\.reason \?\? ['"]error['"]/.test(queueUtil),
     '18d. a refusal carries its reason, and a dead request carries `error`',
     'an event with no reason cannot tell a refusal from a network failure');
-  assert(/queueRefusalLine\(res\?\.reason, opponent\.name\)/.test(seg),
+  assert(/msg: queueRefusalLine\(res\?\.reason, args\.opponent\.name\)/.test(queueUtil),
     '18e. the refusal toast is reason-specific',
     'a generic failure line is the dishonest state the disabled cell stood in for');
+  // 18h — ONE implementation, and BOTH hosts call it. A host that rebuilds
+  // the request inline is a second emitter of `calc_trade_queued` and a
+  // second copy of the refusal table.
+  assert((queueUtil.match(/export async function queueCalcTrade/g) || []).length === 1,
+    '18h. queueCalcTrade is defined exactly once');
+  assert(/queueCalcTrade\(\{/.test(screen) && /queueCalcTrade\(\{/.test(trades),
+    '18h-bis. both hosts of the canvas call it');
+  assert(!/queueTradeForOpponent\(/.test(screen) && !/queueTradeForOpponent\(/.test(trades),
+    '18i. neither host calls the queue route directly',
+    'bypassing the helper skips the analytics row and the refusal copy');
 }
 // 18f — every server reason has a line. The enum is a cross-client invariant;
 // a reason with no case falls to the generic default and the user learns
@@ -333,7 +371,7 @@ assert(/onLikeTrade=\{async \(\{ giveIds, receiveIds, opponent \}\) => \{/.test(
 for (const r of ['likes_you_off', 'not_league_member', 'assets_not_on_roster',
                  'opponent_untouchable', 'opponent_not_interested',
                  'fails_fairness_floor']) {
-  assert(new RegExp(`case '${r}':`).test(screen),
+  assert(new RegExp(`case '${r}':`).test(queueUtil),
     `18f. queueRefusalLine handles '${r}'`);
   assert(new RegExp(`'${r}'`).test(api),
     `18g. CalcQueueReason declares '${r}'`);

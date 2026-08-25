@@ -28,6 +28,9 @@
 //   4. CardImpactBlock never references title_pct.
 //   5. CardImpactBlock renders BAND labels, and its only percentage-shaped
 //      output is the signed whole-point delta (`signedPoints`).
+//   6. The rank chip renders "WR #3", never "WR3" (R-6, #395) — a bare
+//      positional rank beside the slot labels reads as a lineup slot. Anchored
+//      to the rank template literal itself, not a bare `#${` over the file.
 //
 // Run: node tests/check-card-impact-order.js   (or npm run test:card-impact)
 // CI picks it up automatically via the tests/check-*.js glob in ci.yml.
@@ -154,6 +157,32 @@ function strip(src) {
       'signedPoints() is the only permitted numeric odds output');
   } else {
     ok('5c. the delta is rounded to whole points');
+  }
+}
+
+// ── 6. Rank chip is a rank, not a slot (R-6, #395) ────────────────────────
+{
+  // Anchored to the rank template literal itself (per the #395 PRD): a bare
+  // /#\$\{/ over the file would be satisfiable by any future unrelated `#${`
+  // and prove nothing about THIS chip.
+  const s = strip(block);
+  const beforeAnchor = "position ?? ''} #${beforeRank}";
+  const afterAnchor = "position ?? ''} #${afterRank}";
+  if (!s.includes(beforeAnchor)) {
+    bad('6a. rank chip before-half is "#"-prefixed ("WR #3", not "WR3")',
+      `expected the rank template literal to contain \`${beforeAnchor}\`. ` +
+      'Without the "# " separator a positional rank ("WR3") sitting beside ' +
+      'the slot labels reads as a lineup slot (#395). The chip stays a ' +
+      'positional rank (#169) — only the format is pinned.');
+  } else {
+    ok('6a. rank chip before-half is "#"-prefixed ("WR #3", not "WR3")');
+  }
+  if (!s.includes(afterAnchor)) {
+    bad('6b. rank chip after-half is "#"-prefixed ("WR #12", not "WR12")',
+      `expected the rank template literal to contain \`${afterAnchor}\`. ` +
+      'Both halves of the before/after chip carry the "#" prefix (R-6).');
+  } else {
+    ok('6b. rank chip after-half is "#"-prefixed ("WR #12", not "WR12")');
   }
 }
 

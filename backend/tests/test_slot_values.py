@@ -294,7 +294,18 @@ def test_m6_02_slot_values_do_not_reach_the_valuation_lanes(module):
 #
 #   market_pick_pool_value  M6b — the ROUND curve (mid-tercile basis)
 #   market_pick_slot_value  D-144 — the PER-SLOT price for a resolved slot
-_DP_READERS = {"market_pick_pool_value", "market_pick_slot_value"}
+#   market_anchor_season    D-161 — reads "now" (the current draft class) out
+#                           of the SAME map, so the round-1 YoY floor anchors
+#                           on the market's own clock rather than importing
+#                           `server._CURRENT_SEASON` (which `database.py`
+#                           could not follow) or recovering it from
+#                           `min(draft_picks.season)` (which #228 empties
+#                           post-draft). It reads no PRICE and returns a
+#                           season, so the seam widens in kind by nothing: DP
+#                           still reaches the engine only through named
+#                           functions in this module.
+_DP_READERS = {"market_pick_pool_value", "market_pick_slot_value",
+               "market_anchor_season"}
 
 
 def test_m6_02b_pick_values_reads_dp_only_through_the_m6b_seam():

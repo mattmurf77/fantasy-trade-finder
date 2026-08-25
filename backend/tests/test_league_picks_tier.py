@@ -15,6 +15,13 @@ against the checked-in DP snapshot (`conftest.py` pins
 `FTF_DP_PICK_VALUES_FILE`); no tolerance was widened and nothing is asserted
 against "whatever the helper returned".
 
+⚠️  **D-161 (2026-08-24) MOVED IT AGAIN, for round 1 only.** Step 2 now
+carries a YoY floor: a FUTURE first may not price below the CURRENT class's
+first. The 2029 1st therefore goes 1263.0 → 1859.5 and badges `first_1`
+again, re-asserting D-079's flat-firsts ruling at the market seam. See the
+price table below and `test_far_out_first_is_flat_again_while_later_rounds_
+still_decay`, which is the same test that used to pin the opposite.
+
 The rule is UNCHANGED — a badge reflects the value it is served (D-320-2) —
 and so are the BANDS: `tier_config.json` and its five client mirrors
 (docs/cross-client-invariants.md, G-051) are byte-identical, as is the
@@ -76,14 +83,25 @@ FMT = "1qb_ppr"
 #   2026 4th          272.5   →               233.9   fourth  → waivers
 #   2027 2nd          515.6   →               389.7   third    (unmoved)
 #   2027 3rd          345.6   →               254.5   third   → fourth
-#   2029 1st         2117.0   →              1263.0   first_1 → second
+#   2029 1st         2117.0   →              1859.5   first_1  (unmoved)
+#
+# ⚠️  **D-161 (2026-08-24) MOVED THE 2029 FIRST BACK.** The round curve
+# still prices it at 1263.0, but step 2 now carries the round-1 YoY floor:
+# a FUTURE first may not price below the CURRENT class's first, so 1263.0
+# is clamped to 1859.5 and it badges `first_1` again. That is the operator's
+# 2026-08-24 re-ruling ("The ideal solution is the D-079 ruling") re-asserting
+# flat firsts over DP's own year discount — see `pick_values`'s D-161 block.
+# ROUNDS 2-4 ARE NOT FLOORED, deliberately, and the 2027 rows above are the
+# proof at this surface: "other picks can degrade the longer away they are"
+# is the other half of the same ruling.
 _CURVE_2026_1 = 1859.5
 _CURVE_2026_2 = 434.0
 _CURVE_2026_3 = 262.3
 _CURVE_2026_4 = 233.9
 _CURVE_2027_2 = 389.7
 _CURVE_2027_3 = 254.5
-_CURVE_2029_1 = 1263.0
+_CURVE_2029_1_UNFLOORED = 1263.0        # step 2's own answer, pre-clamp
+_CURVE_2029_1 = _CURVE_2026_1           # D-161: floored onto the current class
 
 # Step 1 (the pick's OWN slot), 2026 round 1, 12-team linear board. The
 # ruling's headline: one round, a 5.9x spread, two different badges.
@@ -311,34 +329,46 @@ def test_pick_rows_carry_literal_tier_rungs(client):
     assert rows[f"{LEAGUE}_2026_4_2"]["tier"] == "waivers"    # S1b: 'third'
 
 
-def test_far_out_pick_tier_is_the_discounted_band(client):
+def test_far_out_first_is_flat_again_while_later_rounds_still_decay(client):
     """D-320-2's RULE is unchanged — the badge reflects TODAY's value, not
-    the pick's name.
+    the pick's name. What has moved twice is the VALUE it reflects.
 
-    D-148 changed the VALUE it reflects, and reversed D-079's most visible
-    consequence at this surface: a 2029 1st is no longer FLAT with a
-    current-year 1st. Flat firsts are a property of the stored LADDER, which
-    is now only step 3 of the waterfall; DP's curve decays a first across
-    seasons, so 2117.0 → 1263.0 and the honest badge is 'second'.
+    D-148 put DP's curve behind this surface, and that reversed D-079's most
+    visible consequence here: a 2029 1st stopped being flat with a
+    current-year 1st (2117.0 → 1263.0, badge 'first_1' → 'second'). D-161
+    (2026-08-24) reverses the reversal on the operator's re-ruling — the
+    round-1 YoY floor clamps a future first up to the current class's first,
+    so the served value is 1859.5 again and the badge is 'first_1'. Flat
+    firsts are no longer merely a property of the stored LADDER (step 3);
+    they are asserted at the market seam (step 2) where the price actually
+    comes from.
 
-    A round that moves differently is asserted alongside it, so "someone
-    flattened every season" fails here rather than shipping."""
+    The rounds that were NOT floored are asserted alongside it, so "someone
+    flattened every season" — the failure mode this test has guarded through
+    both reversals — still fails here rather than shipping."""
     rows = _fetch(client)
     row = rows[f"{LEAGUE}_2029_1_1"]
     assert row["round"] == 1
     assert row["pool_value"] == _CURVE_2029_1
-    assert row["tier"] == "second"
+    assert row["tier"] == "first_1"
     # …and it matches the canonical walk over the inverted value map (the S1
-    # "wrong scale" trap: unscaled, 1263.0 would read as Elo 1263 → 'fourth').
+    # "wrong scale" trap: unscaled, 1859.5 would read as Elo 1859.5 →
+    # 'firsts_2' rather than the 'first_1' the inverted value maps to).
     assert row["tier"] == server.RankingService.tier_for_elo(
         value_to_elo(float(row["pool_value"])), None, FMT)
-    # The far-out 1st is now worth strictly LESS than a current-year 1st…
-    assert float(row["pool_value"]) < float(
+    # The far-out 1st is EQUAL to a current-year 1st — the D-161 ruling…
+    assert float(row["pool_value"]) == float(
         rows[f"{LEAGUE}_2026_1_1"]["pool_value"])
-    # …while the STORED column both rows came from still holds them equal,
-    # which is precisely what makes this a pricing change and not a data one.
+    # …and it is strictly above the unfloored round curve, so the equality
+    # above is the clamp doing work rather than DP happening to agree.
+    assert float(row["pool_value"]) > _CURVE_2029_1_UNFLOORED
+    assert priced_pool_value({"season": 2029, "round": 1, "pool_value": None},
+                             scoring_format=FMT, slot=None) == _CURVE_2029_1
+    # …while the STORED column both rows came from also holds them equal,
+    # which is what makes flat firsts a PRICING statement on two scales now.
     assert pick_pool_value(1, 3) == pick_pool_value(1, 0)
-    # …and a future 2nd is still worth strictly less than a current one.
+    # …and a future 2nd is still worth strictly less than a current one:
+    # rounds 2-4 keep DP's discount, per the other half of the ruling.
     assert float(rows[f"{LEAGUE}_2027_2_1"]["pool_value"]) < float(
         rows[f"{LEAGUE}_2026_2_9"]["pool_value"])
 

@@ -32,24 +32,9 @@ interface Props {
    *  `trades_home_inline` experiment, so the entry point has to exist here
    *  too — otherwise those users could never reach the surface under test. */
   onTodaysTrade?: () => void;
-  /** #376 — "The latest update removed the filters/conditions of the trade
-   *  finder. It shouldn't have been removed."
-   *
-   *  It was not removed by an update. This row REPLACES TradeFinderModeBar for
-   *  everyone assigned a `trades_home_inline` variant, and the mode bar was
-   *  where the finder's conditions were reachable from. The experiment has run
-   *  at 100% `strip` on the tester allowlist since 2026-08-09, so for those
-   *  users the conditions survived only behind OutlookBiasReceipt's "Change"
-   *  link — present, but not where anyone looks for a filter.
-   *
-   *  Same optional-prop convention, and the same reasoning already written on
-   *  `onTodaysTrade` above: when this row stands in for the mode bar, every
-   *  entry point the mode bar carried has to exist here too. Omitting it keeps
-   *  a flag-off build byte-identical. */
-  onConditions?: () => void;
   /** Receipts (docs/plans/receipts/, flag `receipts.screen`) — opens the
    *  viewer's graded suggestion track record. Same optional-prop convention as
-   *  `onTodaysTrade` and `onConditions` above: passing the handler is what
+   *  `onTodaysTrade` above: passing the handler is what
    *  creates the control, so a flag-off build renders this row byte-identical
    *  to today. The FLAG gates this entry point; the route itself is
    *  registered unconditionally in RootNav. */
@@ -61,29 +46,14 @@ export default function TradeHomeUtilityRow({
   onFreeAgents,
   onManualCalc,
   onTodaysTrade,
-  onConditions,
   onTrackRecord,
 }: Props) {
   return (
     <View style={styles.row} testID="trades.home-utility-row">
-      {/* #376 — LEADS the row. This is the control the mode bar used to carry
-          and the one the operator reported missing; putting it last would
-          reproduce the discoverability failure that caused the report. */}
-      {onConditions ? (
-        <Pressable
-          testID="trades.home-utility.conditions"
-          accessibilityRole="button"
-          accessibilityLabel="Trade finder filters"
-          onPress={() => {
-            haptics.selection();
-            onConditions();
-          }}
-          style={({ pressed }) => [styles.btn, pressed && styles.btnPressed]}
-        >
-          <Icon name="settings" size={28} color={chalk.dim} />
-          <Text style={styles.lbl}>Filters</Text>
-        </Pressable>
-      ) : null}
+      {/* #379 — the #376 Filters button that used to lead this row was
+          removed by operator ruling: filters live inside the Find-a-Trade
+          page (the minimized "Outlook & filters" row, TradesScreen's
+          trades.outlook-fallback), not as a top-row icon. */}
       {onTodaysTrade ? (
         <Pressable
           testID="trades.home-utility.todays-trade"

@@ -149,6 +149,73 @@ if (guard) {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// 4. TradeCard.tsx — `trades.card-meter` is a TOP-CARD-only registration
+// ═══════════════════════════════════════════════════════════════════════
+//
+// Wave A (v2 note 17, 2026-08-23) retargeted the tour's fairness beat (n22)
+// from `trades.fairness-help` — TradesScreen's ⓘ, which renders inside
+// `{!firstRun && …}` and so never mounts for the first-run decks the tour
+// runs against — onto the top card's own value meter.
+//
+// The scoping is the whole risk. The deck renders a peek card behind the
+// fronted one, plus match / read-only mounts; `disposition` is what marks the
+// ONE card the user is deciding, and `registerGuideTarget` is a last-write-
+// wins map, so an unscoped registration would ring whichever card mounted
+// last. Same property `trades.pass-btn` and `trades.swap-first` already hold —
+// asserted structurally here rather than by grep, so a guard that drifted to
+// `variant === 'swipe'` or vanished is caught.
+
+const meterEffect = findAll(
+  cardSrc,
+  (n) =>
+    ts.isCallExpression(n) &&
+    n.expression.getText() === 'useEffect' &&
+    /registerGuideTarget\('trades\.card-meter'/.test(n.getText()),
+)[0];
+assert(
+  !!meterEffect,
+  'TradeCard: trades.card-meter is registered from an effect',
+  'registering during render leaks a handle on every re-render',
+);
+if (meterEffect) {
+  const body = meterEffect.arguments[0].getText();
+  assert(
+    /if \(!cardMeterMounted\) return;/.test(body),
+    'TradeCard: the meter registration is gated on cardMeterMounted',
+    'an ungated registration is claimed by the peek card too',
+  );
+  assert(
+    /unregisterGuideTarget\('trades\.card-meter'\)/.test(body),
+    'TradeCard: …and it unregisters on teardown',
+    'a stale handle points at an unmounted node for the rest of the session',
+  );
+}
+assert(
+  /const cardMeterMounted = !!disposition && hasValueVerdict && !repricing;/.test(cardText),
+  'TradeCard: cardMeterMounted means "top card, with the bar actually rendered"',
+  'dropping `!!disposition` un-scopes the id; dropping the bar conditions '
+    + 'registers a ref that measures null, which is the bug being fixed',
+);
+// The wrapper has to survive Android view flattening, or the ref measures
+// nothing even on the right card.
+{
+  const at = cardText.indexOf('testID="trades.card-meter"');
+  assert(at !== -1, 'TradeCard: the meter wrapper carries its testID');
+  if (at !== -1) {
+    const window = cardText.slice(Math.max(0, at - 200), at + 100);
+    assert(
+      /collapsable=\{false\}/.test(window) && /ref=\{cardMeterRef\}/.test(window),
+      'TradeCard: the wrapper is a non-collapsable View holding cardMeterRef',
+      'a styleless View is flattened away on Android and measures null',
+    );
+  }
+  assert(
+    cardText.indexOf('testID="trades.card-meter"', at + 1) === -1,
+    'TradeCard: the meter testID is declared exactly once',
+  );
+}
+
 console.log('');
 if (failures) {
   console.error(`${failures} check(s) failed.`);
