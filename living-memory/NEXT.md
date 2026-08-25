@@ -38,7 +38,7 @@
 ## 2026-08-24 — Quick Set `via` gap PR: operator confirm + merge, then the TestFlight check
 
 1. ~~Operator: confirm + merge~~ **MERGED 2026-08-25** (PR #196, operator-confirmed) — [D-162](DECISIONS.md), [scope](../docs/plans/quickset-analytics-via/scope.md), [addendum](../docs/business/analytics/2026-08-24-quickset-via-gap.md). One mobile emitter change lighting up three dark server reads (`quickset_completed`, `tier_save.via`, point-of-use `ranking_method='quickset'`) + the semantics correction (per tagged commit, never per completed position).
-2. After the next mobile release containing it: run the **TestFlight checklist** in scope §3 and log in TEST_LEDGER; remember the seam — don't trend `rank_quickset` / `tier_save.via` splits across that release.
+2. **Now runnable — v1.16.6 / EAS build 132** (submitted 2026-08-25, the first binary that sends the tag): run the **TestFlight checklist** in [scope §3](../docs/plans/quickset-analytics-via/scope.md) and log in TEST_LEDGER. Expect `quickset_completed` + `tier_save.props.via="quickset"` for a real walk, and `via:"tiers"` with NO `quickset_completed` for a plain Tiers save. Seam: every prior row is structurally `'tiers'` — don't trend `rank_quickset` / `tier_save.via` splits across this release.
 
 ## 2026-08-23 — Onboarding × calc tour merge: operator decisions, then Wave A
 
@@ -51,7 +51,7 @@
 2. ~~Wave A~~ / ~~Wave B0~~ **SHIPPED 2026-08-24** (PRs #197/#199, EAS 1.16.4 build 130; B0
    dark behind `calc.inline_home`). Next build: **Wave B, the tour merge** — required BEFORE the
    flag lights (tour is off under it), and it must re-thread the park signals + outlook opener
-   through the inline mount. Checklists H + I1 owed on 130.
+   through the inline mount. Checklists H + I1 owed on 130 — also runnable on **132** (2026-08-25), which is the newer build testers will have.
 
 ## 2026-08-22 — Full sweep: merge the review PR, then the build, then the operator flips
 
