@@ -191,8 +191,25 @@ def test_reengagement_bucket_gate_skips_push_under_flag_default(client):
 # 4. notif.honest_winbacks — daily-tick winback_dormant
 # ---------------------------------------------------------------------------
 
-def _dormant_user(days_inactive=40):
-    now = datetime.now(timezone.utc)
+# The daily tick has a CALENDAR branch: on Aug 25 (`is_aug25` in server.py)
+# every signed-up user gets the season_start fan-out and the branch
+# `continue`s past every winback, so the real date is a hidden test input
+# that fails the winback tests exactly one day a year — found live on
+# 2026-08-25 (the G-059 "hidden wall-clock input" pattern, G-061). Pin the
+# tick's clock to a fixed non-Aug-25 instant; user timestamps derive from
+# the same instant so the relative windows (3d/7d/30d) are unchanged.
+_TICK_NOW = datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+
+
+def _clock_at(fixed):
+    class _FixedClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed if tz else fixed.replace(tzinfo=None)
+    return _FixedClock
+
+
+def _dormant_user(days_inactive=40, now=_TICK_NOW):
     return [{
         "sleeper_user_id":  UID,
         "username":         "dormant",
@@ -204,15 +221,30 @@ def _dormant_user(days_inactive=40):
     }]
 
 
-def _run_daily_tick(c, unread):
+def _run_daily_tick(c, unread, now=_TICK_NOW):
     with patch.object(server, "load_all_signed_up_users",
-                      MagicMock(return_value=_dormant_user())), \
+                      MagicMock(return_value=_dormant_user(now=now))), \
          patch.object(server, "load_unread_match_count",
                       MagicMock(return_value=unread)), \
+         patch.object(server, "datetime", _clock_at(now)), \
          patch.object(server, "_send_typed_push", MagicMock()) as push:
         r = c.post("/api/cron/daily-tick", headers={"X-Cron-Secret": "x"})
     assert r.status_code == 200
     return push, r.get_json()
+
+
+def test_season_start_fanout_on_aug25(client):
+    # The calendar branch itself, pinned: on Aug 25 every signed-up user
+    # gets exactly season_start — and no winback stacks on top of it, even
+    # for a dormant user with unread matches who would otherwise qualify.
+    c, _, flags_on = client
+    flags_on.add("notif.honest_winbacks")
+    aug25 = datetime(2026, 8, 25, 12, 0, 0, tzinfo=timezone.utc)
+    push, body = _run_daily_tick(c, unread=2, now=aug25)
+    kinds = [k.args[1] for k in push.call_args_list]
+    assert kinds == ["season_start"]
+    assert body["season_start"] == 1
+    assert body["winback_dormant"] == 0
 
 
 def test_winback_dormant_dark_keeps_legacy_copy(client):

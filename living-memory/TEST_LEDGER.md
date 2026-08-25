@@ -15,6 +15,23 @@
 
 
 
+## 2026-08-25 — Merge-day addendum to 2026-08-24b: main merged in, D-162 renumber, Aug-25 calendar flake pinned (G-061)
+
+Merging `origin/main` (Group F + feedback wave + Waves A/B0 + pick YoY floor) into the via-gap branch surfaced two things. (1) Main took D-160/D-161 overnight → this branch's decision renumbered **D-162**; `via:'quickset'` verified intact alongside Group F's HOLD changes (`check-quickset-via` + `check-quickset-hold` + `tsc` green on the merged tree). (2) The merged-tree suite failed `test_notif_teardown`'s three winback tests — **because the run date was Aug 25**: the daily tick's `is_aug25` season_start fan-out skips every winback that day, so the real clock was a hidden test input ([G-061](GOTCHAS.md), the G-059 pattern). Fixed by pinning the tick clock in those tests + a new pinned `test_season_start_fanout_on_aug25`; file 19/19 green. Remaining local failure: `test_deck_signal_v2` only — the known 3.14 skew (clean-tree reproduced 2026-08-24b); PR #196 CI (3.12) is the arbiter.
+
+## 2026-08-24b — Quick Set `via` gap fix — full gates, on `claude/elegant-feynman-c3689e` (D-162; held for operator)
+
+Scope: [`docs/plans/quickset-analytics-via/scope.md`](../docs/plans/quickset-analytics-via/scope.md) · addendum [`2026-08-24-quickset-via-gap.md`](../docs/business/analytics/2026-08-24-quickset-via-gap.md). One emitter change (unscoped mobile Quick Set saves tag `via:'quickset'`); no server code change, no taxonomy registry change.
+
+| Gate | Result |
+|---|---|
+| `pytest backend/tests -k "not calibration_gate"` | **4226 passed, 1 failed, 1 skipped** — the failure (`test_deck_signal_v2.py::test_flag_on_writes_impressions_in_served_order`) reproduces on the **clean origin/main tree** (`git stash` → still fails) under local Python **3.14.4**; the known 3.12-skew class (this file, 2026-08-13). Unrelated to the change; CI on the PR sha is the arbiter — and PR #196 CI came back **all green** (backend-tests on 3.12 pass, mobile-typecheck pass, testid-lint pass; run 32762214700), confirming the skew diagnosis |
+| Server branch coverage (pre-existing, all green in the run) | `test_analytics_p0.py::test_quickset_completed_fires_with_props` + `::test_quickset_event_absent_for_plain_tier_save`, `test_rookie_scope.py::test_rookie_via_tags_are_recorded_and_do_not_fire_quickset_completed`, `test_events_api.py` disjointness pins |
+| New structural guard | `mobile/tests/check-quickset-via.js` (`npm run test:quickset-via`) — 13 asserts green. **Sabotage:** non-rookie save arm reverted to `undefined` (the original bug) → guard RED on exactly the pinned assert; restore → green |
+| `tsc --noEmit` (strict) | green |
+| `testid-lint.sh` | OK (no testIDs touched) |
+| Runtime | operator TestFlight checklist in scope §3 — UNRUN, owed after the next mobile release containing this change |
+
 ## 2026-08-24 — Pick YoY floor (D-161) — full gates, live-curve verified, on `claude/pick-yoy-floor-0824`
 
 Plan: [`docs/plans/pick-yoy-floor/`](../docs/plans/pick-yoy-floor/plan.md). One Opus builder, Fable adversarial review (verdict: approve after two one-line fixes, both applied: the Q-018 closure relocation and a `try/finally` knob restore in `test_pick_pricing_m6b`).

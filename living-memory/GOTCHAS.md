@@ -12,6 +12,7 @@
 | ID | Symptom | Area |
 |---|---|---|
 | G-060 | A sabotage-and-restore in the same mtime second at identical size keeps the stale `.pyc` — the test stays red after a byte-clean restore | Python / pytest / bytecode cache |
+| G-061 | The daily tick's Aug-25 `season_start` fan-out `continue`s past every winback — the three winback tests fail exactly one day a year (found live 2026-08-25) | backend / cron / pytest |
 | G-059 | A breaker payload test flakes only on a loaded CI runner — the 250 ms wall-clock budget is a hidden test input | Backend tests / breaker / determinism |
 | G-058 | Loosening a trade-engine knob measures "no effect" three different ways, all of them lies | Trade engine / knob tuning |
 | G-055 | A feedback note over the length cap vanishes: no error, draft cleared, retry loops forever | In-app feedback / silent failure |
@@ -549,3 +550,9 @@ Number sequentially. Don't delete entries even if "obviously fixed by now" — f
 - **Cause:** CPython invalidates bytecode by (mtime, size). A `cp` restore landing in the SAME second as the sabotage write, at identical file size, matches the cached `.pyc`'s stamp — Python keeps executing the sabotaged bytecode. Hit twice during the knockout-refine build (B1's S8, the Fable reviewer's spot-checks).
 - **Fix:** `find backend -name __pycache__ -exec rm -rf {} +` after any restore; then re-run.
 - **Prevention:** every sabotage recipe in a test docstring should end "clear `__pycache__` after restoring". Both knockout-refine test modules now say so.
+
+### G-061 — the winback tests fail exactly one day a year: the daily tick's Aug-25 branch is a hidden calendar input
+- **Symptom:** `test_notif_teardown.py`'s three winback tests fail with zero `winback_dormant` pushes; same tree and interpreter passed the day before. Found live on 2026-08-25, blocking an unrelated PR's local gates.
+- **Cause:** `server.py` daily tick: `is_aug25 = (now.month == 8 and now.day == 25)` sends every signed-up user the `season_start` fan-out and `continue`s — deliberately skipping every winback that day. The tests read the REAL clock, so on Aug 25 the branch under test is unreachable. G-059's lesson in calendar form: any real-world input a route reads (wall-clock budget, date) is a test input whether the test declares it or not.
+- **Fix:** the winback tests pin the tick's clock (`patch.object(server, "datetime", _clock_at(_TICK_NOW))`, user timestamps derived from the same instant); the Aug-25 branch got its own pinned test (`test_season_start_fanout_on_aug25`) instead of staying dark.
+- **Prevention:** a test driving any `/api/cron/*` tick fakes the clock, never inherits the runner's date.

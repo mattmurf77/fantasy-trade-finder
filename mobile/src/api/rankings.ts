@@ -332,7 +332,17 @@ export async function saveTiers(
   // ranked count, quicksetProgress's cache and #244 launch routing, and a
   // rookies-only pass has not completed a position. `via` is the forensic
   // tag the board-restore procedure keys off.
-  opts?: { scope?: RankScopeParam; via?: 'rookie_tiers' | 'rookie_quickset' | 'rookie_anchors' },
+  //
+  // `via:'quickset'` (2026-08-24) is the UNSCOPED Quick Set walk's tag. The
+  // server has branched on it since analytics P0 (FR-20 `quickset_completed`,
+  // `_note_ranking_method` → 'quickset') but no client ever sent it, so both
+  // reads were dark for every mobile Quick Set save. It rides the same
+  // whitelist as the rookie tags; an old server ignores unknown values by
+  // falling back to 'tiers', so this is safe against any deploy skew.
+  opts?: {
+    scope?: RankScopeParam;
+    via?: 'quickset' | 'rookie_tiers' | 'rookie_quickset' | 'rookie_anchors';
+  },
 ) {
   // HOLD contract (D-160, #346/#381 — supersedes #161): a save touches only
   // the pids in `tiers` and `cleared_pids`. Players visible but unselected

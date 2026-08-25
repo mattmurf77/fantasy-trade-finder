@@ -65,6 +65,7 @@
     "test:premium-import": "node tests/check-premium-import.js",
     "test:presentation-v2": "node tests/check-presentation-v2.js",
     "test:quickset-hold": "node tests/check-quickset-hold.js",
+    "test:quickset-via": "node tests/check-quickset-via.js",
     "test:rank-nav-exit": "node tests/check-rank-nav-exit.js",
     "test:rank-presets": "node tests/check-rank-presets.js",
     "test:receipts": "node tests/check-receipts.js",
