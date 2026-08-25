@@ -10,36 +10,22 @@
 
 
 
-## 2026-08-24 — Feedback wave (5 groups / 11 items) QA-green on PR #198; operator go/no-go is the gate
+## 2026-08-25 — v1.16.6 (132) is on TestFlight; everything owed is now RUNTIME verification, not code
 
-**Where:** branch `claude/new-user-feedback-55320e` (worktree `trading-engine-eval-8ab7bc`), pushed;
-[PR #198](https://github.com/mattmurf77/fantasy-trade-finder/pull/198) open against `main`, CI running at handoff.
-Tip `48f0a043`; contains origin/main `cce3895f`. **Nothing merged, nothing deployed.**
+**Where:** `main` at `c092f808`+ (release) — nothing in flight, no branch open, working tree clean. EAS build `8925880d` **finished** and submission `b190d30b` **finished**; Apple-side processing then TestFlight availability is the only remaining step and it is not ours.
 
-**What it is.** The full `/feedback` pipeline on operator-selected groups: A #376/#379/#394 (TradesHome
-"Outlook & filters" row — the "most critical bug"), B #397/#398 (swipe beat → top band pin), C #395/#396
-(lineup-impact alignment + platform template + "WR #3" chips), D #386/#391 (guide re-measure on layout
-shift), F #346/#381 (QuickSet HOLD, D-160 supersedes #161). Specs, reconciliation logs, build reports,
-and dual QA reports (round 1, agents A+B, both PASS) live in each group's `docs/feedback/items/` folder;
-batch plan + consolidated TestFlight checklist in `346-quickset-tier-drop/`.
+**What shipped today.** PR #196 — the Quick Set `via` gap ([D-162](DECISIONS.md)): `POST /api/tiers/save` had branched on `via == "quickset"` since analytics P0, but no client ever sent it, so `quickset_completed`, `tier_save.props.via` and the point-of-use `ranking_method` were dark for every production walk. One emitter change fixes it; the "per completed position" semantics were corrected to "per tagged tier commit" (the save route cannot see a completed position — the walk saves rung by rung and a consensus-accepting walk saves nothing). Then PR #206 cut v1.16.6 and PR #207 corrected the record on G-012.
 
-**Evidence** (TEST_LEDGER 2026-08-24): tsc clean · 78/78 guards · pytest 4238 ×3 clean runs · every
-sabotage re-proven twice independently · v1.16.4 (app.json + Info.plist; pbxproj MARKETING_VERSION is
-stale-inert at 1.16.2 — deliberately untouched, Info.plist literal is what ships).
+**The gate is the operator's device.** Three checklists are now runnable on 132 and every one of them is the ONLY runtime evidence its feature will get (D-056): the **via-gap** check ([scope §3](../docs/plans/quickset-analytics-via/scope.md) — a real Quick Set walk should write `quickset_completed` + `tier_save.props.via="quickset"`, and a plain Tiers save should write `via:"tiers"` and NO `quickset_completed`), plus **H** (steps 63–78, Wave A, needs a genuinely cold league load) and **I1** (79–83, flag-off regression), both owed since 130.
 
-**What's left, in order:** (1) CI green on PR #198; (2) **operator go/no-go** (hard gate — the ship
-summary was presented in-session); (3) on go: merge PR → Render deploy (verify BY CONTENT + confirm a
-deploy was CREATED for the sha, 2026-08-17 lesson) → `eas build` + submit — CHECK `eas build:list` for
-a version race on 1.16.4 first; (4) set the 11 items `fixed`; (5) worktree sweep via recovery ledger
-(7 agent worktrees: ae024cf9…, a0746142…, acf3a1f0…, aa22a939…, aded2055…, a69ec9f0…, a75f033c…,
-a552dedd… + branches `feat/fb*`); (6) operator runs the consolidated TestFlight checklist and logs
-outcomes to TEST_LEDGER.
+**Analytics seam — say it out loud before anyone reads a chart:** every Quick Set row before this release is structurally `via:'tiers'`. Do not trend `FEATURE_VERTICALS["rank_quickset"]` or `tier_save.via` splits across 2026-08-25.
 
-**Sharp edges banked:** `test_deck_signal_v2::test_flag_on_writes_impressions_in_served_order` fails
-against a `data/trade_finder.db` left by a prior full sweep in the same tree — fresh data dir passes;
-bisect before blaming code. A parallel operator-started session is fixing the `quickset_completed`
-via-tag analytics gap — it touches `QuickSetTiersScreen.tsx`, which THIS wave rewrote; that session
-must rebase onto this branch/main-after-merge or it will conflict.
+**Sharp edges banked.**
+- `test_deck_signal_v2::test_flag_on_writes_impressions_in_served_order` fails in this worktree against the stale `data/trade_finder.db` — `mv data data.bak` and it passes. This session first misattributed it to Python-3.14 skew; `git stash` does not touch a gitignored DB, so a clean-tree reproduction does NOT exonerate the code. TEST_LEDGER carries the correction.
+- The daily tick's `is_aug25` `season_start` fan-out skips every winback, so `test_notif_teardown`'s three winback tests fail exactly one day a year — fixed by pinning the tick clock ([G-061](GOTCHAS.md)), with the Aug-25 branch now pinned by its own test.
+- `MARKETING_VERSION` is **inert** here (`INFOPLIST_FILE` set, no `GENERATE_INFOPLIST_FILE`); the Info.plist literal ships. Keep both in sync anyway — a future `expo prebuild` with generated plists would make the stale one authoritative ([G-012](GOTCHAS.md), corrected 2026-08-25).
+- **Worktree debt is at the G-022 threshold again:** the main checkout is 9.5 GB with 5.9 GB under `.claude/worktrees` (21 worktrees). Today's build dodged it by building from a 561 MB worktree, but the next person who builds from the main checkout may hit the upload failure. A ledgered sweep is owed.
+
 ## 2026-08-24 — Waves A + B0 SHIPPED (1.16.4 / EAS 130); Wave B is the next build; do NOT light `calc.inline_home` before it
 
 Both waves of [docs/plans/onboarding-tour-merge/plan.md](../docs/plans/onboarding-tour-merge/plan.md) merged and built: **Wave A** (PR #197 — Next buttons on ten onboarding beats, demo link off, s0.1/s2.1 copy, the n11 loading-race park + outlook-sheet park, n22 → `trades.card-meter`, D-157 Clear button) is **live behavior** on 1.16.4; **Wave B0** (PR #199 — D-158's inline In-league canvas on the guided landing, in-place Find a Trade, anchor-as-filter receipt, pushed page → Real values, all four prefill sites) is **DARK behind `calc.inline_home`**. Built by Opus subagents, adversarially reviewed by a Fable subagent; review fixes A1/A2 (park lifecycle + 60 s outlook bound) and B1 (MatchesScreen's fourth prefill site) landed on top. **Owed:** TestFlight checklist sections **H** (steps 63–78, Wave A — steps 63–67 need a genuinely COLD league load) and **I1** (79–83, flag-off regression) on build 130. **Wave B (the tour merge) must precede lighting the flag** — the tour is deliberately OFF under it (n10's tab is gone), and per the review's composition note Wave B must re-thread `onInLeagueReady`/`onOutlookClosed`/an outlook opener through the INLINE mount (TradesScreen passes none of them today). Remaining plan §4 decisions: tour length, auto-dispatch, invite link, landing wave. Ledger: [docs/recovery/2026-08-24-wave-a-b0-ship.md](../docs/recovery/2026-08-24-wave-a-b0-ship.md).
@@ -116,7 +102,7 @@ move, and the avatar lab's anchor test models the brief's described layout, not 
 **none**, so the bubble reads "The Analyst" above a ram, which is D-155's recorded default). Higgsfield credits ~4.35.
 
 ## Table of Contents
-- [2026-08-24 — Feedback wave (5 groups / 11 items) QA-green on PR #198; operator go/no-go is the gate](#2026-08-24--feedback-wave-5-groups--11-items-qa-green-on-pr-198-operator-gono-go-is-the-gate)
+- [2026-08-25 — v1.16.6 (132) is on TestFlight; everything owed is now RUNTIME verification, not code](#2026-08-25--v1166-132-is-on-testflight-everything-owed-is-now-runtime-verification-not-code)
 - [2026-08-24 — Waves A + B0 SHIPPED (1.16.4 / EAS 130); Wave B is the next build; do NOT light `calc.inline_home` before it](#2026-08-24--waves-a--b0-shipped-1164--eas-130-wave-b-is-the-next-build-do-not-light-calcinline_home-before-it)
 - [2026-08-24 — Fleeced on TestFlight (v1.16.3 build 129), dark; one production write left](#2026-08-24--fleeced-on-testflight-v1163-build-129-dark-one-production-write-left)
 - [2026-08-23 — Fleeced BUILT dark on `claude/ram-mascot-fleeced`; needs a build + an experiment, neither done](#2026-08-23--fleeced-built-dark-on-clauderam-mascot-fleeced-needs-a-build--an-experiment-neither-done)

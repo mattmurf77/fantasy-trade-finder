@@ -15,9 +15,23 @@
 
 
 
+## 2026-08-25 — v1.16.6 (EAS build 132) BUILT + SUBMITTED to TestFlight
+
+Carries PR #196's `via:'quickset'` tag ([D-162](DECISIONS.md)) — the first build in which the Quick Set funnel can emit anything.
+
+| Gate | Result |
+|---|---|
+| Version sources (G-012) | All three iOS spots set to 1.16.6 — `app.json`, `Info.plist` `CFBundleShortVersionString` (the literal that actually ships here), both `MARKETING_VERSION` lines. Verified on the build source commit before upload |
+| CI on the release sha (`cb691b25` → merged `c092f808`) | backend-tests · mobile-typecheck · testid-lint all **pass** |
+| EAS build `8925880d` | **finished** — v1.16.6 (132), commit `c092f808`, profile production |
+| Submission `b190d30b` | **finished** — ASC app 6771488431, auto-submit. Apple-side processing then TestFlight availability is out of our hands |
+| Archive hygiene (G-022) | Built from the 561 MB worktree, NOT the 9.5 GB main checkout (5.9 GB of nested worktrees there — the condition that once failed an upload) |
+
+**Owed runtime evidence, now runnable on 132:** the via-gap checklist ([scope §3](../docs/plans/quickset-analytics-via/scope.md)) — expect `quickset_completed` rows + `tier_save.props.via = "quickset"` for a real walk, and `via:"tiers"` with no `quickset_completed` for a plain Tiers save. Checklists **H** + **I1** (Wave A / flag-off regression) were owed on 130 and are also testable here.
+
 ## 2026-08-25 — Merge-day addendum to 2026-08-24b: main merged in, D-162 renumber, Aug-25 calendar flake pinned (G-061)
 
-Merging `origin/main` (Group F + feedback wave + Waves A/B0 + pick YoY floor) into the via-gap branch surfaced two things. (1) Main took D-160/D-161 overnight → this branch's decision renumbered **D-162**; `via:'quickset'` verified intact alongside Group F's HOLD changes (`check-quickset-via` + `check-quickset-hold` + `tsc` green on the merged tree). (2) The merged-tree suite failed `test_notif_teardown`'s three winback tests — **because the run date was Aug 25**: the daily tick's `is_aug25` season_start fan-out skips every winback that day, so the real clock was a hidden test input ([G-061](GOTCHAS.md), the G-059 pattern). Fixed by pinning the tick clock in those tests + a new pinned `test_season_start_fanout_on_aug25`; file 19/19 green. Remaining local failure: `test_deck_signal_v2` only — the known 3.14 skew (clean-tree reproduced 2026-08-24b); PR #196 CI (3.12) is the arbiter.
+Merging `origin/main` (Group F + feedback wave + Waves A/B0 + pick YoY floor) into the via-gap branch surfaced two things. (1) Main took D-160/D-161 overnight → this branch's decision renumbered **D-162**; `via:'quickset'` verified intact alongside Group F's HOLD changes (`check-quickset-via` + `check-quickset-hold` + `tsc` green on the merged tree). (2) The merged-tree suite failed `test_notif_teardown`'s three winback tests — **because the run date was Aug 25**: the daily tick's `is_aug25` season_start fan-out skips every winback that day, so the real clock was a hidden test input ([G-061](GOTCHAS.md), the G-059 pattern). Fixed by pinning the tick clock in those tests + a new pinned `test_season_start_fanout_on_aug25`; file 19/19 green. Remaining local failure: `test_deck_signal_v2` only — **CORRECTED 2026-08-25: caused by the stale `data/trade_finder.db` in this worktree, not Python skew** (pristine data dir → passes). It reproduced on a clean git tree because `git stash` does not touch the gitignored DB, which is exactly why the clean-tree check looked like it exonerated the code.
 
 ## 2026-08-24b — Quick Set `via` gap fix — full gates, on `claude/elegant-feynman-c3689e` (D-162; held for operator)
 
@@ -25,7 +39,7 @@ Scope: [`docs/plans/quickset-analytics-via/scope.md`](../docs/plans/quickset-ana
 
 | Gate | Result |
 |---|---|
-| `pytest backend/tests -k "not calibration_gate"` | **4226 passed, 1 failed, 1 skipped** — the failure (`test_deck_signal_v2.py::test_flag_on_writes_impressions_in_served_order`) reproduces on the **clean origin/main tree** (`git stash` → still fails) under local Python **3.14.4**; the known 3.12-skew class (this file, 2026-08-13). Unrelated to the change; CI on the PR sha is the arbiter — and PR #196 CI came back **all green** (backend-tests on 3.12 pass, mobile-typecheck pass, testid-lint pass; run 32762214700), confirming the skew diagnosis |
+| `pytest backend/tests -k "not calibration_gate"` | **4226 passed, 1 failed, 1 skipped** — the failure (`test_deck_signal_v2.py::test_flag_on_writes_impressions_in_served_order`) reproduces on the **clean origin/main tree** (`git stash` → still fails) under local Python **3.14.4**; the known 3.12-skew class (this file, 2026-08-13). Unrelated to the change; CI on the PR sha is the arbiter — and PR #196 CI came back **all green** (run 32762214700). **CORRECTED 2026-08-25:** the cause is NOT Python-version skew — it is the stale `data/trade_finder.db` in this worktree (the 2026-08-24 HANDOFF's banked sharp edge). Proven: `mv data data.bak` → the test passes on the same interpreter. The skew attribution was a guess that fit; it was wrong |
 | Server branch coverage (pre-existing, all green in the run) | `test_analytics_p0.py::test_quickset_completed_fires_with_props` + `::test_quickset_event_absent_for_plain_tier_save`, `test_rookie_scope.py::test_rookie_via_tags_are_recorded_and_do_not_fire_quickset_completed`, `test_events_api.py` disjointness pins |
 | New structural guard | `mobile/tests/check-quickset-via.js` (`npm run test:quickset-via`) — 13 asserts green. **Sabotage:** non-rookie save arm reverted to `undefined` (the original bug) → guard RED on exactly the pinned assert; restore → green |
 | `tsc --noEmit` (strict) | green |
