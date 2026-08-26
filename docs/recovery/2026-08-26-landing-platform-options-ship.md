@@ -62,3 +62,29 @@ the shipping session), per the 2026-08-26b HANDOFF entry.
 
 **Recovery:** `git branch claude/entry-platform-login-option 55f06384`
 (reflog expiry ~2026-11-24).
+
+---
+
+## Same-day addendum 3 — the v1.16.8 release branches + the agent worktree
+
+| tip sha | branch | note |
+|---|---|---|
+| `364d8d7c` | `release/v1.16.8` | version bump, squash-merged via PR #217 |
+| `f4b3bfb5` | `feat/guided-onboarding-platform-aware` | platform-aware Analyst beat, squash-merged via PR #218 |
+| `96e48ed7` | `release/v1.16.8-record` | living-memory release record, squash-merged via PR #219 |
+| `6c8d2c86` | `worktree-agent-a9e9f68b6d1f24bbe` | the guided-onboarding subagent's isolated worktree; its content reached main via #218 |
+
+**Why deletion is safe (verification by content, correct direction):**
+`git diff origin/main <branch> --stat` for each is **deletions only** — main is a
+strict superset of every one of them (the diffs are just the later commits those
+branches predate). `release/v1.16.8-record` diffs to **zero**. Every PR's three CI
+checks were polled to COMPLETED/SUCCESS **before** merge (the G-062 discipline).
+
+Evidence trail: the 2026-08-26e `living-memory/TEST_LEDGER.md` entry (build
+`c12643d1` / submission `c6e58906`) and `docs/plans/landing-platform-options/`.
+
+**Deleted:** all four on 2026-08-26. **Still owed:** the sweep of the session
+worktree `.claude/worktrees/app-entry-platform-options-3e16ac`, which hosted four
+shipped branches today and cannot remove itself.
+
+**Recovery:** `git branch <name> <sha>` per row (reflog expiry ~2026-11-24).
