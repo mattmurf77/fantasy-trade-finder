@@ -30,10 +30,21 @@ Slots: `{{first_name}}` (display name, else "coach"), `{{league}}`, `{{pos}}` (Q
 | # | Trigger | Pose | Line | Advance |
 |---|---|---|---|---|
 | S0.1 | Landing mount +600ms (once ever: `guideSeen.s0`) | neutral | "Evening. I'm **The Analyst** — I model dynasty trades. You bring the roster, I bring the math." | tap |
-| S0.2 | auto | point → username field (`signin.username-input`) | "Type your Sleeper username. No password — your rosters are public record, which is convenient for people like me." | user submits |
-| S0.err-notfound | 404 | oops | "No such username. Common error: that's a *team* name. Sleeper profile → the @handle. I'll wait." | resubmit |
-| S0.err-down | 5xx/timeout | oops | "Sleeper isn't answering. Statistically it comes back. Retry in a moment{{demo? — or browse my sample league while we wait}}." | resubmit |
+| S0.2 (Sleeper) | auto, or the Sleeper chip selected | point → username field (`signin.username-input`) | "Type your Sleeper username. No password — your rosters are public record, which is convenient for people like me." | user submits |
+| S0.2 (ESPN) | ESPN chip selected | point → panel link button (`signin.platform-link-btn`) | "Sign in to ESPN or paste a league ID — then pick your team." | user taps the link button |
+| S0.2 (MFL) | MFL chip selected | point → panel link button (`signin.platform-link-btn`) | "Sign in to MFL or paste a league ID — then pick your team." | user taps the link button |
+| S0.err-notfound | 404 *(Sleeper username path only)* | oops | "No such username. Common error: that's a *team* name. Sleeper profile → the @handle. I'll wait." | resubmit |
+| S0.err-down | 5xx/timeout *(Sleeper username path only)* | oops | "Sleeper isn't answering. Statistically it comes back. Retry in a moment{{demo? — or browse my sample league while we wait}}." | resubmit |
 | S0.skip | ✕ on S0.1/S0.2 | — | "Understood. I'll be around." → guide yields for the session; S2 may still offer once (see S2.re-entry) | — |
+
+> **S0 is platform-aware (2026-08-26, D-163/D-164).** Sleeper is no longer the only door: under `landing.platform_options` the entry page carries a Sleeper · ESPN · MFL chip row, and picking ESPN or MFL replaces the username form with a panel whose button opens that platform's link sheet — the user signs in there (or pastes a league ID), claims a team, and gets a session with **no Sleeper identity at all**.
+>
+> Consequences for this section, all shipped in `mobile/src/components/analystScript.ts`:
+> - **S0.1 is unchanged and stays unchanged.** It promises a walkthrough and names no platform, so it was already honest for every door. Do not add one.
+> - **S0.2 is ONE beat with three renderings** — `s0_2(platform)` picks the target and the line. One script id, so the seen/retired ledgers stay about one thing: "the user was shown where to start." The no-argument call renders the Sleeper beat verbatim, which is what every flags-off call site gets.
+> - **A chip switch ends the in-flight S0.2 and re-arms it**, in either direction, so no spotlight outlives its target and the beat is re-offered against the control that replaced it (`selectEntryPlatform`, SignInScreen).
+> - **The S0.err beats stay Sleeper-specific.** Their only trigger is the username submit; an ESPN/MFL failure surfaces inside that platform's link sheet, which is an RN `<Modal>` the guide yields to by §1.2 — a bubble behind it would be invisible, not helpful.
+> - S1.1 needs no change: platform-entry users reach the picker as `account_only` with their platform league merged in, and the line names no platform.
 
 ### S1 · League picker (multi-league only; auto-skip users jump to S2)
 

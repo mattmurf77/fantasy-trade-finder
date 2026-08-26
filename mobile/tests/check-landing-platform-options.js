@@ -16,8 +16,11 @@
 //   3. The Apple success branches forward `platformIntent` to BOTH
 //      `onSignedIn` (linked account) and `onAccountSignedIn` (account-only) —
 //      dropping either turns the ESPN/MFL door into a dead end on that path.
-//   4. Selecting a non-Sleeper chip advances guide step s0.2 — the Analyst's
-//      spotlight targets the username field the chip hides.
+//   4. Guide step s0.2 follows the chip: it is requested for the SELECTED
+//      platform, any switch ends AND re-arms an in-flight one, and the panel
+//      button is a registered target that advances it. Losing any part either
+//      strands a spotlight on an unmounted control or spends the once-ever
+//      beat on the door the user just closed.
 //   5. RootNav maps the intent onto LeaguePicker's auto-open params for both
 //      callbacks (espn → espnLink, mfl → mflLink).
 //   6. LeaguePicker's MFL auto-open keeps the #266 transition-settled
@@ -99,10 +102,58 @@ assert(
   'account-only branch forwards platformIntent',
 );
 
-// ── 4. guide spotlight cannot outlive its target ─────────────────────────
+// ── 4. the guide beat follows the chip, and cannot outlive its target ────
+//
+// s0.2 rings whichever entry control the chip row is showing: the Sleeper
+// username field, or the ESPN/MFL panel's link button. `GUIDE.s0_2(platform)`
+// carries both the target and the line, so three things have to hold together
+// and each protects a different failure:
+//
+//   a. The request is parameterized on the SELECTED chip. Losing this points
+//      an ESPN user at a username field that is not on screen and tells them
+//      to type a Sleeper name they do not have.
+//   b. A switch ENDS an in-flight s0.2 — in either direction. Only the
+//      non-Sleeper direction used to matter; now that the beat can ring the
+//      platform button, switching BACK to Sleeper strands a ring the same way.
+//   c. …and RE-ARMS it. `once: true` means the advance in (b) would otherwise
+//      spend the beat on the door the user just closed, and the platform-entry
+//      user is never shown where to start. Advance without re-arm is the
+//      shipped-before behavior; re-arm without advance is the stranded ring.
+//
+// (d) pins the panel button as a real, measurable target — a beat aimed at an
+// unregistered testID measures null and silently degrades to a bubble.
+const selectFn = signIn.match(
+  /function selectEntryPlatform\([\s\S]{0,1600}?\n  \}/,
+);
+assert(!!selectFn, 'selectEntryPlatform is parseable');
 assert(
-  /if \(p !== 'sleeper'\) \{[\s\S]{0,220}advanceGuideIfActive\('s0\.2'\)/.test(signIn),
-  'non-Sleeper chip selection advances guide step s0.2',
+  /requestGuideStep\(GUIDE\.s0_2\(entryPlatform\)\)/.test(signIn),
+  'a. s0.2 is requested for the SELECTED platform (target + line follow the chip)',
+);
+assert(
+  !!selectFn &&
+    /if \(p !== 'sleeper'\) \{\s*\n\s*Keyboard\.dismiss\(\);\s*\n\s*\}/.test(selectFn[0]),
+  'b. only the keyboard dismissal is scoped to the non-Sleeper direction',
+);
+assert(
+  !!selectFn &&
+    /guideActiveStepId\(\) === 's0\.2'\) \{[\s\S]{0,160}advanceGuideIfActive\('s0\.2'\)/.test(
+      selectFn[0],
+    ),
+  'b. ANY chip switch ends an active s0.2 (no spotlight outlives its target)',
+);
+assert(
+  !!selectFn && /patchOnboardingState\(\{ guideSeen: \{ 's0\.2': false \} \}\)/.test(selectFn[0]),
+  'c. …and re-arms it so the beat is re-offered against the new control',
+);
+assert(
+  /registerGuideTarget\('signin\.platform-link-btn', platformLinkRef\)/.test(signIn) &&
+    /<View ref=\{platformLinkRef\} collapsable=\{false\}>/.test(signIn),
+  'd. the panel button is a registered, measurable guide target',
+);
+assert(
+  /advanceGuideIfActive\('s0\.2'\);\s*\n\s*setEntrySheet\(/.test(signIn),
+  'd. tapping the panel button advances s0.2 (the real action on that path)',
 );
 
 // ── 5. RootNav intent → param mapping, both callbacks ────────────────────
