@@ -305,3 +305,73 @@ same staged widening the other narrowing preferences get.
   `scripts/deck_eval.py` corpus is not present in this worktree, so **no
   measured deck-thinning number is claimed**. The runtime valve is the #189
   relaxed pass; the runtime signal is the existing presentment tripwire.
+
+---
+
+## Post-merge re-verification — 2026-08-26 (merge of `origin/main` @ 867c3baa)
+
+The branch was rebuilt on current `origin/main` (123 commits past the 2a492b6
+base: knockout refine D-159, full sweep D-154, #384 merged calculator, package
+pricing honesty #162, pick YoY floor D-161, receipts, breaker, negmem). Every
+claim below was re-walked on the MERGED tree; line numbers are merged-tree.
+
+**The single flag read and the exclusion chain (R-4, R-11):**
+1. `backend/server.py:5869-5870` — `_run_trade_job` reads
+   `league_preferences.avoid_positions` ONLY when `FLAGS.trade_avoid_positions`
+   is true; otherwise `avoid_positions` stays `[]` (`:5858`). This is still the
+   single point of entry: every downstream consumer receives the list as an
+   argument, so flag-off ⇒ `[]` everywhere ⇒ byte-identical generation.
+2. `backend/server.py:5883-5891` — avoid⊕chase: every avoided position is
+   dropped from `acquire_positions` BEFORE `_generate_kwargs` is built (R-9;
+   `INFO` log names the dropped tokens).
+3. `backend/server.py:6101` — the list rides the generate kwargs;
+   `backend/trade_service.py:4484` accepts it, `:4675` threads it into
+   `_generate_trades_v2`, `:5590/:5838/:5872/:5898` fan it out to the v3 /
+   v2 / consensus pair generators (each `or []`).
+4. Receive-pool construction sites, all filtered through `avoid_ok`:
+   - v3: `backend/trade_optimizer.py:381-385` (`known_opp`), sweetener
+     receive-side candidates `:800-805` (threaded at `:674`);
+   - v2: `backend/trade_service.py:6475-6480` (`_known_opp`);
+   - consensus: `backend/trade_service.py:6726-6730` (`_opp_pool`);
+   - asset ideas: `backend/trade_service.py:5195-5200` (give-direction
+     return pool), `:5262-5265` (pinned receive asset at an avoided
+     position ⇒ empty, D-360-3(b)), `:5281-5285` (extras pool);
+   - likes-you injector: `backend/server.py:3431-3435` (organic mirrors)
+     and `:3590-3593` (#362 standing-offer branch), receiving the set at
+     `:6217`.
+5. Pick-ness before position (R-5): `backend/trade_service.py:2091`
+   (`_pos_for_avoid` — `is_pick_asset` first, so avoiding QB never deletes a
+   4th-round rung; only the `PICK` chip excludes picks) and `:2115`
+   (`avoid_ok` — unknown ids pass, falsy avoid passes everything).
+6. Never relaxed (D-360-4): the #189 relaxed pass re-runs
+   `_generate_trades_v2` with the SAME kwargs
+   (`backend/trade_service.py:4921-4929` states it; `avoid_positions` also
+   marks the job "targeted" at `:4706-4708` so an over-constrained job takes
+   the relaxed pass instead of silently emptying) — the exclusion lives in
+   pool construction, so there is nothing a gate relaxation could reach.
+7. Persistence is NOT flag-gated (R-2/R-3): GET always serves the array
+   (`backend/server.py:17438` no-row fallback, `:17457-17462` row path);
+   POST normalizes-and-echoes (`:17515-17531`, normalizer `:17371`);
+   storage `backend/database.py:998` (column), `:2743` (migration),
+   `:9018-9019` (None-leaves-alone upsert).
+
+**New post-merge seam closed this session:** `origin/main`'s counterparty
+breaker added `load_league_preferences_bulk` (`backend/database.py:9090`),
+contract "identical per-row shape to `load_league_preference`". It predated
+`avoid_positions` and did not carry the key; fixed 2026-08-26 so the bulk row
+now includes `avoid_positions` (pinned by
+`test_breaker_seam.py::test_bulk_readers_match_the_singular_loaders`).
+
+**Mobile (flag-gated render):** `TradeDnaSheet.tsx:282` (`avoidOn`), row
+rendered only when on; `TradesScreen.tsx:657` (`avoidOn`), receipt line
+`:1288-1293` (R-10), empty-state copy naming Avoiding `:1770-1782` (R-9).
+Deliberately absent from `LAUNCHED_FLAG_DEFAULTS` (D-163 — that map fails
+open).
+
+**Fixture note (not a behavior change):** `origin/main` d42872f2 ("package
+pricing honesty + gap auto-sweetener", #162) stopped admitting 1-for-1s that
+lose seed value for the giver. The T-4/T-5 harness seeded coveted receive
+assets at 1500 against a 1540 give, so the BASELINE premise (a WR / the extra
+pick surfaces before Avoiding is applied) failed on the merged engine. The
+fixture now seeds those assets at parity (1540); the assertions are unchanged.
+Suite: `test_avoid_positions.py` 29/29 green on the merged tree, 2026-08-26.
