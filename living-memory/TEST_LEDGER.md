@@ -11,6 +11,18 @@
 
 ---
 
+## 2026-08-26e — v1.16.8 (EAS build 134) BUILT for TestFlight
+
+Release run by the lead session at operator instruction ("push to testflight via EAS"), following the `ops-release` pre-flight.
+
+- **Build:** `c12643d1-a22b-4dee-9e08-611c01f70366` — v1.16.8, build **134**, status **FINISHED**, from git commit **`dd2051bc`**. `--auto-submit` chained the submission: **`c6e58906-3cbc-4418-af97-d7a39a6cc6c3`** — *"Submitted your app to Apple App Store Connect"*, uploaded via the EAS-held ASC API key (`LA9UVSTV2N`). Apple-side processing (~5–10 min) then TestFlight availability is the only remaining step and it is not ours.
+- **Version bump:** 1.16.7 → 1.16.8 in `mobile/app.json` AND `ios/DTFDynastyTradeFinder/Info.plist` — [G-012] says the plist literal is what actually ships in this bare workflow, so bumping only app.json would have shipped a build labelled 1.16.7. `plutil -lint` clean. Build number from EAS remote (`appVersionSource: remote`, autoIncrement), so 134 follows the concurrent session's 133.
+- **Built-tree verification (not assumed):** `git show dd2051bc:` confirmed the entry v2.1 login actions in `backend/server.py`, `signin.platform-link-btn` in `analystScript.ts`, and `1.16.8` in the plist.
+- **Pre-flight gates:** main CI green at every commit in the range; release PR #217 and onboarding PR #218 each had all three checks COMPLETED/SUCCESS **before** merge (the G-062 discipline); backend suite 4,359 passed; 83 mobile structural guards, 0 failing; tsc + testid-lint clean.
+- **What 134 carries beyond 133:** entry v2.1 (#215 — "sign in to ESPN/MFL" as a first-class option) and the platform-aware Analyst beat (#218). 133 already carried the entry chips (#210) and the Apple decoupling (#213).
+- **Owed (operator, on 134):** the TestFlight checklists in [landing-platform-options/scope.md](../docs/plans/landing-platform-options/scope.md) §3, §V2, §V2.1 — plus a spot-check that the tour's opening beat now points at the ESPN/MFL panel button (not the hidden username field) when a non-Sleeper chip is selected.
+- **Rollback without a build:** `landing.platform_options: false` + `POST /api/feature-flags/reload` kills the whole entry surface; `espn.league_picker` / `mfl.auth_link` kill just the login actions.
+
 ## 2026-08-26c — Entry v2.1: login option (Opus subagent build, lead-session review) — full gates
 
 Scope: [docs/plans/landing-platform-options/scope.md](../docs/plans/landing-platform-options/scope.md) §V2.1 · code-walk §V2.1
@@ -3073,6 +3085,7 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-08-26e — v1.16.8 (EAS build 134) BUILT for TestFlight](#2026-08-26e--v1168-eas-build-134-built-for-testflight)
 - [2026-08-26c — Entry v2.1: login option (Opus subagent build, lead-session review) — full gates](#2026-08-26c--entry-v21-login-option-opus-subagent-build-lead-session-review--full-gates)
 - [2026-08-26b — Platform entry decoupled from Apple (D-164) — full gates](#2026-08-26b--platform-entry-decoupled-from-apple-d-164--full-gates)
 - [2026-08-26 — Landing platform options (Sleeper · ESPN · MFL entry chips) — full gates](#2026-08-26--landing-platform-options-sleeper--espn--mfl-entry-chips--full-gates)
