@@ -257,3 +257,39 @@ files. Seeded from history before this skill existed:
   invites the wrong call. The ancestry check caught two branches
   (`wave-calc`, the specs branch) holding content that existed NOWHERE else —
   including a 455-line Phase-1 plan — minutes before deletion.
+- 2026-08-24 [triage] Agent worktrees don't carry `secrets.local.env` (gitignored,
+  lives only in the main checkout) — `fetch_feedback.py` fails before auth. Symlink
+  it from the project root into the worktree (`ln -sf`) rather than asking the
+  operator for the secret.
+- 2026-08-24 [triage] Sixteen open items were already closed in code by non-feedback
+  pipelines (Team Review batch, #355, #384) but never had their DB statuses set —
+  the pipeline only flips statuses for items IT ships. Triage should always propose
+  the fixed/in_progress corrections for work shipped outside this skill, or the
+  open list becomes unreadable (61 rows, ~25 actionable).
+- 2026-08-24 [build] Agent-tool worktrees are cut from origin/main, NOT the session
+  branch holding the committed specs. Every one of 7 build agents had to re-branch
+  from the spec commit named in its prompt. Keep naming the exact spec sha in build
+  prompts (it worked every time), or pre-create the worktree.
+- 2026-08-24 [qa] QA agents write their findings files in THEIR worktrees — the
+  orchestrator's `git add docs/feedback/items` in the session tree captures nothing.
+  Copy the reports out of the QA worktrees (or have QA agents commit them) BEFORE
+  the sweep; this run nearly destroyed all ten reports.
+- 2026-08-24 [qa] `pytest backend/tests` is not hermetic across runs sharing one
+  tree: a full sweep leaves a `data/trade_finder.db` that makes
+  `test_deck_signal_v2::test_flag_on_writes_impressions_in_served_order` fail on the
+  NEXT run. `rm -f data/trade_finder.db*` before any sweep whose result you'll cite;
+  bisect commit-vs-environment in a second worktree before blaming code.
+- 2026-08-24 [ship] main moved TWICE during this run (docs commit mid-build; Waves
+  A+B0 shipped mid-QA and TOOK the 1.16.4 version). Before `gh pr merge`: fetch,
+  expect conflicts on TradesScreen/CLAUDE.md/living-memory, resolve by union, re-run
+  the FULL gate battery on the merged result (cross-session guards both passing is
+  the actual proof), and re-check `eas build:list` for the version race.
+- 2026-08-24 [ship] NEVER delete branches via `grep | xargs git branch -D` — it
+  pattern-matches every session's branches and only pipe buffering limited the blast
+  radius (M-005; one deleted tip was NOT contained in main and needed restore).
+  Delete by explicit name from the ledger row, nothing else.
+- 2026-08-24 [pipeline] A ~40-minute API-overload window killed every in-flight
+  subagent repeatedly. What worked: exponential backoff with a single cheap CANARY
+  resume before re-launching the fleet, and doing well-specified round-3 doc edits
+  inline from the critics' logged objections (the orchestrator's own calls kept
+  succeeding). Agents resumed cleanly from disk state each time.

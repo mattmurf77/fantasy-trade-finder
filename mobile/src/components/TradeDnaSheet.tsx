@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   TextInput,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 import {
@@ -232,6 +233,15 @@ interface Props {
 }
 
 export default function TradeDnaSheet({ visible, onClose, full, openSource }: Props) {
+  // Wave A (v2 note 13) — "the outlook sheet sits too tight to the bottom".
+  // The sheet is `bottom: 0` with a uniform `space.lg` pad, so on a
+  // home-indicator device the last control sat under the indicator and the
+  // whole panel read as cut off. The pad now clears the inset as well:
+  // `space.lg` of breathing room ABOVE whatever the system reserves. Applied
+  // to all three `styles.sheet` mounts — the outlook editor and the two
+  // layers nested inside the same Modal (untouchables, roster picker) are one
+  // surface to the user, and padding only the outer one would look like a bug.
+  const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const league = useSession((s) => s.league);
   const leagueId = league?.league_id || null;
@@ -600,7 +610,7 @@ export default function TradeDnaSheet({ visible, onClose, full, openSource }: Pr
         accessibilityRole="button"
         accessibilityLabel="Close"
       />
-      <View style={styles.sheet}>
+      <View style={[styles.sheet, { paddingBottom: insets.bottom + space.lg }]}>
         <View style={styles.grabber} />
         <View style={styles.sheetTop}>
           <Text style={type.heading} accessibilityRole="header">
@@ -1184,7 +1194,7 @@ export default function TradeDnaSheet({ visible, onClose, full, openSource }: Pr
             accessibilityRole="button"
             accessibilityLabel="Close untouchables"
           />
-          <View style={styles.sheet}>
+          <View style={[styles.sheet, { paddingBottom: insets.bottom + space.lg }]}>
             <View style={styles.grabber} />
             <Text style={type.heading} accessibilityRole="header">
               Untouchables
@@ -1262,7 +1272,7 @@ export default function TradeDnaSheet({ visible, onClose, full, openSource }: Pr
             accessibilityRole="button"
             accessibilityLabel="Close roster picker"
           />
-          <View style={styles.sheet}>
+          <View style={[styles.sheet, { paddingBottom: insets.bottom + space.lg }]}>
             <View style={styles.grabber} />
             <View style={styles.sheetTop}>
               <Text style={type.heading} accessibilityRole="header">

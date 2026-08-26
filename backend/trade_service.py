@@ -30,6 +30,11 @@ from typing import Optional
 
 from .feature_flags import FLAGS
 from .trade_narrative import build_narrative
+# trade.negmem — MODULE import, attribute calls only (T1, LLD §6.2). A value
+# import (`from .negmem import effective_mult`) would freeze the binding and
+# is exactly the form §10 N-11 sabotages. negmem is a LEAF (it imports only
+# database + feature_flags), so this cannot cycle.
+from . import negmem as _negmem
 
 
 # ---------------------------------------------------------------------------
@@ -92,6 +97,22 @@ _DEFAULT_CFG: dict[str, float] = {
     "package_floor_market":      0.70,
     "package_adj_gamma_market":  0.5,
     "package_discount_cap":      0.35,
+    # 2026-08-21 cross-package benchmark fix (operator-approved; evidence
+    # docs/reviews/2026-08-21-market-curve-comparison.md §3b: the own-max
+    # benchmark let 4 mids buy a stud at ~5% haircut — the served
+    # Rice+Etienne+Swift+Corum → Nacua card scored 0.939/fair vs
+    # FantasyCalc 1.362 / KTC 2.260). > 0 ⇒ a multi-asset side that does
+    # NOT hold the trade's best asset is depth-benchmarked against the
+    # TRADE's best asset (v_max) at package_floor_cross; ≤ 0 ⇒ the
+    # pre-fix own-max math, byte-identical (arm A's pin).
+    "package_bench_trade_wide":  1.0,
+    # Contribution floor used ONLY on the cross-benchmarked side above —
+    # lower than package_floor_market because the whole point is that
+    # pieces small relative to the stud being bought stop holding ≥ 70%
+    # of face. 0.40 prices the Nacua 4-for-1 at 0.709, between
+    # FantasyCalc (0.734) and the pre-#214 heavy shape (0.692). Inert
+    # while package_bench_trade_wide ≤ 0.
+    "package_floor_cross":       0.40,
     # Positional preference multipliers
     "pos_acquire_bonus":     0.20,
     "pos_tradeaway_bonus":   0.15,
@@ -180,6 +201,12 @@ _DEFAULT_CFG: dict[str, float] = {
     # ------------------------------------------------------------------
     "asset_ideas_lateral_band":   0.10,
     "asset_ideas_group_cap":      6.0,
+    # ------------------------------------------------------------------
+    # #384 W6-B — fairness-only packages around a fixed give-side anchor
+    # (flag: calc.merged_layout; TradeService.generate_fair_packages).
+    # ONE flat, swipeable list rather than three groups, so it gets one cap.
+    # ------------------------------------------------------------------
+    "fair_packages_cap":         20.0,
     # Waiver/roster-slot cost (amendment A3, FantasyCalc-derived ≈ rank-300 value)
     "waiver_slot_cost":    425.0,     # value cost per extra player received
     # Confidence shrinkage + range-overlap fairness (Change 4 + amendment A4)
@@ -267,6 +294,56 @@ _DEFAULT_CFG: dict[str, float] = {
     "infer_w_pick_share":         2.00,
     "infer_contender_cut":        0.08,
     "infer_rebuilder_cut":       -0.08,
+    # #365 — net first-round-pick capital (flag: trade.outlook_net_firsts).
+    # Weight on clamp((firsts acquired − firsts traded away) / firsts
+    # originally yours). Calibrated on the only real pick corpus available
+    # (docs/feedback/items/365-window-signals/scope.md §7.1): across 24
+    # member-league pairs |net_share| <= 0.75, so at 0.10 the observed
+    # contribution range is ±0.075 against a not_sure band ±0.08 wide — the
+    # term can move an extreme team ONE bucket and can never move any team
+    # two. Set to 0 to keep the card showing the ledger while it stops
+    # scoring it. The cap binds only a team that shipped more firsts than it
+    # originally owned in the horizon.
+    "infer_w_net_firsts":         0.10,
+    "infer_net_firsts_cap":       1.00,
+    # #372 — the COMPOSITE weight vector (flag: trade.outlook_composite).
+    # Operator, 2026-08-20: "age distribution alone is not a strong enough of
+    # a signal. We calculate starter dynasty value. Let's incorporate that and
+    # playoff likelihood. The age distribution can stay but make it a lighter
+    # driver."
+    #
+    # These are a SEPARATE NAMESPACE from the five `infer_w_*` keys above on
+    # purpose: the legacy vector is what every engine caller still scores
+    # with, and reusing its keys would mean the composite could not be tuned
+    # without moving the engine. Set `infer_composite_w_starter` and
+    # `infer_composite_w_playoff` to 0 and the composite degenerates to a
+    # down-weighted age model — a knob-only rollback below the flag.
+    #
+    # Calibration, on 12 real prod leagues / 156 teams
+    # (docs/feedback/items/372-window-composite/scope.md §7):
+    #   legacy    101 rebuilder / 26 not_sure /  29 contender  (65 % rebuilder)
+    #   composite  62 rebuilder / 40 not_sure /  54 contender
+    # The legacy vector's rebuilder skew is the whole of what #365/#371/#372
+    # keep reporting. The cuts (±0.08) are UNMOVED — see D-140.
+    "infer_composite_w_vet":      0.40,   # was 1.00 — "lighter driver"
+    "infer_composite_w_youth":    0.40,   # was 1.00
+    "infer_composite_w_pick":     2.00,   # unchanged; pick capital is not age
+    # Starter-value index = (your starters' value / the league's mean) − 1, so
+    # 0 is an average starting lineup and +0.50 is 50 % above it. Capped
+    # because one absurd roster must not swamp every other term: at 0.60 the
+    # capped contribution is ±0.30, roughly four times the not_sure band.
+    "infer_composite_w_starter":  0.60,
+    "infer_composite_starter_cap": 0.50,
+    # Playoff index = (playoff_pct − centre) / centre-half-width, i.e.
+    # 2·(pct − 0.50). 0.50 is NOT invented here: it is the midpoint of the
+    # `tossup` band (`outlook.trade_delta.playoff_band`: likely >= 0.65,
+    # unlikely < 0.35), so the neutral point of this term is the neutral point
+    # of the band map every client already renders. At the `likely` edge the
+    # contribution is 0.40·0.30 = 0.12, which on its own clears the 0.08
+    # contender cut — a genuinely likely playoff team should be called one.
+    "infer_composite_w_playoff":  0.40,
+    "infer_composite_playoff_center": 0.50,
+    "infer_composite_playoff_cap": 1.00,
     # ------------------------------------------------------------------
     # Tier 2 amendment A6 — league-wide deck diversification
     # (flag: trade.deck_diversity — consumed by server._order_deck)
@@ -354,6 +431,23 @@ _DEFAULT_CFG: dict[str, float] = {
     "exploration_slot_position":  5.0,   # 1-indexed served slot, clamped to [4, 6]
     "exploration_min_deck":       8.0,   # decks below this get no wildcard
     "exploration_overgen":        3.0,   # extra per-opponent candidates generated for the draw pool
+    # Per-opponent keep — the base the over-generation is added to and the
+    # width `server._split_exploration_pool` trims back to. Was the hardcoded
+    # module constant `server._EXPLORATION_BASE_PER_OPP = 5`, which is what
+    # made a `max_per_opponent` change a no-op on the served deck
+    # (docs/plans/full-sweep/plan.md §3.3). 5.0 reproduces that constant
+    # exactly, so this is behaviour-neutral at the default.
+    "exploration_base_per_opp":   5.0,   # served cards kept per opponent
+    # trade.full_sweep wall-clock safety rail (docs/plans/full-sweep/plan.md
+    # §3.5). Removing the `global_target` exit removes the only practical
+    # ceiling on a job: the CONSENSUS per-pair path carries a 1.0s deadline,
+    # but `trade_optimizer.generate_pair_trades_v3` explicitly has none
+    # ("No deadline, no iteration budget", trade_optimizer.py:231), so a slow
+    # league would otherwise run to `server._JOB_HARD_TIMEOUT` (60s). Checked
+    # per opponent, so the budget bounds when the sweep STOPS starting new
+    # pairs, not the pair already in flight. <= 0 disables the rail.
+    # Read only when the flag is on — flag-off never evaluates it.
+    "full_sweep_budget_s":       30.0,   # seconds of opponent sweep before stop
     "audition_min_views":        30.0,   # viewed impressions before an audition verdict
     "audition_like_rate_frac":    0.5,   # graduate at like-rate ≥ this × global base rate
     "audition_retire_days":      30.0,   # retirement window before a failed archetype re-auditions
@@ -390,6 +484,17 @@ _DEFAULT_CFG: dict[str, float] = {
     "v3_pool_size":              12.0,   # per-side candidate pool for exact enumeration
     "sweetener_band":             0.15,  # fairness shortfall band eligible for a sweetener
     "sweetener_max_cards":        2.0,   # max sweetened cards per opponent pair
+    # 2026-08-21 gap auto-sweetener (operator-commissioned; the ratio gate
+    # is scale-blind, so a "fair" 0.85 on a big package can still be a
+    # late-1st of absolute consensus gap — CHANGELOG 2026-08-21: 15% of
+    # served cards carried gap > a late 1st). When a candidate card's
+    # |give_value − receive_value| exceeds this threshold (value units;
+    # 1539 = one late 1st, the operator's agreed line), generation tries
+    # to close it by ADDING the smallest sufficient asset from the richer
+    # side's roster (trade_optimizer.close_value_gap). Runs at generation
+    # time per-arm, never post-draft. ≤ 0 disables the pass entirely
+    # (arm A's pin — the pre-wave engine had no sweetener).
+    "sweetener_gap_threshold": 1539.0,
     "cycle_edge_min_gain":      100.0,   # min per-transfer marginal gain for a cycle edge
     "cycle_min_net":            200.0,   # min net gain per team for a 3-team cycle
     "cycle_max_results":          3.0,   # max 3-team cycles returned per league
@@ -503,7 +608,14 @@ _DEFAULT_CFG: dict[str, float] = {
     # Ghost holdout: withhold ~1-in-N organic deck cards from display
     # (logged with is_ghost=1). ≤0 disables ghosting without touching the
     # flag — the deploy-free rollback lever.
-    "ghost_holdout_one_in":       10,
+    # OPERATOR RULING 2026-08-21 (batch-wide, living-memory/CHANGELOG.md
+    # 2026-08-21): "I still am against the ghost cards" — ghosts are ruled
+    # out entirely, not merely paused. Ghost accumulation was also the
+    # amplifier behind the 6-card-repeat deck (a ghost can never be
+    # decided, so it never leaves the FFV3 pool; one hash ghost-served
+    # 35x). The prod model_config row is already 0; this default makes the
+    # code agree with the ruling instead of relying on a live DB row.
+    "ghost_holdout_one_in":        0,
     # Executed-trade matcher: only suggestions served within this many days
     # BEFORE the trade executed are match candidates.
     "suggestion_match_lookback_days": 14,
@@ -672,6 +784,46 @@ _DEFAULT_CFG: dict[str, float] = {
     "need_gate_upgrade_margin":   0.0,
 
     # ------------------------------------------------------------------
+    # Knockout refine — 2026-08-23 (docs/plans/knockout-refine/plan.md §3;
+    # verdict + evidence docs/reviews/2026-08-22-knockout-rules-judged.html
+    # §03). Four refinements to the G6 knockouts above, each with its own
+    # kill knob whose 0 restores the predicate byte-identically and is a
+    # deploy-free revert (PUT /api/admin/config/<key>). Same five-
+    # registration discipline as the fit/breaker/negmem blocks below: this
+    # dict, database._MODEL_CONFIG_DEFAULTS, _PINNED_KNOBS in
+    # test_bakeoff_arm_a_golden.py, the scope-phase2.md disposition
+    # sentence, and the config-reference row.
+    # ------------------------------------------------------------------
+    # C1 — R5 two-sided. 1.0 (default, LIT at merge): `need_gate_ok` judges
+    # EVERY non-pick received asset for the hole/upgrade tests, and gains a
+    # dual-need rescue (user sheds surplus at a position the partner is
+    # short at, read off the per-member `opp_ctx`). 0 = the primary-only
+    # one-sided kill. Measured one-sidedness 96.3% → 88.7%.
+    "need_gate_dual_rescue":      1.0,
+    # C2 — R1 in the currency the card shows. 1.0 (default, LIT): price
+    # both sides with `package_value_v2` on the consensus emit path's
+    # argument convention before taking the gap. 0 = raw consensus sums.
+    # `max_overpay_frac` / `max_overpay_min_value` are unchanged by this;
+    # a 1-for-1 is identity under `package_value_v2`, so only multi-asset
+    # packages can move.
+    "overpay_adjusted":           1.0,
+    # C3 — R2 quality-aware. 1.0 (default, LIT): an over-cap position may
+    # survive when the shedding side was strictly above starter need there
+    # before and BOTH rosters stay at/above it after, counted in startable
+    # bodies. 0 = today's flat |net| <= pos_net_cap kill. Needs the
+    # per-member `opp_ctx`; without one the flat kill stands.
+    "pos_net_starter_relief":     1.0,
+    # C4 — the v3 optimizer's package-shape rule, previously the literal
+    # `abs(len(give) - len(recv)) > 1`. 1.0 (default) IS that rule, byte-
+    # identical. Read by trade_optimizer via the module object (D-098). 2
+    # is the post-merge prod-bundle flip that unlocks 3-for-1 / 1-for-3 —
+    # the operator's own stated trade style, and 0.5% of served cards
+    # today. Registered here (not with an inline literal default) so `_c`
+    # resolves it, `_cfg_override` reaches it, and the bake-off arms can
+    # pin it; the sole consumer lives in trade_optimizer.py.
+    "v3_shape_max_delta":         1.0,
+
+    # ------------------------------------------------------------------
     # Engine quality — 2026-08-18 field wave (docs/plans/engine-quality/
     # scope.md). Five independent ranking/gating fixes for the two
     # defects diagnosed from the live corpus: picks buying fairness for
@@ -776,6 +928,22 @@ _DEFAULT_CFG: dict[str, float] = {
     "pick_year_decay_r4":         0.85,
 
     # ------------------------------------------------------------------
+    # D-161 (2026-08-24) — the round-1 YoY FLOOR under `market_slots`.
+    # Read ONLY through pick_values.market_r1_yoy_floor(); trade_service
+    # itself never uses it. Same home and same reason as the four rates
+    # above: _c() is what reload_config() refreshes, so a PUT to
+    # /api/admin/config reprices every future first with no deploy.
+    #
+    # A future-season ROUND-1 pick may not price below this fraction of
+    # the CURRENT class's round-1 market price. 1.0 = the D-079 ruling
+    # ("firsts should hold similar value YOY"), re-asserted over DP's own
+    # in-window year discount after the 2026-08-24 operator re-ruling.
+    # 0 = pure market — byte-identical to the pre-D-161 waterfall, and the
+    # deploy-free revert. Rounds 2-4 are untouched at every setting.
+    # ------------------------------------------------------------------
+    "market_r1_yoy_floor":        1.00,
+
+    # ------------------------------------------------------------------
     # D-095 (2026-08-19) — LANDABILITY CHALLENGER (bake-off arm D,
     # docs/plans/landability-challenger/PRD.md §4). Three knobs, every one
     # defaulting to the **live identity**, so the live engine — arm B, what
@@ -834,6 +1002,180 @@ _DEFAULT_CFG: dict[str, float] = {
     # head-to-head is `current` vs `challenger` (composition only — it does
     # NOT change backend/trade_gen_v2.py, which is out of the arm's scope).
     "bakeoff_include_gen_v2":     1.0,
+
+    # ------------------------------------------------------------------
+    # Fit challenger — bake-off arm `fit` K-chain knobs (PR-F1,
+    # docs/plans/fit-challenger/LLD.md §1.6 + §4). Consumed ONLY by
+    # backend/trade_gen_fit.py, a module arm A never imports and
+    # trade_service never calls. They live here because _c() is the
+    # accessor the fit K-chain reads (thread-local overrides and
+    # reload_config() both work) and snapshot_config() must capture them
+    # per run. Five registrations per key, same commit as the consumer
+    # (LLD §4): this dict, database._MODEL_CONFIG_DEFAULTS, _PINNED_KNOBS
+    # in test_bakeoff_arm_a_golden.py, the scope-phase2.md disposition
+    # sentence, and the config-reference row.
+    # ------------------------------------------------------------------
+    # K7 (G6 R5 need gate) mode inside the fit K-chain. 1.0 (default) =
+    # the live predicate kills exactly as written (PRD §3 K7). 0.0 = the
+    # predicate still RUNS but a failure does not kill: the candidate is
+    # tagged `r5_fail` and counted `r5_fail_scored`, with NO score change
+    # in v1 (LLD §8 R-d). Flipping to 0 is F7's pre-registered iterate
+    # action at the S4 verdict, never a build-time default.
+    "fit_r5_mode":                1.0,
+    # Junk-filler kill inside the fit K-chain. 0.0 (default) = no junk
+    # knockout — this arm deliberately lets junk score badly instead
+    # (PRD §3 "explicitly not knockouts"). >= 1.0 arms the live
+    # filler_ok predicate (kills count under "junk"), each side's value
+    # accessor being that team's raw board when boarded, else consensus.
+    "fit_junk_floor":             0.0,
+
+    # ------------------------------------------------------------------
+    # Fit challenger — pool / scorer / enumerator knobs (PR-F2, LLD §1.4,
+    # §1.5, §1.7, §1.9 + §4). Same five-registration discipline and the
+    # same "consumed ONLY by backend/trade_gen_fit.py" posture as the
+    # PR-F1 block above.
+    # ------------------------------------------------------------------
+    # Scorer curve (LLD §1.7): score = clamp(even + 50·tanh(s / scale),
+    # 0, 100). scale 400 ⇒ a +400 surplus scores ≈ 88.1; even is the
+    # zero-surplus midpoint.
+    "fit_score_scale":          400.0,
+    "fit_score_even":            50.0,
+    # Per-side lens weights (L1 own-board, L2 board-vs-consensus, L3
+    # consensus), renormalized to sum 1 over the lenses that fired.
+    "fit_w_board":                0.40,
+    "fit_w_div":                  0.30,
+    "fit_w_cons":                 0.30,
+    # Pool builder (LLD §1.4): per-roster sub-pool sizes and the hard cap
+    # on unique asset ids (picks always enter the union but compete under
+    # the cap — LLD §8 R-c).
+    "fit_pool_consensus":         8.0,
+    "fit_pool_div_seed":          8.0,
+    "fit_pool_div_opp":           8.0,
+    "fit_pool_cap":              15.0,
+    # Enumerator budget (LLD §1.5): hard per-pair enumeration ceiling and
+    # the number of top 1-for-1 survivors used as multi-asset expansion
+    # centerpieces.
+    "fit_max_packages_per_pair": 20000.0,
+    "fit_expand_from":           25.0,
+    # Post-score presentment filters (LLD §1.9 step 1) — defaults 0 = off
+    # (PRD §4: defaulting fit_min_them on would recreate rv ≥ gv).
+    "fit_min_them":               0.0,
+    "fit_min_aggregate":          0.0,
+
+    # ------------------------------------------------------------------
+    # Fit challenger — roster + serve bits (PR-F3, LLD §2.1 + §4).
+    # Disposition B: arm roster / serving bits, not generation — read only
+    # by bakeoff_runner before or after any arm runs; an arm cannot
+    # observe them. Same five-registration discipline as the fit_* keys.
+    # ------------------------------------------------------------------
+    # 0 (default) = arm `fit` is not rostered: never generated, never
+    # drafted, never logged. 1 = fit generates + logs on every organic
+    # bake-off job (W3's dark-roster flip — an operator set_knob write).
+    "bakeoff_include_fit":        0.0,
+    # 0 (default) = a rostered fit generates, logs to arms_json, and is M3-
+    # stamped, but is EXCLUDED from the draft participants on BOTH draft
+    # paths (HLD F-6) — no fit card can reach a served deck. 1 = fit
+    # drafts like any arm (W4's serving flip). Fit-only bit by design
+    # (PLAN-v2 F5b): generalize on the second consumer, not the first.
+    "bakeoff_serve_fit":          0.0,
+
+    # ------------------------------------------------------------------
+    # Counterparty breaker — 25 evaluation-layer knobs
+    # (docs/plans/counterparty-breaker/LLD.md §4). Consumed ONLY by
+    # backend/trade_breaker.py, a module no generator or ranker imports:
+    # it runs AFTER the deck-mutation stack completes and mutates only a
+    # new card attribute, so none of these can move a generated deck.
+    # They live here because _c() is the accessor the breaker's per-job
+    # config snapshot (§3.0) reads — thread-local overrides and
+    # reload_config() both work, and snapshot_config() captures them per
+    # run. Five registrations per key, same logical change as the
+    # consumer (see the fit block above): this dict,
+    # database._MODEL_CONFIG_DEFAULTS, _PINNED_KNOBS in
+    # test_bakeoff_arm_a_golden.py, the scope-phase2.md disposition
+    # sentence, and the config-reference row. `waiver_slot_cost` is
+    # REUSED by the breaker (_SHARED_ENGINE_KNOB_KEYS, §1.1) and is an
+    # existing engine registration — it is not part of the 25.
+    # ------------------------------------------------------------------
+    # Budget + degradation (LLD §3.9, §5.1).
+    "breaker_ms_budget":                    250.0,
+    "breaker_budget_checkpoint_frac":         0.6,
+    "breaker_degraded_share_max":            0.05,
+    # Narration policy bars (LLD §3.8).
+    "breaker_min_severity":                  0.60,
+    "breaker_max_repeat_frac":               0.34,
+    # Viewer-seat shadow evaluation (operator decision 5, LLD §2.5).
+    "breaker_shadow_run":                     1.0,
+    # fit_outlook window handling (LLD §3.3, D-8).
+    "breaker_outlook_haircut_legacy":        0.70,
+    "breaker_outlook_narrate_margin":        0.06,
+    # Board-authenticity thresholds (LLD §3.4 F-3). SEMANTICS are
+    # BREAKER_VERSION-pinned: a threshold change worth making is a
+    # `ver`-bump conversation first (LLD §4).
+    "breaker_board_div_min":                 25.0,
+    "breaker_board_min_divergent":           10.0,
+    # Severity curve scales (LLD §3.4, §3.5).
+    "breaker_value_scale":                  400.0,
+    "breaker_crunch_scale":                 850.0,
+    # Per-class top-selection floors. Floors shape the stamp
+    # distribution, never narration policy (D-6). `value_giving` is split
+    # by basis because the consensus basis is a near-tautology at the
+    # board floor (D-7: 86.3%).
+    "breaker_floor_fit_outlook":             0.35,
+    "breaker_floor_fit_new_weakness":        0.30,
+    "breaker_floor_fit_duplicate":           0.30,
+    "breaker_floor_value_giving":            0.30,
+    "breaker_floor_value_giving_consensus":  0.75,
+    "breaker_floor_other_player_keep":       0.50,
+    "breaker_floor_roster_crunch":           0.40,
+    # Per-class narration switches — ALL default 0 (D-6 maturity ladder).
+    # Graduation is an operator `scripts/set_knob.py` flip, logged in
+    # `model_config_changes`; it is never a build-time default.
+    "breaker_narrate_fit_outlook":            0.0,
+    "breaker_narrate_fit_new_weakness":       0.0,
+    "breaker_narrate_fit_duplicate":          0.0,
+    "breaker_narrate_value_giving":           0.0,
+    "breaker_narrate_other_player_keep":      0.0,
+    "breaker_narrate_roster_crunch":          0.0,
+
+    # ------------------------------------------------------------------
+    # Negative-results memory — 6 knobs (flag `trade.negmem`, default OFF;
+    # docs/plans/negative-results-memory/LLD.md §3.4). Consumed ONLY by
+    # backend/negmem.py, a leaf module that imports no engine module: it
+    # derives a per-(partner × reason-family) soft prior on read, once per
+    # job, and the engines consult it through a pure multiplier. They live
+    # here because `_c()` is the accessor for BOTH read paths — the seam
+    # reads `negmem_strength` / `negmem_floor` inside the arm's overlay
+    # (D-6/D-10), and `server._run_trade_job` reads the four build knobs
+    # off the job thread before the arm fan-out and passes plain floats
+    # into `build_map` (DE-3), which is what keeps negmem literal-free.
+    # Thread-local overrides and reload_config() both work, and
+    # snapshot_config() captures all six per run (D-8). Five registrations
+    # per key, same logical change as the consumer (see the fit block
+    # above): this dict, database._MODEL_CONFIG_DEFAULTS, _PINNED_KNOBS in
+    # test_bakeoff_arm_a_golden.py, the scope-phase2.md disposition
+    # sentence, and the config-reference row. M2's strength is NOT here —
+    # it is governed by the existing `gen2_accept_prior_strength` /
+    # `gen2_accept_global_prior` above, whose 0 is M2's kill.
+    # ------------------------------------------------------------------
+    # M1 lever, read at the seam. 0.0 = byte-identical M1 disable (deck
+    # content, scores and order); M1-ONLY, it does not govern M2.
+    "negmem_strength":            1.0,
+    # Double role (LLD §4.4): the clamp floor for the effective multiplier
+    # AND the build-time evidence-curve asymptote `floor_b`.
+    "negmem_floor":               0.6,
+    # Shrinkage threshold — cells with decayed evidence below this are
+    # identity (multiplier exactly 1.0).
+    "negmem_min_evidence":        3.0,
+    # Exponential-decay half-life in days; also sets the read horizon (x4).
+    "negmem_halflife_days":      45.0,
+    # Saturation pseudo-count of the evidence curve
+    # (mult = 1 - (1 - floor) * n_eff / (n_eff + k)) — the deploy-free
+    # flap lever for the shrinkage-gate discontinuity (OQ-4b).
+    "negmem_sat_k":               3.0,
+    # Evidence mass one admitted viewed like nets against every
+    # (partner, *) cell, folded chronologically with a clamp at zero
+    # after every step (DE-2).
+    "negmem_like_net":            1.0,
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.
@@ -982,28 +1324,50 @@ def stud_tax_mode_for_user(user_id: str | None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# M6b — draft-pick pricing mode (per-user setting `pick_pricing_mode`)
+# Draft-pick pricing — MARKET SLOTS, UNCONDITIONALLY (2026-08-21, D-144)
 # ---------------------------------------------------------------------------
-# 'tier_ladder' (DEFAULT — today's behaviour, EXACTLY) — an owned pick prices
-#     at its stored `draft_picks.pool_value`, written by
-#     `pick_values.pick_pool_value` (the shipped ladder's Mid rung of the
-#     round, year-discounted).
-# 'market_slots' — the pick prices off DynastyProcess's published market curve
-#     for its absolute season+round (`pick_values.market_pick_pool_value`).
+# OPERATOR RULING, 2026-08-21, verbatim:
+#     "Market slots should be default and not an opt-in or even an option to
+#      flip. Aligned that future picks stay default for now."
 #
-# NOTE THE DEFAULT. #214 shipped its retuned mode ('market') as the default;
-# **this wave does NOT**. Operator decision O2 authorises the toggle and the
-# calibration, not a change to what today's users see. `tier_ladder` is the
-# default and the flag `trade.slot_pricing` is OFF, so nothing reprices until
-# somebody deliberately flips both.
+# That retires the M6b opt-in wholesale and closes the implementation half of
+# Q-023. There is no per-user pricing mode any more, no flag read and no DB
+# read: EVERY owned pick, for EVERY user, prices off DynastyProcess's
+# published market curve for its absolute season+round
+# (`pick_values.market_pick_pool_value`).
 #
-# Same thread-local shape as the #215 stud-tax mode above, for the same
-# reason: entry points that know the user pin it once for the whole job, and
-# every pick priced inside inherits it — including `pick_values`'
-# `priced_pool_value`, which resolves `mode=None` through this pin.
+# READ THE SCOPE OF "market slots" CAREFULLY — it is a ROUND-level curve, not
+# a per-slot one. An owned 2026 1st prices at the value-space mean of slots
+# 1.05–1.08 (`pick_values.UNKNOWN_SLOT_BASIS`, the market analogue of the
+# ladder's Mid rung), NOT at its own resolved slot. D-090 resolves the real
+# slot and it drives the LABEL only. True-slot pricing — a 1.01 above a 1.12 —
+# is the remaining, unbuilt half of Q-023; see docs/plans/
+# slot-pricing-unconditional/scope.md §"What this does NOT do".
+#
+# WHAT DID NOT CHANGE, and is load-bearing:
+#   * FUTURE-YEAR picks price off DP's generic/Mid rung for that season — the
+#     operator's "future picks stay default for now". `market_slots` always
+#     keyed off the ABSOLUTE season, so this is the shipped path unmodified.
+#   * UNKNOWN DRAFT ORDER is not a special case and never was: the round-level
+#     basis applies to every pick regardless of whether an order exists.
+#   * DP unreachable / no published price ⇒ `priced_pool_value` still
+#     fail-softs to the stored ladder `pool_value`. Unconditional pricing
+#     makes that the ONLY safety net, so it stays and is now load-bearing.
+#   * `GENERIC_PICK_SEEDS`, the tier ladder and the ABSOLUTE tier bands are
+#     byte-unchanged, exactly as they were in both M6b modes. Pick tier
+#     BADGES do move, because a badge reflects the SERVED value (D-320-2) and
+#     the served value moved. That is a consequence, not a second decision.
+#   * `draft_picks.pool_value` is still never rewritten; pricing is read-time.
+#
+# The two-mode vocabulary survives ONLY as an internal harness/test axis:
+# `pick_pricing_override('tier_ladder')` still pins the legacy ladder so the
+# bake-off harnesses and the M6b regression tests can price both curves side
+# by side in one process. Nothing user-facing can reach it — no route, no
+# setting, no flag. `users.pick_pricing_mode` is dead data, kept under the
+# additive-schema rule (never drop a column).
 
 PICK_PRICING_MODES = ("tier_ladder", "market_slots")
-PICK_PRICING_DEFAULT = "tier_ladder"
+PICK_PRICING_DEFAULT = "market_slots"       # the shipped, only-reachable price
 
 _pick_pricing_local = threading.local()
 
@@ -1016,15 +1380,19 @@ def current_pick_pricing_mode() -> str:
 def pinned_pick_pricing_mode() -> str | None:
     """The explicitly pinned thread-local mode, or None. Mirrors
     `pinned_stud_tax_mode` — entry points keep an active outer pin instead of
-    re-resolving the stored setting, which is also what lets a test (or the
-    M6b matrix/deck harnesses) pin a mode around a whole job."""
+    re-resolving, which is also what lets a test (or the bake-off/deck
+    harnesses) pin the legacy ladder around a whole job."""
     m = getattr(_pick_pricing_local, "mode", None)
     return m if m in PICK_PRICING_MODES else None
 
 
 @contextmanager
 def pick_pricing_override(mode: str | None):
-    """Pin the pick-pricing mode for `priced_pool_value` calls on this thread."""
+    """Pin the pick-pricing mode for `priced_pool_value` calls on this thread.
+
+    HARNESS/TEST SEAM since the 2026-08-21 ruling — production entry points
+    pin `PICK_PRICING_DEFAULT`, which is also what an unpinned thread
+    resolves to, so an outer pin can only ever narrow to the legacy ladder."""
     prev = getattr(_pick_pricing_local, "mode", None)
     _pick_pricing_local.mode = (mode if mode in PICK_PRICING_MODES
                                 else PICK_PRICING_DEFAULT)
@@ -1035,22 +1403,15 @@ def pick_pricing_override(mode: str | None):
 
 
 def pick_pricing_mode_for_user(user_id: str | None) -> str:
-    """The stored per-user mode — **the single flag gate**.
+    """`market_slots`. Always, for everybody. (Operator ruling 2026-08-21.)
 
-    `trade.slot_pricing` OFF (the shipped state) ⇒ always `tier_ladder`, no DB
-    read, so a stored `market_slots` set while the flag was briefly on cannot
-    reprice anybody. DB-unavailable is likewise safe: default.
+    Kept as a named function rather than inlined at the call sites so the
+    ruling has exactly one home, and so a future per-user axis — if one is
+    ever authorised again — has one place to come back to. It reads no flag,
+    no session and no DB row: `user_id` is accepted and ignored, and
+    `users.pick_pricing_mode` is dead data.
     """
-    from .feature_flags import is_enabled
-    if not is_enabled("trade.slot_pricing"):
-        return PICK_PRICING_DEFAULT
-    if not user_id:
-        return PICK_PRICING_DEFAULT
-    try:
-        from .database import get_pick_pricing_mode
-        return get_pick_pricing_mode(user_id)
-    except Exception:
-        return PICK_PRICING_DEFAULT
+    return PICK_PRICING_DEFAULT
 
 
 # ---------------------------------------------------------------------------
@@ -1184,9 +1545,14 @@ def package_value_v2(values: list[float], v_max: float,
     _package_value_market. ``other_values`` (the OTHER side's raw values,
     same value space) enables the both-sides elite crown credit + the
     naive-skew phase-out; callers that omit it get the depth math only.
-    ``v_max``/``n_other`` are ignored in this mode (kept for signature
-    compatibility — the depth benchmark is the package's OWN best asset,
-    and crown eligibility is count-independent).
+    ``n_other`` is ignored in this mode (crown eligibility is
+    count-independent). ``v_max`` — the best single-asset value in the
+    WHOLE trade — feeds the 2026-08-21 cross-package depth benchmark
+    (knob `package_bench_trade_wide`; see _package_value_market): a
+    multi-asset side that does NOT hold the trade's best asset is
+    discounted against that asset, not against its own headliner. At
+    `package_bench_trade_wide` ≤ 0 the pre-fix own-max benchmark applies
+    byte-identically and ``v_max`` is ignored as before.
 
     'heavy' — the pre-#214 legacy math, byte-identical:
 
@@ -1221,7 +1587,7 @@ def package_value_v2(values: list[float], v_max: float,
     if mode == "off":
         return round(sum(values), 1)
     if mode == "market":
-        return _package_value_market(values, other_values)
+        return _package_value_market(values, other_values, v_max)
 
     # ── 'heavy' — pre-#214 legacy math, byte-identical ──────────────────
     v_max = max(v_max, 1e-9)
@@ -1250,14 +1616,30 @@ def package_value_v2(values: list[float], v_max: float,
 
 
 def _package_value_market(values: list[float],
-                          other_values: list[float] | None) -> float:
-    """#214 'market' stud-tax shapes (tuning-proposal.md §1–3).
+                          other_values: list[float] | None,
+                          v_max: float | None = None) -> float:
+    """#214 'market' stud-tax shapes (tuning-proposal.md §1–3), amended
+    2026-08-21 by the cross-package benchmark fix (shape 1a below).
 
-    1. Depth discount benchmarks each piece against the package's OWN best
-       asset — contribution(v) = v · (floor + (1−floor) · (v/own_max)^γ)
-       with floor = package_floor_market, γ = package_adj_gamma_market —
-       and the side's TOTAL discount is capped at package_discount_cap ×
-       the naive sum. A single-asset side is never depth-discounted.
+    1. Depth discount — contribution(v) = v · (floor + (1−floor) ·
+       (v/bench)^γ) with γ = package_adj_gamma_market, and the side's
+       TOTAL discount capped at package_discount_cap × the naive sum.
+       A single-asset side is never depth-discounted.
+    1a. THE BENCHMARK (2026-08-21 fix, operator-approved; evidence
+       docs/reviews/2026-08-21-market-curve-comparison.md §3b). The
+       original #214 shape benchmarked every piece against the package's
+       OWN best asset, so four similar mid-tier players took a ~5%
+       haircut while buying a stud — the served Rice+Etienne+Swift+Corum
+       → Nacua card scored 0.939 (fair) against FantasyCalc 1.362 / KTC
+       2.260. With `package_bench_trade_wide` > 0 (the default) a
+       multi-asset side that does NOT hold the trade's best asset is
+       benchmarked against ``v_max`` — the best asset in the WHOLE trade,
+       KTC's own published shape — with the floor switched to
+       `package_floor_cross` (the own-side floor 0.70 would leave four
+       quarters worth ≥ 70¢ of a dollar regardless of benchmark). A side
+       that holds the trade's best asset, a single-asset side, and every
+       call at `package_bench_trade_wide` ≤ 0 (arm A's pin) keep the
+       original own-max math byte-for-byte.
     2. Crown credit per elite asset (value ≥ crown_elite_value) on EITHER
        side, count-independent, at crown_rate_market per piece (flag
        trade.crown_asset still the kill-switch; needs `other_values` to
@@ -1275,7 +1657,12 @@ def _package_value_market(values: list[float],
     own_max = max(values)
     gamma = _c("package_adj_gamma_market")
     floor = _c("package_floor_market")
-    contrib = sum(v * (floor + (1.0 - floor) * (v / own_max) ** gamma)
+    bench = own_max
+    if (len(values) > 1 and v_max is not None and v_max > own_max
+            and _c("package_bench_trade_wide") > 0):
+        bench = v_max
+        floor = _c("package_floor_cross")
+    contrib = sum(v * (floor + (1.0 - floor) * (v / bench) ** gamma)
                   for v in values)
     cap = _c("package_discount_cap")
     total = max(contrib, naive * (1.0 - cap))
@@ -1635,6 +2022,61 @@ def filler_ok(give_ids: list[str], recv_ids: list[str],
     return True
 
 
+def eval_consensus_package(
+    give_ids: list[str],
+    recv_ids: list[str],
+    *,
+    value_of,
+    raw_value_of,
+    raw_user_elo: dict[str, float] | None,
+    relaxed_thr: float,
+):
+    """The consensus-basis package gate set, in ONE place.
+
+    Prices both sides with `package_value_v2` in the shared value space and
+    applies every non-fairness gate the consensus generator applies, then the
+    WIDENED fairness band. Returns `(fairness, gv, rv)`, or None when any gate
+    refuses.
+
+    Extracted from `_generate_asset_ideas_impl._eval` on 2026-08-22 (#384 W6-B)
+    so the fair-package search (`_generate_fair_packages_impl`) rides the same
+    gates instead of re-stating them — a second copy is how two surfaces that
+    are supposed to price identically start disagreeing. Behaviour is
+    unchanged from the closure it replaces; asset-ideas is byte-identical.
+
+    `value_of` is the CONSENSUS accessor (pid → value); `raw_value_of` is the
+    #141 max-of-boards accessor. `relaxed_thr` is already
+    min(caller threshold, relaxed_fairness_threshold) — the caller decides
+    afterwards whether a pass was strict or relaxed, because that split is a
+    presentation convention (#189), not a gate.
+    """
+    gvals = [value_of(p) for p in give_ids]
+    rvals = [value_of(p) for p in recv_ids]
+    v_max = max(gvals + rvals)
+    gv = package_value_v2(gvals, v_max, n_other=len(recv_ids),
+                          other_values=rvals)
+    rv = package_value_v2(rvals, v_max, n_other=len(give_ids),
+                          other_values=gvals)
+    if gv <= 0 or rv <= 0:
+        return None
+    # #108 — consensus IS the user's board here (never relaxed).
+    if rv - gv < _c("user_gain_epsilon"):
+        return None
+    frac = _c("consolidation_raw_loss_frac")
+    if frac > 0 and len(give_ids) > len(recv_ids):
+        raw_give = sum(gvals)
+        if raw_give - sum(rvals) > frac * raw_give:
+            return None
+    if not user_gain_ok_1for1(give_ids, recv_ids, raw_user_elo):
+        return None
+    if not filler_ok(give_ids, recv_ids, raw_value_of, value_of):
+        return None
+    fairness = min(gv, rv) / max(gv, rv)
+    if fairness < relaxed_thr:
+        return None
+    return fairness, gv, rv
+
+
 def is_pick_asset(p) -> bool:
     """True for any draft-pick asset in the player maps: owned-pick
     pseudo-players (position == "PICK", injected by
@@ -1785,12 +2227,37 @@ def overpay_ok(give_ids, recv_ids, seed_value) -> bool:
     toggle cannot relax it; this is the operative absolute bound on both
     settings. A *small* relative gap is simply fair — no upper-bound
     counterpart exists (round-1 B1 re-audit). frac <= 0 disables.
+
+    **C2, 2026-08-23** (docs/plans/knockout-refine/plan.md §3) — knob
+    `overpay_adjusted`. At >= 1.0 (the default) each side is priced with
+    `package_value_v2` under the SAME argument convention the consensus
+    emit path uses (`_consensus_package_gates`: trade-wide `v_max`,
+    `n_other` = the other side's asset count, `other_values` = the other
+    side's raw values), so the gap is measured in the currency the
+    fairness bar and the card already show instead of in raw sums. Same
+    0.25 frac, same `max_overpay_min_value` floor, still `abs()`
+    two-sided. R1's 0.25 was calibrated on a 78%-one-for-one corpus,
+    where the two currencies coincide — a single-asset side is identity
+    under `package_value_v2` — so this knob can only move MULTI-asset
+    packages. Knob 0 restores the raw-sum body, byte-identical.
     """
     frac = _c("max_overpay_frac")
     if frac <= 0:
         return True
-    g = sum(seed_value(p) for p in give_ids)
-    r = sum(seed_value(p) for p in recv_ids)
+    if _c("overpay_adjusted") >= 1.0:
+        gvals = [seed_value(p) for p in give_ids]
+        rvals = [seed_value(p) for p in recv_ids]
+        both = gvals + rvals
+        if not both:
+            return True
+        v_max = max(both)
+        g = package_value_v2(gvals, v_max, n_other=len(recv_ids),
+                             other_values=rvals)
+        r = package_value_v2(rvals, v_max, n_other=len(give_ids),
+                             other_values=gvals)
+    else:
+        g = sum(seed_value(p) for p in give_ids)
+        r = sum(seed_value(p) for p in recv_ids)
     big = max(g, r)
     if big <= 0:
         return True
@@ -1798,7 +2265,7 @@ def overpay_ok(give_ids, recv_ids, seed_value) -> bool:
     return not (gap >= _c("max_overpay_min_value") and gap / big >= frac)
 
 
-def pos_net_ok(give_ids, recv_ids, players) -> bool:
+def pos_net_ok(give_ids, recv_ids, players, *, opp_ctx=None) -> bool:
     """R2 #341 — per-position signed net cap.
 
     For each P in {QB, RB, WR, TE}: net_P = count(recv at P) − count(give
@@ -1807,6 +2274,24 @@ def pos_net_ok(give_ids, recv_ids, players) -> bool:
     Players only: pick assets are excluded (a pick is not a positional
     body; picks are R3's domain). Positions outside the four are uncounted
     by design. cap <= 0 disables (filler_min_frac convention).
+
+    **C3, 2026-08-23** (docs/plans/knockout-refine/plan.md §3) — knob
+    `pos_net_starter_relief`, plus `opp_ctx` (`_presentment_ctx`, threaded
+    per league-mate by the job closure). The COUNT rule was only ever a
+    proxy for the operator's #341 intent — "don't ship me two starting RBs
+    and send none back". At >= 1.0, with a ctx present, an over-cap
+    position P survives only when the depth story holds:
+
+      * the SHEDDING side (the user when net_P < 0, the opponent when
+        net_P > 0) was STRICTLY ABOVE its starter need at P before, and
+      * BOTH rosters are still at/above starter need at P after.
+
+    Bodies are counted in `analyze_roster_strengths`' own startable
+    definition (elite|starter bin — `_startable_ok_fn`), so RB4 + RB5 out
+    of an RB-rich roster passes while RB1 + RB2 out of a three-deep one
+    dies. Starter need is `_starters_at` (`_STARTER_NEED`, QB→2 in
+    superflex). Picks stay excluded exactly as today. Knob 0, or no ctx
+    (the fit K-chain, unit callers), ⇒ today's flat kill, byte-identical.
     """
     cap = _c("pos_net_cap")
     if cap <= 0:
@@ -1820,7 +2305,38 @@ def pos_net_ok(give_ids, recv_ids, players) -> bool:
             pos = getattr(p, "position", None)
             if pos in _PRESENTMENT_POSITIONS:
                 net[pos] = net.get(pos, 0) + sign
-    return all(abs(n) <= cap for n in net.values())
+    over = {pos: n for pos, n in net.items() if abs(n) > cap}
+    if not over:
+        return True
+    if opp_ctx is None or _c("pos_net_starter_relief") < 1.0:
+        return False
+    startable_ok = opp_ctx["startable_ok"]
+    user_startable = opp_ctx["user_startable"]
+    opp_startable = opp_ctx["startable"]
+    scoring_format = opp_ctx["scoring_format"]
+
+    def _moved(ids, pos) -> int:
+        """Startable bodies at `pos` inside one side of the package."""
+        n = 0
+        for pid in ids:
+            p = players.get(pid)
+            if p is not None and getattr(p, "position", None) == pos \
+                    and startable_ok(pid, p):
+                n += 1
+        return n
+
+    for pos, n in over.items():
+        need = _starters_at(pos, scoring_format)
+        out_of_user = _moved(give_ids, pos)
+        out_of_opp = _moved(recv_ids, pos)
+        u_before = user_startable.get(pos, 0)
+        o_before = opp_startable.get(pos, 0)
+        u_after = u_before - out_of_user + out_of_opp
+        o_after = o_before - out_of_opp + out_of_user
+        shed_before = u_before if n < 0 else o_before
+        if not (shed_before > need and u_after >= need and o_after >= need):
+            return False
+    return True
 
 
 def pick_gap_ok(give_ids, recv_ids, seed_value, players) -> bool:
@@ -1859,7 +2375,7 @@ def pick_gap_ok(give_ids, recv_ids, seed_value, players) -> bool:
 
 def need_gate_ok(give_ids, recv_ids, *, seed_value, players, user_pos_values,
                  outlook, position_needs, position_surplus,
-                 scoring_format) -> bool:
+                 scoring_format, opp_ctx=None) -> bool:
     """R5 #304 — window-scaled need gate, UNTARGETED discovery decks only
     (the caller skips this predicate entirely when the job is targeted —
     R-5b bypass, derived server-side in _run_trade_job).
@@ -1880,6 +2396,25 @@ def need_gate_ok(give_ids, recv_ids, *, seed_value, players, user_pos_values,
           not_sure                      → KILL only if P in surplus
           rebuilder | jets | unresolved → PASS (gate off — deliberate
                                           fail-open, recorded decision)
+
+    **C1, 2026-08-23** (docs/plans/knockout-refine/plan.md §3) — knob
+    `need_gate_dual_rescue`, two edits, both no-ops at knob 0:
+
+      (a) *any-asset*: the hole/upgrade tests judge EVERY non-pick
+          received asset at its own position, not only the primary. A
+          2-for-1 whose second piece is the one that fills the hole is a
+          real need trade and used to die on the headliner alone.
+      (b) *dual-need rescue*, checked just before the contender kill: pass
+          when the give side ships >= 1 non-pick asset at a position where
+          the USER is in `position_surplus` AND the OPPONENT sits below
+          his starter need (`opp_ctx`, threaded per league-mate). R5 was
+          a one-sided kill with no partner-need term at all; this is the
+          two-sided form the 2026-08-22 replay measured at one-sidedness
+          96.3% → 88.7%.
+
+    The originating #304 complaint is unchanged by both: a received asset
+    that fills no hole and upgrades nobody, with no dual-need fact on the
+    give side, still dies for a contender.
     """
     floor = _c("need_gate_min_value")
     if floor <= 0:
@@ -1908,14 +2443,44 @@ def need_gate_ok(give_ids, recv_ids, *, seed_value, players, user_pos_values,
     # branch already prices that case.
     _ = position_needs
     give_set = set(give_ids)
-    vals = sorted((v for pid, v in user_pos_values.get(primary_pos, ())
-                   if pid not in give_set), reverse=True)
-    starters = _starters_at(primary_pos, scoring_format)
-    if len(vals) < starters:
-        return True                       # fills a starting hole
-    incumbent = vals[starters - 1]
-    if primary_val > incumbent * (1.0 + _c("need_gate_upgrade_margin")):
-        return True                       # strict starter upgrade
+
+    def _clears(pos: str, val: float) -> bool:
+        """Today's two PASS tests, for one received asset at `pos`."""
+        vals = sorted((v for pid, v in user_pos_values.get(pos, ())
+                       if pid not in give_set), reverse=True)
+        starters = _starters_at(pos, scoring_format)
+        if len(vals) < starters:
+            return True                   # fills a starting hole
+        incumbent = vals[starters - 1]
+        return val > incumbent * (1.0 + _c("need_gate_upgrade_margin"))
+
+    if _clears(primary_pos, primary_val):
+        return True                       # hole filled / starter upgrade
+    if _c("need_gate_dual_rescue") >= 1.0:
+        # (a) any-asset — the primary is not the only piece that can be
+        # the point of the trade.
+        for pid in recv_ids:
+            p = players.get(pid)
+            if p is None or is_pick_asset(p):
+                continue
+            pos = getattr(p, "position", None)
+            if pos in _PRESENTMENT_POSITIONS and _clears(pos, seed_value(pid)):
+                return True
+        # (b) dual-need rescue — the user sheds surplus at a position the
+        # partner is short at. Needs the per-member ctx; without it (unit
+        # callers, the fit K-chain) this branch cannot fire.
+        if opp_ctx is not None:
+            surplus = set(position_surplus or ())
+            opp_startable = opp_ctx["startable"]
+            for pid in give_ids:
+                p = players.get(pid)
+                if p is None or is_pick_asset(p):
+                    continue
+                pos = getattr(p, "position", None)
+                if pos in surplus and pos in _PRESENTMENT_POSITIONS \
+                        and opp_startable.get(pos, 0) < _starters_at(
+                            pos, scoring_format):
+                    return True
     if outlook in ("championship", "contender"):
         return False
     if outlook == "not_sure":
@@ -1948,13 +2513,183 @@ def _bin_player(value: float) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# #366 — position-relative tier bands (flag: trade.position_tiers, default OFF)
+# Scope block: docs/feedback/items/366-tier-ladder/scope.md
+# ---------------------------------------------------------------------------
+#
+# WHY THE ABSOLUTE CUTS ABOVE ARE WRONG, IN ONE PARAGRAPH.
+# `dynasty_value(p) = ktc_max · e^(−ktc_k·(search_rank−1))` is a pure monotone
+# function of Sleeper's OVERALL `search_rank`, so `_TIER_ELITE = 4000` is not a
+# value judgement at all — it is the disguised statement "overall rank <= 73".
+# Against the live pool that admits 33 elite RBs, 33 elite WRs, 17 elite QBs
+# and SEVEN elite TEs. The word means something different at every position
+# while presenting as one word, which is exactly what feedback #366 reported.
+#
+# THE FIX LEAVES VALUE SPACE ENTIRELY. Bands are cut in rank-WITHIN-POSITION,
+# so "elite QB" and "elite TE" mean the same thing by construction and no
+# constant needs recalibrating when the value curve moves. That second property
+# is not hypothetical: #117 retuned ktc_k/ktc_max and moved every one of the
+# absolute bins at once (docs/runbook.md § Trade-engine side effects).
+#
+# NOTE for anyone reading plan-remaining.md §2: it blames "board-wide value
+# inflation". That is not the mechanism — search_rank is an ordinal and cannot
+# inflate. The drift vector is a model_config retune. Same fix, different cause.
+#
+# The cuts, in positional rank, derived from what a league actually starts
+# (1 QB, 2 RB, 2 WR, 1 TE; superflex starts 2 QB), for a 12-team league:
+#   Elite       — top HALF of the league's starting demand: a positional edge
+#   Starter     — inside 1.5x the demand: a genuinely startable body
+#   Replacement — inside 2.5x: above the waiver pool, below a starter
+# `analyze_roster_strengths` is not passed league size and this change does not
+# add a parameter to a signature six call sites depend on, so 12 is assumed.
+_POS_TIER_CUTS: dict[str, tuple[int, int, int]] = {
+    "QB": (6, 18, 32),
+    "RB": (12, 36, 60),
+    "WR": (12, 36, 60),
+    "TE": (6, 18, 32),
+}
+# Superflex starts two quarterbacks, so QB scarcity matches RB/WR scarcity.
+_POS_TIER_CUTS_SF_QB: tuple[int, int, int] = (12, 36, 60)
+
+# Positional rank is only meaningful over a real pool. Below this many ranked
+# players at a position, `players` is a hand-built fixture or a synthetic demo
+# session, not the universal pool, and that position falls back to the absolute
+# cuts. Real Sleeper pools carry 313 QB / 568 RB / 1134 WR / 516 TE. The mode is
+# REPORTED (`tier_basis`), never silent — a hidden mode switch on pool size is
+# how a fixture quietly starts proving something other than production.
+_POS_TIER_MIN_POOL = 40
+
+# Ordered bin names, low index = better. Index i of a _POS_TIER_CUTS tuple.
+_POS_TIER_BINS: tuple[str, str, str] = ("elite", "starter", "bench")
+
+# Memo for the positional-rank map, keyed on the IDENTITY of the `players`
+# dict. Two slots is enough: the engine reuses one pool object across a whole
+# generation run (trade_service `self._players`, trade_gen_v2's `players`), and
+# the routes build one `players_meta` per request. Building the map over the
+# real 2684-player pool measures 1.31 ms, so the memo exists to keep the
+# engine's per-member loops (13 calls per deck) from paying it thirteen times,
+# not because a single build is expensive.
+#
+# The STRONG reference to the pool dict is load-bearing: `id()` is only unique
+# among live objects, so caching on `id(players)` without pinning the object
+# would let a freed pool's address be recycled by a different dict and serve
+# its ranks. Holding the reference makes that impossible.
+_POS_RANK_CACHE: list[tuple[int, dict, dict[str, int]]] = []
+
+
+def _positional_rank_map(players: dict) -> dict[str, int]:
+    """{player_id: 1-based rank among players at the SAME position}.
+
+    Ordered by Sleeper `search_rank` ascending (lower = better), ties broken on
+    player_id so the map is deterministic. Players with no `search_rank` sort
+    last — they are unranked, not rank-1, and `dynasty_value` already treats a
+    missing rank as `ktc_fallback_rank` for the same reason.
+    """
+    key = id(players)
+    for k, _pool, cached in _POS_RANK_CACHE:
+        if k == key:
+            return cached
+
+    buckets: dict[str, list[tuple[int, str]]] = {}
+    for pid, p in players.items():
+        pos = getattr(p, "position", None)
+        if pos not in _POS_TIER_CUTS:
+            continue
+        sr = getattr(p, "search_rank", None)
+        try:
+            sr_i = int(sr) if sr is not None else None
+        except (TypeError, ValueError):
+            sr_i = None
+        # Unranked sorts after every ranked player.
+        buckets.setdefault(pos, []).append(
+            (sr_i if sr_i is not None and sr_i > 0 else 10 ** 9, str(pid)))
+
+    out: dict[str, int] = {}
+    for pos, lst in buckets.items():
+        lst.sort()
+        for i, (_sr, pid) in enumerate(lst, 1):
+            out[pid] = i
+
+    _POS_RANK_CACHE.append((key, players, out))
+    if len(_POS_RANK_CACHE) > 2:
+        _POS_RANK_CACHE.pop(0)
+    return out
+
+
+def _pool_depth_by_position(players: dict) -> dict[str, int]:
+    """How many players at each core position carry a usable `search_rank`.
+    Feeds the `_POS_TIER_MIN_POOL` guard."""
+    depth: dict[str, int] = {pos: 0 for pos in _POS_TIER_CUTS}
+    for p in players.values():
+        pos = getattr(p, "position", None)
+        if pos not in depth:
+            continue
+        sr = getattr(p, "search_rank", None)
+        try:
+            if sr is not None and int(sr) > 0:
+                depth[pos] += 1
+        except (TypeError, ValueError):
+            continue
+    return depth
+
+
+def _bin_player_relative(pos_rank: int | None, pos: str,
+                         is_superflex: bool) -> str | None:
+    """Band a player by his rank within his own position. `None` = unranked or
+    outside the Replacement cut, matching `_bin_player`'s "not worth counting"."""
+    if pos_rank is None:
+        return None
+    cuts = (_POS_TIER_CUTS_SF_QB
+            if (pos == "QB" and is_superflex) else _POS_TIER_CUTS.get(pos))
+    if cuts is None:
+        return None
+    for name, cut in zip(_POS_TIER_BINS, cuts):
+        if pos_rank <= cut:
+            return name
+    return None
+
+
+def _is_handcuff(player) -> bool:
+    """The RB2 on an NFL depth chart — feedback #366, in the operator's words.
+
+    This is Sleeper's OWN depth chart, not an approximation. FTF has ingested
+    it all along and this is simply its first reader:
+      players.depth_chart_position / .depth_chart_order  database.py:970-971
+      written on every sync                              database.py:8769-8770
+      re-synced whenever older than 24h                  database.py:8652
+      carried on the Player model                        ranking_service.py:262
+      hydrated onto every pooled Player                  server.py:1580-1581
+
+    plan-remaining.md §2 asserted no such feed existed and recommended
+    approximating with "second-highest-valued RB on the same NFL team". That
+    assertion is wrong, and the approximation would have been wrong in exactly
+    the committee backfields where the label matters — see D-121.
+
+    What this is NOT: a usage model. In a true committee the order-2 back may
+    be a co-starter. The client renders the FACT ("RB2 on his NFL depth chart")
+    and never a value or workload claim. Coverage is partial by design — only
+    ~149 of 603 RBs sit on a chart at all; the rest are camp bodies and free
+    agents, who are correctly nobody's handcuff.
+    """
+    if getattr(player, "position", None) != "RB":
+        return False
+    dcp = getattr(player, "depth_chart_position", None)
+    if not dcp or str(dcp).strip().upper() != "RB":
+        return False
+    try:
+        return int(getattr(player, "depth_chart_order", None)) == 2
+    except (TypeError, ValueError):
+        return False
+
+
 def analyze_roster_strengths(
     roster_player_ids: list[str],
     players: dict,
     scoring_format: str = "1qb_ppr",
 ) -> dict:
     """
-    Profile a roster's positional depth using dynasty values.
+    Profile a roster's positional depth.
 
     Returns:
         {
@@ -1962,25 +2697,69 @@ def analyze_roster_strengths(
           "position_needs":  [pos, ...],     # below starter threshold
           "position_surplus":[pos, ...],     # at-or-above surplus threshold
         }
+
+    `tier_depth[pos]` is a DISJOINT PARTITION — every counted player lands in
+    exactly one bin. Nothing non-disjoint may be added to it (the #366 handcuff
+    overlay is a separate top-level key for precisely this reason).
+
+    Two flags extend the return, both default OFF, both independently
+    reversible (scope: docs/feedback/items/366-tier-ladder/scope.md):
+
+    `trade.position_tiers` ON
+        Bands are cut in rank-within-position instead of absolute dynasty
+        value (see _POS_TIER_CUTS above). Adds `tier_basis` and mirrors each
+        `bench` count onto a `replacement` key — the report's word — while
+        KEEPING `bench`, so a client built before this change still parses the
+        payload. OFF, this function returns a dict byte-identical to the one it
+        returned before #366; that identity is pinned by
+        backend/tests/test_position_tiers.py and it matters because
+        `position_needs`/`position_surplus` feed EVERY deck (trade_gen_v2:930,
+        :980; trade_service:3413, :3440, :4096, :4172, :4259).
+
+    `trade.rb_handcuff` ON
+        Adds `handcuff_rb`: how many of this roster's RBs are the RB2 on their
+        NFL depth chart. Purely additive — no engine path reads it. OFF, the
+        key is ABSENT (never 0, never null) and no depth_chart_* attribute is
+        read at all.
     """
+    from .feature_flags import is_enabled
+    relative = is_enabled("trade.position_tiers")
+    want_handcuff = is_enabled("trade.rb_handcuff")
+
     tier_depth: dict[str, dict[str, int]] = {
         pos: {"elite": 0, "starter": 0, "bench": 0}
         for pos in ("QB", "RB", "WR", "TE")
     }
     starter_count: dict[str, int] = {pos: 0 for pos in tier_depth}
+    is_superflex = scoring_format.startswith("sf")
 
+    pos_rank: dict[str, int] = {}
+    # Per position: True = banded by positional rank, False = absolute cuts.
+    basis: dict[str, bool] = {pos: False for pos in tier_depth}
+    if relative:
+        depth = _pool_depth_by_position(players)
+        basis = {pos: depth.get(pos, 0) >= _POS_TIER_MIN_POOL for pos in tier_depth}
+        if any(basis.values()):
+            pos_rank = _positional_rank_map(players)
+
+    handcuff_rb = 0
     for pid in roster_player_ids:
         player = players.get(pid)
         if player is None or getattr(player, "position", None) not in tier_depth:
             continue
-        bin_ = _bin_player(dynasty_value(player))
+        pos = player.position
+        if relative and basis.get(pos):
+            bin_ = _bin_player_relative(pos_rank.get(str(pid)), pos, is_superflex)
+        else:
+            bin_ = _bin_player(dynasty_value(player))
+        if want_handcuff and _is_handcuff(player):
+            handcuff_rb += 1
         if bin_ is None:
             continue
-        tier_depth[player.position][bin_] += 1
+        tier_depth[pos][bin_] += 1
         if bin_ in ("elite", "starter"):
-            starter_count[player.position] += 1
+            starter_count[pos] += 1
 
-    is_superflex = scoring_format.startswith("sf")
     needs: list[str] = []
     surplus: list[str] = []
     for pos in tier_depth:
@@ -1992,10 +2771,99 @@ def analyze_roster_strengths(
         if starter_count[pos] >= _SURPLUS_AT[pos]:
             surplus.append(pos)
 
-    return {
+    out = {
         "tier_depth":       tier_depth,
         "position_needs":   needs,
         "position_surplus": surplus,
+    }
+    if relative:
+        # `replacement` is an ALIAS, not a fourth bin: same count as `bench`,
+        # emitted so clients can adopt the report's vocabulary without the wire
+        # key changing under a shipped build. `bench` is retained on purpose —
+        # dropping it would break every client older than this commit.
+        for pos, bins in tier_depth.items():
+            bins["replacement"] = bins["bench"]
+        out["tier_basis"] = {
+            pos: ("position_relative" if ok else "absolute")
+            for pos, ok in basis.items()
+        }
+    if want_handcuff:
+        out["handcuff_rb"] = handcuff_rb
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Knockout refine — per-member presentment context (2026-08-23)
+# docs/plans/knockout-refine/plan.md §2. The G6 predicates were written as a
+# JOB-level closure with no counterparty in scope, which is exactly why R5
+# was a one-sided kill and R2 a blind count. `opp_profile` already exists at
+# the top of the member loop; these two helpers are all it takes to get it
+# into the gates.
+# ---------------------------------------------------------------------------
+
+
+def _startable_ok_fn(players: dict, scoring_format: str):
+    """Build `(pid, player) -> bool`: is this a STARTABLE body at his position?
+
+    The definition is `analyze_roster_strengths`' OWN — a player whose tier
+    bin is `elite` or `starter`, i.e. the two bins that feed its
+    `starter_count` and therefore `position_needs` / `position_surplus`. No
+    second threshold is invented here: both banding modes are mirrored (the
+    `trade.position_tiers` rank-within-position cuts when the flag is on and
+    the pool is deep enough, the absolute `_TIER_STARTER` cut otherwise), so
+    a count built with this predicate always equals
+    `tier_depth[pos]["elite"] + tier_depth[pos]["starter"]` from a profile
+    over the same roster. That equality is pinned, under BOTH flag settings,
+    by test_knockout_refine.py::test_startable_matches_analyze_roster.
+
+    Built ONCE per job (the flag read and the pool scan are not per-candidate
+    work); the returned callable is what the gates call.
+    """
+    from .feature_flags import is_enabled
+    relative = is_enabled("trade.position_tiers")
+    is_superflex = scoring_format.startswith("sf")
+    pos_rank: dict[str, int] = {}
+    basis: dict[str, bool] = {}
+    if relative:
+        depth = _pool_depth_by_position(players)
+        basis = {pos: depth.get(pos, 0) >= _POS_TIER_MIN_POOL
+                 for pos in _POS_TIER_CUTS}
+        if any(basis.values()):
+            pos_rank = _positional_rank_map(players)
+
+    def _ok(pid, player) -> bool:
+        pos = getattr(player, "position", None) if player is not None else None
+        if pos not in _PRESENTMENT_POSITIONS:
+            return False
+        if relative and basis.get(pos):
+            bin_ = _bin_player_relative(pos_rank.get(str(pid)), pos,
+                                        is_superflex)
+        else:
+            bin_ = _bin_player(dynasty_value(player))
+        return bin_ in ("elite", "starter")
+
+    return _ok
+
+
+def _presentment_ctx(opp_profile: dict, user_startable: dict,
+                     startable_ok, scoring_format: str) -> dict:
+    """The per-league-mate context R5's rescue and R2's relief read.
+
+    `startable` is the OPPONENT's startable count per position, taken
+    straight off the `analyze_roster_strengths` profile the member loop has
+    already computed — no second roster pass, no second definition.
+    `user_startable` is the job-level twin (built once from
+    `_user_pos_values`). Passing `opp_ctx=None` anywhere downstream skips
+    every branch that reads this, which is what keeps the knobs' 0 settings
+    byte-identical for callers that hold no counterparty.
+    """
+    td = opp_profile.get("tier_depth", {})
+    return {
+        "startable": {pos: bins.get("elite", 0) + bins.get("starter", 0)
+                      for pos, bins in td.items()},
+        "user_startable": user_startable,
+        "startable_ok": startable_ok,
+        "scoring_format": scoring_format,
     }
 
 
@@ -2579,11 +3447,198 @@ def fit_premium_1for1(
     return True, round(loss, 1)
 
 
+def first_round_signal(ledger: dict | None) -> dict:
+    """#365 — turn a raw first-round-pick ledger into the scoring term's
+    inputs. Pure, and ALWAYS fully shaped: every key is present in every
+    branch, so no client ever has to distinguish "missing" from "zero".
+
+    `ledger` is the four counts a caller derived from `draft_picks` for ONE
+    member, plus one league-wide fact:
+
+        held         round-1 picks this member currently owns
+        own_total    round-1 picks ORIGINALLY this member's (the baseline)
+        traded_away  originally theirs, now someone else's
+        acquired     theirs now, originally someone else's
+        league_any_traded  any round-1 pick ANYWHERE in the league whose
+                     current owner differs from its original owner
+
+    `net = acquired − traded_away` is exactly the operator's ask — *"number of
+    1sts owned vs traded away"* — because `held − own_total` reduces to it:
+    both sides share the "own firsts retained" count, which cancels.
+
+    THE LAST INPUT IS THE HONESTY GATE, and it is why this is not a one-liner.
+    A league whose pick history predates capture shows `original_user_id ==
+    owner_user_id` on every row and therefore reads as "nobody has traded
+    anything" — indistinguishable, from inside this function, from a league
+    where nobody has. So `league_any_traded` gates the term: when nothing in
+    the league is recorded as having moved we refuse to score the member's
+    zero, and `provenance` says which of the three worlds we are in
+    (`observed` / `none_traded` / `absent`) so the card can state it rather
+    than render a confident 0. Operator ruling, 2026-08-20: degrade honestly
+    and say so on the card.
+    """
+    out = {
+        "held": 0, "own_total": 0, "traded_away": 0, "acquired": 0,
+        "net": 0, "net_share": 0.0,
+        "provenance": "absent", "applied": False,
+    }
+    if not ledger:
+        return out
+    out["held"]        = int(ledger.get("held") or 0)
+    out["own_total"]   = int(ledger.get("own_total") or 0)
+    out["traded_away"] = int(ledger.get("traded_away") or 0)
+    out["acquired"]    = int(ledger.get("acquired") or 0)
+    out["net"]         = out["acquired"] - out["traded_away"]
+
+    if out["own_total"] <= 0 and out["held"] <= 0:
+        return out                                  # provenance stays "absent"
+    if not ledger.get("league_any_traded"):
+        out["provenance"] = "none_traded"
+        return out
+
+    out["provenance"] = "observed"
+    cap = abs(_c("infer_net_firsts_cap"))
+    raw = out["net"] / max(out["own_total"], 1)
+    out["net_share"] = round(max(-cap, min(cap, raw)), 4)
+    out["applied"] = bool(FLAGS.trade_outlook_net_firsts)
+    return out
+
+
+def starter_value_signal(
+    starter_value: float | None,
+    league_starter_value: float | None,
+    num_teams: int,
+) -> dict:
+    """#372 — "we calculate starter dynasty value. Let's incorporate that."
+
+    Turns the caller's value-optimal STARTING lineup into a league-relative
+    index. Pure: the caller sums the values (they come straight off
+    `power_rankings.compute_power_rankings`, whose `starters` list is the
+    value-optimal fill and whose `roster` rows carry the per-player value),
+    this function only relates them and reports its own confidence.
+
+        share = your starters' value / the league's starters' value
+        index = share · num_teams − 1
+
+    `index` is `share − 1/num_teams` rescaled by `num_teams`, which is the
+    same centring convention `pick_share` uses — but expressed so that the
+    number does NOT depend on league size. 0.0 is an exactly average starting
+    lineup; +0.30 is 30 % above the league mean. That independence is why the
+    weight can be one constant instead of one per league shape.
+
+    WHY STARTERS AND NOT ROSTER VALUE. Total roster value is already the
+    standing beat's number and it rewards hoarding: a rebuilder sitting on
+    nine young WR4s can out-total a contender. A team is strong WHERE IT
+    STARTS, which is precisely the axis the age model cannot see — and #372 is
+    a report that the age model called an all-in roster a rebuild.
+
+    DEGRADES BY NAMING THE REASON (same rule as `first_round_signal`, D-110):
+
+      observed        a lineup template was known and the league has priced
+                      starter value — the term counts
+      lineup_unknown  `starters` is None: the platform exposes no
+                      roster_positions equivalent and the meta fetch found no
+                      template (`server._league_lineup_slots` returns None
+                      rather than guess one). We did not look
+      absent          a template existed but the league's total starter value
+                      is zero — an unsynced or demo league. Nothing to relate
+
+    `applied` is the ONLY correct test of whether the term entered the score.
+    Never derive it from `index == 0`: a perfectly average team and a team we
+    could not read both index at 0 and they are different claims.
+    """
+    out = {
+        "starter_value": 0.0, "league_starter_value": 0.0,
+        "share": 0.0, "index": 0.0, "index_raw": 0.0,
+        "provenance": "lineup_unknown", "applied": False,
+    }
+    if starter_value is None or league_starter_value is None:
+        return out
+    lg = float(league_starter_value)
+    out["starter_value"] = round(float(starter_value), 1)
+    out["league_starter_value"] = round(lg, 1)
+    if lg <= 0:
+        out["provenance"] = "absent"
+        return out
+    out["provenance"] = "observed"
+    share = float(starter_value) / lg
+    cap = abs(_c("infer_composite_starter_cap"))
+    raw = share * max(int(num_teams), 1) - 1.0
+    out["share"] = round(share, 4)
+    # BOTH the scored value and the measured one. The cap binds on real
+    # rosters — the FFV3 caller in the report measures +0.82 and is scored at
+    # +0.50 — and a card that printed only `index` would tell him his starters
+    # are 50 % above average when they are 82 % above. `index` is what entered
+    # the score and `index_raw` is what was observed; the card shows the
+    # measurement and names the cap when the two differ.
+    out["index_raw"] = round(raw, 4)
+    out["index"] = round(max(-cap, min(cap, raw)), 4)
+    out["applied"] = bool(FLAGS.trade_outlook_composite)
+    return out
+
+
+def playoff_odds_signal(odds: dict | None, refusal: str | None) -> dict:
+    """#372 — "incorporate … playoff likelihood", as a TERM rather than as the
+    replacement `trades.window_from_odds` (#371/D-111) makes it.
+
+    `odds` is the band block `team_review.resolve_window_from_odds` returns —
+    `{band, playoff_pct, implied}` — and `refusal` is that function's own
+    reason string, or None when it admitted the odds. This function does not
+    re-derive the admission rule, it INHERITS it: the odds engine is
+    Sleeper-only (`backend/outlook/league_state.py` stubs every other
+    platform) and is refused in preseason (D-094: `completed_weeks == 0` is
+    its weakest window), and those two rulings must not exist twice.
+
+        index = clamp(2 · (playoff_pct − centre), ± cap)
+
+    with `centre` the midpoint of the `tossup` band. +0.30 at the `likely`
+    boundary, −0.30 at the `unlikely` boundary, ±1.00 at certainty.
+
+    Provenance is the refusal string when there is one, so the card can say
+    "your odds read likely, but nobody has played a game" rather than showing
+    a term worth nothing:
+
+      observed          the band was admitted — the term counts
+      preseason         a band exists and was deliberately not used
+      odds_unavailable  no band: non-Sleeper, `outlook.odds` off, or the
+                        simulator failed
+      odds_disabled     `trades.window_from_odds` is off, so we never asked
+
+    A refused term is ABSENT FROM THE SCORE, never a zero standing in for
+    "neutral" — the operator's degrade-honestly ruling (D-110).
+    """
+    out = {
+        "playoff_pct": None, "band": None, "index": 0.0,
+        "center": _c("infer_composite_playoff_center"),
+        "provenance": refusal or "odds_unavailable", "applied": False,
+    }
+    if not odds:
+        return out
+    out["band"] = odds.get("band")
+    pct = odds.get("playoff_pct")
+    if pct is not None:
+        out["playoff_pct"] = round(float(pct), 4)
+    if refusal is not None or pct is None:
+        return out
+    centre = float(out["center"])
+    cap = abs(_c("infer_composite_playoff_cap"))
+    # ×2 so the index reaches ±1.00 at 0 % / 100 %, which makes `cap` a
+    # meaningful knob rather than a bound the data can never approach.
+    raw = 2.0 * (float(pct) - centre)
+    out["index"] = round(max(-cap, min(cap, raw)), 4)
+    out["provenance"] = "observed"
+    out["applied"] = bool(FLAGS.trade_outlook_composite)
+    return out
+
+
 def infer_team_outlook(
     roster_ids: list[str],
     players: dict,
     pick_share: float = 0.0,
     num_teams: int = 12,
+    first_round_ledger: dict | None = None,
+    starter_signal: dict | None = None,
+    odds_signal: dict | None = None,
 ) -> tuple[str, float, dict]:
     """Infer a team's contend↔rebuild window from observable roster shape
     (backlog #1). Pure function: no DB, no I/O — feeds the same
@@ -2595,11 +3650,78 @@ def infer_team_outlook(
       • pick capital share — this team's draft-pick value / league total, centred
                              on an equal split (1/num_teams) so an average pick
                              holder contributes 0
+      • net first-round capital (#365, flag `trade.outlook_net_firsts`) —
+        firsts acquired minus firsts traded away, over the firsts originally
+        yours. Only present when a caller supplies `first_round_ledger`.
+      • starter-value index + playoff index (#372, flag
+        `trade.outlook_composite`) — see below. Only present when a caller
+        supplies `starter_signal`.
 
-    Score (higher = more contending) = w_vet·vet − w_youth·youth − w_pick·(pick − equal).
+    Score (higher = more contending)
+        = w_vet·vet − w_youth·youth − w_pick·(pick − equal) − w_firsts·net_share.
     Buckets into contender / not_sure / rebuilder. The extreme labels
     (championship / jets) are deliberately NOT inferred — inference confidence
     rarely justifies α = 1.00 / 0.10; those stay reserved for self-declaration.
+
+    #365 — TWO INVARIANTS THIS FUNCTION OWES THE REST OF THE APP.
+    Its verdict is not a Team Review number: it feeds `outlook_alpha`, which
+    the engine (`trade_gen_v2.py:986`, `trade_service.py:4250`), the mock draft
+    (`server.py:14013`) and the outlook seed (`server.py:5320`) all consume.
+    Changing the score changes every deck for every user. So:
+
+      INV-365   flag OFF ⇒ `first_round_ledger` is accepted and IGNORED. The
+                returned tuple — outlook, score, and every key of `signals` —
+                equals what this function returned before #365, for every
+                caller, even one that passes a ledger. That is why the two new
+                `model` keys are added INSIDE the flag branch: `model` is
+                rendered on screen, so an unconditional key would advertise a
+                term that is not being applied.
+      INV-365b  flag ON but no ledger ⇒ the score is STILL unchanged. Only the
+                Team Review route builds a ledger today, so lighting the flag
+                moves the window beat and not one deck. Wiring the other three
+                callers is a separate change with its own evidence.
+
+    #372 — THE COMPOSITE (flag `trade.outlook_composite`). Operator, third
+    report on this surface: "The logic is still too simple… age distribution
+    alone is not a strong enough of a signal. We calculate starter dynasty
+    value. Let's incorporate that and playoff likelihood. The age distribution
+    can stay but make it a lighter driver."
+
+    This is ONE RE-WEIGHTED SCORE, not a fourth bolt-on term. When the
+    composite is live the whole vector changes at once:
+
+        vet      1.00 → 0.40      the "lighter driver"
+        youth    1.00 → 0.40
+        pick     2.00 → 2.00      unchanged; pick capital is not age
+        starter    —  → 0.60      NEW, capped ±0.50
+        playoff    —  → 0.40      NEW, capped ±1.00, absent in preseason
+        firsts   0.10 → 0.10      unchanged, still its own flag
+
+    The two age terms stay ADJACENT-THRESHOLD siblings (vet_age 27,
+    youth_age 26 — every aged player is one or the other), which is exactly
+    why halving both rather than dropping one is the honest edit: they are
+    close to one rescaled quantity, so the pair's total influence is what
+    #372 asked to reduce, and it drops by 60 %.
+
+    THE SAME TWO INVARIANTS, EXTENDED — and they are what keep every deck
+    where it is:
+
+      INV-372   flag OFF ⇒ `starter_signal` / `odds_signal` are accepted and
+                IGNORED, and neither the score nor any key of `signals`
+                moves. Byte-identical to origin/main for every caller.
+      INV-372b  flag ON but no APPLIED starter signal ⇒ the LEGACY vector
+                still scores. The composite's anchor is starter value, and a
+                re-weighting that halves age without putting anything in its
+                place is not a model, it is a quieter model. So the engine,
+                the mock draft and the outlook seed — none of which pass a
+                starter signal — are untouched even with the flag lit. Only
+                GET /api/league/team-review supplies one.
+
+    DEGRADES PER SIGNAL, NOT ALL-OR-NOTHING. `odds_signal` may be refused
+    (preseason, non-Sleeper, `trades.window_from_odds` off) while the starter
+    term still scores; both signal blocks ride `signals` with their
+    provenance either way, so the card names what is missing instead of
+    scoring an absent term as a neutral zero.
 
     Returns (outlook, score, signals).
     """
@@ -2622,21 +3744,116 @@ def infer_team_outlook(
         elif age <= youth_age:
             youth_val += v
 
-    signals = {"vet_share": 0.0, "youth_share": 0.0, "pick_share": pick_share}
+    # #365 — SHIP THE MODEL, NOT JUST ITS OUTPUT. The Team Review window beat
+    # renders every input this function reads, and a client that hardcodes one
+    # of them drifts silently the day a knob moves: the shipped screen read
+    # "Value age 23 and under" while `youth_age` has been 26, so the threshold
+    # the user was shown was never the threshold the inference applied. Same
+    # rule as `equal_pick_share` in team_review._window — a client reads an
+    # encoding, it never restates one. Additive: existing callers that only
+    # read the share keys are untouched.
+    model = {
+        "vet_age":       vet_age,
+        "youth_age":     youth_age,
+        "w_vet_share":   _c("infer_w_vet_share"),
+        "w_youth_share": _c("infer_w_youth_share"),
+        "w_pick_share":  _c("infer_w_pick_share"),
+        "contender_cut": _c("infer_contender_cut"),
+        "rebuilder_cut": _c("infer_rebuilder_cut"),
+    }
+    signals = {"vet_share": 0.0, "youth_share": 0.0, "pick_share": pick_share,
+               "model": model}
+
+    # #365 — the net-firsts term. Gated on the flag AND on a ledger actually
+    # being supplied (INV-365 / INV-365b above). `firsts` and the two extra
+    # `model` keys ride the payload ONLY inside this branch, so a flag-off
+    # caller's `signals` dict is key-for-key what it was before #365.
+    firsts = None
+    if FLAGS.trade_outlook_net_firsts and first_round_ledger is not None:
+        firsts = first_round_signal(first_round_ledger)
+        signals["firsts"] = firsts
+        model["w_net_firsts"]   = _c("infer_w_net_firsts")
+        model["net_firsts_cap"] = _c("infer_net_firsts_cap")
+
+    # #372 — the composite's two signal blocks. Gated on the flag AND on the
+    # caller supplying a starter signal, exactly as #365 gated on a ledger
+    # (INV-372 / INV-372b above). `composite` decides which WEIGHT VECTOR the
+    # score below uses, so it is resolved before the score and not after.
+    starters_sig = None
+    playoff_sig = None
+    composite = False
+    if FLAGS.trade_outlook_composite and starter_signal is not None:
+        starters_sig = dict(starter_signal)
+        signals["starters"] = starters_sig
+        composite = bool(starters_sig.get("applied"))
+        if odds_signal is not None:
+            playoff_sig = dict(odds_signal)
+            signals["playoff"] = playoff_sig
+        if composite:
+            # D-101 — SHIP THE MODEL YOU ACTUALLY RAN. These two keys already
+            # exist and are RE-STATED at their composite values, because the
+            # card renders `w_vet_share × vet_share` as an arithmetic row: a
+            # model block still reading 1.00 while the score used 0.40 is the
+            # same defect as "age 23 and under" against a youth_age of 26.
+            model["w_vet_share"]   = _c("infer_composite_w_vet")
+            model["w_youth_share"] = _c("infer_composite_w_youth")
+            model["w_pick_share"]  = _c("infer_composite_w_pick")
+            model["w_starter_index"]  = _c("infer_composite_w_starter")
+            model["starter_index_cap"] = _c("infer_composite_starter_cap")
+            model["composite"] = True
+            # The playoff weight rides ONLY when the term actually scores, so
+            # the card can never print a weight beside a refused signal.
+            if playoff_sig is not None and playoff_sig.get("applied"):
+                model["w_playoff_index"]   = _c("infer_composite_w_playoff")
+                model["playoff_center"]    = _c("infer_composite_playoff_center")
+                model["playoff_index_cap"] = _c("infer_composite_playoff_cap")
+
     # No roster value to read ⇒ no opinion. Guard before the pick-centering
     # term, which would otherwise read "owns zero picks" as a contend signal.
+    # The firsts term is suppressed here too: a team with no readable roster
+    # has no window, and half a model is not an opinion. Same for the two
+    # composite terms — a team whose roster we cannot price has no starting
+    # lineup worth relating to the league's either.
     if total <= 0:
+        if firsts is not None:
+            firsts["applied"] = False
+        if starters_sig is not None:
+            starters_sig["applied"] = False
+        if playoff_sig is not None:
+            playoff_sig["applied"] = False
         signals["score"] = 0.0
         return "not_sure", 0.0, signals
     signals["vet_share"]   = vet_val / total
     signals["youth_share"] = youth_val / total
 
     equal_share = 1.0 / max(num_teams, 1)
-    score = (
-        _c("infer_w_vet_share")   * signals["vet_share"]
-        - _c("infer_w_youth_share") * signals["youth_share"]
-        - _c("infer_w_pick_share")  * (pick_share - equal_share)
-    )
+    if composite:
+        # #372 — ONE re-weighted score. Age keeps both signals at 40 % of the
+        # weight it had; starter value and (when the season has started and
+        # the league is Sleeper) playoff likelihood carry the difference.
+        score = (
+            _c("infer_composite_w_vet")     * signals["vet_share"]
+            - _c("infer_composite_w_youth") * signals["youth_share"]
+            - _c("infer_composite_w_pick")  * (pick_share - equal_share)
+            + _c("infer_composite_w_starter") * float(starters_sig["index"])
+        )
+        # Sign convention differs from the pick terms deliberately: a BETTER
+        # starting lineup and BETTER playoff odds both read as contending, so
+        # both ADD, while accumulating pick capital reads as rebuilding and
+        # subtracts.
+        if playoff_sig is not None and playoff_sig.get("applied"):
+            score += _c("infer_composite_w_playoff") * float(playoff_sig["index"])
+    else:
+        score = (
+            _c("infer_w_vet_share")   * signals["vet_share"]
+            - _c("infer_w_youth_share") * signals["youth_share"]
+            - _c("infer_w_pick_share")  * (pick_share - equal_share)
+        )
+    # Same sign convention as the pick-capital term above: ACCUMULATING pick
+    # capital reads as rebuilding, so a positive net (more firsts acquired
+    # than shipped) subtracts, and a manager who has sold his firsts gains.
+    if firsts is not None and firsts["applied"]:
+        score -= _c("infer_w_net_firsts") * firsts["net_share"]
     signals["score"] = score
 
     if score >= _c("infer_contender_cut"):
@@ -2993,6 +4210,15 @@ class TradeCard:
     # otherwise-unfair trade: {"player_id": str, "side": "give"|"receive"}.
     # The player is already included in that side's id list. None otherwise.
     sweetener: Optional[dict] = None
+    # 2026-08-21 gap auto-sweetener (`sweetener_gap_threshold`) — set when a
+    # card's absolute consensus gap exceeded the threshold and an equalizer
+    # asset from the richer side's roster closed it: {"player_id": str,
+    # "side": "give"|"receive", "gap_before": float, "gap_after": float}.
+    # The player is already included in that side's id list. Distinct from
+    # `sweetener` (the 3.4 fairness-band rescue) so measurement can split
+    # them; also stamped into features_json on EVERY impression row (null
+    # when absent). None otherwise.
+    gap_sweetener: Optional[dict] = None
     # FB-47 (flag trade.finder_targeting) — counterparty positional fit for
     # the user's stated targets, 0..1 (1 = ideal partner). None when the
     # flag is off or the user expressed no targets. Serialized when set.
@@ -3305,6 +4531,21 @@ class TradeService:
                                                # for THIS league. Overwrites the
                                                # stored set every call; None ⇒
                                                # empty set, never keep-previous.
+        negmem=None,                           # trade.negmem — the job's
+                                               # negmem.NegmemMap (LLD §2.1).
+                                               # Travels ONLY as this kwarg:
+                                               # deliberately NO self._negmem
+                                               # slot, so a concurrent
+                                               # same-session job has nothing
+                                               # to overwrite (H-4; stronger
+                                               # than the _exclusion_keys
+                                               # overwrite-per-call precedent
+                                               # it was modelled on). None (the
+                                               # default, and the value on every
+                                               # flag-off / non-allowlisted job)
+                                               # ⇒ every seam short-circuits
+                                               # before any arithmetic and the
+                                               # deck is byte-identical (C1).
     ) -> list[TradeCard]:
         """
         Generate trade cards for the user against all league members
@@ -3332,6 +4573,12 @@ class TradeService:
         # REPLACES the stored set on every call; None ⇒ empty set, never
         # "keep previous". Kill counters reset per job alongside it.
         self._exclusion_keys = set(exclusion_keys) if exclusion_keys else set()
+        # trade.negmem — read the kwarg ONCE into a call-local (LLD §6.2).
+        # Same overwrite-per-call semantics as _exclusion_keys above, except
+        # there is no instance slot at all: `_nm` dies with this call, so no
+        # later call can inherit a previous job's map. Every downstream site
+        # reads `_nm`, never the kwarg name, so there is exactly one read.
+        _nm = negmem
         self._job_seed_elo = seed_elo or {}      # C4 centerpiece derivation
         self._presentment_kills = {"R1": 0, "R2": 0, "R3": 0, "R5": 0}
         self._r4_excluded_keys = set()
@@ -3382,6 +4629,18 @@ class TradeService:
                 past_decision_keys=(
                     self._past_decision_keys if r4_bypassed()
                     else self._past_decision_keys | self._exclusion_keys),
+                # trade.negmem (LLD §6.3) — M1 map + the M2 feed. Which one
+                # is conditional matters: `negmem_map` is passed
+                # UNCONDITIONALLY (a plain kwarg carrying None when negmem is
+                # off; the seam guards on `is not None`, never on the kwarg's
+                # presence), while `acceptance_stats` is added ONLY when a map
+                # exists — that splat is what keeps the flag-off call
+                # byte-identical (C1). Do not tidy the two into one form.
+                # m2_feed() returns {} on a degraded map and {} when
+                # gen2_accept_prior_strength ≤ 0 (the sanctioned M2 kill).
+                negmem_map=_nm,
+                **({"acceptance_stats": _nm.m2_feed()}
+                   if _nm is not None else {}),
                 on_opponent_done=on_opponent_done,
             )
             cards = _filter_by_trade_intent(cards, _intent, seed_elo,
@@ -3430,6 +4689,13 @@ class TradeService:
                 target_ids           = target_ids,
                 not_interested_ids   = not_interested_ids,
                 bypass_need_gate     = bypass_need_gate,
+                # trade.negmem — ONE key, in the ONE dict (LLD §6.2). This
+                # dict is both splatted into _generate_trades_v2 below and
+                # handed whole to _relaxed_targeted_pass, so the relaxed
+                # re-run consults the SAME map at the same _c-read strength
+                # with zero special-casing — and there is no duplicate-keyword
+                # hazard because there is only ever one assignment.
+                negmem_map           = _nm,
             )
             cards = self._generate_trades_v2(**_v2_kwargs)
             # #189 — a targeted job (pinned players and/or acquire /
@@ -3475,6 +4741,10 @@ class TradeService:
         # complete in one full pass — the cap never trips, but the
         # per-opponent deadline reduction is what saves them.
         global_target = max(30, max_per_opponent * 6)
+        # trade.full_sweep — the wall-clock rail's origin. Taken here in both
+        # paths so the flag-off branch below is unchanged in every other way;
+        # one `monotonic()` per job, never read unless the flag is on.
+        _sweep_t0 = time.monotonic()
 
         for idx, member in enumerate(eligible):
             opp_profile = analyze_roster_strengths(member.roster, self._players, scoring_format)
@@ -3514,7 +4784,21 @@ class TradeService:
             # Global early exit: enough cards collected, stop scanning more
             # opponents. Always lets the LAST opponent's results land first
             # (the "snapshot" above already includes them).
-            if len(new_cards) >= global_target:
+            #
+            # trade.full_sweep (docs/plans/full-sweep/plan.md §3.2) — ON, the
+            # card-count exit is skipped so every eligible leaguemate is
+            # scored and `_dedup_and_sort` below ranks the whole league;
+            # `global_target` is still computed, and OFF the first branch is
+            # today's behaviour exactly (the second short-circuits away).
+            _over_target = len(new_cards) >= global_target
+            if not FLAGS.trade_full_sweep and _over_target:
+                break
+            # …and ON, the count no longer bounds the job, so a wall-clock
+            # rail does instead (§3.5): the v3 pair path has no deadline of
+            # its own, and `_JOB_HARD_TIMEOUT` at 60s is not a ceiling anyone
+            # should be relying on. Checked between opponents; <= 0 disables.
+            if FLAGS.trade_full_sweep and _c("full_sweep_budget_s") > 0 \
+                    and time.monotonic() - _sweep_t0 > _c("full_sweep_budget_s"):
                 break
 
         # Filter out trades the user has already swiped on (within memory window)
@@ -3812,32 +5096,16 @@ class TradeService:
 
         def _eval(give_ids: list[str], recv_ids: list[str]):
             """All non-fairness gates + the WIDENED fairness band. Returns
-            (fairness, gv, rv) or None when hard-gated."""
-            gvals = [_v(p) for p in give_ids]
-            rvals = [_v(p) for p in recv_ids]
-            v_max = max(gvals + rvals)
-            gv = package_value_v2(gvals, v_max, n_other=len(recv_ids),
-                                  other_values=rvals)
-            rv = package_value_v2(rvals, v_max, n_other=len(give_ids),
-                                  other_values=gvals)
-            if gv <= 0 or rv <= 0:
-                return None
-            # #108 — consensus IS the user's board here (never relaxed).
-            if rv - gv < _c("user_gain_epsilon"):
-                return None
-            frac = _c("consolidation_raw_loss_frac")
-            if frac > 0 and len(give_ids) > len(recv_ids):
-                raw_give = sum(gvals)
-                if raw_give - sum(rvals) > frac * raw_give:
-                    return None
-            if not user_gain_ok_1for1(give_ids, recv_ids, raw_user_elo):
-                return None
-            if not filler_ok(give_ids, recv_ids, _uval_raw, _v):
-                return None
-            fairness = min(gv, rv) / max(gv, rv)
-            if fairness < relaxed_thr:
-                return None
-            return fairness, gv, rv
+            (fairness, gv, rv) or None when hard-gated. The body lives in
+            `eval_consensus_package` so the #384 fair-package search shares
+            these gates rather than copying them."""
+            return eval_consensus_package(
+                give_ids, recv_ids,
+                value_of      = _v,
+                raw_value_of  = _uval_raw,
+                raw_user_elo  = raw_user_elo,
+                relaxed_thr   = relaxed_thr,
+            )
 
         strict: dict[str, list[dict]] = {"upgrade": [], "lateral": [], "downgrade": []}
         relaxed: dict[str, list[dict]] = {"upgrade": [], "lateral": [], "downgrade": []}
@@ -4087,6 +5355,198 @@ class TradeService:
         return out
 
     # ------------------------------------------------------------------
+    # #384 W6-B — fairness-only packages around a FIXED give-side anchor
+    # (flag calc.merged_layout; route POST /api/trades/fair-packages)
+    # ------------------------------------------------------------------
+
+    def generate_fair_packages(self, *, user_id: str, **kwargs):
+        """#215 — same stud-tax mode pinning as generate_trades."""
+        mode = pinned_stud_tax_mode() or stud_tax_mode_for_user(user_id)
+        with stud_tax_override(mode):
+            return self._generate_fair_packages_impl(user_id=user_id, **kwargs)
+
+    def _generate_fair_packages_impl(
+        self,
+        *,
+        user_id: str,
+        user_roster: list[str],
+        league_id: str,
+        seed_elo: dict[str, float],
+        give_player_ids: list[str],
+        receive_player_ids: list[str] | None = None,
+        fairness_threshold: float = 0.50,
+        raw_user_elo: dict[str, float] | None = None,
+        untouchable_ids: set | None = None,
+        not_interested_ids: set | None = None,
+        opponent_user_id: str | None = None,
+    ) -> dict:
+        """What can this EXACT package fetch? — the operator's #384 W6-B ask,
+        verbatim: *"a much simpler set of cards solving for fairness only.
+        Similar to how we determine the consolidate and downgrade suggestions
+        already."*
+
+        The give side is an ANCHOR, not a seed: every idea returned gives away
+        exactly `give_player_ids` and nothing else. The search is over the
+        RETURN — 1–3 assets from one league-mate's roster (or from every
+        league-mate's, when no partner is named). No model, no job, no
+        divergence, no position semantics: `asset-ideas`' gate set applied to a
+        fixed left-hand side, which is precisely the Downgrade group's shape
+        generalised from one pinned asset to a package of N.
+
+        Pricing and gating are `eval_consensus_package` — the same function
+        `_generate_asset_ideas_impl` calls, so a fair package and an asset idea
+        can never price the same trade differently.
+
+        RECEIVE-SIDE PREFERENCE, not constraint (this is what retires the
+        second half of Q-029). Assets the user put on the receive side of the
+        canvas are a statement of interest, so ideas containing ALL of them
+        sort first — but an idea that cannot include them is still shown rather
+        than the user being handed an empty deck with a misleading message. A
+        canvas pick outside `picks_pool_cap` therefore costs nothing here: the
+        anchor is priced from `seed_elo`, never re-derived from `user_roster`.
+
+        Returns `{"ideas": [...], "relaxed": bool, "reason": str | None}`.
+        `reason` is set only when the search refused before enumerating:
+        `give_untouchable` (an anchor asset is on the caller's own untouchable
+        list — their rule, so the honest answer is zero ideas and why),
+        `unknown_asset`, or `no_partner` (the named partner is not a
+        league-mate with a roster).
+
+        Ideas carry the AssetIdea shape (counterparty, both id lists, both
+        package values, signed difference, fairness, and the #189 `relaxed`
+        labels), as ONE flat list capped at `fair_packages_cap` — the deck is
+        a swipe stack, not three groups. Deterministic for a fixed league
+        snapshot.
+        """
+        empty = {"ideas": [], "relaxed": False, "reason": None}
+        league = self._leagues.get(league_id)
+        players = self._players
+        if not league:
+            return dict(empty, reason="unknown_league")
+
+        give_anchor = list(dict.fromkeys(str(p) for p in (give_player_ids or [])))
+        if not give_anchor:
+            return dict(empty, reason="unknown_asset")
+        if any(p not in players for p in give_anchor):
+            return dict(empty, reason="unknown_asset")
+        # The caller's OWN rule, so it is a refusal with a name rather than a
+        # silent filter: an untouchable on the give side means the canvas
+        # contradicts the preference list the user set.
+        if untouchable_ids and any(p in untouchable_ids for p in give_anchor):
+            return dict(empty, reason="give_untouchable")
+
+        anchor_set = set(give_anchor)
+        want_recv = [str(p) for p in (receive_player_ids or [])
+                     if p in players and p not in anchor_set]
+        want_set = set(want_recv)
+
+        _vs_cache: dict[str, float] = {}
+
+        def _v(pid: str) -> float:
+            val = _vs_cache.get(pid)
+            if val is None:
+                val = elo_to_value(seed_elo.get(pid, 1500.0))
+                _vs_cache[pid] = val
+            return val
+
+        def _uval_raw(pid: str) -> float:
+            e = raw_user_elo.get(pid) if raw_user_elo else None
+            return elo_to_value(e) if e is not None else _v(pid)
+
+        relaxed_thr = min(fairness_threshold, _c("relaxed_fairness_threshold"))
+
+        def _eval(recv_ids: list[str]):
+            return eval_consensus_package(
+                give_anchor, recv_ids,
+                value_of     = _v,
+                raw_value_of = _uval_raw,
+                raw_user_elo = raw_user_elo,
+                relaxed_thr  = relaxed_thr,
+            )
+
+        opponents = sorted(
+            (m for m in league.members if m.user_id != user_id and m.roster),
+            key=lambda m: m.user_id)
+        if opponent_user_id:
+            opponents = [m for m in opponents if m.user_id == opponent_user_id]
+            if not opponents:
+                return dict(empty, reason="no_partner")
+
+        strict: list[dict] = []
+        relaxed: list[dict] = []
+        seen: set[tuple] = set()
+
+        def _emit(member, recv_ids: list[str], res) -> None:
+            key = (member.user_id, frozenset(recv_ids))
+            if key in seen:
+                return
+            seen.add(key)
+            fairness, gv, rv = res
+            idea = {
+                "counterparty_user_id":  member.user_id,
+                "counterparty_username": member.username,
+                "give_player_ids":       list(give_anchor),
+                "receive_player_ids":    list(recv_ids),
+                "give_value":            round(gv, 1),
+                "receive_value":         round(rv, 1),
+                "difference":            round(rv - gv, 1),
+                "fairness":              round(fairness, 3),
+            }
+            if fairness >= fairness_threshold:
+                strict.append(idea)
+            else:
+                idea["relaxed"] = True
+                idea["relaxed_reason"] = "fairness_band"
+                relaxed.append(idea)
+
+        # Same bound as the asset-ideas package search: 2- and 3-asset returns
+        # are enumerated over the top-_POOL assets by value, which keeps the
+        # sweep at ~300 evaluations per league-mate.
+        _POOL = 12
+
+        for member in opponents:
+            avail = [p for p in sorted(set(member.roster))
+                     if p in players and p not in anchor_set
+                     and not (not_interested_ids and p in not_interested_ids)]
+            avail.sort(key=lambda p: (-_v(p), p))
+            # Canvas receive assets are held at the HEAD of the combination
+            # pool so a value-based truncation can never drop the very assets
+            # the user asked for.
+            wanted_here = [p for p in avail if p in want_set]
+            rest = [p for p in avail if p not in want_set]
+            pool = wanted_here + rest[:max(0, _POOL - len(wanted_here))]
+
+            for c in avail:                       # 1-for-N: the whole roster
+                res = _eval([c])
+                if res:
+                    _emit(member, [c], res)
+            for r in (2, 3):
+                for combo in combinations(pool, r):
+                    res = _eval(list(combo))
+                    if res:
+                        _emit(member, list(combo), res)
+
+        # #189 convention: the widened band surfaces ONLY when the strict band
+        # produced nothing at all, and stays labelled when it does.
+        chosen = strict or relaxed
+        was_relaxed = not strict and bool(relaxed)
+
+        def _key(i):
+            recv = i["receive_player_ids"]
+            # Preference, not constraint: ideas carrying the whole canvas
+            # receive side lead, then the closest deal to even.
+            covers_all = bool(want_set) and want_set.issubset(recv)
+            return (not covers_all, abs(i["difference"]),
+                    i["counterparty_user_id"], tuple(recv))
+
+        cap = max(1, int(_c("fair_packages_cap")))
+        return {
+            "ideas":   sorted(chosen, key=_key)[:cap],
+            "relaxed": was_relaxed,
+            "reason":  None,
+        }
+
+    # ------------------------------------------------------------------
     # Trade engine v2 (flag: trade_engine.v2)
     # Tier 1 plan (docs/plans/trade-engine-tier1-fixes.md) with research
     # amendments A1–A4 (docs/reviews/trade-engine-external-research.md §6):
@@ -4144,6 +5604,9 @@ class TradeService:
         target_ids: set | None = None,
         not_interested_ids: set | None = None,
         bypass_need_gate: bool = False,
+        negmem_map=None,                # trade.negmem — the job's NegmemMap
+                                        # (LLD §6.2). None ⇒ the seam below is
+                                        # never entered.
     ) -> list[TradeCard]:
         """v2 orchestration: mirrors the legacy loop structure (profiles,
         narrative, streaming callback, global target, dedup) but routes each
@@ -4241,6 +5704,8 @@ class TradeService:
         ))
         total = len(eligible)
         global_target = max(30, max_per_opponent * 6)
+        # trade.full_sweep — see the twin in `_generate_trades_impl`.
+        _sweep_t0 = time.monotonic()
 
         # Backlog #1 — opponent outlook resolution, decoupled (phase 2) into
         # LABEL vs VALUE roles. The label (declared league preference →
@@ -4278,23 +5743,39 @@ class TradeService:
             _r5_needs = list(user_profile.get("position_needs", []))
             _r5_surplus = list(user_profile.get("position_surplus", []))
             _user_pos_values: dict[str, list] = {}
-            if _r5_active:
-                for _pid in user_roster:
-                    _p = self._players.get(_pid)
-                    if _p is None or is_pick_asset(_p):
-                        continue
-                    _pos = getattr(_p, "position", None)
-                    if _pos in _PRESENTMENT_POSITIONS:
-                        _user_pos_values.setdefault(_pos, []).append(
-                            (_pid, _vs(_pid)))
+            # 2026-08-23 (plan §3 C3): built whenever the presentment flag is
+            # on, not only when R5 is active. It is now R2's roster source as
+            # well, and R2 does NOT bypass on targeted jobs — gating this on
+            # `_r5_active` would silently hand targeted decks a strictly
+            # harsher R2 than untargeted ones. No verdict moves for R5: the
+            # only reader of `_user_pos_values` under `_r5_active` False was,
+            # and remains, nothing.
+            for _pid in user_roster:
+                _p = self._players.get(_pid)
+                if _p is None or is_pick_asset(_p):
+                    continue
+                _pos = getattr(_p, "position", None)
+                if _pos in _PRESENTMENT_POSITIONS:
+                    _user_pos_values.setdefault(_pos, []).append(
+                        (_pid, _vs(_pid)))
             _kills = self._presentment_kills
             _players_map = self._players
+            # Startable predicate + the user's startable counts, once per job
+            # (plan §2). Same definition analyze_roster_strengths uses, so
+            # these counts equal user_profile's elite+starter by construction.
+            _startable_ok = _startable_ok_fn(_players_map, scoring_format)
+            _user_startable = {
+                _pos: sum(1 for _pid, _v in _lst
+                          if _startable_ok(_pid, _players_map.get(_pid)))
+                for _pos, _lst in _user_pos_values.items()
+            }
 
-            def _presentment_ok(give_ids, recv_ids):
+            def _presentment_ok(give_ids, recv_ids, opp_ctx=None):
                 if not overpay_ok(give_ids, recv_ids, _vs):
                     _kills["R1"] += 1
                     return False
-                if not pos_net_ok(give_ids, recv_ids, _players_map):
+                if not pos_net_ok(give_ids, recv_ids, _players_map,
+                                  opp_ctx=opp_ctx):
                     _kills["R2"] += 1
                     return False
                 if not pick_gap_ok(give_ids, recv_ids, _vs, _players_map):
@@ -4306,7 +5787,8 @@ class TradeService:
                         user_pos_values=_user_pos_values, outlook=outlook,
                         position_needs=_r5_needs,
                         position_surplus=_r5_surplus,
-                        scoring_format=scoring_format):
+                        scoring_format=scoring_format,
+                        opp_ctx=opp_ctx):
                     _kills["R5"] += 1
                     return False
                 return True
@@ -4314,6 +5796,15 @@ class TradeService:
         for idx, member in enumerate(eligible):
             opp_profile = analyze_roster_strengths(member.roster, self._players, scoring_format)
             match_ctx = build_match_context(user_profile, opp_profile, scoring_format, is_dynasty)
+            # Plan §2 — bind THIS league-mate's context onto the job-level
+            # predicate. The generators keep calling `presentment_ok_fn(g, r)`;
+            # the ctx rides the default argument. Flag off ⇒ still None.
+            _member_presentment = _presentment_ok
+            if _presentment_ok is not None:
+                _member_presentment = (
+                    lambda _g, _r, _ctx=_presentment_ctx(
+                        opp_profile, _user_startable, _startable_ok,
+                        scoring_format): _presentment_ok(_g, _r, _ctx))
 
             alpha_opp = None
             if _infer_outlook:
@@ -4352,7 +5843,8 @@ class TradeService:
                 target_ids           = target_ids,
                 not_interested_ids   = not_interested_ids,
                 raw_user_elo         = user_elo,
-                presentment_ok_fn    = _presentment_ok,
+                presentment_ok_fn    = _member_presentment,
+                scoring_format       = scoring_format,
             )
 
             if member.has_rankings and member.elo_ratings:
@@ -4388,7 +5880,7 @@ class TradeService:
                         not_interested_ids   = not_interested_ids,
                         raw_user_elo         = user_elo,
                         user_needs           = _user_needs,
-                        presentment_ok_fn    = _presentment_ok,
+                        presentment_ok_fn    = _member_presentment,
                     )
                 else:
                     cards = self._generate_for_pair_v2(
@@ -4415,7 +5907,7 @@ class TradeService:
                         not_interested_ids   = not_interested_ids,
                         raw_user_elo         = user_elo,
                         user_needs           = _user_needs,
-                        presentment_ok_fn    = _presentment_ok,
+                        presentment_ok_fn    = _member_presentment,
                     )
                 # 2026-08-15 field bug (docs/plans/compressed-board-pool/) —
                 # a boarded member whose divergence path yields nothing used
@@ -4568,6 +6060,35 @@ class TradeService:
                     c.aggression_variant = _variant
                     c.composite_score = round(
                         c.composite_score * max(mult, 0.0), 3)
+            # trade.negmem (D-4/D-10, LLD §6.2) — partner-constant soft prior
+            # from the viewer's OWN past reasoned rejections of this
+            # counterparty. LAST in the per-member multiplier stack and, like
+            # every multiplier above it, applied AFTER all gates: it reorders
+            # acceptable trades and never rescues or removes one (NG1 is
+            # structural here — the seam cannot change membership, so it can
+            # never trigger the #189 `not cards` relaxed rerun either).
+            # Covers v2-pair, v3 and consensus-fallback cards uniformly, since
+            # all three flow through this loop. The seam owns the eff != 1.0
+            # skip (the `_m != 1.0` idiom of the outlook block above): at
+            # identity there is no multiply and no round, which is what makes
+            # negmem_strength = 0 a byte-identical M1 disable (C1).
+            # `member.user_id` is league_members.user_id — the canonical
+            # roster-owner id (ADR-012), the same space the map is keyed in
+            # and the same id the evidence side wrote as
+            # features_json.partner_user_id, so no aliasing happens here.
+            # The stamp rides the CARD (B2): the features assembly copies it
+            # and never recomputes, because by logging time this arm's
+            # _cfg_override has exited.
+            if negmem_map is not None:
+                _eff = _negmem.effective_mult(negmem_map, member.user_id,
+                                              strength=_c("negmem_strength"),
+                                              floor=_c("negmem_floor"))
+                if _eff != 1.0:
+                    _stamp = _negmem.stamp_payload(negmem_map, member.user_id,
+                                                   _eff)
+                    for c in cards:
+                        c.negmem_stamp = _stamp
+                        c.composite_score = round(c.composite_score * _eff, 3)
             for c in cards:
                 c.match_context = match_ctx
                 c.narrative = build_narrative(c, match_ctx, self._players)
@@ -4580,7 +6101,16 @@ class TradeService:
                 except Exception:
                     pass  # callback issues must not derail the loop
 
-            if len(new_cards) >= global_target:
+            # trade.full_sweep (docs/plans/full-sweep/plan.md §3.2/§3.5) —
+            # see the twin site in `_generate_trades_impl`. ON ⇒ no card-count
+            # exit, so the sweep is complete and `_dedup_and_sort` ranks
+            # globally, bounded instead by the wall-clock rail; OFF ⇒ the
+            # first branch is today's behaviour and the second never runs.
+            _over_target = len(new_cards) >= global_target
+            if not FLAGS.trade_full_sweep and _over_target:
+                break
+            if FLAGS.trade_full_sweep and _c("full_sweep_budget_s") > 0 \
+                    and time.monotonic() - _sweep_t0 > _c("full_sweep_budget_s"):
                 break
 
         new_cards = self._dedup_and_sort(new_cards)
@@ -4802,6 +6332,76 @@ class TradeService:
             elif composite > heap[0][0]:
                 heapq.heapreplace(heap, entry)
 
+        def _pair_surpluses(give_ids: list[str],
+                            recv_ids: list[str]) -> tuple[float, float]:
+            """(user_surplus, opp_surplus) — extracted 2026-08-21 from
+            `_consider` (byte-identical math; `_uv(p)` == the former
+            `user_value[p]` for every pid `_consider` can reach) so the gap
+            auto-sweetener can re-gate sweetened combos through the exact
+            same formulas.
+
+            Package values in EACH side's own value space (Change 2).
+            Tier 2 (2.1): with the marginal flag on, each side's packages
+            are built from over-replacement values against THAT side's own
+            pre-trade roster — clogger packages collapse, need-fillers
+            keep their value. Same package_value_v2 + waiver math after."""
+            if MARGINAL:
+                uvals_give = [_mu(p) for p in give_ids]
+                uvals_recv = [_mu(p) for p in recv_ids]
+            else:
+                uvals_give = [_uv(p) for p in give_ids]
+                uvals_recv = [_uv(p) for p in recv_ids]
+            u_max = max(uvals_give + uvals_recv)
+            give_val_user = package_value_v2(uvals_give, u_max, n_other=len(recv_ids),
+                                             other_values=uvals_recv)
+            recv_val_user = package_value_v2(uvals_recv, u_max, n_other=len(give_ids),
+                                             other_values=uvals_give)
+
+            if MARGINAL:
+                ovals_give = [_mo(p) for p in give_ids]
+                ovals_recv = [_mo(p) for p in recv_ids]
+            else:
+                ovals_give = [_vo(p) for p in give_ids]
+                ovals_recv = [_vo(p) for p in recv_ids]
+            o_max = max(ovals_give + ovals_recv)
+            give_val_opp = package_value_v2(ovals_give, o_max, n_other=len(recv_ids),
+                                            other_values=ovals_recv)  # opp receives
+            recv_val_opp = package_value_v2(ovals_recv, o_max, n_other=len(give_ids),
+                                            other_values=ovals_give)  # opp gives
+
+            # Waiver-slot cost (A3): the side receiving MORE players drops a
+            # waiver-level player per extra slot — subtract from that side's
+            # received package value. Replaces the clogger tax in v2.
+            extra = len(recv_ids) - len(give_ids)
+            if extra > 0:        # user receives more players
+                recv_val_user -= WAIVER * extra
+            elif extra < 0:      # opponent receives more players
+                give_val_opp -= WAIVER * (-extra)
+
+            return (recv_val_user - give_val_user,
+                    give_val_opp - recv_val_opp)
+
+        def _composite_v2(hm: float, fairness: float, give_ids: list[str],
+                          recv_ids: list[str]) -> float:
+            """Extracted 2026-08-21 from `_consider`, byte-identical.
+            C1/C5 (2026-08-18) — the RANKING terms only. The card still
+            stamps the real full-package `fairness`, and every gate ran on
+            the real package."""
+            composite = (W_MIS * min(hm, GAIN_CAP) / GAIN_CAP
+                         * mismatch_damp(give_ids + recv_ids, seed_value,
+                                         confidence)
+                         + W_FAIR * rank_fairness(fairness, give_ids, recv_ids,
+                                                  seed_value, _uv, _vo))
+            composite *= self._tier_mult_v2(shrunk_user_elo, give_ids + recv_ids)
+            # Backlog #2 — reward cards that LAND a target on the receive side.
+            # Applied after the mutual-gain gates (a target never rescues a
+            # non-mutual-gain trade), capped by pos_multiplier_cap.
+            if target_ids:
+                n_t = len(set(recv_ids) & target_ids)
+                if n_t:
+                    composite *= min(1.0 + TARGET_BONUS * n_t, MULT_CAP)
+            return composite
+
         def _consider(give_ids: list[str], recv_ids: list[str]) -> None:
             if pinned_set:
                 if pinned_all:
@@ -4843,46 +6443,7 @@ class TradeService:
                     and not presentment_ok_fn(give_ids, recv_ids):
                 return
 
-            # Package values in EACH side's own value space (Change 2).
-            # Tier 2 (2.1): with the marginal flag on, each side's packages
-            # are built from over-replacement values against THAT side's own
-            # pre-trade roster — clogger packages collapse, need-fillers
-            # keep their value. Same package_value_v2 + waiver math after.
-            if MARGINAL:
-                uvals_give = [_mu(p) for p in give_ids]
-                uvals_recv = [_mu(p) for p in recv_ids]
-            else:
-                uvals_give = [user_value[p] for p in give_ids]
-                uvals_recv = [user_value[p] for p in recv_ids]
-            u_max = max(uvals_give + uvals_recv)
-            give_val_user = package_value_v2(uvals_give, u_max, n_other=len(recv_ids),
-                                             other_values=uvals_recv)
-            recv_val_user = package_value_v2(uvals_recv, u_max, n_other=len(give_ids),
-                                             other_values=uvals_give)
-
-            if MARGINAL:
-                ovals_give = [_mo(p) for p in give_ids]
-                ovals_recv = [_mo(p) for p in recv_ids]
-            else:
-                ovals_give = [_vo(p) for p in give_ids]
-                ovals_recv = [_vo(p) for p in recv_ids]
-            o_max = max(ovals_give + ovals_recv)
-            give_val_opp = package_value_v2(ovals_give, o_max, n_other=len(recv_ids),
-                                            other_values=ovals_recv)  # opp receives
-            recv_val_opp = package_value_v2(ovals_recv, o_max, n_other=len(give_ids),
-                                            other_values=ovals_give)  # opp gives
-
-            # Waiver-slot cost (A3): the side receiving MORE players drops a
-            # waiver-level player per extra slot — subtract from that side's
-            # received package value. Replaces the clogger tax in v2.
-            extra = len(recv_ids) - len(give_ids)
-            if extra > 0:        # user receives more players
-                recv_val_user -= WAIVER * extra
-            elif extra < 0:      # opponent receives more players
-                give_val_opp -= WAIVER * (-extra)
-
-            user_surplus = recv_val_user - give_val_user
-            opp_surplus  = give_val_opp - recv_val_opp
+            user_surplus, opp_surplus = _pair_surpluses(give_ids, recv_ids)
             # True mutual gain (Change 3): BOTH sides must clear the bar.
             if user_surplus < MIN_SIDE or opp_surplus < MIN_SIDE:
                 return
@@ -4892,22 +6453,7 @@ class TradeService:
                 return
 
             hm = _harmonic_mean(user_surplus, opp_surplus)   # A1 ranking
-            # C1/C5 (2026-08-18) — the RANKING terms only. The card still
-            # stamps the real full-package `fairness` below, and every gate
-            # above already ran on the real package.
-            composite = (W_MIS * min(hm, GAIN_CAP) / GAIN_CAP
-                         * mismatch_damp(give_ids + recv_ids, seed_value,
-                                         confidence)
-                         + W_FAIR * rank_fairness(fairness, give_ids, recv_ids,
-                                                  seed_value, _uv, _vo))
-            composite *= self._tier_mult_v2(shrunk_user_elo, give_ids + recv_ids)
-            # Backlog #2 — reward cards that LAND a target on the receive side.
-            # Applied after the mutual-gain gates (a target never rescues a
-            # non-mutual-gain trade), capped by pos_multiplier_cap.
-            if target_ids:
-                n_t = len(set(recv_ids) & target_ids)
-                if n_t:
-                    composite *= min(1.0 + TARGET_BONUS * n_t, MULT_CAP)
+            composite = _composite_v2(hm, fairness, give_ids, recv_ids)
             _offer(composite, hm, fairness, give_ids, recv_ids, _fit_paid)
 
         # ------------------------------------------------------------------
@@ -5013,10 +6559,70 @@ class TradeService:
         # space the manual calculator uses, so a deck card and the calculator
         # show identical numbers for the same players. Lazy import: the
         # optimizer imports this module (top-level would cycle).
-        from .trade_optimizer import _consensus_packages
+        from .trade_optimizer import _consensus_packages, close_value_gap
+
+        # 2026-08-21 gap auto-sweetener (sweetener_gap_threshold): a selected
+        # card whose absolute consensus gap exceeds the threshold is
+        # re-balanced by adding the smallest sufficient equalizer from the
+        # richer side's roster — re-earning this path's own gates via
+        # `_gap_extra_ok` (junk filler, pick swap, presentment, Elo-gap
+        # guard, both-sides surplus) plus lineup feasibility inside the
+        # helper. An unclosable card is kept unsweetened: this pass narrows
+        # gaps, it never shrinks the deck. ≤ 0 disables (arm A's pin).
+        _GAP_THR = _c("sweetener_gap_threshold")
+
+        def _gap_extra_ok(g: list[str], r: list[str]) -> bool:
+            if not filler_ok(g, r, _uv, _vo):
+                return False
+            if not pick_swap_ok(g, r, players, seed_value):
+                return False
+            if presentment_ok_fn is not None \
+                    and not presentment_ok_fn(g, r):
+                return False
+            if not _gap_ok(g, r):
+                return False
+            u_s, o_s = _pair_surpluses(g, r)
+            return u_s >= MIN_SIDE and o_s >= MIN_SIDE
+
         cards: list[TradeCard] = []
+        _picked_keys = {(frozenset(e[5]), frozenset(e[6]))
+                        for e in ranked[:max_cards]}
         for composite, _sz, _t, hm, fairness, give_ids, recv_ids, fit_paid \
                 in ranked[:max_cards]:
+            _gap_info = None
+            if _GAP_THR > 0:
+                closed = close_value_gap(
+                    give_ids, recv_ids, seed_value=seed_value,
+                    gap_threshold=_GAP_THR,
+                    fairness_threshold=fairness_threshold,
+                    user_roster=user_roster, opp_roster=opponent.roster,
+                    players=players, scoring_format=scoring_format,
+                    untouchable_ids=untouchable_ids,
+                    not_interested_ids=not_interested_ids,
+                    extra_ok_fn=_gap_extra_ok)
+                if closed is not None:
+                    s_pid, side, new_give, new_recv, _ngv, _nrv, n_ratio \
+                        = closed
+                    new_key = (frozenset(new_give), frozenset(new_recv))
+                    if new_key not in _picked_keys:
+                        _gv0, _rv0 = _consensus_packages(
+                            give_ids, recv_ids, seed_value)
+                        _gap_info = {
+                            "player_id": s_pid, "side": side,
+                            "gap_before": round(abs(_gv0 - _rv0), 1),
+                            "gap_after": round(abs(_ngv - _nrv), 1),
+                        }
+                        _picked_keys.discard(
+                            (frozenset(give_ids), frozenset(recv_ids)))
+                        _picked_keys.add(new_key)
+                        give_ids, recv_ids = new_give, new_recv
+                        fairness = n_ratio
+                        u_s, o_s = _pair_surpluses(give_ids, recv_ids)
+                        hm = _harmonic_mean(u_s, o_s)
+                        composite = _composite_v2(hm, fairness, give_ids,
+                                                  recv_ids)
+                        if fit_paid is not None:
+                            fit_paid = None   # no longer a 1-for-1 shape
             _gv, _rv = _consensus_packages(give_ids, recv_ids, seed_value)
             card = TradeCard(
                 trade_id          = str(uuid.uuid4())[:8],
@@ -5039,6 +6645,8 @@ class TradeService:
                     "value_paid": fit_paid,
                     "position": getattr(p, "position", None) if p else None,
                 }
+            if _gap_info is not None:
+                card.gap_sweetener = _gap_info
             cards.append(card)
         return cards
 
@@ -5066,6 +6674,7 @@ class TradeService:
         not_interested_ids: set | None = None,
         raw_user_elo: dict[str, float] | None = None,
         presentment_ok_fn=None,              # G6 rules R1/R2/R3/R5; None = off
+        scoring_format: str = "1qb_ppr",     # gap-sweetener lineup feasibility
     ) -> list[TradeCard]:
         """Consensus-basis fallback cards for an opponent with NO rankings.
 
@@ -5151,6 +6760,41 @@ class TradeService:
         cards: list[TradeCard] = []
         seen: set[tuple] = set()
 
+        # 2026-08-21 gap auto-sweetener (sweetener_gap_threshold). Lazy
+        # import — the optimizer imports this module (top-level would
+        # cycle). `_gap_gates_ok` re-earns THIS path's gate stack for a
+        # sweetened combo; the helper itself checks gap, fairness band and
+        # lineup feasibility. ≤ 0 disables (arm A's pin).
+        _GAP_THR = _c("sweetener_gap_threshold")
+        from .trade_optimizer import close_value_gap as _close_gap
+
+        def _gap_gates_ok(g: list[str], r: list[str]) -> bool:
+            gvals2 = [seed_value(p) for p in g]
+            rvals2 = [seed_value(p) for p in r]
+            v_max2 = max(gvals2 + rvals2)
+            gv2 = package_value_v2(gvals2, v_max2, n_other=len(r),
+                                   other_values=rvals2)
+            rv2 = package_value_v2(rvals2, v_max2, n_other=len(g),
+                                   other_values=gvals2)
+            if gv2 <= 0 or rv2 <= 0:
+                return False
+            if not _both_ways and rv2 - gv2 < _c("user_gain_epsilon"):
+                return False
+            _f2 = _c("consolidation_raw_loss_frac")
+            if _f2 > 0 and len(g) > len(r):
+                raw_g = sum(gvals2)
+                if raw_g - sum(rvals2) > _f2 * raw_g:
+                    return False
+            if not user_gain_ok_1for1(g, r, raw_user_elo):
+                return False
+            if not pick_swap_ok(g, r, players, seed_value):
+                return False
+            if not filler_ok(g, r, _uval_raw, seed_value):
+                return False
+            if presentment_ok_fn is not None and not presentment_ok_fn(g, r):
+                return False
+            return True
+
         def _emit(give_ids: list[str], recv_ids: list[str]) -> None:
             # #174 package mode — the give pool is already restricted to
             # pinned players; 'all' additionally requires the FULL set in
@@ -5217,13 +6861,53 @@ class TradeService:
             if fairness < _thr:
                 return
             seen.add(key)
+            # 2026-08-21 gap auto-sweetener: this card passed every gate,
+            # but the ratio gate is scale-blind — close an absolute gap
+            # above the threshold by adding the smallest sufficient
+            # equalizer from the richer side's roster. An unclosable card
+            # is emitted as-is (the pass narrows gaps, never shrinks the
+            # deck).
+            _gap_info = None
+            if _GAP_THR > 0 and abs(gv - rv) > _GAP_THR:
+                closed = _close_gap(
+                    give_ids, recv_ids, seed_value=seed_value,
+                    gap_threshold=_GAP_THR, fairness_threshold=_thr,
+                    user_roster=user_roster,
+                    opp_roster=opponent.roster,
+                    players=players, scoring_format=scoring_format,
+                    untouchable_ids=untouchable_ids,
+                    not_interested_ids=not_interested_ids,
+                    # Round-2 review 2026-08-21: this path PRUNES its pools
+                    # (#174 pinned give players, FB-47 pinned acquire
+                    # targets, need-position receive filter) instead of
+                    # gating per combo, so the equalizer must come from the
+                    # SAME pools — otherwise a pinned "trade away G" job
+                    # could hand the user a card that also ships an
+                    # unpinned player, and an "acquire RB" job could hand
+                    # back an off-need receive asset. The full rosters
+                    # above still drive the 3.2 feasibility counts.
+                    give_candidates=give_pool,
+                    recv_candidates=recv_pool,
+                    extra_ok_fn=_gap_gates_ok)
+                if closed is not None:
+                    s_pid, side, n_give, n_recv, n_gv, n_rv, n_ratio = closed
+                    n_key = (frozenset(n_give), frozenset(n_recv))
+                    if n_key not in seen:
+                        _gap_info = {
+                            "player_id": s_pid, "side": side,
+                            "gap_before": round(abs(gv - rv), 1),
+                            "gap_after": round(abs(n_gv - n_rv), 1),
+                        }
+                        seen.add(n_key)
+                        give_ids, recv_ids = n_give, n_recv
+                        gv, rv, fairness = n_gv, n_rv, n_ratio
             # consensus_score_scale keeps fallback cards (no divergence
             # signal, mismatch 0) from outranking genuine divergence finds —
             # the two composites would otherwise live on different scales
             # (fairness×tier ≈ 1.6 vs surplus-blend ≈ 0.3–0.7).
             composite = (fairness * self._tier_mult_v2(shrunk_user_elo, give_ids + recv_ids)
                          * _c("consensus_score_scale"))
-            cards.append(TradeCard(
+            card = TradeCard(
                 trade_id          = str(uuid.uuid4())[:8],
                 league_id         = league_id,
                 proposing_user_id = user_id,
@@ -5239,7 +6923,10 @@ class TradeService:
                 # value space as the calculator) — drive the TradeValueBar.
                 give_value        = round(gv, 1),
                 receive_value     = round(rv, 1),
-            ))
+            )
+            if _gap_info is not None:
+                card.gap_sweetener = _gap_info
+            cards.append(card)
 
         # 1-for-1 first (most acceptable shape), then 2-for-1.
         for recv_id in recv_pool:

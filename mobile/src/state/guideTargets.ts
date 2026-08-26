@@ -58,3 +58,40 @@ export function subscribeGuideTargetsMoved(fn: GuideTargetsMovedListener): () =>
 export function notifyGuideTargetsMoved(): void {
   movedListeners.forEach((fn) => fn());
 }
+
+// ── Scroll-into-view (#384 device feedback, report 5) ──────────────────────
+// A spotlight can resolve onto a node that is off-screen, or onto one so close
+// to an edge that the avatar+bubble band has nowhere adjacent to sit. The
+// overlay cannot scroll the host itself — it does not own the container and
+// must not import a screen — so hosts register a minimal handle keyed by the
+// SCREEN NAME their steps declare (`GuideStep.screen`), and the overlay asks
+// that handle to bring the target into view.
+//
+// The handle is deliberately two functions, not a ScrollView ref: the overlay
+// works in absolute WINDOW coordinates and the container works in CONTENT
+// offsets, so it needs the host's current offset to convert between them. A
+// screen with no scroll container simply never registers, and the overlay's
+// lookup returns undefined — the same "degrade quietly" posture as a missing
+// target.
+
+export interface GuideScroller {
+  /** Scroll the container so its content offset becomes `y`. */
+  scrollTo: (y: number, animated?: boolean) => void;
+  /** The container's CURRENT content offset, so a window-space delta can be
+   *  turned into an absolute offset. */
+  getScrollY: () => number;
+}
+
+const scrollers = new Map<string, GuideScroller>();
+
+export function registerGuideScroller(screenKey: string, handle: GuideScroller): void {
+  scrollers.set(screenKey, handle);
+}
+
+export function unregisterGuideScroller(screenKey: string): void {
+  scrollers.delete(screenKey);
+}
+
+export function getGuideScroller(screenKey: string | undefined): GuideScroller | undefined {
+  return screenKey ? scrollers.get(screenKey) : undefined;
+}

@@ -151,7 +151,10 @@ def test_the_challenger_is_never_spelled_baseline():
     assert bo.ARM_CHALLENGER != bo.ARM_BASELINE
     # ARMS stays the historical three so Phase 3's fixtures do not shift.
     assert bo.ARMS == ("baseline", "current", "gen_v2")
-    assert bo.ALL_ARMS == ("baseline", "current", "challenger", "gen_v2")
+    # ALL_ARMS gains arm `fit` LAST (fit challenger, LLD §2.1 — `ARMS` stays
+    # the pinned historical fixture, HLD F-8).
+    assert bo.ALL_ARMS == ("baseline", "current", "challenger", "gen_v2",
+                           "fit")
     # …and it generates after `current` (which dark mode serves) but before
     # the historical reconstruction.
     order = list(bo.GENERATION_ORDER)

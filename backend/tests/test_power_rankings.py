@@ -22,8 +22,10 @@ import backend.database as db
 import backend.experiments as ex
 import backend.server as server
 from backend.database import metadata
-from backend.pick_values import pick_pool_value
+from backend.pick_values import pick_pool_value, priced_pool_value
 from backend.power_rankings import (
+    LINEUP_SLOT_ELIGIBILITY,
+    align_starter_slots,
     compute_power_rankings,
     optimal_starter_slots,
     optimal_starters,
@@ -360,6 +362,150 @@ def test_starter_slots_ignore_out_of_pool_slots_and_agree_with_starters():
             == sorted(optimal_starters(roster, slots)))
 
 
+# ---------------------------------------------------------------------------
+# #395 — align_starter_slots: pairwise-align two optimal_starter_slots
+# outputs so a value-identical lineup change displays the minimum honest set
+# of changed rows. Pure display transform — totals, starter sets, and slot
+# eligibility are invariant; scan order is pinned (before side first, (i, j)
+# ascending, restart on apply) so conforming implementations agree byte-fully.
+# ---------------------------------------------------------------------------
+
+# The #395 repro shape (PRD §1): Daniels (QB 9000) canonically owns the QB
+# slot, Maye (QB 6000) the SUPER_FLEX; the user reads it the other way.
+_395_TEMPLATE = ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "SUPER_FLEX"]
+_395_ROSTER = [
+    _row("daniels", "QB", 9000), _row("maye", "QB", 6000),
+    _row("rb_a", "RB", 2000), _row("rb_b", "RB", 1900),
+    _row("wr_a", "WR", 3600), _row("wr_b", "WR", 3400),
+    _row("wr_c", "WR", 3000),                    # FLEX starter both sides
+    _row("te_top", "TE", 3200),                  # dedicated TE both sides
+    _row("fannin", "TE", 2800),                  # benched until Daniels leaves
+]
+
+
+def _changed(before, after):
+    """Indices whose player_id differs between the two aligned sides."""
+    def pid(e):
+        return e["player"]["player_id"] if e["player"] else None
+    return [k for k, (b, a) in enumerate(zip(before, after))
+            if pid(b) != pid(a)]
+
+
+def test_align_starter_slots_superflex_cascade():
+    before = optimal_starter_slots(_395_ROSTER, _395_TEMPLATE)
+    after = optimal_starter_slots(
+        [r for r in _395_ROSTER if r["player_id"] != "daniels"], _395_TEMPLATE)
+    # Unaligned, the canonical fills cascade: QB daniels→maye AND SF
+    # maye→fannin — the phantom two-row display the user reported.
+    assert len(_changed(before, after)) == 2
+    assert before[0]["player"]["player_id"] == "daniels"
+
+    a_before, a_after = align_starter_slots(before, after)
+    # Aligned before matches the user's mental model: Maye at QB, Daniels
+    # at SUPER_FLEX — so exactly ONE row changes: SF, Daniels → Fannin.
+    assert a_before[0]["slot"] == "QB"
+    assert a_before[0]["player"]["player_id"] == "maye"
+    assert a_before[7]["slot"] == "SUPER_FLEX"
+    assert a_before[7]["player"]["player_id"] == "daniels"
+    assert _changed(a_before, a_after) == [7]
+    assert a_after[7]["player"]["player_id"] == "fannin"
+
+
+def test_align_starter_slots_wr_flex_cascade():
+    roster = [_row("wr_hi", "WR", 900), _row("wr_mid", "WR", 800),
+              _row("wr_low", "WR", 700), _row("wr_bench", "WR", 600)]
+    tmpl = ["WR", "WR", "FLEX"]
+    before = optimal_starter_slots(roster, tmpl)
+    after = optimal_starter_slots(
+        [r for r in roster if r["player_id"] != "wr_hi"], tmpl)
+    # Unaligned every row shifts up one — three changed rows.
+    assert len(_changed(before, after)) == 3
+    a_before, a_after = align_starter_slots(before, after)
+    # Aligned: the two WR rows are byte-equal before/after; the single
+    # changed row is the FLEX (departing wr_hi → backfilling wr_bench).
+    changed = _changed(a_before, a_after)
+    assert changed == [2] and a_before[2]["slot"] == "FLEX"
+    assert a_before[2]["player"]["player_id"] == "wr_hi"
+    assert a_after[2]["player"]["player_id"] == "wr_bench"
+    for k in (0, 1):
+        assert a_before[k] == a_after[k]
+
+
+def test_align_preserves_totals_and_eligibility():
+    def check_invariants(before, after, a_before, a_after):
+        for orig, aligned in ((before, a_before), (after, a_after)):
+            def total(rows):
+                return sum(e["player"]["value"] for e in rows if e["player"])
+
+            def ids(rows):
+                return {e["player"]["player_id"] for e in rows if e["player"]}
+            # Alignment does no arithmetic — totals byte-equal, sets equal.
+            assert total(aligned) == total(orig)
+            assert ids(aligned) == ids(orig)
+            assert [e["slot"] for e in aligned] == [e["slot"] for e in orig]
+            for e in aligned:
+                if e["player"] is not None:
+                    assert (e["player"]["position"]
+                            in LINEUP_SLOT_ELIGIBILITY[e["slot"]])
+
+    # Scenario A: the #395 shape. Scenario B: duplicate FLEX + SUPER_FLEX
+    # slots with a multi-asset trade.
+    dup_tmpl = ["QB", "RB", "WR", "TE", "FLEX", "FLEX",
+                "SUPER_FLEX", "SUPER_FLEX"]
+    dup_roster = _395_ROSTER + [_row("rb_c", "RB", 1500)]
+    scenarios = [
+        (optimal_starter_slots(_395_ROSTER, _395_TEMPLATE),
+         optimal_starter_slots(
+             [r for r in _395_ROSTER if r["player_id"] != "daniels"],
+             _395_TEMPLATE)),
+        (optimal_starter_slots(dup_roster, dup_tmpl),
+         optimal_starter_slots(
+             [r for r in dup_roster
+              if r["player_id"] not in ("daniels", "wr_a")], dup_tmpl)),
+    ]
+    for before, after in scenarios:
+        b_snap = [dict(e) for e in before]
+        a_snap = [dict(e) for e in after]
+        a_before, a_after = align_starter_slots(before, after)
+        check_invariants(before, after, a_before, a_after)
+        # Inputs not mutated; repeated calls byte-identical (pinned order).
+        assert before == b_snap and after == a_snap
+        assert align_starter_slots(before, after) == (a_before, a_after)
+
+    # Pinned mixed-flex fixture (PRD test 3, mandatory): the ONLY
+    # match-improving swaps are eligibility-invalid — before-side
+    # teQ → WRRB_FLEX (TE ∉ {RB,WR}); after-side rbR → REC_FLEX
+    # (RB ∉ {WR,TE}) — so a correct implementation applies nothing and
+    # both changed rows stand.
+    mixed_before = [{"slot": "WRRB_FLEX", "player": _row("wrP", "WR", 500)},
+                    {"slot": "REC_FLEX", "player": _row("teQ", "TE", 400)}]
+    mixed_after = [{"slot": "WRRB_FLEX", "player": _row("rbR", "RB", 450)},
+                   {"slot": "REC_FLEX", "player": _row("wrP", "WR", 500)}]
+    a_before, a_after = align_starter_slots(mixed_before, mixed_after)
+    check_invariants(mixed_before, mixed_after, a_before, a_after)
+    assert a_before == mixed_before and a_after == mixed_after
+    assert _changed(a_before, a_after) == [0, 1]
+
+
+def test_align_forced_change_is_noop():
+    # Trade the ONLY QB; the template has a second TE slot the roster cannot
+    # fill (before TE2 = None). The genuine forced change must survive
+    # exactly: the only zero-or-better swap is the INVALID net-0 QB ↔ TE2
+    # (+1 at QB, −1 at the vacated TE2), so alignment applies nothing.
+    roster = [_row("daniels", "QB", 9000), _row("te_top", "TE", 3200)]
+    tmpl = ["QB", "TE", "TE"]
+    before = optimal_starter_slots(roster, tmpl)
+    after = optimal_starter_slots(
+        [r for r in roster if r["player_id"] != "daniels"], tmpl)
+    assert before[1]["player"]["player_id"] == "te_top"
+    assert before[2]["player"] is None                  # unfillable TE2
+    a_before, a_after = align_starter_slots(before, after)
+    assert a_before == before and a_after == after      # no-op
+    assert _changed(a_before, a_after) == [0]           # exactly {QB}
+    assert a_before[0]["player"]["player_id"] == "daniels"
+    assert a_after[0]["player"] is None
+
+
 def test_derived_starters_follow_personal_basis_values():
     # On the caller's board rb2 outvalues rb1 — the optimal lineup must flip
     # with the basis, because starters are a function of the ranked values.
@@ -425,6 +571,19 @@ SEED_SF = {  # superflex pool seed — QBs pumped relative to 1QB
 # Owned-pick fixture rows: the load_draft_picks shape the /api/league/picks
 # route consumes, pool_value written the way sync writes it (pick_pool_value
 # with years_out = season - current season; current season 2026 here).
+#
+# ⚠️  D-148 (2026-08-21, closes Q-026) — the STORED value below is no longer
+# what the route SERVES. `_power_picks_by_owner` now prices each row through
+# `_priced_pick_value`, the same own-slot → round-curve → stored-ladder
+# waterfall the trade engine charges, so Power Rankings and a trade card can
+# no longer disagree about a pick. `_priced` is the expectation helper for
+# that; every literal in this file is re-derived through it against the DP
+# snapshot `conftest.py` pins, and the stored column survives as step 3.
+#
+# These fixtures resolve NO slot (`is_enabled` is patched False, so
+# `picks.slot_labels` is off and `_league_slot_order` returns None), which is
+# the round-curve branch. Per-slot pricing through a league surface is
+# covered in test_league_picks_tier.py's `slotted_client`.
 PICK_ROWS = [
     {"pick_id": f"{LEAGUE}_2026_1_1", "league_id": LEAGUE, "season": 2026,
      "round": 1, "owner_user_id": "u_a", "owner_username": "alice",
@@ -439,6 +598,20 @@ PICK_ROWS = [
      "is_traded": 0, "original_username": "bob",
      "pool_value": pick_pool_value(3, 0)},
 ]
+
+
+def _priced(season: int, rnd: int, years_out: int, fmt: str = "1qb_ppr") -> float:
+    """What a league surface SERVES for a pick, re-derived from the pricing
+    function rather than pinned as a bare number: `priced_pool_value` over a
+    row the sync wrote, with no slot resolved (these fixtures run flags-off).
+
+    Round-curve results under the pinned DP snapshot, for orientation —
+    2026 1st 1859.5 · 2026 2nd 434.0 · 2026 3rd 262.3 · 2027 2nd 389.7 —
+    against stored rungs of 2117.0 / 606.5 / 406.6 / 515.6."""
+    return priced_pool_value(
+        {"season": season, "round": rnd,
+         "pool_value": pick_pool_value(rnd, years_out, fmt)},
+        scoring_format=fmt, slot=None)
 
 
 class _EmptyBoardSvc:
@@ -521,7 +694,7 @@ def test_route_totals_reconcile_with_elo_to_value(client):
 
     exp_players = round(elo_to_value(SEED["qb1"]) + elo_to_value(SEED["rb1"])
                         + 0.0, 1)                       # k1 out of pool → 0
-    exp_picks = round(pick_pool_value(1, 0) + pick_pool_value(2, 1), 1)
+    exp_picks = round(_priced(2026, 1, 0) + _priced(2027, 2, 1), 1)
     assert abs(a["positions_value"] - exp_players) < 0.2
     assert abs(a["picks"]["value"] - exp_picks) < 0.2
     assert abs(a["total_value"] - (exp_players + exp_picks)) < 0.3
@@ -557,9 +730,16 @@ def test_route_superflex_uses_sf_seed(client):
     assert a["positions"]["QB"]["value"] > round(elo_to_value(SEED["qb1"]), 1)
 
 
-# (d) picks group == sum(pick_pool_value) == /api/league/picks data ---------
+# (d) picks group == sum(priced_pool_value) == /api/league/picks data -------
 
-def test_route_picks_group_matches_pick_pool_value_and_picks_route(client):
+def test_route_picks_group_matches_priced_pool_value_and_picks_route(client):
+    """D-148 (Q-026) — THE CROSS-SURFACE AGREEMENT TEST.
+
+    The second half was already here and already passed before D-148, because
+    both surfaces read the same stored column. Its teeth are new: the two now
+    have to agree on a number NEITHER of them stores, produced by the same
+    waterfall the engine charges. The first half pins that number literally,
+    so "they agree because both regressed to the ladder" fails."""
     _install_sess(_mk_sess())
     code, body = _get(client, f"/api/league/power-rankings?league_id={LEAGUE}")
     assert code == 200
@@ -567,13 +747,17 @@ def test_route_picks_group_matches_pick_pool_value_and_picks_route(client):
     b = next(t for t in body["teams"] if t["user_id"] == "u_b")
 
     assert a["picks"]["count"] == 2
-    assert a["picks"]["value"] == round(
+    assert a["picks"]["value"] == round(_priced(2026, 1, 0)
+                                        + _priced(2027, 2, 1), 1) == 2249.2
+    assert b["picks"]["value"] == round(_priced(2026, 3, 0), 1) == 262.3
+    # …and NOT the stored ladder, which is what this surface used to serve.
+    assert a["picks"]["value"] != round(
         pick_pool_value(1, 0) + pick_pool_value(2, 1), 1)
-    assert b["picks"]["value"] == round(pick_pool_value(3, 0), 1)
     labels = [i["label"] for i in a["picks"]["items"]]
     assert labels == ["2026 1st", "2027 2nd (from bob)"]
 
-    # Cross-check against /api/league/picks for the same fixture.
+    # Cross-check against /api/league/picks for the same fixture: same rows,
+    # same waterfall, same slot resolution ⇒ the same number per team.
     code2, picks_body = _get(client, f"/api/league/picks?league_id={LEAGUE}")
     assert code2 == 200
     for team in (a, b):
@@ -895,14 +1079,31 @@ _PICKS_306 = [
      "round": 2, "owner_user_id": "u_a", "owner_username": "alice",
      "is_traded": 1, "original_username": "bob",
      "pool_value": pick_pool_value(2, 0)},
-    # D-084 (2026-08-19): u_a also holds a 3rd. It is what keeps the
+    # D-084 (2026-08-19): u_a also holds 3rds. They are what keeps the
     # dollar-space sabotage trap below sharp — the literal scale prices a
-    # 3rd at exactly 0, the dollar scale at 406.6, so the two answers
+    # 3rd at exactly 0, the dollar scale at 262.3, so the two answers
     # diverge. Before D-084 two 2nds alone were enough to split them; the
     # round-2 deflation moved the engine's 2nd:1st ratio to 0.287, which is
     # within 0.001 of the #285 literal weight of 1/3.5 = 0.286, so two 2nds
     # now agree in BOTH scales and no longer trap anything.
+    #
+    # D-148 (2026-08-21) WIDENED THE GAP THIS FIXTURE HAS TO CROSS. The
+    # market curve deflates a current-year 2nd (606.5 → 434.0) and 3rd
+    # (406.6 → 262.3) while the "firsts" denominator stays the ladder's Mid
+    # 1st, so ONE 3rd no longer separates the scales: 2 seconds + 1 third is
+    # 1130.3 dollars ⇒ "≈0.5 firsts", the same answer the literal count
+    # gives. Re-derived to THREE thirds — 1654.9 dollars ⇒ "≈1 firsts"
+    # against the literal "≈0.5 firsts" — which restores the divergence the
+    # trap is made of. Two thirds would not: 1392.6 still rounds to ≈0.5.
     {"pick_id": f"{LEAGUE}_2026_3_1", "league_id": LEAGUE, "season": 2026,
+     "round": 3, "owner_user_id": "u_a", "owner_username": "alice",
+     "is_traded": 0, "original_username": "alice",
+     "pool_value": pick_pool_value(3, 0)},
+    {"pick_id": f"{LEAGUE}_2026_3_3", "league_id": LEAGUE, "season": 2026,
+     "round": 3, "owner_user_id": "u_a", "owner_username": "alice",
+     "is_traded": 0, "original_username": "alice",
+     "pool_value": pick_pool_value(3, 0)},
+    {"pick_id": f"{LEAGUE}_2026_3_4", "league_id": LEAGUE, "season": 2026,
      "round": 3, "owner_user_id": "u_a", "owner_username": "alice",
      "is_traded": 0, "original_username": "alice",
      "pool_value": pick_pool_value(3, 0)},
@@ -919,8 +1120,9 @@ def test_picks_value_label_literal_count(client):
     base 0.0) — never a conversion of the dollar-priced `picks.value`.
     Dollar-space sabotage trap: computing the label from `picks.value`
     yields "≈1 firsts" for u_a here, not the literal "≈0.5 firsts" — the
-    divergence is carried by his 3rd, which the literal scale prices at 0
-    and the dollar scale at 406.6 (see the fixture note on _PICKS_306)."""
+    divergence is carried by his three 3rds, which the literal scale prices
+    at 0 apiece and the dollar scale at 262.3 apiece (see the fixture note
+    on _PICKS_306, re-derived at D-148)."""
     with patch.object(server, "load_draft_picks",
                       lambda league_id=None, **kw:
                       [dict(p) for p in _PICKS_306]
@@ -941,9 +1143,13 @@ def test_picks_value_label_literal_count(client):
     # the client's count>0 gate decides whether the segment renders).
     assert b["picks"]["value_label"] == "≈0 firsts"
 
-    # And the dollar-priced `picks.value` itself is untouched.
+    # And the dollar-priced `picks.value` is the PRICED sum (D-148), not the
+    # stored ladder — pinned literally so a regression to either the ladder
+    # or a different fixture shape fails here rather than silently.
     assert a["picks"]["value"] == round(
-        2 * pick_pool_value(2, 0) + pick_pool_value(3, 0), 1)
+        2 * _priced(2026, 2, 0) + 3 * _priced(2026, 3, 0), 1) == 1654.9
+    assert a["picks"]["value"] != round(
+        2 * pick_pool_value(2, 0) + 3 * pick_pool_value(3, 0), 1)
 
 
 def test_picks_value_label_present_with_default_fixture(client):

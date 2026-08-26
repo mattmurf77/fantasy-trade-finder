@@ -322,7 +322,6 @@ export async function saveTiers(
   position: Position,
   tiers: Record<string, string[]>,
   clearedPids: string[] = [],
-  demotedPids: string[] = [],
   // rookie-draft M2: a SCOPED save writes only part of the board. The
   // server answers it with the merged-band rule (merge the scoped pids into
   // the band's current full order, spread over the FULL merged list,
@@ -333,18 +332,27 @@ export async function saveTiers(
   // ranked count, quicksetProgress's cache and #244 launch routing, and a
   // rookies-only pass has not completed a position. `via` is the forensic
   // tag the board-restore procedure keys off.
-  opts?: { scope?: RankScopeParam; via?: 'rookie_tiers' | 'rookie_quickset' | 'rookie_anchors' },
+  //
+  // `via:'quickset'` (2026-08-24) is the UNSCOPED Quick Set walk's tag. The
+  // server has branched on it since analytics P0 (FR-20 `quickset_completed`,
+  // `_note_ranking_method` → 'quickset') but no client ever sent it, so both
+  // reads were dark for every mobile Quick Set save. It rides the same
+  // whitelist as the rookie tags; an old server ignores unknown values by
+  // falling back to 'tiers', so this is safe against any deploy skew.
+  opts?: {
+    scope?: RankScopeParam;
+    via?: 'quickset' | 'rookie_tiers' | 'rookie_quickset' | 'rookie_anchors';
+  },
 ) {
-  // demoted_pids (#161): players the user explicitly passed over during a
-  // Quick Set tier save — the backend pins them below every tier band
-  // (unranked) instead of letting them silently keep their old tier. Under
-  // scope this is bounded to the VISIBLE subset (operator decision O4): an
-  // unshown vet is never demoted, because it was never on screen to pass over.
+  // HOLD contract (D-160, #346/#381 — supersedes #161): a save touches only
+  // the pids in `tiers` and `cleared_pids`. Players visible but unselected
+  // during a Quick Set rung keep their current tier — the client no longer
+  // computes or sends a demote list, and the backend ignores the legacy
+  // `demoted_pids` key from old binaries (v1.10.0–v1.16.x).
   return api.post<any>('/api/tiers/save', {
     position,
     tiers,
     cleared_pids: clearedPids,
-    demoted_pids: demotedPids,
     ...(opts?.scope ? { scope: opts.scope } : {}),
     ...(opts?.via ? { via: opts.via } : {}),
   });

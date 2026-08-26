@@ -7,6 +7,8 @@
 ---
 
 ## Table of Contents
+- [2026-08-22 — Open Items (trade-model restrictiveness)](#2026-08-22--open-items-trade-model-restrictiveness)
+- [2026-08-22 — Open Items (#384 merged calculator)](#2026-08-22--open-items-384-merged-calculator)
 - [2026-08-19 — Open Items (team review)](#2026-08-19--open-items-team-review)
 - [2026-08-19 — Open Items (bake-off outlook lane)](#2026-08-19--open-items-bake-off-outlook-lane)
 - [2026-08-19 — Open Items (round-2 pick recalibration)](#2026-08-19--open-items-round-2-pick-recalibration)
@@ -23,6 +25,76 @@
 - [Conventions](#conventions)
 
 ---
+
+## 2026-08-22 — Open Items (trade-model restrictiveness)
+
+### Q-030 — Three operator calls raised by the restrictiveness review; none are model decisions
+- **Why it matters:** [`docs/reviews/2026-08-22-trade-model-restrictiveness.html`](../docs/reviews/2026-08-22-trade-model-restrictiveness.html) ranks eleven fixes, and three of them are product or budget decisions an agent must not make alone. The review is read-only; no engine line changed.
+- **(a) Is the app allowed to suggest a trade the viewer loses slightly?** Today, on the consensus path (~84.5% of served cards), every card must favour the viewer. Dropping that and raising the fairness floor to 0.75 caps either side's loss at exactly 25% — but ~61% of resulting cards ask the viewer to pay. That is a **different product promise**, and it needs card copy that states it. A gentler middle setting exists (≈+18% deck, 31% viewer-pays). See report R11.
+- **(b) How much deck share should `gen_v2` get, and for how long?** The bake-off is serving in prod (`bakeoff_serve_interleaved = 1`) and `gen_v2` is liked at 57% vs `current` 18% — but n=30, one user supplies two-thirds of the likes, and its cards sit deeper in the deck where like rates are naturally higher. The cheapest high-value action available is more volume, not more code. Costs nothing to run; costs deck quality if the signal is wrong. See report R2.
+- **(c) Which comes first — partner coverage or pool depth?** Generation breaks at `global_target`, so a 12-team deck reaches a median **6 of 11** partners. Raising it (R1) and raising `v3_pool_size` (R5) each roughly double generation time, and the per-opponent loop is a plain serial `for` (`trade_service.py`). **Do one, not both**, until that loop is parallelised. Which one is a latency-budget call.
+- **Second-read addendum (2026-08-22, [`second-read.html`](../docs/reviews/2026-08-22-trade-model-second-read.html)):** (c) now has a zero-cost alternative — rotate the unranked-member visiting order per deck (R0) before spending latency on R1; logged `gen_ms` p90 is already 5.3 s. (b) should be graded on **match rate** (baseline 3.2% of likes) and partner-side likes, not viewer likes — consensus cards are liked 30% vs divergence 19% purely because the viewer wins them. (a) has early evidence: the challenger's consensus cards are liked 45% vs current's 23% (n=20).
+- **Action to unblock:** operator reads the report and answers (a), (b), (c). (b) can start immediately and independently of the other two.
+- **Discovered by:** the 2026-08-22 restrictiveness review (three parallel code audits + read-only prod telemetry over all 10,560 served cards).
+- **Owner:** operator.
+
+## 2026-08-22 — Open Items (#384 merged calculator)
+
+### Q-028 — §6b: does the merged surface REPLACE the manual calc tab, or sit beside it as a second tab?
+
+- **Why it matters:** round-2 ruling 3 (2026-08-22) reads *"the new surface replaces the manual calc tab and lives within the league calc"*. The build kept **two** tabs — `In league` | `Real values` — and defaults to **Real values** on a cold open (`TradeCalculatorScreen.tsx`: `useState(prefill ? 'league' : 'live')`). The plan recorded this as a stated assumption needing a yes/no ([`plan.md` §6b](../docs/feedback/items/384-calc-finder-merge/plan.md)); nobody ever answered it, and W0–W5 built to the assumption.
+- **The #310 consequence, which is why this is not cosmetic:** #310 is the report that asked for the calculator to stop being locked behind the trades flow, and `TradesScreen.tsx` records the resulting intent verbatim — *"Calculator … is always reachable — it needs no league"*. The `Real values` tab **is** that reachability: it is the league-free calculator. Collapsing to one page in the ruling's literal sense would delete it and re-answer #310 in the opposite direction. Keeping both tabs honours #310 but leaves ruling 3 half-executed — the merged surface exists *alongside* the manual calc rather than replacing it.
+- **The tour consequence:** the whole walkthrough opens with **n10** — *"Two ways to build a trade. Tap In league to use your real roster."* — an `advance: 'action'` beat that moves only when the user switches tabs, and a run that is ✕-ed there ends the tour (`calcTour.ts` `onBeatComplete`, `slot === 'n10' && via !== 'advance'`). One page means n10 has nothing to point at and the tour needs a new opening beat. It also means a zero-league user has no second tab at all, and today's mode row still renders a single lonely chip for them (e2e review P2 #14, unfixed).
+- **What is unclear:** whether *"replaces the manual calc tab"* meant "the merged layout is what the In-league tab now is" (which is exactly what was built, and then the question is closed as a no-op) or "there is one calculator page, no tabs".
+- **Action to unblock:** operator reads the two sentences above and picks. If it is one page, W6 needs: the mode row deleted, a new opening beat, a #310 re-answer, and a decision about league-less users.
+- **Discovered by:** the #384 plan (§6b) and re-raised by the [2026-08-22 e2e review](../docs/feedback/items/384-calc-finder-merge/review-2026-08-22-e2e.md) spec-traceability table, which marks §6b **still open**.
+- **Owner:** operator. Not blocking the flag flip — the built form works either way — but it *is* blocking a truthful "#384 is done".
+
+**CLOSED 2026-08-22 by [D-151](DECISIONS.md).** Operator: *"I'm fine with it as its own tab for now."* The two-tab form (In league | Real values) as built is the answer; #310's league-free reachability stands; n10 keeps its target. Revisit when Find a Trade is absorbed.
+
+### Q-029 — The ✓ like/queue cell has no contract: what does "queue this trade for the other manager" call? — **CLOSED 2026-08-22 (both halves)**
+
+- **RESOLUTION — the ✓ half, 2026-08-22 (W6-A, [D-152]).** The operator approved building the
+  contract; option (b), a new endpoint, is what shipped as **`POST /api/trades/queue`**. The
+  reading that made it small: the operator's sentence names two systems that already exist —
+  "queue this trade" IS the deck's like (same `trade_decisions` row, same `_reconstruct_swipe_card`
+  → `record_decision` path) and "shows up in their suggested trades" IS the likes-you injector,
+  which reads exactly those rows. So the route mints no new object; a **deterministic** `calcq_`
+  trade_id derived from the package solves the "a canvas has no server-minted id" problem the
+  paragraph below treats as fatal. And because every gate the injector applies is a pure function
+  of state the request already holds, the route evaluates "meets their preferences" **up front**
+  and refuses with a named reason, recording nothing — which is what the operator's *if* actually
+  demands. Contract, evidence and the honest limits of `queued: true`:
+  [`status.md` § W6-A](../docs/feedback/items/384-calc-finder-merge/status.md). Beat n15's copy
+  needed no change, and its placeholder `adoptionEvent` is now `calc_trade_queued`.
+- **RESOLUTION — the receive-side half, 2026-08-22 (W6-B, [D-153]). CLOSED BY RETIREMENT: the
+  concept no longer exists.** The operator re-specified the request rather than answering it.
+  Verbatim: *"I'm thinking that this type of request shouldn't go through our models. It should be
+  a much simpler set of cards solving for fairness only. Similar to how we determine the
+  consolidate and downgrade suggestions already"* — and, on what Include-players OFF should mean,
+  *"C works"*, i.e. the toggle is dropped and the canvas is always the anchor.
+  So there is no longer a pinned model job for `pinned_receive_mode:'all'` to be added to. A
+  filled canvas now runs **`POST /api/trades/fair-packages`**: the canvas GIVE side is an EXACT
+  anchor (every served card gives away precisely that set — stricter than `pinned_give_mode:'all'`
+  ever was, because nothing may be added either), and the receive side is a **ranking preference**
+  — ideas containing all of it sort first, ideas that cannot are still served. That asymmetry is
+  now a decision with a reason rather than an oversight: a hard receive constraint returns an empty
+  deck the moment the canvas names an asset the partner does not own.
+  The **`picks_pool_cap` half dissolves with it.** The anchor is priced from the seed board and is
+  never re-checked against `user_roster`, so a canvas pick outside the cap cannot reject every
+  subset any more — there is no subset search on the give side at all.
+  `POST /api/trades/generate` and its three enumerators are **untouched**: `pinned_give_mode` and
+  the intersect-only receive behaviour are exactly as they were for every non-calculator caller.
+  Contract and evidence: [`status.md` § W6-B](../docs/feedback/items/384-calc-finder-merge/status.md),
+  [`api-reference.md`](../docs/api-reference.md).
+- **Why it mattered (original entry, kept):** the merged action row's ✓ (`calc.action.confirm`) was a **permanently disabled control**. `InLeagueCalculator.tsx` has `disabled={!onLikeTrade || !bothSides}`, and no caller passes `onLikeTrade` — `TradeCalculatorScreen` mounts the component without it. Tour beat **n15** spotlights it (*"The check queues this trade for the other manager, if it fits their preferences"*), [D-150](DECISIONS.md) Decision 3 and `status.md` both presented it as built, and the first TestFlight checklist told the operator to tap it and VoiceOver it. A user who follows the tour reaches a 40 %-opacity button that does nothing.
+- **Why it cannot just be wired:** there is no backend route that queues a **hand-built** package for a counterparty. The deck's like path (`trade_queue` / the likes surface) needs a **server-minted `trade_id`**, which only the generator produces; a calculator canvas has no card and therefore no id. This is an **API contract decision**, not an omission — the bright line CLAUDE.md draws.
+- **The options:** (a) mint via the existing share-package route (`POST /api/trades/share-package` returns a package id) and then like that id — cheapest, but a share-package row is not a trade card and the likes surface would need to render one; (b) a new "submit package as like" endpoint that mints and queues in one call — cleanest contract, most work, and it needs a mutual-match story (what does the counterparty *see*?); (c) **cut the cell and beat n15** until (a) or (b) exists, and correct D-150 / status / checklist — the option that makes the shipped surface honest today.
+- **Second half of the same decision — receive-side "must include".** Ruling 2 says Include-players ON ⇒ the search must include the canvas. The give side honours it (`trade_optimizer.py` `pinned_give_mode:'all'` — every pin required); the receive side requires only that the served card **intersect** the pinned set, in all three enumerators. Making it symmetric means adding `pinned_receive_mode:'all'` through `api/trades.ts` → `server.py` → the enumerators — again an API change. Related: a canvas pick outside `picks_pool_cap` (default 6) is never on `user_roster`, so `pinned_all` rejects every subset and the user gets zero cards behind a misleading "try turning fairness off" message.
+- ~~**Workaround in the meantime:** the cell renders disabled with an honest a11y state, and the TestFlight checklist now tests that it *is* disabled rather than telling the operator to tap it.~~ **Superseded 2026-08-22** — the cell is live, and checklist steps 13 / 13a / 13b test the queue and both refusal paths instead.
+- **Owner:** both halves **closed**. What is left of #384's bright-line list is not this question:
+  the overlay scope (built calculator-origin; reversing it needs an explicit call) and the rollout
+  shape (global boolean vs the `trades_home_inline` tester-allowlist path).
 
 ## 2026-08-19 — Open Items (team review)
 
@@ -138,6 +210,7 @@ it would change Chasing/Shopping too. Worth watching once #360 is lit.
   - **Status:** direction ruled, implementation queued in `NEXT.md`. Not blocking D-090.
 
 ## 2026-08-19 — Open Items (pick ladder, rounds 3-4)
+- **CLOSED 2026-08-21 by [D-146](DECISIONS.md) — both halves, shipped (PR #167 `3192d13`).** Operator: *"Market slots should be default and not an opt-in or even an option to flip. Aligned that future picks stay default for now."* — clarified same day as true per-slot pricing ("each pick holding real value rather than generic"). Current-year resolved-order picks price at their own DP slot row; unresolved → round market curve; future years → generic rung (falls out of the data, no branch).
 
 ### Q-021 — Should `seed_elo_for_value`'s floor compression be re-anchored so 3rds and 4ths reach market-equivalent player ranks?
 - **Why it matters:** the surviving half of Q-019. Our Mid 3rd is worth the **165th** asset against a market median of **231.5**, and our Mid 4th the 228th against 296 — errors of 67 and 68 ranks. They are unreachable from the pick ladder because the seed map has almost no resolution down there (54.9 Elo across ranks 200–300; the market-implied Elo for a Mid 4th, ≈1207, sits **inside** the `waivers` band).
@@ -166,6 +239,7 @@ it would change Chasing/Shopping too. Worth watching once #360 is lit.
 ---
 
 ## 2026-08-15 — Open Items (compressed-board pool prune)
+- **CLOSED 2026-08-24 (operator re-ruling → [D-161](DECISIONS.md)):** MangoPatti's field report surfaced exactly this seam — `market_slots` had reinstated the market's future-first discount D-079 ruled against. Operator, verbatim: *"The ideal solution is the D-079 ruling."* Future-year round-1 now floors at the current-year mid (`market_r1_yoy_floor`, default 1.0; 0 = pure market). The market-disagreement evidence above stands unrefuted; the call is a product ruling, made twice with that evidence in view.
 
 ### Q-017 — Should the pool prune quantile-match the two boards instead of rescaling them?
 - **Why it matters:** `trade.pool_calibration` ([D-052](DECISIONS.md)) removes a board-wide *offset* with a single multiplicative factor. That is exactly right for the pathological case it was built for, and it is enough to rescue gdubs10 (0 → 5 divergence cards on real prod boards). It is **not** enough for MangoPatti or Bcork, which still yield zero divergence cards and are only covered by the consensus fallback. The reason is structural: a floor-pinned board is closer to `value_u^a` (a < 1) than to `c · value_u`, and no single factor undoes an exponent. Those two members therefore get generic fair-value ideas where a large-enough pool finds real divergence trades (`v3_pool_size = 30` produces 5 divergence cards for each — at 26–102 s per pair, which is why it isn't the fix).
@@ -260,16 +334,16 @@ it would change Chasing/Shopping too. Worth watching once #360 is lit.
 - **Owner:** operator.
 - **Asked on:** 2026-05-21.
 
-### Q-009 — Mascot decision (Tommy Tumble vs Ricky Rumble vs other)
-- **Why it matters:** branding direction. The mascot concept (running back mid-fumble) is settled; the name isn't. Per [`../context.md`](../context.md): top candidates are "Tommy Tumble" or "Ricky Rumble."
-- **Action to unblock:** pick. Maybe poll a few dynasty friends.
-- **Workaround in the meantime:** no mascot in current UI.
-- **Owner:** operator.
-- **Asked on:** 2026-05-21.
+### ~~Q-009~~ — Mascot decision (Tommy Tumble vs Ricky Rumble vs other) — **RESOLVED 2026-08-22**
+- **Resolution:** **neither — the ram.** The question's premise ("the concept is settled, only the name isn't") was false: the shipped app icon, splash and notification icon are a ram, not a running back mid-fumble. [D-155](DECISIONS.md) makes the ram the mascot and the guide avatar, names it **Fleeced** after the product, and retires the fumbling-RB concept unbuilt. Asked 2026-05-21; open 15 months against a product that had already answered it.
 
 ---
 
 ## Closed Questions (kept for cross-reference)
+
+### Q-009 — Mascot decision (Tommy Tumble vs Ricky Rumble vs other)
+- **Resolution (2026-08-22, [D-155](DECISIONS.md)):** **Neither.** The mascot is the **ram** already shipping as `mobile/assets/icon.png` / splash / notification icon, named **Fleeced** after the product. The fumbling-running-back concept both brand docs described was never built and is retired. Which of the six "The Analyst" copy strings take the character name vs the role name is deferred to build time.
+- **Lesson:** the question tracked a *name* for 15 months while the *concept* it assumed had already been contradicted by the shipped artwork. An open question whose premise cites a doc should be re-checked against the product, not the doc.
 
 ### Q-019 — Rounds 3/4 badge above their round: do we open the seed map?
 - **Resolution (2026-08-19, [D-088](DECISIONS.md)):** **No.** The badge was a wrong inverse, not a price. `GET /api/league/picks` inverted `pool_value` (stored in `elo_to_value` units) with `data_loader.seed_elo_for_value`, which inverts DynastyProcess's raw 0-10000 scale instead. The two maps agree at exactly Elo 1548.0 and diverge either side, inflating every rung below a mid-1st — Mid 3rd 1320 → **1383.5** (+63.4), Mid 4th 1240 → 1339.3 (+99.3) — so 1383.5 cleared D-084's new `second` floor of 1370. The pick's real price is Elo 1320, **45 points inside `third`**. Fixed with `trade_service.value_to_elo`; no seed, band, client mirror or stored price moved. Memo: [docs/reviews/2026-08-19-pick-badge-scale.md](../docs/reviews/2026-08-19-pick-badge-scale.md).
@@ -302,3 +376,19 @@ it would change Chasing/Shopping too. Worth watching once #360 is lit.
 - **Each item has:** why it matters, action to unblock, workaround, owner, ask date.
 - **Closed items move to the "Closed" section** with a one-line resolution.
 - **Don't delete.** Even resolved questions carry information about why decisions were made.
+
+### Q-026 — League surfaces price picks on the stored ladder while the engine prices per-slot
+**Raised:** 2026-08-21 (slot-pricing ship, scope §6 waiver 2). Power Rankings (`_power_picks_by_owner`) and `GET /api/league/picks` still read `draft_picks.pool_value`; the engine now prices per-slot. Worst live case: a 2026 1.01 reads **2117.0** on Power Rankings and **4867.1** on a trade card (+130%).
+**RULED-DEFERRED (operator, 2026-08-21):** *"I want the league values to reflect the same pick values.. But let's defer that until after finishing this one."* League-surface alignment is the committed next build: route both surfaces through `priced_pool_value` with the same D-090 resolution, re-derive `test_league_picks_tier.py` badges, watch `_user_pick_share` and Power-Rankings pick totals.
+
+**CLOSED 2026-08-21 by [D-148](DECISIONS.md)** (PR [#169](https://github.com/mattmurf77/fantasy-trade-finder/pull/169), `70ae4f4`). `_power_picks_by_owner`, `GET /api/league/picks` and `_roster_eveners` now price through `server._priced_pick_value` — the same `priced_pool_value` waterfall and the same D-090 resolution the engine uses — guarded bidirectionally by an AST walk over the five known call sites. The 1.01's 2117.0-vs-4867.1 split is gone. `test_league_picks_tier.py` re-derived (7 → 12 tests, badges moved as designed); Power Rankings pick totals move +12.4 % to −40.3 % by draft slot, −22.1 % league-wide, and `roster_history` steps at the merge (an ADR-011 boundary, append-only, nothing recomputed). Two residues, both raised rather than buried: pick-SHARE ratios stay on the legacy scale (scope §6 waiver 3) and the non-12-team board/engine mismatch became **Q-027**.
+
+### Q-027 — Board and engine map non-12-team leagues onto DP's curve differently
+
+**Q-027 — The Draft Room board and the engine map non-12-team leagues onto DP's curve differently**
+
+**Raised:** 2026-08-21 (D-148 / league-pick-value-alignment scope §6 waiver 2). DynastyProcess publishes exactly one 12-team slot curve. `draft_board_service._basis_slot` maps a smaller league onto it by percentile within the round (plan O3, ends anchored), so a 10-team league's last first displays as the **1.12 → 820.8**. `pick_values.market_pick_slot_value` has no league size and looks the slot number up literally, so the same pick prices as the **1.10 → 1069.8** — a 30 % disagreement between a league's own board and its own trade cards. The mirror case: a 14-team league's 1.13/1.14 have no DP row, fall to the round curve (1859.5), and therefore price *above* that league's 1.12.
+
+Pre-D-148 this lived only in the engine; D-148 spread it to Power Rankings, `/api/league/picks` and the eveners, which is why it is now worth a decision. Pinned by `test_league_pick_value_alignment.py::test_non_twelve_team_boards_disagree_and_that_is_pinned_not_fixed` so neither mapping can drift silently.
+
+**Options:** (a) route `market_pick_slot_value` through `_basis_slot` — needs league size threaded into `priced_pool_value`, and reprices the engine in every non-12-team league; (b) drop `_basis_slot` and map the board literally — cheaper, but prices a 10-team league's last first as if four more teams existed; (c) accept — a 12-team curve on a 10-team league is an approximation either way, and the board already flags itself `slot_value_approx`. **Needs an operator call.** 12-team leagues are exact under all three.

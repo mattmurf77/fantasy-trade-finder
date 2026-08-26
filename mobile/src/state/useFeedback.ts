@@ -5,11 +5,13 @@ import { submitFeedback, getMyFeedback, CLOSED_FEEDBACK_STATUSES, type FeedbackS
 // In-app feedback capture (TestFlight-era helper).
 //
 // Local AsyncStorage is still the source of truth from the user's POV —
-// every save lands on-device immediately and never blocks the UI. A
-// background POST to /api/feedback then mirrors the note into the backend
-// store; `synced` tracks whether the round-trip succeeded. Failures are
-// silent except for the badge in FeedbackInboxScreen, and `retrySync()`
-// + the App.tsx AppState foreground hook re-attempt unsynced items.
+// every save lands on-device immediately, before anything touches the
+// network. A POST to /api/feedback then mirrors the note into the backend
+// store; `synced` tracks whether the round-trip succeeded. `add()` awaits
+// that POST and resolves with the item's final sync state so the compose
+// sheet can keep the draft when delivery failed; elsewhere failures stay
+// quiet apart from the badge in FeedbackInboxScreen, and `retrySync()` +
+// the App.tsx AppState foreground hook re-attempt unsynced items.
 
 export type FeedbackSeverity = 'bug' | 'polish' | 'idea';
 
@@ -52,6 +54,10 @@ interface FeedbackState {
   items: FeedbackItem[];
   hydrated: boolean;
   hydrate: () => Promise<void>;
+  /** Save a note locally, then attempt the backend POST. Resolves with the
+   *  item in its FINAL state — `synced` true, or false with
+   *  `last_sync_error` set — so the caller can tell a delivered note from
+   *  one that is only on this device. Never rejects. */
   add: (entry: Omit<FeedbackItem, 'id' | 'created_at' | 'synced'>) => Promise<FeedbackItem>;
   remove: (id: string) => Promise<void>;
   clear: () => Promise<void>;
@@ -154,18 +160,20 @@ export const useFeedback = create<FeedbackState>((set, get) => ({
     set({ items: next });
     await persist(next);
 
-    // Fire-and-forget background sync. Resolves into a patch on the item;
-    // we never throw to the caller — UI shouldn't care whether the POST
-    // landed (the badge will reflect it). Use an IIFE so we don't await.
-    void (async () => {
-      const patch = await _syncOne(item);
-      const current = get().items;
-      const merged = current.map((i) => (i.id === item.id ? { ...i, ...patch } : i));
-      set({ items: merged });
-      await persist(merged);
-    })();
+    // Awaited (not fire-and-forget) so the resolved item tells the truth
+    // about delivery. The compose sheet needs that answer before it decides
+    // whether to clear the user's draft — the old background IIFE always
+    // resolved `synced: false`, so a rejected note (e.g. the backend's
+    // `text_too_long`) looked exactly like a successful one and the draft
+    // was destroyed. `_syncOne` swallows its own errors, so this still
+    // never rejects; the local copy above is already durable either way.
+    const patch = await _syncOne(item);
+    const current = get().items;
+    const merged = current.map((i) => (i.id === item.id ? { ...i, ...patch } : i));
+    set({ items: merged });
+    await persist(merged);
 
-    return item;
+    return { ...item, ...patch };
   },
 
   remove: async (id) => {

@@ -37,7 +37,7 @@ There is no simulator or Maestro step — retired 2026-08-15 (D-056). Runtime pr
 | `app.json` / `app.config.js` / `eas.json` | Expo config, test-harness env layer, EAS build + submit profiles |
 | `src/api/` | 26 HTTP client modules — FTF backend, Sleeper, ESPN, MFL, Fleaflicker |
 | `src/components/` | 77 shared components + `chalkline/` (design-system primitives), `analyst/` (mascot poses), `draft/` (Draft Room / Mock pieces) |
-| `src/data/` | `tradeCalcMock.ts` — demo-mode calculator fixtures |
+| `src/data/` | `calcTypes.ts` — shared calculator asset types |
 | `src/hooks/` | 6 cross-cutting hooks (push, scoring format, resume recovery, reduced motion, app-active, what's-new) |
 | `src/navigation/` | `RootNav`, `TabNav`, rank-chooser model, scroll-to-top registry |
 | `src/observability/` | `sentry.ts` — no-ops without a DSN |

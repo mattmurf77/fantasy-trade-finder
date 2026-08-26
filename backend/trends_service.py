@@ -11,7 +11,8 @@ Exposes three pure-functional helpers consumed by the new
                                      league-wide community consensus, plus
                                      Top-5-above / Top-5-below splits.
 
-  2. compute_consensus_gap         — per-player gap = user_elo - community_elo.
+  2. compute_consensus_gap         — per-player edge vs the market: sells are
+     community_elo - user_elo, buys are user_elo - owner_elo. Both positive.
                                      Surfaces "easiest sells from your roster"
                                      (user values > market) and "easiest buys
                                      not on your roster" (user values > owner).
@@ -320,6 +321,8 @@ def compute_consensus_gap(
           "has_baseline":      bool,
           "baseline_user_count": int,
           "easiest_sells":     [ {player_id, name, position, user_elo, community_elo, gap, score}, ... ],
+                              gap = community_elo - user_elo (> 0): the market pays
+                              more for him than your board says he is worth.
           "easiest_buys":      [ {player_id, name, position, user_elo, owner_elo, owner_username, gap, score}, ... ],
         }
     """
@@ -384,9 +387,18 @@ def compute_consensus_gap(
         except (TypeError, ValueError):
             continue
         c   = community_elo[pid]
-        gap = u - c
+        # #367 — the sell edge is the market sitting ABOVE your board, not
+        # below it. A player you rate higher than the league is the one the
+        # league will NOT pay your price for; the surplus you can actually
+        # capture on a sale is `community - user`. Shipped inverted
+        # (`u - c`), which is how the Team Review card came to promise
+        # "someone pays you more than you think" over exactly the players
+        # nobody would overpay for. `gap` stays a POSITIVE edge magnitude,
+        # matching easiest_buys, so every renderer that prints `+gap` is
+        # still correct.
+        gap = c - u
         if gap <= 0:
-            # Only surface players where YOU value them ABOVE the market.
+            # Market at or below your board: no surplus to capture.
             continue
         u_rank = user_overall.get(pid)
         c_rank = comm_overall.get(pid)
@@ -398,13 +410,14 @@ def compute_consensus_gap(
             "community_elo": round(c, 1),
             "gap":           round(gap, 1),
             "score":         _normalise_gap(gap),
-            # Rank view: positive rank_gap = you rank them nearer #1 than market.
+            # Rank view: positive rank_gap = the MARKET ranks them nearer #1
+            # than you do, i.e. the same direction as `gap` above.
             "user_rank":          u_rank,
             "comparison_rank":    c_rank,
-            "rank_gap":           _rank_delta(c_rank, u_rank),
+            "rank_gap":           _rank_delta(u_rank, c_rank),
             "user_pos_rank":      u_prank,
             "comparison_pos_rank": c_prank,
-            "pos_rank_gap":       _rank_delta(c_prank, u_prank),
+            "pos_rank_gap":       _rank_delta(u_prank, c_prank),
         }))
     sells.sort(key=lambda d: d["gap"], reverse=True)
     sells = sells[:top_n]

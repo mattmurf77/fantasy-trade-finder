@@ -72,11 +72,15 @@ const SHOW_POSITION = false;
 // ("Quick set"); finishing (or backing out) returns to the Tiers board,
 // which refetches via the query invalidations below.
 //
-// Save semantics — saves COMPOSE with the existing board because
-// apply_tiers only touches the pids submitted: each step sends
-// `{ tiers: { <tier>: [ids] } }` plus, when the user re-visits a tier via
-// Back and deselects someone saved earlier in this run, that pid in
-// `cleared_pids` (deleting the override → back to the suggested tier).
+// Save semantics — HOLD (D-160, #346/#381; supersedes #161's demote rule):
+// saves COMPOSE with the existing board because apply_tiers only touches
+// the pids submitted. Each step sends `{ tiers: { <tier>: [ids] } }` plus,
+// when the user re-visits a tier via Back and deselects someone saved
+// earlier in this run, that pid in `cleared_pids` (deleting the override →
+// back to the suggested tier). A visible-but-unselected player is touched
+// by NEITHER key: he keeps his current tier and stays selectable on any
+// later rung. Explicit demotion exists only via the FA rung, a
+// revisit-deselect, or the Tiers board.
 export default function QuickSetTiersScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
@@ -124,8 +128,12 @@ export default function QuickSetTiersScreen() {
   // Guided Onboarding v2 — `quickset_started {position, source}`: the
   // client-observable INTENT half of the Quick Set funnel, and `N1`'s
   // declared adoption event. Its completion twin (`quickset_completed`) is
-  // SERVER-fired per position and can never be observed here, so the client
-  // receipt written at the end of the walk stands in for it.
+  // SERVER-fired (per via:'quickset'-tagged tier commit — NOT per completed
+  // position; a walk that accepts consensus by tapping through saves
+  // nothing and is server-invisible) and can never be observed here, so the
+  // client receipt written at the end of the walk stands in for it. The
+  // per-position completion read is analysis-side: `quickset_step_advanced`
+  // with tier_index == tier_count - 1.
   //
   // `source` is the guided hand-off vs. an organic entry. `onboardingReturn`
   // is that hand-off's marker today (TradesScreen's `acceptQuicksetPrompt`
@@ -361,13 +369,19 @@ export default function QuickSetTiersScreen() {
               quicksetCompletedPositions: [...donePositions, position],
             });
           }
-          // No client `quickset_completed` here either (2026-08-13): the name
-          // is SERVER-fired (per completed position, on the scoped save) and
-          // the taxonomy's client/server namespaces are disjoint by an
-          // import-time assert, so this call was dropped behind a 200 since
-          // it shipped. Removed rather than renamed — the server row is the
-          // authoritative completion; its lost `onboarding` prop is recorded
-          // as accepted loss in the 2026-08-13 tracking-plan addendum.
+          // No client `quickset_completed` here either (2026-08-13): the
+          // name is SERVER-fired and the taxonomy's client/server namespaces
+          // are disjoint by an import-time assert, so this call was dropped
+          // behind a 200 since it shipped. Removed rather than renamed; its
+          // lost `onboarding` prop is recorded as accepted loss in the
+          // 2026-08-13 tracking-plan addendum. CORRECTION (2026-08-24): the
+          // server row is NOT a per-completed-position signal and never was
+          // — it fires per via:'quickset'-tagged tier commit (dark until
+          // this build, which is the first to send the tag), and a walk
+          // that tap-accepts consensus commits nothing. The authoritative
+          // per-position completion read is `quickset_step_advanced` with
+          // tier_index == tier_count - 1; see
+          // docs/business/analytics/2026-08-24-quickset-via-gap.md.
           //
           // Guided Onboarding v2 (FR-E3) — the CLIENT receipt that stands in
           // for that server-fired name, so `N1`/`s3.2` can actually retire.
@@ -416,16 +430,22 @@ export default function QuickSetTiersScreen() {
   );
 
   const saveMutation = useMutation({
-    mutationFn: ({ ids, cleared, demoted }: { ids: string[]; cleared: string[]; demoted: string[] }) =>
+    mutationFn: ({ ids, cleared }: { ids: string[]; cleared: string[] }) =>
       saveTiers(
         position,
         ids.length > 0 ? { [tier]: ids } : {},
         cleared,
-        demoted,
         // rookie-draft M2 — merged-band scoped save + the forensic via tag.
+        // Unscoped walks tag via:'quickset' (2026-08-24): the server has
+        // branched on that value since analytics P0 (FR-20
+        // `quickset_completed` per tagged commit, tier_save's `via` prop,
+        // ranking_method written 'quickset' at the point of use) but no
+        // client ever sent it — every mobile Quick Set save landed as plain
+        // 'tiers' and all three reads were dark. See
+        // docs/business/analytics/2026-08-24-quickset-via-gap.md.
         rookieScope.isRookie
           ? { scope: 'rookie', via: 'rookie_quickset' }
-          : undefined,
+          : { via: 'quickset' },
       ),
     onSuccess: (_data, { ids }) => {
       const nextSaved = { ...savedByTier, [tier]: ids };
@@ -452,39 +472,18 @@ export default function QuickSetTiersScreen() {
     const cleared = (savedByTier[tier] ?? []).filter((id) => !selected.has(id));
     if (ids.length === 0 && cleared.length === 0) {
       // Nothing picked and nothing to un-pick — same as Skip (a save with
-      // no assignments and no clears is a 400 on the backend). Skip ≠
-      // demote (#161): only an explicit save with picks demotes anyone.
+      // no assignments and no clears is a 400 on the backend).
       trackStepAdvanced([], 'empty');   // P0-7 F3
       goTo(tierIdx + 1, savedByTier);
       return;
     }
-    // #161 — demotion rule: an EXPLICIT save of this tier (≥1 player
-    // picked) says "these are my <tier> players". Anyone still visible in
-    // this step's grid whose CURRENT tier is this tier or higher was
-    // passed over, so they must not silently keep that tier: they're sent
-    // to unranked (below every band — pending placement), never to an
-    // arbitrarily deeper tier. Players claimed by an earlier tier this
-    // run aren't in the grid and are never demoted; lower-tier players
-    // still get their own steps later in the walk.
-    //
-    // rookie-draft M2 / operator decision O4: this derives from
-    // `gridPlayers`, which under scope IS the rookie subset — so a scoped
-    // save demotes only rookies that were VISIBLE and unselected, and an
-    // unshown vet is never touched. No scope branch is needed: the rule was
-    // already bounded by what the user could see.
-    const tierRank = TIERS.indexOf(tier);
-    const demoted =
-      ids.length === 0
-        ? [] // clear-only save — restores the suggested tier, no demotion
-        : gridPlayers
-            .filter((p) => !selected.has(p.id))
-            .filter((p) => {
-              const cur = tierForElo(p.elo, position, fmt);
-              return cur != null && TIERS.indexOf(cur) <= tierRank;
-            })
-            .map((p) => p.id);
-    saveMutation.mutate({ ids, cleared, demoted });
-  }, [gridPlayers, selected, savedByTier, tier, tierIdx, goTo, saveMutation, position, fmt]);
+    // HOLD (D-160, #346/#381 — supersedes the #161 demote rule): a save
+    // touches exactly the pids in `ids` and `cleared`. A visible-but-
+    // unselected player is passed over in silence — he keeps his current
+    // tier and renders on later rungs at his held position, one tap from
+    // placement. Nothing else is computed or sent.
+    saveMutation.mutate({ ids, cleared });
+  }, [gridPlayers, selected, savedByTier, tier, tierIdx, goTo, saveMutation]);
 
   const onSkip = useCallback(() => {
     trackStepAdvanced([], 'skip');      // P0-7 F3
@@ -771,8 +770,9 @@ export default function QuickSetTiersScreen() {
             the full string + suffix would overflow). It reverts instantly
             via `selectedCount` (derived from the selection state) the
             moment a chip is tapped. LABEL ONLY: the press still runs
-            onSave, whose empty branch composes as a Skip (and #161
-            demotion only ever fires on a save with ≥1 pick — see onSave). */}
+            onSave, whose empty branch composes as a Skip (and a save
+            touches only the selected/cleared pids — unselected players
+            HOLD their tier per D-160; see onSave). */}
         <Pressable
           testID="quick-set.save-btn"
           accessibilityRole="button"

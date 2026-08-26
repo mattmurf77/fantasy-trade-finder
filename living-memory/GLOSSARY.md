@@ -65,7 +65,7 @@ When a term in this file stabilizes (used in production code, in user-facing cop
 | **Simulated leaguemate** | A synthetic opponent generated for trade discovery before real-league linking. |
 | **Ring buffer logger** | In-memory log of the last 200 backend events, accessible via `GET /api/debug/log?n=100`. |
 | **Test_League** | The sample league configuration in `Test_League_Trade_Matches.xlsx` used for manual verification. |
-| **Tommy Tumble / Ricky Rumble** | Mascot concept candidates. Cartoon-style running back mid-fumble. See [`BRAND.md`](BRAND.md) and [`../context.md`](../context.md). |
+| **Fleeced** (the ram) | The mascot and in-app guide avatar — the character shipping as the app icon, splash and notification icon, named after the product (D-155). *The Analyst* is the guide's **role** name, not the character's. The retired "Tommy Tumble / Ricky Rumble" fumbling-RB concept was never built. See [`BRAND.md`](BRAND.md) and [`../context.md`](../context.md). |
 
 ### Skills / tools
 
@@ -92,4 +92,4 @@ When a term in this file stabilizes (used in production code, in user-facing cop
 
 - No automated check that `living-memory/GLOSSARY.md` and `docs/glossary.md` stay in sync.
 - "Tier" definitions specifically: should every tier name live here AND in `cross-client-invariants.md`? Convention TBD.
-- Mascot naming (Tommy Tumble vs Ricky Rumble vs other) not finalized.
+- Mascot identity and name settled (D-155: the ram, named Fleeced). Still open: which guide copy strings use the character name vs the role name *The Analyst*.

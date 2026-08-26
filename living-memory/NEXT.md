@@ -9,6 +9,13 @@
 ---
 
 ## Table of Contents
+- [2026-08-24 — Quick Set `via` gap PR: operator confirm + merge, then the TestFlight check](#2026-08-24--quick-set-via-gap-pr-operator-confirm--merge-then-the-testflight-check)
+- [2026-08-23 — Onboarding × calc tour merge: operator decisions, then Wave A](#2026-08-23--onboarding--calc-tour-merge-operator-decisions-then-wave-a)
+- [2026-08-22 — Full sweep: merge the review PR, then the build, then the operator flips](#2026-08-22-full-sweep-merge-the-review-pr-then-the-build-then-the-operator-flips)
+- [2026-08-22 — negmem: BUILT dark; rollout is two operator flips](#2026-08-22--negmem-built-dark-rollout-is-two-operator-flips)
+- [2026-08-21 — Receipts: the P0 prod read, then grade dark, then the screen](#2026-08-21--receipts-the-p0-prod-read-then-grade-dark-then-the-screen)
+- [2026-08-20 — Fit-challenger: operator decisions, then the W1 re-light](#2026-08-20--fit-challenger-operator-decisions-then-the-w1-re-light)
+- [2026-08-20 — Team Review defect batch: TestFlight pass, merge, then the four planned reports](#2026-08-20--team-review-defect-batch-testflight-pass-merge-then-the-four-planned-reports)
 - [2026-08-19 — #360/#361 + #362 built and green; blocked on two operator calls](#2026-08-19--360361--362-built-and-green-blocked-on-two-operator-calls)
 - [2026-08-19 — likes-you gates: TestFlight pass, merge, then watch the volume](#2026-08-19--likes-you-gates-testflight-pass-merge-then-watch-the-volume)
 - [2026-08-19 — Settings IA follow-ups (branch `feat/settings-ia-hub`)](#2026-08-19--settings-ia-follow-ups-branch-featsettings-ia-hub)
@@ -29,6 +36,137 @@
 
 ---
 
+## 2026-08-24 — Quick Set `via` gap PR: operator confirm + merge, then the TestFlight check
+
+1. ~~Operator: confirm + merge~~ **MERGED 2026-08-25** (PR #196, operator-confirmed) — [D-162](DECISIONS.md), [scope](../docs/plans/quickset-analytics-via/scope.md), [addendum](../docs/business/analytics/2026-08-24-quickset-via-gap.md). One mobile emitter change lighting up three dark server reads (`quickset_completed`, `tier_save.via`, point-of-use `ranking_method='quickset'`) + the semantics correction (per tagged commit, never per completed position).
+2. **Now runnable — v1.16.6 / EAS build 132** (submitted 2026-08-25, the first binary that sends the tag): run the **TestFlight checklist** in [scope §3](../docs/plans/quickset-analytics-via/scope.md) and log in TEST_LEDGER. Expect `quickset_completed` + `tier_save.props.via="quickset"` for a real walk, and `via:"tiers"` with NO `quickset_completed` for a plain Tiers save. Seam: every prior row is structurally `'tiers'` — don't trend `rank_quickset` / `tier_save.via` splits across this release.
+
+## 2026-08-23 — Onboarding × calc tour merge: operator decisions, then Wave A
+
+1. **Operator: remaining [plan §4](../docs/plans/onboarding-tour-merge/plan.md) decisions** —
+   1 and 6 are DECIDED ([D-158](DECISIONS.md) merged page, [D-157](DECISIONS.md) Clear button);
+   still open: bridge-vs-full-spine (§4.2), auto-dispatch cost (§4.3), `growth.invite_join_link`
+   (§4.4), multi-platform-landing timing (§4.5). D-158's two assumptions are CONFIRMED
+   (2026-08-24). *Why now: Wave A and Wave B0 are both fully specified — each is one operator go
+   from build.*
+2. ~~Wave A~~ / ~~Wave B0~~ **SHIPPED 2026-08-24** (PRs #197/#199, EAS 1.16.4 build 130; B0
+   dark behind `calc.inline_home`). Next build: **Wave B, the tour merge** — required BEFORE the
+   flag lights (tour is off under it), and it must re-thread the park signals + outlook opener
+   through the inline mount. Checklists H + I1 owed on 130 — also runnable on **132** (2026-08-25), which is the newer build testers will have.
+
+## 2026-08-22 — Full sweep: merge the review PR, then the build, then the operator flips
+
+1. **Rebase + PR `claude/trade-model-restrictiveness-7f3975`** (docs only; owns G-058 / Q-030 that the build cites). Then **PR `claude/full-sweep-0822-a1c3`** — CI green, `FTF_SKIP_SIM_GATE=1`. Merging lights nothing.
+2. **Operator: run the [TestFlight checklist](../docs/plans/full-sweep/scope.md)** (§3, six steps, server-side flag) and log the numbers in TEST_LEDGER — that is what graduates `trade.full_sweep`.
+3. **Knockout programme — R5/R1/R2/shape SHIPPED 2026-08-24 (D-159); remaining, in order** ([verdict](../docs/reviews/2026-08-22-knockout-rules-judged.html) §04): R5 dual-need rescue alone → consolidation bundle measured together in the replay harness (`filler_min_frac` sweep 0.15/0.10 with `asset_floor_abs` held; `trade_elo_gap_max` → 0; R1 in `package_value_v2`; `v3_shape_max_delta` knob) → R2 starter-depth predicate → the viewer-must-win form (operator, Q-030a). Audit `waiver_slot_cost` = 425 alongside.
+
+## 2026-08-22 — negmem: BUILT dark; rollout is two operator flips
+
+v1 is complete on `claude/vigilant-spence-8583f5` and lit nowhere ([D-147](DECISIONS.md),
+[ADR-015](../docs/adr/adr-015-negmem-soft-prior-not-fourth-filter.md), CHANGELOG same date).
+*Why now:* the remaining work is operator actions and a measurement window, not engineering.
+
+1. **Merge the branch** when the operator wants it on main. Merging lights nothing — the
+   ON-condition is flag **∧** allowlist, and both ship off/empty.
+2. **Rollout, per [PRD](../docs/plans/negative-results-memory/PRD.md) §8.2 — at a bake-off
+   ROUND BOUNDARY** (GR3; mid-round censors the window): add the operator's league to
+   `config/negmem_leagues.json` → flip `trade.negmem` → ≥4-week arm-attributed read.
+3. **The [TestFlight checklist](../docs/plans/negative-results-memory/testflight-checklist.md)
+   is UNRUN** — the only runtime evidence this feature gets under D-056. Step 0 (the
+   before-readout) has to happen *before* the flip or the baseline is gone.
+4. **P2 gates, none of them started:** the RFPS baseline freeze + frozen-cohort artifact
+   (`rfps-baseline-<date>.json`) must be committed at pre-registration, before the window
+   opens; layer-2 tendency modeling stays behind the data-volume gate; and any future
+   *persistence* of per-person profiles — which ruling D3(a) permits — carries its own scope
+   block with the `delete_user_data` partner-keyed deletion path as a named requirement.
+## 2026-08-21 — Receipts: the P0 prod read, then grade dark, then the screen
+
+Built dark on `feat/receipts` (see CHANGELOG + TEST_LEDGER same date). Nothing is pushed.
+*Why now:* the grading clock only starts once the flag is on, and every week dark is cohort
+lost — the 56d window cannot mature before ~Oct 11 given the 2026-08-16 telemetry start.
+
+1. **P0 prod counts** ([LLD §8](../docs/plans/receipts/LLD.md), read-only via
+   `backend/tools/prod_analytics.py`): gradeable impressions + per-league histogram,
+   pick-involvement share, snapshot gap rate since 2026-07-26, per-user×league counts. This is
+   the A-1 gate; the local dev DB has zero impressions, so nothing about cohort size is known
+   yet.
+2. **Merge + flip `receipts.grading`**, then drain with `scripts/receipts_backfill.py`. The
+   grader is inert until this happens.
+3. **A-2 operator checkpoint** on `GET /api/admin/receipts/metrics` — the first real numbers.
+   Pre-committed: a bad number changes **copy**, never the cohort, window or metric.
+4. **TestFlight pass** ([testflight-checklist.md](../docs/plans/receipts/testflight-checklist.md),
+   12 steps) — the only runtime evidence this feature gets — then flip `receipts.screen`.
+5. **Three-way taxonomy reconciliation** still open (PLAN §7 Q-6): confirm sibling prefix
+   claims with negmem + breaker now that `docs/plans/shared/trade-shape-taxonomy.md` v1.1.1 is
+   on `main`.
+
+## 2026-08-20 — Fit-challenger: operator decisions, then the W1 re-light
+
+Built dark on `claude/trade-suggestions-review-69c9eb` (see HANDOFF + CHANGELOG same date).
+*Why now:* the whole serving program is gated on operator calls, not engineering.
+
+1. **Operator: work the [PRD-build decision register](../docs/plans/fit-challenger/PRD-build.md)** —
+   9 items; K1 2-2/3-3 reading, `trade.outlook_direction` flip, R-8 rostering, ms bar are the
+   live ones.
+2. **Prod replay-board dry run** (league `1312140920132497408`, read-only) + baseline readout
+   snapshot before any serving flip.
+3. **W1 re-light** per [PLAN-v2 §5](../docs/plans/fit-challenger/PLAN-v2.md): screen round
+   B+D+C, `bakeoff_group_size=0`, daily deck tripwires (investigate <22, revert <18 ×2 days).
+4. Tester onboarding per [tester-protocol.md](../docs/plans/trade-engine-accuracy/tester-protocol.md)
+   — boards ≥100 votes, declared outlooks; program goal ≥2 leagues with 3+ boards (gen_v2's
+   re-entry condition).
+
+*(Cap note: added while the 7-item cap is already blown — this is the current operative work;
+the 2026-08-08/08-11 sections remain first in line to drop.)*
+## 2026-08-20 — Team Review is shipped; what is owed is RUNTIME evidence, not code
+
+All thirteen reports (#364–#376) are closed in code on `main` `25cc699`, builds 124/125.
+*Why now:* four TestFlight checklists are unrun and one lit flag moves every deck.
+
+1. **Operator: run the four checklists.** `364-team-review-fixes` (13 steps — **step 8**, the sell
+   list holds players you are LOW on, is the whole of #367), plus `366-tier-ladder`,
+   `369-plan-beat`, `372-window-composite`. Under [D-056](DECISIONS.md) this is the only runtime
+   evidence any of it gets, and **#372 is in no build at all**.
+2. **Watch `trade.position_tiers`.** Lit by operator call; it moves `position_needs`/`position_surplus`
+   and therefore every deck, on evidence a green suite provably cannot supply. First suspect if deck
+   composition looks off. Rollback: `false` + `POST /api/feature-flags/reload`.
+3. **Run `scripts/deck_eval.py` on real leagues** — the evidence `position_tiers` was lit without,
+   and the graduation criterion for `trade.outlook_composite` too.
+4. **Decide the three dark flags** after the checklists: `trade.outlook_net_firsts`,
+   `trades.window_from_odds`, `trade.outlook_composite`.
+5. **Fix the test suite's blind spots.** Five dead tests surfaced today and every engine fixture is
+   smaller than `_POS_TIER_MIN_POOL`, so the suite cannot see tier changes at all. A realistically
+   sized shared fixture is worth more than the next feature.
+6. **Still open, not from this batch:** #370 (repeat liked trades — needs a repro against
+   `deck_impressions`, device vs account) and #367's consensus-vs-league toggle
+   (`364-team-review-fixes/plan-remaining.md` §4).
+
+---
+
+## 2026-08-20 — Team Review defect batch: TestFlight pass, merge, then the four planned reports
+
+Built and unmerged on **`claude/team-outlook-experience-27a7a1`** ([D-100](DECISIONS.md), [D-101](DECISIONS.md),
+[scope](../docs/feedback/items/364-team-review-fixes/scope.md)). *Why now:* #367 is a live user-facing
+defect on two surfaces — the app was telling users to sell the players the market **won't** pay for,
+and offering their best buys under "Skip these."
+
+1. **Operator: run the 13-step TestFlight checklist**
+   ([checklist](../docs/feedback/items/364-team-review-fixes/testflight-checklist.md)). Only runtime
+   evidence available under [D-056](DECISIONS.md). **Step 8** — the sell list holds players you are
+   *lower* on than the league — is the whole change. Step 13 covers Trends, which moved with it.
+2. ~~**Push + merge.**~~ **DONE 2026-08-20** — PR #152 merged `bc43b6f`, Render live on it, EAS build 124
+   submitted to TestFlight. The payload half is serving now; the corrected copy needs build 124 to land.
+3. **Know the rollback before you need it:** `trades.team_review` → `false` and `outlook.odds` → `false`
+   are deploy-free, but **neither reverts #367** — `compute_consensus_gap` is ungated and shared, so
+   that one is a code revert.
+4. **Then the four planned reports**, in the order argued in
+   [plan-remaining.md](../docs/feedback/items/364-team-review-fixes/plan-remaining.md): the #367
+   consensus-vs-league toggle (smallest, finishes a half-shipped item) → **#370** repro (a live
+   complaint, different surface) → **#365** net-firsts signal (needs two decisions first; it is a
+   bright-line *engine* change) → **#366** re-tier, with Handcuff split out and gated on whether FTF
+   ingests an NFL depth chart → #369 → #371 (decide alongside #365, not before it).
+
+---
 ## 2026-08-19 — #360/#361 + #362 built and green; blocked on two operator calls
 
 Built and unmerged on **`feat/jon-360-362`** (base `2a492b6`; backend `f488616`, mobile

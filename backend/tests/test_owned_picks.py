@@ -13,7 +13,9 @@ import pytest
 import backend.server as srv
 import backend.database as db
 import backend.trade_service as ts
-from backend.pick_values import pick_pool_value, GENERIC_PICK_SEEDS, YEAR_DISCOUNT
+from backend.pick_values import (pick_pool_value, market_pick_pool_value,
+                                 priced_pool_value,
+                                 GENERIC_PICK_SEEDS, YEAR_DISCOUNT)
 from backend.draft_status import PICK_HORIZON_CLASSES
 
 # #355 — a league carries PICK_HORIZON_CLASSES (3) rookie classes anchored to
@@ -530,12 +532,32 @@ def test_evaluate_resolves_league_pick_not_dropped(_eval_env):
         })
     assert r.status_code == 200
     d = r.get_json()
-    # the league pick is priced, NOT dropped. Its per-player value is the raw
-    # pool_value (package-side totals apply the engine's normal v_max scaling,
-    # same as any player — that math is unchanged here).
+    # the league pick is priced, NOT dropped. Its per-player value is the
+    # MARKET price for its season+round (package-side totals apply the
+    # engine's normal v_max scaling, same as any player — that math is
+    # unchanged here).
+    #
+    # D-144 (2026-08-21) moved the expectation off `pick_pool_value`: owned
+    # picks no longer price on the ladder, so deriving the expectation from
+    # the ladder would assert the wrong contract. What the fixture pins as
+    # literals is the INPUT (season 2027, round 1, the stored ladder
+    # pool_value the sync path really writes).
+    #
+    # D-161 (2026-08-24) moved it one step further along the SAME waterfall:
+    # step 2's round curve is now clamped by the round-1 YoY floor, so this
+    # reads through `priced_pool_value` — the served price — instead of
+    # reproducing step 2 with `market_pick_pool_value`. This test pins what
+    # the ROUTE serves, so it must track the seam, not one of its steps.
     assert "L_2027_1_1" not in d["dropped_player_ids"]
     per = {p["player_id"]: p["value"] for p in d["per_player"]}
-    assert per["L_2027_1_1"] == pytest.approx(pick_pool_value(1, 1), abs=1.0)
+    curve = market_pick_pool_value(2027, 1, "1qb_ppr")
+    assert curve is not None, "the pinned DP snapshot must publish 2027 R1"
+    expected = priced_pool_value(
+        {"season": 2027, "round": 1, "pool_value": pick_pool_value(1, 1)},
+        scoring_format="1qb_ppr", slot=None)
+    assert expected > curve, "D-161: the future first is floored up"
+    assert expected < pick_pool_value(1, 1)      # market is cheaper: the change
+    assert per["L_2027_1_1"] == pytest.approx(expected, abs=1.0)
     assert d["receive_value"] > 0
 
 
@@ -564,12 +586,17 @@ def test_owned_pick_assets_caps_and_prices(monkeypatch):
 
     assets = srv._owned_pick_assets("L", "1qb_ppr")
     assert set(assets.keys()) == {"u1"}
-    # capped to 6 (top-N by pool_value)
+    # capped to 6 (top-N by the PRICED value — D-144 makes that the market
+    # price, and `_owned_pick_assets` caps after pricing precisely because the
+    # market re-orders the ladder in the deep-future tail)
     assert len(assets["u1"]) == 6
-    # top asset is the current-season 1st (highest pool_value)
+    # top asset is still the current-season 1st, but at its market price
     top = assets["u1"][0]
     assert top.position == "PICK" and top.team == "PICK"
-    assert ts.dynasty_value(top) == pytest.approx(pick_pool_value(1, 0), abs=2.0)
+    expected = market_pick_pool_value(2026, 1, "1qb_ppr")
+    assert expected is not None
+    assert expected < pick_pool_value(1, 0)      # market is cheaper: the change
+    assert ts.dynasty_value(top) == pytest.approx(expected, abs=2.0)
 
 
 def test_owned_pick_assets_cap_zero_returns_empty(monkeypatch):

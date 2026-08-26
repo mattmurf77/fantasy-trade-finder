@@ -1,6 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   Pressable,
   ScrollView,
   Share,
@@ -12,25 +14,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQuery } from '@tanstack/react-query';
 
+import type { CalcPlayer, CalcPos } from '../data/calcTypes';
 import {
-  CALC_LEAGUE_NAME,
-  CALC_MY_TEAM,
-  CALC_PARTNERS,
-  CALC_PLAYER_BY_ID,
-  CalcPlayer,
-  CalcPos,
-  boardFor,
-} from '../data/tradeCalcMock';
-import {
-  CALC_VERDICT_LABEL,
   CalcSuggestion,
   evalFromConsensus,
-  evaluateTrade as evaluateTradeLocal,
-  formatDelta,
   rankAddOnCandidates,
   rankPackageCandidates,
-  suggestAddOns,
-  suggestPackages,
 } from '../utils/tradeCalcMath';
 import {
   evaluateTrade as evaluateTradeApi,
@@ -39,7 +28,6 @@ import {
   type TradeProbe,
 } from '../api/calc';
 import TradeSide from '../components/TradeSide';
-import VerdictPanel from '../components/VerdictPanel';
 import ConsensusVerdictCard from '../components/ConsensusVerdictCard';
 import ShareTradeImage, { type ShareAsset } from '../components/ShareTradeImage';
 import SuggestionCard from '../components/SuggestionCard';
@@ -49,41 +37,59 @@ import { Button, Card, Icon, TickLabel } from '../components/chalkline';
 import { haptics } from '../utils/haptics';
 import { track } from '../api/events';
 import { resolveShareUrl } from '../utils/shareLinks';
-import { chalk, flare, fonts, ice, ink, radii, semantic, space, type } from '../theme/chalkline';
+import { chalk, fonts, ice, ink, radii, semantic, space, type } from '../theme/chalkline';
 import { useSession } from '../state/useSession';
+import { useFinderTargets } from '../state/useFinderTargets';
+import { forkCanvasSearch } from '../utils/canvasSearch';
+import { queueCalcTrade } from '../utils/queueCalcTrade';
+import {
+  calcTourHandOffToDeck,
+  calcTourInLeagueReady,
+  calcTourInLeagueGone,
+  calcTourOutlookClosed,
+  calcTourScreenBlurred,
+  startCalcTour,
+} from '../utils/calcTour';
+import { advanceGuideIfActive, guideV2Active, guidedAvatarActive } from '../state/useGuide';
+import {
+  notifyGuideTargetsMoved,
+  registerGuideScroller,
+  registerGuideTarget,
+  unregisterGuideScroller,
+  unregisterGuideTarget,
+} from '../state/guideTargets';
 import { useFlag } from '../state/useFeatureFlags';
 import InLeagueCalculator from '../components/InLeagueCalculator';
-import { tierForElo } from '../utils/tierBands';
-import type { Position, ScoringFormat, Tier } from '../shared/types';
+import type { ScoringFormat, Tier } from '../shared/types';
 
 // Triage undo (S3 PRD-03, flag ux.swipe_undo): how long the cleared-trade
 // snapshot (and its Undo toast) is held. Pure local state — nothing to POST.
 const UNDO_HOLD_MS = 5000;
 
 // Manual Trade Calculator. Two modes:
-//   'live' — REAL consensus values from the backend's universal pool.
-//            Verdicts are server-authoritative (POST /api/trade/evaluate
-//            reuses the finder's _fairness_v3), per the plan doc
-//            docs/plans/manual-trade-calculator-plan.md. No login needed.
-//   'demo' — the seeded mock league (data/tradeCalcMock.ts): dual-board
-//            fairness, partner tendencies, arbitrage badges. Demonstrates
-//            the future league-aware version.
-
-const MY_BOARD = boardFor(CALC_MY_TEAM);
-const PARTNER_BOARDS = Object.fromEntries(CALC_PARTNERS.map((o) => [o.id, boardFor(o)]));
+//   'live'   — REAL consensus values from the backend's universal pool.
+//              Verdicts are server-authoritative (POST /api/trade/evaluate
+//              reuses the finder's _fairness_v3), per the plan doc
+//              docs/plans/manual-trade-calculator-plan.md. No login needed.
+//              This is the league-free entry point #310 requires.
+//   'league' — InLeagueCalculator, mounted below. Needs a real league.
+//
+// A third mode, 'demo' (a seeded mock dual-board league), was REMOVED on
+// 2026-08-22 — feedback #384, operator: "let's also remove the demo calc,
+// it's pointless". Its fixture module `data/tradeCalcMock.ts` went with it;
+// the two types it also exported live on in `data/calcTypes.ts`.
+// NOTE: this is unrelated to the demo SESSION (/api/session/demo,
+// useSession.isDemo, onboarding.demo_bridge), which is untouched.
 
 // Persisted draft trade — survives leaving the Trades stack / app restart.
 const DRAFT_KEY = 'ftf:tradecalc:v1';
-
-// A board disagreement big enough to flag as arbitrage in the demo picker.
-const ARBITRAGE_EDGE = 1.05;
 
 // Live-mode suggestion search runs over the top-N pool players (combos over
 // the full ~500-player universe would be wasteful for no ranking benefit;
 // 40 keeps the 1–3-piece combo scan around ~10k evaluations per edit).
 const LIVE_SUGGEST_POOL = 40;
 
-type CalcMode = 'live' | 'demo' | 'league';
+type CalcMode = 'live' | 'league';
 
 const FORMATS: { key: ScoringFormat; label: string }[] = [
   { key: '1qb_ppr', label: '1QB PPR' },
@@ -100,6 +106,11 @@ function useDebounced<T>(value: T, ms: number): T {
   return v;
 }
 
+// #384 W6-A — the ✓ cell's refusal copy (D-152) MOVED to
+// `utils/queueCalcTrade.ts` on 2026-08-24 (D-158): the canvas gained a second
+// host, and one copy table cannot live in one of two hosts. Same six lines,
+// same enum, same behavior — see that file's header.
+
 export default function TradeCalculatorScreen({ route, navigation }: any) {
   // #190 — deck "Edit in calculator": land in In-league mode with the
   // card's opponent + both sides preloaded. Route param only — no
@@ -108,7 +119,45 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
   const prefill = route?.params?.prefill as
     | { opponentUserId?: string; giveIds?: string[]; receiveIds?: string[] }
     | undefined;
-  const [mode, setMode] = useState<CalcMode>(prefill ? 'league' : 'live');
+  const calcMergedOn = useFlag('calc.merged_layout');
+  // D-158 (Wave B0) — with the guided landing hosting the In-league canvas
+  // inline, THIS page is the #310 league-free promise and nothing else: no
+  // mode tabs, no In-league branch, and no calculator tour (beat n10 is
+  // "Tap In league", pointing at a tab that no longer exists — Wave B
+  // rebuilds the tour against the inline module). Flag OFF ⇒ every line
+  // below reads exactly as it did: two tabs, prefill-lands-in-league, the
+  // auto-tour and the "Show me around" re-entry.
+  const inlineHomeOn = useFlag('calc.inline_home');
+  const [mode, setMode] = useState<CalcMode>(
+    prefill && !inlineHomeOn ? 'league' : 'live',
+  );
+
+  // #384 W4 — the tour's first beat points at the In-league tab, so it needs
+  // a measurable node. Registered here because the tabs live on this screen.
+  const leagueTabRef = useRef<View | null>(null);
+  useEffect(() => {
+    registerGuideTarget('calc.mode-tab.league', leagueTabRef);
+    return () => unregisterGuideTarget('calc.mode-tab.league');
+  }, []);
+
+  // #384 device feedback (report 5) — the page's scroll handle, so the overlay
+  // can bring a below-the-fold target into view before it rings it. Keyed by
+  // the SCREEN NAME the calculator beats declare (`screen: 'TradeCalculator'`).
+  const pageScrollRef = useRef<ScrollView | null>(null);
+  const pageScrollYRef = useRef(0);
+  useEffect(() => {
+    registerGuideScroller('TradeCalculator', {
+      scrollTo: (y, animated) => pageScrollRef.current?.scrollTo({ y, animated }),
+      getScrollY: () => pageScrollYRef.current,
+    });
+    return () => unregisterGuideScroller('TradeCalculator');
+  }, []);
+
+  // #384 W5 — n11's CTA opens the outlook sheet, which lives inside
+  // InLeagueCalculator. The SCREEN starts the tour, so the opener is threaded
+  // up through a ref the component fills on mount rather than the runner
+  // reaching into a component it does not own.
+  const outlookOpenerRef = useRef<(() => void) | null>(null);
   // #166/#167 — default to the LEAGUE's detected scoring format (same rule
   // as InLeagueCalculator); the chips still override per-session, and the
   // saved-draft restore below keeps precedence over this initial value.
@@ -116,11 +165,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
   const [format, setFormat] = useState<ScoringFormat>(
     sessionFormat === 'sf_tep' || sessionFormat === '1qb_ppr' ? sessionFormat : '1qb_ppr',
   );
-  // Demo-mode trade state.
-  const [partnerId, setPartnerId] = useState(CALC_PARTNERS[0].id);
-  const [sendIds, setSendIds] = useState<string[]>([]);
-  const [receiveIds, setReceiveIds] = useState<string[]>([]);
-  // Live-mode trade state (separate so switching modes keeps both drafts).
+  // Live-mode trade state.
   const [liveSendIds, setLiveSendIds] = useState<string[]>([]);
   const [liveReceiveIds, setLiveReceiveIds] = useState<string[]>([]);
   const [picker, setPicker] = useState<'send' | 'receive' | null>(null);
@@ -134,7 +179,9 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
   // S3 PRD-03 — "Clear trade" snapshot + Undo toast.
   const [toast, setToast] = useState<{
     msg: string;
-    tone?: 'success' | 'warn';
+    // 'error' added by #384 W6-A for a failed queue POST — Toast has always
+    // supported the tone; only this local union was narrower.
+    tone?: 'success' | 'warn' | 'error';
     holdMs?: number;
     action?: { label: string; onPress: () => void };
   } | null>(null);
@@ -142,10 +189,12 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
   // #190 — a NEW prefill arriving on an already-mounted screen (deck →
   // edit → back → edit another card) re-asserts In-league mode; the key
   // on InLeagueCalculator below remounts it with the new package.
+  // D-158 — flag on, there is no In-league mode to re-assert; the deck's
+  // edit-in-calculator paths prefill the INLINE canvas and never push here.
   const prefillKey = prefill ? JSON.stringify(prefill) : null;
   useEffect(() => {
-    if (prefillKey) setMode('league');
-  }, [prefillKey]);
+    if (prefillKey && !inlineHomeOn) setMode('league');
+  }, [prefillKey, inlineHomeOn]);
 
   // In-league mode (Mode B) is only offered when a real league is active.
   const league = useSession((s) => s.league);
@@ -154,11 +203,74 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
   const modeTabs: { key: CalcMode; label: string }[] = [
     ...(hasLeague ? [{ key: 'league' as CalcMode, label: 'In league' }] : []),
     { key: 'live', label: 'Real values' },
-    { key: 'demo', label: 'Demo league' },
   ];
 
-  // Restore the persisted draft once; demo ids validate against the mock
-  // rosters here, live ids validate lazily once the pool loads (below).
+  // Entry point 1 (operator): the tour auto-starts the moment the user lands
+  // on the calculator, "since the first step brings them to the league
+  // version". Guarded four ways — the merged layout must be on (the tour
+  // describes controls that only exist there), a prefilled arrival is a
+  // deliberate hand-off from a card and must not be hijacked, a user with no
+  // league has no In-league page for the first beat to carry them to, and
+  // startCalcTour itself refuses when the guided experience is off or the
+  // tour has already been completed once.
+  //
+  // …and it starts AFTER the push transition, not from the bare mount effect.
+  // #384 device feedback (report 1): "Box was in the wrong spot when I first
+  // navigated to the page. When I navigated to the in league page after the
+  // tour and hit 'Show me around', it worked." `measureInWindow` returns
+  // ABSOLUTE window coordinates, and during a native-stack push the screen is
+  // still translated — so a measure taken from the mount effect reports where
+  // the target was mid-slide and nothing re-measures afterwards. Waiting for
+  // `transitionEnd` measures a settled layout. `InteractionManager` is the
+  // fallback for a presentation that emits no transition event (a replace, a
+  // deep link straight onto this route); whichever lands first wins, once.
+  //
+  // D-158 — …and a fifth guard: with `calc.inline_home` on the tour is OFF on
+  // this screen entirely. n10 ("Tap In league") is an `action` beat that only
+  // advances on a real tab switch, and this wave deletes the tab; a runner
+  // that cannot clear its first beat would open the auto-tour and stall.
+  // Wave B retargets the calculator beats at the inline module and re-lights
+  // this. Suppressing at the START is the whole suppression — the runner is
+  // never begun, so no hold is taken and no beat is requested.
+  useEffect(() => {
+    if (!calcMergedOn || prefill || !hasLeague || inlineHomeOn) return;
+    let started = false;
+    const begin = () => {
+      if (started) return;
+      started = true;
+      startCalcTour('auto', { openOutlook: () => outlookOpenerRef.current?.() });
+    };
+    const unsub = navigation.addListener('transitionEnd', begin);
+    // The fallback is a TIMER, not React Native's run-after-interactions
+    // hook: that one fires the moment no touch is in flight — i.e. before the push
+    // transition ends and before the native header has laid out — and the
+    // first beat's frame was measured ~44 pt too high (simulator,
+    // 2026-08-22). `transitionEnd` is the normal path; the timer only covers
+    // a route that never emits it (a cold deep link onto this screen).
+    const fallback = setTimeout(begin, 1000);
+    // Leaving the screen abandons the run — otherwise the tour hold would
+    // outlive the tour and mute every interstitial app-wide. NOT an
+    // unconditional stop: Find a Trade unmounts this screen too, and that
+    // departure is the tour continuing onto the deck.
+    return () => {
+      unsub();
+      clearTimeout(fallback);
+      calcTourScreenBlurred();
+    };
+  }, [calcMergedOn, prefill, hasLeague, inlineHomeOn, navigation]);
+
+  // Unmount is not the only way to leave. A push over this screen (or a tab
+  // change) leaves it MOUNTED, and a tour narrating a page nobody is looking
+  // at holds the mute for nothing. Find a Trade is the one departure that is
+  // the tour continuing rather than ending — `calcTourHandOffToDeck()` in
+  // `onFindATrade` is what tells the runner that.
+  useEffect(() => {
+    const unsub = navigation.addListener('blur', () => calcTourScreenBlurred());
+    return unsub;
+  }, [navigation]);
+
+  // Restore the persisted draft once; live ids validate lazily as the pool
+  // loads (below).
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -169,23 +281,11 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
           // #190 — a prefilled launch stays in In-league mode; the stored
           // draft's mode must not yank the user away from the handed-off
           // package (list drafts still restore for later manual visits).
-          if (!prefill && (draft?.mode === 'demo' || draft?.mode === 'live'))
-            setMode(draft.mode);
+          // A draft saved before 2026-08-22 may carry mode 'demo'; that
+          // mode no longer exists, so it falls through to the 'live'
+          // default rather than restoring into nothing.
+          if (!prefill && draft?.mode === 'live') setMode(draft.mode);
           if (draft?.format === '1qb_ppr' || draft?.format === 'sf_tep') setFormat(draft.format);
-          const savedPartner = CALC_PARTNERS.find((o) => o.id === draft?.partnerId);
-          if (savedPartner) {
-            setPartnerId(savedPartner.id);
-            setSendIds(
-              (Array.isArray(draft.sendIds) ? draft.sendIds : []).filter((id: string) =>
-                CALC_MY_TEAM.rosterIds.includes(id),
-              ),
-            );
-            setReceiveIds(
-              (Array.isArray(draft.receiveIds) ? draft.receiveIds : []).filter((id: string) =>
-                savedPartner.rosterIds.includes(id),
-              ),
-            );
-          }
           if (Array.isArray(draft.liveSendIds)) setLiveSendIds(draft.liveSendIds.map(String));
           if (Array.isArray(draft.liveReceiveIds))
             setLiveReceiveIds(draft.liveReceiveIds.map(String));
@@ -204,9 +304,9 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
     if (!hydrated) return;
     AsyncStorage.setItem(
       DRAFT_KEY,
-      JSON.stringify({ mode, format, partnerId, sendIds, receiveIds, liveSendIds, liveReceiveIds }),
+      JSON.stringify({ mode, format, liveSendIds, liveReceiveIds }),
     ).catch(() => {});
-  }, [hydrated, mode, format, partnerId, sendIds, receiveIds, liveSendIds, liveReceiveIds]);
+  }, [hydrated, mode, format, liveSendIds, liveReceiveIds]);
 
   // ── Live mode: real consensus values ─────────────────────────────────
   const valuesQuery = useQuery({
@@ -384,100 +484,54 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
     },
   });
 
-  // ── Demo mode: seeded dual boards ────────────────────────────────────
-  const partner = CALC_PARTNERS.find((o) => o.id === partnerId)!;
-  const theirBoard = PARTNER_BOARDS[partnerId];
+  // Only 'live' reaches the body below — 'league' returns InLeagueCalculator
+  // in the render. The `active*` aliases survive the demo removal because the
+  // JSX below reads them in ~30 places; they are now plain live bindings.
+  const activeSendIds = liveSendIds;
+  const activeReceiveIds = liveReceiveIds;
+  const setActiveSendIds = setLiveSendIds;
+  const setActiveReceiveIds = setLiveReceiveIds;
+  const activeBoard = liveBoard;
+  const activeOtherBoard = liveBoard;
+  const activePlayerById = livePlayerById;
 
-  const isLive = mode === 'live';
-  const activeSendIds = isLive ? liveSendIds : sendIds;
-  const activeReceiveIds = isLive ? liveReceiveIds : receiveIds;
-  const setActiveSendIds = isLive ? setLiveSendIds : setSendIds;
-  const setActiveReceiveIds = isLive ? setLiveReceiveIds : setReceiveIds;
-  const activeBoard = isLive ? liveBoard : MY_BOARD;
-  const activeOtherBoard = isLive ? liveBoard : theirBoard;
-  const activePlayerById = isLive ? livePlayerById : CALC_PLAYER_BY_ID;
-
-  // #263 — pick-value tier for a player row, keyed off the SAME board a
-  // given TradeSide/picker column already reads its number from. Live mode
-  // reads the server-computed tier (liveTierById); demo mode's mock boards
-  // are already on the raw-Elo scale (data/tradeCalcMock.ts `base`), so
-  // they run straight through the existing tierForElo/TIER_LABEL util — the
-  // one client-side mapping every other rank screen already uses. Picks
-  // (pos 'PICK') have no tier of their own; callers fall back to the
-  // numeric value for them.
-  const tierFor = (board: Record<string, number>, p: CalcPlayer): Tier | null => {
+  // #263 — pick-value tier for a player row, read from the server-computed
+  // `liveTierById`. Picks (pos 'PICK') have no tier of their own; callers
+  // fall back to the numeric value for them. The board argument became
+  // unused when the demo boards were removed (they were the only caller
+  // that needed a client-side tierForElo mapping) — kept so the ~6 call
+  // sites in the JSX below stay untouched by this change.
+  const tierFor = (_board: Record<string, number>, p: CalcPlayer): Tier | null => {
     if (p.pos === 'PICK') return null;
-    if (isLive) return liveTierById[p.id] ?? null;
-    return tierForElo(board[p.id] ?? p.base, p.pos as Position, '1qb_ppr');
+    return liveTierById[p.id] ?? null;
   };
 
-  const demoEvaluation = useMemo(
-    () => evaluateTradeLocal(sendIds, receiveIds, MY_BOARD, theirBoard),
-    [sendIds, receiveIds, theirBoard],
-  );
-
-  // Demo-mode fair-package + balance-add-on suggestions: the demo verdict
-  // panel IS the local dual-board math, so local suggestions agree with it
-  // by construction. Live mode instead renders the server-confirmed
-  // suggestions from suggestQuery (#78) — never these local rankings.
-  const demoSuggested = useMemo(
-    () =>
-      isLive
-        ? null
-        : suggestPackages(
-            sendIds,
-            receiveIds,
-            CALC_MY_TEAM.rosterIds,
-            partner.rosterIds,
-            MY_BOARD,
-            theirBoard,
-            CALC_PLAYER_BY_ID,
-          ),
-    [isLive, sendIds, receiveIds, partner, theirBoard],
-  );
-  const demoAddOns = useMemo(
-    () =>
-      isLive
-        ? null
-        : suggestAddOns(
-            sendIds,
-            receiveIds,
-            CALC_MY_TEAM.rosterIds,
-            partner.rosterIds,
-            MY_BOARD,
-            theirBoard,
-            CALC_PLAYER_BY_ID,
-          ),
-    [isLive, sendIds, receiveIds, partner, theirBoard],
-  );
-
-  // What the sections below render, in either mode: {forSide, suggestions}.
-  const addOns = isLive
-    ? liveAddOnPlan && (suggestQuery.data?.addOns.length ?? 0) > 0
+  // What the sections below render: {forSide, suggestions}. Server-confirmed
+  // (#78) — the local dual-board rankings died with the demo boards.
+  const addOns =
+    liveAddOnPlan && (suggestQuery.data?.addOns.length ?? 0) > 0
       ? { forSide: liveAddOnPlan.forSide, suggestions: suggestQuery.data!.addOns }
-      : null
-    : demoAddOns;
-  const suggested = isLive
-    ? livePkgForSide
-      ? { forSide: livePkgForSide, suggestions: suggestQuery.data?.packages ?? [] }
-      : null
-    : demoSuggested;
-  // Live empty-state only once confirmation has settled (no flicker mid-probe).
-  const suggestSettled = !isLive || (!!valuesQuery.data && !suggestQuery.isFetching);
+      : null;
+  const suggested = livePkgForSide
+    ? { forSide: livePkgForSide, suggestions: suggestQuery.data?.packages ?? [] }
+    : null;
+  // Empty-state only once confirmation has settled (no flicker mid-probe).
+  const suggestSettled = !!valuesQuery.data && !suggestQuery.isFetching;
 
   const bothSides = activeSendIds.length > 0 && activeReceiveIds.length > 0;
   const anySide = activeSendIds.length > 0 || activeReceiveIds.length > 0;
 
   const switchMode = (m: CalcMode) => {
+    // n10 is an `advance: 'action'` beat — tap-anywhere is off for it, so the
+    // tap on the In-league tab is the only thing that can move it on. It
+    // counts even when In league is ALREADY selected: "Show me around" is
+    // offered on that very tab, and a re-run that could not get past its
+    // first beat looked like a dead link.
+    if (m === 'league') advanceGuideIfActive('n10', 'action');
     if (m === mode) return;
     haptics.selection();
     setMode(m);
-  };
-
-  const switchPartner = (id: string) => {
-    haptics.selection();
-    setPartnerId(id);
-    setReceiveIds([]); // their roster changed; what you send can stay
+    track('calc_mode_switched', { mode: m }, 'TradeCalculator');
   };
 
   const switchFormat = (f: ScoringFormat) => {
@@ -502,28 +556,19 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
     haptics.selection();
     const names = (ids: string[]) =>
       ids.map((id) => activePlayerById[id]?.name ?? id).join(', ');
-    const lines = isLive
-      ? [
-          `Trade idea (DTF Trade Calculator · ${FORMATS.find((f) => f.key === format)?.label})`,
-          `Side A: ${names(liveSendIds)}`,
-          `Side B: ${names(liveReceiveIds)}`,
-          evalQuery.data
-            ? `Consensus: ${Math.round(evalQuery.data.give_value).toLocaleString()} vs ${Math.round(evalQuery.data.receive_value).toLocaleString()}${
-                evalQuery.data.point_ratio !== null
-                  ? ` (ratio ${Math.round(evalQuery.data.point_ratio * 100)}%)`
-                  : ''
-              }`
-            : '',
-          evalQuery.data?.verdict ? `Verdict: ${evalQuery.data.verdict}` : '',
-        ]
-      : [
-          `Trade idea vs ${partner.teamName} (DTF Trade Calculator)`,
-          `I send: ${names(sendIds)}`,
-          `I get: ${names(receiveIds)}`,
-          `My board: ${demoEvaluation.myGive.toLocaleString()} out, ${demoEvaluation.myGet.toLocaleString()} back (${formatDelta(demoEvaluation.myDeltaPct)})`,
-          `Their board: ${demoEvaluation.theirGive.toLocaleString()} out, ${demoEvaluation.theirGet.toLocaleString()} back (${formatDelta(demoEvaluation.theirDeltaPct)})`,
-          `Verdict: ${CALC_VERDICT_LABEL[demoEvaluation.verdict]}`,
-        ];
+    const lines = [
+      `Trade idea (DTF Trade Calculator · ${FORMATS.find((f) => f.key === format)?.label})`,
+      `Side A: ${names(liveSendIds)}`,
+      `Side B: ${names(liveReceiveIds)}`,
+      evalQuery.data
+        ? `Consensus: ${Math.round(evalQuery.data.give_value).toLocaleString()} vs ${Math.round(evalQuery.data.receive_value).toLocaleString()}${
+            evalQuery.data.point_ratio !== null
+              ? ` (ratio ${Math.round(evalQuery.data.point_ratio * 100)}%)`
+              : ''
+          }`
+        : '',
+      evalQuery.data?.verdict ? `Verdict: ${evalQuery.data.verdict}` : '',
+    ];
     // S7 PRD-01 (growth.share_landing): shares carry a landing URL with
     // ?ref= attribution.
     //
@@ -538,11 +583,11 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
     let landing = false;
     if (shareLandingOn) {
       const resolved = await resolveShareUrl({
-        // Demo mode's assets are mock ids (data/tradeCalcMock) and the
-        // server refuses demo sessions anyway — pass no ids so the ladder
-        // short-circuits and the demo message stays byte-identical.
-        giveIds: isLive ? liveSendIds : [],
-        receiveIds: isLive ? liveReceiveIds : [],
+        // Real consensus ids. `isDemo` below is the demo SESSION
+        // (/api/session/demo), which the mint server-refuses — unrelated to
+        // the demo CALCULATOR mode removed in #384.
+        giveIds: liveSendIds,
+        receiveIds: liveReceiveIds,
         username: user?.username,
         enabled: shareLandingOn,
         isDemo: useSession.getState().isDemo,
@@ -568,7 +613,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
       if (shareLandingOn && res.action !== Share.dismissedAction) {
         track(
           'calc_trade_shared',
-          { mode, landing, ...(isLive ? { surface: 'calc_live' } : {}) },
+          { mode, landing, surface: 'calc_live' },
           'Calculator',
         );
       }
@@ -614,14 +659,42 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
         action={toast?.action}
         onDismiss={() => setToast(null)}
       />
-      <ScrollView contentContainerStyle={styles.scroll}>
-        {/* Mode switch: real consensus values vs the seeded demo league. */}
+      {/* B1 — the Analyst spotlight caches an ABSOLUTE window frame, so it
+          goes stale the instant this page scrolls underneath it. Every host
+          that registers a guide target and owns a scroll container announces
+          movement; the tour's own beats (n12–n18) all target nodes below the
+          fold on an SE. Unconditional, and throttled — without the throttle
+          iOS fires onScroll about once per second and the ring lurches. */}
+      <ScrollView
+        ref={pageScrollRef}
+        contentContainerStyle={styles.scroll}
+        onScroll={(e: NativeSyntheticEvent<NativeScrollEvent>) => {
+          pageScrollYRef.current = e.nativeEvent.contentOffset.y;
+          notifyGuideTargetsMoved();
+        }}
+        // #384 device feedback (report 1) — scroll is not the only way a
+        // target moves. This page's own content GROWS after first paint (the
+        // rosters land, and the outlook receipt swaps with its fallback), which
+        // shifts every target below it without a single scroll event. Both
+        // callbacks are the same one-line announcement.
+        onLayout={notifyGuideTargetsMoved}
+        onContentSizeChange={notifyGuideTargetsMoved}
+        scrollEventThrottle={16}
+      >
+        {/* Mode switch: In-league vs league-free real consensus values.
+            D-158 — flag on, this page IS Real values, so there is nothing to
+            switch between and the row goes away with the In-league branch
+            below it. */}
+        {inlineHomeOn ? null : (
         <View style={styles.modeRow}>
           {modeTabs.map((m) => {
             const active = mode === m.key;
             return (
               <Pressable
                 key={m.key}
+                // #384 W4 — the tour's first beat spotlights the In-league
+                // tab; only that one needs a measurable node.
+                ref={m.key === 'league' ? leagueTabRef : undefined}
                 testID={`calc.mode-tab.${m.key}`}
                 style={[styles.modeChip, active && styles.modeChipActive]}
                 onPress={() => switchMode(m.key)}
@@ -633,20 +706,30 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
             );
           })}
         </View>
+        )}
 
         {/* #213 — one quiet path from the hand-built calculator to the
             finder. A single text-link row under the mode tabs covers every
-            calculator surface (In-league, live, demo) with one affordance —
+            calculator surface (In-league, live) with one affordance —
             InLeagueCalculator is only ever mounted here, so this is the one
             "Find a trade" entry for the whole create-a-trade feature.
             Chalk-dim text-link tier (the "More ways to rank" precedent),
-            never a button — the calculator's own actions keep primacy. */}
+            never a button — the calculator's own actions keep primacy.
+
+            #384 review §15: the merged In-league page carries its own Find a
+            Trade in the action row, and that one honours Include players.
+            Two entries where one bypasses the canvas is a trap, so this row
+            steps aside there. */}
+        {calcMergedOn && mode === 'league' ? null : (
         <Pressable
           testID="calc.find-a-trade"
           accessibilityRole="button"
           accessibilityLabel="Find a trade"
           accessibilityHint="Opens the trade finder for suggested trades"
-          onPress={() => navigation.navigate('TradesHome')}
+          // popTo, not navigate: `TradesHome` has no `getId`, so a plain
+          // navigate() with no `pop` PUSHES a second copy (routers 7.5.3
+          // StackRouter) and leaves this screen mounted underneath.
+          onPress={() => navigation.popTo('TradesHome')}
           hitSlop={8}
           style={styles.findTradeRow}
         >
@@ -656,27 +739,139 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
             </Text>
           )}
         </Pressable>
+        )}
 
-        {mode === 'league' && league && user ? (
+        {/* D-158 — the In-league branch is DELETED under `calc.inline_home`:
+            the guided landing hosts this same component inline, and two live
+            canvases (one here, one there) would be two drafts of the same
+            trade. `mode` can no longer become 'league' flag-on (the tabs are
+            gone and the prefill re-assert is gated), so this reads as a
+            belt-and-braces guard that also makes the deletion structural. */}
+        {!inlineHomeOn && mode === 'league' && league && user ? (
           <InLeagueCalculator
             // #190 — remount when a different card is handed off so a
             // second "Edit in calculator" from the deck re-applies its
             // prefill (navigate() to a mounted route only swaps params).
+            // …and remount on a LEAGUE switch too (#384 review §10): the
+            // component holds opponentId/giveIds/receiveIds in local state,
+            // so without this the new league renders the old league's canvas
+            // and evaluates the old opponent id against it.
             key={
               prefill
                 ? `prefill-${prefill.opponentUserId}-${(prefill.giveIds ?? []).join('.')}-${(prefill.receiveIds ?? []).join('.')}`
-                : 'manual'
+                : `manual-${league.league_id}`
             }
             leagueId={league.league_id}
             userId={user.user_id}
             initialOpponentId={prefill?.opponentUserId}
             initialGiveIds={prefill?.giveIds}
             initialReceiveIds={prefill?.receiveIds}
+            // Entry point 2 (ruling 4): re-runnable from the top right.
+            // startCalcTour returns false when the guided experience is off,
+            // and the component renders no link without a handler — so the
+            // affordance never appears unless it can actually do something.
+            // guideV2Active() as well: with `onboarding.guide_v2` off the
+            // spotlights, caps and degrade lines do not exist and the tour is
+            // incoherent, so the link must not offer it (startCalcTour
+            // refuses on the same pair). Users who tapped "Skip the tour"
+            // (guideDismissed, folded into guidedAvatarActive) still see no
+            // link — whether an explicit "Show me around" should override a
+            // permanent opt-out is an open product question, not decided here.
+            // D-158 — …and never under `calc.inline_home`: the tour's first
+            // beat points at the In-league tab this wave removes, so the
+            // re-entry must not offer a walk it cannot start (the auto-start
+            // effect above is gated on the same flag).
+            onShowMeAround={
+              !inlineHomeOn && guidedAvatarActive() && guideV2Active()
+                ? () =>
+                    startCalcTour('show_me_around', {
+                      openOutlook: () => outlookOpenerRef.current?.(),
+                    })
+                : undefined
+            }
+            outlookOpenerRef={outlookOpenerRef}
+            // Wave A (v2 note 12) — the In-league content announcing itself.
+            // n10 advances from the tab tap above, but the outlook row n11
+            // spotlights does not exist until this component's league queries
+            // resolve; the runner parks between the two on this signal rather
+            // than racing the load with a 150 ms retry.
+            onInLeagueReady={calcTourInLeagueReady}
+            onInLeagueGone={calcTourInLeagueGone}
+            // Wave A (v2 note 14) — n11's CTA opens the outlook sheet AND
+            // advances the beat, and the guide overlay is mounted below RN
+            // Modals. The runner parks until this fires so n12 lands on the
+            // page instead of behind the sheet.
+            onOutlookClosed={calcTourOutlookClosed}
+            // #384 W6-A (D-152) — the ✓ cell. POST /api/trades/queue records
+            // the package as the caller's LIKE only when the likes-you
+            // injector would actually mirror it into @partner's deck, so the
+            // toast can be specific about who refused and why instead of the
+            // generic failure the disabled cell used to stand in for.
+            // The SCREEN owns the request, the toast and the analytics; the
+            // component owns the canvas and the in-flight lock.
+            // D-158 — the body moved to `utils/queueCalcTrade` when the canvas
+            // gained a second host; the request, the one `calc_trade_queued`
+            // row and the reason-specific copy are now ONE implementation both
+            // hosts call. The SCREEN still owns its Toast — it renders the
+            // descriptor the helper returns.
+            onLikeTrade={async ({ giveIds, receiveIds, opponent }) => {
+              const { toast: t } = await queueCalcTrade({
+                leagueId: league.league_id,
+                opponent,
+                giveIds,
+                receiveIds,
+                screen: 'TradeCalculator',
+              });
+              setToast(t);
+            }}
+            // #384 — the merged layout's own controls. The component owns
+            // the canvas; the SCREEN owns navigation, so the finder hand-off
+            // and the tour re-entry are passed in rather than reached for.
+            onFindATrade={({ give, receive, opponent }) => {
+              // D-153 — the fork: a canvas with a give side is a fairness
+              // question about THAT package; an empty canvas is the model's
+              // question. A canvas with only RECEIVE assets counts as empty:
+              // the fair sweep prices a give side, and there is nothing to
+              // price. D-158 moved the decision AND its
+              // `calc_find_a_trade_tapped` row into `utils/canvasSearch` so
+              // the inline host reaches the same verdict from one function.
+              const fork = forkCanvasSearch(
+                { give, receive, opponent },
+                'TradeCalculator',
+              );
+              const { anchor } = fork;
+              // n18 ("Now tap Find a Trade") is an action beat: this tap is
+              // the only thing that can move it, and it must move BEFORE the
+              // navigation so the runner parks instead of being blurred out.
+              advanceGuideIfActive('n18', 'action');
+              calcTourHandOffToDeck();
+              // D-153 — the canvas no longer touches the PIN STORE at all.
+              // W5 wrote it there because the model deck's generate payload
+              // is what reads pins; the fair sweep takes the canvas in its
+              // own request body instead, so writing pins would only leave a
+              // constraint behind for whatever ran next — which is the only
+              // reason W5 had to clear the store again on the other branch.
+              //
+              // #384 review §3/§6 — the handoff is still what starts the
+              // search and scopes it to the Team dropdown's partner. `origin`
+              // lets the deck tell a calculator arrival from a
+              // league-rankings one; `fairAnchor` is what forks it onto the
+              // fairness sweep instead of the model auto-run.
+              useFinderTargets.getState().setHandoff({
+                opponent: opponent ?? null,
+                autoRun: true,
+                origin: 'calculator',
+                ...(anchor ? { fairAnchor: anchor } : {}),
+              });
+              // popTo, not navigate: without `pop` (and with no `getId` on
+              // TradesHome) routers 7.5.3 PUSHES a second TradesHome, leaving
+              // this screen mounted and the tour hold up behind it.
+              navigation.popTo('TradesHome');
+            }}
           />
         ) : (
         <>
-        {isLive ? (
-          <>
+        <>
             <TickLabel>Scoring format</TickLabel>
             <View style={styles.partnerRow}>
               {FORMATS.map((f) => {
@@ -710,7 +905,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
               <Card>
                 <View style={styles.loadingRow}>
                   <Text style={[type.bodySm, { flex: 1 }]}>
-                    Couldn't reach the value server. Retry, or switch to the demo league.
+                    Couldn't reach the value server. Retry.
                   </Text>
                   <Button
                     label="Retry"
@@ -721,38 +916,11 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
                 </View>
               </Card>
             ) : null}
-          </>
-        ) : (
-          <>
-            <Text style={styles.league}>{CALC_LEAGUE_NAME}</Text>
-            <TickLabel>Trade partner</TickLabel>
-            <View style={styles.partnerRow}>
-              {CALC_PARTNERS.map((o) => {
-                const active = o.id === partnerId;
-                return (
-                  <Pressable
-                    key={o.id}
-                    style={[styles.partnerChip, active && styles.partnerChipActive]}
-                    onPress={() => switchPartner(o.id)}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: active }}
-                  >
-                    <Text style={[styles.partnerText, active && styles.partnerTextActive]}>
-                      {o.teamName}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-            <Text style={styles.tendency}>
-              {partner.ownerName}'s board: {partner.tendency}
-            </Text>
-          </>
-        )}
+        </>
 
         <TradeSide
-          title={isLive ? 'Side A sends' : 'You send'}
-          teamName={isLive ? 'any player' : CALC_MY_TEAM.teamName}
+          title="Side A sends"
+          teamName="any player"
           players={activeSendIds.map((id) => activePlayerById[id]).filter(Boolean)}
           valueOf={(p) => activeBoard[p.id] ?? 0}
           tierOf={(p) => tierFor(activeBoard, p)}
@@ -772,8 +940,8 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
         </View>
 
         <TradeSide
-          title={isLive ? 'Side B sends' : 'You receive'}
-          teamName={isLive ? 'any player' : partner.teamName}
+          title="Side B sends"
+          teamName="any player"
           players={activeReceiveIds.map((id) => activePlayerById[id]).filter(Boolean)}
           valueOf={(p) => activeBoard[p.id] ?? 0}
           tierOf={(p) => tierFor(activeBoard, p)}
@@ -786,7 +954,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
           }}
         />
 
-        {isLive ? (
+        {
           anySide && evalQuery.data ? (
             <View testID="calc.verdict">
               <ConsensusVerdictCard
@@ -812,51 +980,14 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
                 <Text style={type.bodySm}>Evaluating…</Text>
               </View>
             </Card>
-          ) : null
-        ) : bothSides ? (
-          <View testID="calc.verdict"><VerdictPanel evaluation={demoEvaluation} /></View>
-        ) : anySide ? (
-          <Card>
-            <Text style={styles.oneSidedText}>
-              {sendIds.length > 0 ? (
-                <>
-                  That package is worth{' '}
-                  <Text style={styles.oneSidedValue}>
-                    {demoEvaluation.myGive.toLocaleString()}
-                  </Text>{' '}
-                  on your board and{' '}
-                  <Text style={styles.oneSidedValue}>
-                    {demoEvaluation.theirGet.toLocaleString()}
-                  </Text>{' '}
-                  on {partner.ownerName}'s.
-                </>
-              ) : (
-                <>
-                  That package is worth{' '}
-                  <Text style={styles.oneSidedValue}>
-                    {demoEvaluation.myGet.toLocaleString()}
-                  </Text>{' '}
-                  on your board and{' '}
-                  <Text style={styles.oneSidedValue}>
-                    {demoEvaluation.theirGive.toLocaleString()}
-                  </Text>{' '}
-                  on {partner.ownerName}'s.
-                </>
-              )}
-            </Text>
-          </Card>
-        ) : null}
+          ) : null}
 
         {addOns && addOns.suggestions.length > 0 ? (
           <View style={styles.suggestions}>
             <TickLabel color={semantic.warn}>
-              {isLive
-                ? addOns.forSide === 'send'
-                  ? 'To balance — add to Side A'
-                  : 'To balance — add to Side B'
-                : addOns.forSide === 'send'
-                ? 'To balance — add from your side'
-                : `To balance — ask ${partner.teamName} to add`}
+              {addOns.forSide === 'send'
+                ? 'To balance — add to Side A'
+                : 'To balance — add to Side B'}
             </TickLabel>
             {addOns.suggestions.map((s) => (
               <SuggestionCard
@@ -871,13 +1002,9 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
         {suggested && suggested.suggestions.length > 0 ? (
           <View style={styles.suggestions}>
             <TickLabel>
-              {isLive
-                ? suggested.forSide === 'receive'
-                  ? 'Fair returns (consensus)'
-                  : 'Fair offers (consensus)'
-                : suggested.forSide === 'receive'
-                ? `Fair asks from ${partner.teamName}`
-                : `Fair offers from your roster`}
+              {suggested.forSide === 'receive'
+                ? 'Fair returns (consensus)'
+                : 'Fair offers (consensus)'}
             </TickLabel>
             {suggested.suggestions.map((s) => (
               <SuggestionCard
@@ -896,12 +1023,12 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
 
         {anySide ? (
           <View style={styles.actions}>
-            {bothSides && (!isLive || evalQuery.data) ? (
+            {bothSides && evalQuery.data ? (
               <Button label="Share trade" variant="secondary" onPress={shareTrade} />
             ) : null}
             {/* Share-as-image (DynastyDealer teardown 2026-07-26): PNG of
                 the verdict card via the native sheet; text fallback. */}
-            {isLive && bothSides && evalQuery.data ? (
+            {bothSides && evalQuery.data ? (
               <ShareTradeImage
                 caption={`Trade idea · ${FORMATS.find((f) => f.key === format)?.label ?? ''}`}
                 sendTitle="Side A sends"
@@ -932,6 +1059,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
               variant="ghost"
               onPress={() => {
                 haptics.warning();
+                track('calc_cleared', { mode }, 'TradeCalculator');
                 // S3 PRD-03 (ux.swipe_undo): snapshot the hand-built trade
                 // and offer a 5s Undo — no server state, pure restore.
                 if (swipeUndoOn) {
@@ -967,29 +1095,15 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
       <>
       <PlayerPickerModal
         visible={picker === 'send'}
-        title={isLive ? 'Add to Side A' : `Send from ${CALC_MY_TEAM.teamName}`}
-        players={
-          isLive ? livePlayers : CALC_MY_TEAM.rosterIds.map((id) => CALC_PLAYER_BY_ID[id])
-        }
+        title="Add to Side A"
+        players={livePlayers}
         selectedIds={[...activeSendIds, ...activeReceiveIds]}
-        // B3 — live mode's pool is `valuesQuery`; the demo pool is a static
-        // mock import that is never in flight.
-        loading={isLive && valuesQuery.isLoading}
+        loading={valuesQuery.isLoading}
         ownerBoardValue={(p: CalcPlayer) => activeBoard[p.id] ?? 0}
         tierOf={(p: CalcPlayer) => tierFor(activeBoard, p)}
-        secondaryValue={isLive ? undefined : (p: CalcPlayer) => theirBoard[p.id]}
-        // #277 — the demo's dual-board secondary line reads as a tier label
-        // too (theirBoard is on the raw-Elo scale, so tierFor applies).
-        secondaryTierOf={isLive ? undefined : (p: CalcPlayer) => tierFor(theirBoard, p)}
-        secondaryPrefix="them"
-        badgeFor={
-          isLive
-            ? undefined
-            : (p: CalcPlayer) =>
-                theirBoard[p.id] >= MY_BOARD[p.id] * ARBITRAGE_EDGE
-                  ? { label: 'Sell high', color: flare.base }
-                  : null
-        }
+        // The secondary "them" column and the Sell high / Target badges were
+        // the DEMO's dual-board comparison — one consensus board has no
+        // second opinion to show. Removed with the demo boards (#384).
         onPick={(p) => {
           haptics.selection();
           setActiveSendIds((ids) => [...ids, p.id]);
@@ -999,24 +1113,12 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
 
       <PlayerPickerModal
         visible={picker === 'receive'}
-        title={isLive ? 'Add to Side B' : `Receive from ${partner.teamName}`}
-        players={isLive ? livePlayers : partner.rosterIds.map((id) => CALC_PLAYER_BY_ID[id])}
+        title="Add to Side B"
+        players={livePlayers}
         selectedIds={[...activeSendIds, ...activeReceiveIds]}
-        loading={isLive && valuesQuery.isLoading}
+        loading={valuesQuery.isLoading}
         ownerBoardValue={(p: CalcPlayer) => activeOtherBoard[p.id] ?? 0}
         tierOf={(p: CalcPlayer) => tierFor(activeOtherBoard, p)}
-        secondaryValue={isLive ? undefined : (p: CalcPlayer) => MY_BOARD[p.id]}
-        // #277 — same tier-label treatment for the "you" secondary line.
-        secondaryTierOf={isLive ? undefined : (p: CalcPlayer) => tierFor(MY_BOARD, p)}
-        secondaryPrefix="you"
-        badgeFor={
-          isLive
-            ? undefined
-            : (p: CalcPlayer) =>
-                MY_BOARD[p.id] >= theirBoard[p.id] * ARBITRAGE_EDGE
-                  ? { label: 'Target', color: semantic.pos }
-                  : null
-        }
         onPick={(p) => {
           haptics.selection();
           setActiveReceiveIds((ids) => [...ids, p.id]);
@@ -1032,7 +1134,6 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: ink.ink0 },
   scroll: { padding: space.lg, gap: space.md, paddingBottom: space.xxl + space.lg },
-  league: { ...type.bodySm },
   modeRow: {
     flexDirection: 'row',
     borderRadius: radii.sm,
@@ -1064,7 +1165,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.md,
   },
   partnerChipActive: { borderColor: ice.base },
-  partnerChipPressed: { backgroundColor: ink.ink3 },
   partnerText: { fontFamily: fonts.uiSemi, fontSize: 13, lineHeight: 18, color: chalk.dim },
   partnerTextActive: { color: chalk.base },
   tendency: { ...type.bodySm },
@@ -1075,8 +1175,6 @@ const styles = StyleSheet.create({
     gap: space.md,
   },
   rule: { flex: 1, height: 1, backgroundColor: ink.line },
-  oneSidedText: { ...type.body },
-  oneSidedValue: { ...type.data },
   suggestions: { gap: space.sm },
   noSuggestions: { ...type.bodySm },
   actions: { gap: space.sm, alignItems: 'center' },

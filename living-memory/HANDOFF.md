@@ -8,7 +8,112 @@
 
 ---
 
+
+
+## 2026-08-25 — v1.16.6 (132) is on TestFlight; everything owed is now RUNTIME verification, not code
+
+**Where:** `main` at `c092f808`+ (release) — nothing in flight, no branch open, working tree clean. EAS build `8925880d` **finished** and submission `b190d30b` **finished**; Apple-side processing then TestFlight availability is the only remaining step and it is not ours.
+
+**What shipped today.** PR #196 — the Quick Set `via` gap ([D-162](DECISIONS.md)): `POST /api/tiers/save` had branched on `via == "quickset"` since analytics P0, but no client ever sent it, so `quickset_completed`, `tier_save.props.via` and the point-of-use `ranking_method` were dark for every production walk. One emitter change fixes it; the "per completed position" semantics were corrected to "per tagged tier commit" (the save route cannot see a completed position — the walk saves rung by rung and a consensus-accepting walk saves nothing). Then PR #206 cut v1.16.6 and PR #207 corrected the record on G-012.
+
+**The gate is the operator's device.** Three checklists are now runnable on 132 and every one of them is the ONLY runtime evidence its feature will get (D-056): the **via-gap** check ([scope §3](../docs/plans/quickset-analytics-via/scope.md) — a real Quick Set walk should write `quickset_completed` + `tier_save.props.via="quickset"`, and a plain Tiers save should write `via:"tiers"` and NO `quickset_completed`), plus **H** (steps 63–78, Wave A, needs a genuinely cold league load) and **I1** (79–83, flag-off regression), both owed since 130.
+
+**Analytics seam — say it out loud before anyone reads a chart:** every Quick Set row before this release is structurally `via:'tiers'`. Do not trend `FEATURE_VERTICALS["rank_quickset"]` or `tier_save.via` splits across 2026-08-25.
+
+**Sharp edges banked.**
+- `test_deck_signal_v2::test_flag_on_writes_impressions_in_served_order` fails in this worktree against the stale `data/trade_finder.db` — `mv data data.bak` and it passes. This session first misattributed it to Python-3.14 skew; `git stash` does not touch a gitignored DB, so a clean-tree reproduction does NOT exonerate the code. TEST_LEDGER carries the correction.
+- The daily tick's `is_aug25` `season_start` fan-out skips every winback, so `test_notif_teardown`'s three winback tests fail exactly one day a year — fixed by pinning the tick clock ([G-061](GOTCHAS.md)), with the Aug-25 branch now pinned by its own test.
+- `MARKETING_VERSION` is **inert** here (`INFOPLIST_FILE` set, no `GENERATE_INFOPLIST_FILE`); the Info.plist literal ships. Keep both in sync anyway — a future `expo prebuild` with generated plists would make the stale one authoritative ([G-012](GOTCHAS.md), corrected 2026-08-25).
+- **Worktree debt is at the G-022 threshold again:** the main checkout is 9.5 GB with 5.9 GB under `.claude/worktrees` (21 worktrees). Today's build dodged it by building from a 561 MB worktree, but the next person who builds from the main checkout may hit the upload failure. A ledgered sweep is owed.
+
+## 2026-08-24 — Waves A + B0 SHIPPED (1.16.4 / EAS 130); Wave B is the next build; do NOT light `calc.inline_home` before it
+
+Both waves of [docs/plans/onboarding-tour-merge/plan.md](../docs/plans/onboarding-tour-merge/plan.md) merged and built: **Wave A** (PR #197 — Next buttons on ten onboarding beats, demo link off, s0.1/s2.1 copy, the n11 loading-race park + outlook-sheet park, n22 → `trades.card-meter`, D-157 Clear button) is **live behavior** on 1.16.4; **Wave B0** (PR #199 — D-158's inline In-league canvas on the guided landing, in-place Find a Trade, anchor-as-filter receipt, pushed page → Real values, all four prefill sites) is **DARK behind `calc.inline_home`**. Built by Opus subagents, adversarially reviewed by a Fable subagent; review fixes A1/A2 (park lifecycle + 60 s outlook bound) and B1 (MatchesScreen's fourth prefill site) landed on top. **Owed:** TestFlight checklist sections **H** (steps 63–78, Wave A — steps 63–67 need a genuinely COLD league load) and **I1** (79–83, flag-off regression) on build 130. **Wave B (the tour merge) must precede lighting the flag** — the tour is deliberately OFF under it (n10's tab is gone), and per the review's composition note Wave B must re-thread `onInLeagueReady`/`onOutlookClosed`/an outlook opener through the INLINE mount (TradesScreen passes none of them today). Remaining plan §4 decisions: tour length, auto-dispatch, invite link, landing wave. Ledger: [docs/recovery/2026-08-24-wave-a-b0-ship.md](../docs/recovery/2026-08-24-wave-a-b0-ship.md).
+
+## 2026-08-24 — Fleeced on TestFlight (v1.16.3 build 129), dark; one production write left
+
+**Shipped to TestFlight, visible to nobody.** PR #186 merged (`7ac7869`, CI green on GitHub), EAS build `900ffa32`
+submitted, v1.16.3 (129) processing at Apple. `onboarding.mascot_ram` is `false` globally, so the installed app still
+renders The Analyst.
+
+**UPDATE 2026-08-24 — done. The experiment is RUNNING (`mascot_ram_rollout` v2) and verified: the allowlisted device gets the treatment overlay, every other request gets nothing. Fleeced is live for the operator alone, pending only the app updating to v1.16.3. One deviation: it is filed on the **`growth`** layer, not `onboarding`, because `onboarding_v2_rollout` v3 (running, untargeted, full range) occupies that layer and v1 was rejected with `layer_overlap`. It holds the growth layer until stopped — stop it after the TestFlight pass. See `docs/plans/ram-mascot/experiment.md` §7-§8.**
+
+~~**The one step left, and it is deliberately not done:**~~ create + launch `mascot_ram_rollout` — two `X-Cron-Secret`
+POSTs against the **production** DB, spec and curl in [`docs/plans/ram-mascot/experiment.md`](../docs/plans/ram-mascot/experiment.md) §4.
+Held for explicit operator confirmation because it is a production write. Once launched, the operator's device picks up
+the overlay on its next flag fetch (boot, or the ≥30-min foreground refetch).
+
+**Why the build had to come first:** the sprites are bundled and `app.json` has `updates: null` — no EAS Update
+channel. The flag can only choose between components that shipped in the binary, so on any build before 1.16.3 it is
+inert. That ordering is not optional.
+
+**Then run [the checklist](../docs/plans/ram-mascot/testflight-checklist.md).** Section A first, *before* launching the
+experiment: the app must still show The Analyst. If it shows a ram with the flag off, the gate is broken and nothing
+below A is worth running. There is **zero runtime evidence** for this change until that pass happens.
+
+**Sharp edges banked this session:**
+- **Version bumps are two files** — `app.json` AND `ios/DTFDynastyTradeFinder/Info.plist` (D-057, bare workflow).
+  `test_app_version_consistency` catches a one-sided bump.
+- **Lighting a flag in `config/features.json` means updating THREE fixtures** (`release`, `onboarding-v2`,
+  `profiles-on`), not one. #182 updated none and left `main` red; fixing only `release.json` then exposed two more
+  tests that assert exact divergence sets. [#185](https://github.com/mattmurf77/fantasy-trade-finder/pull/185) landed
+  the same fix independently.
+- **Squash-merge trap:** merging `origin/main` into a base that has already shipped as a squashed PR produces dozens of
+  add/add conflicts re-introducing shipped work. Branch fresh from `origin/main` and re-apply instead.
+- **`BUBBLE_ANCHOR` is exported and never consumed** — the bubble sits *beside* the avatar in a flex row, not above it
+  with a tail. Documented in `components/analyst/CLAUDE.md`.
+
+**Open (operator):** launch the experiment · run the checklist. Higgsfield credits ~4.35.
+
+## 2026-08-23 — Fleeced BUILT dark on `claude/ram-mascot-fleeced`; needs a build + an experiment, neither done
+
+**Branch:** `claude/ram-mascot-fleeced`, based on **current `origin/main`** (f89b30e). **Committed, not pushed.** CI green
+locally: pytest 4198 pass, `tsc` clean, 77/77 `check-*.js`, testid-lint OK.
+
+**What exists.** The full mascot swap behind `onboarding.mascot_ram` (default **false**): 18 sprites in
+`mobile/assets/mascot/ram/`, `components/mascot/ram/` (Image-backed, flip-aware), `AnalystAvatar` as the one switch,
+guard `check-mascot-ram.js` (sabotage-tested), scope block, experiment spec, TestFlight checklist, docs, D-155/D-156.
+
+**Two things stand between this and the operator seeing it, and neither is a flag flip:**
+1. **A build.** The sprites are BUNDLED and `app.json` has `updates: null` — no EAS Update channel. Flipping the flag on
+   any existing build is inert; `require()` resolves at bundle time. Needs `eas build` → `eas submit` → TestFlight.
+2. **The experiment.** `mascot_ram_rollout` is **specced but NOT created** — creating and launching it are two
+   `X-Cron-Secret` POSTs against the **production** DB, held for explicit confirmation.
+   Spec + curl: `docs/plans/ram-mascot/experiment.md` §4. Order that works: merge → build → install → create → launch.
+
+**The rebase story, because it will bite the next session too.** This work began on `claude/manual-calculator-e2e-review-39a467`
+at f00ee9f. That branch has since **shipped as PR #172** (app 1.16.0 → 1.16.2 via W7/W8). Merging `origin/main` into the
+old base produced **40 add/add conflicts** re-introducing already-shipped #384 work — the squash-merge trap CLAUDE.md
+warns about. Correct move was to branch fresh from `origin/main` and re-apply only my own files. Snapshot of the old
+state: commit `432f807` on `claude/ram-mascot-brief-exec-6bb3b7`.
+
+**ID collision, confirmed.** The D1 reservation was right: `main` took **D-153** (W6-B) and **D-154**
+(`trade.full_sweep`). Both entries renumbered to **D-155/D-156**, all cross-refs swept including the lab HTML.
+
+**Correction carried forward:** `BUBBLE_ANCHOR` is **exported and never consumed** — `AnalystGuide` lays the bubble
+*beside* the avatar in a flex row (`:526`), not above it with a tail. D2's "anchor moves off-centre" had nothing to
+move, and the avatar lab's anchor test models the brief's described layout, not the shipped one. Recorded in
+`components/analyst/CLAUDE.md` so it is not re-derived.
+
+**Fixed in passing:** `test_release_flags_mirror_features_json` was **already red on `origin/main`**
+(`trade.full_sweep` lit by #182, mirror fixture not updated). CI could not be green for anyone.
+
+**Still open (operator):** the copy split — which of the six "The Analyst" strings become "Fleeced" (this build changes
+**none**, so the bubble reads "The Analyst" above a ram, which is D-155's recorded default). Higgsfield credits ~4.35.
+
 ## Table of Contents
+- [2026-08-25 — v1.16.6 (132) is on TestFlight; everything owed is now RUNTIME verification, not code](#2026-08-25--v1166-132-is-on-testflight-everything-owed-is-now-runtime-verification-not-code)
+- [2026-08-24 — Waves A + B0 SHIPPED (1.16.4 / EAS 130); Wave B is the next build; do NOT light `calc.inline_home` before it](#2026-08-24--waves-a--b0-shipped-1164--eas-130-wave-b-is-the-next-build-do-not-light-calcinline_home-before-it)
+- [2026-08-24 — Fleeced on TestFlight (v1.16.3 build 129), dark; one production write left](#2026-08-24--fleeced-on-testflight-v1163-build-129-dark-one-production-write-left)
+- [2026-08-23 — Fleeced BUILT dark on `claude/ram-mascot-fleeced`; needs a build + an experiment, neither done](#2026-08-23--fleeced-built-dark-on-clauderam-mascot-fleeced-needs-a-build--an-experiment-neither-done)
+- [2026-08-22 — Full sweep BUILT dark on `claude/full-sweep-0822-a1c3`; review PR merges first, then TestFlight checklist, then the operator flips](#2026-08-22-full-sweep-built-dark-on-claudefull-sweep-0822-a1c3-review-pr-merges-first-then-testflight-checklist-then-the-operator-flips)
+- [2026-08-22 — #384 merged calculator: E2E review failed, W5 fixed it on `claude/manual-calculator-e2e-review-39a467`; four bright-line calls + a TestFlight pass owed](#2026-08-22--384-merged-calculator-e2e-review-failed-w5-fixed-it-on-claudemanual-calculator-e2e-review-39a467-four-bright-line-calls--a-testflight-pass-owed)
+- [2026-08-22 — negmem BUILT dark on `claude/vigilant-spence-8583f5`; TestFlight pass + two rollout flips owed](#2026-08-22--negmem-built-dark-on-claudevigilant-spence-8583f5-testflight-pass--two-rollout-flips-owed)
+- [2026-08-21 — Receipts BUILT dark on `feat/receipts`; not pushed, P0 prod read owed](#2026-08-21--receipts-built-dark-on-featreceipts-not-pushed-p0-prod-read-owed)
+- [2026-08-21 — Counterparty-breaker COMPLETE: suite converged, v1 BUILT dark, PR #161 awaits operator merge](#2026-08-21--counterparty-breaker-complete-suite-converged-v1-built-dark-pr-161-awaits-operator-merge)
+- [2026-08-21 — Serving live; operator iterating; planning fleet converging](#2026-08-21--serving-live-operator-iterating-planning-fleet-converging)
+- [2026-08-20 — Fit-challenger BUILT dark on `claude/trade-suggestions-review-69c9eb`; operator holds 9 decisions](#2026-08-20--fit-challenger-built-dark-on-claudetrade-suggestions-review-69c9eb-operator-holds-9-decisions)
+- [2026-08-20 — Team Review defect batch built on `claude/team-outlook-experience-27a7a1`; TestFlight pass owed](#2026-08-20--team-review-defect-batch-built-on-claudeteam-outlook-experience-27a7a1-testflight-pass-owed)
 - [2026-08-19 — #360/#361 + #362 built and green on a branch; two operator calls block merge](#2026-08-19--360361--362-built-and-green-on-a-branch-two-operator-calls-block-merge)
 - [2026-08-19 — Team Review planned end-to-end (#357/#358/#359); `outlook.odds` LIT by operator override](#2026-08-19--team-review-planned-end-to-end-357358359-outlookodds-lit-by-operator-override)
 
@@ -35,6 +140,309 @@
 - [2026-08-11 — Send-in-MFL built + Send-in-ESPN spiked; both on branches, unmerged](#2026-08-11--send-in-mfl-built--send-in-espn-spiked-both-on-branches-unmerged)
 - [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
 
+
+## 2026-08-22 — Full sweep BUILT dark on `claude/full-sweep-0822-a1c3`; review PR merges first, then TestFlight checklist, then the operator flips
+
+**Where things are (updated 2026-08-23).** Review PR #181 MERGED; the build branch is merging with the flag LIT in the same PR (operator: "merge and flip it on"). What remains: the scope §3 post-flip verification in FFV3, the worktree sweep (recovery ledger → remove → delete branches), and the Q-030 calls. Original state for the record:
+- `claude/trade-model-restrictiveness-7f3975` (worktree `.claude/worktrees/trade-model-restrictiveness-7f3975`) — docs-only: three HTML reviews in `docs/reviews/` (restrictiveness, second-read, knockout-rules-judged), Q-030, G-058, CHANGELOG 2026-08-22e. Base `613a34c` → needs a rebase onto `origin/main` (`b6e906a`+) before PR; expect a one-line conflict in `GOTCHAS.md`'s index and the 2026-08-22 section (origin added G-056 there).
+- `claude/full-sweep-0822-a1c3` (worktree `.claude/worktrees/full-sweep-a1c3`) — the build, from fresh `origin/main`. Flag `trade.full_sweep` dark, knobs `exploration_base_per_opp` (5.0) and `full_sweep_budget_s` (30.0), 25 new tests, D-154, docs. 4198 passed. Ledger entry 2026-08-22h.
+
+**Order of operations.** (1) Rebase + PR the review branch first — the build's plan, D-154 and `scope-phase2.md` cite G-058 and Q-030, which only exist there. (2) PR the build; CI green; `FTF_SKIP_SIM_GATE=1` on push. (3) Operator runs the scope §3 TestFlight checklist (server-side flag, no client build): flip, refresh a single-board 12-team league, count partners (expect ≥ 9 of 11), read `gen_ms`, flip back. (4) Operator decides the flip and the deck-size dial (`bakeoff_deck_limit`, prod 60, since `bakeoff_serve_interleaved = 1`).
+
+**Open for the operator (Q-030):** (a) whether the app may suggest a trade the viewer loses slightly — conservative form is a conditional slack at fairness ≥ 0.85, full form is both-ways + 0.75; (b) gen_v2 deck share, graded on match rate and honest-offer likes, not viewer likes; (c) latency is now railed at 30 s, so R1 (this build) supersedes the rotate-order idea.
+
+**Next build after this one:** the knockout programme from [`docs/reviews/2026-08-22-knockout-rules-judged.html`](../docs/reviews/2026-08-22-knockout-rules-judged.html) §04 — R5 dual-need rescue alone first, then the consolidation bundle (`filler_min_frac` 0.25→0.15 with the 450 floor held, `trade_elo_gap_max`→0, R1 repriced in `package_value_v2`, `v3_shape_max_delta` knob at 2) measured together in the replay harness before any flip.
+
+**Watch:** `docs/plans/ram-mascot/brief.md` also proposes D-154; first to land keeps it. `calc_opened` is not dead (3 of 525, 7 taps ever) — the second-read report's retraction stands.
+
+## 2026-08-22 — #384 merged calculator: E2E review failed, W5 fixed it on `claude/manual-calculator-e2e-review-39a467`; four bright-line calls + a TestFlight pass owed
+
+**W8 (same day, v1.16.2 / EAS 128):** build 127 was still blank at Set outlook; the lead reproduced it in the iOS simulator (one-off) — the cause was the native-driven entry spring starting against an UNMOUNTED band, not placement — fixed, plus the auto-tour dying (and retiring itself) behind the deck's stale bubble, and "Show me around" unable to pass n10 from the In-league tab. Calculator half verified on-screen n10–n16, then the FIRST LANDING specifically (timer fallback behind `transitionEnd`, band offset live / side latched, hold before teardown, and an auto-start that refuses when n10 is capped instead of opening on n12's degrade line). **On build 128 the operator's device will most likely show NO auto-tour** (n10 capped by the abandoned runs on 126/127) — "Show me around" on the In-league tab resets it. Deck half still owed (checklist §G on 128). Simulator trap for whoever builds locally next: [G-057](GOTCHAS.md). **Shipped:** PR [#179](https://github.com/mattmurf77/fantasy-trade-finder/pull/179) → `fe77b28`, EAS **1.16.2 (128)** submitted to App Store Connect. Remote `fix/guide-band-entry-animation` ledgered + deleted. **Next session sweeps:** `git worktree remove .claude/worktrees/tweet-product-gap-review-266ff1` (this session's cwd; local branches `claude/manual-calculator-e2e-review-39a467` + `fix/guide-band-entry-animation` inside it, both on `main`), — the docs branches from this session are already ledgered (docs/recovery/2026-08-23-session-docs-branches.md) and deleted.
+
+**W7 (same day): the operator's device feedback on build 126 — six reports — fixed on `fix/384-tour-device-feedback` (adjacent band placement, transitionEnd auto-start, outlook/swap/send targets, scroll-into-view, Next/Done buttons) and shipped as v1.16.1 / EAS 127; checklist §G owed against it.**
+
+**SHIPPED 2026-08-22 — PR #172 `80dee42`, flags LIT for all users, app 1.16.0 via EAS — build **126** finished and submitted to App Store Connect 16:57Z (Apple processing → TestFlight). The paragraphs below are the pre-ship state, kept for the trail. Still owed: the POST-ship checklist run against build 126; the worktree sweep (`.claude/worktrees/tweet-product-gap-review-266ff1` is the shipping session's own cwd and could not remove itself — ledgered in `docs/recovery/2026-08-22-384-merged-calculator-ship.md`, remove it next session; `new-user-feedback-d4c47d` belongs to another session).**
+
+**Where (pre-ship):** `claude/manual-calculator-e2e-review-39a467` = `feat/calc-finder-merge` (W0–W4, `7399e18`)
++ the E2E review + G-056 + four W5 commits (`fcf3413` analytics · `9dcd003` deck · `a52c91e` tour ·
+`fc062dc` guards/scope/docs). **Not pushed, not merged, `calc.merged_layout` false.** The
+`feat/calc-finder-merge` branch itself is untouched — W5 lives only on the review branch; ship from
+the review branch (or cherry-pick), do not rebuild on `feat/calc-finder-merge`. `mobile/node_modules`
+in this worktree is a symlink to `new-user-feedback-d4c47d`'s install.
+
+**What happened:** the W0–W4 build passed every gate and did not work as a journey — review
+(`docs/feedback/items/384-calc-finder-merge/review-2026-08-22-e2e.md`, 5 P0 / 8 P1). W5 fixed
+everything that needed no new contract: overlay dead-end, four beats that could not advance, the deck
+half of the tour, first-visit gate, `guide_v2` prerequisite, outlook fallback + CTA opener, Back-to-
+calculator/unpin, league-switch canvas, format chips, analytics (13 events were being dropped), 15
+guards that stayed green through real regressions. Gates: tsc · lint · **76/76 guards** (all wired to
+`npm run`) · pytest **4128**.
+
+**Then the operator ruled, and W6 landed the same day:** §6b → own tab ([D-151](DECISIONS.md));
+the ✓ contract → `POST /api/trades/queue` (**W6-A** `d6c54cf`, [D-152](DECISIONS.md)); Find a
+Trade forks on the canvas — empty ⇒ modeled deck, filled ⇒ fairness-only `POST
+/api/trades/fair-packages`, toggle removed, tour reshaped to end in the modeled cards, calculator
+scroll-tracking fixed (**W6-B**, [D-153](DECISIONS.md)). Q-028 and Q-029 both closed. pytest
+**4173**, 76/76 guards.
+
+**Still owed:** (1) rollout shape — global flag vs tester allowlist (scope.md §6); (2) the
+prerequisite flags — `onboarding.guide_v2` is **false** and the tour does not run without it,
+`trade.outlook_direction` false ⇒ the outlook fallback row; (3) the TestFlight checklist, rewritten
+for W6, **UNRUN** — section A flag-OFF first. Known minor: partner-summary lines are not in the
+merged team sheet; the fair sweep inherits the `finderHubOn && finderMode` choke-point posture.
+
+**Parallel thread:** `docs/plans/ram-mascot/brief.md` (ram replaces The Analyst) — a separate
+session is executing it; Part 3 of that brief must not start until this branch's W6-B commit is
+confirmed (it is, as of this handoff).
+
+**Next session:** run the checklist on a build containing the W6-B commit or later; then the
+rollout-shape call; then push/PR.
+
+## 2026-08-22 — negmem BUILT dark on `claude/vigilant-spence-8583f5`; TestFlight pass + two rollout flips owed
+
+**Where:** v1 is **complete and dark** on `claude/vigilant-spence-8583f5` — not merged, not
+pushed unless asked. The planning suite (memo · scope · PLAN · PRD/HLD/LLD FINAL ·
+reconciliation-log) is unchanged and on the same branch; the operator's three §6 rulings
+(2026-08-22) opened the build gate, and the build ran as four waves.
+
+**What exists (code):** `backend/negmem.py` — leaf, imports stdlib + feature_flags + database
+only · flag `trade.negmem` (**false**) + 6 `negmem_*` knobs ×3 registrations + `MODEL_A_PROFILE`
+pin at strength 0.0 · `config/negmem_leagues.json` (**empty**) + `FTF_NEGMEM_LEAGUES`, `"*"` =
+all · four consultation seams (serving stack, gen_v2, fit, and both `bakeoff_runner` arm
+adapters) · the features-assembly stamp trichotomy · the M2 feed at both gen_v2 call sites ·
+`backend/scripts/negmem_readout.py` + `negmem_rfps.py` · `scripts/negmem-stamp-rate.sql` +
+`scripts/negmem-gr4-joint.sql`. **Docs:** config-reference (flag + allowlist incl. the wildcard
++ 6 knobs + the M2 global-kill note) · data-dictionary (all four stamp variants + the job-dict
+`negmem_note`) · glossary (negmem / reason family / evidence cell) · architecture +
+living-memory/HLD + living-memory/LLD · runbook § negmem (8 lines) ·
+[ADR-015](../docs/adr/adr-015-negmem-soft-prior-not-fourth-filter.md) · [D-147](DECISIONS.md) ·
+TEST_LEDGER 2026-08-22.
+
+**What is OWED, in order:**
+1. **Merge** (operator's call). Merging lights nothing: the ON-condition is flag **∧**
+   allowlist, and both ship off/empty.
+2. **The [TestFlight checklist](../docs/plans/negative-results-memory/testflight-checklist.md)
+   — UNRUN.** It is the only runtime evidence under D-056, and **step 0 must run BEFORE the
+   flip** or the before-picture is unrecoverable.
+3. **Two rollout flips at a bake-off ROUND BOUNDARY** (GR3 — mid-round censors the window):
+   league into `config/negmem_leagues.json`, then `trade.negmem` true. Then the ≥4-week
+   arm-attributed read and the pre-registered RFPS graduation rule (PRD §8.3) — whose baseline
+   freeze + frozen-cohort artifact must be committed **before** the window opens.
+
+**Two traps that both look like success — do not re-derive:** killing M2 through a per-arm
+overlay leaves the feed populated (only a **GLOBAL** `gen2_accept_prior_strength = 0` empties
+it; `negmem_strength` governs M1 only), and a stamp-rate query returning **zero rows** means an
+empty allowlist, not failing builds. Both are runbook lines 4 and 7.
+
+**Do not claim this is validated.** Evidence is structural only: green suite with named
+sabotages. No deck has ever been generated with the flag on for a real league.
+## 2026-08-21 — Receipts BUILT dark on `feat/receipts`; not pushed, P0 prod read owed
+
+**Where it is.** Complete and green on `feat/receipts` (worktree `agent-a60b48a57928d5895`),
+cut from `origin/main` at `eb9c1de`, with `plan/receipts` merged in (that merge IS the shared
+taxonomy's repo landing — the file is byte-identical to `main`'s copy, same blob SHA) and
+`origin/main` re-merged at `d42872f` after PRs #161/#162 landed mid-build. **Nothing is
+pushed and nothing is merged**, per the brief.
+
+Four commits: P1 (schema/flags/knobs/grader/cron/backfill) · the merge · the 54-test matrix ·
+P3 (user route/screen/analytics/structural guard) · docs+evidence.
+
+**Gates: all green.** `pytest backend/tests` 3951 passed / 1 skipped (54 of them new);
+`tsc --noEmit` green; `npm run test:receipts` 12/12; `testid-lint OK`. 21 named sabotages all
+confirmed RED. Details + the six blind-guard fixes are in TEST_LEDGER 2026-08-21b.
+
+**What is NOT done, and blocks everything downstream:**
+1. The **P0 prod cohort read** has never run. `data/trade_finder.db` holds zero
+   `deck_impressions` rows, so the backfill dry-run correctly reports 0 and **nothing is known
+   about real cohort size** — the A-1 gate is unevaluated. Run LLD §8's five read-only queries
+   via `backend/tools/prod_analytics.py` first.
+2. Both flags are off, so the grader is inert. Grading must run dark ≥2 weeks before the
+   screen ships (PRD DR-11), and the 56d window cannot mature before ~Oct 11.
+3. No device has ever rendered `ReceiptsScreen`. The 12-step checklist at
+   `docs/plans/receipts/testflight-checklist.md` is the only runtime evidence it will get.
+
+**Two things a future session should not have to rediscover.** A same-length source edit
+inside one mtime-second leaves Python running a **stale `.pyc`** — that masked a real dedup
+bug during sabotage runs and made `inspect.getsource` disagree with what was executing; clear
+`__pycache__` between sabotage steps. And the daily-tick response payload is a contract other
+tests pin: a guard that serializes a key while its flag is off is a payload change shipped by
+a dark feature.
+
+**One convention divergence, deliberate:** `GET /api/league/<league_id>/receipts` uses a path
+segment where every older league route takes `?league_id=`. The LLD specifies the path form
+in three places and the mobile client is built to it; flagged here so it is not mistaken for
+drift.
+
+## 2026-08-21 — Counterparty-breaker COMPLETE: suite converged, v1 BUILT dark, PR #161 awaits operator merge
+
+**Where:** branch `claude/counterparty-breaker-plan`, tip `da23921`, **pushed** —
+**[PR #161](https://github.com/mattmurf77/fantasy-trade-finder/pull/161) open, merge is the
+operator's call.** Suite complete AND v1 built dark in one session (operator authorized build
+post-PRD mid-session; Opus build agents, 3 waves).
+
+**What exists:** `docs/plans/counterparty-breaker/` — scope · PLAN · HLD · LLD · PRD (each
+dual-agent converged, 4 rounds) · reconciliation-log (the cold-start read) ·
+calibration-readout-spec.md (preregistered, committed pre-flag-on) · code-walk.md · drafts/.
+Code: `backend/trade_breaker.py` (+67 tests) · server seam post-F9/pre-ghost-split with
+narration-gated payload + seam republish (+35 integration tests incl. the T-13 flag matrix) ·
+`trade_narrative.hesitation_line` (brt-1, incl. `roster_crunch.one` pluralization) · 25 knobs
+×5 registrations · `trade.breaker` + `trade.breaker_narrative` both **false** · mobile
+hesitation element + `check-breaker-card.js` (12 sabotage-proven assertions) · shared taxonomy
+v1.1.1 landed. Suite at tip **3872 passed / 1 skipped**; testid-lint OK; `tsc` rides CI
+(no local node_modules — pre-existing). [D-142](DECISIONS.md), TEST_LEDGER 2026-08-21.
+
+**Operator-owed next (in order):** (1) merge PR #161 when CI is green; (2) the PRD §8.3 launch
+sequence — P1 `trade.breaker` on (dark stamp) → calibration readout per the preregistered spec
+→ per-class graduation (`breaker_narrate_<class>` via `set_knob`) → operator-only narrative
+first light (single allowlisted device, readout-excluded) → the **19-step TestFlight checklist
+(UNRUN — the only runtime evidence under D-056; needs a build cut)**; (3) the 20-item register
+in PRD §9 — defaults ship, all post-build tuning. **Sequencing:** dry run + calibration cohort
+start at/after the Monday `fix/package-benchmark-sweetener` merge (a code-ship boundary the M1
+rail cannot censor).
+
+**Binding constraints (do not re-derive):** NO ghost cards (operator, batch-wide) · v1 zero
+ordering effect (interleaved serving live) · narration derives from public state only; dark
+window serves no payload key · vocabulary anchors on `trade_pass_reasons` (+`roster_crunch`;
+`shape_aversion`=negmem via producer column) · fit-challenger rulings untouched.
+
+**Sibling batch:** Receipts suite final + batch check PASS; negmem HLD final (their LLD was
+resuming); three-way taxonomy closed at v1.1.1. The three suites go to the operator as one
+batch — mine is delivered via PR #161.
+
+## 2026-08-21 — Serving live; operator iterating; planning fleet converging
+
+**Live state:** interleaved serving ON (B/D/C), deck cap 60, ghosts off + ruled out, QB 1QB
+repriced (cap 1644/knee 1200 — operator owes the `players-refresh?force=1` click or waits for
+the daily cycle). All flips logged in `model_config_changes`.
+
+**In flight:** market-curve comparison (Opus agent → `docs/reviews/2026-08-21-market-curve-comparison.md`,
+uncommitted) · Receipts suite FINAL on `plan/receipts` in the planner worktree
+(`agent-af95ea98f982612d6`, 5 commits, not pushed) · negmem + breaker LLDs in their sessions ·
+three-way batch → operator review next.
+
+**Queued builds (operator-commissioned):** auto-sweetener pass (all arms; threshold in
+pick-equivalents, late 1st = 1539) · ghost knob code-default → 0 · fit W3 roster flip
+(`bakeoff_include_fit` 1, operator: yes at W3).
+
+**Watch:** daily deck-median tripwire (investigate < 22, revert < 18 ×2 days) — first Friday
+readout due; `scripts/bakeoff_readout.sql`.
+
+## 2026-08-20 — Fit-challenger SHIPPED dark to `main`; W3 roster flip + W1 re-light are next
+
+**Where:** the full fit-challenger program (new generator arm `fit` + measurement rail +
+serving guards) is BUILT, tested (**3651p/1s** post-merge with PR #152), and **SHIPPED to
+`main` 2026-08-20** (operator: "merge and deploy"). Operator rulings taken same day: K1
+widened (2-2/3-3 legal, PRD §12.6); `trade.outlook_direction` OFF; ms bar set; fit rosters
+dark at W3 (`bakeoff_include_fit = 1`, `bakeoff_serve_fit` stays 0). No EAS build needed —
+zero mobile files changed. Doc suite:
+[docs/plans/fit-challenger/](../docs/plans/fit-challenger/) (PRD → PLAN-v2 → HLD → LLD →
+PRD-build + drafts/critiques as the reasoning record) and
+[docs/plans/trade-engine-accuracy/PLAN.md](../docs/plans/trade-engine-accuracy/PLAN.md).
+
+**Nothing serves.** `bakeoff_include_fit` 0 · `bakeoff_serve_fit` 0 · `bakeoff_serve_interleaved`
+still 0. Every flip is the operator's, via `scripts/set_knob.py` (logged), per
+[PRD-build's 9-item decision register](../docs/plans/fit-challenger/PRD-build.md) — headline
+items: K1's literal shape list excludes 2-2/3-3 (confirm or widen, one line);
+`trade.outlook_direction` W0 flip (operator said "remove it for now" mid-session, then pivoted
+to the review — still awaiting their confirm); R-8 rostering call (fixture dry run: fit 253 vs
+arm B 12 ideas); the ms fail bar.
+
+**Next session:** (1) prod replay-board dry run for league `1312140920132497408` + baseline M2
+readout snapshot (read-only; fixture-only dry run is in TEST_LEDGER); (2) on operator confirms,
+the W1 re-light per [PLAN-v2 §5](../docs/plans/fit-challenger/PLAN-v2.md) (B+D+C screen round);
+(3) push/PR when the operator says ship.
+
+**Blocking:** operator decisions only. **Stale-entry corrections:** the 2026-08-19 entries below
+saying likes-you gates / arm D are unmerged are outdated — `7110af2`, `d755b3b`, `38806e0` are
+all on `origin/main`.
+## 2026-08-20 — Team Review #364–#376 all shipped; three flags dark, four TestFlight checklists unrun
+
+`origin/main` = `25cc699`. Builds **124** (`bc43b6f`) and **125** (`63d2965`) in TestFlight;
+Render live. All thirteen reports closed in code.
+
+**Flag state, and it matters.** LIT by operator call: `trade.position_tiers`, `trade.rb_handcuff`
+(verified serving in prod). DARK, not graduated: `trade.outlook_net_firsts`,
+`trades.window_from_odds`, `trade.outlook_composite`.
+
+**The single most important thing for the next session:** `trade.position_tiers` is lit and it
+**moves every deck** — it changes `position_needs`/`position_surplus`, which the engine reads. It
+was lit on evidence that provably cannot support it (all 65 engine tests stayed green with the
+bands forced on; disabling the small-pool guard turned exactly 1 of 65 red, proving every fixture
+is too small to distinguish them). If deck composition looks wrong, that flag is the first suspect.
+Rollback is `false` + `POST /api/feature-flags/reload` — no build, no deploy. `scripts/deck_eval.py`
+on real leagues is the evidence nobody has run.
+
+**Do not re-derive these; they each cost real time today.**
+- `compute_consensus_gap`'s sell direction is ungated and shared by three surfaces — **no flag
+  reverts #367**; rollback is a code revert.
+- The depth beat's positions write had never succeeded, so
+  `team_review_action_taken{action:'positions_set'}` has **no production history**. Not a baseline.
+- `trades_home_inline` runs at **100% strip, control 0 bp**, on the tester allowlist. Anything that
+  "disappeared from TradesHome" should be checked against that experiment before the build diff.
+- A local `data/trade_finder.db` **missing the subject league is the wrong sample, not a small one**
+  — it produced a confident, inverted #365 finding that argued against shipping the right fix.
+  Prefer read-only prod (`DATABASE_URL_PROD`; the value is quoted, strip before connecting).
+- Restoring a sabotaged file leaves an older mtime than the run's `.pyc` — clear `__pycache__` or a
+  correct tree tests red. And **commit before sabotaging**: `git checkout --` reverts to HEAD and
+  silently wiped uncommitted work once today.
+
+**Owed:** TestFlight checklists for the #364 batch (13 steps), #366, #369 and #372 — all unrun, and
+under [D-056](DECISIONS.md) they are the only runtime evidence any of this gets.
+
+**Worktrees swept** — [recovery ledger](../docs/recovery/2026-08-20-team-review-batch-worktrees.md).
+
+ `claude/team-outlook-experience-27a7a1`; TestFlight pass owed
+
+**Branch:** `claude/team-outlook-experience-27a7a1` (worktree of the same name), at `origin/main` `a76498e`.
+**SHIPPED** — PR #152 merged `bc43b6f`, Render live on it, EAS build 124 submitted to TestFlight and
+awaiting Apple processing. Full gates ran — the operator did not declare express.
+[scope](../docs/feedback/items/364-team-review-fixes/scope.md) · [code-walk](../docs/feedback/items/364-team-review-fixes/code-walk.md) ·
+[checklist](../docs/feedback/items/364-team-review-fixes/testflight-checklist.md) · [plan for the rest](../docs/feedback/items/364-team-review-fixes/plan-remaining.md) ·
+[D-100](DECISIONS.md), [D-101](DECISIONS.md).
+
+**What happened.** Team Review shipped 2026-08-19 and the operator ran it for the first time on
+2026-08-20, filing **8 reports (#364–#371)**. Nothing had been picked up. Operator selection this
+session: *"Confirmed defects now, plan the rest"* and *"Fix upstream — repairs Trends too."*
+
+**The finding that matters most.** #367 was not a copy bug. `compute_consensus_gap` selected
+"easiest sells" as roster players the USER rated **above** the market — the set the league will not
+pay up for — and `_divergence` then crossed both field names, so the user's best **buys** rendered
+under *"Skip these — you'd be buying at a price you don't believe."* Two independent errors pointing
+the same wrong way. `easiest_buys` was always correct (it compares against the **owner's** elo), and
+that asymmetry — sell into a market, buy from a person — is now pinned in
+`docs/cross-client-invariants.md` § Consensus-gap direction.
+
+**#368 was one root cause with two symptoms, and both were in the wiring, not the logic.** The route
+computes `pick_share` and `first_rounds` per owner (`server.py:23269-23278`) and never passed them,
+so `_partners` fell back to `{}` — every member read "0 firsts" **and** a contending caller's sort
+key was uniformly 0.0, leaving the list in arbitrary order. No unit test on the pure module could
+see it; the new guard AST-parses the route and asserts both kwargs are present.
+
+**Two operator asks landed mid-session and are built:** `window.model` ships all seven inference
+knobs so the beat renders its own inputs (it had hardcoded *"age 23 and under"* against a `youth_age`
+of **26** — the number shown was never the number used); and finishing the flow minimizes the entry
+card to a **"Team review · done"** row, kept as a separate key from "Not now" so the two states stay
+distinguishable.
+
+**THE SINGLE MOST IMPORTANT THING FOR THE NEXT SESSION: no flag reverts #367.**
+`compute_consensus_gap` is ungated and shared by mobile Trends, web Trends and Team Review, so
+rollback is a **code revert**, not a `features.json` flip. `trades.team_review` and `outlook.odds`
+still kill their own surfaces deploy-free, but neither touches the sell direction. Checklist step 8
+is the one to run first.
+
+**A green suite was hiding a dead test.** `test_divergence_ignores_unjudged_players` went vacuous
+under the fix — both divergence lists came back empty, so its leak assertion proved nothing while
+still passing. Repaired with a non-emptiness assertion. Worth remembering as a class: when a fix
+changes *selection*, re-read the tests that pass, not only the ones that fail.
+
+**What is owed.** (1) ~~Push + merge~~ **DONE** — `bc43b6f`, Render live, build 124 submitted.
+(2) The 13-step TestFlight checklist is
+**UNRUN**, and the corrected divergence beat has never been seen on a device; it needs a client
+release (the backend half goes live on merge, the copy does not). (3) Four reports are **planned,
+not built** — #365 (window is age-only; it is a bright-line *engine* change via `outlook_alpha`),
+#366 (Handcuff needs an NFL depth chart FTF does not ingest), #369, #371 — plus #367's
+consensus-vs-league toggle and #370 (a TradesHome deck bug, different surface). All specced in
+`plan-remaining.md` with the decision each one needs.
 
 ## 2026-08-19 — Team Review planned end-to-end (#357/#358/#359); `outlook.odds` LIT by operator override
 

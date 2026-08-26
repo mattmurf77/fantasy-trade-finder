@@ -656,6 +656,13 @@ def test_give_direction_balanced_mix_under_market_mode():
     svc.add_league(League(league_id="L1", name="T", platform="demo",
                           members=[opp]))
 
+    # 2026-08-21 — the cross-package benchmark fix post-dates this fixture
+    # (its literal values were sized against own-max market math; under the
+    # trade-wide benchmark the P+pair package prices below the fairness
+    # floor by design). Pinned to the kill value so this stays the #286
+    # paired-sweetener mechanics guard; the new benchmark's own shapes are
+    # pinned in test_package_benchmark.py.
+    ts._cfg["package_bench_trade_wide"] = 0.0
     with ts.stud_tax_override("market"):
         groups = svc.generate_asset_ideas(
             user_id="user",
@@ -729,6 +736,9 @@ def test_receive_direction_balanced_mix_under_market_mode():
     svc.add_league(League(league_id="L1", name="T", platform="demo",
                           members=[owner]))
 
+    # 2026-08-21 — same kill-value pin as the give-direction test above;
+    # see the comment there.
+    ts._cfg["package_bench_trade_wide"] = 0.0
     with ts.stud_tax_override("market"):
         groups = svc.generate_asset_ideas(
             user_id="user",

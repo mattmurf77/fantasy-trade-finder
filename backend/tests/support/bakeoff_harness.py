@@ -73,8 +73,24 @@ def _opp_board(roster_bias: float):
 
 def _flag_patches(*, signal_v2=True, thompson=True, diversity=True):
     """One fixed presentation configuration, patched at the helper level so
-    the capture never depends on config/features.json drift."""
+    the capture never depends on config/features.json drift.
+
+    The GENERATION-side flags read via the FLAGS proxy must be pinned too —
+    the proxy resolves through feature_flags.is_enabled at call time, so a
+    features.json flip (e.g. trade.outlook_direction, operator-flipped OFF
+    2026-08-20) would otherwise silently re-price the golden. Pinned to the
+    values in force when flag_off_golden.json was captured."""
+    import backend.feature_flags as _ff
+    _real_is_enabled = _ff.is_enabled
+    _GOLDEN_FLAG_PINS = {"trade.outlook_direction": True}
+
+    def _pinned_is_enabled(key):
+        if key in _GOLDEN_FLAG_PINS:
+            return _GOLDEN_FLAG_PINS[key]
+        return _real_is_enabled(key)
+
     return [
+        patch.object(_ff, "is_enabled", _pinned_is_enabled),
         patch.object(server, "_deck_signal_v2_enabled", lambda: signal_v2),
         patch.object(server, "_thompson_deck_enabled", lambda: thompson),
         patch.object(server, "_deck_thompson_v2_enabled", lambda: False),

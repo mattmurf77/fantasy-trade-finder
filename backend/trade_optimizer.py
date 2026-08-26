@@ -27,8 +27,8 @@ means. Several small private helpers from trade_service are replicated
 here (marked with TODO refactor comments) because they are closures /
 methods that cannot be imported without touching trade_service.py.
 
-Config keys (all read live via trade_service._cfg with inline defaults —
-nothing added to trade_service._DEFAULT_CFG):
+Config keys read live via trade_service._cfg with inline defaults (nothing
+added to trade_service._DEFAULT_CFG for these):
 
     v3_pool_size          12     per-side candidate pool size (3.1 prune)
     sweetener_band        0.15   how far below fairness_threshold a
@@ -38,6 +38,12 @@ nothing added to trade_service._DEFAULT_CFG):
                                  directed edge in the cycle graph
     cycle_min_net         200.0  min per-team net surplus for a 3-cycle
     cycle_max_results     3      max cycles returned
+
+Every other knob this module reads — including C4's ``v3_shape_max_delta``
+(max |len(give) - len(receive)| a package shape may carry; 1 = the
+historical rule, 2 unlocks the 3-for-1 / 1-for-3 subsets the enumeration
+already builds) — goes through ``trade_service._c``, which consults the
+``_cfg_override`` thread-local before the live map.
 """
 
 from __future__ import annotations
@@ -69,7 +75,8 @@ from .trade_service import (
     replacement_levels,
 )
 
-__all__ = ["generate_pair_trades_v3", "find_three_team_cycles"]
+__all__ = ["generate_pair_trades_v3", "find_three_team_cycles",
+           "close_value_gap"]
 
 
 # ---------------------------------------------------------------------------
@@ -268,6 +275,17 @@ def generate_pair_trades_v3(
     W_MIS    = _c("mismatch_weight")
     W_FAIR   = _c("fairness_weight")
     POOL_P   = int(_ts._cfg.get("v3_pool_size", 12))
+    # C4 (docs/plans/knockout-refine/plan.md §3) — the package-shape rule is
+    # a knob, not a literal. Read at CALL time, never bound at import
+    # (D-098 / G-058 cause 3), and through `_c` rather than `_ts._cfg.get`:
+    # the key lives in `trade_service._DEFAULT_CFG`, so `_c` is what the
+    # sibling knobs above use, and it is the only reader that honours the
+    # `_cfg_override` thread-local. That overlay is not a detail — it is how
+    # the #189 relaxed pass and bake-off arm A's `MODEL_A_PROFILE` pin of
+    # this knob to 1.0 are applied, and `_ts._cfg.get` cannot see it, so an
+    # arm-A pin would silently no-op the moment prod flips the row to 2.
+    # Default 1 is the historical `> 1` rule, byte-identical.
+    SHAPE_D  = int(_c("v3_shape_max_delta"))
     SW_BAND  = float(_ts._cfg.get("sweetener_band", 0.15))
     SW_MAX   = int(_ts._cfg.get("sweetener_max_cards", 2))
     TARGET_BONUS = _c("target_acquire_bonus")   # #2 per-target reward
@@ -526,7 +544,7 @@ def generate_pair_trades_v3(
         for recv_ids in recv_subsets:
             if pinned_recv_set and not (set(recv_ids) & pinned_recv_set):
                 continue
-            if abs(len(give_ids) - len(recv_ids)) > 1:
+            if abs(len(give_ids) - len(recv_ids)) > SHAPE_D:
                 continue
             if not _positions_ok(give_ids, recv_ids):
                 continue
@@ -678,6 +696,75 @@ def generate_pair_trades_v3(
             organic_keys.add(key)
             budget -= 1
 
+    # --- 2026-08-21 gap auto-sweetener (sweetener_gap_threshold) ----------
+    # Runs at generation time on this pair's finished cards (never
+    # post-draft): a card whose absolute consensus gap exceeds the
+    # threshold is re-balanced in place by adding the smallest sufficient
+    # equalizer from the richer side's roster, re-earning every gate. A
+    # card the pass cannot close is kept unsweetened — the pass narrows
+    # gaps, it does not shrink the deck. ≤ 0 disables (arm A's pin).
+    GAP_THR = _c("sweetener_gap_threshold")
+    if GAP_THR > 0 and cards:
+        card_keys = {(frozenset(c.give_player_ids),
+                      frozenset(c.receive_player_ids)) for c in cards}
+
+        def _gap_extra_ok(g, r):
+            if not filler_ok(g, r, _uv, _vo):
+                return False
+            if not pick_swap_ok(g, r, players, _sv):
+                return False
+            if presentment_ok_fn is not None and not presentment_ok_fn(g, r):
+                return False
+            if not _gap_ok(g, r):
+                return False
+            u_s, o_s = _surpluses(g, r)
+            return u_s >= MIN_SIDE and o_s >= MIN_SIDE
+
+        for card in cards:
+            closed = close_value_gap(
+                card.give_player_ids, card.receive_player_ids,
+                seed_value=_sv, gap_threshold=GAP_THR,
+                fairness_threshold=fairness_threshold,
+                user_roster=user_roster, opp_roster=opponent.roster,
+                players=players, scoring_format=scoring_format,
+                untouchable_ids=untouchable_ids,
+                not_interested_ids=not_interested_ids,
+                extra_ok_fn=_gap_extra_ok)
+            if closed is None:
+                continue
+            s_pid, side, new_give, new_recv, n_gv, n_rv, ratio = closed
+            new_key = (frozenset(new_give), frozenset(new_recv))
+            if new_key in card_keys:      # would collide with a sibling card
+                continue
+            gap_before = abs((card.give_value or 0.0)
+                             - (card.receive_value or 0.0))
+            user_s, opp_s = _surpluses(new_give, new_recv)
+            hm = _harmonic_mean(user_s, opp_s)
+            card_keys.discard((frozenset(card.give_player_ids),
+                               frozenset(card.receive_player_ids)))
+            card.give_player_ids = new_give
+            card.receive_player_ids = new_recv
+            card.mismatch_score = round(hm, 1)
+            card.fairness_score = ratio
+            card.composite_score = round(
+                _composite(hm, ratio, new_give + new_recv, new_recv,
+                           new_give), 3)
+            card.give_value = round(n_gv, 1)
+            card.receive_value = round(n_rv, 1)
+            # Round-2 review 2026-08-21: `fit_premium` is a 1-for-1-only
+            # annotation (fit_premium_1for1 returns a price only when the
+            # #108 raw-board gate fails, which it can only do on a 1x1).
+            # A sweetened card is no longer that shape, so the stale price
+            # must not ride along on the payload — the v2 divergence path
+            # already nulls its `fit_paid` for the same reason.
+            card.fit_premium = None
+            card.gap_sweetener = {
+                "player_id": s_pid, "side": side,
+                "gap_before": round(gap_before, 1),
+                "gap_after": round(abs(n_gv - n_rv), 1),
+            }
+            card_keys.add(new_key)
+
     return cards
 
 
@@ -743,6 +830,101 @@ def _try_sweeten(give_ids, recv_ids, *, user_roster, opp_roster, seed_value,
         if user_s < min_side or opp_s < min_side:
             continue
         return s_pid, side, new_give, new_recv, user_s, opp_s, round(ratio, 3)
+    return None
+
+
+def close_value_gap(give_ids, recv_ids, *, seed_value, gap_threshold,
+                    fairness_threshold, user_roster, opp_roster, players,
+                    scoring_format="1qb_ppr", untouchable_ids=None,
+                    not_interested_ids=None, extra_ok_fn=None,
+                    give_candidates=None, recv_candidates=None):
+    """2026-08-21 gap auto-sweetener (`sweetener_gap_threshold`) — close an
+    ABSOLUTE consensus gap on a card that already passed its path's gates.
+
+    The ratio gate is scale-blind: fairness 0.85 on a five-figure package
+    still leaves more than a late 1st of consensus value on the table
+    (CHANGELOG 2026-08-21 — 15% of served cards carried gap > a late 1st).
+    This pass generalizes `_try_sweeten` (the 3.4 fairness-band rescue)
+    from "lift the ratio into the band" to "bring |gv − rv| under
+    ``gap_threshold``": the RICHER side — the one receiving more consensus
+    value — adds the smallest asset from its roster that
+
+      (a) brings the recomputed gap ≤ ``gap_threshold``,
+      (b) keeps the consensus point ratio ≥ ``fairness_threshold``,
+      (c) keeps BOTH post-trade lineups feasible (3.2 rule), and
+      (d) clears ``extra_ok_fn`` — the calling path's own gate stack
+          (junk-filler, presentment, pick-swap, surplus gates, …), so a
+          sweetened combo re-earns every gate the organic combo passed.
+
+    Candidates are tried cheapest-consensus-value first, so the first hit
+    is the smallest sufficient equalizer. They are drawn from the richer
+    side's ROSTER by default, never untouchables (give side) and never
+    not-interested players (receive side).
+
+    ``give_candidates`` / ``recv_candidates`` (2026-08-21 round-2 review)
+    narrow that universe when the CALLING path restricted its own pools
+    rather than gating per-combo: the consensus generator prunes
+    `give_pool` to the #174 pinned give players and `recv_pool` to the
+    FB-47 pinned acquire targets / needed positions, so an equalizer
+    drawn from the raw roster would put an asset in the card that the
+    path itself would never have enumerated. Paths whose pinned/position
+    rules are per-combo and monotone under addition (v2 divergence, v3)
+    pass nothing and keep the full-roster universe, matching
+    `_try_sweeten`. ``user_roster``/``opp_roster`` are still the FULL
+    rosters — the 3.2 lineup-feasibility counts are computed from them.
+
+    Picks: when `trade.picks_in_pool` is on, owned picks are injected as
+    PICK pseudo-assets INTO the rosters, so a pick can be the equalizer.
+    `pick_swap_ok` re-runs inside every caller's `extra_ok_fn` (#227/C3),
+    which is the guard that keeps a pick-for-pick churn shape out.
+
+    Returns (sweetener_pid, side, new_give, new_recv, gv, rv, point_ratio)
+    or None. ``side`` is the side the asset was ADDED to: "give" when the
+    USER was the richer party (they pay the equalizer), "receive" when the
+    opponent was.
+    """
+    gv, rv = _consensus_packages(give_ids, recv_ids, seed_value)
+    if abs(gv - rv) <= gap_threshold:
+        return None
+    in_trade = set(give_ids) | set(recv_ids)
+    if rv > gv:            # user receives more — user adds to the give side
+        side = "give"
+        roster = user_roster if give_candidates is None else give_candidates
+    else:                  # opponent receives more — they add (user receives)
+        side = "receive"
+        roster = opp_roster if recv_candidates is None else recv_candidates
+
+    user_counts = _pos_counts(user_roster, players)
+    opp_counts = _pos_counts(opp_roster, players)
+
+    candidates = sorted((p for p in roster if p not in in_trade
+                         and not (side == "give" and untouchable_ids
+                                  and p in untouchable_ids)
+                         and not (side == "receive" and not_interested_ids
+                                  and p in not_interested_ids)),
+                        key=seed_value)
+    for s_pid in candidates:
+        if side == "give":
+            new_give, new_recv = list(give_ids) + [s_pid], list(recv_ids)
+        else:
+            new_give, new_recv = list(give_ids), list(recv_ids) + [s_pid]
+        n_gv, n_rv = _consensus_packages(new_give, new_recv, seed_value)
+        if n_gv <= 0 or n_rv <= 0:
+            continue
+        if abs(n_gv - n_rv) > gap_threshold:      # too small to close it
+            continue
+        ratio = min(n_gv, n_rv) / max(n_gv, n_rv)
+        if ratio < fairness_threshold:            # fell out of the band
+            continue
+        g_delta = _subset_pos_delta(new_give, players)
+        r_delta = _subset_pos_delta(new_recv, players)
+        if not (_feasible_after(user_counts, g_delta, r_delta, scoring_format)
+                and _feasible_after(opp_counts, r_delta, g_delta,
+                                    scoring_format)):
+            continue
+        if extra_ok_fn is not None and not extra_ok_fn(new_give, new_recv):
+            continue
+        return s_pid, side, new_give, new_recv, n_gv, n_rv, round(ratio, 3)
     return None
 
 

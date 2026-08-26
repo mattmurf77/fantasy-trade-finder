@@ -27,7 +27,7 @@ except ImportError:                # pragma: no cover
 
 from sqlalchemy import (
     Column, Float, Index, Integer, MetaData, String, Table, Text, UniqueConstraint,
-    create_engine, delete, func, insert, or_, select, update, and_, text,
+    create_engine, delete, func, insert, literal, or_, select, update, and_, text,
 )
 from sqlalchemy import event as sa_event
 from datetime import timedelta
@@ -233,11 +233,15 @@ users_table = Table("users", metadata,
     # trade_service.stud_tax_mode_for_user for /api/trade/evaluate and
     # deck generation.
     Column("stud_tax_mode",         String),
-    # ── M6b draft-pick pricing mode (flag `trade.slot_pricing`) ───────────
-    # 'tier_ladder' (default/NULL — today's shipped ladder, unchanged) |
-    # 'market_slots' (DynastyProcess per-slot market curve). Read at pick
-    # PRICING time by trade_service.pick_pricing_mode_for_user; it never
-    # rewrites draft_picks.pool_value, which is league-shared.
+    # ── ⚠️ DEAD DATA since 2026-08-21 (D-144) ─────────────────────────────
+    # Was M6b's per-user draft-pick pricing mode ('tier_ladder' |
+    # 'market_slots'). The operator ruled market pricing "not an opt-in or an
+    # option to flip", so trade_service.pick_pricing_mode_for_user now returns
+    # 'market_slots' unconditionally WITHOUT reading this column, and
+    # /api/settings/pick-pricing no longer writes it (PUT is 410 Gone).
+    # Every row still holds 'tier_ladder' or NULL. Ignore it.
+    # NOT DROPPED, on purpose: additive-schema rule, and keeping it means a
+    # restore of the per-user axis would need no migration.
     Column("pick_pricing_mode",     String),
 )
 
@@ -1529,7 +1533,38 @@ model_config_table = Table("model_config", metadata,
     Column("key",         String, primary_key=True),
     Column("value",       Float,  nullable=False),
     Column("description", String),
+    # ── M1 (fit-challenger measurement rail, LLD §5.1) ───────────────────
+    # ISO UTC instant of the last write that went through set_config().
+    # NULL on rows never touched since the column landed (additive, no
+    # backfill). A raw-SQL bypass write leaves it stale — the per-run
+    # config_json snapshot diff is what catches those (PLAN-v2 R-5).
+    Column("updated_at",  String),
 )
+
+# ---------------------------------------------------------------------------
+# model_config_changes — append-only log of every funneled knob write (M1).
+# One row per set_config() call, written in the SAME transaction as the
+# value update, so a knob's change date is knowable after the fact and every
+# measurement window can be censored at the logged timestamp (PLAN-v2 R-5).
+#
+# key:        the model_config key that changed
+# old_value:  prior value (NULL on the first logged write of a key)
+# new_value:  the value written
+# changed_at: ISO UTC
+# source:     who/what wrote it — 'operator' (set_knob.py), 'admin-api'
+#             (PUT /api/admin/config default), 'operator-local', tests, …
+# ---------------------------------------------------------------------------
+
+model_config_changes_table = Table("model_config_changes", metadata,
+    Column("id",         Integer, primary_key=True, autoincrement=True),
+    Column("key",        String,  nullable=False),
+    Column("old_value",  Float),                    # NULL on first logged write
+    Column("new_value",  Float,   nullable=False),
+    Column("changed_at", String,  nullable=False),  # ISO UTC
+    Column("source",     String),                   # 'operator' | 'admin-api' | …
+)
+Index("ix_model_config_changes_key",
+      model_config_changes_table.c.key, model_config_changes_table.c.changed_at)
 
 # ---------------------------------------------------------------------------
 # Agent 6 additions — wrapped_events  ***FROZEN (analytics P0 cutover)***
@@ -2191,6 +2226,97 @@ mock_drafts_table = Table("mock_drafts", metadata,
     Index("ix_mock_drafts_user_league", "user_id", "league_id"),
 )
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Receipts — graded suggestion track record (docs/plans/receipts/LLD.md §3)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# The serve-time `deck_impressions` row IS the prediction (preregistration):
+# `assets_json` names the asset set and direction, and it was frozen before
+# any outcome existed. These two tables record only how CONSENSUS moved
+# afterwards — never a re-derivation of what the engine thought at serve.
+#
+# Written exclusively by `backend/receipts_service.py` (flag
+# `receipts.grading`, default off). Soft references, no FKs — house style,
+# cf. deck_outcomes above.
+#
+# receipts_grades — APPEND-ONLY. One row per
+# (impression_id, window_days, grader_version) that reaches a TERMINAL
+# status ('graded' or 'ungradeable'). Never UPDATEd, never DELETEd:
+# corrections are a new `grader_version` with the old rows retained
+# (HLD D-3), which is what makes "we can't move the goalposts" mechanical
+# rather than aspirational. Rows whose window endpoint is not yet resolvable
+# are simply absent — the queue is defined by that absence (LLD §4.1), so
+# idempotency is structural rather than bookkept.
+receipts_grades_table = Table("receipts_grades", metadata,
+    Column("id",              Integer, primary_key=True, autoincrement=True),
+    Column("impression_id",   String,  nullable=False),   # deck_impressions soft ref
+    Column("window_days",     Integer, nullable=False),   # 14 | 28 | 56
+    Column("grader_version",  String,  nullable=False),   # 'receipts-1'
+    Column("taxonomy_version", String),                   # '1.1.1' (doc mirror, HLD D-10)
+    Column("status",          String,  nullable=False),   # 'graded' | 'ungradeable'
+    Column("reason",          String),                    # NULL when graded; enum LLD §5.3
+    # The snapshot dates ACTUALLY used, so the ±tolerance match is auditable
+    # and the admin `effective_window` block can report the real spread.
+    Column("serve_snap_date",  String),
+    Column("window_snap_date", String),
+    # Players-only consensus sums, value units (HLD D-1/D-2). Picks are held
+    # at delta 0 and never enter these sums.
+    Column("give_serve_value",   Float), Column("receive_serve_value", Float),
+    Column("give_delta",         Float), Column("receive_delta",       Float),
+    Column("edge",               Float), Column("edge_pct",            Float),
+    Column("baseline_edge",      Float),  # RESERVED, always NULL in v1 (shuffle baseline)
+    # Coverage + pick accounting (HLD D-7)
+    Column("coverage_give",   Float), Column("coverage_receive", Float),
+    Column("has_picks",       Integer),
+    Column("imputed_count",   Integer),   # pool-floor-imputed assets (HLD D-8)
+    # Per-asset audit trail:
+    #   [{id, side, is_pick, cv0, cv1, imputed_floor}]
+    Column("assets_detail_json", Text),
+    # Denormalized slice keys, copied FROM the impression at grade time so a
+    # per-cell read is one GROUP BY with no features_json parsing.
+    Column("league_id",       String, nullable=False),
+    Column("user_id",         String, nullable=False),
+    Column("scoring_format",  String),
+    Column("served_at",       String, nullable=False),
+    Column("trade_hash",      String),                    # read-time dedup key
+    # Always NULL/0 on a graded row: the queue predicate excludes ghosts
+    # entirely (operator ruling 2026-08-21). Kept as a column so a future
+    # ruling change is a one-line predicate flip, not a migration.
+    Column("is_ghost",        Integer),
+    Column("shape_bucket",    String), Column("archetype", String),
+    Column("basis",           String), Column("model_arm", String),
+    Column("policy_version",  String),
+    Column("graded_at",       String, nullable=False),    # ISO UTC
+    UniqueConstraint("impression_id", "window_days", "grader_version",
+                     name="uq_receipts_grade"),
+)
+Index("ix_receipts_grades_league",
+      receipts_grades_table.c.league_id, receipts_grades_table.c.window_days)
+Index("ix_receipts_grades_user",
+      receipts_grades_table.c.user_id, receipts_grades_table.c.league_id)
+Index("ix_receipts_grades_shape",
+      receipts_grades_table.c.shape_bucket, receipts_grades_table.c.window_days)
+
+# receipts_grade_runs — run ledger, APPEND-ONLY, TWO rows per invocation
+# sharing a `run_id`: kind='start' at run begin and kind='end' at completion.
+# A killed run (crash, Render free-instance spin-down mid-run) is visible as
+# an unmatched start row — the observability surface for a job with no UI.
+# Counts live on the 'end' row.
+receipts_grade_runs_table = Table("receipts_grade_runs", metadata,
+    Column("id",             Integer, primary_key=True, autoincrement=True),
+    Column("run_id",         String,  nullable=False),    # uuid4 hex, shared by the pair
+    Column("kind",           String,  nullable=False),    # 'start' | 'end'
+    Column("run_at",         String,  nullable=False),    # ISO UTC of THIS row
+    Column("trigger",        String),                     # 'cron' | 'daily_tick' | 'backfill'
+    Column("duration_ms",    Integer),                    # end rows only
+    Column("graded",         Integer), Column("ungradeable", Integer),
+    Column("reason_counts_json", Text),
+    Column("batch_cap",      Integer), Column("cap_hit", Integer),
+    Column("remaining_resolvable", Integer),              # backlog estimate (end rows)
+    Column("grader_version", String),
+    Index("ix_receipts_grade_runs_run", "run_id"),
+)
+
 # Default values seeded on first run.  Only inserted if the key doesn't
 # already exist (INSERT OR IGNORE) so manual overrides survive re-deploys.
 _MODEL_CONFIG_DEFAULTS = [
@@ -2306,6 +2432,7 @@ _MODEL_CONFIG_DEFAULTS = [
     # ── Trade engine Tier 3 (flags trade_engine.v3, trade.three_team) ────
     ("v3_pool_size",            12.0,   "v3: per-side candidate pool size for exact enumeration"),
     ("sweetener_band",           0.15,  "v3: fairness shortfall band eligible for a sweetener rescue"),
+    ("sweetener_gap_threshold",  1539.0, "2026-08-21 gap auto-sweetener: close absolute consensus gaps above this (value units; 1539 = one late 1st) by adding the smallest sufficient asset from the richer side's roster; <=0 disables"),
     ("sweetener_max_cards",      2.0,   "v3: max sweetened cards per opponent pair"),
     ("cycle_edge_min_gain",    100.0,   "v3: min per-transfer marginal gain for a 3-team cycle edge"),
     ("cycle_min_net",          200.0,   "v3: min net gain per team for a 3-team cycle"),
@@ -2336,6 +2463,8 @@ _MODEL_CONFIG_DEFAULTS = [
     ("package_floor_market",     0.70,  "#214: market-mode depth-discount contribution floor (piece contributes at least this fraction of face value)"),
     ("package_adj_gamma_market", 0.5,   "#214: market-mode depth-discount exponent, benchmarked against the package's OWN best asset"),
     ("package_discount_cap",     0.35,  "#214: cap on a side's total market-mode depth discount as a fraction of its naive sum"),
+    ("package_bench_trade_wide", 1.0,   "2026-08-21 benchmark fix: >0 = depth-discount a multi-asset side that lacks the trade's best asset against the TRADE's best asset (v_max); <=0 = pre-fix own-max benchmark (arm A's pin)"),
+    ("package_floor_cross",      0.40,  "2026-08-21 benchmark fix: contribution floor on the cross-benchmarked (stud-buying) side; inert while package_bench_trade_wide <= 0"),
     ("fairness_floor_divergence", 0.55, "interview: consensus fairness gate for divergence cards = min(fairness_threshold, this) — extreme-case veto only"),
     # ── #189 — relaxed fallback for empty targeted sweeps ────────────────
     ("relaxed_fairness_threshold", 0.55, "#189: stage-1 fairness bar for the relaxed fallback pass on empty targeted jobs (never tightens below the caller's threshold)"),
@@ -2343,6 +2472,8 @@ _MODEL_CONFIG_DEFAULTS = [
     # ── #172/#189 follow-up — asset-centric trade ideas (trade.asset_ideas) ──
     ("asset_ideas_lateral_band", 0.10,  "asset ideas: ± consensus-value band around the pinned asset classifying a counterpart as Lateral; above=Upgrade, below=Downgrade piece"),
     ("asset_ideas_group_cap",    6.0,   "asset ideas: max ideas returned per group (upgrade/lateral/downgrade), ordered by |difference|"),
+    # ── #384 W6-B — fairness-only packages for a fixed give anchor (calc.merged_layout) ──
+    ("fair_packages_cap",       20.0,   "#384: max fair-package ideas returned by POST /api/trades/fair-packages — ONE flat swipeable deck, so one cap (not per group)"),
     ("bench_credit_qb",          0.10,  "interview: bench credit for QB depth in 1QB formats"),
     ("bench_credit_rb",          0.30,  "interview: bench credit for RB depth (near-startable insurance)"),
     ("bench_credit_wr",          0.30,  "interview: bench credit for WR depth (near-startable insurance)"),
@@ -2394,6 +2525,15 @@ _MODEL_CONFIG_DEFAULTS = [
     ("need_gate_min_value",     500.0,  "G6 R5 #304: min consensus value of the primary received player before the need gate applies (untargeted decks only); <=0 disables the whole gate"),
     ("need_gate_upgrade_margin",  0.0,  "G6 R5 #304: primary must beat the post-give incumbent by this fraction to count as a starter upgrade; 0 = any strict upgrade passes"),
 
+    # ── Knockout refine (2026-08-23) ──────────────────────────────────────
+    # docs/plans/knockout-refine/plan.md §3. Four refinements to the G6
+    # knockouts above; each knob's 0 restores that predicate byte-identically
+    # and is a deploy-free revert via PUT /api/admin/config.
+    ("need_gate_dual_rescue",     1.0,  "Knockout refine C1 (R5 #304): 1 = the need gate judges EVERY non-pick received asset and gains a dual-need rescue (viewer sheds surplus at a position the partner is short at); 0 = the primary-only one-sided kill, byte-identical"),
+    ("overpay_adjusted",          1.0,  "Knockout refine C2 (R1 #340): 1 = price both sides with package_value_v2 (the currency the card shows) before taking the gap; 0 = raw consensus sums, byte-identical. max_overpay_frac/_min_value unchanged; a 1-for-1 is identity under package_value_v2"),
+    ("pos_net_starter_relief",    1.0,  "Knockout refine C3 (R2 #341): 1 = an over-cap position survives when the shedding side was strictly above starter need there before and BOTH rosters stay at/above it after (startable bodies, picks excluded); 0 = the flat |net| <= pos_net_cap kill, byte-identical"),
+    ("v3_shape_max_delta",        1.0,  "Knockout refine C4: max |len(give) - len(recv)| the v3 optimizer will enumerate. 1 = today's rule, byte-identical; 2 unlocks 3-for-1 / 1-for-3 (the post-merge consolidation-bundle flip). Read by trade_optimizer through the trade_service module object (D-098)"),
+
     # Dismiss ("pass") cooldown — docs/plans/pass-cooldown/plan.md, D-067.
     # The UI's "dismiss" is the API's decision='pass'. Deploy-free revert to
     # the pre-fix behavior: set this to 7.0.
@@ -2410,6 +2550,116 @@ _MODEL_CONFIG_DEFAULTS = [
     # ── #362 standing offers (flag trade.standing_offers) ────────────────
     ("standing_offer_days",       30.0, "#362: days a standing offer stays live; STORED on the row at create time, so a change here moves only offers created after it"),
     ("standing_offer_inject_cap",  2.0, "#362: max of the 3 likes-you injection slots a deck may spend on standing offers (organic mirrors are evaluated first). 3 = unreserved cap; **`0` = off / kill switch**, standing offers stop injecting without a flag flip"),
+    # ── D-161 round-1 YoY floor (pick_values.market_r1_yoy_floor) ─────────
+    # D-079's flat-firsts ruling re-asserted at the market_slots seam, where
+    # DP's own in-window year discount had been overriding it (2027 1st 1751
+    # / 2028 1st 1459 vs a 2184.6 current-year mid, measured on prod
+    # 2026-08-24). 0 = pure market, the deploy-free revert to pre-D-161.
+    ("market_r1_yoy_floor", 1.00, "D-161: a FUTURE-season 1st-round pick never prices below this fraction of the CURRENT class's round-1 market price (1.0 = firsts hold value YoY, operator re-ruling 2026-08-24). 0 = pure DynastyProcess curve, byte-identical to pre-D-161. Rounds 2-4 untouched"),
+    # ── Fit-challenger arm knobs (docs/plans/fit-challenger/LLD.md §4) ────
+    # All 17 seeded in PR-M so set_config/PUT never KeyErrors on them (HLD
+    # F-1); backend/trade_gen_fit.py consumes them from PR-F1/F2/F3 on.
+    # Generation knobs are dark: arm A never imports the fit module.
+    ("fit_score_scale",           400.0, "fit arm: tanh surplus scale — surplus 400 → score ≈ 88.1"),
+    ("fit_score_even",             50.0, "fit arm: score of a zero-surplus (even) trade — the tanh curve midpoint"),
+    ("fit_w_board",                0.40, "fit arm: lens weight L1 (own-board surplus) in the per-side combine"),
+    ("fit_w_div",                  0.30, "fit arm: lens weight L2 (board-vs-consensus divergence) in the combine"),
+    ("fit_w_cons",                 0.30, "fit arm: lens weight L3 (consensus surplus) in the combine"),
+    ("fit_pool_consensus",          8.0, "fit arm pool: top-N roster assets by consensus value"),
+    ("fit_pool_div_seed",           8.0, "fit arm pool: top-N assets by viewer-board-over-seed divergence"),
+    ("fit_pool_div_opp",            8.0, "fit arm pool: top-N assets by opponent-board divergence"),
+    ("fit_pool_cap",               15.0, "fit arm pool: hard cap on unique asset ids per roster (picks compete under it)"),
+    ("fit_max_packages_per_pair", 20000.0, "fit arm: enumeration ceiling per viewer-opponent pair — the ms relief valve"),
+    ("fit_expand_from",            25.0, "fit arm: top-N 1-for-1 survivors used as seeds for multi-asset expansion"),
+    ("fit_min_them",                0.0, "fit arm post-score filter: min them-score to surface; 0 = off (PRD default)"),
+    ("fit_min_aggregate",           0.0, "fit arm post-score filter: min you+them aggregate to surface; 0 = off"),
+    ("fit_r5_mode",                 1.0, "fit arm K7: 1 = R5 need-gate failure kills (live-as-written); 0 = score + tag r5_fail"),
+    ("fit_junk_floor",              0.0, "fit arm: 1 = kill sides padded below asset_floor_abs; 0 = lens 3 tanks junk instead"),
+    # ── Bake-off serving knobs (seeded 2026-08-20, W1 re-light) ─────────────
+    # These pre-date the fit build but were NEVER seeded, so `set_config`
+    # KeyError'd on them and every "deploy-free flip" of the serving posture
+    # was actually a code-default edit + deploy (the 2026-08-18/19 dance).
+    # Values here MATCH trade_service._DEFAULT_CFG exactly — seeding is
+    # behavior-neutral; it only makes the knobs remotely settable (HLD F-1).
+    ("bakeoff_serve_interleaved",   0.0, "bake-off serving: 1 = interleaved deck served; 0 = dark (arm B only)"),
+    ("bakeoff_deck_limit",         30.0, "bake-off: max cards in the served interleaved deck (0 = uncapped)"),
+    ("bakeoff_group_size",         10.0, "bake-off composition: cards per group; 0 kills the composition layer (plain per-arm draft)"),
+    ("bakeoff_group_value_slots",   5.0, "bake-off composition: value-lane slots per group (outlook = remainder)"),
+    ("bakeoff_fill_policy",         0.0, "bake-off: 1 = backfill residual lane slots cross-lane (flagged); 0 = leave short"),
+    ("bakeoff_lane_reallocate",     1.0, "bake-off: 1 = lanes may spill into slots the other lane cannot fill (own bucket only)"),
+    ("bakeoff_include_baseline",    0.0, "bake-off roster bit: 1 = arm A (baseline) generates; 0 = out (default)"),
+    ("bakeoff_include_challenger",  1.0, "bake-off roster bit: 1 = arm D (challenger) generates; 0 = out"),
+    ("bakeoff_include_gen_v2",      1.0, "bake-off roster bit: 1 = arm C (gen_v2) generates; 0 = out"),
+    # OPERATOR RULING 2026-08-21 (batch-wide): ghosts are ruled out
+    # entirely, so the SEED default is 0 — a fresh DB must not start
+    # ghosting. <=0 disables ghosting inside the flag.
+    ("ghost_holdout_one_in",        0.0, "suggestion telemetry: withhold ~1-in-N organic deck cards as ghosts; <=0 disables ghosting. DEFAULT 0 per the operator ruling 2026-08-21 (ghosts ruled out entirely)"),
+    ("bakeoff_include_fit",         0.0, "bake-off roster bit: 1 = arm fit generates + logs; 0 = not rostered (default)"),
+    ("bakeoff_serve_fit",           0.0, "bake-off serve bit: 1 = fit cards join the served draft; 0 = dark (generate + log only)"),
+
+    # ── Receipts — OFFLINE grading knobs (docs/plans/receipts/LLD.md §1) ──
+    # Consumed ONLY by backend/receipts_service.py, which runs after the
+    # fact against frozen impressions and frozen consensus snapshots. NO
+    # generation path reads them and they are deliberately absent from
+    # trade_service._DEFAULT_CFG, so arm A (and every other arm) cannot
+    # observe them — the arm-A disposition sentence for each key is
+    # recorded in docs/plans/three-model-bakeoff/scope-phase2.md.
+    ("receipts_grade_batch",      500.0, "receipts: terminal grade rows written per run (fan-out cap)"),
+    ("receipts_min_n",             10.0, "receipts: min displayed n before the user-facing headline renders"),
+    ("receipts_coverage_min",       0.5, "receipts: min(coverage_give, coverage_receive) a graded row needs for user aggregates"),
+    ("receipts_pick_share_max",     0.5, "receipts: pick share of a side's serve value above which the row is ungradeable/pick_majority"),
+    ("receipts_snap_tolerance_days", 3.0, "receipts: +/- days tolerance when matching a value snapshot to an endpoint date"),
+    # ── Counterparty-breaker knobs (docs/plans/counterparty-breaker/LLD.md §4) ─
+    # All 25 seeded here so `set_config` / PUT /api/admin/config never KeyError
+    # on them and the LLD §6 rollback ladder is real rather than theater.
+    # Consumed by backend/trade_breaker.py, which runs AFTER generation and
+    # ranking; no generator or ranker imports it. `waiver_slot_cost` above is
+    # reused by the breaker and is NOT part of the 25.
+    ("breaker_ms_budget",                   250.0, "breaker: per-deck eval budget ms; 0 disables (minimal markers)"),
+    ("breaker_budget_checkpoint_frac",        0.6, "breaker: budget fraction at which pass 2 is dropped whole; 1.0 disables"),
+    ("breaker_degraded_share_max",           0.05, "breaker: graduation bar — max share of degraded (rung 1-3) rows; 1.0 off"),
+    ("breaker_min_severity",                 0.60, "breaker: global narration bar over the per-class floors; 1.1 silences all"),
+    ("breaker_max_repeat_frac",              0.34, "breaker: per-(partner,code) narration share cap before suppression; 1.0 off"),
+    ("breaker_shadow_run",                    1.0, "breaker: 1 = viewer-seat shadow eval; 0 = breaker_shadow null everywhere"),
+    ("breaker_outlook_haircut_legacy",       0.70, "breaker: fit_outlook severity multiplier when outlook_src='legacy'; 1.0 none"),
+    ("breaker_outlook_narrate_margin",       0.06, "breaker: inferred-window margin over the cut required to NARRATE fit_outlook"),
+    ("breaker_board_div_min",                25.0, "breaker: Elo divergence from seed for a board row to count as divergent"),
+    ("breaker_board_min_divergent",          10.0, "breaker: divergent rows needed for board_auth='board'; below ⇒ board_suspect"),
+    ("breaker_value_scale",                 400.0, "breaker: their-seat negative margin mapping value_giving severity to 1.0"),
+    ("breaker_crunch_scale",                850.0, "breaker: slot-cost total mapping roster_crunch severity to 1.0"),
+    ("breaker_floor_fit_outlook",            0.35, "breaker: top-selection floor for fit_outlook; 1.1 removes it from selection"),
+    ("breaker_floor_fit_new_weakness",       0.30, "breaker: top-selection floor for fit_new_weakness; 1.1 removes it"),
+    ("breaker_floor_fit_duplicate",          0.30, "breaker: top-selection floor for fit_duplicate; 1.1 removes it"),
+    ("breaker_floor_value_giving",           0.30, "breaker: value_giving floor on the BOARD basis; 1.1 removes it"),
+    ("breaker_floor_value_giving_consensus", 0.75, "breaker: value_giving floor on the CONSENSUS basis (higher — D-7); 1.1 off"),
+    ("breaker_floor_other_player_keep",      0.50, "breaker: top-selection floor for other_player_keep; 1.1 removes it"),
+    ("breaker_floor_roster_crunch",          0.40, "breaker: top-selection floor for roster_crunch; 1.1 removes it"),
+    ("breaker_narrate_fit_outlook",           0.0, "breaker: 1 = fit_outlook may narrate; 0 (default) = stamp only"),
+    ("breaker_narrate_fit_new_weakness",      0.0, "breaker: 1 = fit_new_weakness may narrate; 0 (default) = stamp only"),
+    ("breaker_narrate_fit_duplicate",         0.0, "breaker: 1 = fit_duplicate may narrate; 0 (default) = stamp only"),
+    ("breaker_narrate_value_giving",          0.0, "breaker: 1 = value_giving may narrate (CONSENSUS basis only — D-7); 0 = off"),
+    ("breaker_narrate_other_player_keep",     0.0, "breaker: symmetry only — the D-6 whitelist blocks this class even at 1"),
+    ("breaker_narrate_roster_crunch",         0.0, "breaker: 1 = roster_crunch may narrate; 0 (default) = stamp only"),
+    # ── Negative-results memory (docs/plans/negative-results-memory/LLD.md §3.4) ─
+    # All 6 seeded here so `set_config` / PUT /api/admin/config never KeyError on
+    # them — a knob with no row cannot be flipped remotely, which is what makes
+    # the LLD §6 kill ladder (negmem_strength = 0 for M1) real rather than
+    # theater. Values MATCH trade_service._DEFAULT_CFG exactly; seeding is
+    # behavior-neutral. M2's strength knob is the existing
+    # `gen2_accept_prior_strength`, not one of these 6.
+    ("negmem_strength",       1.0,  "negmem M1 strength; 0 = byte-identical M1 disable (M1-only — M2 is governed by gen2_accept_prior_strength)"),
+    ("negmem_floor",          0.6,  "negmem clamp floor for the effective multiplier; also the evidence-curve asymptote"),
+    ("negmem_min_evidence",   3.0,  "negmem shrinkage threshold: cells with decayed evidence below this are identity"),
+    ("negmem_halflife_days", 45.0,  "negmem evidence exponential-decay half-life (days); read horizon = 4x this"),
+    ("negmem_sat_k",          3.0,  "negmem evidence-curve saturation pseudo-count (mult = 1 - (1-floor)*n_eff/(n_eff+k))"),
+    ("negmem_like_net",       1.0,  "negmem: evidence mass one admitted viewed like nets against every (partner, *) cell"),
+    # ── Full sweep (docs/plans/full-sweep/plan.md §3.3) ──────────────────
+    # Seeded so the per-opponent keep is remotely settable: it was the
+    # hardcoded `server._EXPLORATION_BASE_PER_OPP = 5`, which is what made a
+    # `max_per_opponent` change a no-op on the served deck. Value MATCHES
+    # trade_service._DEFAULT_CFG exactly; seeding is behavior-neutral.
+    ("exploration_base_per_opp", 5.0, "full sweep: served cards kept per opponent — the base exploration_overgen adds to, and the width _split_exploration_pool trims back to. 5.0 reproduces the pre-knob hardcoded constant exactly"),
+    ("full_sweep_budget_s",     30.0, "full sweep: wall-clock seconds of opponent sweep before generation stops starting new pairs, checked BETWEEN opponents. Read only while trade.full_sweep is ON — it replaces the global_target card count as the job's ceiling, because trade_optimizer.generate_pair_trades_v3 carries no deadline of its own. <=0 disables the rail (job then bounded only by _JOB_HARD_TIMEOUT, 60s)"),
 ]
 
 
@@ -2627,6 +2877,9 @@ def _migrate_db() -> None:
         ("deck_impressions",   "lane_slot",             "VARCHAR"),
         ("deck_impressions",   "trade_intent",          "VARCHAR"),
         ("bakeoff_runs",       "groups_json",           "TEXT"),
+        # M1 (fit-challenger measurement rail) — stamp of the last funneled
+        # write; NULL until a key's first set_config() after this landed.
+        ("model_config",       "updated_at",            "VARCHAR"),
     ]
     # Each ALTER TABLE gets its own transaction so a "column already exists"
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
@@ -4164,11 +4417,13 @@ def get_wrapped_cutover_iso() -> str:
     return ""
 
 
-def set_config(key: str, value: float) -> dict:
+def set_config(key: str, value: float, source: str = "unspecified") -> dict:
     """
-    Update a single model_config value.  Returns the updated row as a dict.
-    Raises KeyError if the key doesn't exist (we don't allow ad-hoc keys).
+    Update one model_config value, stamping updated_at and appending a
+    model_config_changes row — one transaction (M1, fit-challenger LLD §5.1).
+    Raises KeyError for unknown keys (unchanged contract — no ad-hoc keys).
     """
+    now = datetime.now(timezone.utc).isoformat()
     with engine.begin() as conn:
         existing = conn.execute(
             select(model_config_table).where(model_config_table.c.key == key)
@@ -4178,9 +4433,12 @@ def set_config(key: str, value: float) -> dict:
         conn.execute(
             update(model_config_table)
             .where(model_config_table.c.key == key)
-            .values(value=value)
+            .values(value=value, updated_at=now)
         )
-    return {"key": key, "value": value}
+        conn.execute(insert(model_config_changes_table).values(
+            key=key, old_value=existing.value, new_value=value,
+            changed_at=now, source=source))
+    return {"key": key, "value": value, "old_value": existing.value}
 
 
 def list_config() -> list[dict]:
@@ -4369,10 +4627,13 @@ PICK_PRICING_MODES = ("tier_ladder", "market_slots")
 
 
 def get_pick_pricing_mode(user_id: str) -> str:
-    """M6b — the user's stored pick-pricing mode. Missing row / NULL /
-    unknown value = 'tier_ladder' (today's shipped behaviour). Callers go
-    through trade_service.pick_pricing_mode_for_user, which also applies the
-    `trade.slot_pricing` flag gate."""
+    """⚠️ NO PRODUCTION CALLERS since 2026-08-21 (D-144) — the column is dead
+    data and `trade_service.pick_pricing_mode_for_user` returns 'market_slots'
+    without reading it. Kept, with its setter, so a restore of the per-user
+    axis would need no migration; pinned by
+    `test_db_accessors_survive_as_dead_data`.
+
+    Missing row / NULL / unknown value = 'tier_ladder', as it always did."""
     with engine.connect() as conn:
         row = conn.execute(
             select(users_table.c.pick_pricing_mode).where(
@@ -5322,6 +5583,42 @@ def load_recent_league_likes(
             "created_at":         r.created_at,
         })
     return result
+
+
+def find_live_trade_like(user_id: str, league_id: str, trade_id: str) -> dict | None:
+    """The newest still-live (`retracted_at IS NULL`) 'like' row for this
+    (user, league, trade_id), or None. Read-only.
+
+    D-152 — the idempotency probe for `POST /api/trades/queue`. That route
+    mints a DETERMINISTIC `trade_id` from the package, so "has this exact
+    package already been queued?" is exactly this lookup, and it is unbounded
+    in time — unlike `save_trade_decision`'s `TRADE_DECISION_DEDUPE_SECONDS`
+    window, which is a double-fire guard and would let a re-tap ten seconds
+    later double the Elo signal.
+
+    Filters `retracted_at IS NULL` on purpose: the #318 revive path (like ->
+    retract -> re-like) must be able to queue the package again.
+    """
+    if not (user_id and league_id and trade_id):
+        return None
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(
+                trade_decisions_table.c.id,
+                trade_decisions_table.c.created_at,
+            ).where(
+                and_(
+                    trade_decisions_table.c.user_id      == user_id,
+                    trade_decisions_table.c.league_id    == league_id,
+                    trade_decisions_table.c.trade_id     == trade_id,
+                    trade_decisions_table.c.decision     == "like",
+                    trade_decisions_table.c.retracted_at.is_(None),
+                )
+            ).order_by(trade_decisions_table.c.id.desc()).limit(1)
+        ).fetchone()
+    if row is None:
+        return None
+    return {"id": row.id, "created_at": row.created_at}
 
 
 # ---------------------------------------------------------------------------
@@ -8790,6 +9087,48 @@ def load_league_preference(user_id: str, league_id: str) -> dict | None:
     }
 
 
+def load_league_preferences_bulk(user_ids: list, league_id: str) -> dict:
+    """Bulk sibling of `load_league_preference` — {user_id: prefs_row_dict}
+    for every user in `user_ids` that has a row (absent users simply missing).
+
+    Counterparty breaker LLD §2.2: ONE `IN (...)` select instead of a
+    per-partner query loop on the trade-job thread. Read-only; identical
+    per-row shape to `load_league_preference`.
+    """
+    ids = [u for u in dict.fromkeys(user_ids or ()) if u]
+    if not ids:
+        return {}
+
+    def _parse_positions(raw) -> list:
+        if not raw:
+            return []
+        try:
+            result = json.loads(raw)
+            return result if isinstance(result, list) else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    out: dict = {}
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(league_preferences_table).where(
+                and_(
+                    league_preferences_table.c.user_id.in_(ids),
+                    league_preferences_table.c.league_id == league_id,
+                )
+            )
+        ).fetchall()
+    for row in rows:
+        out[row.user_id] = {
+            "team_outlook":          row.team_outlook,
+            "acquire_positions":     _parse_positions(
+                getattr(row, "acquire_positions", None)),
+            "trade_away_positions":  _parse_positions(
+                getattr(row, "trade_away_positions", None)),
+        }
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Asset preferences — untouchables + targets + not-interested (backlog #2, #163)
 # ---------------------------------------------------------------------------
@@ -8818,6 +9157,44 @@ def load_asset_preferences(user_id: str, league_id: str) -> dict:
             out["targets"].append(r.player_id)
         elif r.list_type == "not_interested":
             out["not_interested"].append(r.player_id)
+    return out
+
+
+def load_asset_preferences_bulk(user_ids: list, league_id: str) -> dict:
+    """Bulk sibling of `load_asset_preferences` — {user_id: {list_key: [...]}}
+    for every user in `user_ids` that has rows (absent users simply missing,
+    so callers can distinguish "no prefs saved" from "not asked about").
+
+    Counterparty breaker LLD §2.2: ONE `IN (...)` select instead of a
+    per-partner query loop on the trade-job thread. Read-only; per-user shape
+    identical to `load_asset_preferences` (plural list keys, `ASSET_PREF_LISTS`
+    row types).
+    """
+    ids = [u for u in dict.fromkeys(user_ids or ()) if u]
+    if not ids:
+        return {}
+    _KEY = {"untouchable":    "untouchables",
+            "target":         "targets",
+            "not_interested": "not_interested"}
+    out: dict = {}
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(asset_preferences_table).where(
+                and_(
+                    asset_preferences_table.c.user_id.in_(ids),
+                    asset_preferences_table.c.league_id == league_id,
+                )
+            )
+        ).fetchall()
+    for r in rows:
+        key = _KEY.get(r.list_type)
+        if key is None:
+            continue
+        bucket = out.get(r.user_id)
+        if bucket is None:
+            bucket = out[r.user_id] = {"untouchables": [], "targets": [],
+                                       "not_interested": []}
+        bucket[key].append(r.player_id)
     return out
 
 
@@ -13104,3 +13481,360 @@ def update_mock_draft(mock_id: int, user_id: str, *, picks_json: str | None = No
             .values(**values)
         )
     return bool(result.rowcount)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Receipts — graded suggestion track record (docs/plans/receipts/LLD.md)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# INSERT + SELECT ONLY, deliberately. `receipts_grades` and
+# `receipts_grade_runs` are append-only (HLD D-3): a wrong grade is corrected
+# by bumping `grader_version` and regrading, never by editing a row. There is
+# no UPDATE or DELETE helper for either table anywhere in the codebase, and
+# `backend/tests/test_receipts_grading.py` (T-10) fails if one appears.
+
+def _receipts_serve_date_expr():
+    """`substr(served_at, 1, 10)` — the UTC serve DATE of an impression.
+
+    `served_at` is an ISO-UTC timestamp string (deck_impressions.served_at),
+    so the first ten characters are the date and lexicographic ordering
+    matches chronological ordering. `substr` is spelled identically on
+    SQLite and Postgres, which is why the receipts queue never needs the
+    dialect-divergent `date()` / `::date` forms.
+    """
+    return func.substr(deck_impressions_table.c.served_at, 1, 10)
+
+
+def _receipts_candidate_where(window_days: int, grader_version: str,
+                              serve_dates: list[str]):
+    """Shared WHERE for the grading queue and its backlog COUNT (LLD §4.1).
+
+    Four predicates, each load-bearing:
+      * `assets_json IS NOT NULL` — telemetry-era rows only. Pre-telemetry
+        impressions are permanently ungradeable (PLAN NG-7): `trade_hash` is
+        not invertible and reconstructing the asset set at grade time would
+        mint a new prediction, which is exactly what preregistration forbids.
+      * `is_ghost IS NULL OR is_ghost = 0` — operator ruling 2026-08-21:
+        ghost rows never enter the grading queue.
+      * serve date ∈ `serve_dates` — the caller passes the dates whose window
+        endpoint is RESOLVABLE NOW (or past its retry deadline, and therefore
+        terminally `missing_snapshot`). Folding resolvability into the WHERE
+        is the LLD §4.1 alternative to skip-and-fill: every selected candidate
+        produces a terminal row, so the batch cap bounds terminal rows
+        directly and a head-of-queue block of unresolvable impressions cannot
+        starve a run.
+      * no grade row at this (window, grader_version) — the queue is defined
+        by ABSENCE, which is what makes the job idempotent by construction.
+    """
+    g = receipts_grades_table
+    already = (
+        select(literal(1))
+        .where(g.c.impression_id == deck_impressions_table.c.impression_id)
+        .where(g.c.window_days == int(window_days))
+        .where(g.c.grader_version == str(grader_version))
+        .exists()
+    )
+    return and_(
+        deck_impressions_table.c.assets_json.isnot(None),
+        or_(deck_impressions_table.c.is_ghost.is_(None),
+            deck_impressions_table.c.is_ghost == 0),
+        _receipts_serve_date_expr().in_([str(d) for d in serve_dates]),
+        ~already,
+    )
+
+
+def receipts_min_served_date() -> str | None:
+    """Earliest UTC serve date among gradeable (telemetry-era) impressions.
+
+    Bounds the serve-date enumeration the queue predicate needs; None when no
+    telemetry-era impression exists at all.
+    """
+    try:
+        with engine.connect() as conn:
+            return conn.execute(
+                select(func.min(_receipts_serve_date_expr()))
+                .where(deck_impressions_table.c.assets_json.isnot(None))
+            ).scalar()
+    except Exception as e:
+        print(f"[receipts_min_served_date] failed: {e}")
+        return None
+
+
+def load_receipts_queue(window_days: int, grader_version: str,
+                        serve_dates: list[str], limit: int) -> list[dict]:
+    """Impressions awaiting a grade at (window_days, grader_version)."""
+    if not serve_dates:
+        return []
+    i = deck_impressions_table
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                select(i.c.impression_id, i.c.user_id, i.c.league_id,
+                       i.c.trade_hash, i.c.features_json, i.c.served_at,
+                       i.c.is_ghost, i.c.assets_json, i.c.archetype,
+                       i.c.shape_bucket, i.c.model_arm, i.c.policy_version)
+                .where(_receipts_candidate_where(window_days, grader_version,
+                                                 serve_dates))
+                .order_by(i.c.served_at.asc())
+                .limit(int(limit))
+            ).fetchall()
+        return [dict(r._mapping) for r in rows]
+    except Exception as e:
+        print(f"[load_receipts_queue] failed: {e}")
+        return []
+
+
+def count_receipts_queue(window_days: int, grader_version: str,
+                         serve_dates: list[str]) -> int:
+    """COUNT of the same queue — the `remaining_resolvable` backlog figure
+    returned in every cron 202 (LLD §2.1). Retry-pending impressions are
+    excluded because their serve dates are simply absent from `serve_dates`.
+    """
+    if not serve_dates:
+        return 0
+    try:
+        with engine.connect() as conn:
+            return int(conn.execute(
+                select(func.count())
+                .select_from(deck_impressions_table)
+                .where(_receipts_candidate_where(window_days, grader_version,
+                                                 serve_dates))
+            ).scalar() or 0)
+    except Exception as e:
+        print(f"[count_receipts_queue] failed: {e}")
+        return 0
+
+
+def insert_receipts_grades(rows: list[dict]) -> int:
+    """Append terminal grade rows. INSERT-OR-IGNORE on `uq_receipts_grade`, so
+    a crashed run that already wrote part of a batch re-runs cleanly and a
+    cron/daily-tick double-fire cannot duplicate (LLD §5.1)."""
+    if not rows:
+        return 0
+    written = 0
+    if engine.dialect.name == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert as _dialect_insert
+    else:
+        from sqlalchemy.dialects.postgresql import insert as _dialect_insert
+    try:
+        with engine.begin() as conn:
+            for row in rows:
+                try:
+                    stmt = _dialect_insert(receipts_grades_table).values(**row)
+                    stmt = stmt.on_conflict_do_nothing(
+                        index_elements=["impression_id", "window_days",
+                                        "grader_version"])
+                    result = conn.execute(stmt)
+                    written += int(result.rowcount or 0)
+                except Exception as e:
+                    print(f"[insert_receipts_grades] row failed: {e}")
+    except Exception as e:
+        print(f"[insert_receipts_grades] failed: {e}")
+    return written
+
+
+def insert_receipts_grade_run(row: dict) -> None:
+    """Append one run-ledger row. Runs write a `kind='start'` row at begin and
+    a `kind='end'` row at completion; an unmatched start is the kill marker
+    for a crashed or spun-down run (HLD §5)."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(receipts_grade_runs_table.insert().values(**row))
+    except Exception as e:
+        print(f"[insert_receipts_grade_run] failed: {e}")
+
+
+def load_receipts_grade_runs(limit: int = 20) -> list[dict]:
+    """Most recent run-ledger rows (operator readout)."""
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                select(receipts_grade_runs_table)
+                .order_by(receipts_grade_runs_table.c.id.desc())
+                .limit(int(limit))
+            ).fetchall()
+        return [dict(r._mapping) for r in rows]
+    except Exception as e:
+        print(f"[load_receipts_grade_runs] failed: {e}")
+        return []
+
+
+def load_receipts_grades(*, user_id: str | None = None,
+                         league_id: str | None = None,
+                         grader_version: str | None = None,
+                         window_days: int | None = None,
+                         shape_bucket: str | None = None,
+                         basis: str | None = None,
+                         model_arm: str | None = None) -> list[dict]:
+    """Grade rows for a read surface. Every filter is optional; the user route
+    always passes `user_id` + `league_id` (viewer scoping is a WHERE, never a
+    post-filter)."""
+    g = receipts_grades_table
+    conds = []
+    if user_id is not None:
+        conds.append(g.c.user_id == str(user_id))
+    if league_id is not None:
+        conds.append(g.c.league_id == str(league_id))
+    if grader_version is not None:
+        conds.append(g.c.grader_version == str(grader_version))
+    if window_days is not None:
+        conds.append(g.c.window_days == int(window_days))
+    if shape_bucket is not None:
+        conds.append(g.c.shape_bucket == str(shape_bucket))
+    if basis is not None:
+        conds.append(g.c.basis == str(basis))
+    if model_arm is not None:
+        conds.append(g.c.model_arm == str(model_arm))
+    try:
+        with engine.connect() as conn:
+            stmt = select(g)
+            if conds:
+                stmt = stmt.where(and_(*conds))
+            rows = conn.execute(stmt.order_by(g.c.served_at.asc(),
+                                              g.c.id.asc())).fetchall()
+        return [dict(r._mapping) for r in rows]
+    except Exception as e:
+        print(f"[load_receipts_grades] failed: {e}")
+        return []
+
+
+def load_receipts_grader_versions() -> list[str]:
+    """Distinct `grader_version` values present in `receipts_grades`. Reads
+    pin the MAX by NUMERIC SUFFIX (`receipts-10` > `receipts-2`), which the
+    caller does — ordering here would be lexicographic and wrong."""
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                select(receipts_grades_table.c.grader_version).distinct()
+            ).fetchall()
+        return [r[0] for r in rows if r[0]]
+    except Exception as e:
+        print(f"[load_receipts_grader_versions] failed: {e}")
+        return []
+
+
+def receipts_impression_cohort(user_id: str, league_id: str) -> dict:
+    """Cohort sizing for the maturity state and the read-time disclosure: how
+    many of the viewer's impressions in this league are gradeable at all
+    (`tracked`), when tracking started, and how many are permanently
+    ungradeable pre-telemetry rows (`pre_telemetry`, disclosed not graded)."""
+    i = deck_impressions_table
+    base = and_(i.c.user_id == str(user_id), i.c.league_id == str(league_id),
+                or_(i.c.is_ghost.is_(None), i.c.is_ghost == 0))
+    out: dict = {"tracked": 0, "first_tracked_at": None, "pre_telemetry": 0}
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                select(func.count(), func.min(_receipts_serve_date_expr()))
+                .select_from(i)
+                .where(and_(base, i.c.assets_json.isnot(None)))
+            ).fetchone()
+            if row:
+                out["tracked"] = int(row[0] or 0)
+                out["first_tracked_at"] = row[1]
+            out["pre_telemetry"] = int(conn.execute(
+                select(func.count()).select_from(i)
+                .where(and_(base, i.c.assets_json.is_(None)))
+            ).scalar() or 0)
+    except Exception as e:
+        print(f"[receipts_impression_cohort] failed: {e}")
+    return out
+
+
+def load_value_snapshot_dates(scoring_format: str) -> list[str]:
+    """Every `snapshot_date` present for a scoring format, ascending. The
+    grader turns this into the set of serve dates whose window endpoint is
+    resolvable, so the queue predicate can be a plain IN list."""
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                select(player_value_history_table.c.snapshot_date)
+                .where(player_value_history_table.c.scoring_format
+                       == scoring_format)
+                .distinct()
+                .order_by(player_value_history_table.c.snapshot_date.asc())
+            ).fetchall()
+        return [r[0] for r in rows if r[0]]
+    except Exception as e:
+        print(f"[load_value_snapshot_dates] {scoring_format} failed: {e}")
+        return []
+
+
+def load_value_snapshots_for(scoring_format: str, player_ids: list[str],
+                             date_lo: str, date_hi: str) -> dict:
+    """Batched consensus prefetch: {(player_id, snapshot_date):
+    consensus_value} for one format over an inclusive date range (LLD §4.2).
+    One query per run rather than one per asset per endpoint."""
+    if not player_ids:
+        return {}
+    p = player_value_history_table
+    out: dict[tuple[str, str], float] = {}
+    ids = sorted({str(x) for x in player_ids})
+    try:
+        with engine.connect() as conn:
+            # Chunked so a large asset set cannot blow a parameter limit.
+            for start in range(0, len(ids), 500):
+                rows = conn.execute(
+                    select(p.c.player_id, p.c.snapshot_date, p.c.consensus_value)
+                    .where(p.c.scoring_format == scoring_format)
+                    .where(p.c.player_id.in_(ids[start:start + 500]))
+                    .where(p.c.snapshot_date >= date_lo)
+                    .where(p.c.snapshot_date <= date_hi)
+                ).fetchall()
+                for r in rows:
+                    if r.consensus_value is not None:
+                        out[(r.player_id, r.snapshot_date)] = float(r.consensus_value)
+    except Exception as e:
+        print(f"[load_value_snapshots_for] {scoring_format} failed: {e}")
+    return out
+
+
+def load_value_snapshot_floors(scoring_format: str,
+                               dates: list[str]) -> dict[str, float]:
+    """{snapshot_date: MIN(consensus_value)} — the consensus POOL FLOOR per
+    date. A player who cratered out of the pool between serve and window is
+    imputed to this floor rather than dropped (HLD D-8): dropping him would
+    delete our worst outcomes, which is survivorship bias that flatters the
+    engine."""
+    if not dates:
+        return {}
+    p = player_value_history_table
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                select(p.c.snapshot_date, func.min(p.c.consensus_value))
+                .where(p.c.scoring_format == scoring_format)
+                .where(p.c.snapshot_date.in_([str(d) for d in dates]))
+                .group_by(p.c.snapshot_date)
+            ).fetchall()
+        return {r[0]: float(r[1]) for r in rows if r[1] is not None}
+    except Exception as e:
+        print(f"[load_value_snapshot_floors] {scoring_format} failed: {e}")
+        return {}
+
+
+def load_league_scoring_map(league_ids: list[str]) -> dict[str, str]:
+    """{league_id: scoring_format} for a batch of leagues, defaulting to
+    DEFAULT_SCORING exactly as `get_league_scoring` does for one. Leagues with
+    no row at all are OMITTED, so the grader can tell "unknown league"
+    (→ ungradeable/format_missing) from "league defaulting to 1qb_ppr"."""
+    if not league_ids:
+        return {}
+    ids = sorted({str(x) for x in league_ids})
+    out: dict[str, str] = {}
+    try:
+        with engine.connect() as conn:
+            for start in range(0, len(ids), 500):
+                rows = conn.execute(
+                    select(leagues_table.c.sleeper_league_id,
+                           leagues_table.c.default_scoring)
+                    .where(leagues_table.c.sleeper_league_id
+                           .in_(ids[start:start + 500]))
+                ).fetchall()
+                for r in rows:
+                    fmt = r.default_scoring
+                    out[r.sleeper_league_id] = (
+                        fmt if fmt in SCORING_FORMATS else DEFAULT_SCORING)
+    except Exception as e:
+        print(f"[load_league_scoring_map] failed: {e}")
+    return out

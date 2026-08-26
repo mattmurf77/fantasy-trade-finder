@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-24 — Feedback-wave sweep](#2026-08-24--feedback-wave-sweep)
 - [2026-05-21 — Initial Capture](#2026-05-21--initial-capture)
 - [Mistake Template](#mistake-template)
 - [Cross-cutting Lessons](#cross-cutting-lessons)
@@ -63,6 +64,16 @@ The living-memory layer was just adopted; the project has shipped substantial fe
 **Cross-reference:** [`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md) Q-004.
 
 ---
+
+## 2026-08-24 — Feedback-wave sweep
+
+### M-005 — Pattern-matched branch deletion (`grep | xargs git branch -D`) without pre-capture
+**Tried:** sweeping the wave's throwaway `worktree-agent-*` branches with `git branch | grep worktree-agent | xargs -n1 git branch -D | head -8`.
+**Failed because:** the grep matched EVERY session's agent branches, not this wave's eight — and only a `head -8` SIGPIPE stopped it after deleting eight historical branches whose tips were never ledgered first.
+**Why it was wrong:** the recovery-ledger rule is capture-then-delete, per named branch — a pattern is not a capture. Piping a destructive loop through `head` also means the blast radius is decided by pipe buffering, not intent.
+**What would change to reconsider:** never; deletions are enumerated by explicit name from a ledger row.
+**Cost of the mistake:** ~15 min of forensics. Outcome: all eight deleted tips captured from the command output; 7 were ancestors of `origin/main`; the eighth (`worktree-agent-a05d00e6` @ `dddb1ff8`, 2026-04-29) was NOT and was restored from its still-live commit object. Nothing lost.
+**Cross-reference:** [docs/recovery/2026-08-24-feedback-wave-sweep.md](../docs/recovery/2026-08-24-feedback-wave-sweep.md)
 
 ## Mistake Template
 

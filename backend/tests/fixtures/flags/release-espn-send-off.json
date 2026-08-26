@@ -1,5 +1,5 @@
 {
-  "_comment_fixture": "DERIVED from release.json for flow p0-6-espn-copy-trade.yaml (#309): release verbatim MINUS the `espn.send` key (backend/feature_flags.py defaults it false), re-creating the engaged-kill-switch state in which SendInSleeperButton's stated-reason fallback is reachable on an ESPN league at all — under plain release (espn.send: true since 2026-08-12) an ESPN league renders the live send button and the fallback this flow proves is unreachable. When release.json is refreshed from config/features.json, re-derive this file the same way.",
+  "_comment_fixture": "DERIVED from release.json for flow p0-6-espn-copy-trade.yaml (#309): release verbatim MINUS the `espn.send` key (backend/feature_flags.py defaults it false), re-creating the engaged-kill-switch state in which SendInSleeperButton's stated-reason fallback is reachable on an ESPN league at all \u2014 under plain release (espn.send: true since 2026-08-12) an ESPN league renders the live send button and the fallback this flow proves is unreachable. When release.json is refreshed from config/features.json, re-derive this file the same way.",
   "swipe.community_compare": false,
   "swipe.qc_compliments": true,
   "swipe.gesture_audit": true,
@@ -19,7 +19,7 @@
   "profiles.public_pages": false,
   "players.profile_pages": false,
   "landing.smart_start_cta": false,
-  "landing.try_before_sync": true,
+  "landing.try_before_sync": false,
   "trade_math.qb_tax": false,
   "trade_math.star_tax": false,
   "trade_math.roster_clogger": false,
@@ -97,6 +97,7 @@
   "marketplace.contributor_sales": false,
   "marketplace.cash_payouts": false,
   "ranks.import": true,
+  "calc.merged_layout": false,
   "ux.sheet_guard": true,
   "ux.rank_tab_destination": true,
   "ux.retap_active_tab": true,

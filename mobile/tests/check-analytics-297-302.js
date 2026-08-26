@@ -258,16 +258,31 @@ assert(
 
 const findTapped = trackPropKeys(tradesText, 'find_trades_tapped');
 assert(
-  findTapped.length === 3,
+  findTapped.length === 4,
   '#298 all find_trades_tapped call sites are accounted for',
-  `expected 3 (handleFindTrades + the legacy !consolidateOn arm + the #330 auto-run emit in the choke-point effect), saw ${findTapped.length}`,
+  'expected 4 (handleFindTrades + the legacy !consolidateOn arm + the #330 '
+    + 'auto-run emit in the choke-point effect + the #384 W6-B fair-package '
+    + `sweep, which is a find-trades dispatch with no job), saw ${findTapped.length}`,
 );
 assert(
-  countOf(
-    tradesCode,
-    "track('find_trades_tapped', { source: 'league_offer', mode: deckMode }, 'Trades')",
-  ) === 1,
-  "#330 the third emitter is the auto-run's source:'league_offer' dispatch, reading the same deckMode",
+  // W6-B (D-153) — the fairness-only sweep is still a search the user asked
+  // for, so it fires the SAME event with the same attributable source and the
+  // ONE deckMode derivation. A sweep that fired nothing would make the
+  // calculator's conversion look like it stopped converting.
+  (tradesCode.match(
+    /track\('find_trades_tapped', \{ source: 'calculator', mode: deckMode \}, 'Trades'\)/g,
+  ) || []).length === 1,
+  "#384 the fair-package sweep emits find_trades_tapped{source:'calculator'}",
+  'a synchronous sweep that skips the event is a search that vanishes from the funnel',
+);
+assert(
+  // #384 — the auto-run emitter now attributes the calculator's hand-off too
+  // (`source` is a ternary over the armed origin); `mode` still reads the
+  // ONE deckMode derivation.
+  (tradesCode.match(
+    /track\(\s*'find_trades_tapped',\s*\{\s*source: autoRunOrigin === 'calculator' \? 'calculator' : 'league_offer',\s*mode: deckMode,\s*\},\s*'Trades',?\s*\)/g,
+  ) || []).length === 1,
+  "#330 the third emitter is the auto-run's source:'league_offer' (or 'calculator') dispatch, reading the same deckMode",
   'a third emitter with its own mode derivation is how the arms come to disagree; details pinned by check-offer-prefill-330.js S-3',
 );
 assert(

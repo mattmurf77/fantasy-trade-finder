@@ -20,6 +20,7 @@ Operational procedures. Add to this as you learn things.
 - [Trade engine flags + kill switch](#trade-engine-flags-kill-switch)
 - [Runtime tuning](#runtime-tuning)
 - [Presentment-rules tripwire (`trade.presentment_rules`, G6 2026-08-16)](#presentment-rules-tripwire-tradepresentment_rules-g6-2026-08-16)
+- [Negative-results memory (`trade.negmem`, 2026-08-22)](#negative-results-memory-tradenegmem-2026-08-22)
 - [Debug log](#debug-log)
 - [Verified-session grace monitoring (account-auth P1)](#verified-session-grace-monitoring-account-auth-p1)
 - [Common failure modes](#common-failure-modes)
@@ -250,6 +251,57 @@ contender complaint) — log any hit with its rule attribution in
 `docs/feedback/items/304-positional-need-filter/status.md`.
 
 ---
+
+## Negative-results memory (`trade.negmem`, 2026-08-22)
+
+Feature docs: [`plans/negative-results-memory/`](plans/negative-results-memory/) ·
+[ADR-015](adr/adr-015-negmem-soft-prior-not-fourth-filter.md) · knobs in
+[config-reference](config-reference.md#negative-results-memory-flag-tradenegmem--trade_service_default_cfg-db-seeded).
+Operator surfaces are **scripts, not routes**: `python3 -m backend.scripts.negmem_readout
+--user <id> --league <id> [--as-of ISO] [--prod]` prints the §7.1 dump (the substance of
+the [TestFlight checklist](plans/negative-results-memory/testflight-checklist.md)), and
+`python3 -m backend.scripts.negmem_rfps` computes the graduation metric. Two pack queries:
+`scripts/negmem-stamp-rate.sql`, `scripts/negmem-gr4-joint.sql`.
+
+1. **negmem stamp-rate < 100% on allowlisted leagues while `trade.negmem` is ON** ⇒ map
+   builds are failing silently (flag ON + no `negmem` keys is the failure signature —
+   failure is in the data, never inferred from absence). **Triage order:** stamp rate →
+   degraded notes (`negmem_note` on job dicts / `{degraded:true}` stamps) → the knob
+   triple (`negmem_strength` / `negmem_floor` / `gen2_accept_prior_strength`).
+2. **negmem degraded-rate > 1% of jobs over 24h** ⇒ set `negmem_strength = 0` and
+   investigate; the measurement window is censored at the flip timestamp (PRD §8.3).
+3. **Any PRD §8.3 guardrail breach at any time** ⇒ `negmem_strength = 0` (deploy-free). A
+   breach plausibly originating in the acceptance prior additionally takes
+   `gen2_accept_prior_strength = 0` (or rung 1: flag off) — **`negmem_strength` does NOT
+   govern M2.**
+4. **Kill M2 via the GLOBAL knob only** (`PUT /api/admin/config/gen2_accept_prior_strength`
+   = 0, i.e. `scripts/set_knob.py`), **NEVER an arm overlay pin** — arm overlays are
+   bake-off instruments, not kill switches, and the feed guard fires on the job-level
+   GLOBAL read, so only the global knob verifiably empties the feed. A per-arm pin with a
+   nonzero global leaves the feed populated and `acceptance_prior` computing the raw
+   unshrunk ratio.
+5. **Flag flips and every `negmem_*` / `gen2_accept_prior_*` knob move land at bake-off
+   ROUND BOUNDARIES only** (GR3 — a mid-round flip censors the window,
+   [ADR-014](adr/adr-014-bakeoff-serving-rounds.md)).
+6. **GR4:** p5 of (`negmem_m` × `final_score`/`base_score`) on allowlisted non-bake-off
+   rows **< 0.15** ⇒ raise floors. First check the known downward pollution (the diversity
+   penalty rides the same ratio) before concluding real compounding.
+7. **The stamp-rate query returns ZERO ROWS (empty denominator) while the flag is ON** ⇒
+   the allowlist file is missing, unparseable, or empty — check the build warning log and
+   the readout's `allowlisted` field before assuming build failures. (`config/negmem_leagues.json`;
+   `["*"]` is the every-league wildcard.)
+8. **"A partner's cards moved for one deck and then settled"** ⇒ likely a min-evidence
+   crossing, not a bug: the curve steps at the threshold. Compare the readout's
+   `n_decayed` for that partner's cells against `negmem_min_evidence` — a value hovering
+   just either side confirms it. To soften the step, raise `negmem_sat_k` (step size =
+   `(1 − negmem_floor)/(1 + negmem_sat_k)`: 0.10 at k=3, 0.05 at k=7, 0.02 at k=19);
+   deploy-free, at a round boundary, and note that a higher k also flattens mid-range
+   damping.
+
+**Reading zeros.** `dropped_unmapped_partner_ids: 0` in the readout means "no count taken"
+whenever `m2` reads `killed (…)` or `degraded` — the M2 queries never ran. Always read that
+counter together with the `m2` annotation. Likewise `likes_net` is pre-clamp and
+readout-only: `n_decayed + likes_net` does not reconstruct the gross evidence.
 
 ## Debug log
 

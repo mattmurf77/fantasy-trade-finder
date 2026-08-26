@@ -118,6 +118,14 @@ ARM_GEN_V2     = "gen_v2"
 #: proposal about the future, and conflating them in a stored `model_arm`
 #: value would make both unreadable after the fact.
 ARM_CHALLENGER = "challenger"
+#: Arm `fit` — the fit challenger (docs/plans/fit-challenger/LLD.md §2). A
+#: GENERATOR arm like `gen_v2` (backend/trade_gen_fit.py called directly via
+#: `gen_fit_cards`), never an engine arm: it must NOT join ENGINE_ARMS (HLD
+#: F-7) — on fit cards `basis` means data-availability, so basis-narrowed
+#: groups and the divergence fairness floor would both read the wrong thing.
+#: Roster bit `bakeoff_include_fit` (default 0); serve bit `bakeoff_serve_fit`
+#: (default 0 — generates, logs, stamped, excluded from the draft).
+ARM_FIT = "fit"
 
 #: Every arm that EXISTS. Not every arm that runs — see `arm_roster()`, which
 #: is what the fan-out and the draft actually iterate. Order here is the
@@ -133,7 +141,7 @@ ARMS: tuple[str, ...] = (ARM_BASELINE, ARM_CURRENT, ARM_GEN_V2)
 #: Every arm the runner knows about, in canonical listing order. This is what
 #: `arm_roster()` filters; `ARMS` is a historical fixture, not a superset.
 ALL_ARMS: tuple[str, ...] = (ARM_BASELINE, ARM_CURRENT, ARM_CHALLENGER,
-                             ARM_GEN_V2)
+                             ARM_GEN_V2, ARM_FIT)
 
 #: Arms that run the v1/v3 engine and therefore produce BOTH bases —
 #: `divergence` for opponents with real rankings, `consensus` for the
@@ -187,8 +195,11 @@ INTENT_MODES: frozenset[str] = frozenset(
 #: first (it is what dark mode serves and what the progress bar tracks), and
 #: the challenger — the arm anyone is actually reading right now — runs before
 #: the historical reconstruction, which is off the roster by default anyway.
+#: Arm `fit` runs LAST (LLD §2.1): arm B stays first — it is the dark
+#: fallback and what the progress bar tracks — and fit, like arms A/C/D,
+#: runs with progress streaming suppressed.
 GENERATION_ORDER: tuple[str, ...] = (ARM_CURRENT, ARM_CHALLENGER,
-                                     ARM_BASELINE, ARM_GEN_V2)
+                                     ARM_BASELINE, ARM_GEN_V2, ARM_FIT)
 
 #: The single arm served in Phase-4 dark validation.
 DARK_SERVED_ARM = ARM_CURRENT
@@ -236,6 +247,15 @@ def serve_interleaved() -> bool:
     return bakeoff_enabled() and _cfg("bakeoff_serve_interleaved", 1.0) >= 1.0
 
 
+def serve_fit() -> bool:
+    """F5b — `bakeoff_serve_fit` (default 0): 0 = fit generates, logs, and is
+    stamped, but is EXCLUDED from the draft participants on BOTH draft paths
+    (`compose_deck` AND the `bakeoff_group_size = 0` team-draft fallback —
+    HLD F-6); 1 = fit drafts like any arm. Fit-only bit by design (PLAN-v2
+    F5b) — generalize on the second consumer, not the first."""
+    return _cfg("bakeoff_serve_fit", 0.0) >= 1.0
+
+
 def deck_limit() -> int | None:
     """`bakeoff_deck_limit` — max cards in the served bake-off deck. Default
     30: three groups of ten. 0 = uncapped, which together with
@@ -276,6 +296,9 @@ def arm_roster() -> tuple[str, ...]:
         ARM_CHALLENGER: _cfg("bakeoff_include_challenger", 1.0) >= 1.0,
         ARM_GEN_V2:     _cfg("bakeoff_include_gen_v2", 1.0) >= 1.0,
         ARM_BASELINE:   _cfg("bakeoff_include_baseline", 0.0) >= 1.0,
+        # Fit challenger (LLD §2.1) — default OFF the roster; rostering is a
+        # W3 operator decision, and serving is a SECOND bit (`serve_fit()`).
+        ARM_FIT:        _cfg("bakeoff_include_fit", 0.0) >= 1.0,
     }
     return tuple(a for a in ALL_ARMS if included[a])
 
@@ -1185,6 +1208,10 @@ def gen_v2_cards(trade_service, kwargs: dict) -> list:
     past_keys = set(getattr(trade_service, "_past_decision_keys", None) or set())
     past_keys |= set(kwargs.get("exclusion_keys") or set())
     mode = pinned_stud_tax_mode() or stud_tax_mode_for_user(kwargs.get("user_id"))
+    # trade.negmem (LLD §6.3) — the job's NegmemMap, read ONCE from the
+    # splatted `_generate_kwargs` (server.py sets the key only when a map
+    # exists, so `.get` yields None on the flag-off / not-allowlisted path).
+    _nm = kwargs.get("negmem")
     with stud_tax_override(mode):
         cards, _report = generate_league_suggestions(
             players              = trade_service._players,
@@ -1205,6 +1232,17 @@ def gen_v2_cards(trade_service, kwargs: dict) -> list:
             opponent_outlooks    = kwargs.get("opponent_outlooks"),
             opponent_pick_shares = kwargs.get("opponent_pick_shares"),
             past_decision_keys   = past_keys,
+            # trade.negmem (LLD §6.3) — the same asymmetric pair the serving
+            # path uses (trade_service.py, v2 branch): `negmem_map` rides
+            # UNCONDITIONALLY as a plain kwarg carrying None when negmem is
+            # off (the seam guards on `is not None`, never on the kwarg's
+            # presence), while `acceptance_stats` is spliced in ONLY when a
+            # map exists — that splat is what keeps the flag-off call
+            # byte-identical (C1). Do not tidy the two into one form.
+            # `m2_feed()` returns {} on a degraded map and {} when
+            # gen2_accept_prior_strength <= 0 (the sanctioned M2 kill).
+            negmem_map           = _nm,
+            **({"acceptance_stats": _nm.m2_feed()} if _nm is not None else {}),
             on_opponent_done     = kwargs.get("on_opponent_done"),
         )
     cards = list(cards or [])
@@ -1273,6 +1311,127 @@ def gen_v2_cards(trade_service, kwargs: dict) -> list:
     return cards
 
 
+#: Arm fit's per-batch diagnostics (FitReport.diagnostics() + the S7
+#: post-generation counters), handed from `gen_fit_cards` to `run_bakeoff`.
+#: The `_gen2_diag` pattern verbatim, and for the same reasons: the arm
+#: reaches the fan-out as an opaque callable, and thread-local keeps
+#: concurrent jobs from reading each other's counters.
+_fit_diag_tl = threading.local()
+
+
+def last_fit_diagnostics() -> dict:
+    """`FitReport.diagnostics()` from the most recent `gen_fit_cards` call ON
+    THIS THREAD, then CLEARED — the `_gen2_diag` drain pattern verbatim. `{}`
+    (arm fit did not run, or raised before generating) is the honest answer
+    for a drained or never-written slot."""
+    diag = getattr(_fit_diag_tl, "value", None) or {}
+    _fit_diag_tl.value = {}
+    return dict(diag)
+
+
+def gen_fit_cards(trade_service, kwargs: dict) -> list:
+    """Arm `fit` — `trade_gen_fit.generate_league_suggestions` called
+    DIRECTLY (docs/plans/fit-challenger/LLD.md §2.3).
+
+    Mirrors `gen_v2_cards` step for step, and for the same reason: the
+    stud-tax pin, the #172 intent filter, the C4b give-headliner cap, and
+    the lane labelling are presentation-side treatment arms A/B/D get, so
+    fit gets them too — the bake-off compares GENERATION. The module is the
+    only production importer of `trade_gen_fit` (organic isolation:
+    `trade_service` never imports it, `test_organic_never_imports_fit`)."""
+    from .trade_gen_fit import generate_league_suggestions
+    from .trade_service import (_c, _filter_by_trade_intent, cap_give_headliners,
+                                classify_lane, elo_to_value,
+                                pinned_stud_tax_mode, signed_lane_shift,
+                                stud_tax_mode_for_user, stud_tax_override)
+    from .feature_flags import FLAGS
+
+    # Cleared on ENTRY as well as drained on read — the gen_v2 leak guard.
+    _fit_diag_tl.value = {}
+
+    league = trade_service._leagues.get(kwargs["league_id"])
+    if league is None:
+        _fit_diag_tl.value = {"S0_no_league": 1}
+        return []
+    past_keys = set(getattr(trade_service, "_past_decision_keys", None) or set())
+    past_keys |= set(kwargs.get("exclusion_keys") or set())
+    mode = pinned_stud_tax_mode() or stud_tax_mode_for_user(kwargs.get("user_id"))
+    with stud_tax_override(mode):                 # same pin gen_v2_cards re-applies
+        cards, report = generate_league_suggestions(
+            players              = trade_service._players,
+            league               = league,
+            user_id              = kwargs["user_id"],
+            user_elo             = kwargs["user_elo"],
+            user_roster          = kwargs["user_roster"],
+            seed_elo             = kwargs["seed_elo"],
+            scoring_format       = kwargs.get("scoring_format", "1qb_ppr"),
+            outlook              = kwargs.get("outlook"),
+            bypass_need_gate     = bool(kwargs.get("bypass_need_gate")),
+            untouchable_ids      = kwargs.get("untouchable_ids"),
+            not_interested_ids   = kwargs.get("not_interested_ids"),
+            target_ids           = kwargs.get("target_ids"),
+            acquire_positions    = kwargs.get("acquire_positions"),
+            trade_away_positions = kwargs.get("trade_away_positions"),
+            opponent_user_id     = kwargs.get("opponent_user_id"),
+            past_decision_keys   = past_keys,
+            # trade.negmem (LLD §6.4) — plain kwarg, always present, carrying
+            # None when negmem is off; fit's seam guards on `is not None`.
+            # No M2 feed here: `acceptance_prior` is a gen_v2 mechanism and
+            # trade_gen_fit has no acceptance_stats parameter.
+            negmem_map           = kwargs.get("negmem"),
+            # Operator decision 2026-08-16 / LLD §8 R-g — no engine
+            # truncation, same as gen_v2_cards.
+            max_per_opponent     = None,
+        )
+    cards = list(cards or [])
+
+    # `getattr` rather than a direct call — the gen_v2 guard, same reason:
+    # tests substitute stubs, and diagnostics are telemetry that degrade to
+    # "no stages reported", never break the arm.
+    _diag_fn = getattr(report, "diagnostics", None)
+    diag = dict(_diag_fn()) if callable(_diag_fn) else {}
+
+    seed_elo = kwargs.get("seed_elo") or {}
+    scoring_format = kwargs.get("scoring_format", "1qb_ppr")
+    _n_before = len(cards)
+    cards = _filter_by_trade_intent(
+        cards, effective_trade_intent(kwargs.get("trade_intent")),
+        seed_elo, trade_service._players, scoring_format)
+    diag["S7_intent_filter"] = _n_before - len(cards)
+
+    # C4b give-side headliner cap — same deck-assembly treatment as the
+    # other arms (the module applies C4; the adapter applies C4b exactly
+    # where gen_v2_cards does).
+    _n_before = len(cards)
+    cards = cap_give_headliners(cards, seed_elo, trade_service._players,
+                                int(_c("deck_give_headliner_cap")))
+    diag["S7_headliner_cap"] = _n_before - len(cards)
+    diag["S7_served_to_deck"] = len(cards)
+    _fit_diag_tl.value = diag
+
+    # lane_shift (unconditional) + lane (flagged) — byte-for-byte the
+    # gen_v2_cards block, sharing its `_vs` consensus accessor shape.
+    _vs_cache: dict = {}
+
+    def _vs(pid: str) -> float:
+        v = _vs_cache.get(pid)
+        if v is None:
+            v = elo_to_value(seed_elo.get(pid, 1500.0))
+            _vs_cache[pid] = v
+        return v
+
+    outlook = kwargs.get("outlook")
+    for c in cards:
+        c.lane_shift = signed_lane_shift(
+            c.give_player_ids, c.receive_player_ids,
+            trade_service._players, outlook, _vs)
+        if FLAGS.trade_lanes:
+            c.lane = classify_lane(
+                c.give_player_ids, c.receive_player_ids,
+                trade_service._players, outlook, _vs)
+    return cards
+
+
 def restore_order(fixed: list, after: list) -> list:
     """§3.4 Channel 2 — put a bake-off deck back in the interleaver's order
     after a layer that RE-SORTS it.
@@ -1323,6 +1482,9 @@ def run_bakeoff(
     *,
     generate: Callable[..., list],
     gen_v2: Callable[..., list],
+    gen_fit: Callable[..., list] | None = None,   # NEW — arm `fit` (additive
+    # keyword, default None, so every existing caller compiles unchanged;
+    # rostered-without-a-callable is a recorded arm error, HLD F-3)
     league_id: str,
     fairness_threshold: float | None = None,
     trade_intent: str | None = None,
@@ -1394,6 +1556,12 @@ def run_bakeoff(
             elif arm == ARM_CURRENT:
                 cfg_seen = snapshot_config()
                 cards = list(generate(**quiet) or [])
+            elif arm == ARM_FIT:
+                cfg_seen = snapshot_config()
+                if gen_fit is None:      # rostered without a callable is a
+                    raise RuntimeError(  # recorded arm error, never a job failure
+                        "arm fit rostered but no gen_fit callable bound")
+                cards = list(gen_fit(**quiet) or [])
             else:
                 cfg_seen = snapshot_config()
                 cards = list(gen_v2(**quiet) or [])
@@ -1401,29 +1569,46 @@ def run_bakeoff(
             log.warning("bake-off arm %s failed (recorded, not fatal): %s", arm, e)
             cards, err = [], repr(e)
         # Drained here, immediately after the call that wrote it, and only
-        # for arm C — `gen_v2_cards` is the only writer. An arm that raised
-        # leaves `{}`, which is the honest reading: no stage completed.
-        diag = last_gen_v2_diagnostics() if arm == ARM_GEN_V2 else {}
+        # for the arm whose adapter is the writer (`gen_v2_cards` /
+        # `gen_fit_cards`). An arm that raised leaves `{}`, which is the
+        # honest reading: no stage completed.
+        if arm == ARM_GEN_V2:
+            diag = last_gen_v2_diagnostics()
+        elif arm == ARM_FIT:
+            diag = last_fit_diagnostics()
+        else:
+            diag = {}
         arms[arm] = ArmResult(
             arm=arm, cards=cards,
             gen_ms=int((time.monotonic() - t0) * 1000),
             error=err,
             diagnostics=diag,
             # gen_v2 takes no fairness_threshold — recording None is the
-            # honest answer and is itself the fact a reader needs.
-            fairness_threshold=(None if arm == ARM_GEN_V2
+            # honest answer and is itself the fact a reader needs. Fit joins
+            # it (HLD F-7): its fairness is a score, not a gate.
+            fairness_threshold=(None if arm in (ARM_GEN_V2, ARM_FIT)
                                 else fairness_threshold),
             trade_intent=intent,
             config=cfg_seen or snapshot_config(),
         )
 
-    arm_lists = {a: arms[a].cards for a in roster}
+    arm_lists = {a: arms[a].cards for a in roster}          # FULL lists — the
+    # `_agreement` scan in both draft fns runs over these, so a dark fit
+    # still shows up in `also_proposed_by` (LLD §8 R-a: free telemetry, no
+    # serving effect, since fit is absent from every participant order).
+    serving_roster = tuple(a for a in roster
+                           if a != ARM_FIT or serve_fit())  # F5b
     groups, group_order, draft = compose_deck(
-        arm_lists, league_id=league_id, iso_week=iso_week, roster=roster,
-        limit=limit)
+        arm_lists, league_id=league_id, iso_week=iso_week,
+        roster=serving_roster, limit=limit)
     if not groups:
-        # bakeoff_group_size = 0 — Phase 3's plain per-ARM team draft.
-        group_order = draft_order_for(roster, league_id, iso_week)
+        # bakeoff_group_size = 0 — Phase 3's plain per-ARM team draft. THIS
+        # is the live path for the whole program (W1 sets group_size = 0),
+        # so the serve-bit MUST act here too (HLD F-6): fit's list stays in
+        # `arm_lists` (for `_agreement`) but fit is absent from the
+        # rotation, so `_draft_core` (`order = [p for p in order if p in
+        # lists]`) never draws it.
+        group_order = draft_order_for(serving_roster, league_id, iso_week)
         draft = team_draft(arm_lists, group_order, limit=limit)
 
     run = BakeoffRun(

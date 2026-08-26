@@ -84,7 +84,7 @@ from .database import (
     upsert_user, upsert_league,
     save_ranking_swipes, save_trade_swipes,
     save_trade_decision, load_swipe_decisions, load_trade_decisions,
-    load_recent_league_likes, log_trade_impressions,
+    load_recent_league_likes, find_live_trade_like, log_trade_impressions,
     # #362 standing offers
     create_standing_offer, load_standing_offers, load_user_standing_offers,
     revoke_standing_offer, league_pick_seasons,
@@ -237,9 +237,11 @@ from . import ranking_service as _ranking_service_mod
 from . import rankings_import as _rankings_import   # #232 follow-on (ranks.import)
 from . import trends_service as _trends_service_mod
 from . import draft_status as _draft_status_mod   # W3 M-A — ROOKIE_MAX_ROUNDS
-from . import pick_slots                          # D-090 — real-slot pick labels
+from . import pick_slots                          # D-090 — real-slot pick labels AND, since D-144, per-slot prices
 from . import api_observability as _api_obs   # obs.api_events — inbound/outbound API event capture
 from . import bakeoff_runner as _bakeoff      # trade.bakeoff — three-model bake-off (Phase 3)
+from . import negmem as _negmem               # trade.negmem — negative-results memory (T1:
+                                              # module import, attribute calls only)
 from .feature_flags import FLAGS, is_enabled, flags_dict, reload as reload_flags
 from .trade_service import TradeService, TradeCard, League, LeagueMember
 # Aliased: the likes-you injector's own parameter is named `trade_service`
@@ -830,7 +832,7 @@ g_universal_seed: dict[str, float] = {}
 from .pick_values import (
     GENERIC_PICK_SEEDS, _PICK_ORDINALS, generic_pick_label, pick_pool_value,
     discount_pick_value, parse_generic_pick_id, year_pick_label,
-    priced_pool_value,          # M6b read-time pricing seam (flag trade.slot_pricing)
+    priced_pool_value,          # read-time market pricing seam (D-144)
     GENERIC_PICK_ID_PREFIX,     # Send-in-MFL pick split (_is_ftf_pick_asset)
 )
 
@@ -1029,7 +1031,8 @@ _EVENER_PAIR_POOL = 15        # top-N sub-gap assets scanned pairwise for the co
 
 def _roster_eveners(league_id: str, owner_user_id: str, gap_value: float,
                     exclude_ids: set, pool_players: list,
-                    seed_value, tier_of=None) -> list[dict]:
+                    seed_value, tier_of=None,
+                    scoring_format: str = DEFAULT_SCORING) -> list[dict]:
     """Evener candidates from one owner's roster + owned picks (Mode B).
 
     Up to _EVENER_MAX single assets whose consensus value falls inside the
@@ -1044,6 +1047,15 @@ def _roster_eveners(league_id: str, owner_user_id: str, gap_value: float,
     RAW seed Elo + active format). When given, each PLAYER row additionally
     carries `tier`; picks and 2-piece packages never do (a pick's own label
     already reads as a ladder rung, and a package sum has no single tier).
+
+    **D-148 — picks are priced, not read off the stored column.** Both call
+    sites live inside `_trade_evaluate_impl`, whose `gap_value` is computed
+    from the ENGINE's priced picks; sizing the candidates against the stored
+    ladder meant a one-tap "add their 2026 1.01" was offered as closing a
+    2117.0 gap the card charged 4867.1 for — the sweetener and the hole it
+    was sized to fill came off two different price lists. `scoring_format`
+    exists only for that: the waterfall needs a format, and the caller's is
+    the one the rest of the response used.
     """
     lo, hi = gap_value * _EVENER_WINDOW[0], gap_value * _EVENER_WINDOW[1]
     try:
@@ -1085,7 +1097,7 @@ def _roster_eveners(league_id: str, owner_user_id: str, gap_value: float,
     for pk in load_draft_picks(league_id=league_id, owner_user_id=owner_user_id,
                                source=_pick_read_source()):
         pid = str(pk["pick_id"])
-        val = float(pk.get("pool_value") or 0.0)
+        val = _priced_pick_value(pk, slot_order, scoring_format)
         if pid in skip or val <= 0:
             continue
         assets.append({
@@ -1185,7 +1197,8 @@ def _starter_impact(league_id: str, caller_user_id: str,
     responsibility), so both keys are omitted entirely and the payload is
     byte-identical to pre-#169.
     """
-    from .power_rankings import optimal_starter_slots, optimal_starters
+    from .power_rankings import (align_starter_slots, optimal_starter_slots,
+                                 optimal_starters)
     # #311 — platform-aware template resolution (leagues.platform branch);
     # Sleeper leagues delegate to _sleeper_lineup_slots unchanged. This is
     # the ONLY call site switched: mock draft keeps its own fallback and the
@@ -1270,6 +1283,11 @@ def _starter_impact(league_id: str, caller_user_id: str,
             pool_rows(rosters[str(caller_user_id)]), slots)
         after_ = optimal_starter_slots(
             pool_rows(after(rosters[str(caller_user_id)], give, recv)), slots)
+        # #395 — pairwise-align the two canonical fills so a value-identical
+        # assignment displays the minimum honest set of changed rows (no
+        # phantom "QB: Daniels › Maye" when only the SF slot really moves).
+        # Display-only: totals/deltas above are already computed.
+        before, after_ = align_starter_slots(before, after_)
         # Label duplicate slots by template position (RB → RB1/RB2) so
         # clients render distinct rows; a slot the league has once keeps its
         # bare name.
@@ -1334,6 +1352,140 @@ _ANCHOR_VIA = ("anchors", "draft_room")
 # actual generic Mid 1st asset in their pool (Elo 1650), and m = N — the
 # user's own definition of a top-tier asset — lands on the same Elo the
 # default math gives "4 firsts". N = 4 → γ = 1 → byte-identical to the
+# ---------------------------------------------------------------------------
+# With-trade playoff-odds impact (#357, flag `outlook.trade_impact`)
+# ---------------------------------------------------------------------------
+# Answers Jon's *"raises your playoff odds to X"*. Reverses D-025's deferral of
+# the card odds block, which was dropped on backend cost that had never been
+# measured; measured 2026-08-19 it was a ~20x overestimate for a DELTA, because
+# the simulator seeds off the league rather than the rosters and so both runs
+# share one random stream (common random numbers). See
+# `backend/outlook/trade_delta.py` for the full argument and its evidence.
+#
+# THE CACHE IS THE PERFORMANCE DESIGN. Within one deck the baseline is
+# identical for all ~30 cards, so `_outlook_impact_baseline` computes the
+# LeagueState + baseline sim ONCE per (league, basis, completed_weeks) and each
+# card re-sims only the with-trade half (~112 ms at DELTA_SIM_COUNT). Without
+# this the 30-card deck would pay 60 simulations instead of 31.
+_OUTLOOK_IMPACT_CACHE: dict[tuple, tuple[float, object, dict]] = {}
+_OUTLOOK_IMPACT_LOCK = threading.Lock()
+_OUTLOOK_IMPACT_TTL = 900.0   # 15 min — the live week's TTL, same reasoning
+
+
+def _outlook_impact_baseline(league_id: str, basis: str, sess: dict):
+    """(LeagueState, baseline_payload, player_value, player_pos, seed_type) or None.
+
+    Sleeper-only by construction: `backend/outlook/league_state.py` registers
+    ESPN/MFL/Fleaflicker as NotImplemented stubs, so this returns None for them
+    and the caller omits the block. That is the same honest-absence posture
+    `LeagueSummaryScreen`'s `outlookSupported` gate already takes client-side.
+    """
+    platform = (get_league_draft_context(league_id) or {}).get("platform") or "sleeper"
+    if platform != "sleeper":
+        return None
+
+    key = (league_id, basis)
+    now = time.time()
+    with _OUTLOOK_IMPACT_LOCK:
+        hit = _OUTLOOK_IMPACT_CACHE.get(key)
+        if hit and (now - hit[0]) < _OUTLOOK_IMPACT_TTL:
+            return hit[2]
+
+    from . import outlook as outlook_pkg
+    from .outlook.trade_delta import DELTA_SIM_COUNT, resim_baseline
+
+    fmt = _active_format(sess)
+    captured: dict = {}
+    state = outlook_pkg.build_league_state(
+        league_id, platform=platform, fetch=_outlook_sleeper_fetch(captured))
+    if not state.teams:
+        return None
+
+    pool_players, seed = _get_universal_pool(fmt)
+    svc_seed = getattr(sess.get("service"), "_seed", None) or {}
+    if svc_seed:
+        seed = {**svc_seed, **seed}
+    players_meta = {p.id: p for p in pool_players}
+    for p in (sess.get("players") or []):
+        players_meta.setdefault(p.id, p)
+    e2v = _trade_service_mod.elo_to_value
+
+    board_elo = None
+    if basis == "personal" and sess.get("service") is not None:
+        board_elo = {rp.player.id: rp.elo
+                     for rp in sess["service"].get_rankings(position=None).rankings}
+
+    def _value_of(pid: str) -> float:
+        if board_elo is not None and pid in board_elo:
+            return e2v(board_elo[pid])
+        if pid in seed:
+            return e2v(seed[pid])
+        return 0.0
+
+    player_value: dict[str, float] = {}
+    player_pos: dict[str, str] = {}
+    for t in state.teams:
+        for raw_pid in t.player_ids:
+            pid = str(raw_pid)
+            if pid in player_value:
+                continue
+            player_value[pid] = round(_value_of(pid), 1)
+            pm = players_meta.get(pid)
+            player_pos[pid] = getattr(pm, "position", None) or "?"
+
+    seed_type = captured.get("playoff_seed_type")
+    baseline = resim_baseline(
+        state, player_value=player_value, player_pos=player_pos,
+        model_cfg=get_config(), basis=basis, scoring_format=fmt,
+        playoff_seed_type=seed_type, n_sims=DELTA_SIM_COUNT)
+
+    bundle = (state, baseline, player_value, player_pos, seed_type, fmt)
+    with _OUTLOOK_IMPACT_LOCK:
+        _OUTLOOK_IMPACT_CACHE[key] = (now, key, bundle)
+    return bundle
+
+
+def _trade_outlook_impact(league_id: str, caller_user_id: str,
+                          opponent_user_id: str, give: list, recv: list,
+                          sess: dict, basis: str = "consensus") -> dict | None:
+    """The `outlook_impact` block, or None.
+
+    None — never a partial or a guessed number — whenever the answer cannot be
+    computed honestly: flag off, non-Sleeper league, no resolvable roster for
+    either side, or any failure inside the pipeline. An odds hiccup must never
+    cost the caller their trade evaluation, so every caller wraps this in its
+    own try/except as well.
+    """
+    if not is_enabled("outlook.trade_impact"):
+        return None
+    if not (give or recv):
+        return None
+    bundle = _outlook_impact_baseline(league_id, basis, sess)
+    if bundle is None:
+        return None
+    state, baseline, player_value, player_pos, seed_type, fmt = bundle
+
+    # LeagueState is keyed by roster_id; the caller/opponent arrive as LEAGUE
+    # user ids (see backend/CLAUDE.md § Identity). Resolve through the state's
+    # own rows so co-owned rosters resolve the same way everywhere else does.
+    roster_of = {str(t.user_id): t.roster_id for t in state.teams}
+    me = roster_of.get(str(caller_user_id))
+    them = roster_of.get(str(opponent_user_id))
+    if me is None or them is None:
+        return None
+
+    from .outlook.trade_delta import DELTA_SIM_COUNT, compute_trade_odds_impact
+    imp = compute_trade_odds_impact(
+        baseline, state,
+        user_roster_id=me, opponent_roster_id=them,
+        give_player_ids=[str(x) for x in (give or [])],
+        receive_player_ids=[str(x) for x in (recv or [])],
+        player_value=player_value, player_pos=player_pos,
+        model_cfg=get_config(), basis=basis, scoring_format=fmt,
+        playoff_seed_type=seed_type, n_sims=DELTA_SIM_COUNT)
+    return imp.as_dict() if imp is not None else None
+
+
 # plain m × base mapping (so the default anchor Elos are unchanged by the
 # re-derivation). Applies ONLY to the anchor wizard's multi-first keys:
 # single-pick anchors, the generic pick assets in the pool, and the
@@ -4139,6 +4291,12 @@ def _is_ghost_card(league_id: str, card) -> bool:
         league_id, _deck_trade_hash(give, recv, target))
 
 
+#: Counterparty breaker (LLD §1.4) — a fresh sentinel, never None, so
+#: "card carries no breaker attribute" stays distinguishable from any stamped
+#: value (including a legitimately null-ish one) at impression-log time.
+_BK_SENTINEL = object()
+
+
 def _served_cards(cards: list, league_id: str, ghost_active: bool) -> list:
     """The render gate: every published job snapshot (streaming AND final)
     filters ghosts through here, so a withheld card can never flash
@@ -4173,6 +4331,11 @@ def _log_deck_signal_impressions(
     # flag-off caller value) ⇒ no model_arm / arm_rank / agreement stamping
     # anywhere, so rows stay byte-identical to pre-bake-off.
     bakeoff_run=None,
+    # trade.negmem — the job's NegmemMap, or None (flag off, league not
+    # allowlisted, or hard build failure). It is the ON-CONDITION of the
+    # §3.4 stamp trichotomy, not a data source: the stamp itself is COPIED
+    # off the card. None ⇒ no `negmem` key on any row (C1).
+    nm_map=None,
 ) -> dict[int, str]:
     """Write one deck_impressions row per card (final served order) and
     return {id(card): impression_id} so the caller can stamp the ids into
@@ -4288,6 +4451,12 @@ def _log_deck_signal_impressions(
             "fit_premium":        bool(getattr(card, "fit_premium", None)),
             "aggression_variant": getattr(card, "aggression_variant", None),
             "relaxed":            bool(getattr(card, "relaxed", False)),
+            # 2026-08-21 gap auto-sweetener — stamped on EVERY row (null
+            # when the card was not sweetened) so measurement can split
+            # sweetened cards without an absent-key ambiguity. Rides
+            # INSIDE features_json (one column), so the executemany
+            # first-row-keys trap cannot drop it.
+            "gap_sweetener":      getattr(card, "gap_sweetener", None),
             # Board-state-at-serve (frozen: F6/F8 need serve-time recency)
             "ranked_player_count":  ranked_count,
             "last_board_update_at": last_board_update,
@@ -4303,6 +4472,38 @@ def _log_deck_signal_impressions(
         # by test_bakeoff_serving's flag-off golden).
         if getattr(card, "standing_offer_reason", None):
             features["standing_offer"] = True
+        # trade.negmem — the §3.4 stamp trichotomy. ON-condition is
+        # `nm_map is not None` (flag ON *and* the league allowlisted), and it
+        # is checked here, not per card, so the key exists on EVERY row this
+        # job writes — served and ghost, every arm. Absence therefore means
+        # exactly one thing: negmem was not on for this job.
+        #
+        # This block COPIES card state and computes NOTHING (B2 provenance).
+        # By logging time every arm's _cfg_override context has exited, so a
+        # recompute here would stamp arm-A rows with the LIVE arm's m — the
+        # named sabotage of §10 N-10. There is deliberately no
+        # `effective_mult` call and no `_c` read anywhere in this assembly.
+        #
+        # Precedence: a consult-time stamp on the card always rides. The
+        # `exempt` default applies only to cards with no consult site —
+        # likes-you INJECTIONS, which the injector builds after generation
+        # (the R4 exemption). An organic card the injector merely boosted was
+        # consulted before its like status was known, so its real stamp is the
+        # honest record. Rides INSIDE features_json (one Text column), so the
+        # save_deck_impressions executemany first-row-keys trap cannot drop it.
+        if nm_map is not None:
+            if nm_map.degraded:
+                features["negmem"] = {"m": 1.0, "ver": _negmem.NEGMEM_VER,
+                                      "degraded": True}
+            else:
+                _nm_st = getattr(card, "negmem_stamp", None)
+                if _nm_st is not None:
+                    features["negmem"] = _nm_st
+                elif features["likes_you"]:
+                    features["negmem"] = {"m": 1.0, "ver": _negmem.NEGMEM_VER,
+                                          "exempt": True}
+                else:
+                    features["negmem"] = {"m": 1.0, "ver": _negmem.NEGMEM_VER}
         # F10 — deck provenance ("replenish" for cron-pre-generated decks).
         # Key added only when a source marker exists, so pull-generated
         # decks' features_json stays byte-identical to pre-F10.
@@ -4339,6 +4540,43 @@ def _log_deck_signal_impressions(
             _agree = bakeoff_run.also_proposed_by(card)
             if _agree:
                 features["also_proposed_by"] = _agree
+            # Fit challenger (LLD §3.3, T2): BOTH keys on EVERY bake-off
+            # row, null-valued when absent — the M4 null-share tripwire
+            # needs absence to be impossible. They ride INSIDE features_json
+            # (one column), so the executemany first-row-keys trap
+            # (save_deck_impressions) cannot drop them. `fit` is non-null
+            # only on served fit-arm cards; `fit_diag` on every card the M3
+            # stamp reached. Flag-off rows are byte-identical — both lines
+            # sit inside the `bakeoff_run is not None` guard.
+            features["fit"]      = getattr(card, "fit", None)
+            features["fit_diag"] = getattr(card, "fit_diag", None)
+        # Counterparty breaker (LLD §1.4, ruling M-2) — OUTSIDE the
+        # bakeoff_run guard: organic decks stamp too. ATTRIBUTE-gated, not
+        # flag-gated: a mid-job hot flag flip must not make this block see a
+        # flag state the stamp site never saw, and this loop has NO per-row
+        # try/except — one AttributeError here would lose the whole deck's
+        # impressions (fit keys included) to the outer catch in _run_trade_job.
+        # When the flag reads ON at log time but a card lacks the attribute
+        # (hot-reload flip mid-job, injected-card race), a SYNTHETIC
+        # degradation marker is written — never a bare null, never a crash,
+        # never a silent absence on a flag-on row (invariant lives in tests:
+        # test_impressions_breaker_uniform_keys, test_midjob_flag_flip_no_crash).
+        # Both keys ride INSIDE features_json (one column) — the
+        # save_deck_impressions executemany first-row-keys trap
+        # (database.py) cannot drop them. Ghost rows (inert under the
+        # no-ghost ruling) take the same copy; readouts filter is_ghost=0
+        # regardless. The synthetic marker's `ver` is null by construction:
+        # at log time the module may never have been imported, so no version
+        # literal can honestly be claimed.
+        _bk = getattr(card, "breaker", _BK_SENTINEL)
+        if _bk is not _BK_SENTINEL:
+            features["breaker"]        = _bk
+            features["breaker_shadow"] = getattr(card, "breaker_shadow", None)
+        elif FLAGS.trade_breaker:
+            features["breaker"] = {"ver": None,
+                                   "degraded": "flag_flip_or_unstamped",
+                                   "objections": None}
+            features["breaker_shadow"] = None
         if getattr(card, "wildcard", False):
             features["wildcard"] = True
             features["wildcard_pool_size"] = getattr(
@@ -4900,7 +5138,11 @@ _AUDITION_ESTABLISHED = frozenset({"window", "value"})
 
 _EXPLORATION_BASE_PER_OPP = 5   # generate_trades' max_per_opponent default —
                                 # the served-deck per-opponent budget the
-                                # flag-off path has always used.
+                                # flag-off path has always used. Now the
+                                # FALLBACK for the `exploration_base_per_opp`
+                                # model_config knob (both read sites go
+                                # through `_deck_cfg`), so an unseeded DB
+                                # still reproduces this value exactly.
 _EXPLORATION_SLOT_MIN = 4       # PRD: slot fixed mid-deck, positions 4–6
 _EXPLORATION_SLOT_MAX = 6
 
@@ -5799,7 +6041,50 @@ def _run_trade_job(
             _overgen = max(0, int(_deck_cfg("exploration_overgen", 3)))
             if _overgen:
                 gen_kwargs["max_per_opponent"] = (
-                    _EXPLORATION_BASE_PER_OPP + _overgen)
+                    max(1, int(_deck_cfg("exploration_base_per_opp",
+                                         _EXPLORATION_BASE_PER_OPP)))
+                    + _overgen)
+
+        # trade.negmem (D-3, LLD §4.2/§6.1) — build the job's negative-results
+        # map ONCE, here on the job thread, BEFORE any arm context is entered.
+        # That placement is deliberate, not incidental: build-time knobs are
+        # overlay-BLIND by design (HLD §2.1), so every arm shares one frozen
+        # map (H-3) and arm A's opt-out is strength-only, applied at the seam.
+        # Nobody should "fix" this by moving the reads inside the fan-out.
+        # Knobs are read through the trade_service MODULE object (imported at
+        # the top of this file) rather than a fresh `from .trade_service
+        # import _c`, which would freeze the binding (the T1 hazard) and add a
+        # second way to reach one accessor. gen2_accept_prior_strength rides
+        # along because it governs the M2 feed guard, and negmem — a leaf that
+        # cannot import trade_service — must not keep a copy of its default.
+        _ts_c = _trade_service_mod._c        # readability alias only; resolved
+                                             # at call time, per job
+        nm_map = None
+        if FLAGS.trade_negmem and league_id != "league_demo":
+            try:
+                nm_map = _negmem.build_map(
+                    g_user_id, league_id,
+                    halflife_days         = _ts_c("negmem_halflife_days"),
+                    min_evidence          = _ts_c("negmem_min_evidence"),
+                    sat_k                 = _ts_c("negmem_sat_k"),
+                    like_net              = _ts_c("negmem_like_net"),
+                    floor_b               = _ts_c("negmem_floor"),
+                    accept_prior_strength = _ts_c("gen2_accept_prior_strength"),
+                    # owner_alias: NOT PASSED in v1 (DE-5) — identity default.
+                    # No server-side co-owner source exists to build one from,
+                    # and M1's evidence path needs no mapping at all.
+                )
+            except Exception as nm_err:      # belt — build_map never raises
+                log.warning("negmem build failed hard (no stamps this job): %s",
+                            nm_err)
+                nm_map = None
+            if nm_map is not None:
+                with _trade_jobs_lock:       # the suppression_note pattern
+                    _jn = _trade_jobs.get(job_id)
+                    if _jn is not None:
+                        _jn["negmem_note"] = {"degraded": nm_map.degraded,
+                                              "build_ms": round(nm_map.build_ms, 1),
+                                              "cells": len(nm_map.cells)}
 
         _generate_kwargs = dict(
             user_id              = g_user_id,
@@ -5830,6 +6115,14 @@ def _run_trade_job(
             exclusion_keys       = exclusion_keys,
             **gen_kwargs,
         )
+        # trade.negmem — the key is ABSENT when there is no map (flag off, not
+        # allowlisted, or a hard build failure), so flag-off kwargs are
+        # byte-identical (C1). Both bake-off fan-out lambdas and the organic
+        # call below splat this same dict, so one frozen map reaches every arm
+        # (H-3); the arms differ only through each one's overlay-read
+        # negmem_strength.
+        if nm_map is not None:
+            _generate_kwargs["negmem"] = nm_map
         if bakeoff_on:
             # Three generations, SEQUENTIAL on this thread (PLAN.md §3.1 —
             # the config seam is thread-local). Arm A rides
@@ -5841,6 +6134,8 @@ def _run_trade_job(
                 generate  = lambda **ov: trade_service.generate_trades(
                     **{**_generate_kwargs, **ov}),
                 gen_v2    = lambda **ov: _bakeoff.gen_v2_cards(
+                    trade_service, {**_generate_kwargs, **ov}),
+                gen_fit   = lambda **ov: _bakeoff.gen_fit_cards(
                     trade_service, {**_generate_kwargs, **ov}),
                 league_id = league_id,
                 # Recorded, not inferred: both arrive per-request from the
@@ -5854,14 +6149,38 @@ def _run_trade_job(
         else:
             final_cards = trade_service.generate_trades(**_generate_kwargs)
 
+        # M3 (R-11) — diagnostic fit stamp on EVERY bake-off card of EVERY
+        # arm, so the readout can bucket-match arm B against fit. Post-
+        # ranking, attribute-only, and inert: nothing downstream reads
+        # fit_diag except the features_json copy in
+        # _log_deck_signal_impressions (test_fit_diag_inert enforces).
+        if bakeoff_run is not None:
+            try:
+                from .trade_gen_fit import stamp_fit_diag  # lazy — the
+                # organic (bakeoff_run is None) path never executes this
+                # import
+                stamp_fit_diag(
+                    {a: r.cards for a, r in bakeoff_run.arms.items()},
+                    players  = players_dict,
+                    league   = g_league,
+                    user_elo = elo_map_rt,
+                    seed_elo = seed_map,
+                )
+            except Exception as fd_err:
+                log.warning("fit_diag stamp failed (non-fatal): %s", fd_err)
+
         # F7 — split the over-generated list into the served deck (top
-        # _EXPLORATION_BASE_PER_OPP per opponent — the flag-off membership)
+        # `exploration_base_per_opp` per opponent — the flag-off membership)
         # and the wildcard draw pool, then republish so the trimmed deck
         # replaces the last streaming snapshot (which contained pool cards).
         exploration_pool: list = []
         if explore_active:
             final_cards, exploration_pool = _split_exploration_pool(
-                final_cards, _EXPLORATION_BASE_PER_OPP)
+                final_cards,
+                # max(1, …): a knob of 0 would send the ENTIRE deck into the
+                # wildcard pool and serve nothing.
+                max(1, int(_deck_cfg("exploration_base_per_opp",
+                                     _EXPLORATION_BASE_PER_OPP))))
             if exploration_pool:
                 snapshot = []
                 for c in _served_cards(final_cards, league_id, ghost_on):
@@ -6177,6 +6496,88 @@ def _run_trade_job(
             except Exception as br_err:
                 log.warning("board-refresh header failed (non-fatal): %s", br_err)
 
+        # Counterparty breaker (v1) — evaluate + stamp + (flag 2) narrate.
+        # Post-mutation-stack, pre-ghost-split: `final_cards` here is the
+        # exact list _log_deck_signal_impressions receives (likes-you-
+        # injected cards included — they carry no fit_diag; their `them`
+        # passthrough is null, D-3). Attribute-only; zero ordering effect
+        # (test_breaker_zero_ordering_effect); fail-open with LABELED
+        # degradation (LLD §5) — never a bare null, never a missing key on
+        # a flag-on deck. Ghost split below is inert (no-ghost ruling):
+        # served_final == final_cards.
+        # Both flags read ONCE, up front (§5.5 E-8): the pair the whole
+        # block acts on is one coherent read.
+        # Skips (T-1 ruling, §9 Q-10): the demo league (consistent with
+        # every neighboring mutation layer and the demo-guarded impressions
+        # blocks below) and superseded jobs (pure wasted-compute avoidance —
+        # no correctness dependency either way, §5.5 E-13).
+        _bk_on   = FLAGS.trade_breaker
+        _bk_narr = FLAGS.trade_breaker_narrative
+        if (_bk_on and league_id != "league_demo"
+                and not _job_superseded(job_id)):
+            try:
+                from .trade_breaker import stamp_breaker, compose_narration
+                # lazy — flag-off never imports (NFR-3,
+                # test_flag_off_never_imports_breaker)
+                _bk_job = stamp_breaker(
+                    final_cards,
+                    league            = g_league,
+                    players           = players_dict,
+                    seed_elo          = seed_map,
+                    scoring_format    = active_format,
+                    league_id         = league_id,
+                    viewer_user_id    = g_user_id,
+                    viewer_roster     = _generate_kwargs["user_roster"],
+                    viewer_elo        = elo_map_rt,
+                    viewer_outlook    = outlook_value,
+                    declared_outlooks = opponent_outlooks,
+                    pick_shares       = opponent_pick_shares,
+                )
+                _n_narrated = 0
+                if _bk_narr:
+                    _n_narrated = compose_narration(final_cards,
+                                                    players=players_dict,
+                                                    job=_bk_job)
+                if _n_narrated:
+                    # M-1 republish contract: republish iff narrated_count
+                    # > 0, so the narrated payload reaches the snapshot the
+                    # client actually receives on EVERY flag combination
+                    # (§1.3) — the deck.signal_v2 republish below is
+                    # conditional and must not be relied on. Same idiom as
+                    # the F7/F9 republishes above (standard decoration,
+                    # _served_cards path, _job_live-guarded).
+                    snapshot = []
+                    for c in _served_cards(final_cards, league_id, ghost_on):
+                        d = trade_card_to_dict(c, players_dict)
+                        d["real_opponent"] = c.target_user_id in real_user_ids
+                        d["outlook"]       = outlook_value
+                        snapshot.append(d)
+                    with _trade_jobs_lock:
+                        j = _trade_jobs.get(job_id)
+                        if _job_live(j):
+                            j["cards"] = snapshot
+            except Exception as bk_err:
+                log.warning("breaker stamp failed (non-fatal): %s", bk_err)
+                # Rung 5 — minimal marker on EVERY card, constructed with no
+                # breaker state (the import itself may be what failed). The
+                # "brk-1" literal is version-pinned against
+                # trade_breaker.BREAKER_VERSION by
+                # test_rung5_marker_version_pinned.
+                _mark = {"ver": "brk-1", "degraded": "exception_outer",
+                         "objections": None}
+                # BOTH markers stamped with NO knob read and NO module
+                # reference: in _run_trade_job the local `trade_service` is
+                # the per-format TradeService INSTANCE, which has no `_c` —
+                # and a live knob read at failure time would violate the
+                # §3.0 one-job-one-knob-state rule anyway. A shadow marker
+                # on a shadow-off deck is harmless (readouts treat markers
+                # as degraded either way); an existing shadow stamp is
+                # preserved.
+                for _bc in final_cards:
+                    _bc.breaker = dict(_mark)
+                    if getattr(_bc, "breaker_shadow", None) is None:
+                        _bc.breaker_shadow = dict(_mark)
+
         # suggestion.telemetry — split the final deck into served cards and
         # ghost cards (ghosts keep their would-have-been position for the
         # counterfactual log). ghost_on=False ⇒ served_final IS final_cards
@@ -6260,6 +6661,7 @@ def _run_trade_job(
                     seed_map       = seed_map,   # F3 — centerpiece stamping
                     first_deck     = fs_first_deck,   # F9 — frozen features stamp
                     bakeoff_run    = bakeoff_run,     # trade.bakeoff — arm attribution
+                    nm_map         = nm_map,          # trade.negmem — stamp ON-condition
                     **telemetry_kw,
                 )
                 if imp_by_card:
@@ -7659,53 +8061,52 @@ def stud_tax_setting_route():
 
 @app.route("/api/settings/pick-pricing", methods=["GET", "PUT"])
 def pick_pricing_setting_route():
-    """GET/PUT /api/settings/pick-pricing — M6b per-user pick-pricing mode.
+    """GET/PUT /api/settings/pick-pricing — **RETIRED 2026-08-21** (D-144).
 
-    GET → {"mode": "tier_ladder"|"market_slots"} (stored setting;
-    'tier_ladder' — TODAY'S BEHAVIOUR — is the default). PUT persists it.
-    Sibling of /api/settings/stud-tax in every respect except one: this route
-    is FLAG-GATED. `trade.slot_pricing` off ⇒ 404 on both verbs, so the mode
-    cannot even be stored while the repricing is dark.
+    The operator ruling — *"Market slots should be default and not an opt-in or
+    even an option to flip"* — deleted the setting this route managed. Pick
+    pricing is now `market_slots` for everybody, resolved in
+    `trade_service.pick_pricing_mode_for_user` with no DB read.
 
-    Unlike #214/#215 — which shipped its retuned mode as the DEFAULT — the
-    market mode here is opt-in. Operator decision O2 authorises the toggle and
-    the calibration, not a change to what today's users are charged for picks.
+    WHY THE ROUTE SURVIVES AT ALL, in two different shapes:
+
+    * **GET → 200 `{"mode": "market_slots", "retired": true}`.** Build 12x
+      clients in the field still call this on Settings open. They 404'd
+      gracefully while the flag was dark, but the shipped mobile build that
+      DOES render the control reads `{mode}` and selects the matching pill —
+      so serving the true fixed state makes an old build show the honest
+      answer ("Market", selected) instead of a stale default. The stored
+      `users.pick_pricing_mode` column is deliberately NOT read: it is dead
+      data, and echoing it back would tell an old client the setting still
+      means something.
+    * **PUT → 410 Gone.** The correct code for a resource that existed and was
+      deliberately withdrawn — a 404 would read as "wrong URL / not deployed
+      yet", which is what it meant last week. There is no precedent for a
+      retired route in this codebase (grep: zero 410s before this one), so
+      this is the precedent: retire a write verb with 410 and a body naming
+      the replacement, keep the read verb serving the fixed state for old
+      clients. The shipped mobile catch-block turns this into a non-fatal
+      "Could not save the pick pricing setting" warn toast and reverts the
+      pill — no crash, no data loss (there is no data left to lose).
+
+    The PUT no longer runs `_verified_write_denial`. That is deliberate, not
+    an oversight: the denial existed to stop an unverified account writing a
+    setting, and nothing is written any more. An unverified caller now gets
+    the same 410 as everyone else, which is the more honest answer than "you
+    are not allowed to do this" about a thing nobody is allowed to do.
+
+    `pick_pricing_mode_changed` is no longer emitted; the event stays
+    registered in `analytics_taxonomy` so historical rows remain queryable.
     """
-    if not is_enabled("trade.slot_pricing"):
-        return jsonify({"error": "not_found"}), 404
-    from .database import (get_pick_pricing_mode, set_pick_pricing_mode,
-                           PICK_PRICING_MODES)
-    sess = _require_session()
-    g_user_id = sess["user_id"]
+    _require_session()          # unchanged auth posture: 401 before anything
     if request.method == "GET":
-        try:
-            return jsonify({"mode": get_pick_pricing_mode(g_user_id)})
-        except Exception as e:
-            log.error("pick-pricing read failed for %s: %s", g_user_id, e)
-            return jsonify({"error": "internal_error"}), 500
-    denial = _verified_write_denial(sess)
-    if denial is not None:
-        return denial
-    body = request.get_json(silent=True) or {}
-    mode = body.get("mode", "")
-    if mode not in PICK_PRICING_MODES:
-        return jsonify({"error": f"Invalid mode: {mode!r}"}), 400
-    try:
-        set_pick_pricing_mode(g_user_id, mode)
-        log.info("pick-pricing mode set for %s: %s", g_user_id, mode)
-        try:
-            record_event(
-                g_user_id, "pick_pricing_mode_changed",
-                league_id=getattr(sess.get("league"), "league_id", None),
-                source="api", props={"mode": mode},
-                **(getattr(g, "device_info", {}) or {}),
-            )
-        except Exception as ev_err:
-            log.warning("record_event(pick_pricing_mode_changed) failed: %s", ev_err)
-        return jsonify({"ok": True, "mode": mode})
-    except Exception as e:
-        log.error("pick-pricing write failed for %s: %s", g_user_id, e)
-        return jsonify({"error": "internal_error"}), 500
+        return jsonify({"mode": "market_slots", "retired": True})
+    return jsonify({
+        "error": "gone",
+        "message": ("Pick pricing is no longer configurable — every pick "
+                    "prices off the dynasty market curve."),
+        "mode": "market_slots",
+    }), 410
 
 
 @app.route("/api/scoring/switch", methods=["POST"])
@@ -8006,6 +8407,17 @@ def _derive_board_from_format(source_elo: dict[str, float], to_format: str) -> d
     return derived
 
 
+# Application-level cap on an in-app feedback note, in characters.
+# `app_feedback.text` is a SQLAlchemy `Text` column (unbounded in both SQLite
+# and Postgres), so this is validation, not storage — but /api/feedback accepts
+# ANONYMOUS writes, so the bound is the only thing keeping a runaway payload out.
+# Raised 2000 -> 8000 on 2026-08-22 (operator confirm, express lane): the old cap
+# silently ate a long operator report. The client mirrors this as
+# FEEDBACK_TEXT_MAX in mobile/src/api/feedback.ts — the two are pinned together by
+# mobile/tests/check-feedback-capture.js. Change both or neither.
+FEEDBACK_TEXT_MAX = 8000
+
+
 @app.route("/api/feedback", methods=["POST"])
 @_gate_unverified_write
 def submit_feedback_route():
@@ -8015,7 +8427,7 @@ def submit_feedback_route():
       client_id           required, unique per note (mobile's local id)
       screen              required, non-empty (≤ 100 chars; truncated)
       severity            required, one of bug | polish | idea
-      text                required, non-empty, ≤ 2000 chars
+      text                required, non-empty, ≤ FEEDBACK_TEXT_MAX chars
       client_created_at   required, ISO timestamp from the client
 
     Auth is best-effort: if X-Session-Token resolves to a session we
@@ -8048,8 +8460,9 @@ def submit_feedback_route():
     screen    = screen_raw.strip()[:100]
     severity  = severity_raw
     text_body = text_raw.strip()
-    if len(text_body) > 2000:
-        return jsonify({"error": "text_too_long", "limit": 2000}), 400
+    if len(text_body) > FEEDBACK_TEXT_MAX:
+        return jsonify({"error": "text_too_long",
+                        "limit": FEEDBACK_TEXT_MAX}), 400
 
     # ── Best-effort session lookup; anonymous on miss ──────────────────
     user_id = None
@@ -8318,6 +8731,54 @@ def suggestion_telemetry_ratio_route():
     })
 
 
+@app.route("/api/admin/receipts/metrics", methods=["GET"])
+def receipts_admin_metrics_route():
+    """GET /api/admin/receipts/metrics — per-taxonomy-cell grading accuracy.
+
+    Receipts' internal readout (docs/plans/receipts/LLD.md §2.3). Operator-only
+    (X-Cron-Secret, the `suggestion-telemetry/ratio` pattern above). Cells are
+    (window × shape_bucket × basis × model_arm); each carries `n`, win share, a
+    **Wilson 95% interval** in its centre-shifted form, median `edge_pct`, and
+    `gradeable_share` with a `flag_low_share` marker below 70%.
+
+    No bare percentages: at the single-digit per-cell n this feature will live
+    at for months, a point estimate without its interval is a claim the data
+    cannot support. Cells here deliberately SKIP the user surface's coverage
+    filter — the admin read wants every graded row plus the disclosure, not a
+    tidier subset — and the `n == rows used` invariant holds per surface.
+
+    `effective_window` reports the real span of `window_snap_date −
+    serve_snap_date`: a nominal 14-day window lands at roughly 11–20 days once
+    both anchors resolve, and the operator should read the number knowing it.
+
+    Optional filters: `window`, `shape_bucket`, `basis`, `model_arm`,
+    `league_id`, `dedup` (default 1 — the same earliest-serve rule as the user
+    surface; `dedup=0` includes re-serves and the response says so).
+
+    Available regardless of `receipts.screen`; 404 `feature_disabled` while
+    `receipts.grading` is off.
+    """
+    _require_cron_auth()
+    from .receipts_service import admin_metrics, grading_enabled
+    if not grading_enabled():
+        return jsonify({"error": "feature_disabled"}), 404
+
+    window = request.args.get("window")
+    try:
+        window_days = int(window) if window else None
+    except (TypeError, ValueError):
+        return jsonify({"error": "window must be an integer"}), 400
+
+    return jsonify(admin_metrics(
+        window=window_days,
+        shape_bucket=request.args.get("shape_bucket") or None,
+        basis=request.args.get("basis") or None,
+        model_arm=request.args.get("model_arm") or None,
+        league_id=request.args.get("league_id") or None,
+        dedup=request.args.get("dedup", "1") != "0",
+    ))
+
+
 @app.route("/api/admin/analytics/<report>", methods=["GET"])
 def analytics_report_route(report):
     """GET /api/admin/analytics/<report> — the P2 report catalog (LLD §2.3;
@@ -8556,7 +9017,7 @@ def _record_trends_snapshot(service, user_id, league, fmt, changed_pids) -> None
 @app.route("/api/tiers/save", methods=["POST"])
 @_gate_unverified_write
 def save_tiers_route():
-    """POST /api/tiers/save {position: 'RB', tiers: {first_1: [...ids], ...}, cleared_pids: [...], demoted_pids: [...]}
+    """POST /api/tiers/save {position: 'RB', tiers: {first_1: [...ids], ...}, cleared_pids: [...]}
 
     Converts tier assignments into ELO overrides and marks the position as saved.
 
@@ -8564,11 +9025,11 @@ def save_tiers_route():
     from all tiers (× button → back to pool). Their override is deleted
     so they don't snap back to a previous tier on the next refresh.
 
-    `demoted_pids` (optional, #161): pids the user explicitly passed over
-    in a Quick Set tier save (visible-but-unselected players previously in
-    the saved tier or higher). Pinned below every band (unranked/pending)
-    so they don't silently keep the old higher tier. Skip never demotes —
-    the client only sends this on an explicit save with picks.
+    A save mutates ONLY the assigned and cleared pids (D-160, #346/#381 —
+    supersedes the #161 demote rule): passed-over players HOLD their tier.
+    Old binaries (v1.10.0–v1.16.x) still send a `demoted_pids` key; it is
+    accepted and silently ignored like any unknown body key — never parsed,
+    never pinned, and the response is byte-identical to a request without it.
     """
     sess = _require_initialized_session()
     service   = sess["service"]
@@ -8582,19 +9043,15 @@ def save_tiers_route():
     if not isinstance(cleared_pids, list):
         cleared_pids = []
     cleared_pids = [str(x) for x in cleared_pids if x]
-    demoted_pids = body.get("demoted_pids") or []
-    if not isinstance(demoted_pids, list):
-        demoted_pids = []
-    demoted_pids = [str(x) for x in demoted_pids if x]
 
     if position not in ("QB", "RB", "WR", "TE"):
         return jsonify({"error": f"Invalid position: {position!r}"}), 400
 
-    # Must have at least one player in some tier OR something to clear or
-    # demote. (Pure "clear-only" saves are valid — e.g. user removes their
+    # Must have at least one player in some tier OR something to clear.
+    # (Pure "clear-only" saves are valid — e.g. user removes their
     # last tier-placed RB; we still need to apply the deletion server-side.)
     total_assigned = sum(len(ids) for ids in tiers.values() if isinstance(ids, list))
-    if total_assigned == 0 and not cleared_pids and not demoted_pids:
+    if total_assigned == 0 and not cleared_pids:
         return jsonify({"error": "No players in any tier"}), 400
 
     # M2 — a SCOPED save writes only part of the board. Read behind the flag,
@@ -8620,21 +9077,18 @@ def save_tiers_route():
                 scope_pids=_rookie_scope_ids(sess),
                 scoring_format=fmt,
                 cleared_pids=cleared_pids,
-                demoted_pids=demoted_pids,
             )
         else:
             # apply_tiers assigns ELOs inside each tier's band (see
             # backend/tier_config.json) so on reload the frontend re-buckets
             # players into the same tier they were placed. Bands are
             # position+format-aware. cleared_pids lets the frontend tell us
-            # "this player is back in the pool — drop their override";
-            # demoted_pids pins passed-over players below every band (#161).
+            # "this player is back in the pool — drop their override".
             service.apply_tiers(
                 position=position,
                 tiers=tiers,
                 scoring_format=fmt,
                 cleared_pids=cleared_pids,
-                demoted_pids=demoted_pids,
             )
 
         # Persist the full tier override dict for THIS format so it survives
@@ -8729,10 +9183,18 @@ def save_tiers_route():
         except Exception as ev_err:
             log.warning("record_event(tier_save) failed: %s", ev_err)
 
-        # FR-20 (analytics P0, LLD §6.4b): QuickSet completion is a
-        # first-class funnel event — one per position committed through the
-        # QuickSet walk. duration_ms/skipped are client-passed (absent from
-        # old binaries → null).
+        # FR-20 (analytics P0, LLD §6.4b): the QuickSet funnel's server
+        # event. SEMANTICS CORRECTION (2026-08-24): one per via-tagged tier
+        # COMMIT, not per completed position — Quick Set saves rung by rung,
+        # the route cannot tell which commit is the walk's last, and a walk
+        # that tap-accepts consensus commits nothing at all. Dark until the
+        # first mobile build with the 2026-08-24 fix: no client ever sent
+        # via:'quickset' before it (web has no Quick Set), so this branch
+        # had zero production firings.
+        # duration_ms/skipped are client-passed (mobile sends neither →
+        # null). Per-position completion is analysis-side:
+        # `quickset_step_advanced` with tier_index == tier_count - 1. See
+        # docs/business/analytics/2026-08-24-quickset-via-gap.md.
         if via == "quickset":
             try:
                 record_event(
@@ -9726,15 +10188,12 @@ def trade_evaluate_route():
         _sess_for_mode = _get_session(request.headers.get("X-Session-Token", ""))
         _mode = (_trade_service_mod.stud_tax_mode_for_user(_sess_for_mode.get("user_id"))
                  if _sess_for_mode else _trade_service_mod.STUD_TAX_DEFAULT)
-    # M6b — the pick-pricing mode rides the same request-scoped pin. Resolved
-    # from the same (optional) session: Mode A stays public, and an anonymous
-    # caller gets the 'tier_ladder' default. An outer pin wins, as above.
-    _pp_mode = _trade_service_mod.pinned_pick_pricing_mode()
-    if _pp_mode is None:
-        if _sess_for_mode is None:
-            _sess_for_mode = _get_session(request.headers.get("X-Session-Token", ""))
-        _pp_mode = _trade_service_mod.pick_pricing_mode_for_user(
-            _sess_for_mode.get("user_id") if _sess_for_mode else None)
+    # Pick pricing rides the same request-scoped pin, but since the 2026-08-21
+    # ruling (D-144) it has nothing to resolve: `market_slots` for everybody,
+    # signed-in or anonymous, so no session lookup happens on its account. An
+    # outer pin still wins — that is the bake-off/test seam, never a user.
+    _pp_mode = (_trade_service_mod.pinned_pick_pricing_mode()
+                or _trade_service_mod.pick_pricing_mode_for_user(None))
     with _trade_service_mod.stud_tax_override(_mode), \
             _trade_service_mod.pick_pricing_override(_pp_mode):
         return _trade_evaluate_impl(_mode)
@@ -9789,11 +10248,12 @@ def _trade_evaluate_impl(stud_tax_mode: str):
         # (already in elo_to_value units, so it composes directly with player
         # values). Generic picks (generic_pick_*) still resolve via `seed`.
         #
-        # M6b — the price is resolved at READ time under the caller's
-        # pick-pricing mode (pinned for this request by trade_evaluate_route,
-        # alongside the #215 stud-tax pin). `tier_ladder` (default, and the
-        # only reachable mode while `trade.slot_pricing` is off) returns the
-        # stored pool_value unchanged. The stored column is never written.
+        # The price is resolved at READ time under the pricing mode pinned for
+        # this request by trade_evaluate_route, alongside the #215 stud-tax
+        # pin. Since D-144 that is always `market_slots`, and the waterfall is
+        # the pick's OWN slot price when D-090 resolves one → the round curve
+        # → the stored ladder value. The stored column is never written —
+        # pricing is read-time in every mode.
         #
         # W3 M-C (S1) — the read opts into asserted rows behind
         # `picks.assign_tradeable`, and each priced pick entry carries its
@@ -9804,10 +10264,15 @@ def _trade_evaluate_impl(stud_tax_mode: str):
         _tradeable = _asserted_picks_tradeable()
         if league_id and league_id != "league_demo":
             try:
+                # D-144 per-slot pricing needs the league's resolved draft
+                # order. Looked up ONCE per request (it is DB-backed with a
+                # 60s cache), never per pick — same discipline as the deck
+                # lane's lookup in `_owned_pick_assets`.
+                _slot_order = _league_slot_order(league_id)
                 for _p in load_draft_picks(league_id=league_id,
                                            source=_pick_read_source()):
-                    league_pick_vals[_p["pick_id"]] = priced_pool_value(
-                        _p, scoring_format=fmt)
+                    league_pick_vals[_p["pick_id"]] = _priced_pick_value(
+                        _p, _slot_order, fmt)
                     league_pick_meta[_p["pick_id"]] = _pick_wire_source(
                         _p, _tradeable, with_season=True)
             except Exception as _lp_err:
@@ -9992,6 +10457,24 @@ def _trade_evaluate_impl(stud_tax_mode: str):
                 except Exception as si_err:
                     log.warning("evaluate: starter-impact build failed (omitted): %s", si_err)
 
+                # #357 (flag `outlook.trade_impact`) — what this trade does to
+                # the caller's PLAYOFF odds. Additive and independently
+                # omissible: a failure here costs the odds block, never the
+                # evaluation. Sleeper-only and Mode-B only (a rosterless Mode-A
+                # read has no league to simulate). See _trade_outlook_impact.
+                try:
+                    # LEAGUE identity, not the account id: LeagueState rows are
+                    # keyed on the roster's owner_id, so a co-owned roster
+                    # resolves only through _league_user_id (backend/CLAUDE.md
+                    # § Identity). Identical for a sole owner.
+                    _oi = _trade_outlook_impact(
+                        league_id, _league_user_id(_mode_b_sess),
+                        opponent_user_id, give, recv, _mode_b_sess)
+                    if _oi is not None:
+                        result["outlook_impact"] = _oi
+                except Exception as oi_err:
+                    log.warning("evaluate: outlook-impact build failed (omitted): %s", oi_err)
+
         # ── Eveners (DynastyGM teardown 2026-07-26) ──────────────────────────
         # Additive `eveners` list: one-tap assets to balance an uneven trade.
         # Present only on an uneven two-sided read. gap.add_to names the side
@@ -10010,7 +10493,8 @@ def _trade_evaluate_impl(stud_tax_mode: str):
                              else opponent_user_id)
                     result["eveners"] = _roster_eveners(
                         league_id, owner, gap["value"], in_trade,
-                        _pool_players, seed_value, tier_of=_evener_tier)
+                        _pool_players, seed_value, tier_of=_evener_tier,
+                        scoring_format=fmt)
                 else:
                     pe = gap.get("pick_equivalent")
                     result["eveners"] = (
@@ -10038,7 +10522,8 @@ def _trade_evaluate_impl(stud_tax_mode: str):
                     result["eveners"] = _roster_eveners(
                         league_id, _os_owner, _os_gap,
                         set(give_raw) | set(recv_raw),
-                        _pool_players, seed_value, tier_of=_evener_tier)
+                        _pool_players, seed_value, tier_of=_evener_tier,
+                        scoring_format=fmt)
             except Exception as evn_err:
                 log.warning("evaluate: one-sided evener build failed (omitted): %s",
                             evn_err)
@@ -10342,17 +10827,47 @@ def get_league_picks():
         # map: the seed map's real floor compression is genuine but is a
         # RANK-EQUIVALENCE issue against the outside market, not the cause of
         # the wrong badge. See docs/reviews/2026-08-19-pick-badge-scale.md.
+        #
+        # ── D-148 (2026-08-21, closes Q-026) — THE VALUE THIS BADGES IS NOW
+        # THE ENGINE'S. `pool_value` on the wire is `_priced_pick_value`, the
+        # same own-slot → round-curve → stored-ladder waterfall under the same
+        # D-090 resolution a trade card charges, so this list, the in-league
+        # calculator that reads `pool_value` off it, and the card can no
+        # longer disagree about a pick. Operator ruling: *"I want the league
+        # values to reflect the same pick values."*
+        #
+        # The badges MOVE, and that is the point rather than a side effect: a
+        # badge reflects the value it is served (D-320-2), and for a
+        # CURRENT-YEAR slotted pick the served value now spreads 5.9x across
+        # one round. A 2026 1.01 badges UP and a 1.12 badges DOWN — they were
+        # identical before, which is the thing the ruling calls wrong. The
+        # BANDS are untouched: `tier_config.json` and its five client mirrors
+        # (docs/cross-client-invariants.md, G-051) are byte-identical, and so
+        # is the inverse — `value_to_elo`, per D-088 below.
+        #
+        # NULL-tier contract, PRESERVED but re-anchored: a row is badgeless
+        # when the waterfall can price it at nothing at all (every step
+        # empty ⇒ 0.0), and `pool_value` then serves as null rather than as a
+        # fake zero. A stored NULL is no longer automatically badgeless,
+        # because the market can price a row the sync never did — which is
+        # exactly what `_power_picks_by_owner` and the engine already do with
+        # the same row, and disagreeing with them is what this ship exists to
+        # end. A price below the `waivers` floor still badges null.
         fmt = sess.get("active_format") or DEFAULT_SCORING
-        def _pick_tier(p: dict):
-            v = p.get("pool_value")
+        def _pick_tier(v):
             if v is None:
                 return None
             return RankingService.tier_for_elo(
                 _trade_service_mod.value_to_elo(float(v)), None, fmt)
         slot_order = _league_slot_order(league_id)      # D-090, once per request
-        all_picks = [{**p, "label": _owned_pick_label(p, slot_order),
-                      "tier": _pick_tier(p),
-                      **_pick_wire_source(p, tradeable)} for p in raw]
+        def _serialize(p: dict) -> dict:
+            priced = _priced_pick_value(p, slot_order, fmt)
+            value = round(priced, 1) if priced > 0 else None
+            return {**p, "pool_value": value,
+                    "label": _owned_pick_label(p, slot_order),
+                    "tier": _pick_tier(value),
+                    **_pick_wire_source(p, tradeable)}
+        all_picks = [_serialize(p) for p in raw]
         my_picks  = [p for p in all_picks if p.get("owner_user_id") == g_user_id]
         return jsonify({
             "my_picks": my_picks,
@@ -10697,6 +11212,45 @@ def _invalidate_slot_order(league_id: str) -> None:
         _slot_order_cache.pop(str(league_id), None)
 
 
+# ── D-148 — ONE priced value for an owned pick, engine and league alike ───
+#
+# D-146 shipped the per-slot waterfall into the ENGINE only and left the two
+# league SURFACES on the stored ladder, knowingly (slot-pricing scope §6
+# waiver 2). Live, that read as a 2.3x disagreement about the single most
+# valuable asset a team can hold: a 2026 1.01 was 2117.0 on Power Rankings
+# and 4867.1 inside a trade card. The operator's ruling — *"I want the league
+# values to reflect the same pick values"* (2026-08-21, Q-026) — closes it.
+#
+# This helper is the closure. Every site that prices an owned pick calls it,
+# so "the same waterfall with the same slot resolution" is STRUCTURAL rather
+# than six copies of one expression that agree today. `test_pick_pricing_
+# one_seam.py` asserts the reader set by AST walk, in both directions.
+#
+# It is deliberately NOT the place that resolves the order: `slot_order` is
+# passed in because this runs once per PICK and `_league_slot_order` costs a
+# DB read plus a cache lookup once per LEAGUE. Every caller hoists it.
+
+def _priced_pick_value(p: dict, slot_order: dict | None,
+                       scoring_format: str) -> float:
+    """The engine value of ONE owned-pick row `p` — THE only pricing call.
+
+    `pick_slots.slot_for` is pure and refuses everything it should (a future
+    season per #273, an unknown roster, a malformed blob, an unverifiable
+    snake reversal), so a `None` slot rides `priced_pool_value`'s step 2 by
+    itself. `slot_order=None` — the answer for every league whose order is
+    unset, unsupported or unresolvable, and for every league at all while
+    `picks.slot_labels` is off — reproduces the round curve for every pick.
+
+    Returns a number in the stored `draft_picks.pool_value` scale
+    (elo_to_value units). It NEVER writes: pricing is read-time in every mode
+    and the stored column stays the sync-written ladder value (D-146).
+    """
+    return priced_pool_value(
+        p, scoring_format=scoring_format,
+        slot=pick_slots.slot_for(slot_order, p.get("season"), p.get("round"),
+                                 p.get("original_roster_id")))
+
+
 def _owned_picks_available(league_id: str, league) -> bool:
     """May this league's owned picks enter ENGINE math?
 
@@ -10741,19 +11295,26 @@ def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr") -> dict:
     primed with these picks via _pick_asset_elos (see _inject_owned_picks) or
     every pick silently defaults to Elo 1500.
 
-    **M6b (flag `trade.slot_pricing`, operator decision O2)** — the price is
-    resolved HERE, at read time, through `pick_values.priced_pool_value` under
-    the thread-local pricing mode. The stored `draft_picks.pool_value` column
-    is NEVER rewritten: it is written by a league-wide sync path and shared by
-    every user of the league, so a per-user mode that rewrote it would
-    silently reprice the user's leaguemates. Under the default `tier_ladder`
-    mode `priced_pool_value` returns the stored value unchanged and no
-    DynastyProcess read is attempted, so this call is a no-op.
+    **Pricing (D-144, 2026-08-21)** — the price is resolved HERE, at read
+    time, through `pick_values.priced_pool_value` under the thread-local
+    pricing mode, which is now always `market_slots`. A pick whose slot D-090
+    resolves is priced at THAT slot's market value; everything else rides the
+    round curve. The stored
+    `draft_picks.pool_value` column is NEVER rewritten: it is written by a
+    league-wide sync path and shared by every user of the league, and keeping
+    pricing read-time is what leaves the legacy ladder available as a harness
+    axis. This call is no longer a no-op — it reaches DynastyProcess's cached
+    pick curve (24 h TTL, fail-soft to `{}`) on the first pick of a request.
 
     The cap is applied AFTER pricing (sort key is the priced value), because
-    `market_slots` re-shapes the curve — a 2029 3rd and a 2026 1st do not keep
-    their relative order across the two modes, and capping on the stale order
-    would inject a different top-N than the one the engine then prices.
+    the market curve re-shapes the ladder — a 2029 3rd and a 2026 1st do not
+    keep their relative order across the two curves, and capping on the stale
+    order would inject a different top-N than the one the engine then prices.
+    **Per-slot pricing makes this load-bearing rather than merely tidy**: the
+    ladder prices every 2026 first identically, so it cannot rank a 1.01 above
+    a 1.12, and a cap applied on stored values would routinely inject the
+    wrong first. It now sorts 1.01 (4867.1) above 2026 2.01 above 1.12
+    (820.8), which is the whole point of the ruling.
     """
     cap = _picks_pool_cap()
     if cap <= 0:
@@ -10771,8 +11332,16 @@ def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr") -> dict:
         owner = p.get("owner_user_id")
         if owner:
             by_owner.setdefault(owner, []).append(p)
-            _priced[p["pick_id"]] = priced_pool_value(
-                p, scoring_format=scoring_format)
+            # D-144 — the slot that sets the PRICE, resolved inside
+            # `_priced_pick_value`. `_owned_pick_label` below re-derives the
+            # same slot for the LABEL from the same `slot_order` and the same
+            # row, so the two agree by construction: `pick_slots.slot_for` is
+            # pure, and both calls pass identical arguments. That redundancy
+            # is deliberate — threading a precomputed slot through
+            # `_owned_pick_label` would mean changing all five of its call
+            # sites, four of which have no price to keep in step.
+            _priced[p["pick_id"]] = _priced_pick_value(p, slot_order,
+                                                       scoring_format)
 
     out: dict[str, list] = {}
     for owner, picks in by_owner.items():
@@ -10839,13 +11408,15 @@ def _inject_owned_picks(*, league_id: str, scoring_format: str, trade_service,
     job-local COPY when picks were injected, so the session's shared
     service._seed is never polluted with pick ids.
 
-    **M6b** — this is the pricing-mode entry point for BOTH pick-bearing
-    engine lanes (the /api/trades/generate job and /api/trades/asset-ideas):
-    the deck owner's `pick_pricing_mode` is resolved once and pinned for the
-    whole injection, exactly as #215 pins the stud-tax mode. An already-active
-    outer pin wins (tests and the M6b matrix/deck harnesses pin around a whole
-    job). Flag off ⇒ `pick_pricing_mode_for_user` returns 'tier_ladder'
-    without a DB read and every price below is today's stored value.
+    **Pricing pin (D-144)** — this is the pricing entry point for BOTH
+    pick-bearing engine lanes (the /api/trades/generate job and
+    /api/trades/asset-ideas). The mode is pinned once for the whole injection,
+    exactly as #215 pins the stud-tax mode, so every pick in one deck is
+    priced off one curve. Since the 2026-08-21 ruling there is nothing
+    per-user to resolve — `market_slots` for everybody, `user_id` unread on
+    this account — but the pin stays, because an already-active outer pin
+    (the bake-off/deck harnesses, and the M6b regression tests) must still be
+    able to price a whole job on the legacy ladder.
     """
     _pp_mode = (_trade_service_mod.pinned_pick_pricing_mode()
                 or _trade_service_mod.pick_pricing_mode_for_user(user_id))
@@ -11165,6 +11736,12 @@ def trade_card_to_dict(card, players: dict) -> dict:
     sweetener = getattr(card, "sweetener", None)
     if sweetener:
         out["sweetener"] = sweetener
+    # 2026-08-21 gap auto-sweetener — same convention as `sweetener` above:
+    # serialized only when present, the equalizer player is already inside
+    # the side's id array; this identifies it and records the gap it closed.
+    gap_sweetener = getattr(card, "gap_sweetener", None)
+    if gap_sweetener:
+        out["gap_sweetener"] = gap_sweetener
     # F3 (deck.fatigue) — the ONE post-decline-window retest card, labeled
     # honestly. The attribute is only ever set while the flag is on, so
     # flag-off payloads stay byte-identical.
@@ -11193,6 +11770,28 @@ def trade_card_to_dict(card, players: dict) -> dict:
     need_fit = getattr(card, "need_fit", None)
     if need_fit is not None:
         out["need_fit"] = need_fit
+    # Fit challenger (bake-off arm `fit`, LLD §3.4) — the dual-score payload
+    # {you, them, aggregate, bucket, boards, ver, r5_fail, lenses}, only ever
+    # present on fit-arm cards inside a bake-off deck. Additive: clients
+    # ignore unknown keys (no mobile/web render in v1 — scope.md §3 waiver).
+    _fit = getattr(card, "fit", None)
+    if _fit is not None:
+        out["fit"] = _fit
+    # Counterparty breaker (LLD §1.5) — NARRATION-GATED: during the dark-
+    # stamp window (trade.breaker on, trade.breaker_narrative off) the
+    # payload carries NO breaker key at all — dark-class codes must never
+    # ship as inspectable structured data. The full objection vector never
+    # serializes (features_json only); card.breaker_shadow NEVER serializes
+    # (test_breaker_shadow_never_serialized). `top` is non-null whenever
+    # narrated is (compose_narration's invariant, pinned in tests) — the
+    # unguarded index is deliberate: a violation must fail loudly in tests.
+    _bk = getattr(card, "breaker", None)
+    if isinstance(_bk, dict) and _bk.get("narrated"):
+        out["breaker"] = {
+            "code":     _bk["top"]["code"],
+            "severity": _bk["top"]["severity"],
+            "sentence": _bk["narrated"],
+        }
     # Interview phase 2 — two-lane label ("window" | "value"), only when
     # trade.lanes stamped it (user has a resolved window).
     lane = getattr(card, "lane", None)
@@ -11599,6 +12198,215 @@ def asset_trade_ideas():
         "basis":       "consensus",
         "groups":      {k: [_idea_row(i) for i in v] for k, v in groups.items()},
     })
+
+
+# ---------------------------------------------------------------------------
+# Fair packages for a hand-built give side (#384 W6-B, D-153)
+# docs/feedback/items/384-calc-finder-merge/status.md § W6-B
+# ---------------------------------------------------------------------------
+# The operator's ruling, verbatim: "this type of request shouldn't go through
+# our models. It should be a much simpler set of cards solving for fairness
+# only. Similar to how we determine the consolidate and downgrade suggestions
+# already."
+#
+# So: Find a Trade with a FILLED canvas is not a model run. It is one
+# synchronous fairness sweep around the canvas's give side — no job, no
+# divergence, no streaming, no lanes. Find a Trade with an EMPTY canvas is
+# unchanged and still runs the model deck (the #330 hand-off auto-run).
+
+def _fair_package_trade_id(user_id: str, league_id: str, opponent_user_id: str,
+                           give_ids: list, recv_ids: list) -> str:
+    """Deterministic card id for one fair package.
+
+    Same construction and the same reasoning as `_calc_queue_trade_id`: the
+    SET is the identity, so re-ordering the canvas is the same trade and the
+    same id. It matters here because these cards are never registered by a
+    generator — a swipe on one arrives at `/api/trades/swipe` with an id the
+    in-memory deck has never seen, and `_reconstruct_swipe_card` rebuilds it
+    from the echoed context. A stable id is what makes a re-swipe one row.
+    """
+    payload = "|".join([
+        str(user_id), str(league_id), str(opponent_user_id or ""),
+        ",".join(sorted(str(p) for p in give_ids)),
+        ",".join(sorted(str(p) for p in recv_ids)),
+    ])
+    return "fairpk_" + hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
+
+
+@app.route("/api/trades/fair-packages", methods=["POST"])
+@_gate_unverified_write
+def fair_packages():
+    """POST /api/trades/fair-packages   (flag calc.merged_layout; #384 W6-B)
+
+    Fairness-only ideas around a FIXED give-side anchor — the merged
+    calculator's Find a Trade when the canvas has assets on it.
+
+    Body: {
+      league_id            required — must be the session's active league
+      give_player_ids      required, non-empty — the ANCHOR. Every idea's
+                           give side is exactly this set, in this order.
+      receive_player_ids?  the canvas receive side. A PREFERENCE, not a
+                           constraint: ideas containing all of them sort
+                           first, ideas that cannot are still returned.
+      opponent_user_id?    scope the sweep to one league-mate; omitted ⇒
+                           every league-mate with a roster
+      fairness_threshold?  default 0.50, the same wide net asset-ideas uses
+    }
+
+    Response 200: {
+      basis:   "consensus",
+      anchor:  {give_player_ids, receive_player_ids, opponent_user_id|null},
+      ideas:   [idea],            # flat, capped at model_config
+                                  # `fair_packages_cap` (default 20)
+      relaxed: bool,              # #189 — the whole list came from the
+                                  # widened band because the strict one was empty
+      reason?: str                # only alongside `ideas: []`
+    }
+    idea = the asset-ideas shape (counterparty ids, both id lists and player
+    dicts, give_value/receive_value/difference/fairness, favors/gap, the #189
+    `relaxed` labels) PLUS `trade_id` (deterministic `fairpk_…`) and
+    `basis: "consensus"`, which together are what let a client swipe, queue or
+    flag one of these cards through the shipped routes: they all echo card
+    context and rebuild through `_reconstruct_swipe_card`.
+
+    `reason` vocabulary (200 with an empty list, never a 4xx — the request was
+    well formed and the answer is a product answer):
+      give_untouchable  an anchor asset is on the CALLER's untouchable list
+      unknown_asset     an anchor id is not in the player pool
+      no_partner        `opponent_user_id` is not a league-mate with a roster
+      unknown_league    the league is not loaded on this session
+
+    400: `missing_field` (give_player_ids), `league_mismatch`.
+    404 `feature_disabled` when `calc.merged_layout` is off — checked before
+    any session work, the same convention `/api/trades/queue` uses.
+
+    Gates are `trade_service.eval_consensus_package` — literally the function
+    `_generate_asset_ideas_impl` calls, so a fair package and an asset idea can
+    never price the same trade differently.
+    """
+    if not getattr(FLAGS, "calc_merged_layout", False):
+        return jsonify({"error": "feature_disabled"}), 404
+
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess["user_id"]
+    g_league  = sess.get("league")
+    if not (g_user_id and g_league):
+        return jsonify({"error": "session missing user/league"}), 400
+
+    body = request.get_json(force=True, silent=True) or {}
+
+    give_raw = body.get("give_player_ids")
+    if not isinstance(give_raw, list) or not give_raw:
+        return jsonify({"error": "missing_field", "field": "give_player_ids"}), 400
+    give_ids = [str(p) for p in give_raw]
+    recv_raw = body.get("receive_player_ids")
+    recv_ids = [str(p) for p in recv_raw] if isinstance(recv_raw, list) else []
+
+    league_id = str(body.get("league_id") or "").strip() or g_league.league_id
+    if league_id != g_league.league_id:
+        # The sweep needs THIS league's members, rosters and seed board, all of
+        # which live on the session — another league is unanswerable, not
+        # refusable. Same call as /api/trades/queue.
+        return jsonify({"error": "league_mismatch"}), 400
+
+    opponent_user_id = str(body.get("opponent_user_id") or "").strip() or None
+    fairness_threshold = float(body.get("fairness_threshold", 0.50))
+
+    fmt           = _active_format(sess)
+    services      = sess.get("services") or {}
+    trade_svcs    = sess.get("trade_svcs") or {}
+    service       = services.get(fmt) or sess.get("service")
+    trade_service = trade_svcs.get(fmt) or sess.get("trade_svc")
+    g_user_roster = sess.get("user_roster")
+    g_players     = sess.get("players")
+    if not (service and trade_service and g_user_roster and g_players):
+        return jsonify({"error": "session missing required state"}), 400
+
+    user_rankings = service.get_rankings(position=None)
+    raw_user_elo  = {rp.player.id: rp.elo for rp in user_rankings.rankings}
+    seed_map      = dict(service._seed or {})
+    players_dict  = {p.id: p for p in g_players}
+    user_roster   = list(g_user_roster)
+
+    # Backlog #2 / #163 — the same exclusion lists asset-ideas loads.
+    untouchable_ids: set = set()
+    not_interested_ids: set = set()
+    if FLAGS.trade_preference_lists:
+        try:
+            ap = load_asset_preferences(user_id=g_user_id, league_id=league_id)
+            untouchable_ids = set(ap.get("untouchables", []))
+            not_interested_ids = set(ap.get("not_interested", []))
+        except Exception as ap_err:
+            log.warning("fair-packages: asset prefs load failed: %s", ap_err)
+
+    # #170/#171/#185 — owned-pick injection through the shared helper, so a
+    # canvas pick is priced and returnable exactly as it is everywhere else.
+    if _owned_picks_available(league_id, g_league):
+        try:
+            seed_map, user_roster, _n = _inject_owned_picks(
+                league_id      = league_id,
+                scoring_format = fmt,
+                trade_service  = trade_service,
+                players_dict   = players_dict,
+                seed_map       = seed_map,
+                user_elo       = raw_user_elo,
+                user_id        = g_user_id,
+                user_roster    = user_roster,
+                league         = g_league,
+            )
+        except Exception as pick_err:
+            log.warning("fair-packages: owned-pick injection failed (continuing): %s",
+                        pick_err)
+
+    result = trade_service.generate_fair_packages(
+        user_id            = g_user_id,
+        user_roster        = user_roster,
+        league_id          = league_id,
+        seed_elo           = seed_map,
+        give_player_ids    = give_ids,
+        receive_player_ids = recv_ids,
+        fairness_threshold = fairness_threshold,
+        raw_user_elo       = raw_user_elo,
+        untouchable_ids    = untouchable_ids or None,
+        not_interested_ids = not_interested_ids or None,
+        opponent_user_id   = opponent_user_id,
+    )
+
+    def _idea_row(idea: dict) -> dict:
+        out = dict(idea)
+        out["give"]    = [player_to_dict(players_dict[p])
+                          for p in idea["give_player_ids"] if p in players_dict]
+        out["receive"] = [player_to_dict(players_dict[p])
+                          for p in idea["receive_player_ids"] if p in players_dict]
+        # #216 — the same single-source verdict construction evaluate, the deck
+        # cards and asset-ideas use, so the four surfaces cannot drift.
+        verdict = _value_verdict_payload(
+            float(out.get("give_value") or 0.0),
+            float(out.get("receive_value") or 0.0),
+            even=float(out.get("fairness") or 0.0) >= 0.95,
+        )
+        out["favors"]   = verdict["favors"]
+        out["gap"]      = verdict["gap"]
+        out["basis"]    = "consensus"
+        out["trade_id"] = _fair_package_trade_id(
+            g_user_id, league_id, idea["counterparty_user_id"],
+            idea["give_player_ids"], idea["receive_player_ids"])
+        return out
+
+    payload = {
+        "basis":   "consensus",
+        "anchor":  {
+            "give_player_ids":    give_ids,
+            "receive_player_ids": recv_ids,
+            "opponent_user_id":   opponent_user_id,
+        },
+        "ideas":   [_idea_row(i) for i in result.get("ideas") or []],
+        "relaxed": bool(result.get("relaxed")),
+    }
+    if result.get("reason"):
+        payload["reason"] = result["reason"]
+    return jsonify(payload)
 
 
 @app.route("/api/trades/suppressions/undo", methods=["POST"])
@@ -12039,6 +12847,397 @@ def swipe_trade():
     except Exception as e:
         log.exception("swipe_trade failed")
         return jsonify({"error": "bad_request"}), 400
+
+
+# ---------------------------------------------------------------------------
+# Queue a hand-built package for the counterparty (#384 ✓ cell, D-152)
+# docs/feedback/items/384-calc-finder-merge/status.md § W6-A
+# ---------------------------------------------------------------------------
+# The merged calculator's ✓ cell. The operator's spec, verbatim: "queue this
+# trade for the other manager — it shows up in their suggested trades if it
+# meets their preferences." That sentence names two existing systems and adds
+# nothing:
+#
+#   1. "queue this trade"      = the deck's LIKE. One record path, reused
+#                                verbatim (`_reconstruct_swipe_card` ->
+#                                `record_decision` -> `save_trade_decision` /
+#                                `save_trade_swipes`), so a calculator like and
+#                                a deck like are the same row in the same table
+#                                with the same Elo weighting.
+#   2. "shows up in their      = the likes-you injector (`_inject_likes_you_cards_impl`).
+#      suggested trades if it    It reads exactly the rows (1) writes, and every
+#      meets their preferences"  gate it applies is a pure function of state
+#                                this route already holds. So the route
+#                                EVALUATES that predicate UP FRONT and refuses
+#                                with a named reason instead of recording a
+#                                like that would silently never mirror.
+#
+# The route mints NOTHING new: no table, no card type, no second like path.
+# Its only original content is (a) a deterministic trade_id so the same
+# package queued twice is one row, and (b) `_calc_queue_mirror_reason`, which
+# is a line-for-line re-read of the injector's own skip conditions.
+
+# Refusal vocabulary. LOW-CARDINALITY and shared with the clients — mirrored in
+# `mobile/src/api/trades.ts` (CalcQueueReason) and listed in
+# docs/cross-client-invariants.md. `detail` is free text for the log/debug and
+# is never switched on by a client.
+CALC_QUEUE_REASONS = (
+    "likes_you_off",            # the mirror surface itself is dark (flag/demo)
+    "not_league_member",        # caller or opponent is not in this league
+    "assets_not_on_roster",     # an asset is not on the roster it must come from
+    "opponent_untouchable",     # they marked something you are asking for untouchable
+    "opponent_not_interested",  # they marked something you are offering not-interested
+    "fails_fairness_floor",     # the D-096 quality ladder refuses it from THEIR side
+)
+
+
+def _calc_queue_denied():
+    """Gate for /api/trades/queue — an error response, or None.
+
+    Flag-only, checked BEFORE any session work (the `draft.room` /
+    `feedback.decline_reasons` convention). `calc.merged_layout` OFF ⇒ the ✓
+    cell does not render on any client, so the route must not exist either.
+    Ordinary write auth still applies via `@_gate_unverified_write`.
+    """
+    if not getattr(FLAGS, "calc_merged_layout", False):
+        return jsonify({"error": "feature_disabled"}), 404
+    return None
+
+
+def _calc_queue_trade_id(user_id: str, league_id: str, opponent_user_id: str,
+                         give_ids: list, recv_ids: list) -> str:
+    """The deterministic card id for one queued package.
+
+    The deck mints `uuid4()[:8]` per generated card because each card is a
+    fresh object. A queued package has no card — the SET is the identity — so
+    the id is derived from (user, league, opponent, give set, receive set).
+    Sets, so re-ordering the canvas is the same trade; sorted, so the digest is
+    stable. `calcq_` prefixes it the way `likesyou_` prefixes a synthesized
+    mirror, and keeps it un-collidable with an 8-hex deck id.
+
+    This IS the idempotency key: `find_live_trade_like` on it answers "already
+    queued?" without a second table.
+    """
+    payload = "|".join([
+        str(user_id), str(league_id), str(opponent_user_id),
+        ",".join(sorted(str(p) for p in give_ids)),
+        ",".join(sorted(str(p) for p in recv_ids)),
+    ])
+    return "calcq_" + hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def _calc_queue_mirror_reason(*, league, caller_member, opponent, give_ids: list,
+                              recv_ids: list, seed_map: dict) -> tuple:
+    """Would `_inject_likes_you_cards_impl` mirror this like into the
+    OPPONENT's deck? Returns `(reason, detail)`, or `(None, None)` to pass.
+
+    Read this against `_inject_likes_you_cards_impl` — every branch below is
+    one of its `continue`s, evaluated with the same inputs from the OPPONENT's
+    point of view. In the injector's variable names, with the opponent as the
+    viewer and the caller as `opp`:
+
+        their_give = give_ids        (the caller's give side)
+        their_recv = recv_ids        (the caller's receive side)
+        my_give    = recv_ids        (the OPPONENT gives what the caller receives)
+        my_recv    = give_ids
+
+    WHAT IS EVALUATED HERE (all pure functions of state that is stable between
+    now and the opponent's next deck): membership, roster actionability, the
+    opponent's untouchables and not-interested lists, and the D-096 quality
+    ladder — the gate level, the user-gain floor, directional R1 and
+    `filler_ok`. Those ARE "their preferences" as the operator used the phrase.
+
+    WHAT IS NOT, AND CANNOT BE (facts that only exist at the opponent's next
+    generation, so a `queued: true` is "eligible", not "guaranteed position 1"):
+      * `_LIKES_YOU_CAP` — at most 3 mirrors per deck; a better like can win the
+        slot.
+      * `_past_decision_keys` — whether the opponent has already swiped this
+        exact package (per-session state rebuilt by replay).
+      * the R4 `exclusion_keys` dedup — whether the package is already live in
+        their match pipeline.
+      * the 90-day recency window in `load_recent_league_likes`, and any roster
+        or preference change between now and then.
+    """
+    # 1 — membership. The injector resolves the liker through
+    #     `members_by_id.get(like["user_id"])` and skips when it is None or is
+    #     the viewer themselves.
+    if caller_member is None:
+        return "not_league_member", "caller is not a member of this league"
+    if opponent is None:
+        return "not_league_member", "opponent is not a member of this league"
+    if opponent.user_id == caller_member.user_id:
+        return "not_league_member", "cannot queue a trade with yourself"
+
+    # 2 — still actionable. `set(their_give) <= set(opp.roster)` and
+    #     `set(their_recv) <= user_roster_set`. Both rosters are the
+    #     pick-injected ones (the caller runs `_inject_owned_picks` first, which
+    #     rewrites EVERY member's roster in place), so an owned pick inside
+    #     `picks_pool_cap` passes and one outside it does not — which is
+    #     exactly what the opponent's own deck will conclude.
+    missing_give = [p for p in give_ids if p not in set(caller_member.roster)]
+    if missing_give:
+        return "assets_not_on_roster", f"not on your roster: {','.join(missing_give)}"
+    missing_recv = [p for p in recv_ids if p not in set(opponent.roster)]
+    if missing_recv:
+        return ("assets_not_on_roster",
+                f"not on @{opponent.username}'s roster: {','.join(missing_recv)}")
+
+    # 3 — the opponent's asset preference lists (backlog #2 / #163), loaded for
+    #     THEM, not for the caller. `untouchable_ids & their_recv` and
+    #     `not_interested_ids & their_give` in the injector.
+    if FLAGS.trade_preference_lists:
+        try:
+            ap = load_asset_preferences(user_id=opponent.user_id,
+                                        league_id=league.league_id)
+        except Exception as ap_err:
+            log.warning("trades/queue: opponent asset prefs load failed: %s", ap_err)
+            ap = {}
+        untouchable = set(ap.get("untouchables", []))
+        not_interested = set(ap.get("not_interested", []))
+        hit = untouchable & set(recv_ids)
+        if hit:
+            return "opponent_untouchable", ",".join(sorted(hit))
+        hit = not_interested & set(give_ids)
+        if hit:
+            return "opponent_not_interested", ",".join(sorted(hit))
+
+    # 4 — the D-096 quality ladder, measured from the OPPONENT's side, under
+    #     THEIR pinned stud-tax mode (#215 — `_likes_you_package_delta` must run
+    #     inside that context, which is why `_inject_likes_you_cards` wraps the
+    #     whole impl in it).
+    my_give, my_recv = list(recv_ids), list(give_ids)
+    _mode = (_trade_service_mod.pinned_stud_tax_mode()
+             or _trade_service_mod.stud_tax_mode_for_user(opponent.user_id))
+    with _trade_service_mod.stud_tax_override(_mode):
+        if _likes_you_gate_level() <= 0:
+            if (_likes_you_user_delta(my_give, my_recv, seed_map)
+                    < _likes_you_min_user_delta()):
+                return "fails_fairness_floor", "level 0 raw-sum floor"
+        else:
+            seed_value = _likes_you_seed_value(seed_map)
+            _gv, _rv, delta = _likes_you_package_delta(my_give, my_recv, seed_value)
+            if delta < _likes_you_min_user_gain():
+                return "fails_fairness_floor", f"package delta {delta:.0f}"
+            if (_likes_you_gate_level() >= 2
+                    and not _likes_you_presentment_ok(my_give, my_recv, seed_value)):
+                return "fails_fairness_floor", "presentment (R1/filler)"
+    return None, None
+
+
+@app.route("/api/trades/queue", methods=["POST"])
+@_gate_unverified_write
+def queue_trade_for_opponent():
+    """POST /api/trades/queue — queue a hand-built package for a league-mate.
+
+    Body:
+      league_id           required — must be the session's active league
+      opponent_user_id    required — the counterparty's LEAGUE member id
+      give_player_ids     required, non-empty — what the caller sends
+      receive_player_ids  required, non-empty — what the caller receives
+
+    404 `feature_disabled` when `calc.merged_layout` is off.
+
+    200 `{queued: true, trade_id, already_queued: bool}` — the like is
+    recorded and WILL be eligible for the opponent's likes-you injection.
+    200 `{queued: false, reason, detail?}` — nothing is recorded; `reason` is
+    one of `CALC_QUEUE_REASONS`. A refusal is deliberately not a 4xx: the
+    request was well formed and the answer is a product answer.
+
+    **A `queued: false` records nothing.** The operator's spec is "it shows up
+    in their suggested trades IF it meets their preferences" — a like that the
+    mirror would silently drop is worse than no like: it moves the caller's
+    Elo board and lands in their "Awaiting them" list for a trade the other
+    manager will never see.
+
+    Idempotent per (user, league, opponent, give set, receive set) via the
+    deterministic `trade_id` from `_calc_queue_trade_id`. A second identical
+    call finds the live row, returns `already_queued: true`, and fires NO Elo
+    signal and NO second `trade_decisions` / `swipe_decisions` write. This
+    guard sits BEFORE `record_trade_signal` — unlike `swipe_trade`, where the
+    G-049 / D-073 note deliberately leaves the in-memory signal ungated,
+    because a deck swipe cannot be replayed by the user at will and a ✓ tap
+    can.
+
+    Mutual-match detection is deliberately NOT run here. The queued like
+    reaches the counterparty as a likes-you card on their next deck, and their
+    swipe on it fires `check_for_match` through the shipped path — one place
+    where a match is minted, not two.
+    """
+    denied = _calc_queue_denied()
+    if denied:
+        return denied
+
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess["user_id"]
+    g_league  = sess["league"]
+    body = request.get_json(force=True, silent=True) or {}
+
+    give_raw = body.get("give_player_ids")
+    recv_raw = body.get("receive_player_ids")
+    if not isinstance(give_raw, list) or not give_raw:
+        return jsonify({"error": "missing_field", "field": "give_player_ids"}), 400
+    if not isinstance(recv_raw, list) or not recv_raw:
+        return jsonify({"error": "missing_field", "field": "receive_player_ids"}), 400
+    give_ids = [str(p) for p in give_raw]
+    recv_ids = [str(p) for p in recv_raw]
+
+    opponent_user_id = str(body.get("opponent_user_id") or "").strip()
+    if not opponent_user_id:
+        return jsonify({"error": "missing_field", "field": "opponent_user_id"}), 400
+
+    league_id = str(body.get("league_id") or "").strip()
+    if not league_id:
+        return jsonify({"error": "missing_field", "field": "league_id"}), 400
+    if not g_league or league_id != g_league.league_id:
+        # The predicate below needs THIS league's members, rosters and seed
+        # board, all of which live on the session. Another league is not a
+        # product refusal, it is an unanswerable request.
+        return jsonify({"error": "league_mismatch"}), 400
+
+    service       = sess.get("service")
+    trade_service = sess.get("trade_svc")
+    if not (service and trade_service):
+        return jsonify({"error": "session missing required state"}), 400
+
+    # The mirror surface has to exist at all before its preferences can matter.
+    # Checked before any pick/board work — there is nothing to evaluate.
+    if not _likes_you_enabled():
+        return jsonify({"queued": False, "reason": "likes_you_off",
+                        "detail": "trade.likes_you is off"})
+    if league_id == "league_demo":
+        return jsonify({"queued": False, "reason": "likes_you_off",
+                        "detail": "the demo league has no likes-you injection"})
+
+    # League identity for the roster comparisons (backend/CLAUDE.md § Identity);
+    # the DECISION row keeps `sess["user_id"]`, byte-identical to swipe_trade,
+    # because that is the id `load_recent_league_likes` will read back.
+    caller_league_id = _league_user_id(sess)
+    seed_map = dict(getattr(service, "_seed", None) or {})
+
+    # #170/#171/#185 — the same owned-pick injection the generate job and
+    # asset-ideas run, so `member.roster` and `seed_map` carry priced picks and
+    # a pick on the canvas is judged exactly as the opponent's own deck will
+    # judge it. Best-effort, same as both existing call sites.
+    if _owned_picks_available(league_id, g_league):
+        try:
+            seed_map, _ur, _n = _inject_owned_picks(
+                league_id      = league_id,
+                scoring_format = _active_format(sess),
+                trade_service  = trade_service,
+                players_dict   = {p.id: p for p in (sess.get("players") or [])},
+                seed_map       = seed_map,
+                user_elo       = {},
+                user_id        = caller_league_id,
+                user_roster    = list(sess.get("user_roster") or []),
+                league         = g_league,
+            )
+        except Exception as pick_err:
+            log.warning("trades/queue: owned-pick injection failed (continuing): %s",
+                        pick_err)
+
+    members_by_id = {m.user_id: m for m in g_league.members}
+    caller_member = members_by_id.get(caller_league_id)
+    opponent      = members_by_id.get(opponent_user_id)
+
+    reason, detail = _calc_queue_mirror_reason(
+        league        = g_league,
+        caller_member = caller_member,
+        opponent      = opponent,
+        give_ids      = give_ids,
+        recv_ids      = recv_ids,
+        seed_map      = seed_map,
+    )
+    if reason:
+        resp = {"queued": False, "reason": reason}
+        if detail:
+            resp["detail"] = detail
+        return jsonify(resp)
+
+    trade_id = _calc_queue_trade_id(g_user_id, league_id, opponent_user_id,
+                                    give_ids, recv_ids)
+
+    # Idempotency probe — BEFORE any signal or write. See the docstring.
+    try:
+        existing = find_live_trade_like(g_user_id, league_id, trade_id)
+    except Exception as dup_err:
+        log.warning("trades/queue: idempotency probe failed: %s", dup_err)
+        existing = None
+    if existing is not None:
+        return jsonify({"queued": True, "already_queued": True,
+                        "trade_id": trade_id})
+
+    # ── Record the like. ONE path, the swipe route's, reused verbatim. ──────
+    card = _reconstruct_swipe_card(
+        trade_service,
+        {
+            "trade_id":           trade_id,
+            "league_id":          league_id,
+            "give_player_ids":    give_ids,
+            "receive_player_ids": recv_ids,
+            "target_user_id":     opponent.user_id,
+            "target_username":    opponent.username,
+        },
+        g_user_id,
+        league_id,
+    )
+    if card is None:
+        return jsonify({"error": "bad_request"}), 400
+    card = trade_service.record_decision(trade_id=trade_id, decision="like")
+
+    # D-060 fit-congruence + the bake-off Elo freeze, computed exactly as
+    # swipe_trade does. A queued card carries no `lane_shift` (there was no
+    # generation to stamp one), so `fit_congruence_mult` returns 1.0 — the same
+    # value an FB-46 reconstruction gets.
+    fit_mult = _trade_service_mod.fit_congruence_mult(
+        getattr(card, "lane_shift", None), "like")
+    fit_mult = _bakeoff.elo_freeze_mult(fit_mult)
+    from .ranking_service import _c as _rs_c
+    service.record_trade_signal(
+        winner_ids = card.receive_player_ids,
+        loser_ids  = card.give_player_ids,
+        decision   = "like",
+        fit_mult   = fit_mult,
+    )
+
+    try:
+        wrote_decision = save_trade_decision(
+            user_id            = g_user_id,
+            league_id          = league_id,
+            trade_id           = trade_id,
+            give_player_ids    = card.give_player_ids,
+            receive_player_ids = card.receive_player_ids,
+            decision           = "like",
+        )
+        if wrote_decision:
+            save_trade_swipes(
+                user_id        = g_user_id,
+                winner_ids     = card.receive_player_ids,
+                loser_ids      = card.give_player_ids,
+                k_factor       = _rs_c("trade_k_like") * fit_mult,
+                scoring_format = _active_format(sess),
+            )
+        record_event(
+            g_user_id,
+            "trade_proposed",
+            league_id = league_id,
+            source    = "calc_queue",
+            props     = {
+                "decision": "like",
+                "trade_id": trade_id,
+                "give":     card.give_player_ids,
+                "receive":  card.receive_player_ids,
+                "target":   opponent.user_id,
+            },
+            **(getattr(g, "device_info", {}) or {}),
+        )
+    except Exception as db_err:
+        log.warning("DB write failed for queued trade (continuing): %s", db_err)
+
+    log.info("trades/queue: %s queued %s for %s (league=%s)",
+             g_user_id, trade_id, opponent.user_id, league_id)
+    return jsonify({"queued": True, "already_queued": False,
+                    "trade_id": trade_id})
 
 
 # ---------------------------------------------------------------------------
@@ -13736,6 +14935,15 @@ def draft_board_route():
 # ---------------------------------------------------------------------------
 
 _MOCK_DEFAULT_LINEUP = ["QB", "RB", "RB", "WR", "WR", "WR", "TE", "FLEX"]
+
+# #396 — the honest standard template `_league_lineup_slots` serves for
+# ESPN/MFL/Fleaflicker leagues (its platform branch is the ONLY user).
+# 2 WR + 2 FLEX instead of the mock's 3 WR: a FLEX label is a claim the app
+# can stand behind (a flex can legally start a WR), whereas "WR3" asserts a
+# dedicated slot most platform leagues don't have. Mock draft keeps
+# _MOCK_DEFAULT_LINEUP above — the constants diverge on purpose (pinned by
+# test_trade_evaluate.test_platform_template_has_no_wr3).
+_PLATFORM_DEFAULT_LINEUP = ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "FLEX"]
 
 #: `mfl:<league>.f<franchise>` — the synthetic member id `_mfl_member_id`
 #: (:20109) mints for every MFL franchise that is not the linked user.
@@ -16433,6 +17641,65 @@ def set_asset_prefs():
         return jsonify({"error": "internal_error"}), 500
 
 
+@app.route("/api/league/<league_id>/receipts")
+@_gate_unverified_read
+def league_receipts_route(league_id):
+    """GET /api/league/<league_id>/receipts — the viewer's graded track record.
+
+    Receipts (docs/plans/receipts/LLD.md §2.2). One payload carries ALL THREE
+    windows (14/28/56d) plus the fixed 28d headline: making every window
+    present is what stops any surface — this one or a later one — from
+    selecting the best-looking number. There is no per-window endpoint on
+    purpose.
+
+    A path segment rather than `?league_id=` (the older league routes' shape),
+    because the LLD specifies this path and the mobile client is built to it.
+
+    Scoping is a WHERE, not a post-filter: rows are `user_id = the session's
+    ACCOUNT id` (what `_log_deck_signal_impressions` stamps, `server.py:6102`)
+    AND this league. A non-member therefore sees an empty payload rather than
+    a permission error, and cross-user receipts are unreachable by
+    construction (PLAN NG-3). Ghost rows are filtered again here as defense in
+    depth — the queue predicate means none can exist (operator ruling
+    2026-08-21) — and re-serves of one card collapse to their earliest serve
+    so a deck regeneration cannot give one call two votes.
+
+    Names are resolved server-side for DISPLAY ONLY and never enter the math.
+
+    404 `feature_disabled` while `receipts.screen` is off — the client hides
+    the entry point on that response rather than showing an error.
+    """
+    from .receipts_service import league_receipts, screen_enabled
+    if not screen_enabled():
+        return jsonify({"error": "feature_disabled"}), 404
+
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    viewer = sess.get("user_id")
+    if not viewer:
+        return jsonify({"error": "unauthorized"}), 401
+
+    payload = league_receipts(str(viewer), str(league_id))
+
+    # Display enrichment, after the fact: collect the player ids the payload
+    # actually renders and name them in one batched query. A lookup failure
+    # costs names, never the route.
+    try:
+        ids = {a["id"] for row in payload.get("rows", [])
+               for side in ("give", "receive")
+               for a in row[side]["assets"] if not a["is_pick"]}
+        names = _player_names_by_id(ids) if ids else {}
+        for row in payload.get("rows", []):
+            for side in ("give", "receive"):
+                for a in row[side]["assets"]:
+                    if not a["is_pick"]:
+                        a["name"] = names.get(a["id"]) or a["name"]
+    except Exception as e:
+        log.warning("receipts: name resolution failed (continuing): %s", e)
+
+    return jsonify(payload)
+
+
 @app.route("/api/league/summary")
 def league_summary_route():
     """GET /api/league/summary?league_id=XXX
@@ -17193,8 +18460,10 @@ def admin_config_list():
 def admin_config_update(key: str):
     """
     PUT /api/admin/config/<key>
-    Body: {"value": <float>}
-    Updates the config value, reloads both service modules, returns {key, value}.
+    Body: {"value": <float>, "source": <optional str, default "admin-api">}
+    Updates the config value, stamps model_config.updated_at, appends a
+    model_config_changes row attributed to `source` (M1 knob log), reloads
+    both service modules, returns {key, value, old_value}.
 
     Operator-only (X-Cron-Secret, same as /api/cron/*): this mutates live
     ranking/trade math for every user, so it must never be world-callable.
@@ -17205,7 +18474,8 @@ def admin_config_update(key: str):
         if "value" not in body:
             return jsonify({"error": "body must contain 'value'"}), 400
         new_value = float(body["value"])
-        result = set_config(key, new_value)
+        source = str(body.get("source") or "admin-api")[:64]
+        result = set_config(key, new_value, source=source)
 
         # Reload live config in both service modules so the change takes
         # effect immediately (no server restart required).
@@ -19973,6 +21243,32 @@ def cron_daily_tick():
     except Exception as e:
         log.warning("daily-tick: roster-snapshot kickoff failed (continuing): %s", e)
 
+    # ── Receipts grading guard (docs/plans/receipts/, HLD D-9) ──
+    # POST /api/cron/receipts-grade is the primary trigger, but no Render cron
+    # service is provisioned for it (operator ruling Q-4) — and the one
+    # value-snapshot "provisioned cron" this repo believed in turned out to be
+    # fictional (reverted in commit 1e50d3e). So grading rides the same
+    # three-trigger pattern roster_history uses (database.py:1320-1336): the
+    # dedicated endpoint, this guard, and the backfill script all call ONE
+    # idempotent writer. The guard is what actually fires day to day.
+    #
+    # Fire-and-forget on a daemon thread: a grading run must never lengthen
+    # the tick or be able to fail the push work above (and vice versa). Single-
+    # flight inside the service means an overlap with the dedicated endpoint
+    # no-ops rather than duplicating. No-op while `receipts.grading` is off.
+    #
+    # The counter is serialized ONLY when `receipts.grading` is on, so a
+    # flag-off tick payload stays byte-identical to today — the
+    # `_run_weekly_replenishment` convention, pinned by
+    # test_deck_replenishment.py::test_flag_off_no_replenish_work_no_push_no_payload_change.
+    receipts_grade_started: bool | None = None
+    try:
+        from .receipts_service import grading_enabled as _receipts_on
+        if _receipts_on():
+            receipts_grade_started = _kickoff_receipts_grading("daily_tick")
+    except Exception as e:
+        log.warning("daily-tick: receipts-grade guard failed (continuing): %s", e)
+
     log.info("daily-tick: %s", counters)
     extra: dict = {}
     # Serialized only when the flag is on — flag-off tick payloads stay
@@ -19982,6 +21278,8 @@ def cron_daily_tick():
         extra["roster_snapshot"] = roster_snapshot_stats
     if players_refresh_started is not None:
         extra["players_refresh_started"] = players_refresh_started
+    if receipts_grade_started is not None:
+        extra["receipts_grade_started"] = receipts_grade_started
     if replenish_stats is not None:
         log.info("daily-tick replenish: %s", replenish_stats)
         return jsonify({"ok": True, **counters, "replenish": replenish_stats, **extra})
@@ -20005,6 +21303,75 @@ def cron_value_snapshot():
     _require_cron_auth()
     today, counters = _write_daily_value_snapshots()
     return jsonify({"ok": True, "snapshot_date": today, **counters})
+
+
+def _kickoff_receipts_grading(trigger: str, batch: int | None = None) -> bool:
+    """Start a Receipts grading run on a daemon thread. Returns whether a run
+    was actually started.
+
+    Render "cron" is an HTTP POST into the single-worker web service, so the
+    grading loop must NEVER run inline — same constraint, same answer, as
+    `_refresh_players_cache_async` (`cron_players_refresh` below). Single-
+    flight lives inside `receipts_service`, so a double-fire (dedicated
+    endpoint + daily-tick guard on the same day) is a no-op, not a duplicate.
+    """
+    from .receipts_service import grading_enabled, is_running, run_grading
+    if not grading_enabled() or is_running():
+        return False
+    t = threading.Thread(
+        target=lambda: run_grading(trigger=trigger, batch=batch),
+        name=f"receipts-grade-{trigger}", daemon=True)
+    t.start()
+    return True
+
+
+@app.route("/api/cron/receipts-grade", methods=["POST"])
+def cron_receipts_grade():
+    """Grade elapsed suggestion windows against consensus movement.
+
+    Receipts (docs/plans/receipts/). The serve-time `deck_impressions` row is
+    the preregistered prediction; this job marks it to market at 14/28/56 days
+    and appends immutable `receipts_grades` rows. It reads only frozen data
+    (`deck_impressions`, `player_value_history`) and writes only
+    `receipts_*` tables, so it cannot affect serving in any flag state.
+
+    Returns **202 immediately** and grades on a daemon thread — never inline,
+    because one gunicorn worker serves every request (`render.yaml:16`).
+    `started=false` means a run was already in flight (single-flight, not a
+    queue). `remaining_resolvable` is a cheap COUNT of work that can reach a
+    TERMINAL row today — impressions still waiting on a future snapshot are
+    excluded, so the number never looks like a stuck backlog.
+
+    `?batch=N` (1..5000) overrides `receipts_grade_batch` for one run — what
+    `scripts/receipts_backfill.py` drives the launch-day drain with.
+
+    Flag `receipts.grading` off → `200 {"ok": true, "skipped": "flag"}` and
+    NO writes. Env kill switch `FTF_RECEIPTS_GRADE=0` → the same, without a
+    flag write. Auth: X-Cron-Secret, same as every other /api/cron/*.
+    """
+    _require_cron_auth()
+    from .receipts_service import grading_enabled, remaining_resolvable
+    if not grading_enabled():
+        return jsonify({"ok": True, "skipped": "flag"})
+
+    batch = None
+    raw = request.args.get("batch")
+    if raw:
+        try:
+            batch = max(1, min(5000, int(raw)))
+        except (TypeError, ValueError):
+            return jsonify({"error": "batch must be an integer 1..5000"}), 400
+
+    # Computed BEFORE the thread starts, so the number in the 202 describes
+    # the backlog the caller is about to work on rather than a race.
+    try:
+        left = remaining_resolvable()
+    except Exception as e:
+        log.warning("receipts-grade: backlog count failed (continuing): %s", e)
+        left = None
+    started = _kickoff_receipts_grading("cron", batch)
+    return jsonify({"ok": True, "started": started,
+                    "remaining_resolvable": left}), 202
 
 
 @app.route("/api/cron/players-refresh", methods=["POST"])
@@ -20193,8 +21560,9 @@ def trends_consensus_gap_route():
     GET /api/trends/consensus-gap?league_id=...&top_n=5
     Per-player gap between the user's ELO and the community ELO (for
     non-roster picks: vs the specific owner's ELO).  Returns
-    "easiest_sells" (own roster, over-valued vs market) and
-    "easiest_buys" (not on roster, over-valued vs owner).
+    "easiest_sells" (own roster, the MARKET rates him above your board — the
+    surplus you capture by selling) and "easiest_buys" (not on roster, your
+    board rates him above his OWNER's — the discount you capture by buying).
     """
     sess = _require_initialized_session()
     sess["last_active"] = time.time()
@@ -23364,11 +24732,28 @@ def _power_picks_by_owner(league_id: str, fmt: str) -> dict[str, list[dict]]:
     Same source as /api/league/picks (load_draft_picks + _owned_pick_label).
     ESPN leagues carry no pick ownership (#158) and demo leagues have no
     rows — both yield {} so every team gets an empty picks group and totals
-    stay players-only. Value is the stored pool_value (written at sync via
-    pick_values.pick_pool_value); rows synced before the pool_value column
-    existed are re-priced via pick_pool_value directly, years_out relative
-    to the earliest synced season (sync writes seasons starting at the
-    league's current season, so min(season) recovers it).
+    stay players-only.
+
+    **Value is the ENGINE's price (D-148, 2026-08-21, closes Q-026).** Each
+    row goes through `_priced_pick_value` — the same three-step waterfall
+    (own slot → round curve → stored ladder) and the same D-090 resolution a
+    trade card charges, so the Power Rankings screen and a trade card can no
+    longer disagree about a pick. Before this, a 2026 1.01 read 2117.0 here
+    and 4867.1 on a card.
+
+    The stored `pool_value` did not stop mattering: it is step 3, the
+    waterfall's floor, so a league DP cannot price at all degrades to exactly
+    the number this function used to serve. Rows synced before the column
+    existed still carry NULL, and are still re-derived via `pick_pool_value`
+    (years_out relative to the earliest synced season — sync writes forward
+    from the league's current season, so min(season) recovers it) BEFORE the
+    waterfall runs, so that legacy floor survives the alignment rather than
+    collapsing to zero.
+
+    Callers inherit the move. `_do_league_history_snapshot` feeds this dict
+    to `roster_history`, so `team_value` / `team_value_picks` shift at this
+    ship — an ADR-011 time-series BOUNDARY, not a rewrite: history rows are
+    append-only and none are recomputed.
 
     `round` (#285, docs/feedback/items/285-pick-sums/status.md) rides each
     item purely for `_pick_firsts_equivalent`'s literal pick-count label
@@ -23393,14 +24778,21 @@ def _power_picks_by_owner(league_id: str, fmt: str) -> dict[str, list[dict]]:
         owner = str(p.get("owner_user_id") or "")
         if not owner:
             continue
-        val = p.get("pool_value")
-        if val is None:
+        if p.get("pool_value") is None:
             # NOTE (INV-5): this NULL branch is exactly why a contested slot is
             # withheld by ROW FILTER and never by nulling `pool_value` — nulling
             # would land here and silently re-derive the price the rule exists
             # to withhold.
+            #
+            # D-148 — re-derive INTO a row copy rather than short-circuiting
+            # the waterfall, so a legacy NULL row is priced by the same three
+            # steps as every other row and still keeps this ladder value as
+            # its step-3 floor. The copy is local; the loaded row (and the
+            # stored column behind it) is never mutated.
             years_out = max(0, int(p.get("season") or cur_season) - cur_season)
-            val = pick_pool_value(int(p.get("round") or 4), years_out, fmt)
+            p = {**p, "pool_value": pick_pool_value(
+                int(p.get("round") or 4), years_out, fmt)}
+        val = _priced_pick_value(p, slot_order, fmt)
         out.setdefault(owner, []).append({
             "label": _owned_pick_label(p, slot_order),
             "value": round(float(val), 1),
@@ -23450,7 +24842,8 @@ def _league_lineup_slots(league_id: str) -> list[str] | None:
          default_scoring). No leagues row → None (never guess a template
          for an unknown league).
       2. platform in ('espn', 'mfl', 'fleaflicker') → the app's one
-         standard template (`_MOCK_DEFAULT_LINEUP`), plus a trailing
+         standard template (`_PLATFORM_DEFAULT_LINEUP`, #396 — 2 WR +
+         2 FLEX, never a fabricated "WR3"), plus a trailing
          SUPER_FLEX when default_scoring == 'sf_tep' (NULL reads as
          '1qb_ppr', the database.py convention). These platforms expose no
          roster_positions equivalent today; slot-FILLING stays 100%
@@ -23485,7 +24878,7 @@ def _league_lineup_slots(league_id: str) -> list[str] | None:
         return None
     platform = (row.platform or "sleeper").lower()
     if platform in ("espn", "mfl", "fleaflicker"):
-        slots = list(_MOCK_DEFAULT_LINEUP)
+        slots = list(_PLATFORM_DEFAULT_LINEUP)
         if (row.default_scoring or "1qb_ppr") == "sf_tep":
             slots.append("SUPER_FLEX")
         return slots
@@ -23711,10 +25104,484 @@ def league_power_rankings_route():
         return jsonify({"error": "internal_error"}), 500
 
 
+def _first_round_ledgers(league_id: str) -> dict[str, dict]:
+    """#365 — per-owner round-1 pick provenance for one league.
+
+    {owner_or_original_user_id: {held, own_total, traded_away, acquired,
+                                 league_any_traded}}
+
+    The operator's ask was *"number of 1sts owned vs traded away"*, and both
+    halves are already in `draft_picks`: `owner_user_id` is who holds the pick
+    now, `original_user_id` is whose pick it was (`database.py:1050-1052`,
+    shipped since #158). No new source, no new column, no platform call — the
+    same `load_draft_picks` read `_power_picks_by_owner` already performs, run
+    once for the whole league rather than per member.
+
+    THE ONLY SUBTLE PART IS `league_any_traded`, and it is the honesty gate.
+    A league synced before pick provenance was captured has
+    `original_user_id == owner_user_id` on every row and is therefore
+    indistinguishable, from here, from a league where nobody has traded a
+    first. Rather than let that read as "you have traded nothing" — a
+    confident claim built on absent data — the flag rides every member's
+    ledger and `trade_service.first_round_signal` refuses to score the term,
+    labelling it `none_traded` so the card can say so.
+
+    Called ONLY when `trade.outlook_net_firsts` is on, so a flag-off request
+    costs exactly the reads it costs today.
+    """
+    try:
+        rows = load_draft_picks(league_id=league_id, source=_pick_read_source())
+    except Exception as e:
+        log.warning("team-review: first-round ledger load failed (omitted): %s", e)
+        return {}
+    firsts = [p for p in rows if int(p.get("round") or 0) == 1]
+    if not firsts:
+        return {}
+    any_traded = False
+    out: dict[str, dict] = {}
+
+    def _slot(uid: str) -> dict:
+        return out.setdefault(uid, {
+            "held": 0, "own_total": 0, "traded_away": 0, "acquired": 0,
+            "league_any_traded": False,
+        })
+
+    for p in firsts:
+        cur = str(p.get("owner_user_id") or "")
+        # A NULL original owner is un-attributable, not evidence of a trade:
+        # fall back to the current owner so the row reads as "never moved"
+        # rather than inventing a counterparty.
+        orig = str(p.get("original_user_id") or "") or cur
+        if not cur and not orig:
+            continue
+        moved = bool(cur and orig and cur != orig)
+        any_traded = any_traded or moved
+        if cur:
+            s = _slot(cur)
+            s["held"] += 1
+            if moved:
+                s["acquired"] += 1
+        if orig:
+            s = _slot(orig)
+            s["own_total"] += 1
+            if moved:
+                s["traded_away"] += 1
+    for s in out.values():
+        s["league_any_traded"] = any_traded
+    return out
+
+
 # #14/#21 rank chips — per-league consensus-rank cache so a fan of home
 # league cards costs one power-rankings computation per league per minute,
 # not one per card render. In-process only (fine across Render restarts —
 # it just recomputes).
+@app.route("/api/league/team-review")
+@_gate_unverified_read
+def league_team_review_route():
+    """GET /api/league/team-review?league_id=...&basis=consensus|personal
+
+    Feedback #357 / #358 / #359 — the six-beat guided read of the CALLER's own
+    team. Contract: `docs/feedback/items/357-team-review/lld-delta.md` §2.
+
+    Gated wholesale by `@_gate_unverified_read`, unlike
+    `/api/league/power-rankings` (which cannot be, because its consensus basis
+    is league-shared by design). Team Review is per-user by construction — your
+    team, your board, your preferences — so the wholesale gate is correct and
+    matches its nearest sibling, `GET /api/league/preferences`.
+
+    404 while `trades.team_review` is off, checked before any session work.
+
+    The odds band on the `standing` beat is composed HERE rather than in
+    `backend/team_review.py`: that module is a pure composer over existing
+    service outputs, and reaching into the outlook pipeline from inside it
+    would entangle two feature flags. Here the outlook read is its own
+    try/except, so a dark `outlook.odds`, a non-Sleeper league or a simulator
+    hiccup costs the band and never the review.
+    """
+    if not is_enabled("trades.team_review"):
+        return jsonify({"error": "not_found"}), 404
+
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    g_league = sess.get("league")
+    league_id = request.args.get("league_id") or (g_league.league_id if g_league else "")
+    if not league_id:
+        return jsonify({"error": "league_id is required"}), 400
+
+    basis = (request.args.get("basis") or "consensus").strip().lower()
+    if basis == "redraft":
+        return jsonify({
+            "error":   "not_available",
+            "message": ("Redraft team review isn't available — FTF values are "
+                        "dynasty-only. Use basis=consensus or basis=personal."),
+        }), 501
+    if basis not in ("consensus", "personal"):
+        return jsonify({"error": "basis must be one of consensus, personal, redraft"}), 400
+
+    try:
+        from .power_rankings import compute_power_rankings, optimal_starter_slots
+        from .team_review import (
+            build_team_review, resolve_window_from_odds,
+            resolve_window_precedence,
+        )
+
+        members, seed, players_meta, fmt = _power_ranking_inputs(sess, league_id)
+        if members is None:
+            return jsonify({"error": "league_not_found"}), 404
+
+        me_league_id = _league_user_id(sess)
+
+        # Board — the caller's own Elo plus which players they have actually
+        # JUDGED. `get_rankings` returns the WHOLE pool (see team_review's
+        # `_divergence` docstring), so the judged set comes from each row's
+        # win/loss counts, never from the map's length.
+        board_elo = None
+        judged: set[str] = set()
+        interactions = 0
+        service = sess.get("service")
+        if service is not None:
+            rs = service.get_rankings(position=None)
+            board_elo = {rp.player.id: rp.elo for rp in rs.rankings}
+            judged = {rp.player.id for rp in rs.rankings
+                      if (rp.wins or 0) + (rp.losses or 0) > 0}
+            interactions = int(rs.interaction_count or 0)
+
+        picks_by_owner = _power_picks_by_owner(league_id, fmt)
+        teams = compute_power_rankings(
+            members, seed, players_meta,
+            board_elo=(board_elo if basis == "personal" else None),
+            picks_by_owner=picks_by_owner,
+            lineup_slots=_league_lineup_slots(league_id),
+        )
+
+        # Per-member roster profiles and inferred windows — the SAME pure
+        # functions the engine and /api/league/preferences already use, so a
+        # league-mate's window here can never disagree with the one the deck
+        # reasons about.
+        member_profiles: dict[str, dict] = {}
+        member_windows: dict[str, str] = {}
+        pick_share: dict[str, float] = {}
+        first_rounds: dict[str, int] = {}
+        total_pick_value = 0.0
+        for m in members:
+            uid = str(m.get("user_id"))
+            pids = [str(x) for x in (m.get("player_ids") or [])]
+            try:
+                member_profiles[uid] = _trade_service_mod.analyze_roster_strengths(
+                    pids, players_meta, fmt)
+            except Exception:
+                member_profiles[uid] = {}
+            owned = picks_by_owner.get(uid) or []
+            v = sum(float(p.get("value") or 0.0) for p in owned)
+            pick_share[uid] = v
+            total_pick_value += v
+            first_rounds[uid] = sum(
+                1 for p in owned if "1st" in str(p.get("label") or ""))
+        if total_pick_value > 0:
+            pick_share = {k: v / total_pick_value for k, v in pick_share.items()}
+        # #365 — round-1 pick provenance per member, read ONCE for the league
+        # and only while `trade.outlook_net_firsts` is on. Flag off ⇒ this is
+        # `{}`, every `.get()` below yields None, and `infer_team_outlook` is
+        # called with the same four arguments it has always taken (INV-365).
+        firsts_ledgers: dict[str, dict] = {}
+        if is_enabled("trade.outlook_net_firsts"):
+            firsts_ledgers = _first_round_ledgers(league_id)
+
+        # #372 — STARTER DYNASTY VALUE, summed straight off the
+        # `compute_power_rankings` call above: `starters` is that function's
+        # value-optimal lineup fill and `roster[].value` is the same per-player
+        # number the standing beat ranks with, so this route computes no new
+        # value and there is no second definition to drift. `starters` is None
+        # for EVERY team at once (it is a function of the league's lineup
+        # template), so `starters_known` is a league-level fact, not a
+        # per-team one — which is why a non-Sleeper league degrades the whole
+        # composite rather than half of it.
+        starter_value_by_uid: dict[str, float] = {}
+        league_starter_value = 0.0
+        starters_known = any(t.get("starters") is not None for t in teams)
+        for t in teams:
+            ids = set(t.get("starters") or [])
+            v = sum(float(r.get("value") or 0.0) for r in (t.get("roster") or [])
+                    if str(r.get("player_id")) in ids)
+            starter_value_by_uid[str(t["user_id"])] = v
+            league_starter_value += v
+
+        # #372 — the caller's roster profile, hoisted above the inference block
+        # below (which now runs after the odds are known) because the
+        # divergence and depth beats read it and neither waits on a window.
+        my_roster = [str(x) for x in (sess.get("user_roster") or [])]
+        my_profile = _trade_service_mod.analyze_roster_strengths(
+            my_roster, players_meta, fmt) if my_roster else {}
+
+        # Weakest starting slot — lowest-valued filled slot in the caller's
+        # value-optimal lineup. None when the template is unknown.
+        weakest = None
+        try:
+            slots_tpl = _league_lineup_slots(league_id)
+            if slots_tpl and my_roster:
+                rows = [{"player_id": pid,
+                         "position": getattr(players_meta.get(pid), "position", None),
+                         "value": _trade_service_mod.elo_to_value(seed.get(pid, 0.0))}
+                        for pid in my_roster if pid in players_meta]
+                filled = [r for r in optimal_starter_slots(rows, slots_tpl)
+                          if r.get("player")]
+                if filled:
+                    low = min(filled, key=lambda r: float(r["player"].get("value") or 0.0))
+                    pl = players_meta.get(str(low["player"]["player_id"]))
+                    weakest = {
+                        "slot": low["slot"],
+                        "player_id": str(low["player"]["player_id"]),
+                        "name": getattr(pl, "name", None) or "",
+                        "position": getattr(pl, "position", None) or "?",
+                    }
+        except Exception as ws_err:
+            log.warning("team-review: weakest-slot build failed (omitted): %s", ws_err)
+
+        # League-community divergence, when enough members have ranked.
+        community_gap = None
+        try:
+            community = load_community_elo_for_league(
+                league_id=league_id, exclude_user_id=sess["user_id"],
+                scoring_format=fmt)
+            if community and board_elo:
+                community_gap = _trends_service_mod.compute_consensus_gap(
+                    user_elo=board_elo, community_rankings=community,
+                    user_roster=my_roster,
+                    league_members=[{"user_id": m.get("user_id"),
+                                     "username": m.get("username"),
+                                     "roster": m.get("player_ids") or []}
+                                    for m in members],
+                    players_by_id=_players_by_id_for(sess.get("players") or []))
+        except Exception as cg_err:
+            log.warning("team-review: consensus-gap build failed (omitted): %s", cg_err)
+
+        # Retrospective scoring (#358 "11th in PPG this year"). REAL points
+        # already scored — never a projection. Sleeper-only and empty before
+        # week 1, and the reason is named rather than hidden.
+        scoring = None
+        reason = None
+        platform = (get_league_draft_context(league_id) or {}).get("platform") or "sleeper"
+        completed_weeks = 0
+        if platform != "sleeper":
+            reason = "platform_unsupported"
+        else:
+            try:
+                from . import outlook as outlook_pkg
+                state = outlook_pkg.build_league_state(
+                    league_id, platform=platform, fetch=_outlook_sleeper_fetch({}))
+                completed_weeks = int(state.completed_weeks or 0)
+                if completed_weeks <= 0:
+                    reason = "preseason"
+                else:
+                    rid_of = {str(t.user_id): t.roster_id for t in state.teams}
+                    ppg = {t.roster_id: (t.points_for / completed_weeks)
+                           for t in state.teams if completed_weeks}
+                    mine = rid_of.get(str(me_league_id))
+                    if mine is not None and mine in ppg:
+                        order = sorted(ppg.items(), key=lambda kv: kv[1], reverse=True)
+                        scoring = {
+                            "ppg": round(ppg[mine], 1),
+                            "ppg_rank": next(i + 1 for i, (r, _) in enumerate(order)
+                                             if r == mine),
+                            "record": next(
+                                ({"w": t.wins, "l": t.losses, "t": t.ties}
+                                 for t in state.teams if t.roster_id == mine),
+                                None),
+                        }
+            except Exception as sc_err:
+                reason = "platform_unsupported"
+                log.warning("team-review: scoring read failed (degraded): %s", sc_err)
+
+        # #357 — the playoff BAND for the caller's team, composed here so the
+        # pure module stays free of the outlook flag. Absent (never null-filled)
+        # when `outlook.odds` is off, the league is not Sleeper, or the
+        # simulator fails: the band is enrichment, the review is the feature.
+        #
+        # #371 HOISTED IT ABOVE `build_team_review` — same computation, same
+        # guards, same try/except, and it is still assigned onto
+        # `payload["standing"]["outlook"]` below. It moved because the band may
+        # now DRIVE the window, and the window is built inside the composer.
+        outlook_band = None
+        # #372 — EVERY member's band, not just the caller's. The composite
+        # scores playoff likelihood as a term, and the `partners` beat pits
+        # your window against your league-mates': scoring the odds for you and
+        # not for them would put two different definitions of "contender" in
+        # one payload, which is the exact failure #365 was arranged to avoid.
+        band_by_uid: dict[str, dict] = {}
+        try:
+            if is_enabled("outlook.odds") and platform == "sleeper":
+                bundle = _outlook_impact_baseline(league_id, basis, sess)
+                if bundle is not None:
+                    from .outlook.trade_delta import playoff_band
+                    _st, base_payload, _pv, _pp, _stype, _fmt = bundle
+                    rid_of = {str(t.user_id): t.roster_id for t in _st.teams}
+                    uid_of = {rid: uid for uid, rid in rid_of.items()}
+                    for _row in (base_payload.get("teams") or []):
+                        _uid = uid_of.get(_row.get("roster_id"))
+                        _pct = ((_row.get("odds") or {}).get("playoff_pct"))
+                        if _uid is None or _pct is None:
+                            continue
+                        band_by_uid[str(_uid)] = {
+                            "band": playoff_band(float(_pct)),
+                            "playoff_pct": round(float(_pct), 4),
+                        }
+                    mine = rid_of.get(str(me_league_id))
+                    row = next((t for t in (base_payload.get("teams") or [])
+                                if t.get("roster_id") == mine), None)
+                    if row is not None:
+                        meta = base_payload.get("meta") or {}
+                        outlook_band = {
+                            "band": playoff_band(float(row["odds"]["playoff_pct"])),
+                            "playoff_pct": round(float(row["odds"]["playoff_pct"]), 4),
+                            "projected_seed": row["odds"].get("projected_seed"),
+                            "beta": bool(meta.get("beta")),
+                            "is_preseason": bool(meta.get("is_preseason")),
+                            "priced_slot_coverage": meta.get("priced_slot_coverage"),
+                        }
+        except Exception as ob_err:
+            log.warning("team-review: outlook band failed (omitted): %s", ob_err)
+
+        # #371 — "we should primarily use the playoff outlook value as the
+        # decision maker". It INFORMS the window; it does not replace the
+        # heuristic, and the ruling is load-bearing rather than timid. The odds
+        # engine is Sleeper-only (`backend/outlook/league_state.py` registers
+        # the other platforms as NotImplemented stubs) while
+        # `infer_team_outlook` works anywhere a roster exists, so a straight
+        # replacement strands every ESPN and MFL league with no window at all.
+        # And `completed_weeks == 0` is the simulator's weakest window (D-094),
+        # which is precisely when a manager is setting his window.
+        #
+        # So the odds drive only when every one of five things holds, and when
+        # they do not, `window.odds_reason` NAMES which one failed. The roster
+        # verdict rides the payload either way as `window.roster_inferred`.
+        window_source = None
+        window_odds = None
+        window_odds_reason = None
+        # `odds_refusal` is what the COMPOSITE's playoff term is told. When
+        # `trades.window_from_odds` is off we never asked the simulator's
+        # opinion at all, and "we did not ask" is a different claim from "we
+        # asked and it had nothing" — hence a fourth provenance value that
+        # deliberately does NOT leak into #371's `window.odds_reason`
+        # vocabulary (odds_unavailable | preseason). That field keeps its
+        # contract; `signals.playoff.provenance` carries this one.
+        odds_refusal: str | None = "odds_disabled"
+        if is_enabled("trades.window_from_odds"):
+            window_source, window_odds, window_odds_reason = \
+                resolve_window_from_odds(outlook_band, completed_weeks)
+            odds_refusal = window_odds_reason
+
+        # #372 — the inference itself, MOVED DOWN TO HERE from above the
+        # scoring block. It has to run after `outlook_band`, because the
+        # playoff band is now an INPUT to the score rather than an override
+        # applied to its output. Nothing between the old site and this one
+        # read a window.
+        composite_on = is_enabled("trade.outlook_composite")
+
+        def _starter_sig(uid: str):
+            """None while the flag is off — that is what makes
+            `infer_team_outlook` byte-identical (INV-372). With the flag on it
+            is always a dict, even when unreadable, so the card can name the
+            reason instead of showing an unexplained absence."""
+            if not composite_on:
+                return None
+            return _trade_service_mod.starter_value_signal(
+                starter_value_by_uid.get(uid) if starters_known else None,
+                league_starter_value if starters_known else None,
+                len(members))
+
+        def _odds_sig(uid: str):
+            if not composite_on:
+                return None
+            return _trade_service_mod.playoff_odds_signal(
+                band_by_uid.get(uid), odds_refusal)
+
+        for m in members:
+            uid = str(m.get("user_id"))
+            pids = [str(x) for x in (m.get("player_ids") or [])]
+            try:
+                # League-mates get the ledger too, deliberately: the `partners`
+                # beat pits your window against theirs, and two different
+                # definitions of "contender" inside one payload is exactly the
+                # failure this whole build is arranged to avoid. #372 extends
+                # that to the composite — same model for every team or none.
+                w, _score, _sig = _trade_service_mod.infer_team_outlook(
+                    pids, players_meta, pick_share.get(uid, 0.0), len(members),
+                    firsts_ledgers.get(uid), _starter_sig(uid), _odds_sig(uid))
+                member_windows[uid] = w
+            except Exception:
+                member_windows[uid] = "not_sure"
+
+        my_window, _my_score, my_signals = _trade_service_mod.infer_team_outlook(
+            my_roster, players_meta, pick_share.get(me_league_id, 0.0), len(members),
+            firsts_ledgers.get(me_league_id),
+            _starter_sig(me_league_id), _odds_sig(me_league_id))
+        roster_window = my_window
+
+        # #372 PRECEDENCE. When the composite actually APPLIED, the band was
+        # already scored as a weighted term, so letting it ALSO overwrite the
+        # verdict would count the same signal twice — the band drives once or
+        # not at all. `source` reads "composite" and `inferred ==
+        # roster_inferred` by construction, because nothing replaced anything.
+        # When the composite did not apply (flag off, or no lineup template to
+        # read starters from) #371's behaviour is untouched.
+        composite_applied = bool((my_signals.get("starters") or {}).get("applied"))
+        window_source, my_window = resolve_window_precedence(
+            composite_applied, window_source,
+            (window_odds or {}).get("implied"), roster_window)
+
+        payload = build_team_review(
+            teams=teams,
+            you_user_id=me_league_id,
+            num_teams=len(members),
+            scoring_format=fmt,
+            completed_weeks=completed_weeks,
+            scoring=scoring,
+            scoring_unavailable_reason=reason,
+            inferred_outlook=my_window,
+            outlook_signals=my_signals,
+            stored_prefs=(load_league_preference(user_id=sess["user_id"],
+                                                 league_id=league_id) or {}),
+            roster_profile=my_profile,
+            member_profiles=member_profiles,
+            member_windows=member_windows,
+            weakest_slot=weakest,
+            user_elo=board_elo,
+            board_interactions=interactions,
+            judged_ids=judged,
+            seed_elo=seed,
+            community_gap=community_gap,
+            user_roster=my_roster,
+            players=players_meta,
+            # #368 — both of these were computed above and then NOT passed,
+            # so `_partners` fell back to its `{}` defaults: every member
+            # reported "0 firsts", and for a CONTENDING caller the sort key
+            # (`pick_capital_share`) was 0.0 for everyone, leaving the
+            # "pointed the other way" list in arbitrary order. That is the
+            # whole of what made the beat read as nonsense.
+            pick_share_by_owner=pick_share,
+            first_round_by_owner=first_rounds,
+            # #371 — None-by-default, and `window_source` being None is what
+            # keeps the flag-off `window` block byte-identical.
+            window_source=window_source,
+            window_roster_inferred=roster_window,
+            window_odds=window_odds,
+            window_odds_reason=window_odds_reason,
+        )
+        if not payload:
+            return jsonify({"error": "league_not_found"}), 404
+
+        payload["league_id"] = league_id
+        payload["platform"] = platform
+        payload["basis"] = basis
+        if outlook_band is not None:
+            payload["standing"]["outlook"] = outlook_band
+
+        return jsonify(payload)
+    except Exception as e:
+        log.error("league/team-review error: %s", e)
+        return jsonify({"error": "internal_error"}), 500
+
+
 _RANK_CHIP_TTL_S = 60.0
 _rank_chip_cache: dict[str, tuple[float, dict]] = {}
 
