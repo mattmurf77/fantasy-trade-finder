@@ -228,3 +228,45 @@ dated addendum line. The §1c waiver (no chip-selection event) stands.
 - The `espn.league_picker` my-leagues list doesn't render in entry mode
   (it reads *stored* credentials); manual league id + WebView sign-in covers
   entry. Possible later polish, not in scope.
+
+---
+
+# V2.1 — "Log in" as a first-class entry option (2026-08-26, same day)
+
+**Operator ask:** the live entry flow leads with league IDs; users should have
+the **option to log in** to ESPN/MFL instead. Implemented by an Opus subagent,
+reviewed line-by-line and shipped by the lead session.
+
+- **Route:** `POST /api/entry/platform` gains two sessionless account-discovery
+  actions, mutually exclusive with the mint: ESPN `my_leagues` (fan-profile
+  list for the supplied cookie pair; byte-identical shape to
+  `GET /api/espn/my-leagues`; gated `espn.league_picker`) and MFL
+  `auth_leagues` (the same login+myleagues pair `/api/mfl/auth-link` uses;
+  gated `mfl.auth_link`). **Both store nothing** — no credential row, no
+  user, no session; the MFL password is transient and never logged.
+- **ESPN entry UX:** "Sign in to ESPN" is a first-class button on the input
+  step (same `espn.webview_capture` WebView, which runs signed-out); a capture
+  with no league id typed feeds the sessionless my-leagues action and the
+  existing picker list renders — the user never needs a league id. Failures
+  are soft: the league-id field stays usable.
+- **MFL entry UX:** "Sign in with MFL" appears above the league-id field;
+  login lists the account's leagues **with the user's own franchise_id**, so
+  a single tap mints directly (no team-claim step) → canonical import → a
+  best-effort credential re-store under the fresh session (so Send-in-MFL
+  works later; password held in a ref, dropped before that one call, cleared
+  on every exit path).
+- **Evidence:** `test_entry_platform_route.py` 13→23 (incl. a
+  stored-nothing assertion helper on users/credentials/leagues/sessions);
+  structural guard 36→61 assertions (one V2 claim — "entry suppresses the MFL
+  password path" — deliberately superseded); tsc, testid-lint, full suite
+  green. Sabotage-proven both ways by the subagent (flag-gate drop and
+  `!entry` restore each turned exactly the expected tests red).
+- **TestFlight checklist (v2.1, additive to V2's):**
+  1. ESPN chip → "Sign in to ESPN" (no league id typed) → ESPN login → back
+     in the sheet, **your leagues are listed** → tap one → team list → claim
+     → in. No league id ever typed, no Apple prompt.
+  2. MFL chip → "Sign in with MFL" → username/password → league list shows
+     your franchise per league → tap one → **straight to the import summary**
+     (no team-claim step) → in. Then Trades → a send-in-MFL surface should
+     find the credential already stored.
+  3. Both league-ID paths from the V2 checklist still work unchanged.

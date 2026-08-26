@@ -11,6 +11,17 @@
 
 ---
 
+## 2026-08-26c — Entry v2.1: login option (Opus subagent build, lead-session review) — full gates
+
+Scope: [docs/plans/landing-platform-options/scope.md](../docs/plans/landing-platform-options/scope.md) §V2.1 · code-walk §V2.1
+
+- **Backend pytest:** `test_entry_platform_route.py` **13 → 23 PASS** — the two account-discovery actions (ESPN `my_leagues`, MFL `auth_leagues`): shapes, flag gates (`espn.league_picker`/`mfl.auth_link` on top of the feature flag), cookie-XOR and missing-credential 400s, bad-login 403 `mfl_bad_credentials`, `bad_action` 400, and a shared `_assert_stored_nothing` helper proving no users/credentials/leagues/sessions are created. Full suite **4,359 passed / 1 skipped** (5:38) on a tree that also carries the concurrent v1.16.7 session's tests.
+- **Structural guard:** `check-landing-platform-options.js` **36 → 61 PASS** — V2.1 pins incl.: discovery calls sessionless + analytics-free, ESPN capture→sessionless my-leagues→existing picker, soft-fail keeps the manual field, `mflAuthEnabled` no longer excludes entry, entry sign-in single-select mints directly and never touches the bulk `mflAuthImport`, the in-flight password is a ref (never state) dropped before the best-effort re-store. One V2 assertion ("entry suppresses the MFL password path") deliberately superseded.
+- **Typecheck** clean · **testid-lint** OK.
+- **Subagent sabotage runs** (reverted): dropping the `espn.league_picker` gate and restoring `&& !entry` each turned exactly the expected test/guard assertions red.
+- **Review:** lead session verified the backend serializations/signatures against the real my-leagues and auth-link routes directly, confirmed linked-mode render identity, and tightened the SignInScreen panel copy.
+- **Owed (operator):** TestFlight checklist §V2.1 (3 steps) on the FIRST build after v1.16.7 — 1.16.7 carries entry v1+v2 only.
+
 ## 2026-08-26 — #360/#361 + #362 REBUILT on current main; #362 SHIPPED LIT, #360 held dark
 
 **Branch:** `feat/jon-360-362` — the 2026-08-19 build (base `2a492b6`) merged with
@@ -3062,6 +3073,7 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-08-26c — Entry v2.1: login option (Opus subagent build, lead-session review) — full gates](#2026-08-26c--entry-v21-login-option-opus-subagent-build-lead-session-review--full-gates)
 - [2026-08-26b — Platform entry decoupled from Apple (D-164) — full gates](#2026-08-26b--platform-entry-decoupled-from-apple-d-164--full-gates)
 - [2026-08-26 — Landing platform options (Sleeper · ESPN · MFL entry chips) — full gates](#2026-08-26--landing-platform-options-sleeper--espn--mfl-entry-chips--full-gates)
 - [2026-08-25 — v1.16.6 (EAS build 132) BUILT + SUBMITTED to TestFlight](#2026-08-25--v1166-eas-build-132-built--submitted-to-testflight)

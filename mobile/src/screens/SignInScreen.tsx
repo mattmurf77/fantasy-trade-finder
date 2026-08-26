@@ -610,8 +610,8 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
               <View testID="signin.platform-panel">
                 <ChalkText style={styles.platformExplainer}>
                   {entryPlatform === 'espn'
-                    ? 'ESPN dynasty leagues are supported. Point us at your league and claim your team — no extra account needed. Private leagues sign in to ESPN itself.'
-                    : 'MyFantasyLeague dynasty leagues are supported. Point us at your league and claim your franchise — no extra account needed.'}
+                    ? 'ESPN dynasty leagues are supported. Sign in to ESPN and we’ll find your leagues, or enter a league ID — no extra account needed.'
+                    : 'MyFantasyLeague dynasty leagues are supported. Sign in with MFL and we’ll find your leagues, or enter a league ID — no extra account needed.'}
                 </ChalkText>
                 <Pressable
                   testID="signin.platform-link-btn"

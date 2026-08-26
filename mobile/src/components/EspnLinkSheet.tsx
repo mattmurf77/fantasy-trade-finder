@@ -27,7 +27,11 @@ import {
   EspnImportSummary,
   EspnMyLeague,
 } from '../api/espn';
-import { entryEspnPreview, entryPlatformMint } from '../api/platformEntry';
+import {
+  entryEspnPreview,
+  entryEspnMyLeagues,
+  entryPlatformMint,
+} from '../api/platformEntry';
 
 interface Props {
   visible: boolean;
@@ -172,6 +176,30 @@ export default function EspnLinkSheet({
     }
   }
 
+  // Entry mode's twin of fetchMyLeagues (v2.1). The stored-credential route
+  // above can't work before a session exists, so the sessionless
+  // /api/entry/platform `my_leagues` action is fed the pair the WebView
+  // capture just produced. Nothing is stored server-side by that call.
+  // Failure is SOFT on purpose: a dim line explains it and the manual
+  // league-id field stays usable, so signing in can never dead-end the door.
+  async function fetchEntryMyLeagues(s2: string, sw: string) {
+    if (!leaguePicker) return;
+    setMyLeaguesBusy(true);
+    setError(null);
+    try {
+      const leagues = await entryEspnMyLeagues({ espnS2: s2, swid: sw });
+      setMyLeagues(leagues);
+      if (leagues.length > 0) setUseManualEntry(false);
+    } catch {
+      setMyLeagues(null);
+      setError(
+        "We couldn't list your ESPN leagues — enter a league ID below instead.",
+      );
+    } finally {
+      setMyLeaguesBusy(false);
+    }
+  }
+
   // Picking a league from the list proceeds through the SAME preview flow
   // manual entry uses — just with the id supplied directly instead of
   // parsed from the text field.
@@ -203,6 +231,11 @@ export default function EspnLinkSheet({
       setSwid(pair.swid);
       if (parseEspnLeagueInput(input)) {
         void fetchPreview({ espnS2: pair.espnS2, swid: pair.swid });
+      } else if (entry) {
+        // v2.1: entry mode's whole point is "sign in, never type a league
+        // id" — the captured pair goes straight to the sessionless
+        // my_leagues action and populates the SAME picker below.
+        void fetchEntryMyLeagues(pair.espnS2, pair.swid);
       } else {
         // No league id typed yet — this is exactly the case the picker is
         // for. A capture only fills local state; cookies aren't stored
@@ -417,6 +450,29 @@ export default function EspnLinkSheet({
               Read-only import: we read team names and rosters — we never post
               or change anything in ESPN.
             </Text>
+            {/* v2.1 — entry mode only: signing in is a FIRST-CLASS option,
+                not something buried under "Private league?". Same flag
+                (`espn.webview_capture`) and same launcher as the fallback
+                block below; the league-id field stays as the other path.
+                Hidden once the picker has rows (the sign-in already paid
+                off). Linked mode renders none of this — byte-identical. */}
+            {entry && webviewCapture && !showingPicker ? (
+              <>
+                <Button
+                  testID="espn-link.entry-signin"
+                  label="Sign in to ESPN"
+                  onPress={launchWebViewCapture}
+                  disabled={busy}
+                />
+                <Text style={[type.bodySm, styles.cookieHint]}>
+                  We’ll find your leagues — no league ID needed. We never see
+                  your password.
+                </Text>
+                <Text style={[type.bodySm, styles.cookieHint]}>
+                  or enter a league ID
+                </Text>
+              </>
+            ) : null}
             {/* League picker (flag `espn.league_picker`): once we know the
                 account's ESPN cookies (WebView capture, or already stored
                 from a prior link), skip asking for a league id entirely —
