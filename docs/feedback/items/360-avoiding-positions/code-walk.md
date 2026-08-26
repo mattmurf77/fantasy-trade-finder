@@ -365,7 +365,7 @@ now includes `avoid_positions` (pinned by
 **Mobile (flag-gated render):** `TradeDnaSheet.tsx:282` (`avoidOn`), row
 rendered only when on; `TradesScreen.tsx:657` (`avoidOn`), receipt line
 `:1288-1293` (R-10), empty-state copy naming Avoiding `:1770-1782` (R-9).
-Deliberately absent from `LAUNCHED_FLAG_DEFAULTS` (D-164 — that map fails
+Deliberately absent from `LAUNCHED_FLAG_DEFAULTS` (D-166 — that map fails
 open).
 
 **Fixture note (not a behavior change):** `origin/main` d42872f2 ("package

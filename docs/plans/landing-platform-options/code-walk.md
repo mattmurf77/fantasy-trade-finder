@@ -3,6 +3,11 @@
 Line numbers as of the shipping commit on branch
 `claude/app-entry-platform-options-3e16ac`.
 
+> **V2 note (same day):** sections 3, 4 and "Session requirement" below
+> describe the v1 Apple-panel design, superseded hours later by the
+> sessionless entry in §V2 at the bottom (D-164). Sections 1, 2, 5, 6, 7
+> still describe shipped behavior.
+
 ## 1. The chip row renders, correctly gated
 
 - `mobile/src/screens/SignInScreen.tsx:115` — `platformPickerShown = landingOn
@@ -101,3 +106,72 @@ start sign-in by itself. Apple sign-in (`auth.accounts`, live) is the one
 session mint that needs no Sleeper username — which is why the ESPN/MFL
 panels lead with it rather than a platform-native credential flow at entry
 (see the DECISIONS entry for this feature).
+
+---
+
+# V2 — Sessionless platform entry (D-164): the Apple decoupling
+
+Line numbers as of the shipping commit on `claude/platform-entry-decouple-apple`.
+
+## 1. The sessionless route
+
+- `backend/server.py:21544` — `POST /api/entry/platform` (`entry_platform`).
+  Gated on `landing.platform_options` + the platform's `espn.link`/`mfl.link`;
+  **no `_require_session` anywhere in the body** (pinned by the structural
+  guard). Preview branches return the byte-shape of the link routes'
+  `choose_team` payloads; ESPN cookies come from the body only.
+- Deterministic ids: `server.py:21656-21658` (`entry:espn:<canonical SWID>`,
+  else `entry:espn:<league>.t<team>`) and `:21696`
+  (`entry:mfl:<league>.f<franchise>` via `_mfl_member_id`). The `entry:`
+  namespace never collides with the `espn:`/`mfl:` member placeholders
+  (documented never-routable at `database.py` `replace_espn_league_members`).
+- Mint: `server.py:21700` — the same `_extension_build_session` behind
+  `/api/extension/auth` (creates the users row, registers the token);
+  `_link_device_identity` for analytics stitching; `extension/auth`-shaped
+  response. #321 wrong-account parity: the cookie-pair SWID must own the
+  claimed team (403 `espn_bad_credentials` + `wrong_account`).
+- Proven by `backend/tests/test_entry_platform_route.py` (13 tests), incl.
+  the end-to-end handoff: the minted token drives the real `/api/mfl/link`
+  import and the claimed franchise binds to the entry user in
+  `league_members`.
+
+## 2. The sheets in entry mode
+
+- `EspnLinkSheet.tsx:280` — preview through `entryEspnPreview` (same wire
+  shape, same 403 `espn_auth_required` self-serve, WebView capture path
+  untouched — `EspnConnectScreen`'s default path makes zero authenticated
+  calls and runs signed-out). `:162` — the my-leagues fetch (a
+  stored-credential read) is skipped in entry mode. `:332` — `pickTeam`
+  mints first (`entryPlatformMint` stores the token —
+  `api/platformEntry.ts`), delivers the user via `onEntrySession`, then runs
+  the **canonical** `linkEspnLeague` import under the fresh token.
+- `PlatformLinkSheet.tsx:202/:238` — the MFL twins; `:89` — the
+  `mfl.auth_link` username/password path (session-required routes) is
+  suppressed in entry mode.
+- Entry props default off → both sheets' linked flows are byte-identical.
+
+## 3. The host
+
+- `SignInScreen.tsx:617-624` — the ESPN/MFL panel's primary button opens the
+  entry sheet (`signin.platform-link-btn`); Apple is gone from the panel.
+  The quiet "Already have an account? Sign in with Apple" link is restored
+  under every chip and still carries the v1 `platformIntent`.
+- `:140` — `handleEntrySession` pins `{user_id, display_name,
+  account_only: true}`; `account_only` is load-bearing: LeaguePicker's
+  refresh skips the Sleeper league fetch for it and merges the platform
+  leagues instead.
+- `:153` — `handleEntryLinked` closes the sheet and routes through
+  `(onAccountSignedIn ?? onSignedIn)()` → `LeaguePicker` (no params) → the
+  shipped platform-league merge finds exactly one league →
+  `onboarding.league_autoskip` picks it → session-init → Main. No new
+  activation code.
+- `:811-826` — sheet mounts mirror LeaguePicker's pattern (ESPN
+  unconditional, PlatformLinkSheet conditional; one visible at a time).
+
+## 4. Analytics
+
+`api/platformEntry.ts` — the mint fires `signin_attempted` /
+`signin_succeeded` / `signin_failed` with `method: 'espn' | 'mfl'` (the claim
+IS the sign-in attempt). Value-only addition on the registered `method` prop;
+tracking-plan addendum noted in
+`docs/business/analytics/2026-07-17-tracking-plan-v2.md`.

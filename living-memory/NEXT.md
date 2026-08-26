@@ -172,7 +172,7 @@ and offering their best buys under "Skip these."
 Built and unmerged on **`feat/jon-360-362`** (base `2a492b6`; backend `f488616`, mobile
 `705ab2c`). Full pipeline: dual planning agents → contract docs → one backend agent → one
 mobile agent as sole owner of `TradesScreen.tsx`. Evidence:
-[TEST_LEDGER 2026-08-26](TEST_LEDGER.md) · [D-164](DECISIONS.md). Rebuilt on current
+[TEST_LEDGER 2026-08-26](TEST_LEDGER.md) · [D-166](DECISIONS.md). Rebuilt on current
 `origin/main` (`867c3baa`) 2026-08-26; all gates re-run green on the merged tree.
 
 1. **~~Answer Q-032 / Q-033~~ — RESOLVED 2026-08-19.** Operator ruled: **ship dark**

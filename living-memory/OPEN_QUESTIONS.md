@@ -122,7 +122,7 @@ deliberately not flag-gated: the column stores and the API serves in both states
 loses data while it is off and lighting it later is deploy-free.
 **To light it:** flip **four** files (the key + `release.json` + `onboarding-v2.json` +
 `profiles-on.json` — see [G-062](GOTCHAS.md)), after the TestFlight checklist passes. Do **not**
-add it to `LAUNCHED_FLAG_DEFAULTS` ([D-164](DECISIONS.md)).
+add it to `LAUNCHED_FLAG_DEFAULTS` ([D-166](DECISIONS.md)).
 **Status:** RESOLVED.
 
 ### Q-033 — Should the one-tap outlook confirm stop clearing the position lists? — **RESOLVED 2026-08-19: NO, keep inherited behavior**

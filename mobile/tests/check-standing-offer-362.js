@@ -619,7 +619,7 @@ console.log('═'.repeat(72));
 // to 0, disables the feature deploy-free.
 //
 // SC-14b below is the invariant that holds in BOTH states and is the one that
-// must never be relaxed (D-164): the client flag map fails OPEN, so listing
+// must never be relaxed (D-166): the client flag map fails OPEN, so listing
 // this flag there would light the feature on a first boot or a failed
 // revalidate — for a lit flag that breaks the kill switch, and for a dark one
 // it lights a feature the operator never enabled.

@@ -52,7 +52,7 @@ The living-memory layer was just adopted; the project has shipped substantial fe
 2. **Overrode a standing instruction I had already read.** I added `outlook.odds` to `LAUNCHED_FLAG_DEFAULTS` to fix a one-frame paint-in. `mobile/src/api/league.ts:709` says "Never add `outlook.odds` to the launched-flag defaults" — and I had printed that exact comment block earlier in the same session while investigating. The map **fails open**, so listing it punches a hole in the kill switch that [D-094](DECISIONS.md) explicitly relies on being total. The peer session rejected the change with that reasoning.
 **Rules taken from it:**
 - Before building anything non-trivial here: check `git branch -a`, `git worktree list`, and whether a `docs/feedback/items/<id>-*` folder already exists for the id. Concurrent work is the norm, not the exception.
-- When a comment in the code says "never do X", treat it as a constraint with a reason, not as advice — find the reason before overriding it. Generalized as [D-164](DECISIONS.md).
+- When a comment in the code says "never do X", treat it as a constraint with a reason, not as advice — find the reason before overriding it. Generalized as [D-166](DECISIONS.md).
 - ID collisions (`D-`/`Q-`/`G-`/`M-`) are the visible symptom of the first failure. Grep for the max **immediately before writing**, not at the start of the session — a peer may have taken the number in between. This session collided on `D-092` and then on `Q-024`.
 
 ### M-004 — Assuming DynastyProcess player names match Sleeper exactly

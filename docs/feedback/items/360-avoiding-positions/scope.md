@@ -85,7 +85,7 @@ That is correct and needs **no backfill**: `load_league_preference`'s
 Registration: `config/features.json` + `backend/feature_flags.py` `FLAG_KEYS`
 (the tuple opened at `:47`; `"trade.presentment_rules"` at `:799` is the
 comment-block template) + `docs/config-reference.md`.
-Mobile: **do NOT** add `'trade.avoid_positions'` to `LAUNCHED_FLAG_DEFAULTS` (superseded by [D-164](../../../living-memory/DECISIONS.md) — that map fails open)
+Mobile: **do NOT** add `'trade.avoid_positions'` to `LAUNCHED_FLAG_DEFAULTS` (superseded by [D-166](../../../living-memory/DECISIONS.md) — that map fails open)
 (`mobile/src/state/useFeatureFlags.ts:45`) per the #115 fail-open lesson
 documented at `:36-44` — and note the rule stated at `:62-70`: a key present in
 only one of `features.json` / `LAUNCHED_FLAG_DEFAULTS` **disagrees with itself

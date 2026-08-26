@@ -68,7 +68,7 @@ export interface PlatformLinkRequest {
   teamId?: string;
 }
 
-function normalizePreview(res: any): PlatformLinkPreview {
+export function normalizePreview(res: any): PlatformLinkPreview {
   const lg = res.league || {};
   return {
     status: 'choose_team',

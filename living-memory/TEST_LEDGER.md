@@ -21,7 +21,7 @@ Flags at ship: **`trade.standing_offers` `true`** (graduated, [D-165](DECISIONS.
 **`trade.avoid_positions` `false`** (held — [Q-031](OPEN_QUESTIONS.md) gen_v2 gap is live in
 prod, [Q-032](OPEN_QUESTIONS.md) upheld). Records:
 [360-avoiding-positions/](../docs/feedback/items/360-avoiding-positions/) ·
-[362-standing-offer/](../docs/feedback/items/362-standing-offer/) · [D-164](DECISIONS.md).
+[362-standing-offer/](../docs/feedback/items/362-standing-offer/) · [D-166](DECISIONS.md).
 
 **Gates were run THREE times and all three runs are reported here**, because the flag flip
 was made between them and the middle run failed:
@@ -41,7 +41,7 @@ TestFlight pass on a real league") and the backend assertion above. Each now ass
 and carries an in-file comment recording that graduation happened **without** the TestFlight
 pass, per [D-165](DECISIONS.md). A repo-wide search found no third pin. `SC-14b` — the
 `LAUNCHED_FLAG_DEFAULTS` absence check, which is the assertion that actually protects the
-kill switch ([D-164](DECISIONS.md)) — was **not** touched and holds in both flag states.
+kill switch ([D-166](DECISIONS.md)) — was **not** touched and holds in both flag states.
 
 | Gate | Result (final run, measured 2026-08-26 on the merged tree, flag lit) |
 |---|---|
@@ -66,7 +66,7 @@ Also: the merge union dropped `seasonSpan`'s closing brace in `TradeCard.tsx`
 (caught by `tsc`, restored).
 
 **ID de-collisions this session** (parallel sessions took the branch's IDs on main):
-D-098→**D-164**, Q-026/027/028→**Q-031/032/033**, G-053→**G-062** (+ its missing
+D-098→**D-166**, Q-026/027/028→**Q-031/032/033**, G-053→**G-062** (+ its missing
 GOTCHAS index row added), M-005→**M-006**; PRD-local decisions renumbered item-scoped
 D-093…D-096→**D-360-1…D-360-4**, #362's D-093→**D-362-1** (the D-306-1 convention —
 main took D-093–D-097). Every cross-reference updated; `feature_flags.py` /
@@ -74,6 +74,15 @@ main took D-093–D-097). Every cross-reference updated; `feature_flags.py` /
 
 **Not claimed:** that either feature behaves correctly on a device — no runtime
 evidence exists until the two TestFlight checklists run with the flags lit.
+
+## 2026-08-26b — Platform entry decoupled from Apple (D-164) — full gates
+
+Scope: [docs/plans/landing-platform-options/scope.md](../docs/plans/landing-platform-options/scope.md) §V2 · code-walk §V2 · decision: [D-164](DECISIONS.md)
+
+- **Backend pytest:** new `backend/tests/test_entry_platform_route.py` — **13/13 PASS** (flag gating feature+platform, bad platform, MFL preview persists/mints nothing, deterministic `entry:mfl:` mint + users row + idempotent re-claim, bad franchise 400, ESPN preview shape, cookie XOR, SWID-keyed id, #321 wrong-account 403, bad team 400, private→`espn_auth_required`, and the end-to-end proof: minted token drives the real `/api/mfl/link` import and binds the claimed franchise to the entry user in `league_members`). Full suite **4,289 passed / 1 skipped** (5:42).
+- **Structural guard:** `check-landing-platform-options.js` extended to **36/36 PASS** — V2 pins: no Apple in the panel, mint-before-canonical-import in both sheets, session-dependent paths suppressed in entry mode, `account_only` entry user, token stored + signin funnel in the api layer, route sessionless + dual-gated + deterministic `entry:` ids via `_extension_build_session`.
+- **Typecheck:** `npx tsc --noEmit` clean · **testid-lint:** OK.
+- **Owed (operator, next TestFlight build):** checklist v2 in scope §V2 — public ESPN claim with no Apple prompt anywhere, private ESPN via the ESPN WebView, MFL claim, relaunch persistence, Sleeper flow unchanged, sign-out→re-claim recovers the board. Supersedes v1 §3 steps 2–4.
 
 ## 2026-08-26 — Landing platform options (Sleeper · ESPN · MFL entry chips) — full gates
 
@@ -3053,6 +3062,7 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-08-26b — Platform entry decoupled from Apple (D-164) — full gates](#2026-08-26b--platform-entry-decoupled-from-apple-d-164--full-gates)
 - [2026-08-26 — Landing platform options (Sleeper · ESPN · MFL entry chips) — full gates](#2026-08-26--landing-platform-options-sleeper--espn--mfl-entry-chips--full-gates)
 - [2026-08-25 — v1.16.6 (EAS build 132) BUILT + SUBMITTED to TestFlight](#2026-08-25--v1166-eas-build-132-built--submitted-to-testflight)
 - [2026-08-24c — Waves A + B0 SHIPPED — PRs #197/#199, EAS 1.16.4 (130) submitted](#2026-08-24c--waves-a--b0-shipped--prs-197199-eas-1164-130-submitted)

@@ -10,11 +10,17 @@
 
 
 
-## 2026-08-26 — v1.16.7 ships #362 LIT **and carries the landing platform chips**; #360 blocked on a live gen_v2 defect
+## 2026-08-26 — v1.16.7 ships #362 LIT **and carries BOTH entry-page waves**; #360 blocked on a live gen_v2 defect
 
 **Where:** `feat/jon-360-362` merged to `main` and pushed; **v1.16.7** cut for TestFlight. The week-old dark build was merged onto current `main` (123 commits of drift), de-collided twice, re-gated, and shipped.
 
-**This build also carries PR #210's entry-page platform chips.** That session's handoff said its mobile change "reaches users only with the next EAS build — nothing after v1.16.6 (132) carries it yet." **v1.16.7 is that build.** So its owed TestFlight checklist ([landing-platform-options/scope.md](../docs/plans/landing-platform-options/scope.md) §3, 6 steps) is now runnable, and its `landing.platform_options` flag is already live from its own merge. Its worktree sweep is **done** — ledgered in [docs/recovery/2026-08-26-landing-platform-options-ship.md](../docs/recovery/2026-08-26-landing-platform-options-ship.md) (PR #211). Still open from it: a surfaced waiver — no chip-selection analytics event (taxonomy default-deny; signin funnel + `league_selected.platform` cover it).
+**This build carries BOTH entry-page waves — #210's platform chips AND #213's Apple decoupling.** Both of those handoffs said their mobile surface "reaches users only with the next EAS build." **v1.16.7 is that build**, cut from a tree containing both. Their flags (`landing.platform_options`) and the `POST /api/entry/platform` route are already live from their own merges; only the mobile halves were waiting on a binary. So **three** TestFlight checklists are runnable on 1.16.7, not one:
+
+1. **#362 standing offers** — the one this branch owes, and shipped without.
+2. **Entry chips v1** — [landing-platform-options/scope.md](../docs/plans/landing-platform-options/scope.md) §3, 6 steps.
+3. **Entry decoupling v2** — same scope §V2, 6 steps (public ESPN claim with no Apple prompt, private ESPN via the WebView, MFL claim, relaunch persistence, Sleeper unchanged, sign-out→re-claim recovers the board).
+
+Open from #210: a surfaced waiver — no chip-selection analytics event (taxonomy default-deny; signin funnel + `league_selected.platform` cover it). Open from #213: entry sessions are unverified, so if `auth.enforce_verified_writes` ever flips on, entry users lose the write-grace path. #210's worktree sweep is done ([recovery ledger](../docs/recovery/2026-08-26-landing-platform-options-ship.md), PR #211); #213's `claude/platform-entry-decouple-apple` may still need one.
 
 **What went live from this branch.** `trade.standing_offers` = **true** ([D-165](DECISIONS.md)) — the post-like sheet, the three `/api/trades/standing-offer*` routes, the injector branch and the sender chip. Deploy-free tuning stays available: `standing_offer_inject_cap` (2.0; **0 kills injection without a flag flip**) and `standing_offer_days` (30.0).
 
@@ -22,7 +28,7 @@
 
 **The thing to pick up first — this is a live bug, not a nicety.** Chasing and Shopping are silently ignored on the gen_v2 share of every real user's deck **today**, and have been since that knob was raised. Nothing to do with this branch. Q-031 is rewritten as live and escalated; it now offers three real choices (port preferences into gen_v2 / drop the knob to 0 and end the bake-off's serving phase / accept and disclose). **Resolving it also unblocks lighting #360, which is a four-file flip away.**
 
-**Owed runtime evidence, and it is the only kind mobile gets (D-056).** The #362 TestFlight checklist is **UNRUN** — the feature graduated without it, by explicit operator ruling. Two independent guards (mobile SC-14a, backend `test_flag_and_knobs_registered`) had pinned the flag dark with the reason "graduation is an operator action after a TestFlight pass on a real league"; both were changed to assert lit, each carrying an in-file note that the pass did not happen. `SC-14b`, the `LAUNCHED_FLAG_DEFAULTS` absence check that actually protects the kill switch ([D-164](DECISIONS.md)), was deliberately left untouched.
+**Owed runtime evidence, and it is the only kind mobile gets (D-056).** The #362 TestFlight checklist is **UNRUN** — the feature graduated without it, by explicit operator ruling. Two independent guards (mobile SC-14a, backend `test_flag_and_knobs_registered`) had pinned the flag dark with the reason "graduation is an operator action after a TestFlight pass on a real league"; both were changed to assert lit, each carrying an in-file note that the pass did not happen. `SC-14b`, the `LAUNCHED_FLAG_DEFAULTS` absence check that actually protects the kill switch ([D-166](DECISIONS.md)), was deliberately left untouched.
 
 **Sharp edge:** three gate runs are recorded in TEST_LEDGER, not one. The pre-flip run (4336/1, run independently) matched the build agent's claim exactly, which is why its other numbers were trusted. The post-flip run failed on exactly one thing — the dark-posture pin — and no behavior.
 **Two TestFlight checklists are now owed on 1.16.7, and both are the only runtime evidence their feature will get (D-056):** the **#362 standing-offer** checklist ([362-standing-offer/](../docs/feedback/items/362-standing-offer/)) — which the feature shipped *without*, by ruling — and the **landing platform chips** checklist ([landing-platform-options/scope.md](../docs/plans/landing-platform-options/scope.md) §3: chips render, ESPN chip → Apple → ESPN sheet auto-opens un-wedged, MFL twin, Sleeper flow unchanged, single-league auto-skip yields to the MFL intent). Log both outcomes in TEST_LEDGER.
