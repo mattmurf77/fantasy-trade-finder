@@ -10,6 +10,17 @@
 
 
 
+## 2026-08-26b — Platform entry DECOUPLED from Apple (D-164), shipped to main; owed: TestFlight checklist v2 + worktree sweep
+
+**Where:** same-day v2 of the landing platform options: sessionless `POST /api/entry/platform` + entry-mode link sheets ([D-164](DECISIONS.md), [scope §V2](../docs/plans/landing-platform-options/scope.md)). ESPN/MFL users claim their team at the entry page with no Apple account; deterministic `entry:…` identity. Backend route is live on Render at deploy; **the mobile surface reaches users only with the next EAS build**.
+
+**Owed:**
+1. **Operator TestFlight checklist v2** — scope §V2 (6 steps: public ESPN claim end-to-end with no Apple prompt, private ESPN via the ESPN WebView, MFL claim, relaunch persistence, Sleeper unchanged + Apple link under every chip, sign-out→re-claim recovers the board). Log outcome in TEST_LEDGER.
+2. **Worktree sweep** — `.claude/worktrees/app-entry-platform-options-3e16ac` (now also branch `claude/platform-entry-decouple-apple`) couldn't remove itself; ledger + remove per docs/recovery/CLAUDE.md once verified on `origin/main`.
+3. **Standing consequence to remember:** entry sessions are unverified → if `auth.enforce_verified_writes` ever flips on, entry users lose the write-grace path (noted in D-164).
+
+**Blocking:** nothing. Revert lever unchanged: `landing.platform_options: false` + `POST /api/feature-flags/reload` now kills chips AND the entry route.
+
 ## 2026-08-26 — Landing platform options SHIPPED to main; owed: TestFlight checklist on the next build + worktree sweep
 
 **Where:** entry-page platform options (Sleeper · ESPN · MFL chips on `SignInScreen`, flag `landing.platform_options`, [D-163](DECISIONS.md)) built under full gates in worktree `app-entry-platform-options-3e16ac` and merged to `main`. Backend delta is flag-registry-only (features.json + FLAG_KEYS + the three flag fixtures), so the Render deploy is inert; **the mobile change reaches users only with the next EAS build** — nothing after v1.16.6 (132) carries it yet.

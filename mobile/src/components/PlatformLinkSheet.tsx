@@ -31,6 +31,7 @@ import {
   mflAuthLink,
   mflAuthImport,
 } from '../api/platformLink';
+import { entryMflPreview, entryPlatformMint } from '../api/platformEntry';
 
 interface Props {
   visible: boolean;
@@ -38,6 +39,17 @@ interface Props {
   onClose: () => void;
   /** Fired after a successful import — the caller merges + activates the league. */
   onLinked: (league: { league_id: string; name: string; total_rosters: number; platform: LinkPlatform }) => void;
+  /** Sessionless entry mode (landing platform options v2, D-164; MFL only —
+   *  SignInScreen hosts this sheet with NO session). Preview goes through
+   *  the sessionless /api/entry/platform; picking a franchise MINTS the
+   *  entry session first (delivered via onEntrySession), then runs the
+   *  canonical import under the fresh token. The `mfl.auth_link`
+   *  username/password path is suppressed — its routes require a session.
+   *  Default off — linked flow byte-identical. */
+  entry?: boolean;
+  /** Entry mode only: the minted session's user, delivered BEFORE the
+   *  import runs so the host can pin it into useSession. */
+  onEntrySession?: (user: { user_id: string; display_name: string }) => void;
 }
 
 const LABEL: Record<LinkPlatform, string> = { mfl: 'MFL', fleaflicker: 'Fleaflicker' };
@@ -48,7 +60,14 @@ const LABEL: Record<LinkPlatform, string> = { mfl: 'MFL', fleaflicker: 'Fleaflic
 //              optional "find by email" lookup)
 //   2. team  — preview came back; "which team is yours?"
 //   3. done  — import summary: teams, match rate, skipped players, read-only note
-export default function PlatformLinkSheet({ visible, platform, onClose, onLinked }: Props) {
+export default function PlatformLinkSheet({
+  visible,
+  platform,
+  onClose,
+  onLinked,
+  entry,
+  onEntrySession,
+}: Props) {
   const [step, setStep] = useState<'input' | 'team' | 'done' | 'auth-pick' | 'auth-done'>('input');
   const [input, setInput] = useState('');
   const [year, setYear] = useState('2026');
@@ -65,7 +84,9 @@ export default function PlatformLinkSheet({ visible, platform, onClose, onLinked
   // The password lives in component state just long enough to make the ONE
   // auth-link call (our backend uses it for MFL's login and never stores it);
   // it is cleared the moment the call returns and never logged or echoed.
-  const mflAuthEnabled = useFlag('mfl.auth_link') && platform === 'mfl';
+  // Entry mode suppresses the sign-in path: /api/mfl/auth-link requires a
+  // session, and entry's whole point is that none exists yet.
+  const mflAuthEnabled = useFlag('mfl.auth_link') && platform === 'mfl' && !entry;
   const [showMflAuth, setShowMflAuth] = useState(false);
   const [mflUser, setMflUser] = useState('');
   const [mflPass, setMflPass] = useState('');
@@ -175,11 +196,18 @@ export default function PlatformLinkSheet({ visible, platform, onClose, onLinked
     setBusy(true);
     setError(null);
     try {
-      const res = await linkPlatformLeague({
-        platform,
-        leagueInput: id,
-        year: platform === 'mfl' ? parseInt(year, 10) || undefined : undefined,
-      });
+      // Entry mode (MFL only) previews through the sessionless route —
+      // normalized to the same PlatformLinkPreview shape.
+      const res = entry
+        ? await entryMflPreview({
+            leagueInput: id,
+            year: parseInt(year, 10) || undefined,
+          })
+        : await linkPlatformLeague({
+            platform,
+            leagueInput: id,
+            year: platform === 'mfl' ? parseInt(year, 10) || undefined : undefined,
+          });
       if (isPlatformPreview(res)) {
         setPreview(res);
         setStep('team');
@@ -203,6 +231,21 @@ export default function PlatformLinkSheet({ visible, platform, onClose, onLinked
     setBusyTeamId(teamId);
     setError(null);
     try {
+      // Entry mode: the claim MINTS the session first (deterministic
+      // entry:mfl:… id; the api fn stores the token), hands the user to the
+      // host, then the canonical import below runs under the fresh token.
+      if (entry) {
+        const minted = await entryPlatformMint({
+          platform: 'mfl',
+          leagueInput: preview.league.league_id,
+          year: preview.league.season,
+          teamId,
+        });
+        onEntrySession?.({
+          user_id: minted.user_id,
+          display_name: minted.display_name,
+        });
+      }
       const res = await linkPlatformLeague({
         platform,
         leagueInput: preview.league.league_id,

@@ -27,6 +27,7 @@ import {
   EspnImportSummary,
   EspnMyLeague,
 } from '../api/espn';
+import { entryEspnPreview, entryPlatformMint } from '../api/platformEntry';
 
 interface Props {
   visible: boolean;
@@ -34,6 +35,17 @@ interface Props {
   /** Fired after a successful import — the caller merges the league into
    *  the cached list and activates it. */
   onLinked: (league: { league_id: string; name: string; total_rosters: number }) => void;
+  /** Sessionless entry mode (landing platform options v2, D-164): the sheet
+   *  is hosted by SignInScreen with NO session. Preview goes through the
+   *  sessionless /api/entry/platform; picking a team MINTS the entry session
+   *  first (delivered via onEntrySession), then runs the canonical import
+   *  under the fresh token. Session-dependent niceties are suppressed: the
+   *  `espn.league_picker` my-leagues list reads STORED credentials, which an
+   *  entry user doesn't have yet. Default off — linked flow byte-identical. */
+  entry?: boolean;
+  /** Entry mode only: the minted session's user, delivered BEFORE the import
+   *  runs so the host can pin it into useSession. */
+  onEntrySession?: (user: { user_id: string; display_name: string }) => void;
 }
 
 // Copy for the backend's `espn_auth_required` 403. Two honest variants
@@ -60,7 +72,13 @@ function espnAuthErrorCopy(webviewCapture: boolean, cookiesWereSent: boolean): s
 //   2. team   — preview came back; "which team is yours?"
 //   3. done   — import summary: teams, match rate, skipped players,
 //               read-only expectations copy
-export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
+export default function EspnLinkSheet({
+  visible,
+  onClose,
+  onLinked,
+  entry,
+  onEntrySession,
+}: Props) {
   const [step, setStep] = useState<'input' | 'team' | 'done'>('input');
   const [input, setInput] = useState('');
   const [showCookies, setShowCookies] = useState(false);
@@ -139,7 +157,9 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
   // field" (see the render logic below). Guarded by the flag so it's a
   // true no-op with `espn.league_picker` off.
   async function fetchMyLeagues() {
-    if (!leaguePicker) return;
+    // Entry mode: /api/espn/my-leagues reads the session user's STORED
+    // credentials — neither exists before the mint. Skip, keep the text field.
+    if (!leaguePicker || entry) return;
     setMyLeaguesBusy(true);
     try {
       const leagues = await getMyEspnLeagues();
@@ -254,11 +274,19 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
     setBusy(true);
     setError(null);
     try {
-      const res = await linkEspnLeague({
-        espnLeagueId: leagueId,
-        espnS2: s2 || undefined,
-        swid: sw || undefined,
-      });
+      // Entry mode previews through the sessionless route — same wire shape,
+      // same errors (incl. the private-league 403 handled below).
+      const res: EspnLinkPreview | EspnImportSummary = entry
+        ? await entryEspnPreview({
+            espnLeagueId: leagueId,
+            espnS2: s2 || undefined,
+            swid: sw || undefined,
+          })
+        : await linkEspnLeague({
+            espnLeagueId: leagueId,
+            espnS2: s2 || undefined,
+            swid: sw || undefined,
+          });
       if (isEspnPreview(res)) {
         setPreview(res);
         setStep('team');
@@ -296,6 +324,24 @@ export default function EspnLinkSheet({ visible, onClose, onLinked }: Props) {
     setBusyTeamId(teamId);
     setError(null);
     try {
+      // Entry mode: the claim MINTS the session first (deterministic
+      // entry:espn:… id; the api fn stores the token), hands the user to the
+      // host, then the canonical import below runs under the fresh token —
+      // exactly the linked flow from here on.
+      if (entry) {
+        const minted = await entryPlatformMint({
+          platform: 'espn',
+          espnLeagueId: preview.league.espn_league_id,
+          season: preview.league.season,
+          teamId,
+          espnS2: espnS2.trim() || undefined,
+          swid: swid.trim() || undefined,
+        });
+        onEntrySession?.({
+          user_id: minted.user_id,
+          display_name: minted.display_name,
+        });
+      }
       const res = await linkEspnLeague({
         espnLeagueId: preview.league.espn_league_id,
         season: preview.league.season,

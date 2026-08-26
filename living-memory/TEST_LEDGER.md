@@ -15,6 +15,15 @@
 
 
 
+## 2026-08-26b — Platform entry decoupled from Apple (D-164) — full gates
+
+Scope: [docs/plans/landing-platform-options/scope.md](../docs/plans/landing-platform-options/scope.md) §V2 · code-walk §V2 · decision: [D-164](DECISIONS.md)
+
+- **Backend pytest:** new `backend/tests/test_entry_platform_route.py` — **13/13 PASS** (flag gating feature+platform, bad platform, MFL preview persists/mints nothing, deterministic `entry:mfl:` mint + users row + idempotent re-claim, bad franchise 400, ESPN preview shape, cookie XOR, SWID-keyed id, #321 wrong-account 403, bad team 400, private→`espn_auth_required`, and the end-to-end proof: minted token drives the real `/api/mfl/link` import and binds the claimed franchise to the entry user in `league_members`). Full suite **4,289 passed / 1 skipped** (5:42).
+- **Structural guard:** `check-landing-platform-options.js` extended to **36/36 PASS** — V2 pins: no Apple in the panel, mint-before-canonical-import in both sheets, session-dependent paths suppressed in entry mode, `account_only` entry user, token stored + signin funnel in the api layer, route sessionless + dual-gated + deterministic `entry:` ids via `_extension_build_session`.
+- **Typecheck:** `npx tsc --noEmit` clean · **testid-lint:** OK.
+- **Owed (operator, next TestFlight build):** checklist v2 in scope §V2 — public ESPN claim with no Apple prompt anywhere, private ESPN via the ESPN WebView, MFL claim, relaunch persistence, Sleeper flow unchanged, sign-out→re-claim recovers the board. Supersedes v1 §3 steps 2–4.
+
 ## 2026-08-26 — Landing platform options (Sleeper · ESPN · MFL entry chips) — full gates
 
 Scope: [docs/plans/landing-platform-options/scope.md](../docs/plans/landing-platform-options/scope.md) · code-walk: [code-walk.md](../docs/plans/landing-platform-options/code-walk.md) · decision: [D-163](DECISIONS.md)
@@ -2993,6 +3002,7 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-08-26b — Platform entry decoupled from Apple (D-164) — full gates](#2026-08-26b--platform-entry-decoupled-from-apple-d-164--full-gates)
 - [2026-08-26 — Landing platform options (Sleeper · ESPN · MFL entry chips) — full gates](#2026-08-26--landing-platform-options-sleeper--espn--mfl-entry-chips--full-gates)
 - [2026-08-25 — v1.16.6 (EAS build 132) BUILT + SUBMITTED to TestFlight](#2026-08-25--v1166-eas-build-132-built--submitted-to-testflight)
 - [2026-08-24c — Waves A + B0 SHIPPED — PRs #197/#199, EAS 1.16.4 (130) submitted](#2026-08-24c--waves-a--b0-shipped--prs-197199-eas-1164-130-submitted)

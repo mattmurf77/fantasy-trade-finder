@@ -141,6 +141,107 @@ assert(
   'single-league auto-skip blocks on autoOpenMflLink',
 );
 
+// ── V2 (D-164): sessionless platform entry — no Apple dependency ─────────
+const espnSheet = read('src/components/EspnLinkSheet.tsx');
+const platformSheet = read('src/components/PlatformLinkSheet.tsx');
+const entryApi = read('src/api/platformEntry.ts');
+const serverPy = fs.readFileSync(
+  path.join(__dirname, '..', '..', 'backend', 'server.py'), 'utf8');
+
+// V2.1 — the panel opens the entry sheet; Apple is NOT in the panel.
+assert(
+  /signin\.platform-link-btn/.test(signIn) &&
+    /setEntrySheet\(entryPlatform === 'espn' \? 'espn' : 'mfl'\)/.test(signIn),
+  'V2: panel button opens the entry sheet',
+);
+assert(
+  !/signin\.platform-apple-btn/.test(signIn),
+  'V2: no Apple button inside the platform panel',
+);
+
+// V2.2 — the host pins an account_only entry user, then routes to the
+// picker (whose platform-league merge + auto-skip finish the flow).
+const entrySessionFn = signIn.match(
+  /async function handleEntrySession[\s\S]{0,600}?\n  \}/,
+);
+assert(
+  !!entrySessionFn && /account_only: true/.test(entrySessionFn[0]),
+  'V2: handleEntrySession pins an account_only entry user',
+);
+assert(
+  /function handleEntryLinked\(\) \{\s*\n\s*setEntrySheet\(null\);\s*\n\s*\(onAccountSignedIn \?\? onSignedIn\)\(\);/.test(signIn),
+  'V2: entry link completion routes through the account callback',
+);
+assert(
+  /<EspnLinkSheet\s*\n\s*entry\b/.test(signIn) &&
+    /<PlatformLinkSheet\s*\n\s*entry\b/.test(signIn),
+  'V2: SignIn hosts both sheets in entry mode',
+);
+
+// V2.3 — sheets: mint BEFORE the canonical import, inside pickTeam.
+const espnPick = espnSheet.match(/async function pickTeam[\s\S]{0,900}?await linkEspnLeague/);
+assert(
+  !!espnPick && /if \(entry\) \{[\s\S]{0,400}entryPlatformMint\(/.test(espnPick[0]),
+  'V2: ESPN pickTeam mints the entry session before the canonical import',
+);
+const mflPick = platformSheet.match(/async function pickTeam[\s\S]{0,900}?await linkPlatformLeague/);
+assert(
+  !!mflPick && /if \(entry\) \{[\s\S]{0,400}entryPlatformMint\(/.test(mflPick[0]),
+  'V2: MFL pickTeam mints the entry session before the canonical import',
+);
+
+// V2.4 — sheets: session-dependent paths suppressed in entry mode.
+assert(
+  /if \(!leaguePicker \|\| entry\) return;/.test(espnSheet),
+  'V2: entry mode skips the my-leagues fetch (stored-credential read)',
+);
+assert(
+  /useFlag\('mfl\.auth_link'\) && platform === 'mfl' && !entry/.test(platformSheet),
+  'V2: entry mode suppresses the MFL username/password path',
+);
+assert(
+  /entry\s*\n?\s*\? await entryEspnPreview\(/.test(espnSheet) &&
+    /entry\s*\n?\s*\? await entryMflPreview\(/.test(platformSheet),
+  'V2: entry mode previews through the sessionless route',
+);
+
+// V2.5 — the api layer stores the minted token and carries the signin funnel.
+assert(
+  /await setSessionToken\(res\.session_token\);/.test(entryApi) &&
+    /track\('signin_attempted', \{ method: args\.platform \}/.test(entryApi) &&
+    /track\('signin_succeeded', \{ method: args\.platform \}/.test(entryApi) &&
+    /signin_failed/.test(entryApi),
+  'V2: mint stores the token and fires the signin funnel (method espn/mfl)',
+);
+
+// V2.6 — backend route exists, sessionless, dual-gated, deterministic ids.
+const entryRoute = serverPy.match(
+  /@app\.route\("\/api\/entry\/platform", methods=\["POST"\]\)\s*\ndef entry_platform\(\):[\s\S]{0,9000}?\n@app\.route/,
+);
+assert(!!entryRoute, 'V2: POST /api/entry/platform route exists');
+assert(
+  !!entryRoute &&
+    /is_enabled\("landing\.platform_options"\)/.test(entryRoute[0]) &&
+    /is_enabled\("espn\.link"\)/.test(entryRoute[0]) &&
+    /is_enabled\("mfl\.link"\)/.test(entryRoute[0]),
+  'V2: entry route gated on the feature flag AND each platform flag',
+);
+assert(
+  !!entryRoute && !/_require_session\(\)/.test(entryRoute[0]),
+  'V2: entry route is sessionless (no _require_session)',
+);
+assert(
+  !!entryRoute &&
+    /entry:espn:\{_espn\.canonical_swid\(team\.owner_swid\)\}/.test(entryRoute[0]) &&
+    /entry:espn:\{league_id\}\.t\{team_id\}/.test(entryRoute[0]) &&
+    /f"entry:\{_mfl_member_id\(league_id, franchise_id\)\}"/.test(entryRoute[0]),
+  'V2: deterministic entry: ids, distinct from the espn:/mfl: placeholder class',
+);
+assert(
+  !!entryRoute && /_extension_build_session\(/.test(entryRoute[0]),
+  'V2: mint goes through the one reusable session builder',
+);
+
 // ── 7. flag registered on both sides ─────────────────────────────────────
 assert(
   /"landing\.platform_options": true/.test(features),
