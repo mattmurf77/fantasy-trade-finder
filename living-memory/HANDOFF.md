@@ -10,6 +10,17 @@
 
 
 
+## 2026-08-26 — Landing platform options SHIPPED to main; owed: TestFlight checklist on the next build + worktree sweep
+
+**Where:** entry-page platform options (Sleeper · ESPN · MFL chips on `SignInScreen`, flag `landing.platform_options`, [D-163](DECISIONS.md)) built under full gates in worktree `app-entry-platform-options-3e16ac` and merged to `main`. Backend delta is flag-registry-only (features.json + FLAG_KEYS + the three flag fixtures), so the Render deploy is inert; **the mobile change reaches users only with the next EAS build** — nothing after v1.16.6 (132) carries it yet.
+
+**Owed:**
+1. **Operator TestFlight checklist** — [docs/plans/landing-platform-options/scope.md](../docs/plans/landing-platform-options/scope.md) §3 (6 steps: chips render, ESPN chip → Apple → ESPN sheet auto-opens un-wedged, MFL twin, Sleeper flow unchanged, single-league auto-skip yields to the MFL intent) — on the next build that carries this; log the outcome in TEST_LEDGER.
+2. **Worktree sweep** — `.claude/worktrees/app-entry-platform-options-3e16ac` (branch `claude/app-entry-platform-options-3e16ac`) couldn't remove itself; once content is verified on `origin/main`, ledger + remove per docs/recovery/CLAUDE.md.
+3. **Surfaced waiver (scope §1):** no chip-selection analytics event — taxonomy is default-deny for new client events pending a tracking-plan addendum; signin funnel + `league_selected.platform` cover the flow. If selection-level data is wanted, it's a one-event follow-up.
+
+**Blocking:** nothing. Revert lever: `landing.platform_options: false` + `POST /api/feature-flags/reload` (config-only, no deploy).
+
 ## 2026-08-25 — v1.16.6 (132) is on TestFlight; everything owed is now RUNTIME verification, not code
 
 **Where:** `main` at `c092f808`+ (release) — nothing in flight, no branch open, working tree clean. EAS build `8925880d` **finished** and submission `b190d30b` **finished**; Apple-side processing then TestFlight availability is the only remaining step and it is not ours.

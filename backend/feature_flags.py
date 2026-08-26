@@ -74,6 +74,9 @@ FLAG_KEYS: tuple[str, ...] = (
     "profiles.public_pages",
     "landing.smart_start_cta",
     "landing.try_before_sync",
+    # Landing platform options (2026-08-26): SignInScreen's Sleeper/ESPN/MFL
+    # entry chips. Client-only gate — no backend route reads it.
+    "landing.platform_options",
     # Player profiles (#17)
     "players.profile_pages",
     # Trade math (Agent A8)

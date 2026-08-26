@@ -14,6 +14,10 @@
 
 
 
+## 2026-08-26 — Entry page offers Sleeper · ESPN · MFL (flag `landing.platform_options`; D-163)
+
+Operator ask: the entry page for new users should offer ESPN and MFL alongside Sleeper as supported platforms. Built in worktree `app-entry-platform-options-3e16ac` under full gates ([scope](../docs/plans/landing-platform-options/scope.md), [code-walk](../docs/plans/landing-platform-options/code-walk.md)). `SignInScreen` (the `onboarding.landing` layout) gains a three-chip platform row: Sleeper (default) renders the existing username form untouched; ESPN/MFL swap it for an explainer + Sign in with Apple — the link routes `_require_session`, and Apple is the only username-free session mint (D-163) — and the choice rides both Apple callbacks as `platformIntent`, so RootNav lands LeaguePicker with the matching sheet auto-opened (#130 `espnLink` / new symmetric `mflLink` with the same #266 transition-settled deferral; single-league auto-skip yields to the intent). Also corrected the dark smart-start "ESPN/MFL sync is coming soon" copy (both live). Evidence: 20-assertion `check-landing-platform-options` guard, tsc clean, testid-lint OK, backend 4,275 green after mirroring the flag into the three flag fixtures. Owed: operator TestFlight checklist (scope §3) on the next build; waiver surfaced — no chip-selection analytics event (taxonomy default-deny; signin funnel + `league_selected.platform` cover it).
+
 ## 2026-08-25 — v1.16.6 (build 132) on TestFlight: the Quick Set funnel can finally emit
 
 PR #196 merged (`b7591418`), then cut and submitted **v1.16.6 / EAS 132** (build `8925880d`, submission `b190d30b`, both finished). This is the first binary that sends `via:'quickset'`, so `quickset_completed`, `tier_save.props.via` and the point-of-use `ranking_method='quickset'` stop reading zero from here — treat the release as the seam. Version bumped rather than reusing 1.16.5 (build 131 already holds it) to keep the 1:1 version↔build mapping the owed checklists name.

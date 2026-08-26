@@ -15,6 +15,16 @@
 
 
 
+## 2026-08-26 — Landing platform options (Sleeper · ESPN · MFL entry chips) — full gates
+
+Scope: [docs/plans/landing-platform-options/scope.md](../docs/plans/landing-platform-options/scope.md) · code-walk: [code-walk.md](../docs/plans/landing-platform-options/code-walk.md) · decision: [D-163](DECISIONS.md)
+
+- **Structural guard:** `mobile/tests/check-landing-platform-options.js` (`npm run test:landing-platform-options`) — **20/20 PASS**. Pins the dual flag gate, per-platform chip gates + de-flag fallback, intent forwarding on both Apple branches, the s0.2 guide advance, RootNav's intent→param mapping, the MFL auto-open's #266 deferral, the auto-skip block, and the two-sided flag registration.
+- **Typecheck:** `npx tsc --noEmit` (strict) — clean.
+- **testid-lint:** `bash mobile/scripts/testid-lint.sh` — OK (new `signin.platform-*` ids are flow-unreferenced).
+- **Backend:** `pytest backend/tests` — **4275 passed, 1 skipped** on first run with one failure (`test_release_flags_mirror_features_json` — the new flag key missing from the mirror fixtures); fixed by adding `landing.platform_options: true` to `release.json` / `profiles-on.json` / `onboarding-v2.json`, after which `test_seed_ui_test_db.py` is **76/76 PASS**. No backend behavior changed (FLAG_KEYS + fixtures only).
+- **Owed (operator, next TestFlight build):** the 6-step runtime checklist in scope.md §3 — chips render, ESPN chip → Apple → ESPN sheet auto-opens un-wedged (#266 class), MFL twin, Sleeper flow unchanged, single-league auto-skip yields to the MFL intent.
+
 ## 2026-08-25 — v1.16.6 (EAS build 132) BUILT + SUBMITTED to TestFlight
 
 Carries PR #196's `via:'quickset'` tag ([D-162](DECISIONS.md)) — the first build in which the Quick Set funnel can emit anything.
@@ -2983,6 +2993,8 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-08-26 — Landing platform options (Sleeper · ESPN · MFL entry chips) — full gates](#2026-08-26--landing-platform-options-sleeper--espn--mfl-entry-chips--full-gates)
+- [2026-08-25 — v1.16.6 (EAS build 132) BUILT + SUBMITTED to TestFlight](#2026-08-25--v1166-eas-build-132-built--submitted-to-testflight)
 - [2026-08-24c — Waves A + B0 SHIPPED — PRs #197/#199, EAS 1.16.4 (130) submitted](#2026-08-24c--waves-a--b0-shipped--prs-197199-eas-1164-130-submitted)
 - [2026-08-24b — Wave B0 the layout merge (`calc.inline_home`) — full gates, FLAG DARK, NOT MERGED](#2026-08-24b--wave-b0-the-layout-merge-calcinline_home--full-gates-flag-dark-not-merged-on-featinline-home-b0)
 - [2026-08-24 — Onboarding-tour Wave A — full gates green on `feat/tour-wave-a`; runtime evidence owed](#2026-08-24--onboarding-tour-wave-a--full-gates-green-on-feattour-wave-a;-runtime-evidence-owed)

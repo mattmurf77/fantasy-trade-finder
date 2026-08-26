@@ -14,7 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { ink, chalk, ice, semantic, space, radii, type, fonts } from '../theme/chalkline';
-import { TickLabel } from '../components/chalkline';
+import { TickLabel, Text as ChalkText } from '../components/chalkline';
 import { appleSignIn, resolveSmartStart, signIn } from '../api/auth';
 import { track } from '../api/events';
 import { consumeAppleReauthHint, NO_LEAGUE_ID, useSession } from '../state/useSession';
@@ -34,8 +34,14 @@ import { testLaunchArg } from '../utils/testRouteEntry';
 // argument domain is volatile and cannot be set at runtime.
 const TEST_APPLE_SUB = testLaunchArg('FTFTestAppleSub');
 
+/** Landing platform options (`landing.platform_options`): the entry chip a
+ *  non-Sleeper manager picked before signing in with Apple. Rides the two
+ *  sign-in callbacks so RootNav can land LeaguePicker with the matching
+ *  link sheet auto-opened (#130 `espnLink` / its new `mflLink` twin). */
+export type EntryPlatformIntent = 'espn' | 'mfl';
+
 interface Props {
-  onSignedIn: () => void;
+  onSignedIn: (platformIntent?: EntryPlatformIntent) => void;
   /** Called when the user opts into the seeded demo session. Bundle 8 sends
    *  them straight into the Main tabs (no league picker). */
   onDemoStarted?: () => void;
@@ -43,7 +49,7 @@ interface Props {
    *  Sleeper source — the account-keyed session + sentinel league are
    *  already pinned, so the caller routes straight into Main (no league
    *  picker). Falls back to onSignedIn when unset. */
-  onAccountSignedIn?: () => void;
+  onAccountSignedIn?: (platformIntent?: EntryPlatformIntent) => void;
 }
 
 // Sign-in (P2.6 account-first): Sign in with Apple is the PRIMARY portal
@@ -85,6 +91,54 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
   // landing.try_before_sync (the backend demo endpoint 404s without it) —
   // the operator flips that flag together with onboarding.landing.
   const landingOn = useOnboardingFeature('onboarding.landing');
+
+  // ── Landing platform options (flag `landing.platform_options`) ─────────
+  // The entry page offers Sleeper · ESPN · MFL as supported platforms.
+  // Sleeper (default) renders today's username form untouched. ESPN/MFL swap
+  // the form for an explainer + Sign in with Apple: the link routes
+  // (/api/espn/link, /api/mfl/link) require a session, and Apple is the only
+  // mint that doesn't need a Sleeper username — the chip choice rides the
+  // Apple callbacks as `platformIntent` and LeaguePicker opens the matching
+  // link sheet on arrival. landingOn-layout only: the flags-off P2.6 layout
+  // is already Apple-first and platform-agnostic.
+  const platformOptionsFlag = useFlag('landing.platform_options');
+  const espnLinkOn = useFlag('espn.link');
+  const mflLinkOn = useFlag('mfl.link');
+  const [entryPlatform, setEntryPlatform] =
+    useState<'sleeper' | EntryPlatformIntent>('sleeper');
+  const platformChips: Array<'sleeper' | EntryPlatformIntent> = [
+    'sleeper',
+    ...(espnLinkOn ? (['espn'] as const) : []),
+    ...(mflLinkOn ? (['mfl'] as const) : []),
+  ];
+  // A single chip is no choice — hide the row unless ≥2 platforms are live.
+  const platformPickerShown =
+    landingOn && platformOptionsFlag && platformChips.length >= 2;
+  const nonSleeperEntry = platformPickerShown && entryPlatform !== 'sleeper';
+  // Flag revalidation can withdraw the selected platform mid-session — fall
+  // back to Sleeper instead of stranding the user on a chip that no longer
+  // renders.
+  useEffect(() => {
+    if (
+      (entryPlatform === 'espn' && !espnLinkOn) ||
+      (entryPlatform === 'mfl' && !mflLinkOn)
+    ) {
+      setEntryPlatform('sleeper');
+    }
+  }, [entryPlatform, espnLinkOn, mflLinkOn]);
+
+  function selectEntryPlatform(p: 'sleeper' | EntryPlatformIntent) {
+    if (p === entryPlatform) return;
+    setEntryPlatform(p);
+    setError(null);
+    setErrorKind(null);
+    if (p !== 'sleeper') {
+      Keyboard.dismiss();
+      // The Analyst's s0.2 spotlight targets the username field this chip
+      // hides — advance it so no spotlight is left pointing at nothing.
+      advanceGuideIfActive('s0.2');
+    }
+  }
 
   // ── Sign in with Apple (auth.accounts flag; account-auth plan P2/P2.6) ─
   const [appleAvailable, setAppleAvailable] = useState(false);
@@ -176,6 +230,10 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
 
   async function handleAppleSignIn() {
     if (busy || demoBusy || appleBusy) return;
+    // Landing platform options: an ESPN/MFL chip selection rides the Apple
+    // flow so LeaguePicker can auto-open the matching link sheet on arrival.
+    const platformIntent: EntryPlatformIntent | undefined =
+      nonSleeperEntry ? entryPlatform : undefined;
     setAppleBusy(true);
     setError(null);
     setErrorKind(null);
@@ -223,7 +281,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
           // Non-fatal; picker will fetch its own copy
         }
         track('signin_succeeded', { method: 'apple' }, 'SignIn');
-        onSignedIn();
+        onSignedIn(platformIntent);
       } else if (res.account_only && res.user_id && res.session_token) {
         // ACCOUNT-FIRST (P2.6): no Sleeper source linked — the backend
         // minted an account-keyed session with an empty sentinel league.
@@ -241,7 +299,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
           league_name: res.league_name || 'No league linked',
         });
         track('signin_succeeded', { method: 'apple' }, 'SignIn');
-        (onAccountSignedIn ?? onSignedIn)();
+        (onAccountSignedIn ?? onSignedIn)(platformIntent);
       } else {
         throw new Error('Apple sign-in did not return a usable session.');
       }
@@ -301,8 +359,21 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
             { method, error_code: 'platform_unsupported' },
             'SignIn',
           );
+          // ESPN/MFL are live platforms now — a league URL just can't START
+          // sign-in (the link routes need a session first). Point at the
+          // entry chips when they render; otherwise at the Settings path.
+          const pname =
+            resolved.platform === 'espn'
+              ? 'ESPN'
+              : resolved.platform === 'mfl'
+              ? 'MFL'
+              : null;
           setError(
-            `${resolved.platform === 'espn' ? 'ESPN' : resolved.platform === 'mfl' ? 'MyFantasyLeague' : 'That platform'} sync is coming soon — paste a Sleeper league URL or your username for now.`,
+            pname && platformPickerShown
+              ? `That's an ${pname} league URL — choose ${pname} above to link it.`
+              : pname
+              ? `${pname} leagues link after sign-in — enter a Sleeper username here, or sign in with Apple and link your league from Settings.`
+              : "That league URL isn't from a supported platform — paste a Sleeper league URL or your username.",
           );
           setBusy(false);
           return;
@@ -449,6 +520,40 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
                 {inviteHeadline}
               </Text>
             ) : null}
+            {/* Landing platform options — Sleeper · ESPN · MFL entry chips.
+                Sleeper (default) leaves the form below untouched; ESPN/MFL
+                swap it for the explainer + Apple panel further down. */}
+            {platformPickerShown ? (
+              <View style={styles.platformRow}>
+                {platformChips.map((p) => {
+                  const on = entryPlatform === p;
+                  return (
+                    <Pressable
+                      key={p}
+                      testID={`signin.platform-${p}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Use ${
+                        p === 'sleeper' ? 'Sleeper' : p === 'espn' ? 'ESPN' : 'MyFantasyLeague'
+                      }`}
+                      accessibilityState={{ selected: on }}
+                      onPress={() => selectEntryPlatform(p)}
+                      disabled={busy || demoBusy || appleBusy}
+                      style={({ pressed }) => [
+                        styles.platformChip,
+                        on && styles.platformChipOn,
+                        pressed && !on && styles.platformChipPressed,
+                      ]}
+                    >
+                      <ChalkText
+                        style={[styles.platformChipText, on && styles.platformChipTextOn]}
+                      >
+                        {p === 'sleeper' ? 'Sleeper' : p === 'espn' ? 'ESPN' : 'MFL'}
+                      </ChalkText>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : null}
             {!landingOn && appleShown ? (
               <>
                 {/* P2.6 — Apple is the PRIMARY portal. Official Apple button
@@ -468,7 +573,44 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
                 <Text style={styles.orDivider}>or continue with Sleeper</Text>
               </>
             ) : null}
-            {hint ? (
+            {nonSleeperEntry ? (
+              // ESPN/MFL entry panel: explainer + Sign in with Apple. The
+              // link routes require a session, and Apple is the only mint
+              // that doesn't need a Sleeper username — the chip choice rides
+              // handleAppleSignIn as `platformIntent`.
+              <View testID="signin.platform-panel">
+                <ChalkText style={styles.platformExplainer}>
+                  {entryPlatform === 'espn'
+                    ? 'ESPN dynasty leagues are supported. Sign in with Apple to save your board, then link your ESPN league — it takes about a minute.'
+                    : 'MyFantasyLeague dynasty leagues are supported. Sign in with Apple to save your board, then link your MFL league — it takes about a minute.'}
+                </ChalkText>
+                {appleShown ? (
+                  <>
+                    <AppleAuthentication.AppleAuthenticationButton
+                      testID="signin.platform-apple-btn"
+                      buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+                      buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
+                      cornerRadius={radii.sm}
+                      style={styles.appleButton}
+                      onPress={handleAppleSignIn}
+                    />
+                    {appleBusy ? (
+                      <ActivityIndicator color={chalk.dim} style={styles.appleBusy} />
+                    ) : null}
+                  </>
+                ) : (
+                  <ChalkText
+                    testID="signin.platform-unavailable"
+                    style={styles.platformUnavailable}
+                  >
+                    {`Linking ${
+                      entryPlatform === 'espn' ? 'an ESPN' : 'an MFL'
+                    } league needs Sign in with Apple, which isn't available on this device.`}
+                  </ChalkText>
+                )}
+              </View>
+            ) : null}
+            {!nonSleeperEntry && hint ? (
               <Pressable
                 testID="signin.hint-btn"
                 accessibilityRole="button"
@@ -488,7 +630,10 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
               </Pressable>
             ) : null}
             {/* Guide spotlight target — collapsable={false} so the wrapper
-                survives view-flattening and stays measurable. */}
+                survives view-flattening and stays measurable. Hidden while an
+                ESPN/MFL chip is selected; selectEntryPlatform advances s0.2
+                first so no spotlight outlives its target. */}
+            {nonSleeperEntry ? null : (
             <View ref={usernameFieldRef} collapsable={false}>
             <TextInput
               testID="signin.username-input"
@@ -508,7 +653,8 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
               inputMode="text"
             />
             </View>
-            {landingOn ? (
+            )}
+            {nonSleeperEntry ? null : landingOn ? (
               <Text style={styles.fieldHint}>
                 No password. Your league's rosters do the talking.
               </Text>
@@ -537,6 +683,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
                 )}
               </Pressable>
             ) : null}
+            {nonSleeperEntry ? null : (
             <Pressable
               testID="signin.continue-btn"
               accessibilityRole="button"
@@ -561,6 +708,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
                 </Text>
               )}
             </Pressable>
+            )}
 
             {tryDemoEnabled ? (
               <Pressable
@@ -587,7 +735,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
               </Pressable>
             ) : null}
 
-            {landingOn && appleShown ? (
+            {landingOn && appleShown && !nonSleeperEntry ? (
               // ADR-006: quiet re-entry door for existing Apple-bound
               // (P2.6 account-only) users — they may have no Sleeper
               // username to type. Text link by design: it must never
@@ -748,6 +896,43 @@ const styles = StyleSheet.create({
   fieldHint: {
     ...type.bodySm,
     marginTop: -space.xs,
+    marginBottom: space.sm,
+  },
+  // ── Landing platform options (Sleeper · ESPN · MFL entry chips) ────────
+  // Outline chips matching hintRow's border treatment; selected = ice, the
+  // one action accent Chalkline allows.
+  platformRow: {
+    flexDirection: 'row',
+    gap: space.sm,
+    marginBottom: space.md,
+  },
+  platformChip: {
+    flex: 1,
+    minHeight: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: ink.lineStrong,
+    borderRadius: radii.sm,
+    paddingHorizontal: space.md,
+  },
+  platformChipOn: { borderColor: ice.base },
+  platformChipPressed: { backgroundColor: ink.ink3 },
+  platformChipText: {
+    ...type.bodySm,
+    fontFamily: fonts.uiSemi,
+    color: chalk.dim,
+  },
+  platformChipTextOn: { color: chalk.base },
+  platformExplainer: {
+    ...type.bodySm,
+    color: chalk.dim,
+    marginBottom: space.md,
+  },
+  platformUnavailable: {
+    ...type.bodySm,
+    color: chalk.faint,
     marginBottom: space.sm,
   },
   // ── Sign in with Apple (auth.accounts; P2.6 primary portal) ────────────
