@@ -36,7 +36,7 @@ EXCLUDED = {
     "color-lab.html":   "frozen ADR-005 palette artifact; not shipped",
     "color-lab-2.html": "frozen ADR-005 palette artifact; not shipped",
     "style-guide.html": "internal design reference; 404s in prod",
-    "admin/analytics.html": "operator dashboard; CRON_SECRET-gated data",
+    "admin/analytics.html": "operator dashboard; 404s in prod, CRON_SECRET-gated data",
 }
 
 # docs/design/design-system.md is the authority for these.

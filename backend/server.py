@@ -9578,13 +9578,15 @@ def rankings_import_apply():
 # web/ is served at the site root (static_url_path=""), so every file in it is
 # reachable by guessing its path. These are build-time design artifacts with no
 # user or operator value in production.
-# NOTE: web/admin/analytics.html is deliberately NOT in this set — the operator
-# uses it against production data. Its data is CRON_SECRET-gated; only the page
-# shell is public. Blocking it is an operator decision, not an engineering one.
+# web/admin/analytics.html is blocked here per the operator's 2026-08-26 call.
+# Its data was already CRON_SECRET-gated — only the page shell was public — so
+# this removes a public shell, not an access control. The operator reaches it by
+# running the server locally, where _IS_PROD_ENV is false.
 _PROD_BLOCKED_STATIC = frozenset({
     "/style-guide.html",
     "/color-lab.html",
     "/color-lab-2.html",
+    "/admin/analytics.html",
 })
 
 

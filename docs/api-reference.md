@@ -13,7 +13,10 @@ The extension uses its own token from `/api/extension/auth`.
 `/api/*` and `/og/*` always return JSON `{"error": "not_found"}` — the contract clients parse —
 while any other path with `text/html` in `Accept` gets `web/404.html`. Browser navigation to a
 mistyped URL previously rendered raw JSON. Additionally `_PROD_BLOCKED_STATIC` 404s the design-lab
-pages (`/style-guide.html`, `/color-lab*.html`) in deployed environments only.
+pages (`/style-guide.html`, `/color-lab*.html`) and, per the operator's 2026-08-26 call, the
+operator dashboard shell (`/admin/analytics.html`) in deployed environments only. The dashboard's
+data was already `X-Cron-Secret`-gated, so this removes a public page shell, not an access control;
+the operator reaches it by running the server locally.
 
 
 ## Table of Contents
