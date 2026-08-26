@@ -2,7 +2,7 @@
   "expo": {
     "name": "Fleeced",
     "slug": "dtf-dynasty-trade-finder",
-    "version": "1.16.6",
+    "version": "1.16.7",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "dtf",

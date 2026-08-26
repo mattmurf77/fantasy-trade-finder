@@ -527,7 +527,7 @@ Feature docs: [docs/feedback/items/360-avoiding-positions/](feedback/items/360-a
 
 ---
 
-## Flags — Standing offers (#362) (2026-08-19 — ships dark)
+## Flags — Standing offers (#362) (built 2026-08-19 dark; **shipped LIT 2026-08-26**, operator ruling)
 
 Feature docs: [docs/feedback/items/362-standing-offer/](feedback/items/362-standing-offer/).
 

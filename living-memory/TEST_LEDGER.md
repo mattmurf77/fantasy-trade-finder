@@ -11,20 +11,41 @@
 
 ---
 
-## 2026-08-26 — #360/#361 + #362 REBUILT on current main, full gates re-run — NOT PUSHED, on `feat/jon-360-362`
+## 2026-08-26 — #360/#361 + #362 REBUILT on current main; #362 SHIPPED LIT, #360 held dark
 
 **Branch:** `feat/jon-360-362` — the 2026-08-19 build (base `2a492b6`) merged with
 `origin/main` `867c3baa` (123 commits: knockout refine D-159, full sweep, #384, package
-pricing honesty #162, pick YoY floor, receipts/breaker/negmem). **Not pushed, not merged.**
+pricing honesty #162, pick YoY floor, receipts/breaker/negmem).
 This entry REPLACES the stale 2026-08-19i entry — those were the pre-rebase numbers.
-Flags: **both dark** — `trade.avoid_positions` `false` ([Q-032](OPEN_QUESTIONS.md)),
-`trade.standing_offers` `false`. Records:
+Flags at ship: **`trade.standing_offers` `true`** (graduated, [D-164](DECISIONS.md)) ·
+**`trade.avoid_positions` `false`** (held — [Q-031](OPEN_QUESTIONS.md) gen_v2 gap is live in
+prod, [Q-032](OPEN_QUESTIONS.md) upheld). Records:
 [360-avoiding-positions/](../docs/feedback/items/360-avoiding-positions/) ·
 [362-standing-offer/](../docs/feedback/items/362-standing-offer/) · [D-163](DECISIONS.md).
 
-| Gate | Result (measured 2026-08-26 on the merged tree) |
+**Gates were run THREE times and all three runs are reported here**, because the flag flip
+was made between them and the middle run failed:
+
+1. **Pre-flip (both flags dark), run by this session independently of the build agent:**
+   `4336 passed, 1 skipped` in 364.57s, exit 0 — matching the build agent's reported number
+   exactly. That cross-check is why the agent's other claims were taken as measured.
+2. **Post-flip, first run:** `1 failed, 4335 passed, 1 skipped` (443.25s). The single failure
+   was `test_standing_offers.py::test_flag_and_knobs_registered`, which asserted
+   `features["trade.standing_offers"] is False, "ships dark"`. **No behavior broke — the only
+   thing that failed was a pin on the dark posture itself.**
+3. **Final, after updating the two dark-posture pins:** the numbers in the table below.
+
+**Two independent guards pinned this flag dark and BOTH were changed to ship it lit** —
+`mobile/tests/check-standing-offer-362.js` SC-14a ("graduation is an operator action after a
+TestFlight pass on a real league") and the backend assertion above. Each now asserts `true`
+and carries an in-file comment recording that graduation happened **without** the TestFlight
+pass, per [D-164](DECISIONS.md). A repo-wide search found no third pin. `SC-14b` — the
+`LAUNCHED_FLAG_DEFAULTS` absence check, which is the assertion that actually protects the
+kill switch ([D-163](DECISIONS.md)) — was **not** touched and holds in both flag states.
+
+| Gate | Result (final run, measured 2026-08-26 on the merged tree, flag lit) |
 |---|---|
-| `python3 -m pytest backend/tests -q` | **4336 passed, 1 skipped, 0 failed** (331.95s) |
+| `python3 -m pytest backend/tests -q` | **4336 passed, 1 skipped, 0 failed** (320.07s) |
 | `npx tsc --noEmit` (mobile) | **exit 0, zero errors** |
 | `bash mobile/scripts/testid-lint.sh` | **testid-lint OK**, exit 0 |
 | all `mobile/tests/check-*.js` | **82 passed, 0 failed** (80 pre-existing + `check-avoid-positions.js` + `check-standing-offer-362.js`) |

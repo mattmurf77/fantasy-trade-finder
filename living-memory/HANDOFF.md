@@ -10,6 +10,20 @@
 
 
 
+## 2026-08-26 — v1.16.7 ships #362 LIT; #360 is built and blocked on a live gen_v2 defect
+
+**Where:** `feat/jon-360-362` merged to `main` and pushed; v1.16.7 cut for TestFlight. The week-old dark build was merged onto current `main` (123 commits of drift), de-collided, re-gated, and shipped.
+
+**What went live.** `trade.standing_offers` = **true** ([D-164](DECISIONS.md)) — the post-like sheet, the three `/api/trades/standing-offer*` routes, the injector branch and the sender chip. Deploy-free tuning stays available: `standing_offer_inject_cap` (2.0; **0 kills injection without a flag flip**) and `standing_offer_days` (30.0).
+
+**What did NOT go live, and why.** `trade.avoid_positions` stays **false**. Checking prod before flipping found `bakeoff_serve_interleaved` = **1.0** live — not the `0.0` its seed and [Q-031](OPEN_QUESTIONS.md) both assumed — with `bakeoff_include_gen_v2` = 1.0. `trade_gen_v2.py` reads **no** positional preference, so it serves a third of every organic deck while ignoring them. #360's contract is "a promise, not a preference", and a promise cannot ship 2/3 true.
+
+**The thing to pick up first — this is a live bug, not a nicety.** Chasing and Shopping are silently ignored on the gen_v2 share of every real user's deck **today**, and have been since that knob was raised. Nothing to do with this branch. Q-031 is rewritten as live and escalated; it now offers three real choices (port preferences into gen_v2 / drop the knob to 0 and end the bake-off's serving phase / accept and disclose). **Resolving it also unblocks lighting #360, which is a four-file flip away.**
+
+**Owed runtime evidence, and it is the only kind mobile gets (D-056).** The #362 TestFlight checklist is **UNRUN** — the feature graduated without it, by explicit operator ruling. Two independent guards (mobile SC-14a, backend `test_flag_and_knobs_registered`) had pinned the flag dark with the reason "graduation is an operator action after a TestFlight pass on a real league"; both were changed to assert lit, each carrying an in-file note that the pass did not happen. `SC-14b`, the `LAUNCHED_FLAG_DEFAULTS` absence check that actually protects the kill switch ([D-163](DECISIONS.md)), was deliberately left untouched.
+
+**Sharp edge:** three gate runs are recorded in TEST_LEDGER, not one. The pre-flip run (4336/1, run independently) matched the build agent's claim exactly, which is why its other numbers were trusted. The post-flip run failed on exactly one thing — the dark-posture pin — and no behavior.
+
 ## 2026-08-25 — v1.16.6 (132) is on TestFlight; everything owed is now RUNTIME verification, not code
 
 **Where:** `main` at `c092f808`+ (release) — nothing in flight, no branch open, working tree clean. EAS build `8925880d` **finished** and submission `b190d30b` **finished**; Apple-side processing then TestFlight availability is the only remaining step and it is not ours.

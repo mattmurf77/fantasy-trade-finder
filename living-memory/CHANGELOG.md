@@ -14,6 +14,16 @@
 
 
 
+## 2026-08-26 — #362 standing offers ship LIT, #360 held dark; and gen_v2 turns out to be eating positional preferences in prod
+
+`feat/jon-360-362` — built dark 2026-08-19, held unmerged a week — merged onto current `main` (123 commits of drift; 22 conflicts in 18 files, plus 3 semantic fixes the conflicts did not flag). ID de-collision: D-098→**D-163**, Q-026/027/028→**Q-031/032/033**, G-053→**G-062**, M-005→**M-006**, plus five PRD-local decisions renumbered item-scoped.
+
+**Operator asked for both flags lit; only one shipped.** Checking prod first ([D-164](DECISIONS.md)) found `bakeoff_serve_interleaved = **1.0**` live — not the `0.0` its seed and [Q-031](OPEN_QUESTIONS.md) both assumed — with `bakeoff_include_gen_v2 = 1.0`. `trade_gen_v2.py` reads **no** positional preference (0 refs to `avoid_positions`/`acquire_positions`/`trade_away_positions`; 6 each to `not_interested_ids`/`untouchable_ids`), so it serves a third of every organic deck while ignoring them. `trade.standing_offers` → **true** (four files, G-062); `trade.avoid_positions` stays **false**, upholding Q-032 — a hard exclusion cannot ship while a third of the deck ignores it.
+
+**Pre-existing live defect now on the record:** Chasing and Shopping have been silently ignored on the gen_v2 share of every real deck since that knob was raised. Nothing to do with this branch. Q-031 rewritten from hypothetical to live and escalated.
+
+Runtime evidence for #362 is **none** — its TestFlight checklist is unrun, accepted explicitly by the operator.
+
 ## 2026-08-25 — v1.16.6 (build 132) on TestFlight: the Quick Set funnel can finally emit
 
 PR #196 merged (`b7591418`), then cut and submitted **v1.16.6 / EAS 132** (build `8925880d`, submission `b190d30b`, both finished). This is the first binary that sends `via:'quickset'`, so `quickset_completed`, `tier_save.props.via` and the point-of-use `ranking_method='quickset'` stop reading zero from here — treat the release as the seam. Version bumped rather than reusing 1.16.5 (build 131 already holds it) to keep the 1:1 version↔build mapping the owed checklists name.

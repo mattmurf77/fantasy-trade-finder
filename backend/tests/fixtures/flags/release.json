@@ -220,5 +220,5 @@
   "trade.negmem": false,
   "trade.full_sweep": true,
   "trade.avoid_positions": false,
-  "trade.standing_offers": false
+  "trade.standing_offers": true
 }
