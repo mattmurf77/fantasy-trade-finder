@@ -62,3 +62,6 @@ docs/design/icon-explorations/
 
 # Maestro ad-hoc screenshot output (screen-library captures live in /screens; run artifacts in mobile/test-artifacts)
 mobile/.maestro/screenshots/
+
+# 42MB, 3,073,019 rows — regenerable, deliberately not committed (see README)
+docs/reviews/2026-08-19-knockout-waterfall/knockout-all-candidates.csv.gz

@@ -1,5 +1,9 @@
 # FB-161 — unselected players drop on Quick Set save
 
+> **SUPERSEDED 2026-08-24 by #381/#346 (D-160):** the demote rule below is
+> removed — Quick Set saves now HOLD unselected players. See
+> [`../346-quickset-tier-drop/`](../346-quickset-tier-drop/prd.md).
+
 - **Type:** behavior fix · **Status:** built 2026-07-25 (branch `teardown-remediation` worktree)
 - **Screen:** QuickSetTiersScreen · **Backend:** `/api/tiers/save` + `RankingService.apply_tiers`
 - **Sibling:** FB-159 (empty-save-as-skip CTA) — its PRD explicitly carves this out; the two rules compose: **skip ≠ demote, only explicit saves demote.**

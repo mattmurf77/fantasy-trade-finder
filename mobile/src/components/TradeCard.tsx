@@ -1,8 +1,11 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
+  Modal,
+  Platform,
+  KeyboardAvoidingView,
   Pressable,
   ActivityIndicator,
   type AccessibilityActionEvent,
@@ -12,13 +15,30 @@ import { TickLabel, Button, Icon, Badge } from './chalkline';
 import PlayerCard from './PlayerCard';
 import StrengthBar from './StrengthBar';
 import TradeValueBar from './TradeValueBar';
+import CardImpactBlock from './CardImpactBlock';
+import type { CardImpactState } from '../state/useCardImpact';
 import SendInSleeperButton from './SendInSleeperButton';
 import DeclineReasonPanel, {
   type DeclineReasonPanelProps,
 } from './DeclineReasonPanel';
 import { LockGlyph } from './PlayerContextMenu';
+import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTargets';
 import { useFlag } from '../state/useFeatureFlags';
+import { consensusNote } from '../utils/consensusNote';
 import type { Player, TradeCard as TradeCardData } from '../shared/types';
+
+// #384 — the overlay presentation needs two host hooks the inline form has no
+// use for. Kept OUT of `DeclineReasonPanelProps` on purpose: the panel itself
+// knows nothing about being hosted in a sheet, and every existing caller of it
+// (inline deck, EndorsedTradeCard) must stay untouched.
+export interface DispositionReasons extends DeclineReasonPanelProps {
+  /** The ✕ opened the reason sheet. */
+  onOverlayOpened?: () => void;
+  /** The sheet was dismissed by the backdrop / system close. `banked` is true
+   *  when a layer-1 tile had already committed the pass — the host must then
+   *  commit the deferred deck advance, or the card is stranded (review #1). */
+  onOverlayDismissed?: (banked: boolean) => void;
+}
 
 interface Props {
   data: TradeCardData;
@@ -48,6 +68,12 @@ interface Props {
   // edited card's /api/trade/evaluate round-trip re-prices the package.
   onSwapPlayer?: (player: Player, side: 'give' | 'receive') => void;
   repricing?: boolean;
+  // #357 — per-card lineup + playoff-odds impact, fetched by the HOST for the
+  // fronted card only (operator: "compute on the fronted card only"). Absent
+  // on peek cards, match/awaiting mounts and read-only cards, which is what
+  // keeps a 30-card deck at one simulation rather than thirty. Prop-driven
+  // rather than self-fetching, per the components/ convention.
+  cardImpact?: CardImpactState | null;
   // Player context menu (teardown S3 PRD-02, flag ux.player_context_menu).
   // When set (screens pass it only while the flag is on), long-pressing ANY
   // player row opens the shared context menu instead of the legacy
@@ -95,8 +121,14 @@ interface Props {
     // the ✓ is untouched. Absent (flag off, or any non-deck mount) ⇒ the
     // shipped ✓/✕ row renders byte-identically. Only TradesScreen's top
     // card ever supplies it.
-    reasons?: DeclineReasonPanelProps;
+    reasons?: DispositionReasons;
   };
+  // #384 ruling 1 (review #7) — render the decline reasons as an OVERLAY over
+  // the page instead of the shipped inline tiles. A PROP, never a flag read:
+  // the operator scoped the overlay to "this version of the calculator", and
+  // only the host knows whether this deck was reached from it. Absent/false ⇒
+  // the shipped inline-tile form, byte-identical.
+  reasonsAsOverlay?: boolean;
   // #319 — rendered as the card's FINAL block, after the actions/send rows.
   // The Matches inbox mounts MatchValueSection (and the awaiting Dismiss row)
   // here; every other caller omits it and the card renders byte-identically.
@@ -140,6 +172,7 @@ function TradeCardComp({
   onToggleUntouchable,
   onSwapPlayer,
   repricing = false,
+  cardImpact = null,
   onPlayerMenu,
   fitTargetPositions,
   onKeepSide,
@@ -148,6 +181,7 @@ function TradeCardComp({
   hideMatchStrength = false,
   hideLockButton = false,
   disposition,
+  reasonsAsOverlay = false,
   footer,
 }: Props) {
   const matchPct = Math.round(data.match_score || 0);
@@ -163,6 +197,10 @@ function TradeCardComp({
   // v2: consensus cards are fair-value ideas vs an opponent who hasn't
   // ranked yet (no real disagreement signal behind them).
   const isConsensus = data.basis === 'consensus';
+  // …and whether this particular one clears the app's own balanced bar
+  // (0.75). Computed unconditionally — it is a pure call on a number — and
+  // read only inside the `isConsensus` block below.
+  const note = consensusNote(data.fairness);
   // v2: the counterparty already liked the mirror of this trade.
   const likesYou = data.likesYou === true;
   // v2 sweetener — resolve the flagged player from whichever side it's
@@ -182,6 +220,77 @@ function TradeCardComp({
   // omits `reasons` when the flag is off, double-gating client-side keeps
   // the rendering predictable if flags drift (e.g. cached job snapshot).
   const reasonsEnabled = useFlag('trade_math.human_explanations');
+  // #384 ruling 1 — in the merged calculator experience the ✕ stays ONE
+  // button and the reasons arrive as an overlay over the page, instead of
+  // three inline tiles replacing the ✕. `reasonsAsOverlay` is a PROP (see the
+  // Props comment): the host owns the "arrived from the calculator" fact.
+  const [reasonOverlayOpen, setReasonOverlayOpen] = useState(false);
+  // Review #1 — a layer-1 tile BANKS the pass (`advance('pass', {
+  // deferDeckAdvance: true })`) and the host only fronts the next card from
+  // layer 2. So the sheet must stay up through layer 2, and a backdrop
+  // dismiss AFTER a tile has been banked has to tell the host to commit that
+  // deferred advance — otherwise ✓/✕/swipe/VoiceOver are all inert and the
+  // card is a dead end. Ref, not state: read inside the dismiss handler only.
+  const reasonBankedRef = useRef(false);
+  // Review #3c — n19 spotlights `trades.pass-btn`, which was never registered
+  // as a guide target (only four ids are, TradesScreen :3003-3006). Registered
+  // per-instance from here because ONLY the deck's top card is given
+  // `disposition` (TradesScreen :6972 is the single call site), so exactly one
+  // node can ever claim the id. Skipped when the inline-tile form removes the
+  // button — an id pointing at an unmounted node measures to null anyway.
+  const passBtnRef = useRef<View | null>(null);
+  const passBtnMounted = !!disposition && !(disposition.reasons && !reasonsAsOverlay);
+  useEffect(() => {
+    if (!passBtnMounted) return;
+    registerGuideTarget('trades.pass-btn', passBtnRef);
+    return () => unregisterGuideTarget('trades.pass-btn');
+  }, [passBtnMounted]);
+  // #384 device feedback (report 4) — n20 ("Swap arrows change any player")
+  // shipped untargeted because the affordance is per-row. It only needs ONE
+  // row to teach the control, so the FIRST give row's swap button carries the
+  // id. Same scoping rule as `trades.pass-btn` above: registered only when
+  // `disposition` is present, i.e. only on the deck's top card, so exactly one
+  // node can ever claim it. Also gated on `onSwapPlayer` — without it the slot
+  // renders null and an empty wrapper measures to nothing.
+  const swapFirstRef = useRef<View | null>(null);
+  const swapFirstMounted = !!disposition && !!onSwapPlayer && givePlayers.length > 0;
+  useEffect(() => {
+    if (!swapFirstMounted) return;
+    registerGuideTarget('trades.swap-first', swapFirstRef);
+    return () => unregisterGuideTarget('trades.swap-first');
+  }, [swapFirstMounted]);
+  // Device feedback 2026-08-23 (v2 note 17) — n22 ("the fairness meter") used
+  // to target `trades.fairness-help`, the ⓘ in TradesScreen's "Trade fairness"
+  // row. That row renders inside `{!firstRun && …}`, so on a first-run deck —
+  // precisely when a new user is being toured — the node never mounts and the
+  // beat degrades to a bubble with no ring and no scroll. Retargeted at the
+  // meter itself, which is what the note asked to see highlighted.
+  //
+  // Same scoping rule as `trades.pass-btn` and `trades.swap-first` above: only
+  // the deck's top card is given `disposition`, so exactly one node can ever
+  // claim the id — a peek card, a match card or a read-only mount would
+  // otherwise race for it and the spotlight would ring whichever won.
+  // `hasValueVerdict`/`repricing` are the same conditions the bar renders
+  // under; registering while it is hidden would measure null.
+  const cardMeterRef = useRef<View | null>(null);
+  const cardMeterMounted = !!disposition && hasValueVerdict && !repricing;
+  useEffect(() => {
+    if (!cardMeterMounted) return;
+    registerGuideTarget('trades.card-meter', cardMeterRef);
+    return () => unregisterGuideTarget('trades.card-meter');
+  }, [cardMeterMounted]);
+
+  // Backdrop / system dismiss of the reason overlay. BEFORE any tile the card
+  // is simply left undecided (today's intent). AFTER a tile, the pass is
+  // already written server-side and the deck advance is the only thing still
+  // owed — the host commits it with layer 2 = none, which is exactly the row
+  // an inline-mode user leaves when they answer layer 1 and stop.
+  function dismissReasonOverlay() {
+    const banked = reasonBankedRef.current;
+    reasonBankedRef.current = false;
+    setReasonOverlayOpen(false);
+    disposition?.reasons?.onOverlayDismissed?.(banked);
+  }
   const showReasons = reasonsEnabled
     && Array.isArray(data.reasons)
     && data.reasons.length > 0;
@@ -443,14 +552,46 @@ function TradeCardComp({
         </View>
       )}
 
+      {/* Counterparty breaker — "their likely hesitation" (flag
+          trade.breaker_narrative; the server serializes `breaker` only for
+          narrated cards, so payload presence IS the gate — a client-side
+          flag check would add a second gate that can only disagree, fit
+          precedent). The fixed lead-in label "Their likely hesitation:" is
+          part of the server-composed sentence (LLD §1.6 template table);
+          the client holds no copy of its own and never switches on
+          `code`/`severity`. Optional chaining is the null-safety: an absent
+          or malformed `breaker` renders nothing, so older payloads and
+          flag-off decks are byte-identical to today.
+          Chalkline: type tokens + flare for the informational dot
+          (ADR-005) — no new colors, no emoji, radius within spec. */}
+      {data.breaker?.sentence && (
+        <View style={styles.breakerRow} testID="trade-card.breaker-hesitation">
+          <View style={styles.breakerDot} />
+          <Text style={type.bodySm} testID="trade-card.breaker-hesitation.body">
+            {data.breaker.sentence}
+          </Text>
+        </View>
+      )}
+
       {/* Consensus basis — subtle label so users know this card isn't
           built on real ranking disagreement. No tooltip pattern in the
-          app, so the hint renders inline as a muted sub-line. */}
+          app, so the hint renders inline as a muted sub-line.
+
+          The sub-line USED to assert "this is a balanced trade by consensus
+          value" on `isConsensus` alone, with no fairness check — and the
+          live generation floor is 0.50, not the app's own 0.75 bar, so 805
+          of 7,293 served consensus cards said "balanced" while sitting below
+          it. `consensusNote` now derives the copy from `data.fairness`:
+          below the bar the line TRUNCATES to its true half and stops. No
+          replacement wording (operator, 2026-08-19) — the TradeValueBar
+          below already shows direction and magnitude via favors/gap, so
+          prose about value would restate it. utils/consensusNote.ts carries
+          the reasoning; check-consensus-balance-claim.js pins it. */}
       {isConsensus && (
-        <View style={styles.consensusNote}>
-          <Text style={type.label}>Fair-value idea</Text>
-          <Text style={type.bodySm}>
-            This league-mate hasn't ranked players yet — this is a balanced trade by consensus value.
+        <View style={styles.consensusNote} testID="trade-card.consensus-note">
+          <Text style={type.label}>{note.label}</Text>
+          <Text style={type.bodySm} testID="trade-card.consensus-note.body">
+            {note.body}
           </Text>
         </View>
       )}
@@ -467,7 +608,7 @@ function TradeCardComp({
         <View style={styles.side}>
           <TickLabel>YOU SEND</TickLabel>
           <View style={styles.sideStack}>
-            {givePlayers.map((p) => (
+            {givePlayers.map((p, i) => (
               <PlayerCard
                 key={p.id}
                 player={p}
@@ -493,7 +634,17 @@ function TradeCardComp({
                   (!hideLockButton && onPlayerMenu && onToggleUntouchable) ? (
                     <View style={styles.rightSlotStack}>
                       {lockSlot(p)}
-                      {swapSlot(p, 'give')}
+                      {/* n20's spotlight rides the FIRST give row's swap
+                          control — one row is enough to teach a per-row
+                          affordance, and the top card is the only card that
+                          ever has one (#384 report 4). */}
+                      {i === 0 ? (
+                        <View ref={swapFirstRef} collapsable={false}>
+                          {swapSlot(p, 'give')}
+                        </View>
+                      ) : (
+                        swapSlot(p, 'give')
+                      )}
                       {removeSlot(p, 'give')}
                     </View>
                   ) : undefined
@@ -557,10 +708,24 @@ function TradeCardComp({
                 alone — unchanged in every other respect. `reasons` absent
                 (flag off, and on every non-deck mount) ⇒ this renders
                 byte-identically to the shipped ✓/✕ row. */}
-            {disposition.reasons ? null : (
+            {disposition.reasons && !reasonsAsOverlay ? null : (
               <Pressable
+                ref={passBtnRef}
+                collapsable={false}
                 testID="trades.pass-btn"
-                onPress={disposition.onPass}
+                onPress={
+                  // Overlay mode: the ✕ opens the reason sheet, and the
+                  // PANEL commits the pass (its layer-1 tap is the
+                  // disposition — same contract as the inline form). Without
+                  // reasons wired it is the plain pass it has always been.
+                  disposition.reasons && reasonsAsOverlay
+                    ? () => {
+                        reasonBankedRef.current = false;
+                        setReasonOverlayOpen(true);
+                        disposition.reasons!.onOverlayOpened?.();
+                      }
+                    : disposition.onPass
+                }
                 disabled={disposition.disabled}
                 style={({ pressed }) => [
                   styles.dispositionBtn,
@@ -594,8 +759,54 @@ function TradeCardComp({
               )}
             </Pressable>
           </View>
-          {disposition.reasons ? (
+          {disposition.reasons && !reasonsAsOverlay ? (
             <DeclineReasonPanel {...disposition.reasons} />
+          ) : null}
+          {disposition.reasons && reasonsAsOverlay ? (
+            <Modal
+              visible={reasonOverlayOpen}
+              transparent
+              animationType="fade"
+              onRequestClose={() => dismissReasonOverlay()}
+            >
+              {/* The "Other" composer's send button opens BELOW its text box.
+                  Inside a Modal the host ScrollView's inset machinery cannot
+                  reach it, so the sheet lifts itself. */}
+              <KeyboardAvoidingView
+                style={styles.reasonOverlayFill}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              >
+                <Pressable
+                  style={styles.reasonOverlayBackdrop}
+                  onPress={() => dismissReasonOverlay()}
+                  accessibilityRole="button"
+                  accessibilityLabel="Dismiss the decline reasons"
+                />
+                <View style={styles.reasonOverlaySheet} testID="trades.pass-reason-overlay">
+                  {/* The sheet STAYS UP through layer 1 (review #1): the tile
+                      tap banks the pass but defers the deck advance, and the
+                      host only fronts the next card from layer 2. Closing here
+                      left the card banked and every control inert. Only the two
+                      ADVANCING callbacks close. */}
+                  <DeclineReasonPanel
+                    onLayer1={(r, from) => {
+                      reasonBankedRef.current = true;
+                      disposition.reasons!.onLayer1(r, from);
+                    }}
+                    onLayer2Select={(r, d) => {
+                      setReasonOverlayOpen(false);
+                      disposition.reasons!.onLayer2Select(r, d);
+                    }}
+                    onLayer2Bank={(r, d) => disposition.reasons!.onLayer2Bank(r, d)}
+                    onLayer2Send={(r, d, t) => {
+                      setReasonOverlayOpen(false);
+                      disposition.reasons!.onLayer2Send(r, d, t);
+                    }}
+                    onRevealRequest={disposition.reasons!.onRevealRequest}
+                  />
+                </View>
+              </KeyboardAvoidingView>
+            </Modal>
           ) : null}
         </>
       ) : null}
@@ -620,15 +831,37 @@ function TradeCardComp({
       ) : null}
 
       {hasValueVerdict && !repricing && (
-        <TradeValueBar
-          giveValue={data.give_value as number}
-          receiveValue={data.receive_value as number}
-          favors={data.favors ?? null}
-          gap={data.gap ?? null}
-          youLabel="You"
-          themLabel={`@${data.opponent_username}`}
-        />
+        // n22's spotlight target (see `cardMeterRef` above). The wrapper adds
+        // no layout of its own; `collapsable={false}` keeps Android from
+        // flattening a styleless View away, which would leave the ref
+        // measuring nothing — the same guard `trades.fairness-help` carries.
+        // It spans the WHOLE bar including the "Why?" disclosure the beat's
+        // copy now names, so the ring frames the control it talks about.
+        <View ref={cardMeterRef} collapsable={false} testID="trades.card-meter">
+          <TradeValueBar
+            giveValue={data.give_value as number}
+            receiveValue={data.receive_value as number}
+            favors={data.favors ?? null}
+            gap={data.gap ?? null}
+            youLabel="You"
+            themLabel={`@${data.opponent_username}`}
+          />
+        </View>
       )}
+
+      {/* #357 — lineup movement + playoff-odds shift for THIS trade.
+          Mounted here on purpose: D-025 fixed the card's vertical order as
+          disposition pair -> TradeValueBar -> "any future card odds block",
+          and this is that block. Host-fetched (see useCardImpact) and only
+          for the fronted card, so a peek/match/read-only mount passes
+          nothing and costs nothing. */}
+      {cardImpact ? (
+        <CardImpactBlock
+          loading={cardImpact.loading}
+          evaluation={cardImpact.evaluation}
+          failed={cardImpact.failed}
+        />
+      ) : null}
 
       {/* Edited-card re-price in flight — the value bar above is hidden
           (give/receive cleared on swap) until fresh numbers land. */}
@@ -704,6 +937,18 @@ function TradeCardComp({
 export default React.memo(TradeCardComp);
 
 const styles = StyleSheet.create({
+  // #384 ruling 1 — the decline reasons as an overlay over the page. Bottom
+  // sheet rather than a centred dialog: the panel's layer 2 opens a text
+  // composer, and a keyboard under a centred dialog would cover it.
+  reasonOverlayFill: { flex: 1 },
+  reasonOverlayBackdrop: { flex: 1, backgroundColor: '#0009' },
+  reasonOverlaySheet: {
+    maxHeight: '80%',
+    padding: space.md,
+    backgroundColor: ink.ink2,
+    borderTopWidth: 1,
+    borderTopColor: ink.line,
+  },
   // #276 — vertical-cost audit (typical 2-for-2 must fit an 852pt viewport
   // alongside the pick-valuation line): padding lg→md and the outer stack
   // gap md→sm trim ~28pt across a typical card's ~6 sections without
@@ -775,6 +1020,20 @@ const styles = StyleSheet.create({
     height: 6,
     borderWidth: 1,
     borderColor: chalk.dim,
+  },
+  // Counterparty-breaker hesitation line: same hint-tier row construction as
+  // fitRow, with the 6px square marker filled in flare — informational
+  // highlight only (ADR-005); ice stays reserved for actions. Colors by token
+  // reference; check-breaker-card.js bans hex literals here.
+  breakerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+  },
+  breakerDot: {
+    width: 6,
+    height: 6,
+    backgroundColor: flare.base,
   },
   nameRow: {
     flexDirection: 'row',

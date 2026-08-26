@@ -233,7 +233,8 @@ assert(run(pool, 'RB').length === 1, 'RB keeps only the real RB', `${run(pool, '
 assert(run(pool, 'RB')[0]?.id === 'brobinson', 'the RB row survives, the rung does not');
 assert(run(pool, null).length === 3, 'no filter keeps every row (nothing disappears from ALL)');
 assert(run(pool, 'QB').length === 0, 'an unrepresented position is legitimately empty');
-// Demo picks (tradeCalcMock: pos 'PICK', nflTeam '—') still match.
+// Picks authored as pos 'PICK' / nflTeam '—' still match. (This shape came
+// from the removed demo board; live rows carry the server's is_pick.)
 assert(
   run([{ id: 'demo1', pos: 'PICK', nflTeam: '—' }], 'PICK').length === 1,
   'demo picks (nflTeam "—") still match the PICK chip',

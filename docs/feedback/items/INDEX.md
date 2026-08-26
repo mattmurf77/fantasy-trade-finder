@@ -246,6 +246,32 @@
 | 339 | pick-not-the-gap | shipped | 2026-08-16 | wave `20b40db` — G6, canonical `304-positional-need-filter/`; `pick_gap_frac` band still untuned |
 | 340 | max-overpay-cap | shipped | 2026-08-16 | wave `20b40db` — G6, canonical `304-positional-need-filter/` |
 | 341 | package-position-cap | shipped | 2026-08-16 | wave `20b40db` — G6, canonical `304-positional-need-filter/` |
+| 346 | quickset-tier-drop | planned | 2026-08-24 | **canonical** G-F of the 2026-08-24 wave (#346/#381) — QuickSet unselected players drop to FA; batch `plan.md` lives here (lowest selected id) |
+| 355 | phantom-pick-years | shipped | 2026-08-19 | fix merged `eafd3f8` (real draft-pick horizon derivation); DB status set `fixed` 2026-08-24 |
+| 357 | team-review | shipped | 2026-08-19 | **canonical** for #357/#358/#359 — SHIPPED PRs #142/#143, `outlook.odds` lit (D-094), EAS build 121; DB status set `fixed` 2026-08-24 |
+| 358 | team-review-link | shipped | 2026-08-19 | canonical `357-team-review/` |
+| 359 | team-review-link | shipped | 2026-08-19 | canonical `357-team-review/` |
+| 364 | team-review-fixes | shipped | 2026-08-20 | PR #152 `bc43b6f`, Render live, EAS build 124; IDP disclaimer names the unpriced slots |
+| 365 | team-review-window-signals | built-dark | 2026-08-20 | closed in code (builds 124/125) behind `trade.outlook_net_firsts` (dark); DB status `in_progress` 2026-08-24 |
+| 366 | team-review-tier-ladder | shipped | 2026-08-20 | closed in code; `trade.position_tiers` + `trade.rb_handcuff` LIT (checklist unrun); DB status `fixed` 2026-08-24 |
+| 367 | consensus-gap-direction | shipped | 2026-08-20 | canonical `364-team-review-fixes/`; sell direction fixed UPSTREAM (D-100), PR #152 — toggle half still planned §4 |
+| 368 | team-review-partners | shipped | 2026-08-20 | canonical `364-team-review-fixes/`; route dropped the pick capital it computed, PR #152 |
+| 369 | team-review-plan-beat | shipped | 2026-08-20 | closed in code (builds 124/125); checklist unrun; DB status `in_progress` 2026-08-24 pending graduation read |
+| 370 | deck-repeat-liked-trades | planned | 2026-08-20 | `364-team-review-fixes/plan-remaining.md` §6 — TradesHome deck, NOT Team Review; needs a repro; #350 is the same complaint class |
+| 371 | outlook-as-window-driver | built-dark | 2026-08-20 | closed in code behind `trades.window_from_odds` (dark); DB status `in_progress` 2026-08-24 |
+| 372 | window-composite | built-dark | 2026-08-20 | composite re-weighting MERGED (`bbc2e4b`) behind `trade.outlook_composite` (dark); DB status `in_progress` 2026-08-24 |
+| 374 | partners-copy-and-finder-conditions | shipped | 2026-08-20 | #374 + first #376 fix — `fix/finder-conditions-and-partners-copy` merged (ancestry-verified 2026-08-24); DB status `fixed` 2026-08-24. #376 re-reported → see `376-finder-filters-regression/` |
+| 376 | finder-filters-regression | planned | 2026-08-24 | **canonical** G-A of the 2026-08-24 wave (#376/#379/#394, +#333 verify) — outlook & prefs entry missing again on 1.16.2 post-#384 rebuild; operator: "most critical bug" |
+| 379 | finder-filters-placement | planned | 2026-08-24 | G-A satellite, canonical `376-finder-filters-regression/` |
+| 381 | quickset-downgrade-fa | planned | 2026-08-24 | G-F satellite (detailed repro), canonical `346-quickset-tier-drop/` |
+| 384 | calc-finder-merge | shipped | 2026-08-22 | **SHIPPED** PR #172 `80dee42`, flags LIT for all users, app 1.16.0 (EAS). merge Find a Trade into the manual calculator; canonical for #310/#379/#380, touches #333. W0–W5 built behind `calc.merged_layout` (**false**), not merged, not pushed; TestFlight checklist UNRUN. W5 fixed the e2e review's 5 P0 + most P1: the four action beats now advance, the tour reaches the deck (park + hand-off, `popTo`), the ✕-overlay no longer strands the card, overlay scope is calculator-origin, first-visit receipt + cap reset, league-keyed remount, 13 analytics names registered, `scope.md` written, guards hardened (15 sabotages red). **Operator rulings 2026-08-22:** §6b → own tab for now (D-151, Q-028 closed); ✓ like/queue contract approved and in build (W6-A). **Still open:** receive-side `pinned_receive_mode:'all'` vs give-side-only (Q-029 second half), rollout shape. Flip also needs `onboarding.guide_v2` (off today) or there is no tour. **The report the 2000-char cap ate** (D-149/G-055) |
+| 386 | analyst-playoff-odds | planned | 2026-08-24 | **canonical** G-D of the 2026-08-24 wave (#386/#391) — analyst pop-up broken when playoff odds expanded on LeagueRankings |
+| 391 | analyst-box-minimized | planned | 2026-08-24 | G-D satellite (minimized-state observation), canonical `386-analyst-playoff-odds/` |
+| 394 | outlook-prefs-missing | planned | 2026-08-24 | G-A satellite (the "most critical bug" report), canonical `376-finder-filters-regression/` |
+| 395 | lineup-impact-superflex | planned | 2026-08-24 | **canonical** G-C of the 2026-08-24 wave (#395/#396) — SF slot attribution + flex slot labels in starting-lineup impact |
+| 396 | flex-slot-label | planned | 2026-08-24 | G-C satellite, canonical `395-lineup-impact-superflex/` |
+| 397 | swipe-tour-placement | planned | 2026-08-24 | **canonical** G-B of the 2026-08-24 wave (#397/#398) — swipe tour beat moves above the trade chip strip (#398 supersedes #397) |
+| 398 | swipe-tour-top | planned | 2026-08-24 | G-B satellite (the operative placement ask), canonical `397-swipe-tour-placement/` |
 | — | 2026-07-26-adjustments-breakdown | shipped | 2026-07-26 | n/a |
 | — | 2026-07-26-asset-trade-ideas | shipped | 2026-07-26 | teardown-remediation / `trade.asset_ideas` ON |
 | — | 2026-07-26-calc-eveners | shipped | 2026-07-26 | `eveners`/`adjustments`/`naive_totals` on `/api/trade/evaluate` — CHANGELOG 2026-07-26 |
@@ -269,8 +295,11 @@
 | declined | 2 |
 | unknown | 1 |
 
-167 rows against 167 folders in `docs/feedback/items/` — 1:1, verified
-2026-08-18. Two rows share id **#169** (a real id collision, flagged inline);
+167 rows against 167 folders — 1:1, verified 2026-08-18. **2026-08-24:** 13
+rows added (the 11 folders of the 2026-08-24 wave, plus backfilled rows for
+`355-phantom-pick-years/` and `374-partners-copy-and-finder-conditions/`,
+which had folders but no row) → 180 rows / 180 folders; the distribution
+table below predates this and is not regenerated. Two rows share id **#169** (a real id collision, flagged inline);
 the eight `—` rows are the six date-keyed operator asks plus the two named
 programs, per [README.md](README.md) § Naming.
 

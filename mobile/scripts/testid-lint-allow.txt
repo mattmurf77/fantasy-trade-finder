@@ -61,8 +61,14 @@ fa-claim.drop.*
 trades.finder-mode.*
 # SettingsScreen.tsx:869        testID={`settings.stud-tax.${o.key}`}
 settings.stud-tax.*
-# SettingsScreen.tsx:913        testID={`settings.pick-pricing.${o.key}`}
-settings.pick-pricing.*
+# settings.pick-pricing.* — REMOVED 2026-08-21 (D-144). The Pick pricing control
+# was deleted when the operator made market pick pricing unconditional, so there
+# is no constructing file left to allow. The entry is dropped rather than kept
+# "just in case": this file exists to vouch for ids the source really builds via
+# template literals, and vouching for one that no longer exists would let a
+# .maestro flow reference a dead control without the lint noticing.
+# The inverse assertion lives in mobile/tests/check-settings-testids.js
+# (DELETED_PREFIXES).
 # FeedbackInboxScreen.tsx:212   testID={`feedback-inbox.delete.${it.id}`}
 feedback-inbox.delete.*
 # DraftModeToggle builds ids from a variable prefix (MockChrome.tsx: testID={`${testIDPrefix}.real`})

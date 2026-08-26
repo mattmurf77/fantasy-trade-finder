@@ -131,6 +131,72 @@ def optimal_starter_slots(
     return [{"slot": s, "player": a} for s, a in zip(eligible, assigned)]
 
 
+def align_starter_slots(
+    before: list[dict], after: list[dict],
+) -> tuple[list[dict], list[dict]]:
+    """#395 — pairwise-align two optimal_starter_slots outputs so a
+    value-identical lineup change displays the minimum honest set of changed
+    rows. The greedy fill canonically parks the best QB in the dedicated QB
+    slot, so trading him renders a phantom two-row cascade ("QB: Daniels ›
+    Maye" + "SF: Maye › Fannin"); aligned, only the SF row changes.
+
+    `before`/`after` are parallel row lists ({"slot", "player"}) over the
+    SAME template. Pure display transform: only which row a player occupies
+    moves, and only via same-side swaps where every non-None player is
+    eligible for its destination slot (LINEUP_SLOT_ELIGIBILITY) — per-side
+    totals and starter sets are invariant by construction. Inputs are not
+    mutated; aligned copies are returned.
+
+    Pinned scan order (contract — the result is order-dependent when
+    multiple 1-changed-row optima exist, see the #395 PRD R-1): scan the
+    BEFORE side first. Within a side, visit index pairs (i, j), i < j, in
+    ascending lexicographic order; apply the first strictly-improving
+    eligibility-valid swap (strictly increases the count of indices k where
+    both sides hold the same player_id, None matching None) and restart that
+    side's scan from (0, 1). A side is done when a full scan applies
+    nothing; then scan the other side the same way, alternating until both
+    sides pass a full scan clean. Terminates: every applied swap strictly
+    increases the match count, bounded by the template length.
+    """
+    before = [dict(r) for r in before]
+    after = [dict(r) for r in after]
+
+    def _pid(row: dict) -> str | None:
+        return row["player"]["player_id"] if row["player"] else None
+
+    def _fits(player: dict | None, slot: str) -> bool:
+        return player is None or player["position"] in LINEUP_SLOT_ELIGIBILITY[slot]
+
+    def _align_side(side: list[dict], other: list[dict]) -> bool:
+        """Run `side` to its local fixpoint. True if any swap applied."""
+        applied_any = False
+        restart = True
+        while restart:
+            restart = False
+            for i in range(len(side) - 1):
+                for j in range(i + 1, len(side)):
+                    p_i, p_j = side[i]["player"], side[j]["player"]
+                    if not (_fits(p_j, side[i]["slot"])
+                            and _fits(p_i, side[j]["slot"])):
+                        continue
+                    o_i, o_j = _pid(other[i]), _pid(other[j])
+                    id_i = p_i["player_id"] if p_i else None
+                    id_j = p_j["player_id"] if p_j else None
+                    cur = (id_i == o_i) + (id_j == o_j)
+                    new = (id_j == o_i) + (id_i == o_j)
+                    if new > cur:
+                        side[i]["player"], side[j]["player"] = p_j, p_i
+                        applied_any = restart = True
+                        break
+                if restart:
+                    break
+        return applied_any
+
+    while _align_side(before, after) | _align_side(after, before):
+        pass
+    return before, after
+
+
 def compute_power_rankings(
     members: list[dict],
     seed_elo: dict[str, float],

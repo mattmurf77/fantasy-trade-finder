@@ -994,6 +994,15 @@
         .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
 
+    // The app's own bar for calling a package balanced: fairness_score ≥ 0.75.
+    // CROSS-CLIENT INVARIANT — the same number as mobile's
+    // utils/tradePresentation.NORMAL_LOW and api/tradePregen.FAIRNESS_ON_THRESHOLD.
+    // See docs/cross-client-invariants.md § "Consensus balance claim"; the
+    // mobile structural check (tests/check-consensus-balance-claim.js) reads
+    // THIS literal out of this file, so the two clients cannot drift.
+    // Not the generation floor — that is 0.50 today and moves. This does not.
+    const FAIRNESS_BALANCED_MIN = 0.75;
+
     // Player-profile linkification (#17). Renders a player's name as a link to
     // the profile page when players.profile_pages is on AND we have a real
     // player id. Picks (pick_value != null) have no profile until #15 lands, so
@@ -3424,8 +3433,33 @@
 
         // v2 — consensus basis: fair-value idea vs an opponent who hasn't
         // ranked yet. Muted tag + title tooltip (same pattern as dataTag).
+        //
+        // The tooltip used to assert "balanced" on `basis === 'consensus'`
+        // alone. It must not: the live generation floor is 0.50 while the
+        // app's own bar for balanced is FAIRNESS_BALANCED_MIN (0.75), and
+        // 805 of 7,293 served consensus cards sat below it. Below the bar
+        // (or when fairness is unknown) the tooltip TRUNCATES to its true
+        // half and stops — no replacement wording, because the value
+        // verdict is already rendered elsewhere on the card.
+        // Mirrors mobile `utils/consensusNote.consensusNote()`: the two
+        // strings and the threshold are a cross-client invariant
+        // (docs/cross-client-invariants.md § Consensus balance claim), and
+        // the structural check reconstructs BOTH strings from this source
+        // and compares them byte for byte. Change both clients or neither.
         const consensusTag = card.basis === 'consensus'
-          ? `<span class="consensus-tag" title="This league-mate hasn't ranked players yet — this is a balanced trade by consensus value.">Fair-value idea</span>`
+          ? (() => {
+              const f = card.fairness_score;
+              // Number.isFinite, NOT the global isFinite: the global coerces, so a
+              // stringified "0.9" would pass and then compare as a string. Mobile's
+              // consensusNote() makes the same guard. Pinned by the structural check.
+              const balanced = typeof f === 'number' && Number.isFinite(f)
+                && f >= FAIRNESS_BALANCED_MIN;
+              const prefix = "This league-mate hasn't ranked players yet";
+              const tip = balanced
+                ? `${prefix} — this is a balanced trade by consensus value.`
+                : `${prefix}.`;
+              return `<span class="consensus-tag" title="${escapeHtml(tip)}">Fair-value idea</span>`;
+            })()
           : '';
 
         // v2 — fairness meter (0–100%), same semantics as mobile's

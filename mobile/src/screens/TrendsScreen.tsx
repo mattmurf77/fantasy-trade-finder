@@ -207,7 +207,7 @@ export default function TrendsScreen() {
           }
         >
           <GapBlock
-            label="Easiest sells (you rank them higher than league consensus)"
+            label="Easiest sells (league consensus ranks them higher than you)"
             rows={filterGap(gapQuery.data?.easiest_sells, filter)}
             mode="sell"
           />

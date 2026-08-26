@@ -1,5 +1,13 @@
 # In-App Feedback → Backend Sync
 
+> **AMENDED 2026-08-22 — the text cap in this doc is stale.** The contract locked here said
+> `text` ≤ **2000** characters. It is now **8000** (`backend/server.py:FEEDBACK_TEXT_MAX`,
+> mirrored as `FEEDBACK_TEXT_MAX` in `mobile/src/api/feedback.ts`). The old cap silently
+> discarded a long operator report on 2026-08-22. The occurrences below are left as written
+> so the June contract still reads as it was locked, each marked inline. **Current truth is
+> [`docs/api-reference.md`](../../api-reference.md) § In-app feedback**, not this file — this
+> folder is `abandoned` in [`../README.md`](../README.md).
+
 Extension of the in-app feedback feature that landed in PR #41. Today notes only live in mobile `AsyncStorage`; the user has to share-sheet them out manually. This plan adds an authoritative backend store + automatic sync so external TestFlight testers' notes land in our Postgres without any user action.
 
 ---
@@ -39,7 +47,7 @@ mobile/src/api/feedback.ts → POST /api/feedback
        │
        ▼
 backend/server.py  /api/feedback  (POST)
-       │  validate (severity ∈ {bug, polish, idea}, text ≤ 2000 chars)
+       │  validate (severity ∈ {bug, polish, idea}, text ≤ 2000 chars)  # now 8000
        │  resolve session token → user_id (optional)
        │  INSERT OR IGNORE INTO app_feedback (client_id is unique)
        ▼
@@ -89,7 +97,7 @@ Body (application/json):
     "client_id":           "1748102400000-xyz123",   # required, unique per note
     "screen":              "Trades",                 # required, non-empty
     "severity":            "bug" | "polish" | "idea", # required
-    "text":                "free text",              # required, 1..2000 chars
+    "text":                "free text",              # required, 1..2000 chars (now 1..8000)
     "client_created_at":   "2026-05-21T03:14:15Z"    # required, ISO 8601
   }
 
@@ -111,7 +119,7 @@ Responses:
 Validation:
 
 - `severity` MUST be one of `bug`, `polish`, `idea`. Anything else → 400.
-- `text` MUST be non-empty after `.strip()`, ≤ 2000 chars. Anything else → 400.
+- `text` MUST be non-empty after `.strip()`, ≤ 2000 chars. Anything else → 400. **(Raised to 8000 on 2026-08-22 — see the banner at the top.)**
 - `screen` MUST be non-empty after `.strip()`, ≤ 100 chars (truncate on receive).
 - `client_id` MUST be non-empty, ≤ 100 chars.
 

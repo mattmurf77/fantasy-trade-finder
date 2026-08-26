@@ -99,7 +99,12 @@ def _multi_setup():
 def test_min_side_surplus_monotone():
     _flags(**{"trade_engine.v2": True})
     counts = []
-    for surplus in (50.0, 150.0, 400.0, 900.0):
+    # Sweep widened 2026-08-21: the cross-package benchmark fix
+    # (package_bench_trade_wide) discounts the multi-piece give side against
+    # the trade's best asset, which raises every surviving card's surplus on
+    # this fixture above the old 900 top step — the gate still bites, just
+    # higher up the scale.
+    for surplus in (50.0, 150.0, 900.0, 2500.0):
         svc, ue, ur, seed = _divergence_league()
         ts._cfg["min_side_surplus"] = surplus
         counts.append(len(_gen(svc, ue, ur, seed, max_per_opponent=10)))

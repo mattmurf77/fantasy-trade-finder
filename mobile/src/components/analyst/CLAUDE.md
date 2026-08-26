@@ -2,8 +2,37 @@
 
 React-native-svg renderings of "The Analyst," the football mascot that guides
 the onboarding-conversion flow. Six poses (neutral, point, celebrate,
-computing, thinking, oops) plus the `AnalystAvatar` switcher and
-`BUBBLE_ANCHOR` (speech bubble attaches top-center).
+computing, thinking, oops) plus the `AnalystAvatar` switcher.
+
+## This folder is no longer the only mascot
+
+`AnalystAvatar` is now a **switch** (D-155/D-156, flag `onboarding.mascot_ram`,
+read through `useOnboardingFeature` so the `onboarding.v2` master ANDs in):
+
+| Flag | Renders |
+|---|---|
+| on | **Fleeced**, the painted ram — [`../mascot/ram/`](../mascot/ram/index.tsx), raster sprites |
+| off | The Analyst in this folder, **byte-identical** to before the flag existed |
+
+The switch lives in `index.tsx` on purpose: all three call sites
+(`AnalystGuide`, `TeamReviewScreen`, `TeamReviewEntryCard`) go through that one
+function, so neither they nor the tour script change. The pose union
+`AnalystPose` is shared by both mascots, which is what keeps
+`guide_step_shown{pose}` meaning the same thing in either state.
+`mobile/tests/check-mascot-ram.js` pins all of that.
+
+## `BUBBLE_ANCHOR` is exported and never consumed
+
+It says "top-center", but nothing reads it. `AnalystGuide` lays the bubble out
+**beside** the avatar in a flex row (`row: { flexDirection: 'row',
+alignItems: 'flex-end' }`), not above it with a tail. Treat it as a declared
+intention, not behaviour — and do not "fix" a layout on the strength of it
+without checking who reads it first. `mascot/ram` declares its own
+`RAM_BUBBLE_ANCHOR` for symmetry, equally unconsumed.
+
+Bottom-alignment is also why Fleeced may be taller than the Analyst: the
+avatar box is `{ width: AVATAR }` with no height constraint, so a square
+sprite grows upward off a shared bottom edge.
 
 ## Source of truth
 

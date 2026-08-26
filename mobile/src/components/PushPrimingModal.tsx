@@ -11,7 +11,7 @@ import {
 } from '../theme/chalkline';
 import { Button, Icon } from './chalkline';
 import { usePushPriming } from '../state/usePushPriming';
-import { useInterruptCoordinator } from '../state/useInterruptCoordinator';
+import { useInterruptCoordinator, isInterruptBusy } from '../state/useInterruptCoordinator';
 import { useFlag } from '../state/useFeatureFlags';
 import { track } from '../api/events';
 
@@ -34,7 +34,10 @@ export default function PushPrimingModal() {
   const acceptHandler = usePushPriming((s) => s.acceptHandler);
   const dismiss = usePushPriming((s) => s.dismiss);
   const arbiterOn = useFlag('ux.prompt_arbiter');
-  const surfaceBusy = useInterruptCoordinator((s) => s.activeSurface !== null);
+  // #384 ruling 10 — `isInterruptBusy` also covers the tour hold, so a
+  // root modal cannot slip through the gap BETWEEN two tour steps (the
+  // slot is genuinely free there; the floor is not).
+  const surfaceBusy = useInterruptCoordinator(isInterruptBusy);
 
   const accept = async () => {
     if (arbiterOn) track('push_primer_accepted');

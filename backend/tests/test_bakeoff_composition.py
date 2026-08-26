@@ -65,7 +65,17 @@ def _cards(spec):
     return out
 
 
+#: D-095 — arm D (`challenger`) joined the DEFAULT roster. Every test in this
+#: file predates it and is about composition MECHANICS (quotas, lanes,
+#: interleaving, under-fill), not about which arms exist, so they keep running
+#: against the roster they were written for. The new default roster and the
+#: challenger's kill knob are asserted explicitly in the roster section below,
+#: where they belong — not smuggled into thirty unrelated fixtures.
+_PRE_CHALLENGER_ROSTER = {"bakeoff_include_challenger": 0.0}
+
+
 def _knobs(**vals):
+    vals = {**_PRE_CHALLENGER_ROSTER, **vals}
     return patch.object(bo, "_cfg", lambda key, default: float(vals.get(key, default)))
 
 
@@ -88,8 +98,68 @@ def test_default_roster_drops_arm_baseline_from_serving():
 
 
 def test_arm_baseline_is_restored_by_a_knob_not_a_deploy():
+    # `_knobs` pins the challenger off, so this is the pre-D-095 three-arm
+    # roster — which is the shape this test was written to guard. The
+    # four-arm roster is asserted in test_every_optional_arm_has_its_own_
+    # kill_knob below.
     with _knobs(bakeoff_include_baseline=1.0):
         assert bo.arm_roster() == ("baseline", "current", "gen_v2")
+
+
+# --- D-095: arm D joins the roster -----------------------------------------
+
+def test_the_live_default_roster_includes_the_challenger():
+    """The real default, asserted against no overrides at all. Everything else
+    in this file pins `bakeoff_include_challenger` = 0; this is the one place
+    that must not."""
+    with patch.object(bo, "_cfg", lambda key, default: float(default)):
+        assert bo.arm_roster() == ("current", "challenger", "gen_v2")
+        assert bo.ARM_BASELINE not in bo.arm_roster()
+
+
+def test_every_optional_arm_has_its_own_kill_knob():
+    """Each arm is a one-value, no-deploy round trip, and `current` has none
+    on purpose — a roster without the served arm is an outage, not a config."""
+    def roster(**kw):
+        with patch.object(bo, "_cfg",
+                          lambda k, d: float(kw.get(k, d))):
+            return bo.arm_roster()
+
+    assert roster(bakeoff_include_challenger=0.0) == ("current", "gen_v2")
+    assert roster(bakeoff_include_gen_v2=0.0) == ("current", "challenger")
+    assert roster(bakeoff_include_challenger=0.0,
+                  bakeoff_include_gen_v2=0.0) == ("current",)
+    assert roster(bakeoff_include_baseline=1.0) == (
+        "baseline", "current", "challenger", "gen_v2")
+
+
+def test_the_challenger_is_an_engine_arm_and_earns_both_groups():
+    """Arm D runs the live v1/v3 engine under an overlay, so it produces both
+    bases — and its CONSENSUS group is the point of the whole arm, since 84.5%
+    of cards take that path (PRD G2)."""
+    assert bo.ARM_CHALLENGER in bo.ENGINE_ARMS
+    keys = [g.key for g in bo.groups_for(("current", "challenger", "gen_v2"))]
+    assert keys == ["current_divergence", "current_consensus",
+                    "challenger_divergence", "challenger_consensus", "gen_v2"]
+
+
+def test_the_challenger_is_never_spelled_baseline():
+    """The arm was briefed as "the new arm A" and is not one. `model_arm` is a
+    stored column: if the two ever shared a value, neither run would be
+    readable afterwards (PRD §8 naming-collision row)."""
+    assert bo.ARM_CHALLENGER == "challenger"
+    assert bo.ARM_CHALLENGER != bo.ARM_BASELINE
+    # ARMS stays the historical three so Phase 3's fixtures do not shift.
+    assert bo.ARMS == ("baseline", "current", "gen_v2")
+    # ALL_ARMS gains arm `fit` LAST (fit challenger, LLD §2.1 — `ARMS` stays
+    # the pinned historical fixture, HLD F-8).
+    assert bo.ALL_ARMS == ("baseline", "current", "challenger", "gen_v2",
+                           "fit")
+    # …and it generates after `current` (which dark mode serves) but before
+    # the historical reconstruction.
+    order = list(bo.GENERATION_ORDER)
+    assert order.index("current") < order.index("challenger") \
+        < order.index("baseline")
 
 
 def test_arm_a_leaves_serving_but_phase_2_stays_intact():

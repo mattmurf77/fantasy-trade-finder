@@ -6,7 +6,7 @@ All app source. Subfolders are organized **by concern, not by feature** — a fe
 |---|---|---|
 | `api/` | Network calls, wire-shape parsing, offline write queues | React, navigation, UI (flag-store reads are the one allowed upward import — `events.ts`, `tradePregen.ts`) |
 | `components/` | Reusable UI, prop-driven by default | Data fetching, unless the widget is self-contained (10 exceptions today — see [README.md](README.md)) |
-| `data/` | Demo/mock fixtures (`tradeCalcMock.ts`) | Anything a shipping code path reads |
+| `data/` | Shared calculator asset types (`calcTypes.ts`) | Fixture/mock data — the demo calculator's `tradeCalcMock.ts` was removed 2026-08-22 (#384) |
 | `hooks/` | Cross-cutting React hooks used by ≥2 screens | Screen-local hooks (keep those in the screen) |
 | `navigation/` | Stack/tab definitions, navigator-level helpers | Screen bodies |
 | `observability/` | Sentry init (`sentry.ts`) | Analytics — that's `api/events.ts` |

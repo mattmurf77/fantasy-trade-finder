@@ -38,6 +38,7 @@ import TradesScreen from '../screens/TradesScreen';
 // stays in the tree pending a later cleanup pass, but nothing imports it.
 import PortfolioScreen from '../screens/PortfolioScreen';
 import TradeCalculatorScreen from '../screens/TradeCalculatorScreen';
+import TeamReviewScreen from '../screens/TeamReviewScreen';
 // Presentation v2 (flag `trades.presentation_v2`, docs/plans/
 // trade-presentation-v2/scope.md). Both screens register UNCONDITIONALLY,
 // per the house rule that a flag gates the ENTRY POINT, not the navigator
@@ -467,6 +468,18 @@ function TradesStackNav() {
         name="Portfolio"
         component={PortfolioScreen}
         options={chalklineHeader('Portfolio')}
+      />
+      {/* #357/#358/#359 — Team Review. Registered inside the TRADES stack
+          because the operator's framing was explicit: a Team Review button
+          INSIDE the find-a-trade experience, not a separate tab. Uses the
+          shared always-on back control (native back is dead on iOS 26,
+          RNS#3294 — the same reason Calculator and Today do). As a tab-stack
+          screen it mounts NO FeedbackFAB of its own; RootNav's single global
+          mount already covers it (#188 / #196 / #197). */}
+      <TradesStack.Screen
+        name="TeamReview"
+        component={TeamReviewScreen}
+        options={subScreenOptions('Team review', 'TradesHome')}
       />
       <TradesStack.Screen
         name="TradeCalculator"

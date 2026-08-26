@@ -2,28 +2,54 @@
 
 D-320-1 (operator 2026-08-16, supersedes #263's "picks stay numeric"): pick
 rows on calculator surfaces carry the pick-value ladder rung their
-DISCOUNTED `pool_value` sits in, so the client can badge them through the
-same TierBadge/TIER_LABEL machinery it uses for players — never a
-client-side derivation from the display value.
+`pool_value` sits in, so the client can badge them through the same
+TierBadge/TIER_LABEL machinery it uses for players — never a client-side
+derivation from the display value.
 
-Every tier assertion below pins a LITERAL rung, because the two named
-sabotages both produce a "tier" that a tautological
-tier-equals-whatever-the-helper-returns test would wave through:
+⚠️  **D-148 (2026-08-21) MOVED THE VALUE THIS FILE BADGES.** Closing Q-026,
+the route now serves `_priced_pick_value` — the engine's own three-step
+waterfall (own slot → round curve → stored ladder) under the same D-090
+resolution a trade card charges — instead of the stored `draft_picks.
+pool_value`. Every literal below is re-derived from the pricing functions
+against the checked-in DP snapshot (`conftest.py` pins
+`FTF_DP_PICK_VALUES_FILE`); no tolerance was widened and nothing is asserted
+against "whatever the helper returned".
 
-  S1 "wrong scale": passing `pool_value` straight to `tier_for_elo` without
-     any inversion (the exact #263 scale-confusion bug) reads a 2117-value
-     1st as Elo 2117 → 'firsts_4plus', and a 406-value 3rd as Elo 406 →
-     None. Both literal assertions fail.
-  S1b "wrong INVERSE" (D-088, the defect this file's pins now trap):
-     inverting with `seed_elo_for_value` instead of `value_to_elo`. That
-     reads a value-scale number as a DynastyProcess 0-10000 consensus
-     value, inflating every rung cheaper than a mid-1st — Mid 3rd 1320 →
-     1383.5, Mid 4th 1240 → 1339.3 — so a current-year 3rd badges 'second'
-     and a current-year 4th badges 'third'. Both are pinned literally, and
-     `test_current_year_rungs_badge_their_own_round` pins the underlying
-     identity so no future inverse can drift back.
-  S2 "platform-only tiers": skipping tier for `source: 'user'` rows fails
-     the asserted-pick case.
+⚠️  **D-161 (2026-08-24) MOVED IT AGAIN, for round 1 only.** Step 2 now
+carries a YoY floor: a FUTURE first may not price below the CURRENT class's
+first. The 2029 1st therefore goes 1263.0 → 1859.5 and badges `first_1`
+again, re-asserting D-079's flat-firsts ruling at the market seam. See the
+price table below and `test_far_out_first_is_flat_again_while_later_rounds_
+still_decay`, which is the same test that used to pin the opposite.
+
+The rule is UNCHANGED — a badge reflects the value it is served (D-320-2) —
+and so are the BANDS: `tier_config.json` and its five client mirrors
+(docs/cross-client-invariants.md, G-051) are byte-identical, as is the
+inverse (`value_to_elo`, D-088). What changed is the price, and therefore
+the badge. The headline the operator asked for is
+`test_slotted_first_badges_above_a_slotted_twelfth`: a 2026 1.01 and a 2026
+1.12 used to be one number and one badge; they are now 4867.1/`firsts_2` and
+820.8/`second`.
+
+Every tier assertion pins a LITERAL rung, because the three named sabotages
+all produce a "tier" that a tautological tier-equals-whatever-the-helper-
+returns test would wave through. All three were re-verified against the
+PRICED values at the D-148 rewrite:
+
+  S1 "wrong scale": passing the value straight to `tier_for_elo` without any
+     inversion (the #263 bug) reads the 1859.5 round-curve 1st as Elo 1859.5
+     → 'firsts_2', and every cheaper rung → None.
+  S1b "wrong INVERSE" (D-088): inverting with `seed_elo_for_value` instead of
+     `value_to_elo` reads a value-scale number as a DynastyProcess 0-10000
+     consensus value, inflating everything cheaper than a mid-1st — the
+     current-year 2nd reads 'second' instead of 'third', the 3rd 'third'
+     instead of 'fourth', the 4th 'third' instead of 'waivers'.
+  S2 "platform-only tiers": skipping tier for `source: 'user'` rows fails the
+     asserted-pick case.
+  S3 (new, D-148) "left on the ladder": serving `p["pool_value"]` verbatim —
+     the pre-D-148 code — puts every 2026 first back at 2117.0/'first_1',
+     which `test_slotted_first_badges_above_a_slotted_twelfth` and every
+     round-curve literal reject.
 
 Isolation mirrors test_power_rankings.py's route tests: Flask test client,
 injected session, patched load_draft_picks, no network/DB.
@@ -35,89 +61,103 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import backend.server as server
-from backend.pick_values import GENERIC_PICK_SEEDS, pick_pool_value
+from backend.pick_values import (GENERIC_PICK_SEEDS, market_pick_slot_value,
+                                 pick_pool_value, priced_pool_value)
 from backend.trade_service import value_to_elo
 
 LEAGUE = "league_picks_tier_test"
 TOKEN = "sess-picks-tier-test"
+FMT = "1qb_ppr"
 
-# The load_draft_picks row shape the route consumes; pool_value written the
-# way sync writes it (pick_pool_value with years_out = season - current
-# season; current season 2026 here). Expected rungs verified against the
-# canonical band walk at authoring time (1qb_ppr bands, position-uniform):
-#   2026 1st  → pool 2117.0 → Elo 1650.0 → 'first_1'
-#   2027 2nd  → pool  515.6 → Elo 1367.5 → 'third'    (D-088: was 'second')
-#   2026 3rd  → pool  406.6 → Elo 1320.0 → 'third'    (D-088: was 'second')
-#   2027 3rd  → pool  345.6 → Elo 1287.5 → 'third'
-#   2026 4th  → pool  272.5 → Elo 1240.0 → 'fourth'   (D-088: was 'third')
+# ── The prices this file pins, all re-derived from the pricing functions ───
+# Step 2 (round curve) is what an unslotted read serves; the `client` fixture
+# patches `is_enabled` to False, so `picks.slot_labels` is off, so
+# `_league_slot_order` returns None and NOTHING resolves a slot. That is also
+# the honest production answer for every future season (#273) and every
+# league whose order we cannot resolve.
 #
-# ⚠️  D-088 (2026-08-19) CORRECTED THE INVERSE AND MOVED 600 OF 1104 LIVE
-# PICK BADGES. The Elo column above USED to read 1635.5 / 1413.3 / 1383.5 /
-# 1364.6 / 1339.3, because #320 inverted `pool_value` with
-# `seed_elo_for_value` (which inverts DynastyProcess's raw 0-10000 scale)
-# rather than `value_to_elo` (the true inverse of the `elo_to_value` units
-# `pool_value` is stored in — see database.py's column comment). The two
-# maps agree only at Elo 1548.0, so every rung below a mid-1st was inflated,
-# growing with cheapness: +63.4 Elo at the Mid 3rd, +99.3 at the Mid 4th,
-# +109.5 at the Late 4th.
+#   pick        stored ladder      priced (round curve)      badge
+#   2026 1st         2117.0   →              1859.5   first_1  (unmoved)
+#   2026 2nd          606.5   →               434.0   second  → third
+#   2026 3rd          406.6   →               262.3   third   → fourth
+#   2026 4th          272.5   →               233.9   fourth  → waivers
+#   2027 2nd          515.6   →               389.7   third    (unmoved)
+#   2027 3rd          345.6   →               254.5   third   → fourth
+#   2029 1st         2117.0   →              1859.5   first_1  (unmoved)
 #
-# That inflation — NOT the D-084 band move, and NOT the seed map's genuine
-# rank compression — is why a current-year 3rd badged "2nd" once the
-# `second` floor dropped to 1370: the inflated 1383.5 cleared it. The pick's
-# real price is Elo 1320, 45 points inside `third`.
-#
-# The fix restores an identity that tier_config.json's own `_calibration`
-# already asserts ("third floor = Late 3rd seed 1280"): a CURRENT-YEAR pick
-# of round R badges exactly where GENERIC_PICK_SEEDS[(R, "Mid")] sits.
-# `test_current_year_rungs_badge_their_own_round` pins that for all four
-# rounds, so a future edit cannot silently swap the inverse back.
-# Rationale + measurement: docs/reviews/2026-08-19-pick-badge-scale.md.
-#   2029 1st  → pool 2117.0 → Elo 1650.0 → 'first_1' (D-079: firsts are flat)
+# ⚠️  **D-161 (2026-08-24) MOVED THE 2029 FIRST BACK.** The round curve
+# still prices it at 1263.0, but step 2 now carries the round-1 YoY floor:
+# a FUTURE first may not price below the CURRENT class's first, so 1263.0
+# is clamped to 1859.5 and it badges `first_1` again. That is the operator's
+# 2026-08-24 re-ruling ("The ideal solution is the D-079 ruling") re-asserting
+# flat firsts over DP's own year discount — see `pick_values`'s D-161 block.
+# ROUNDS 2-4 ARE NOT FLOORED, deliberately, and the 2027 rows above are the
+# proof at this surface: "other picks can degrade the longer away they are"
+# is the other half of the same ruling.
+_CURVE_2026_1 = 1859.5
+_CURVE_2026_2 = 434.0
+_CURVE_2026_3 = 262.3
+_CURVE_2026_4 = 233.9
+_CURVE_2027_2 = 389.7
+_CURVE_2027_3 = 254.5
+_CURVE_2029_1_UNFLOORED = 1263.0        # step 2's own answer, pre-clamp
+_CURVE_2029_1 = _CURVE_2026_1           # D-161: floored onto the current class
+
+# Step 1 (the pick's OWN slot), 2026 round 1, 12-team linear board. The
+# ruling's headline: one round, a 5.9x spread, two different badges.
+_SLOT_2026_101 = 4867.1
+_SLOT_2026_112 = 820.8
+
 PICK_ROWS = [
     {"pick_id": f"{LEAGUE}_2026_1_1", "league_id": LEAGUE, "season": 2026,
      "round": 1, "owner_user_id": "u_a", "owner_username": "alice",
-     "is_traded": 0, "original_username": "alice",
+     "is_traded": 0, "original_username": "alice", "original_roster_id": "r1",
      "pool_value": pick_pool_value(1, 0)},
     {"pick_id": f"{LEAGUE}_2027_2_1", "league_id": LEAGUE, "season": 2027,
      "round": 2, "owner_user_id": "u_a", "owner_username": "alice",
-     "is_traded": 0, "original_username": "alice",
+     "is_traded": 0, "original_username": "alice", "original_roster_id": "r1",
      "pool_value": pick_pool_value(2, 1)},
     {"pick_id": f"{LEAGUE}_2026_3_1", "league_id": LEAGUE, "season": 2026,
      "round": 3, "owner_user_id": "u_b", "owner_username": "bob",
-     "is_traded": 0, "original_username": "bob",
+     "is_traded": 0, "original_username": "bob", "original_roster_id": "r1",
      "pool_value": pick_pool_value(3, 0)},
-    # Far-out 1st, heavily discounted — nominal round 1, badge 'second'.
+    # Far-out 1st. On the ladder D-079 made this flat with a current-year
+    # 1st; the market curve decays it (see the far-out test).
     {"pick_id": f"{LEAGUE}_2029_1_1", "league_id": LEAGUE, "season": 2029,
      "round": 1, "owner_user_id": "u_b", "owner_username": "bob",
-     "is_traded": 0, "original_username": "bob",
+     "is_traded": 0, "original_username": "bob", "original_roster_id": "r1",
      "pool_value": pick_pool_value(1, 3)},
-    # A 2027 3rd — still 'third' after D-084, so the band is provably still
-    # reachable and "everything collapsed upward" fails here.
+    # A 2027 3rd — the band it lands in must still be REACHABLE from
+    # somewhere, so "everything collapsed downward" fails here.
     {"pick_id": f"{LEAGUE}_2027_3_1", "league_id": LEAGUE, "season": 2027,
      "round": 3, "owner_user_id": "u_b", "owner_username": "bob",
-     "is_traded": 0, "original_username": "bob",
+     "is_traded": 0, "original_username": "bob", "original_roster_id": "r1",
      "pool_value": pick_pool_value(3, 1)},
     # A leaguemate-ASSERTED pick (W3 M-C `source: 'user'`) — prices, so it
     # tiers exactly like a platform row (sabotage S2 trap).
     {"pick_id": f"{LEAGUE}_2026_2_9", "league_id": LEAGUE, "season": 2026,
      "round": 2, "owner_user_id": "u_a", "owner_username": "alice",
      "is_traded": 0, "original_username": "alice", "source": "user",
-     "pool_value": pick_pool_value(2, 0)},
-    # A CURRENT-YEAR 4th — the second rung D-088 moved (was 'third', which
-    # claimed a 4th this year was worth a 3rd-round pick). Elo 1240.
+     "original_roster_id": "r9", "pool_value": pick_pool_value(2, 0)},
     {"pick_id": f"{LEAGUE}_2026_4_2", "league_id": LEAGUE, "season": 2026,
      "round": 4, "owner_user_id": "u_b", "owner_username": "bob",
-     "is_traded": 0, "original_username": "bob",
+     "is_traded": 0, "original_username": "bob", "original_roster_id": "r2",
      "pool_value": pick_pool_value(4, 0)},
-    # NULL pool_value (pre-pool_value-column row) — no price, no tier.
+    # NULL pool_value (pre-pool_value-column row). D-148: this no longer
+    # implies "no price" — the market can price a row the sync never did,
+    # and the engine already does. See its own test.
     {"pick_id": f"{LEAGUE}_2026_4_1", "league_id": LEAGUE, "season": 2026,
      "round": 4, "owner_user_id": "u_b", "owner_username": "bob",
-     "is_traded": 0, "original_username": "bob",
+     "is_traded": 0, "original_username": "bob", "original_roster_id": "r1",
      "pool_value": None},
 ]
 
+# A 12-team linear board — roster rN holds slot N in every round.
+SLOT_ORDER = {"schema": 1, "season": 2026, "teams": 12, "type": "linear",
+              "slots": {f"r{i}": i for i in range(1, 13)}}
 
-def _mk_sess(user_id="u_a", fmt="1qb_ppr"):
+
+def _mk_sess(user_id="u_a", fmt=FMT):
     """Minimal session satisfying _require_initialized_session."""
     return {
         "user_id":       user_id,
@@ -136,6 +176,7 @@ def _mk_sess(user_id="u_a", fmt="1qb_ppr"):
 
 @pytest.fixture()
 def client():
+    """Flags OFF — no slot resolves, so every row rides the ROUND CURVE."""
     server.app.config["TESTING"] = True
     c = server.app.test_client()
     with patch.object(server, "is_enabled", lambda k: False), \
@@ -149,6 +190,31 @@ def client():
         finally:
             with server._sessions_lock:
                 server._sessions.pop(TOKEN, None)
+
+
+@pytest.fixture()
+def slotted_client():
+    """`picks.slot_labels` ON with a resolvable 12-team order — the state
+    that makes step 1 of the waterfall reachable through the route."""
+    server.app.config["TESTING"] = True
+    c = server.app.test_client()
+    with server._slot_order_lock:
+        server._slot_order_cache.clear()
+    with patch.object(server, "is_enabled",
+                      lambda k: k == "picks.slot_labels"), \
+         patch.object(server, "touch_user_activity", MagicMock()), \
+         patch.object(server, "load_draft_slot_order", lambda lid: SLOT_ORDER), \
+         patch.object(server, "load_draft_picks",
+                      lambda league_id=None, **kw:
+                      [dict(p) for p in PICK_ROWS]
+                      if league_id == LEAGUE else []):
+        try:
+            yield c
+        finally:
+            with server._sessions_lock:
+                server._sessions.pop(TOKEN, None)
+            with server._slot_order_lock:
+                server._slot_order_cache.clear()
 
 
 def _install_sess(sess):
@@ -165,50 +231,144 @@ def _picks_by_id(body):
     return {p["pick_id"]: p for p in body["all_picks"]}
 
 
+def _fetch(c):
+    _install_sess(_mk_sess())
+    code, body = _get(c, f"/api/league/picks?league_id={LEAGUE}")
+    assert code == 200
+    return _picks_by_id(body)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# D-148 — the route serves the ENGINE's price, and badges follow it
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_served_value_is_the_engine_price_not_the_stored_ladder(client):
+    """Q-026's closure, asserted as a NUMBER before any badge is read.
+
+    Sabotage S3 (`{**p}` leaving the stored column on the wire — literally
+    the pre-D-148 line) fails every assertion here."""
+    rows = _fetch(client)
+    served = {pid: r["pool_value"] for pid, r in rows.items()}
+    assert served[f"{LEAGUE}_2026_1_1"] == _CURVE_2026_1
+    assert served[f"{LEAGUE}_2026_2_9"] == _CURVE_2026_2
+    assert served[f"{LEAGUE}_2026_3_1"] == _CURVE_2026_3
+    assert served[f"{LEAGUE}_2026_4_2"] == _CURVE_2026_4
+    assert served[f"{LEAGUE}_2027_2_1"] == _CURVE_2027_2
+    assert served[f"{LEAGUE}_2029_1_1"] == _CURVE_2029_1
+    # …and none of them is the stored rung it used to be.
+    for pid, stored_rung in [(f"{LEAGUE}_2026_1_1", 2117.0),
+                             (f"{LEAGUE}_2026_2_9", 606.5),
+                             (f"{LEAGUE}_2026_3_1", 406.6),
+                             (f"{LEAGUE}_2026_4_2", 272.5)]:
+        assert served[pid] != stored_rung, pid
+
+
+def test_the_route_agrees_with_priced_pool_value_row_for_row(client):
+    """The route is not allowed to have its OWN pricing opinion: every served
+    number must be exactly what `pick_values.priced_pool_value` returns for
+    the same row. This is the invariant the literals above are instances of —
+    both are asserted, so neither a drifted literal nor a drifted route can
+    pass alone."""
+    rows = _fetch(client)
+    for p in PICK_ROWS:
+        expected = priced_pool_value(dict(p), scoring_format=FMT, slot=None)
+        served = rows[p["pick_id"]]["pool_value"]
+        assert served == (round(expected, 1) if expected > 0 else None), \
+            p["pick_id"]
+
+
+def test_slotted_first_badges_above_a_slotted_twelfth(slotted_client):
+    """THE OPERATOR'S HEADLINE (Q-026 ruling, D-148 §2).
+
+    Same round, same season, same stored rung (2117.0) — and now a 5.9x
+    price spread and two different badges, on the list screen, matching what
+    a trade card charges. Under the pre-D-148 code both rows read 2117.0 and
+    both badged 'first_1'."""
+    _install_sess(_mk_sess())
+    code, body = _get(slotted_client, f"/api/league/picks?league_id={LEAGUE}")
+    assert code == 200
+    rows = _picks_by_id(body)
+    first = rows[f"{LEAGUE}_2026_1_1"]      # roster r1 → slot 1
+    assert first["pool_value"] == _SLOT_2026_101
+    assert first["tier"] == "firsts_2"
+    assert first["label"] == "2026 1.01"     # price and label, one resolution
+    # The 1.12 of the same round, via the asserted round-2 row's roster? No —
+    # use the round-1 row's own slot, and pin the twelfth from the pricing
+    # function so the spread is stated as a fact about the curve.
+    assert market_pick_slot_value(2026, 1, 12, FMT) == _SLOT_2026_112
+    assert server.RankingService.tier_for_elo(
+        value_to_elo(_SLOT_2026_112), None, FMT) == "second"
+    assert first["pool_value"] / _SLOT_2026_112 > 5.0
+
+
+def test_slot_resolution_moves_price_and_label_together(slotted_client):
+    """The 2026 2nd asserted to roster r9 prices at 2.09 and is LABELLED
+    2.09. One `slot_for` result drives both, so the list can never say
+    "2026 2.09" while charging for a generic second."""
+    _install_sess(_mk_sess())
+    code, body = _get(slotted_client, f"/api/league/picks?league_id={LEAGUE}")
+    assert code == 200
+    row = _picks_by_id(body)[f"{LEAGUE}_2026_2_9"]
+    assert row["label"] == "2026 2.09"
+    assert row["pool_value"] == market_pick_slot_value(2026, 2, 9, FMT)
+    # …and a FUTURE season keeps its generic label AND its round-curve price,
+    # because #273 refuses to invent next year's order.
+    future = _picks_by_id(body)[f"{LEAGUE}_2027_2_1"]
+    assert future["label"] == "2027 2nd"
+    assert future["pool_value"] == _CURVE_2027_2
+
+
 def test_pick_rows_carry_literal_tier_rungs(client):
-    _install_sess(_mk_sess())
-    code, body = _get(client, f"/api/league/picks?league_id={LEAGUE}")
-    assert code == 200
-    rows = _picks_by_id(body)
-    # Sabotage S1 "wrong scale" turns these into 'firsts_4plus' / None /
-    # None respectively — the literal rungs are the trap.
+    rows = _fetch(client)
+    # Sabotage S1 "wrong scale" turns these into 'firsts_2' / None / None;
+    # S1b "wrong inverse" reads them one band too rich.
     assert rows[f"{LEAGUE}_2026_1_1"]["tier"] == "first_1"
-    # D-088: the current-year 3rd bands where its OWN rung sits (Elo 1320,
-    # 45 points inside `third`). Sabotage S1b puts this back at 'second'.
-    assert rows[f"{LEAGUE}_2026_3_1"]["tier"] == "third"
-    # ...and a 2027 3rd, discounted a year, is still 'third' too.
-    assert rows[f"{LEAGUE}_2027_3_1"]["tier"] == "third"
-    # A discounted 2027 2nd is worth LESS than a late 2026 2nd (Elo 1367.5
-    # vs the 1370 `second` floor), so it honestly reads 'third' — D-320-2's
-    # rule, applied with the correct inverse. Under S1b this reads 'second'.
-    assert rows[f"{LEAGUE}_2027_2_1"]["tier"] == "third"
+    assert rows[f"{LEAGUE}_2026_3_1"]["tier"] == "fourth"     # S1b: 'third'
+    assert rows[f"{LEAGUE}_2027_3_1"]["tier"] == "fourth"     # S1b: 'third'
+    assert rows[f"{LEAGUE}_2027_2_1"]["tier"] == "third"      # S1b: 'second'
+    assert rows[f"{LEAGUE}_2026_4_2"]["tier"] == "waivers"    # S1b: 'third'
 
 
-def test_far_out_pick_tier_is_the_discounted_band(client):
+def test_far_out_first_is_flat_again_while_later_rounds_still_decay(client):
     """D-320-2's RULE is unchanged — the badge reflects TODAY's value, not
-    the pick's name. D-079 changed the VALUE it reflects: a 2029 1st no
-    longer decays (2117.0, not 1300.1), so the honest badge is now 'first_1'
-    rather than 'second'. The operator reported the old badge's cause
-    directly ("2029 1st values are the issue"), so this test now pins the
-    fix. The S1 "wrong scale" trap is preserved by the canonical-walk
-    assertion below: unscaled, 2117.0 would read as Elo 2117 and mis-band.
+    the pick's name. What has moved twice is the VALUE it reflects.
 
-    A round that still decays is asserted alongside it, so "someone flattened
-    every round" fails here rather than shipping."""
-    _install_sess(_mk_sess())
-    code, body = _get(client, f"/api/league/picks?league_id={LEAGUE}")
-    assert code == 200
-    rows = _picks_by_id(body)
+    D-148 put DP's curve behind this surface, and that reversed D-079's most
+    visible consequence here: a 2029 1st stopped being flat with a
+    current-year 1st (2117.0 → 1263.0, badge 'first_1' → 'second'). D-161
+    (2026-08-24) reverses the reversal on the operator's re-ruling — the
+    round-1 YoY floor clamps a future first up to the current class's first,
+    so the served value is 1859.5 again and the badge is 'first_1'. Flat
+    firsts are no longer merely a property of the stored LADDER (step 3);
+    they are asserted at the market seam (step 2) where the price actually
+    comes from.
+
+    The rounds that were NOT floored are asserted alongside it, so "someone
+    flattened every season" — the failure mode this test has guarded through
+    both reversals — still fails here rather than shipping."""
+    rows = _fetch(client)
     row = rows[f"{LEAGUE}_2029_1_1"]
     assert row["round"] == 1
+    assert row["pool_value"] == _CURVE_2029_1
     assert row["tier"] == "first_1"
-    # ...and it matches the canonical walk over the inverted value map.
+    # …and it matches the canonical walk over the inverted value map (the S1
+    # "wrong scale" trap: unscaled, 1859.5 would read as Elo 1859.5 →
+    # 'firsts_2' rather than the 'first_1' the inverted value maps to).
     assert row["tier"] == server.RankingService.tier_for_elo(
-        value_to_elo(float(row["pool_value"])), None, "1qb_ppr")
-    # A far-out 1st is now worth exactly a current-year 1st...
+        value_to_elo(float(row["pool_value"])), None, FMT)
+    # The far-out 1st is EQUAL to a current-year 1st — the D-161 ruling…
     assert float(row["pool_value"]) == float(
         rows[f"{LEAGUE}_2026_1_1"]["pool_value"])
-    # ...while a future 2nd is still worth strictly less than a current one.
+    # …and it is strictly above the unfloored round curve, so the equality
+    # above is the clamp doing work rather than DP happening to agree.
+    assert float(row["pool_value"]) > _CURVE_2029_1_UNFLOORED
+    assert priced_pool_value({"season": 2029, "round": 1, "pool_value": None},
+                             scoring_format=FMT, slot=None) == _CURVE_2029_1
+    # …while the STORED column both rows came from also holds them equal,
+    # which is what makes flat firsts a PRICING statement on two scales now.
+    assert pick_pool_value(1, 3) == pick_pool_value(1, 0)
+    # …and a future 2nd is still worth strictly less than a current one:
+    # rounds 2-4 keep DP's discount, per the other half of the ruling.
     assert float(rows[f"{LEAGUE}_2027_2_1"]["pool_value"]) < float(
         rows[f"{LEAGUE}_2026_2_9"]["pool_value"])
 
@@ -217,19 +377,42 @@ def test_asserted_user_source_pick_carries_tier_too(client):
     """Sabotage S2 "platform-only tiers": a `source: 'user'` row prices, so
     it tiers — skipping it fails here. (The provenance MARKER is a separate,
     flag-gated concern; the tier is not.)"""
-    _install_sess(_mk_sess())
-    code, body = _get(client, f"/api/league/picks?league_id={LEAGUE}")
-    assert code == 200
-    assert _picks_by_id(body)[f"{LEAGUE}_2026_2_9"]["tier"] == "second"
+    assert _fetch(client)[f"{LEAGUE}_2026_2_9"]["tier"] == "third"
 
 
-def test_null_pool_value_yields_null_tier_not_a_guess(client):
-    _install_sess(_mk_sess())
-    code, body = _get(client, f"/api/league/picks?league_id={LEAGUE}")
-    assert code == 200
-    row = _picks_by_id(body)[f"{LEAGUE}_2026_4_1"]
-    assert row["pool_value"] is None
-    assert row["tier"] is None
+def test_stored_null_now_prices_from_the_market_like_the_engine_does(client):
+    """D-148 re-anchored the null contract, deliberately.
+
+    A NULL `pool_value` used to mean "no price, no badge". It never meant
+    that to anyone else: `_power_picks_by_owner` re-derives a price from a
+    NULL, and `priced_pool_value` prices the row off the market regardless of
+    what the sync stored. Serving null HERE while the engine charged for the
+    same row is exactly the disagreement Q-026 closed, so the row now prices
+    — at the identical number its non-null twin gets, since the stored column
+    is only step 3."""
+    rows = _fetch(client)
+    null_row = rows[f"{LEAGUE}_2026_4_1"]      # stored NULL
+    twin = rows[f"{LEAGUE}_2026_4_2"]          # same season+round, stored 272.5
+    assert null_row["pool_value"] == _CURVE_2026_4 == twin["pool_value"]
+    assert null_row["tier"] == twin["tier"] == "waivers"
+
+
+def test_unpriceable_row_still_serves_null_rather_than_a_fake_zero(client):
+    """The null contract that SURVIVES: when every step of the waterfall is
+    empty — DP unreachable (`load_pick_slot_values` fail-softs to `{}`) and
+    no stored value — there is nothing honest to say, so `pool_value` is
+    null and the badge is null. Never 0.0, which would render as "this pick
+    is worthless" on every client."""
+    row = {"pick_id": f"{LEAGUE}_2026_4_1", "league_id": LEAGUE,
+           "season": 2026, "round": 4, "owner_user_id": "u_b",
+           "owner_username": "bob", "is_traded": 0, "original_username": "bob",
+           "pool_value": None}
+    with patch("backend.data_loader.load_pick_slot_values", lambda *a, **k: {}), \
+         patch.object(server, "load_draft_picks",
+                      lambda league_id=None, **kw: [dict(row)]):
+        served = _fetch(client)[f"{LEAGUE}_2026_4_1"]
+    assert served["pool_value"] is None
+    assert served["tier"] is None
 
 
 def test_my_picks_rows_carry_tier_and_demo_league_unchanged(client):
@@ -247,69 +430,62 @@ def test_my_picks_rows_carry_tier_and_demo_league_unchanged(client):
                     "picks_supported": True}
 
 
-def test_current_year_rungs_badge_their_own_round(client):
-    """D-088 — THE INVARIANT, not a literal restatement of it.
+def test_the_d088_inverse_identity_is_still_the_one_this_route_uses(client):
+    """D-088 — THE INVARIANT, restated where D-148 left it.
 
-    `tier_config.json`'s `_calibration` defines each band's floor AS a rung
-    of `GENERIC_PICK_SEEDS` ("third floor = Late 3rd seed 1280"), which is
-    only coherent if the seeds live on the tier-band Elo scale. So a
-    CURRENT-year pick — `years_out == 0`, no decay applied — must badge
-    exactly where its own Mid rung sits. Any inverse other than
-    `value_to_elo` breaks this for at least one round:
+    `tier_config.json`'s `_calibration` defines each band's floor AS a rung of
+    `GENERIC_PICK_SEEDS` ("third floor = Late 3rd seed 1280"), which is only
+    coherent if the seeds live on the tier-band Elo scale. The identity that
+    pins it — `value_to_elo(pick_pool_value(R, 0)) == GENERIC_PICK_SEEDS[(R,
+    'Mid')]` — is a property of the LADDER, and D-148 did not touch it: the
+    ladder is still step 3, and `value_to_elo` is still the exact inverse of
+    the units every step of the waterfall returns.
 
-      * `seed_elo_for_value` (the #320 defect) → r3 'second', r4 'third'
-      * no inversion at all (the #263 defect) → r1 'firsts_4plus', r3 None
+    What D-148 changed is which number goes IN. So this asserts both halves,
+    separately, because only the pair excludes both defects:
 
-    Asserted through the ROUTE, so it covers the serializer and not just the
-    helper, and asserted for all four rounds so a single-round patch cannot
-    satisfy it."""
-    _install_sess(_mk_sess())
-    code, body = _get(client, f"/api/league/picks?league_id={LEAGUE}")
-    assert code == 200
-    rows = _picks_by_id(body)
-    served = {1: f"{LEAGUE}_2026_1_1", 3: f"{LEAGUE}_2026_3_1",
-              4: f"{LEAGUE}_2026_4_2"}
-    for rnd, pick_id in served.items():
-        seed_tier = server.RankingService.tier_for_elo(
-            GENERIC_PICK_SEEDS[(rnd, "Mid")], None, "1qb_ppr")
-        assert rows[pick_id]["tier"] == seed_tier, (
-            f"round {rnd}: badge {rows[pick_id]['tier']!r} != its own rung "
-            f"{seed_tier!r} (Elo {GENERIC_PICK_SEEDS[(rnd, 'Mid')]})")
-    # …and the round-2 rung too, via the current-year asserted pick row.
-    assert rows[f"{LEAGUE}_2026_2_9"]["tier"] == (
-        server.RankingService.tier_for_elo(
-            GENERIC_PICK_SEEDS[(2, "Mid")], None, "1qb_ppr"))
-    # The identity underneath, stated directly: value_to_elo is the EXACT
-    # inverse of the elo_to_value units pick_pool_value returns.
+      1. the ladder identity itself, for all four rounds; and
+      2. the route badging the SERVED value through that same inverse.
+
+    Any inverse other than `value_to_elo` breaks at least one round:
+      * `seed_elo_for_value` (the #320 defect) → the 2026 2nd reads 'second'
+        instead of 'third' and the 2026 4th 'third' instead of 'waivers'
+      * no inversion at all (the #263 defect) → the 2026 1st reads 'firsts_2'
+        and everything cheaper reads None
+    """
+    # (1) the ladder identity — unchanged by D-148.
     for rnd in (1, 2, 3, 4):
         assert abs(value_to_elo(pick_pool_value(rnd, 0))
                    - GENERIC_PICK_SEEDS[(rnd, "Mid")]) < 0.05
+    # (2) the route walks the SERVED value through that inverse, every row.
+    rows = _fetch(client)
+    for pid, row in rows.items():
+        v = row["pool_value"]
+        expected = (None if v is None else server.RankingService.tier_for_elo(
+            value_to_elo(float(v)), None, FMT))
+        assert row["tier"] == expected, pid
     # Named literals, so "all four collapsed to one tier" fails here.
     assert rows[f"{LEAGUE}_2026_1_1"]["tier"] == "first_1"
-    assert rows[f"{LEAGUE}_2026_2_9"]["tier"] == "second"
-    assert rows[f"{LEAGUE}_2026_3_1"]["tier"] == "third"
-    assert rows[f"{LEAGUE}_2026_4_2"]["tier"] == "fourth"
+    assert rows[f"{LEAGUE}_2026_2_9"]["tier"] == "third"
+    assert rows[f"{LEAGUE}_2026_3_1"]["tier"] == "fourth"
+    assert rows[f"{LEAGUE}_2026_4_2"]["tier"] == "waivers"
 
 
 def test_deep_far_out_pick_tiers_null_rather_than_flattering_it(client):
-    """A pick priced BELOW the `waivers` floor (1150) gets no badge at all
-    — the documented null-tier contract, same as an unpriced row — never a
-    fabricated `third`. Under the #320 inverse a 2029 4th read Elo 1330.7
-    and badged 'third'; its real price is Elo 1142.5, below every band.
+    """A pick priced BELOW the `waivers` floor (Elo 1150) gets no badge at
+    all — the documented null-tier contract — never a fabricated `fourth`.
 
-    This is the one case where the fix removes a badge rather than lowering
-    it, so it is pinned explicitly."""
-    from backend.pick_values import pick_pool_value as _ppv
-    deep = {"pick_id": f"{LEAGUE}_2029_4_1", "league_id": LEAGUE,
-            "season": 2029, "round": 4, "owner_user_id": "u_b",
+    Re-derived for D-148: the 2029 4th that used to sit below the floor now
+    prices at 195.2 (Elo 1173.3) and honestly badges 'waivers', so the case
+    is pinned one year deeper, at a 2030 4th (166.0 → Elo 1140.8). The
+    PRICE is still served — only the badge is withheld."""
+    deep = {"pick_id": f"{LEAGUE}_2030_4_1", "league_id": LEAGUE,
+            "season": 2030, "round": 4, "owner_user_id": "u_b",
             "owner_username": "bob", "is_traded": 0,
-            "original_username": "bob", "pool_value": _ppv(4, 3)}
+            "original_username": "bob", "pool_value": pick_pool_value(4, 4)}
     with patch.object(server, "load_draft_picks",
                       lambda league_id=None, **kw: [dict(deep)]):
-        _install_sess(_mk_sess())
-        code, body = _get(client, f"/api/league/picks?league_id={LEAGUE}")
-    assert code == 200
-    row = _picks_by_id(body)[f"{LEAGUE}_2029_4_1"]
-    assert row["pool_value"] is not None
+        row = _fetch(client)[f"{LEAGUE}_2030_4_1"]
+    assert row["pool_value"] == 166.0
     assert value_to_elo(float(row["pool_value"])) < 1150.0
     assert row["tier"] is None

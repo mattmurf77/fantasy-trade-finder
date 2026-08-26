@@ -68,6 +68,28 @@
 //      `declineReasonsOn ? … : undefined` pair. File-agnostic over
 //      `src/screens`, so a host added later is covered.
 //
+//  11  **The band is ADJACENT to its cutout, and the solver is RUN.** Added
+//      2026-08-22 from the device pass: the shipped rule put the band at a
+//      fixed `top: 54` whenever the target's bottom edge fell below 60 % of
+//      the window, which is every calculator beat after the outlook — the
+//      operator saw five correct rings with no Analyst beside any of them, and
+//      the avatar reappeared on the header-less deck. `solveBandPlacement` is
+//      lifted out of the source, transpiled and executed over a sweep of ring
+//      positions and band heights; the invariants are that the band never
+//      overlaps its ring and a top-anchored band always clears the top inset.
+//      Sabotage: `{ top: 54 }` in the style, or a solver that ignores
+//      `insets.top` → red. Assertion 7's latch moved with it: it now holds the
+//      whole `{from, offset}` placement, so 7a–7f are RE-POINTED at `place`,
+//      not deleted.
+//  12  The calculator announces movement from `onLayout` and
+//      `onContentSizeChange` as well as `onScroll` — its content grows after
+//      first paint (rosters land, the outlook receipt swaps with its fallback)
+//      and that moves every target below it with no scroll event at all.
+//  13  Scroll-into-view: the `registerGuideScroller` seam exists, the overlay
+//      asks for a scroller from an effect (never during render), and it does
+//      so at most ONCE per step. Sabotage: drop the `scrolledForRef` latch and
+//      the scroll notifies → re-measures → re-scrolls for the life of the step.
+//
 // Structural, not textual: parses the shipped source with the project's own
 // TypeScript and walks the AST, like check-single-pin-actions.js — a grep
 // cannot tell a guarded setter from an unguarded one, and that distinction
@@ -474,28 +496,52 @@ if (!trackImpl) {
 // 7 — the band placement is latched per step
 // ═══════════════════════════════════════════════════════════════════════════
 
-const atTopDecl = declOf(overlay, 'atTop');
+// 2026-08-22 (#384 device report 3): the latched value is no longer a
+// boolean band choice but the whole PLACEMENT — `{from, offset}` — because the
+// band is now sited adjacent to its cutout rather than parked at a fixed
+// `top: 54`. The latch property is unchanged and is what these assertions are
+// for; they are re-pointed at `place`, not deleted.
+const placeDecl = declOf(overlay, 'place');
 
-if (!atTopDecl || !atTopDecl.initializer) {
-  fail('7 — `atTop` is declared in the overlay', 'declaration not found');
-} else {
-  const init = atTopDecl.initializer;
-  const initText = flat(overlay, init);
+{
+  const atTopDecl = declOf(overlay, 'atTop');
   assert(
-    initText !== 'targetInBottomBand',
+    !!atTopDecl && !!atTopDecl.initializer &&
+      flat(overlay, atTopDecl.initializer) !== 'targetInBottomBand',
     '7a — `atTop` is not the bare re-solving predicate',
     'const atTop = targetInBottomBand — this is the pre-fix line: with a ' +
       'tracking frame the avatar and bubble flip bands mid-fling',
   );
+  // The 60 %-of-the-window rule IS the report-3 defect: it is what sent every
+  // calculator beat after the outlook to `top: 54`, on a screen with a native
+  // header, far from the ring it was explaining.
+  assert(
+    !declOf(overlay, 'targetInBottomBand'),
+    '7a2 — the 60 %-of-the-window band predicate is gone entirely',
+    'restoring it re-creates the fixed-band placement the device pass rejected',
+  );
+}
 
-  // The latch itself: a ref read from `atTop`'s initializer.
-  const refRead = findAll(
-    init,
-    (n) => ts.isPropertyAccessExpression(n) && n.name.text === 'current',
-  )[0];
+if (!placeDecl || !placeDecl.initializer) {
+  fail('7 — `place` is declared in the overlay', 'declaration not found');
+} else {
+  const init = placeDecl.initializer;
+  const initText = flat(overlay, init);
+
+  // The latch itself: a ref read from `place`'s initializer — or, since the
+  // live-offset change (2026-08-22, the band must FOLLOW a ring that
+  // re-measures after the push transition), from the `latched` declaration
+  // that `place` derives from. Either way the side comes from a ref.
+  const latchedDecl = declOf(overlay, 'latched');
+  const refRead =
+    findAll(init, (n) => ts.isPropertyAccessExpression(n) && n.name.text === 'current')[0] ||
+    (latchedDecl && latchedDecl.initializer &&
+      referencesIdentifier(overlay, init, 'latched') &&
+      findAll(latchedDecl.initializer,
+        (n) => ts.isPropertyAccessExpression(n) && n.name.text === 'current')[0]);
   assert(
     !!refRead,
-    '7b — `atTop` reads a latch ref',
+    '7b — `place` reads a latch ref',
     `saw: ${initText}`,
   );
 
@@ -531,6 +577,22 @@ if (!atTopDecl || !atTopDecl.initializer) {
         /\bid\b/.test(flat(overlay, latchWrite.right)),
         '7e — the latch is keyed on the step id',
         `saw: ${flat(overlay, latchWrite.right)}`,
+      );
+      // And only on an ON-SCREEN cutout: the first frame of a step can
+      // resolve while the push transition still has the screen off to the
+      // right, which solves to the bottom band — latching that pins the
+      // wrong SIDE for the life of the step (simulator, 2026-08-22).
+      assert(
+        !!guard && referencesIdentifier(overlay, guard.expression, 'cutout'),
+        '7h — the latch is written only once the cutout is ON-screen',
+        guard ? `guard: ${flat(overlay, guard.expression)}` : 'no guard',
+      );
+      // The OFFSET is live whenever the solver agrees on the side — the band
+      // must follow a ring that re-measures (post-transition, scroll).
+      assert(
+        /latched\.from === solved\.from \? solved/.test(flat(overlay, placeDecl.initializer)),
+        '7g — the placement offset is live when the latched side agrees with the solver',
+        `saw: ${flat(overlay, placeDecl.initializer)}`,
       );
     }
     assert(
@@ -805,6 +867,516 @@ for (const rel of hostRels) {
         : undefined,
     );
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 10 — every scrolling guide HOST announces movement
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Assertion 9 checks the hosts that already opted in. This one finds the ones
+// that SHOULD have: any file under src/ that registers a guide target AND owns
+// a ScrollView is a page whose spotlight can go stale under a scroll, and the
+// #384 calculator was exactly that file — it registered six targets, scrolled,
+// and never announced, so every beat below the fold pointed at the wrong place
+// the moment the user moved the page.
+//
+// The rule is deliberately mechanical (register + ScrollView ⇒ notify) rather
+// than a hand-kept list, so a screen added later is covered on the day it is
+// written. Exceptions are ENUMERATED here with a reason, never by weakening
+// the predicate — a rule with a silent hole is worse than no rule.
+
+const SCROLL_HOST_EXCEPTIONS = {
+  // The ONLY ScrollView in this file is inside the team-picker `Modal`
+  // (`calc.team-sheet`) — a bottom sheet with no guide target in it, mounted
+  // over a page that is not scrolling while it is open. The page's own scroll
+  // container lives in TradeCalculatorScreen, which does announce.
+  'src/components/InLeagueCalculator.tsx':
+    'its only ScrollView is inside the team-picker Modal and contains no guide target',
+};
+
+function walkTsFiles(dir) {
+  const out = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const abs = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...walkTsFiles(abs));
+    else if (/\.tsx?$/.test(entry.name)) out.push(abs);
+  }
+  return out;
+}
+
+{
+  const SRC = path.join(ROOT, 'src');
+  const shouldNotify = walkTsFiles(SRC)
+    .map((abs) => path.relative(ROOT, abs))
+    .filter((rel) => {
+      const text = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+      return text.includes('registerGuideTarget(') && text.includes('<ScrollView');
+    });
+
+  assert(
+    shouldNotify.length > 0,
+    '10a — the register+scroll scan found files to check',
+    'a renamed API would make this rule vacuous',
+  );
+
+  for (const rel of shouldNotify) {
+    const excuse = SCROLL_HOST_EXCEPTIONS[rel];
+    const text = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    const notifies = text.includes('notifyGuideTargetsMoved');
+    if (excuse) {
+      assert(
+        !notifies,
+        `10b — ${rel} is listed as an exception and still does not announce`,
+        `it now calls notifyGuideTargetsMoved — delete its exception entry (${excuse})`,
+      );
+      continue;
+    }
+    assert(
+      notifies,
+      `10c — ${rel} registers a guide target, owns a ScrollView, and announces movement`,
+      'the spotlight caches an ABSOLUTE window frame; without an onScroll '
+        + 'notifier every target below the fold is highlighted at its stale '
+        + 'position the moment the page moves. Add onScroll + '
+        + 'scrollEventThrottle, or add a reasoned entry to '
+        + 'SCROLL_HOST_EXCEPTIONS',
+    );
+  }
+
+  // The two shipped hosts must stay in the set — if either stops registering
+  // targets or stops scrolling, this rule quietly covers one file instead of
+  // three and nobody finds out.
+  for (const rel of ['src/screens/TradesScreen.tsx',
+                     'src/screens/LeagueSummaryScreen.tsx',
+                     'src/screens/TradeCalculatorScreen.tsx']) {
+    assert(
+      shouldNotify.includes(rel),
+      `10d — ${rel} is still in scope for the register+scroll rule`,
+      'it no longer registers a guide target or no longer owns a ScrollView — '
+        + 'confirm that is intended before accepting this',
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 11 — the band is ADJACENT to its cutout (#384 device report 3)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// WHY. Operator report, 2026-08-22, build 1.16.0 (126): five consecutive
+// calculator beats drew a correct spotlight ring with no Analyst beside it,
+// and the avatar reappeared the moment the tour reached the deck. The shipped
+// solver parked the band at a fixed `top: 54` whenever the target's bottom
+// edge fell below 60 % of the window — which is every calculator beat after
+// the outlook, on the one screen in the pair that carries a native-stack
+// header. Adjacency deletes the whole class: the band is next to the ring, or
+// it is the bottom band, and it is never in the top inset.
+//
+// The solver is EXECUTED, not described — same posture as section 8, and for
+// the same reason: a shape assertion cannot tell a clamp from a placement.
+// Sabotage: return `{from:'top', offset: 54}` unconditionally → red.
+
+{
+  const fnDecl = findAll(
+    overlay,
+    (n) => ts.isFunctionDeclaration(n) && !!n.name && n.name.text === 'solveBandPlacement',
+  )[0];
+
+  if (!fnDecl) {
+    fail(
+      '11a — the overlay exports a `solveBandPlacement` solver',
+      'the adjacency solver is gone; the band is placed inline again and ' +
+        'nothing here can execute it',
+    );
+  } else {
+    const consts = ['BAND_GAP', 'BAND_EDGE', 'BAND_BOTTOM']
+      .map((name) => {
+        const d = declOf(overlay, name);
+        return d && d.initializer ? `const ${name} = ${d.initializer.getText(overlay)};` : '';
+      })
+      .join('\n');
+    assert(
+      /BAND_GAP/.test(consts) && /BAND_EDGE/.test(consts) && /BAND_BOTTOM/.test(consts),
+      '11b — the solver\'s three constants are module-level and liftable',
+      consts,
+    );
+
+    let solve = null;
+    try {
+      const tsSrc = `${consts}\n${fnDecl.getText(overlay).replace(/^export\s+/, '')}`;
+      const js = ts.transpileModule(tsSrc, {
+        compilerOptions: { module: ts.ModuleKind.None, target: ts.ScriptTarget.ES2019 },
+      }).outputText;
+      // eslint-disable-next-line no-new-func
+      solve = new Function(`${js}\nreturn solveBandPlacement;`)();
+    } catch (e) {
+      fail('11c — the solver is liftable and runnable', String(e && e.message));
+    }
+
+    if (solve) {
+      const H = 844;
+      const INSETS = { top: 59, bottom: 34 };
+      const BAND = 180;
+      const GAP = Number((consts.match(/BAND_GAP = (\d+)/) || [])[1]);
+      const EDGE = Number((consts.match(/BAND_EDGE = (\d+)/) || [])[1]);
+      const BOTTOM = Number((consts.match(/BAND_BOTTOM = (\d+)/) || [])[1]);
+
+      // Preferred: ABOVE the ring, and the band's bottom edge stops one gap
+      // short of it.
+      {
+        const c = { top: 500, height: 80 };
+        const p = solve(c, BAND, H, INSETS);
+        assert(
+          p.from === 'top' && p.offset === c.top - BAND - GAP,
+          '11d — a ring with room above it gets the band directly above',
+          JSON.stringify(p),
+        );
+      }
+      // No room above (a ring near the top): BELOW, one gap under the ring.
+      {
+        const c = { top: 100, height: 60 };
+        const p = solve(c, BAND, H, INSETS);
+        assert(
+          p.from === 'top' && p.offset === c.top + c.height + GAP,
+          '11e — a ring too near the top puts the band below it',
+          JSON.stringify(p),
+        );
+      }
+      // Neither fits (a ring taller than the space around it): the old bottom
+      // band, which is the only honest fallback.
+      {
+        const p = solve({ top: 80, height: 700 }, BAND, H, INSETS);
+        assert(
+          p.from === 'bottom' && p.offset === BOTTOM,
+          '11f — a ring with room on neither side falls back to the bottom band',
+          JSON.stringify(p),
+        );
+      }
+      assert(
+        solve(null, BAND, H, INSETS).from === 'bottom',
+        '11g — an untargeted step (no cutout) uses the bottom band',
+      );
+      assert(
+        solve({ top: 500, height: 80 }, 0, H, INSETS).from === 'bottom',
+        '11h — an UNMEASURED band cannot be placed adjacent and uses the fallback',
+        'placing before onLayout would site the band by a height of zero',
+      );
+
+      // The two invariants, swept over every ring position and a range of band
+      // heights. `top: 54` — the pre-fix constant — violates both.
+      let overlaps = null;
+      let inInset = null;
+      for (let bandH = 80; bandH <= 320; bandH += 40) {
+        for (let top = -40; top <= H + 40; top += 17) {
+          for (const height of [40, 120, 400]) {
+            const c = { top, height };
+            const p = solve(c, bandH, H, INSETS);
+            if (p.from !== 'top') continue;
+            const above = p.offset + bandH <= c.top;
+            const below = p.offset >= c.top + c.height;
+            if (!above && !below) {
+              overlaps = overlaps || { c, bandH, p };
+            }
+            if (p.offset < INSETS.top + EDGE) {
+              inInset = inInset || { c, bandH, p };
+            }
+          }
+        }
+      }
+      assert(
+        overlaps === null,
+        '11i — the band never overlaps the ring it is explaining',
+        `first overlap: ${JSON.stringify(overlaps)}`,
+      );
+      assert(
+        inInset === null,
+        '11j — a top-anchored band always clears the top safe-area inset',
+        `first violation: ${JSON.stringify(inInset)} — a fixed offset (the ` +
+          'shipped `top: 54`) lands under the status bar and, on a sub-screen, ' +
+          'under the native header',
+      );
+
+      // #397/#398 — the per-step pin: an opt-in 5th argument overrides
+      // adjacency with the top of the window. EXECUTED like 11d–11j; the
+      // 4-arg cases above are the mechanical proof the un-pinned path did
+      // not move.
+      {
+        // The exact tall-ring input 11f bottom-bands — pinned, it tops.
+        const p = solve({ top: 80, height: 700 }, BAND, H, INSETS, 'top');
+        assert(
+          p.from === 'top' && p.offset === INSETS.top + EDGE,
+          "11n — a pinned step ('top') tops the band even when adjacency would bottom-band it",
+          JSON.stringify(p),
+        );
+      }
+      {
+        // The pin PRECEDES the null-cutout/unmeasured early return: a
+        // degraded or not-yet-measured pinned step still honors the ask.
+        const p = solve(null, 0, H, INSETS, 'top');
+        assert(
+          p.from === 'top' && p.offset === INSETS.top + EDGE,
+          '11o — the pin precedes the null-cutout / unmeasured-band early return',
+          JSON.stringify(p),
+        );
+      }
+    }
+  }
+
+  // The band's own style must READ the solved offset. A numeric literal here
+  // is the exact regression: the placement is computed and then ignored.
+  const litTop = findAll(
+    overlay,
+    (n) =>
+      ts.isConditionalExpression(n) &&
+      ts.isObjectLiteralExpression(n.whenTrue) &&
+      n.whenTrue.properties.some((p) => p.name && p.name.getText(overlay) === 'top'),
+  )[0];
+  assert(
+    !!litTop,
+    '11k — the band style still picks its anchor with a conditional',
+    'the top/bottom conditional is gone; re-point this assertion',
+  );
+  if (litTop) {
+    const topProp = litTop.whenTrue.properties.find(
+      (p) => p.name && p.name.getText(overlay) === 'top',
+    );
+    assert(
+      !!topProp && !ts.isNumericLiteral(topProp.initializer),
+      '11l — the top anchor is the SOLVED offset, not a fixed number',
+      `saw: ${flat(overlay, litTop.whenTrue)} — \`{ top: 54 }\` is the shipped bug`,
+    );
+  }
+
+  // The band's height has to come from a real measurement, or the solver runs
+  // on a guess and every placement is off by the difference.
+  const bandLayout = findAll(overlay, (n) => {
+    if (!isJsxEl(n)) return false;
+    const a = attr(overlay, n, 'onLayout');
+    return !!a && !!a.initializer && referencesIdentifier(overlay, a.initializer, 'setBandH');
+  });
+  assert(
+    bandLayout.length === 1,
+    '11m — the band measures its own height from onLayout',
+    `${bandLayout.length} onLayout handlers write the band height`,
+  );
+
+  // #397/#398 — the pin's two structural links. Executing the solver (11n/11o)
+  // proves the pin WORKS; these prove it is WIRED: the s2_2 builder declares
+  // it, and the overlay's solver call actually forwards it.
+  {
+    // 11p — bound to the s2_2 builder's own returned object literal via the
+    // AST: a comment, or `band: 'top'` on any OTHER builder, cannot satisfy it.
+    const scriptSf = parse('src/components/analystScript.ts');
+    const s22Builder = findAll(
+      scriptSf,
+      (n) =>
+        ts.isPropertyAssignment(n) &&
+        n.name.getText(scriptSf) === 's2_2' &&
+        ts.isArrowFunction(n.initializer),
+    )[0];
+    let s22Band = null;
+    if (s22Builder) {
+      const body = s22Builder.initializer.body;
+      const obj = ts.isParenthesizedExpression(body) ? body.expression : body;
+      if (ts.isObjectLiteralExpression(obj)) {
+        s22Band =
+          obj.properties.find(
+            (p) => ts.isPropertyAssignment(p) && p.name.getText(scriptSf) === 'band',
+          ) || null;
+      }
+    }
+    assert(
+      !!s22Band &&
+        ts.isStringLiteral(s22Band.initializer) &&
+        s22Band.initializer.text === 'top',
+      "11p — the s2_2 builder declares `band: 'top'` (the swipe beat pins to the top)",
+      s22Band
+        ? `saw: ${flat(scriptSf, s22Band)}`
+        : 'no `band` property on the s2_2 builder\'s returned object literal',
+    );
+
+    // 11q — the 5th argument INSIDE the solveBandPlacement CallExpression is
+    // `active.band`. The assertion walks the call's own arguments — a bare
+    // `active.band` token elsewhere in the file must not satisfy it.
+    const solveCalls = callsTo(overlay, 'solveBandPlacement');
+    const fifth = solveCalls.length === 1 ? solveCalls[0].arguments[4] : undefined;
+    assert(
+      solveCalls.length === 1 &&
+        !!fifth &&
+        ts.isPropertyAccessExpression(fifth) &&
+        ts.isIdentifier(fifth.expression) &&
+        fifth.expression.text === 'active' &&
+        fifth.name.text === 'band',
+      '11q — the overlay forwards `active.band` as the solver call\'s 5th argument',
+      solveCalls.length === 1
+        ? `call args: ${flat(overlay, solveCalls[0])}`
+        : `${solveCalls.length} call(s) to solveBandPlacement`,
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 12 — a growing page moves targets without ever scrolling (#384 report 1)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The calculator's content GROWS after first paint — the rosters land and the
+// outlook receipt swaps with its fallback — which shifts every target below it
+// with no scroll event at all. `onScroll` alone cannot see that, which is half
+// of why the first-landing spotlight was wrong. #386 added a second host with
+// the same defect class: LeagueSummaryScreen's Season outlook section
+// mounts/toggles after first paint (AsyncStorage hydration, outlook-query
+// resolution, the strip tap), shifting the position pills under an already-
+// measured n5 spotlight. Every host below is asserted independently, and a
+// host whose wired `onScroll` cannot be found fails LOUDLY — it is never
+// skipped, so silently dropping a host from parsing cannot green the suite.
+// Sabotage: drop either callback from either host → red.
+
+{
+  const GROWING_HOSTS_REL = [
+    'src/screens/TradeCalculatorScreen.tsx',
+    'src/screens/LeagueSummaryScreen.tsx', // #386 — outlook section shifts the pills
+  ];
+  for (const rel of GROWING_HOSTS_REL) {
+    const sf = parse(rel);
+    const scroller = findAll(sf, (n) => {
+      if (!isJsxEl(n)) return false;
+      const a = attr(sf, n, 'onScroll');
+      return !!a && !!a.initializer && referencesIdentifier(sf, a.initializer, 'notifyGuideTargetsMoved');
+    })[0];
+
+    if (!scroller) {
+      fail(`12a — ${rel}'s page ScrollView announces movement`, 'no wired onScroll found');
+    } else {
+      for (const name of ['onLayout', 'onContentSizeChange']) {
+        const a = attr(sf, scroller, name);
+        assert(
+          !!a && !!a.initializer && referencesIdentifier(sf, a.initializer, 'notifyGuideTargetsMoved'),
+          `12b — ${where(sf, scroller)} also announces from ${name}`,
+          `${rel}: content that grows under a settled scroll offset moves ` +
+            'every target below it and fires no scroll event',
+        );
+      }
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 13 — scroll-into-view: the seam, and the once-per-step guard
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The overlay owns no scroll container, so hosts register a handle keyed by
+// the screen name their steps declare. The re-entrancy guard is the load-
+// bearing part: scrolling notifies, the notify re-measures, and a re-measure
+// that re-entered the scroll would chase its own tail for as long as the step
+// is up. Sabotage: drop the `scrolledForRef` guard → red.
+
+{
+  const scrollerFns = ['registerGuideScroller', 'unregisterGuideScroller', 'getGuideScroller'];
+  for (const name of scrollerFns) {
+    assert(
+      exportedFns.has(name),
+      `13a — guideTargets exports ${name}`,
+      'the host↔overlay scroll seam is incomplete',
+    );
+  }
+  const askCalls = callsTo(overlay, 'getGuideScroller');
+  assert(
+    askCalls.length === 1,
+    '13b — the overlay asks for a scroller exactly once',
+    `${askCalls.length} call(s)`,
+  );
+  const scrollEffect = askCalls.length === 1
+    ? enclosing(askCalls[0], (n) => isCallTo(n, 'useEffect'))
+    : null;
+  assert(
+    !!scrollEffect,
+    '13c — the scroll-into-view lives in a useEffect (never in render)',
+    'scrolling a host during render is a side effect in the render phase',
+  );
+  if (scrollEffect) {
+    const fn = scrollEffect.arguments[0];
+    const guard = findAll(fn, (n) => ts.isIfStatement(n)).find(
+      (n) => /scrolledForRef\.current === active\.id/.test(flat(overlay, n.expression)),
+    );
+    assert(
+      !!guard,
+      '13d — a step scrolls its target into view at most ONCE',
+      'without the latch the scroll notifies, the notify re-measures, and the ' +
+        'effect re-enters for the life of the step',
+    );
+    assert(
+      referencesIdentifier(overlay, fn, 'bandMeasured') || referencesIdentifier(overlay, fn, 'bandH'),
+      '13e — the scroll reserves room for the MEASURED band',
+      'scrolling to an edge without accounting for the band lands the target ' +
+        'exactly where the band has to go',
+    );
+    const FORBIDDEN = ['commitShown', 'track', 'dismissActiveStep', 'skipStep'];
+    const seen = FORBIDDEN.filter((id) => referencesIdentifier(overlay, fn, id));
+    assert(
+      seen.length === 0,
+      '13f — the scroll-into-view emits nothing and ends no step',
+      `references ${seen.join(', ')}`,
+    );
+  }
+}
+
+// ── 14: the entry slide runs against a MOUNTED band ───────────────────────
+//
+// Operator device report 2026-08-22 (builds 126 and 127), reproduced in the
+// simulator on the sign-in username beat: a TARGETED beat that follows another
+// beat drew its ring and no avatar/bubble. The overlay returns null while a
+// targeted step's spotlight is pending, so the band UNMOUNTS; the entry
+// spring used to start on step activation — i.e. against the unmounted band —
+// with the native driver, and the remounted band initialised from the stale
+// JS-side value (0) and never received another native frame. Two properties
+// pin the fix: the spring is keyed on the band rendering (`spotlightPending`
+// in its deps and its guard), and it is JS-driven.
+{
+  const springs = findAll(
+    overlay,
+    (n) =>
+      ts.isCallExpression(n) &&
+      ts.isPropertyAccessExpression(n.expression) &&
+      flat(overlay, n.expression) === 'Animated.spring',
+  );
+  assert(springs.length === 1, '14a — exactly one entry spring', `${springs.length} found`);
+  if (springs.length === 1) {
+    const spring = springs[0];
+    const cfg = spring.arguments[1];
+    assert(
+      !!cfg && /useNativeDriver:\s*false/.test(flat(overlay, cfg)),
+      '14b — the entry spring is JS-driven (useNativeDriver: false)',
+      'a native-driven value on a band that unmounts and remounts initialises ' +
+        'the remounted view from the stale JS value and never updates it',
+    );
+    const effect = enclosing(spring, (n) => isCallTo(n, 'useEffect'));
+    assert(!!effect, '14c — the entry spring lives in a useEffect');
+    if (effect) {
+      const deps = effect.arguments[1] ? flat(overlay, effect.arguments[1]) : '';
+      assert(
+        /spotlightPending/.test(deps),
+        '14d — the spring effect is keyed on spotlightPending (the band RENDERING), not only the step id',
+        `deps are ${deps || '(none)'} — keyed on activation alone, the spring runs against an unmounted band`,
+      );
+      const fn = effect.arguments[0];
+      const guard = findAll(fn, (n) => ts.isIfStatement(n)).find((n) =>
+        /spotlightPending/.test(flat(overlay, n.expression)),
+      );
+      assert(
+        !!guard,
+        '14e — the spring effect bails while the spotlight is pending',
+        'without the guard the spring still starts on the pending (null) render',
+      );
+    }
+  }
+  // And the activation effect must NOT start the spring any more.
+  const activation = findAll(
+    overlay,
+    (n) => isCallTo(n, 'useEffect') && /\[active\?\.id\]/.test(flat(overlay, n.arguments[1] || n)),
+  );
+  assert(
+    activation.length >= 1 && activation.every((e) => !referencesIdentifier(overlay, e.arguments[0], 'spring')),
+    '14f — the [active?.id] activation effect does not animate the band',
+    'the regression is exactly a spring started on activation',
+  );
 }
 
 console.log('');

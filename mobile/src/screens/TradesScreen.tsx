@@ -33,6 +33,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { haptics } from '../utils/haptics';
+import { useCardImpact, type CardImpactState } from '../state/useCardImpact';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 import {
@@ -50,8 +51,7 @@ import {
 } from '../theme/chalkline';
 import { posColor } from '../theme/colors';
 import { TickLabel, Button, Meter, Icon, Card } from '../components/chalkline';
-import TradeCardComp from '../components/TradeCard';
-import { type DeclineReasonPanelProps } from '../components/DeclineReasonPanel';
+import TradeCardComp, { type DispositionReasons } from '../components/TradeCard';
 import SendInSleeperButton from '../components/SendInSleeperButton';
 import Toast from '../components/Toast';
 import PlayerContextMenu, { type PlayerMenuAction } from '../components/PlayerContextMenu';
@@ -68,12 +68,12 @@ import TradeDnaSheet, {
 } from '../components/TradeDnaSheet';
 import TradeHomeUtilityRow from '../components/TradeHomeUtilityRow';
 import TradingWithStrip from '../components/TradingWithStrip';
-import TradeBuildCanvas from '../components/TradeBuildCanvas';
+import TradeBuildCanvas, { type CanvasPrefill } from '../components/TradeBuildCanvas';
 import LeagueSwitcherSheet from '../components/LeagueSwitcherSheet';
 import QueueChip from '../components/QueueChip';
 import SwapPlayerSheet from '../components/SwapPlayerSheet';
 import PlayerPickerModal from '../components/PlayerPickerModal';
-import type { CalcPlayer } from '../data/tradeCalcMock';
+import type { CalcPlayer } from '../data/calcTypes';
 import {
   generateTrades,
   getTradeStatus,
@@ -83,9 +83,19 @@ import {
   getAwaitingTrades,
   undoDeckSuppression,
   fetchAssetIdeas,
+  getFairPackages,
   type AssetIdea,
   type SwipeSignal,
 } from '../api/trades';
+// #384 W6-B — the fair-package deck builds its cards with the SAME helper the
+// featured-trade window uses, so a fair card and a window card can never
+// diverge. Pure, zero runtime imports (utils/ideaToCard.ts).
+import { ideaToCard } from '../utils/ideaToCard';
+// D-158 — the canvas fork and the ✓ queue, shared with TradeCalculatorScreen
+// so the two hosts of the same canvas can never diverge (see each file's
+// header).
+import { anchorSummary, forkCanvasSearch } from '../utils/canvasSearch';
+import { queueCalcTrade } from '../utils/queueCalcTrade';
 import {
   postDeclineReason,
   type Layer1Code,
@@ -116,8 +126,9 @@ import { getProgress } from '../api/rankings';
 import { track, msSinceOpen } from '../api/events';
 import { ApiError, getBaseUrl } from '../api/client';
 import { resolveShareUrl } from '../utils/shareLinks';
-import { useInterruptSlot } from '../state/useInterruptCoordinator';
+import { useInterruptSlot, useMutedDuringTour } from '../state/useInterruptCoordinator';
 import InviteLeaguematesBanner from '../components/InviteLeaguematesBanner';
+import TeamReviewEntryCard from '../components/TeamReviewEntryCard';
 import FormatGate, { formatLabel } from '../components/FormatGate';
 import ProvenanceChip from '../components/ProvenanceChip';
 import SkeletonTradeCard from '../components/SkeletonTradeCard';
@@ -143,7 +154,9 @@ import {
   type GuideCompletionVia,
 } from '../state/useGuide';
 import {
+  registerGuideScroller,
   registerGuideTarget,
+  unregisterGuideScroller,
   unregisterGuideTarget,
   notifyGuideTargetsMoved,
 } from '../state/guideTargets';
@@ -195,6 +208,8 @@ import {
 // P0-2 — the read gate's 403 gets its own copy on the deck-failure card.
 import { readErrorCopy } from '../utils/verification';
 import { applyJobResult } from '../utils/applyJobResult';
+// #384 — the merged calculator's tour hands the deck its second half.
+import { calcTourRunning, calcTourDeckArrived } from '../utils/calcTour';
 import type { Player, TradeCard, TradeJobSnapshot, ScoringFormat } from '../shared/types';
 
 const SCREEN_W = Dimensions.get('window').width;
@@ -619,6 +634,8 @@ export default function TradesScreen({ navigation, route }: any) {
   const fullSheetOn = useFlag('trades.edit_full_sheet');
   // #172 — trade intent modes chip row (full sheet only).
   const intentModesOn = useFlag('trades.intent_modes');
+  // #357/#358/#359 — Team Review entry (dark until the operator flips it).
+  const teamReviewOn = useFlag('trades.team_review');
   // #269 — specific-team targeting + league picker move into the full
   // sheet; the mode-bar's Team and Player chips go away.
   const sheetTargetingOn = useFlag('trades.sheet_targeting');
@@ -636,6 +653,18 @@ export default function TradesScreen({ navigation, route }: any) {
     : homeInlineStripOn
       ? 'strip'
       : 'control';
+  // D-158 (Wave B0, plan docs/plans/onboarding-tour-merge/plan.md §3b) — the
+  // guided landing BECOMES the merged In-league page: the same
+  // `TradeBuildCanvas` the #270 experiment mounts, promoted from a per-unit
+  // variant to the layout and wired with the #384 handlers it lacked, so a
+  // user can build a trade or find one from one surface. Ships DARK.
+  //
+  // PRECEDENCE against the experiment (a unit could hold both): the FLAG path
+  // wins and the canvas mounts exactly ONCE — see `canvasFromFlag` /
+  // `canvasFromExperiment` at the mount below. The experiment's assigned units
+  // keep their variant verbatim while this is off, which is the whole of
+  // "graduates/closes when this lands" (D-158 rollout).
+  const inlineHomeOn = useFlag('calc.inline_home');
 
   // ── FB #156/#246 — finder modes (flag `trades.finder_hub`) ────────────
   // route.params carries which mode this screen is in and (team mode) the
@@ -656,12 +685,62 @@ export default function TradesScreen({ navigation, route }: any) {
   // handler is omitted, the chip does not exist, and the strip renders
   // byte-identically to today. Pinned by mobile/tests/check-presentation-v2.js.
   const presentationV2On = useFlag('trades.presentation_v2');
+  // Receipts (docs/plans/receipts/, flag `receipts.screen`). Same shape as the
+  // flag above and changes nothing else in this file: off ⇒ the handler is
+  // omitted, the utility row has no Track-record control, and ReceiptsScreen
+  // is unreachable even though its route is registered. Pinned by
+  // mobile/tests/check-receipts.js.
+  const receiptsOn = useFlag('receipts.screen');
   // #269 — sheet-local team-targeting selection (declared ahead of
   // `scopedOpponent` below, which reads it). Single-select; `null` = no
   // opponent chosen (unscoped, today's behavior).
   const [sheetOpponent, setSheetOpponent] = useState<
     { userId: string; name: string } | null
   >(null);
+  // #384 (review #7) — where THIS deck came from. Set only by consuming a
+  // handoff stamped `origin:'calculator'`; it is the single signal that makes
+  // the ✕ decline-reason OVERLAY legal (round-2 ruling 1: "this calculator
+  // only" — the shipped decks keep their inline tiles). Cleared on league
+  // switch, on the pins being emptied, on a later handoff with a different
+  // origin, and on a mode-bar switch — the four ways a deck stops being the
+  // one the calculator sent.
+  const [deckOrigin, setDeckOrigin] = useState<'calculator' | null>(null);
+  // #384 W6-B (D-153) — this deck is a FAIR-PACKAGE deck: cards came from one
+  // synchronous `POST /api/trades/fair-packages` sweep around the calculator
+  // canvas, not from the model's job pipeline. It is the deck-level basis
+  // marker (each card also carries `basis: 'consensus'`, which is what draws
+  // the per-card consensus note), and it is what swaps the end-of-deck exits:
+  // there are no PINS on a fair deck — the anchor rode the request body — so
+  // the W5 unpin-retry is meaningless here and "Search all trades" takes its
+  // place. Cleared by every path that starts or invalidates a model search.
+  const [fairDeck, setFairDeck] = useState(false);
+  // D-158 — the anchored deck's FILTER RECEIPT. The operator's framing: an
+  // anchored Find a Trade "becomes the same treatment as the existing filters
+  // from the outlook tab", so the anchor is shown as a receipt above the
+  // results rather than as a separate deck world reachable only from an
+  // end-of-deck exit. Set by the inline canvas's own search (the only thing
+  // that can anchor a deck once this flag is on); read together with
+  // `fairDeck`, which every path that starts or invalidates a model search
+  // already clears — so a stale label can never outlive its deck.
+  const [inlineAnchor, setInlineAnchor] = useState<{
+    label: string;
+    giveIds: string[];
+    receiveIds: string[];
+  } | null>(null);
+  // D-158 — a host-driven prefill for the inline canvas, replacing the three
+  // `navigate('TradeCalculator', {prefill})` hand-offs. The SEQ is the
+  // trigger (the same package may legitimately be loaded twice), and the Y is
+  // what lets a load scroll the canvas back into view.
+  const [canvasPrefill, setCanvasPrefill] = useState<CanvasPrefill | null>(null);
+  const [canvasPrefillSeq, setCanvasPrefillSeq] = useState(0);
+  // D-158 — bumping this re-fires the ONE #330 choke point below, which is
+  // also the one place a deck dispatch happens. The inline Find a Trade arms
+  // exactly the refs a calculator hand-off used to arrive with and then bumps
+  // this, so in-place search and pushed-page hand-off share the dispatch
+  // instead of owning two of them. Separate from `autoRunSeq` (that one
+  // carries the STORE's seq and must not be written by anything else).
+  const [canvasRunSeq, setCanvasRunSeq] = useState(0);
+  const canvasY = useRef(0);
   const finderMode: 'guided' | 'team' | 'player' | undefined = finderHubOn
     ? route?.params?.mode
     : undefined;
@@ -754,8 +833,23 @@ export default function TradesScreen({ navigation, route }: any) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route?.params?.editDna]);
+  // D-158 review fix B1 — the Matches tab's "edit in calculator" can't land
+  // on the pushed page any more when the flag is on (its In-league mode is
+  // gone), so MatchesScreen sends the package HERE as a route param and this
+  // consumes it into the inline canvas — same consume-and-clear shape as
+  // `editDna` above. Seq-keyed so a second tap on the same match re-loads.
+  useEffect(() => {
+    const p = route?.params?.canvasPrefill as CanvasPrefill | undefined;
+    if (!inlineHomeOn || !p) return;
+    loadCanvasPrefill(p);
+    navigation?.setParams?.({ canvasPrefill: undefined, canvasPrefillSeq: undefined });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route?.params?.canvasPrefillSeq]);
   const switchFinderMode = useCallback(
     (m: 'guided' | 'team' | 'player') => {
+      // #384 — the user re-aiming the finder ends the calculator's ownership
+      // of this deck, whether or not the mode actually changes.
+      setDeckOrigin(null);
       if (m === 'team') {
         setTeamPickerOpen(true);
         return;
@@ -912,6 +1006,8 @@ export default function TradesScreen({ navigation, route }: any) {
     prefsChangedSinceGenerateRef.current = false;
     setShowPrefsChangedStrip(false);
     setPinIdeaResumed(false); // #317 — a new search's deck re-takes the slot
+    setFairDeck(false); // #384 W6-B — this dispatch is the MODEL's, so the
+                        // deck that lands is not a fair deck
     pendingScrollToDeckRef.current = true; // #276
     generateMutation.mutate({});
   }
@@ -929,6 +1025,7 @@ export default function TradesScreen({ navigation, route }: any) {
     setDeckIdx(0);
     setLaneFilter(null);
     setJob(null);
+    setFairDeck(false); // #384 W6-B
     setDeckFailure(null); // P0-2 — the deck AND the reason it failed
     setScopedEmpty(null); // #330 — a fairness change can change results; drop the stale zero-result card
     setEdits({});
@@ -1237,6 +1334,16 @@ export default function TradesScreen({ navigation, route }: any) {
   // refetches. Tap-through hands the package to the calculator via the
   // #190 prefill param — the least-invasive full-detail view.
   const assetIdeasOn = useFlag('trade.asset_ideas');
+  // #384 — the merged calculator flow. Read here only to decide whether
+  // the deck's exhausted state offers the two calculator-first exits
+  // (ruling 8). Nothing else on this screen branches on it.
+  const calcMergedOn = useFlag('calc.merged_layout');
+  // #384 ruling 10 — the four in-flow notices below are not arbiter
+  // surfaces (they never claimed a slot, and enrolling them now would make
+  // them defer to each other in ordinary use). They take the tour-only
+  // mute instead: hidden while a scripted tour holds the floor, unchanged
+  // in every other state.
+  const mutedForTour = useMutedDuringTour();
   // #287 — the featured window renders the pinned idea as an editable
   // InLeagueCalculator instead of a read-only TradeCard tile.
   const playerOffersCalcOn = useFlag('trades.player_offers_calc');
@@ -1309,6 +1416,17 @@ export default function TradesScreen({ navigation, route }: any) {
 
   function handleOpenAssetIdea(idea: AssetIdea) {
     haptics.selection();
+    // D-158 — flag on, the calculator IS this page: load the inline canvas
+    // and scroll to it instead of pushing a screen that no longer has an
+    // In-league mode to land in.
+    if (inlineHomeOn) {
+      loadCanvasPrefill({
+        opponentId: idea.counterparty_user_id,
+        give: idea.give_player_ids,
+        receive: idea.receive_player_ids,
+      });
+      return;
+    }
     navigation?.navigate?.('TradeCalculator', {
       prefill: {
         opponentUserId: idea.counterparty_user_id,
@@ -1740,6 +1858,7 @@ export default function TradesScreen({ navigation, route }: any) {
     setLaneFilter(null);
     setTradeIntent(null); // #172 — a declared shape is league-specific
     setJob(null);
+    setFairDeck(false); // #384 W6-B — a fair deck is canvas-specific too
     setDeckFailure(null); // P0-2 — last league's failure never follows you
     setScopedEmpty(null); // #330 — ditto for the scoped zero-result card
     setEdits({});
@@ -2331,6 +2450,8 @@ export default function TradesScreen({ navigation, route }: any) {
     setDeckIdx(0);
     setLaneFilter(null);
     setJob(null);
+    setFairDeck(false); // #384 W6-B — the next deck is the model's until a
+                        // fair sweep says otherwise
     setScopedEmpty(null); // #330 — a reset invalidates the scoped zero-result card
     setEdits({});
     setSwapTarget(null);
@@ -2374,19 +2495,64 @@ export default function TradesScreen({ navigation, route }: any) {
   // (`trades.finder_hub` OFF or no finderMode) the ref is NOT armed and the
   // seq NOT recorded — the handoff degrades to prefill-without-autorun
   // instead of leaving an armed ref to detonate on a later mode entry.
+  //
+  // #384 — the merged calculator's "Find a Trade" parks the SAME handoff with
+  // `origin:'calculator'`. Three additions, none of which touch the #330 path:
+  // the origin is recorded (and any other origin CLEARS it, so a league-offer
+  // handoff can never inherit the calculator's overlay), the auto-run is armed
+  // even with no opponent chosen, and — W6-B (D-153) — a `fairAnchor` FORKS
+  // the arrival off the model entirely.
+  //
+  // The fork, in the operator's words: *"this type of request shouldn't go
+  // through our models. It should be a much simpler set of cards solving for
+  // fairness only."* So a canvas with a give side runs ONE synchronous
+  // `/api/trades/fair-packages` sweep and its ideas become the deck; an EMPTY
+  // canvas is unchanged and still arms the model auto-run below. The anchor
+  // travels in the handoff (and then in the request body) rather than through
+  // the pin store, which is why nothing here writes pins any more.
   const navFocused = useIsFocused();
   const finderHandoff = useFinderTargets((s) => s.handoff);
   const [autoRunSeq, setAutoRunSeq] = useState(0);
   const autoRunPendingRef = useRef(false);
+  const autoRunOriginRef = useRef<'calculator' | null>(null);
+  const fairAnchorRef = useRef<{ giveIds: string[]; receiveIds: string[] } | null>(null);
   useEffect(() => {
     if (!navFocused || !finderHandoff) return;
     useFinderTargets.getState().setHandoff(null); // one-shot: consume first
     setSheetOpponent(finderHandoff.opponent);
+    const origin = finderHandoff.origin === 'calculator' ? 'calculator' : null;
+    setDeckOrigin(origin);
+    const fair = origin && finderHandoff.fairAnchor?.giveIds?.length
+      ? finderHandoff.fairAnchor
+      : null;
     if (finderHubOn && finderMode) {
-      autoRunPendingRef.current = true;
+      // The ref is read by the ONE choke point below, which is also the one
+      // place a model dispatch happens — so arming the fair path and arming
+      // the model path are mutually exclusive by construction rather than by
+      // two branches that could both fire.
+      fairAnchorRef.current = fair;
+      autoRunPendingRef.current = !fair;
+      autoRunOriginRef.current = origin;
       setAutoRunSeq(finderHandoff.seq);
     }
   }, [navFocused, finderHandoff, finderHubOn, finderMode]);
+
+  // League switch invalidates the pins (the store's own subscription) and with
+  // them the calculator's claim on this deck.
+  useEffect(() => {
+    setDeckOrigin(null);
+  }, [leagueId]);
+
+  // "Pins emptied" as an EVENT, not a state: a calculator arrival with
+  // Include-players OFF legitimately has zero pins from the first frame, so
+  // only a non-empty → empty transition (handleClearPin, the board's own
+  // removals, `clear()`) ends the calculator's ownership.
+  const prevPinCountRef = useRef(pinnedGive.length + pinnedReceive.length);
+  useEffect(() => {
+    const n = pinnedGive.length + pinnedReceive.length;
+    if (prevPinCountRef.current > 0 && n === 0) setDeckOrigin(null);
+    prevPinCountRef.current = n;
+  }, [pinnedGive.length, pinnedReceive.length]);
 
   const finderScopeSeen = useRef(false);
   useEffect(() => {
@@ -2397,13 +2563,45 @@ export default function TradesScreen({ navigation, route }: any) {
     // effect for a repeat Offer to the SAME team (`scopedOpponent` is a
     // derived string — unchanged in that case). One choke point, one
     // dispatch per handoff; no new mutate site.
-    const autoRun = autoRunPendingRef.current;
-    if ((finderScopeSeen.current || autoRun) && scopedOpponent) {
+    // W6-B (D-153) — the fair fork, taken BEFORE the model gate below so a
+    // canvas-anchored arrival can never also dispatch a generate. The reset
+    // above already emptied the deck and dropped any stale job, which is the
+    // whole of "clear any stale job" for this path: there is no job to poll.
+    const fairAnchor = fairAnchorRef.current;
+    if (fairAnchor) {
+      fairAnchorRef.current = null;
       autoRunPendingRef.current = false;
+      autoRunOriginRef.current = null;
+      runFairPackages(fairAnchor);
+      prefsChangedSinceGenerateRef.current = false;
+      setShowPrefsChangedStrip(false);
+      finderScopeSeen.current = true;
+      return;
+    }
+    const autoRun = autoRunPendingRef.current;
+    const autoRunOrigin = autoRunOriginRef.current;
+    // #384 (review #3/#9) — a calculator hand-off must generate even with no
+    // partner chosen: the Team dropdown is optional there, and the pins alone
+    // are a complete search. `scopedOpponent` stays the gate for every other
+    // arrival, so the #330 behaviour is untouched.
+    if (
+      (finderScopeSeen.current || autoRun) &&
+      (scopedOpponent || (autoRun && autoRunOrigin === 'calculator'))
+    ) {
+      autoRunPendingRef.current = false;
+      autoRunOriginRef.current = null;
       if (autoRun) {
         // R-4 — the auto-run is a find-trades dispatch the user asked for
-        // with the Offer/Target tap; same event, attributable source.
-        track('find_trades_tapped', { source: 'league_offer', mode: deckMode }, 'Trades');
+        // with the Offer/Target tap (or the calculator's Find a Trade); same
+        // event, attributable source.
+        track(
+          'find_trades_tapped',
+          {
+            source: autoRunOrigin === 'calculator' ? 'calculator' : 'league_offer',
+            mode: deckMode,
+          },
+          'Trades',
+        );
       }
       generateMutation.mutate({});
       // The sweep about to land IS the current prefs — don't leave the #257
@@ -2413,8 +2611,85 @@ export default function TradesScreen({ navigation, route }: any) {
       setShowPrefsChangedStrip(false);
     }
     finderScopeSeen.current = true;
+    // D-158 — `canvasRunSeq` is the inline canvas's trigger into this SAME
+    // choke point (see `handleInlineFindATrade`). It is only ever bumped with
+    // `calc.inline_home` on, so flag-off this dep is a constant 0 and the
+    // effect fires exactly when it always did.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [finderMode, scopedOpponent, autoRunSeq]);
+  }, [finderMode, scopedOpponent, autoRunSeq, canvasRunSeq]);
+
+  // ── D-158 — the inline canvas's own Find a Trade (no navigation) ────────
+  //
+  // The pushed page's handler wrote a `FinderHandoff` and `popTo`'d here; on
+  // one screen there is nothing to hand off to. So this arms exactly the refs
+  // a calculator arrival used to be consumed into and bumps `canvasRunSeq`,
+  // and the choke point above does the rest — one dispatch site, one fork,
+  // one epoch guard, for both hosts of the canvas.
+  //
+  // The fork itself (fair vs model) and its `calc_find_a_trade_tapped` row
+  // live in `utils/canvasSearch.forkCanvasSearch`, which `TradeCalculatorScreen`
+  // calls too: the two entries can never price the same canvas differently.
+  function handleInlineFindATrade(opts: {
+    give: CalcPlayer[];
+    receive: CalcPlayer[];
+    opponent: { userId: string; name: string } | null;
+  }) {
+    const fork = forkCanvasSearch(opts, 'Trades');
+    // The canvas's Team dropdown is the search scope, exactly as the hand-off
+    // carried it — adopting it here is what `setSheetOpponent(handoff.opponent)`
+    // did on arrival.
+    setSheetOpponent(fork.opponent);
+    // #384 review #7 — this deck came from the calculator, which is what keeps
+    // the ✕→decline-reason OVERLAY and the calculator-first end-of-deck exits
+    // legal on it. The canvas being inline does not change whose deck it is.
+    setDeckOrigin('calculator');
+    const summary = anchorSummary(opts.give);
+    setInlineAnchor(
+      fork.anchor && summary
+        ? { label: summary, giveIds: fork.anchor.giveIds, receiveIds: fork.anchor.receiveIds }
+        : null,
+    );
+    fairAnchorRef.current = fork.anchor;
+    autoRunPendingRef.current = !fork.anchor;
+    autoRunOriginRef.current = 'calculator';
+    pendingScrollToDeckRef.current = true; // #276 — results, not the canvas
+    setCanvasRunSeq((n) => n + 1);
+  }
+
+  // D-158 — the ✓ cell, inline. Same one implementation the pushed page calls
+  // (`utils/queueCalcTrade`, D-152); this screen owns its Toast.
+  async function handleInlineLikeTrade(args: {
+    giveIds: string[];
+    receiveIds: string[];
+    opponent: { userId: string; name: string };
+  }) {
+    if (!leagueId) return;
+    const { toast: t } = await queueCalcTrade({
+      leagueId,
+      opponent: args.opponent,
+      giveIds: args.giveIds,
+      receiveIds: args.receiveIds,
+      screen: 'Trades',
+    });
+    setToast(t);
+  }
+
+  // D-158 — the receipt's "Change": the canvas still HOLDS the assets (this
+  // screen never remounts it on search), so changing the anchor is a scroll,
+  // not a reload.
+  function handleAnchorChange() {
+    haptics.selection();
+    mainScrollRef.current?.scrollTo({ y: canvasY.current, animated: true });
+  }
+
+  // D-158 — load a package into the inline canvas and bring it into view.
+  // Replaces `navigate('TradeCalculator', {prefill})` on this screen's three
+  // hand-off paths when the flag is on.
+  function loadCanvasPrefill(p: CanvasPrefill) {
+    setCanvasPrefill(p);
+    setCanvasPrefillSeq((n) => n + 1);
+    mainScrollRef.current?.scrollTo({ y: canvasY.current, animated: true });
+  }
 
   function handleAddTarget(p: CalcPlayer) {
     const player: Player = {
@@ -2513,6 +2788,135 @@ export default function TradesScreen({ navigation, route }: any) {
     track('trade_pin_cleared', { restored: !!snap }, 'Trades');
   }
 
+  // ── #384 W6-B (D-153) — the fairness-only sweep ─────────────────────────
+  //
+  // ONE request, no job, no polling: the deck IS the response. The cards go
+  // through `ideaToCard`, which is the same helper the featured-trade window
+  // uses, so every downstream path the deck already owns — disposition, the
+  // ✕ overlay, swipe, the ✓ queue, flag, edit-in-calculator — works on them
+  // unchanged. What makes that true is the server-minted `fairpk_…` id each
+  // idea carries: `/api/trades/swipe`, `/api/trades/queue` and
+  // `/api/trades/flag` all echo the card's give/receive ids plus the
+  // counterparty and let `_reconstruct_swipe_card` (FB-46) rebuild the card
+  // under that id, exactly as they already do for a deck lost to a restart.
+  async function runFairPackages(anchor: { giveIds: string[]; receiveIds: string[] }) {
+    if (!leagueId) return;
+    const epoch = deckEpochRef.current;
+    setDeckFailure(null);
+    setScopedEmpty(null);
+    setSummaryDismissed(false);
+    // R-4 — the sweep is a find-trades dispatch the user asked for with the
+    // calculator's Find a Trade, same event and same attributable source as
+    // the model path below.
+    track('find_trades_tapped', { source: 'calculator', mode: deckMode }, 'Trades');
+    try {
+      const res = await getFairPackages({
+        league_id: leagueId,
+        give_player_ids: anchor.giveIds,
+        ...(anchor.receiveIds.length
+          ? { receive_player_ids: anchor.receiveIds }
+          : {}),
+        ...(scopedOpponent ? { opponent_user_id: scopedOpponent } : {}),
+      });
+      // #330 R-10 — the same generation-epoch guard the model path uses: a
+      // league switch or a newer search while this was in flight must not be
+      // overwritten by a stale answer.
+      if (deckEpochRef.current !== epoch) return;
+      // The deck rewinds to 0 below, so the double-fire guard has to be
+      // re-armed — and here that is not a formality: `fairpk_` ids are
+      // DETERMINISTIC, so re-running the same canvas serves cards with the
+      // exact ids the last run dispositioned, and a stale guard would silently
+      // no-op every ✕/✓/swipe on them.
+      flushPendingPassRef.current();
+      lastDispositionedRef.current = null;
+      setDeck(res.ideas.map((idea) => ideaToCard(idea, leagueId)));
+      setDeckIdx(0);
+      setJob(null);
+      setFairDeck(true);
+    } catch (e: any) {
+      if (deckEpochRef.current !== epoch) return;
+      // The existing deck-failure copy, verbatim — a fair sweep that fails is
+      // a failed search, and the P0-2 card is where the app says so.
+      setDeckFailure({
+        kind: 'generate',
+        message: readErrorCopy(e, DECK_FAIL_GENERIC),
+      });
+      setFairDeck(false);
+    }
+  }
+
+  // ── #384 ruling 8 (review #9) — the two calculator-first deck exits ─────
+  // Defined once and rendered from BOTH exhausted branches (the
+  // `deck.replenishment` summary card and the plain "That's all for now"),
+  // so the two can never drift apart.
+  const pinCount = pinnedGive.length + pinnedReceive.length;
+  // Any pin count, not just `singlePin`: a 1-send + 1-receive canvas or a
+  // packageMode canvas is exactly as likely to be why the deck ran dry.
+  const unpinRetryLabel =
+    pinCount === 1
+      ? `Search without ${(pinnedGive[0] ?? pinnedReceive[0]).name}`
+      : 'Search without the pinned players';
+
+  function handleBackToCalculator() {
+    haptics.selection();
+    track('deck_back_to_calculator', { pin_count: pinCount }, 'Trades');
+    // D-158 — "back to calculator" on the merged landing is a scroll: the
+    // canvas is already on this page and still holds what the user built, so
+    // the prefill only has to re-assert the pins the deck was generated
+    // around. Same event, same pin payload; no push.
+    if (inlineHomeOn) {
+      loadCanvasPrefill({
+        ...(scopedOpponent ? { opponentId: scopedOpponent } : {}),
+        give: pinnedGive.map((p) => p.id),
+        receive: pinnedReceive.map((p) => p.id),
+      });
+      return;
+    }
+    // The #190 `prefill` shape is what TradeCalculatorScreen already reads
+    // (:111-114): a truthy prefill object forces `mode:'league'` (:114 + the
+    // :168-170 re-assert) and suppresses the auto-tour (:132), and
+    // InLeagueCalculator seeds its canvas from the same ids. Rebuilt from the
+    // pins so the canvas survives the round trip; with no partner scoped the
+    // object still carries the assets, which is what keeps the arrival in
+    // league mode instead of resetting to Real values.
+    navigation?.navigate?.('TradeCalculator', {
+      prefill: {
+        ...(scopedOpponent ? { opponentUserId: scopedOpponent } : {}),
+        giveIds: pinnedGive.map((p) => p.id),
+        receiveIds: pinnedReceive.map((p) => p.id),
+      },
+    });
+  }
+
+  function handleUnpinRetry() {
+    track('deck_unpin_retry', { pin_count: pinCount }, 'Trades');
+    setSummaryDismissed(true);
+    // handleClearPin owns the unpin (store clear + snapshot restore where one
+    // exists + `trade_pin_cleared`). It leaves an EMPTY deck when there is no
+    // snapshot, which from the calculator is always — so the search the button
+    // promises has to actually run. Same dispatch the Find-a-Trade CTA uses
+    // (:913 handleFindTrades → generateMutation.mutate({})); the payload's pins
+    // are read from the store inside mutationFn (:1495-1499), so the clear
+    // above is already visible to it.
+    handleClearPin();
+    handleFindTrades('deck_summary_unpin');
+  }
+
+  // #384 W6-B (D-153) — the FAIR deck's own exit. A fair deck is every trade
+  // the canvas package can fetch; when it runs out, the honest next offer is
+  // not "search without the pins" (there are none — the anchor rode the
+  // request body, which is exactly why the W5 unpin-retry must not render
+  // here) but "drop the anchor and let the model look at everything", for the
+  // SAME partner. `handleFindTrades` is that search verbatim, and it clears
+  // `fairDeck` itself, so the deck that lands is a normal model deck with its
+  // normal exits.
+  function handleSearchAllTrades() {
+    haptics.selection();
+    track('deck_search_all_tapped', undefined, 'Trades');
+    setSummaryDismissed(true);
+    handleFindTrades('deck_search_all');
+  }
+
   // F3 (deck.fatigue) — deck-note "Undo": lift the newest decline
   // suppression server-side, then regenerate so the hidden trades can
   // come back. force:true — the server invalidated its cache on the lift,
@@ -2542,6 +2946,17 @@ export default function TradesScreen({ navigation, route }: any) {
     // eventual disposition outcome.
     if (signalV2On) engagementRef.current.calcOpened = true;
     track('trade_edit_in_calculator_tapped', undefined, 'Trades');
+    // D-158 — the deck's per-card "full editor" hand-off, in place. This is
+    // also what replaces #270's suggestion rail: the card's own edit action
+    // loads the canvas, so the deck below IS the rail.
+    if (inlineHomeOn) {
+      loadCanvasPrefill({
+        opponentId: card.opponent_user_id,
+        give: card.give_player_ids,
+        receive: card.receive_player_ids,
+      });
+      return;
+    }
     navigation?.navigate?.('TradeCalculator', {
       prefill: {
         opponentUserId: card.opponent_user_id,
@@ -2663,6 +3078,27 @@ export default function TradesScreen({ navigation, route }: any) {
   // carries the MODIFIED package into every payload.
   const rawTopCard = sortedDeck[deckIdx];
   const topCard = rawTopCard ? edits[rawTopCard.trade_id] ?? rawTopCard : undefined;
+
+  // #357 — lineup movement + playoff-odds shift for the FRONTED card only
+  // (operator, 2026-08-19: "compute on the fronted card only"). The with-trade
+  // re-simulation is ~112 ms server-side; fetching it for all ~30 deck cards
+  // would add ~3.4 s to deck generation and discard most of it, because the
+  // median card is passed in under a second. Keyed on trade_id, so it fires
+  // exactly once per card the user actually stops on.
+  const topCardImpact = useCardImpact({
+    enabled: !!topCard,
+    tradeId: topCard?.trade_id ?? null,
+    leagueId: topCard?.league_id ?? leagueId,
+    opponentUserId: topCard?.opponent_user_id ?? null,
+    givePlayerIds: topCard?.give_player_ids ?? [],
+    receivePlayerIds: topCard?.receive_player_ids ?? [],
+    // `calcFormat`, NOT the raw `activeFormat`: the session's format is
+    // legitimately null in several states, and every other consumer in this
+    // file already falls back through calcFormat. Passing the raw value made
+    // the hook's key null, which DISABLED the fetch and rendered nothing at
+    // all — no spinner, no error. That was the "still not there" bug.
+    format: calcFormat,
+  });
   const nextCard = sortedDeck[deckIdx + 1];
 
   // ── Swap suggestions (2026-07-27 player-changer) ─────────────────────
@@ -2958,18 +3394,66 @@ export default function TradesScreen({ navigation, route }: any) {
   // a superset of the Change link that always contains it. TODO: move to a
   // per-instance registration inside the component when that file is free.
   const outlookReceiptWrapRef = useRef<View | null>(null);
+  // #384 (review #3c) — n22's target. Same hosting pattern as the outlook
+  // receipt above: a wrapper around the mounted InfoButton, which is a
+  // superset of the control and always contains it. `trades.package-toggle`
+  // (n21) registers itself per-instance from PackageToggle instead — that one
+  // has three mutually exclusive mount sites, so a single hosted ref here
+  // would point at whichever branch happened to render.
+  const fairnessHelpWrapRef = useRef<View | null>(null);
+  // #384 device feedback (report 5) — n23/n23b's target. The send CONTROL is
+  // platform-resolved inside `SendInSleeperButton` (Sleeper / MFL / ESPN /
+  // copy), so no inner id is stable; this wrapper always contains whichever
+  // branch rendered.
+  const sendBtnWrapRef = useRef<View | null>(null);
   useEffect(() => {
     registerGuideTarget('trades.card-body', deckWrapRef);
     registerGuideTarget('trades.provenance-chip', chipWrapRef);
     registerGuideTarget('trades.trio-entry', trioWrapRef);
     registerGuideTarget('trades.outlook-receipt.change', outlookReceiptWrapRef);
+    registerGuideTarget('trades.fairness-help', fairnessHelpWrapRef);
+    registerGuideTarget('trades.send-btn', sendBtnWrapRef);
     return () => {
       unregisterGuideTarget('trades.card-body');
       unregisterGuideTarget('trades.provenance-chip');
       unregisterGuideTarget('trades.trio-entry');
       unregisterGuideTarget('trades.outlook-receipt.change');
+      unregisterGuideTarget('trades.fairness-help');
+      unregisterGuideTarget('trades.send-btn');
     };
   }, []);
+
+  // #384 device feedback (report 5) — the deck's scroll handle. n23 points at
+  // the send button, which lives below the fold on the deck; the overlay asks
+  // for it by the screen name the deck beats declare (`screen: 'Trades'`).
+  const guideScrollYRef = useRef(0);
+  useEffect(() => {
+    registerGuideScroller('Trades', {
+      scrollTo: (y, animated) => mainScrollRef.current?.scrollTo({ y, animated }),
+      getScrollY: () => guideScrollYRef.current,
+    });
+    return () => unregisterGuideScroller('Trades');
+  }, []);
+
+  // #384 (review #3) — the deck half of the tour (n19–n24). The runner in
+  // utils/calcTour cannot observe navigation, so the screen it lands on
+  // announces its own arrival. Armed once per FOCUS: a re-render never
+  // re-announces, and leaving and returning mid-tour does. "Arrived" means
+  // a card is on screen, not merely that the route is focused — n19
+  // spotlights the top card's ✕, which does not exist until generation has
+  // produced one (the runner's own timeout covers a generation that never
+  // does).
+  const calcTourArrivalRef = useRef(false);
+  const hasTopCard = !!topCard;
+  useEffect(() => {
+    if (!navFocused) {
+      calcTourArrivalRef.current = false;
+      return;
+    }
+    if (calcTourArrivalRef.current || !hasTopCard || !calcTourRunning()) return;
+    calcTourArrivalRef.current = true;
+    calcTourDeckArrived();
+  }, [navFocused, hasTopCard]);
 
   // S2.wait — computing pose while the first deck generates.
   useEffect(() => {
@@ -3006,7 +3490,11 @@ export default function TradesScreen({ navigation, route }: any) {
     // here so it never preempts the s2.2 coaching bubble.
     if (v2 && v2N1Armed) {
       setV2N1Armed(false);
-      if (!requestGuideStep(GUIDE.n1())) setV2N1Skipped(true);
+      // #384 (review #20) — a refusal WHILE the scripted tour holds the floor
+      // is the tour winning the slot, not the user declining N1. Marking it
+      // skipped there would retire the beat for a reason that has nothing to
+      // do with N1, and it never comes back.
+      if (!requestGuideStep(GUIDE.n1()) && !calcTourRunning()) setV2N1Skipped(true);
       return;
     }
     // N2 — re-aim the deck (PRD §5.3, two-form). Form A spotlights the
@@ -4371,15 +4859,58 @@ export default function TradesScreen({ navigation, route }: any) {
     });
   }
 
-  const declineReasonProps: DeclineReasonPanelProps | undefined = declineReasonsOn
+  // #384 (review #1) — the ✕ sheet's own lifecycle. The overlay is the only
+  // presentation that can be dismissed WITHOUT answering, and a dismiss after
+  // a layer-1 tile leaves the pass written but the deck un-advanced: ✓/✕/
+  // swipe/VoiceOver are all inert on a banked card, so the user is stranded.
+  // Committing the deferred advance with layer 2 = none writes nothing extra
+  // (layer 1 already POSTed) and produces exactly the row an inline-mode user
+  // leaves when they answer layer 1 and stop — the two modes stay comparable.
+  function handleReasonOverlayOpened() {
+    track('trade_pass_overlay_opened', {}, 'Trades');
+  }
+
+  function handleReasonOverlayDismissed(banked: boolean) {
+    track('trade_pass_overlay_dismissed', { banked }, 'Trades');
+    if (banked) commitReasonAdvance();
+  }
+
+  const declineReasonProps: DispositionReasons | undefined = declineReasonsOn
     ? {
         onLayer1: handleReasonLayer1,
         onLayer2Select: handleReasonLayer2Select,
         onLayer2Bank: handleReasonLayer2Bank,
         onLayer2Send: handleReasonLayer2Send,
         onRevealRequest: handleReasonReveal,
+        onOverlayOpened: handleReasonOverlayOpened,
+        onOverlayDismissed: handleReasonOverlayDismissed,
       }
     : undefined;
+
+  // #384 review #7 — the overlay presentation is for the deck reached FROM the
+  // merged calculator, and nothing else. Both halves are required: the flag
+  // (the feature exists at all) AND the origin (this deck is that deck).
+  const reasonsAsOverlay = calcMergedOn && deckOrigin === 'calculator';
+
+  // D-158 — who owns the canvas mount, resolved ONCE so the two paths cannot
+  // both render (see the mount below). `'flag'` is the layout; `'experiment'`
+  // is #270's per-unit variant with its original gates intact; `null` is
+  // today's landing, canvas-free.
+  const canvasHost: 'flag' | 'experiment' | null =
+    inlineHomeOn && finderMode === 'guided' && leagueId
+      ? 'flag'
+      : homeInlineVariant === 'canvas' &&
+          finderMode === 'guided' &&
+          !firstRun &&
+          !singlePin &&
+          leagueId
+        ? 'experiment'
+        : null;
+  // The receipt describes THIS deck, so it needs both halves: the deck is a
+  // fair (anchored) deck, and the anchor is one this page built. `fairDeck` is
+  // cleared by every path that starts or invalidates a model search, so a
+  // "Built around" line can never outlive the deck it describes.
+  const inlineAnchorShown = canvasHost === 'flag' && fairDeck && !!inlineAnchor;
 
   // Bad-trade flag (feedback #85): file the engine-quality flag, then move
   // past the card exactly like a pass — flagging implies "not interested",
@@ -4664,6 +5195,10 @@ export default function TradesScreen({ navigation, route }: any) {
           // B1 — a measured spotlight frame is absolute window coordinates,
           // so the guide must re-measure whenever this list moves.
           notifyGuideTargetsMoved();
+          // …and the guide's scroll-into-view needs the CURRENT offset to turn
+          // a window-space delta into an absolute one. Unconditional, unlike
+          // the decline-reason ref below: the guide is not behind that flag.
+          guideScrollYRef.current = e.nativeEvent.contentOffset.y;
           // The decline-reason panel's reveal callback needs the offset to
           // scroll from; the ref write is flag-scoped, the listener is not.
           if (declineReasonsOn) mainScrollYRef.current = e.nativeEvent.contentOffset.y;
@@ -4717,6 +5252,18 @@ export default function TradesScreen({ navigation, route }: any) {
                 onTodaysTrade={
                   presentationV2On
                     ? () => navigation?.navigate?.('TodaysTrade')
+                    : undefined
+                }
+                // #379 — no Filters button here: the operator ruled the
+                // top-row placement out. The sheet's in-page entry is the
+                // "Outlook & filters" row below (trades.outlook-fallback).
+                // Receipts (docs/plans/receipts/) — same optional-prop
+                // convention as onTodaysTrade above: the handler's presence IS
+                // the control, so with `receipts.screen` dark this row renders
+                // exactly as it does today and the screen is unreachable.
+                onTrackRecord={
+                  receiptsOn
+                    ? () => navigation?.navigate?.('Receipts')
                     : undefined
                 }
               />
@@ -4777,6 +5324,67 @@ export default function TradesScreen({ navigation, route }: any) {
                 setDnaSheetOpen(true);
               }}
             />
+            {/* #376/#379/#394 — always-available minimized "Outlook &
+                filters" row: the receipt's quiet bar minus the lean claim,
+                mirroring the calculator's own fallback
+                (InLeagueCalculator.tsx `calc.outlook-fallback`, #384). The
+                gate is the exact complement of the receipt's render
+                predicate under `consolidateOn && !firstRun` (#254 rule):
+                exactly one of {receipt, this row} renders — never both,
+                never neither. It reads NO flag and NO experiment variant,
+                so the control cohort gets a sheet entry too (they had
+                none). Guarded by check-finder-conditions-reachable.js:
+                the condition below must EQUAL the whitelist
+                `consolidateOn && !outlookReceiptShown && !firstRun` —
+                add or drop a conjunct and the guard goes red. Deliberately
+                mortal: Wave B0's inline calculator carries its own outlook
+                surface and deletes this row (prd.md §5). */}
+            {consolidateOn && !outlookReceiptShown && !firstRun ? (
+              <View testID="trades.outlook-fallback" style={styles.outlookFallback}>
+                <View style={styles.outlookFallbackRow}>
+                  <Text style={styles.outlookFallbackText} numberOfLines={1}>
+                    {`Outlook & filters · ${
+                      prefsQuery.data?.team_outlook
+                        ? OUTLOOK_FALLBACK_LABEL[prefsQuery.data.team_outlook]
+                        : 'Not set'
+                    }`}
+                  </Text>
+                  <Pressable
+                    testID="trades.outlook-fallback.change"
+                    accessibilityRole="button"
+                    accessibilityLabel="Change outlook and trade filters"
+                    hitSlop={8}
+                    onPress={() => {
+                      haptics.selection();
+                      setDnaSheetOpen(true);
+                    }}
+                  >
+                    {({ pressed }) => (
+                      <Text
+                        style={[
+                          styles.outlookFallbackChange,
+                          pressed && styles.outlookFallbackPressed,
+                        ]}
+                      >
+                        Change
+                      </Text>
+                    )}
+                  </Pressable>
+                </View>
+                {/* #315 contract — same ≤2-row budget and content rules as
+                    trades.outlook-receipt.details (never team scope or
+                    specific players). Not interactive. */}
+                {receiptDetails ? (
+                  <Text
+                    testID="trades.outlook-fallback.details"
+                    style={styles.outlookFallbackDetails}
+                    numberOfLines={1}
+                  >
+                    {receiptDetails}
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
           </View>
         ) : null}
 
@@ -4785,7 +5393,7 @@ export default function TradesScreen({ navigation, route }: any) {
             shopping/untouchables) changed while it was open, this one-line
             strip offers the refresh instead of silently leaving a stale
             deck on screen. */}
-        {consolidateOn && showPrefsChangedStrip ? (
+        {consolidateOn && showPrefsChangedStrip && !mutedForTour ? (
           <Pressable
             testID="trades.prefs-changed-strip"
             accessibilityRole="button"
@@ -4856,6 +5464,28 @@ export default function TradesScreen({ navigation, route }: any) {
             leagueName={league?.league_name}
             username={user?.username}
             total={coverage!.total}
+          />
+        ) : null}
+
+        {/* #357/#358/#359 — Team Review entry. Placed HERE and not as a
+            seventh chip in TradeFinderModeBar, on that component's own
+            measurement: its shipped chips already run ~402pt against ~361pt of
+            usable width, so the strip is genuinely scrolled and an APPENDED
+            chip would sit off-screen and never be seen. The user who most
+            needs this feature is the least likely to scroll a chip rail to
+            find it. #359 was filed against TradesHome, which is exactly here.
+            Dismissing COLLAPSES it to a one-line row rather than removing it
+            (the D-025 collapsed-strip pattern) — a permanently dismissible
+            entry means one accidental tap loses the feature forever. */}
+        {teamReviewOn && leagueId ? (
+          <TeamReviewEntryCard
+            leagueId={leagueId}
+            onOpen={(source) => {
+              try {
+                track('team_review_opened', { league_id: leagueId, source });
+              } catch { /* analytics must never block navigation */ }
+              navigation.navigate('TeamReview' as never);
+            }}
           />
         ) : null}
 
@@ -5052,15 +5682,19 @@ export default function TradesScreen({ navigation, route }: any) {
               {helpOn ? (
                 <View style={styles.helpLabelRow}>
                   <TickLabel>Trade fairness</TickLabel>
-                  <InfoButton
-                    testID="trades.fairness-help"
-                    label="How trades are priced"
-                    size={16}
-                    onPress={() => {
-                      track('help_opened', { topic: 'trade_pricing' }, 'Trades');
-                      setPricingHelpOpen(true);
-                    }}
-                  />
+                  {/* The wrapper exists only to give n22's spotlight a frame
+                      (see fairnessHelpWrapRef); it adds no layout of its own. */}
+                  <View ref={fairnessHelpWrapRef} collapsable={false}>
+                    <InfoButton
+                      testID="trades.fairness-help"
+                      label="How trades are priced"
+                      size={16}
+                      onPress={() => {
+                        track('help_opened', { topic: 'trade_pricing' }, 'Trades');
+                        setPricingHelpOpen(true);
+                      }}
+                    />
+                  </View>
                 </View>
               ) : (
                 <TickLabel>Trade fairness</TickLabel>
@@ -5612,17 +6246,83 @@ export default function TradesScreen({ navigation, route }: any) {
             additive). Deliberately additive, not a replacement: the swipe
             deck below still renders untouched — see TradeBuildCanvas's file
             header and the status doc for why. */}
-        {homeInlineVariant === 'canvas' &&
-        finderMode === 'guided' &&
-        !firstRun &&
-        !singlePin &&
-        leagueId ? (
-          <TradeBuildCanvas
-            leagueId={leagueId}
-            userId={userId}
-            opponentUserId={scopedOpponent ?? null}
-            suggestions={deck}
-          />
+        {/* D-158 (Wave B0) — the SAME mount, promoted. Two ways in, and the
+            flag's way WINS so the canvas renders exactly once:
+              • flag path (`calc.inline_home`): the guided landing IS the
+                merged In-league page. No experiment gate, no first-run /
+                single-pin exclusions — those were the experiment's caution
+                about an additive surface, and this is the layout. The
+                suggestion rail is dropped (the deck below is the rail) and
+                the #384 handlers are wired; `onShowMeAround` is deliberately
+                NOT passed — n10 points at the tab this wave deletes, and Wave
+                B rebuilds the tour.
+              • experiment path (#270 `trades_home_inline.canvas`): unchanged,
+                rail and all, for its assigned units — but only when the flag
+                path did not already claim the mount. */}
+        {canvasHost ? (
+          <View
+            onLayout={(e) => { canvasY.current = e.nativeEvent.layout.y; }}
+          >
+            <TradeBuildCanvas
+              leagueId={leagueId!}
+              userId={userId}
+              opponentUserId={scopedOpponent ?? null}
+              suggestions={deck}
+              showSuggestionRail={canvasHost === 'experiment'}
+              onFindATrade={
+                canvasHost === 'flag' ? handleInlineFindATrade : undefined
+              }
+              onLikeTrade={
+                canvasHost === 'flag' ? handleInlineLikeTrade : undefined
+              }
+              prefill={canvasHost === 'flag' ? canvasPrefill : undefined}
+              prefillSeq={canvasHost === 'flag' ? canvasPrefillSeq : undefined}
+            />
+          </View>
+        ) : null}
+
+        {/* D-158 — the anchor as a FILTER RECEIPT, above the results, in the
+            OutlookBiasReceipt visual pattern (flare tick, quiet ink2 bar, ice
+            text-link actions). "Change" scrolls back to the canvas, which
+            still holds the assets; "Clear" is the fair deck's own
+            `handleSearchAllTrades` verbatim — drop the anchor, run the model
+            for the same partner — which is why the end-of-deck "Search all
+            trades" exit steps aside for an inline-anchored deck below. */}
+        {inlineAnchorShown ? (
+          <View testID="trades.anchor-receipt" style={styles.anchorReceipt}>
+            <View style={styles.anchorRow}>
+              <View style={styles.anchorTick} />
+              <Text style={styles.anchorText} numberOfLines={2}>
+                Built around <Text style={styles.anchorStrong}>{inlineAnchor!.label}</Text>.
+              </Text>
+              <Pressable
+                testID="trades.anchor-receipt.change"
+                accessibilityRole="button"
+                accessibilityLabel="Change the players this search is built around"
+                hitSlop={8}
+                onPress={handleAnchorChange}
+              >
+                {({ pressed }) => (
+                  <Text style={[styles.anchorAction, pressed && { color: ice.press }]}>
+                    Change
+                  </Text>
+                )}
+              </Pressable>
+              <Pressable
+                testID="trades.anchor-receipt.clear"
+                accessibilityRole="button"
+                accessibilityLabel="Clear the anchor and search all trades"
+                hitSlop={8}
+                onPress={handleSearchAllTrades}
+              >
+                {({ pressed }) => (
+                  <Text style={[styles.anchorAction, pressed && { color: ice.press }]}>
+                    Clear
+                  </Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
         ) : null}
 
         {/* #216/#209 (flag trade.asset_ideas) — single-pin find-a-trade:
@@ -5758,7 +6458,7 @@ export default function TradesScreen({ navigation, route }: any) {
           />
           </View>
         ) : null}
-        {quicksetDiffBanner ? (
+        {quicksetDiffBanner && !mutedForTour ? (
           <View testID="trades.diff-banner" style={styles.diffBanner}>
             <Text style={styles.diffBannerText}>
               Re-ranked with your {quicksetDiffBanner.position} board —{' '}
@@ -5831,6 +6531,7 @@ export default function TradesScreen({ navigation, route }: any) {
             theater rule). One line, dismissible per job; Undo lifts the
             newest suppression and regenerates. */}
         {fatigueOn &&
+        !mutedForTour &&
         job?.suppression_note &&
         job.suppression_note.count > 0 &&
         suppressionNoteDismissedJob !== job.job_id ? (
@@ -5922,7 +6623,7 @@ export default function TradesScreen({ navigation, route }: any) {
               onAccept={() => acceptQuicksetPrompt('prompt')}
               onDismiss={snoozeQuicksetPrompt}
             />
-          ) : adaptationMoment && topCard ? (
+          ) : adaptationMoment && topCard && !mutedForTour ? (
             // F9 (deck.first_session) — the adaptation moment: ONE inline
             // card between deck cards (QuickSetPromptCard precedent — it
             // holds the top-of-deck slot until dismissed; the deck resumes
@@ -5977,6 +6678,7 @@ export default function TradesScreen({ navigation, route }: any) {
               <SwipableTopCard
                 key={topCard.trade_id}
                 card={topCard}
+                cardImpact={topCardImpact}
                 nudge={swipeHintActive}
                 onFirstTouch={dismissSwipeHint}
                 onCardLayout={(e) => setTopCardH(e.nativeEvent.layout.height)}
@@ -5990,6 +6692,7 @@ export default function TradesScreen({ navigation, route }: any) {
                   (declineReasonsOn && reasonBankedId === rawTopCard?.trade_id)
                 }
                 declineReasons={declineReasonProps}
+                reasonsAsOverlay={reasonsAsOverlay}
                 untouchableIds={untouchablesEnabled ? untouchableIds : undefined}
                 onToggleUntouchable={
                   untouchablesEnabled ? handleToggleUntouchable : undefined
@@ -6059,27 +6762,38 @@ export default function TradesScreen({ navigation, route }: any) {
               ) : null}
               {/* Send in Sleeper — flagged beta. Directly proposes THIS found
                   trade to the opponent (skips the mutual-match wait). Hides
-                  itself when trade.send_in_sleeper is off. */}
-              <SendInSleeperButton
-                leagueId={topCard.league_id}
-                theirUserId={topCard.opponent_user_id}
-                givePlayerIds={topCard.give_player_ids}
-                receivePlayerIds={topCard.receive_player_ids}
-                givePlayerNames={topCard.give_players.map((p) => p.name)}
-                receivePlayerNames={topCard.receive_players.map((p) => p.name)}
-                opponentUsername={topCard.opponent_username}
-                surface="deck"
-                impressionId={signalV2On ? rawTopCard?.impression_id : undefined}
-                onSent={
-                  // F10 — deck-done summary "proposed" tally.
-                  replenishmentOn
-                    ? () =>
-                        setSessionTally((t) => ({ ...t, proposed: t.proposed + 1 }))
-                    : undefined
-                }
-                compact
-                style={styles.sendInSleeper}
-              />
+                  itself when trade.send_in_sleeper is off.
+                  The wrapper is n23/n23b's spotlight target (#384 report 5):
+                  the button inside resolves to one of four platform branches,
+                  so the WRAPPER is the only stable node. `collapsable={false}`
+                  keeps it measurable on Android. */}
+              <View
+                ref={sendBtnWrapRef}
+                collapsable={false}
+                style={styles.sendInSleeperWrap}
+                testID="trades.send-btn"
+              >
+                <SendInSleeperButton
+                  leagueId={topCard.league_id}
+                  theirUserId={topCard.opponent_user_id}
+                  givePlayerIds={topCard.give_player_ids}
+                  receivePlayerIds={topCard.receive_player_ids}
+                  givePlayerNames={topCard.give_players.map((p) => p.name)}
+                  receivePlayerNames={topCard.receive_players.map((p) => p.name)}
+                  opponentUsername={topCard.opponent_username}
+                  surface="deck"
+                  impressionId={signalV2On ? rawTopCard?.impression_id : undefined}
+                  onSent={
+                    // F10 — deck-done summary "proposed" tally.
+                    replenishmentOn
+                      ? () =>
+                          setSessionTally((t) => ({ ...t, proposed: t.proposed + 1 }))
+                      : undefined
+                  }
+                  compact
+                  style={styles.sendInSleeper}
+                />
+              </View>
               <Text style={styles.deckHint}>
                 Swipe right to like · Swipe left to pass
               </Text>
@@ -6194,6 +6908,53 @@ export default function TradesScreen({ navigation, route }: any) {
                   <Text style={styles.emptyBody}>{GUIDE.n4().line}</Text>
                 ) : null}
                 <View style={styles.summaryBtnRow}>
+                  {/* #384 ruling 8 — the merged flow starts at the
+                      calculator, so a finished deck needs a way BACK to it.
+                      Flag-gated: without the merged layout there is no
+                      calculator-first flow to return to, and the button
+                      would be a non-sequitur. */}
+                  {calcMergedOn ? (
+                    <Button
+                      testID="trades.deck-summary.back-to-calc"
+                      label="Back to calculator"
+                      variant="secondary"
+                      compact
+                      onPress={handleBackToCalculator}
+                    />
+                  ) : null}
+                  {/* #384 ruling 8 — a deck generated around pinned assets is
+                      exhausted; the pins are the most likely reason it ran
+                      dry. Offer the same search without them, for ANY pin
+                      count (review #9 — a 1-send + 1-receive canvas got no
+                      unpin path at all). handleClearPin still owns the unpin,
+                      so the snapshot restore and trade_pin_cleared stay on
+                      the single path. */}
+                  {calcMergedOn && !fairDeck && pinCount > 0 ? (
+                    <Button
+                      testID="trades.deck-summary.unpin-retry"
+                      label={unpinRetryLabel}
+                      variant="secondary"
+                      compact
+                      onPress={handleUnpinRetry}
+                    />
+                  ) : null}
+                  {/* W6-B (D-153) — the fair deck's replacement for the exit
+                      above. A fair deck has NO pins, so unpin-retry would be
+                      a button that unpinned nothing; this one drops the
+                      canvas anchor and runs the model for the same partner. */}
+                  {/* D-158 — with the anchor shown as a receipt ABOVE the
+                      results, its Clear IS this exit and having both would be
+                      the same action twice on one screen. Flag off (or an
+                      anchored deck this page did not build) ⇒ unchanged. */}
+                  {calcMergedOn && fairDeck && !inlineAnchorShown ? (
+                    <Button
+                      testID="trades.deck-summary.search-all"
+                      label="Search all trades"
+                      variant="secondary"
+                      compact
+                      onPress={handleSearchAllTrades}
+                    />
+                  ) : null}
                   <Button
                     testID="trades.deck-summary.see-liked"
                     label="See liked"
@@ -6253,6 +7014,43 @@ export default function TradesScreen({ navigation, route }: any) {
                     invite leaguemates to unlock more.
                   </Text>
                 )}
+                {/* #384 ruling 8 (review #9) — the same two exits as the
+                    summary card. They lived only inside the
+                    `deck.replenishment` branch, so a user who finished a deck
+                    with that flag off (or with no disposition tallied) hit a
+                    dead end. Same handlers, same gate, distinct ids so each
+                    surface stays separately attributable. */}
+                {calcMergedOn ? (
+                  <View style={styles.summaryBtnRow}>
+                    <Button
+                      testID="trades.deck-exhausted.back-to-calc"
+                      label="Back to calculator"
+                      variant="secondary"
+                      compact
+                      onPress={handleBackToCalculator}
+                    />
+                    {!fairDeck && pinCount > 0 ? (
+                      <Button
+                        testID="trades.deck-exhausted.unpin-retry"
+                        label={unpinRetryLabel}
+                        variant="secondary"
+                        compact
+                        onPress={handleUnpinRetry}
+                      />
+                    ) : null}
+                    {/* D-158 — same stand-aside as the summary card above:
+                        the receipt's Clear already offers this. */}
+                    {fairDeck && !inlineAnchorShown ? (
+                      <Button
+                        testID="trades.deck-exhausted.search-all"
+                        label="Search all trades"
+                        variant="secondary"
+                        compact
+                        onPress={handleSearchAllTrades}
+                      />
+                    ) : null}
+                  </View>
+                ) : null}
               </View>
             </Card>
           ) : deckFailure ? (
@@ -6680,8 +7478,20 @@ function summarizePlayers(players: Player[]): string {
 // toggle). Rendered only with 2+ pinned give players; ON sends
 // pinned_give_mode='all' so every idea carries the whole package.
 function PackageToggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
+  // #384 (review #3c) — n21's spotlight target. Registered per-INSTANCE rather
+  // than from the screen body: the toggle has three mutually exclusive mount
+  // sites (pin board, target section, inline home), so one hosted ref would
+  // point at whichever branch happened to render. Only one instance is ever
+  // mounted, so the id has exactly one claimant.
+  const wrapRef = useRef<View | null>(null);
+  useEffect(() => {
+    registerGuideTarget('trades.package-toggle', wrapRef);
+    return () => unregisterGuideTarget('trades.package-toggle');
+  }, []);
   return (
     <Pressable
+      ref={wrapRef}
+      collapsable={false}
       testID="trades.package-toggle"
       accessibilityRole="switch"
       accessibilityState={{ checked: on }}
@@ -6712,6 +7522,9 @@ function PackageToggle({ on, onToggle }: { on: boolean; onToggle: () => void }) 
 
 // ── SwipableTopCard — Tinder-style gesture on the top card only ─────
 interface SwipableProps {
+  /** #357 — host-fetched impact for the fronted card (see useCardImpact).
+   *  Only SwipableTopCard receives it; peek cards render without it. */
+  cardImpact?: CardImpactState | null;
   card: TradeCard;
   // #107/#110 — reports the card's laid-out height so the deck can clip
   // the behind-card peek to the top card's bounds. onLayout height is the
@@ -6725,7 +7538,11 @@ interface SwipableProps {
   // Decline-reason capture (flag `feedback.decline_reasons`) — pass-through
   // to TradeCard's `disposition.reasons`. Present ⇒ the ✕ is replaced by the
   // three layer-1 tiles; absent ⇒ today's ✓/✕ row, unchanged.
-  declineReasons?: DeclineReasonPanelProps;
+  declineReasons?: DispositionReasons;
+  // #384 review #7 — pass-through: render those reasons as an overlay instead
+  // of inline tiles. Host-decided (flag AND calculator origin), never a flag
+  // read inside the card.
+  reasonsAsOverlay?: boolean;
   untouchableIds?: ReadonlySet<string>;
   onToggleUntouchable?: (player: Player) => void;
   // Player-swap (feedback #86) — pass-throughs to TradeCard.
@@ -6752,11 +7569,13 @@ interface SwipableProps {
 
 function SwipableTopCard({
   card,
+  cardImpact,
   onCardLayout,
   onLike,
   onPass,
   dispositionDisabled,
   declineReasons,
+  reasonsAsOverlay,
   untouchableIds,
   onToggleUntouchable,
   onSwapPlayer,
@@ -6854,6 +7673,7 @@ function SwipableTopCard({
             disabled: dispositionDisabled,
             reasons: declineReasons,
           }}
+          reasonsAsOverlay={reasonsAsOverlay}
           untouchableIds={untouchableIds}
           onToggleUntouchable={onToggleUntouchable}
           onSwapPlayer={onSwapPlayer}
@@ -6863,6 +7683,7 @@ function SwipableTopCard({
           onKeepSide={onKeepSide}
           onEditInCalculator={onEditInCalculator}
           onRemoveAsset={onRemoveAsset}
+          cardImpact={cardImpact}
         />
       </Animated.View>
     </GestureDetector>
@@ -6872,6 +7693,22 @@ function SwipableTopCard({
 function cap(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
+
+// #376/#394 — display names for the minimized "Outlook & filters" row.
+// The four directional values use OutlookBiasReceipt's LEAN names (#253
+// canonical order) so the row and the receipt share one vocabulary; the
+// map is duplicated here because the receipt keeps LEAN private.
+// `not_sure` IS a declared value (TradeDnaSheet persists it when positions
+// are saved without an outlook pick) — it renders "Not sure", never the
+// cap() literal "Not_sure" and never "Not set". "Not set" is reserved for
+// null/absent, applied at the call site.
+const OUTLOOK_FALLBACK_LABEL: Record<string, string> = {
+  championship: 'All-in',
+  contender: 'Contending',
+  rebuilder: 'Rebuilding',
+  jets: 'Tanking',
+  not_sure: 'Not sure',
+};
 
 // ── Styles — Chalkline (docs/design/design-system.md) ───────────────
 const styles = StyleSheet.create({
@@ -7179,6 +8016,48 @@ const styles = StyleSheet.create({
   },
   prefsChangedTick: { width: 3, height: 12, backgroundColor: ice.base },
   prefsChangedText: { ...type.bodySm, color: chalk.base, fontFamily: fonts.uiSemi },
+  // #376/#394 — minimized "Outlook & filters" row. The calculator's
+  // `calc.outlook-fallback` styles (InLeagueCalculator.tsx) plus the
+  // receipt's own bottom margin — the wrapper adds no layout, so the row
+  // carries its spacing exactly as the receipt does. Vertical padding +
+  // gap mirror the receipt's two-row composition for the details line.
+  outlookFallback: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: space.sm,
+    marginBottom: space.md,
+    gap: 2,
+  },
+  outlookFallbackRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space.sm,
+  },
+  outlookFallbackText: { ...type.bodySm, flex: 1, color: chalk.dim },
+  outlookFallbackChange: { ...type.bodySm, color: ice.base, fontFamily: fonts.uiSemi },
+  outlookFallbackPressed: { opacity: 0.6 },
+  outlookFallbackDetails: { ...type.bodySm, color: chalk.dim },
+  // D-158 — the anchor filter receipt, built to OutlookBiasReceipt's spec
+  // (components/OutlookBiasReceipt.tsx): ink2 bar, hairline ink.line border,
+  // radii.sm, a 3×12 flare tick (informational highlight), bodySm dim text
+  // with a chalk.base semibold emphasis, ice text-link actions. Tokens only.
+  anchorReceipt: {
+    backgroundColor: ink.ink2,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.sm,
+    paddingHorizontal: 10,
+    paddingVertical: space.sm,
+    marginBottom: space.md,
+    gap: 2,
+  },
+  anchorRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  anchorTick: { width: 3, height: 12, backgroundColor: flare.base },
+  anchorText: { ...type.bodySm, flex: 1, color: chalk.dim },
+  anchorStrong: { color: chalk.base, fontFamily: fonts.uiSemi },
+  anchorAction: { ...type.bodySm, color: ice.base, fontFamily: fonts.uiSemi },
   progressStrip: {
     marginTop: space.sm,
     paddingHorizontal: space.md,
@@ -7409,6 +8288,12 @@ const styles = StyleSheet.create({
   sendInSleeper: {
     alignSelf: 'center',
     marginTop: space.sm,
+  },
+  // The guide-target wrapper around the send router. Carries the same
+  // self-alignment the button already had, so it hugs its content and the
+  // layout is unchanged.
+  sendInSleeperWrap: {
+    alignSelf: 'center',
   },
   queueBtn: {
     alignSelf: 'center',

@@ -25,7 +25,7 @@ The `waivers` display label was renamed **"Waivers" → "FA"** on 2026-07-17 (la
 
 **Locations (colors + labels):** `mobile/src/theme/colors.ts` (`colors.tier`), `mobile/src/components/TierBadge.tsx` + `chalkline/Badge.tsx` (`TierChalkBadge`) label maps, `mobile/src/utils/tierBands.ts` (`TIERS`/`TIER_LABEL`), `web/positional-tiers.html` (inline CSS: tier-row accents, tier-assign buttons, legend swatches; JS `TIERS`/`TIER_LABELS_SHORT`), `web/profile.html` (inline `:root` vars + `TIER_ORDER`/`TIER_LABELS`), `web/style-guide.html` (badge swatches), `extension/content.css` (`.ftf-badge.ftf-tier-*`) + `extension/content.js` (`TIER_LABELS`), `backend/og_image.py` (`TIER_ORDER`/`TIER_LABELS`/`TIER_TINTS`).
 
-Note: `web/css/styles.css` has a separate 4-level *dynasty value* badge set (`.tier-elite/.tier-high/.tier-mid/.tier-depth`) — a different taxonomy, not these tokens. Likewise `trade_service.analyze_roster_strengths`' `tier_depth` profile bins (`elite/starter/bench`, KTC-value thresholds) and the `tier_mult_*` `model_config` keys are backend-internal engine taxonomies that merely reuse the old words — they are NOT the tier enum and were deliberately left untouched by the 2026-07-11/12 ladder migrations. `extension/popup.css` contains no tier colors. Rank-medal accents (web `.ranked-1/2/3`, mobile `PlayerCard` rank styles) use the gold/silver/neutral medal tokens, not tier tokens.
+Note: `web/css/styles.css` has a separate 4-level *dynasty value* badge set (`.tier-elite/.tier-high/.tier-mid/.tier-depth`) — a different taxonomy, not these tokens. Likewise `trade_service.analyze_roster_strengths`' `tier_depth` profile bins (`elite/starter/bench`, KTC-value thresholds) and the `tier_mult_*` `model_config` keys are backend-internal engine taxonomies that merely reuse the old words — they are NOT the tier enum and were deliberately left untouched by the 2026-07-11/12 ladder migrations. **That `tier_depth` taxonomy gained a wire alias and a second band mode on 2026-08-20 (#366) — see "Roster-profile depth bins" below.** `extension/popup.css` contains no tier colors. Rank-medal accents (web `.ranked-1/2/3`, mobile `PlayerCard` rank styles) use the gold/silver/neutral medal tokens, not tier tokens.
 
 ---
 
@@ -48,13 +48,98 @@ Saved boards need no data migration when bands change: `users.tier_overrides` st
 
 The two maps agree at **exactly one point, Elo 1548.0**, and diverge in both directions — so a mistake is silent near a mid-1st and grows the cheaper the asset. Using `seed_elo_for_value` on an engine value inflates: a Mid 3rd (Elo 1320) reads 1383.5, a Mid 4th (1240) reads 1339.3, a Late 4th (1220) reads 1329.5. That is what made a current-year 3rd badge `second` on `GET /api/league/picks` after D-084 moved the `second` floor to 1370. Full derivation: [docs/reviews/2026-08-19-pick-badge-scale.md](reviews/2026-08-19-pick-badge-scale.md).
 
-**The invariant to test against, in either direction:** a CURRENT-year pick of round R must badge exactly where `GENERIC_PICK_SEEDS[(R, "Mid")]` sits, because `tier_config.json`'s `_calibration` *defines* the band floors as those rungs. Pinned by `backend/tests/test_league_picks_tier.py::test_current_year_rungs_badge_their_own_round`.
+**The invariant to test against, in either direction:** a CURRENT-year pick of round R **priced on the LADDER** must badge exactly where `GENERIC_PICK_SEEDS[(R, "Mid")]` sits, because `tier_config.json`'s `_calibration` *defines* the band floors as those rungs. That is a property of `pick_pool_value` and D-148 did not touch it — but since D-148 the surfaces serve the MARKET price, so the identity is pinned at the function level and the route is pinned against the canonical band walk over whatever it served: `backend/tests/test_league_picks_tier.py::test_the_d088_inverse_identity_is_still_the_one_this_route_uses`.
 
 **Clients never re-derive a tier from a value.** Every tier on the wire is server-computed through `RankingService.tier_for_elo`; the mirrors below exist only as pre-fetch fallbacks for the *bands*, never as a place to redo this conversion.
 
 Since #313, `1qb_ppr` QB **seed values** are compressed so no quarterback seeds above the `first_1` band (`qb_1qb_cap_elo`, default 1785). The **bands themselves are unchanged and remain position- and format-uniform** — the cap is applied in value space at pool build, so every client's tier walk (`mobile/src/utils/tierBands.ts`, the extension badge, `RankingService.tier_for_elo`) stays a single shared ladder with no per-position fork.
 
 **Locations:** `backend/tier_config.json` (canonical), `backend/ranking_service.py` (`ORDERED_TIERS` / `tier_bands_for` / `tier_for_elo` / `apply_tiers`), `mobile/src/utils/tierBands.ts` (offline fallback mirror — keep in sync), `web/positional-tiers.html` (fallback `TIER_CONFIG` mirror), `web/js/app.js` (`_eloToTierLabel` floor mirror), `extension` badge (consumes the backend walk).
+
+---
+
+## Roster-profile depth bins (`tier_depth`) — #366, 2026-08-20
+
+**This is NOT the tier enum above.** It is `trade_service.analyze_roster_strengths`' own
+three-bin roster profile, and the two taxonomies merely reuse two of the same English words.
+Nothing here maps to a tier key, a tier color, or an Elo band, and no client may render a
+`tier_depth` bin with a `TierBadge`.
+
+The bins are a **disjoint partition** — every counted player lands in exactly one. Nothing
+non-disjoint may be added to `tier_depth[pos]` (which is why the handcuff overlay below is a
+separate top-level key).
+
+### Wire keys, and the `bench` → `replacement` alias
+
+| Wire key | Present when | Meaning |
+|---|---|---|
+| `elite` / `starter` / `bench` | **always**, at every flag setting | the three bins as they have always shipped |
+| `replacement` | only when `trade.position_tiers` is ON | **an alias of `bench` — identical count**, carrying the word feedback #366 asked for |
+
+`bench` was **not renamed**, deliberately. A rename would have broken every client older than
+this change, including the shipped TestFlight build; both keys ship instead. **Clients read
+`replacement ?? bench`** — reading `replacement` alone renders a hole against a flag-off
+backend, and that pair is pinned by `mobile/tests/check-team-review-depth.js`. The user-facing
+LABEL is "Replacement" at all times; the word "bench" is never shown.
+
+### The two band modes, and `tier_basis`
+
+| Mode | When | Cut on |
+|---|---|---|
+| `absolute` (legacy) | `trade.position_tiers` OFF, **or** the pool is too thin at that position | `dynasty_value`: elite ≥ 4000, starter ≥ 1500, bench ≥ 500 |
+| `position_relative` | flag ON and the pool is real | rank **within the position** |
+
+The absolute cuts are position-blind and are really a cut on Sleeper's **overall
+`search_rank`** — `dynasty_value(p) = ktc_max·e^(−ktc_k·(search_rank−1))` is monotone in it, so
+4000/1500/500 mean "overall ≤ 73 / ≤ 151 / ≤ 238". Against the live pool that admits 33 elite
+RBs, 33 elite WRs, 17 elite QBs and **7** elite TEs: one word, four meanings. That is the
+defect #366 reported.
+
+The positional cuts, derived from what a 12-team league starts (1 QB, 2 RB, 2 WR, 1 TE;
+superflex starts 2 QB) — **canonical in `trade_service._POS_TIER_CUTS`; clients never
+re-derive them:**
+
+| Band | Definition | QB (1QB) · TE | RB · WR · QB (superflex) |
+|---|---|---|---|
+| Elite | top **half** of the league's starting demand | ≤ 6 | ≤ 12 |
+| Starter | inside **1.5×** the demand | ≤ 18 | ≤ 36 |
+| Replacement | inside **2.5×** | ≤ 32 | ≤ 60 |
+
+Below `_POS_TIER_MIN_POOL` (40) ranked players at a position, positional rank is meaningless
+and that position falls back to the absolute cuts. The mode is **reported, never inferred**:
+`depth.tier_basis` is `{pos: "position_relative" | "absolute"}`. Real Sleeper pools carry
+313 QB / 568 RB / 1134 WR / 516 TE, so production always bands relatively.
+
+**`trade.position_tiers` is not a display flag.** `analyze_roster_strengths` also produces
+`position_needs` / `position_surplus`, consumed by `trade_gen_v2` (`:930`, `:980`) and
+`trade_service` (`:3413`, `:3440`, `:4096`, `:4172`, `:4259`) — flipping it ON changes every
+deck for every user. OFF, the profile is byte-identical to pre-#366
+(`backend/tests/test_position_tiers.py`).
+
+### `handcuff_rb` — the RB2 overlay (flag `trade.rb_handcuff`)
+
+`depth.handcuff_rb` counts the caller's RBs who are the **RB2 on their NFL depth chart**:
+`position == "RB"` ∧ `depth_chart_position == "RB"` ∧ `depth_chart_order == 2`, read from
+Sleeper's own dump (`players.depth_chart_*`, `database.py:970-971`, re-synced every 24 h).
+It is an **overlay, not a fourth bin** — an RB2 is also Elite, Starter or Replacement — so it
+never appears inside `tier_depth[pos]`.
+
+**ABSENT when the flag is off — never `0`, never `null`.** "We did not look" and "you own
+none" are different claims, and the client must render them differently: it gates on key
+presence and must never write `handcuff_rb ?? 0`. Coverage is partial by design (≈149 of 603
+RBs sit on a chart at all); the rest are camp bodies and free agents, correctly nobody's
+handcuff. The label states the fact — *"RB2 on his NFL depth chart"* — and makes no usage or
+value claim, because a committee back can hold order 2.
+
+**Locations:** `backend/trade_service.py` (`_POS_TIER_CUTS`, `_POS_TIER_CUTS_SF_QB`,
+`_POS_TIER_MIN_POOL`, `_bin_player`, `_bin_player_relative`, `_is_handcuff`,
+`analyze_roster_strengths` — canonical), `backend/team_review.py` (`_depth`, pass-through
+only), `mobile/src/api/teamReview.ts` (`TeamReviewDepth`),
+`mobile/src/screens/TeamReviewScreen.tsx` (`Depth`),
+`backend/tests/test_position_tiers.py` + `mobile/tests/check-team-review-depth.js` (guards).
+No web or extension surface consumes `tier_depth` — checked 2026-08-20 by
+`git grep -n "tier_depth"`; `web/css/styles.css`'s `.tier-depth` class is an unrelated
+dynasty-value badge, not this taxonomy.
 
 ---
 
@@ -97,6 +182,41 @@ Allowed values: `'1qb_ppr'`, `'sf_tep'`. Null in legacy rows is treated as `'1qb
 ## Decision type strings
 
 `swipe_decisions.decision_type`: `'rank'`, `'trade'`. Hard-coded — search both before renaming.
+
+---
+
+## Trade-queue refusal reasons (`POST /api/trades/queue`)
+
+The merged calculator's ✓ cell ("queue this trade for the other manager")
+answers `{queued: false, reason}` when the counterparty's own preferences mean
+the like would never surface in their deck. **`reason` is a closed,
+low-cardinality enum and every client switches on it**, so a value added
+server-side without the clients falls through to a generic "couldn't queue
+that" line — the exact dishonest state the cell was left disabled to avoid
+(#384, Q-029, [D-152]).
+
+| `reason` | What refused it | Mirror-time source |
+|---|---|---|
+| `likes_you_off` | the mirror surface itself is dark — flag `trade.likes_you` off, or the demo league | `server._likes_you_enabled()`; `league_id != "league_demo"` guard on the injector call |
+| `not_league_member` | the caller or the named counterparty is not in this league (includes queueing against yourself) | `members_by_id.get(...)` / `opp.user_id == user_id` |
+| `assets_not_on_roster` | a side is no longer on the roster it must come from — includes an owned pick outside `picks_pool_cap`, which is never injected and so can never mirror | `set(their_give) <= set(opp.roster)`, `set(their_recv) <= user_roster_set` |
+| `opponent_untouchable` | THEY marked a player you are asking for untouchable (#95) | `untouchable_ids & their_recv` |
+| `opponent_not_interested` | THEY marked a player you are offering not-interested (#163) | `not_interested_ids & their_give` |
+| `fails_fairness_floor` | the D-096 quality ladder refuses it **from their side** — the user-gain floor, directional `overpay_ok`, or `filler_ok` | `_likes_you_user_delta` / `_likes_you_package_delta` / `_likes_you_presentment_ok` |
+
+Locations to change together:
+
+- `backend/server.py` — `CALC_QUEUE_REASONS` (the tuple is asserted verbatim by `backend/tests/test_calc_trade_queue.py::test_the_refusal_enum_is_closed`) and `_calc_queue_mirror_reason`, whose branches are a line-for-line re-read of `_inject_likes_you_cards_impl`'s own `continue`s.
+- `mobile/src/api/trades.ts` — the `CalcQueueReason` union.
+- `mobile/src/screens/TradeCalculatorScreen.tsx` — `queueRefusalLine`, one toast line per value (`mobile/tests/check-calc-merged-behavior.js` 18f/18g fails on a missing case).
+
+Web and the extension have neither the calculator nor the deck, so there is
+nothing to mirror there today. `detail` is **not** part of the contract: it is
+diagnostic free text (it can name player ids), no client switches on it, and it
+is never an analytics property.
+
+The client event `calc_trade_queued {queued, reason?}` carries the same six
+values plus a client-only `error` for a request that never got an answer.
 
 ---
 
@@ -168,11 +288,50 @@ Shared user-facing strings rendered by both mobile and web — must stay charact
 | String | Shown when |
 |---|---|
 | `They're interested` (preceded by the Chalkline `eye` icon, not an emoji — changed from `👀 They're interested` 2026-07-02, ADR-004) | card has `likes_you: true` (likes-you pill) |
-| `Fair-value idea` | card has `basis: "consensus"` (consensus label/tag) |
-| `This league-mate hasn't ranked players yet — this is a balanced trade by consensus value.` | consensus-card explainer (mobile body text; web `title` tooltip on the tag) |
+| `Fair-value idea` | card has `basis: "consensus"` (consensus label/tag) — names the PRICING BASIS, unconditional |
+| the consensus-card explainer, **two states** — see § Consensus balance claim below | card has `basis: "consensus"` (mobile body text; web `title` tooltip on the tag) |
 | `+ {player name} added to balance the deal` | card has a `sweetener` (Tier 3) — name interpolated from the referenced player |
 
 **Locations:** `mobile/src/components/TradeCard.tsx`, `web/js/app.js` (search "likes-you-pill" / "consensus-tag" / "trade-sweetener").
+
+## Counterparty-breaker objection codes — **deliberately NOT a cross-client invariant in v1** (2026-08-21, flags `trade.breaker` / `trade.breaker_narrative`)
+
+Recorded here so the absence is a decision on the record rather than an omission. The breaker's objection-code enum (`fit_outlook`, `fit_new_weakness`, `fit_duplicate`, `value_giving`, `other_player_keep`, `roster_crunch` — see [glossary](glossary.md) and [data-dictionary § `deck_impressions`](data-dictionary.md#deck_impressions)) is a **server-internal** vocabulary in v1 and imposes **no client obligation**:
+
+- The one user-visible artefact is the **hesitation line**, a complete sentence composed on the server (`trade_narrative.hesitation_line`, template version `brt-1`). It arrives as `breaker.sentence` and is rendered **verbatim**. Clients contribute no copy of their own — not even the "Their likely hesitation:" lead-in, which lives inside the sentence.
+- **No client may switch on `breaker.code`**, map it to a label, or derive an icon, colour or ordering from it. `code` and `severity` ride the payload for inspectability and debugging only. `mobile/tests/check-breaker-card.js` asserts the mobile element reads only `sentence` — a client that starts branching on codes turns a server-internal enum into a wire contract, and that is precisely the change this row exists to make deliberate.
+- **Payload presence IS the gate.** The server serializes the `breaker` object only for a card that actually narrated, so the client re-checks no flag and needs no knowledge of the dark-stamp window. Web and the extension render nothing at all in v1 and ignore the key; that is parity by omission, not drift.
+- The full objection vector and `breaker_shadow` **never** leave the server (`features_json` only).
+
+**When this row must change:** the moment any client branches on a code — a per-code icon, a filter chip, an "objections" detail sheet, or client-composed copy. At that point the enum becomes a real cross-client contract and gets a proper table here (keys, exact labels, and the rule that an unknown code degrades silently rather than rendering raw). Product outcome 1 (filter/demote the deck on a breaker verdict) is v2 and would arrive with its own scope block.
+
+## Consensus balance claim — the 0.75 bar (D-097, 2026-08-19)
+
+**The app may not call a trade balanced below its own definition of balanced.** Until 2026-08-19 the consensus explainer asserted `…this is a balanced trade by consensus value.` gated on `basis === 'consensus'` **alone**, with no fairness check. The app's bar for balanced is **0.75**, but the mobile fairness default flipped OFF on 2026-08-17 so the live generation floor is **0.50** and cards ship down to 0.501. Measured read-only against prod `deck_impressions` on 2026-08-19: **805 of 7,293 served consensus cards (11.0%)** carried that sentence while below the bar (band `[0.501, 0.75)`; p10 0.7302, p50 0.8590, min 0.5010, and 7,293/7,293 carried a non-NULL `fairness_score`).
+
+**The claim is REMOVED, not replaced.** Below the bar the sub-line truncates to its true half and stops. Two character-identical strings on both clients, keyed on `fairness_score`:
+
+| `fairness_score` | String |
+|---|---|
+| `>= 0.75` | `This league-mate hasn't ranked players yet — this is a balanced trade by consensus value.` |
+| `< 0.75`, or absent / non-finite | `This league-mate hasn't ranked players yet.` |
+
+Three rules that are not negotiable:
+
+- **No replacement prose below the bar** (operator, 2026-08-19). The card already renders `TradeValueBar` with `give_value` / `receive_value` / `favors` / `gap` — direction *and* magnitude are on screen from the component whose own comment calls it the universal value verdict. A sentence about value here would restate the bar. This also settles the directional-wording question ("leans your way" / "leans theirs"): it is duplication, and on web it would additionally require plumbing `give_value` / `receive_value` into `web/js/app.js`, which has neither today. **Do not re-open it.**
+- **The explanation half is never dropped.** `This league-mate hasn't ranked players yet` is the one thing on the card that says *why this is a fair-value idea rather than a divergence card*. Nothing else conveys it, so the fix truncates — it does not hide the line.
+- **Fail-safe direction is DOWN.** Unknown fairness renders the truncated string, never the balanced claim. Both clients compute `balanced` as a single conjunct (`typeof === 'number' && Number.isFinite(…) && … >= 0.75`), so this is structural rather than merely tested. `Number.isFinite`, **not** the coercing global `isFinite` — `isFinite('0.9')` is `true` and a stringified payload would then compare as a string.
+
+**The 0.75 threshold is a constant, not a server knob** — matching the two constants it mirrors. It is the *definition* of balanced, deliberately **not** the generation floor (which is 0.50 today and moves with the fairness toggle). Four spellings of the same number, all pinned to each other by `mobile/tests/check-consensus-balance-claim.js` §2:
+
+| Spelling | Location |
+|---|---|
+| `NORMAL_LOW` | `mobile/src/utils/tradePresentation.ts` (canonical for mobile) |
+| `FAIRNESS_ON_THRESHOLD` | `mobile/src/api/tradePregen.ts` (the `fairness_threshold` sent to the generator in balanced mode) |
+| `CONSENSUS_BALANCED_MIN` | `mobile/src/utils/consensusNote.ts` — **re-exports** `NORMAL_LOW`, never redeclares it |
+| `FAIRNESS_BALANCED_MIN` | `web/js/app.js` — the one unavoidable literal (vanilla JS, no import from TS) |
+
+**Locations to update together:** `mobile/src/utils/consensusNote.ts` (the only place the copy is authored), `mobile/src/components/TradeCard.tsx` (renders `note.label` / `note.body`), `web/js/app.js` (`consensus-tag` tooltip + `FAIRNESS_BALANCED_MIN`), and this table. Guard: `npm run test:consensus-balance-claim` in `mobile/` — §3 **reconstructs both web strings from web source and compares them byte for byte** against the mobile module's output, so it catches wording drift, not just a missing gate.
 
 ## Fairness meter semantics
 
@@ -218,6 +377,107 @@ Row **order** is a sibling encoding: a surface presenting the rows as projected 
 **Locations to update together:** `mobile/src/screens/LeagueSummaryScreen.tsx` (`PLAYOFF_BAND_LIKELY_MIN` / `PLAYOFF_BAND_UNLIKELY_MAX` / `PLAYOFF_BAND_LABEL` / `PLAYOFF_BAND_COLOR` / `playoffBand`), `mobile/src/theme/chalkline.ts` (`semantic`), `mobile/src/api/league.ts` (the `odds` field notes), and — when web parity lands — `web/league-rankings.html`. Backend serves raw fractions and must stay band-agnostic.
 
 ---
+
+## Playoff band → inferred window (#371, flag `trades.window_from_odds`, D-111)
+
+A second, narrower encoding riding the same bands as the section above. When `trades.window_from_odds` is on and the league qualifies, the Team Review window beat's verdict is derived from the band — and the derivation is **server-side**. A client renders `window.odds.implied`; it must never map a band to a window itself, for the same reason it must never map a percentage to a band.
+
+| `standing.outlook.band` | `window.odds.implied` |
+|---|---|
+| `likely` | `contender` |
+| `tossup` | `not_sure` |
+| `unlikely` | `rebuilder` |
+
+Three rules travel with the map and are part of the invariant:
+
+- **The extremes are unreachable.** `championship` and `jets` never appear, exactly as `infer_team_outlook` refuses them: a simulated 71 % does not justify α = 1.00, and those two stay reserved for self-declaration (see § Team outlook modes).
+- **An unmapped band is `null`, never a silent `not_sure`.** If `playoff_band` ever gains a fourth value, the server returns `implied: null` and falls back to the roster heuristic with `odds_reason: "odds_unavailable"`. A client that defaults an unknown band to a window would invent an opinion.
+- **`window.source` is the authority on which model spoke**, and `window.roster_inferred` always carries the roster heuristic's own verdict. Both ship together so the two definitions of "contender" are visible at once rather than one silently replacing the other. A client must not infer the source from whether `odds` is present — the band is also shipped when it was **refused** (preseason).
+
+**Locations to update together:** `backend/team_review.py` (`WINDOW_FROM_BAND`, `resolve_window_from_odds`), `mobile/src/api/teamReview.ts` (`TeamReviewWindow.odds` / `.source` / `.odds_reason`), `mobile/src/screens/TeamReviewScreen.tsx` (the `Window` beat). Backend owns the mapping; no client holds a copy.
+
+---
+
+## Net first-round capital — `provenance` and `applied` (#365, flag `trade.outlook_net_firsts`, D-110)
+
+`window.signals.firsts` carries the net-first-round-pick signal. Two of its fields are cross-client contracts rather than data, because both encode *absence of knowledge*, and absence of knowledge is exactly what a client is most likely to render as a confident zero.
+
+| `provenance` | Meaning | May the client show a number as a signal? |
+|---|---|---|
+| `observed` | at least one round-1 pick in this league sits under an owner other than its original | yes |
+| `none_traded` | round-1 rows exist, but none is recorded as having moved — **either** nobody has traded a first **or** the trade history predates capture, and the two are indistinguishable from the data | no — state both possibilities |
+| `absent` | no round-1 rows for this league at all (ESPN without asserted picks, an MFL crosswalk gap, demo, unsynced) | no — state that there are no records |
+
+- **`applied` is read, never derived.** It says whether the term actually entered `score`. It is *not* recoverable from `provenance` (the weight knob may be 0) and it is *not* recoverable from `net_share == 0` (a genuine net of zero is a real, scored signal). A client that infers it will eventually disagree with the score it is printing.
+- **The counts are shown even when the term is refused.** `held` / `own_total` / `traded_away` / `acquired` are facts about the league; only their *interpretation* is withheld.
+- **A NULL original owner is not a trade.** The server reads an un-attributable row as "never moved" rather than inventing a counterparty; no client should apply a different rule to any pick provenance it renders.
+
+**Locations to update together:** `backend/trade_service.py` (`first_round_signal`), `backend/server.py` (`_first_round_ledgers`), `mobile/src/api/teamReview.ts` (`FirstsProvenance`), `mobile/src/screens/TeamReviewScreen.tsx` (the `Window` beat's firsts card).
+
+---
+
+## Composite window signals — `provenance`, `applied`, and the fourth refusal (#372, flag `trade.outlook_composite`, D-140)
+
+`window.signals.starters` and `window.signals.playoff` carry the two signals #372 added. They follow the same contract as `signals.firsts` above and for the same reason: both encode *absence of knowledge*, and absence of knowledge is what a client is most likely to render as a confident zero.
+
+| `starters.provenance` | Meaning | May the client show the index as a signal? |
+|---|---|---|
+| `observed` | a lineup template was known and the league has priced starter value | yes |
+| `lineup_unknown` | `starters` is `None` — the platform exposes no `roster_positions` equivalent and no template was found, so there is no "starting lineup" to value | no — say we could not read it |
+| `absent` | a template existed but the league's total starter value is zero (unsynced, demo) | no — say there is nothing to compare against |
+
+| `playoff.provenance` | Meaning | May the client show the term as a signal? |
+|---|---|---|
+| `observed` | the band was admitted and scored | yes |
+| `preseason` | a band exists and was **deliberately not used** — `completed_weeks == 0` is the simulator's weakest window (D-094) | no — show the band, state the refusal |
+| `odds_unavailable` | no band at all: non-Sleeper, `outlook.odds` off, or the sim failed | no |
+| `odds_disabled` | `trades.window_from_odds` is off, so we never asked | no |
+
+- **`odds_disabled` is a fourth value and is NOT `odds_unavailable`.** "We did not ask" and "we asked and got nothing" are different claims and the card says which. It deliberately does **not** enter `window.odds_reason`'s vocabulary (`preseason` \| `odds_unavailable`), which keeps #371's field contract intact — `signals.playoff.provenance` carries this one.
+- **`applied` is read, never derived**, exactly as for `firsts` — and here the trap is sharper: an exactly average starting lineup and a lineup we could not read **both index at 0**, and a genuinely even playoff team and a refused band both index at 0. Only `applied` separates them. Pinned by `test_an_unapplied_starter_signal_with_a_LOUD_index_still_scores_nothing` and `test_a_refused_playoff_term_is_absent_from_the_score_not_a_zero`, both of which hand the function a refused block with a **loud** index precisely because a test built on the helper's own (zeroed) output cannot tell a working guard from a lucky number.
+- **Render `starters.index_raw`, score `starters.index`.** `index` is `index_raw` clamped to `model.starter_index_cap`, and **the cap binds on real rosters** — the FFV3 caller measures +0.82 and is scored at +0.50. A card printing `index` would tell him his starters are 50 % above the league mean when they are 82 % above: the model's number stated as the team's. Show the measurement, and name the cap only when the two differ.
+- **`starters.index` is `share × num_teams − 1`, not `share − 1/num_teams`.** Same centring, rescaled so the number does not depend on league size: 0.0 is an exactly average starting lineup and +0.30 is 30 % above the league mean in a 10-team league and in a 14-team league alike. That independence is what lets one weight be correct everywhere. A client renders it; it never re-derives it from `share`.
+- **`playoff.center` is shipped, not restated.** It is the midpoint of the `tossup` band (see § Playoff band above), and a client that hardcodes 0.5 drifts the day the band cuts move — the D-101 defect exactly.
+- **`window.model`'s three existing weights are RE-STATED at their composite values** when `model.composite` is `true`. Under the composite `w_vet_share` is `0.40`, not `1.00`. A client that reads them is always right; one that hardcodes either value prints arithmetic that does not add up to the total beside it.
+- **`window.source: "composite"` means the band was scored, not obeyed**, so `inferred == roster_inferred`. When `trade.outlook_composite` and `trades.window_from_odds` are both on, the composite **suppresses** the band→window replacement (`team_review.resolve_window_precedence`): a signal drives once or not at all.
+
+**Locations to update together:** `backend/trade_service.py` (`starter_value_signal`, `playoff_odds_signal`, `infer_team_outlook`), `backend/team_review.py` (`resolve_window_precedence`, `_window`), `backend/server.py` (the team-review route's window wiring), `mobile/src/api/teamReview.ts` (`StarterProvenance`, `PlayoffProvenance`, `TeamReviewWindow`), `mobile/src/screens/TeamReviewScreen.tsx` (the `Window` beat).
+
+---
+
+## Consensus-gap direction — which list is the sell list (#367, D-100, 2026-08-20)
+
+`GET /api/trends/consensus-gap` has **three consumers** — mobile Trends
+(`TrendsScreen.tsx`), the web Trends panel (`web/js/app.js`), and
+`GET /api/league/team-review`'s `divergence` beat — so the sign convention is a
+cross-client encoding, not an implementation detail. It shipped inverted on one
+side and is pinned here so it cannot drift back.
+
+| List | Roster test | Comparison | Sign | Means |
+|---|---|---|---|---|
+| `easiest_sells` | **on** the caller's roster | league **community mean** elo | `gap = community_elo − user_elo > 0` | the market rates him above your board — selling captures the surplus |
+| `easiest_buys` | **not** on the caller's roster | the **owner's** own elo | `gap = user_elo − owner_elo > 0` | you rate him above the man who has him — buying captures the discount |
+
+**Both sides ship `gap` and `rank_gap` as POSITIVE edge magnitudes.** Clients render
+`+{gap}` on both lists; a client must never infer the direction from the sign.
+
+**The buys side compares against the OWNER, the sells side against the COMMUNITY.**
+That asymmetry is deliberate — you buy from one specific person, but you sell into a
+market — and it is why `easiest_buys` was correct while `easiest_sells` was not.
+
+**Team Review field mapping** (`divergence`), which follows from the table above and
+was shipped crossed:
+
+- `higher_than_market` ← `easiest_buys` — you are higher than the market, he is not yours → **buy**
+- `lower_than_market` ← `easiest_sells` — the market is higher than you, he is yours → **sell**
+
+The consensus-seed fallback ladder obeys the same rule (`gap > 0 and not on roster`
+→ buy; `gap < 0 and on roster` → sell, magnitude negated). Before D-100 the two
+ladders disagreed about what the same field meant.
+
+**Copy rule.** A client may not describe a sell list as "players you rate highly" or a
+buy list as something to skip. The shipped defect was exactly this: the buy list sat
+under *"Skip these — you'd be buying at a price you don't believe."*
 
 ## Deck disposition (Pass / Like) (#169)
 
@@ -525,13 +785,19 @@ Tracking plan v2 ([spec](business/analytics/2026-07-17-tracking-plan-v2.md) §S2
   - Trios: `trio_entry_tapped`, `trio_session_started`
   - Settings: `notif_denied_settings_shown`, `notif_denied_settings_tapped`, `pick_pricing_mode_changed`, `stud_tax_mode_changed`, `guide_tour_reenabled`
   - Growth: `rating_prompt_requested`
-  - **`quickset_completed` is NOT among them, on purpose:** the name is server-fired and the namespaces are disjoint by an import-time assert, so the colliding client emitter in `QuickSetTiersScreen.tsx` was **deleted** (its `onboarding` prop is recorded as accepted loss in the addendum), never registered and never aliased.
+  - **`quickset_completed` is NOT among them, on purpose:** the name is server-fired and the namespaces are disjoint by an import-time assert, so the colliding client emitter in `QuickSetTiersScreen.tsx` was **deleted** (its `onboarding` prop is recorded as accepted loss in the addendum), never registered and never aliased. **Semantics correction (2026-08-24 — [addendum](business/analytics/2026-08-24-quickset-via-gap.md)):** the server row fires per `via:'quickset'`-tagged tier COMMIT, not per completed position, and no client sent that tag until the 2026-08-24 mobile fix — the row was dark for every production Quick Set walk, and a walk that tap-accepts consensus commits nothing and stays server-invisible. The per-position completion read is `quickset_step_advanced` with `tier_index == tier_count - 1`.
+
+- **#384 merged calculator + finder batch (2026-08-22 — [addendum](business/analytics/2026-08-22-384-calc-finder-addendum.md)); mobile only:**
+  - Calculator tour (screen `TradeCalculator`): `calc_tour_started` (`source` ∈ **`auto` | `show_me_around`**), `calc_tour_ended` (`reason` ∈ **`finished` | `abandoned`**, `beats_shown`), `calc_tour_beat_missing` (`beat` = a script beat id `n10`…`n24`, owned by `mobile/src/components/analystScript.ts`). All three had **live emitters and no registration** since W4 shipped — every one was counted-and-dropped behind a 200.
+  - Calculator interactions: `calc_mode_switched` (`mode` ∈ **`live` | `league`**), `calc_include_players_toggled` (`on` = the RESULTING state), `calc_asset_added` (`side` ∈ **`give` | `receive`**), `calc_cleared` (`mode`), `calc_find_a_trade_tapped` (`include_players`, `give_count`, `receive_count`, `has_partner`). **`calc_find_a_trade_tapped` is NOT `find_trades_tapped`** — the latter fires only from `TradesScreen`'s own controls, and the calculator's control navigates to `TradesHome` without `TradesScreen` firing on mount, so one tap is still one event. The props are the calculator's state and would hollow out the deck emitter's two-prop row. `calc_trade_queued` (`queued` bool; `reason` present ONLY on `queued: false` — the six `POST /api/trades/queue` refusal codes above plus the client-only `error` for a request that never got an answer) is the ✓ cell's outcome, one event per tap on both outcomes.
+  - Deck (screen `Trades`): `deck_back_to_calculator`, `deck_unpin_retry` (both `pin_count`); the #384-local pass **overlay** pair `trade_pass_overlay_opened` (no props, on purpose) / `trade_pass_overlay_dismissed` (`banked` — a BOOLEAN, never the reason code and never the free text). The overlay presentation is local to this page: the shipped deck keeps `DeclineReasonPanel`'s inline tiles, and `trade_pass_layer1` / `trade_pass_layer2` remain the reason capture on both.
+  - Prompt arbiter: `prompt_deferred` (`surface` = the `InterruptSurface` enum, identical to `prompt_shown.surface`; `blocked_by` = the literal **`tour`** for a calc-tour hold, else the holding surface). **Registration of a live emitter, not a new signal** — `useInterruptCoordinator.ts` has fired it since the arbiter shipped while only its granted twin `prompt_shown` was registered.
 
 **Canonical send names + the `surface` enum.** The reserved names are `sleeper_send_attempted` / `sleeper_send_failed` / `sleeper_send_succeeded` — **not** `send_in_sleeper_*`. `analytics_queries` reserved this exact trio in 2026-07-17 and `FUNNEL_STAGES` stage 8 + `FEATURE_VERTICALS["send_in_sleeper"]` already reference the succeeded name, so the reserved spelling lights those up without a query edit. Every one of them carries `surface` ∈ **`deck` | `match` | `awaiting` | `calculator`** — the four `SendInSleeperButton` mounts. Canonical definition: `SendSurface` / `SEND_SURFACES` in `mobile/src/utils/tradeText.ts`; mirrored in `CLIENT_EVENT_PROPS`. **`awaiting` is the Matches non-match send row — it is NOT `suggested`.** Adding a mount means adding a value in both places.
 
 **`celebration_shown`, never `celebration_fired`.** The registered name has always been `celebration_shown`; the client emitted `celebration_fired` and every one of those events was dropped. Fixed 2026-08-11 by **renaming the client**, deliberately **without an alias** — an alias would make the taxonomy the place typos go to live.
 
-**INTENT is a deny-list, so taxonomy growth is intent-by-default.** Impression-, navigation- and outcome-class names MUST also be added to `analytics_queries.NON_INTENT_EVENTS` in the same commit, or DAU/WAU step-change on ship day and every retention and churn series breaks at that seam — silently and permanently. `tab_selected`, `league_view`, `experiment_exposed` and `quickset_abandoned` are classified **non-intent** for exactly this reason (a tab tap and a League mount would otherwise make DAU ≈ app-open count). `quickset_step_advanced` stays **intent** — it is real ranking intent. Seam date recorded in the addendum. `lineup_impact_unavailable` (impression) and `league_team_closed` (terminator/dismissal, like `quickset_abandoned`) are classified **non-intent** for the same reason, added in the same commit as their allowlist entries. `league_team_opened` **stays intent** — the enter half is the value moment and already counts the user once, so admitting its terminator too would only ever add user-days where the opener was lost to queue overflow. The 2026-08-13 backlog batch classifies eight of its 27 names non-intent (`prompt_shown`, `push_primer_shown`, `notif_denied_settings_shown`, `apple_banner_dismissed`, `push_primer_dismissed`, `deck_summary_viewed`, `trio_session_started` — fires on mount — and `rating_prompt_requested` — a StoreKit request the OS may never honor); the other 19 are real user decisions and stay intent, which widens INTENT coverage at that seam (recorded in the addendum).
+**INTENT is a deny-list, so taxonomy growth is intent-by-default.** Impression-, navigation- and outcome-class names MUST also be added to `analytics_queries.NON_INTENT_EVENTS` in the same commit, or DAU/WAU step-change on ship day and every retention and churn series breaks at that seam — silently and permanently. `tab_selected`, `league_view`, `experiment_exposed` and `quickset_abandoned` are classified **non-intent** for exactly this reason (a tab tap and a League mount would otherwise make DAU ≈ app-open count). `quickset_step_advanced` stays **intent** — it is real ranking intent. Seam date recorded in the addendum. `lineup_impact_unavailable` (impression) and `league_team_closed` (terminator/dismissal, like `quickset_abandoned`) are classified **non-intent** for the same reason, added in the same commit as their allowlist entries. `league_team_opened` **stays intent** — the enter half is the value moment and already counts the user once, so admitting its terminator too would only ever add user-days where the opener was lost to queue overflow. The 2026-08-13 backlog batch classifies eight of its 27 names non-intent (`prompt_shown`, `push_primer_shown`, `notif_denied_settings_shown`, `apple_banner_dismissed`, `push_primer_dismissed`, `deck_summary_viewed`, `trio_session_started` — fires on mount — and `rating_prompt_requested` — a StoreKit request the OS may never honor); the other 19 are real user decisions and stay intent, which widens INTENT coverage at that seam (recorded in the addendum). The 2026-08-22 #384 batch classifies six of its 13 names non-intent — `calc_tour_started` (the tour **auto-starts on landing**, so it is a mount counter for a primary surface; admitting it would make DAU ≈ calculator-visit count), `calc_tour_ended` (terminator), `calc_tour_beat_missing` (script-defect diagnostic), `trade_pass_overlay_opened` (exposure — the decision is `trade_pass_layer1`/`_layer2`), `trade_pass_overlay_dismissed` (dismissal) and `prompt_deferred` (a system refusal, the `guide_step_suppressed` peer, matching its already-non-intent twin `prompt_shown`); the other seven — the two calculator toggles, `calc_asset_added`, `calc_cleared`, `calc_find_a_trade_tapped`, `deck_back_to_calculator`, `deck_unpin_retry` — are real user decisions and stay intent. `calc_trade_queued` (added 2026-08-22, W6-A) joins them as **intent**: the tap IS the user's decision to offer the trade — the `sleeper_send_attempted` class, not `prompt_deferred` — and it is unreachable without a filled canvas, so `calc_asset_added` has already counted the user-day.
 
 **Web (`web/js/events.js`) and the extension (`extension/background.js`) fire NONE of the P0-batch names.** That omission is deliberate — these are mobile surfaces — and is stated here so a future reader reads it as a decision, not as drift.
 
@@ -591,7 +857,7 @@ The pick-anchor wizard's answer vocabulary (2026-07-10), defined in `backend/ser
 
 Anchor values are position-uniform on purpose (uniform valuation across position groups); tier assignment falls out of the per-position/format band walk. The Elo seeds come from `GENERIC_PICK_SEEDS` (`backend/pick_values.py` since #158 — re-exported by `backend/server.py`, so `server.GENERIC_PICK_SEEDS` still resolves) — if those seeds or the anchor set change, update the backend constant, the mobile union type + button rows, and this table. The ≈-Elo values above assume the default `elo_value_*` config (base 1000, ref 1500, k 0.005).
 
-**Owned-pick `pool_value` (#158) — clients MUST NOT recompute it differently.** An owned draft pick's calculator/suggestion value is server-authoritative: `pool_value = pick_pool_value(round, years_out)` = `elo_to_value(GENERIC_PICK_SEEDS[(round,"Mid")]) × 0.85^years_out` (the round's **Mid** seed, year-discounted 15%/yr in value space; deep rounds clamp to the (4,"Mid") seed). At `years_out=0` a league pick equals its generic "Mid <round>" pool twin exactly. This is the **only** value clients render for owned picks — they read `pool_value` off `GET /api/league/picks`, never derive it. Single source: `backend/pick_values.py::pick_pool_value` (shared by the calculator, the suggestion-pool injection, and #157). The legacy `draft_picks.pick_value` (0–100 round-tier scale, mid-1st 67.5) is a **different** number used only for pick-**share** ratios — not a client-facing value.
+**Owned-pick `pool_value` (#158) — clients MUST NOT recompute it differently.** An owned draft pick's calculator/suggestion value is server-authoritative: `pool_value = pick_pool_value(round, years_out)` = `elo_to_value(GENERIC_PICK_SEEDS[(round,"Mid")]) × 0.85^years_out` (the round's **Mid** seed, year-discounted 15%/yr in value space; deep rounds clamp to the (4,"Mid") seed). At `years_out=0` a league pick equals its generic "Mid <round>" pool twin exactly. **Since D-148 (2026-08-21) that formula is the FLOOR, not the served number.** `pool_value` is still what the sync writes and still what the column holds, but every surface serves `priced_pool_value` over it — the pick's own slot price, else the round curve, else this ladder value. The client-facing rule is unchanged and now matters more: this is the **only** value clients render for owned picks — they read `pool_value` off `GET /api/league/picks`, never derive it, and must not assume it equals `pick_pool_value(round, years_out)` (it usually does not). Single source: `backend/pick_values.py::pick_pool_value` (shared by the calculator, the suggestion-pool injection, and #157). The legacy `draft_picks.pick_value` (0–100 round-tier scale, mid-1st 67.5) is a **different** number used only for pick-**share** ratios — not a client-facing value.
 
 **`notice.code` is an OPEN set; `state` / `kind` / `order_confidence` are CLOSED (draft-extensions W3 M-B, 2026-08-08).** `GET /api/draft/board`'s three state enums are closed vocabularies a client may switch on exhaustively — `state` ∈ `upcoming|live|complete|unavailable`, `kind` ∈ `rookie|startup|unknown`, `order_confidence` ∈ `assigned|unset|unknown` — and **no wave may add a member**. `notice.code` is deliberately the opposite: an open set carrying a server-authored `message`, so a client that does not recognise a code renders `notice.message` verbatim. That is the whole reason W3's new ESPN state ships as `notice.code = "picks_not_assigned"` on an `unavailable` board rather than as a new `state`: an old binary renders the message and behaves correctly, and `schema` stays `1`. Any future state should ride `notice.code` the same way. Codes so far: `order_not_set`, `startup_draft`, `platform_unsupported`, `class_not_loaded`, `mfl_reconnect`, `picks_not_assigned`.
 
@@ -648,28 +914,52 @@ Every place it appears carries a **one-action correction** that deep-links to th
 
 It comes from DynastyProcess's *combined* `files/values.csv` — the `pos == "PICK"` rows, which price individual slots (`"2026 Pick 1.01"` … `"2026 Pick 5.12"`) plus the future-year rungs — mapped into seed-Elo space through the same `data_loader.seed_elo_for_value` the player seeds use, so the number is directly comparable to a player's Elo *on screen*. That is the whole of its contract.
 
-**What it is NOT.** It is not `GENERIC_PICK_SEEDS`, not `pick_pool_value`, and not a tier-band floor. **Amended by M6b (2026-08-06):** it CAN now reach the trade engine, the suggestion pool and `/api/trade/evaluate` — but only through the one named seam `pick_values.priced_pool_value`, only for OWNED picks, only under the per-user mode `pick_pricing_mode == 'market_slots'`, and only while the flag `trade.slot_pricing` is on (it is off). It still never reaches an anchor, the ranking pool or a tier band. The two scales genuinely disagree: DP's current-year slot curve is far steeper than our shipped ladder — **1.01 ≈ Elo 1817 against "Early 1st" 1720, and 1.12 ≈ 1461 against "Late 1st" 1580** (1QB, 2026-08-06 snapshot). A client that renders a slot value next to a ladder value must label which is which.
+**What it is NOT.** It is not `GENERIC_PICK_SEEDS`, not `pick_pool_value`, and not a tier-band floor. **Amended by M6b (2026-08-06), then widened by D-146 (2026-08-21):** it reaches the trade engine, the suggestion pool and `/api/trade/evaluate` for **every user, unconditionally** — but still only through the one named seam `pick_values.priced_pool_value`, and still only for OWNED picks. There is no longer a per-user mode or a flag in front of it. It still never reaches an anchor, the ranking pool or a tier band. The two scales genuinely disagree: DP's current-year slot curve is far steeper than our shipped ladder — **1.01 ≈ Elo 1817 against "Early 1st" 1720, and 1.12 ≈ 1461 against "Late 1st" 1580** (1QB, 2026-08-06 snapshot). A client that renders a slot value next to a ladder value must label which is which.
 
-**The two prices of a pick, and which is which (M6b).** After M6b there are TWO engine-visible prices for an owned pick, selected per user:
+**The two prices of a pick, and which is which (M6b, settled by D-146).** Two engine-visible prices exist in code; only one is reachable:
 
 | mode | source | who sees it |
 |---|---|---|
-| `tier_ladder` (**default**) | `pick_values.pick_pool_value` — the shipped ladder's **Mid** rung of the round, `YEAR_DISCOUNT ** years_out` | everyone today |
-| `market_slots` | `pick_values.market_pick_pool_value` — DP's published curve for the pick's **absolute** season+round | opt-in, flag-gated, currently nobody |
+| `market_slots` (**the price**) | `pick_values.market_pick_pool_value` — DP's published curve for the pick's **absolute** season+round | **everyone, unconditionally** since 2026-08-21 |
+| `tier_ladder` | `pick_values.pick_pool_value` — the shipped ladder's **Mid** rung of the round, `YEAR_DISCOUNT ** years_out` | nobody. Reachable only by an explicit `pick_pricing_override` from a bake-off harness or a test |
 
-**The 12 generic pick rungs are byte-identical in BOTH modes, always.** They are rankable pool assets whose seed Elo anchors the tier bands in the table above, those bands are absolute Elo mirrored across five clients, and the pricing mode is per-user — so repricing a rung would repaint another user's tier colours. `GENERIC_PICK_SEEDS` is not a function of `pick_pricing_mode` and must never become one.
+The ladder is **still what `draft_picks.pool_value` stores** — the sync path writes it and the market price is applied at read time, never written back.
+
+**ONE PRICE, EVERY SURFACE (D-148, 2026-08-21 — Q-026 CLOSED).** build-m6b deviation D-7 had left `_power_picks_by_owner` (Power Rankings) and `GET /api/league/picks` serving the stored value while the engine priced per slot; live, that quoted a 2026 1.01 at **2117.0** on one screen and **4867.1** on another. On the operator's ruling (*"I want the league values to reflect the same pick values"*) every surface that displays or aggregates an owned pick's value now calls **one** helper — `server._priced_pick_value`, which is `priced_pool_value` under the slot resolution below. Five call sites, no sixth: `_roster_eveners`, `_trade_evaluate_impl`, `get_league_picks`, `_owned_pick_assets`, `_power_picks_by_owner`, pinned bidirectionally by an AST guard (`backend/tests/test_league_pick_value_alignment.py`). **Clients must not re-derive a pick's price from anything else** — read the served number.
+
+Two readers are deliberately NOT on the waterfall and are not defects: the sync path, which WRITES the ladder into `pool_value` (that is step 3, the whole safety net when DP is unreachable), and the pick-SHARE ratios (`_user_pick_share` and the trade job's opponent shares), which sum the legacy `pick_value` column into a 0-1 ratio for the contend/rebuild classifier and are not client-facing — so that classifier still weights every first alike. Awaiting an operator call ([scope §6 waiver 3](plans/league-pick-value-alignment/scope.md)).
+
+**Known open divergence — non-12-team leagues (Q-027).** DP publishes one 12-team curve. The Draft Room board maps a smaller league onto it by percentile within the round (`draft_board_service._basis_slot`), while `market_pick_slot_value` looks the slot number up literally. A 10-team league's last first is therefore **displayed** as the 1.12 (820.8) and **priced** as the 1.10 (1069.8); a 14-team league's 1.13/1.14 have no DP row at all and fall to the round curve, so they price ABOVE that league's 1.12. 12-team leagues agree exactly, asserted slot by slot. Pinned, not fixed.
+
+**PER-SLOT where the order is known; round-level where it is not.** The price of an owned pick is a three-step waterfall in `pick_values.priced_pool_value`:
+
+| step | source | when |
+|---|---|---|
+| 1 | `market_pick_slot_value(season, round, slot)` — DP's row for that exact slot | D-090 resolved a real slot (current season, published order) |
+| 2 | `market_pick_pool_value(season, round)` — the mid-tercile round curve | no slot: **every future-year pick** (DP publishes per-slot rows only for the current class), unsupported platform, unpublished or unresolvable order, or `picks.slot_labels` off |
+| 3 | the stored ladder `pool_value` | DP unreachable, or a season it neither publishes nor extrapolates to |
+
+The slot is **resolved once per league** (`server._league_slot_order` → `pick_slots.slot_for`) and passed in; it is never resolved inside the pricing function, which runs per pick. The SAME resolution drives the label, so a card cannot say "2026 1.03" while charging for a generic first.
+
+**The spread is the whole point, and it is large.** 1QB, 2026 round 1, against the snapshot: **1.01 = 4867.1, 1.05 = 2343.2, 1.12 = 820.8**, versus one round price of 1859.5 and one ladder rung of 2117.0. A 1.01 is **5.9x** a 1.12 and **2.30x** the ladder rung every 2026 first used to be charged at. Superflex is dearer again (1.01 = 6181.1).
+
+**⚠️ `picks.slot_labels` is now a PRICING flag, not just a display flag.** `_league_slot_order` returns `None` when it is off, so turning it off drops every pick back to step 2. That coupling is deliberate and is the only deploy-free lever over per-slot pricing — see `docs/plans/slot-pricing-unconditional/scope.md` §6.
+
+**The 12 generic pick rungs are byte-identical in BOTH modes, always.** They are rankable pool assets whose seed Elo anchors the tier bands in the table above, and those bands are absolute Elo mirrored across five clients — so repricing a rung would repaint tier colours on every client. `GENERIC_PICK_SEEDS` is not a function of `pick_pricing_mode` and must never become one.
+
+**Owned-pick tier BADGES do move; the BANDS do not.** A badge reflects the value a pick is SERVED at (D-320-2), and D-146 moved that value, so a badge computed from the market price may land in a different band than one computed from the ladder. No band edge and no colour changed. Because of Q-026 above, the same pick can currently badge from the market number inside a trade card and from the ladder number on the Power Rankings screen.
 
 **The unknown-slot basis.** An owned `draft_picks` row carries `(season, round)` and no slot. Under `market_slots` a round maps to the **value-space mean of that round's middle tercile** (slots 5–8 of a 12-team round) — DP's own definition of a "Mid" rung, and the market analogue of the ladder's Mid rung. It lives in ONE place, `pick_values.UNKNOWN_SLOT_BASIS` / `_basis_slots`. Seasons past DP's ~3-year horizon extrapolate from the deepest published season with the shipped `YEAR_DISCOUNT`.
 
-**The measured direction is DEFLATION, not inflation.** The plan's premise (a steeper DP curve inflates pick values) is wrong for owned picks: in 1QB every representative owned pick gets CHEAPER under `market_slots` — 1sts by 12–17 %, **2nds by ~40–47 %** — because the 1.01 premium only attaches to the literal 1.01 slot, which an unknown-slot pick never receives. Superflex is far closer to parity at round 1 and still ~35–42 % down at round 2. Read any future calibration for 2nd/3rd-round package deflation first (numbers: `docs/plans/rookie-draft/build-m6b.md`).
+**The measured direction depends on the SLOT, and since D-146 it is what every user gets.** For a pick whose order is unknown — the round curve, step 2 — it is deflation throughout (below). For a pick with a resolved slot it cuts both ways: the top third of round 1 inflates hard (a 1.01 more than doubles, 2117.0 → 4867.1) and the bottom two thirds deflate hard (a 1.12 falls to 820.8). Rounds 2–4 deflate at almost every slot. The round-curve figures below therefore describe the FALLBACK, which is what every future-year pick still gets: The plan's premise (a steeper DP curve inflates pick values) is wrong for owned picks: in 1QB every representative owned pick got CHEAPER — a 2026 1st **−12.2 %** (2117.0 → 1859.5), a 2028 1st **−40.3 %** (2117.0 → 1263.0), a 2026 2nd **−28.4 %** — because the 1.01 premium only attaches to the literal 1.01 slot, which a round-priced pick never receives. Deep-future 4ths are the one inversion: **+16.6 %**, which is why `_owned_pick_assets` caps AFTER pricing. Superflex is far closer to parity at round 1 and still ~35–42 % down at round 2. Read any future calibration for 2nd/3rd-round package deflation first (numbers: `docs/plans/rookie-draft/build-m6b.md`).
 
 **Approximation marker.** DP publishes ONE slot curve and it is a **12-team** curve. A 12-team league is priced exactly and the payload carries **no** `slot_value_approx` key; any other league size is mapped onto the 12-team curve by within-round percentile with both ends anchored (slot 1 → `x.01`, slot T → `x.12`) and the payload carries `slot_value_approx: true`. Clients must label an approximated axis.
 
 **Omit-when-absent.** With the flag off, the read failed, the order unresolved (`slot: null`), or the round/season unpublished by DP, the `slot_value` key is **absent entirely** — never `null`, never `0`. A null would render as "this pick is worthless".
 
-**Locations:** `backend/data_loader.py` (`PICK_VALUES_URL`, `load_pick_slot_values`, `pick_slot_label`) · `backend/draft_board_service.py` (`_annotate_slot_values`, `_basis_slot`, `SLOT_VALUE_BASIS_TEAMS`) · flag `picks.slot_values` in `backend/feature_flags.py` · test seam `FTF_DP_PICK_VALUES_FILE` ([config-reference](config-reference.md)). M6b: `backend/pick_values.py` (`market_pick_pool_value`, `priced_pool_value`, `UNKNOWN_SLOT_BASIS`, `PICK_PRICING_MODES`) · `backend/trade_service.py` (`pick_pricing_override`, `pick_pricing_mode_for_user`) · `backend/server.py` (`_owned_pick_assets`, `_inject_owned_picks`, `/api/trade/evaluate`, `/api/settings/pick-pricing`) · `users.pick_pricing_mode` · flag `trade.slot_pricing`.
+**Locations:** `backend/data_loader.py` (`PICK_VALUES_URL`, `load_pick_slot_values`, `pick_slot_label`) · `backend/draft_board_service.py` (`_annotate_slot_values`, `_basis_slot`, `SLOT_VALUE_BASIS_TEAMS`) · flag `picks.slot_values` in `backend/feature_flags.py` · test seam `FTF_DP_PICK_VALUES_FILE` ([config-reference](config-reference.md)). M6b + D-146: `backend/pick_values.py` (`market_pick_slot_value`, `market_pick_pool_value`, `priced_pool_value`, `UNKNOWN_SLOT_BASIS`, `PICK_PRICING_MODES`) · `backend/pick_slots.py` (`slot_for` — D-090's resolver, now load-bearing for PRICE as well as label) · `backend/trade_service.py` (`pick_pricing_override`, `pick_pricing_mode_for_user` — now a constant) · `backend/server.py` (`_owned_pick_assets`, `_inject_owned_picks`, `/api/trade/evaluate`, and the RETIRED `/api/settings/pick-pricing`) · `users.pick_pricing_mode` (dead data, kept) · flag `trade.slot_pricing` (retired, never read).
 
-Tests: `backend/tests/test_slot_values.py` (T-M6-01/02/03, including a per-module assertion that `trade_service`, `trade_optimizer` and `ranking_service` never read the map, and that `pick_values` reads it ONLY from `market_pick_pool_value`) and `backend/tests/test_pick_pricing_m6b.py` (T-M6B-01 flag-off byte-identity, T-M6B-02 the flag is the only gate, T-M6B-03 read-time-only, T-M6B-04 the ladder is unchanged in both modes).
+Tests: `backend/tests/test_slot_values.py` (T-M6-01/02/03, including a per-module assertion that `trade_service`, `trade_optimizer` and `ranking_service` never read the map, and that `pick_values` reads it ONLY from `market_pick_pool_value`) and `backend/tests/test_pick_pricing_m6b.py` (T-M6B-01 the ladder axis reads no DP, T-M6B-02 **the flag and the stored column are no longer read at all**, T-M6B-03 read-time-only, T-M6B-04 the ladder is unchanged in both modes, T-M6B-05 a resolved 1.01 outprices a 1.05 outprices a 1.12, with siblings pinning the unresolved-order and future-year fallbacks to the round curve).
 
 ---
 
@@ -770,6 +1060,18 @@ nothing. `mock_started` carries the resolved value as its seventh prop
 | `declined` | Not planned | **no — closed** |
 
 NULL in the DB reads as `new` everywhere. Labels are emoji-free as of the Chalkline re-skin (ADR-004). Closed statuses (2026-07-04) are defined in `backend/database.py:FEEDBACK_CLOSED_STATUSES` and mirrored in `mobile/src/api/feedback.ts:CLOSED_FEEDBACK_STATUSES` — `/api/feedback/mine` excludes them server-side AND the mobile inbox hides locally-persisted notes whose merged status is closed (or that no longer come back from `/mine` for the signed-in account). If you add or reclassify a status, update both constants and this table.
+
+## Feedback note length cap (2026-08-22)
+
+| Invariant | Value | Where |
+|---|---|---|
+| Max characters in a feedback note's `text` | **8000** (was 2000 until 2026-08-22) | `backend/server.py:FEEDBACK_TEXT_MAX` (authority) · `mobile/src/api/feedback.ts:FEEDBACK_TEXT_MAX` (mirror) |
+| Measured on | the **trimmed** body, in characters — the same string the client counts and the server stores | both |
+| Over-cap response | `400 {"error": "text_too_long", "limit": <the cap>}` | `POST /api/feedback` |
+
+**Why this is an invariant and not just a number.** The two copies ship on different cadences — the server through Render, the client through TestFlight — so a build in the field can hold either value. A client cap **above** the server's turns every long note into a permanent 400 (`retrySync()` re-POSTs it forever and it is never delivered); a client cap **below** the server's silently shortens what testers are able to say. The 2026-08-22 incident was the first of those: no counter, no cap awareness, and a compose sheet that cleared the draft regardless, so a long operator report vanished with no error anywhere.
+
+`mobile/tests/check-feedback-capture.js` pins the two numbers to each other and runs in CI, so a one-sided change fails the build. The storage column is unbounded (`app_feedback.text` is `TEXT`) — this is validation only; see the data dictionary.
 
 ## Premium rankings import (D-058, 2026-08-15)
 

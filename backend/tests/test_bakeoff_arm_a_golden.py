@@ -409,12 +409,20 @@ def test_pick_pair_strip_kill_value_is_load_bearing():
 def test_r4_bypass_restores_a_card_the_flag_would_exclude():
     """R4 (#336 windowless awaiting/matched exclusion) has no kill knob, so
     arm A needs the thread-local bypass. Feed the engine an exclusion key for
-    a card the golden contains: arm B must drop it, arm A must keep it."""
+    a card the golden contains: arm A must keep it. Arm B's R4-respect half
+    uses a victim from arm B's OWN current deck — since the 2026-08-21
+    package-benchmark fix, arm B no longer emits GOLDEN[0]'s shape on this
+    fixture (the cross-benchmarked receive side prices out of band), so a
+    golden victim would never reach R4 there."""
     victim = GOLDEN[0]
     key = {(frozenset(victim[0]), frozenset(victim[1]))}
 
-    svc_b, arm_b = _deck(presentment=True, exclusion_keys=key)
-    assert [r[:2] for r in arm_b].count(victim[:2]) == 0
+    _, arm_b_full = _deck(presentment=True, exclusion_keys=set())
+    assert arm_b_full, "fixture yields no arm-B deck at live defaults"
+    b_victim = arm_b_full[0]
+    b_key = {(frozenset(b_victim[0]), frozenset(b_victim[1]))}
+    svc_b, arm_b = _deck(presentment=True, exclusion_keys=b_key)
+    assert [r[:2] for r in arm_b].count(b_victim[:2]) == 0
     assert svc_b.presentment_kill_counts()["R4"] == 1
 
     svc_a, arm_a = _deck(presentment=True, exclusion_keys=key, arm_a=True)
@@ -447,7 +455,64 @@ def test_r4_bypass_is_thread_local():
 
 # ── drift alarm: a new knob must not slip past the profile ─────────────────
 
-#: Every key in `trade_service._DEFAULT_CFG` as of 2026-08-18. This is the
+#: Every key in `trade_service._DEFAULT_CFG` as of 2026-08-18 (plus later
+#: additions, each DECIDED below and in scope-phase2.md's exclusion table —
+#: 2026-08-20 added `infer_w_net_firsts` / `infer_net_firsts_cap`, D-110:
+#: excluded from MODEL_A_PROFILE because they cannot reach generation at all.
+#: The term they weight is gated on BOTH `trade.outlook_net_firsts` AND a
+#: caller supplying `first_round_ledger`, and the only caller that does is
+#: GET /api/league/team-review — trade_gen_v2, the mock draft and the outlook
+#: seed all still pass four positional arguments. Pinning a kill value would
+#: imply the knobs matter to a deck; they provably do not.
+#: 2026-08-20 added the eight `infer_composite_*` knobs, D-140: excluded for
+#: the SAME reason, one report later. They weight `infer_team_outlook`'s
+#: composite vector, which is gated on BOTH `trade.outlook_composite` AND a
+#: caller supplying an APPLIED `starter_signal` — and starter value can only
+#: be summed off a league-wide power-rankings call, which no generation path
+#: makes. trade_gen_v2, the mock draft and the outlook seed still pass four
+#: positional arguments, so with the flag lit they score the LEGACY vector
+#: (INV-372b, pinned by test_window_composite.py). Excluded rather than
+#: pinned: a kill value would assert these reach a deck.)
+#: 2026-08-21 added the 25 `breaker_*` knobs (counterparty breaker,
+#: docs/plans/counterparty-breaker/LLD.md §4): excluded from MODEL_A_PROFILE
+#: because they are EVALUATION-layer, not generation. `backend/trade_breaker.py`
+#: is imported by no generator and no ranker; it runs after the deck-mutation
+#: stack completes and mutates only a new card attribute, so no arm can observe
+#: one. Dispositions in scope-phase2.md. `waiver_slot_cost`, which the breaker
+#: reuses, is an existing engine knob and was already pinned below.)
+#: 2026-08-22 added the six `negmem_*` knobs (negative-results memory,
+#: docs/plans/negative-results-memory/LLD.md §3.4). `negmem_strength` is
+#: INCLUDED in MODEL_A_PROFILE at 0.0 — negmem post-dates the reference SHA and
+#: its seam multiplies `composite_score` inside generation, so 0.0 (the
+#: documented byte-identical M1 disable) is what preserves the pre-wave engine;
+#: the golden was re-run with the pin in place and did NOT need re-capturing.
+#: 2026-08-22 added `fair_packages_cap` (#384 W6-B, POST /api/trades/fair-packages).
+#: EXCLUDED from MODEL_A_PROFILE: it caps a SURFACE, not a generator. No arm
+#: reaches `TradeService.generate_fair_packages` — the bake-off deck comes from
+#: `generate_trades` / `trade_gen_v2` / `generate_pair_trades_v3`, none of which
+#: calls it — so a kill value would falsely assert the knob reaches an arm-A deck.
+#: Same rule as `asset_ideas_group_cap`, its sibling one line up.
+#: 2026-08-22 added two full-sweep knobs (docs/plans/full-sweep/plan.md).
+#: `exploration_base_per_opp` (§3.3) is EXCLUDED from MODEL_A_PROFILE, but NOT
+#: for the "runs after generation" reason its `exploration_*` siblings get —
+#: that reason is FALSE here and saying it would be worse than saying nothing.
+#: Its first read sets `gen_kwargs["max_per_opponent"]`, which IS splatted into
+#: every arm's generate call, so it does reach generators. It is excluded
+#: because an arm pin is structurally UNREACHABLE: both reads happen on the job
+#: thread in `server._run_trade_job`, OUTSIDE every arm's `_cfg_override`
+#: context, so the value is a job-level constant shared identically by all
+#: arms and no profile entry could ever change it. Its default 5.0 is the
+#: pre-knob hardcoded `server._EXPLORATION_BASE_PER_OPP`, so arm A is unmoved.
+#: `full_sweep_budget_s` (§3.5) is EXCLUDED too: it is a job-level wall-clock
+#: safety rail, read ONLY inside `if FLAGS.trade_full_sweep` in the two
+#: opponent loops, so with the flag dark it is never evaluated at all and it
+#: shapes no gate, score or package. A kill value would assert arm A's deck
+#: depends on how long the sweep ran, which is exactly what it must not.
+#: The other five (`negmem_floor`, `negmem_min_evidence`, `negmem_halflife_days`,
+#: `negmem_sat_k`, `negmem_like_net`) are EXCLUDED: at strength 0.0
+#: `negmem.effective_mult` returns exactly 1.0 before any of them is consulted —
+#: they shape the map, not the gate — so pinning a kill value would falsely
+#: assert they reach an arm-A deck. Dispositions in scope-phase2.md. This is the
 #: guard the plan's §8 risk row ("arm A drifts and stops being original")
 #: actually needs: the golden only catches a new knob if that knob happens to
 #: move THIS fixture, whereas this catches it the moment it is declared.
@@ -455,17 +520,33 @@ _PINNED_KNOBS = frozenset("""
 aggression_weight asset_floor_abs asset_ideas_group_cap
 bakeoff_deck_limit bakeoff_serve_interleaved bakeoff_group_size
 bakeoff_group_value_slots bakeoff_fill_policy bakeoff_include_baseline
-bakeoff_lane_reallocate
+bakeoff_include_challenger bakeoff_include_gen_v2 bakeoff_include_fit
+bakeoff_lane_reallocate bakeoff_serve_fit
 asset_ideas_lateral_band audition_like_rate_frac audition_min_views
 audition_retire_days bench_credit_qb bench_credit_qb_sf bench_credit_rate
 bench_credit_rb bench_credit_te bench_credit_te_tep bench_credit_wr
-block_boost_weight boost_moderate boost_strong consensus_score_scale
+block_boost_weight boost_moderate boost_strong
+breaker_board_div_min breaker_board_min_divergent
+breaker_budget_checkpoint_frac breaker_crunch_scale
+breaker_degraded_share_max breaker_floor_fit_duplicate
+breaker_floor_fit_new_weakness breaker_floor_fit_outlook
+breaker_floor_other_player_keep breaker_floor_roster_crunch
+breaker_floor_value_giving breaker_floor_value_giving_consensus
+breaker_max_repeat_frac breaker_min_severity breaker_ms_budget
+breaker_narrate_fit_duplicate breaker_narrate_fit_new_weakness
+breaker_narrate_fit_outlook breaker_narrate_other_player_keep
+breaker_narrate_roster_crunch breaker_narrate_value_giving
+breaker_outlook_haircut_legacy breaker_outlook_narrate_margin
+breaker_shadow_run breaker_value_scale
+consensus_both_ways
+consensus_fairness_floor consensus_score_scale
 consolidation_raw_loss_frac crown_elite_value crown_rate crown_rate_market
 crown_share_floor cycle_edge_min_gain cycle_max_results cycle_min_net
 deck_give_headliner_cap deck_headliner_cap deck_max_per_target
 diversity_penalty diversity_user_cap
 diversity_window_days elo_value_base elo_value_k elo_value_ref
-exploration_min_deck exploration_overgen exploration_rate
+exploration_base_per_opp exploration_min_deck exploration_overgen
+exploration_rate
 exploration_slot_position fairness_floor_divergence fairness_weight fatigue_a
 fatigue_arch_a fatigue_b fatigue_decline_suppress_days
 fatigue_decline_value_band fatigue_floor fatigue_lookback_days
@@ -474,23 +555,37 @@ fatigue_w2 filler_min_frac first_session_deck_max first_session_deck_min
 first_session_max_side_assets first_session_max_total_assets
 first_session_min_fairness first_session_min_margin first_session_min_seed_elo
 first_session_top_k fit_consensus_weight fit_divergence_weight
-fit_k_defying_mult fit_k_explained_mult fit_premium_max_loss fuzzy_match_tau
+fit_expand_from fit_junk_floor fit_k_defying_mult fit_k_explained_mult
+fit_max_packages_per_pair fit_min_aggregate fit_min_them fit_pool_cap
+fit_pool_consensus fit_pool_div_opp fit_pool_div_seed fit_premium_max_loss
+fit_r5_mode fit_score_even fit_score_scale fit_w_board fit_w_cons fit_w_div
+full_sweep_budget_s
+fair_packages_cap
+fuzzy_match_tau
 gen2_accept_global_prior gen2_accept_prior_strength gen2_band
 gen2_centerpiece_top_k gen2_consol_floor gen2_consol_gamma gen2_dedup_jaccard
 gen2_epsilon gen2_exposure_cap gen2_exposure_floor gen2_featured_count
 gen2_give_pool gen2_meso_band gen2_meso_max_variants gen2_min_divergence
 gen2_recv_extra_pool gen2_youth_age ghost_holdout_one_in infer_contender_cut
-infer_rebuilder_cut infer_w_pick_share infer_w_vet_share infer_w_youth_share
+infer_composite_playoff_cap infer_composite_playoff_center
+infer_composite_starter_cap infer_composite_w_pick infer_composite_w_playoff
+infer_composite_w_starter infer_composite_w_vet infer_composite_w_youth
+infer_net_firsts_cap infer_rebuilder_cut infer_w_net_firsts
+infer_w_pick_share infer_w_vet_share infer_w_youth_share
 jets_age ktc_fallback_rank ktc_k ktc_max lane_shift_frac
-likes_you_min_user_delta max_candidates max_overpay_frac max_overpay_min_value
+likes_you_gate_level likes_you_min_user_delta likes_you_min_user_gain
+max_candidates max_overpay_frac max_overpay_min_value
 max_value_ratio min_mismatch_score min_package_band min_side_surplus
 min_side_surplus_marginal mismatch_confidence_damp mismatch_weight
 mutual_gain_cap need_fit_weight need_gate_min_value need_gate_upgrade_margin
+negmem_floor negmem_halflife_days negmem_like_net negmem_min_evidence
+negmem_sat_k negmem_strength
 neutral outlook_alpha_championship outlook_alpha_contender outlook_alpha_jets
 outlook_alpha_not_sure outlook_alpha_rebuilder outlook_dir_age_gap_mult
 outlook_dir_age_tolerance outlook_dir_boost outlook_dir_contend_weight
 outlook_dir_penalty outlook_dir_rescue_frac package_adj_gamma
-package_adj_gamma_market package_discount_cap package_floor_market
+package_adj_gamma_market package_bench_trade_wide package_discount_cap
+package_floor_cross package_floor_market
 package_weight_1 package_weight_2 package_weight_3 package_weight_4
 package_weight_5 pass_cooldown_days pass_cooldown_start_epoch penalty_heavy
 penalty_mod penalty_soft pick_gap_frac pick_gap_min_value pick_pair_strip_frac
@@ -502,15 +597,119 @@ relaxed_fairness_threshold relaxed_surplus_floor replenish_weekday
 roster_clogger_penalty roster_clogger_threshold roster_spot_penalty
 shrink_pseudocount skew_phaseout star_tax_elite_multiplier
 star_tax_per_tier_gap suggestion_match_lookback_days
-suggestion_match_min_overlap sweetener_band sweetener_max_cards
+suggestion_match_min_overlap sweetener_band sweetener_gap_threshold
+sweetener_max_cards
 target_acquire_bonus taste_clamp_hi taste_clamp_lo taste_dwell_bonus
 taste_dwell_ms taste_epsilon taste_eta_long taste_eta_short
 taste_prior_ref_delta taste_prior_scale taste_prior_shrink taste_tau_long_days
 taste_tau_short_days thompson_decay_gamma thompson_prior_base_rate
 tier_mult_bench tier_mult_depth tier_mult_elite tier_mult_solid
-tier_mult_starter trade_elo_gap_max user_gain_epsilon v3_diversity_max_overlap
+tier_mult_starter trade_elo_gap_max user_elo_shrink user_gain_epsilon
+v3_diversity_max_overlap
 v3_pool_size vet_age waiver_baseline_value waiver_slot_cost youth_age
-""".split())
+""".split()) | {
+    # ── knockout refine, 2026-08-23 ────────────────────────────────────────
+    # docs/plans/knockout-refine/plan.md §3. Four knobs, four dispositions.
+    # A `.split()` blob cannot carry a per-key reason, so these are declared
+    # here instead — the disposition is the point, not the membership.
+    #
+    # All four are read by `_c()` (C4 through the `trade_service` module
+    # object, D-098) DURING generation, on the arm's own thread, INSIDE the
+    # `_cfg_override` context `model_a()` opens. Unlike `exploration_base_per_opp`
+    # they are therefore structurally arm-pinnable, so "excluded" below never
+    # means "unreachable" — it means the read never happens under arm A.
+
+    # C1. Read inside `need_gate_ok`, but only AFTER
+    # `if _c("need_gate_min_value") <= 0: return True`. MODEL_A_PROFILE pins
+    # `need_gate_min_value` at 0.0, so R5 returns True on its first line and
+    # this knob is never consulted on an arm-A thread. EXCLUDED, by the
+    # precedent already recorded for `need_gate_upgrade_margin`: "Companion
+    # knobs are deliberately absent — their predicates return early at the
+    # kill value above and never read them."
+    "need_gate_dual_rescue",
+
+    # C2. Read inside `overpay_ok`, after
+    # `if _c("max_overpay_frac") <= 0: return True`. MODEL_A_PROFILE pins
+    # `max_overpay_frac` at 0.0. EXCLUDED, same precedent, same sentence —
+    # this is the exact companion relationship `max_overpay_min_value` has.
+    "overpay_adjusted",
+
+    # C3. Read inside `pos_net_ok`, after
+    # `if _c("pos_net_cap") <= 0: return True`, AND behind a second guard
+    # (`opp_ctx is None`) that no arm can satisfy without the member-loop
+    # binding. MODEL_A_PROFILE pins `pos_net_cap` at 0.0. EXCLUDED, same
+    # precedent.
+    "pos_net_starter_relief",
+
+    # C4. The ONLY one of the four with no sibling kill knob in front of it:
+    # `trade_optimizer` reads it unconditionally in the v3 enumeration, on
+    # every arm's thread, inside the overlay. It is NOT a post-reference-SHA
+    # rule — `abs(len(give_ids) - len(recv_ids)) > 1` is present verbatim at
+    # 92c31d5 (trade_optimizer.py:507) — so arm A's correct value is the
+    # knob's identity value 1.0, not a kill value.
+    #
+    # DECISION: **pin at 1.0 in MODEL_A_PROFILE.** This is the one place the
+    # D-095 exclusion rule ("their defaults ARE the pre-wave engine, so a pin
+    # would change arm A rather than preserve it") must NOT be applied. That
+    # rule is safe only while the LIVE row keeps sitting at the pre-wave
+    # value, and here it demonstrably will not: the post-merge consolidation
+    # bundle flips the prod `model_config` row to 2 (plan §1). `reload_config()`
+    # writes that into `_cfg`, and `_cfg_override` shadows only keys the
+    # profile names — so an unpinned arm A would silently start enumerating
+    # 3-for-1 shapes the pre-wave engine could not build, with no test red.
+    # Pinning the identity value costs nothing today (it equals the default,
+    # so the golden stands un-recaptured) and is exactly the move
+    # `package_bench_trade_wide` made for the same reason one wave earlier.
+    #
+    # The profile edit itself lives in backend/bakeoff_profiles.py, which is
+    # The pin landed in bakeoff_profiles.py in the same tree (C4, D-159).
+    "v3_shape_max_delta",
+
+    # ── pick YoY floor, 2026-08-24 ─────────────────────────────────────────
+    # docs/plans/pick-yoy-floor/plan.md §2 (D-161). One knob, one disposition,
+    # written in the corrected style: WHERE the knob is read, relative to the
+    # arm overlays.
+    #
+    # WHERE IT IS READ: `pick_values.market_r1_yoy_floor()` → `_c`, called
+    # from `pick_values._r1_yoy_floored`, called from `priced_pool_value`
+    # step 2. On the generation path the only route in is
+    # `server._priced_pick_value` (server.py:10909) ← `_owned_pick_assets`
+    # (server.py:10962, the `_priced[...]` loop at :11019) ←
+    # `_inject_owned_picks` (server.py:11063).
+    #
+    # RELATIVE TO THE ARM OVERLAYS: `_inject_owned_picks` is called ONCE per
+    # job, at server.py:5690, on the `_run_trade_job` thread — and
+    # `_bakeoff.run_bakeoff` is not reached until server.py:5824. Every pick
+    # is therefore priced, and this knob read, ~130 lines BEFORE the first
+    # arm's `_cfg_override` is entered; the prices are then frozen into
+    # `players_dict` / `seed_map` and the four arms all score the same
+    # numbers. An arm pin is structurally UNREACHABLE, exactly as it is for
+    # `exploration_base_per_opp` above — and for the same reason, which is
+    # why that entry's wording is reused rather than a new one invented.
+    #
+    # ARM A DOES NOT PIN A PICK-PRICING MODE EITHER. `MODEL_A_PROFILE`
+    # (bakeoff_profiles.py:68-116) names no pick key, and neither
+    # `bakeoff_profiles.py` nor `bakeoff_runner.py` mentions
+    # `pick_pricing_override` at all — so arm A prices picks on
+    # `market_slots`, the process default resolved at server.py:11097-11099,
+    # exactly like arms B/C/D. It does NOT ride `tier_ladder`, and the
+    # tempting "arm A predates market_slots so pin the identity 0.0" is
+    # therefore wrong twice over: the pin could not be honoured (see above),
+    # and it would be describing a mode arm A does not run in.
+    #
+    # DECISION: **EXCLUDED from MODEL_A_PROFILE.** This is the same class as
+    # its four `pick_year_decay_r*` siblings, whose recorded reason —
+    # "they price an ASSET rather than decide which package to build from
+    # priced assets" (docs/config-reference.md, D-079 § Not a generation
+    # knob) — applies verbatim; the unreachability above is the second,
+    # independent reason. The golden stands un-recaptured, and not merely
+    # because it was re-run: the fixture's PICK assets are literal `_Pick`
+    # objects carrying a hardcoded `pick_value = 60.0` (line 121). They are
+    # not `draft_picks` rows, `_owned_pick_assets` is never called, and
+    # `priced_pool_value` is never entered — so no season, no round, and
+    # nothing for a market floor to clamp.
+    "market_r1_yoy_floor",
+}
 
 
 def test_no_generation_knob_was_added_without_an_arm_a_decision():
@@ -520,6 +719,9 @@ def test_no_generation_knob_was_added_without_an_arm_a_decision():
         f"trade_service._DEFAULT_CFG drifted: added={added} removed={removed}."
         "\nA new knob is a new way for arm A to stop being the pre-wave "
         "engine. Decide, in docs/plans/three-model-bakeoff/scope-phase2.md:"
+        "\n  (D-095 precedent: the five landability-challenger knobs are "
+        "EXCLUDED — their defaults ARE the pre-wave engine, so pinning a "
+        "kill value would change arm A rather than preserve it.)"
         "\n  • generation logic that post-dates "
         f"{MODEL_A_REFERENCE_SHA} -> add its kill value to MODEL_A_PROFILE "
         "and re-capture the golden;"

@@ -1,0 +1,612 @@
+<title>Why the Deck Runs Dry</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+:root{
+  --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+  --line:#262C35; --line-strong:#59647A;
+  --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+  --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013;
+  --flare:#F0508C;
+  --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --r-xs:2px; --r-sm:4px; --r-md:8px;
+  --measure:68ch;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--ink-0); color:var(--chalk);
+  font-family:Archivo,"Helvetica Neue",Arial,sans-serif; font-size:15px; line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1080px; margin:0 auto; padding:0 24px 96px}
+
+/* ---------- type ---------- */
+h1,h2,h3{font-family:"Barlow Condensed","Arial Narrow",sans-serif; text-transform:uppercase; text-wrap:balance; margin:0}
+h1{font-weight:700; font-size:clamp(38px,6.2vw,62px); line-height:1.02; letter-spacing:.02em}
+h2{font-weight:700; font-size:30px; line-height:1.1; letter-spacing:.03em}
+h3{font-weight:600; font-size:21px; line-height:1.2; letter-spacing:.03em; color:var(--chalk)}
+p{margin:0; max-width:var(--measure)}
+.lede{font-size:18px; line-height:1.6; color:var(--chalk-dim); max-width:62ch}
+.label{font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--chalk-dim); margin:0}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace; font-variant-numeric:tabular-nums}
+code{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.86em; background:var(--ink-2); border:1px solid var(--line); border-radius:var(--r-xs); padding:1px 5px; color:var(--chalk)}
+a{color:var(--ice); text-decoration:none; border-bottom:1px solid rgba(86,217,236,.35)}
+a:hover{border-bottom-color:var(--ice)}
+:focus-visible{outline:2px solid var(--ice); outline-offset:2px; border-radius:var(--r-xs)}
+
+/* ---------- masthead ---------- */
+.masthead{border-bottom:1px solid var(--line); padding:64px 0 40px; margin-bottom:56px}
+.eyebrow{display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:24px}
+.tick{display:inline-block; width:3px; height:13px; background:var(--ice); border-radius:var(--r-xs)}
+.masthead h1{margin-bottom:20px; max-width:16ch}
+.meta-row{display:flex; flex-wrap:wrap; gap:0; margin-top:36px; border-top:1px solid var(--line)}
+.meta-cell{flex:1 1 150px; padding:16px 20px 16px 0; border-right:1px solid var(--line)}
+.meta-cell:last-child{border-right:0}
+.meta-cell .label{margin-bottom:6px}
+.meta-cell .v{font-family:"IBM Plex Mono",monospace; font-weight:600; font-size:14px; font-variant-numeric:tabular-nums; color:var(--chalk)}
+
+/* ---------- sections ---------- */
+section{margin-bottom:72px; scroll-margin-top:24px}
+.sec-head{display:flex; align-items:baseline; gap:14px; border-bottom:1px solid var(--line); padding-bottom:12px; margin-bottom:28px}
+.sec-num{font-family:"IBM Plex Mono",monospace; font-size:12px; font-weight:600; color:var(--ice); letter-spacing:.06em; padding-top:4px}
+.stack{display:flex; flex-direction:column; gap:18px}
+.stack-tight{display:flex; flex-direction:column; gap:10px}
+
+/* ---------- verdict ---------- */
+.verdict{background:var(--ink-1); border:1px solid var(--line); border-left:3px solid var(--ice); border-radius:var(--r-md); padding:26px 28px; display:flex; flex-direction:column; gap:16px}
+.verdict p{max-width:64ch}
+.verdict strong{color:var(--chalk); font-weight:600}
+
+/* ---------- cards ---------- */
+.grid{display:grid; gap:16px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+.card{background:var(--ink-1); border:1px solid var(--line); border-radius:var(--r-md); padding:20px 22px; display:flex; flex-direction:column; gap:10px}
+.card p{font-size:14px; line-height:1.55; color:var(--chalk-dim)}
+.stat{font-family:"IBM Plex Mono",monospace; font-weight:600; font-variant-numeric:tabular-nums; font-size:34px; line-height:1; color:var(--chalk); letter-spacing:-.01em}
+.stat.ice{color:var(--ice)} .stat.flare{color:var(--flare)} .stat.neg{color:var(--neg)} .stat.pos{color:var(--pos)} .stat.warn{color:var(--warn)}
+.stat-sub{font-size:13px; color:var(--chalk-faint); line-height:1.45}
+
+/* ---------- charts ---------- */
+.chart{background:var(--ink-1); border:1px solid var(--line); border-radius:var(--r-md); padding:22px 24px}
+.chart-title{font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--chalk-dim); margin-bottom:4px}
+.chart-note{font-size:13px; color:var(--chalk-faint); margin-bottom:20px; max-width:60ch}
+.bars{display:flex; flex-direction:column; gap:7px}
+.bar-row{display:grid; grid-template-columns:96px 1fr 62px; align-items:center; gap:12px}
+.bar-lbl{font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--chalk-dim); text-align:right; font-variant-numeric:tabular-nums}
+.bar-track{display:block; height:16px; background:var(--ink-3); border-radius:var(--r-xs); overflow:hidden}
+.bar-fill{display:block; height:100%; min-width:2px; background:var(--ice); border-radius:var(--r-xs)}
+.bar-fill.dim{background:var(--line-strong)}
+.bar-fill.flare{background:var(--flare)}
+.bar-fill.neg{background:var(--neg)}
+.bar-fill.pos{background:var(--pos)}
+.bar-val{font-family:"IBM Plex Mono",monospace; font-size:12px; font-weight:600; color:var(--chalk); font-variant-numeric:tabular-nums}
+.bar-row.peak .bar-lbl,.bar-row.peak .bar-val{color:var(--ice)}
+
+/* funnel */
+.funnel{display:flex; flex-direction:column; gap:2px; margin-top:6px}
+.fn{display:grid; grid-template-columns:1fr; position:relative; background:var(--ink-3); border-radius:var(--r-xs); overflow:hidden}
+.fn-fill{padding:11px 14px; background:var(--ink-2); border-left:3px solid var(--line-strong); display:flex; justify-content:space-between; gap:14px; align-items:baseline; flex-wrap:wrap}
+.fn-fill.a{border-left-color:var(--chalk-faint)}
+.fn-fill.b{border-left-color:var(--warn)}
+.fn-fill.c{border-left-color:var(--neg)}
+.fn-fill.d{border-left-color:var(--ice)}
+.fn-name{font-size:13.5px; color:var(--chalk)}
+.fn-name span{color:var(--chalk-faint); font-size:12.5px}
+.fn-num{font-family:"IBM Plex Mono",monospace; font-weight:600; font-size:14px; font-variant-numeric:tabular-nums; white-space:nowrap}
+
+/* ---------- tables ---------- */
+.tw{overflow-x:auto; border:1px solid var(--line); border-radius:var(--r-md); background:var(--ink-1)}
+table{border-collapse:collapse; width:100%; min-width:600px; font-size:13.5px}
+th{font-family:"Barlow Condensed",sans-serif; font-weight:600; font-size:14px; letter-spacing:.05em; text-transform:uppercase; text-align:left; color:var(--chalk-dim); padding:12px 16px; border-bottom:1px solid var(--line); white-space:nowrap; background:var(--ink-2)}
+td{padding:12px 16px; border-bottom:1px solid var(--line); vertical-align:top; line-height:1.5; color:var(--chalk-dim)}
+tbody tr:last-child td{border-bottom:0}
+td.k{color:var(--chalk); font-weight:500}
+td .mono{color:var(--chalk); font-size:12.5px}
+td strong{color:var(--chalk); font-weight:600}
+
+/* ---------- pills ---------- */
+.pill{display:inline-block; font-size:10.5px; font-weight:600; letter-spacing:.07em; text-transform:uppercase; padding:3px 8px; border-radius:var(--r-xs); border:1px solid; white-space:nowrap}
+.p-hi{color:var(--neg); border-color:rgba(239,68,68,.5); background:rgba(239,68,68,.09)}
+.p-md{color:var(--warn); border-color:rgba(245,158,11,.5); background:rgba(245,158,11,.09)}
+.p-lo{color:var(--chalk-dim); border-color:var(--line-strong); background:transparent}
+.p-keep{color:var(--pos); border-color:rgba(34,197,94,.5); background:rgba(34,197,94,.09)}
+.p-ice{color:var(--ice); border-color:rgba(86,217,236,.45); background:rgba(86,217,236,.08)}
+
+/* ---------- quotes ---------- */
+.quotes{display:flex; flex-direction:column; gap:12px}
+.q{background:var(--ink-1); border:1px solid var(--line); border-left:3px solid var(--flare); border-radius:var(--r-md); padding:16px 20px}
+.q p{font-size:14.5px; line-height:1.6; color:var(--chalk); max-width:70ch}
+.q .attr{font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--chalk-faint); margin-top:8px; letter-spacing:.03em}
+
+/* ---------- recs ---------- */
+.rec{background:var(--ink-1); border:1px solid var(--line); border-radius:var(--r-md); padding:22px 24px; display:flex; flex-direction:column; gap:12px}
+.rec-top{display:flex; align-items:baseline; gap:12px; flex-wrap:wrap}
+.rec-n{font-family:"IBM Plex Mono",monospace; font-size:12px; font-weight:600; color:var(--ice)}
+.rec h3{flex:1 1 260px}
+.rec dl{display:grid; grid-template-columns:auto 1fr; gap:6px 16px; margin:0; font-size:13.5px}
+.rec dt{font-size:10.5px; font-weight:600; letter-spacing:.07em; text-transform:uppercase; color:var(--chalk-faint); padding-top:4px}
+.rec dd{margin:0; color:var(--chalk-dim); line-height:1.55}
+.rec dd .mono{color:var(--chalk); font-size:12.5px}
+
+.tier-head{display:flex; align-items:center; gap:12px; margin:36px 0 18px}
+.tier-head:first-of-type{margin-top:0}
+.tier-head .label{color:var(--ice)}
+.tier-head .rule{flex:1; height:1px; background:var(--line)}
+
+hr.soft{border:0; border-top:1px solid var(--line); margin:0}
+.footnote{font-size:13px; color:var(--chalk-faint); max-width:66ch; line-height:1.6}
+ul.clean{margin:0; padding-left:20px; display:flex; flex-direction:column; gap:9px}
+ul.clean li{font-size:14px; line-height:1.6; color:var(--chalk-dim); max-width:64ch}
+ul.clean li strong{color:var(--chalk); font-weight:600}
+@media (prefers-reduced-motion:no-preference){
+  .bar-fill{transition:width 400ms ease-out}
+}
+@media (max-width:640px){
+  .bar-row{grid-template-columns:76px 1fr 52px; gap:8px}
+  .meta-cell{border-right:0; border-bottom:1px solid var(--line); flex:1 1 100%}
+  .wrap{padding:0 18px 72px}
+}
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <div class="eyebrow">
+    <span class="tick"></span>
+    <span class="label">Fleeced &middot; Trade Engine Review</span>
+    <span class="label" style="color:var(--chalk-faint)">22 August 2026</span>
+  </div>
+  <h1>Why the deck runs dry</h1>
+  <p class="lede">The trade model isn&rsquo;t too strict in one place. It&rsquo;s cautious in about twenty places at once, and it stops shopping after six of your eleven leaguemates. This is what the production data says, why it happens, and what to change first.</p>
+  <div class="meta-row">
+    <div class="meta-cell"><p class="label">Evidence</p><div class="v">10,560 served cards</div></div>
+    <div class="meta-cell"><p class="label">Window</p><div class="v">27 Jul &ndash; 22 Aug</div></div>
+    <div class="meta-cell"><p class="label">Decisions</p><div class="v">619 like / pass</div></div>
+    <div class="meta-cell"><p class="label">Source</p><div class="v">Live production DB</div></div>
+  </div>
+</header>
+
+<section id="verdict">
+  <div class="sec-head"><span class="sec-num">01</span><h2>The short answer</h2></div>
+  <div class="stack">
+    <div class="verdict">
+      <p><strong>You are right, but not for the reason you&rsquo;d expect.</strong> The deck isn&rsquo;t small &mdash; a typical one holds 25 cards. The problem is that those 25 cards are drawn from a very shallow well, and the well is shallow for three separate reasons that stack on top of each other.</p>
+      <p><strong>1. The engine stops shopping after six trade partners.</strong> It works through your leaguemates one at a time and quits once it has collected enough cards. In an eleven-opponent league it typically quits at six. The other five are never even considered &mdash; not rejected, never looked at.</p>
+      <p><strong>2. For each partner it only considers a third of their roster.</strong> Before any fairness check runs, the engine narrows each side down to twelve assets. On a normal 33-player dynasty roster that means <strong>64% of it is invisible</strong> for that matchup.</p>
+      <p><strong>3. On the majority of cards, &ldquo;good for both teams&rdquo; is mathematically impossible to satisfy.</strong> When your leaguemate hasn&rsquo;t ranked players, both sides of the trade get priced with the exact same numbers. One side&rsquo;s gain is then, by definition, the other side&rsquo;s loss. So the engine can&rsquo;t look for mutual gain &mdash; it substitutes a different rule: <em>you win, but not by too much.</em></p>
+      <p style="color:var(--chalk-dim)">The good news is at the end: a different engine is already running in production alongside the current one, and users are liking its trades roughly three times as often.</p>
+    </div>
+  </div>
+</section>
+
+<section id="evidence">
+  <div class="sec-head"><span class="sec-num">02</span><h2>What users actually see</h2></div>
+  <div class="stack">
+    <p class="lede" style="font-size:16px">Five people, six leagues, four weeks, every card the app served. Everything below is measured, not modelled.</p>
+
+    <div class="grid g3">
+      <div class="card">
+        <p class="label">Typical deck</p>
+        <div class="stat">25</div>
+        <p class="stat-sub">cards per refresh &mdash; healthy on its face</p>
+      </div>
+      <div class="card">
+        <p class="label">Leaguemates represented</p>
+        <div class="stat warn">6 <span style="font-size:18px;color:var(--chalk-faint)">of 11</span></div>
+        <p class="stat-sub">40% of decks cover fewer than half the league</p>
+      </div>
+      <div class="card">
+        <p class="label">Repeat cards, heaviest user</p>
+        <div class="stat neg">80%</div>
+        <p class="stat-sub">2,921 cards shown, only 578 different ideas</p>
+      </div>
+    </div>
+
+    <div class="chart">
+      <p class="chart-title">How much of your league the deck reaches</p>
+      <p class="chart-note">Distinct trade partners appearing in one deck, across 182 decks in leagues of 12. The spike at six is not a coincidence &mdash; it is the engine&rsquo;s stopping rule, visible in the data.</p>
+      <div class="bars">
+        <div class="bar-row"><span class="bar-lbl">3 partners</span><span class="bar-track"><span class="bar-fill dim" style="width:12%"></span></span><span class="bar-val">8</span></div>
+        <div class="bar-row"><span class="bar-lbl">4 partners</span><span class="bar-track"><span class="bar-fill dim" style="width:29%"></span></span><span class="bar-val">19</span></div>
+        <div class="bar-row"><span class="bar-lbl">5 partners</span><span class="bar-track"><span class="bar-fill dim" style="width:45%"></span></span><span class="bar-val">29</span></div>
+        <div class="bar-row peak"><span class="bar-lbl">6 partners</span><span class="bar-track"><span class="bar-fill" style="width:100%"></span></span><span class="bar-val">65</span></div>
+        <div class="bar-row"><span class="bar-lbl">7 partners</span><span class="bar-track"><span class="bar-fill dim" style="width:57%"></span></span><span class="bar-val">37</span></div>
+        <div class="bar-row"><span class="bar-lbl">8 partners</span><span class="bar-track"><span class="bar-fill dim" style="width:25%"></span></span><span class="bar-val">16</span></div>
+        <div class="bar-row"><span class="bar-lbl">9 partners</span><span class="bar-track"><span class="bar-fill dim" style="width:6%"></span></span><span class="bar-val">4</span></div>
+        <div class="bar-row"><span class="bar-lbl">10 partners</span><span class="bar-track"><span class="bar-fill dim" style="width:3%"></span></span><span class="bar-val">2</span></div>
+        <div class="bar-row"><span class="bar-lbl">11 partners</span><span class="bar-track"><span class="bar-fill dim" style="width:3%"></span></span><span class="bar-val">2</span></div>
+      </div>
+      <p class="chart-note" style="margin:20px 0 0">Bigger decks don&rsquo;t fix this. A 35-card deck still reaches only six partners &mdash; it just shows you more variations involving the same six.</p>
+    </div>
+
+    <div class="chart">
+      <p class="chart-title">Fresh ideas run out after about a week</p>
+      <p class="chart-note">Share of each deck the user had never been shown before, by how many decks they&rsquo;d already seen in that league.</p>
+      <div class="bars">
+        <div class="bar-row peak"><span class="bar-lbl">1st deck</span><span class="bar-track"><span class="bar-fill" style="width:100%"></span></span><span class="bar-val">100%</span></div>
+        <div class="bar-row"><span class="bar-lbl">2nd&ndash;3rd</span><span class="bar-track"><span class="bar-fill" style="width:71%"></span></span><span class="bar-val">71%</span></div>
+        <div class="bar-row"><span class="bar-lbl">4th&ndash;10th</span><span class="bar-track"><span class="bar-fill dim" style="width:38%"></span></span><span class="bar-val">38%</span></div>
+        <div class="bar-row"><span class="bar-lbl">11th&ndash;25th</span><span class="bar-track"><span class="bar-fill neg" style="width:17%"></span></span><span class="bar-val">17%</span></div>
+        <div class="bar-row"><span class="bar-lbl">26th&ndash;50th</span><span class="bar-track"><span class="bar-fill neg" style="width:9%"></span></span><span class="bar-val">9%</span></div>
+        <div class="bar-row"><span class="bar-lbl">51st+</span><span class="bar-track"><span class="bar-fill neg" style="width:10%"></span></span><span class="bar-val">10%</span></div>
+      </div>
+      <p class="chart-note" style="margin:20px 0 0">By the tenth visit, nine of every ten cards are re-runs. One trade was served to the same user <strong style="color:var(--chalk)">45 separate times</strong>.</p>
+    </div>
+
+    <div class="chart">
+      <p class="chart-title">Three of every four cards get passed &mdash; and almost everything is a one-for-one</p>
+      <p class="chart-note">Trade shapes as a share of all served cards, with the like rate for each. &ldquo;2&times;1&rdquo; means you send two players and get one back.</p>
+      <div class="bars">
+        <div class="bar-row"><span class="bar-lbl">1&times;1</span><span class="bar-track"><span class="bar-fill" style="width:100%"></span></span><span class="bar-val">75%</span></div>
+        <div class="bar-row"><span class="bar-lbl">2&times;1</span><span class="bar-track"><span class="bar-fill dim" style="width:10%"></span></span><span class="bar-val">8%</span></div>
+        <div class="bar-row"><span class="bar-lbl">3&times;2</span><span class="bar-track"><span class="bar-fill dim" style="width:6.6%"></span></span><span class="bar-val">5%</span></div>
+        <div class="bar-row"><span class="bar-lbl">3&times;3</span><span class="bar-track"><span class="bar-fill dim" style="width:4.9%"></span></span><span class="bar-val">4%</span></div>
+        <div class="bar-row"><span class="bar-lbl">everything else</span><span class="bar-track"><span class="bar-fill dim" style="width:9.7%"></span></span><span class="bar-val">8%</span></div>
+      </div>
+      <p class="chart-note" style="margin:20px 0 0">The overall like rate is <strong style="color:var(--chalk)">25%</strong>. Simple swaps do best (1&times;1 at 31%, 2&times;1 at 33%); the big multi-player packages the engine does produce land badly (3&times;3 at 8%, 2&times;3 at 6%). Note what&rsquo;s missing entirely: <strong style="color:var(--chalk)">3-for-1</strong> &mdash; the classic &ldquo;my three good pieces for your stud&rdquo; &mdash; is 0.5% of cards, because on the main path it is structurally impossible to build.</p>
+    </div>
+
+    <h3 style="margin-top:12px">Testers have been describing this problem for weeks</h3>
+    <div class="quotes">
+      <div class="q">
+        <p>&ldquo;There are a good bit of occurrences where I keep getting trade suggestions involving the same 2 or 3 players &hellip; It&rsquo;s annoying to continue seeing the same player appear over and over again in a bad package.&rdquo;</p>
+        <p class="attr">feedback #350 &middot; TradesHome &middot; 17 Aug</p>
+      </div>
+      <div class="q">
+        <p>&ldquo;The find a trade feature is doing a good job suggesting trades based on value, but I want to add another layer to the logic to focus on position specific needs for both owners &hellip; They offer me Colston Loveland who I rank as TE3, but I already own Trey McBride who is TE2. <strong>So the trade works on value, but breaks on user needs.</strong>&rdquo;</p>
+        <p class="attr">feedback #304 &middot; TradesHome &middot; 11 Aug</p>
+      </div>
+      <div class="q">
+        <p>&ldquo;Seems to be a bug in presenting trades across sessions. I keep getting the same trades I&rsquo;ve already liked&hellip;&rdquo;</p>
+        <p class="attr">feedback #370 &middot; TradesHome &middot; 20 Aug</p>
+      </div>
+    </div>
+    <p class="footnote">#304 is the whole report in one sentence. The engine is a value machine, and the thing that makes a trade genuinely good for both sides &mdash; each roster needing what the other has spare &mdash; barely reaches the decision at all.</p>
+  </div>
+</section>
+
+<section id="why">
+  <div class="sec-head"><span class="sec-num">03</span><h2>Where the trades go</h2></div>
+  <div class="stack">
+    <p class="lede" style="font-size:16px">Follow one league through the whole machine. Each step is a real, measured number from the engine replay.</p>
+
+    <div class="chart">
+      <p class="chart-title">From every possible trade to the thirty you see</p>
+      <p class="chart-note">One production league, 30 partner pairings, the path used when both managers have ranked players.</p>
+      <div class="funnel">
+        <div class="fn"><div class="fn-fill a"><span class="fn-name">Packages that exist between two median rosters <span>&mdash; per partner</span></span><span class="fn-num">~35,800,000</span></div></div>
+        <div class="fn"><div class="fn-fill b"><span class="fn-name">Survive the top-12 shortlist <span>&mdash; before any rule runs</span></span><span class="fn-num">83,524 <span style="color:var(--warn)">&nbsp;1 in 429</span></span></div></div>
+        <div class="fn"><div class="fn-fill a"><span class="fn-name">Scored across all 30 partner pairings</span><span class="fn-num">2,505,720</span></div></div>
+        <div class="fn"><div class="fn-fill c"><span class="fn-name">Pass roughly twenty acceptance rules</span><span class="fn-num">1,827 <span style="color:var(--neg)">&nbsp;0.07%</span></span></div></div>
+        <div class="fn"><div class="fn-fill c"><span class="fn-name">Survive the &ldquo;don&rsquo;t show me similar trades&rdquo; filter</span><span class="fn-num">161 <span style="color:var(--neg)">&nbsp;&minus;91%</span></span></div></div>
+        <div class="fn"><div class="fn-fill c"><span class="fn-name">Survive the five-per-partner cap</span><span class="fn-num">79</span></div></div>
+        <div class="fn"><div class="fn-fill d"><span class="fn-name">Reach your deck</span><span class="fn-num">~30</span></div></div>
+      </div>
+      <p class="chart-note" style="margin:20px 0 0">Read the two red bars together. The famous fairness rules cut the field to 1,827. Then a step nobody has ever audited &mdash; the shortlist that decides which surviving trades are &ldquo;too similar to each other&rdquo; &mdash; throws away <strong style="color:var(--chalk)">91% of what was left</strong>. That single step removes more defensible trades than any fairness rule in the system.</p>
+    </div>
+
+    <h3>The five real causes</h3>
+
+    <div class="grid g2">
+      <div class="card">
+        <div class="rec-top"><span class="pill p-hi">Cause 1</span></div>
+        <h3 style="font-size:18px">It stops after six partners</h3>
+        <p>The engine loops through leaguemates and quits once it has banked enough cards. With eight cards per partner and a budget of forty-eight, it quits at partner six. Partners seven through eleven are never generated against at all &mdash; so their trades appear in no rejection log, because they were never considered.</p>
+        <p style="color:var(--chalk-faint)"><span class="mono">global_target = max(30, max_per_opponent &times; 6)</span></p>
+      </div>
+      <div class="card">
+        <div class="rec-top"><span class="pill p-hi">Cause 2</span></div>
+        <h3 style="font-size:18px">It only looks at 12 assets a side</h3>
+        <p>For each partner the engine shortlists twelve assets per team &mdash; the ones you and they disagree about most in raw value. Everything else is unreachable. On a 33-asset roster that hides two-thirds of the team, and the hidden part includes every player you <em>agree</em> on but have opposite needs at.</p>
+        <p style="color:var(--chalk-faint)"><span class="mono">v3_pool_size = 12</span></p>
+      </div>
+      <div class="card">
+        <div class="rec-top"><span class="pill p-hi">Cause 3</span></div>
+        <h3 style="font-size:18px">Mutual gain can&rsquo;t be computed for most cards</h3>
+        <p>When the other manager hasn&rsquo;t ranked players &mdash; about <strong>85% of served cards</strong> &mdash; both sides get priced with one set of numbers. Your gain is then exactly their loss. The engine cannot ask &ldquo;do both teams win?&rdquo;, so it asks &ldquo;does the viewer win, and by less than double?&rdquo; instead. The fairness slider isn&rsquo;t a quality bar there; it&rsquo;s a cap on how badly the other manager is being asked to lose.</p>
+      </div>
+      <div class="card">
+        <div class="rec-top"><span class="pill p-md">Cause 4</span></div>
+        <h3 style="font-size:18px">Twenty rules that mostly say the same thing</h3>
+        <p>Four separate rules all punish &ldquo;one big player for several smaller ones,&rdquo; using four different formulas on three different value scales. <strong>97.6% of rejections are made by two or more rules at once.</strong> That&rsquo;s why loosening any single knob produces almost nothing &mdash; and why the last loosening experiment looked like a failure.</p>
+      </div>
+      <div class="card">
+        <div class="rec-top"><span class="pill p-md">Cause 5</span></div>
+        <h3 style="font-size:18px">Whole trade shapes are impossible to build</h3>
+        <p>A 3-for-1 consolidation cannot be generated on the main path &mdash; a hard rule forbids sides differing by more than one player. And on the 85% path, only two shapes exist at all: one-for-one and two-for-one. No 2-for-2, no 1-for-2. Production holds 6,635 one-for-ones and exactly <strong>zero</strong> one-for-twos.</p>
+      </div>
+      <div class="card" style="border-color:var(--line-strong)">
+        <div class="rec-top"><span class="pill p-lo">Not a cause</span></div>
+        <h3 style="font-size:18px">Deck size</h3>
+        <p>The served deck is capped at 60 cards and typically fills 25&ndash;31. The cap is not what&rsquo;s binding &mdash; supply is. Raising the cap alone would just show more re-runs.</p>
+      </div>
+    </div>
+
+    <h3 style="margin-top:16px">The rules ranked by damage</h3>
+    <p style="color:var(--chalk-dim); font-size:14.5px">&ldquo;Only rule blocking it&rdquo; counts trades that every other rule was willing to allow. That is the number that matters &mdash; a rule with a huge rejection count but no unique blocks is redundant, and removing it changes nothing.</p>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Rule, in plain terms</th><th>Damage</th><th>Only rule blocking it</th><th>Why it hurts</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="k">&ldquo;Too similar to a trade I already picked&rdquo;<div class="mono">v3_diversity_max_overlap = 0.4</div></td>
+            <td><span class="pill p-hi">High</span></td>
+            <td class="mono">1,827 &rarr; 161</td>
+            <td>Removes 91% of everything that survived every fairness rule. A genuinely different second idea involving the same star player dies here.</td>
+          </tr>
+          <tr>
+            <td class="k">&ldquo;No filler players in a package&rdquo;<div class="mono">asset_floor_abs = 450</div></td>
+            <td><span class="pill p-hi">High</span></td>
+            <td class="mono">44,529 / 8,348</td>
+            <td>The largest unique blocker in every arm, by more than all others combined. Every secondary piece must itself be a league-average starter &mdash; which is exactly the shape of a consolidation trade.</td>
+          </tr>
+          <tr>
+            <td class="k">&ldquo;The viewer must win&rdquo;<div class="mono">consensus_both_ways = 0</div></td>
+            <td><span class="pill p-hi">High</span></td>
+            <td class="mono">1,156</td>
+            <td>Low count, huge consequence: it&rsquo;s why the 85% path has no partner-benefit test at all and why one-for-two trades don&rsquo;t exist.</td>
+          </tr>
+          <tr>
+            <td class="k">Five cards per partner, three times over<div class="mono">max_per_opponent = 5</div></td>
+            <td><span class="pill p-hi">High</span></td>
+            <td class="mono">4,659 &rarr; 180</td>
+            <td>Applied at generation, again at the deck budget, then again by a hardcoded constant with no config knob. Raising the knob alone changes nothing.</td>
+          </tr>
+          <tr>
+            <td class="k">&ldquo;This doesn&rsquo;t fill a hole in your lineup&rdquo;<div class="mono">need_gate_min_value = 500</div></td>
+            <td><span class="pill p-md">Medium</span></td>
+            <td class="mono">827 / 1,919</td>
+            <td>Only looks at <em>your</em> needs &mdash; the function has no parameter for the partner. It killed 61 trades that filled a genuine hole on <em>both</em> rosters.</td>
+          </tr>
+          <tr>
+            <td class="k">&ldquo;Nobody may overpay&rdquo;<div class="mono">max_overpay_frac = 0.25</div></td>
+            <td><span class="pill p-md">Medium</span></td>
+            <td class="mono">697 / 2,599</td>
+            <td>Blocks gaps in <em>either</em> direction, including trades that favour you, and cannot be relaxed by the in-app fairness toggle.</td>
+          </tr>
+          <tr>
+            <td class="k">&ldquo;No tier jumps&rdquo;<div class="mono">trade_elo_gap_max = 250</div></td>
+            <td><span class="pill p-md">Medium</span></td>
+            <td class="mono">0</td>
+            <td>Blocks nothing unique <em>today</em> &mdash; but only because the filler rule kills the same trades first. Loosen filler and this becomes the new wall. Move them together or you&rsquo;ll measure a false negative.</td>
+          </tr>
+          <tr>
+            <td class="k">Both teams must gain something<div class="mono">min_side_surplus_marginal = 60</div></td>
+            <td><span class="pill p-keep">Keep</span></td>
+            <td class="mono">5,429</td>
+            <td>This <em>is</em> the both-teams-benefit promise, in code. Everything it blocks is a trade where a side gains essentially nothing. Don&rsquo;t touch it.</td>
+          </tr>
+          <tr>
+            <td class="k">Both teams can still field a lineup</td>
+            <td><span class="pill p-keep">Keep</span></td>
+            <td class="mono">557</td>
+            <td>A trade that leaves a manager unable to start a legal roster isn&rsquo;t a trade. If anything it&rsquo;s too permissive &mdash; it ignores FLEX and bench depth.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="footnote">Counts are from the engine replay of the one production league with enough ranked members to support it (six). Ratios are trustworthy; absolute forecasts of your deck size are not.</p>
+  </div>
+</section>
+
+<section id="armb">
+  <div class="sec-head"><span class="sec-num">04</span><h2>A better engine is already running</h2></div>
+  <div class="stack">
+    <p class="lede" style="font-size:16px">This was the surprise of the review. Three engines generate cards in production and their results are shuffled into the same deck. Users have been quietly voting on them for three weeks, and the vote is lopsided.</p>
+
+    <div class="chart">
+      <p class="chart-title">Like rate by engine, live production decks</p>
+      <p class="chart-note">Every card carries a stamp saying which engine built it. These are real like/pass decisions by real users, in the same decks, on the same days.</p>
+      <div class="bars">
+        <div class="bar-row peak"><span class="bar-lbl">gen_v2</span><span class="bar-track"><span class="bar-fill pos" style="width:100%"></span></span><span class="bar-val">57%</span></div>
+        <div class="bar-row"><span class="bar-lbl">challenger</span><span class="bar-track"><span class="bar-fill dim" style="width:54%"></span></span><span class="bar-val">31%</span></div>
+        <div class="bar-row"><span class="bar-lbl">current</span><span class="bar-track"><span class="bar-fill neg" style="width:33%"></span></span><span class="bar-val">18%</span></div>
+      </div>
+      <p class="chart-note" style="margin:20px 0 0"><span class="mono" style="color:var(--chalk)">gen_v2</span> 17 likes of 30 &middot; <span class="mono" style="color:var(--chalk)">challenger</span> 19 of 62 &middot; <span class="mono" style="color:var(--chalk)">current</span> 22 of 119. The gap between gen_v2 and the shipping engine is not a coin flip &mdash; <span class="mono">p = 0.00009</span>.</p>
+    </div>
+
+    <div class="grid g2">
+      <div class="card">
+        <h3 style="font-size:18px">Why it wins</h3>
+        <p><span class="mono" style="color:var(--chalk)">gen_v2</span> is the one engine that requires <strong>each side to gain on its own board</strong>, rather than requiring the viewer to win on a shared board. It also builds real packages: only 5% of its cards are one-for-ones, against 78% for the shipping engine. It is producing the trade shapes testers keep asking for.</p>
+      </div>
+      <div class="card">
+        <h3 style="font-size:18px">Why to be careful</h3>
+        <p>Thirty decisions is a small sample. Two-thirds of its likes come from one user, and its cards sit slightly deeper in the deck, where like rates are naturally higher. Controlling for that helps rather than hurts &mdash; in the first ten cards of a deck it runs 11 likes from 14 &mdash; but that is fourteen decisions. <strong>This is a strong lead, not a proven result.</strong></p>
+      </div>
+    </div>
+
+    <div class="verdict" style="border-left-color:var(--pos)">
+      <p><strong>The cheapest high-value action available right now is to give this engine more of the deck and wait two weeks.</strong> It costs no engineering work &mdash; the arm is already generating, already being served, already logging. It needs volume, not a build. If it holds at even 40%, it more than doubles the shipping engine and the entire restrictiveness debate resolves itself in its favour.</p>
+    </div>
+  </div>
+</section>
+
+<section id="recs">
+  <div class="sec-head"><span class="sec-num">05</span><h2>What to do</h2></div>
+  <div class="stack">
+    <p class="lede" style="font-size:16px">Ordered by value returned per unit of risk. The first group is settings changes with no code and no deploy. The second needs a small build. The third is a real decision about what the product promises.</p>
+
+    <div class="tier-head"><span class="label">This week &mdash; settings only</span><span class="rule"></span></div>
+    <div class="stack">
+
+      <div class="rec">
+        <div class="rec-top"><span class="rec-n">R1</span><h3>Let the engine finish the league</h3><span class="pill p-ice">Biggest single win</span></div>
+        <p>Right now it stops after six of eleven partners. Raise the stopping budget so every leaguemate gets considered. This is the one change that adds genuinely new ideas rather than reshuffling old ones &mdash; nearly half your league is currently invisible.</p>
+        <dl>
+          <dt>Change</dt><dd><span class="mono">global_target</span> from <span class="mono">max(30, per_opponent&times;6)</span> to <span class="mono">per_opponent &times; (league size &minus; 1)</span></dd>
+          <dt>Effect</dt><dd>Partner coverage goes from ~6/11 to 11/11. Roughly doubles the pool of distinct ideas per league.</dd>
+          <dt>Cost</dt><dd>Generation time roughly doubles. Watch the job deadline &mdash; don&rsquo;t pair this with R5 until the partner loop runs in parallel.</dd>
+          <dt>Risk</dt><dd>Low. Nothing about trade quality changes; more partners are simply examined.</dd>
+        </dl>
+      </div>
+
+      <div class="rec">
+        <div class="rec-top"><span class="rec-n">R2</span><h3>Weight the deck toward the engine that&rsquo;s winning</h3></div>
+        <p>Give <span class="mono">gen_v2</span> a larger share of served cards and let it run two more weeks. This is the cheapest way to turn a promising 30-decision signal into a decision you can actually make.</p>
+        <dl>
+          <dt>Change</dt><dd>Bake-off share only &mdash; the arm is already live (<span class="mono">bakeoff_include_gen_v2 = 1</span>, <span class="mono">bakeoff_serve_interleaved = 1</span>)</dd>
+          <dt>Effect</dt><dd>A defensible sample instead of a hint. If it holds, this decides the roadmap.</dd>
+          <dt>Risk</dt><dd>Low, and self-limiting &mdash; if the like rate falls, dial it back.</dd>
+        </dl>
+      </div>
+
+      <div class="rec">
+        <div class="rec-top"><span class="rec-n">R3</span><h3>Loosen the &ldquo;too similar&rdquo; filter and the per-partner cap together</h3></div>
+      <p style="color:var(--warn); font-size:13.5px; border:1px solid rgba(245,158,11,.5); border-radius:var(--r-sm); padding:8px 12px; max-width:70ch"><strong>Superseded 22 Aug (later the same day):</strong> the diversity pass is a selector into 5&ndash;8 slots, not a bulk filter &mdash; loosening it buys near-duplicates and recreates #350. Withdrawn as a volume lever. See <a href="https://claude.ai/code/artifact/d7130dcd-3c0d-48b6-8844-9d4c4a1972ea">The Knockout Rules, Judged</a>.</p>
+        <p>These two live in the same loop, and moving either one alone accomplishes nothing. Together they are the step that discards 91% of trades that already passed every quality rule.</p>
+        <dl>
+          <dt>Change</dt><dd><span class="mono">v3_diversity_max_overlap</span> 0.4 &rarr; 0.6, with <span class="mono">max_per_opponent</span> 5 &rarr; 8</dd>
+          <dt>Effect</dt><dd>Real sibling variants of a strong idea survive instead of exactly one card per idea.</dd>
+          <dt>Risk</dt><dd>Medium &mdash; this is the filter that stops &ldquo;the same trade plus a bench guy&rdquo; five times. Don&rsquo;t go past 0.6.</dd>
+          <dt>Trap</dt><dd><strong>The per-partner cap is applied a third time by a hardcoded constant</strong> (<span class="mono">_EXPLORATION_BASE_PER_OPP = 5</span>) with no config knob. Without a one-line code change, raising the setting is a no-op &mdash; and you&rsquo;ll conclude wrongly that the knob doesn&rsquo;t matter.</dd>
+        </dl>
+      </div>
+
+      <div class="rec">
+        <div class="rec-top"><span class="rec-n">R4</span><h3>Lower the filler floor &mdash; one half of it, on its own</h3></div>
+      <p style="color:var(--warn); font-size:13.5px; border:1px solid rgba(245,158,11,.5); border-radius:var(--r-sm); padding:8px 12px; max-width:70ch"><strong>Superseded 22 Aug (later the same day):</strong> this had the two halves backwards. 91% of #141&rsquo;s kills carry a sub-450 body; the 450 floor stays. The half taxing consolidation is the <em>relative</em> bar (<span class='mono'>filler_min_frac</span>) &mdash; lower that instead. See <a href="https://claude.ai/code/artifact/d7130dcd-3c0d-48b6-8844-9d4c4a1972ea">The Knockout Rules, Judged</a>.</p>
+        <p>The no-junk rule has two floors: a relative one (every extra piece must be worth 25% of the headliner) and a flat one (450 points, about a league-average starter). Move the flat floor only. The relative floor is what actually stops padded packages and has been measured to make things worse when removed.</p>
+        <dl>
+          <dt>Change</dt><dd><span class="mono">asset_floor_abs</span> 450 &rarr; 275. Leave <span class="mono">filler_min_frac</span> at 0.25.</dd>
+          <dt>Effect</dt><dd>Useful bench pieces can make a three-for-one&rsquo;s arithmetic work again.</dd>
+          <dt>Risk</dt><dd>Medium. Deleting this rule entirely was measured to push one-sided offers from 87% to 100%. Move one half, measure, then decide.</dd>
+          <dt>Pairs with</dt><dd>The tier-jump rule (<span class="mono">trade_elo_gap_max</span>). It blocks nothing today only because this rule fires first &mdash; expect it to become the new wall.</dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="tier-head"><span class="label">Next &mdash; small builds</span><span class="rule"></span></div>
+    <div class="stack">
+
+      <div class="rec">
+        <div class="rec-top"><span class="rec-n">R5</span><h3>Allow the three-for-one</h3><span class="pill p-ice">Cheapest structural fix</span></div>
+        <p>One comparison forbids sides differing by more than one player, which makes the single most-wanted dynasty shape &mdash; three good pieces for one stud &mdash; impossible to generate. Changing <span class="mono">&gt; 1</span> to <span class="mono">&gt; 2</span> unlocks it and its mirror.</p>
+        <dl>
+          <dt>Cost</dt><dd><strong>+6% search time.</strong> Measured, not estimated.</dd>
+          <dt>Caveat</dt><dd>New 3-for-1s land straight into the filler rule&rsquo;s teeth. Ship it with R4 or most of them will die on arrival.</dd>
+          <dt>Do it as</dt><dd>A knob (<span class="mono">v3_shape_max_delta</span>, default 1) so it&rsquo;s revertible without a deploy.</dd>
+        </dl>
+      </div>
+
+      <div class="rec">
+        <div class="rec-top"><span class="rec-n">R6</span><h3>Give the 85% path more than two trade shapes</h3></div>
+        <p>When your leaguemate hasn&rsquo;t ranked players &mdash; most of the deck &mdash; the engine can only build one-for-one and two-for-one, and it takes the <em>first</em> few that pass rather than the best. Add the missing shapes and score the full set before choosing.</p>
+        <dl>
+          <dt>Effect</dt><dd>Roughly 12&times; the search space on the path that produces most of your cards, and the deck stops being &ldquo;the first five things that passed.&rdquo;</dd>
+          <dt>Risk</dt><dd>Medium &mdash; it rewrites the highest-traffic code in the engine. Build it behind a knob.</dd>
+        </dl>
+      </div>
+
+      <div class="rec">
+        <div class="rec-top"><span class="rec-n">R7</span><h3>Make the shortlist see roster fit, not just disagreement</h3></div>
+        <p>The twelve-asset shortlist picks the players you and your partner <em>disagree</em> about most. But the thing that decides whether a trade is good is roster fit &mdash; how much each player is worth <em>to that specific team</em>. The shortlist is selecting on a different axis from the one the model optimises.</p>
+        <p style="color:var(--chalk-dim); font-size:14px">The trade this can never find: you both price Nacua at 6,200 and Bijan at 6,000, but you&rsquo;re four deep at receiver and one deep at back, and your partner is the mirror. Both teams gain hundreds of points. Neither player makes either shortlist, because you don&rsquo;t <em>disagree</em> about them. This trade is never enumerated, so it appears in no rejection log anywhere &mdash; which is exactly why previous audits couldn&rsquo;t see it.</p>
+        <dl>
+          <dt>Change</dt><dd>Keep the top 12 by disagreement, add the top 4 by roster-fit asymmetry. Both numbers are already computed.</dd>
+          <dt>Cost</dt><dd>Up to 2.4&times; per pairing, measured. Less in practice, since the two lists overlap.</dd>
+          <dt>Do it as</dt><dd>A proper bake-off arm, not a settings flip. This changes what kind of trade exists.</dd>
+        </dl>
+      </div>
+
+      <div class="rec">
+        <div class="rec-top"><span class="rec-n">R8</span><h3>Stop letting a calibration quirk decide which way picks move</h3></div>
+        <p>Draft picks get the same value on every board by design, so they carry zero &ldquo;disagreement&rdquo; &mdash; which means on any given pairing, picks either all crowd into the <em>give</em> pool or all get pushed out of it, decided by a board-scale artifact that has nothing to do with what either manager thinks of picks. Reserve two shortlist slots per side for picks and the direction stops being accidental.</p>
+        <dl>
+          <dt>Cost</dt><dd>Zero &mdash; the shortlist stays twelve.</dd>
+          <dt>Related</dt><dd>Only six picks per team enter the pool at all (<span class="mono">picks_pool_cap = 6</span>), roughly half of a team&rsquo;s draft capital.</dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="tier-head"><span class="label">The real decision</span><span class="rule"></span></div>
+    <div class="stack">
+
+      <div class="rec" style="border-left:3px solid var(--flare)">
+        <div class="rec-top"><span class="rec-n">R9</span><h3>Price both sides against their own roster, not one shared list</h3><span class="pill p-ice">Fixes the root cause</span></div>
+        <p>This is the only change that makes &ldquo;good for both teams&rdquo; a computable question on the 85% path. A player&rsquo;s <em>market</em> value is one number for everyone &mdash; but his value <em>to a roster</em> is not. Your RB3 on a stacked backfield is worth a bench slot to you and a starting slot to the manager with a hole. Price each side that way and the two gains stop being mirror images.</p>
+        <p style="color:var(--chalk-dim); font-size:14px">The machinery already exists and is already trusted &mdash; it&rsquo;s exactly the math the engine uses on the 15% path where both managers have ranked. This applies it to the other 85%. And it&rsquo;s the most orthodox idea in the sport: replacement level and starter scarcity underpin every ranking system in fantasy football. It also directly answers feedback #304.</p>
+        <dl>
+          <dt>Effect</dt><dd>Mutual gain becomes a real test instead of a substitute rule. The displayed value bar doesn&rsquo;t change &mdash; fairness stays on market values.</dd>
+          <dt>Risk</dt><dd>Needs its own calibration; roster-relative numbers run much smaller than market ones. Keep the market fairness ratio as the backstop so a trade can&rsquo;t be &ldquo;mutually marginal&rdquo; while being wildly lopsided on paper.</dd>
+        </dl>
+      </div>
+
+      <div class="rec">
+        <div class="rec-top"><span class="rec-n">R10</span><h3>Turn on the contention-window blend</h3></div>
+        <p>A contender and a rebuilder genuinely price a 29-year-old differently, and that difference is one of the most reliable sources of a trade both managers want. The engine has this built, wired and tested &mdash; and switched off. Today window and age only steer <em>labels</em>, never values, so they can reorder your deck but can never add a trade to it.</p>
+        <dl>
+          <dt>Change</dt><dd>Flag <span class="mono">trade.outlook_blend</span></dd>
+          <dt>Risk</dt><dd>Real: for most partners the window is <em>inferred</em>, so a wrong guess would now move value rather than just sort order. Feedback #365 says the inference is already misreading an all-in team as a rebuilder. <strong>Fix the window signal first.</strong></dd>
+        </dl>
+      </div>
+
+      <div class="rec">
+        <div class="rec-top"><span class="rec-n">R11</span><h3>Decide whether the app is allowed to suggest a trade you lose slightly</h3></div>
+        <p>Today, on the 85% path, every suggested trade must favour the viewer. Dropping that requirement while raising the fairness floor to 0.75 was measured to <strong>double the deck</strong>, with the trade quality statistically indistinguishable and a hard cap on damage: no card could ever ask either side to give up more than 25% more than it gets.</p>
+        <p style="color:var(--chalk-dim); font-size:14px">Be clear-eyed: about 61% of the resulting cards ask the viewer to pay something. That is a defensible product &mdash; &ldquo;market-even trades your leaguemate might actually accept&rdquo; &mdash; but it is a <em>different promise</em> from today&rsquo;s, and it needs card copy that says so. A gentler middle setting exists at roughly +18% deck with 31% viewer-pays.</p>
+        <dl>
+          <dt>Correction</dt><dd>The doubling figure is quoted in the existing audit docs, but the knob as built only delivers the <strong>+18% version</strong> &mdash; one of the two viewer-must-win checks isn&rsquo;t governed by it. Reaching the doubled deck needs a small code change first. Don&rsquo;t ship expecting 2&times;.</dd>
+          <dt>Decision</dt><dd>Yours, not the model&rsquo;s. This is a product promise, not a tuning value.</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="keep">
+  <div class="sec-head"><span class="sec-num">06</span><h2>What not to loosen</h2></div>
+  <div class="stack">
+    <p class="lede" style="font-size:16px">The goal is more good offers, not more offers. These rules are the reason the app doesn&rsquo;t embarrass users, and one of them is the promise itself.</p>
+    <ul class="clean">
+      <li><strong>Both teams must gain something.</strong> This is &ldquo;benefits both teams&rdquo; written as code, and it&rsquo;s the single purest rule in the system &mdash; 97% of what it blocks, nothing else objects to. Everything it removes is a trade where one side gains essentially nothing. Once volume is restored elsewhere, this is the rule worth <em>tightening</em>.</li>
+      <li><strong>Both teams can still field a lineup.</strong> Not negotiable, and currently too permissive rather than too strict &mdash; it ignores FLEX and bench depth entirely.</li>
+      <li><strong>The relative filler floor.</strong> The flat 450 floor is worth moving; the &ldquo;25% of the headliner&rdquo; rule is not. Deleting the filler rule was measured to push one-sided offers from 87% to 100%.</li>
+      <li><strong>The fairness floor on the no-board path.</strong> Today it&rsquo;s a taste setting. The moment you ship R11 it becomes the only safety rail &mdash; it <em>is</em> the cap on how badly either manager can be asked to lose.</li>
+      <li><strong>Never re-show a declined or pending trade.</strong> Feedback #370 says this is already leaking. That&rsquo;s a credibility cost with no upside.</li>
+      <li><strong>The pick-churn ban.</strong> Nearly free, and it stops the &ldquo;a 1st for a 1st riding along inside a bigger deal&rdquo; shape testers complained about.</li>
+    </ul>
+    <div class="verdict" style="border-left-color:var(--warn)">
+      <p><strong>One warning about sequencing.</strong> Because the rules overlap so heavily, loosening them one at a time and measuring will mostly show nothing &mdash; another rule catches the same trade. Four rules all punish &ldquo;one big player for several smaller ones,&rdquo; and 97.6% of rejections are made redundantly. Change them in the paired groups above, or you will correctly measure &ldquo;no effect&rdquo; and draw the wrong conclusion from it.</p>
+    </div>
+  </div>
+</section>
+
+<section id="caveats">
+  <div class="sec-head"><span class="sec-num">07</span><h2>How much to trust this</h2></div>
+  <div class="stack">
+    <div class="grid g2">
+      <div class="card">
+        <h3 style="font-size:17px">Solid</h3>
+        <ul class="clean" style="margin-top:4px">
+          <li>Everything in section 2 is a direct count over all 10,560 served cards in the live database.</li>
+          <li>The six-partner ceiling is confirmed twice: predicted from the code, then found in the data as a sharp spike at exactly six with a cliff at five cards per partner.</li>
+          <li>All settings values were read from live production, not from code defaults.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3 style="font-size:17px">Shakier</h3>
+        <ul class="clean" style="margin-top:4px">
+          <li><strong>Five users, six leagues.</strong> Mostly your own testing. Treat everything as directional.</li>
+          <li>The engine-comparison result rests on 30 decisions, two-thirds from one user.</li>
+          <li>Every rejection count comes from replaying <em>one</em> league &mdash; the only one with enough ranked members. Ratios hold; absolute deck-size forecasts don&rsquo;t.</li>
+          <li>Partner attribution assumes rosters haven&rsquo;t changed since the card was served, so partner coverage is slightly noisy. The spike at six is far too sharp to be noise.</li>
+        </ul>
+      </div>
+    </div>
+    <hr class="soft">
+    <h3>Three things the existing audit docs get wrong</h3>
+    <ul class="clean">
+      <li><strong>The bake-off is live, not dark.</strong> Prior reports state that alternative engines generate but are never served, and therefore have zero user decisions. In production <span class="mono">bakeoff_serve_interleaved = 1</span>: three engines&rsquo; cards are interleaved into real decks and have collected 211 real decisions. That data is the most valuable signal in this report and nobody was reading it.</li>
+      <li><strong>The &ldquo;doubles the deck&rdquo; figure is not what the switch delivers.</strong> The knob only governs one of the two viewer-must-win checks; as built it delivers roughly +18%, not +112%.</li>
+      <li><strong>Line references in the 2026-08-19 reviews have drifted by several hundred lines.</strong> Anyone working from them should re-locate against the current code.</li>
+    </ul>
+    <hr class="soft">
+    <p class="footnote">Method: three independent code audits (acceptance rules, search space, mutual-gain math) run in parallel against the current tree, reconciled against read-only production queries and the engine replay reports in <span class="mono">docs/reviews/</span>. No engine code was modified. Live settings were read from the production <span class="mono">model_config</span> table on 22 August 2026.</p>
+  </div>
+</section>
+
+</div>

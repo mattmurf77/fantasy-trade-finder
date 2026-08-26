@@ -20,7 +20,7 @@ import PositionChip from './PositionChip';
 import TierBadge from './TierBadge';
 import { Badge, Button, TickLabel } from './chalkline';
 import { TIER_LABEL } from '../utils/tierBands'; // tier name in the composed a11y label
-import { CalcPlayer, CalcPos } from '../data/tradeCalcMock';
+import { CalcPlayer, CalcPos } from '../data/calcTypes';
 import type { Tier } from '../shared/types';
 import {
   ink,

@@ -336,7 +336,7 @@ export default function TiersScreen() {
           // Only send the real tiers — `unassigned` isn't a tier on the server.
           const payload: Record<string, string[]> = {};
           for (const t of TIERS) payload[t] = buckets[t].map((p) => p.id);
-          return saveTiers(position, payload, cleared, [], scopeOpts);
+          return saveTiers(position, payload, cleared, scopeOpts);
         }
 
         // #132 All view — /api/tiers/save is per-position (QB/RB/WR/TE
@@ -377,7 +377,7 @@ export default function TiersScreen() {
           (pos) =>
             TIERS.some((t) => perPos[pos][t].length > 0) ||
             clearedByPos[pos].length > 0,
-        ).map((pos) => saveTiers(pos, perPos[pos], clearedByPos[pos], [], scopeOpts));
+        ).map((pos) => saveTiers(pos, perPos[pos], clearedByPos[pos], scopeOpts));
         return Promise.all(calls);
       }),
     onSuccess: () => {
@@ -1093,14 +1093,14 @@ export default function TiersScreen() {
         ? ({ scope: 'rookie', via: 'rookie_tiers' } as const)
         : undefined;
       if (!isAllView) {
-        return saveTiers(position, {}, players.map((p) => p.id), [], scopeOpts);
+        return saveTiers(position, {}, players.map((p) => p.id), scopeOpts);
       }
       // #132 All view — clear-only saves routed per position (the save
       // endpoint is per-position; see saveMutation).
       const byPos: Record<Position, string[]> = { QB: [], RB: [], WR: [], TE: [] };
       for (const p of players) byPos[p.position as Position]?.push(p.id);
       const calls = POSITIONS.filter((pos) => byPos[pos].length > 0).map(
-        (pos) => saveTiers(pos, {}, byPos[pos], [], scopeOpts),
+        (pos) => saveTiers(pos, {}, byPos[pos], scopeOpts),
       );
       return Promise.all(calls);
     },

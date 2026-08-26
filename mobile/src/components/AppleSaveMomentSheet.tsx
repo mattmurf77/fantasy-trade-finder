@@ -5,7 +5,7 @@ import { ink, chalk, space, radii, type, fonts, scrim } from '../theme/chalkline
 import { TickLabel } from './chalkline';
 import { appleSignIn } from '../api/auth';
 import { useSession } from '../state/useSession';
-import { useInterruptCoordinator } from '../state/useInterruptCoordinator';
+import { useInterruptCoordinator, isInterruptBusy } from '../state/useInterruptCoordinator';
 import { useFlag } from '../state/useFeatureFlags';
 
 interface Props {
@@ -37,7 +37,10 @@ export default function AppleSaveMomentSheet({ visible, trigger, onClose }: Prop
   // stays true, so the sheet presents the moment the slot frees instead of
   // stacking over an open banner/prompt. Flag off: passthrough.
   const arbiterOn = useFlag('ux.prompt_arbiter');
-  const surfaceBusy = useInterruptCoordinator((s) => s.activeSurface !== null);
+  // #384 ruling 10 — `isInterruptBusy` also covers the tour hold, so a
+  // root modal cannot slip through the gap BETWEEN two tour steps (the
+  // slot is genuinely free there; the floor is not).
+  const surfaceBusy = useInterruptCoordinator(isInterruptBusy);
   const effectiveVisible = visible && !(arbiterOn && surfaceBusy);
 
   async function handleApple() {

@@ -10,6 +10,863 @@
 > Companion files: [`HANDOFF.md`](HANDOFF.md) for forward-looking; [`../docs/`](../docs/) for per-feature reference updates.
 
 ---
+
+
+
+
+## 2026-08-25 — v1.16.6 (build 132) on TestFlight: the Quick Set funnel can finally emit
+
+PR #196 merged (`b7591418`), then cut and submitted **v1.16.6 / EAS 132** (build `8925880d`, submission `b190d30b`, both finished). This is the first binary that sends `via:'quickset'`, so `quickset_completed`, `tier_save.props.via` and the point-of-use `ranking_method='quickset'` stop reading zero from here — treat the release as the seam. Version bumped rather than reusing 1.16.5 (build 131 already holds it) to keep the 1:1 version↔build mapping the owed checklists name.
+
+Two record corrections came out of the release, both in living memory now: (1) **G-012** — the `MARKETING_VERSION` vs `Info.plist` gap is NOT drift; `INFOPLIST_FILE` is set and `GENERATE_INFOPLIST_FILE` is not, so the checked-in plist's literal ships and the 2026-08-24 HANDOFF was right to leave it stale (we still sync both, as trap removal). (2) The local `test_deck_signal_v2` failure is the **stale `data/trade_finder.db`**, not Python-version skew as this session first claimed — `git stash` doesn't touch a gitignored DB, which is why the clean-tree check looked exonerating. Also fixed en route: the Aug-25 `season_start` branch made three winback tests fail exactly one day a year ([G-061](GOTCHAS.md)).
+
+## 2026-08-24 — Quick Set `via` gap: the tag no client ever sent (D-162; PR #196, merged 2026-08-25 on operator confirm)
+
+Found while planning Group F: `POST /api/tiers/save` has branched on `via == "quickset"` since analytics P0 — FR-20 `quickset_completed`, `tier_save.props.via`, P0-1's point-of-use `ranking_method='quickset'` — but **no client ever sent the value** (mobile's `saveTiers` whitelisted only `rookie_*`; web has no Quick Set), so all three reads were dark for every production walk while the 2026-08-13 addendum deleted the client emitter calling the server row "the authoritative completion". Worse, "per completed position" was never implementable: the walk saves rung by rung and a consensus-accepting user saves nothing. Fix on `claude/elegant-feynman-c3689e`: unscoped Quick Set saves now tag `via:'quickset'` (one emitter change, no registry change); semantics corrected everywhere to "per tagged tier commit", per-position completion = `quickset_step_advanced` at the last rung. Guard `check-quickset-via` (sabotage-proven), tsc green. Addendum: `docs/business/analytics/2026-08-24-quickset-via-gap.md`; scope: `docs/plans/quickset-analytics-via/`. Held for operator confirm (analytics bright line); merged 2026-08-25. Seam: do not trend `rank_quickset` / `tier_save.via` across the next mobile release.
+
+## 2026-08-24 — Future firsts floor at the current-year mid: D-079 re-asserted under market_slots (D-161)
+
+Tester MangoPatti's report (via the operator) that "1sts are still undervalued" was validated and root-caused: D-146's market pricing quietly reinstated the market's future-first discount that D-079 had ruled against (Q-018 warned of exactly this), and the served card had priced future firsts at ≈ 1,171 — the ~93rd asset — against A.J. Brown. Operator re-ruled, verbatim: *"The ideal solution is the D-079 ruling."* One clamp at `priced_pool_value` step 2: future-year round-1 ≥ `market_r1_yoy_floor` × the current-year mid (default 1.0 flat; 0 = pure market, deploy-free). Live curve verified: 2027/2028/2029 firsts now serve at 2,184.6 (1qb) / 2,434.0 (sf); rounds 2–4 keep their decay; slotted current-year picks, the ladder mode and the DP-absent fallback byte-identical. Suite 4,275 green; Q-018 CLOSED as ruled. Adjacent open item, not built: picks are DP-pure while players are 50% KTC-blended.
+
+## 2026-08-24 — Feedback wave: 5 groups / 11 items built, QA-green, awaiting ship go/no-go (branch `claude/new-user-feedback-55320e`)
+
+Full `/feedback` pipeline run, no express. **A** (#376/#379/#394): TradesHome regains an always-on
+"Outlook & filters" row → full DNA sheet; top-row Filters button removed (#379); root cause = every
+entry flag-coupled or stranded. **B** (#397/#398): s2.2 swipe beat pinned to top via opt-in
+`GuideStep.band:'top'`. **C** (#395/#396): `align_starter_slots()` kills phantom lineup-cascade rows;
+real platform lineup template replaces the 3-WR mock default; rank chips "WR #3". **D** (#386/#391):
+LeagueSummaryScreen announces layout shifts to the guide (calculator precedent). **F** (#346/#381):
+QuickSet **HOLD** ([D-160](DECISIONS.md), supersedes #161) — server ignores legacy `demoted_pids`,
+client stops sending it. Evidence in TEST_LEDGER same date (tsc, 78/78 guards, pytest 4238 ×3, all
+sabotages re-proven by two independent QA agents, both PASS). v1.16.4 bumped. **Not on `main`,
+nothing deployed** — operator go/no-go pending; runtime evidence owed via the
+[consolidated checklist](../docs/feedback/items/346-quickset-tier-drop/testflight-checklist-batch.md).
+Triage also corrected 16 stale item statuses and backfilled INDEX.md (180/180). Batch docs:
+[`346-quickset-tier-drop/plan.md`](../docs/feedback/items/346-quickset-tier-drop/plan.md).
+## 2026-08-24c — Waves A + B0 merged and built: 1.16.4 (EAS 130); `calc.inline_home` DARK until Wave B
+
+The two entries below were written on their branches; both are now ON MAIN — Wave A squash PR
+[#197](https://github.com/mattmurf77/fantasy-trade-finder/pull/197) → `7452650`, Wave B0
+[#199](https://github.com/mattmurf77/fantasy-trade-finder/pull/199) → `14a4ce4` — after a Fable
+subagent review (verdicts: merge-with-fixes / merge-as-is-dark). Lead landed the review fixes
+before merge: A1/A3 (the In-league ready level now tracks the CONTENT — blur no longer clears it,
+unmount does), A2 (outlook park bound 10 s → 60 s), B1 (MatchesScreen's cross-tab
+edit-in-calculator was a FOURTH prefill site that flag-on silently dropped — now routes to the
+guided landing via a `canvasPrefill` route param, guard 9d–f). EAS **1.16.4 (130)** submitted.
+Checklists H/I1 owed on 130; the tour is OFF under `calc.inline_home` until Wave B re-threads it
+through the inline mount. Ledger: `docs/recovery/2026-08-24-wave-a-b0-ship.md`.
+
+## 2026-08-24 — Wave B0 BUILT dark: the guided landing hosts the In-league canvas (`calc.inline_home`, D-158)
+
+Branch `feat/inline-home-b0`, **not merged, not PR'd**. New flag `calc.inline_home` (**false**;
+mirrored into all three flag fixtures + `backend/feature_flags.py`). ON: `TradeBuildCanvas` is
+promoted from the #270 experiment to the guided layout (flag path outranks the experiment; ONE
+mount), its suggestion rail dies, Find a Trade runs **in place** through the same D-153 fork and
+the same #330 choke point (no navigation, no `FinderHandoff`, no new dispatch site), an anchored
+deck gets a `trades.anchor-receipt` filter row (Change = scroll to the canvas · Clear =
+`handleSearchAllTrades` verbatim, which is why the end-of-deck Search-all steps aside), the three
+edit-in-calculator hand-offs load the canvas, the pushed page becomes **Real values only**, and
+the Calc chip reads `Real values`. OFF = byte-identical (code-walk in the scope block §3).
+**No new events, no schema, no route change** — the fork and the ✓ queue moved to
+`utils/canvasSearch.ts` / `utils/queueCalcTrade.ts`, one implementation each, two callers.
+**The tour is OFF under this flag** (n10 points at the deleted tab) — Wave B rebuilds it.
+Scope: [`docs/plans/onboarding-tour-merge/scope-wave-b0.md`](../docs/plans/onboarding-tour-merge/scope-wave-b0.md).
+
+## 2026-08-24 — Tour merge Wave A built on `feat/tour-wave-a`: Segrave's notes, minus the merge itself
+
+Plan §7 Wave A ([scope](../docs/plans/onboarding-tour-merge/scope-wave-a.md)) — nine notes, no new
+surface, route, event or schema. **Demo link off**: `landing.try_before_sync` → false in
+`config/features.json` + the three fixture mirrors (code path intact; flipping the key back is the
+whole revert). **Ten onboarding talk beats get Next buttons** (`s0.1`, both `s0.err-*`, `s2.1`,
+`s4.1`, `s5.0`, `s5.1`, `s8.1`, `n1`, router-less `n6.1`) — a tap beat mounts the full-screen
+catcher that also ate deck scroll. `s0.1` now promises the walkthrough; `s2.1` carries provenance
+(consensus now / your swipes teach me yours). **Two new runner parks** in `calcTour.ts`, both
+bounded at 10 s into `endTour('abandoned')`: after n10 until the In-league content mounts (a
+LEVEL signal, so a warm re-run proceeds instantly) and after n11's accept until the outlook sheet
+closes. Fixes n11's ringless bubble and n12 drawing behind the Modal — a race the simulator hid
+behind a warm cache. **n22 retargeted** off `trades.fairness-help` (never mounts on a first-run
+deck) onto a new `trades.card-meter` on the top card. **D-157**: the action row's ✕ becomes a
+labelled **Clear**, 50/30/20. Outlook sheet gains a safe-area bottom pad. Not merged, not shipped.
+
+## 2026-08-24 — Knockout refine BUILT + measured: R5 two-sided, R1 currency knob, R2 quality-aware, 3-for-1 knob (D-159)
+
+The four gate refinements from the knockout verdict, on `claude/knockout-refine-0823` (Opus B1/B2 build, Fable adversarial review, lead-merged). Each behind its own `model_config` kill knob; off settings byte-identical to `c321958` (proven mechanically). The read-only prod replay of FFV3 picked the flip values: **filler 0.15 / gap 0 / shape 2 / overpay stays raw** — consolidation-family cards 1 → 8 with junk share flat (18%), while filler 0.10 (junk 27%) and adjusted R1 (kills 2x1s 28→21) were measured and declined. Operator's #341 intent recorded: positional protection is R2's job, now quality-aware (startable depth both sides); the shape rule is a knob. Suite 4230 green. Flips applied post-deploy via admin API; the ledger entry carries the numbers.
+
+## 2026-08-23 — CI flake `test_stud_tax_pinned_market` pinned: breaker wall-clock budget was a hidden test input
+
+The 2026-08-23 CI failure on a docs-only PR (run 32681703490) was not pollution or iteration order: `stamp_breaker`
+runs under the real 250 ms `breaker_ms_budget`, and past the 0.6× pass-2 checkpoint the stamped payload changes
+(`skipped: {reason: "budget"}`). The test stamps twice and compares, so a loaded runner that crosses 150 ms on one
+stamp and not the other fails it — reproduced deterministically by skewing the breaker's `monotonic` +12 ms/call on
+the second stamp only. **Fix:** `test_trade_breaker.py`'s autouse `_env` fixture now pins
+`breaker_ms_budget = 10**9`; budget rungs keep their own coverage via `_snap_with` overrides and fake clocks.
+Evidence: 67/67 under a hostile always-slow clock (fails pre-fix); full suite 4198 passed / 1 skipped locally.
+Details: [G-059](GOTCHAS.md), TEST_LEDGER 2026-08-23b.
+
+## 2026-08-24 — D-158: the guided tab becomes the merged In-league page; canvas anchor = deck filter
+
+Operator worked plan §4 decision 1 live: the guided (Find a Trade) tab IS the merged In-league
+calculator page — build manually or find a trade from one surface; an anchored search gets "the
+same treatment as the existing filters from the outlook tab" (a receipt row: Built around · Change
+/ Clear); the pushed Manual Calc stays with the In-league tab deleted (Real values only). Recorded
+as [D-158](DECISIONS.md) (amends D-151), spec in plan §3b, new **Wave B0** ahead of the tour
+merge. Key find: #270's `trades_home_inline.canvas` experiment already mounts `InLeagueCalculator`
+wholesale on the guided tab — B0 is promotion + handler wiring (`calc.inline_home`, dark), and the
+in-place Find a Trade retires the FinderHandoff calculator lane, the G-056 popTo exposure, and the
+tour's park/deck-arrival machinery. Two flagged assumptions await the operator (existing deck
+visible beneath the canvas; Calc chip relabeled). D-157 ruled same day (labeled Clear button).
+
+## 2026-08-24 — `mascot_ram_rollout` LAUNCHED; Fleeced is live on the operator's device only
+
+Experiment **v2 running on production**, verified three ways: the allowlisted device gets
+`mascot_ram_rollout: treatment` with overlay `{onboarding.mascot_ram: true}`; a request with no device header and one
+with a random device id both get `{}` and the flag stays `false`. The base flag map reads `false` even for the
+allowlisted device — correct, because `api/flags.ts` merges `configs.*.flags` over the base with overlay-wins.
+
+**Filed on the `growth` layer, not `onboarding`, and that is a deviation worth knowing about.** `onboarding` is fully
+occupied by `onboarding_v2_rollout` v3 — running, `targeting: null` (every user), device units, buckets `[0,10000)`.
+Layers enforce bucket exclusivity, so v1 of this rollout was **rejected at launch** with `layer_overlap`. `/revise`
+minted v2 on `growth` (one of only two free layers). This rollout measures nothing so it cannot confound a growth test,
+but **it does hold the growth layer's full range until stopped** — clear that by stopping it after the TestFlight pass
+([experiment.md](../docs/plans/ram-mascot/experiment.md) §8).
+
+**Not verified, so not assumed:** `onboarding_v2_rollout` v3 may be vestigial post-Phase-A — the flags it overlays are
+the release default now. If so, stopping it frees the layer this rollout actually belongs to. That is an operator call.
+
+## 2026-08-24 — Fleeced SHIPPED to TestFlight in v1.16.3 (129), still dark for everyone
+
+**Merged** as [PR #186](https://github.com/mattmurf77/fantasy-trade-finder/pull/186) (squash, `7ac7869`) with all three
+CI jobs green on GitHub, not just locally. **Built** `900ffa32` (EAS production, iOS) and **submitted** to App Store
+Connect — v1.16.3 build 129, processing at Apple.
+
+**Nobody sees the ram yet, and that is the intended state.** `onboarding.mascot_ram` is `false` globally. The build is
+the *precondition*, not the delivery: the sprites are bundled and there is no EAS Update channel, so the flag could not
+do anything until a binary carrying `assets/mascot/ram/` existed. Now one does. The remaining step is creating and
+launching `mascot_ram_rollout` — two `X-Cron-Secret` POSTs against the production DB
+([experiment.md](../docs/plans/ram-mascot/experiment.md) §4), which is a production write and is **still held**.
+
+**Version bump is two files, and a test enforces it.** `app.json` *and*
+`ios/DTFDynastyTradeFinder/Info.plist` (bare workflow, D-057) —
+`test_app_version_consistency` caught the one-sided bump immediately.
+
+**Merge note for the next session:** `main` moved four commits while this was in review, and
+[#185](https://github.com/mattmurf77/fantasy-trade-finder/pull/185) independently landed the same
+`trade.full_sweep` fixture fix this branch carried. Conflicts were confined to `CHANGELOG.md` and `TEST_LEDGER.md`,
+both append-at-top — resolved by keeping **both** sides' entries, nothing dropped.
+
+## 2026-08-23 — Fleeced the ram: mascot decided, art built, swap built dark behind `onboarding.mascot_ram`
+
+**Not shipped to anyone.** Built on `claude/ram-mascot-fleeced`, CI green, flag `false`. Reaching the operator needs a
+build plus an experiment that has not been created.
+
+**Decided.** [D-155](DECISIONS.md) — the ram is the mascot *and* the guide avatar, **named Fleeced**;
+[Q-009](OPEN_QUESTIONS.md) closed after 15 months as "neither — the ram", its premise having been contradicted by the
+shipped icon all along. The raster rule gains a scoped exception (mascot sprites only, under `mascot/ram/`, ≤60 KB).
+[D-156](DECISIONS.md) — painted at every size, chosen **against** the measured 44 pt legibility evidence and recorded
+that way so nobody later "fixes" it; plus the sizing rule: mascot art is inset to **70 % of box width**, because `size`
+is the width of the *box*, not the character, and the Analyst only ever fills 62–90 pt of its 96 pt box.
+
+**Built.** Six painted poses generated one at a time from one approved hero (`nano_banana_pro` / `nano_banana`), alpha
+cut, exported `@1x/@2x/@3x` as 256-colour PNG-8 — worst sprite **15.6 KB** against a 60 KB budget, whole set 167 KB.
+`AnalystAvatar` becomes a flag switch; all three call sites and the tour script are untouched. New guard
+`check-mascot-ram.js`, sabotage-tested. Three self-contained lab pages under `mockups/avatar-lab/`.
+
+**Two corrections worth carrying forward.** (1) `BUBBLE_ANCHOR` is **exported and never consumed** — `AnalystGuide`
+lays the bubble out *beside* the avatar in a flex row, not above it with a tail. The "anchor moves off-centre" decision
+had nothing to move, and the avatar lab's horn-clash test describes the layout the brief *described*, not the one that
+ships. (2) The ID reservation flagged at D1 was correct and then some: `main` took **D-153** (W6-B) *and* **D-154**
+(`trade.full_sweep`) while this work was in flight, so both entries renumbered on rebase.
+
+**Copy landed too.** The operator wrote the line — *"I'm Fleeced, the ram. Good to see another sheep here for me to take
+advantage of."* — which closed the split D-155 had deferred. The rule: the character name replaces the role name wherever
+the text names **who is speaking**; feature-worded copy stays feature-worded. One module writes the name
+(`utils/mascotCopy.ts`); the ram's introduction rides a `lineRam` field on beat `s0.1` so the script lint caps it like any
+other line.
+
+**Also fixed:** the flag fixtures had drifted from `config/features.json` — `trade.full_sweep` was lit by #182 in
+**none** of the three. `origin/main` was already red on `test_release_flags_mirror_features_json`; fixing only that file
+then exposed two more. All three corrected.
+
+## 2026-08-23b — Onboarding × calculator tour merge: PLAN written, nothing built
+
+Operator delivered Segrave's onboarding notes and the intent to merge the new-user walkthrough
+with the #384 calculator tour. Captured verbatim + dispositioned in
+[docs/plans/onboarding-tour-merge/](../docs/plans/onboarding-tour-merge/plan.md): roughly a third
+of the notes are already fixed by W7/W8 — but only for calc beats, which IS the disjointedness
+(onboarding talk beats still advance by invisible tap-catcher); a third is small (demo-link
+flag-off, `s0.1`/`s2.1` copy, Next buttons); the rest is real work in three waves — A: buttons +
+copy + `landing.try_before_sync` off; B: generalize the calc-tour runner into one spine that stops
+at the first trade and bridges into n10–n24, auto-dispatch the guided first search, replace
+`n6.1`-routable's Sleeper-send push with a queued-confirmation + invite moment; C: multi-platform
+landing (research answer: ESPN/MFL have NO username lookup — three platform tiles, three different
+inputs). Five operator decisions in plan §4; the plan proposes "stop at first trade + offer to
+continue" for the tour-length question. **v2 same day:** Segrave added the calculator-tour
+section (notes v2) — dispositioned as plan §2b. Operator later confirmed the
+feedback is FROM build 128, so n11's missing ring is OPEN: the runner requests n11 on the tab tap
+while In-league is still "Loading your league…", the target isn't mounted, and the 150 ms retry
+loses the race on device (the W8 simulator pass was a warm-cache false pass) — fix is a park until
+In-league mounts, joining four other Wave-A items (outlook-sheet margin, park the runner while the sheet is open,
+retarget n22 at the card meter — its current target sits inside `{!firstRun && …}` and never
+mounts for a first-run deck); decision 6 raised (relabel the action row's ✕ to a Clear button
+rather than hiding it mid-tour).
+
+## 2026-08-23a — Full sweep SHIPPED and LIT: the deck now scores every leaguemate (`trade.full_sweep`)
+
+The [full-sweep build](../docs/plans/full-sweep/plan.md) ([D-154](DECISIONS.md), ledger [2026-08-22j](TEST_LEDGER.md)) merged to `main` with the flag flipped **true** in the same PR, by operator instruction ("merge and flip it on"). Both opponent loops now skip the `global_target` early exit, so every eligible leaguemate is generated against and `_dedup_and_sort` ranks the league globally; wall-clock rail `full_sweep_budget_s` = 30 s (the v3 pair path has no deadline of its own); per-opponent keep is the knob `exploration_base_per_opp` (5.0, clamped ≥ 1). Expected in FFV3: every deck reaches all 11 partners (was ~6, fixed set in single-board leagues); deck grows toward `bakeoff_deck_limit` (prod 60); `gen_ms` ≈ 2×. **Owed:** the scope §3 post-flip verification (count partners, read `gen_ms`, prove the kill switch). Kill switch: flag → false + `POST /api/feature-flags/reload`. Review PR #181 (three trade-model reports, Q-030/G-058) merged first, same day.
+
+## 2026-08-22m — Trade-model restrictiveness review, two reads (docs + living-memory only)
+
+Two operator-facing HTML reports in `docs/reviews/`: [`…restrictiveness.html`](../docs/reviews/2026-08-22-trade-model-restrictiveness.html) (three parallel Opus audits + prod telemetry) and [`…second-read.html`](../docs/reviews/2026-08-22-trade-model-second-read.html) (a second model re-verifying the first). **No engine line changed.** Knobs read from prod `model_config`.
+
+Carry forward: the deck reaches a median **6 of 11** partners (sweep breaks at `global_target`) and in single-board leagues it is the **same six every time** — 5/13 and 7/13 leaguemates never served. The bake-off **is serving** (`bakeoff_serve_interleaved = 1`, contra prior memos): `gen_v2` 57% liked vs `current` 6% on the same basis. **Like rate is a viewer-appeal meter** (consensus 30% vs divergence 19%); two-sided scoreboard: 465 likes → 15 matches → 3 accepted; 1 partial / 0 exact of 127 linked real trades. `consensus_both_ways` delivers ≈+18%, not 2×. (A first-draft "`calc_opened` is dead" claim was retracted: 3 of 525 rows set, 7 taps ever.)
+
+Write-back: [Q-030](OPEN_QUESTIONS.md), [G-058](GOTCHAS.md), `docs/reviews/CLAUDE.md` rows.
+
+## 2026-08-22l — #384 W8: the REAL cause of the blank Analyst bubble, found in the simulator (v1.16.2)
+
+Build 127 was still blank at Set outlook. W7's placement theory was wrong. Lead built for the iOS
+simulator (one-off, D-056 still stands) and reproduced it on the sign-in username beat: **every
+targeted beat after another beat drew its ring and no band.** Cause: the band unmounts while a
+targeted spotlight is pending; the native-driven entry spring started on ACTIVATION ran against the
+unmounted band, and the remounted band initialised from the stale JS value (0) and never updated.
+Fix: spring keyed on the band rendering, JS-driven. Verified in the simulator n10 → n16 incl. the
+failing Set outlook beat. Two more found the same way: the auto-tour died behind the deck's
+`s2.wait` bubble and — worse — recorded the first-visit receipt with zero beats shown (fixed:
+starting tour tears down any standing bubble; receipt only when a beat was shown); "Show me around"
+from the In-league tab could not pass n10 (fixed: the tab tap advances n10 even when selected).
+Scroll-into-view reserves tab-bar chrome. Guards: spotlight §14a–f, calc-tour 29/41/42. Gates: tsc
+· 76/76 · lint. Deck half still unverified on device (unverified simulator session 403s on
+generation).
+
+**Second pass, same branch, before the build was cut.** Three first-landing defects reproduced and
+fixed: the auto-start's `InteractionManager` fallback fired before the header laid out (now a 1 s
+timer behind `transitionEnd`); the band latched its OFFSET from that early frame (side stays
+latched, offset live; latch waits for an on-screen cutout); tearing down the deck's stale bubble let
+TradesScreen request N2 synchronously and take n10's slot (hold + owned ids now go up BEFORE the
+teardown — calc-tour 43). Then a fourth, found because the simulator had auto-started the tour
+more than three times: with n10/n11 at `maxDisplayCount` the runner stepped over them and the
+auto-tour OPENED ON n12's DEGRADE LINE with the page still on Real values — an auto-start now
+refuses up front when n10 is capped (calc-tour 44/44a; "Show me around" still resets). The
+operator's device has abandoned the tour repeatedly, so on 128 expect NO auto-tour — use "Show me
+around". Verified in the simulator on the first landing: n10 rings the In-league tab with the band
+beneath it, n11 rings the outlook row with its CTA. Session cost: a `pod install` re-sync left the
+DEBUG Hermes under a `Release` marker and the app SIGSEGV'd at launch — [G-057](GOTCHAS.md).
+Shipped v1.16.2 / EAS 128.
+
+## 2026-08-22k — #384 W7: the tour as the operator actually saw it on device — placement, timing, targets, Next buttons (v1.16.1)
+
+First runtime evidence for #384 came from the operator on build 126, six reports. One Opus
+package, lead-reviewed. **Cause of the big one:** `AnalystGuide` parked the avatar band at a fixed
+`top: 54` whenever the target sat in the lower 60% of the window — every calculator beat after the
+outlook — on the one screen with a native-stack header; the deck (no header) showed it. Replaced by
+`solveBandPlacement()`: the band sits **adjacent to its ring** (above if it clears `insets.top`,
+else below, floored at the top inset; else the legacy bottom band), height measured by `onLayout`
+and latched per step. **First-landing misplacement** was measure timing: auto-start now waits for
+`transitionEnd` (InteractionManager fallback) and the calculator announces `onLayout` +
+`onContentSizeChange` as well as scroll. **Three new targets:** `calc.outlook-row` (n11),
+`trades.swap-first` (n20), `trades.send-btn` (n23/n23b). **Scroll-into-view:** `guideTargets`
+scroller registry (calculator + deck); a targeted step below the fold is scrolled up once. **Next /
+Done buttons** replace tap-anywhere on all eleven talk beats (the full-screen tap-catcher was what
+broke scrolling); n10/n18 stay action beats. Guard hardening found a pre-existing hole:
+`registerGuideTarget\('id'` matched `unregisterGuideTarget('id')` — now word-bounded. Gates: tsc ·
+76/76 guards · lint (backend untouched). Shipped as v1.16.1 (EAS build 127).
+
+## 2026-08-22j — #384 SHIPPED: merged calculator LIVE for all users (PR #172 `80dee42`, flags LIT, app 1.16.0)
+
+Operator: *"Merge and ship live. Turn the flags on and make available for all users."* Branch
+`claude/manual-calculator-e2e-review-39a467` (20 commits: E2E review → W5 → D-151 → W6-A → W6-B →
+flip) rebased onto `613a34c`, squash-merged as **#172**. `calc.merged_layout` **true** and
+**`onboarding.guide_v2` true** (its original graduation criteria — TestFlight pass + M1–M8
+diagnostics — waived by the operator; note it lights EVERY v2 Analyst beat for all users, not only
+the calculator tour; config-only revert). Fixture mirrors updated (release, onboarding-v2,
+profiles-on). App **1.16.0** (`app.json`, `Info.plist`, pbxproj) — EAS production build
+`--auto-submit` to TestFlight cut from the same tip. Gates at ship: pytest 4173 · tsc · 76/76
+guards · testid-lint. **No runtime evidence** (D-056); the rewritten checklist is now a POST-ship
+checklist. Render auto-deploys the backend from `main`.
+
+## 2026-08-22i — #384 W6-B: Find a Trade forks on the canvas — fairness-only packages (D-153); still dark, not pushed
+
+Operator re-ruled the contract (no model for a filled canvas; toggle dropped; tour ends in the
+modeled cards). One Opus build package, lead-reviewed. Backend: `POST /api/trades/fair-packages`
+(flag-gated) — give side an exact anchor, 1–3-asset returns, receive side a ranking preference;
+`_generate_asset_ideas_impl._eval` extracted to `trade_service.eval_consensus_package` and shared
+(asset-ideas byte-identical, golden green); `fair_packages_cap` knob (20); deterministic `fairpk_`
+ids that `_reconstruct_swipe_card` accepts (tested end to end). Mobile: handoff `fairAnchor`
+replaces `includePlayers`; TradesScreen forks before the model gate and `setDeck`s
+`ideaToCard` cards (helper moved to `utils/ideaToCard.ts`, pure); toggle removed (row 70/15/15);
+tour `n10 n11 n12 n13 n15 n16 n18 | n19–n24` (n14/n17 builders deleted; n16 a tap beat);
+calculator `ScrollView` announces scroll + guard rule 10 makes it mandatory; "Search all trades"
+exit on fair decks. Analytics: `calc_include_players_toggled` removed, `path` prop,
+`deck_search_all_tapped`. Gates: pytest **4173** · tsc · 76/76 guards · 5 sabotages red.
+Q-029 fully closed (✓ half D-152, receive-side half retired by D-153). Also this session:
+`docs/plans/ram-mascot/brief.md` (own thread, awaiting D1).
+
+## 2026-08-22h — #384 W6-A: the ✓ cell is wired — `POST /api/trades/queue` (D-152); D-151 closes §6b (still dark, not pushed)
+
+Operator rulings: §6b → the merged calculator keeps its own tab ([D-151](DECISIONS.md), Q-028 closed);
+the ✓ like/queue contract approved and built as **W6-A** ([D-152](DECISIONS.md)). One Opus build
+package, lead-reviewed: the route records the deck's own like through `_reconstruct_swipe_card` →
+`record_decision` with a deterministic `calcq_` id (idempotent, one Elo signal), evaluates the
+counterparty's likes-you gates **up front** and refuses with a closed six-reason enum recording
+nothing; `find_live_trade_like` is a read-only helper (no schema change). Mobile: `onLikeTrade` →
+`queueTradeForOpponent`, per-reason toasts, in-flight lock; `calc_trade_queued {queued, reason}`
+registered (INTENT). 26 backend tests incl. "the queued like reaches the opponent's deck"; pytest
+**4154**; 76/76 guards; docs (api-reference, cross-client-invariants reasons enum, architecture,
+LLD, glossary, scope, status W6-A, checklist 13/13a/13b). Next: **W6-B** — Find a Trade with a
+filled canvas becomes a fairness-only package search (asset-ideas engine generalised), empty canvas
+keeps the modeled deck, the Include-players toggle is removed, the tour is reshaped to end in the
+modeled cards, and the calculator `ScrollView` announces scroll so spotlights track.
+
+## 2026-08-22g — #384 W5: the journey works on paper again (three Opus build packages, lead-reviewed; still dark, not pushed)
+
+Built on the review below, same branch. `fcf3413` **W5-B** — 13 calculator/tour/deck events +
+`prompt_deferred` registered with exact prop allowlists and NON_INTENT classification
+(ingest was dropping every one); addendum `docs/business/analytics/2026-08-22-384-calc-finder-addendum.md`;
+pytest 4128. `9dcd003` **W5-D** — the ✕-overlay stays up through layer 2 and a backdrop-dismiss after a
+banked tile commits the deferred advance (the P0 dead-end); `reasonsAsOverlay` is a host PROP driven by a
+handoff `origin:'calculator'` (not a flag read — shipped decks keep their tiles); `FinderHandoff` gains
+`origin`/`includePlayers`/nullable opponent and the choke point regenerates on a calculator arrival;
+Back-to-calculator via the #190 prefill shape; unpin-retry for any pin count, regenerates; deck guide
+targets registered. `a52c91e` **W5-T** — n10/n16/n17/n18 advance on the real action; Find a Trade uses
+`popTo` (G-056) and the runner PARKS/resumes on deck arrival; auto-start gated on a `calc_tour_completed`
+receipt, `hasLeague`, and `onboarding.guide_v2`; tour-owned mute in `useGuide`; n11 opens the DNA sheet +
+outlook fallback row; format chips restored; league-keyed remount; n23/n23b by platform. Lead added: endTour
+tears down its own bubble, run-ahead Find-a-Trade jumps to the deck half, arrival waits for a card.
+Gates: tsc · lint · **76/76 guards** (+13 assertions) · pytest 4128. **Still open (bright line):** ✓
+like/queue contract (cell stays disabled), receive-side `pinned_receive_mode:'all'`, §6b, rollout shape.
+
+## 2026-08-22f — #384 E2E review: do NOT flip `calc.merged_layout` yet (review-only, nothing shipped)
+
+Five independent Fable code-walk reviews + lead verification of every P0/P1 on
+`feat/calc-finder-merge` @ `7399e18`. Gates re-run and green (tsc · lint · 76/76 guards ·
+pytest 4117). **5 P0 · 8 P1 · 7 P2 · 4 P3** in
+[review-2026-08-22-e2e.md](../docs/feedback/items/384-calc-finder-merge/review-2026-08-22-e2e.md).
+The journey does not work: the ✕-overlay strands every card (layer-1 closes the sheet, the host
+advances only from layer 2); four `action` beats have no `advanceGuideIfActive` call site; the
+deck half of the tour is unreachable (navigate PUSHES a second TradesHome — routers 7.5.3, no
+`getId`/`pop` — and nothing regenerates; deck targets never registered); the tour's spotlights
+and caps hang off `onboarding.guide_v2` (false) and the outlook row off `trade.outlook_direction`
+(false), neither named as a prerequisite; the ✓ cell is a permanently disabled control
+(`onLikeTrade` never passed). Also: receive-side pins are any-one not all (`trade_optimizer.py:522`),
+the overlay is app-wide (`TradeCard.tsx:205`), no first-visit gate, league switch leaves a stale
+canvas, format chips dropped, 12/61 sabotages stayed green, no scope.md, tour events unregistered.
+Four bright-line operator decisions listed in the review. Suggested W5 (no API) / W6 (after rulings).
+
+## 2026-08-22e — The merged calculator: five waves, BUILT DARK (#384, `feat/calc-finder-merge`, not merged)
+
+The report the cap ate ([D-149](DECISIONS.md)) turned into the build. #384 — canonical for
+#310/#379/#380, touching #333 — specced a merged Find-a-Trade/calculator surface plus a
+fifteen-beat tour. Ten rulings at triage, four at plan review, then "continue through all
+waves". [D-150](DECISIONS.md).
+
+- **W0 `224a830` — the demo CALCULATOR removed** (net −239 lines), and only that. "Demo" names
+  two unrelated systems across sixteen files; the demo **SESSION** (`/api/session/demo`,
+  try-before-you-sync, `onboarding.demo_bridge`) is open-access onboarding and is untouched,
+  verified by an empty `git diff` over its five files. `check-demo-calc-removed.js` is
+  two-sided so a future change cannot delete the wrong one. It also surfaced that
+  `tradeCalcMock.ts` exported two types that were never demo-only, and that
+  `utils/CLAUDE.md` called `tradeCalcMath.ts` "demo mode only" when three components import
+  it — a stale doc that would have justified deleting a live module.
+- **W1 `dfcd532` — the layout**, behind `calc.merged_layout` (**false**). Outlook beat,
+  league/team dropdowns (#333), two vertical columns, the 40/30/15/15 action row. Flag-off is
+  proven by **excising every gated region by brace balancing** and asserting no merged-only
+  testID survives — not by grepping for gates.
+- **W2 `56111a0` — behaviour.** ✕ keeps one button and pops the reasons as an overlay;
+  end-of-deck gains "Back to calculator" and "Search without <player>"; include-players writes
+  the **shipped** `useFinderTargets` pin store rather than a `requireAssets` param nothing
+  would have read. **The send ruling needed no code** — `resolveSendPlatform` already routes
+  Sleeper/MFL/ESPN.
+- **W3 `4ff15f3` — a tour-long HOLD, not a new gate.** The plan priced this as building
+  suppression across six surfaces; `useInterruptCoordinator` already was that gate and is
+  live. The real gap: the slot frees BETWEEN steps, so an interstitial legitimately wins the
+  gap. A hold closes it; `isInterruptBusy()` extends it to the root modals.
+- **W4 `ae605ad` — 15 beats compressed to the CI copy budget** (auto 12 / action 16 / tap 20 /
+  cta 16), every line word-counted before authoring, worst case 14/16. Runner owns sequence
+  and lifecycle; the script stays data. Beats decline behavioural retirement **with the reason
+  written inline**, because no receipt means "understands the calculator".
+
+**Gates every wave:** pytest **4117 passed / 1 skipped**, tsc clean, testid-lint OK,
+structural suites **71 → 76**.
+
+**Five dead assertions found and fixed — all in MY OWN guards, none in the product:** two
+substring anchors that survived their own sabotage (`/isDemo/` matched `isDemoRenamed`,
+`/onDemo/` matched `onDemoStarted`), a backwards proximity search for the flag gate that
+stayed green when the gate it should have read was replaced, a fixed-size window that read the
+next JSX prop's body, and a drift detector that threw instead of failing a named assertion.
+An existing suite also broke honestly (`check-decline-reasons.js` pinned the ✕ condition as a
+literal string); its two legal shapes are now enumerated rather than the pattern loosened —
+verified by sabotage that it still rejects `reasons && false`.
+
+**Nothing is live and nothing has runtime evidence.** `calc.merged_layout` is false, the
+branch is unmerged, and the 27-step TestFlight checklist is unrun. Reported not buried: a
+**pre-existing** Chalkline floor violation (`lineupHeadText` at fontSize 10, on `main` since
+#297), and plan §6b — ruling 3 collides with #310 and with the tour's own first beat, built to
+a stated assumption that still wants a yes/no.
+
+## 2026-08-22d — A long feedback note stopped vanishing (cap 2000 → 8000, and the three silences around it)
+
+The operator wrote a long in-app note, tapped Save, watched the sheet close normally — and it
+never arrived. Not a network blip: `POST /api/feedback` had refused it with `400 text_too_long`,
+and **three separate behaviors conspired to make that invisible** ([G-055](GOTCHAS.md),
+[D-149](DECISIONS.md)):
+
+- the compose sheet had **no counter and no `maxLength`**, so nothing hinted a cap existed;
+- `onSave` cleared the draft and closed **unconditionally**, so failure looked exactly like success;
+- `useFeedback.add` fired the POST into a detached `void (async …)()` IIFE that **always** resolved
+  `synced:false`, so the caller could not have checked even if it had tried. And because a 400 is
+  *permanent*, `retrySync()` plus the AppState foreground hook re-attempted the same doomed
+  request forever.
+
+**Nothing was actually lost** — `add()` persists to AsyncStorage *before* the network call, so the
+note sat readable the whole time at Settings → Testing → "Test feedback", badged `Sync failed`. The
+defect is that nothing said so.
+
+- **Cap raised 2000 → 8000, and deliberately kept.** `/api/feedback` accepts anonymous writes, so
+  the bound is the only limit on payload size. `app_feedback.text` is unbounded `TEXT` — validation,
+  not storage, so no migration.
+- **Soft cap, not `maxLength`.** RN's `maxLength` silently truncates a *paste* — the same data loss
+  moved earlier. The counter reddens, names the overshoot, and holds Save; the app never edits the
+  user's text.
+- **One number, pinned across the seam** (`backend/server.py` ↔ `mobile/src/api/feedback.ts`) by
+  `check-feedback-capture.js`. **It caught a real mismatch on day one:** mid-build the client was at
+  8000 while the server was still at 2000, and the assertion fired with the right diagnosis.
+- **Deploy order matters and CI cannot enforce it:** backend-first is safe, client-first *reproduces*
+  the defect for 2001–8000-char notes. Backend ships now; the client half waits for a build.
+
+**Evidence.** pytest **4117 passed / 1 skipped** (baseline 4114 + 3 boundary tests); `tsc` clean;
+testid-lint OK; **71** structural guards incl. the new 6-assertion one. Red-proofed both ways: the
+new guard is **6/6 RED** on the pristine defect tree at `9e1a8be`, and **20 sabotage cycles** (one
+per named failure branch) each fired the branch it targeted. The backend trio caught three
+sabotages including the nastiest — making the server **truncate** at 2000 instead of refusing still
+returns `201`, so only the stored-length assertion catches it.
+
+**Unknowable, and worth stating plainly:** a rejected POST writes no row, so there is no
+server-side record of how many notes this cap ate before today. `obs.api_events` captures the 400s
+from here on.
+
+## 2026-08-21d — Decision-ID attribution corrected: slot pricing is D-146 everywhere (docs only)
+
+Nine reference-doc sites and three `LLD.md` headings credited the wrong decision for
+per-slot pick pricing. Root cause: the slot-pricing session drafted its decision as
+**D-144**, renumbered only the `DECISIONS.md` entry to **D-146** ([G-048](GOTCHAS.md)),
+and left the draft ID in every doc it had already written. PR #168 then blanket-replaced
+`D-144` → `D-147` across `LLD.md`, turning an already-wrong ID into a differently-wrong
+one; the tell was a heading reading D-147 above an anchor still reading `d-144`.
+Corrected against `DECISIONS.md` **one site at a time, by what each decision actually
+decided** — never by adjacency or date:
+
+- `LLD.md` — "Retiring a per-user setting" and "Pricing waterfalls" → **D-146**;
+  "Append-only… `receipts_*`" stays **D-144** (genuinely Receipts); "Consulting a leaf"
+  stays **D-147** (negmem), anchor healed. All five TOC rows now agree with their
+  headings, and the receipts section got the TOC row #165 never gave it.
+- `api-reference` (retired `/api/settings/pick-pricing`), `config-reference`
+  (`trade.slot_pricing`), `data-dictionary` (`pick_pricing_mode`) and **5** sites in
+  `cross-client-invariants` → **D-146**. Each had been sending readers to Receipts grading.
+- PR #169's day-old D-148 section opened *"D-144 put per-slot pick pricing into the
+  engine"* — inherited from the neighbour it was written beside. Fixed.
+
+`docs/plans/**` drafts keep `D-144` on purpose (historical record of the draft).
+New [G-054](GOTCHAS.md): a heading/anchor mismatch is the fingerprint of a blanket
+replace, with a slug-every-heading detector; **`git grep` the OLD id after any renumber.**
+Also indexed G-049/G-050, which had entries but no index row (so the SessionStart
+injection never surfaced them). Docs only — no code, no schema, no routes.
+
+## 2026-08-21c — League surfaces now price picks at the engine's waterfall (PR #169, `70ae4f4`)
+
+Closes the disagreement [D-146](DECISIONS.md) knowingly left open: a 2026 1.01 read **2117.0 on
+Power Rankings and 4867.1 inside a trade card**. Five call sites now share ONE seam
+(`_priced_pick_value`), bidirectionally AST-guarded so a sixth cannot appear —
+[D-148](DECISIONS.md), closes [Q-026](OPEN_QUESTIONS.md).
+
+- **A real defect fell out:** `_roster_eveners` sized its one-tap "add their 1.01" suggestions off
+  the stored ladder while the same response's `gap` came from priced picks — offering to close a
+  2117.0 hole it charged 4867.1 for.
+- **Power Rankings deflate, monotonically by slot:** +12.4 % (1.01 holder) → −40.3 % (1.12),
+  **−22.1 % league-wide**. These have been the ENGINE's prices since `3192d13`; this stops a
+  screen contradicting them. **50 of 96 badges re-band** (bands + five client mirrors untouched).
+- **ADR-011 boundary named:** `roster_history.team_value` steps at this merge (Wrapped/trends read
+  across it). Nothing historical recomputed — pinned by a test asserting `roster_history.py`
+  contains no pricing call at all.
+- Golden set in isolation **3×, zero edits**; suite **4114p/1s**; zero client diffs.
+- Residues raised not buried: pick-SHARE ratios stay legacy (waiver 3 — an inference input, and
+  changing it changes deck generation), and the non-12-team board/engine mapping became
+  **[Q-027](OPEN_QUESTIONS.md)** (a 10-team league's last first displays 820.8, prices 1069.8).
+
+## 2026-08-22c — negmem SHIPPED dark: merged to `main`, deployed to Render (PR #168)
+
+The negative-results-memory branch merged (`7b7c314`) after re-merging `origin/main`
+(Receipts #165, arm-C sweetener #166, slot pricing #167 — no code conflicts; my
+`trade_gen_v2` seam and the new arm-C sweetener coexist, suite 4097 green). **D-number
+collision caught and fixed at merge:** Receipts landed D-144 first, so the negmem entry
+renumbered **D-144 → D-147** with every negmem cross-reference repointed — renumber the
+newcomer, never someone else's landed entry. CI green on 3.12.3; zero mobile files, so no
+TestFlight build was cut (operator instruction: GH + Render only). Render deploy verified
+by `trade.negmem` moving ABSENT → false on `/api/feature-flags`. **Everything is dark:**
+flag false ∧ allowlist empty (ON needs both) ∧ arm A pinned to 0. Rollout remains two
+operator flips at a bake-off round boundary; the TestFlight checklist is UNRUN and is the
+only runtime evidence this feature can get (D-056).
+
+## 2026-08-22 — negmem BUILT DARK: the whole v1 is on the branch, nothing is lit (`claude/vigilant-spence-8583f5`, not merged)
+
+Build gate opened by the operator's three §6 rulings (D1 yes · D2 seed-only · D3 (a) full
+layer 2, knowingly against the recommendation). Built in **three waves**: B1 the leaf
+`backend/negmem.py` (83 tests, 26/26 sabotages RED-then-restored, LLD worked examples exact)
+→ B2 the registration surface (flag + 6 knobs ×3 registrations, arm-A pin, allowlist file;
+arm-A golden UNMOVED, no recapture) → B3 the four consultation seams + threading + the stamp
+trichotomy (33 seam tests, 6 sabotage families) → this wave: the `bakeoff_runner` forwarding
+that B3 left, 5 through-the-runner tests, the two readout SQL files, the TestFlight checklist,
+and every docs row. Suite **4025 passed / 1 skipped / 0 failed** (wave-2 baseline 4016; +9 this wave); testid-lint OK; zero mobile files touched.
+[ADR-015](../docs/adr/adr-015-negmem-soft-prior-not-fourth-filter.md) + [D-147](DECISIONS.md)
+record the soft-prior-not-a-filter shape and the build-complete state.
+
+**Known gap, deliberate:** nothing is lit. `trade.negmem` is false and
+`config/negmem_leagues.json` is empty — the ON-condition is BOTH — so no deck has ever been
+generated with this on. The [TestFlight checklist](../docs/plans/negative-results-memory/testflight-checklist.md)
+is written and **unrun**. Rollout is two operator flips at a bake-off round boundary, not code.
+
+## 2026-08-21b — negmem LLD FINAL: the planning suite is COMPLETE (branch `claude/vigilant-spence-8583f5`, not merged)
+
+Resumed post-limit-reset; LLD authored via drafts (Fable) → merge agent under an 11-point
+ruling sheet → rounds 2–3 on **Opus** (operator-directed model switch). Dual sign-off
+round 3/4. The round-2 review killed a merge-adopted mechanism outright (`owner_alias`:
+unbuildable AND unnecessary — M1 needed no aliasing; M2 ships identity + a real
+tripwire), fixed the like-leg retraction to honor the schema's revive path, made a
+vacuous sabotage falsifiable, and resolved OQ-4b by independent convergence (keep the
+shrinkage-gate discontinuity; `negmem_sat_k` is the deploy-free flap lever). 27
+sabotage-pinned tests; 7 HLD/PRD deltas logged. **Suite: memo · scope · PLAN · PRD FINAL
+· HLD FINAL · LLD FINAL · reconciliation-log (3 sections) — planning only, zero code.**
+Shared taxonomy closed at v1.1.1 (three-way + my admission-list footnote). Batch
+delivery to the operator: pinged Receipts; rides with the breaker suite. The three
+operator decisions (negmem scope §6) remain the build gate.
+
+## 2026-08-21 — negmem planning suite: memo, scope, plan, PRD FINAL, HLD FINAL (branch `claude/vigilant-spence-8583f5`, not merged)
+
+Operator product-gap item 2 ("Negative-results memory") taken through full gates,
+planning only. Code-truth memo (518 lines: every existing rejection-consumer cited; the
+gen_v2 `acceptance_prior` unfed-stub finding; D-067 soft-only constraint) → scope block
+(3 operator decisions) → PLAN → dual-agent **PRD FINAL** (9 blockers fixed across 4
+rounds; v1 = soft prior keyed (partner × {value,fit}), 22 cells, floor 0.6 + feed the
+stub; privacy rec = aggregate-only derive-on-read) → dual-agent **HLD FINAL** (8+1
+blockers across 4 rounds; pure `effective_mult`, kwarg threading, stamp trichotomy,
+M2×strength decision: `negmem_strength` M1-only, M2 kill = `gen2_accept_prior_strength=0`).
+Three-way reconciliation with Receipts CONFIRMED (their contract §7; two data boundaries
+inherited); breaker boundary agreed (shape_aversion producer=negmem); operator ghost
+ruling absorbed (checked NOT load-bearing). **LLD pending — session limit** (see HANDOFF).
+## 2026-08-21b — Triple ship: Receipts LIVE (grading lit) · arm C unbenched with its sweetener · TRUE PER-SLOT pick pricing
+
+Three merges, all operator-driven same-day, each a value/measurement boundary:
+
+- **#165 `93f1fd0` Receipts** — nightly suggestion grading over the 4,051-card cohort
+  (P0 prod checks passed: cohort from 2026-08-16, zero snapshot gaps, top testers 750–840
+  gradeable each). `receipts.grading` LIT at ship (Q-1..Q-4 rulings); screen dark until the
+  operator's TestFlight pass. First mature grades ≈ 2026-08-30.
+- **#166 `3df71c0` arm-C gap sweetener** (cherry-picked from the operator's side session)
+  — closes the regression that benched gen_v2 at #162; `bakeoff_include_gen_v2` 0→1 @18:49Z.
+  **All three serving arms now run honest pricing + the sweetener.**
+- **#167 `3192d13` per-slot pick pricing, unconditional** ([D-146](DECISIONS.md), closes
+  Q-023 fully; Q-026 ruled-deferred). 1QB 2026: 1.01 **4867** … 1.12 **821** (5.9× spread)
+  where the ladder charged 2117 flat. The operator's Maye+Adams ↔ 1.05+2027-1st proof case:
+  +372 picks-favored → **−15 near-even**. Opt-in mode/route/Settings row retired (repo's
+  first 410). Goldens: 156 assertions, zero edits, twice. Repo's first conftest.py pins the
+  DP pick snapshot (suite was one network fetch from flaky).
+
+Origin story for the day: operator feedback on ONE trade (Maye+Adams for 1.03+1.05) →
+market-curve analysis → benchmark+sweetener ship → per-slot ship. Suite 3969p/1s at day end.
+## 2026-08-21 — Receipts built dark on `feat/receipts` (NOT pushed, NOT merged)
+
+Grades our own past suggestions against subsequent consensus movement. No competitor grades
+its own advice. Everything is behind two default-false flags.
+
+- **Metric is swap edge** (`receive-delta − give-delta` on `player_value_history`), not an
+  acquire-side % — the give side is the market control (D-145). Valuation never comes from
+  the frozen card, whose values may be the user's personal board.
+- **Grades are append-only + `grader_version`-stamped** (D-144): no UPDATE/DELETE path exists
+  for `receipts_*`, test-enforced. A correction is a regrade; old rows stay.
+- Ships: `backend/receipts_service.py` (leaf — no engine import, both directions guarded), 2
+  tables, 3 routes (cron 202+daemon, viewer-scoped league read, admin per-cell readout with
+  Wilson intervals), daily-tick guard, `scripts/receipts_backfill.py`, `ReceiptsScreen` +
+  entry point, 3 analytics events.
+- **Both screen states built** per operator ruling Q-1 — the maturity/ledger state is the
+  launch hero, not an empty state.
+- Evidence: 54 pytest + 12 structural checks, **21 named sabotages all RED**; six guards were
+  blind on the first pass and were strengthened. Two real defects caught: a dedup keeping the
+  latest serve (masked by a stale `.pyc`) and a flag-off daily-tick payload change.
+- Backfill exercised on a synthetic fixture DB: 565 resolvable → 542 graded + 23 ungradeable,
+  terminating on two zero-work runs, 0 ghosts graded. The real dev DB has no impressions, so
+  its dry-run correctly reports 0; the prod P0 cohort read is still outstanding.
+
+## 2026-08-22 — SHIPPED early by operator call: package pricing honesty + gap auto-sweetener (PR #162, `d42872f`)
+
+Operator: *"I would rather the more accurate trade suggestions now."* Merged ahead of the
+Monday boundary; this week's readout is two-window censored at the merge SHA (accepted).
+
+- **The mid-package-buys-stud defect is dead:** `_package_value_market` depth discount now
+  benchmarks against the TRADE's best asset. Nacua proof case 0.952 → 0.709 (blocked).
+- **Gap auto-sweetener:** consensus gap > 1539 (one late 1st) ⇒ generation adds the best
+  equalizer from the richer side. Real-boards replay: fires 1.42/deck, closed **17 of 17**
+  it touched (mean gap 2173 → 850); deck cost only **−1.6%**; arm-B over-line 8.1 → 3.8%.
+- **NOT independently revertable** (replay finding): the benchmark fix ALONE raises the
+  over-line share (v3 6.7→11.3%) — the sweetener nets it down. Rollback = BOTH
+  `package_bench_trade_wide ≤ 0` AND `sweetener_gap_threshold ≤ 0` together ([D-143](DECISIONS.md)).
+- **Arm A never moved:** knobs pinned 0.0 in `MODEL_A_PROFILE`, deck-level byte-identity
+  proven on fixtures AND real boards — golden un-recaptured, operator-ratified ("Y").
+- **Arm C benched at ship** (`bakeoff_include_gen_v2` 0, logged 16:37Z): it inherits honest
+  pricing without the sweetener (37.2% over-line on real boards). Unbench when the arm-C
+  sweetener extension (separate session, in flight) merges.
+- `ghost_holdout_one_in` code/seed defaults → 0 (the 08-21 ruling, now durable). Opus
+  review pre-ship fixed two inherited defects (sweetener targeting bypass; stale
+  fit_premium on v3 sweetened cards). Suite 3897p/1s post-#161-merge; CI green ×2.
+
+## 2026-08-21 — Counterparty-breaker suite CONVERGED (dual-agent, three-way reconciled); build started dark
+
+Full planning suite for the "Counterparty breaker" (evaluates every trade suggestion from the
+OTHER manager's seat; predicts their decline reason in `trade_pass_reasons` vocabulary; v1 =
+stamp + hesitation narrative, zero ordering effect) completed on `claude/counterparty-breaker-plan`
+(tip `c14680a`+): [docs/plans/counterparty-breaker/](../docs/plans/counterparty-breaker/) —
+scope · PLAN · HLD · LLD · PRD, each dual-agent converged (4 rounds each), full
+[reconciliation-log](../docs/plans/counterparty-breaker/reconciliation-log.md).
+
+- **Three-way reconciled** with Receipts + negative-results-memory; shared taxonomy **v1.1.1**
+  closed on `plan/receipts` (`5572604`, producer column enforces the breaker/negmem boundary);
+  Receipts batch check **PASS**.
+- **Review caught real defects pre-build:** false seam claim (likes-you cards injected after the
+  fit-stamp site), payload-layer privacy leak (dark window now serves NO breaker key), rung-5
+  handler crash, picks-in-lean contradiction, lost flag-off MUST — all fixed in-loop.
+- **Binding constraints recorded:** operator NO-ghost ruling; interleave discipline (v1 zero
+  ordering effect); Monday `fix/package-benchmark-sweetener` ship = named measurement boundary
+  (arm A byte-invariant — knobs pinned 0.0 in its profile; `gap_sweetener` key).
+- **Build COMPLETE same session** per operator instruction (Opus subagents, 3 waves: module+knobs+
+  templates+mobile → server seam → docs/evidence). Everything behind `trade.breaker` +
+  `trade.breaker_narrative`, both **false**; suite at tip **3872p/1s**; 25 knobs ×5; taxonomy
+  v1.1.1 landed; calibration spec committed pre-flag-on; [D-142](DECISIONS.md);
+  **[PR #161](https://github.com/mattmurf77/fantasy-trade-finder/pull/161) open — merge is the
+  operator's.** 20-item register in PRD §9 — defaults ship, register is post-build tuning.
+
+## 2026-08-21 — Serving RE-LIT (B/D/C interleaved), ghosts OFF by ruling, QB 1QB repriced, planning fleet
+
+**All prod changes via `scripts/set_knob.py`, logged in `model_config_changes` (the M1 rail's
+first live use).** Operator-driven session, all decisions theirs:
+
+- **Interleaved serving LIVE** 00:43Z: `bakeoff_serve_interleaved` 1, `bakeoff_group_size` 0
+  (plain draft), `bakeoff_deck_limit` 60. First decks: 26–29 cards, arm mix challenger 38 /
+  current 26 / gen_v2 17. Root cause of the operator's 6-card-repeat deck: FFV3 pool exhaustion
+  (287 decided + 812 standing decisions) **amplified by ghost accumulation** — ghosts can never
+  be decided so never leave the pool (one hash ghost-served 35×; two decks were 100% ghost).
+- **Ghost holdout OFF** (`ghost_holdout_one_in` 0) and then **ghosts ruled out entirely**
+  (operator: "I still am against the ghost cards") — Receipts amended post-sign-off (`325896e`),
+  all three planning suites carry the ruling; code/seed defaults flip to 0 next ship.
+- **QB 1QB repriced** 04:46Z: `qb_1qb_cap_elo` 1785→**1644**, knee 1580→**1200** — two-anchor
+  solve: Allen = exactly a late 1st (1539), sub-first QBs = mid-2nds. The old cap priced Allen
+  ABOVE an early 1st (3592 vs 3373). Also seeded 10 never-seeded serving/ghost knobs
+  (`024b030`) — the "deploy-free" flips had been code-default edits all along.
+- **Tier-anchor diagnostic** (operator's "too flat" thesis): within-band spread is HEALTHY
+  (p10/p50/p90 ≈ .07/.5/.9 in every band) — thesis not confirmed as stated; rung occupancy
+  lumpy; market-curve steepness comparison (D-084 method, vs KTC/FC) running as the follow-up.
+- **Post-flip card analysis:** 15% of cards carry gap > a late 1st, all from arms D/C at
+  fairness .73–.83 on big packages — the ratio-gate scale-blindness, live. Operator
+  commissioned an **auto-sweetener pass** (add the equalizer instead of serving the gap); queued.
+- **Planning fleet** (3 sessions + coordinator): Receipts suite COMPLETE (dual sign-off, round 3;
+  8 blockers fixed incl. a wrong Wilson formula and a sign error both reviewers independently
+  caught) on `plan/receipts`; negmem + breaker reconciled against its §7 contract; shared
+  trade-shape taxonomy v1.0.0 seeded (`docs/plans/shared/`). Batch → operator when sibling LLDs land.
+
+## 2026-08-20c — Team Review #364–#376 all shipped; #366 tiers LIT, three window flags dark
+
+Operator ran the flow end-to-end and filed **thirteen reports**. All closed in code across
+PRs #152/#155/#156/#157/#158 and builds **124**/**125**.
+
+- **#372 — one re-weighted composite window** ([D-140](DECISIONS.md), `trade.outlook_composite`,
+  **dark**): age 1.00 → 0.40, `starter_index` +0.60, `playoff_index` +0.40, cuts unmoved. Measured
+  on prod (12 leagues / 156 teams) the legacy vector called **65% of every team a rebuilder**; the
+  composite gives 62/40/54. FFV3 flips rebuilder → contender; `PaulSm3nis` flips the other way,
+  reading contender on age alone while owning the league's worst starting lineup.
+- **#366 tiers LIT** (PR #157, operator call, evidence caveat reaffirmed). `trade.position_tiers`
+  moves `position_needs`/`position_surplus` and therefore **every deck**. Handcuff is real, not
+  approximated — Sleeper's `depth_chart_order`, exactly 32 RB2s, one per NFL team.
+- **#369/#375 — plan beat rebuilt**, and it uncovered live data loss: the depth beat's "Save &
+  continue" **had never saved anything** (positions-only body, route 400s without `team_outlook`,
+  client throws, the success line never ran behind an empty `catch`). So
+  `team_review_action_taken{action:'positions_set'}` has **never fired in production**.
+- **#376 — the filters were NOT removed by an update.** Build 123→124 changed four files, none on
+  TradesHome; all 178 prod flags matched `main`. Cause: `trades_home_inline` at **100% strip since
+  2026-08-09**, where `TradeHomeUtilityRow` replaces the mode bar and shipped with no conditions
+  entry. Filters button restored; experiment kept by operator choice.
+- **#374** — "pointed the other way" defined from both sides in the user's own window terms.
+- **Evidence quality is the story: FIVE dead tests found** across three waves — one asserted the
+  defect, one went vacuous when a fix changed selection, one's escape hatch held only by accident,
+  one's helper zeroed its own index so deleting the guard was a numeric no-op, one regex needed a
+  literal word near a differently-written gate. Separately, forcing #366's bands on left **all 65
+  engine tests green** — proven meaningless by disabling the small-pool guard, which turned exactly
+  1 of 65 red.
+- Final gates: pytest **3761 passed, 1 skipped**, tsc clean, **68** `check-*.js` suites, testid-lint OK.
+- **Owed:** four TestFlight checklists, all unrun. #372 is in no build.
+
+ + measurement rail + serving guards (dark; SHIPPED to `main` 2026-08-20)
+
+**Session arc:** re-reviewed the trade-suggestion research corpus against fresh read-only prod
+pulls (position curve INVERTED — like-rate 16.9% top-of-deck → 50%+ past card 25; `propose` = 0
+all-time; pass reasons 40% `value_giving` / 33% `fit_outlook`; only arm `current` has ever
+served), wrote [trade-engine-accuracy/PLAN.md](../docs/plans/trade-engine-accuracy/PLAN.md),
+reviewed the operator's fit-challenger PRD
+([review](../docs/reviews/2026-08-20-fit-challenger-review.md), C1–C7 + T1–T4), then ran the
+full dual-agent pipeline (drafts → cross-critique → merged
+[PLAN-v2](../docs/plans/fit-challenger/PLAN-v2.md) → HLD → LLD → PRD-build) and BUILT it in
+5 commits: PR-M `980eeea` (knob log `model_config_changes` + `set_knob.py` + readout SQL incl.
+lens calibration), PR-S `b2b4461` (08-18 shrink regression test, sabotage-proven; bypass
+code-walk: all 7 layers covered; finding: serving-mode state is `served_arm` alone), PR-F1
+`ba5b1e0` (knockout chain, K3-last, T1 module-binding sabotage-tested), PR-F2 `d8a80a5`
+(enumerator + dual 0–100 scorer on RAW boards + `fit_diag` stamp w/ lenses), PR-F3 `cb3cb3d`
+(post-filters, runner wiring, serve-bit proven at BOTH draft paths, docs rows). Suite
+**3645 passed, 1 skipped**. 17 knobs, all arm-A-dispositioned. [D-098](DECISIONS.md)/[D-099](DECISIONS.md),
+ADR-013/014. Fixture dry run: fit **253 distinct ideas vs arm B 12** (~21×), one_sided 0.48,
+junk 0.055, 1.8 s @ 5k cap — R-8 says rostering is now an **operator decision**
+([register, 9 items](../docs/plans/fit-challenger/PRD-build.md)). Everything dark:
+`bakeoff_include_fit` = 0 (operator: flip to 1 at W3), `bakeoff_serve_fit` = 0,
+`bakeoff_serve_interleaved` untouched at 0. Same-day operator rulings shipped with it:
+K1 widened to include 2-2/3-3 (PRD §12.6), `trade.outlook_direction` OFF (experiment #1 —
+watch `fit_outlook` pass-reason share), ms bar set (scope.md §6). No client build needed:
+zero mobile files changed.
+**Corrections:** D-096 likes-you gates (`7110af2`), balanced-claim fix (`d755b3b`), and arm D
+(`38806e0`) are MERGED on `origin/main` — earlier HANDOFF/NEXT entries calling them unmerged are
+stale.
+## 2026-08-20 — "Elite" meant four different things, and the NFL depth chart was there all along (#366, dark, not merged)
+
+Second item from the same operator pass. Two flags, both **OFF**, neither graduated; committed on
+`worktree-agent-a4ab94c51456abb78`, **not pushed and not merged**.
+[scope](../docs/feedback/items/366-tier-ladder/scope.md) ·
+[code-walk](../docs/feedback/items/366-tier-ladder/code-walk.md) ·
+[D-120](DECISIONS.md) · [D-121](DECISIONS.md)
+
+- **The elite logic was a disguised overall-rank cut.** `_bin_player` banded on three absolute
+  `dynasty_value` thresholds, and `dynasty_value` is a monotone function of Sleeper's **overall**
+  `search_rank` — so 4000/1500/500 really meant "overall rank ≤ 73 / 151 / 238", applied identically
+  to a TE and a RB. Measured on the live pool: **33 elite RBs, 33 elite WRs, 17 elite QBs, 7 elite
+  TEs.** One word, four meanings, exactly as reported. Behind `trade.position_tiers` the bands now cut
+  in rank **within the position** — Elite = top half of the league's starting demand, Starter = inside
+  1.5×, Replacement = inside 2.5×, superflex widening QB to the RB/WR cuts.
+
+- **The third layer existed and was never rendered.** `bench` has been computed since the function was
+  written; the beat printed `N elite · N starter` and dropped it. `bench` is **not renamed** —
+  `replacement` ships alongside it as an alias so the shipped TestFlight build keeps parsing, and the
+  screen reads `replacement ?? bench`. The label is "Replacement"; the word "bench" is never shown.
+
+- **Handcuff is real data, and the plan doc was wrong about that.**
+  [plan-remaining.md](../docs/feedback/items/364-team-review-fixes/plan-remaining.md) §2 said no FTF
+  feed carries an NFL depth chart and floated approximating with "second-highest-valued RB on the
+  team". Sleeper's `depth_chart_position` / `depth_chart_order` have been ingested since
+  `database.py:8769`, re-synced every 24 h, and hydrated onto every pooled `Player` at
+  `server.py:1580` — **149 of 603 RBs carry a real order today**, matching the 32 actual NFL charts.
+  So the tag is the operator's literal definition (`order == 2`), not a guess that would have been
+  wrong in precisely the committee backfields where the label matters. `handcuff_rb` is **absent** when
+  its flag is off, never `0`: "we did not look" and "you own none" are different claims.
+
+- **Two flags, not one, because the blast radii differ by orders of magnitude.**
+  `analyze_roster_strengths` also produces `position_needs` / `position_surplus`, which the trade
+  engine consumes — `trade.position_tiers` ON **changes every deck for every user**, so OFF returns a
+  byte-identical dict (pinned, sabotage-proven). `trade.rb_handcuff` is one additive integer no engine
+  path reads. Rollback is deploy-free: flip `config/features.json`, `POST /api/feature-flags/reload`.
+
+- **Found while testing, and it is a graduation blocker:** 65 pre-existing engine tests are
+  **completely insensitive** to the new banding — they stay green with the flag forced on, because
+  every fixture pool is smaller than the small-pool guard and cannot distinguish the bands.
+  `trade.position_tiers` must not graduate on a green suite; it needs `scripts/deck_eval.py` on real
+  leagues plus the TestFlight step written for it.
+
+Gates: **3638 backend tests** (+32), `tsc` clean, 65 `check-*.js` suites green (new
+`check-team-review-depth`, 8 assertions), testid-lint OK, **12 of 12 sabotages red then green**.
+
+## 2026-08-20 — Team Review defect batch: the sell list was inverted, the partners beat was starved (#364/#367/#368)
+
+First operator pass over the Team Review flow shipped 2026-08-19 produced 8 reports. Three built,
+four planned by operator selection ([plan-remaining.md](../docs/feedback/items/364-team-review-fixes/plan-remaining.md)).
+
+- **#367 — the sell list selected the wrong players, in two places.** `compute_consensus_gap` kept
+  roster players the USER rated *above* the market; the card then promised *"someone pays you more
+  than you think they're worth"* over exactly the set nobody overpays for. Separately,
+  `_divergence` crossed both field names, so the user's best BUYS rendered under **"Skip these."**
+  Fixed **upstream** by operator call, which repairs mobile Trends too ([D-100](DECISIONS.md)).
+- **#368 — one root cause, both symptoms.** The route computed `pick_share` and `first_rounds` per
+  owner and never passed them, so `_partners` fell back to `{}`: every team read "0 firsts" **and**
+  a contender's sort key was uniformly 0.0, leaving the beat in arbitrary order. Two kwargs.
+- **#364 — the outlook caption now names IDP** and lists the unpriced slots, reading
+  `meta.priced_slot_coverage.unpriced_slots`, on the wire since 2026-08-10 and never read by any client.
+- **Operator asks, same session:** `window.model` ships all seven inference knobs so the beat renders
+  its own inputs ([D-101](DECISIONS.md)) — it had hardcoded *"age 23 and under"* against a `youth_age`
+  of **26**; and completing the flow now minimizes the entry card to a "Team review · done" row.
+- **Docs:** `/api/league/team-review` was **never documented** — added, post-fix contract. New
+  `cross-client-invariants.md` § Consensus-gap direction (three consumers, so the sign is an invariant).
+- **Gates:** pytest **3606 passed, 1 skipped**; tsc clean; 64 `check-*.js` suites green; testid-lint OK.
+  6 new backend tests, **5 sabotage-proven red**; 2 pre-existing tests repaired — one asserted the
+  defect, one had gone **vacuous** under the fix while still passing. TestFlight checklist UNRUN.
+- **No flag reverts #367** — `compute_consensus_gap` is ungated and shared. Rollback is a code revert.
+- **SHIPPED.** PR #152 merged `bc43b6f`; CI green on the pushed sha (backend-tests, mobile-typecheck,
+  testid-lint). Render **live on `bc43b6f`**, so the divergence/partners/caption fixes are serving now.
+  EAS **build 124 (v1.15.0)** from that sha submitted to App Store Connect and accepted, awaiting Apple
+  processing — the corrected COPY and the window inputs card need the build; the payload half did not.
+
+---
+## 2026-08-19 — likes-you injector gated (D-096); the floor moves into the units the user reads
+
+**Not shipped — committed to `fix/likes-you-quality-gates`, not pushed, not merged.**
+
+`server._inject_likes_you_cards_impl` faced no quality gates by design ([D-055](DECISIONS.md)
+sub-decision (5) / Q-G6-1). Its only floor was measured on **raw summed** values while the
+value bar renders **package-adjusted** ones — so a −500 floor shipped a −5,571 card, pinned
+to deck position 1–3. Read-only prod measurement: **115 of 198** served likes-you
+impressions showed the user paying, vs. effectively none on the gated deck.
+
+[**D-096**](DECISIONS.md) reverses the exemption: the floor moves into package-adjusted
+units at a default of **0.0** (= `user_gain_epsilon`, the gated path's own rule), and R1
+`overpay_ok` + `filler_ok` run at level 2. **R1 runs DIRECTIONALLY** — blanket R1 was
+measured and rejected because it kills 58 of the 83 floor-surviving cards and **all 58 are
+cards where the USER is being overpaid**, the largest a +6,325 one-for-one the counterparty
+had already liked. Fairness/R2/R3/R5 excluded with stated reasons and a pinning test.
+
+Measured cost: **198 → 83 impressions (41.9%), 51 → 16 distinct cards, user-pays 115 → 0,
+worst card −5,571 → +32.** One knob, `likes_you_gate_level`; **`= 0` restores today's
+behaviour exactly, deploy-free**, which is why `likes_you_min_user_delta` keeps its −500
+default. `pytest backend/tests` 3524 → **3540 passed, 1 skipped**. Evidence per D-056:
+16 unit tests, a code-walk proof, 4 sabotage runs, and an UNRUN operator TestFlight
+checklist. Arm A of the bake-off is deliberately not pinned (serving-layer post-process);
+`bakeoff_profiles.py` untouched.
+
+## 2026-08-19 — Bake-off arm D: the landability challenger (dark, not merged)
+
+**Branch `feat/bakeoff-arm-a-challenger` off `origin/main` `50e0451`. Not pushed.**
+[D-095](DECISIONS.md) · [PRD](../docs/plans/landability-challenger/PRD.md).
+
+A fourth bake-off arm, `challenger`, running the live v1/v3 engine under a
+thread-local overlay: shrink neither board, drop the consensus `rv ≥ gv` sign
+test (so an even trade can surface in the direction the **partner** gains),
+enumerate 1-for-2, floor consensus fairness at 0.75, R5 off, tier ladder
+compressed 4.57× → 1.44× so fairness can outrank the biggest name.
+
+**It was briefed as "the new Arm A" and is deliberately not one.** D-075 pins
+arm A as a constant with a golden; overwriting it makes the bake-off
+unfalsifiable. Arm A, its profile and its captured deck are untouched — the
+new knobs are *excluded* from `MODEL_A_PROFILE` because their **defaults are
+the pre-wave engine**.
+
+Dark: `bakeoff_serve_interleaved` stays 0, users still see arm `current`.
+`bakeoff_include_challenger` = 0 is the no-deploy kill. Arm B byte-identical,
+proved by goldens captured at the pre-knob commit. 3524 → **3554 passed, 1
+skipped**; 13 sabotages, 13 caught.
+
+## 2026-08-19 — `outlook.odds` LIT + Team Review planned (PR #142, merged `6a3eab3`)
+
+**Shipped.** Playoff odds are live. Operator override (*"Outlook odds should be visible. Forward PPG cut. I waive maestro"*) reversed the same session's own D-093 recommendation — [D-094](DECISIONS.md). Lights the #169 League-Summary layer built-but-dark since `f27c0f5` (2026-08-11): the D-025 collapsed strip, the section behind it, `GET /api/league/outlook`. **No client release needed** — the UI shipped months ago and flags come from the server; verified live, `/api/feature-flags` serves `outlook.odds: true`.
+
+**Bands only, and that is enforced, not intended.** `title_pct` stays unrenderable at any week (absence of skill, CI spans zero); `playoff_pct` renders only as the three-band chip; `OUTLOOK_WEEK6_PERCENT_ENABLED` stays false. Preseason posture (`completed_weeks == 0`): Sleeper only, `meta.beta` true ⇒ bands + row order, no win-loss numbers.
+
+**The flip was five touches, not one** — `config/features.json` plus the `release`/`onboarding-v2`/`profiles-on` fixtures (the latter two each asserted to differ from release by exactly one key). `DEFAULT_FLAGS` stays false (fails CLOSED) and mobile's `LAUNCHED_FLAG_DEFAULTS` stays untouched (those fail OPEN, which would outlive a kill).
+
+**Evidence** (Maestro waived, already void under D-056): new `mobile/tests/check-outlook-bands.js`, 7 assertions, **all six sabotages proven red**; the two darkness-guard tests inverted, keeping `test_flag_off_still_closes_the_route` (flag off ⇒ 404 + empty fan-out). Gates: pytest **3525 passed/1 skipped**, tsc clean, 61 structural suites, testid-lint OK.
+
+**Also merged:** the Team Review plan for #357/#358/#359 (docs only — [D-092](DECISIONS.md), Q-024, Q-025). Build not started.
+
+**Released.** EAS iOS **build 121 (v1.15.0)**, `ccc3cd57`, built from `f1cb03e` (same tree as `main`), **submitted to TestFlight** and accepted by App Store Connect (submission `769a6193`). Awaiting Apple processing. Backend gates re-run on the merged sha with `node_modules` finally installed: `tsc --noEmit` clean and **61** structural suites green — both had been unrunnable in this worktree earlier in the session.
+
+**Watch:** nobody has seen the lit surface on a device; a preseason band can be confidently wrong (2 of 6 backtested seasons lose to climatology); `meta.priced_slot_coverage` is still unrendered, so IDP bands read as whole-lineup on 7-of-15 priced slots.
 ## 2026-08-19 — Web Phase 2: session-gated calculator + market pulse (`fix/web-phase0`, NOT merged)
 
 **`web/calculator.html`** — mirrors the app's calculator: asset search over

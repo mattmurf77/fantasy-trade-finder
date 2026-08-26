@@ -8,7 +8,7 @@ components/     77 shared components
   chalkline/    design-system primitives (Text, Button, Card, Badge, Meter, Icon, TickLabel)
   analyst/      "The Analyst" mascot pose SVGs
   draft/        Draft Room / Mock Draft rows, chrome, sheets
-data/           tradeCalcMock.ts — demo-mode calculator fixtures
+data/           calcTypes.ts — CalcPlayer/CalcPos, the shared calculator asset shape
 hooks/          6 cross-cutting hooks
 navigation/     RootNav, TabNav, rankChooserModel, scrollToTop
 observability/  sentry.ts

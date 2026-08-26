@@ -5,12 +5,29 @@ Scope block: docs/plans/three-model-bakeoff/scope-phase3.md.
 
 Contract under test, in `server._run_trade_job`:
 
-  • Flag OFF ⇒ the generation path is byte-identical to pre-bake-off
-    `origin/main`. Proven against a CAPTURED golden
-    (backend/tests/fixtures/bakeoff/flag_off_golden.json, produced by running
+  • Flag OFF ⇒ the generation path is the non-bake-off path, and the only
+    admitted difference from it is the additive NULL columns. Proven
+    against backend/tests/fixtures/bakeoff/flag_off_golden.json.
+    PROVENANCE, and what the golden does and does NOT prove today —
+    the original capture came from running
     backend/tests/support/bakeoff_harness.py inside a worktree at the
-    pre-bake-off SHA), not against an assertion about ourselves. The only
-    admitted difference is the two additive NULL columns.
+    pre-bake-off SHA, so it was EXTERNAL evidence: flag-off output equalled
+    real pre-bake-off `origin/main` output. It has since been RE-CAPTURED
+    from this repo's own code twice, both on 2026-08-21: (1) the
+    operator-approved package-benchmark fix (`package_bench_trade_wide`,
+    docs/reviews/2026-08-21-market-curve-comparison.md §3b) deliberately
+    moved generation for every arm, so the flag-off deck moved with it
+    (2 cards → 1 on this fixture — the receive side of the dropped
+    1-for-2 now prices out of band); (2) the gap auto-sweetener stamps a
+    `gap_sweetener` key (null when unsweetened) on every impression row's
+    features_json. So `test_flag_off_is_byte_identical_to_the_captured_golden`
+    is now a DRIFT DETECTOR against a self-capture, not independent
+    evidence of parity with the pre-bake-off SHA — that historical claim
+    died with the re-capture and is not re-provable without a worktree at
+    that SHA. What still holds independently is the live contract:
+    `test_dark_mode_serves_the_flag_off_deck` compares the flag-ON deck to
+    the SAME golden, so flag-off and bake-off-dark are still proven to
+    serve identical decks through two different code paths.
   • Phase 4 (dark, the default inside the flag): three arms generate and log,
     only arm `current` is served, and the served deck is still the flag-off
     deck.
@@ -64,8 +81,15 @@ def _strip_new_columns(capture: dict) -> dict:
 #: Phase 3's serving shape as knob KILL values: no group composition, no deck
 #: cap, arm A in the roster. The tests written for Phase 3 keep asserting it,
 #: which is what proves the kill values still restore it.
+#:
+#: D-095 adds `bakeoff_include_challenger` = 0 for the same reason the other
+#: three are here: arm D joined the DEFAULT roster, and these tests are about
+#: Phase 3's three-arm serving shape, not about which arms exist today. Its
+#: presence here is itself the assertion that the challenger's kill knob
+#: restores the pre-D-095 roster exactly (PRD §5 A1).
 PHASE3_KNOBS = {"bakeoff_group_size": 0.0, "bakeoff_deck_limit": 0.0,
-                "bakeoff_include_baseline": 1.0}
+                "bakeoff_include_baseline": 1.0,
+                "bakeoff_include_challenger": 0.0}
 
 
 def _bakeoff_patches(*, enabled: bool, interleaved: bool = False,
@@ -527,7 +551,12 @@ def test_served_deck_is_composed_of_groups_and_every_row_carries_its_group():
 
 def test_arm_baseline_never_reaches_a_served_deck():
     """Arm A is out of the roster: it must not generate, must not be drafted,
-    and must not appear on any impression row."""
+    and must not appear on any impression row.
+
+    D-095: the engine now runs TWICE on the live default roster — once as
+    `current`, once as `challenger` under `model_challenger()`. That is the
+    fan-out cost the challenger's kill knob exists to give back, and it is
+    asserted here rather than left implicit."""
     calls = []
 
     def fake_generate(self, *a, **kw):
@@ -541,11 +570,43 @@ def test_arm_baseline_never_reaches_a_served_deck():
             extra_patches=_bakeoff_patches(enabled=True, interleaved=True,
                                            composed=True))
 
-    assert len(calls) == 1, "the engine must run once, not twice"
+    assert len(calls) == 2, "the engine runs for `current` and `challenger`"
     assert all(r["model_arm"] != "baseline" for r in capture["impressions"])
     with eng.connect() as conn:
         run = conn.execute(select(bakeoff_runs_table)).fetchone()
-    assert set(json.loads(run.arms_json)) == {"current", "gen_v2"}
+    assert set(json.loads(run.arms_json)) == {"current", "challenger",
+                                              "gen_v2"}
+
+
+def test_the_challenger_generates_and_logs_but_is_never_served():
+    """PRD G7 / §9.1 — the dark-mode contract, end to end. With the flag on
+    and `bakeoff_serve_interleaved` = 0, arm D must appear in `arms_json` and
+    `groups_json` while every served impression still reads `current`."""
+    def fake_generate(self, *a, **kw):
+        return [_lane_card(["qb1"], ["rb2"], basis="divergence", lane="value")]
+
+    with patch("backend.trade_service.TradeService.generate_trades",
+               fake_generate), \
+            patch.object(bo, "gen_v2_cards", lambda svc, kw: []):
+        capture, _job, eng = H.run_capture(
+            extra_patches=_bakeoff_patches(enabled=True, interleaved=False,
+                                           composed=True))
+
+    assert capture["impressions"]
+    assert all(r["model_arm"] == "current" for r in capture["impressions"]), \
+        "a challenger card reached a user — bakeoff_serve_interleaved is 0"
+    with eng.connect() as conn:
+        run = conn.execute(select(bakeoff_runs_table)).fetchone()
+    assert run.served_arm == "current"
+    assert "challenger" in json.loads(run.arms_json)
+    assert {"challenger_divergence", "challenger_consensus"} \
+        <= set(json.loads(run.groups_json))
+    # …and the config snapshot proves the overlay was actually entered.
+    from backend.bakeoff_profiles import MODEL_CHALLENGER_PROFILE
+    delta = json.loads(run.config_json)["arm_delta"]["challenger"]
+    assert delta and set(delta) <= set(MODEL_CHALLENGER_PROFILE)
+    for key, val in delta.items():
+        assert val == MODEL_CHALLENGER_PROFILE[key], key
 
 
 def test_run_row_records_the_per_group_under_fill_through_the_real_path():
@@ -593,7 +654,9 @@ def test_composition_is_bypassed_for_a_dark_mode_deck():
     with eng.connect() as conn:
         run = conn.execute(select(bakeoff_runs_table)).fetchone()
     groups = json.loads(run.groups_json)
-    assert set(groups) == {"current_divergence", "current_consensus", "gen_v2"}
+    assert set(groups) == {"current_divergence", "current_consensus",
+                           "challenger_divergence", "challenger_consensus",
+                           "gen_v2"}
     for summary in groups.values():
         assert set(summary["short"]) == {"value", "outlook"}
 
@@ -827,3 +890,468 @@ def test_gen_v2_diagnostics_are_drained_so_they_cannot_leak_between_runs():
     bo._gen2_diag.value = {"S2_considered": 42}
     assert bo.last_gen_v2_diagnostics() == {"S2_considered": 42}
     assert bo.last_gen_v2_diagnostics() == {}
+
+
+# ---------------------------------------------------------------------------
+# PR-S — serving-readiness guards for the W1 re-light
+# (fit-challenger PLAN-v2 §2 S1b + §5 W1; HLD finding F-6; LLD §6.2;
+#  scope block docs/plans/fit-challenger/scope-serving.md)
+#
+# The 2026-08-18 shrink, inverted into a regression test. What happened: with
+# interleaved serving lit under COMPOSITION, arm C zero-carded (`gen_v2:
+# cards=0, forfeits=9` against `current: cards=40`) and the leave-short lane
+# quotas turned that into a 10-card deck from a 40-card pool — see the
+# `serve_interleaved()` docstring in bakeoff_runner.py. The W1 posture pins
+# `bakeoff_group_size = 0` precisely so the live draft path is the plain
+# per-arm `team_draft` fallback (HLD F-6: bakeoff_runner.py:1424-1427), where
+# a zero-card arm forfeits its rotation slots and the surviving arms backfill
+# the deck to `bakeoff_deck_limit`. These tests pin BOTH halves: the fallback
+# fills (the guard), and composition today does not (the reason W1 is 0).
+# ---------------------------------------------------------------------------
+
+#: W1 fixture, inputs pinned as literals: the shape of the 08-18 incident.
+#: One arm zero-cards; the other two hold 40 distinct trades — comfortably
+#: more than `bakeoff_deck_limit` = 30 combined.
+_W1_DECK_LIMIT = 30
+_W1_CUR_CARDS  = 20
+_W1_CHAL_CARDS = 20
+
+
+def _w1_fixture():
+    cur  = [_card([f"cur_g{i}"],  [f"cur_r{i}"])  for i in range(_W1_CUR_CARDS)]
+    chal = [_card([f"chal_g{i}"], [f"chal_r{i}"]) for i in range(_W1_CHAL_CARDS)]
+    v2: list = []                                  # the zero-card arm
+    return cur, chal, v2
+
+
+def _w1_run(*, group_size: float, interleave: bool = True):
+    """`run_bakeoff` directly, stub generators (the challenger-test idiom),
+    on the W1 roster (current + challenger + gen_v2) at the W1 knob values:
+    `bakeoff_deck_limit = 30`, `bakeoff_group_size` as given. The same
+    `generate` callable serves arms B and D; the thread-local overlay the
+    runner enters is what distinguishes them, exactly as in production."""
+    from backend.bakeoff_profiles import MODEL_CHALLENGER_PROFILE
+    from backend.trade_service import _cfg_local
+
+    cur, chal, v2 = _w1_fixture()
+
+    def generate(**ov):
+        overlay = getattr(_cfg_local, "map", None) or {}
+        is_chal = bool(MODEL_CHALLENGER_PROFILE) and all(
+            overlay.get(k) == v for k, v in MODEL_CHALLENGER_PROFILE.items())
+        return list(chal if is_chal else cur)
+
+    knobs = {"bakeoff_deck_limit": float(_W1_DECK_LIMIT),
+             "bakeoff_group_size": float(group_size)}
+    with patch.object(bo, "_cfg", lambda k, d: float(knobs.get(k, d))):
+        return bo.run_bakeoff(
+            generate=generate, gen_v2=lambda **ov: list(v2),
+            league_id="league_w1", iso_week="2026-W34",
+            interleave=interleave,
+            roster=(bo.ARM_CURRENT, bo.ARM_CHALLENGER, bo.ARM_GEN_V2))
+
+
+def test_zero_card_arm_deck_still_fills():
+    """S1b — the regression guard for the W1 re-light. Under
+    `bakeoff_group_size = 0` (the W1 posture; HLD F-6 says this makes the
+    `team_draft` fallback the live path for the whole program), an arm that
+    produces ZERO cards must cost the deck nothing: it forfeits its rotation
+    slots — counted, on the record — and the surviving arms fill the deck all
+    the way to `bakeoff_deck_limit`."""
+    run = _w1_run(group_size=0)
+
+    # F-6: this IS the team_draft fallback, not compose_deck.
+    assert run.groups == {}, "group_size=0 must kill composition entirely"
+
+    # The deck fills to the limit despite the zero-card arm.
+    assert len(run.draft.deck) == _W1_DECK_LIMIT
+    assert [id(c) for c in run.served_deck()] == \
+        [id(c) for c in run.draft.deck], "interleaved serve = the draft deck"
+
+    # The empty arm is DATA, never silence: recorded empty, forfeits counted.
+    assert run.arms["gen_v2"].cards == []
+    assert run.draft.forfeits["gen_v2"] > 0
+    row = run.run_row(job_id="j", user_id="u", league_id="league_w1")
+    arms = json.loads(row["arms_json"])
+    assert arms["gen_v2"]["empty"] is True
+    assert arms["gen_v2"]["cards"] == 0
+    assert arms["gen_v2"]["forfeits"] > 0
+    assert row["deck_size"] == _W1_DECK_LIMIT
+
+    # Every served card came from a surviving arm.
+    credited = {run.draft.attribution[id(c)][0] for c in run.draft.deck}
+    assert credited == {bo.ARM_CURRENT, bo.ARM_CHALLENGER}
+
+
+def test_zero_card_arm_composed_deck_shrinks_under_group_quotas():
+    """The companion, same fixture, composition ON (`bakeoff_group_size` at
+    its live default 10) — documenting WHY W1 pins it to 0.
+
+    Under composition the per-group quota caps each group at `group_size`
+    cards, and a group whose (arm, basis) pool is empty composes zero. Here
+    the two engine arms' cards are all divergence-basis, so both consensus
+    groups compose 0, the gen_v2 group composes 0, and the deck tops out at
+    20 of its 30 slots — the 08-18 shrink in miniature (the operator's
+    10-card deck from a 40-card arm-B pool). Not a bug in composition: the
+    under-fill is recorded per group, by design (D-078). But it is the
+    behavior the W1 screen round must NOT serve, which is what makes
+    `group_size = 0` a load-bearing W1 knob value rather than a stylistic
+    one. If this test ever starts filling to 30, composition's supply
+    behavior changed and the W1 posture should be re-decided, not silently
+    kept."""
+    run = _w1_run(group_size=10)
+
+    assert run.groups, "group_size=10 must compose groups"
+    by_key = {k: gr.summary() for k, gr in run.groups.items()}
+    assert by_key["current_divergence"]["composed"] == 10      # capped at size
+    assert by_key["challenger_divergence"]["composed"] == 10   # capped at size
+    assert by_key["current_consensus"]["composed"] == 0        # empty basis
+    assert by_key["challenger_consensus"]["composed"] == 0     # empty basis
+    assert by_key["gen_v2"]["composed"] == 0                   # zero-card arm
+
+    # 20 composed cards < deck_limit 30: the same inputs that fill the
+    # team-draft deck leave a third of the composed deck empty.
+    assert len(run.draft.deck) == 20
+    assert len(run.draft.deck) < _W1_DECK_LIMIT
+
+    # …and the shrink is on the record, not silent (D-078's contract).
+    assert by_key["current_consensus"]["short"] == {"value": 5, "outlook": 5}
+    assert by_key["gen_v2"]["short"] == {"value": 5, "outlook": 5}
+
+
+def test_run_row_serving_mode_is_served_arm_not_a_bypass_marker():
+    """PR-S finding, pinned: an interleaved run carries NO dedicated
+    re-ranker-bypass marker. The only serving-mode state the run row records
+    is `served_arm` — NULL means interleaved (the interleaver owned the
+    order, so `bypass_rerankers()` was True for every card of this deck),
+    `'current'` means dark (the normal presentation stack ran). The M4
+    "re-ranker bypass assertion" tripwire therefore has to key on
+    `served_arm IS NULL`, joined against `deck_impressions.model_arm`
+    distribution — asserted here so that contract cannot drift silently. If
+    a dedicated marker is ever wanted, it is new schema, not a new test."""
+    interleaved = _w1_run(group_size=0, interleave=True)
+    row = interleaved.run_row(job_id="j", user_id="u", league_id="league_w1")
+    assert row["served_arm"] is None
+
+    dark = _w1_run(group_size=0, interleave=False)
+    dark_row = dark.run_row(job_id="j", user_id="u", league_id="league_w1")
+    assert dark_row["served_arm"] == bo.DARK_SERVED_ARM
+
+    # No bypass-named key exists anywhere on the row — the finding itself.
+    assert not any("bypass" in k for k in row), \
+        "a bypass marker appeared on the run row — update the M4 tripwire " \
+        "and scope-serving.md, which document served_arm as the only signal"
+
+
+# ---------------------------------------------------------------------------
+# Fit challenger (PR-F3) — serve-bit, runner API, T2 uniform columns, C7b
+# ---------------------------------------------------------------------------
+
+def _fit_stub_lists():
+    """Stub lists for the fit-arm runner tests. Fit's first card duplicates
+    arm B's first trade so `_agreement` has something to record for a dark
+    fit."""
+    cur = [_card([f"cur_g{i}"], [f"cur_r{i}"]) for i in range(4)]
+    fit = [_card(["cur_g0"], ["cur_r0"]),          # the agreement duplicate
+           _card(["fit_g1"], ["fit_r1"]),
+           _card(["fit_g2"], ["fit_r2"])]
+    return cur, fit
+
+
+def _fit_run(*, serve_fit: float, group_size: float, gen_fit="stub",
+             fit_diag=None):
+    """`run_bakeoff` with fit rostered explicitly (the W1/challenger idiom).
+    `gen_fit="stub"` binds a 3-card stub that also writes the diagnostics
+    thread-local, the way the real adapter does; None passes no callable."""
+    cur, fit = _fit_stub_lists()
+
+    def fit_cb(**_ov):
+        bo._fit_diag_tl.value = dict(fit_diag or {"enumerated": 9,
+                                                  "scored": 3})
+        return list(fit)
+
+    kwargs = {}
+    if gen_fit == "stub":
+        kwargs["gen_fit"] = fit_cb
+    elif gen_fit is not None:
+        kwargs["gen_fit"] = gen_fit
+    knobs = {"bakeoff_group_size": float(group_size),
+             "bakeoff_deck_limit": 0.0,
+             "bakeoff_serve_fit": float(serve_fit)}
+    with patch.object(bo, "_cfg", lambda k, d: float(knobs.get(k, d))):
+        run = bo.run_bakeoff(
+            generate=lambda **ov: list(cur),
+            gen_v2=lambda **ov: [],
+            league_id="league_fit_bit", iso_week="2026-W34",
+            interleave=True,
+            roster=(bo.ARM_CURRENT, bo.ARM_GEN_V2, bo.ARM_FIT),
+            **kwargs)
+    return run, cur, fit
+
+
+@pytest.mark.parametrize("group_size", [0, 10])
+def test_serve_fit_bit_excludes_from_draft(group_size):
+    """F5b / HLD F-6 — the serve-bit acts on BOTH draft paths. The F-6 leak
+    lives on the `group_size = 0` path (the W1 posture: composition killed,
+    `team_draft` fallback live), so both are parametrized here."""
+    run, cur, fit = _fit_run(serve_fit=0, group_size=group_size)
+
+    # Dark fit: generated and recorded…
+    assert run.arms["fit"].cards == fit
+    row = run.run_row(job_id="j", user_id="u", league_id="league_fit_bit")
+    arms = json.loads(row["arms_json"])
+    assert arms["fit"]["cards"] == 3
+    assert arms["fit"]["diagnostics"] == {"enumerated": 9, "scored": 3}
+    # …but absent from the rotation and the deck on THIS path.
+    assert not any(p == "fit" or p.startswith("fit")
+                   for p in run.arm_order)
+    fit_ids = {id(c) for c in fit}
+    assert not any(id(c) in fit_ids for c in run.draft.deck)
+    assert not any(id(c) in fit_ids for c in run.served_deck())
+    # A dark fit still registers agreement (LLD §8 R-a): the served copy of
+    # the duplicated trade cites arm fit.
+    dup = next(c for c in run.draft.deck
+               if c.give_player_ids == ["cur_g0"])
+    assert "fit" in run.also_proposed_by(dup)
+
+    # Bit = 1: fit drafts like any arm, on the same path.
+    run_on, _cur, fit_on = _fit_run(serve_fit=1, group_size=group_size)
+    fit_on_ids = {id(c) for c in fit_on}
+    assert any(id(c) in fit_on_ids for c in run_on.draft.deck)
+    assert any(p == "fit" for p in run_on.arm_order)
+
+
+def test_run_bakeoff_gen_fit_optional():
+    """HLD F-3 — `gen_fit` is an additive keyword. Absent + fit unrostered:
+    unchanged behavior. Absent + fit rostered: a RECORDED arm error, never a
+    job failure."""
+    cur = [_card(["qb1"], ["rb2"])]
+    knobs = {"bakeoff_group_size": 0.0, "bakeoff_deck_limit": 0.0}
+    with patch.object(bo, "_cfg", lambda k, d: float(knobs.get(k, d))):
+        run = bo.run_bakeoff(
+            generate=lambda **ov: list(cur), gen_v2=lambda **ov: [],
+            league_id="league_fit_opt", interleave=True,
+            roster=(bo.ARM_CURRENT, bo.ARM_GEN_V2))
+    assert "fit" not in run.arms
+    assert len(run.draft.deck) == 1
+
+    run2, _cur, fit = _fit_run(serve_fit=1, group_size=0, gen_fit=None)
+    assert run2.arms["fit"].error is not None
+    assert "gen_fit callable" in run2.arms["fit"].error
+    assert run2.arms["fit"].cards == []
+    assert len(run2.draft.deck) > 0              # the job completed
+
+
+def test_fit_fairness_threshold_none():
+    """HLD F-7 — fit joins gen_v2's None: its fairness is a score, not a
+    gate, and `basis` on a fit card means data-availability."""
+    run, _cur, _fit = _fit_run(serve_fit=0, group_size=0)
+    assert run.arms["fit"].fairness_threshold is None
+
+
+def test_arm_roster_reads_bakeoff_include_fit():
+    """LLD §2.1 — `bakeoff_include_fit` (default 0) is the roster bit."""
+    with patch.object(bo, "_cfg", lambda k, d: float(d)):
+        assert bo.ARM_FIT not in bo.arm_roster()          # default: off
+    with patch.object(bo, "_cfg",
+                      lambda k, d: 1.0 if k == "bakeoff_include_fit"
+                      else float(d)):
+        roster = bo.arm_roster()
+    assert roster == (bo.ARM_CURRENT, bo.ARM_CHALLENGER, bo.ARM_GEN_V2,
+                      bo.ARM_FIT)
+
+
+def test_draft_rank_only():
+    """C7b — sabotage 2. Multiply ONE arm's every composite_score ×100: the
+    drafted deck is IDENTICAL, because the draft is a cursor walk over list
+    ORDER. A magnitude-reading draft would reorder and fail this assert —
+    which is what licenses fit's 0–200 composite scale next to the engine
+    arms' scale."""
+    def _deck_ids(scale):
+        b = [_card([f"bg{i}"], [f"br{i}"], composite=(3.0 - i) * scale)
+             for i in range(3)]
+        c = [_card([f"cg{i}"], [f"cr{i}"], composite=(3.0 - i))
+             for i in range(3)]
+        knobs = {"bakeoff_group_size": 0.0, "bakeoff_deck_limit": 0.0}
+        with patch.object(bo, "_cfg", lambda k, d: float(knobs.get(k, d))):
+            run = bo.run_bakeoff(
+                generate=lambda **ov: list(b), gen_v2=lambda **ov: list(c),
+                league_id="league_rank_only", iso_week="2026-W34",
+                interleave=True, roster=(bo.ARM_CURRENT, bo.ARM_GEN_V2))
+        return [(tuple(x.give_player_ids), tuple(x.receive_player_ids))
+                for x in run.served_deck()]
+
+    assert _deck_ids(1.0) == _deck_ids(100.0)
+
+
+def test_impressions_uniform_columns():
+    """T2 — `save_deck_impressions` compiles its executemany statement from
+    the FIRST row's keys. With the deck LED by an unattributed injection,
+    every row must still carry the identical key set, and every
+    features_json must decode with `fit` and `fit_diag` present (null
+    allowed — absence is what the M4 null-share tripwire cannot survive)."""
+    run, _cur, fit = _fit_run(serve_fit=1, group_size=0)
+    # Give the drafted fit cards a real fit payload (the module half would
+    # have); arm-B cards carry none — nulls must still serialize.
+    for c in fit:
+        c.fit = {"you": 61.0, "them": 55.5, "aggregate": 116.5,
+                 "bucket": "both_ok", "boards": "both", "ver": "fit-1",
+                 "r5_fail": False, "lenses": {}}
+    injection = _card(["inj_g"], ["inj_r"])      # no arm produced this
+    cards = [injection] + list(run.served_deck())
+
+    seen = {}
+    with patch.object(server, "save_deck_impressions",
+                      lambda rows: seen.setdefault("rows", rows)), \
+            patch.object(server, "load_board_state",
+                         lambda *a, **kw: (0, None)), \
+            patch.object(server, "_deck_fatigue_enabled", lambda: False), \
+            patch.object(server, "_deck_taste_enabled", lambda: False):
+        server._log_deck_signal_impressions(
+            user_id=H.ME, league_id=H.LEAGUE, job_id="j-uniform",
+            cards=cards, players_dict={}, capture=None,
+            scoring_format="1qb_ppr", seed_map={}, bakeoff_run=run)
+
+    rows = seen["rows"]
+    assert len(rows) == len(cards)
+    # One key set, batch-wide — the T2 contract.
+    assert len({tuple(sorted(r)) for r in rows}) == 1
+    feats = [json.loads(r["features_json"]) for r in rows]
+    for f in feats:
+        assert "fit" in f and "fit_diag" in f    # null allowed, never absent
+    # The injection row is honestly unattributed, null-fit…
+    assert rows[0]["model_arm"] is None
+    assert feats[0]["fit"] is None
+    # …and a served fit card carries its payload.
+    fit_rows = [i for i, r in enumerate(rows) if r["model_arm"] == "fit"]
+    assert fit_rows
+    assert feats[fit_rows[0]]["fit"]["ver"] == "fit-1"
+
+
+# ---------------------------------------------------------------------------
+# Counterparty breaker — the uniform-keys extension (LLD §1.4 / §7.3, T-10)
+# ---------------------------------------------------------------------------
+
+#: A scored stamp, shaped like trade_breaker's real payload. Only the keys the
+#: features copy has to carry verbatim matter here.
+_BK_SCORED = {
+    "ver": "brk-1", "degraded": None, "them": None, "narrated": None,
+    "tmpl_ver": None,
+    "top": {"code": "fit_outlook", "severity": 0.82, "evidence": {}},
+    "objections": [{"code": "fit_outlook", "severity": 0.82, "evidence": {}}],
+}
+_BK_MARKER = {"ver": "brk-1", "degraded": "exception_card", "objections": None}
+
+
+def _breaker_flags(monkeypatch, on: bool):
+    import backend.feature_flags as ff
+    flags = dict(ff.flags_dict())
+    flags["trade.breaker"] = on
+    monkeypatch.setattr(ff, "_flags_cache", flags, raising=False)
+
+
+def _log_rows(cards, *, bakeoff_run):
+    seen = {}
+    with patch.object(server, "save_deck_impressions",
+                      lambda rows: seen.setdefault("rows", rows)), \
+            patch.object(server, "load_board_state",
+                         lambda *a, **kw: (0, None)), \
+            patch.object(server, "_deck_fatigue_enabled", lambda: False), \
+            patch.object(server, "_deck_taste_enabled", lambda: False):
+        server._log_deck_signal_impressions(
+            user_id=H.ME, league_id=H.LEAGUE, job_id="j-breaker",
+            cards=cards, players_dict={}, capture=None,
+            scoring_format="1qb_ppr", seed_map={}, bakeoff_run=bakeoff_run)
+    return seen["rows"]
+
+
+def _mixed_deck():
+    """Deck LED by an UNSTAMPED likes-you-style injection, then a scored card
+    and a rung-marker card — the three states a flag-on deck can hold."""
+    run, _cur, fit = _fit_run(serve_fit=1, group_size=0)
+    served = list(run.served_deck())
+    assert len(served) >= 2
+    served[0].breaker = dict(_BK_SCORED)
+    served[0].breaker_shadow = dict(_BK_MARKER)
+    served[1].breaker = dict(_BK_MARKER)          # no shadow attribute at all
+    injection = _card(["inj_g"], ["inj_r"])       # never stamped
+    return run, [injection] + served
+
+
+@pytest.mark.parametrize("bakeoff", [True, False])
+def test_impressions_breaker_uniform_keys(monkeypatch, bakeoff):
+    """LLD §1.4 / §7.3 (T-10) — extends `test_impressions_uniform_columns` to
+    the breaker keys. On a flag-on deck EVERY impression row's features_json
+    decodes with a non-null `breaker` (scored payload, rung marker, or the
+    synthetic `flag_flip_or_unstamped` marker for the injected card that the
+    stamp never reached) and a present `breaker_shadow`. Parametrized over
+    bake-off and ORGANIC logging: the block sits OUTSIDE the `bakeoff_run is
+    not None` guard, so organic rows stamp too."""
+    _breaker_flags(monkeypatch, True)
+    run, cards = _mixed_deck()
+    rows = _log_rows(cards, bakeoff_run=run if bakeoff else None)
+
+    assert len(rows) == len(cards)
+    assert len({tuple(sorted(r)) for r in rows}) == 1      # T2 key set
+    feats = [json.loads(r["features_json"]) for r in rows]
+    for f in feats:
+        assert f.get("breaker") is not None                # never a bare null
+        assert "breaker_shadow" in f
+    # The injected, never-stamped card: the SYNTHETIC marker, ver honestly
+    # null (at log time the module may never have been imported).
+    assert feats[0]["breaker"] == {"ver": None,
+                                   "degraded": "flag_flip_or_unstamped",
+                                   "objections": None}
+    assert feats[0]["breaker_shadow"] is None
+    # The scored card rides through whole, shadow included.
+    assert feats[1]["breaker"]["top"]["code"] == "fit_outlook"
+    assert feats[1]["breaker_shadow"] == _BK_MARKER
+    # A rung-marker card with no shadow attribute: key present, value null.
+    assert feats[2]["breaker"]["degraded"] == "exception_card"
+    assert feats[2]["breaker_shadow"] is None
+    if bakeoff:                                            # fit keys intact
+        for f in feats:
+            assert "fit" in f and "fit_diag" in f
+
+
+def test_midjob_flag_flip_no_crash(monkeypatch):
+    """LLD §7.3 / erratum E-A — the row the HLD's bare-attribute sketch would
+    have lost. This loop has no per-row try/except, so an AttributeError here
+    would drop the WHOLE deck's impressions.
+
+    off→on (flag flipped on between stamp and log): unstamped cards still
+    write rows, each carrying the synthetic marker. on→off: stamped payloads
+    ride through, because the copy is ATTRIBUTE-gated, not flag-gated."""
+    run, _cur, _fit = _fit_run(serve_fit=1, group_size=0)
+    unstamped = list(run.served_deck())
+    for c in unstamped:
+        assert not hasattr(c, "breaker")
+
+    _breaker_flags(monkeypatch, True)                      # off → on
+    rows = _log_rows(unstamped, bakeoff_run=run)
+    feats = [json.loads(r["features_json"]) for r in rows]
+    assert len(rows) == len(unstamped)
+    assert all(f["breaker"]["degraded"] == "flag_flip_or_unstamped"
+               for f in feats)
+    assert all("fit" in f and "fit_diag" in f for f in feats)
+
+    _breaker_flags(monkeypatch, False)                     # on → off
+    for c in unstamped:
+        c.breaker = dict(_BK_SCORED)
+    rows2 = _log_rows(unstamped, bakeoff_run=run)
+    feats2 = [json.loads(r["features_json"]) for r in rows2]
+    assert all(f["breaker"] == _BK_SCORED for f in feats2)
+    assert all(f["breaker_shadow"] is None for f in feats2)
+
+
+def test_flag_off_features_json_carries_no_breaker_key(monkeypatch):
+    """LLD §7.3 — flag off at BOTH sites ⇒ no key at all, so a flag-off row is
+    byte-identical to today's (NFR-3). The full-capture byte-identity proof is
+    `test_breaker_seam.test_flag_off_features_json_byte_identical`."""
+    _breaker_flags(monkeypatch, False)
+    run, _cur, _fit = _fit_run(serve_fit=1, group_size=0)
+    rows = _log_rows(list(run.served_deck()), bakeoff_run=run)
+    for r in rows:
+        assert "breaker" not in r["features_json"]
+        f = json.loads(r["features_json"])
+        assert "breaker" not in f and "breaker_shadow" not in f

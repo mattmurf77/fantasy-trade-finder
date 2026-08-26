@@ -120,7 +120,11 @@ def test_flag_off_no_replenish_work_no_push_no_payload_change(client):
 
     with _replenish(False), \
          patch.object(server, "_replenish_deck_for", MagicMock()) as gen, \
-         patch.object(server, "_send_typed_push", MagicMock()) as push:
+         patch.object(server, "_send_typed_push", MagicMock()) as push, \
+         patch("backend.receipts_service.grading_enabled", lambda: False):
+        # receipts.grading is LIT in features.json since 2026-08-22; pin it
+        # off HERE so this test keeps asserting the replenishment-off payload
+        # exactly, independent of the receipts ship state.
         body = _tick(c)
 
     assert "replenish" not in body           # response payload unchanged

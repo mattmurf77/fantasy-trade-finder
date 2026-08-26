@@ -93,21 +93,39 @@ if (guard) {
     'TradeCard: the ✕ still exists inside the disposition guard',
     'flag OFF must render the shipped ✓/✕ row — the ✕ is conditioned, never removed',
   );
+  // #384 W2 added a SECOND presentation (an overlay, behind
+  // `calc.merged_layout`), so the condition gained a conjunct. The two
+  // legal forms are enumerated rather than matched loosely: a permissive
+  // pattern like /disposition\.reasons[^?]*\?/ would also accept
+  // `disposition.reasons && false ?`, which is the defect these two
+  // assertions exist to catch. Either exact shape, nothing else.
+  const XI = /disposition\.reasons\s*\?\s*null\s*:\s*\(/;                          // pre-#384
+  const XO = /disposition\.reasons\s*&&\s*!reasonsAsOverlay\s*\?\s*null\s*:\s*\(/;  // #384 overlay build
   assert(
-    /disposition\.reasons\s*\?\s*null\s*:\s*\(/.test(inGuard),
+    XI.test(inGuard) || XO.test(inGuard),
     'TradeCard: the ✕ renders only when `disposition.reasons` is absent',
     'without this condition a flag-ON build shows the ✕ AND the tiles',
   );
+  const PI = /disposition\.reasons\s*\?\s*\(?\s*<DeclineReasonPanel/;
+  const PO = /disposition\.reasons\s*&&\s*!reasonsAsOverlay\s*\?\s*\(?\s*<DeclineReasonPanel/;
   assert(
-    /disposition\.reasons\s*\?\s*\(?\s*<DeclineReasonPanel/.test(inGuard),
+    PI.test(inGuard) || PO.test(inGuard),
     'TradeCard: the panel renders only when `disposition.reasons` is present',
     'an unconditional mount would grow a tile row on every deck card',
   );
 }
+// #384 W5 widened the type to `DispositionReasons` (DeclineReasonPanelProps
+// plus the two overlay-lifecycle hooks the sheet host needs). Both names are
+// accepted; the thing being pinned is the `?`.
 assert(
-  /reasons\?:\s*DeclineReasonPanelProps/.test(cardText),
+  /reasons\?:\s*(DeclineReasonPanelProps|DispositionReasons)\b/.test(cardText),
   'TradeCard: `disposition.reasons` is optional',
   'a required prop would force every caller to supply it — match/peek mounts must not',
+);
+assert(
+  /interface DispositionReasons extends DeclineReasonPanelProps/.test(cardText),
+  'TradeCard: the overlay hooks EXTEND the panel props, they do not replace them',
+  'forking the panel contract would let the overlay and inline forms drift apart',
 );
 
 // ═══════════════════════════════════════════════════════════════════════

@@ -96,15 +96,19 @@ def test_bakeoff_skips_targeted_and_demo_decks():
         assert bo.bakeoff_active("league_x", None, None, "opp") is False
 
 
-def test_dark_is_the_default_serving_mode_inside_the_flag():
-    # Operator 2026-08-19: back to dark. Interleaved serving shrank the deck to
-    # 10 cards because arm C forfeits everything and leave-short drops its slots.
+def test_interleaved_is_the_default_serving_mode_inside_the_flag():
+    # Operator 2026-08-19, after the challenger landed: all three arms
+    # (current + challenger + gen_v2) serve. The earlier dark revert was taken
+    # when arm C forfeited everything and the outlook lane filled 0 of 5; D-086
+    # fixed the lane and the challenger adds a third contributing arm. Deck
+    # size remains the thing to watch — `bakeoff_serve_interleaved = 0` is the
+    # one-value, deploy-free revert.
     with _flag(True), _knobs():
-        assert bo.serve_interleaved() is False          # Phase 4 dark
-        assert bo.bypass_rerankers("l", None, None, None) is False
-    with _flag(True), _knobs(bakeoff_serve_interleaved=1.0):
-        assert bo.serve_interleaved() is True           # Phase 5, opt-in
+        assert bo.serve_interleaved() is True           # interleaved
         assert bo.bypass_rerankers("l", None, None, None) is True
+    with _flag(True), _knobs(bakeoff_serve_interleaved=0.0):
+        assert bo.serve_interleaved() is False          # dark, the revert
+        assert bo.bypass_rerankers("l", None, None, None) is False
 
 
 # ---------------------------------------------------------------------------

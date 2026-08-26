@@ -36,6 +36,7 @@ import PremiumRankingsBrowserScreen from '../screens/PremiumRankingsBrowserScree
 import TestStagesScreen from '../screens/TestStagesScreen';
 import LeagueSummaryScreen from '../screens/LeagueSummaryScreen';
 import FreeAgentsScreen from '../screens/FreeAgentsScreen';
+import ReceiptsScreen from '../screens/ReceiptsScreen';
 import DraftRoomScreen from '../screens/DraftRoomScreen';
 import MockDraftScreen from '../screens/MockDraftScreen';
 import PickAssignmentScreen from '../screens/PickAssignmentScreen';
@@ -128,6 +129,11 @@ type AuthStack = {
   // the League tab's Explore rows.
   LeagueSummary: undefined;
   FreeAgents: undefined;
+  // Receipts — the viewer's graded suggestion track record
+  // (docs/plans/receipts/). No params: the screen scopes itself to the
+  // session's league and the session's own user, because cross-user receipts
+  // are a non-goal (PLAN NG-3) and a league param would invite one.
+  Receipts: undefined;
   // rookie-draft M4 (flag `draft.room`) — read-only Draft Room, entered
   // from the League tab's Explore tile and (placement wave) the Acquire
   // tab's leading Draft chip. `leagueId` is an OVERRIDE used only by the
@@ -719,6 +725,39 @@ export default function RootNav({ booted }: { booted: boolean }) {
             headerLeft: () => (
               <HeaderBack
                 testID="free-agents.back-btn"
+                onPress={() =>
+                  navigation.canGoBack()
+                    ? navigation.goBack()
+                    : navigation.navigate('Main')
+                }
+              />
+            ),
+          })}
+        />
+        {/* Receipts — the viewer's graded suggestion track record
+            (docs/plans/receipts/). Pushed from the Trades home utility row.
+            Registered UNCONDITIONALLY, per the house rule the Draft Room
+            comment below states: the FLAG (`receipts.screen`) gates the ENTRY
+            POINT, not the route, so an in-flight push survives a flag
+            revalidation instead of unmounting under the user.
+
+            A ROOT-STACK push, so ReceiptsScreen mounts its own FeedbackFAB
+            (#188) — RootNav's global mount covers the tab stack only. */}
+        <Stack.Screen
+          name="Receipts"
+          component={ReceiptsScreen}
+          options={({ navigation }) => ({
+            headerShown: true,
+            title: 'Track record',
+            headerTitle: () => <HeaderTitle>Track record</HeaderTitle>,
+            headerStyle: { backgroundColor: ink.ink0 },
+            headerTintColor: chalk.base,
+            // Same iOS 26 back-control workaround as FreeAgents above
+            // (react-native-screens#3294).
+            headerBackVisible: false,
+            headerLeft: () => (
+              <HeaderBack
+                testID="receipts.back-btn"
                 onPress={() =>
                   navigation.canGoBack()
                     ? navigation.goBack()

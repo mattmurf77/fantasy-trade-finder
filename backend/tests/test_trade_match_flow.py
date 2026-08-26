@@ -327,8 +327,22 @@ def test_inject_likes_you_skips_untouchable_give(mem_engine):
 #   SCRAP 1300 ->  ~368    NEAR  1450 ->  ~779
 # so give=[STAR]/receive=[SCRAP] is Δ ≈ -7021 (blocked at the default) and
 # give=[MID]/receive=[NEAR] is Δ ≈ -221 (negative but immaterial, passes).
+#
+# D-096 (2026-08-19) superseded this floor as the SHIPPED behaviour: the
+# default is now `likes_you_gate_level = 2` (a floor in package-adjusted
+# value-bar units, plus directional R1 and filler_ok). The Δ ≈ -221 like
+# this block asserts "still surfaces" is one of the cards D-096 stops
+# serving — see backend/tests/test_likes_you_gates.py for the new posture,
+# and docs/plans/likes-you-quality-gates/scope.md for the measurement.
+#
+# This block is KEPT, pinned to `likes_you_gate_level = 0`, because that
+# level is D-096's documented one-value deploy-free revert. Every assertion
+# below is therefore a live guarantee that the revert really does restore
+# D-055 behaviour — an independent check on the same claim
+# test_likes_you_gates.py::test_level_zero_is_byte_identical_to_legacy makes.
 
 _FLOOR_KEY = "likes_you_min_user_delta"
+_LEVEL_KEY = "likes_you_gate_level"
 
 STAR_ELO, SCRAP_ELO, MID_ELO, NEAR_ELO = 1900.0, 1300.0, 1500.0, 1450.0
 
@@ -354,16 +368,29 @@ def _insert_mild_like(conn):
 
 
 def _inject_floor_deck(cards=None):
-    return server._inject_likes_you_cards(
-        cards=list(cards or []), trade_service=_mk_trade_service(_FLOOR_IDS),
-        user_id=ME, league_id=LEAGUE,
-        league=_mk_league(my_roster=_MY_ROSTER, opp_roster=_OPP_ROSTER),
-        user_roster=_MY_ROSTER, seed_map=dict(_FLOOR_SEED),
-    )
+    """Inject at D-096 gate level 0 — the legacy D-055 floor this block
+    documents. Restores whatever `likes_you_gate_level` was set to, so the
+    monkeypatched-knob tests below are unaffected."""
+    had = _LEVEL_KEY in ts_module._cfg
+    prev = ts_module._cfg.get(_LEVEL_KEY)
+    ts_module._cfg[_LEVEL_KEY] = 0.0
+    try:
+        return server._inject_likes_you_cards(
+            cards=list(cards or []), trade_service=_mk_trade_service(_FLOOR_IDS),
+            user_id=ME, league_id=LEAGUE,
+            league=_mk_league(my_roster=_MY_ROSTER, opp_roster=_OPP_ROSTER),
+            user_roster=_MY_ROSTER, seed_map=dict(_FLOOR_SEED),
+        )
+    finally:
+        if had:
+            ts_module._cfg[_LEVEL_KEY] = prev
+        else:
+            ts_module._cfg.pop(_LEVEL_KEY, None)
 
 
 def test_likes_you_floor_default_is_the_ratified_materiality_floor():
-    """D-055 ships the floor at -500 — the deck-eval materiality floor."""
+    """D-055's floor value is unchanged by D-096 — deliberately, so that
+    `likes_you_gate_level = 0` is an exact revert in ONE value."""
     assert ts_module._DEFAULT_CFG[_FLOOR_KEY] == -500.0
     assert server._likes_you_min_user_delta() == -500.0
 
@@ -384,8 +411,10 @@ def test_likes_you_floor_blocks_below_threshold_injection(mem_engine):
 
 
 def test_likes_you_floor_passes_above_threshold_injection(mem_engine):
-    """The floor removes bad-for-viewer injections, not merely-negative
-    ones: Δ ≈ -221 is above the -500 floor and still surfaces."""
+    """At level 0 the floor removes bad-for-viewer injections, not
+    merely-negative ones: Δ ≈ -221 is above the -500 floor and still
+    surfaces. (At the shipped level 2 this card is blocked — see
+    test_likes_you_gates.py.)"""
     with mem_engine.begin() as conn:
         _insert_mild_like(conn)
 

@@ -234,6 +234,13 @@ FLAG_KEYS: tuple[str, ...] = (
     # the config-only rollback lever. NOT `guided_layer` (v2.1 coach marks,
     # still dark) and NOT `guided_avatar` (the v1 tour, already true).
     "onboarding.guide_v2",
+    # D-155/D-156 — onboarding.mascot_ram: swap the guide avatar from The
+    # Analyst to Fleeced, the painted ram, inside AnalystAvatar only. Pose
+    # names, tour script, beats, the three call sites and the
+    # guide_step_shown{pose} analytics prop are all unchanged, so OFF is
+    # byte-identical to today. Ships FALSE; reaches the operator through an
+    # is_tester_allowlist experiment overlay, never a global flip.
+    "onboarding.mascot_ram",
     # ── Monetization platform (docs/plans/monetization/00-platform-foundation.md §1) ──
     # One flag per monetization strategy; everything ships dark. Rollout
     # order per foundation §1: monetize.entitlements ON in observe mode
@@ -280,6 +287,14 @@ FLAG_KEYS: tuple[str, ...] = (
     # Unflagged-by-design exceptions: league-prefs authz fix (security),
     # first_match/new_match dedup, AASA route (inert without the mobile
     # entitlement), Apple token revocation on deletion.
+    "calc.merged_layout",
+    # D-158 (Wave B0, 2026-08-24) — the guided landing hosts the In-league
+    # canvas inline. CLIENT-ONLY: no route reads this key. The two routes the
+    # inline surface calls (POST /api/trades/fair-packages, POST
+    # /api/trades/queue) stay gated on `calc.merged_layout`, which is
+    # therefore a prerequisite. Registered here so the flag ships through
+    # /api/feature-flags like every other key.
+    "calc.inline_home",
     "ux.sheet_guard",
     "ux.rank_tab_destination",
     "ux.retap_active_tab",
@@ -504,6 +519,55 @@ FLAG_KEYS: tuple[str, ...] = (
     # Protocol providers; the projection/points source is config-selected via
     # FTF_OUTLOOK_STRENGTH_SOURCE. Preseason payloads are flagged beta.
     "outlook.odds",
+    # #357 — with-trade playoff-odds delta on evaluate + deck cards.
+    # Independent of `outlook.odds`: that one gates the STANDALONE League
+    # Summary surface, this one gates the per-trade DELTA. Either may be on
+    # without the other, and each is its own kill switch.
+    "outlook.trade_impact",
+    # #357/#358/#359 — the six-beat Team Review flow (client surface in the
+    # Trades tab, hence the `trades.*` namespace; `trade.*` is the engine).
+    "trades.team_review",
+    # #365 — the net first-round-pick term inside `infer_team_outlook`
+    # ("number of 1sts owned vs traded away"). NAMED `trade.*` ON PURPOSE:
+    # this one lives in the ENGINE's classifier, whose verdict feeds
+    # outlook_alpha for trade_gen_v2, the mock draft and the outlook seed.
+    # OFF (default) ⇒ the kwarg is accepted and IGNORED, so
+    # `infer_team_outlook` is byte-identical for every caller (INV-365) and
+    # the Team Review route never even reads the pick ledger. ON ⇒ the term
+    # applies ONLY where a ledger is supplied, and today only the Team Review
+    # route supplies one — so lighting this moves the WINDOW BEAT and no deck
+    # (INV-365b). Knobs: `infer_w_net_firsts` (0.10),
+    # `infer_net_firsts_cap` (1.0); either at 0 neutralises the term without
+    # changing the payload shape.
+    "trade.outlook_net_firsts",
+    # #371 — let the simulated PLAYOFF BAND drive the Team Review window
+    # instead of the roster heuristic. `trades.*` because it composes in the
+    # route and changes no engine value: `infer_team_outlook` still runs, and
+    # its verdict still ships as `window.roster_inferred` whichever path wins.
+    # Sleeper-only by construction (backend/outlook/league_state.py registers
+    # the other platforms as NotImplemented stubs) and REFUSED in preseason,
+    # `completed_weeks == 0` being the odds engine's weakest window (D-094).
+    # OFF (default) ⇒ `window` carries none of the source/odds keys and the
+    # payload is byte-identical.
+    "trades.window_from_odds",
+    # #372 — the COMPOSITE window model. Third operator report on this
+    # surface: age alone is too simple, incorporate starter dynasty value and
+    # playoff likelihood, and make age a lighter driver. `trade.*` for the
+    # same reason as `trade.outlook_net_firsts`: it re-weights the ENGINE's
+    # classifier, whose verdict feeds outlook_alpha.
+    # OFF (default) ⇒ the two new kwargs are accepted and IGNORED, so
+    # `infer_team_outlook` is byte-identical for every caller (INV-372) and
+    # the route builds no starter signal at all. ON ⇒ the re-weighting applies
+    # ONLY where an APPLIED starter signal is supplied, and today only the
+    # Team Review route supplies one — so lighting this moves the WINDOW BEAT
+    # and no deck (INV-372b). It also SUPERSEDES `trades.window_from_odds`'s
+    # replacement behaviour when both are on: the playoff band becomes a
+    # weighted term inside the score instead of overwriting the verdict, and
+    # counting the same signal twice is what that precedence exists to stop.
+    # Knobs: `infer_composite_w_*` (vet 0.40 / youth 0.40 / pick 2.00 /
+    # starter 0.60 / playoff 0.40); starter and playoff at 0 neutralise the
+    # new terms without changing the payload shape.
+    "trade.outlook_composite",
     # ── Rookie draft (docs/plans/rookie-draft/) ────────────────────────────
     # M2 — `?scope=rookie` on /api/rankings + /api/trio, and `scope` in the
     # /api/tiers/save body. A POST-Elo VIEW filter over the ONE existing board:
@@ -556,16 +620,27 @@ FLAG_KEYS: tuple[str, ...] = (
     # order entry (never null), no `slot_value_approx` key, and values.csv is
     # never fetched. A fetch failure with the flag ON degrades the same way.
     "picks.slot_values",
-    # M6b — DynastyProcess market slot values IN THE TRADE ENGINE (plan
-    # operator decision O2, which reverses hld KD-9 / lld §4.7). Gates the
-    # per-user `pick_pricing_mode` setting ('tier_ladder' default |
-    # 'market_slots'): the /api/settings/pick-pricing route and the mode
-    # resolution in trade_service.pick_pricing_mode_for_user.
-    # OFF (default) ⇒ pick_pricing_mode_for_user returns 'tier_ladder' for
-    # EVERY user without reading the DB, /api/settings/pick-pricing 404s, and
-    # every owned pick prices at its stored `draft_picks.pool_value` exactly
-    # as today. `GENERIC_PICK_SEEDS`, the tier ladder and the tier bands are
-    # byte-unchanged in BOTH modes — this flag reprices owned picks only.
+    # ⚠️ RETIRED 2026-08-21 (D-144) — REGISTERED BUT NEVER READ. Zero call
+    # sites: `git grep 'trade.slot_pricing' backend mobile web extension`
+    # returns this line, config/features.json, the fixture mirrors and docs,
+    # and nothing else. Setting it either way changes nothing.
+    #
+    # It gated M6b: the per-user `pick_pricing_mode` setting ('tier_ladder' |
+    # 'market_slots'), the /api/settings/pick-pricing route, and the mode
+    # resolution in trade_service.pick_pricing_mode_for_user. The operator
+    # ruling of 2026-08-21 — "Market slots should be default and not an opt-in
+    # or even an option to flip" — made market pricing unconditional, so there
+    # is no longer anything to gate.
+    #
+    # THE KEY IS KEPT ON PURPOSE, at `true`, and this is the disposition to
+    # copy for the next retired flag. Deleting it from FLAG_KEYS would force a
+    # matching delete in config/features.json and all five flag fixtures (the
+    # test_release_flags_mirror_features_json exact-equality test), would make
+    # every client build in the field that reads the key see it vanish from
+    # /api/feature-flags, and would silently reinterpret any stored override
+    # row as an unknown key. Keeping it is additive, free, and honest: the
+    # flag reads `true` because market pricing IS on. Removal, if ever, is its
+    # own change once no shipped build reads the key.
     "trade.slot_pricing",
     # draft-extensions W1 — per-player ACTIONS on the Draft Room's undrafted
     # rows (docs/plans/draft-extensions/plan.md §4, lld §4.1). ON ⇒ a
@@ -850,6 +925,129 @@ FLAG_KEYS: tuple[str, ...] = (
     # TradeFinderModeBar / TradeHomeUtilityRow render byte-identical to
     # today. The existing deck is never modified either way.
     "trades.presentation_v2",
+    # ── #366 — position-relative tier bands (docs/feedback/items/366-tier-ladder) ──
+    # ON ⇒ trade_service.analyze_roster_strengths bands each player by his rank
+    # WITHIN HIS POSITION instead of by three absolute dynasty-value cuts, and
+    # mirrors every `bench` count onto a `replacement` key (alias, not a fourth
+    # bin — `bench` is retained so pre-#366 clients still parse). The absolute
+    # cuts are a disguised OVERALL-search_rank cut, which is why "elite" admits
+    # 33 RBs and 7 TEs today; the report asked for that logic to be reviewed.
+    #
+    # THIS IS NOT A DISPLAY FLAG. `analyze_roster_strengths` also produces
+    # `position_needs` / `position_surplus`, consumed by trade_gen_v2 (:930,
+    # :980) and trade_service (:3413, :3440, :4096, :4172, :4259) — flipping it
+    # ON CHANGES EVERY DECK FOR EVERY USER. Graduation wants a deck-quality
+    # read (scripts/deck_eval.py) on real leagues first, not an eyeball.
+    #
+    # OFF (default) ⇒ `_bin_player`'s three absolute cuts run unchanged and the
+    # profile dict is byte-identical to pre-#366 — pinned by
+    # backend/tests/test_position_tiers.py, which is the whole reason this is a
+    # flag rather than an edit.
+    "trade.position_tiers",
+    # ── #366 — the RB Handcuff tag ────────────────────────────────────────────
+    # ON ⇒ the roster profile gains `handcuff_rb`: how many of the roster's RBs
+    # are the RB2 on their NFL depth chart (`depth_chart_position == "RB"` AND
+    # `depth_chart_order == 2`). This rides Sleeper's OWN depth chart, already
+    # ingested (database.py:970-971, :8769-8770, re-synced every 24h) and
+    # already hydrated onto every pooled Player (server.py:1580-1581) — it is
+    # NOT the "second-highest-valued RB on the team" approximation that
+    # plan-remaining.md §2 proposed and rightly warned against (D-121).
+    #
+    # Deliberately SEPARATE from `trade.position_tiers`: this key is purely
+    # additive and no engine path reads it, so a deck regression must be
+    # revertible without also taking down a harmless label.
+    #
+    # OFF (default) ⇒ the key is ABSENT from the profile (never 0, never null)
+    # and no depth_chart_* attribute is read at all.
+    "trade.rb_handcuff",
+    # ── Receipts — graded suggestion track record (docs/plans/receipts/) ──
+    # TWO INDEPENDENT KILL SWITCHES, both default false, sequenced
+    # grading-then-screen (PRD DR-11) so the numbers exist before any screen
+    # can show them.
+    #
+    # `receipts.grading` ON ⇒ POST /api/cron/receipts-grade does work, the
+    # daily-tick guard calls the same function, and GET
+    # /api/admin/receipts/metrics answers. OFF (default) ⇒ the cron endpoint
+    # returns {"ok": true, "skipped": "flag"} and writes NOTHING, the guard
+    # is a no-op, and the admin route 404s. Nothing else in the app reads
+    # `receipts_*` tables, so OFF is byte-identical serving by construction —
+    # the grader is an offline consumer of frozen impressions and frozen
+    # consensus snapshots, and adds no line to any generation module
+    # (PLAN §7.3, pinned by test_receipts_grading.py's isolation test).
+    "receipts.grading",
+    # `receipts.screen` ON ⇒ GET /api/league/<id>/receipts answers and the
+    # mobile "Track record" entry point renders. OFF (default) ⇒ that route
+    # 404s `feature_disabled` and the entry point is ABSENT (never an error
+    # dialog — PRD FR-5). Deliberately separate from `receipts.grading`: the
+    # grading half must run dark for ≥2 weeks before any screen ships, and a
+    # bad screen must be revertible without stopping data collection.
+    "receipts.screen",
+    # ── Counterparty breaker (docs/plans/counterparty-breaker/LLD.md §1.7) ────
+    # ON ⇒ `backend/trade_breaker.py` is imported and every served card is
+    # stamped with a `breaker` attribute: the counterparty's likely objection,
+    # scored across six classes. COMPUTE + STAMP ONLY — zero user-visible
+    # effect, zero ordering effect. The evaluation runs after the whole
+    # deck-mutation stack, so no generator or ranker can observe it.
+    #
+    # OFF (default) ⇒ the module is never imported (`sys.modules` check), no
+    # card attribute, no `features_json` key, no payload key, no publish-count
+    # change — rows and payloads byte-identical to today (NFR-3).
+    #
+    # Graduation criterion (scope.md §2): stamp coverage ≥99% of served cards
+    # with no p95 job-time regression, and the calibration readout (PLAN §6)
+    # runs once.
+    "trade.breaker",
+    # ON ⇒ the on-card "their likely hesitation" line is composed and
+    # serialized (`trade_card_to_dict` emits `breaker` only for narrated
+    # cards, so payload presence IS the client gate).
+    #
+    # REQUIRES `trade.breaker`: the narration call sits inside the
+    # `FLAGS.trade_breaker` block, so this key alone does nothing. The
+    # requires-relationship is structural, not checked twice.
+    #
+    # Graduation criterion (scope.md §2): operator TestFlight pass + the A/B
+    # readout in PLAN §6.
+    "trade.breaker_narrative",
+    # ── Negative-results memory (docs/plans/negative-results-memory/LLD.md §3.5) ─
+    # ON ⇒ `server._run_trade_job` builds one `negmem.NegmemMap` per job (a
+    # derive-on-read soft prior over the viewer's own past rejections, keyed
+    # partner × reason-family) and passes it into generation as a kwarg. The
+    # engines consult it as a pure multiplier on `composite_score`, floored at
+    # `negmem_floor` — it re-weights cards the viewer has already turned down
+    # from this partner for this reason; it never adds, removes or hard-filters
+    # one. Two layers: M1 (the multiplier, governed by `negmem_strength`) and
+    # M2 (feeding the gen_v2 `acceptance_prior` stub, governed by the existing
+    # `gen2_accept_prior_strength`).
+    #
+    # The flag is only HALF the ON-condition: `build_map` also requires the
+    # league to be in `config/negmem_leagues.json` (or `FTF_NEGMEM_LEAGUES`),
+    # which ships EMPTY — flipping this key alone activates nothing, by design.
+    #
+    # OFF (default) ⇒ the map is never built, the `negmem` kwarg never reaches
+    # `generate_trades`, no seam executes, and no `features_json.negmem` stamp
+    # is written — decks, scores, order and rows byte-identical to today. The
+    # not-allowlisted case is deliberately indistinguishable from OFF.
+    "trade.negmem",
+    # ── Full sweep — score every leaguemate, rank globally ───────────
+    # docs/plans/full-sweep/plan.md §3.1. Both opponent loops in
+    # `trade_service` stop as soon as the deck holds `global_target =
+    # max(30, max_per_opponent * 6)` cards, so a 12-team league usually ends
+    # its walk after ~6 partners — and because the visit order is fixed
+    # (boarded members first, then roster order), it is the SAME leaguemates
+    # skipped on every refresh.
+    #
+    # ON ⇒ the early exit is skipped in BOTH `_generate_trades_impl` (v1)
+    # and `_generate_trades_v2` (the served path), so every eligible
+    # leaguemate is scored and `_dedup_and_sort` — which already sorts the
+    # whole collected set by `composite_score` — ranks the league globally.
+    # No new ranking code and no new cap: per-pair budgets, streaming order
+    # and the consensus fallback are untouched, and deck size stays the
+    # operator's `bakeoff_deck_limit` dial.
+    #
+    # OFF (default) ⇒ both breaks fire exactly as today and `global_target`
+    # is still computed — deck, order and rows byte-identical, pinned by
+    # backend/tests/test_full_sweep.py.
+    "trade.full_sweep",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

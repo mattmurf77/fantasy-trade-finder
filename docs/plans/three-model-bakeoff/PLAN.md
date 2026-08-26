@@ -9,6 +9,23 @@
 
 ---
 
+> **2026-08-19 — a fourth arm exists (D-095).** This plan is titled "three-model"
+> and the count is now four: `backend/bakeoff_profiles.MODEL_CHALLENGER_PROFILE`
+> adds arm **D**, `challenger` — the landability challenger
+> ([PRD](../landability-challenger/PRD.md)). It is on the default roster
+> (`bakeoff_include_challenger` = 1), generated and logged, and **never served**
+> while `bakeoff_serve_interleaved` is 0.
+>
+> **Arm A is untouched by that work, deliberately.** The challenger was briefed
+> as "the new Arm A" and is not one: D-075 makes `MODEL_A_PROFILE` a pinned
+> constant with a golden, and overwriting it makes every comparison in this plan
+> unfalsifiable. `MODEL_A_PROFILE`, `model_a()`, `MODEL_A_REFERENCE_SHA` and the
+> golden's captured deck are byte-unchanged; the challenger's three new knobs are
+> **excluded** from arm A's profile with a reason in
+> [scope-phase2.md](scope-phase2.md), because their *defaults* are the pre-wave
+> engine. Read `deck_impressions.model_arm = 'baseline'` as the pre-G6
+> reconstruction, exactly as before — never as the challenger.
+
 ## 1. What "three models" precisely means
 
 | Arm | Name | What it is | How it is invoked |
@@ -291,3 +308,31 @@ learn how three generators fail differently, on a tiny user base, using the rich
 feedback channel available. The plausible outcomes — pick one, blend, or serve only trades
 two arms agree on — all stay open, and the data model above supports all three without
 rework.
+
+---
+
+## 10. Addendum — arm `fit` (fit challenger, 2026-08-20)
+
+A fourth generator arm joined the runner: **`fit`** (`backend/trade_gen_fit.py`
+via `bakeoff_runner.gen_fit_cards` — thin knockouts, dual 0–100 scores; spec:
+[../fit-challenger/LLD.md](../fit-challenger/LLD.md)). Three deltas to this
+plan's machinery, all additive:
+
+- **Roster.** `ALL_ARMS` and `GENERATION_ORDER` gain `fit` (LAST — arm B stays
+  first, the dark fallback). `ARMS` and `ENGINE_ARMS` are untouched: fit is a
+  generator arm like `gen_v2` (one group, no basis split, `fairness_threshold`
+  recorded NULL — on fit cards `basis` means data-availability, so the
+  divergence fairness floor would read the wrong thing). Rostered by
+  `bakeoff_include_fit` (default 0).
+- **Serve-bit.** `bakeoff_serve_fit` (default 0) is a SECOND bit between
+  rostered and served: a dark fit generates, logs its diagnostics to
+  `arms_json['fit']`, registers agreement in `also_proposed_by`, and is M3
+  `fit_diag`-stamped — but is excluded from the draft participants on BOTH
+  draft paths, `compose_deck` and the `bakeoff_group_size = 0` `team_draft`
+  fallback. Fit-only by design; generalize on the second consumer.
+- **`group_size = 0` serving posture.** The fit program's serving windows (W1
+  onward, [../fit-challenger/PLAN-v2.md](../fit-challenger/PLAN-v2.md) §5) run
+  with composition KILLED — plain per-arm team draft, `bakeoff_deck_limit` 30 —
+  so §4's group machinery is dormant there and the serve-bit's fallback-path
+  behavior is the live one (`test_serve_fit_bit_excludes_from_draft`,
+  parametrized over both paths).

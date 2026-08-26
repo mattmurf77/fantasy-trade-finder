@@ -50,22 +50,13 @@ export async function setStudTaxMode(
   });
 }
 
-// ── M6b — draft-pick pricing mode (flag `trade.slot_pricing`; 404 while the
-// flag is dark, which the Settings section treats as "hide the control").
-// 'tier_ladder' (DEFAULT — today's shipped pick ladder) | 'market_slots'
-// (DynastyProcess per-slot market curve). Note the default differs from
-// #215's: the market mode here is opt-in, not the shipped behaviour.
-export type PickPricingMode = 'tier_ladder' | 'market_slots';
-
-export async function getPickPricingMode(): Promise<{ mode: PickPricingMode }> {
-  return api.get<{ mode: PickPricingMode }>('/api/settings/pick-pricing');
-}
-
-export async function setPickPricingMode(
-  mode: PickPricingMode,
-): Promise<{ ok: boolean; mode: PickPricingMode }> {
-  return api.put<{ ok: boolean; mode: PickPricingMode }>(
-    '/api/settings/pick-pricing',
-    { mode },
-  );
-}
+// ── Draft-pick pricing mode — CLIENT REMOVED 2026-08-21 (D-144) ──────────
+// Operator ruling: "Market slots should be default and not an opt-in or even
+// an option to flip." There is no per-user pick-pricing mode any more, so
+// `PickPricingMode`, `getPickPricingMode` and `setPickPricingMode` are gone
+// along with the Settings control that was their only caller.
+//
+// `/api/settings/pick-pricing` still exists for builds already in the field:
+// GET serves the fixed `{mode: "market_slots", retired: true}`, PUT is 410
+// Gone. Do not re-add a client for it — add nothing here unless a per-user
+// pricing axis is authorised again.

@@ -1,0 +1,353 @@
+<title>The Blind Spot in the Deck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+:root{
+  --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+  --line:#262C35; --line-strong:#59647A;
+  --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+  --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013;
+  --flare:#F0508C;
+  --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --r-xs:2px; --r-sm:4px; --r-md:8px;
+  --measure:68ch;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--ink-0); color:var(--chalk);
+  font-family:Archivo,"Helvetica Neue",Arial,sans-serif; font-size:15px; line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1080px; margin:0 auto; padding:0 24px 96px}
+
+/* ---------- type ---------- */
+h1,h2,h3{font-family:"Barlow Condensed","Arial Narrow",sans-serif; text-transform:uppercase; text-wrap:balance; margin:0}
+h1{font-weight:700; font-size:clamp(38px,6.2vw,62px); line-height:1.02; letter-spacing:.02em}
+h2{font-weight:700; font-size:30px; line-height:1.1; letter-spacing:.03em}
+h3{font-weight:600; font-size:21px; line-height:1.2; letter-spacing:.03em; color:var(--chalk)}
+p{margin:0; max-width:var(--measure)}
+.lede{font-size:18px; line-height:1.6; color:var(--chalk-dim); max-width:62ch}
+.label{font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--chalk-dim); margin:0}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace; font-variant-numeric:tabular-nums}
+code{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.86em; background:var(--ink-2); border:1px solid var(--line); border-radius:var(--r-xs); padding:1px 5px; color:var(--chalk)}
+a{color:var(--ice); text-decoration:none; border-bottom:1px solid rgba(86,217,236,.35)}
+a:hover{border-bottom-color:var(--ice)}
+:focus-visible{outline:2px solid var(--ice); outline-offset:2px; border-radius:var(--r-xs)}
+
+/* ---------- masthead ---------- */
+.masthead{border-bottom:1px solid var(--line); padding:64px 0 40px; margin-bottom:56px}
+.eyebrow{display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:24px}
+.tick{display:inline-block; width:3px; height:13px; background:var(--ice); border-radius:var(--r-xs)}
+.masthead h1{margin-bottom:20px; max-width:16ch}
+.meta-row{display:flex; flex-wrap:wrap; gap:0; margin-top:36px; border-top:1px solid var(--line)}
+.meta-cell{flex:1 1 150px; padding:16px 20px 16px 0; border-right:1px solid var(--line)}
+.meta-cell:last-child{border-right:0}
+.meta-cell .label{margin-bottom:6px}
+.meta-cell .v{font-family:"IBM Plex Mono",monospace; font-weight:600; font-size:14px; font-variant-numeric:tabular-nums; color:var(--chalk)}
+
+/* ---------- sections ---------- */
+section{margin-bottom:72px; scroll-margin-top:24px}
+.sec-head{display:flex; align-items:baseline; gap:14px; border-bottom:1px solid var(--line); padding-bottom:12px; margin-bottom:28px}
+.sec-num{font-family:"IBM Plex Mono",monospace; font-size:12px; font-weight:600; color:var(--ice); letter-spacing:.06em; padding-top:4px}
+.stack{display:flex; flex-direction:column; gap:18px}
+.stack-tight{display:flex; flex-direction:column; gap:10px}
+
+/* ---------- verdict ---------- */
+.verdict{background:var(--ink-1); border:1px solid var(--line); border-left:3px solid var(--ice); border-radius:var(--r-md); padding:26px 28px; display:flex; flex-direction:column; gap:16px}
+.verdict p{max-width:64ch}
+.verdict strong{color:var(--chalk); font-weight:600}
+
+/* ---------- cards ---------- */
+.grid{display:grid; gap:16px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+.card{background:var(--ink-1); border:1px solid var(--line); border-radius:var(--r-md); padding:20px 22px; display:flex; flex-direction:column; gap:10px}
+.card p{font-size:14px; line-height:1.55; color:var(--chalk-dim)}
+.stat{font-family:"IBM Plex Mono",monospace; font-weight:600; font-variant-numeric:tabular-nums; font-size:34px; line-height:1; color:var(--chalk); letter-spacing:-.01em}
+.stat.ice{color:var(--ice)} .stat.flare{color:var(--flare)} .stat.neg{color:var(--neg)} .stat.pos{color:var(--pos)} .stat.warn{color:var(--warn)}
+.stat-sub{font-size:13px; color:var(--chalk-faint); line-height:1.45}
+
+/* ---------- charts ---------- */
+.chart{background:var(--ink-1); border:1px solid var(--line); border-radius:var(--r-md); padding:22px 24px}
+.chart-title{font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--chalk-dim); margin-bottom:4px}
+.chart-note{font-size:13px; color:var(--chalk-faint); margin-bottom:20px; max-width:60ch}
+.bars{display:flex; flex-direction:column; gap:7px}
+.bar-row{display:grid; grid-template-columns:96px 1fr 62px; align-items:center; gap:12px}
+.bar-lbl{font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--chalk-dim); text-align:right; font-variant-numeric:tabular-nums}
+.bar-track{display:block; height:16px; background:var(--ink-3); border-radius:var(--r-xs); overflow:hidden}
+.bar-fill{display:block; height:100%; min-width:2px; background:var(--ice); border-radius:var(--r-xs)}
+.bar-fill.dim{background:var(--line-strong)}
+.bar-fill.flare{background:var(--flare)}
+.bar-fill.neg{background:var(--neg)}
+.bar-fill.pos{background:var(--pos)}
+.bar-val{font-family:"IBM Plex Mono",monospace; font-size:12px; font-weight:600; color:var(--chalk); font-variant-numeric:tabular-nums}
+.bar-row.peak .bar-lbl,.bar-row.peak .bar-val{color:var(--ice)}
+
+/* funnel */
+.funnel{display:flex; flex-direction:column; gap:2px; margin-top:6px}
+.fn{display:grid; grid-template-columns:1fr; position:relative; background:var(--ink-3); border-radius:var(--r-xs); overflow:hidden}
+.fn-fill{padding:11px 14px; background:var(--ink-2); border-left:3px solid var(--line-strong); display:flex; justify-content:space-between; gap:14px; align-items:baseline; flex-wrap:wrap}
+.fn-fill.a{border-left-color:var(--chalk-faint)}
+.fn-fill.b{border-left-color:var(--warn)}
+.fn-fill.c{border-left-color:var(--neg)}
+.fn-fill.d{border-left-color:var(--ice)}
+.fn-name{font-size:13.5px; color:var(--chalk)}
+.fn-name span{color:var(--chalk-faint); font-size:12.5px}
+.fn-num{font-family:"IBM Plex Mono",monospace; font-weight:600; font-size:14px; font-variant-numeric:tabular-nums; white-space:nowrap}
+
+/* ---------- tables ---------- */
+.tw{overflow-x:auto; border:1px solid var(--line); border-radius:var(--r-md); background:var(--ink-1)}
+table{border-collapse:collapse; width:100%; min-width:600px; font-size:13.5px}
+th{font-family:"Barlow Condensed",sans-serif; font-weight:600; font-size:14px; letter-spacing:.05em; text-transform:uppercase; text-align:left; color:var(--chalk-dim); padding:12px 16px; border-bottom:1px solid var(--line); white-space:nowrap; background:var(--ink-2)}
+td{padding:12px 16px; border-bottom:1px solid var(--line); vertical-align:top; line-height:1.5; color:var(--chalk-dim)}
+tbody tr:last-child td{border-bottom:0}
+td.k{color:var(--chalk); font-weight:500}
+td .mono{color:var(--chalk); font-size:12.5px}
+td strong{color:var(--chalk); font-weight:600}
+
+/* ---------- pills ---------- */
+.pill{display:inline-block; font-size:10.5px; font-weight:600; letter-spacing:.07em; text-transform:uppercase; padding:3px 8px; border-radius:var(--r-xs); border:1px solid; white-space:nowrap}
+.p-hi{color:var(--neg); border-color:rgba(239,68,68,.5); background:rgba(239,68,68,.09)}
+.p-md{color:var(--warn); border-color:rgba(245,158,11,.5); background:rgba(245,158,11,.09)}
+.p-lo{color:var(--chalk-dim); border-color:var(--line-strong); background:transparent}
+.p-keep{color:var(--pos); border-color:rgba(34,197,94,.5); background:rgba(34,197,94,.09)}
+.p-ice{color:var(--ice); border-color:rgba(86,217,236,.45); background:rgba(86,217,236,.08)}
+
+.p-ok{color:var(--pos); border-color:rgba(34,197,94,.5); background:rgba(34,197,94,.09)}
+.p-sharp{color:var(--ice); border-color:rgba(86,217,236,.45); background:rgba(86,217,236,.08)}
+.p-over{color:var(--warn); border-color:rgba(245,158,11,.5); background:rgba(245,158,11,.09)}
+.p-new{color:var(--flare); border-color:rgba(240,80,140,.5); background:rgba(240,80,140,.09)}
+.cmp{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px}
+.cmp .card{align-items:flex-start}
+.cmp .stat{font-size:28px}
+/* ---------- quotes ---------- */
+.quotes{display:flex; flex-direction:column; gap:12px}
+.q{background:var(--ink-1); border:1px solid var(--line); border-left:3px solid var(--flare); border-radius:var(--r-md); padding:16px 20px}
+.q p{font-size:14.5px; line-height:1.6; color:var(--chalk); max-width:70ch}
+.q .attr{font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--chalk-faint); margin-top:8px; letter-spacing:.03em}
+
+/* ---------- recs ---------- */
+.rec{background:var(--ink-1); border:1px solid var(--line); border-radius:var(--r-md); padding:22px 24px; display:flex; flex-direction:column; gap:12px}
+.rec-top{display:flex; align-items:baseline; gap:12px; flex-wrap:wrap}
+.rec-n{font-family:"IBM Plex Mono",monospace; font-size:12px; font-weight:600; color:var(--ice)}
+.rec h3{flex:1 1 260px}
+.rec dl{display:grid; grid-template-columns:auto 1fr; gap:6px 16px; margin:0; font-size:13.5px}
+.rec dt{font-size:10.5px; font-weight:600; letter-spacing:.07em; text-transform:uppercase; color:var(--chalk-faint); padding-top:4px}
+.rec dd{margin:0; color:var(--chalk-dim); line-height:1.55}
+.rec dd .mono{color:var(--chalk); font-size:12.5px}
+
+.tier-head{display:flex; align-items:center; gap:12px; margin:36px 0 18px}
+.tier-head:first-of-type{margin-top:0}
+.tier-head .label{color:var(--ice)}
+.tier-head .rule{flex:1; height:1px; background:var(--line)}
+
+hr.soft{border:0; border-top:1px solid var(--line); margin:0}
+.footnote{font-size:13px; color:var(--chalk-faint); max-width:66ch; line-height:1.6}
+ul.clean{margin:0; padding-left:20px; display:flex; flex-direction:column; gap:9px}
+ul.clean li{font-size:14px; line-height:1.6; color:var(--chalk-dim); max-width:64ch}
+ul.clean li strong{color:var(--chalk); font-weight:600}
+@media (prefers-reduced-motion:no-preference){
+  .bar-fill{transition:width 400ms ease-out}
+}
+@media (max-width:640px){
+  .bar-row{grid-template-columns:76px 1fr 52px; gap:8px}
+  .meta-cell{border-right:0; border-bottom:1px solid var(--line); flex:1 1 100%}
+  .wrap{padding:0 18px 72px}
+}
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <div class="eyebrow">
+    <span class="tick"></span>
+    <span class="label">Fleeced &middot; Trade Engine Review &middot; Second Read</span>
+    <span class="label" style="color:var(--chalk-faint)">22 August 2026</span>
+  </div>
+  <h1>The blind spot in the deck</h1>
+  <p class="lede">A second model re-checked the first report&rsquo;s claims against the code and the production database, then looked where it hadn&rsquo;t. The mechanics hold. Two framings were overstated. And three things it didn&rsquo;t examine turn out to matter more than anything it did.</p>
+  <div class="meta-row">
+    <div class="meta-cell"><p class="label">Re-verified</p><div class="v">7 code claims, 4 measurements</div></div>
+    <div class="meta-cell"><p class="label">New evidence</p><div class="v">14 queries, 2 code reads</div></div>
+    <div class="meta-cell"><p class="label">Companion</p><div class="v">Why the Deck Runs Dry</div></div>
+    <div class="meta-cell"><p class="label">Engine code changed</p><div class="v">none</div></div>
+  </div>
+</header>
+
+<section id="verdict">
+  <div class="sec-head"><span class="sec-num">01</span><h2>The short answer</h2></div>
+  <div class="stack">
+    <div class="verdict">
+      <p><strong>The first report&rsquo;s diagnosis is right. Its prescription is incomplete, and one of its success metrics is pointing the wrong way.</strong></p>
+      <p><strong>1. The six-partner ceiling is worse than reported.</strong> It isn&rsquo;t that each deck reaches six of eleven leaguemates. In a league where only you have ranked players, it&rsquo;s the <em>same</em> six every time &mdash; the code visits partners in roster order and stops. Across 6 to 11 refreshes, <strong>5 of 13 and 7 of 13 leaguemates never appeared in any deck, ever.</strong> Those managers are invisible to you, permanently, for zero good reason.</p>
+      <p><strong>2. &ldquo;Like rate&rdquo; measures whether the viewer wins, not whether both teams do.</strong> Cards built where the viewer wins by construction are liked 30% of the time. Cards that genuinely require the other manager to gain too are liked 19%. If you tune toward likes, you will tune toward lopsided offers &mdash; the opposite of what you asked for.</p>
+      <p><strong>3. The scoreboard that matters reads almost zero.</strong> Four hundred sixty-five likes have produced fifteen mutual matches and three accepted trades, ever. Of 127 real Sleeper trades the app has captured, exactly one partially resembled anything it suggested. That is the number to move.</p>
+      <p style="color:var(--chalk-dim)">The gen_v2 finding survives every confound this review threw at it, and sharpens: on the only path where it runs, the shipping engine is liked <strong style="color:var(--chalk)">6%</strong> of the time and gen_v2 <strong style="color:var(--chalk)">57%</strong>.</p>
+    </div>
+  </div>
+</section>
+
+<section id="scorecard">
+  <div class="sec-head"><span class="sec-num">02</span><h2>Scorecard on the first report</h2></div>
+  <div class="stack">
+    <p class="lede" style="font-size:16px">Every load-bearing claim, re-tested. &ldquo;Verified&rdquo; means I read the code or re-ran the query myself rather than trusting the summary.</p>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Claim</th><th>Verdict</th><th>What I found</th></tr></thead>
+        <tbody>
+          <tr><td class="k">Engine stops after ~6 of 11 partners (<span class="mono">global_target</span>)</td><td><span class="pill p-sharp">Sharpened</span></td><td>Code verified (<span class="mono">trade_service.py:5106, 5473</span>). Data reproduces identically on a 14-day-only cut, so roster drift isn&rsquo;t inflating it. And it&rsquo;s a fixed set, not a rotating one &mdash; see &sect;03.</td></tr>
+          <tr><td class="k">12-asset shortlist; shape rule forbids 3-for-1; need gate has no partner parameter; per-opponent cap re-applied by a hardcoded constant</td><td><span class="pill p-ok">Verified</span></td><td>All four read directly: <span class="mono">trade_optimizer.py:524</span>, <span class="mono">trade_service.py:2132</span>, <span class="mono">server.py:4854/5862</span>.</td></tr>
+          <tr><td class="k">The both-ways knob delivers ~+18%, not the documented 2&times;</td><td><span class="pill p-ok">Verified</span></td><td><span class="mono">trade_service.py:6181</span> is guarded by <span class="mono">_both_ways</span>; the 1-for-1 veto at <span class="mono">:6196</span> is not. Correction stands.</td></tr>
+          <tr><td class="k">gen_v2 liked 57% vs current 18%</td><td><span class="pill p-sharp">Sharpened</span></td><td>The headline compared gen_v2 in mixed decks against the current engine mostly in single-arm decks. Fairer cuts: <strong>within the same decks</strong> 57% vs 36% (n=11); <strong>top-3 slots only</strong> 75% vs 9%; <strong>same trade basis</strong> 57% vs 6%. Every cut favours gen_v2; the last is the honest one.</td></tr>
+          <tr><td class="k">&ldquo;Fresh ideas run out after a week&rdquo;; 80% repeat rate</td><td><span class="pill p-over">Overstated</span></td><td>Driven by the operator refreshing ~2&times;/day/league without swiping &mdash; <strong>372 of 424 decks had zero decisions.</strong> An unswiped deck re-serving the same supply is expected. The real number is the supply ceiling: 578 distinct ideas in the heaviest league over four weeks.</td></tr>
+          <tr><td class="k">#370: declined trades are re-served &mdash; &ldquo;already leaking&rdquo;</td><td><span class="pill p-over">Mostly by design</span></td><td>177 re-serves after a decision. <strong>151 are passes forgiven by your own 17 Aug amnesty</strong> (<span class="mono">pass_cooldown_start_epoch</span>). The actual leak is <strong>2 liked trades, 12 impressions</strong>, inside the 7-day like window. Not a pick-ID mismatch: re-served cards are 13% pick-bearing vs 55% baseline.</td></tr>
+          <tr><td class="k">Deck size isn&rsquo;t the binding constraint</td><td><span class="pill p-ok">Verified</span></td><td>Median 25 cards against a 60 cap; supply, not presentation.</td></tr>
+          <tr><td class="k">&ldquo;Generation time roughly doubles&rdquo; under R1 &mdash; stated without a baseline</td><td><span class="pill p-sharp">Grounded</span></td><td>Logged <span class="mono">gen_ms</span>: median <strong>1.7 s</strong>, p90 <strong>5.3 s</strong>, max 11.6 s in August &mdash; already 4&times; July as decks grew 15 &rarr; 26 cards. Doubling puts p90 near 10 s. The budget is real, which is why &sect;04 leads with a zero-cost fix instead.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="new">
+  <div class="sec-head"><span class="sec-num">03</span><h2>What the first report didn&rsquo;t look at</h2></div>
+  <div class="stack">
+
+    <div class="chart">
+      <p class="chart-title">Leaguemates who never appeared in any deck, across every refresh</p>
+      <p class="chart-note">Per user-and-league, the union of all trade partners shown across all decks, against the partners available. &ldquo;Boards&rdquo; is how many managers in that league have ranked players.</p>
+      <div class="tw" style="border:0;background:transparent">
+      <table style="min-width:520px">
+        <thead><tr><th>League</th><th>Boards</th><th>Decks</th><th>Available</th><th>Ever shown</th><th>Never shown</th></tr></thead>
+        <tbody>
+          <tr><td class="k">Operator league A</td><td class="mono">1</td><td class="mono">11</td><td class="mono">13</td><td class="mono">8</td><td><strong style="color:var(--neg)" class="mono">5</strong></td></tr>
+          <tr><td class="k">Operator league B</td><td class="mono">1</td><td class="mono">6</td><td class="mono">13</td><td class="mono">6</td><td><strong style="color:var(--neg)" class="mono">7</strong></td></tr>
+          <tr><td class="k">FFV3 (6 boards), three users</td><td class="mono">6</td><td class="mono">41&ndash;74</td><td class="mono">11</td><td class="mono">9&ndash;11</td><td class="mono">0&ndash;2</td></tr>
+          <tr><td class="k">Second 2-board league</td><td class="mono">2</td><td class="mono">13</td><td class="mono">11</td><td class="mono">10</td><td class="mono">1</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p class="chart-note" style="margin:16px 0 0">The mechanism is at <span class="mono">trade_service.py:5093</span>: partners are sorted ranked-first, then <em>roster order</em>, and the sweep breaks at the card budget. In a league with six boards the break lands in different places and coverage rotates. In a league where only you have ranked, nothing reorders &mdash; the same tail is skipped every single time. <strong>This is the single cheapest fix in either report: rotate where the sweep starts.</strong></p>
+    </div>
+
+    <div class="chart">
+      <p class="chart-title">Like rate by how the card was built</p>
+      <p class="chart-note">&ldquo;Consensus&rdquo; cards are built when the partner hasn&rsquo;t ranked &mdash; the viewer wins by construction. &ldquo;Divergence&rdquo; cards require both sides to gain on their own boards.</p>
+      <div class="bars">
+        <div class="bar-row peak"><span class="bar-lbl">consensus</span><span class="bar-track"><span class="bar-fill" style="width:100%"></span></span><span class="bar-val">30%</span></div>
+        <div class="bar-row"><span class="bar-lbl">divergence</span><span class="bar-track"><span class="bar-fill dim" style="width:63%"></span></span><span class="bar-val">19%</span></div>
+      </div>
+      <p class="chart-note" style="margin:20px 0 0">102 of 343 vs 52 of 278. <strong style="color:var(--chalk)">Users like the cards they win.</strong> That is not a quality signal for &ldquo;benefits both teams&rdquo; &mdash; it&rsquo;s the opposite of one. Your own decision record already says so (D-099: pooled like-rate is a guardrail, never a verdict). Any knob change judged by like rate alone will drift toward fleecing the other manager.</p>
+    </div>
+
+    <div class="grid g2">
+      <div class="card">
+        <p class="label">Likes &rarr; mutual matches, all time</p>
+        <div class="stat neg">3.2%</div>
+        <p class="stat-sub">465 likes &rarr; 15 matches (10 pending, 3 accepted, 2 declined)</p>
+      </div>
+      <div class="card">
+        <p class="label">Real Sleeper trades resembling a suggestion</p>
+        <div class="stat neg">1 <span style="font-size:18px;color:var(--chalk-faint)">of 127</span></div>
+        <p class="stat-sub">one 50%-overlap partial match; zero exact. Seven real trades happened in served leagues during the window; one was the partial.</p>
+      </div>
+    </div>
+    <p class="footnote">These two numbers are the product&rsquo;s actual job. They are also the only two-sided signals in the database, because the partner&rsquo;s opinion is what a match and a real trade both encode. Every other metric in both reports is one-sided.</p>
+
+    <div class="chart">
+      <p class="chart-title">The current engine&rsquo;s two paths, and where gen_v2 plays</p>
+      <p class="chart-note">Like rate by engine and card basis. gen_v2 only builds divergence cards, so that column is the like-for-like comparison.</p>
+      <div class="bars">
+        <div class="bar-row peak"><span class="bar-lbl">gen_v2 &middot; div</span><span class="bar-track"><span class="bar-fill pos" style="width:100%"></span></span><span class="bar-val">57%</span></div>
+        <div class="bar-row"><span class="bar-lbl">challenger &middot; cons</span><span class="bar-track"><span class="bar-fill dim" style="width:79%"></span></span><span class="bar-val">45%</span></div>
+        <div class="bar-row"><span class="bar-lbl">challenger &middot; div</span><span class="bar-track"><span class="bar-fill dim" style="width:42%"></span></span><span class="bar-val">24%</span></div>
+        <div class="bar-row"><span class="bar-lbl">current &middot; cons</span><span class="bar-track"><span class="bar-fill dim" style="width:41%"></span></span><span class="bar-val">23%</span></div>
+        <div class="bar-row"><span class="bar-lbl">current &middot; div</span><span class="bar-track"><span class="bar-fill neg" style="width:11%"></span></span><span class="bar-val">6%</span></div>
+      </div>
+      <p class="chart-note" style="margin:20px 0 0">Two things to read here. The shipping engine&rsquo;s divergence path &mdash; the one <em>designed</em> for mutual gain &mdash; is the worst-performing thing in the product (2 likes of 33). gen_v2 replaces exactly that path. And the challenger&rsquo;s consensus cards, the arm that lets the viewer lose slightly, are liked <strong style="color:var(--chalk)">45%</strong> against the current engine&rsquo;s 23% &mdash; early evidence (n=20) that users don&rsquo;t punish an honest, market-even offer. That bears directly on the &ldquo;real decision&rdquo; the first report left with you.</p>
+    </div>
+
+    <div class="grid g2">
+      <div class="card">
+        <h3 style="font-size:17px">Same shapes, opposite results</h3>
+        <p>The first report wondered whether gen_v2 wins because users simply like multi-player packages. No: the current engine&rsquo;s own multi-asset cards are liked <strong>2 of 35</strong>; gen_v2&rsquo;s are liked <strong>16 of 27</strong>. It builds better packages, not just more of them.</p>
+      </div>
+      <div class="card" style="border-color:var(--warn)">
+        <h3 style="font-size:17px">A claim I got wrong, then checked</h3>
+        <p>The first draft of this page called <span class="mono">calc_opened</span> a dead instrument because it averaged 0.00. It isn&rsquo;t dead &mdash; it&rsquo;s rare. The bit is set on <strong>3 of 525</strong> recorded outcomes, and the &ldquo;open in calculator&rdquo; tap has fired <strong>7 times, ever</strong>. The 0.00 was two-decimal rounding. The real gap is small: 4 of those 7 taps never reached an outcome row, because the bit only rides on a later like/pass of the same card, and someone who opens the calculator usually sends from there instead.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="recs">
+  <div class="sec-head"><span class="sec-num">04</span><h2>What changes in the recommendations</h2></div>
+  <div class="stack">
+    <p class="lede" style="font-size:16px">Nothing here contradicts the first report&rsquo;s R3&ndash;R10. Two things get added or reframed, one is retracted.</p>
+
+    <div class="rec" style="border-left:3px solid var(--ice)">
+      <div class="rec-top"><span class="rec-n">R0</span><h3>Rotate the partner sweep &mdash; do this before R1</h3><span class="pill p-new">New &middot; zero cost</span></div>
+      <p>R1 (&ldquo;let the engine finish the league&rdquo;) doubles generation time, and the logs say p90 is already 5.3 seconds. Most of R1&rsquo;s value can be had for nothing: in leagues where partner order never changes, start the sweep at a different leaguemate each refresh. The deck still stops at six partners &mdash; but a <em>different</em> six, so over a week every manager gets considered. Fixes the permanent blind spot without touching the latency budget.</p>
+      <dl>
+        <dt>Change</dt><dd>Seed the order of unranked members per deck (e.g. rotate by job count, or a per-deck shuffle seeded on user+league+week) at <span class="mono">trade_service.py:5093</span>. Ranked-first stays.</dd>
+        <dt>Effect</dt><dd>Union coverage over a week goes from 6&ndash;8 of 13 to 13 of 13 in single-board leagues. Per-deck count unchanged.</dd>
+        <dt>Risk</dt><dd>Negligible. Same rules, same budget, different visiting order.</dd>
+      </dl>
+    </div>
+
+    <div class="rec">
+      <div class="rec-top"><span class="rec-n">R2&prime;</span><h3>Judge gen_v2 by matches, not likes</h3><span class="pill p-sharp">Reframed</span></div>
+      <p>Weighting the deck toward gen_v2 is still the right call. But grade it on the two-sided signals: <strong>mutual-match rate</strong> and <strong>partner-side like rate</strong> (when the partner sees the mirror card, do they like it?). A like rate win can be bought by favouring the viewer; a match can&rsquo;t. The first report&rsquo;s success criterion (&ldquo;holds at 40% likes&rdquo;) would pass an engine that had learned to fleece.</p>
+      <dl>
+        <dt>Baseline to beat</dt><dd>3.2% of likes become matches. Any arm that doubles that has proven something no like rate can.</dd>
+      </dl>
+    </div>
+
+    <div class="rec">
+      <div class="rec-top"><span class="rec-n">R11&prime;</span><h3>The &ldquo;viewer may lose slightly&rdquo; decision now has early evidence</h3><span class="pill p-sharp">Reframed</span></div>
+      <p>The first report left this as a pure product call. The challenger arm is that product, and its consensus cards are liked 45% against the current engine&rsquo;s 23% on the same basis. Twenty decisions is thin, but the direction says users read a market-even offer as a <em>better</em> offer, not a worse one. Let the challenger earn the rest of the sample alongside gen_v2 rather than deciding in the abstract.</p>
+    </div>
+
+    <div class="rec" style="border-left:3px solid var(--warn)">
+      <div class="rec-top"><span class="rec-n">R12</span><h3>Withdrawn: the calculator-open event is not broken</h3><span class="pill p-over">Retracted</span></div>
+      <p>Recorded 3 times against 7 taps in four weeks. The event works; the action is rare. If the 4 lost taps matter, the fix is one line &mdash; write the outcome row at tap time instead of waiting for a swipe &mdash; but it is not the instrument failure I claimed, and it should not be first in line for anything.</p>
+    </div>
+
+    <div class="rec">
+      <div class="rec-top"><span class="rec-n">&mdash;</span><h3>Drop &ldquo;#370 is leaking&rdquo; from the keep-list</h3><span class="pill p-over">Corrected</span></div>
+      <p>The first report listed re-serving declined trades as an active leak. 151 of the 177 cases are your 17 Aug amnesty working as designed. The residual is two liked trades re-shown within their 7-day window &mdash; worth a look, not worth a rule.</p>
+    </div>
+  </div>
+</section>
+
+<section id="trust">
+  <div class="sec-head"><span class="sec-num">05</span><h2>How much to trust this</h2></div>
+  <div class="stack">
+    <div class="grid g2">
+      <div class="card">
+        <h3 style="font-size:17px">Solid</h3>
+        <ul class="clean" style="margin-top:4px">
+          <li>The blind-spot table is a direct union over every served card per user-and-league. The single-board leagues show 5 and 7 never-seen partners across 11 and 6 decks; that is not a sampling artefact.</li>
+          <li>The like-rate-by-basis split is over all 621 decided cards with a recorded basis.</li>
+          <li>The match and real-trade counts are whole-table counts.</li>
+          <li>All seven code claims were read at the cited lines in the current tree.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3 style="font-size:17px">Shakier</h3>
+        <ul class="clean" style="margin-top:4px">
+          <li>Within-deck arm comparison rests on 11 current-engine decisions. Rank-matched on 34 vs 16. Basis-matched on 33 vs 30.</li>
+          <li>The challenger&rsquo;s 45% is 9 of 20.</li>
+          <li>Real-trade matching only runs for leagues with telemetry on, with a 14-day lookback &mdash; &ldquo;1 of 127&rdquo; is a floor on misses, not a ceiling.</li>
+          <li>Still five users. Still mostly you.</li>
+        </ul>
+      </div>
+    </div>
+    <hr class="soft">
+    <p class="footnote">Method: re-read each cited line of <span class="mono">trade_service.py</span>, <span class="mono">trade_optimizer.py</span> and <span class="mono">server.py</span> rather than accepting the prior summaries; re-ran the prior session&rsquo;s partner-coverage and novelty scripts with tighter windows; added fourteen read-only production queries covering arm rank, deck composition, card basis, decision re-serves, cooldown knobs, executed-trade links, match status, and generation latency. No engine code was modified.</p>
+  </div>
+</section>
+
+</div>

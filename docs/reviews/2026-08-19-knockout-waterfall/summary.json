@@ -1,0 +1,731 @@
+{
+ "B_divergence": {
+  "n_candidates": 2505720,
+  "shapes": {
+   "1x1": 4320,
+   "1x2": 23760,
+   "2x1": 23760,
+   "2x2": 130680,
+   "2x3": 435600,
+   "3x2": 435600,
+   "3x3": 1452000
+  },
+  "first_kill": {
+   "G6_R1_overpay": 35014,
+   "gap_max": 1250720,
+   "G6_R5_need": 3058,
+   "R0_141_filler": 1200451,
+   "R0_108_1for1": 981,
+   "feasibility": 1711,
+   "min_side_surplus": 5579,
+   "G6_R3_pickgap": 548,
+   "R0_227_pickswap": 3373,
+   "G6_R2_posnet": 2454,
+   "fairness": 4
+  },
+  "rule_fail": {
+   "G6_R1_overpay": 2078626,
+   "G6_R5_need": 451963,
+   "min_side_surplus": 2181490,
+   "fairness": 1640957,
+   "gap_max": 1250720,
+   "R0_108_1for1": 2635,
+   "feasibility": 209570,
+   "R0_141_filler": 2434743,
+   "G6_R2_posnet": 1066206,
+   "G6_R3_pickgap": 166455,
+   "R0_227_pickswap": 3489
+  },
+  "unique_kill": {
+   "G6_R5_need": 827,
+   "min_side_surplus": 5429,
+   "R0_141_filler": 44529,
+   "G6_R1_overpay": 697,
+   "G6_R2_posnet": 412,
+   "feasibility": 557,
+   "R0_108_1for1": 13,
+   "G6_R3_pickgap": 20,
+   "fairness": 4
+  },
+  "survivors_distinct": 1827,
+  "survivors_rows": 1827,
+  "rule_order": [
+   "gap_max",
+   "R0_108_1for1",
+   "R0_227_pickswap",
+   "R0_141_filler",
+   "G6_R1_overpay",
+   "G6_R2_posnet",
+   "G6_R3_pickgap",
+   "G6_R5_need",
+   "feasibility",
+   "min_side_surplus",
+   "fairness"
+  ],
+  "by_shape": {
+   "1x1": {
+    "G6_R1_overpay": 254,
+    "gap_max": 2366,
+    "R0_108_1for1": 981,
+    "G6_R5_need": 87,
+    "feasibility": 19,
+    "min_side_surplus": 517,
+    "SURVIVED": 35,
+    "R0_227_pickswap": 58,
+    "fairness": 3
+   },
+   "1x2": {
+    "G6_R5_need": 132,
+    "R0_141_filler": 8346,
+    "gap_max": 13000,
+    "G6_R1_overpay": 1423,
+    "SURVIVED": 43,
+    "min_side_surplus": 219,
+    "G6_R3_pickgap": 2,
+    "G6_R2_posnet": 53,
+    "feasibility": 9,
+    "R0_227_pickswap": 533
+   },
+   "2x1": {
+    "R0_141_filler": 5976,
+    "gap_max": 14534,
+    "G6_R1_overpay": 1959,
+    "G6_R5_need": 134,
+    "min_side_surplus": 329,
+    "G6_R2_posnet": 117,
+    "SURVIVED": 176,
+    "feasibility": 52,
+    "R0_227_pickswap": 476,
+    "G6_R3_pickgap": 6,
+    "fairness": 1
+   },
+   "2x2": {
+    "R0_141_filler": 53021,
+    "gap_max": 71001,
+    "G6_R1_overpay": 4557,
+    "G6_R2_posnet": 206,
+    "G6_R3_pickgap": 36,
+    "G6_R5_need": 456,
+    "min_side_surplus": 648,
+    "SURVIVED": 255,
+    "feasibility": 170,
+    "R0_227_pickswap": 330
+   },
+   "2x3": {
+    "R0_141_filler": 205594,
+    "gap_max": 220143,
+    "G6_R2_posnet": 491,
+    "G6_R1_overpay": 6416,
+    "G6_R5_need": 520,
+    "G6_R3_pickgap": 80,
+    "feasibility": 104,
+    "min_side_surplus": 1172,
+    "SURVIVED": 178,
+    "R0_227_pickswap": 902
+   },
+   "3x2": {
+    "R0_141_filler": 187050,
+    "gap_max": 235973,
+    "G6_R1_overpay": 8731,
+    "G6_R2_posnet": 660,
+    "G6_R5_need": 583,
+    "feasibility": 431,
+    "R0_227_pickswap": 748,
+    "min_side_surplus": 773,
+    "G6_R3_pickgap": 106,
+    "SURVIVED": 545
+   },
+   "3x3": {
+    "R0_141_filler": 740464,
+    "gap_max": 693703,
+    "G6_R1_overpay": 11674,
+    "G6_R2_posnet": 927,
+    "min_side_surplus": 1921,
+    "G6_R3_pickgap": 318,
+    "feasibility": 926,
+    "R0_227_pickswap": 326,
+    "G6_R5_need": 1146,
+    "SURVIVED": 595
+   }
+  },
+  "by_user": {
+   "mattmurf77": {
+    "G6_R1_overpay": 1828,
+    "gap_max": 204098,
+    "G6_R5_need": 108,
+    "R0_141_filler": 211024,
+    "R0_108_1for1": 188,
+    "feasibility": 22,
+    "min_side_surplus": 219,
+    "SURVIVED": 20,
+    "G6_R3_pickgap": 4,
+    "R0_227_pickswap": 3,
+    "G6_R2_posnet": 106
+   },
+   "Bcork": {
+    "G6_R1_overpay": 3216,
+    "R0_108_1for1": 102,
+    "gap_max": 223036,
+    "R0_141_filler": 187391,
+    "SURVIVED": 99,
+    "min_side_surplus": 1510,
+    "feasibility": 803,
+    "G6_R2_posnet": 66,
+    "R0_227_pickswap": 1271,
+    "G6_R3_pickgap": 116,
+    "G6_R5_need": 10
+   },
+   "gdubs10": {
+    "SURVIVED": 124,
+    "gap_max": 217489,
+    "G6_R1_overpay": 4703,
+    "R0_141_filler": 193006,
+    "R0_108_1for1": 239,
+    "G6_R5_need": 509,
+    "min_side_surplus": 559,
+    "G6_R2_posnet": 277,
+    "feasibility": 161,
+    "R0_227_pickswap": 484,
+    "G6_R3_pickgap": 69
+   },
+   "jonbonjourvi": {
+    "G6_R1_overpay": 5487,
+    "R0_108_1for1": 109,
+    "gap_max": 229983,
+    "R0_141_filler": 179287,
+    "G6_R2_posnet": 112,
+    "G6_R5_need": 305,
+    "min_side_surplus": 911,
+    "feasibility": 45,
+    "SURVIVED": 383,
+    "R0_227_pickswap": 972,
+    "G6_R3_pickgap": 26
+   },
+   "johnstanfield": {
+    "gap_max": 187102,
+    "SURVIVED": 848,
+    "R0_108_1for1": 158,
+    "G6_R1_overpay": 10019,
+    "R0_141_filler": 215594,
+    "fairness": 3,
+    "min_side_surplus": 1862,
+    "G6_R2_posnet": 694,
+    "feasibility": 680,
+    "R0_227_pickswap": 450,
+    "G6_R3_pickgap": 210
+   },
+   "MangoPatti": {
+    "G6_R1_overpay": 9761,
+    "R0_108_1for1": 185,
+    "gap_max": 189012,
+    "R0_141_filler": 214149,
+    "SURVIVED": 353,
+    "G6_R5_need": 2126,
+    "min_side_surplus": 518,
+    "G6_R2_posnet": 1199,
+    "fairness": 1,
+    "G6_R3_pickgap": 123,
+    "R0_227_pickswap": 193
+   }
+  },
+  "ordered_pairs": 30,
+  "truth_scored": 1827,
+  "validated": true,
+  "served_after_selection": 109
+ },
+ "B_consensus": {
+  "n_candidates": 361674,
+  "shapes": {
+   "1x1": 22659,
+   "2x1": 339015
+  },
+  "first_kill": {
+   "consensus_eps": 259179,
+   "R0_108_1for1": 1805,
+   "G6_R1_overpay": 14888,
+   "R0_227_pickswap": 452,
+   "G6_R5_need": 2342,
+   "fairness": 662,
+   "R0_141_filler": 77128,
+   "G6_R2_posnet": 559
+  },
+  "rule_fail": {
+   "consensus_eps": 259179,
+   "R0_108_1for1": 11888,
+   "G6_R1_overpay": 263980,
+   "fairness": 251377,
+   "G6_R5_need": 92690,
+   "G6_R3_pickgap": 26706,
+   "R0_227_pickswap": 6309,
+   "consolidation_loss": 236441,
+   "G6_R2_posnet": 57269,
+   "R0_141_filler": 258408
+  },
+  "unique_kill": {
+   "R0_108_1for1": 913,
+   "G6_R1_overpay": 2599,
+   "G6_R5_need": 1919,
+   "fairness": 662,
+   "consensus_eps": 1156,
+   "R0_227_pickswap": 255,
+   "R0_141_filler": 8348,
+   "G6_R2_posnet": 271
+  },
+  "survivors_distinct": 4659,
+  "survivors_rows": 4659,
+  "rule_order": [
+   "consensus_eps",
+   "consolidation_loss",
+   "R0_108_1for1",
+   "R0_227_pickswap",
+   "R0_141_filler",
+   "G6_R1_overpay",
+   "G6_R2_posnet",
+   "G6_R3_pickgap",
+   "G6_R5_need",
+   "fairness"
+  ],
+  "by_shape": {
+   "1x1": {
+    "consensus_eps": 10441,
+    "R0_108_1for1": 1805,
+    "G6_R1_overpay": 5847,
+    "R0_227_pickswap": 452,
+    "G6_R5_need": 829,
+    "SURVIVED": 2623,
+    "fairness": 662
+   },
+   "2x1": {
+    "consensus_eps": 248738,
+    "R0_141_filler": 77128,
+    "SURVIVED": 2036,
+    "G6_R1_overpay": 9041,
+    "G6_R5_need": 1513,
+    "G6_R2_posnet": 559
+   }
+  },
+  "by_user": {
+   "mattmurf77": {
+    "consensus_eps": 64693,
+    "R0_108_1for1": 677,
+    "G6_R1_overpay": 2909,
+    "R0_227_pickswap": 72,
+    "G6_R5_need": 480,
+    "SURVIVED": 939,
+    "fairness": 339,
+    "R0_141_filler": 31596,
+    "G6_R2_posnet": 40
+   },
+   "Bcork": {
+    "consensus_eps": 10395,
+    "SURVIVED": 379,
+    "G6_R1_overpay": 461,
+    "R0_141_filler": 3449,
+    "G6_R2_posnet": 12,
+    "fairness": 45,
+    "R0_108_1for1": 1
+   },
+   "gdubs10": {
+    "R0_108_1for1": 466,
+    "G6_R1_overpay": 5277,
+    "consensus_eps": 75707,
+    "SURVIVED": 1320,
+    "R0_227_pickswap": 144,
+    "G6_R5_need": 761,
+    "fairness": 107,
+    "R0_141_filler": 17664,
+    "G6_R2_posnet": 299
+   },
+   "jonbonjourvi": {
+    "consensus_eps": 24581,
+    "G6_R1_overpay": 1155,
+    "R0_108_1for1": 238,
+    "SURVIVED": 571,
+    "R0_227_pickswap": 107,
+    "G6_R5_need": 98,
+    "fairness": 27,
+    "R0_141_filler": 2447,
+    "G6_R2_posnet": 17
+   },
+   "johnstanfield": {
+    "consensus_eps": 13088,
+    "R0_108_1for1": 408,
+    "SURVIVED": 334,
+    "G6_R2_posnet": 5,
+    "G6_R1_overpay": 313,
+    "R0_141_filler": 4112,
+    "fairness": 10
+   },
+   "MangoPatti": {
+    "R0_108_1for1": 15,
+    "G6_R1_overpay": 4773,
+    "consensus_eps": 70715,
+    "G6_R5_need": 1003,
+    "SURVIVED": 1116,
+    "R0_227_pickswap": 129,
+    "fairness": 134,
+    "R0_141_filler": 17860,
+    "G6_R2_posnet": 186
+   }
+  },
+  "ordered_pairs": 36,
+  "served_after_selection": 761,
+  "validated": true
+ },
+ "C_gen_v2": {
+  "n_candidates": 205625,
+  "shapes": {
+   "1x1": 1220,
+   "2x1": 5490,
+   "3x1": 14640,
+   "1x2": 4380,
+   "2x2": 19710,
+   "3x2": 52560,
+   "1x3": 6150,
+   "2x3": 27675,
+   "3x3": 73800
+  },
+  "first_kill": {
+   "S3c_dual_eps_user": 2467,
+   "S3c_dual_eps_opp": 4459,
+   "S3a_141_filler": 192827,
+   "S3a_net_cap": 3881,
+   "S3b_feasibility": 1294,
+   "S3d_fairness_band": 269,
+   "S3a_pick_band": 241
+  },
+  "rule_fail": {
+   "S3c_dual_eps_user": 68009,
+   "S3d_fairness_band": 183467,
+   "S3c_dual_eps_opp": 112938,
+   "S3a_141_filler": 192827,
+   "S3a_net_cap": 82507,
+   "S3b_feasibility": 30353,
+   "S3a_pick_band": 4283
+  },
+  "unique_kill": {
+   "S3c_dual_eps_opp": 31,
+   "S3a_141_filler": 4938,
+   "S3c_dual_eps_user": 253,
+   "S3d_fairness_band": 269,
+   "S3a_net_cap": 92,
+   "S3b_feasibility": 134,
+   "S3a_pick_band": 2
+  },
+  "survivors_distinct": 118,
+  "survivors_rows": 187,
+  "rule_order": [
+   "S3a_141_filler",
+   "S3a_227_pickswap",
+   "S3a_net_cap",
+   "S3a_pick_band",
+   "S3b_feasibility",
+   "S3c_dual_eps_user",
+   "S3c_dual_eps_opp",
+   "S3d_fairness_band"
+  ],
+  "by_shape": {
+   "1x1": {
+    "S3c_dual_eps_user": 420,
+    "S3c_dual_eps_opp": 602,
+    "S3b_feasibility": 102,
+    "SURVIVED": 16,
+    "S3d_fairness_band": 37,
+    "S3a_pick_band": 43
+   },
+   "2x1": {
+    "S3c_dual_eps_user": 605,
+    "S3a_141_filler": 4099,
+    "S3c_dual_eps_opp": 245,
+    "S3a_net_cap": 173,
+    "SURVIVED": 32,
+    "S3d_fairness_band": 64,
+    "S3b_feasibility": 171,
+    "S3a_pick_band": 101
+   },
+   "3x1": {
+    "S3a_141_filler": 13142,
+    "S3a_net_cap": 372,
+    "S3c_dual_eps_opp": 115,
+    "S3d_fairness_band": 45,
+    "S3c_dual_eps_user": 696,
+    "S3a_pick_band": 47,
+    "SURVIVED": 16,
+    "S3b_feasibility": 207
+   },
+   "1x2": {
+    "SURVIVED": 34,
+    "S3c_dual_eps_opp": 1052,
+    "S3a_141_filler": 2640,
+    "S3c_dual_eps_user": 108,
+    "S3a_net_cap": 426,
+    "S3b_feasibility": 106,
+    "S3d_fairness_band": 14
+   },
+   "2x2": {
+    "S3c_dual_eps_user": 266,
+    "S3a_141_filler": 17982,
+    "S3c_dual_eps_opp": 652,
+    "S3a_net_cap": 496,
+    "S3b_feasibility": 222,
+    "S3d_fairness_band": 52,
+    "SURVIVED": 24,
+    "S3a_pick_band": 16
+   },
+   "3x2": {
+    "S3a_141_filler": 50912,
+    "S3a_net_cap": 566,
+    "S3c_dual_eps_opp": 410,
+    "S3c_dual_eps_user": 294,
+    "S3b_feasibility": 288,
+    "S3d_fairness_band": 36,
+    "S3a_pick_band": 34,
+    "SURVIVED": 20
+   },
+   "1x3": {
+    "S3a_141_filler": 4740,
+    "S3c_dual_eps_user": 15,
+    "S3d_fairness_band": 12,
+    "SURVIVED": 9,
+    "S3c_dual_eps_opp": 540,
+    "S3a_net_cap": 819,
+    "S3b_feasibility": 15
+   },
+   "2x3": {
+    "S3a_141_filler": 26487,
+    "S3c_dual_eps_user": 36,
+    "S3c_dual_eps_opp": 471,
+    "S3a_net_cap": 588,
+    "S3b_feasibility": 57,
+    "SURVIVED": 30,
+    "S3d_fairness_band": 6
+   },
+   "3x3": {
+    "S3a_141_filler": 72825,
+    "S3a_net_cap": 441,
+    "S3c_dual_eps_opp": 372,
+    "S3c_dual_eps_user": 27,
+    "S3b_feasibility": 126,
+    "S3d_fairness_band": 3,
+    "SURVIVED": 6
+   }
+  },
+  "by_user": {
+   "mattmurf77": {
+    "S3c_dual_eps_user": 246,
+    "S3c_dual_eps_opp": 408,
+    "S3a_141_filler": 42474,
+    "SURVIVED": 21,
+    "S3a_net_cap": 196,
+    "S3b_feasibility": 48,
+    "S3d_fairness_band": 7
+   },
+   "Bcork": {
+    "S3d_fairness_band": 56,
+    "S3b_feasibility": 265,
+    "S3c_dual_eps_opp": 913,
+    "SURVIVED": 20,
+    "S3a_141_filler": 36245,
+    "S3a_pick_band": 35,
+    "S3a_net_cap": 626,
+    "S3c_dual_eps_user": 340
+   },
+   "gdubs10": {
+    "SURVIVED": 31,
+    "S3c_dual_eps_opp": 558,
+    "S3c_dual_eps_user": 319,
+    "S3a_141_filler": 21902,
+    "S3d_fairness_band": 38,
+    "S3a_net_cap": 695,
+    "S3a_pick_band": 51,
+    "S3b_feasibility": 31
+   },
+   "jonbonjourvi": {
+    "S3b_feasibility": 361,
+    "S3c_dual_eps_opp": 1364,
+    "S3c_dual_eps_user": 457,
+    "S3a_net_cap": 769,
+    "S3a_141_filler": 28047,
+    "S3d_fairness_band": 18,
+    "S3a_pick_band": 74,
+    "SURVIVED": 60
+   },
+   "johnstanfield": {
+    "S3c_dual_eps_opp": 680,
+    "S3d_fairness_band": 69,
+    "SURVIVED": 23,
+    "S3a_net_cap": 866,
+    "S3a_141_filler": 35838,
+    "S3c_dual_eps_user": 620,
+    "S3b_feasibility": 529,
+    "S3a_pick_band": 50
+   },
+   "MangoPatti": {
+    "S3d_fairness_band": 81,
+    "SURVIVED": 32,
+    "S3c_dual_eps_opp": 536,
+    "S3a_net_cap": 729,
+    "S3a_141_filler": 28321,
+    "S3c_dual_eps_user": 485,
+    "S3b_feasibility": 60,
+    "S3a_pick_band": 31
+   }
+  },
+  "ordered_pairs": 30,
+  "engine_counters": {
+   "S0_boarded_opponents": 30,
+   "S0_unranked_opponents": 0,
+   "S1_no_board_overlap": 0,
+   "S1_no_centerpiece": 1,
+   "S2_considered": 205625,
+   "S3a_composition": 192827,
+   "S3a_net_cap": 3881,
+   "S3a_pick_band": 241,
+   "S3b_feasibility": 1294,
+   "S3c_dual_board_ir": 6926,
+   "S3d_fairness_band": 269,
+   "S4_survivors": 187,
+   "S6_emitted": 65,
+   "S7_intent_filter": 0,
+   "S7_headliner_cap": 2,
+   "S7_served_to_deck": 63
+  },
+  "harness_first_kill_mapped": {
+   "S3a_composition": 192827,
+   "S3a_net_cap": 3881,
+   "S3a_pick_band": 241,
+   "S3b_feasibility": 1294,
+   "S3c_dual_board_ir": 6926,
+   "S3d_fairness_band": 269
+  },
+  "validated": true,
+  "served_after_selection": 63
+ },
+ "_files": {
+  "full_rows": 3073019,
+  "notable_rows": 81003,
+  "full_bytes": 44001929,
+  "survivor_rows": 6673,
+  "notable_bytes": 1422490,
+  "survivor_bytes": 1144459
+ },
+ "_pre_gate": {
+  "B_divergence": {
+   "pool_size": 12,
+   "subsets_per_side": 298,
+   "cross_product_per_pair": 88804,
+   "shape_valid_per_pair": 83524,
+   "cross_product_total": 2664120,
+   "shape_valid_total": 2505720,
+   "shape_kills_total": 158400,
+   "pairs": 30,
+   "mean_user_roster": 29.0,
+   "mean_partner_roster": 29.0
+  }
+ },
+ "_selection_ladder": {
+  "divergence": [
+   [
+    "gates only",
+    1827
+   ],
+   [
+    "+ v3 diversity",
+    161
+   ],
+   [
+    "+ max_per_opponent=5",
+    79
+   ],
+   [
+    "+ past-decision & R4",
+    72
+   ],
+   [
+    "+ C4 headliner cap",
+    65
+   ],
+   [
+    "+ C4b give-headliner cap",
+    63
+   ]
+  ],
+  "consensus": [
+   [
+    "gates only",
+    4659
+   ],
+   [
+    "+ v3 diversity",
+    4659
+   ],
+   [
+    "+ max_per_opponent=5",
+    180
+   ],
+   [
+    "+ past-decision & R4",
+    158
+   ],
+   [
+    "+ C4 headliner cap",
+    128
+   ],
+   [
+    "+ C4b give-headliner cap",
+    124
+   ]
+  ]
+ },
+ "_meta": {
+  "league": "1312140920132497408",
+  "scoring_format": "1qb_ppr",
+  "snapshot": "2026-08-19",
+  "boarded": [
+   "mattmurf77",
+   "Bcork",
+   "gdubs10",
+   "jonbonjourvi",
+   "johnstanfield",
+   "MangoPatti"
+  ],
+  "unboarded": [
+   "Shark357",
+   "PaulSm3nis",
+   "lofman",
+   "bsharp3",
+   "dondags20",
+   "KevinLake"
+  ],
+  "fairness_threshold": 0.5,
+  "knobs": {
+   "v3_pool_size": 12.0,
+   "v3_diversity_max_overlap": 0.4,
+   "trade_elo_gap_max": 250.0,
+   "min_side_surplus": 150.0,
+   "min_side_surplus_marginal": 60.0,
+   "filler_min_frac": 0.25,
+   "asset_floor_abs": 450.0,
+   "user_gain_epsilon": 0.0,
+   "consolidation_raw_loss_frac": 0.15,
+   "fairness_floor_divergence": 0.55,
+   "deck_headliner_cap": 2.0,
+   "deck_give_headliner_cap": 3.0,
+   "pos_net_cap": 1.0,
+   "pick_gap_frac": 0.8,
+   "need_gate_min_value": 500.0,
+   "gen2_epsilon": 100.0,
+   "gen2_band": 0.15,
+   "gen2_centerpiece_top_k": 5.0,
+   "gen2_give_pool": 10.0,
+   "gen2_recv_extra_pool": 4.0,
+   "gen2_min_divergence": 0.0,
+   "picks_pool_cap": 6.0
+  },
+  "validated": {
+   "B_divergence": true,
+   "B_consensus": true,
+   "C": true
+  }
+ }
+}

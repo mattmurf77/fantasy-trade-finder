@@ -453,7 +453,7 @@ def test_clearing_a_pid_drops_its_stamp():
     lambda s: s.apply_reorder("WR", ["p3", "p1", "p0", "p2", "p4"]),
     lambda s: s.apply_value_map("WR", ["p3", "p1", "p0", "p2", "p4"]),
     lambda s: s.apply_anchor("p2", 1600.0),
-    lambda s: s.apply_tiers("WR", {"firsts_2": ["p0"]}, demoted_pids=["p1"]),
+    lambda s: s.apply_tiers("WR", {"firsts_2": ["p0"]}),
     lambda s: s.apply_tiers_subset("WR", {"firsts_2": ["p0"]}, scope_pids={"p0"}),
 ])
 def test_every_override_mutator_stamps(mutate):

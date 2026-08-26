@@ -1079,10 +1079,13 @@ def test_guided_onboarding_v2_registers_exactly_the_agreed_names():
         assert name not in tax.ALLOWED_CLIENT_EVENTS, f"{name} is Phase 2"
 
 
-def test_guided_onboarding_v2_flag_is_registered_and_ships_dark():
+def test_guided_onboarding_v2_flag_is_registered_and_lit():
     """The 3-touch mirror: FLAG_KEYS, config/features.json, release.json.
-    Off = byte-identical to pre-build behavior, so `false` is the contract,
-    not a placeholder — graduation is an operator decision (scope.md §2)."""
+    Shipped `false` (off = byte-identical to pre-build behavior; graduation
+    was an operator decision, scope.md §2). LIT `true` on 2026-08-22 by
+    operator decision with #384 — the merged-calculator tour requires the v2
+    layer — so `true` is now the pinned contract; a flip back to `false` is a
+    deliberate revert and must change this line with it."""
     from pathlib import Path
     from backend.feature_flags import FLAG_KEYS
     repo = Path(__file__).resolve().parents[2]
@@ -1090,5 +1093,5 @@ def test_guided_onboarding_v2_flag_is_registered_and_ships_dark():
     release = json.loads(
         (repo / "backend/tests/fixtures/flags/release.json").read_text())
     assert "onboarding.guide_v2" in FLAG_KEYS
-    assert features["onboarding.guide_v2"] is False
+    assert features["onboarding.guide_v2"] is True
     assert release["onboarding.guide_v2"] == features["onboarding.guide_v2"]

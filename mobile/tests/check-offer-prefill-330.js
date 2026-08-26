@@ -125,23 +125,59 @@ assert(
   'sabotage detected: writing route params instead — ignored while trades.sheet_targeting is ON',
 );
 assert(
-  /if \(finderHubOn && finderMode\) \{\s*autoRunPendingRef\.current = true;\s*setAutoRunSeq\(finderHandoff\.seq\);\s*\}/.test(consumeEffect),
+  // #384 — the calculator origin and (W6-B) the fair anchor are armed
+  // alongside the pending ref, inside the SAME gate. The comment lines are
+  // skipped; every ASSIGNMENT in the block must be one of the four.
+  (() => {
+    const m = consumeEffect.match(
+      /if \(finderHubOn && finderMode\) \{([\s\S]*?)\n    \}/,
+    );
+    if (!m) return false;
+    const body = m[1]
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith('//'));
+    return (
+      body.includes('setAutoRunSeq(finderHandoff.seq);') &&
+      body.every((l) =>
+        /^(fairAnchorRef\.current = fair;|autoRunPendingRef\.current = !fair;|autoRunOriginRef\.current = origin;|setAutoRunSeq\(finderHandoff\.seq\);)$/.test(l),
+      )
+    );
+  })(),
   'S-2 the ref-arm (and seq bump) is guarded by the SAME finderHubOn && finderMode gate the choke point uses (R-8)',
   'sabotage detected: arming unconditionally leaves a live ref to detonate when the user later enters a finder mode',
 );
+assert(
+  // W6-B (D-153) — the two arms are MUTUALLY EXCLUSIVE at the source: the
+  // model auto-run is armed with `!fair`, so a canvas-anchored arrival can
+  // never also dispatch a generate. `= true` here is the regression.
+  /autoRunPendingRef\.current = !fair;/.test(consumeEffect),
+  'S-2 the model auto-run is armed only when there is NO fair anchor',
+  'sabotage detected: `autoRunPendingRef.current = true` runs the model deck alongside the fairness sweep',
+);
 
+// D-158 (Wave B0, 2026-08-24) — the choke point gained ONE more trigger,
+// `canvasRunSeq`, which is the inline canvas's in-place Find a Trade routing
+// through this SAME effect instead of opening a second dispatch site (the
+// `generateMutation.mutate(` count assertion below is what keeps that honest).
+// It is only ever bumped with `calc.inline_home` on, so flag-off the dep is a
+// constant 0 and the effect fires exactly when it always did. The three
+// original deps are still required, in order.
 const chokeEffect = region(
   tradesCode,
-  /const finderScopeSeen = useRef\(false\);[\s\S]*?\}, \[finderMode, scopedOpponent, autoRunSeq\]\);/,
+  /const finderScopeSeen = useRef\(false\);[\s\S]*?\}, \[finderMode, scopedOpponent, autoRunSeq(?:, canvasRunSeq)?\]\);/,
   'S-2 the scoped-opponent choke-point effect',
 );
 assert(
-  /\}, \[finderMode, scopedOpponent, autoRunSeq\]\);/.test(chokeEffect),
+  /\}, \[finderMode, scopedOpponent, autoRunSeq(?:, canvasRunSeq)?\]\);/.test(chokeEffect),
   'S-2 the choke-point deps contain autoRunSeq (B-1)',
   'sabotage detected: dropping it — a repeat Offer to the SAME team changes no dep, the second handoff lands its pin on the stale deck silently (the original #330 symptom reborn)',
 );
 assert(
-  /if \(\(finderScopeSeen\.current \|\| autoRun\) && scopedOpponent\) \{/.test(chokeEffect),
+  // #384 — the calculator's hand-off may carry NO opponent (its Team dropdown
+  // is optional); that origin, and only that origin, widens the opponent half
+  // of the gate. The #330 shape is the first alternative, byte-identical.
+  /if \(\(finderScopeSeen\.current \|\| autoRun\) && scopedOpponent\) \{|if \(\s*\(finderScopeSeen\.current \|\| autoRun\) &&\s*\(scopedOpponent \|\| \(autoRun && autoRunOrigin === 'calculator'\)\)\s*\) \{/.test(chokeEffect),
   'S-2 an armed handoff widens the fresh-mount gate (generate on first observation)',
   'sabotage detected: keeping the bare finderScopeSeen gate makes the cold-mount handoff a prefill with no search',
 );
@@ -164,8 +200,11 @@ assert(
 // ═══════════════════════════════════════════════════════════════════════
 
 assert(
-  /if \(autoRun\) \{\s*track\('find_trades_tapped', \{ source: 'league_offer', mode: deckMode \}, 'Trades'\);\s*\}/.test(chokeEffect),
-  "S-3 the auto-run dispatch emits find_trades_tapped {source:'league_offer', mode}",
+  // #384 — `source` is a ternary over the armed origin (calculator vs
+  // league_offer); the emit is still inside the autoRun branch, still `mode:
+  // deckMode`, still exactly one call.
+  /if \(autoRun\) \{[\s\S]*?track\(\s*'find_trades_tapped',\s*\{\s*source: autoRunOrigin === 'calculator' \? 'calculator' : 'league_offer',\s*mode: deckMode,\s*\},\s*'Trades',?\s*\);\s*\}/.test(chokeEffect),
+  "S-3 the auto-run dispatch emits find_trades_tapped {source:'league_offer' | 'calculator', mode}",
   'sabotage detected: dropping the emit makes handoff adoption unmeasurable; emitting outside the autoRun branch double-counts in-place team picks',
 );
 // Source-of-truth cross-check (the check-league-candidates-300.js pattern):

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { ink, chalk, ice, flare, space, radii, type, fonts } from '../theme/chalkline';
@@ -56,8 +56,15 @@ export function outlookReceiptCovers(
 export default function OutlookBiasReceipt({
   onChange,
   details,
+  onHiddenChange,
 }: {
   onChange: () => void;
+  /** #384 — reports whether this receipt rendered nothing. TradesScreen has
+   *  always had a fallback row for that case (its `outlookReceiptShown`
+   *  predicate); the merged calculator needs the same, but it mounts the
+   *  receipt directly and cannot run the predicate without the prefs query.
+   *  Absent ⇒ nothing changes here. */
+  onHiddenChange?: (hidden: boolean) => void;
   /** #315 — optional dim second row summarizing the sheet's OTHER
    *  configurations (chasing/shopping positions, trade-idea lane,
    *  untouchables count), composed by the HOST from state it already owns
@@ -86,7 +93,12 @@ export default function OutlookBiasReceipt({
   const resolved = declared ?? inferred ?? null;
   const entry = resolved ? LEAN[resolved] : undefined;
   // Same predicate TradesScreen gates its duplicate row on (#254).
-  if (!outlookReceiptCovers(directionOn, declared, inferred) || !entry) {
+  const hidden = !outlookReceiptCovers(directionOn, declared, inferred) || !entry;
+  // Before the early return, or the hook count would change between renders.
+  useEffect(() => {
+    onHiddenChange?.(hidden);
+  }, [hidden, onHiddenChange]);
+  if (hidden) {
     return null;
   }
 

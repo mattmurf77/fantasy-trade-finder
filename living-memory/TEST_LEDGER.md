@@ -10,6 +10,1623 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+
+
+
+
+
+## 2026-08-25 — v1.16.6 (EAS build 132) BUILT + SUBMITTED to TestFlight
+
+Carries PR #196's `via:'quickset'` tag ([D-162](DECISIONS.md)) — the first build in which the Quick Set funnel can emit anything.
+
+| Gate | Result |
+|---|---|
+| Version sources (G-012) | All three iOS spots set to 1.16.6 — `app.json`, `Info.plist` `CFBundleShortVersionString` (the literal that actually ships here), both `MARKETING_VERSION` lines. Verified on the build source commit before upload |
+| CI on the release sha (`cb691b25` → merged `c092f808`) | backend-tests · mobile-typecheck · testid-lint all **pass** |
+| EAS build `8925880d` | **finished** — v1.16.6 (132), commit `c092f808`, profile production |
+| Submission `b190d30b` | **finished** — ASC app 6771488431, auto-submit. Apple-side processing then TestFlight availability is out of our hands |
+| Archive hygiene (G-022) | Built from the 561 MB worktree, NOT the 9.5 GB main checkout (5.9 GB of nested worktrees there — the condition that once failed an upload) |
+
+**Owed runtime evidence, now runnable on 132:** the via-gap checklist ([scope §3](../docs/plans/quickset-analytics-via/scope.md)) — expect `quickset_completed` rows + `tier_save.props.via = "quickset"` for a real walk, and `via:"tiers"` with no `quickset_completed` for a plain Tiers save. Checklists **H** + **I1** (Wave A / flag-off regression) were owed on 130 and are also testable here.
+
+## 2026-08-25 — Merge-day addendum to 2026-08-24b: main merged in, D-162 renumber, Aug-25 calendar flake pinned (G-061)
+
+Merging `origin/main` (Group F + feedback wave + Waves A/B0 + pick YoY floor) into the via-gap branch surfaced two things. (1) Main took D-160/D-161 overnight → this branch's decision renumbered **D-162**; `via:'quickset'` verified intact alongside Group F's HOLD changes (`check-quickset-via` + `check-quickset-hold` + `tsc` green on the merged tree). (2) The merged-tree suite failed `test_notif_teardown`'s three winback tests — **because the run date was Aug 25**: the daily tick's `is_aug25` season_start fan-out skips every winback that day, so the real clock was a hidden test input ([G-061](GOTCHAS.md), the G-059 pattern). Fixed by pinning the tick clock in those tests + a new pinned `test_season_start_fanout_on_aug25`; file 19/19 green. Remaining local failure: `test_deck_signal_v2` only — **CORRECTED 2026-08-25: caused by the stale `data/trade_finder.db` in this worktree, not Python skew** (pristine data dir → passes). It reproduced on a clean git tree because `git stash` does not touch the gitignored DB, which is exactly why the clean-tree check looked like it exonerated the code.
+
+## 2026-08-24b — Quick Set `via` gap fix — full gates, on `claude/elegant-feynman-c3689e` (D-162; held for operator)
+
+Scope: [`docs/plans/quickset-analytics-via/scope.md`](../docs/plans/quickset-analytics-via/scope.md) · addendum [`2026-08-24-quickset-via-gap.md`](../docs/business/analytics/2026-08-24-quickset-via-gap.md). One emitter change (unscoped mobile Quick Set saves tag `via:'quickset'`); no server code change, no taxonomy registry change.
+
+| Gate | Result |
+|---|---|
+| `pytest backend/tests -k "not calibration_gate"` | **4226 passed, 1 failed, 1 skipped** — the failure (`test_deck_signal_v2.py::test_flag_on_writes_impressions_in_served_order`) reproduces on the **clean origin/main tree** (`git stash` → still fails) under local Python **3.14.4**; the known 3.12-skew class (this file, 2026-08-13). Unrelated to the change; CI on the PR sha is the arbiter — and PR #196 CI came back **all green** (run 32762214700). **CORRECTED 2026-08-25:** the cause is NOT Python-version skew — it is the stale `data/trade_finder.db` in this worktree (the 2026-08-24 HANDOFF's banked sharp edge). Proven: `mv data data.bak` → the test passes on the same interpreter. The skew attribution was a guess that fit; it was wrong |
+| Server branch coverage (pre-existing, all green in the run) | `test_analytics_p0.py::test_quickset_completed_fires_with_props` + `::test_quickset_event_absent_for_plain_tier_save`, `test_rookie_scope.py::test_rookie_via_tags_are_recorded_and_do_not_fire_quickset_completed`, `test_events_api.py` disjointness pins |
+| New structural guard | `mobile/tests/check-quickset-via.js` (`npm run test:quickset-via`) — 13 asserts green. **Sabotage:** non-rookie save arm reverted to `undefined` (the original bug) → guard RED on exactly the pinned assert; restore → green |
+| `tsc --noEmit` (strict) | green |
+| `testid-lint.sh` | OK (no testIDs touched) |
+| Runtime | operator TestFlight checklist in scope §3 — UNRUN, owed after the next mobile release containing this change |
+
+## 2026-08-24 — Pick YoY floor (D-161) — full gates, live-curve verified, on `claude/pick-yoy-floor-0824`
+
+Plan: [`docs/plans/pick-yoy-floor/`](../docs/plans/pick-yoy-floor/plan.md). One Opus builder, Fable adversarial review (verdict: approve after two one-line fixes, both applied: the Q-018 closure relocation and a `try/finally` knob restore in `test_pick_pricing_m6b`).
+
+| Gate | Result |
+|---|---|
+| `pytest backend/tests` | **4275 passed, 1 skipped** (builder run 301 s, reviewer run 306 s; +37 `test_pick_yoy_floor.py`) |
+| Sabotages | 8 by the builder (S1–S8, module docstring), 3 re-run independently by the reviewer (S1/S4/S6), all byte-copy restores + `__pycache__` cleared per [G-060](GOTCHAS.md) |
+| Existing-test dispositions | 12 failures judged individually: market-semantics tests pinned at knob 0 (both regimes stay pinned), served-pricing tests now expect the floored value with floor-is-active side assertions, one test overturned by name (its docstring pinned the pre-ruling behavior D-161 reverses), one evener re-fixture verified to reproduce the original geometry to 4 decimals |
+| **Live curve (read-only prod DP)** | 1qb r1: 2027 1,750.7 → **2,184.6** · 2028 1,459.4 → **2,184.6** · 2029 → **2,184.6** · current-year and rounds 2–4 unmoved · sf_tep floors at 2,434.0 |
+| Reference case | The MangoPatti card family (A.J. Brown + depth for a player + three future firsts): the pick side reprices from ≈ 3 × 1,171–1,751 to 3 × 2,184.6 |
+| Runtime | scope §3 checklist owed post-deploy: a served card carrying a 2027/2028 1st displays ≈ a current mid-first |
+
+**Fable code-walk:** knob-0 byte-identity — at `market_r1_yoy_floor = 0`, `_r1_yoy_floored` returns the raw market value before the anchor read and before any second market lookup (loader-call counter pins 1 load at knob 0, 3 at default). Four paths untouched at every knob value: step-1 slotted picks (return before the clamp's path), rounds 2–4 (bail ahead of the anchor read — value and lookup count unchanged), `tier_ladder` (stored value before any DP read), the DP-absent fallback (stored, None-guard proven load-bearing). Anchor = DP's own earliest slotted season; a stale rung-only season cannot steal it (S8); the DP-reader seam guard still asserts the exact reader set both directions. Judgment calls ACCEPTED with reasoning: anchor-lag risk is bounded (floor too high by one year's class drift, transient on DP's 24 h TTL, and under the flat ruling the pick still serves ≈ a current mid); the [0,1] clamp mirrors `year_decay`'s for the mirrored arbitrage.
+
+## 2026-08-24 — Feedback wave (5 groups, 11 items): full gates green on `claude/new-user-feedback-55320e`; TestFlight checklists owed
+
+Batch: [`docs/feedback/items/346-quickset-tier-drop/plan.md`](../docs/feedback/items/346-quickset-tier-drop/plan.md).
+Groups A (#376/#379/#394 outlook & filters row), B (#397/#398 tour pin), C (#395/#396 lineup impact),
+D (#386/#391 guide layout notify), F (#346/#381 QuickSet HOLD, [D-160](DECISIONS.md)). All fast-track, full gates, no express.
+
+- **Phase 1:** dual-agent plan/author/critique per group; every critique round found real defects
+  (self-satisfying checklist steps in B/D, a blacklist-beatable guard spec in A, two self-satisfying
+  pytest sabotages in C caught by hand-recomputation, 7 contract amendments in F). All resolved, logs in each folder.
+- **Phase 2:** 7 build agents in isolated worktrees, disjoint ownership held; merges clean
+  (one intended status.md both-halves conflict, resolved keep-both).
+- **Phase 3 (round 1, agents A+B independently, commit `c8b0e224`):** both PASS all five groups.
+  `tsc --noEmit` clean · **78/78** `mobile/tests/check-*.js` green · testid-lint OK · full
+  `pytest backend/tests` **4238 passed / 1 skipped** (×3 independent clean runs) · every PRD sabotage
+  mapping re-proven red→green by both agents independently (12 in A, 5+2 probes in B, 6+2 in C, 4 in D, 7+guard-13 in F)
+  · `web/`+`extension/` diff empty · Group F mobile↔backend payload shape verified consistent.
+  One convergent finding (F-1, minor): Group F T-2's sabotage wording overstated (conditional echo only) — PRD tightened, no code change.
+- **Known environment gotcha (recorded):** `test_deck_signal_v2.py::test_flag_on_writes_impressions_in_served_order`
+  fails against a `data/trade_finder.db` left by a previous full sweep in the same tree; fresh data dir passes.
+  Not a code regression (bisected: same commit passes clean).
+- **Version:** mobile 1.16.4 (app.json + Info.plist; `test_app_version_consistency` green).
+- **Owed (the only runtime evidence, D-056):** the five operator TestFlight checklists —
+  consolidated in [`docs/feedback/items/346-quickset-tier-drop/testflight-checklist-batch.md`](../docs/feedback/items/346-quickset-tier-drop/testflight-checklist-batch.md).
+  CI on the pushed sha pending at entry time; ship gate = operator go/no-go.
+## 2026-08-24c — Waves A + B0 SHIPPED — PRs #197/#199, EAS 1.16.4 (130) submitted
+
+Wave A merged as `7452650` (CI green: backend 9m14s · typecheck · lint) with the Fable review's A1/A2/A4/A6 fixes on top (gates re-run on `274a0ea9`: tsc · 77/77 · lint · pytest 4230/1). Wave B0 rebased over it and merged as `14a4ce4` (CI green) with review fix B1 (MatchesScreen prefill) + the reviewer's doc-conflict resolutions (checklist H→I, steps 79–99); gates on the rebased tip: tsc · 78/78 · lint · pytest 4230/1. `git diff feat/inline-home-b0 origin/main` EMPTY at merge. EAS production **1.16.4 (130)** built and submitted to App Store Connect (submission `a7b08771`). `FTF_SKIP_SIM_GATE=1` on pushes (D-056). **Owed on 130:** checklist section H (63–78; 63–67 on a COLD league load) and I1 (79–83, flag-off regression). `calc.inline_home` stays false until Wave B.
+
+## 2026-08-24b — Wave B0 the layout merge (`calc.inline_home`) — full gates, FLAG DARK, NOT MERGED, on `feat/inline-home-b0`
+
+Scope: [`docs/plans/onboarding-tour-merge/scope-wave-b0.md`](../docs/plans/onboarding-tour-merge/scope-wave-b0.md) · [D-158](DECISIONS.md) · plan §3b. Branched from `origin/main` @ `ff153a0f`. **No PR, no merge.**
+
+| Gate | Result |
+|---|---|
+| `mobile` `tsc --noEmit` | clean, exit 0 |
+| Every `npm run test:*` guard | **78 ran, 0 failed** (77 existing + the new `test:inline-home`) |
+| `bash mobile/scripts/testid-lint.sh` | `testid-lint OK` |
+| `python3 -m pytest backend/tests -q` | **4230 passed, 1 skipped**, 336 s, exit 0 |
+
+**New guard `mobile/tests/check-inline-home.js`** (10 sections, 46 assertions). Pins, in order: the flag ships **false** in `config/features.json` with a D-158/kill-switch comment, is mirrored false into `release.json` / `onboarding-v2.json` / `profiles-on.json`, and is registered in `backend/feature_flags.py`; **exactly one** `<TradeBuildCanvas>` mount, with `canvasHost` resolving the flag path AHEAD of the #270 experiment and the experiment's own `!firstRun && !singlePin` gates intact; the rail dies only on the flag path and `showSuggestionRail` defaults to `true`; no `onShowMeAround` reaches the inline mount; the pushed page's tour is refused at BOTH doors with the guard as an effect dep, and `utils/calcTour.ts` is untouched (Wave A owns it); the fork and the ✓ queue are each **one definition, two callers, no second emitter**; the inline search neither navigates nor writes a handoff, stamps `deckOrigin:'calculator'`, and adds no `generateMutation.mutate` site (count still 8); the receipt's **Clear IS `handleSearchAllTrades`** and both end-of-deck Search-all buttons stand aside for it; all three `navigate('TradeCalculator', {prefill})` calls survive for the flag-off path; `CHIPS` still says `Calc`.
+
+**Existing guards updated to the new truth, none deleted:** `check-calc-merged-behavior.js` 13/13a/13b re-pointed at `utils/canvasSearch.ts` (the fork moved files, the contract did not) plus new 13c–13e; 18a–18f re-pointed at `utils/queueCalcTrade.ts` plus new 18h/18i. `check-offer-prefill-330.js` — the choke-point region/dep pattern now admits the added `canvasRunSeq` trigger, with the three original deps still required in order. `check-calc-tour.js` 15a — the auto-start dep list gained `inlineHomeOn`, the fifth guard.
+
+**Caught by the gates, not by review:** the first full pytest run failed `test_entitlements.test_features_json_keys_known` — a new `config/features.json` key must also be registered in `backend/feature_flags.py` `FLAG_KEYS`. Fixed and re-run clean. (The three-fixture mirror was done up front; only release.json is exact-mirror-tested, but onboarding-v2/profiles-on are what other suites boot from.)
+
+**Code-walk (flag-off byte-identity), full trace in the scope block §3.** Each behavior change is one gated site whose flag-off value is the original expression: `TradesScreen.tsx:4887` `canvasHost` collapses to the old mount condition; `:4901` `inlineAnchorShown` is unconditionally false, which makes the receipt unreachable and restores both end-of-deck conditions; `:1410/:2855/:2940` early-return above untouched `navigate` calls; `:2607`'s added dep `canvasRunSeq` is a frozen `0` (its only writer is inside a handler passed as a prop only on the flag path); `TradeCalculatorScreen.tsx:129/193/233/685/747/782` each reduce to the pre-wave expression; `TradeFinderModeBar.tsx:147` falls back to `c.label` with `CHIPS` untouched; `TradeBuildCanvas.tsx` reads no flag at all — every change is an optional prop with a today-preserving default.
+
+**Runtime evidence: NONE, and that is the known gap.** Section **I** of [`docs/feedback/items/384-calc-finder-merge/testflight-checklist.md`](../docs/feedback/items/384-calc-finder-merge/testflight-checklist.md) is new and **unrun** — I1 is 5 flag-OFF regression steps (79–83, the pass that matters while the flag is dark) and I2 is 15 flag-ON steps (84–98). (Lettered H→I and renumbered at the Wave-A rebase; the content is unchanged.) The two things no structural guard can see: the **ordering** inside the #330 choke point when the inline search re-fires it (reset → fork → dispatch), and the **layout** of a full In-league calculator stacked above a swipe deck on a small screen. Under D-056 that checklist is the only runtime proof this can get.
+
+**Pre-push gate:** `FTF_SKIP_SIM_GATE=1` (D-056 standing posture — the simulator marker `qa/sim-runs/last-sim-run.json` is retired); the evidence run instead is the four gates above plus the new guard.
+
+## 2026-08-24 — Onboarding-tour Wave A — full gates green on `feat/tour-wave-a`; runtime evidence owed
+
+Scope block: [`docs/plans/onboarding-tour-merge/scope-wave-a.md`](../docs/plans/onboarding-tour-merge/scope-wave-a.md)
+(§5 carries the file:line code-walk for both new parks). Full gates, **not** express.
+
+| Gate | Result |
+|---|---|
+| `pytest backend/tests` | **4230 passed, 1 skipped**, 333 s, exit 0 |
+| `npx tsc --noEmit` (mobile) | clean, exit 0 |
+| Every `npm run test:*` guard | **77/77 passed** (looped over `package.json`, none skipped) |
+| `mobile/scripts/testid-lint.sh` | OK |
+| Assertion counts on the three extended suites | `check-calc-tour` 168 ✓ · `check-guide-script` 455 PASS · `check-card-disposition` 17 PASS |
+| `githooks/pre-push` simulator gate | **skipped** — `FTF_SKIP_SIM_GATE=1`, the standing posture under [D-056](DECISIONS.md). What ran instead is every other row of this table plus the scope block's §5 code-walk; `qa/sim-runs/last-sim-run.json` is deliberately not written |
+
+**New structural coverage.** `check-calc-tour.js` §45 (a–n) pins both parks three ways each: the
+park is taken at the right seam, it is **time-bounded** and expiry ends the run (an unbounded park
+holds the interrupt hold and mutes every interstitial app-wide), and the resume is wired end to
+end — screen prop → runner export → `requestAt`. 45c/45d/45e pin the **level** semantics of the
+In-league ready signal; 45l/45m pin that the component's `inLeagueReady` predicate stays the
+negation of the two early returns it derives from. §40d–40f cover n22's new target. New in
+`check-card-disposition.js` §4: `trades.card-meter` is an effect registration gated on
+`cardMeterMounted`, unregisters on teardown, and its wrapper is a non-collapsable `View`. New in
+`check-guide-script.js` §10/§11: the ten converted beats are `cta` **with buttons**, and the only
+`advance: 'tap'` beats left in the whole script are the two named exemptions (`s2.3` deprecated,
+`n9` out of Wave A's scope) — the closed-set half is what catches a *new* tap beat.
+
+**Sabotage verified (1).** Deleting the `if (inLeagueReady)` fast path from `calcTour.ts` turned
+45c red; restoring it turned it green. The rest of §45 is regex-on-source and was written against
+already-passing code, so it is pinned but not independently falsified.
+
+**Two guards UPDATED to the new truth, not deleted.**
+`check-guide-script.js` `8b` asserted `S.n6_1(false).ctas === undefined` — a statement about that
+beat being tap-advance. Restated as the property that mattered: the router-less variant carries
+exactly one plain `Next` and **none of the routing variant's buttons** (+ `8b-ii`, no lifetime
+bound). `backend/tests/test_seed_ui_test_db.py::test_onboarding_v2_flags_are_release_plus_the_onboarding_surface`
+asserted `landing.try_before_sync is True` in both flag files; now `is False` in both, with the
+cross-file agreement — the thing that actually broke main CI on 2026-08-23a — left intact.
+
+**Runtime evidence: ZERO, and two items genuinely need it.** New **section H** (steps 63–78) in
+[the #384 checklist](../docs/feedback/items/384-calc-finder-merge/testflight-checklist.md), unrun.
+Steps 63–67 must be run on a **cold** league load: both parks fix a *race*, and a warm React Query
+cache is exactly what made the W8 simulator pass a false green while note 12 stayed open. Step 64
+(airplane mode) is the one that proves a park that never resolves still releases the hold.
+
+## 2026-08-24 — Knockout refine (R5/R1/R2/shape) — full gates, MEASURED on prod FFV3, on `claude/knockout-refine-0823`
+
+Plan: [`docs/plans/knockout-refine/`](../docs/plans/knockout-refine/plan.md) · [D-159](DECISIONS.md). Built by Opus B1/B2, adversarially reviewed by a Fable reviewer (verdict: safe to merge; the D-159 renumber + two doc fixes, all done pre-merge).
+
+| Gate | Result |
+|---|---|
+| Full `pytest backend/tests` | **4230 passed, 1 skipped** (lead run 454 s and reviewer run 442 s, both exit 0; +19 `test_knockout_refine.py`, +13 `test_shape_knob.py`) |
+| Byte-identity at off settings | 210-pair verdict sweeps against predicates vendored from `c321958` (reviewer diffed the vendored copies against `git show` — the true old bodies) |
+| Sabotages | B1: 8 · B2: 3 · reviewer re-ran 3 independently. All byte-copy restores; see [G-060](GOTCHAS.md) for the `.pyc` trap two of these hit |
+| Operator invariants (reviewer, incl. scratch end-to-end) | #341 double-startable-RB strip dies at every knob setting; #304 Loveland dies with the rescue lit; a delta-2 3-for-1 that strips a position below startable depth is emitted by the optimizer and killed by R2 relief |
+| **Measured (read-only prod replay, league `1312140920132497408`, 4 variants)** | baseline 280 cards / 270 ideas / 1 consolidation-family card / 18.1% sub-450 share · **bundle+raw-R1 280 / 267 / 8 / 19.4%** · bundle+adjusted-R1 275 / 260 / 8 / 17.9% · filler-0.10 276 / 263 / 10 / **27.0%** |
+| Flip decision from the measurement | `filler_min_frac` **0.15** (0.10 doubles junk share) · `overpay_adjusted` **0** (adjusted killed ~7 consolidation ideas incl. 2x1s 28→21 for a 1.5pp junk benefit) · `trade_elo_gap_max` **0** · `v3_shape_max_delta` **2**. Applied via admin config API after the deploy seeds the new rows; each individually revertible |
+| Runtime | scope §3 checklist owed post-flip (3-for-1s appear; no card strips a position below startable depth on either side) |
+
+**Reviewer code-walk:** at the off settings every predicate is verdict-identical to origin/main @ c321958 — `overpay_ok` knob<1 takes the untouched raw-sum branch; `pos_net_ok` reduces to the old `all(abs(n)<=cap)` with the relief unread when the knob is 0 or ctx is None; `need_gate_ok` at knob 0 runs the refactored-but-equivalent primary-only checks; the optimizer's `SHAPE_D=int(_c(...))=1` reproduces the literal `>1`. `opp_ctx` is early-bound per member via a lambda default arg; the boarded-branch consensus fallback shares the member-scoped kwargs, so no caller sees another member's context.
+
+## 2026-08-24 — `mascot_ram_rollout` gate verified on production
+
+`GET /api/feature-flags` × 3, against live production:
+
+| Request | `experiments` | overlay | base flag |
+|---|---|---|---|
+| allowlisted device id | `mascot_ram_rollout: treatment` | `{onboarding.mascot_ram: true}` | `false` |
+| no device header | `{}` | absent | `false` |
+| random device id | `{}` | absent | `false` |
+
+**This proves the gate, not the render.** It shows the overlay reaches exactly one unit and no other. It does **not**
+show a ram on a screen — the TestFlight checklist is still unrun, and section A (flag OFF is byte-identical) should be
+run *before* trusting anything under flag ON.
+
+## 2026-08-24 — v1.16.3 (129) to TestFlight: CI green on GitHub, runtime evidence still owed
+
+**CI on the pushed sha (not just local):** `backend-tests` pass 8m58s · `mobile-typecheck` pass 1m2s ·
+`maestro-testid-lint` pass 10s. Merge state `CLEAN` before squash.
+
+**Local, post-merge, after the version bump:** pytest **4198 passed, 1 skipped**; `tsc --noEmit` clean; 77/77
+`check-*.js`; testid-lint OK.
+
+**`test_app_version_consistency` earned its place.** Bumping `app.json` to 1.16.3 without
+`ios/DTFDynastyTradeFinder/Info.plist` failed immediately — exactly the bare-workflow trap D-057 documents.
+
+**Runtime evidence: still ZERO.** The build exists and is processing at Apple, but
+[the checklist](../docs/plans/ram-mascot/testflight-checklist.md) is unrun and cannot be run until the build is
+installed **and** `mascot_ram_rollout` is launched. Until both, the app on TestFlight renders The Analyst — which is
+itself checklist section A, and the first thing to verify.
+
+## 2026-08-23b — `test_stud_tax_pinned_market` flake pinned: breaker wall-clock budget removed from test inputs
+
+**Diagnosis, with a deterministic repro.** The CI failure on `8fd23e2` (run 32681703490) was the breaker's 250 ms
+`breaker_ms_budget`: past the 0.6× pass-2 checkpoint (`trade_breaker.py:929`) a stamp's payload changes
+(`skipped: {reason: "budget"}`, pass-2 classes emptied), so the stamp-twice-and-compare tests had wall clock as a
+hidden input. Reproduced exactly (same assertion diff) by skewing `trade_breaker.time.monotonic` +12 ms/call during
+the second stamp only — the asymmetry a loaded runner produces. Not fixture pollution, not iteration order. Full
+write-up: [G-059](GOTCHAS.md).
+
+**Fix + evidence.** `_env` autouse fixture in `backend/tests/test_trade_breaker.py` pins
+`breaker_ms_budget = 10**9` (budget rungs keep their own coverage via `_snap_with` / fake clocks). Verified:
+67/67 `test_trade_breaker.py` under a hostile clock (+12 ms on *every* `monotonic()` call — pre-fix this fails);
+full suite `python3 -m pytest backend/tests -q` → **4198 passed, 1 skipped** (6m22s, local).
+
+## 2026-08-23 — Fleeced mascot swap (`onboarding.mascot_ram`), CI green on `claude/ram-mascot-fleeced`
+
+**Ran, and what each proved.**
+
+| Gate | Result | What it actually proves |
+|---|---|---|
+| `pytest backend/tests` | **4198 passed, 1 skipped** | The new flag key registers cleanly. No server behaviour branches on it |
+| `npx tsc --noEmit` | **clean** | The switch and `RamAvatar` typecheck under `strict` |
+| `for f in tests/check-*.js` | **77/77 pass** | Including the new `check-mascot-ram.js`. No existing guard regressed |
+| `mobile/scripts/testid-lint.sh` | **OK** | No testID moved — the `guide.avatar.<pose>` id is on the wrapper, not the avatar |
+
+**`check-mascot-ram.js` was sabotage-tested, which is the only reason to trust it.** Forcing the gate
+(`useOnboardingFeature(...) || true`) → caught. Re-exporting a sprite trimmed to its bounding box → caught, reporting
+**97.9 % ink against the 70 % target**. Both reverted; guard green. The inset check decodes the PNG alpha channel
+itself (RGBA8 and palette+tRNS) rather than trusting file size — and it caught its own blindness first, failing
+"inset measurable" when it only handled RGBA and the sprites were palette PNGs.
+
+**Copy pass (same day).** `check-guide-script.js` extended so `lineRam` takes the same per-class word cap as `line` — without it the ram variant would have been an uncapped side-door into the copy budget. Sabotage-tested: a 30-word `lineRam` on a `tap` beat (cap 20) → caught. `check-mascot-ram.js` gained six copy assertions; hardcoding `>The Analyst<` back into `AnalystGuide` → caught. Full re-run after the copy work: **4198 passed, 1 skipped**, `tsc` clean, 77/77 guards, testid-lint OK.
+
+**A pre-existing CI failure was fixed, not introduced.** `test_release_flags_mirror_features_json` was **already red on
+`origin/main`**: `trade.full_sweep` was lit in `config/features.json` by #182 without updating
+`backend/tests/fixtures/flags/release.json`. Verified against `origin/main` before touching it — unrelated to this
+feature, but it blocked the "CI green" gate for everyone.
+
+**The drift was wider than one file, and the first fix was incomplete.** Correcting `release.json` alone then broke
+`test_onboarding_v2_flags_are_release_plus_the_onboarding_surface` and `test_profiles_on_flags_turn_on_public_pages_only`,
+because those fixtures assert an exact divergence set from release. #182 had updated **none of the three**. All three
+now carry `trade.full_sweep: true` and the divergence sets are back to their single intended key each. Worth noting for
+the next flag flip: lighting a flag in `config/features.json` means updating **three** fixtures, not one.
+
+**NOT run — owed:** [the TestFlight checklist](../docs/plans/ram-mascot/testflight-checklist.md). It needs a build
+containing `assets/mascot/ram/` (bundled sprites, no OTA channel) and the `mascot_ram_rollout` experiment running. Until
+then there is **zero runtime evidence** for this change — the guard proves shape, `tsc` proves types, neither has seen a
+sprite on a screen.
+
+## 2026-08-23a — main CI red → green: full-sweep fixture mirrors flipped
+
+The full-sweep flip (2026-08-22j, LIT at merge) updated `config/features.json` but not the fixture mirrors, so `test_seed_ui_test_db.py::test_release_flags_mirror_features_json` failed on every `main` run after it (first surfaced on docs-only PR #184). Fix: `trade.full_sweep` → `true` in `release.json` / `onboarding-v2.json` / `profiles-on.json` (`all-on`, `release-300`, `release-espn-send-off` never carried the key). `python3 -m pytest backend/tests -q` on the fix branch: **4198 passed, 1 skipped** (5:20). Reminder the mirror rule exists for: flag flips update the fixtures in the SAME commit.
+
+## 2026-08-22j — Full sweep (`trade.full_sweep`) — full gates; LIT 2026-08-23 by operator instruction at merge
+
+Plan + scope: [`docs/plans/full-sweep/`](../docs/plans/full-sweep/plan.md) · [D-154](DECISIONS.md). Built by Opus agents A1 (engine/flag/knobs/tests) and A2 (arm parity + docs), adversarially reviewed read-only by A3 (2 blockers, 7 should-fix, 5 nits — all closed before commit), lead-reconciled.
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q -x` | **4198 passed, 1 skipped** (+17 `test_full_sweep.py`, +8 `test_arm_sweep_parity.py`; bake-off arm-A golden green with two new `_PINNED_KNOBS` rows) |
+| `tsc --noEmit` / `check-*.js` / `testid-lint` | unaffected — no client change (no new testID) |
+| Sabotages, `test_full_sweep.py` | unconditional `break` restored at either loop → the matching `[legacy]`/`[v2]` visit test red (loops pinned independently); time rail deleted from either loop → red; `> 0` disable inverted → both budget-0 tests red; flag dropped from the rail → the flag-off leak test red; clamp dropped at either `server.py` site, or either site reverted to the bare constant → the AST pin red. All restored from byte copies (not `git checkout --` — uncommitted branch). |
+| Sabotages, `test_arm_sweep_parity.py` | `trade_gen_v2.py` break after 2 members → 3 red; `trade_gen_fit.py` 2-member break → 2 red. A3 re-ran four of the above independently and reproduced every one. |
+| Runtime | **none yet** — server-side flag, no client build needed. Operator lit the flag at merge (2026-08-23), ahead of the [scope §3 TestFlight checklist](../docs/plans/full-sweep/scope.md); the checklist (≥ 9 of 11 partners; `gen_ms` recorded; kill switch proven) is now the **post-flip verification**, still owed here. |
+
+**A3 code-walk — `trade.full_sweep` OFF produces byte-identical output to `origin/main` @ `b6e906a`.** (a) `git grep -n trade_full_sweep -- backend/ config/` → exactly two executable reads, the guarded exits in `_generate_trades_impl` and `_generate_trades_v2`; the guard is `if not FLAGS.trade_full_sweep and len(new_cards) >= global_target: break` — flag off ⇒ the identical shipped test, same position; the time rail is `if FLAGS.trade_full_sweep and …`, never evaluated flag-off. (b) No other read: no `is_enabled("trade.full_sweep")`, no import-time capture; `DEFAULT_FLAGS` derives `false` from `FLAG_KEYS`; `features.json` ships `false`. (c) `_deck_cfg` returns a float, both `server.py` reads wrap `max(1, int(...))`; executed: key present → 5, key absent → fallback constant → 5; `_split_exploration_pool(cards, 5) == split(5.0)` on a 4×9 fixture — identical partitions. (d) `FLAGS` is a process-global `_FlagsProxy` (verified at runtime), so every bake-off arm reads the same value; `model_a()`/`model_challenger()` wrap only the thread-local `_cfg_override`. (e) The one addition on the flag-off path is a single `time.monotonic()` capture per loop entry (`_sweep_t0`) — no behavioural effect; "byte-identical output", not "no added instruction". (f) `git diff origin/main -- backend/trade_service.py backend/server.py` contains nothing beyond plan §3.2/§3.3/§3.5.
+
+**A3 findings closed:** B1 v3 pairs have no deadline → `full_sweep_budget_s` rail (30 s) + every doc corrected; B2 flag is global so arm A sweeps too → accepted + recorded in `scope-phase2.md`; S1 `bakeoff_serve_interleaved` is **1 in prod** (A3 read the local DB) → docs state the dial under both postures; S2 wrong arm-A reason → rewritten in test + scope-phase2; S3 `max(1, …)` clamps; S4 G-058/Q-030 live on the review branch (`claude/trade-model-restrictiveness-7f3975`) — **merge that PR first**; S5/S6/S7/N1/N2/N4 wording; N5 `docs/plans/ram-mascot/brief.md` also proposes D-154 — first to land on `main` keeps it.
+
+## 2026-08-22i — #384 W8 — simulator reproduction + mobile gates, v1.16.2 (EAS 128)
+
+**First simulator evidence since D-056** (one-off debug of a live regression; the harness stays retired). Release build, iPhone 16 / iOS 18.4, against production. Reproduced the blank-band bug on the sign-in username beat on `origin/main` (`d79f9f4`), then on the fix: username beat, n10, n11 (Set outlook), n12, n13, n15, n16 all render ring + avatar + bubble + Next/CTA. Not reached: n18 → deck (session unverified → `verification_required` on generation and outlook writes). `npx tsc --noEmit` clean · 76/76 guards (spotlight §14 a–f, calc-tour 29/41/42 new; sabotage: native driver back on / activation-keyed spring → 3 red) · `testid-lint OK`. Backend untouched.
+
+**Second simulator pass (same branch, pre-build):** after the first-landing fixes (timer fallback, latch-on-cutout + live offset, hold-before-teardown) — launch → Acquire → Manual calc auto-starts n10 with the ring on the In-league tab and the band directly beneath it (no overlap, no deck-beat hijack); tap In league → n11 rings the outlook row, bubble above with "Set outlook"; "Show me around" replays from n10 with ring + band. Found and fixed in the same pass: auto-start with n10 capped opened on n12's degrade line (calc-tour 44/44a). Final gates on the tip: `npx tsc --noEmit` clean · 76/76 guards · `testid-lint OK`. Simulator setup trap recorded as [G-057](GOTCHAS.md) (debug Hermes under a `Release` marker → SIGSEGV at launch). **Shipped:** squash PR [#179](https://github.com/mattmurf77/fantasy-trade-finder/pull/179) → `fe77b28`; CI on the PR green (backend-tests 8m53s, typecheck, testid-lint). EAS production build **1.16.2 (128)** `59b89897` finished and was submitted to App Store Connect 2026-08-22 (submission `338a1549`); checklist §G is owed against 128.
+
+## 2026-08-22h — #384 W7 device-feedback fixes — mobile gates, v1.16.1 (EAS 127)
+
+Branch `fix/384-tour-device-feedback`. `npx tsc --noEmit` clean · 76/76 `check-*.js` · `testid-lint OK`. Backend untouched (pytest unchanged from 2026-08-22g). Sabotages red: fixed `top: 54` band, constant ABOVE branch, solver ignoring `insets.top`, a beat back to `advance:'tap'`, n20 losing its target, `trades.send-btn` registration deleted, calculator dropping `onContentSizeChange`, auto-start not listening for `transitionEnd`. **Runtime:** the operator's device report on build 126 IS the evidence this wave answers; checklist section G (steps 50–62) is owed against build 127. The placement *mechanism* (occlusion vs. far-from-ring) is inferred from correlation, not observed — if step 54 still shows a bare ring, suspect native-header z-order.
+
+## 2026-08-22g — #384 SHIPPED — PR #172 `80dee42`, flags LIT, EAS build 1.16.0 (126) submitted
+
+Pre-ship gates at `304f55a` (flags lit, fixture mirrors updated): `pytest backend/tests -q` **4173 passed / 1 skipped** · `npx tsc --noEmit` clean · 76/76 `check-*.js` · `testid-lint OK`. `FTF_SKIP_SIM_GATE=1` on push (D-056 standing posture — the evidence is the structural suite + the rewritten, now POST-ship, TestFlight checklist). CI on `main` run 32585974208: typecheck + testid-lint green; backend job still in progress when this was written. EAS production build **1.16.0 (126)** `01465dd0` finished 16:57Z and auto-submitted to App Store Connect (submission `9a89555f`). **No device run yet** — the checklist in `docs/feedback/items/384-calc-finder-merge/testflight-checklist.md` is owed against build 126.
+
+## 2026-08-22f — #384 W6-A + W6-B — full gates, FLAG DARK, NOT MERGED, on `claude/manual-calculator-e2e-review-39a467`
+
+W6-A (`d6c54cf`, ✓ queue contract, [D-152](DECISIONS.md)) and W6-B (fairness-only packages +
+tour reshape, [D-153](DECISIONS.md)), each lead-reviewed line by line before commit.
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q` | **4173 passed, 1 skipped** (+26 `test_calc_trade_queue.py`, +19 `test_fair_packages.py`; asset-ideas + bake-off arm-A goldens untouched and green) |
+| `cd mobile && npx tsc --noEmit` | clean |
+| every `mobile/tests/check-*.js` (76, all `npm run`-wired) | 76 / 0 failed — `check-guide-spotlight-tracking` gained rule 10 (scroll announcement mandatory where guide targets sit in a ScrollView) |
+| `bash mobile/scripts/testid-lint.sh` | OK |
+| Sabotages | W6-A: 5 backend + 4 mobile red/restored · W6-B: toggle restored → red; fair anchor also arming the model → red (two guards); calculator `onScroll` dropped → red; idea give side ≠ anchor → red; random ids → red |
+| Runtime | **none** — TestFlight checklist (`docs/feedback/items/384-calc-finder-merge/testflight-checklist.md`, rewritten for W6) UNRUN. Prerequisite flags incl. `onboarding.guide_v2` (false) still gate the tour |
+
+## 2026-08-22e — #384 merged calculator W5 + guard hardening — full gates, FLAG DARK, NOT MERGED, on `claude/manual-calculator-e2e-review-39a467`
+
+W5 answers the [2026-08-22 e2e review](../docs/feedback/items/384-calc-finder-merge/review-2026-08-22-e2e.md)
+(5 P0 / 8 P1) in three build packages — `fcf3413` (analytics registration), `9dcd003` (the deck
+side), `a52c91e` (the tour) — plus this evidence pass. Scope block:
+[scope.md](../docs/feedback/items/384-calc-finder-merge/scope.md) (written retrospectively; gate 1
+had been skipped). Decision: [D-150](DECISIONS.md), amended. Checklist:
+[testflight-checklist.md](../docs/feedback/items/384-calc-finder-merge/testflight-checklist.md) —
+rewritten against current behaviour, **still UNRUN**.
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q` | **4128 passed, 1 skipped** (+11 over W4 — the taxonomy/NON_INTENT registration) |
+| `cd mobile && npx tsc --noEmit` | clean, exit 0 |
+| every `mobile/tests/check-*.js` | **76 files, 0 failed** |
+| `mobile/scripts/testid-lint.sh` | **OK** |
+| `npm run test:<name>` coverage | **76 / 76** — the last 19 unscripted guards wired into `mobile/package.json` (additions only, 19 insertions / 0 deletions) |
+| Sim gate | `FTF_SKIP_SIM_GATE=1`, standing posture under [D-056](DECISIONS.md) |
+
+**Guard hardening — 15 sabotages, all GREEN before / RED after.** The review's QA pass ran 61
+cycles against W4's guards and found **12 that stayed green**. Each named case below was patched
+into the real source, run against the guard as it stood at `a52c91e` **and** against the hardened
+guard, then reverted (`git status --short` confirmed only `mobile/tests/` + `mobile/package.json`
+modified afterwards).
+
+| # | Sabotage | Guard | Before | After | Assertion that catches it |
+|---|---|---|---|---|---|
+| 1 | `const merged = useFlag('calc.merged_layout') \|\| true;` | `check-calc-merged-layout` | GREEN | RED | 4 — the flag read anchored to its whole statement incl. `;` |
+| 2 | `const merged = !useFlag('calc.merged_layout');` | `check-calc-merged-layout` | GREEN | RED | 4 (same anchor) |
+| 3 | `compact={true}` at both `TradeSide` mounts | `check-calc-merged-layout` | GREEN | RED | 4b — every `compact=` prop must read exactly `merged` |
+| 4 | target-registration effect loses `if (!merged) return;` | `check-calc-merged-layout` | GREEN | RED | 4c — the effect body must bail; 4d pins `[merged]` deps |
+| 5 | `if (give.length \|\| receive.length)` — Include OFF still pins | `check-calc-merged-behavior` | GREEN | RED | 13a — `includePlayers &&` must be IN the pin condition |
+| 6 | `reasonsAsOverlay = calcMergedOn && deckOrigin === 'calculator' \|\| true;` | `check-calc-merged-behavior` | GREEN | RED | 1c — anchored to the statement terminator |
+| 7 | `endTourHold: () => {}` | `check-tour-suppression` | GREEN | RED | 8 — the store is now transpiled and EXECUTED, not modelled |
+| 8 | `beginTourHold: () => {}` | `check-tour-suppression` | GREEN | RED | 2a — `tourHold` read back off the real store |
+| 9 | the `blocked_by:'tour'` `track()` call deleted, doc comment kept | `check-tour-suppression` | GREEN | RED | 13 — anchored on the emitter, not the phrase |
+| 10 | `cursor = 0` dropped from `startCalcTour` (re-entry resumes) | `check-calc-tour` | GREEN | RED | 29a — the reset triple before `requestAt(0)` |
+| 11 | auto-start effect deps `[]` | `check-calc-tour` | GREEN | RED | 15a — `[calcMergedOn, prefill, hasLeague]` |
+| 12 | demo-bridge surface deleted from `TradesScreen` | `check-demo-calc-removed` | GREEN | RED | 7 — three named anchors, replacing a ≥2-FILE threshold that prose could satisfy |
+| 13 | "Retry, or switch to the demo league." copy restored | `check-demo-calc-removed` | GREEN | RED | 8 — comment-stripped copy scan (new) |
+| 14 | n12 loses `target`, keeps "This is your canvas" | `check-guide-script` | GREEN | RED | 5b — a `degradeLine` may exist only on a beat with a `target` |
+| 15 | n22 loses `target`, keeps "Tap the meter…" | `check-guide-script` | GREEN | RED | 5b (same rule) |
+
+`check-tour-suppression` no longer re-implements the reducer it tests: it transpiles
+`useInterruptCoordinator.ts` with the project's own TypeScript and executes it against a minimal
+zustand `create`, the way `check-presentation-v2.js` executes `tradePresentation.ts`. That single
+change is what makes cases 7 and 8 falsifiable — the old model was green through both because
+nothing in the file ever ran the source's version. `check-guide-script`'s DEIXIS vocabulary was
+also widened with the calculator beats' element nouns (`canvas`, `cross`, `check`, `meter`,
+`columns`, `arrows`), and the copy budget was not loosened.
+
+**What this run does NOT prove.** Nothing has executed on a device or a simulator. The feature is
+almost entirely presentation and timing — two columns at SE width, 53pt tap targets, spotlight
+geometry, the rhythm of a 15-beat tour — which is the class of claim a structural guard cannot
+reach. The rewritten TestFlight checklist (46 steps, A/B/C/D + a five-flag Prerequisites table) is
+the only runtime evidence available, and it is unrun.
+
+## 2026-08-22d — #384 merged calculator W0–W4 — full gates, FLAG DARK, NOT MERGED, on `feat/calc-finder-merge`
+
+Branch cut from `origin/main` `941a36d`. Five waves, each committed with its own gate run.
+Scope/plan: [docs/feedback/items/384-calc-finder-merge/](../docs/feedback/items/384-calc-finder-merge/plan.md) ·
+Decision: [D-150](DECISIONS.md) · Checklist: [testflight-checklist.md](../docs/feedback/items/384-calc-finder-merge/testflight-checklist.md) (**UNRUN**).
+
+| Gate | Result (identical at every wave boundary) |
+|---|---|
+| `python3 -m pytest backend/tests -q` | **4117 passed, 1 skipped, 0 failed** — unchanged from the branch point; the only backend delta is a flag registration |
+| `cd mobile && ./node_modules/.bin/tsc --noEmit` | clean, exit 0 (`npm ci` in the worktree, never a symlink) |
+| every `mobile/tests/check-*.js` | **76 scripts, 0 failed** (71 at branch point; +5 new) |
+| `mobile/scripts/testid-lint.sh` | **OK** |
+| Sim gate | `FTF_SKIP_SIM_GATE=1`, standing posture under [D-056](DECISIONS.md) |
+
+**New guards, all red-proofed:** `check-demo-calc-removed` (11 sabotages) ·
+`check-calc-merged-layout` (9) · `check-calc-merged-behavior` (8) · `check-tour-suppression`
+(7) · `check-calc-tour` (7). **42 sabotage cycles**, every one watched failing with its
+intended message, every file byte-compared against a saved baseline after restore.
+
+**Two guards do more than grep.** `check-tour-suppression` **executes** the real claim/release
+reducer — assertion 6 runs the exact between-two-steps sequence W3 exists to fix — and guards
+the model with named checks that the source still contains each rule it mirrors, so model and
+implementation cannot drift silently. `check-calc-merged-layout` excises flag-gated regions by
+brace balancing and tests the remainder, which is by construction the flag-off render.
+
+**FIVE DEAD ASSERTIONS FOUND AND FIXED, all mine, none in the product.** This is the finding.
+(1) `/isDemo/` matched `isDemoRenamed`. (2) `/onDemo/` matched `onDemoStarted`. (3) The
+flag-gating check was a backwards proximity search that stayed green when the action row's own
+gate was replaced with `{true ?` — it simply found the header's gate instead. (4) A fixed-size
+character window read the NEXT JSX prop's body and failed on a close that was not its own.
+(5) A drift detector threw an exception instead of failing a named assertion, which is red but
+illegible in CI. Every one was found by sabotage, not by review.
+
+**An existing suite broke honestly and was NOT loosened.** `check-decline-reasons.js` pinned
+the ✕ condition as a literal string; W2's conjunct changed it. Rather than relax to
+`disposition\.reasons[^?]*\?` — which would also accept `disposition.reasons && false ?`, the
+exact defect those assertions exist to catch — the two legal shapes are enumerated. Verified
+by sabotage that the updated matcher still rejects `&& false`.
+
+**Copy budget verified BEFORE authoring, not after.** All 15 tour lines were word-counted
+against their advance class up front (worst case 14/16), so `check-guide-script.js` confirmed
+the budget rather than discovering a violation.
+
+**Runtime evidence: NONE.** No device has run any of this. The two least-proven things are
+named in the checklist's own "known-unverified" section: the two-column layout on a 375pt
+screen (column width, the wrapped value line, and the two ~53pt action cells are all sized by
+reasoning) and tour copy read beside the controls it names.
+
+## 2026-08-22c — Feedback capture cap (2000 → 8000) + the three silences — full gates, backend SHIPPED, client awaiting a build
+
+**Branch:** `claude/new-user-feedback-d4c47d`, cut from `origin/main` `9e1a8be` (0 ahead / 0 behind at branch time).
+Operator declared **express** on the cap; I flagged the CLAUDE.md bright line (it changes a documented
+API contract) and got a confirming yes for 8000 before proceeding, so **full gates ran anyway**.
+Scope: [docs/plans/feedback-capture-cap/scope.md](../docs/plans/feedback-capture-cap/scope.md) ·
+Decision: [D-149](DECISIONS.md) · Gotcha: [G-055](GOTCHAS.md).
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q` | **4117 passed, 1 skipped, 0 failed** (baseline 4114 on `9e1a8be`; +3 in `test_feedback_text_cap.py`) |
+| `cd mobile && ./node_modules/.bin/tsc --noEmit` | clean, exit 0 (`npm ci` in the worktree — **not** a symlink) |
+| every `mobile/tests/check-*.js` | **71 scripts, 0 failed**, incl. the new `check-feedback-capture.js` (6 assertions) |
+| `mobile/scripts/testid-lint.sh` | **OK** (3 new testIDs: `feedback.char-count`, `feedback.note-error`, `feedback.save-error`) |
+| Sim gate | `FTF_SKIP_SIM_GATE=1`, standing posture under [D-056](DECISIONS.md) |
+
+**Backend sabotage evidence — 3 cycles, each RED with the intended assertion, restored and byte-verified.**
+S1 cap lowered back to 2000 → `test_the_report_the_old_cap_ate_now_lands`. S2 cap check deleted →
+`test_one_character_past_the_cap_is_refused`. **S3 cap made to TRUNCATE at 2000 instead of refusing**
+— this is the one that matters: it returns **`201`**, so every status-code assertion passes and only
+the stored-length check (`len(stored[0]["text"]) == 2001`) catches it. Silent truncation is the same
+data loss wearing a success code, and a boundary suite that only checks status codes would have
+blessed it.
+
+**Client guard red-proofed in BOTH directions.** `check-feedback-capture.js` run against the pristine
+defect tree (`git show 9e1a8be:<path>`): **6 of 6 RED**, each message naming the real defect. Against
+the fixed tree: 6/6 green. Then **20 sabotage cycles**, one per named failure branch — every one fired
+the branch it targeted, every one restored and re-verified. The cross-file assertion (client cap ==
+server cap == the number the 400 reports) **fired for real mid-build** when the two halves were
+briefly out of step.
+
+**Method note worth keeping.** The QA agent did *not* sabotage the live worktree: three agents were
+holding uncommitted work, so `git checkout --` would have destroyed a peer's changes rather than
+restored them. It ran every cycle against isolated file replicas and byte-compared afterwards. I hit
+the same trap first-hand — a `git checkout -- backend/server.py` mid-sabotage reverted my own
+uncommitted fix and I had to re-apply it. **Copy the good file aside before any sabotage cycle on an
+uncommitted tree.**
+
+**Runtime evidence: NONE, and the client half has none available.** Under D-056 the only runtime proof
+mobile can get is an operator TestFlight pass, and these client changes are **in no build**. The
+backend half is verifiable in prod directly (a >2000-char POST now returns 201).
+
+## 2026-08-21d — Decision-ID attribution correction (docs only) — `fix/lld-decision-id-attribution`
+
+Docs-only change: 12 wrong decision-ID citations for per-slot pick pricing corrected to **D-146**
+across `LLD.md`, `api-reference`, `config-reference`, `data-dictionary` and `cross-client-invariants`.
+**Zero code, schema, route, flag or analytics files touched** — `git diff --stat origin/main` is six
+`.md` files.
+
+| Gate | Result |
+|---|---|
+| `pytest backend/tests` | **not run — no Python file in the diff.** Nothing to exercise. |
+| `tsc --noEmit` / testid-lint | **not run — no mobile file in the diff.** |
+| CI (all three jobs) | runs on the PR; expected green by construction (no source files) |
+| Simulator gate | **`FTF_SKIP_SIM_GATE=1`** — standing D-056 posture, and doubly moot here: markdown has no runtime. |
+
+**Evidence actually run**, since the failure mode is *wrong prose*, not wrong behavior:
+
+1. **Per-site verification against `DECISIONS.md`** — every one of the 12 sites read against the
+   full text of D-144, D-146, D-147 and D-148 and attributed by *what the decision decided*, not by
+   date or adjacency. D-146's own Status line (*"Renumbered from the draft's D-144"*) is the
+   corroborating record; D-146's body names the LLD section by title.
+2. **Anchor-resolution check over `LLD.md`** — slug every `^## ` heading, assert every `](#…)`
+   target resolves AND equals the slug of its own link text. **Clean**, except a pre-existing
+   `#section-1` inside a fenced markdown *template* block (illustrative, not a link).
+3. **Residual grep** — `git grep D-144 -- living-memory/ docs/ ':!docs/plans'` returns only sites
+   that genuinely mean Receipts, plus the CHANGELOG history of the #168 renumber. `docs/plans/**`
+   drafts intentionally retain the old ID.
+
+**Not evidence:** nothing here was executed. The claim is that the citations now match
+`DECISIONS.md`, and that claim is checkable by re-running items 1–3.
+
+## 2026-08-22b — negmem SHIPPED to `main` (PR #168) — deployed dark to Render
+
+**Merged:** squash PR [#168](https://github.com/mattmurf77/fantasy-trade-finder/pull/168) → `main` `7b7c314`; branch tip `71f63da` ledgered ([recovery](../docs/recovery/2026-08-22-negmem-ship.md)) before the remote delete.
+
+| Gate | Result |
+|---|---|
+| `pytest backend/tests` (local, merged tree) | **4097 passed, 1 skipped, 0 failed** |
+| CI `backend-tests` (Python 3.12.3) | **pass** (9m27s) |
+| CI `mobile-typecheck` | **pass** |
+| CI `maestro-testid-lint` | **pass** |
+| Mobile diff vs main | **empty** — zero mobile files; no EAS/TestFlight build cut or needed |
+| Simulator gate | **`FTF_SKIP_SIM_GATE=1`** — the standing D-056 posture. Evidence run instead: the full suite above + 30+ named sabotages RED-then-restored + CI. No simulator exists to run; this is the documented replacement, not a waiver of evidence. |
+
+**Post-deploy verification:** polled `GET /api/feature-flags` on Render — `trade.negmem` moved **ABSENT → false**, which is itself the proof the new build is live (the old build did not know the key). Deployed state: flag **false**, `config/negmem_leagues.json` **empty**, `MODEL_A_PROFILE` pins `negmem_strength = 0.0`. **The ON-condition is BOTH the flag and the allowlist, so nothing generates differently for anyone.**
+
+**Owed, unchanged by the ship:** the [TestFlight checklist](../docs/plans/negative-results-memory/testflight-checklist.md) is **UNRUN** — the feature has structural evidence only and must not be described as validated.
+
+## 2026-08-22 — Negative-results memory v1 (leaf · registration · four seams · runner forwarding · readout pack) — full gates, FLAG DARK + ALLOWLIST EMPTY, NOT MERGED, on `claude/vigilant-spence-8583f5`
+
+**Branch:** `claude/vigilant-spence-8583f5`, cut from `origin/main`. Not pushed, not merged.
+Full gates — the operator did **not** declare express, and the change is outside the express
+lane by the bright-line rule anyway (new flag surface, six `model_config` keys, a new
+`features_json` key).
+Spec: [LLD](../docs/plans/negative-results-memory/LLD.md) §10 (the 27-test N-plan) ·
+scope [§6-RULINGS](../docs/plans/negative-results-memory/scope.md) ·
+[ADR-015](../docs/adr/adr-015-negmem-soft-prior-not-fourth-filter.md) · [D-147](DECISIONS.md).
+
+**Flag `trade.negmem` = false AND `config/negmem_leagues.json` = `[]`.** The ON-condition is
+both, so nothing in this entry is runtime evidence of the feature working — it is evidence that
+the feature is correctly inert and internally correct.
+
+| Gate | Result |
+|---|---|
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest backend/tests -q` | **4025 passed, 1 skipped, 0 failed** (345 s). Wave-2 tip baseline on this tree: **4016 passed, 1 skipped**. The +9 are this wave's additions (5 through-the-runner + 4 pack-SQL); nothing removed, nothing newly skipped. Local interpreter is **3.14.4**; CI is 3.12.3 — check CI before attributing any red to this branch (the standing version-skew caveat) |
+| `bash mobile/scripts/testid-lint.sh` | **testid-lint OK**. `git diff --stat -- mobile/` is **empty** — zero mobile files touched on the whole branch, so the mobile CI jobs are byte-identical to `origin/main`'s |
+| `cd mobile && tsc --noEmit` · `check-*.js` | not run in this worktree (no `node_modules`); moot per the line above |
+| Knob-inventory guard (`test_no_generation_knob_was_added_without_an_arm_a_decision`) + `test_model_a_profile_only_names_real_knobs` | green with all six `negmem_*` keys in `_PINNED_KNOBS` + disposition sentences, and `MODEL_A_PROFILE`'s `negmem_strength = 0.0` naming a real knob |
+| Arm-A golden | **UNMOVED on first run, no recapture** (wave 2). The profile pin changes `snapshot_config` output and not deck bytes — which is the claim, asserted directly in `test_n7_serving_golden_strength0_is_stamp_inclusive_identity` |
+| Sim gate | `FTF_SKIP_SIM_GATE=1` standing posture (D-056); evidence is this entry |
+
+**Negmem test totals: 128** — `test_negmem.py` **87** (the leaf: admission closed list, undo
+replay, decay/shrinkage worked examples incl. the five OQ-4b threshold assertions, MIN combine,
+`effective_mult` invariants, netting/retraction/revive, determinism + immutability, M2 E-B
+parity + feed guard, degraded taxonomy, identity hygiene, horizon/epoch boundaries, SQL
+dialect, leaf-import contract, readout format) and `test_negmem_seams.py` **41** (the four
+seams, the stamp trichotomy, the two goldens, T1, the relaxed pass, arm A, and this wave's
+runner half).
+
+**Sabotage discipline, by wave.** `PYTHONDONTWRITEBYTECODE=1` plus a `backend/__pycache__`
+clear between every cycle — stale `.pyc` gave wave 1 a false GREEN, and that is the reason the
+discipline is written down rather than assumed.
+
+- **B1 (leaf):** 26/26 named sabotages RED-then-restored; LLD worked examples reproduced exact.
+  One substitution recorded in-code: N-5's named sabotage is unreachable because the
+  strength-0 short-circuit precedes the upper clamp, so an equivalent was used.
+- **B2 (registration):** no behavioural sabotage — the inventory tests ARE the alarm, and they
+  fail by name. Values in `_DEFAULT_CFG` and `_MODEL_CONFIG_DEFAULTS` verified identical.
+- **B3 (seams):** 6 sabotage families RED-then-restored across the four seams and the stamp.
+- **This wave (runner + pack):** 4 cycles, each RED then restored:
+  1. delete `negmem_map = _nm` from `gen_v2_cards` → `test_runner_gen_v2_cards_forwards_the_map_and_the_m2_feed`,
+     `..._carry_negmem_influence_to_arm_c` and `test_runner_bakeoff_job_carries_negmem_into_arm_c_and_arm_fit` RED;
+  2. delete the `acceptance_stats` splat alone → the forwarding test RED, the rest green (the
+     asymmetry is separable, which is the point of testing both);
+  3. delete `negmem_map = kwargs.get("negmem")` from `gen_fit_cards` → the two fit runner tests
+     + the bake-off test RED;
+  4. paste `json_extract(...)` into `negmem-gr4-joint.sql`'s executable SQL → the pack
+     banned-token scan RED.
+
+**What the through-the-runner tests exist for.** `bakeoff_runner.gen_v2_cards` / `gen_fit_cards`
+are the ONLY callers of their generators inside a bake-off job. Every pre-existing seam test
+calls those generators directly, so a runner that dropped the forwarding would have left all 33
+of them green while arms C and fit ran negmem-blind. Sabotage 1 and 3 above are the proof that
+gap was real. The end-to-end test assembles the fan-out exactly as `server._run_trade_job` does
+(one map, splatted into every arm's lambda) over the direct-engine world rather than the
+bake-off harness world — the harness's opponents are unranked, so arms C and fit legitimately
+emit zero cards there and the assertion would have been vacuous.
+
+**Pack SQL is executed, not just scanned.** Both shipped files run against the seeded in-memory
+SQLite engine with real binds, so a renamed column fails here rather than in the operator's
+hands; the banned-token scan runs over the **executable** half (comments stripped) because both
+files document their Postgres-only variant in a comment, per the `bakeoff_readout.sql`
+convention. Comments are stripped before binding too — SQLAlchemy's `text()` harvests `:name`
+binds out of comment prose, and both files name their binds there.
+
+**Runtime evidence: NONE, and that is the honest state.** The
+[TestFlight checklist](../docs/plans/negative-results-memory/testflight-checklist.md) is written
+and **UNRUN**; no deck has ever been generated with this flag on for a real league. Its step 0
+(the before-readout) must run before the flip or the baseline is unrecoverable.
+
+---
+
+## 2026-08-21c — League-surface pick-value alignment (Q-026 closed) — full gates, NOT PUSHED, on `feat/league-pick-value-alignment`
+
+**Branch:** `feat/league-pick-value-alignment`, cut from `origin/main` @ `f01ac9f` (which contains PR #167 `3192d13`, the per-slot pricing ship this follows). Not pushed, not merged.
+**`origin/main` advanced mid-build to `5472e70` (PR #168, negmem) and was MERGED IN**; every gate below was then re-run on the merged tree. That merge also forced a **D-id renumber: this ship's decision is D-148, not D-147** — PR #168 took D-147 while this branch was building. G-048, again, in the same week it was last logged.
+Full gates — the operator did **not** declare express. Operator ruling: *"I want the league values to reflect the same pick values."*
+Scope + code-walk + operator checklist: [docs/plans/league-pick-value-alignment/scope.md](../docs/plans/league-pick-value-alignment/scope.md) · ship-time entries **drafted, not applied**: [decisions-draft.md](../docs/plans/league-pick-value-alignment/decisions-draft.md) (D-148, Q-026 closure, new Q-027).
+
+**No schema change, no flag change, no client change.** `git diff --name-only origin/main -- mobile web extension` = **zero files**.
+
+**GOLDEN SET FIRST, IN ISOLATION, TWICE — the standing discipline, honoured.**
+
+| when | files | result |
+|---|---|---|
+| before any source edit | `test_bakeoff_arm_a_golden` · `test_engine_quality_golden` · `test_fairness_gate_golden` · `test_rnk_elo_golden` | **29 passed** |
+| after the source change, before any fixture was touched | same four | **29 passed, ZERO edits** |
+| again after merging `origin/main` `5472e70` (which itself edited `test_bakeoff_arm_a_golden.py`) | same four | **29 passed, ZERO edits** |
+
+Arm A's structural immunity (it never constructs a `draft_picks` row, so it never reaches `priced_pool_value`) was **verified, not assumed** — that is what the second isolated run is for. No tolerance widened, no golden fixture touched.
+
+**What ran, and what it proves.**
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q` (pre-merge, base `f01ac9f`) | **3986 passed, 1 skipped, 0 failed** (331 s) against a measured baseline of **3969 passed, 1 skipped** (305 s) on the same tree at `f01ac9f` |
+| `python3 -m pytest backend/tests -q` (**post-merge, base `5472e70` — the number that counts**) | **4114 passed, 1 skipped, 0 failed** (287 s). `origin/main` @ `5472e70` records **4097 passed, 1 skipped** in PR #168's own entry above. Delta **+17**, reconciling exactly on both baselines: **+5** from `test_league_picks_tier.py` (7 → 12) and **+12** from the new `test_league_pick_value_alignment.py`. Nothing removed, nothing newly skipped |
+| `bash mobile/scripts/testid-lint.sh` | **green** (`testid-lint OK`) |
+| `cd mobile && npx tsc --noEmit` · `check-*.js` | **NOT RUN in this worktree** — no `mobile/node_modules`, and `npm ci` needs network which is unavailable here. Evidence in its place: **zero mobile/web/extension diffs** against an `origin/main` whose CI is green. Asserted unaffected, **not observed — CI on the pushed sha must confirm** |
+| Sim gate | `FTF_SKIP_SIM_GATE=1` standing posture (D-056); evidence = everything in this entry |
+
+**MEASURED BEFORE/AFTER — FFV3-shaped fixture** (12-team linear board, 2026 rounds 1–4 × 12 slots + 2027/2028 firsts and seconds = 96 picks, 1QB, pinned DP snapshot `dp_values_picks_2026-08-06.csv`).
+
+Per-pick, 2026 round 1 — before → after (badge):
+
+| 1.01 | 1.05 | 1.08 | 1.12 |
+|---|---|---|---|
+| 2117.0 → **4867.1** (`first_1`→`firsts_2`) | 2117.0 → 2343.2 (unmoved) | 2117.0 → 1435.5 (`first_1`→`second`) | 2117.0 → **820.8** (`first_1`→`second`) |
+
+**Per-roster team-value pick totals** — monotonic by draft slot, which is the shape that proves the slot is reaching the price:
+
+| roster | 1 | 2 | 3 | 6 | 9 | 12 | league |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| before | 8590.4 | 8590.4 | 8590.4 | 8590.4 | 8590.4 | 8590.4 | 103084.8 |
+| after | 9653.9 | 8722.1 | 7965.4 | 6439.9 | 5598.8 | 5124.6 | 80298.3 |
+| Δ | **+12.4 %** | +1.5 % | −7.3 % | −25.0 % | −34.8 % | **−40.3 %** | **−22.1 %** |
+
+**Badge movement: 50 of 96 picks (52 %).** 6 of the twelve 2026 firsts, 8 of the seconds, all 12 thirds, all 12 fourths, and all 12 **2028 firsts** (`first_1` → `second`). 2027 picks and the 2026 1.02–1.07 keep their badge. Bands untouched (`tier_config.json` + five client mirrors byte-identical); the inverse is still `value_to_elo` (D-088).
+
+**Read the league row honestly: aggregate DEFLATION, not just dispersion.** The dispersion story holds within 2026 round 1; across a roster the round curve dominates because DP decays future firsts hard (2028 1st 2117.0 → 1263.0) where D-079's ladder held them flat. Those are the engine's prices as of `3192d13` — this ship stops one screen disagreeing with them, it does not create them.
+
+**ADR-011 TIME-SERIES BOUNDARY AT THIS MERGE — named, and proven to be a boundary rather than a rewrite.** `roster_history.team_value` / `team_value_picks` are fed by `_power_picks_by_owner`, so the series steps here and is **not comparable across 2026-08-21** for any pick-holding team; the Wrapped/recap and trends consumers read across it. Nothing historical is recomputed, verified by `test_history_snapshot_reads_the_same_priced_picks_as_power_rankings`, which asserts `roster_history.py` contains no `priced_pool_value`, no `_priced_pick_value` and no `pick_pool_value` call at all — the writer is HANDED its prices and has no pricing path to re-run.
+
+**Structural guard, sabotage-verified three ways** (`test_league_pick_value_alignment.py`, bidirectional AST walk over `server.py`). Each sabotage applied, suite run, reverted:
+
+| # | sabotage | caught by |
+|---|---|---|
+| 1 | `_power_picks_by_owner` regresses to `p.get("pool_value")` — literally the pre-D-148 line | 4 tests, incl. both AST guards |
+| 2 | a surface calls `priced_pool_value` directly with the **identical expression** (behaviourally a no-op) | 3 tests — proving the guard is structural, not behavioural |
+| 3 | `_league_slot_order` resolved once per PICK instead of once per league | `test_power_rankings_resolves_the_draft_order_once_per_league` (48 picks, 12 rosters, asserts exactly 1 lookup) |
+
+**Three fixture files re-derived from the pricing functions with literal inputs; no tolerance widened.**
+
+- `test_league_picks_tier.py` (7 → 12): every badge literal re-derived. **All three original sabotages re-verified against the PRICED values** (S1 raw scale, S1b `seed_elo_for_value` inverse, S2 platform-only) — each still produces a different tier on ≥2 rows — and a fourth added (S3: leaving the stored column on the wire). The null-tier contract was re-anchored: a stored NULL now prices from the market like the engine already did, and null is reserved for "every step of the waterfall is empty".
+- `test_power_rankings.py` (3 tests): **one trap had to be reshaped, not renumbered.** D-084's "u_a's one 3rd separates the literal from the dollar label scale" collapsed under the new prices — 2 seconds + 1 third is 1130.3 dollars, which rounds to ≈0.5 firsts, the same answer the literal count gives. Re-derived to **three** thirds (1654.9 ⇒ "≈1 firsts" vs literal "≈0.5 firsts"). Two thirds would not have worked (1392.6 still rounds to ≈0.5); the fixture note says so.
+- `test_trade_evaluate.py` (1 test): the evener pick moved 2027 → 2028 so its priced value (1263.0) lands where the ordering assertion needs it, and the row now STORES 1005.3 so "priced, not stored" is provable rather than incidental.
+
+**A real defect fixed in passing.** `_roster_eveners` (S4) priced sweetener candidates off the stored ladder while the `gap` they were sized against came from priced picks — both call sites are inside `_trade_evaluate_impl`. A one-tap "add their 2026 1.01" was offered as closing a 2117.0 hole the same response charged 4867.1 for.
+
+**Two residues raised rather than buried, both needing an operator call:** pick-SHARE ratios (`_user_pick_share` + the trade job's opponent shares) stay on the legacy `pick_value` column, so the contend/rebuild classifier still weights every first alike (scope §6 waiver 3); and the Draft Room board vs engine mismatch in non-12-team leagues — a 10-team league's last first displays as 820.8 and prices as 1069.8 — pinned by a test and raised as **Q-027** (scope §6 waiver 2). 12-team leagues agree exactly, asserted slot by slot.
+
+---
+## 2026-08-21b — Gap auto-sweetener extended to bake-off arm C (`trade_gen_v2`) — full gates, NOT PUSHED, NOT MERGED, on `feat/gap-sweetener-arm-c`
+
+**Branch:** `feat/gap-sweetener-arm-c`, **stacked on `fix/package-benchmark-sweetener` @ `480cce0`** — NOT cut from `origin/main`. `close_value_gap` does not exist on `origin/main` at all, so this work is unbuildable there; the operator chose the stacked branch over waiting for the Monday window (2026-08-21). **Merge order is load-bearing: the parent lands first, then this.**
+Full gates ran — operator did **not** declare express.
+Scope + code-walk: [docs/plans/package-benchmark-sweetener/scope-arm-c.md](../docs/plans/package-benchmark-sweetener/scope-arm-c.md) ·
+ship-time entries **drafted, not applied**: [decisions-draft-arm-c.md](../docs/plans/package-benchmark-sweetener/decisions-draft-arm-c.md).
+
+**No feature flag, no new knob.** Arm C reuses the parent's `sweetener_gap_threshold` (1539.0); ≤ 0 remains the deploy-free rollback and arm A's pin.
+
+**Why it was needed, measured.** Arm C inherited the parent's trade-wide package benchmark — which WIDENS absolute consensus gaps — through `_consensus_packages` at card-build time, but did not run the closer. Its deck is card-for-card identical across the parent (the parent moves its *prices*, not its *selections*), so the entire rise is mispricing. Reproduced on this tree: **12-team 3/22 over the line (13.6 %), 16-team 2/19 (10.5 %)**, `sweetened: 0` in both, against 0–5.3 % for every other served arm.
+## 2026-08-21b — Receipts (graded suggestion track record) built dark — full gates, NOT PUSHED, NOT MERGED, on `feat/receipts`
+
+**Branch:** `feat/receipts` (worktree `agent-a60b48a57928d5895`), cut from `origin/main` at `eb9c1de`, then `plan/receipts` merged in (that merge IS the shared taxonomy's repo landing) and `origin/main` re-merged at `d42872f` after PRs #161/#162 landed mid-build. **Not pushed, not merged.**
+Full gates — the operator did not declare express, and the change is outside the express lane by the bright-line rule anyway (2 new tables, 3 new routes, 2 new flags, 5 new knobs, 3 new analytics events).
+Spec: [docs/plans/receipts/](../docs/plans/receipts/) (dual-agent reviewed, 3 adversarial rounds) · code-walk: [code-walk.md](../docs/plans/receipts/code-walk.md) · operator checklist: [testflight-checklist.md](../docs/plans/receipts/testflight-checklist.md).
+
+**Everything ships dark.** `receipts.grading` and `receipts.screen` both default false; env kill switch `FTF_RECEIPTS_GRADE=0`.
+
+**What ran, and what it proves.**
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q` | **3795 passed, 1 skipped, 0 failed** (340 s). Baseline measured on this same tree at the parent tip `480cce0`: **3786 passed, 1 skipped**. The +9 are the new `test_gap_sweetener_arm_c.py`; no other delta, nothing removed, nothing newly skipped |
+| `cd mobile && tsc --noEmit` · `check-*.js` · `testid-lint.sh` | **not run in this worktree** (no `node_modules`); **zero mobile files touched** — `git diff --stat <parent> -- mobile/` is empty, so the mobile CI jobs are byte-identical to the parent's |
+| Sim gate | `FTF_SKIP_SIM_GATE=1` standing posture (D-056); evidence = everything in this entry |
+
+**Verify-by-revert on all nine new tests, three trees.** With `backend/trade_gen_v2.py` reverted to the parent, **8 of 9 go red**; with the *contained-pools* variant (equalizer drawn from `give_pool`/`extras` rather than the semantic universes) exactly **1 goes red** — `test_arm_c_equalizer_reaches_past_the_budget_slice`, the test that pins the §0b decision. Shipped tree: 9/9 green. The ninth test, `test_arm_c_kill_value_is_a_byte_identical_no_op`, passes on the parent **by design** — it asserts the threshold-0 deck IS the pre-sweetener deck, so a green there is the claim, not a gap in coverage. It pins the organic card's exact literals (`["G"] → ["R"]`, 10000.0 / 11600.0, band 0.862, gap 1600.0) so drift in the disabled path cannot be silently rebaselined.
+
+**Two defects found by reading arm C rather than copying the other three hooks** (both would have shipped had this been a copy-paste; details in scope-arm-c.md §0):
+
+1. **Placement.** The gap is only computable at the card-build call to `_consensus_packages`, but ten derived fields — `_dedup_batch` keys, `_meso_variants`, `_rationale`, `classify_package_shape` (whose `"consolidation"` label is literally `len(ids) == 1`), `card.health`'s seven entries, `mismatch_score`, `fairness_score`, `composite_score` and the Stage 6/7 exposure + tier ranking — are computed earlier from the `_Candidate`. Sweetening at the obvious site leaves every one of them describing the unsweetened trade: arm C's much larger analogue of the v3 stale-`fit_premium` defect. Fixed by hooking inside `_pair_survivors` and rebuilding the whole `_Candidate`.
+2. **`past_decision_keys` was re-checkable and unchecked.** A sweetened combo is a different trade with a different key; the enumeration only ever tested the unsweetened shape. Without the re-test the pass could ship a combo the user had already rejected. Pinned by `test_arm_c_sweetened_combo_respects_past_decisions`.
+
+**Pool containment — the round-2 lesson applied, and where it stops.** Arm C prunes in two layers and only one is semantic. `user_assets` (on BOTH boards, not untouchable) and `extras_all` (divergence-positive, not not-interested) encode real rules and are the equalizer universe. `[:gen2_give_pool]` / `[:gen2_recv_extra_pool]` are enumeration budget — documented as bounding "SEARCH BREADTH, never output length" alongside `gen2_centerpiece_top_k` — and the sweetener deliberately reaches past them. **Measured justification:** wired to the budget slices the pass fires but the deck metric does not move (3/22 and 2/19 unchanged), because **78 of 112 and 63 of 86 rejected equalizers are undershoot** — nothing in the slice is big enough — against only 8 and 13 killed by arm C's own gates. Reaching the semantic universe moves the 12-team fixture **3 → 1 over the line (13.6 % → 4.6 %), p90 1665 → 951**; the 16-team stays at 2 but its mean gap falls 551 → 488. Operator chose the widened reading with the numbers in front of them. This is NOT the `49c1d76` defect relaxed: that one crossed a semantic line (a #174 pinned "trade away G" job smuggling in an unpinned player — a broken user instruction).
+
+**Golden disposition — re-verified deliberately, and they did NOT move. No re-capture, no kill-value pin.** The brief expected the gen2 goldens to move. Instrumented rather than assumed, with a probe counting arm-C sweetener invocations per file:
+
+| File | `generate_league_suggestions` calls | arm-C cards | sweetener fired | verdict |
+|---|---|---|---|---|
+| `test_bakeoff_arm_a_golden.py` | 0 | 0 | 0 | never enters arm C — arm A is the v2/consensus path, and pins the knob at 0 besides |
+| `test_engine_quality_golden.py` · `test_engine_quality.py` | 0 | 0 | 0 | never enters arm C |
+| `test_bakeoff_runner.py` · `test_bakeoff_composition.py` · `test_bakeoff_challenger.py` | 0 | 0 | 0 | never enters arm C |
+| `test_bakeoff_serving.py` | 10 | **0 cards** | 0 | enters, but the fixture yields empty arm-C decks |
+| `test_trade_gen_v2.py` (arm C's own suite, not a golden) | 36 | 57 | **10 fired, 10 closed** | all 40 assertions still green |
+
+Confirmed by forcing the gap line to **1.0** — a threshold every nonzero gap exceeds: still **0 invocations** in every golden file. So the goldens are stable because arm C's generator is not reached in them, not because the threshold happens to sit above their gaps. There is no baseline to re-capture and nothing to pin.
+
+**Where the sweetener does real work, proven by the same probe on three trees** — `test_trade_gen_v2.py`, all 40 pre-existing tests green throughout:
+
+| Tree | cards | max gap | over 1539 |
+|---|---|---|---|
+| parent (`480cce0`) | 58 | 1861.5 | **2** |
+| contained pools | 57 | 1234.2 | 0 |
+| shipped (widened) | 57 | 1234.2 | 0 |
+
+**Known effect, deliberately accepted — for arm C the pass CAN shrink the deck by one, unlike the other three paths.** D-143 states the sweetener "narrows gaps, never shrinks the deck". That holds where it was written, but arm C is the only path with `_dedup_batch` downstream, and its bucket key is `(opponent, centerpiece, "{len(give)}x{len(recv)}")`. Sweetening changes a card's SHAPE, so it can land in an occupied bucket and the lower-ranked occupant is dropped. Diffed card-for-card on `test_trade_gen_v2.py` deck #11: parent held `u_rb1 → o_wr1` (gap 1671, over) and `u_rb2+u_wr1 → o_wr1` (gap 1861, over); shipped sweetens the first into a 2×1 (`+u_wr1`, gap 1234) which collides with the second's bucket and evicts it. Net 3 cards → 2, and **both over-the-line cards are gone**. Acceptable: the bucket rule exists precisely to stop two near-duplicate shapes serving together, and arm C emits its full survivor set with no truncation, so the loss is one near-dup rather than a suppressed idea.
+
+**Harness determinism — see [G-053](GOTCHAS.md).** The first before/after run showed arm D moving, which cannot happen from a `trade_gen_v2` edit. Two consecutive runs on the identical tree reproduced the flip: the harness is seed-dependent. Every number in this entry was produced with `PYTHONHASHSEED=0` on both sides, verified byte-identical across two seeded runs. This retroactively qualifies single-card deltas in 2026-08-21a, which was measured unseeded.
+
+**Not covered / owed at ship.** No runtime evidence: arm C serves quota-capped bake-off slots and rides the parent's [testflight-checklist.md](../docs/plans/package-benchmark-sweetener/testflight-checklist.md) rather than adding a second manual pass. Deck-level effects above are fixture-only and DIRECTIONAL — synthetic boards, `max_per_opponent=5` (the engine default is None, so production decks are larger than the harness's).
+| `python3 -m pytest backend/tests -q` | **3951 passed, 1 skipped, 0 failed** (301 s), measured on the merged tree. Exactly **54** of those are the new `backend/tests/test_receipts_grading.py`, so the merged tree's pre-existing count is 3897 — no existing test was changed, removed, or newly skipped, and the only test file this branch adds is the receipts one. (The brief's 3651 baseline predates PRs #161/#162, which landed mid-build and brought their own suites.) |
+| `cd mobile && npx tsc --noEmit` | **green** (`npm ci` first — the worktree had no `node_modules`) |
+| `node tests/check-receipts.js` (`npm run test:receipts`) | **12 passed, 0 failed** |
+| `bash mobile/scripts/testid-lint.sh` | **testid-lint OK** |
+| Knob-inventory guard | green and **correctly silent**: the five `receipts_*` knobs are deliberately NOT in `trade_service._DEFAULT_CFG`, so `_PINNED_KNOBS` does not apply. A test asserts they never enter it, and each has an arm-A disposition sentence in `docs/plans/three-model-bakeoff/scope-phase2.md` |
+
+**Sabotage discipline — 21 named sabotages, all confirmed RED then green on revert.**
+Backend (12): edge sign flip · D-8 floor imputation dropped · serve anchor allowing a post-serve snapshot · pick weights read live from `GENERIC_PICK_SEEDS` · Wilson centre shift dropped · valuation leaking from the frozen card · ghosts entering the queue · queue ignoring existing grades · min-n gate removed · an UPDATE path on `receipts_grades` · pre-telemetry rows queued · dedup keeping the latest serve.
+Mobile (9): FeedbackFAB removed from one render branch · FAB given tab-stack props · a second per-window fetch · worst call dropped while best call kept · route wrapped in the flag · entry point ungated · ledger state deleted · disclosure not rendered · give-side delta dropped.
+
+**Six guards were BLIND on the first pass and were strengthened rather than logged as passing** — this is the part worth reading:
+- **T-4 (deploy invariance)** compared two rows that BOTH became `pick_majority` under the sabotage, so a field-by-field equality check passed while proving nothing. Now pins `status == "graded"` on both sides, plus a direct assertion that the frozen weights survive `GENERIC_PICK_SEEDS` being emptied entirely.
+- **T-1 (pre-telemetry)** ran against an empty cohort, so the run short-circuited and the test passed because *nothing happened at all*. Now seeds a gradeable neighbour and asserts the run did real work.
+- **FAB check** passed with one of three render branches stripped — the error branch, i.e. the user with the most to report and no way to report it. Now counts mounts against render branches and prop-checks every mount.
+- **Unconditional-route check** searched for the flag NAME, so `{true ? <Stack.Screen…}` slipped through. Now inspects the token before the tag.
+- **Both-sides check** matched `give_delta` surviving inside a style callback after the rendered number was deleted. Now asserts the rendered value.
+
+**Two real defects the discipline caught (not test bugs).**
+1. `_dedup_earliest` was keeping the LATEST serve instead of the earliest — masked by a **stale `.pyc`**: the sabotage swapped `<`→`>`, identical byte length inside one mtime-second, so Python reused cached bytecode and `inspect.getsource` disagreed with what was actually running. Sabotage runs now clear bytecode between steps. **Worth remembering: a same-length edit inside one second is invisible to Python's import cache.**
+2. The daily-tick guard serialized `receipts_grade_started` unconditionally, changing the flag-off tick payload — caught by `test_deck_replenishment`'s byte-identical assertion, fixed, and now pinned from the receipts side too.
+
+**Backfill exercised end to end** against a synthetic fixture DB (420 impressions across 3 leagues / 2 formats / 3 users, 8 640 snapshot rows, a deliberate 2-day supply gap, 23 ghosts, 49 pre-telemetry rows): 565 resolvable → **542 graded + 23 ungradeable = 565 exactly**, terminating on two consecutive zero-work runs; re-run wrote 0; ledger showed 6 complete start/end pairs and 0 unmatched starts; **0 ghost rows graded**; 47 floor-imputed (D-8) rows retained. Win/loss landed at 283/259 on drift-only synthetic data — near the 50% null, which is what an unbiased grader should produce on random walks. `effective_window` for 28d: min 27, max 30, median 28.
+The **real dev DB dry-run reports 0** and that is correct, not a failure: `data/trade_finder.db` holds zero `deck_impressions` rows, so there is nothing local to grade. The prod cohort is the P0 read, still outstanding.
+
+**Code-ship boundary, examined rather than assumed (coordinator note).** `d42872f` (2026-08-22, package pricing + sweetener) changes package-value SEMANTICS in the engine. It does **not** affect grades: the grader reads only `player_value_history` consensus snapshots and never computes a package value, so no grade moves across that boundary — HL-4 recalibration immunity holds by construction. What it *does* affect is attribution: impressions served before and after `d42872f` come from different engine behaviour, and that is already carried by the `policy_version` slice key stamped on every impression and copied onto every grade row. No action; recorded so it is not re-examined.
+
+**Not run:** anything on a device. Receipts has never rendered on real hardware — that is the operator's checklist above, and it is the only runtime evidence this feature will get.
+
+---
+## 2026-08-21a — Package-benchmark fix + gap auto-sweetener + ghost default, round-2 reviewed — full gates, NOT PUSHED, NOT MERGED, on `fix/package-benchmark-sweetener`
+
+**Branch:** `fix/package-benchmark-sweetener` (worktree `agent-a8f35b1a442cb2147`), cut from `origin/main` at `eb9c1de`. **Not pushed, not merged** — the merge is the operator's Monday-boundary call (change-control rule, trade-engine-accuracy PLAN Phase 0.4).
+Full gates ran — operator did **not** declare express, and the change is outside the express lane by the bright-line rule anyway (it adds three `model_config` keys and changes a shipped default).
+Scope: [docs/plans/package-benchmark-sweetener/scope.md](../docs/plans/package-benchmark-sweetener/scope.md) (round-2 review in §6) ·
+code-walk: [code-walk.md](../docs/plans/package-benchmark-sweetener/code-walk.md) ·
+checklist: [testflight-checklist.md](../docs/plans/package-benchmark-sweetener/testflight-checklist.md) ·
+ship-time entries **drafted, not applied**: [decisions-draft.md](../docs/plans/package-benchmark-sweetener/decisions-draft.md).
+
+**No feature flag.** Knob-gated: `package_bench_trade_wide` 1.0, `package_floor_cross` 0.40, `sweetener_gap_threshold` 1539.0 — each ≤ 0 is a deploy-free rollback. Changed default: `ghost_holdout_one_in` 10 → 0.
+
+**What ran, and what it proves.**
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q` | **3786 passed, 1 skipped, 0 failed** (271 s). Baseline on the inherited tip `0e04d30`, measured on this same tree: **3782 passed, 1 skipped**. The +4 are the round-2 regression tests in `test_gap_sweetener.py`; no other delta, nothing removed, nothing skipped that was not already skipped |
+| `cd mobile && tsc --noEmit` · `check-*.js` · `testid-lint.sh` | **not run in this worktree** (no `node_modules`); **zero mobile files touched** on the whole branch — `git diff --stat origin/main -- mobile/` is empty, so the mobile CI jobs are byte-identical to `origin/main`'s green |
+| Knob-inventory guard (`test_no_generation_knob_was_added_without_an_arm_a_decision`) | green with all three new keys in `_PINNED_KNOBS` + disposition sentences in `docs/plans/three-model-bakeoff/scope-phase2.md` |
+| Sim gate | `FTF_SKIP_SIM_GATE=1` standing posture (D-056); evidence = everything in this entry |
+
+**Round-2 adversarial review of the inherited commits — two real defects, both reproduced before they were fixed.** The operator re-delegated the sweetener for a hostile re-read. `72ecd51` (benchmark fix) came back **clean**: `v_max` verified trade-wide at all 14 constructions in `backend/`, the carve-outs verified surgical, kill-value identity verified test-proved rather than asserted. `0e04d30` (sweetener) shipped two defects, fixed in `49c1d76`:
+
+1. **The consensus generator's pool pruning was bypassed.** `_generate_consensus_for_pair` prunes `give_pool` to the #174 pinned give players and `recv_pool` to the FB-47 pinned acquire targets / need positions, rather than gating per combo. `close_value_gap` drew from the raw rosters, so a `pinned_give_players=["G"]` job emitted `[G, X1] → [R]` with `X1` never offered up, and a WR-only acquire job could hand back an off-need RB. Fixed with optional `give_candidates`/`recv_candidates` (rosters still drive the 3.2 feasibility counts). v2 and v3 pass nothing — their pinned/position rules are per-combo and monotone under addition, verified callsite by callsite.
+2. **v3 shipped a stale `fit_premium`.** `fit_premium_1for1` can only price a 1×1; the gap pass rewrote the card to a 1-for-2 and left the badge on. The v2 divergence path already nulled its `fit_paid`; v3 now does too.
+
+**Verify-by-revert on all four new tests:** with `backend/trade_service.py` + `backend/trade_optimizer.py` stashed back to `0e04d30`, `test_helper_candidate_pools_narrow_the_equalizer_universe`, `test_consensus_sweetener_never_adds_an_unpinned_give_player`, `test_consensus_sweetener_respects_the_acquire_position_filter` and `test_v3_gap_sweetener_clears_the_stale_fit_premium` all go **red**; restored, all green. Each also carries its own non-vacuity half (the same fixture without the pin IS sweetened; the knob-off half proves the v3 organic winner really is a fit-premium 1-for-1 carrying a 1600 gap).
+
+**Sabotage check on the extraction the predecessor claimed was byte-identical — it holds, but NOT where the commit said.** `0e04d30` pulled the v2 divergence surplus/composite math out of `_consider` into `_pair_surpluses` / `_composite_v2` and asserted the extraction was pinned by "the full suite plus the arm-A/challenger/engine-quality goldens". Sabotage: `u_max = max(uvals_give + uvals_recv)` → `max(uvals_give)` inside `_pair_surpluses`, `__pycache__` cleared. **Those three golden files all stayed GREEN** — they run with `trade_engine.v3` on, so `_generate_for_pair_v2` is never entered. The full suite DID catch it, at **`test_trade_optimizer.py::test_v3_top_card_matches_v2_on_1for1_fixture`** and **`test_trade_tier2.py::test_outlook_rebuilder_outranks_championship`** (2 failed, 3784 passed). Restored with `git checkout --`, proved restored with `git diff --quiet`, re-run green. So the claim is TRUE and the extraction is genuinely guarded — the commit message just named the wrong guards, which would have sent the next person debugging the wrong file.
+
+**W0-style deck-size / gap-distribution measurement — `origin/main` `eb9c1de` vs this branch tip.** Fixture-only. Two constructed leagues (12-team 1QB 26-man, 16-team SF 21-man) drafted from `backend/tests/fixtures/player_pool_2026.json`, 3 owned-pick pseudo-assets per team, hash-offset synthetic boards, `fairness_threshold` 0.85, `max_per_opponent` 5, `_cfg` at code defaults, flags from `config/features.json`. Harness committed for reproducibility: [`measure_gap_distribution.py`](../docs/plans/package-benchmark-sweetener/measure_gap_distribution.py). The "before" side was produced by `git archive origin/main` into a scratch tree and running the same file there. **One deviation from the fit-challenger W0 recipe, and it is load-bearing:** W0's flat rank-ladder Elo seeds (1750 → 1250) compress the board into 286..3490 value units, where a 1539 gap is arithmetically almost unreachable — the measurement reads zero everywhere regardless of the engine. Seeds here come from the pool's own DynastyProcess values rescaled so the #1 asset lands on FTF's real top-asset price (~7737), reproducing the production value CURVE.
+
+| League | Path | Arm | main cards | branch cards | Δ | main >1539 | branch >1539 | sweetened | main mean gap | branch mean gap |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 12t 1QB | v2 only | B `current` | 14 | 13 | −1 (−7%) | 0 (0.0%) | 0 (0.0%) | 1 | 105.4 | 112.2 |
+| 12t 1QB | v2 only | B, sweetener OFF | — | 13 | — | — | 1 (7.7%) | 0 | — | 211.5 |
+| 12t 1QB | v2 only | D `challenger` | 14 | 13 | −1 (−7%) | 0 (0.0%) | 0 (0.0%) | 1 | 105.4 | 112.2 |
+| 12t 1QB | v2 only | C `gen_v2` | 22 | 22 | +0 | 0 (0.0%) | **3 (13.6%)** | 0 | 427.0 | 583.5 |
+| 12t 1QB | v2 only | A `baseline` | 30 | 30 | +0 | 3 (10.0%) | 3 (10.0%) | 0 | 312.4 | **312.4** |
+| 12t 1QB | v3 | B `current` | 19 | 16 | −3 (−16%) | 1 (5.3%) | 0 (0.0%) | 1 | 284.9 | 393.9 |
+| 12t 1QB | v3 | B, sweetener OFF | — | 16 | — | — | 1 (6.2%) | 0 | — | 492.0 |
+| 12t 1QB | v3 | D `challenger` | 20 | 16 | **−4 (−20%)** | 1 (5.0%) | 0 (0.0%) | 1 | 287.3 | 379.9 |
+| 12t 1QB | v3 | A `baseline` | 30 | 30 | +0 | 3 (10.0%) | 3 (10.0%) | 0 | 448.3 | **448.3** |
+| 16t SF | v2 only | B `current` | 16 | 17 | +1 (+6%) | 0 (0.0%) | 0 (0.0%) | 0 | 305.9 | 125.4 |
+| 16t SF | v2 only | D `challenger` | 16 | 17 | +1 (+6%) | 0 (0.0%) | 0 (0.0%) | 0 | 305.9 | 125.4 |
+| 16t SF | v2 only | C `gen_v2` | 19 | 19 | +0 | 1 (5.3%) | **2 (10.5%)** | 0 | 468.3 | 551.5 |
+| 16t SF | v2 only | A `baseline` | 30 | 30 | +0 | 0 (0.0%) | 0 (0.0%) | 0 | 178.5 | **178.5** |
+| 16t SF | v3 | B `current` | 19 | 19 | +0 | 0 (0.0%) | 1 (5.3%) | 1 | 291.4 | 470.2 |
+| 16t SF | v3 | B, sweetener OFF | — | 19 | — | — | 2 (10.5%) | 0 | — | 495.1 |
+| 16t SF | v3 | D `challenger` | 19 | 19 | +0 | 0 (0.0%) | 1 (5.3%) | 1 | 284.3 | 470.2 |
+| 16t SF | v3 | A `baseline` | 30 | 30 | +0 | 3 (10.0%) | 3 (10.0%) | 0 | 560.7 | **560.7** |
+
+**Four readings.**
+
+- **Deck shrink — the number the operator accepted in advance:** **−3.9%** across the served arm roster (B + C + D, 178 → 171 cards); **−4.4%** for arm `current` alone (68 → 65). Worst single cell **−20%** (12-team 1QB, v3, arm D: 20 → 16). No cell lost more than 4 cards.
+- **Arm A is byte-identical at `origin/main` and at this branch tip** — same 30 cards, same 9 over-the-line count, same p90 and mean gaps to 0.1, on every league × path. That is LIVE evidence for the pin-instead-of-recapture choice, on top of the unit test, and it is the strongest single result in this run.
+- **The sweetener works where it fires, and it fires narrowly.** The branch-only "sweetener OFF" rows isolate it from the benchmark fix: arm `current` would carry 1 / 1 / 2 over-the-line cards on the three cells where it matters, and the pass takes those to 0 / 0 / 1 — 3 of 4 closed. It sweetens roughly **one card per deck**, not a third of it.
+- **Arm C gets WORSE, and this is the finding to act on.** Arm C's deck is identical card-for-card (22 and 19 on both trees) — only the DISPLAYED values moved, because it inherits `package_value_v2` through `_consensus_packages` but does not run the sweetener. Its over-the-line share goes 0 → 13.6% and 5.3 → 10.5%. Across the served roster that alone lifts the combined over-the-line share from 1.7% to 4.1%. The arm-C follow-up named in scope.md is a **priority item**, not a nicety.
+
+**What is NOT proven, and is owed.** (a) The manual TestFlight checklist — it needs a build containing this branch, which does not exist; no runtime evidence exists for these cards yet. (b) A prod-replay half against real league boards — needs prod read access, operator item, same gap the fit W0 run had. (c) Fixture boards are synthetic (rank-drafted rosters, hash-offset personal Elo), so the LEVELS above are directional; the main-vs-branch DELTAS are the result. (d) The fixture decks carry a far lower over-the-line share (0–5% on arm B) than the 15% the CHANGELOG measured on real served cards, so the sweetener's real-world firing rate is likely HIGHER than one card per deck — read it from the checklist's readout SQL before trusting the fixture rate.
+
+**Six operator ratification items** are listed in [scope.md §6](../docs/plans/package-benchmark-sweetener/scope.md) — headline ones: the arm-A golden was pinned rather than re-captured, and the flag-off serving golden's parity-with-the-pre-bake-off-SHA claim died with its re-capture and is now a drift detector.
+
+### Addendum 2026-08-21b — the PROD-REPLAY half, on real boards. Owed item (b) above is now CLOSED.
+
+Read-only prod replay of league `1312140920132497408` ("Fantasy Football Version 3", `1qb_ppr`) — the
+only league with 3+ boards — against **`origin/main` `eb9c1de`** (pinned by SHA and materialized with
+`git archive`, because main moves) **vs this branch tip `480cce0`**. Nothing was pushed, merged,
+flagged or written; no engine file was touched by this measurement. (A concurrent session committed `e59650c` to this branch mid-run; it is docs-only — `git diff 480cce0 e59650c -- backend/ config/` is empty — so these numbers still describe the current tip.)
+
+**Method** — the arm-B audit's recipe ([docs/reviews/2026-08-19-armb-audit-claims-3-4.md](../docs/reviews/2026-08-19-armb-audit-claims-3-4.md) §7),
+extended to the full serving inputs. Prod was read **once** into a local JSON fixture and both trees
+then ran against those FROZEN inputs — no per-generation prod access. Connection posture copied from
+`backend/tools/prod_analytics.py`: `DATABASE_URL_PROD` from the gitignored root `secrets.local.env`,
+session-level `default_transaction_read_only=on` + `statement_timeout`, SELECT only, DSN never printed.
+
+- Pool + consensus seed: `player_value_history` @ `2026-08-21` / `1qb_ppr` (644 rows) joined to `players`.
+- Each member's board: their **real** `swipe_decisions` replayed through the **real**
+  `RankingService.replay_from_db` (1808 / 1080 / 956 / 175 / 120 / 42 rows), `users.tier_overrides`
+  restored into `_elo_overrides` (with `__OVERRIDE_AT__` stamps), then `get_rankings()`,
+  `comparison_counts()` → `confidence`, `placement_bands()` → `placements`.
+- Rosters from `league_members.roster_data`; outlooks + acquire/trade-away positions from
+  `league_preferences`; `asset_preferences` as untouchable/target/not-interested sets; opponent
+  outlooks and pick shares assembled as `_run_trade_job` does.
+- Owned picks injected exactly as `server._inject_owned_picks` does (144 rows, `picks_pool_cap`, and
+  `trade.slot_pricing`'s default `tier_ladder` mode ⇒ the stored `pool_value`), with `_pick_asset_elos`
+  priming every Elo map — so a pick can be an equalizer, as it is in prod.
+- Prod `model_config` (185 rows) into both modules' `_cfg`; each viewer's real `stud_tax_mode` pinned;
+  flags from `config/features.json`; cards from the real `TradeService.generate_trades` at the **organic
+  serving parameters** (`fairness_threshold` 0.75, `max_per_opponent` 5).
+- **Both trees ran against ONE shared throwaway SQLite `DATABASE_URL`** so neither could read a
+  different local `experiments` / `model_config` table (the branch worktree has a populated
+  `data/trade_finder.db`; the archived main tree does not — that asymmetry was found and removed).
+- 6 boarded viewers × 2 paths (v3 = the live posture, and v2-only) × arms A/B/C/D, plus a branch-only
+  `sweetener_gap_threshold = 0` control that isolates the sweetener from the benchmark fix.
+- **Determinism proved, not assumed:** the whole branch run was repeated and the two result files are
+  byte-identical.
+
+Harness committed (DB-free half): [`replay_prod_boards.py`](../docs/plans/package-benchmark-sweetener/replay_prod_boards.py).
+The prod extractor is deliberately **not** committed — it holds a prod connection helper, the same
+posture the arm-B audit took with its probe scripts.
+
+| Slice | main cards | branch cards | Δ | main >1539 | branch >1539 | sweetened | main mean gap | branch mean gap |
+|---|---|---|---|---|---|---|---|---|
+| **Served arm roster (B+C+D, both paths)** | 434 | 427 | **−7 (−1.6%)** | 45 (10.4%) | 33 (7.7%) | 28 | 614.0 | 568.6 |
+| arm B `current`, both paths | 186 | 185 | −1 (−0.5%) | 15 (8.1%) | 7 (3.8%) | 17 | 552.6 | 486.2 |
+| **arm B, v3 path — the live posture** | 105 | 106 | **+1 (+1.0%)** | 7 (6.7%) | **3 (2.8%)** | 9 | 538.1 | 501.3 |
+| arm B, v2-only path | 81 | 79 | −2 (−2.5%) | 8 (9.9%) | 4 (5.1%) | 8 | 571.3 | 466.1 |
+| **arm A `baseline` (pin check)** | 376 | 376 | **+0** | 71 (18.9%) | 71 (18.9%) | 0 | **835.6** | **835.6** |
+| arm C `gen_v2` (inherits the fix, no sweetener) | 51 | 51 | +0 | 15 (29.4%) | **19 (37.2%)** | 0 | 1173.7 | 1253.0 |
+| arm D `challenger` | 197 | 191 | −6 (−3.0%) | 15 (7.6%) | 7 (3.7%) | 11 | 527.2 | 465.7 |
+
+By basis, arm B, both paths: **divergence** 96 → 94 cards, over-line 13 (13.5%) → 7 (7.4%), 15 sweetened;
+**consensus** 90 → 91 cards, over-line 2 (2.2%) → **0 (0.0%)**, 2 sweetened. Sweetener fire rate splits
+almost entirely by basis, not by path: divergence **15.9%** (v2) / **16.0%** (v3), consensus 2.9% / 1.8%.
+
+**Fixture prediction vs real boards — four corrections and one confirmation.**
+
+1. **Deck shrink is less than half what the fixture predicted.** Fixture: **−3.9%** served roster,
+   −4.4% arm B, worst cell −20%. Real boards: **−1.6%** served roster, **−0.5%** arm B, and the live
+   v3 path actually gains a card (**+1.0%**). Worst single cell is `v2_only` / arm D / MangoPatti,
+   15 → 11 (−26.7%); worst arm-B cell is `v2_only` / johnstanfield, 17 → 15 (−11.8%). The operator
+   accepted −3.9% in advance; the real cost is smaller than the number they accepted.
+2. **The over-the-line LEVEL the fixture could not reach is confirmed, and the CHANGELOG's ~15% is
+   located.** At `origin/main` on real boards: arm A **18.9%**, arm C **29.4%**, arm B **8.1%** — and
+   arm B's **divergence** slice is **13.5%**. The fixture read 0–5% on arm B. So the ~15% figure is a
+   divergence/mixed-arm number, not an arm-B-overall one, and the fixture was indeed measuring an
+   arithmetically compressed board.
+3. **The sweetener fires about twice as often as the fixture implied — confirmed as predicted.**
+   Fixture: 3 sweetened cards across 65 arm-B cards (~4.6%), "roughly one card per deck". Real boards:
+   **17 / 185 = 9.2%**, **1.42 cards per deck** on a mean deck of 15.4. Owed item (d) called this and
+   was right.
+4. **The sweetener's economics on real assets.** Mean gap **2173 → 850** (median 2010 → 814), mean
+   1324 units closed. **17 of 17 sweetened cards land under the 1539 line** — when the pass fires it
+   always succeeds. Equalizer came off the **give** side 14 times, the **receive** side 3, and was an
+   owned **PICK** 5 of 17 (Bcork's 2027 1sts, johnstanfield's 2026 1sts) — the `close_value_gap`
+   docstring correction in §6 is load-bearing in production, not theoretical. The 7 cards still over
+   the line on the branch are **all unsweetened** (gaps 1648, 1648, 1812, 1876, 2171, 2547, 4105) —
+   unclosable and kept, exactly as specced.
+5. **NEW — the branch's two halves pull in opposite directions, and only the sweetener makes it a
+   win.** The branch-only `sweetener_gap_threshold=0` control isolates them on identical decks
+   (deck size is unchanged by the sweetener on real boards — every viewer's card count matches
+   card-for-card between sweetener-on and sweetener-off, so the whole −1.6% deck delta is the
+   BENCHMARK FIX, not the sweetener):
+
+   | Path | main | branch, sweetener OFF | branch, sweetener ON |
+   |---|---|---|---|
+   | v3 | 7/105 = 6.7% | **12/106 = 11.3%** | 3/106 = **2.8%** |
+   | v2-only | 8/81 = 9.9% | **12/79 = 15.2%** | 4/79 = **5.1%** |
+
+   The benchmark fix ALONE would raise arm B's over-the-line share (6.7 → 11.3, 9.9 → 15.2) — the same
+   mechanism that makes arm C worse. The sweetener then removes 9 of 12 and 8 of 12. **Shipping the
+   benchmark fix without the sweetener would be a net regression on this metric**; they must ship
+   together, and `sweetener_gap_threshold` is not an independent rollback lever for the benchmark fix.
+
+**Arm A is byte-identical on REAL boards too** — 376 cards, 71 over the line, mean gap 835.6 to 0.1, on
+both trees, across all six viewers and both paths. Ratification item 1 (the arm-A golden pinned rather
+than re-captured) now has live-data evidence on top of the fixture and the unit test.
+
+**Arm C is worse than the fixture said, and it is a pre-existing problem the branch deepens.** Real
+boards: **29.4% → 37.2%** over the line on an identical 51-card deck (fixture: 0 → 13.6% and
+5.3 → 10.5%). Most of that level is NOT this branch — jonbonjourvi's arm C is 11 of 13 over the line on
+BOTH trees. Ratification item 5 stands, and the arm-C follow-up is confirmed as a priority.
+
+**One caveat the headline numbers hide: net deck size barely moves, but deck CONTENT churns hard.**
+Arm B across all 12 viewer-path decks: 107 cards common, 51 main-only, 50 branch-only — roughly a
+third of the deck is different. Per-viewer worst case is Bcork on `v2_only`, 4 of 12 cards common. A
+tester comparing decks before/after the merge will see much more change than "−1 card" suggests.
+
+**Not measured here, still owed:** the manual TestFlight checklist (item (a)) — unchanged, it needs a
+build. This replay covers generation only; the post-generation presentation stack (thompson, diversity,
+fatigue, session rerank, first-session shaping, bake-off interleave) was not replayed, so these are
+served-CANDIDATE decks, not final served decks.
+
+**Ship recommendation: unchanged — ship.** Every headline moved in the branch's favour relative to the
+fixture: less deck loss than the operator pre-accepted, a bigger over-the-line reduction on a higher
+real baseline, and a sweetener that closes every gap it touches. The two findings that change anything
+are (5) — the halves are not independently shippable — and the arm-C deepening, which is a follow-up,
+not a blocker.
+
+---
+## 2026-08-21 — Counterparty breaker waves 1+2 (module · seam · narration · mobile element) — full gates, BOTH FLAGS DARK, NOT MERGED, on `claude/counterparty-breaker-plan`
+
+**Branch:** `claude/counterparty-breaker-plan` (worktree `trading-engine-eval-8ab7bc`), tip `fdd1683`
+(wave 1 `0b808b5` → wave 2 `9806d01` → taxonomy v1.1.1 `fdd1683`). **Not pushed, not merged.**
+Full gates — the operator explicitly declared **NOT express**, and the change is outside the express
+lane by the bright-line rule regardless (two new feature flags, 25 new `model_config` keys, a new
+API payload field, two new `features_json` keys).
+Scope: [docs/plans/counterparty-breaker/scope.md](../docs/plans/counterparty-breaker/scope.md) ·
+code-walk: [code-walk.md](../docs/plans/counterparty-breaker/code-walk.md) ·
+readout spec: [calibration-readout-spec.md](../docs/plans/counterparty-breaker/calibration-readout-spec.md) ·
+checklist: [PRD](../docs/plans/counterparty-breaker/PRD.md) §8.3.
+Decision: [D-142](DECISIONS.md).
+
+**Flags, both default OFF and NEITHER graduated:** `trade.breaker` (compute + stamp),
+`trade.breaker_narrative` (the on-card hesitation line; structurally requires the first).
+
+**What ran, and what it proves.** Counts below were re-verified by collection in this checkout on
+2026-08-21, not quoted from the commit messages.
+
+| Gate | Result |
+|---|---|
+| `backend/tests/test_trade_breaker.py` | **67 collected, 67 passed** — predicates, determinism, vocabulary + evidence-key closure, degenerate inputs, tie-break, the whole rung ladder, budget, shadow, knob-snapshot freezing |
+| `backend/tests/test_breaker_seam.py` | **30 collected, 30 passed** — seam placement, zero ordering effect (parametrized `bakeoff_group_size ∈ {0, N}` + organic), D-11 seam-creep grep guard, flag-off non-import + byte-identity, dark-window payload absence, the full republish matrix |
+| `backend/tests/test_trade_narrative.py` | **22 collected, 22 passed** (file total; **10 of them new**) — the narration gate chain, repetition suppression, template snapshot + `brt-1` version pin, honesty (missing **or present-but-null** evidence ⇒ silence) |
+| `backend/tests/test_bakeoff_serving.py` | **+4 collected rows / 3 new functions** (`test_impressions_breaker_uniform_keys` parametrized ×2, `test_midjob_flag_flip_no_crash`, `test_flag_off_features_json_carries_no_breaker_key`); file 42 passed. **Correction to the wave-2 hand-off, which said "+5"** — the true figure is 4 collected rows |
+| three breaker files together, re-run 2026-08-21 | **119 passed** |
+| `python3 -m pytest backend/tests -q` (full suite) | **3872 passed, 1 skipped, 0 failed** in 264 s — measured at tip `fdd1683` this session. (Wave 1 reported 3835/1, wave 2 reported 3869/1. The +3 over wave 2 is **explained**: wave 2 ran `-k "not calibration_gate"` and reported "3 deselected" — 3869 + 3 deselected = 3872 collected. Same suite, no discrepancy) |
+| `mobile/tests/check-breaker-card.js` | **12 assertions, 12 passed / 0 failed**, re-run in this checkout. Sabotage-proven at build |
+| `mobile/scripts/testid-lint.sh` | **OK**, re-run in this checkout (2 new testIDs: `trade-card.breaker-hesitation`, `trade-card.breaker-hesitation.body`) |
+| `cd mobile && npx tsc --noEmit` | **NOT RUN LOCALLY — deferred to CI's `mobile-typecheck` job.** `mobile/node_modules` is absent in this worktree; this is pre-existing and not a property of the change |
+| Sim gate | `FTF_SKIP_SIM_GATE=1` standing posture (D-056); evidence = everything above plus the code-walk |
+
+**Named sabotages that are permanent tests, not one-off cycles.** These landed as tests, so the
+proof re-runs on every CI pass rather than living in a session log: `test_breaker_binding_sabotage`
+(monkeypatch a `ts` knob ⇒ the next `stamp_breaker` verdict moves — T1 module-import discipline;
+plus a module-attribute swap of `ts.package_value_v2` to a sentinel, which a value-binding
+implementation would no-op on) · `test_knob_snapshot_frozen_within_job` (mutate `ts._cfg` between
+pass 1 and pass 2 ⇒ stamps unchanged) · `test_per_class_exception_contained` (one predicate raises ⇒
+that class stamps `skipped:"predicate_error"`, the other five score, card stays rung 0) ·
+`test_budget_ladder_labeling` (tiny `breaker_ms_budget` + a slowed predicate ⇒ the correct rung at
+each of three trip points, incl. mid-pass-2 buffered work **discarded**) · `test_exception_rungs`
+(context-assembly raise ⇒ rung 4 for that card only; `stamp_breaker` monkeypatched to raise at the
+seam ⇒ rung-5 marker on **every** card — `test_breaker_seam.py:111` is the injected failure) ·
+`test_breaker_zero_ordering_effect` (delete-attribute variant included) ·
+`test_flag_off_never_imports_breaker`. The mobile guard was likewise sabotage-proven at build
+(each of its 12 assertions driven red by an edit to `TradeCard.tsx`, then restored).
+
+**Gap in this record, stated rather than papered over:** wave 2's commit message reports "4 named
+sabotages red→green" and wave 1's reports the guard as "sabotage-proven", but the **individual
+wave-2 sabotage names and their red-run output were not written down in-session**. The permanent
+sabotage tests above are re-runnable evidence and cover the same seams; the four cycles themselves
+are not independently reconstructable from the repo. Recorded as a documentation miss.
+
+**Not run — the load-bearing absence.** The [PRD](../docs/plans/counterparty-breaker/PRD.md) §8.3
+manual TestFlight checklist (**19 numbered steps**; steps 1–4 are the dark-window sub-checklist)
+is **UNRUN**. It is **operator-owed** and needs a build cut containing the hesitation element, which
+does not exist. Per D-056 this checklist is the **only** runtime evidence this feature will ever get,
+so as of today **no runtime evidence exists for the counterparty breaker at all** — everything above
+is static. `trade.breaker_narrative` must not light before it passes.
+
+**Also owed before `trade.breaker` lights** (preconditions, not stretch items): the TBD-operator
+cells in the [calibration-readout spec](../docs/plans/counterparty-breaker/calibration-readout-spec.md)
+§4.1 (per-class min n and margins), the §2.4 `fix/package-benchmark-sweetener` deploy timestamp (a
+code-ship boundary that `model_config_changes` **cannot** see), the reviewed `scripts/`-style readout
+SQL artifact, and the dry-run `ms` number to the operator.
+
+## 2026-08-20f — Composite window model #372 (starter value + playoff likelihood + age at 40 %) — full gates, FLAG DARK, NOT MERGED, on `claude/372-window-composite`
+
+**Branch:** `claude/372-window-composite`, cut from `origin/main` at `c00a9a6`. **Not pushed, not merged** — parent agent integrates.
+Full gates ran — operator did **not** declare express, and the change is outside the express lane by the bright-line rule anyway (a new feature flag and new API fields).
+Scope: [docs/feedback/items/372-window-composite/scope.md](../docs/feedback/items/372-window-composite/scope.md) ·
+code-walk: [code-walk.md](../docs/feedback/items/372-window-composite/code-walk.md) ·
+checklist: [testflight-checklist.md](../docs/feedback/items/372-window-composite/testflight-checklist.md).
+Decisions: [D-140](DECISIONS.md), [D-141](DECISIONS.md).
+
+**Flag, default OFF and NOT graduated:** `trade.outlook_composite`.
+
+**What ran, and what it proves.**
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q` | **3761 passed, 1 skipped, 0 failed** (bar was 3721 on `c00a9a6`; +38 new in `test_window_composite.py`, +2 parametrized fixture rows) |
+| `cd mobile && ./node_modules/.bin/tsc --noEmit` | clean, exit 0 (`node_modules` symlinked from `jolly-leakey-d20295`) |
+| every `mobile/tests/check-*.js` | **67 scripts, 0 failed**, including the new `check-window-composite.js` (14 assertions) |
+| `mobile/scripts/testid-lint.sh` | **OK** (2 new testIDs: `team-review.window.starters`, `team-review.window.playoff`) |
+| Sim gate | `FTF_SKIP_SIM_GATE=1` standing posture (D-056); evidence = everything above plus the prod calibration below |
+
+**Two structural guards on `origin/main` fired on this change and were answered, not silenced.** `test_no_generation_knob_was_added_without_an_arm_a_decision` caught all eight new `infer_composite_*` knobs — they are added to `_PINNED_KNOBS` with a written exclusion rationale (they cannot reach generation: the term they weight needs an applied starter signal, which needs a league-wide power-rankings call no generation path makes). `test_release_flags_mirror_features_json` caught the new flag missing from `backend/tests/fixtures/flags/release.json`, and two sibling fixtures (`onboarding-v2`, `profiles-on`) needed the same mirror.
+
+**Sabotage evidence — 22 cycles, every one RED with the NAMED test in the failures, restored via `git checkout --`, proved restored with `git diff --quiet`, re-run GREEN. `__pycache__` cleared between every cycle.**
+
+Backend (13, against `backend/tests/test_window_composite.py`): S1 composite branch drops the `starter_signal is not None` gate · S2 `composite` set regardless of `applied` · S3 flag gate removed · S4 `model` not re-stated at composite weights · S5 refused playoff term scored anyway · S6 starter index uncapped · S7 precedence rule deleted (band replaces AND scores) · S8 `_window` stops passing `starters` through · S9 `starter_value_signal` fakes `observed` on unreadable input · S10 age weights left at 1.00 inside the composite · S11 playoff index scale doubled · S12 starter term gated on `index != 0` instead of `applied` · S13 `index_raw` capped, so the card would print the model's number instead of the team's.
+
+Mobile (9, against `check-window-composite.js`): M1 starter weight hardcoded · M2 `composite` derived from `st.applied` alone · M3 `lineup_unknown` copy branch removed · M4 `signals.starters` made required in the type · M5 `'composite'` dropped from the `source` union · M6 "whole model" sentence made unconditional · M7 `starterScored` gated on `st.index !== 0` · M8 playoff contribution row deleted · M9 starter card switched to the capped `index`.
+
+**TWO DEAD ASSERTIONS FOUND AND FIXED — this is the finding, not a footnote.**
+
+1. **S5 did not go red on the first run.** `test_a_refused_playoff_term_is_absent_from_the_score_not_a_zero` built its refused signal from `playoff_odds_signal`, which zeroes `index` whenever it refuses — so deleting the `applied` guard was a numeric no-op and the test passed against a broken function. Fixed by handing `infer_team_outlook` a refused block with a **loud** index of 0.8; only the `applied` check can now keep it out. Its starter-side sibling (`test_an_unapplied_starter_signal_with_a_LOUD_index_still_scores_nothing`, sabotage S12) was written at the same time for the same reason.
+2. **M7 did not go red on the first run.** Mobile check 4 read `/starters[\s\S]{0,80}index\s*[!=]==?\s*0/` — it required the literal word "starters" within 80 characters of the comparison, but the real gate is written `st.index`. Rewritten to match the comparison itself anywhere in the beat, plus a new positive half (4b) asserting both `Scored` flags derive from `applied`.
+
+Both were the exact class the brief warned about: an assertion that holds by accident and can never fail. They join the three found earlier the same day.
+
+**Prod calibration — read-only, and it is the load-bearing evidence.** The #365 session concluded from `data/trade_finder.db` that this family of signal pointed the wrong way; **that corpus does not contain FFV3 at all**. Every number below comes from a read-only `DATABASE_URL_PROD` connection (`set_session(readonly=True)`) plus the league's real Sleeper lineup template.
+
+- **`Fantasy Football Version 3` (`1312140920132497408`), `mattmurf77`: legacy `−0.4867 rebuilder` → composite `+0.2009 CONTENDER`.** His starters are worth 43,615 against a league mean of 23,963 — 82 % above average, the best starting lineup in the league — while he holds essentially no pick capital (0.004 share against an even 0.083). The league is `pre_draft`, so the playoff term is refused (`preseason` / `odds_disabled`) and the composite runs on starters, picks and down-weighted age alone.
+- **The reverse sanity check:** `PaulSm3nis` is a legacy **contender** on age alone (vet share 0.65) while owning the league's *worst* starting lineup (3.2 % share) and sitting 12th of 12 in value. The composite calls him a rebuilder.
+- **Across 12 prod leagues / 156 teams:** legacy = **101 rebuilder / 26 not_sure / 29 contender** (65 % rebuilder, and *zero* not_sure verdicts in FFV3 itself); composite = 62 / 40 / 54. Transitions run both ways (29 rebuilder→contender, 4 contender→rebuilder, 8 contender→not_sure), which is what a re-weighting looks like rather than a thumb on the scale. This distribution is the evidence for **leaving `infer_contender_cut` / `infer_rebuilder_cut` unmoved** (D-140).
+
+**Not run:** the TestFlight checklist (8 numbered steps across all four flag combinations) — it needs a build containing this branch, which does not exist. No runtime mobile evidence exists for #372 yet; the flag stays dark until it does.
+
+## 2026-08-20b — Fit challenger PR-F3 (filters + arm wiring + serve-bit) + W0 offline dry run (SHIPPED to `main` 2026-08-20)
+
+**Branch:** `claude/trade-suggestions-review-69c9eb` (worktree), on top of PR-F2 `d8a80a5`. **Not committed, not merged** — the finishing package of the fit-challenger build ([PRD-build](../docs/plans/fit-challenger/PRD-build.md) PR-F3 + deferred docs rows).
+## 2026-08-20c — Window signals #365 (net firsts) + #371 (playoff odds) — full gates, BOTH FLAGS DARK, NOT MERGED, on `worktree-agent-a3ea3b1d38e084930`
+
+**Branch:** `worktree-agent-a3ea3b1d38e084930`, cut from `origin/main` at `bc43b6f`. **Not pushed, not merged.**
+Full gates ran — operator did **not** declare express, and explicitly ruled the change outside the express lane (it adds two feature flags and two API fields).
+Scope: [docs/feedback/items/365-window-signals/scope.md](../docs/feedback/items/365-window-signals/scope.md) · code-walk: [code-walk.md](../docs/feedback/items/365-window-signals/code-walk.md) · checklist: [testflight-checklist.md](../docs/feedback/items/365-window-signals/testflight-checklist.md).
+Decisions: [D-110](DECISIONS.md), [D-111](DECISIONS.md).
+
+**Flags, both default OFF and neither graduated:** `trade.outlook_net_firsts`, `trades.window_from_odds`.
+## 2026-08-20e — Team Review `plan` beat rebuilt (#369) — full gates, NOT MERGED, on `worktree-agent-a7bed877f805980b0`
+
+**Branch:** `worktree-agent-a7bed877f805980b0`, worktree at `origin/main` `bc43b6f`. **Not pushed, not merged** — parent agent integrates.
+Full gates ran — operator did **not** declare express.
+Scope: [docs/feedback/items/369-plan-beat/scope.md](../docs/feedback/items/369-plan-beat/scope.md) ·
+Code-walk: [code-walk.md](../docs/feedback/items/369-plan-beat/code-walk.md) ·
+Decisions: [D-130](DECISIONS.md), [D-131](DECISIONS.md).
+
+**What ran, and what it proves.**
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q` | **3645 passed, 1 skipped, 0 failed** (bar was ≥ 3629; +20 new fit/serving tests) |
+| Knob-inventory guard (`test_no_generation_knob_was_added_without_an_arm_a_decision`) | green with **all 17** fit/bakeoff keys in `_PINNED_KNOBS` + 17 disposition sentences in scope-phase2.md |
+| Organic isolation | `test_organic_never_imports_fit` (sys.modules + comment-stripped source grep) + the standing flag-off captured golden (`test_flag_off_is_byte_identical_to_the_captured_golden`) both green |
+| `bash mobile/scripts/testid-lint.sh` | **OK** |
+| `npx tsc --noEmit` | not run in this worktree (no `node_modules`); **zero mobile files touched** — the mobile CI jobs are byte-identical to `origin/main`'s green |
+| Sim gate | `FTF_SKIP_SIM_GATE=1` standing posture (D-056); evidence = the suite above |
+
+**Sabotage evidence (serve-bit, both draft paths — HLD F-6).** `test_serve_fit_bit_excludes_from_draft` is parametrized over `bakeoff_group_size ∈ {0, 10}`. Sabotage: the `group_size = 0` fallback's rotation was reverted from `serving_roster` to the full `roster` (the exact F-6 leak — one line in `run_bakeoff`). Result: **`[0]` went red, `[10]` stayed green** — proving the 0-path case guards the `team_draft` fallback specifically (the W1 live path), not just `compose_deck`. Reverted, re-ran green; full suite re-run green after.
+Prior sabotages standing from PR-F1/F2: T1 binding (`overpay_ok` rebind), M3 inertness (`fit_diag` delete), C7b (`test_draft_rank_only`, new in this package: one arm's composite ×100 ⇒ identical deck).
+
+**W0 offline dry run (PLAN-v2 §5 W0) — FIXTURE-ONLY.** No prod DB access from this worktree: the replay boards for league `1312140920132497408` are a prod artifact and were NOT run — that half of the W0 contract plus the baseline M2 readout snapshot is an **operator item**. Leagues below: (a) the literal bakeoff-test fixture league (`backend/tests/support/bakeoff_harness._POOL`); (b)/(c) leagues built deterministically from the committed 340-player pool `backend/tests/fixtures/player_pool_2026.json` with rank-ladder Elo seeds (1750→1250), hash-offset synthetic boards (±120 on ~40% of assets; viewer + half the opponents boarded), and 3 owned-pick pseudo-assets per team. Script: session scratchpad `w0_dry_run.py` (throwaway, not committed). All at PRD-default knobs unless noted; viewer outlook None unless noted.
+
+| League | Cap | ms (module) | enumerated | scored | emitted | killed (nonzero) | one_sided | both_high/mixed/you_tilt | top_q pick/junk | capped_pairs |
+|---|---|---|---|---|---|---|---|---|---|---|
+| (a) harness fixture (8 players, 2 opp) | 20000 | **0** | 16 | 0 | 0 | K3 6, K4 10 | — | — | — | 0 |
+| (b) 12-team 1QB, 26-man+3-pick | 20000 | **8396** (repeat 5769) | 195,783 | 38,634 | 253 | K2 520 · K3 416 · **K4 133,923** · K5 15,765 · K6 6,525 | 0.480 | .045/.100/.164 | **0.699** / 0.055 | 6/11 |
+| (b') same, W3 posture cap 5000 | 5000 | **1826** | 55,000 | 11,326 | 248 | K4 37,389 · K5 4,254 · K6 1,764 · K2 158 · K3 109 | 0.446 | .081/.150/.209 | 0.648 / 0.059 | 11/11 |
+| (b+outlook=contender) | 20000 | 5312 (wall) | 194,913 | 33,976 | 156 | **K7 6,925** + as (b) | 0.496 | — | — | — |
+| (c) 16-team SF (`sf_tep`), 21-man+3-pick | 20000 | **5772** | 227,230 | 38,090 | 333 | K4 154,455 · K5 27,703 · K6 4,971 · K3 1,391 · K2 620 | 0.417 | .142/.166/.192 | 0.682 / **0.390** | 7/15 |
+| (c') same, cap 5000 | 5000 | **1374** | 70,210 | 10,637 | 294 | K4 46,900 · K5 10,449 · K6 1,449 | 0.359 | .237/.178/.187 | 0.638 / 0.375 | 14/15 |
+
+Emitted bucket mix (b, defaults): both_high 47 · mixed 101 · them_tilt 24 · you_tilt 22 · both_ok 5 · weak 54. Post-filters: **C4 centerpiece cap is the dominant post-score filter** (38,381 of 38,634 scored dropped on (b) — small-league centerpiece concentration; `deck_headliner_cap` 2). All other `post_filtered` counters 0 (no prefs in the fixture jobs).
+
+**Readings for the operator (the decisions this run feeds):**
+
+- **ms fail bar (scope.md §6, blocks rostering):** 12-team defaults ≈ **5.8–8.4 s** per job; at the W3 posture (`fit_max_packages_per_pair = 5000`) ≈ **1.4–1.8 s**; 16-team SF the same shape. The cap knob is the relief valve exactly as designed — W3's 5000 first looks right.
+- **R-8 volume check:** fit **253** distinct ideas vs arm B **12** (engine-default `max_per_opponent=5`, same league, 307 ms) — ratio ≈ **21×**, far above the 1.2× bar ⇒ per R-8 the build **pauses at this readout for an operator call**; no auto-roster. (Also the PRD §11.6 read: `enumerated` 195,783 ≫ arm B's emitted set.)
+- **`killed[K7]` (F7 evidence):** 0 with no declared outlook (live R5 is outlook-scoped), **6,925** under `contender` — the dual-R5 debate has its number, but only on outlook-declared jobs.
+- **W3 soak-bar preview:** `top_q_junk_share` 0.055 on the 12-team fixture (bar ≤ 0.10: passes) but **0.375–0.390 on the constructed 16-team SF fixture** — likely an artifact of 21-man rosters built from a 340-player pool (deep tails sit under `asset_floor_abs` 450 in the rank-ladder Elo mapping), but it is exactly the C5 flooding signature the soak bar exists for: read it on real W3 data before trusting either interpretation. `top_q_pick_share` ≈ 0.64–0.70 everywhere (picks ride high consensus percentile under R-c) — the W3 bar is relative to arm B, which this fixture cannot supply.
+- **(a) harness fixture emits 0 cards** — its 4-asset rosters put every cross-value package over K4's overpay ceiling; a fixture artifact, not a generator defect (the 26-man leagues emit 250+).
+
+**What is NOT proven, and is owed.** Prod replay boards (league `1312140920132497408`) + baseline M2 readout snapshot — operator, needs prod read access. Constructed-league Elo/boards are synthetic (rank-ladder + hash offsets), so bucket mixes and junk shares are directional, not calibrated. `bakeoff_include_fit` stays 0 (decision 4) until the operator sets the ms bar and answers R-8; `bakeoff_serve_fit` stays 0 regardless.
+
+---
+| `python3 -m pytest backend/tests -q` | **3646 passed, 1 skipped** (259 s). Baseline before this work on the same tree: **3606 passed, 1 skipped** — +40, all in the new `backend/tests/test_window_signals.py` |
+| `cd mobile && ./node_modules/.bin/tsc --noEmit` | **clean** |
+| `mobile/tests/check-*.js` — **65** suites (64 pre-existing + the new `check-window-signals.js`) | **0 failed**. `check-window-signals` 10/10, `check-team-review` 7/7 still green |
+| `mobile/scripts/testid-lint.sh` | **OK** |
+| Sabotage proof — **20 of 20** | every one turned its **named** guard red, each source restored with `git checkout --` and verified **by content** (`git diff --quiet`), `__pycache__` cleared before every run, and re-run green |
+
+**The load-bearing evidence is the flag-off invariant, and it is a golden, not a re-derivation.**
+`infer_team_outlook` feeds `outlook_alpha` for the trade engine, the mock draft and the outlook seed,
+so a score change is a deck change for every user. The goldens in `test_window_signals.py` were
+captured by extracting the `bc43b6f` backend tree (`git archive`) and running the same fixtures
+against it — code that had never heard of the new kwarg — rather than by re-deriving the formula the
+module now contains, which would have proved nothing. Two invariants pinned:
+**INV-365** flag OFF ⇒ the ledger kwarg is accepted and ignored, whole tuple equal;
+**INV-365b** flag ON but no ledger ⇒ score still unchanged, because only the Team Review route
+builds a ledger. Together they mean lighting `trade.outlook_net_firsts` moves the window beat and
+**not one deck**.
+
+**Sabotage table — 20 cases.** Harness `scratchpad/sabotage_365_371.py`; per case: apply one targeted
+revert → clear `__pycache__` → run → require red **and** require the *named* guard to be the one that
+failed → `git checkout --` → `git diff --quiet` → clear `__pycache__` → re-run → require green.
+
+| # | Behaviour reverted | Guard | Red | Clean | Green |
+|---|---|---|---|---|---|
+| S1 | term applies with the flag OFF | `test_flag_off_ignores_a_supplied_ledger_entirely` | yes | yes | yes |
+| S2 | term applies with the flag on but no ledger | `test_flag_on_without_a_ledger_is_still_the_golden` | yes | yes | yes |
+| S3 | sign flipped (hoarding reads as contending) | `test_selling_firsts_raises_the_score_and_hoarding_lowers_it` | yes | yes | yes |
+| S4 | `net_share` clamp removed | `test_net_share_is_clamped_by_the_knob` | yes | yes | yes |
+| S5 | uncaptured pick history scores as a confident zero | `test_a_league_with_no_recorded_trades_is_none_traded_not_a_confident_zero` | yes | yes | yes |
+| S6 | empty roster still reports the term applied | `test_empty_roster_never_reports_an_applied_term` | yes | yes | yes |
+| S7 | `window.model` advertises unused knobs | `test_model_carries_the_new_knobs_whenever_the_term_is_live` | yes | yes | yes |
+| S8 | NULL original owner read as a trade | `test_ledger_reader_treats_a_null_original_owner_as_never_moved` | yes | yes | yes |
+| S9 | ledger counts every round, not just firsts | `test_ledger_reader_splits_held_owned_traded_and_acquired` | yes | yes | yes |
+| S20 | ledger stops attributing acquisitions | `test_ledger_reader_splits_held_owned_traded_and_acquired` | yes | yes | yes |
+| S19 | ledger computed then not passed through | `test_window_passes_the_firsts_ledger_through_untouched` | yes | yes | yes |
+| S10 | preseason odds obeyed instead of refused | `test_preseason_refuses_the_band_but_still_reports_it` | yes | yes | yes |
+| S11 | empty band dict treated as a real band | `test_no_band_falls_back_and_names_it` | yes | yes | yes |
+| S12 | #371 keys ship with the flag off | `test_window_is_shape_identical_when_both_flags_are_off` | yes | yes | yes |
+| S13 | heuristic verdict lost when odds override | `test_window_reports_which_model_drove_and_keeps_the_other_one` | yes | yes | yes |
+| S14 | beat hardcodes an age threshold again | `check-window-signals` 1 | yes | yes | yes |
+| S15 | ledger shown but contribution not itemised | `check-window-signals` 2 | yes | yes | yes |
+| S16 | "we ignore traded picks" becomes fixed copy | `check-window-signals` 3 | yes | yes | yes |
+| S17 | `none_traded` no longer distinguished | `check-window-signals` 4 | yes | yes | yes |
+| S18 | a flag-gated field made required in the type | `check-window-signals` 7 | yes | yes | yes |
+
+**One guard in this batch was vacuous, and the sabotage is what found it — recorded because it is the
+more useful finding.** `check-window-signals` claim 2 originally asserted only that the identifier
+`w_net_firsts` appeared somewhere in the `Window` component. It does, unconditionally: the weight is
+destructured at `TeamReviewScreen.tsx:390`. So **S15 deleted the contribution row outright and the
+check stayed green.** It now requires the *product* — the weight × `net_share` on one line, with the
+alias discovered from the source rather than assumed. This is the same class of failure the
+2026-08-20a batch hit (`test_divergence_ignores_unjudged_players` went vacuous while passing), which
+is why the harness requires the **named** guard to fail rather than merely a red run.
+
+**Three pre-existing structural guards fired on this change and were each resolved deliberately, not
+suppressed.** All three are working exactly as designed and are recorded so the resolutions are
+auditable:
+- `test_bakeoff_arm_a_golden::test_no_generation_knob_was_added_without_an_arm_a_decision` — two new
+  `_DEFAULT_CFG` knobs. **Excluded from `MODEL_A_PROFILE`**, with the reason recorded in
+  `docs/plans/three-model-bakeoff/scope-phase2.md`'s exclusion table: they cannot reach generation at
+  all, because the term is gated on a ledger no generator supplies (INV-365b). Pinning a kill value
+  would imply they matter to a deck; they provably do not. Arm-A golden re-run green.
+- `test_pick_assignment::test_w3_02_ast_only_sanctioned_call_sites_name_source` — `_first_round_ledgers`
+  is the **eighth** sanctioned `load_draft_picks` opt-in, added to `_SEVEN_READ_SITES` with the
+  rationale inline: it must count the same picks `_power_picks_by_owner` prices two lines away in the
+  same route, so a literal `platform` would make the card and the beat above it disagree on any ESPN
+  league with `picks.assign_tradeable` on.
+- `test_seed_ui_test_db` (three assertions) — the flag fixtures. Both flags added `false` to
+  `release.json`, `onboarding-v2.json` and `profiles-on.json`, which are asserted to share a key set;
+  deliberately **not** added to `all-on.json` (a client overlay, not a full map), matching the
+  `outlook.odds` precedent.
+
+**Calibration evidence, and the finding that cuts against the feature.** `infer_w_net_firsts = 0.10`
+was set against the only real pick corpus reachable from the session (`data/trade_finder.db`): across
+24 member-league pairs in the two leagues that carry round-1 provenance, `|net_share| ≤ 0.75`, so the
+contribution range is ±0.075 against a `not_sure` band of ±0.08 — one bucket at most, never two,
+pinned by `test_the_term_can_move_one_bucket_and_never_two`. **In both of those leagues the operator
+has traded away zero of his own firsts and acquired one**, so the signal he asked for points *him*
+further toward rebuilder; and **FFV3, the league in the report, has no `draft_picks` rows in that DB
+at all**. Prod Postgres would settle both and was not reachable (the read was denied by the sandbox).
+This is why the flag ships dark and why its graduation criterion is an operator check on prod.
+
+**CORRECTED SAME DAY by a read-only prod query.** The local corpus was the problem, and the conclusion above is BACKWARDS for the league that filed the report. Prod carries 276 round-1 rows across 7 leagues with a traded first; in **Fantasy Football Version 3 (FFV3, `1312140920132497408`) `mattmurf77` holds ZERO firsts having sold all three of his own — **3 sold, 0 acquired, 0 still owned** — stated as counts on purpose, because the two conventions in play have opposite signs: this prose had been reading "net +3" in a sold-minus-bought sense while the CODE scores `firsts.net_share` as owned-minus-traded, i.e. **−3**. Same fact, opposite sign, and neither had stated its convention. The scoring direction is correct either way (the score subtracts `w × net_share`, so a seller gains)**, the strongest all-in reading the term produces, pointing him toward CONTENDER. His other leagues run the other way (La Resistance −5, Lakeview −1). Lesson worth keeping: *a local DB that is missing the subject league is not a small sample, it is the wrong sample* — and it produced a confident, inverted finding that would have argued against shipping the right fix.
+
+**Not run, and owed:** the manual TestFlight pass
+([testflight-checklist.md](../docs/feedback/items/365-window-signals/testflight-checklist.md)). It is
+the gate on graduating either flag. Note that §C4–C6 (the odds path actually driving) **cannot be
+walked until week 1 is played** — `completed_weeks == 0` today, and the refusal is the designed
+behaviour, so the in-season half of #371 has no runtime evidence yet and must not be claimed.
+
+---
+
+## 2026-08-20d — #366 position-relative tier bands + RB Handcuff — full gates, NOT MERGED, on `worktree-agent-a4ab94c51456abb78`
+
+**Branch:** `worktree-agent-a4ab94c51456abb78`, worktree at `origin/main` `bc43b6f`. **Not pushed, not merged.**
+Full gates ran — operator did **not** declare express. Both flags ship **OFF** and are **not graduated**.
+Scope: [docs/feedback/items/366-tier-ladder/scope.md](../docs/feedback/items/366-tier-ladder/scope.md).
+Code-walk: [code-walk.md](../docs/feedback/items/366-tier-ladder/code-walk.md).
+Decisions: [D-120](DECISIONS.md), [D-121](DECISIONS.md).
+
+**What ran.**
+
+| Gate | Before | After |
+|---|---|---|
+| `python3 -m pytest backend/tests -q` | 3606 passed, 1 skipped (356s) | **3638 passed, 1 skipped** (352s) |
+| `tsc --noEmit` | clean | **clean** |
+| `mobile/tests/check-*.js` (65 suites) | 64 suites, 0 failed | **65 suites, 0 failed** (new `check-team-review-depth` 8/8; `check-team-review` still 7/7) |
+| `bash mobile/scripts/testid-lint.sh` | OK | **OK** |
+| Sabotage proof | — | **12 of 12 turned their guard red**, restored clean, re-run green |
+
+New tests: `backend/tests/test_position_tiers.py` (**30**), `backend/tests/test_team_review.py` (**+2**),
+`mobile/tests/check-team-review-depth.js` (**8 assertions**). Net +32 backend tests (3606 → 3638).
+
+**Sabotage table.** Every cycle: apply one targeted revert → run → require RED **and** require the
+*named* guard to be the one that failed → `git checkout --` → prove restoration with
+`git diff --quiet` (never with a test result) → re-run → require GREEN.
+`find backend -name __pycache__ -type d -exec rm -rf {} +` ran before **every** invocation, because a
+`git checkout` restore leaves the source older than the sabotage run's `.pyc` and Python will happily
+serve stale bytecode — a correct tree then tests red and the whole table becomes noise.
+
+| # | Sabotage applied | Guard that caught it | Red | Restored clean | Green again |
+|---|---|---|---|---|---|
+| S1 | emit the `replacement` alias unconditionally | `test_flag_off_adds_no_keys_anywhere` | ✅ | ✅ | ✅ |
+| S2 | band boundary `<=` → `<` | `test_relative_band_boundaries` | ✅ | ✅ | ✅ |
+| S3 | drop the superflex QB widening | `test_superflex_widens_qb_and_nothing_else` | ✅ | ✅ | ✅ |
+| S4 | `_POS_TIER_MIN_POOL` 40 → 0 | `test_thin_pool_falls_back_to_absolute_cuts` | ✅ | ✅ | ✅ |
+| S5 | handcuff accepts `order in (1, 2)` | `test_handcuff_rejects_everything_that_is_not_an_rb2` | ✅ | ✅ | ✅ |
+| S6 | reorder so `_is_handcuff` runs before the flag check | `test_flag_off_never_touches_the_depth_chart` | ✅ | ✅ | ✅ |
+| S7 | composer emits `handcuff_rb` unconditionally | `test_depth_omits_366_keys_entirely_when_the_flags_are_off` | ✅ | ✅ | ✅ |
+| S8 | mobile reads `replacement ?? 0` (drops the `bench` fallback) | `check-team-review-depth` #2 | ✅ | ✅ | ✅ |
+| S9 | mobile gates on `(handcuff_rb ?? 0) >= 0` | `check-team-review-depth` #4 | ✅ | ✅ | ✅ |
+| S10 | TS type makes `replacement` required | `check-team-review-depth` #3a | ✅ | ✅ | ✅ |
+| S11 | force `relative = True` (relative path leaks with the flag OFF) | `test_flag_off_bins_follow_the_absolute_cuts_exactly` | ✅ | ✅ | ✅ |
+| S12 | drop the "Replacement" label from the beat | `check-team-review-depth` #5a | ✅ | ✅ | ✅ |
+
+**The finding that matters more than the table: 65 existing engine tests are BLIND to this change.**
+Per the standing instruction to re-read the tests that *pass*, `test_roster_profile`, `test_need_fit`,
+`test_finder_targeting` and `test_presentment_rules` were re-run with `relative` forced `True` in
+source. **All 65 stayed green.** The cause was then confirmed rather than assumed: disabling
+`_POS_TIER_MIN_POOL` as well turns exactly **1 of 65** red, so every fixture in those files is smaller
+than the small-pool guard and cannot distinguish the bands even in principle. They are evidence for
+the flag-**off** path only. Consequence, recorded in the scope block and D-120:
+**`trade.position_tiers` must not graduate on a green suite** — it needs `scripts/deck_eval.py` on real
+leagues plus step 6 of the TestFlight checklist.
+
+**Measurements taken during the build** (not test results — inputs to the design):
+- Absolute cuts against the live pool (`data/trade_finder.db`, 2 684 players): **elite = 33 RB, 33 WR,
+  17 QB, 7 TE.** The reported defect, quantified.
+- The three value thresholds are exactly overall-`search_rank` cuts at **73 / 151 / 238**
+  (`1 + ln(ktc_max/T)/ktc_k`, `ktc_k = 0.0126`).
+- Depth-chart coverage: **149 of 603** RB rows carry a real `depth_chart_order`, matching the 32 actual
+  NFL charts. The nulls are camp bodies and FAs.
+- `_positional_rank_map` build cost: **1.31 ms** over 2 684 players (50 iterations); memoized on pool
+  identity, so ~1 build per request rather than 13 per deck run.
+
+**TestFlight:** checklist written
+([testflight-checklist.md](../docs/feedback/items/366-tier-ladder/testflight-checklist.md), 6 steps),
+**not run** — owed by the operator, and moot until a flag is lit. Step 3 deliberately checks the
+handcuff tag against nfl.com rather than merely checking that something rendered.
+
+**Not covered by anything here:** whether the new bands make decks *better*. That is a judgement call
+and it is the operator's; the flags ship off so it does not have to be made today.
+| `python3 -m pytest backend/tests -q` | **3606 passed, 1 skipped** (339s) — unchanged from baseline; no backend code was touched |
+| `tsc --noEmit` | **clean** |
+| 64 `mobile/tests/check-*.js` suites | **0 failed**; `check-team-review` went **7 → 13 assertions**, all green |
+| `mobile/scripts/testid-lint.sh` | **OK** |
+| Sabotage proof — 9 of 9 | **every one turned its guard red on the EXPECTED assertion**, sources restored, guard re-run green after each |
+
+**Sabotages, individually.** (5b) render `{o.playoff_pct}` as visible text → RED;
+(6) source the plan chips from `data.depth.acquire_positions`, the stale mount-time snapshot → RED;
+(6b) drop `refetchOnMount: 'always'` → RED;
+(7) gate a plan-beat lever on `done.current` again → RED;
+(8) rename the "Trade fairness" lever off the page → RED;
+(9) add a second `asset_preferences` writer to the screen → RED;
+(10) remove the `team_outlook` backfill, i.e. reinstate the shipped bug → RED;
+(11a) stop handing the scoped partner to the #330 store → RED;
+(11b) delete the deck-side handoff consumption in `TradesScreen.tsx` → RED.
+
+**Two findings recorded because they are worth more than the pass count.**
+- **A shipped write has never once succeeded.** The depth beat posted a positions-only body and
+  `POST /api/league/preferences` **400s without `team_outlook`** (`server.py:15788-15790`);
+  `apiRequest` throws on non-2xx, so `done.current.add('positions_set')` on the next line never ran and
+  the empty `catch` hid it. `team_review_action_taken{action:'positions_set'}` has therefore **never been
+  emitted in production** — do not read its history as a baseline. Now pinned by assertion 10.
+- **An existing green assertion was about to go vacuous — the same failure mode as 2026-08-20a.**
+  Assertion 5b guarded "never render a bare playoff percentage" with a whole-FILE escape hatch
+  (`… && !/accessibilityLabel/.test(s)`). `TeamReviewScreen.tsx` at `HEAD` contained **zero**
+  `accessibilityLabel` occurrences, which is the only reason the clause held; the plan beat's chips add
+  three, so from this commit the condition could never be true and 5b would have kept passing while
+  proving nothing. Rewritten per-occurrence in the same commit and sabotage-proven. *Two batches
+  running, two dead-test escapes — re-reading the tests that PASS is now the cheapest gate we have.*
+
+**What is NOT proven.** The manual TestFlight checklist
+([testflight-checklist.md](../docs/feedback/items/369-plan-beat/testflight-checklist.md), 9 steps) is
+**UNRUN**. Under [D-056](DECISIONS.md) it is the only runtime evidence this gets, and the central claim
+— that the beat shows what is *actually saved* — is a network read whose failure mode is a stale but
+entirely plausible page. Steps 2, 3 and 7 are the load-bearing ones. **Requires a client release**; none
+of this is in build 122.
+
+---
+## 2026-08-20a — Team Review defect batch (#364/#367/#368) — full gates, NOT MERGED, on `claude/team-outlook-experience-27a7a1`
+
+**Branch:** `claude/team-outlook-experience-27a7a1`, worktree at `origin/main` `a76498e`. **Not pushed, not merged** *(at time of writing — since merged to `origin/main` as PR #152, `bc43b6f`)*.
+Full gates ran — operator did **not** declare express.
+Scope: [docs/feedback/items/364-team-review-fixes/scope.md](../docs/feedback/items/364-team-review-fixes/scope.md).
+Decisions: [D-100](DECISIONS.md), [D-101](DECISIONS.md).
+
+**What ran, and what it proves.**
+
+| Gate | Result |
+|---|---|
+| `pytest backend/tests` | **3606 passed, 1 skipped** (292s) |
+| `tsc --noEmit` | **clean** |
+| 64 `mobile/tests/check-*.js` suites | **0 failed** (incl. `check-team-review` 7/7, `check-outlook-bands` 7/7) |
+| `mobile/scripts/testid-lint.sh` | **OK** |
+| Sabotage proof — 5 of 5 | **every one turned its guard red**, sources restored, full suite re-run green |
+
+**Sabotages, individually.** (1) drop the `#368` kwargs → `test_team_review_route_passes_the_pick_capital_it_computes` FAILED;
+(2) re-cross the seed ladder → `test_seed_ladder_buys_are_off_roster_and_sells_are_on_roster` FAILED;
+(3) re-cross the community ladder → `test_community_ladder_maps_buys_to_higher_and_sells_to_lower` FAILED;
+(4) stop shipping `model` → `test_window_ships_the_model_so_no_client_restates_a_threshold` FAILED;
+(5) restore `gap = u - c` → `test_consensus_gap_sells_are_where_the_market_is_higher_than_you` FAILED.
+
+**Two pre-existing tests were not merely re-run — they were wrong, and are recorded here because
+that is the more useful finding.**
+- `test_consensus_gap_sells_expose_rank_gap` **asserted the defect**: it took a player the user rated
+  300 *above* the community and asserted he was an "easiest sell". Re-encoded and renamed; it now holds
+  **both** roster players so it proves a *selection* (the 200-below player in, the 300-above player out).
+- `test_divergence_ignores_unjudged_players` went **vacuous** under the fix — its fixture put p1
+  on-roster-and-high and p2 off-roster-and-low, so under the corrected rule both lists came back empty
+  and its leak assertion proved nothing **while still passing green**. Roster re-aimed, plus an explicit
+  non-emptiness assertion so it cannot silently hollow out again. *A green suite was hiding a dead test.*
+
+**Gotcha worth the note.** After a sabotage cycle, restoring a file with `cp` from a backup gives it an
+**older mtime than the `.pyc` written during the sabotage run**, so Python reuses the sabotaged bytecode
+and the restored tree tests red. `find backend -name __pycache__ -type d -exec rm -rf {} +` between
+cycles; verify restoration with `git diff`, not with a test result.
+
+**Post-merge, on the pushed sha.** GitHub Actions on PR #152: `backend-tests` **pass** (6m33s),
+`mobile-typecheck` **pass** (52s), `maestro-testid-lint` **pass** (8s). Merged `bc43b6f`; Render deploy
+**live** on that sha (verified via the Render API, not by assumption). EAS build **124** (v1.15.0,
+commit `bc43b6f`) finished and was **accepted by App Store Connect**; Apple processing pending.
+
+**What is NOT proven.** The manual TestFlight checklist
+([testflight-checklist.md](../docs/feedback/items/364-team-review-fixes/testflight-checklist.md), 13 steps)
+is **UNRUN** — under [D-056](DECISIONS.md) it is the only runtime evidence this gets, and **nobody has
+seen the corrected divergence beat on a device**. Step 8 (the sell list contains players you are LOW on)
+is the whole change. Step 13 covers the Trends screen, which moved with the upstream fix.
+---
+## 2026-08-19h — `outlook.odds` LIT by operator override + its replacement guard (D-094, NOT MERGED, on `claude/team-review-analysis-plan-1f91e3`)
+
+**Branch:** `claude/team-review-analysis-plan-1f91e3`, branched from `origin/main` `50e0451`. **Not pushed, not merged.**
+Operator override 2026-08-19 (*"Outlook odds should be visible. Forward PPG cut. I waive maestro"*) flipped
+`outlook.odds` `false` → **`true`**, reversing the same session's [D-093](DECISIONS.md) recommendation.
+Decision: [D-094](DECISIONS.md). Docs: [docs/feedback/items/357-team-review/](../docs/feedback/items/357-team-review/status.md).
+
+**What ran, and what it proves.**
+
+| Gate | Result |
+|---|---|
+| `node mobile/tests/check-outlook-bands.js` (new) | **7 passed, 0 failed** against the real shipped sources |
+| Sabotage proof — all six | **6 of 6 turned the guard red**, then sources restored and `git diff` verified empty |
+| `config/features.json` JSON validity after the flip | parses; `outlook.odds == True` |
+| CI pickup | automatic — `ci.yml` `mobile-typecheck` globs `tests/check-*.js`; **no CI edit needed** |
+
+**The six sabotages, each with the assertion it was required to break:**
+
+| Sabotage | Assertion that went red |
+|---|---|
+| `PLAYOFF_BAND_LIKELY_MIN` 0.65 → 0.70 | 1. thresholds are 0.65 / 0.35 |
+| `likely: semantic.pos` → a raw hex literal | 2a. bands use the semantic tokens |
+| `playoffBand`'s `p >= LIKELY_MIN` → `p > LIKELY_MIN` | 3. boundaries belong to the higher band |
+| Add a `title_pct` read to the screen | 4. `title_pct` is never read |
+| `OUTLOOK_WEEK6_PERCENT_ENABLED` false → true | 5. the bare percentage stays off |
+| Strip the "unrenderable" warning from `api/league.ts` | 4b. league.ts warns title_pct is unrenderable |
+
+**MERGED 2026-08-19 (PR #142, `6a3eab3`) — the gate set completed after this entry was first written.**
+The original entry recorded pytest as *not run for this change*; that was true of the flag flip alone but
+became false once the flip broke three tests. Corrected, final numbers on the merged sha:
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q` | **3525 passed, 1 skipped, 0 failed** |
+| `npx tsc --noEmit` | **clean (exit 0)** — run after `npm ci`, which this worktree had been missing |
+| Full structural glob, `for f in tests/check-*.js` | **61 passed, 0 failed** |
+| `bash mobile/scripts/testid-lint.sh` | **OK** |
+| Live verification | `/api/feature-flags` on Render serves `outlook.odds: true` |
+
+**Three tests failed on the first attempt and all three were mine** — the flip is five touches, not one:
+`test_flag_is_registered_and_defaults_off_everywhere`, `test_ships_off_route_is_unreachable_and_makes_no_sleeper_call`,
+and `test_release_flags_mirror_features_json`. A peer session independently hit the same wall and flagged a
+fourth trap I had not yet reached and verified myself before acting: `onboarding-v2.json` and `profiles-on.json`
+are each asserted to differ from `release.json` by **exactly one key**, so moving `release` alone breaks both —
+a failure that only surfaces on a full suite run, one cycle after the obvious fix.
+
+**Sabotage proof for the rewritten kill-switch test:** removing the `is_enabled("outlook.odds")` guard from
+`/api/league/outlook` made `test_flag_off_still_closes_the_route` fail (200 instead of 404); `backend/server.py`
+restored and `git diff` verified empty.
+
+**Evidence posture under D-056.** The operator **waived** the Maestro flow this lighting owed
+(`NEXT.md` item 7) — it was already void when D-056 retired Maestro entirely. The guard above replaces it
+as the standing structural net. **No backend test was run for this change and none was needed:** the flip
+touches `config/features.json` only; the `/api/league/outlook` route, the pipeline and the serializer are
+unmodified and were already covered by `backend/tests/test_outlook_odds.py` and `test_outlook_calibration.py`.
+
+**What is NOT proven, and is owed.**
+
+- **Nobody has seen the lit surface on a device.** The League-Summary outlook strip and section have shipped
+  in every build since 2026-08-11 but have never rendered, because the flag was dark. The first TestFlight
+  look is owed before this reaches users, and the operator's own league is the first read.
+- **`meta.priced_slot_coverage` has never been rendered by any client.** In an IDP league (7 of 15 starting
+  slots priced in the operator's FFV3) the bands are an offensive-core estimate presented as a whole-lineup
+  one. Team Review's plan specs the caption; League Summary has none.
+- **A preseason band can be confidently wrong for an individual league** — 2 of 6 backtested league-seasons
+  lose to climatology outright, one with an ordering correlation of +0.022. Bands are immune to being
+  *precisely* wrong, not to being wrong.
+
+## 2026-08-19h — likes-you injector quality gates (D-096, NOT SHIPPED, on `fix/likes-you-quality-gates`)
+
+**Branch:** `fix/likes-you-quality-gates`, branched from `origin/main` `50e0451`. **Not pushed, not merged.**
+No feature flag: `trade.likes_you` already gates the surface. Knob-only, default **ON** at
+`likes_you_gate_level = 2` (its OFF state, level 0, is the defect).
+Scope + code-walk + checklist: [docs/plans/likes-you-quality-gates/](../docs/plans/likes-you-quality-gates/).
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q -p no:randomly` | **3540 passed, 1 skipped, 0 failed** |
+| Baseline on the same branch point (`50e0451`), before any edit | **3524 passed, 1 skipped** — reproduced exactly, in a separate detached worktree |
+| `npx tsc --noEmit` / `testid-lint.sh` / `check-*.js` | **n/a — ZERO mobile files touched.** Not run, and not claimed. |
+| Maestro / simulator / `screens/` captures | n/a — retired by [D-056](DECISIONS.md). |
+| Sim gate | `FTF_SKIP_SIM_GATE=1`, the standing posture under D-056 |
+| **Runtime evidence** | **NONE. The 10-step operator TestFlight checklist + 2-step rollback rehearsal are UNRUN.** |
+
+**Net +16 tests, all new** (`backend/tests/test_likes_you_gates.py`): the raw-vs-package unit split
+(including a guard on the fixture itself, so the file cannot silently stop proving anything), the
+gate-level ladder, `likes_you_gate_level = 0` as an exact revert, directional R1 in both directions,
+`filler_ok` and its documented kill switch, the no-cap-slot-consumed semantics, that a gated-out
+*existing* card keeps its organic deck position, that the card's bar values are the same objects the
+gate compared, knob defaults, garbage-level clamping, `likes_you_min_user_gain == user_gain_epsilon`,
+and a pin that R2/R3/R5 are deliberately NOT run.
+
+**4 pre-existing tests touched, none loosened:**
+- `test_trade_match_flow.py` ×3 (`..._floor_blocks_below_threshold_injection`,
+  `..._floor_passes_above_threshold_injection`, `..._floor_knob_override_respected`) — the D-055
+  floor block is **kept in full** and re-pinned to `likes_you_gate_level = 0` via `_inject_floor_deck`,
+  so every assertion in it now stands guard over D-096's documented revert path instead of being
+  deleted. Two docstrings updated to say which level they describe.
+- `test_bakeoff_arm_a_golden.py` ×1 — the two new knobs added to `_PINNED_KNOBS`. Arm A is
+  **not** pinned to level 0; the exclusion and its reason are recorded in
+  [`scope-phase2.md`](../docs/plans/three-model-bakeoff/scope-phase2.md) § Excluded. `bakeoff_profiles.py`
+  was **not** touched (a sibling session owns it).
+
+### Prod measurement (READ-ONLY, `SET TRANSACTION READ ONLY`, SELECT only)
+
+Population: **198 served likes-you impressions / 51 distinct cards**, one league, 2026-08-11 → 08-19
+(`trade_impressions` for the asset ids, `deck_impressions.features_json` for prod's own logged bar
+values). Per-card consensus values reconstructed from `player_value_history` daily snapshots +
+`draft_picks.pool_value`; **reconstruction validated at median abs error 2.9** against 83 rows where
+prod logged both the assets and the bar values, and it reproduces the audit's worst card to the
+decimal (−6,019.4 on the recorded values).
+
+| Option | Impressions surviving | Distinct cards | User-pays | Worst bar delta |
+|---|---|---|---|---|
+| **As served today** | 198 / 198 | 51 / 51 | **115** | **−5,571** |
+| Package floor ≥ 0 only (level 1) | 83 (41.9%) | 16 | 0 | +32 |
+| **Package floor ≥ 0 + directional R1 + `filler_ok` (level 2, SHIPPED)** | **83 (41.9%)** | **16** | **0** | **+32** |
+| Package floor ≥ 0 + **blanket** R1 | 25 (12.6%) | 9 | 0 | +32 |
+| Package floor ≥ 0 + blanket R1 + fairness ≥ 0.75 | 25 (12.6%) | 9 | 0 | +32 |
+| Fairness ≥ 0.75 alone | 115 (58.1%) | — | 90 | −2,436 |
+| R1 (blanket) alone | 120 (60.6%) | — | 95 | −2,136 |
+| `filler_ok` alone | 191 (96.5%) | — | 108 | −5,571 |
+
+Restricted to the 145 impressions served **after** the D-055 floor went live (2026-08-15), where the
+old floor was already active: as served 145, user-pays **76**, worst **−4,672**; level 2 → **69
+(47.6%)**, 15 distinct, user-pays **0**. Loosening the package floor to −500 was measured and
+rejected: 74 survivors instead of 69, but 60 of them still show the user paying.
+
+**The finding that shaped the design:** blanket R1 kills 58 of the 83 floor-surviving cards and
+**58 of 58 of those kills are cards where the USER is the one being overpaid** — the largest a
+**+6,325 one-for-one that the counterparty had already liked**. Directional R1 kills **0** of the 83.
+On the post-D-055 slice the same shape holds: 55 of 69, all 55 user-favourable, 0 killed directionally.
+
+### Sabotage tests (D-056 requirement) — all reverted
+
+| Mutation | Result |
+|---|---|
+| Floor compared against the raw delta again (undo the unit fix) | 2 failed |
+| Directional guard `g > r` removed (blanket R1) | 4 failed |
+| `if gate_level <= 0:` → `if False:` (level 0 stops reverting) | 4 failed, incl. all 3 re-pinned D-055 tests |
+| `filler_ok` call replaced with `return True` | 1 failed |
+| Reverted | 49 passed |
+
+**Files touched:** `backend/server.py`, `backend/trade_service.py` (`_DEFAULT_CFG` only, +14 lines,
+no logic), `backend/tests/test_likes_you_gates.py` (new), `backend/tests/test_trade_match_flow.py`,
+`backend/tests/test_bakeoff_arm_a_golden.py`, `docs/config-reference.md`,
+`docs/plans/three-model-bakeoff/scope-phase2.md`, `docs/plans/likes-you-quality-gates/` (new),
+`living-memory/{DECISIONS,LLD,TEST_LEDGER,CHANGELOG,NEXT,HANDOFF}.md`.
+
+## 2026-08-19h — The "balanced trade" claim gets a fairness gate (audit bug 2, NOT SHIPPED, on `fix/balanced-claim-fairness-gate`)
+
+**Branch:** `fix/balanced-claim-fairness-gate`, worktree off a freshly fetched `origin/main` **`50e0451`**.
+**Not pushed, not merged.** Ships **unflagged** — a flag's OFF state here would re-enable a false
+statement (see [D-097](DECISIONS.md)).
+Scope: [docs/plans/consensus-balance-claim/scope.md](../docs/plans/consensus-balance-claim/scope.md)
+(code-walk proof §7, TestFlight checklist §8).
+
+| Gate | Result |
+|---|---|
+| `mobile/tests/check-*.js` (all) | **61 / 61 passed, 0 failed** (60 pre-existing + 1 new) |
+| `mobile/tests/check-consensus-balance-claim.js` (new) | **36 / 36 assertions passed** |
+| `mobile/scripts/testid-lint.sh` | **OK, exit 0** |
+| `npx tsc --noEmit` (mobile) | **1 error, pre-existing + environmental, NOT from this diff** — `ImportRankingsSheet.tsx(11,33): TS2307 Cannot find module 'expo-document-picker'`. `mobile/node_modules` is **empty in the main checkout**, so it was symlinked from `ftf-test-clone`, whose install predates that dependency. **Proven, not assumed:** stashing this branch's `.tsx` + `package.json` edits and re-running produced byte-identical output. My diff adds **zero** type errors. |
+| `pytest backend/tests -q` | **3524 passed, 1 skipped, 0 failed** — insurance only; **zero backend files touched** (`git status -- backend/` empty). No route, schema, migration, or engine line moves. |
+| Maestro / simulator | n/a — retired by [D-056](DECISIONS.md). No flow authored, none run, no `screens/` capture. |
+| Sim gate | `FTF_SKIP_SIM_GATE=1`, the standing posture under D-056 |
+| **Runtime evidence** | **NONE. The scope §8 operator TestFlight checklist is UNRUN.** |
+
+**Prod measurement (read-only, `SET TRANSACTION READ ONLY`, SELECT only, `deck_impressions`).**
+Reproduces the audit's 805 / 7,282 exactly; the denominator moved to 7,293 because eleven more cards
+were served between the audit snapshot and this run.
+
+| Metric | Value |
+|---|---|
+| Consensus cards served | **7,293** |
+| …carrying a non-NULL `fairness_score` | **7,293 (100%)** — this is the proof the field reaches the clients, not an inference |
+| …**below the app's own 0.75 bar** while claiming "balanced" | **805 (11.04%)** |
+| …below the 0.50 generation floor | **0** |
+| Fairness distribution | min **0.5010**, p10 **0.7302**, p25 0.7890, p50 **0.8590**, p90 0.9750, max 1.0000 |
+
+**Sabotage test — the check is only evidence if it goes red without the fix.** Four independent
+reverts, each applied, measured, restored; final `git diff --stat` byte-identical to pre-sabotage:
+
+| # | Sabotage | Result |
+|---|---|---|
+| S1 | Revert the gate — `balanced` forced `true`, i.e. always claim balanced | **RED, 14 failures**, exit 1 |
+| S2 | Flip the fail-safe — unknown fairness returns the balanced claim | **RED, 7 failures**, exit 1 |
+| S3a | Fix mobile, leave web stale — web ternary collapsed to the unconditional string | **RED, 5 failures**, exit 1 |
+| S3b | **The subtle one** — web keeps its gate but *drifts the wording* (`— no rankings on file.`) | **RED, 2 failures**, exit 1 |
+| S4 | Re-inline the literal into `TradeCard.tsx` JSX, bypassing `consensusNote` | **RED, 2 failures**, exit 1 |
+| S5 | Re-add value prose below the bar (the copy the operator struck) | **RED, 12 failures**, exit 1 |
+| — | Restore all | **GREEN, exit 0**, diff byte-identical to pre-sabotage |
+
+**What the 36 assertions pin**, rather than "the string changed": the gate at the real band edges
+(0.75 → balanced; 0.7499, 0.7302 = prod p10, 0.55, 0.501 = prod min → **truncated**); the fail-safe
+direction for `undefined`/`null`/`NaN`/`±Infinity`; that the function yields **exactly two** distinct
+strings and only the at-or-above-bar one contains the word "balanced"; that **every** state keeps the
+`hasn't ranked players yet` explanation (the fix removes the claim — it does **not** hide the line);
+that **no value prose is re-added** below the bar (`priced from public values` / `even split` /
+`leans` must appear nowhere — this is the assertion that holds the operator's 2026-08-19 amendment in
+place); that **no** state names a winner; that all **four** spellings of 0.75 agree (`NORMAL_LOW`,
+`FAIRNESS_ON_THRESHOLD`, `CONSENSUS_BALANCED_MIN`, and web's `FAIRNESS_BALANCED_MIN` parsed back out
+of `web/js/app.js`).
+
+**The cross-client half is the most valuable part and is built to survive rewording.** §3 does not
+look for remembered strings: it **extracts** web's `prefix` literal and both tooltip templates from
+`web/js/app.js`, expands them, and compares the results **byte for byte against the mobile module's
+own output**. That is why S3b — web still gating correctly but saying something different — goes red
+at all. Those assertions are deliberately **not** wrapped in an `if (extraction succeeded)` guard: a
+failed extraction means web no longer has the shape the parity depends on, which is itself the
+divergence being guarded against, so it must fail rather than skip.
+
+**Note on `mobile/package.json`:** the only edit is registering
+`"test:consensus-balance-claim": "node tests/check-consensus-balance-claim.js"`. No dependency added,
+removed, or bumped — `living-memory/DEPENDENCIES.md` needs no entry.
+
+**Operator amendment, same day.** The first revision of this fix put replacement copy below the bar
+(*"priced from public values, not an even split"*). The operator struck it — *"We don't need to add
+the copy suggested.. We already have already features that provide the value summary/snap assessment
+on trade valuation"* — and is right: `TradeValueBar` already renders `favors`/`gap` on these cards.
+The sub-threshold line now **truncates** to `This league-mate hasn't ranked players yet.` and stops.
+The gate, the fail-safe, the constant and the cross-client parity are unchanged; the replacement prose
+is gone from both clients and from the module, and S5 exists to keep it gone. Directional wording
+("leans your way"/"leans theirs") is settled as duplication and should not be re-opened.
+
+**Not tested, and deliberately so:** `tradePresentation.counterpartyStatement()` asserts partner
+interest unconditionally (same defect class) but is dark behind `trades.presentation_v2: false` and
+belongs to a surface under separate review. Recorded in D-097 and scope §9; **not** touched.
+
+## 2026-08-19h — Landability challenger, bake-off arm D (D-095, NOT SHIPPED, on `feat/bakeoff-arm-a-challenger`)
+
+**Branch:** `feat/bakeoff-arm-a-challenger`, branched from `origin/main` `50e0451`. **Not pushed, not merged.**
+Spec: [docs/plans/landability-challenger/PRD.md](../docs/plans/landability-challenger/PRD.md) §5 Track A (A1–A4).
+No feature flag: `trade.bakeoff` already gates the fan-out and `bakeoff_serve_interleaved` stays **0**, so the arm is dark.
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q` | **3554 passed, 1 skipped, 0 failed** |
+| Baseline re-measured on the same branch point before any edit | **3524 passed, 1 skipped** — reproduced exactly |
+| PRD A4 done-when set | `test_bakeoff_challenger.py test_bakeoff_arm_a_golden.py test_bakeoff_composition.py test_bakeoff_runner.py test_user_gain_gate.py` — **120 passed** (the sabotage matrix ran a wider set including `test_bakeoff_serving.py`: 148) |
+| `npx tsc --noEmit` / `testid-lint.sh` / `check-*.js` | **n/a — ZERO mobile files touched.** Not run, and not claimed. |
+| Maestro / simulator / `screens/` captures | n/a — retired by [D-056](DECISIONS.md). |
+| Sim gate | `FTF_SKIP_SIM_GATE=1`, the standing posture under D-056 |
+| **Runtime evidence** | **NONE, and none is owed** — the arm generates and logs but is never served (PRD G7). The dark contract is asserted in tests instead: `test_the_challenger_generates_and_logs_but_is_never_served`. |
+
+**Net +30 tests** — 25 new in `backend/tests/test_bakeoff_challenger.py`, 5 new in
+`test_bakeoff_composition.py` / `test_bakeoff_serving.py`.
+
+**The load-bearing invariant — arm B is byte-identical — is PROVED, not asserted.**
+`test_bakeoff_challenger.py` carries two goldens captured by checking out `origin/main`
+`50e0451` into a second worktree, copying the test file in, and running its capture mode
+there: code that had never heard of the three new knobs. Today's live-defaults run must
+reproduce both byte for byte. Surfaces: a full `generate_trades` deck (covers dedup, deck
+caps, v2 orchestration) and `_generate_consensus_for_pair` called directly and uncapped —
+the latter because deck-assembly caps hide most of the consensus path, so measured through
+a deck alone the two consensus knobs would read as inert while being perfectly alive.
+Backed by `test_every_new_knob_is_inert_at_its_default`, which sets each knob *explicitly*
+to the value `_DEFAULT_CFG` already carries — that catches a knob inert only because some
+other guard skips its code path, which a golden cannot distinguish.
+
+**Arm A is byte-identical too**, per PRD N1: `MODEL_A_PROFILE`, `model_a()`,
+`MODEL_A_REFERENCE_SHA` and the golden's captured deck are unchanged. The only edit to
+`test_bakeoff_arm_a_golden.py` is five names added to `_PINNED_KNOBS` plus one sentence of
+remedy text; its 10 tests pass unmodified.
+
+**Code-walk proof** (file:line on this branch):
+
+| Lever | Site | Live identity |
+|---|---|---|
+| `user_elo_shrink` | `trade_service.py:1339` — `if confidence is None or _c("user_elo_shrink") <= 0: return dict(user_elo)` | 1.0 ⇒ the early return never fires; the blend below is untouched |
+| `consensus_both_ways` | `trade_service.py:5086` — `if not _both_ways and rv - gv < _c("user_gain_epsilon")` | 0.0 ⇒ `_both_ways` False ⇒ the original predicate, unchanged |
+| 1-for-2 loop | `trade_service.py:5168` — `if _both_ways and len(cards) < max_cards` | 0.0 ⇒ loop never entered |
+| `consensus_fairness_floor` | `trade_service.py:4998` (`_thr = max(requested, floor)`), read at `:5117` | 0.0 ⇒ `_thr is fairness_threshold` |
+| profile entry point | `bakeoff_profiles.py` `model_challenger()` — `_cfg_override(MODEL_CHALLENGER_PROFILE)`, **no** `r4_bypass` | inert until entered |
+| fan-out | `bakeoff_runner.py` `run_bakeoff` `elif arm == ARM_CHALLENGER:` — snapshot taken INSIDE the overlay | arm B's branch untouched |
+| roster | `bakeoff_runner.arm_roster()` — `ALL_ARMS` filtered by four include knobs | `bakeoff_include_challenger` = 0 restores the pre-D-095 roster |
+
+**Import-time binding checked, not assumed.** `trade_optimizer.py:51` and
+`trade_gen_v2.py:112` import `_c` and `_shrink_user_elo` **by value**. All three knobs
+are read *inside* existing function bodies rather than by wrapping or rebinding them, so
+every bound site sees the change — the class of no-op that cost an audit agent a
+perfect-zero measurement on a gate firing 1.17M times cannot occur here.
+
+**Sabotage-tested: 13 deliberate breakages, 13 caught.** Each mutation applied, the A4
+pytest set run, the mutation reverted:
+
+| # | Sabotage | Caught by |
+|---|---|---|
+| 1 | `user_elo_shrink` ignored (shrink always off) | arm-B goldens, both shrink tests, **arm-A golden**, `test_user_gain_gate` Maye-for-Dart repro (v2 + v3) |
+| 2 | sign test dropped for every arm | both arm-B goldens, `test_live_never_emits_a_card_the_user_pays_for` |
+| 3 | both-ways knob never read | `test_both_ways_emits_the_user_pays_direction`, `test_one_for_two_exists_only_under_both_ways` |
+| 4 | floor knob never read | 3 floor tests |
+| 5 | floor OVERRIDES instead of tightening | `test_the_floor_only_ever_tightens` |
+| 6 | 1-for-2 enumeration removed | `test_one_for_two_exists_only_under_both_ways` |
+| 7 | overlay entered for arm B as well | 7 tests incl. both config-snapshot tests |
+| 8 | `model_challenger` gains arm A's R4 bypass | `test_model_challenger_does_not_bypass_r4` |
+| 9 | a challenger knob leaks into `MODEL_A_PROFILE` | **arm-A golden**, `test_the_two_profiles_do_not_collide`, `test_model_a_still_sees_the_live_identity_for_the_new_knobs` |
+| 10 | tier ladder left uncompressed | both ladder tests |
+| 11 | challenger dropped from the default roster | 8 tests across composition/serving/challenger |
+| 12 | challenger stops being an engine arm (loses its consensus group) | 3 tests incl. the dark-mode group assertion |
+| 13 | a new knob vanishes from `_PINNED_KNOBS` | the arm-A inventory guard **and** its cross-check |
+
+**Known gap:** Track C's `measurement.md` (the offline four-cell count) is not written by
+this work — C1 was run elsewhere and its numbers (0.75 both-ways = 200.5% of the one-way
+baseline, 61.2% user-pays, damage capped at 25.0%) are quoted in the profile and
+config-reference on that authority, not re-derived here.
 ## 2026-08-19j — Web Phase 2: calculator + market pulse (NOT SHIPPED, on `fix/web-phase0`)
 
 **Branch:** `fix/web-phase0`. Not pushed, not merged. No flags, no schema, **no backend change**.
@@ -1451,6 +3068,25 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-08-24c — Waves A + B0 SHIPPED — PRs #197/#199, EAS 1.16.4 (130) submitted](#2026-08-24c--waves-a--b0-shipped--prs-197199-eas-1164-130-submitted)
+- [2026-08-24b — Wave B0 the layout merge (`calc.inline_home`) — full gates, FLAG DARK, NOT MERGED](#2026-08-24b--wave-b0-the-layout-merge-calcinline_home--full-gates-flag-dark-not-merged-on-featinline-home-b0)
+- [2026-08-24 — Onboarding-tour Wave A — full gates green on `feat/tour-wave-a`; runtime evidence owed](#2026-08-24--onboarding-tour-wave-a--full-gates-green-on-feattour-wave-a;-runtime-evidence-owed)
+- [2026-08-23b — `test_stud_tax_pinned_market` flake pinned: breaker wall-clock budget removed from test inputs](#2026-08-23b--test_stud_tax_pinned_market-flake-pinned-breaker-wall-clock-budget-removed-from-test-inputs)
+- [2026-08-23a — main CI red → green: full-sweep fixture mirrors flipped](#2026-08-23a--main-ci-red--green-full-sweep-fixture-mirrors-flipped)
+- [2026-08-22j — Full sweep — full gates; LIT at merge](#2026-08-22j--full-sweep-tradefull_sweep--full-gates-lit-2026-08-23-by-operator-instruction-at-merge)
+- [2026-08-22i — #384 W8 — simulator reproduction, v1.16.2 (EAS 128)](#2026-08-22i--384-w8--simulator-reproduction--mobile-gates-v1162-eas-128)
+- [2026-08-22h — #384 W7 device-feedback fixes — v1.16.1 (EAS 127)](#2026-08-22h--384-w7-device-feedback-fixes--mobile-gates-v1161-eas-127)
+- [2026-08-22g — #384 SHIPPED — PR #172, flags LIT, EAS 1.16.0 (126)](#2026-08-22g--384-shipped--pr-172-80dee42-flags-lit-eas-build-1160-126-submitted)
+- [2026-08-22f — #384 W6-A + W6-B — full gates, FLAG DARK, NOT MERGED](#2026-08-22f--384-w6-a--w6-b--full-gates-flag-dark-not-merged-on-claudemanual-calculator-e2e-review-39a467)
+- [2026-08-22e — #384 merged calculator W5 + guard hardening — full gates, FLAG DARK, NOT MERGED, on `claude/manual-calculator-e2e-review-39a467`](#2026-08-22e--384-merged-calculator-w5--guard-hardening--full-gates-flag-dark-not-merged-on-claudemanual-calculator-e2e-review-39a467)
+- [2026-08-22d — #384 merged calculator W0–W4 — full gates, FLAG DARK, NOT MERGED, on `feat/calc-finder-merge`](#2026-08-22d--384-merged-calculator-w0w4--full-gates-flag-dark-not-merged-on-featcalc-finder-merge)
+- [2026-08-22c — Feedback capture cap (2000 → 8000) + the three silences — full gates, backend SHIPPED, client awaiting a build](#2026-08-22c--feedback-capture-cap-2000--8000--the-three-silences--full-gates-backend-shipped-client-awaiting-a-build)
+- [2026-08-20b — Fit challenger PR-F3 (filters + arm wiring + serve-bit) + W0 offline dry run](#2026-08-20b--fit-challenger-pr-f3-filters--arm-wiring--serve-bit--w0-offline-dry-run-not-merged-worktree-claudetrade-suggestions-review-69c9eb)
+- [2026-08-20a — Team Review defect batch (#364/#367/#368) — full gates](#2026-08-20a--team-review-defect-batch-364367368--full-gates-not-merged-on-claudeteam-outlook-experience-27a7a1)
+- [2026-08-20d — #366 position-relative tier bands + RB Handcuff — full gates, NOT MERGED, on `worktree-agent-a4ab94c51456abb78`](#2026-08-20d--366-position-relative-tier-bands--rb-handcuff--full-gates-not-merged-on-worktree-agent-a4ab94c51456abb78)
+- [2026-08-20e — Team Review `plan` beat rebuilt (#369) — full gates, NOT MERGED, on `worktree-agent-a7bed877f805980b0`](#2026-08-20e--team-review-plan-beat-rebuilt-369--full-gates-not-merged-on-worktree-agent-a7bed877f805980b0)
+- [2026-08-20a — Team Review defect batch (#364/#367/#368) — full gates, NOT MERGED, on `claude/team-outlook-experience-27a7a1`](#2026-08-20a--team-review-defect-batch-364367368--full-gates-not-merged-on-claudeteam-outlook-experience-27a7a1)
+- [2026-08-19h — `outlook.odds` LIT by operator override + its replacement guard (D-094, NOT MERGED, on `claude/team-review-analysis-plan-1f91e3`)](#2026-08-19h--outlookodds-lit-by-operator-override--its-replacement-guard-d-094-not-merged-on-claudeteam-review-analysis-plan-1f91e3)
 - [2026-08-08](#2026-08-08)
 - [2026-07-04](#2026-07-04)
 - [2026-06-11](#2026-06-11)

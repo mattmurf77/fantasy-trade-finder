@@ -200,6 +200,35 @@ export interface CalcEvaluationInLeague extends CalcEvaluation {
     note: string;
     slots?: StarterImpactSlot[];
   };
+
+  /** #357 — what this trade does to YOUR playoff odds (flag
+   *  `outlook.trade_impact`; absent when off, on a non-Sleeper league, or on
+   *  any pipeline failure — the block is never partial).
+   *
+   *  `delta_pct` is EXACTLY 0 when the trade changes neither roster: the
+   *  simulator seeds off the league rather than the rosters, so the
+   *  before/after runs share one random stream and an unchanged lineup is
+   *  bit-identical. That is why a shift can be shown at all.
+   *
+   *  RENDERING RULES (docs/cross-client-invariants.md § "Trade odds impact"):
+   *  lead with the BAND movement; `delta_pct` may accompany it rounded to
+   *  whole percentage points and labelled a projection; never render
+   *  `before_pct`/`after_pct` as bare percentages. There is deliberately no
+   *  `title_pct` — championship odds are unrenderable at any week. */
+  outlook_impact?: {
+    before_pct: number;
+    after_pct: number;
+    delta_pct: number;
+    before_band: 'likely' | 'tossup' | 'unlikely';
+    after_band: 'likely' | 'tossup' | 'unlikely';
+    band_changed: boolean;
+    before_seed: number;
+    after_seed: number;
+    seed_delta: number;
+    sims: number;
+    is_preseason: boolean;
+    beta: boolean;
+  };
 }
 
 // ── Suggestion confirmation (#78) ────────────────────────────────────────

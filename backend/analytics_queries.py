@@ -91,6 +91,17 @@ NON_INTENT_EVENTS = frozenset({
     #     league_team_opened itself stays INTENT, untouched.
     "lineup_impact_unavailable",
     "league_team_closed",
+    # Team Review (#357/#358/#359), added in the SAME commit that registered
+    # them, for the reason at the top of this block.
+    #   team_review_beat_viewed — an IMPRESSION, the league_view /
+    #     tab_selected class. The user already emitted team_review_opened to
+    #     get here; admitting beat views would let ONE flow mint six user-days.
+    #   team_review_exited — a TERMINATOR, the league_team_closed class. Every
+    #     exit is preceded by an open, which is already intent.
+    # team_review_opened and team_review_action_taken are deliberately ABSENT:
+    # both are intent, the peers of find_trades_tapped and league_candidate_pinned.
+    "team_review_beat_viewed",
+    "team_review_exited",
     # Feedback #300, 2026-08-12 — added in the SAME commit that added it to
     # ALLOWED_CLIENT_EVENTS, for the reason stated at the top of this block.
     # Tracking plan:
@@ -239,6 +250,78 @@ NON_INTENT_EVENTS = frozenset({
     # (and the apply behind it) does not already account for.
     "rankings_preset_detected",
     "rankings_preset_fallback",
+    # ── Receipts, 2026-08-21 (docs/plans/receipts/, PRD DR-9) — added in the
+    # SAME commit that registered it in analytics_taxonomy, for the reason
+    # stated at the top of this block.
+    #
+    #   receipts_grade_run — SERVER-fired, one row per grading run, carrying
+    #     user_id="system:receipts". It fires on a daily cron tick whether or
+    #     not a human opened the app, so admitting it to INTENT would mint a
+    #     user-day out of a background job and step-change DAU/WAU at the
+    #     seam. The `api_call` / `api_request` class exactly.
+    #
+    # `receipts_opened` is deliberately ABSENT from this deny-list and stays
+    # INTENT: opening your own track record is a deliberate feature
+    # engagement, the peer of `find_trades_tapped`. Its NON_INTENT sibling
+    # `receipts_window_changed` (navigation, the `tab_selected` class) lands
+    # here with the screen that emits it.
+    "receipts_grade_run",
+    # `receipts_window_changed` — navigation, the `tab_selected` class, added
+    # in the SAME commit as its emitter. Every emission is preceded on the
+    # same screen by `receipts_opened`, which IS intent and already counts the
+    # user, so no user-day exists for this to add. `receipts_opened` itself
+    # stays deliberately ABSENT from this deny-list.
+    "receipts_window_changed",
+    # ── #384 merged calculator + finder, 2026-08-22 — added in the SAME
+    # commit that registered the batch in ALLOWED_CLIENT_EVENTS, for the
+    # reason stated at the top of this block. Addendum:
+    # docs/business/analytics/2026-08-22-384-calc-finder-addendum.md.
+    # Per-event, one line each:
+    #
+    #   calc_tour_started — the tour AUTO-starts on landing on the
+    #     calculator, so this is a MOUNT counter for a primary surface (the
+    #     `trio_session_started` class); admitting it would promote every
+    #     calculator visit to a user-day and step-change DAU from ship day.
+    #   calc_tour_ended — a TERMINATOR, the `league_team_closed` /
+    #     `team_review_exited` class; every end is preceded by its own start.
+    #   calc_tour_beat_missing — a SCRIPT DEFECT diagnostic: a beat the
+    #     builder could not resolve. Nothing the user did or was shown.
+    #   trade_pass_overlay_opened — an EXPOSURE of the capture surface, not
+    #     the decision it collects (`trade_pass_layer1`/`_layer2` carry that
+    #     and stay INTENT); an overlay opened and dismissed without a choice
+    #     is a NON-conversion, and crediting it a user-day would be the
+    #     `rankings_preset_detected` mistake.
+    #   trade_pass_overlay_dismissed — a DISMISSAL, the
+    #     `apple_banner_dismissed` class: something shown TO the user waved
+    #     away. Every one is preceded on the same card by trade_card_viewed.
+    #   prompt_deferred — a SYSTEM REFUSAL, the exact peer of
+    #     `guide_step_suppressed`: the arbiter declined to show a prompt. The
+    #     user chose nothing and, on the `blocked_by:'tour'` lane, was shown
+    #     nothing. Its granted twin `prompt_shown` is already here.
+    #
+    # Deliberately NOT here, i.e. deliberately INTENT: calc_mode_switched,
+    # calc_asset_added, calc_cleared, calc_find_a_trade_tapped,
+    # calc_trade_queued, deck_back_to_calculator, deck_unpin_retry,
+    # deck_search_all_tapped — all eight are real user decisions (a
+    # configuration change, the core add-an-asset gesture, a deliberate clear,
+    # the hand-off tap, the ✓ queue tap, and three deck actions reachable only
+    # from a deck the user asked for). Every one of them fires behind an INTENT
+    # event that already counts the user that day, so none opens a DAU seam.
+    # (`calc_include_players_toggled` was on this list until 2026-08-22; W6-B
+    # / D-153 removed the toggle, so the name is gone from the taxonomy too.)
+    #
+    # `calc_trade_queued` (#384 W6-A / D-152) is the one worth spelling out,
+    # because it fires on a REFUSAL too. The tap is the user's decision to
+    # offer the trade; the server's `queued: false` is the answer to that
+    # decision, not an unbidden impression — the `sleeper_send_attempted`
+    # class, not `prompt_deferred`. And it is unreachable without a filled
+    # canvas, so `calc_asset_added` has already counted the user-day.
+    "calc_tour_started",
+    "calc_tour_ended",
+    "calc_tour_beat_missing",
+    "trade_pass_overlay_opened",
+    "trade_pass_overlay_dismissed",
+    "prompt_deferred",
 })
 # INTENT is a deny-list in SQL so taxonomy growth is intent-by-default.
 INTENT_EVENTS = (SERVER_FIRED_EVENTS | ALLOWED_CLIENT_EVENTS) - NON_INTENT_EVENTS
