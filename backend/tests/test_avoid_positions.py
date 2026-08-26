@@ -261,10 +261,17 @@ def _gen_divergence(svc, extra=(), **kw):
     user_elo["ow1"] = 1700            # …and ow1 (a WR), so the baseline deck
                                       # contains a WR on the RECEIVE side and
                                       # "avoid WR" has something to remove
-    seed = {pid: (1540 if pid in ("G", "R") else 1500) for pid, _ in _ALL}
+    # Coveted receive assets are seeded at PARITY with G (1540): since
+    # origin/main d42872f2 ("package pricing honesty + gap auto-sweetener",
+    # 2026-08-22, #162) a 1-for-1 that loses seed value for the giver is no
+    # longer admitted, so a 1500-seed receive target never surfaces against
+    # the 1540-seed G and the baseline premise ("the deck offers a WR /
+    # the extra asset") fails before Avoiding is ever exercised.
+    seed = {pid: (1540 if pid in ("G", "R", "ow1") else 1500)
+            for pid, _ in _ALL}
     for pid, _pos, _t in extra:
         user_elo[pid] = 1700
-        seed[pid] = 1500
+        seed[pid] = 1540
     return svc.generate_trades(
         user_id="user",
         user_elo=user_elo,
@@ -360,7 +367,7 @@ def test_v3_sweetener_never_adds_an_avoided_position():
 # ---------------------------------------------------------------------------
 
 def test_shop_and_avoid_same_position_still_generates():
-    """T-3 (D-094) — "I'm selling my RB and I don't want another one back".
+    """T-3 (D-360-2) — "I'm selling my RB and I don't want another one back".
     Shopping gates give_ids; Avoiding gates the receive pool. They are
     disjoint sides of the same trade and MUST be co-selectable — the naive
     "make all three mutually exclusive" implementation makes the single most
@@ -476,7 +483,7 @@ def _ideas(svc, **kw):
 def test_asset_ideas_honor_avoid():
     """T-7 (R-6) — the /api/trades/asset-ideas return pools are receive-side
     guards, and #163 IS applied there, so Avoiding applies there too
-    (D-095(a)). Avoiding WR ⇒ no idea returns a WR.
+    (D-360-3(a)). Avoiding WR ⇒ no idea returns a WR.
 
     SABOTAGE: remove the new load_league_preference call in the asset-ideas
     route (the kwarg then silently defaults to []) — or drop the predicate
@@ -499,7 +506,7 @@ def test_asset_ideas_honor_avoid():
 
 
 def test_asset_ideas_receive_direction_pinned_avoided_is_empty():
-    """T-7b (R-6.2, D-095(b)) — pinning an asset to ACQUIRE whose position
+    """T-7b (R-6.2, D-360-3(b)) — pinning an asset to ACQUIRE whose position
     the user avoids returns the empty result, mirroring #163's identical
     guard. An exclusion beats a pin.
 
@@ -547,7 +554,7 @@ def test_likes_you_injection_refuses_avoided_position(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_exclusion_beats_pinned_receive():
-    """T-9 (R-8, D-095(b)) — a pinned receive target at an avoided position
+    """T-9 (R-8, D-360-3(b)) — a pinned receive target at an avoided position
     does NOT re-enter the pool. The re-add loops iterate the ALREADY-FILTERED
     list, which is the shipped house rule stated in the consensus path's own
     comment ("so an exclusion always wins"). This test exists so that a build
@@ -660,7 +667,7 @@ def test_avoid_all_positions_yields_empty_deck_no_exception():
 
 
 def test_avoid_is_never_relaxed():
-    """T-12b (D-096) — the #189 relaxed pass re-runs _generate_trades_v2 with
+    """T-12b (D-360-4) — the #189 relaxed pass re-runs _generate_trades_v2 with
     the SAME kwargs and relaxes only the fairness band and the surplus floor,
     so a pool-construction filter is structurally un-relaxable. Pinned as a
     behavioral test: a targeted job whose normal pass is empty still returns

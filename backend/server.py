@@ -12117,7 +12117,7 @@ def asset_trade_ideas():
         except Exception as ap_err:
             log.warning("asset-ideas: asset prefs load failed: %s", ap_err)
 
-    # #360 — Avoiding applies exactly where not-interested applies (D-095(a)),
+    # #360 — Avoiding applies exactly where not-interested applies (D-360-3(a)),
     # and not-interested IS applied on this route's three receive-side guards.
     # This is NEW plumbing, not a mirror: the route above loads ASSET prefs
     # only and passes no positional prefs at all. Best-effort, in the same

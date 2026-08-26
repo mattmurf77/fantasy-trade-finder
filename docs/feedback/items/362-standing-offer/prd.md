@@ -645,7 +645,7 @@ On a real 12-team Sleeper league, with `trade.standing_offers` on:
 3. The operator's manual pass MT-1 … MT-10 is clean, logged in `TEST_LEDGER.md`.
 4. `docs/api-reference.md`, `docs/data-dictionary.md`, `docs/config-reference.md`,
    `docs/glossary.md`, `living-memory/LLD.md`, `docs/architecture.md`,
-   `living-memory/HLD.md` and `living-memory/DECISIONS.md` (D-093) are updated per
+   `living-memory/HLD.md` and `living-memory/DECISIONS.md` (decision recorded item-scoped as D-362-1 — see hld-delta.md §9) are updated per
    [`scope.md`](scope.md) §4.
 
 **Health criteria** (read after the flag is on for real testers):

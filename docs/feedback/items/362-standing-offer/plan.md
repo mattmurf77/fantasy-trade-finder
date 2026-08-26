@@ -567,7 +567,7 @@ stated convention (`backend/analytics_taxonomy.py:1016-1020`).
 | `docs/architecture.md` / `living-memory/HLD.md` | **n/a** — no new module or client; one predicate inside an existing injector |
 | `docs/cross-client-invariants.md` | **n/a** — no shared constant, color, or enum crosses clients |
 | `docs/glossary.md` | **updated** — "standing offer" |
-| `DECISIONS.md` | **updated** — one entry, next id = max+1 (currently D-091; grep first). Subject: *the offer is bounded by round and by the user's own team selection, not by a pick-value band, because FTF prices every first in a league identically* (§4). |
+| `DECISIONS.md` | **recorded item-scoped as D-362-1** (origin/main took the sequential ids before ship; see hld-delta.md §9). Subject: *the offer is bounded by round and by the user's own team selection, not by a pick-value band, because FTF prices every first in a league identically* (§4). |
 
 ---
 

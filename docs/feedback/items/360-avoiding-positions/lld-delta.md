@@ -6,7 +6,7 @@
 > picks one reading and says so.
 >
 > **Base sha:** `f68eddd`. Every `file:line` re-read this session.
-> **Companions:** `prd.md` (requirements R-1…R-16, decisions D-093…D-096),
+> **Companions:** `prd.md` (requirements R-1…R-16, decisions D-360-1…D-360-4),
 > `scope.md` (gates), `hld-delta.md` (n/a, one line).
 
 ---
@@ -290,7 +290,7 @@ Pinned by assertion `A-10`.
 ## 4. Engine seams — every function-level touch point
 
 Seven receive-side seams. The set is **exactly** the sites where
-`not_interested_ids` is applied (PRD D-095(a)), which makes it verifiable by
+`not_interested_ids` is applied (PRD D-360-3(a)), which makes it verifiable by
 `git grep -n not_interested -- backend`.
 
 | # | Seam | `file:line` | Change |
@@ -386,7 +386,7 @@ And extend the `NEVER relaxed:` list in the `_relaxed_targeted_pass` docstring
 (`:3492-3501`) to name `avoid_positions`. **No code change is needed for the
 guarantee** — the relaxed pass re-runs `_generate_trades_v2` with the *same*
 kwargs and relaxes only the fairness band and the surplus floor, so a
-pool-construction filter is structurally un-relaxable (PRD D-096). The docstring
+pool-construction filter is structurally un-relaxable (PRD D-360-4). The docstring
 edit is so the guarantee is written where the next reader looks.
 
 ### 4.5 Preference loaders — two of them
@@ -459,7 +459,7 @@ then pass `avoid_positions = avoid_positions or None` in the
 `:11073`.
 
 Note the resulting asymmetry, which is **intended**: asset ideas honor Avoiding
-but not Chasing/Shopping. That follows D-095(a) — Avoiding goes where
+but not Chasing/Shopping. That follows D-360-3(a) — Avoiding goes where
 `not_interested` goes, and `not_interested` is applied here (`:3775`, `:3836`,
 `:3855`) while Chasing/Shopping never were. Asset ideas are already scoped by
 the pinned asset, so a Chasing filter there would be redundant at best.
@@ -468,10 +468,10 @@ the pinned asset, so a Chasing filter there would be redundant at best.
 
 | Site | Why |
 |---|---|
-| `_roster_eveners` (`backend/server.py:1027`, prefs read at `:1046-1049`) | reads **only** `untouchables`; `not_interested` is not applied there either (ruling Q-A4, PRD D-095(a)) |
+| `_roster_eveners` (`backend/server.py:1027`, prefs read at `:1046-1049`) | reads **only** `untouchables`; `not_interested` is not applied there either (ruling Q-A4, PRD D-360-3(a)) |
 | `backend/trade_gen_v2.py` | orchestrator ruling Q-A1 — **but read PRD §5.1 before agreeing with it**, and ship the `bakeoff_serve_interleaved` guardrail |
 | `_generate_for_pair` (`backend/trade_service.py:5094`) and its gate at `:5460-5470` | legacy v1, unreachable, applies no exclusion lists |
-| `pos_conflict_penalty` / `pos_acquire_bonus` / `pos_tradeaway_bonus` | dormant, named not deleted (D-093) |
+| `pos_conflict_penalty` / `pos_acquire_bonus` / `pos_tradeaway_bonus` | dormant, named not deleted (D-360-1) |
 | `backend/tests/test_bakeoff_arm_a_golden.py` | no new `model_config` key ⇒ no golden edit |
 
 ---
@@ -516,7 +516,7 @@ No signature change to `getLeaguePreferences` (`:47-51`) or
 
 All six payload sites are R-13; assertion `A-4` pins them together.
 
-#### 5.2.1 `toggleDnaPos` — the D-094 asymmetry
+#### 5.2.1 `toggleDnaPos` — the D-360-2 asymmetry
 
 Signature widens from `(side: 'chase' | 'shop', pos: string)` to
 `(side: 'chase' | 'shop' | 'avoid', pos: string)`. The move table, in full —
@@ -569,7 +569,7 @@ flare for informational highlights only).
 | legacy hint (`:781-785`) — **rewrite** | "Pick as many per row as apply. A position can't be both chased and shopped, or both chased and avoided — tapping it there moves it. Shopping and avoiding the same position is fine: you're selling it and don't want another back. Changes save as you tap." |
 
 The hint rewrite is mandatory (R-14): leaving *"A position can't be both chased
-and shopped"* after D-094 ships is wrong documentation inside the product.
+and shopped"* after D-360-2 ships is wrong documentation inside the product.
 
 #### 5.2.4 Flag gate
 
@@ -634,7 +634,7 @@ nothing else**), `mobile/src/screens/TradeFinderHubScreen.tsx` (one line),
 new `mobile/tests/check-avoid-positions.js`, `mobile/package.json`.
 
 **Docs** (`scope.md` §4 table) can land with either agent, but the three
-`DECISIONS.md` entries (D-093, D-094, D-095), the `OPEN_QUESTIONS.md` entry
+item-scoped decisions (D-360-1, D-360-2, D-360-3 — in `prd.md` §2), the `OPEN_QUESTIONS.md` entry
 (Q-031 — renumbered from Q-024 on 2026-08-19 after `origin/main` advanced and took Q-024/Q-025; wording constrained by PRD §5.1) and the two `bakeoff_serve_interleaved`
 guardrail lines are **backend-agent deliverables** — they carry the reasoning
 that agent is closest to.

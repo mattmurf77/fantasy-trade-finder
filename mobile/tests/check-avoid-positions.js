@@ -299,7 +299,7 @@ if (toggleFn) {
   );
   assert(
     isPlainRef(rhsOf(shopBranch, 'nextAvoiding'), 'draftAvoiding'),
-    "A-3f — tapping 'shop' LEAVES Avoiding UNCHANGED (D-094)",
+    "A-3f — tapping 'shop' LEAVES Avoiding UNCHANGED (D-360-2)",
     'filtering draftAvoiding here makes Shopping and Avoiding mutually ' +
       'exclusive, which destroys the headline use case: "I am selling my QB ' +
       'and I do not want another one back"',
@@ -312,7 +312,7 @@ if (toggleFn) {
   );
   assert(
     isPlainRef(rhsOf(avoidBranch, 'nextShopping'), 'draftShopping'),
-    "A-3h — tapping 'avoid' LEAVES Shopping UNCHANGED (D-094)",
+    "A-3h — tapping 'avoid' LEAVES Shopping UNCHANGED (D-360-2)",
     'the mirror of A-3f — same use case, tapped from the other row',
   );
 }

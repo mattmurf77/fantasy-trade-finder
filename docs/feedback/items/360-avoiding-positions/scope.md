@@ -96,7 +96,7 @@ two-file edit.
 
 This is a deliberate dividend of choosing a hard pool exclusion over reviving the
 dormant `pos_conflict_penalty` multiplier (`backend/database.py:2187`,
-`backend/trade_service.py:98`) — see PRD D-093. Consequences worth stating
+`backend/trade_service.py:98`) — see PRD D-360-1. Consequences worth stating
 because a reviewer will look for them:
 
 - **No edit to the knob-inventory golden** at
@@ -183,7 +183,7 @@ capture can be produced. Any design review reads the source.
 | `living-memory/HLD.md` | **n/a because** same reason — see `hld-delta.md`, which states it in one line rather than leaving the row blank. |
 | `docs/cross-client-invariants.md` | **updated** | The "Mirror locations" table (`:398-404`) gains a row for the backend's new `_pos_for_avoid` re-derivation of pick identity. It is a **backend** re-derivation that calls the canonical `is_pick_asset` (`backend/trade_service.py:1549-1557`) rather than re-implementing it, so its Status reads "reads the canonical predicate" — but the register exists precisely because unregistered re-derivations drifted before (#222, the 2026-08-18 B3 sweep), so it gets a row. |
 | ADR | **n/a because** no architectural decision of ADR weight. Two `DECISIONS.md` entries carry the non-obvious choices instead. |
-| `living-memory/DECISIONS.md` | **updated ×4** — **D-093** (hard pool exclusion over reviving `pos_conflict_penalty`), **D-094** (Shopping + Avoiding co-selectable; Chasing ⊕ Avoiding exclusive), **D-095** (Avoiding applies exactly where `not_interested` applies; an exclusion beats a pin), **D-096** (the never-relaxed guarantee is structural — write it down anyway). Next free id verified this session: max is D-092. Full rationale for each is in `prd.md` §2; the DECISIONS entries should be its condensed form, not a pointer. |
+| `living-memory/DECISIONS.md` | **updated ×4** — **D-360-1** (hard pool exclusion over reviving `pos_conflict_penalty`), **D-360-2** (Shopping + Avoiding co-selectable; Chasing ⊕ Avoiding exclusive), **D-360-3** (Avoiding applies exactly where `not_interested` applies; an exclusion beats a pin), **D-360-4** (the never-relaxed guarantee is structural — write it down anyway). **Disposition corrected 2026-08-26:** recorded ITEM-SCOPED in prd.md §2 as D-360-1…D-360-4 (the D-306-1 / D-320-2 convention): origin/main took sequential ids D-093–D-097 before this branch shipped, so writing them to DECISIONS.md would have collided. DECISIONS.md carries only D-163. |
 | `living-memory/OPEN_QUESTIONS.md` | **updated ×1** — **Q-031**, the `trade_gen_v2` preference gap. (Written as Q-024; renumbered 2026-08-19 when `origin/main` advanced and took Q-024 + Q-025 — max is now Q-025.) Headline is the **pre-existing Chasing/Shopping gap**, not Avoiding (orchestrator ruling Q-A1). Wording constraint in `prd.md` §5.1. |
 | `living-memory/CHANGELOG.md`, `TEST_LEDGER.md`, `NEXT.md` | **updated at ship** | Standard write-back. TEST_LEDGER names the pytest file, the `check-*.js` suite, the code-walk doc, and the operator's checklist outcome. |
 
@@ -237,7 +237,7 @@ Three further findings not in `plan.md` at all, all now specified:
   the `target_ids` re-add (`:412-415`) iterate that already-filtered list. This
   settles a question `plan.md` never raised (what happens when a user pins a
   receive target whose position they avoid) **by precedent rather than by
-  invention** — see `prd.md` D-095 and R-8.
+  invention** — see `prd.md` D-360-3 and R-8.
 
 - **`backend/server.py:15483` defines `valid_positions = {"QB","RB","WR","TE"}`
   and never uses it.** Dead since it was written — no reference anywhere in the

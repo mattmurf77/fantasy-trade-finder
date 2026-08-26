@@ -517,7 +517,7 @@ Plan: [docs/plans/three-model-bakeoff/PLAN.md](plans/three-model-bakeoff/PLAN.md
 
 ## Flags — "Avoiding" positions (#360/#361, 2026-08-19 — ships **ON**)
 
-Feature docs: [docs/feedback/items/360-avoiding-positions/](feedback/items/360-avoiding-positions/). A third row in the Trade DNA sheet, under Chasing and Shopping. **No new `model_config` keys** — the dormant `pos_conflict_penalty` / `pos_acquire_bonus` / `pos_tradeaway_bonus` multipliers stay dormant (D-093), so there is no new tuning surface to look for and no knob-inventory golden to edit.
+Feature docs: [docs/feedback/items/360-avoiding-positions/](feedback/items/360-avoiding-positions/). A third row in the Trade DNA sheet, under Chasing and Shopping. **No new `model_config` keys** — the dormant `pos_conflict_penalty` / `pos_acquire_bonus` / `pos_tradeaway_bonus` multipliers stay dormant (D-360-1), so there is no new tuning surface to look for and no knob-inventory golden to edit.
 
 | Flag | Default | Gates |
 |---|---|---|

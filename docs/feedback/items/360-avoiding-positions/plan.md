@@ -480,7 +480,7 @@ verbatim:
 | `living-memory/LLD.md` | **updated** — the negative-receive-constraint convention (positions join players) |
 | `docs/architecture.md` / `living-memory/HLD.md` | likely **n/a** — no new module or flow; state the reason, don't leave blank |
 | `docs/cross-client-invariants.md` | **judgment call** — see §10 R3. If the PICK-identity predicate is used, the "Mirror locations" table at `:398+` gains a row |
-| `DECISIONS.md` (next id **D-093**; max today is D-092) | **required ×2** — (i) hard exclusion over reviving `pos_conflict_penalty`, with the retired-trio reasoning; (ii) the Shopping+Avoiding co-selectable asymmetry |
+| `DECISIONS.md` (decisions recorded item-scoped as **D-360-1…D-360-4** in `prd.md` §2 — sequential ids were taken by `origin/main` before ship) | **required ×2** — (i) hard exclusion over reviving `pos_conflict_penalty`, with the retired-trio reasoning; (ii) the Shopping+Avoiding co-selectable asymmetry |
 
 ### §5 Ship gate
 
@@ -652,12 +652,12 @@ is the smaller, more contained change) and rebase #362 on top.
 - **Q-A5 (§5):** Confirm the asymmetry — Chasing ⊕ Avoiding mutually exclusive,
   **Shopping + Avoiding co-selectable**. This is the operator's own
   "selling my QB, don't want another back" case and it needs to be an explicit,
-  recorded decision (D-093) rather than an implementation detail, because the
+  recorded decision (D-360-1) rather than an implementation detail, because the
   obvious three-way-exclusion implementation silently deletes it.
 - **Q-A6 (§9.1):** New analytics event, or stored-state query only? Planned
   default: no new event; adoption comes from `league_preferences.avoid_positions`.
 - **Q-A7 (§7):** Web parity — follow-up item, or same wave? Planned default:
   follow-up (verified no data loss in the meantime).
 
-Next OPEN_QUESTIONS id is **Q-031** (was Q-024 when this plan was written; `origin/main` advanced on 2026-08-19 and took Q-024 + Q-025, so max is now Q-025); next DECISIONS id is
-**D-093** (max today D-092).
+Next OPEN_QUESTIONS id is **Q-031** (was Q-024 when this plan was written; `origin/main` advanced repeatedly — renumbered again 2026-08-26 to clear Q-026, which main had also taken); the four decisions are
+recorded item-scoped as **D-360-1…D-360-4** in `prd.md` §2 (sequential ids D-093–D-096 were taken by `origin/main` before ship).

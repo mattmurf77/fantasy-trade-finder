@@ -9125,6 +9125,11 @@ def load_league_preferences_bulk(user_ids: list, league_id: str) -> dict:
                 getattr(row, "acquire_positions", None)),
             "trade_away_positions":  _parse_positions(
                 getattr(row, "trade_away_positions", None)),
+            # #360 — kept in lockstep with load_league_preference: the bulk
+            # reader's contract is "identical per-row shape to the singular
+            # loader" (test_breaker_seam pins it).
+            "avoid_positions":       _parse_positions(
+                getattr(row, "avoid_positions", None)),
         }
     return out
 

@@ -44,6 +44,8 @@ function seasonSpan(seasons: number[]): string {
   return contiguous
     ? `${short(sorted[0])}–${short(sorted[sorted.length - 1])}`
     : sorted.map(short).join(' ');
+}
+
 // #384 — the overlay presentation needs two host hooks the inline form has no
 // use for. Kept OUT of `DeclineReasonPanelProps` on purpose: the panel itself
 // knows nothing about being hosted in a sheet, and every existing caller of it

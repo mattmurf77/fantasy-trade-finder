@@ -377,7 +377,7 @@ def generate_pair_trades_v3(
     # #163 — not-interested players never enter the receive pool (dropped at
     # the source; the pinned/target re-adds below iterate this filtered list).
     # #360 — avoided POSITIONS are dropped at the same source, for the same
-    # reason: an exclusion always wins over a pin (PRD R-8 / D-095(b)).
+    # reason: an exclusion always wins over a pin (PRD R-8 / D-360-3(b)).
     _avoid = set(avoid_positions or ())
     known_opp = [p for p in opponent.roster
                  if p in shrunk_user_elo and p in opp_elo

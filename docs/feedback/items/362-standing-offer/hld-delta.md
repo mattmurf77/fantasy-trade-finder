@@ -177,10 +177,11 @@ Stated so a reviewer can confirm the blast radius by reading rather than by diff
 
 ## 9. Decision to record
 
-`living-memory/DECISIONS.md` — **next id is D-093** (max present is D-092, verified
-2026-08-19; grep before writing).
+Recorded **item-scoped as D-362-1** (the D-306-1 / D-320-2 convention). Written
+2026-08-19 as "next DECISIONS.md id D-093", but `origin/main` took D-093–D-097
+before this branch shipped, so the decision lives here rather than colliding.
 
-> ## D-093 — A Standing Offer Is Bounded by Round and by the User's Own Team Selection, Not by a Pick-Value Band
+> ## D-362-1 — A Standing Offer Is Bounded by Round and by the User's Own Team Selection, Not by a Pick-Value Band
 >
 > **Status:** accepted · **Date:** 2026-08-19 · **Item:** #362
 >

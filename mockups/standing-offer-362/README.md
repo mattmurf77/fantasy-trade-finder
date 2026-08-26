@@ -92,7 +92,7 @@ to be relative to. **No value gate is built.** The offer is bounded by round, by
 seasons and teams the user selects, and by the pre-existing D-055 user-gain floor on the
 receiving side, which standing-offer cards inherit by reusing the injector loop.
 
-Revisit only if Q-023 is ever built. Ruling recorded as **D-093**; build contract in
+Revisit only if Q-023 is ever built. Ruling recorded as **D-362-1**; build contract in
 [`docs/feedback/items/362-standing-offer/`](../../docs/feedback/items/362-standing-offer/).
 
 The other two open questions were also ruled, and the lab's instincts on both held up:

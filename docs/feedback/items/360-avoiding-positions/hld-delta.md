@@ -14,7 +14,7 @@ answered or explicitly waived with a reason.
 
 **What an architecture shift would have looked like here, and why none of it
 happened.** The design was chosen partly *because* it is architecturally inert
-(`prd.md` D-093):
+(`prd.md` D-360-1):
 
 | Would have been an HLD change | Did it happen? |
 |---|---|

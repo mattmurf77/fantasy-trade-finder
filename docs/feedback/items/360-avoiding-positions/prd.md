@@ -43,7 +43,7 @@ position granularity. Shopping constrains `give_ids` only.
 Each of these is a real decision with a real alternative that was considered.
 The three marked **D-0xx** go into `living-memory/DECISIONS.md`.
 
-### D-093 — Hard pool exclusion, not a soft multiplier
+### D-360-1 — Hard pool exclusion, not a soft multiplier
 
 **Decision:** Avoiding is a hard exclusion applied at *pool construction*.
 The dormant `pos_conflict_penalty` knob (`backend/database.py:2187` seed row;
@@ -71,7 +71,7 @@ Supporting, in descending weight:
   filter: untouchables (give side, never relaxed), #163 `not_interested`
   (receive side, never relaxed), pinned give/receive. There is no soft negative
   anywhere.
-- **The never-relaxed guarantee comes free.** See D-096 below.
+- **The never-relaxed guarantee comes free.** See D-360-4 below.
 - **No new `model_config` key** ⇒ no edit to the knob-inventory golden in
   `backend/tests/test_bakeoff_arm_a_golden.py`, and no default to calibrate.
 
@@ -83,7 +83,7 @@ mechanism uniform across all generator paths, and in that path it is already
 the local idiom. It is also strictly cheaper (smaller search space rather than
 enumerate-then-discard) and it covers sweeteners for free.
 
-### D-094 — Shopping + Avoiding are co-selectable; Chasing ⊕ Avoiding are not
+### D-360-2 — Shopping + Avoiding are co-selectable; Chasing ⊕ Avoiding are not
 
 *(Orchestrator ruling Q-A5, recorded as a decision because the obvious
 implementation silently destroys the headline use case.)*
@@ -102,7 +102,7 @@ the existing two" implementation makes the single most common real usage
 **unexpressible**. This is the highest-risk misimplementation in the feature and
 is pinned by both a structural test (§7.2 A-3) and a pytest (§7.1 T-3).
 
-### D-095 — An exclusion beats a pin; Avoiding applies exactly where `not_interested` applies
+### D-360-3 — An exclusion beats a pin; Avoiding applies exactly where `not_interested` applies
 
 **Two questions, one rule.**
 
@@ -143,7 +143,7 @@ state to name Avoiding as the cause, and `receiptDetails` (R-10) keeps the
 avoid set permanently visible above the deck. Without both, this decision would
 be the "silent zero deck" failure and should be reversed.
 
-### D-096 — The never-relaxed guarantee is structural, and must be written down anyway
+### D-360-4 — The never-relaxed guarantee is structural, and must be written down anyway
 
 Adding `avoid_positions` to the #189 `targeted` predicate
 (`backend/trade_service.py:3294-3295`) gives a narrowed job the same staged
@@ -164,12 +164,12 @@ they have broken.
 - **Analytics: no new event.** Full waiver with the alternative named and
   costed — `scope.md` §1 (orchestrator ruling Q-A6).
 - **Eveners: out of scope.** Orchestrator ruling Q-A4; the consistency argument
-  is in D-095(a) above, stated so the next reader does not read it as an
+  is in D-360-3(a) above, stated so the next reader does not read it as an
   oversight.
 - **Web parity: follow-up, not this wave.** Orchestrator ruling Q-A7. The
   no-data-loss verification is in §5.3.
 - **Likes-you injection honors Avoiding: yes.** Orchestrator ruling Q-A3; it
-  falls out of D-095(a) automatically, since `not_interested` is applied there
+  falls out of D-360-3(a) automatically, since `not_interested` is applied there
   (`backend/server.py:3021`).
 
 ---
@@ -244,7 +244,7 @@ deliberately rather than discovered:
    what the user asked for.
 2. `direction == "receive"` with the pinned asset itself at an avoided
    position: return the empty result, mirroring #163's identical guard at
-   `backend/trade_service.py:3836-3837` (D-095(b)).
+   `backend/trade_service.py:3836-3837` (D-360-3(b)).
 
 *Pass:* `T-7`.
 
@@ -260,7 +260,7 @@ untouchables, #163 and the R4 dedup already apply there.
 **R-8 — An exclusion beats a pin.** A `pinned_receive_players` entry or a
 Backlog-#2 `target_ids` entry at an avoided position does **not** re-enter the
 pool. Implementation is free: the re-add loops already iterate the filtered
-list (D-095(b)). This requirement exists so that a build agent does not
+list (D-360-3(b)). This requirement exists so that a build agent does not
 "helpfully" add an exemption.
 *Pass:* `T-9` (a pinned receive target at an avoided position yields no card,
 and specifically does not yield a card containing it).
@@ -294,7 +294,7 @@ non-empty); `A-6` (the toast branch reads `avoid_positions`); TestFlight step 7.
 (`mobile/src/screens/TradesScreen.tsx:1058-1074`) gains an `Avoiding …` part
 using the existing `posLabel` helper at `:1059` (which already maps
 `PICK → 'Picks'`), in the order **Chasing · Shopping · Avoiding · <intent> ·
-N off the table**. This is what makes D-095(b) honest rather than silent.
+N off the table**. This is what makes D-360-3(b) honest rather than silent.
 *Pass:* `A-5`; TestFlight step 8.
 
 **R-11 — Flag off ⇒ byte-identical.** With `trade.avoid_positions` false and a
@@ -305,7 +305,7 @@ in both flag states, so flipping the flag back on restores every saved set.
 
 ### Client
 
-**R-12 — Three-way toggle preserving the D-094 asymmetry.**
+**R-12 — Three-way toggle preserving the D-360-2 asymmetry.**
 `toggleDnaPos` (`mobile/src/components/TradeDnaSheet.tsx:474-500`) extends from
 a 2-way to a 3-way move:
 
@@ -346,7 +346,7 @@ Plus the seeding effect at `:353-362` (`setDraftAvoiding(prefs?.avoid_positions 
   `:781-785` currently reads *"A position can't be both chased and shopped"* and
   **must be rewritten** to state the three-way rule **including the
   Shopping + Avoiding exception** — a hint that still claims two-way exclusion
-  after D-094 ships is actively wrong documentation in the product.
+  after D-360-2 ships is actively wrong documentation in the product.
 
 *Pass:* `A-1`, `A-2`, `A-8` (the hint no longer claims two-way exclusion);
 TestFlight steps 1 and 2.
@@ -386,7 +386,7 @@ an empty deck and the R-9 copy explaining why.
    deck without seeing a single QB on the receive side of any card — headline or
    package filler, on any generator path, including a boosted likes-you card.
 2. A user who sets Shopping QB **and** Avoiding QB together still gets cards,
-   and those cards send their QB out. (D-094; the feature's headline use case.)
+   and those cards send their QB out. (D-360-2; the feature's headline use case.)
 3. Turning `trade.avoid_positions` off restores today's decks byte-for-byte
    without a deploy, with no data loss.
 4. CI green on the pushed sha: `backend-tests`, `mobile-typecheck` (tsc + the
@@ -409,7 +409,7 @@ Shopping are *already* not honored there". The first half is true. But gen-v2
 **does** apply the per-player negative constraints: `not_interested_ids` at
 `backend/trade_gen_v2.py:509`, filtered at `:530`, and `untouchable_ids` at
 `:533`. Since this feature's entire architecture is *"Avoiding is the positional
-twin of `not_interested`"* (D-095(a)), the governing scope rule points **into**
+twin of `not_interested`"* (D-360-3(a)), the governing scope rule points **into**
 gen-v2, not away from it. The ruling is a defensible product call — gen-v2 is
 dark for serving — but it is not the free consequence of an existing gap that
 the rationale describes, and the next reader deserves to know that.
@@ -448,11 +448,11 @@ third list to fix, never as the headline.
 |---|---|---|
 | **Eveners** (`_roster_eveners`, `backend/server.py:1027`, reached from `/api/trade/evaluate`) | out | Q-A4. Decisive and mechanical: that function reads asset preferences at `:1046-1049` and takes **only `untouchables`** — `not_interested` is not applied there either. Including Avoiding would make the position-level filter **stricter than the player-level one on the same surface**, which is backwards. This is consistency, not an oversight. |
 | **The give side** | out | #360's wording — "positions we're not looking for" — is unambiguously about what *arrives*. A reasonable reader could stretch "I don't want QB" into "keep QBs out of the trade entirely"; that reading is wrong, and Shopping already owns the give side. |
-| **Legacy v1 `_generate_for_pair`** (`backend/trade_service.py:5094`) | out | Applies neither `untouchable_ids` nor `not_interested_ids`, so D-095(a) excludes it. Unreachable in production (`trade_engine.v2 = true`). |
+| **Legacy v1 `_generate_for_pair`** (`backend/trade_service.py:5094`) | out | Applies neither `untouchable_ids` nor `not_interested_ids`, so D-360-3(a) excludes it. Unreachable in production (`trade_engine.v2 = true`). |
 | **`web/`** | follow-up | Q-A7. Verification in §5.3. |
 | **`extension/`** | n/a | `git grep -n "preferences\|acquire_pos" -- extension` returns nothing; the extension never reads league preferences. |
 | **`mobile/src/screens/TradeFinderHubScreen.tsx`** | **do not touch** | It duplicates the whole Chasing/Shopping editor (`:299-303`, `:322-323`, `:341-344`, `:383-384`) but is **UNROUTED** — `mobile/src/navigation/TabNav.tsx:37` ("TradeFinderHubScreen is unrouted (guided-first landing)"). Dead code kept in tree per #246. **Explicit warning to the build agent:** a `git grep acquire_positions -- mobile/src` makes this look like a required second edit. It is not. It will, however, need a compile-only fix once `avoid_positions` is required on `LeaguePreferences` — see `lld-delta.md` §6.3. |
-| **`pos_conflict_penalty` / `pos_acquire_bonus` / `pos_tradeaway_bonus`** | leave dormant | D-093. Named, not deleted. |
+| **`pos_conflict_penalty` / `pos_acquire_bonus` / `pos_tradeaway_bonus`** | leave dormant | D-360-1. Named, not deleted. |
 | **`backend/server.py:15483` dead `valid_positions`** | leave | Dead and wrong (omits `PICK`), but fixing it would newly reject payloads the shipped client sends. Surgical changes. Recorded in `scope.md` §6. |
 
 ### 5.3 Web parity — the no-data-loss verification, re-verified this session
@@ -477,7 +477,7 @@ Web parity ships as a follow-up feedback item.
    bugs from re-deriving pick identity (#222, the 2026-08-18 B3 sweep) are why
    `docs/cross-client-invariants.md:380` exists. Call `is_pick_asset`; do not
    re-implement it.
-2. **Never let Avoiding become relaxable.** D-096. If a future change moves the
+2. **Never let Avoiding become relaxable.** D-360-4. If a future change moves the
    filter from pool construction into a gate, the #189 relaxed pass will start
    relaxing it, silently.
 3. **Never silently override a saved preference.** R-16. "Avoid everything"
@@ -492,7 +492,7 @@ Web parity ships as a follow-up feedback item.
    shrinks the search space on every opponent. `plan.md` §12 R1 established that
    the `scripts/deck_eval.py` corpus lives in gitignored scratch and is **not
    present in this worktree** — so **do not promise a measured deck-size delta.**
-   The runtime valve is the #189 relaxed pass (D-096); the runtime signal is the
+   The runtime valve is the #189 relaxed pass (D-360-4); the runtime signal is the
    existing presentment tripwire near `backend/server.py:5100-5110`. If the
    operator wants a number before ship, that is a spike, not part of this build.
 
@@ -510,13 +510,13 @@ shipped once already (`mobile/tests/check-league-candidates-300.js` header).
 |---|---|---|---|
 | **T-1** | `test_column_defaults_to_empty_list` | R-1 | Change `_parse_positions` to return `None` for falsy input, or drop the `migration_cols` entry. |
 | **T-2** | `test_prefs_route_roundtrip` | R-2, R-3 | Remove `avoid_positions` from the GET payload dict, or from the `upsert_league_preference` call. |
-| **T-3** | **`test_shop_and_avoid_same_position_still_generates`** | **D-094** | Make Shopping and Avoiding mutually exclusive server-side (drop avoided positions from `trade_away_positions`). The deck goes empty; assert both non-empty **and** that a card's give side contains the position. **This test is the feature.** |
+| **T-3** | **`test_shop_and_avoid_same_position_still_generates`** | **D-360-2** | Make Shopping and Avoiding mutually exclusive server-side (drop avoided positions from `trade_away_positions`). The deck goes empty; assert both non-empty **and** that a card's give side contains the position. **This test is the feature.** |
 | **T-4** | `test_no_avoided_position_received[v3\|v3_sweetened\|v2\|consensus]` | R-4 | Remove the predicate from any one of the four seams — the parameterization is what makes a single-seam miss visible. |
 | **T-5** | `test_avoid_qb_keeps_pick_rungs` | R-5 | Replace `_pos_for_avoid` with a raw `p.position` read. Round-4 generic rungs carry a fake `"QB"` and vanish. |
 | **T-6** | `test_avoid_pick_removes_pick_assets` | R-5 | Drop the `is_pick_asset` arm so `"PICK"` matches only owned-pick pseudo-assets and generic rungs survive. |
 | **T-7** | `test_asset_ideas_honor_avoid` | R-6 | Remove the new `load_league_preference` call in the asset-ideas route; the kwarg silently defaults to `[]`. |
 | **T-8** | `test_likes_you_injection_refuses_avoided_position` | R-7 | Remove the position-set intersection at `backend/server.py:3021`. A mirrored card carrying an avoided position is injected at deck position 1. |
-| **T-9** | `test_exclusion_beats_pinned_receive` | R-8, D-095(b) | Add a pin exemption — re-add `pinned_recv_set` members from the **unfiltered** roster. |
+| **T-9** | `test_exclusion_beats_pinned_receive` | R-8, D-360-3(b) | Add a pin exemption — re-add `pinned_recv_set` members from the **unfiltered** roster. |
 | **T-10** | **`test_avoid_and_chase_same_position_is_not_a_silent_zero_deck`** | **R-9** | Remove the `_run_trade_job` guard. Every opponent yields zero cards with no error — the single highest-value regression in the suite. |
 | **T-11** | `test_post_normalizes_and_echoes` | R-3 | Skip normalization: `["qb", "DEF", "QB"]` stores verbatim and the echo lies about what was stored. |
 | **T-12** | `test_flag_off_deck_is_byte_identical` | R-11 | Read the column unconditionally instead of behind `FLAGS.trade_avoid_positions`. Follows the existing flag-off golden pattern. |
@@ -535,7 +535,7 @@ before.
 |---|---|---|
 | **A-1** | The `full` variant contains three `styles.posLine` blocks, in source order Chasing → Shopping → Avoiding (RN lays a column out in child order, so source order **is** screen order). | Insert Avoiding above Shopping, or omit it. |
 | **A-2** | The legacy variant contains an Avoiding `DNA_POSITIONS.map` block with `dna.avoid.` testIDs. | Add the row to `full` only — the legacy branch is live and would silently lack it. |
-| **A-3** | **In `toggleDnaPos`, the `avoid` branch filters `draftChasing` and does **not** filter `draftShopping`; the `shop` branch does not filter avoid.** AST-level, not textual. | Implement three-way mutual exclusion. **This assertion is worth the whole file** — it is the only mechanical check on D-094. |
+| **A-3** | **In `toggleDnaPos`, the `avoid` branch filters `draftChasing` and does **not** filter `draftShopping`; the `shop` branch does not filter avoid.** AST-level, not textual. | Implement three-way mutual exclusion. **This assertion is worth the whole file** — it is the only mechanical check on D-360-2. |
 | **A-4** | All six R-13 payload sites carry an `avoid` key. | Omit it from any one; the clear silently fails to persist. |
 | **A-5** | `receiptDetails` reads `avoid_positions` and pushes its part after `shopping`. | Drop the part, or order it before Shopping. |
 | **A-6** | The empty-state toast branch at `TradesScreen.tsx:1509-1532` references `avoid_positions`. | Ship the server guard without the copy. |
@@ -553,7 +553,7 @@ The only runtime evidence mobile gets. Written as a regression suite.
 | 1 | Trades → open the DNA sheet. | A third row **Avoiding / "no thanks"** sits directly under Shopping, with five chips (QB RB WR TE Picks). Tapping one fills it and shows an **✕** glyph, not a check. Chips are ≥44pt tall and legible. |
 | 2 | Read the sheet's hint text (legacy half-sheet entry point, if reachable). | It describes the three-way rule and states that Shopping + Avoiding *can* both be set. It must **not** still say "can't be both chased and shopped". |
 | 3 | Set Chasing = QB. Then tap Avoiding **QB**. | QB **clears** from Chasing and lights in Avoiding. |
-| 4 | Set Shopping = QB (with Avoiding QB still on). | **Both stay lit.** This is D-094; if Shopping clears, stop — the build is wrong. |
+| 4 | Set Shopping = QB (with Avoiding QB still on). | **Both stay lit.** This is D-360-2; if Shopping clears, stop — the build is wrong. |
 | 5 | Close the sheet, re-run the finder, and swipe the **entire** deck — not just the first few cards. | No card sends you a QB, in **any** package position, including sweeteners and any card badged as a counterparty like. |
 | 6 | Confirm the cards from step 5 send your QB **out**. | They do. Shopping still works alongside Avoiding. |
 | 7 | Clear Shopping. Set Chasing = QB and Avoiding = QB together via a direct sequence (tap Chasing QB, then Avoiding QB, then Chasing QB again). | The UI never lets both be lit. Re-run: you get cards, not an empty deck and not a spinner. |
@@ -570,7 +570,7 @@ backend build agent. A `file:line`-cited trace showing:
 
 1. All **seven** receive-side seams (`lld-delta.md` §4) are on the filtered path.
 2. Both preference loaders pass the third list.
-3. The two exempt seams (eveners, `trade_gen_v2`) are exempt **by the D-095(a)
+3. The two exempt seams (eveners, `trade_gen_v2`) are exempt **by the D-360-3(a)
    rule**, not by omission — with the `not_interested` grep that proves it for
    eveners and the §5.1 caveat restated for gen-v2.
 4. The flag-off path reaches none of them.
@@ -594,7 +594,7 @@ promise is strictly worse than the one-frame paint-in that omitting the key caus
 The one-frame pop-in is accepted. Reasoning is written into comments at both gating
 sites (`TradeDnaSheet.tsx`, `TradesScreen.tsx`) and in the check file's header.
 This is the same trap that `mobile/src/api/league.ts:709` warns about for
-`outlook.odds`; see D-094 in the parallel Team Review work.
+`outlook.odds`; see D-360-2__KEEP__ in the parallel Team Review work.
 
 **D-2 — Hazard A-8 reworded rather than implemented literally.**
 A-8 asked for the string `both chased and shopped` to be removed from the file

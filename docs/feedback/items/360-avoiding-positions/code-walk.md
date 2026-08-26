@@ -20,7 +20,7 @@ construction**, threaded through call signatures that already carried its two
 siblings, and read behind the flag at exactly **one** point of entry per
 route. Nothing enumerates a package and then discards it; nothing gates.
 
-The governing scope rule (PRD D-095(a)) is: **Avoiding applies exactly where
+The governing scope rule (PRD D-360-3(a)) is: **Avoiding applies exactly where
 `not_interested` applies, and nowhere else.** That makes every scope question
 mechanically decidable by `git grep -n not_interested -- backend`, and §4
 below runs that grep.
@@ -170,7 +170,7 @@ its neighbour:
 then threaded at `backend/server.py:16172`.
 
 The resulting asymmetry — asset ideas honor Avoiding but not
-Chasing/Shopping — is **intended** and follows D-095(a): `not_interested` is
+Chasing/Shopping — is **intended** and follows D-360-3(a): `not_interested` is
 applied on this route's three receive-side guards and Chasing/Shopping never
 were.
 
@@ -248,7 +248,7 @@ Tracked as `living-memory/OPEN_QUESTIONS.md` **Q-031** (renumbered from Q-024
 on 2026-08-19: `origin/main` advanced mid-build and took Q-024 and Q-025).
 
 **Not delivered by this agent:** the `living-memory/OPEN_QUESTIONS.md` entry
-`Q-024` and the four `DECISIONS.md` entries (D-093…D-096). `living-memory/`
+`Q-024` (shipped as Q-031) and the four decisions (item-scoped D-360-1…D-360-4, recorded in `prd.md` §2, not in DECISIONS.md — see scope.md §4). `living-memory/`
 is owned by the orchestrator for this wave; the wording constraint from PRD
 §5.1 (headline is the pre-existing Chasing/Shopping gap, Avoiding named in
 the body) still applies.

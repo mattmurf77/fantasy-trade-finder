@@ -530,7 +530,7 @@ export default function TradeDnaSheet({ visible, onClose, full, openSource }: Pr
   // position. Next values are computed up front so the tap can autosave
   // the exact state it shows.
   //
-  // #360 D-094 — the three rows are NOT symmetric, and the obvious
+  // #360 D-360-2 — the three rows are NOT symmetric, and the obvious
   // "make all three mutually exclusive like the existing two" is the
   // highest-risk misimplementation in this feature:
   //
@@ -917,7 +917,7 @@ export default function TradeDnaSheet({ visible, onClose, full, openSource }: Pr
               ) : null}
 
               {/* #360 R-14 — the hint must state the THREE-way rule,
-                  including the Shopping + Avoiding exception (D-094).
+                  including the Shopping + Avoiding exception (D-360-2).
                   Leaving the old two-way sentence in place after Avoiding
                   ships would be actively wrong documentation inside the
                   product. Flag off ⇒ the original sentence, unchanged. */}

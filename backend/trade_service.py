@@ -5261,7 +5261,7 @@ class TradeService:
             if not_interested_ids and asset_id in not_interested_ids:
                 return empty     # user said never offer this to them
             # #360 — same rule at position granularity: an exclusion beats a
-            # pin (PRD R-6.2 / D-095(b)), mirroring the #163 guard above.
+            # pin (PRD R-6.2 / D-360-3(b)), mirroring the #163 guard above.
             if not avoid_ok(asset_id, players, _avoid):
                 return empty
             owner = next(
@@ -6472,7 +6472,7 @@ class TradeService:
         # at the source, so no combo — nor the pinned/target re-adds below,
         # which iterate this filtered list — can offer them to the user).
         # #360 — avoided POSITIONS are dropped at the same source, so an
-        # exclusion always wins over a pin (PRD R-8 / D-095(b)).
+        # exclusion always wins over a pin (PRD R-8 / D-360-3(b)).
         _avoid = set(avoid_positions or ())
         _known_opp  = [p for p in opponent.roster
                        if p in shrunk_user_elo and p in opp_elo
