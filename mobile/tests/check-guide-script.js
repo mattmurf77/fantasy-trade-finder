@@ -102,7 +102,11 @@ const RECEIPTS = new Set(Object.values(GUIDE_RECEIPTS || {}));
 // and every rendering is held to the full contract.
 const PROBES = {
   s0_1: { id: 's0.1', args: [[]] },
-  s0_2: { id: 's0.2', args: [[]] },
+  // Platform-aware entry (D-163/D-164): one beat, three renderings — the
+  // no-argument call is the flags-off shape and must stay identical to
+  // `('sleeper')`. Every rendering is held to the full contract, so the
+  // ESPN/MFL lines are inside the same `action` cap as the Sleeper one.
+  s0_2: { id: 's0.2', args: [[], ['sleeper'], ['espn'], ['mfl']] },
   s0_err_notfound: { id: 's0.err-notfound', args: [[]] },
   s0_err_down: { id: 's0.err-down', args: [[]] },
   s1_1: { id: 's1.1', args: [[]] },
@@ -516,6 +520,49 @@ assert(
     '11c — n22 names the control the meter actually has (its "Why?" line)',
     `"${n22.line}"`,
   );
+}
+
+// ═══ 12 — s0.2 is platform-aware, and flags-off is untouched ═══════════════
+//
+// Sleeper stopped being the only door (D-163/D-164): the entry page carries a
+// Sleeper · ESPN · MFL chip row and a platform user may never type a Sleeper
+// username or hold a Sleeper identity. The beat therefore follows the chip.
+// Two properties are pinned, and the first is the revert lever: with
+// `landing.platform_options` off the chips never render, `entryPlatform` is
+// pinned to 'sleeper', and this beat must be the one that already shipped.
+{
+  const bare = S.s0_2();
+  const sleeper = S.s0_2('sleeper');
+  assert(
+    JSON.stringify(bare) === JSON.stringify(sleeper),
+    '12a — the no-argument call renders exactly the Sleeper beat (flags-off shape)',
+    `${JSON.stringify(bare)} vs ${JSON.stringify(sleeper)}`,
+  );
+  assert(
+    sleeper.target === 'signin.username-input' &&
+      /Sleeper username/.test(sleeper.line),
+    '12b — the Sleeper rendering still rings the username field and names it',
+    `${sleeper.target} · "${sleeper.line}"`,
+  );
+  for (const p of ['espn', 'mfl']) {
+    const step = S.s0_2(p);
+    const label = p === 'espn' ? 'ESPN' : 'MFL';
+    assert(
+      step.target === 'signin.platform-link-btn',
+      `12c — the ${label} rendering rings the panel's link button, not the hidden field`,
+      `target=${step.target} — the username field does not mount under a non-Sleeper chip`,
+    );
+    assert(
+      !/Sleeper/i.test(step.line),
+      `12d — the ${label} rendering makes no Sleeper claim`,
+      `"${step.line}" — this user may have no Sleeper account at all`,
+    );
+    assert(
+      new RegExp(`\\b${label}\\b`).test(step.line),
+      `12e — the ${label} rendering names the platform the user actually chose`,
+      `"${step.line}"`,
+    );
+  }
 }
 
 console.log(

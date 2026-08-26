@@ -108,11 +108,46 @@ export const S = {
     // copy makes a weaker promise is a regression waiting for the flip.
     lineRam: "I'm Fleeced, the ram. Stick with me — I'll walk you to your first trade.",
   }),
-  s0_2: (): GuideStep => ({
-    id: 's0.2', screen: 'SignIn', pose: 'point', flip: true, side: 'right',
-    advance: 'action', target: 'signin.username-input', once: true,
-    line: 'Type your Sleeper username. No password needed.',
-  }),
+  /** S0.2 — point at the entry control the landing page is ACTUALLY showing.
+   *
+   *  Sleeper stopped being the only door (D-163/D-164): under
+   *  `landing.platform_options` the entry page carries a Sleeper · ESPN · MFL
+   *  chip row, and picking ESPN or MFL replaces the username form with a
+   *  panel whose button opens that platform's link sheet. Such a user signs
+   *  in to their platform (or pastes a league ID), claims a team, and gets a
+   *  session with no Sleeper identity at all — so a beat that says "type your
+   *  Sleeper username" and rings a field that is not on screen is pointing at
+   *  a door that closed.
+   *
+   *  ONE beat, one id, three renderings: the target and the line follow the
+   *  chip, so the seen/retired ledgers stay about one thing — "the user was
+   *  shown where to start" — exactly as the `s2.wait` and `n6.1` variants do.
+   *  `'sleeper'` (and the no-argument call, which is the shape every
+   *  flags-off call site keeps) renders the shipped beat verbatim. */
+  s0_2: (platform: 'sleeper' | 'espn' | 'mfl' = 'sleeper'): GuideStep =>
+    platform === 'sleeper'
+      ? {
+          id: 's0.2', screen: 'SignIn', pose: 'point', flip: true, side: 'right',
+          advance: 'action', target: 'signin.username-input', once: true,
+          line: 'Type your Sleeper username. No password needed.',
+        }
+      : {
+          // The panel's own button (`signin.platform-link-btn`) is what opens
+          // the link sheet, so it is what gets rung — and tapping it IS the
+          // action this beat advances on, the same contract the username
+          // field's submit carries.
+          id: 's0.2', screen: 'SignIn', pose: 'point', flip: true, side: 'right',
+          advance: 'action', target: 'signin.platform-link-btn', once: true,
+          line:
+            platform === 'espn'
+              ? 'Sign in to ESPN or paste a league ID — then pick your team.'
+              : 'Sign in to MFL or paste a league ID — then pick your team.',
+        },
+  // Both S0 error beats name Sleeper on purpose and stay that way: their ONLY
+  // call site is `handleSubmit`'s catch in SignInScreen, i.e. the Sleeper
+  // username path. An ESPN/MFL entry failure surfaces inside that platform's
+  // link sheet — an RN <Modal>, which the guide yields to by principle §1.2 —
+  // so a bubble there would be invisible, not helpful.
   s0_err_notfound: (): GuideStep => ({
     id: 's0.err-notfound', screen: 'SignIn', pose: 'oops', advance: 'cta',
     ctas: [NEXT],

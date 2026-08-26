@@ -19,8 +19,14 @@ import { appleSignIn, resolveSmartStart, signIn } from '../api/auth';
 import { track } from '../api/events';
 import { consumeAppleReauthHint, NO_LEAGUE_ID, useSession } from '../state/useSession';
 import { useFlag, useOnboardingFeature } from '../state/useFeatureFlags';
-import { useGuide, requestGuideStep, advanceGuideIfActive, guidedAvatarActive } from '../state/useGuide';
-import { getOnboardingState } from '../state/useOnboardingState';
+import {
+  useGuide,
+  requestGuideStep,
+  advanceGuideIfActive,
+  guideActiveStepId,
+  guidedAvatarActive,
+} from '../state/useGuide';
+import { getOnboardingState, patchOnboardingState } from '../state/useOnboardingState';
 import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTargets';
 import { S as GUIDE } from '../components/analystScript';
 import { getLeagues, getLeagueRosters, getLeagueUsers } from '../api/sleeper';
@@ -37,9 +43,11 @@ import PlatformLinkSheet from '../components/PlatformLinkSheet';
 const TEST_APPLE_SUB = testLaunchArg('FTFTestAppleSub');
 
 /** Landing platform options (`landing.platform_options`): the entry chip a
- *  non-Sleeper manager picked before signing in with Apple. Rides the two
- *  sign-in callbacks so RootNav can land LeaguePicker with the matching
- *  link sheet auto-opened (#130 `espnLink` / its new `mflLink` twin). */
+ *  non-Sleeper manager selected. Since D-164 the chip's own panel carries the
+ *  sessionless entry flow, so this type survives for the ONE remaining Apple
+ *  path — the quiet "Already have an account?" re-entry link, whose callbacks
+ *  carry it so RootNav can land LeaguePicker with the matching link sheet
+ *  auto-opened (#130 `espnLink` / its `mflLink` twin). */
 export type EntryPlatformIntent = 'espn' | 'mfl';
 
 interface Props {
@@ -97,12 +105,12 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
   // ── Landing platform options (flag `landing.platform_options`) ─────────
   // The entry page offers Sleeper · ESPN · MFL as supported platforms.
   // Sleeper (default) renders today's username form untouched. ESPN/MFL swap
-  // the form for an explainer + Sign in with Apple: the link routes
-  // (/api/espn/link, /api/mfl/link) require a session, and Apple is the only
-  // mint that doesn't need a Sleeper username — the chip choice rides the
-  // Apple callbacks as `platformIntent` and LeaguePicker opens the matching
-  // link sheet on arrival. landingOn-layout only: the flags-off P2.6 layout
-  // is already Apple-first and platform-agnostic.
+  // the form for an explainer + a button that opens that platform's link
+  // sheet in ENTRY mode (D-164): the user signs in to ESPN/MFL or pastes a
+  // league ID, claims a team, and the sessionless POST /api/entry/platform
+  // mints the session at the claim — no Apple account anywhere in the path.
+  // landingOn-layout only: the flags-off P2.6 layout is already Apple-first
+  // and platform-agnostic.
   const platformOptionsFlag = useFlag('landing.platform_options');
   const espnLinkOn = useFlag('espn.link');
   const mflLinkOn = useFlag('mfl.link');
@@ -162,9 +170,24 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
     setErrorKind(null);
     if (p !== 'sleeper') {
       Keyboard.dismiss();
-      // The Analyst's s0.2 spotlight targets the username field this chip
-      // hides — advance it so no spotlight is left pointing at nothing.
+    }
+    // The Analyst's s0.2 spotlight rings whichever entry control the chip row
+    // is currently showing — the Sleeper username field, or the ESPN/MFL
+    // panel's link button (`GUIDE.s0_2(entryPlatform)` below picks both the
+    // target and the line). A switch unmounts that control, in EITHER
+    // direction, so the beat has to do two things:
+    //
+    //   advance — end it now, so no ring outlives its target. This is why the
+    //             switch BACK to Sleeper is handled too: once the beat can
+    //             point at the platform button, returning to Sleeper strands
+    //             it exactly the way leaving Sleeper used to.
+    //   re-arm  — clear its once-ever mark, so the chain effect re-offers it
+    //             against the control that replaced it. Without this, `once:
+    //             true` spends the beat on the door the user just closed and a
+    //             platform-entry user is never told where to start.
+    if (guideActiveStepId() === 's0.2') {
       advanceGuideIfActive('s0.2');
+      patchOnboardingState({ guideSeen: { 's0.2': false } });
     }
   }
 
@@ -226,9 +249,18 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
   // persisted guideSeen, so a backgrounded app re-offers at the same gate.
   const guideActive = useGuide((s) => s.active);
   const usernameFieldRef = useRef<View | null>(null);
+  // The ESPN/MFL panel's link button — s0.2's target whenever a non-Sleeper
+  // chip is selected. Registered unconditionally, like the username field:
+  // only one of the two is ever mounted, and the other measures null, which
+  // is the registry's ordinary degrade-to-bubble path.
+  const platformLinkRef = useRef<View | null>(null);
   useEffect(() => {
     registerGuideTarget('signin.username-input', usernameFieldRef);
-    return () => unregisterGuideTarget('signin.username-input');
+    registerGuideTarget('signin.platform-link-btn', platformLinkRef);
+    return () => {
+      unregisterGuideTarget('signin.username-input');
+      unregisterGuideTarget('signin.platform-link-btn');
+    };
   }, []);
   useEffect(() => {
     if (!landingOn || !guidedAvatarActive()) return;
@@ -238,10 +270,15 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
       return () => clearTimeout(t);
     }
     if (!guideActive && !seen['s0.2']) {
-      requestGuideStep(GUIDE.s0_2());
+      // Platform-aware: the beat rings the control this chip choice put on
+      // screen. `entryPlatform` is a dep so a chip switch re-offers it (see
+      // selectEntryPlatform, which ends + re-arms an in-flight s0.2); with
+      // `landing.platform_options` off the chips never render, the value is
+      // pinned to 'sleeper', and this is the shipped call.
+      requestGuideStep(GUIDE.s0_2(entryPlatform));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [landingOn, guideActive]);
+  }, [landingOn, guideActive, entryPlatform]);
 
   useEffect(() => {
     if (!accountsEnabled || Platform.OS !== 'ios') return;
@@ -613,6 +650,11 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
                     ? 'ESPN dynasty leagues are supported. Sign in to ESPN and we’ll find your leagues, or enter a league ID — no extra account needed.'
                     : 'MyFantasyLeague dynasty leagues are supported. Sign in with MFL and we’ll find your leagues, or enter a league ID — no extra account needed.'}
                 </ChalkText>
+                {/* Guide spotlight target — collapsable={false} so the
+                    wrapper survives view-flattening and stays measurable,
+                    exactly as the username field's wrapper does. This is what
+                    s0.2 rings for an ESPN/MFL chip. */}
+                <View ref={platformLinkRef} collapsable={false}>
                 <Pressable
                   testID="signin.platform-link-btn"
                   accessibilityRole="button"
@@ -620,9 +662,12 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
                     styles.button,
                     pressed && styles.buttonPressed,
                   ]}
-                  onPress={() =>
-                    setEntrySheet(entryPlatform === 'espn' ? 'espn' : 'mfl')
-                  }
+                  onPress={() => {
+                    // The real action s0.2 asks for on this path — the same
+                    // contract handleSubmit carries for the username field.
+                    advanceGuideIfActive('s0.2');
+                    setEntrySheet(entryPlatform === 'espn' ? 'espn' : 'mfl');
+                  }}
                   disabled={busy || demoBusy || appleBusy}
                 >
                   <Text style={styles.buttonText}>
@@ -631,6 +676,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
                       : 'Link your MFL league →'}
                   </Text>
                 </Pressable>
+                </View>
               </View>
             ) : null}
             {!nonSleeperEntry && hint ? (
@@ -654,8 +700,9 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
             ) : null}
             {/* Guide spotlight target — collapsable={false} so the wrapper
                 survives view-flattening and stays measurable. Hidden while an
-                ESPN/MFL chip is selected; selectEntryPlatform advances s0.2
-                first so no spotlight outlives its target. */}
+                ESPN/MFL chip is selected; selectEntryPlatform ends s0.2 before
+                that happens (and re-arms it against the platform panel's
+                button), so no spotlight outlives its target. */}
             {nonSleeperEntry ? null : (
             <View ref={usernameFieldRef} collapsable={false}>
             <TextInput
