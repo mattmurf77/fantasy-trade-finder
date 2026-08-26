@@ -15,6 +15,52 @@
 
 
 
+## 2026-08-26 — `fix/web-phase0` merged with `origin/main`; full gate set re-run green on the merged tree
+
+**Every number below was measured on the merge commit `b4f29220` + `6cd163a4`, on this tree.** The
+stale figures carried on the branch (161/161 web checks, "backend not re-run") are superseded — do
+not quote them.
+
+Full gates, not express: the branch touches API surface and analytics, which `CLAUDE.md` marks as a
+bright line ([D-163](DECISIONS.md) §D5). Express was never available here.
+
+| Gate | Result |
+|---|---|
+| `pytest backend/tests` | **4286 passed, 1 skipped** in 445.16 s (includes the 10 new cases below) |
+| `npx tsc --noEmit` (mobile) | **exit 0**, zero output (after `npm ci` — this worktree had no `node_modules`) |
+| `mobile/scripts/testid-lint.sh` | **`testid-lint OK`** |
+| `python3 qa/web/check_web_structure.py` | **173/173** — DS 80/80 · TOK 1/1 · SEO 50/50 · A11Y 38/38 · HYG 4/4 |
+| `mobile/tests/check-*.js` (81 suites) | **all pass**, zero failures |
+
+**Merge verification, not just "it applied clean".** 140 commits of `origin/main` drift since base
+`50e0451d`. `backend/server.py` and `web/js/app.js` both **auto-merged**, which is exactly the case
+worth distrusting, so both sides were checked present afterward by grep on the merged file: the
+branch's flag-readiness fix (`FTF_FLAGS_READY`, `ftf:flags-ready`, the `pending[]` drain in
+`events.js`) **and** main's `FAIRNESS_BALANCED_MIN = 0.75` cross-client invariant with its
+`consensus-tag` tooltip block. Both intact. The five conflicts were all append-at-top ledger files.
+
+**New: `backend/tests/test_prod_blocked_static.py` (10 cases).** Pins `_PROD_BLOCKED_STATIC` in both
+directions — the four blocked paths 404 when `_IS_PROD_ENV`, all four still serve 200 in dev (that is
+how the operator reaches the dashboard), the set is exactly those four, and `/index.html` is not
+caught by an over-broad block. **Verified non-vacuous:** removing the `/admin/analytics.html` entry
+turns 2 of the 10 red. This is the mechanically-checkable evidence the gates require for the
+admin-block change; no code-walk proof is owed for it.
+
+**Gotcha renumber.** The branch's `G-053` collided with `origin/main`'s `G-053`…`G-061` and was
+renumbered to **[G-062](GOTCHAS.md)**. One cross-reference (`HANDOFF.md`) moved with it. No
+anchor-style `#g-053-…` links existed anywhere in the tree, so the [G-054](GOTCHAS.md) trap — a
+blanket ID replace that rewrites headings but not their anchors — did not apply. Checked, not assumed.
+
+**Not run, and why:** no EAS build, no TestFlight pass, no simulator (retired, D-056). Nothing in
+this merge touches mobile source — the mobile gates were run only to prove the *merge* is green, not
+because mobile behavior changed. `githooks/pre-push` still enforces the retired simulator marker;
+`FTF_SKIP_SIM_GATE=1` is the standing D-056 posture and the five gates above are what was run instead.
+
+**Still owed before this ships to users:** the operator's manual pass on the live site after deploy.
+The web surface has no runtime harness — `check_web_structure.py` parses source and never loads a page.
+
+---
+
 ## 2026-08-25 — v1.16.6 (EAS build 132) BUILT + SUBMITTED to TestFlight
 
 Carries PR #196's `via:'quickset'` tag ([D-162](DECISIONS.md)) — the first build in which the Quick Set funnel can emit anything.

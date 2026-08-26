@@ -515,6 +515,9 @@
 | D-096 | The likes-you Injector Is Gated: the Floor Moves Into the Units the User Reads, and R1 Runs Directionally (Reverses D-055 sub-decision (5) / Q-G6-1) | 2026-08-19 |
 
 | D-090 | A Current-Year Pick Reads as Its Real Slot; the 2026-07-18 "Can't Resolve a Slot" Premise Is Narrowed, Not the Decision | 2026-08-19 |
+| D-163 | Web Posture Is B, Companion: Marketing Front Door Plus Session-Gated Tools, Not Full Parity | 2026-08-26 |
+
+> **This index is stale.** It lists 76 of the 135 entries: coverage runs D-001 … D-096 (D-095 missing), then stops, and D-163 below was appended by hand. Everything D-097 … D-162 exists as a `## D-xxx` heading further down but is absent here. Treat `grep -n '^## D-' living-memory/DECISIONS.md` as the authoritative list, not this table. Backfilling it is unclaimed work.
 
 ---
 
@@ -1535,3 +1538,17 @@ No historical 1100-pin repair — indistinguishable from anchor no-value.
 **Alternatives considered:** (a) tag only the final rung's save — preserves the documented per-position shape but misses every walk whose last rung is skipped/empty, leaves 7/8 `tier_save` rows mislabeled `'tiers'`, and leaves `ranking_method` mostly wrong; (b) docs-only correction — leaves `FEATURE_VERTICALS["rank_quickset"]` permanently zero and Quick Set with no server signal at all; (c) a new client `quickset_walk_finished` event — the honest per-position signal, but new taxonomy surface, reserved (per the 2026-08-13 addendum) for when the split is actually needed.
 
 **Consequences:** `rank_quickset`, funnel stage 4's own entry, `tier_save.via` splits, and the `quickset` ranking-method label all light up at the next mobile release; do not trend across the seam. `duration_ms`/`skipped` stay null (no honest whole-walk value per commit) so `report_time`'s quickset row stays dark — as it always effectively was. Consensus-accepting walks remain server-invisible. No taxonomy registry change; INTENT classification unchanged.
+
+## D-163 — Web Posture Is **B, Companion**: Marketing Front Door Plus Session-Gated Tools, Not Full Parity
+
+**Date:** 2026-08-26 · **Status:** decided (operator) · **Scope:** [`docs/plans/web-parity/plan.md`](../docs/plans/web-parity/plan.md) D1, phases 3a
+
+**Context:** The 2026-08-19 web-parity audit found the site badly out of step with the app and offered three postures: A (front door — marketing only), B (companion — marketing plus session-gated tools for existing users), C (full parity — web matches the app feature for feature). Phases 0-2 are unconditional under all three, so the branch could be built before the call; D1 only decides where **Phase 3** stops. Posture A was foreclosed on 2026-08-19 when the operator dropped anonymous web surfaces — A was the posture that depended on them.
+
+**Decision:** **B — Companion.** Phase 3 stops at **3a**. Web is a marketing front door plus session-gated tools that support the app; it is not a second full client and does not chase the app's feature set. This confirms the plan's own recommendation and matches what `fix/web-phase0` already built (the calculator and market pulse are session-gated, per the same operator call that foreclosed A).
+
+**Alternatives considered:** (a) C, full parity — the largest Phase 3 by a wide margin, and it makes every future mobile feature a two-client obligation under a "no framework, no build step" commitment; (b) A, front door — already foreclosed, and it would mean deleting the working session-gated calculator this branch just built.
+
+**Consequences:** Phase 3b/3c are out of scope and should not be picked up without a new decision. Web is permanently allowed to lag the app on features, which means "web doesn't have X" stops being a defect class. **D2 (remediate vs rewrite) and D3 (bundle+minify) remain OPEN** — both gate Phase 3, not the Phase 0-2 merge, so this branch does not wait on them. D3 is the largest item still on the table: 266 KB unminified `app.js` plus 133 KB CSS at `no-cache` is the biggest perf lever the site has.
+
+**Related:** [D-056](#d-056) (gates posture), [G-062](GOTCHAS.md) (the web-analytics race Phase 0 fixed).

@@ -58,13 +58,17 @@ Phases 0–2 are unconditional under all three postures.
 
 ## Decisions needed before build
 
-| # | Decision | Options | Recommendation |
-|---|---|---|---|
-| **D1** | Target posture | A / B / C above | **B — Companion** |
-| **D2** | Rebuild or remediate | Rewrite `web/` on a framework, vs fix in place | **Remediate.** `CLAUDE.md` commits to "no framework, no build step"; the audit found the site is already on-brand Chalkline with working drag boards. The problems are duplication and rot, not architecture. |
-| **D3** | Introduce a minimal build step | None / bundle+minify only / full toolchain | **Bundle + minify only.** 266 KB unminified `app.js` + 133 KB CSS at `no-cache` is the single biggest perf lever, and shared-token extraction (P1-1) needs *some* pipeline. Stop short of a framework. |
-| **D4** | Demo mode: fix or remove | Fix the synthetic-id path / remove the CTA | **Fix.** `landing.try_before_sync` is now ON for mobile on `main`; removing web's demo diverges the funnel further. But remove the CTA *today* if the fix is not same-day. |
-| **D5** | Express lane? | Full gates / express on the P0 subset | **Operator's call.** Agents never self-select express. Note the bright line: P2-1 (public calculator) touches API surface + analytics and is **not** a quick fix under any framing. |
+**D1, D4 and D5 are settled** (2026-08-26 operator call; D5 settled by the
+bright line, not by choice). **D2 and D3 remain open** — they gate Phase 3, not
+the Phase 0-2 merge.
+
+| # | Decision | Options | Recommendation | Status |
+|---|---|---|---|---|
+| **D1** | Target posture | A / B / C above | **B — Companion** | **DECIDED 2026-08-26 — B.** Operator confirmed the recommendation. Phase 3 stops at 3a. |
+| **D2** | Rebuild or remediate | Rewrite `web/` on a framework, vs fix in place | **Remediate.** `CLAUDE.md` commits to "no framework, no build step"; the audit found the site is already on-brand Chalkline with working drag boards. The problems are duplication and rot, not architecture. | **OPEN.** |
+| **D3** | Introduce a minimal build step | None / bundle+minify only / full toolchain | **Bundle + minify only.** 266 KB unminified `app.js` + 133 KB CSS at `no-cache` is the single biggest perf lever, and shared-token extraction (P1-1) needs *some* pipeline. Stop short of a framework. | **OPEN.** Biggest remaining perf lever; needs the operator against the no-build-step commitment. |
+| **D4** | Demo mode: fix or remove | Fix the synthetic-id path / remove the CTA | **Fix.** `landing.try_before_sync` is now ON for mobile on `main`; removing web's demo diverges the funnel further. But remove the CTA *today* if the fix is not same-day. | **DECIDED — fixed.** Phase 0 fixed the demo path (two causes); CTA kept. |
+| **D5** | Express lane? | Full gates / express on the P0 subset | **Operator's call.** Agents never self-select express. Note the bright line: P2-1 (public calculator) touches API surface + analytics and is **not** a quick fix under any framing. | **DECIDED — full gates.** This branch touches API surface + analytics; express unavailable. |
 
 ---
 
@@ -365,9 +369,12 @@ backend dependency and no blocker.
 
 ## Open questions
 
-1. **D1 — posture.** A, B, or C? Determines where Phase 3 stops.
-2. **P0-3** — governing-law jurisdiction for Terms. Operator only.
+1. ~~**D1 — posture.**~~ **CLOSED 2026-08-26 — B, Companion.** Phase 3 stops at 3a.
+2. ~~**P0-3** — governing-law jurisdiction for Terms.~~ **CLOSED 2026-08-26 — operator
+   chose to leave the `[STATE]` TODO in place.** Terms ships legally incomplete, knowingly.
+   Re-open only when the operator names a jurisdiction.
 3. **P0-7** — per-page call on the five dark/broken pages: fix, gate, or remove?
 4. **D3** — is a bundle/minify step acceptable given the "no build step" commitment?
+   **Still open**, and now the largest single item left on the table.
 5. Is converting web visitors into **TestFlight testers** the primary success metric for
    Phase 2, or is standalone web usage a goal in its own right? This changes what P2-3 is.

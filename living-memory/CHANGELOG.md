@@ -11,6 +11,38 @@
 
 ---
 
+## 2026-08-26 — `fix/web-phase0` caught up to `main`, four operator blockers closed (still NOT merged)
+
+**The branch is now mergeable.** It sat 140 commits behind `origin/main`; the merge is `b4f29220`.
+`backend/server.py` and `web/js/app.js` auto-merged and were then verified by hand on the merged
+file — the branch's flag-readiness analytics fix and main's `FAIRNESS_BALANCED_MIN` cross-client
+invariant are both intact. All five conflicts were append-at-top ledger files.
+
+**Gotcha `G-053` → [G-062](GOTCHAS.md).** `origin/main` had taken `G-053`…`G-061` while the branch
+was parked. One cross-reference moved with it; no anchor-style links existed, so the [G-054](GOTCHAS.md)
+heading-vs-anchor trap did not bite.
+
+**Operator closed the four blockers** (2026-08-26):
+- **Posture: B, Companion** — [D-163](DECISIONS.md). Phase 3 stops at 3a; web is a front door plus
+  session-gated tools, not a second full client. Confirms the plan's recommendation.
+- **`web/admin/analytics.html` now 404s in prod** — added to `_PROD_BLOCKED_STATIC` (`6cd163a4`).
+  Its data was already `X-Cron-Secret`-gated, so this removes a public page shell, not an access
+  control; the operator reaches it via a local server. Pinned by a new 10-case backend test.
+- **`[STATE]` in `terms.html` stays a TODO** — operator declined to name a governing-law
+  jurisdiction. Terms ships legally incomplete, knowingly. Waiver W1 stands.
+- **No support email** — `contact.html` remains the single support route. Waiver W2 stands.
+
+**Gates, all re-run on the merged tree:** pytest 4286 passed / 1 skipped · `tsc --noEmit` clean ·
+testid-lint OK · web-structure 173/173 · 81 mobile structural suites pass. Full detail in
+[TEST_LEDGER](TEST_LEDGER.md) 2026-08-26. The branch's older numbers are superseded.
+
+**Still open:** **P2-3, the landing page** — deliberately not done; it is positioning copy that wants
+the operator's voice. And plan decisions **D2** (remediate vs rewrite) and **D3** (bundle + minify —
+266 KB unminified `app.js` + 133 KB CSS at `no-cache` is the biggest perf lever left). Both gate
+Phase 3, not this merge.
+
+**Not pushed, not merged, not deployed.**
+
 
 
 

@@ -101,10 +101,13 @@ codifying them is a P1-2 deliverable once a harness exists to hold them.
 
 ## 6. Waivers requiring operator sign-off
 
-| # | Waived | Why | Owner |
-|---|---|---|---|
-| W1 | **P0-3 not done** — `[STATE]` still in `web/terms.html:157` | Governing-law jurisdiction is a legal choice; an agent inventing one would be worse than the placeholder | Operator |
-| W2 | **No support email added** | None exists anywhere in the repo. `contact.html` gives web users a working channel without one; a plain email address can be added alongside | Operator |
-| W3 | **`web/admin/analytics.html` still reachable in prod** | It is the operator's live dashboard. Its data is `CRON_SECRET`-gated; only the shell is public. Blocking it removes operator tooling — their call, not an engineering one | Operator |
-| W4 | **No automated regression test for these fixes** | No web test harness exists (plan P1-2). Manual matrix in §3 is the evidence | Accepted for Phase 0 |
-| W5 | **`league-rankings.html` still 401s when reached by direct URL** | Its flag is off by design; the page shows an unavailable state. Not user-reachable through the UI | Accepted |
+**Operator ruled on W1-W3 on 2026-08-26** (see the Resolution column). W3 is
+closed by code; W1 and W2 are closed as standing decisions, not as work owed.
+
+| # | Waived | Why | Owner | Resolution (2026-08-26) |
+|---|---|---|---|---|
+| W1 | **P0-3 not done** — `[STATE]` still in `web/terms.html:157` | Governing-law jurisdiction is a legal choice; an agent inventing one would be worse than the placeholder | Operator | **Stands.** Operator chose to leave the `[STATE]` TODO in place rather than name a jurisdiction now; Terms ships legally incomplete, knowingly. |
+| W2 | **No support email added** | None exists anywhere in the repo. `contact.html` gives web users a working channel without one; a plain email address can be added alongside | Operator | **Stands.** `contact.html` is the single support route; no email address to add. |
+| W3 | **`web/admin/analytics.html` still reachable in prod** | It is the operator's live dashboard. Its data is `CRON_SECRET`-gated; only the shell is public. Blocking it removes operator tooling — their call, not an engineering one | Operator | **CLOSED — blocked.** Added to `_PROD_BLOCKED_STATIC`; pinned by `backend/tests/test_prod_blocked_static.py`. Operator uses a local server. |
+| W4 | **No automated regression test for these fixes** | No web test harness exists (plan P1-2). Manual matrix in §3 is the evidence | Accepted for Phase 0 | **Superseded by P1-2** — `qa/web/check_web_structure.py` now runs in CI (`web-structure`), 173/173. |
+| W5 | **`league-rankings.html` still 401s when reached by direct URL** | Its flag is off by design; the page shows an unavailable state. Not user-reachable through the UI | Accepted | Unchanged. |

@@ -10,6 +10,58 @@
 
 
 
+## 2026-08-26 — `fix/web-phase0` is caught up, gated green, and waiting on a merge decision
+
+**Where:** branch `fix/web-phase0` at `6cd163a4`, checked out in worktree
+`.claude/worktrees/wait-instructions-ef2095`. **Not pushed, not merged, not deployed.** Working tree
+clean. `mobile/node_modules` was installed here to run `tsc` — remove it or remove the worktree
+before any EAS build ([G-022](GOTCHAS.md): nested worktrees once broke an upload).
+
+**What changed this session.** Two commits. `b4f29220` merges 140 commits of `origin/main` into the
+branch, which had been parked since base `50e0451d`. `6cd163a4` blocks the operator dashboard shell
+in prod and adds a 10-case test pinning the whole block list.
+
+**The merge is verified, not just clean.** `backend/server.py` and `web/js/app.js` auto-merged —
+the case most worth distrusting — so both sides were grepped on the merged file afterward: the
+branch's flag-readiness analytics fix and main's `FAIRNESS_BALANCED_MIN` cross-client invariant are
+both present. The five real conflicts were all append-at-top ledger files.
+
+**The ID collision is resolved.** The branch's `G-053` became **[G-062](GOTCHAS.md)**; `origin/main`
+had taken `G-053`…`G-061`. No anchor-style links existed, so [G-054](GOTCHAS.md)'s heading-vs-anchor
+trap did not apply — that was checked, not assumed.
+
+**Gates, all re-run here on the merged tree** (branch's older numbers are superseded — do not quote
+161/161): pytest **4286 passed, 1 skipped** · `tsc --noEmit` **exit 0** · testid-lint **OK** ·
+`check_web_structure.py` **173/173** · 81 `mobile/tests/check-*.js` suites **all pass**. Detail in
+[TEST_LEDGER](TEST_LEDGER.md) 2026-08-26. Full gates, not express: API surface + analytics is a
+bright line.
+
+**Operator closed all four blockers** — posture **B, Companion** ([D-163](DECISIONS.md), Phase 3
+stops at 3a); admin dashboard **blocked in prod**; `[STATE]` in Terms **stays a TODO** (ships legally
+incomplete, knowingly); **no support email**, `contact.html` is the only route. Waivers W1/W2 stand
+as decisions, not as work owed — recorded in [`scope.md`](../docs/plans/web-parity/scope.md) §6.
+
+### What is next, in order
+
+1. **The merge decision is the operator's.** Everything mechanical is done and green. Nothing here
+   has been pushed. This is 34+ files of web change plus a prod-behavior change — it wants a look
+   before it goes to `main` and auto-deploys to Render.
+2. **P2-3, the landing page** — still deliberately not done. Positioning copy that wants the
+   operator's voice; everything it needs is in place. This is the last Phase 2 item.
+3. **D2 and D3 are still open** and gate Phase 3, not this merge. D3 (bundle + minify) is the
+   largest item left: 266 KB unminified `app.js` + 133 KB CSS at `no-cache`.
+4. **After deploy, an operator pass on the live site.** `check_web_structure.py` parses source and
+   never loads a page — web has no runtime harness, so this is the only runtime evidence available.
+
+### Watch out for
+
+- **The `DECISIONS.md` index is stale** — 76 of 135 entries; it stops after D-096. A note saying so
+  now sits under the table. Backfilling it is unclaimed work.
+- **This worktree holds the branch.** If it is removed, ledger the tip sha in `docs/recovery/` first,
+  verified by content against `origin/main` (this repo squash-merges).
+
+---
+
 ## 2026-08-25 — v1.16.6 (132) is on TestFlight; everything owed is now RUNTIME verification, not code
 
 **Where:** `main` at `c092f808`+ (release) — nothing in flight, no branch open, working tree clean. EAS build `8925880d` **finished** and submission `b190d30b` **finished**; Apple-side processing then TestFlight availability is the only remaining step and it is not ours.
@@ -102,6 +154,7 @@ move, and the avatar lab's anchor test models the brief's described layout, not 
 **none**, so the bubble reads "The Analyst" above a ram, which is D-155's recorded default). Higgsfield credits ~4.35.
 
 ## Table of Contents
+- [2026-08-26 — `fix/web-phase0` is caught up, gated green, and waiting on a merge decision](#2026-08-26--fixweb-phase0-is-caught-up-gated-green-and-waiting-on-a-merge-decision)
 - [2026-08-25 — v1.16.6 (132) is on TestFlight; everything owed is now RUNTIME verification, not code](#2026-08-25--v1166-132-is-on-testflight-everything-owed-is-now-runtime-verification-not-code)
 - [2026-08-24 — Waves A + B0 SHIPPED (1.16.4 / EAS 130); Wave B is the next build; do NOT light `calc.inline_home` before it](#2026-08-24--waves-a--b0-shipped-1164--eas-130-wave-b-is-the-next-build-do-not-light-calcinline_home-before-it)
 - [2026-08-24 — Fleeced on TestFlight (v1.16.3 build 129), dark; one production write left](#2026-08-24--fleeced-on-testflight-v1163-build-129-dark-one-production-write-left)
