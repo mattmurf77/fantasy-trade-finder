@@ -21540,6 +21540,190 @@ def extension_auth():
     })
 
 
+@app.route("/api/entry/platform", methods=["POST"])
+def entry_platform():
+    """Sessionless ESPN/MFL entry (landing platform options v2, D-164).
+
+    The Sleeper door is "claim your username, no password" — this is its
+    platform twin: "point at your league, claim your team". Two steps in one
+    route, mirroring the link routes' preview/import split:
+
+      • no team_id → PREVIEW: fetch + crosswalk the league and return the
+        exact `choose_team` shape POST /api/{espn,mfl}/link returns, so the
+        existing link sheets parse it unchanged. Nothing is persisted and no
+        session exists yet. ESPN cookies come from the body only — there is
+        no user to hold a stored credential.
+      • team_id → MINT: validate the claim and mint a session for a
+        DETERMINISTIC user id derived from the claimed team, via the same
+        _extension_build_session that backs /api/extension/auth (which also
+        creates the users row). Deterministic ids make identity durable:
+        re-claiming the same team recovers the same boards, exactly like
+        re-typing the same Sleeper username.
+
+    Id namespace — deliberately distinct from the `espn:`/`mfl:` member
+    placeholders, which are documented as never-routable (see
+    replace_espn_league_members):
+      entry:espn:<canonical SWID>       (claimed team has an owner SWID)
+      entry:espn:<league_id>.t<team_id> (ownerless team)
+      entry:mfl:<league_id>.f<franchise_id>
+
+    The route does NOT import the league. The client follows the mint with
+    the canonical POST /api/{espn,mfl}/link import under the fresh token
+    (admitted by the unverified-write grace path), which binds the claimed
+    team to the entry user and persists league/members/credentials through
+    the one existing implementation.
+
+    Errors reuse the link routes' vocabulary (espn_auth_required /
+    espn_bad_credentials + wrong_account / *_bad_league_id / *_bad_team_id /
+    *_unavailable) so the sheets' error handling applies verbatim.
+    404 while `landing.platform_options` or the platform's link flag is off.
+    """
+    if not is_enabled("landing.platform_options"):
+        return jsonify({"error": "feature_disabled"}), 404
+    body = request.get_json(force=True) or {}
+    platform = str(body.get("platform") or "").strip().lower()
+    if platform not in ("espn", "mfl"):
+        return jsonify({"error": "bad_platform",
+                        "message": "platform must be 'espn' or 'mfl'."}), 400
+
+    if platform == "espn":
+        if not is_enabled("espn.link"):
+            return jsonify({"error": "feature_disabled"}), 404
+        from . import espn_service as _espn
+
+        league_id = str(body.get("espn_league_id") or "").strip()
+        if not league_id.isdigit():
+            return jsonify({"error": "espn_bad_league_id",
+                            "message": "ESPN league IDs are numeric."}), 400
+        try:
+            season = int(body.get("season") or _ESPN_DEFAULT_SEASON)
+        except (TypeError, ValueError):
+            return jsonify({"error": "espn_bad_season"}), 400
+        espn_s2 = (body.get("espn_s2") or "").strip() or None
+        swid = (body.get("swid") or "").strip() or None
+        if bool(espn_s2) != bool(swid):
+            return jsonify({
+                "error": "espn_cookies_incomplete",
+                "message": "Private leagues need both espn_s2 and SWID.",
+            }), 400
+
+        try:
+            league, mapped = _espn_import_payload(league_id, season,
+                                                  espn_s2, swid)
+        except _espn.EspnError as e:
+            return _espn_error_response(e)
+
+        team_id = body.get("team_id")
+        if team_id is None:
+            return jsonify({
+                "status": "choose_team",
+                "league": {
+                    "espn_league_id": league["league_id"] or league_id,
+                    "name":           league["name"],
+                    "season":         league["season"] or season,
+                    "total_teams":    league["total_teams"],
+                },
+                "teams": [
+                    {
+                        "team_id":        t.team_id,
+                        "name":           t.name,
+                        "owner_display":  t.owner_display,
+                        "mapped_players": len(mapped["rosters"].get(t.team_id, [])),
+                    }
+                    for t in league["teams"]
+                ],
+                "report": _espn_report_json(mapped["report"]),
+            })
+
+        try:
+            team_id = int(team_id)
+        except (TypeError, ValueError):
+            return jsonify({"error": "espn_bad_team_id"}), 400
+        team = next((t for t in league["teams"] if t.team_id == team_id), None)
+        if team is None:
+            return jsonify({"error": "espn_bad_team_id",
+                            "message": "That team isn't in this league."}), 400
+        # #321 parity: when the claim arrives with a live cookie pair, the
+        # pair's SWID must own the claimed team (an ownerless team is
+        # inconclusive-accept, same as the link route).
+        if espn_s2 and swid and team.owner_swid:
+            if (_espn.canonical_swid(team.owner_swid).upper()
+                    != _espn.canonical_swid(swid).upper()):
+                return jsonify({"error": "espn_bad_credentials",
+                                "reason": "wrong_account",
+                                "message": _ESPN_WRONG_ACCOUNT_MSG}), 403
+        if team.owner_swid:
+            entry_uid = f"entry:espn:{_espn.canonical_swid(team.owner_swid)}"
+        else:
+            entry_uid = f"entry:espn:{league_id}.t{team_id}"
+        display_name = team.name or f"Team {team_id}"
+    else:
+        if not is_enabled("mfl.link"):
+            return jsonify({"error": "feature_disabled"}), 404
+        from . import mfl_service as _mfl
+
+        try:
+            league_id, year, host = _mfl_resolve(body)
+            raw = _mfl.fetch_league_bundle(league_id, year, host)
+        except _mfl.MflError as e:
+            return _platform_error_response(e, "mfl")
+
+        parsed = _mfl.parse_bundle(raw)
+        mapped = _mfl.map_franchises(parsed, _shared_crosswalk())
+
+        franchise_id = body.get("franchise_id") or body.get("team_id")
+        if franchise_id is None:
+            return jsonify({
+                "status": "choose_team",
+                "league": {"mfl_league_id": parsed["league_id"] or league_id,
+                           "name": parsed["name"], "season": year,
+                           "total_teams": parsed["total_teams"], "host": host},
+                "teams": [
+                    {"team_id": fr["franchise_id"], "name": fr["name"],
+                     "mapped_players":
+                         len(mapped["rosters"].get(fr["franchise_id"], []))}
+                    for fr in parsed["franchises"]
+                ],
+                "report": _platform_report_json(mapped["report"]),
+            })
+
+        franchise_id = str(franchise_id)
+        franchise = next((fr for fr in parsed["franchises"]
+                          if fr["franchise_id"] == franchise_id), None)
+        if franchise is None:
+            return jsonify({"error": "mfl_bad_team_id",
+                            "message": "That franchise isn't in this league."}), 400
+        entry_uid = f"entry:{_mfl_member_id(league_id, franchise_id)}"
+        display_name = franchise["name"] or f"Franchise {franchise_id}"
+
+    try:
+        token, payload = _extension_build_session(
+            user_id=entry_uid,
+            username="",
+            display_name=display_name,
+            avatar=None,
+        )
+    except Exception as e:
+        log.error("entry_platform: session build failed: %s", e)
+        return jsonify({"error": "session_build_failed",
+                        "message": str(e)}), 500
+    _link_device_identity(sleeper_user_id=entry_uid)
+    log.info("entry_platform: minted %s session for %s (%s)",
+             platform, entry_uid, display_name)
+    return jsonify({
+        "stage":         "connected",
+        "session_token": token,
+        "expires_at":    int(payload["last_active"]) + 4 * 3600,
+        "user_id":       entry_uid,
+        "username":      "",
+        "display_name":  display_name,
+        "avatar":        None,
+        "platform":      platform,
+        "league_id":     league_id,
+        "team_id":       team_id if platform == "espn" else franchise_id,
+    })
+
+
 @app.route("/api/extension/rankings")
 @_gate_unverified_read
 def extension_rankings():

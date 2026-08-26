@@ -1,7 +1,7 @@
 # Feature Scope — Landing platform options (Sleeper · ESPN · MFL at entry)
 
-**Date:** 2026-08-26
-**Entry point:** direct ask — "update the app entry page for new users to offer ESPN and MFL alongside Sleeper as the platforms we offer support for"
+**Date:** 2026-08-26 (v2 same day — see §V2 at the bottom)
+**Entry point:** direct ask — "update the app entry page for new users to offer ESPN and MFL alongside Sleeper as the platforms we offer support for"; v2 follow-up ask — "decouple the Apple account dependency from ESPN and MFL"
 **Builder:** Claude session (worktree `app-entry-platform-options-3e16ac`)
 **Operator sign-off on waivers:** pending — one waiver (§1c) surfaced in the session summary
 
@@ -118,3 +118,113 @@ Apple and platform-agnostic.
 - **TestFlight verification:** checklist in §3 — operator runs it on the next
   build that carries this change; outcome logged in TEST_LEDGER.
 - Express lane declared by the operator? **No** — full gates.
+
+---
+
+# V2 — Decouple Apple: sessionless platform entry (2026-08-26, D-164)
+
+**Operator ask:** "Can't we decouple the Apple account dependency from ESPN and
+MFL? If so, let's do that now."
+
+## What changes
+
+The v1 ESPN/MFL panels replaced the form with *Sign in with Apple* because the
+link routes `_require_session`. V2 removes that dependency: the panels open the
+**existing link sheets** directly on the entry page, and the session is minted
+**at the team-claim step** — the same trust model as Sleeper entry (claim your
+username, no password): claim your team, no account.
+
+- **New route `POST /api/entry/platform`** (sessionless; gated on
+  `landing.platform_options` + the platform's own `espn.link`/`mfl.link`):
+  - *Preview* (no `team_id`): same fetch/crosswalk internals and the exact
+    same `choose_team` wire shapes as `/api/espn/link` / `/api/mfl/link`, so
+    the sheets parse it unchanged. ESPN cookies come from the body only (no
+    stored-credential fallback — there is no user yet); a private league
+    without cookies gets the same 403 `espn_auth_required` the sheet already
+    self-serves via the ESPN WebView sign-in (which runs fully signed-out).
+  - *Mint* (`team_id` present): validates the team, runs the #321
+    wrong-account SWID assertion when cookies are in hand, derives a
+    **deterministic user id** — `entry:espn:<canonical SWID>` (else
+    `entry:espn:<league>.t<team>`) / `entry:mfl:<league>.f<franchise>` — and
+    mints the session via the existing `_extension_build_session` (which also
+    creates the users row). Returns an `extension_auth`-shaped payload.
+    The `entry:` namespace is deliberately distinct from the `espn:`/`mfl:`
+    placeholder member ids, which are documented as never-routable.
+- **The canonical import stays canonical:** after the mint the sheet calls the
+  normal `/api/espn/link` / `/api/mfl/link` import with the fresh token (the
+  unverified-write grace path admits it), binding the claimed team to the
+  entry user and persisting league/members/credentials exactly as today. No
+  import logic is duplicated server-side.
+- **Sheets get an `entry` mode** (prop, default off — linked-flow byte-identical):
+  preview goes to the entry route; `pickTeam` mints first, hands the user to
+  the host via `onEntrySession`, then runs the existing import; the
+  session-requiring nice-to-haves are suppressed (`espn.league_picker`
+  my-leagues list, `mfl.auth_link` username/password path).
+- **SignInScreen panels v2:** primary button opens the sheet ("Link your ESPN
+  league →" / MFL); Apple leaves the panel entirely. The quiet
+  "Already have an account? Sign in with Apple" re-entry link is restored in
+  all chip states (it still carries the v1 `platformIntent`). After
+  `onEntrySession` the host `setUser({...account_only: true})` and on
+  `onLinked` routes to LeaguePicker, where the shipped platform-league merge +
+  single-league auto-skip carries the user into Main — no new activation code.
+- **Deterministic identity = durable identity:** re-claiming the same team
+  re-mints the same user id, recovering the same boards — exactly what a
+  Sleeper username re-claim does.
+
+## Analytics (v2)
+
+`signin_attempted` / `signin_succeeded` / `signin_failed` gain the **method
+values** `espn` and `mfl`, fired from the entry mint call (attempt = the user
+claimed a team). Value-only addition on an already-whitelisted prop — no new
+event, no new prop, no registry change; the tracking plan's value list gets a
+dated addendum line. The §1c waiver (no chip-selection event) stands.
+
+## Schema & flag scope (v2 delta)
+
+- Tables/columns: **none** (the `entry:` ids ride the existing `users` PK
+  keyspace; no uniqueness hazard — PK only).
+- `landing.platform_options` is **no longer client-only**: the entry route
+  reads it server-side. `docs/config-reference.md` row updated.
+- New route → `docs/api-reference.md` updated.
+
+## Evidence scope (v2 delta)
+
+- **Backend pytest:** `backend/tests/test_entry_platform_route.py` — flag
+  gating (feature + per-platform), bad platform, MFL preview persists nothing
+  and mints nothing, MFL mint returns a registered token + deterministic
+  `entry:mfl:` id + users row (idempotent re-claim → same id, fresh token),
+  bad team 400, ESPN mint id forms (SWID and ownerless), #321 wrong-account
+  403, and the integration proof: the minted token drives the real
+  `/api/mfl/link` import, binding the claimed franchise to the entry user in
+  `league_members`.
+- **Structural guard:** `check-landing-platform-options.js` extended — panel
+  opens the sheets (no Apple in the panel), sheets' entry mode mints before
+  import and suppresses the session-dependent paths, host sets an
+  `account_only` entry user, backend route exists with both flag gates.
+- **Code-walk:** `code-walk.md` §V2.
+- **Manual TestFlight checklist (v2, replaces v1 §3 steps 2–4):**
+  1. Fresh install → ESPN chip → "Link your ESPN league" → enter a **public**
+     ESPN league id → team list appears → tap your team → import summary →
+     Open league → you land in the app on that league. No Apple prompt at any
+     point.
+  2. Same with a **private** ESPN league: entering the id shows the private
+     copy → Sign in to ESPN (WebView) → back in the sheet, preview loads →
+     claim team → in. Apple never appears.
+  3. MFL chip → league id + year → franchise list → claim → in.
+  4. Kill the app, relaunch: still signed in on the claimed league.
+  5. Sleeper chip flow unchanged; "Already have an account? Sign in with
+     Apple" link present under every chip.
+  6. Settings → sign out → redo step 1 with the same team: your board from
+     step 1 is back (deterministic identity).
+
+## Consequences / accepted limits (v2)
+
+- Entry sessions are **unverified** → not server-persisted; recovery is the
+  client Keychain token, then re-claim (cheap, deterministic). If
+  `auth.enforce_verified_writes` is ever turned on, entry users lose the
+  write-grace path — flagged as a consequence in D-164.
+- Two humans claiming the same team share an identity — identical to two
+  humans claiming the same Sleeper username. Accepted trust model.
+- The `espn.league_picker` my-leagues list doesn't render in entry mode
+  (it reads *stored* credentials); manual league id + WebView sign-in covers
+  entry. Possible later polish, not in scope.

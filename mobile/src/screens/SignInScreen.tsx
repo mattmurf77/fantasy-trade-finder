@@ -27,6 +27,8 @@ import { getLeagues, getLeagueRosters, getLeagueUsers } from '../api/sleeper';
 import { fetchInviteMeta } from '../api/league';
 import { getLastUsername, setLastUsername } from '../api/client';
 import { testLaunchArg } from '../utils/testRouteEntry';
+import EspnLinkSheet from '../components/EspnLinkSheet';
+import PlatformLinkSheet from '../components/PlatformLinkSheet';
 
 // Maestro seam (hld.md §5). `null` in every production bundle: testLaunchArg
 // returns null unless the build-time `extra.testMode` constant is true, which
@@ -126,6 +128,32 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
       setEntryPlatform('sleeper');
     }
   }, [entryPlatform, espnLinkOn, mflLinkOn]);
+
+  // V2 (D-164): which entry-mode link sheet is open. One at a time — iOS
+  // won't stack sibling RN Modals (#266 class).
+  const [entrySheet, setEntrySheet] = useState<null | 'espn' | 'mfl'>(null);
+
+  // Entry mint landed (the sheet stored the session token already) — pin the
+  // entry user. account_only is accurate AND load-bearing: it tells
+  // LeaguePicker's refresh to skip the Sleeper league fetch (an entry:… id
+  // is not a Sleeper user id) and merge the platform leagues instead.
+  async function handleEntrySession(u: { user_id: string; display_name: string }) {
+    await setUser({
+      user_id: u.user_id,
+      username: '',
+      display_name: u.display_name,
+      avatar_id: null,
+      account_only: true,
+    });
+  }
+
+  // Entry import finished — the league is persisted server-side and bound to
+  // the entry user. Route to LeaguePicker: its refresh merges the platform
+  // league (one league → onboarding.league_autoskip carries them into Main).
+  function handleEntryLinked() {
+    setEntrySheet(null);
+    (onAccountSignedIn ?? onSignedIn)();
+  }
 
   function selectEntryPlatform(p: 'sleeper' | EntryPlatformIntent) {
     if (p === entryPlatform) return;
@@ -574,40 +602,35 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
               </>
             ) : null}
             {nonSleeperEntry ? (
-              // ESPN/MFL entry panel: explainer + Sign in with Apple. The
-              // link routes require a session, and Apple is the only mint
-              // that doesn't need a Sleeper username — the chip choice rides
-              // handleAppleSignIn as `platformIntent`.
+              // ESPN/MFL entry panel (v2, D-164): no Apple dependency. The
+              // button opens the platform's own link sheet in entry mode —
+              // claim your team, and the session is minted at the claim (the
+              // sessionless /api/entry/platform), same trust model as the
+              // Sleeper username field beside it.
               <View testID="signin.platform-panel">
                 <ChalkText style={styles.platformExplainer}>
                   {entryPlatform === 'espn'
-                    ? 'ESPN dynasty leagues are supported. Sign in with Apple to save your board, then link your ESPN league — it takes about a minute.'
-                    : 'MyFantasyLeague dynasty leagues are supported. Sign in with Apple to save your board, then link your MFL league — it takes about a minute.'}
+                    ? 'ESPN dynasty leagues are supported. Point us at your league and claim your team — no extra account needed. Private leagues sign in to ESPN itself.'
+                    : 'MyFantasyLeague dynasty leagues are supported. Point us at your league and claim your franchise — no extra account needed.'}
                 </ChalkText>
-                {appleShown ? (
-                  <>
-                    <AppleAuthentication.AppleAuthenticationButton
-                      testID="signin.platform-apple-btn"
-                      buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
-                      buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
-                      cornerRadius={radii.sm}
-                      style={styles.appleButton}
-                      onPress={handleAppleSignIn}
-                    />
-                    {appleBusy ? (
-                      <ActivityIndicator color={chalk.dim} style={styles.appleBusy} />
-                    ) : null}
-                  </>
-                ) : (
-                  <ChalkText
-                    testID="signin.platform-unavailable"
-                    style={styles.platformUnavailable}
-                  >
-                    {`Linking ${
-                      entryPlatform === 'espn' ? 'an ESPN' : 'an MFL'
-                    } league needs Sign in with Apple, which isn't available on this device.`}
-                  </ChalkText>
-                )}
+                <Pressable
+                  testID="signin.platform-link-btn"
+                  accessibilityRole="button"
+                  style={({ pressed }) => [
+                    styles.button,
+                    pressed && styles.buttonPressed,
+                  ]}
+                  onPress={() =>
+                    setEntrySheet(entryPlatform === 'espn' ? 'espn' : 'mfl')
+                  }
+                  disabled={busy || demoBusy || appleBusy}
+                >
+                  <Text style={styles.buttonText}>
+                    {entryPlatform === 'espn'
+                      ? 'Link your ESPN league →'
+                      : 'Link your MFL league →'}
+                  </Text>
+                </Pressable>
               </View>
             ) : null}
             {!nonSleeperEntry && hint ? (
@@ -735,7 +758,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
               </Pressable>
             ) : null}
 
-            {landingOn && appleShown && !nonSleeperEntry ? (
+            {landingOn && appleShown ? (
               // ADR-006: quiet re-entry door for existing Apple-bound
               // (P2.6 account-only) users — they may have no Sleeper
               // username to type. Text link by design: it must never
@@ -781,6 +804,27 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
           </View>
         </View>
       </KeyboardAvoidingView>
+      {/* V2 (D-164) — entry-mode link sheets. Mount pattern mirrors
+          LeaguePicker: ESPN sheet unconditional (it manages its own Modal
+          visibility, incl. hiding for the EspnConnect WebView push),
+          PlatformLinkSheet conditional. Only one is ever visible. */}
+      <EspnLinkSheet
+        entry
+        visible={entrySheet === 'espn'}
+        onClose={() => setEntrySheet(null)}
+        onEntrySession={handleEntrySession}
+        onLinked={handleEntryLinked}
+      />
+      {entrySheet === 'mfl' ? (
+        <PlatformLinkSheet
+          entry
+          visible
+          platform="mfl"
+          onClose={() => setEntrySheet(null)}
+          onEntrySession={handleEntrySession}
+          onLinked={handleEntryLinked}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -929,11 +973,6 @@ const styles = StyleSheet.create({
     ...type.bodySm,
     color: chalk.dim,
     marginBottom: space.md,
-  },
-  platformUnavailable: {
-    ...type.bodySm,
-    color: chalk.faint,
-    marginBottom: space.sm,
   },
   // ── Sign in with Apple (auth.accounts; P2.6 primary portal) ────────────
   appleButton: {
