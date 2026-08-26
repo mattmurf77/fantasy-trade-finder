@@ -106,7 +106,7 @@
 *Original framing, kept for the record:* gen-v2 is dark for normal serving. But `trade.bakeoff` is **ON** and the `gen_v2` arm calls the module directly; serving is gated by a `model_config` knob (`bakeoff_serve_interleaved`), **not a flag**. Raising that knob above 0 would silently stop honoring Chasing and Shopping for the served fraction — and, once #360 ships, Avoiding too. Avoiding is worse in kind: Chasing is a preference, Avoiding is a promise.
 **Decision taken for now (orchestrator, #360 build):** gen-v2 is **out of scope** for #360. Avoiding must not be the feature that silently repairs an unrelated engine gap. A guardrail note was added wherever the bake-off arm is documented: **do not raise `bakeoff_serve_interleaved` above 0 until gen-v2 honors positional preferences, `not_interested_ids` and `untouchable_ids`.**
 **What the operator needs to decide (rewritten 2026-08-26, now that the knob is known to be at 1.0):** the "keep the knob at 0" option is no longer a hold — it is a **rollback**, and it would pause the running bake-off. Three real choices: (a) port all three preference families into gen-v2 as its own scoped work, then light `trade.avoid_positions`; (b) drop `bakeoff_serve_interleaved` to 0, which repairs Chasing/Shopping immediately and ends the bake-off's serving phase; (c) formally accept that Chasing and Shopping do not apply to the gen_v2 share while the bake-off runs, and say so somewhere a user can see.
-**Blocks:** `trade.avoid_positions` cannot be lit until this is resolved — [D-164](DECISIONS.md) holds it dark for exactly this reason.
+**Blocks:** `trade.avoid_positions` cannot be lit until this is resolved — [D-165](DECISIONS.md) holds it dark for exactly this reason.
 **Status:** OPEN — **escalated 2026-08-26 from a hypothetical to a live production defect.**
 
 ### Q-032 — Should `trade.avoid_positions` ship lit, making #360 live on merge? — **RESOLVED 2026-08-19: NO, ship dark**
@@ -122,7 +122,7 @@ deliberately not flag-gated: the column stores and the API serves in both states
 loses data while it is off and lighting it later is deploy-free.
 **To light it:** flip **four** files (the key + `release.json` + `onboarding-v2.json` +
 `profiles-on.json` — see [G-062](GOTCHAS.md)), after the TestFlight checklist passes. Do **not**
-add it to `LAUNCHED_FLAG_DEFAULTS` ([D-163](DECISIONS.md)).
+add it to `LAUNCHED_FLAG_DEFAULTS` ([D-164](DECISIONS.md)).
 **Status:** RESOLVED.
 
 ### Q-033 — Should the one-tap outlook confirm stop clearing the position lists? — **RESOLVED 2026-08-19: NO, keep inherited behavior**

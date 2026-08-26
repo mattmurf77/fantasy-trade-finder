@@ -11,7 +11,7 @@ import * as Linking from 'expo-linking';
 import { ink, chalk, ice, fonts, radii } from '../theme/chalkline';
 import { Icon } from '../components/chalkline';
 import { useSession, NO_LEAGUE_ID } from '../state/useSession';
-import SignInScreen from '../screens/SignInScreen';
+import SignInScreen, { EntryPlatformIntent } from '../screens/SignInScreen';
 import LeaguePickerScreen from '../screens/LeaguePickerScreen';
 import LeagueJoinScreen from '../screens/LeagueJoinScreen';
 import TabNav from './TabNav';
@@ -73,6 +73,9 @@ type AuthStack = {
   LeaguePicker:
     | {
         espnLink?: boolean;
+        /** Landing platform options — the MFL twin of `espnLink`: auto-opens
+         *  the MFL PlatformLinkSheet on arrival (entry-chip intent). */
+        mflLink?: boolean;
         /** P0-3 case B — hint that this league should auto-pin if present.
          *  A hint, not a command: the picker re-derives membership from its
          *  own refreshed list. */
@@ -166,6 +169,17 @@ type AuthStack = {
 };
 
 const Stack = createNativeStackNavigator<AuthStack>();
+
+// Landing platform options — map an entry-chip intent onto LeaguePicker's
+// auto-open params. Exactly one param per intent; undefined → no params, so
+// every Sleeper-path arrival is unchanged.
+function platformIntentParams(
+  intent?: EntryPlatformIntent,
+): AuthStack['LeaguePicker'] {
+  if (intent === 'espn') return { espnLink: true };
+  if (intent === 'mfl') return { mflLink: true };
+  return undefined;
+}
 export const navigationRef = createNavigationContainerRef<AuthStack>();
 
 // Chalkline stack-header title — Barlow Condensed caps on the ink-0 bar.
@@ -503,7 +517,13 @@ export default function RootNav({ booted }: { booted: boolean }) {
         <Stack.Screen name="SignIn">
           {({ navigation }) => (
             <SignInScreen
-              onSignedIn={() => navigation.replace('LeaguePicker')}
+              // Landing platform options: an ESPN/MFL entry-chip choice rides
+              // the Apple sign-in as `platformIntent` — land the picker with
+              // the matching link sheet auto-opening (#130 espnLink / its
+              // mflLink twin). Undefined (every Sleeper path) → no params,
+              // byte-for-byte the previous behavior.
+              onSignedIn={(platformIntent) =>
+                navigation.replace('LeaguePicker', platformIntentParams(platformIntent))}
               // Demo flow already pinned a synthetic league + token in
               // useSession.startDemoSession, so we jump straight to Main.
               onDemoStarted={() => navigation.replace('Main')}
@@ -512,7 +532,8 @@ export default function RootNav({ booted }: { booted: boolean }) {
               // the tabs. Route to the picker, whose companion state leads with
               // "Connect Sleeper, ESPN or MFL". `replace`, not `navigate`: the
               // SignIn screen's session is spent and must not stay on the stack.
-              onAccountSignedIn={() => navigation.replace('LeaguePicker')}
+              onAccountSignedIn={(platformIntent) =>
+                navigation.replace('LeaguePicker', platformIntentParams(platformIntent))}
             />
           )}
         </Stack.Screen>
@@ -527,6 +548,8 @@ export default function RootNav({ booted }: { booted: boolean }) {
               // #130 — Settings' "Link an ESPN league" row lands here with
               // the sheet already open (flag-gated inside the screen).
               autoOpenEspnLink={route.params?.espnLink === true}
+              // Landing platform options — the MFL twin of #130's espnLink.
+              autoOpenMflLink={route.params?.mflLink === true}
               // P0-3 (commit 12) — invite context, when the arrival came from
               // LeagueJoin. Unset by every wave-1 entry; the companion state
               // renders its generic copy when they are null.

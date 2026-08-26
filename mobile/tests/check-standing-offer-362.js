@@ -610,23 +610,23 @@ console.log('11 — the flag is DARK, and says so in both places');
 console.log('═'.repeat(72));
 
 // SC-14 — `trade.standing_offers` GRADUATED to lit on 2026-08-26 (operator
-// ruling, D-164). This assertion previously pinned the flag OFF, on the
+// ruling, D-165). This assertion previously pinned the flag OFF, on the
 // reasoning that "graduation is an operator action after a TestFlight pass on
 // a real league". Recording honestly what changed: the operator graduated it
 // WITHOUT that pass — the #362 TestFlight checklist is still unrun, and the
-// accepted trade-off is written up in D-164. The flag is still a kill switch:
+// accepted trade-off is written up in D-165. The flag is still a kill switch:
 // flipping it back to false, or setting model_config standing_offer_inject_cap
 // to 0, disables the feature deploy-free.
 //
 // SC-14b below is the invariant that holds in BOTH states and is the one that
-// must never be relaxed (D-163): the client flag map fails OPEN, so listing
+// must never be relaxed (D-164): the client flag map fails OPEN, so listing
 // this flag there would light the feature on a first boot or a failed
 // revalidate — for a lit flag that breaks the kill switch, and for a dark one
 // it lights a feature the operator never enabled.
 const featuresJson = JSON.parse(read(path.join(REPO, 'config/features.json')));
 assert(
   featuresJson['trade.standing_offers'] === true,
-  '#362 SC-14a — config/features.json ships trade.standing_offers LIT (D-164)',
+  '#362 SC-14a — config/features.json ships trade.standing_offers LIT (D-165)',
   'graduated 2026-08-26 by operator ruling; flip to false to kill deploy-free',
 );
 const flagStoreSrc = read(path.join(MOBILE, 'src/state/useFeatureFlags.ts'));

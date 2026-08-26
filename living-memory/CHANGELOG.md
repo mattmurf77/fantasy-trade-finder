@@ -14,15 +14,19 @@
 
 
 
-## 2026-08-26 — #362 standing offers ship LIT, #360 held dark; and gen_v2 turns out to be eating positional preferences in prod
+## 2026-08-26 — v1.16.7: #362 standing offers ship LIT, #360 held dark; and gen_v2 turns out to be eating positional preferences in prod
 
-`feat/jon-360-362` — built dark 2026-08-19, held unmerged a week — merged onto current `main` (123 commits of drift; 22 conflicts in 18 files, plus 3 semantic fixes the conflicts did not flag). ID de-collision: D-098→**D-163**, Q-026/027/028→**Q-031/032/033**, G-053→**G-062**, M-005→**M-006**, plus five PRD-local decisions renumbered item-scoped.
+`feat/jon-360-362` — built dark 2026-08-19, held unmerged a week — merged onto current `main` (123 commits of drift; 22 conflicts in 18 files, plus 3 semantic fixes the conflicts did not flag). ID de-collision: D-098→**D-165**, Q-026/027/028→**Q-031/032/033**, G-053→**G-062**, M-005→**M-006**, plus five PRD-local decisions renumbered item-scoped. Renumbered a **second** time at push: a concurrent session took D-164 for `landing.platform_options` (below) while this was gating — exactly the M-006 lesson, grep the max immediately before writing.
 
-**Operator asked for both flags lit; only one shipped.** Checking prod first ([D-164](DECISIONS.md)) found `bakeoff_serve_interleaved = **1.0**` live — not the `0.0` its seed and [Q-031](OPEN_QUESTIONS.md) both assumed — with `bakeoff_include_gen_v2 = 1.0`. `trade_gen_v2.py` reads **no** positional preference (0 refs to `avoid_positions`/`acquire_positions`/`trade_away_positions`; 6 each to `not_interested_ids`/`untouchable_ids`), so it serves a third of every organic deck while ignoring them. `trade.standing_offers` → **true** (four files, G-062); `trade.avoid_positions` stays **false**, upholding Q-032 — a hard exclusion cannot ship while a third of the deck ignores it.
+**Operator asked for both flags lit; only one shipped.** Checking prod first ([D-165](DECISIONS.md)) found `bakeoff_serve_interleaved = **1.0**` live — not the `0.0` its seed and [Q-031](OPEN_QUESTIONS.md) both assumed — with `bakeoff_include_gen_v2 = 1.0`. `trade_gen_v2.py` reads **no** positional preference (0 refs to `avoid_positions`/`acquire_positions`/`trade_away_positions`; 6 each to `not_interested_ids`/`untouchable_ids`), so it serves a third of every organic deck while ignoring them. `trade.standing_offers` → **true** (four files, G-062); `trade.avoid_positions` stays **false**, upholding Q-032 — a hard exclusion cannot ship while a third of the deck ignores it.
 
 **Pre-existing live defect now on the record:** Chasing and Shopping have been silently ignored on the gen_v2 share of every real deck since that knob was raised. Nothing to do with this branch. Q-031 rewritten from hypothetical to live and escalated.
 
-Runtime evidence for #362 is **none** — its TestFlight checklist is unrun, accepted explicitly by the operator.
+Runtime evidence for #362 is **none** — its TestFlight checklist is unrun, accepted explicitly by the operator. Two guards that pinned the flag dark were changed to assert it lit, each carrying an in-file note that the pass did not happen.
+
+## 2026-08-26 — Entry page offers Sleeper · ESPN · MFL (flag `landing.platform_options`; D-163)
+
+Operator ask: the entry page for new users should offer ESPN and MFL alongside Sleeper as supported platforms. Built in worktree `app-entry-platform-options-3e16ac` under full gates ([scope](../docs/plans/landing-platform-options/scope.md), [code-walk](../docs/plans/landing-platform-options/code-walk.md)). `SignInScreen` (the `onboarding.landing` layout) gains a three-chip platform row: Sleeper (default) renders the existing username form untouched; ESPN/MFL swap it for an explainer + Sign in with Apple — the link routes `_require_session`, and Apple is the only username-free session mint (D-163) — and the choice rides both Apple callbacks as `platformIntent`, so RootNav lands LeaguePicker with the matching sheet auto-opened (#130 `espnLink` / new symmetric `mflLink` with the same #266 transition-settled deferral; single-league auto-skip yields to the intent). Also corrected the dark smart-start "ESPN/MFL sync is coming soon" copy (both live). Evidence: 20-assertion `check-landing-platform-options` guard, tsc clean, testid-lint OK, backend 4,275 green after mirroring the flag into the three flag fixtures. Owed: operator TestFlight checklist (scope §3) on the next build; waiver surfaced — no chip-selection analytics event (taxonomy default-deny; signin funnel + `league_selected.platform` cover it).
 
 ## 2026-08-25 — v1.16.6 (build 132) on TestFlight: the Quick Set funnel can finally emit
 

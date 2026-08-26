@@ -20,6 +20,8 @@
   "players.profile_pages": false,
   "landing.smart_start_cta": false,
   "landing.try_before_sync": false,
+  "landing.platform_options": true,
+  "_comment_landing_platform_options": "2026-08-26 operator ask: the entry page offers Sleeper/ESPN/MFL as supported platforms. landing.platform_options gates the SignInScreen platform chip row (onboarding.landing layout only): Sleeper (default) renders the existing username form untouched; ESPN/MFL swap it for an explainer + Sign in with Apple, and the choice rides the Apple callbacks as platformIntent so LeaguePicker auto-opens the matching link sheet (#130 espnLink / new mflLink twin). Client-only gate \u2014 no backend route reads it. Per-platform chips additionally require espn.link / mfl.link. Ships TRUE (operator-requested surface); this key is the deploy-free revert lever. Graduation: delete after one clean TestFlight cycle.",
   "trade_math.qb_tax": false,
   "trade_math.star_tax": false,
   "trade_math.roster_clogger": false,

@@ -43,6 +43,10 @@ interface Props {
   /** #130 — open the ESPN link sheet on mount (Settings CTA). Honored only
    *  while the `espn.link` flag is on. */
   autoOpenEspnLink?: boolean;
+  /** Landing platform options — the MFL twin of `autoOpenEspnLink`: the
+   *  entry page's MFL chip rode Apple sign-in here, open the MFL link sheet
+   *  on arrival. Honored only while the `mfl.link` flag is on. */
+  autoOpenMflLink?: boolean;
   /** P0-3 (commit 12) — invite context for an account-only arrival via
    *  LeagueJoin. Optional and unset in wave 1; when present the companion
    *  state names the inviter and league instead of its generic copy. Never
@@ -65,6 +69,7 @@ export default function LeaguePickerScreen({
   onLeaguePicked,
   onSignOut,
   autoOpenEspnLink,
+  autoOpenMflLink,
   invitedBy,
   invitedLeagueName,
   autoPinLeagueId,
@@ -156,6 +161,31 @@ export default function LeaguePickerScreen({
     };
   }, [autoOpenEspnLink, espnEnabled, navigation]);
 
+  // Landing platform options — the MFL twin of the #130 auto-open above,
+  // with the same #266 transition-settled deferral (PlatformLinkSheet is a
+  // sibling RN <Modal> and wedges the same way if presented mid-transition).
+  useEffect(() => {
+    if (!autoOpenMflLink || !mflEnabled) return;
+    let opened = false;
+    const open = () => {
+      if (opened) return;
+      opened = true;
+      setPlatformOpen('mfl');
+    };
+    const unsub = navigation.addListener(
+      'transitionEnd',
+      (e: { data?: { closing?: boolean } }) => {
+        if (e?.data?.closing) return; // leaving, not arriving
+        open();
+      },
+    );
+    const fallback = setTimeout(open, 800);
+    return () => {
+      unsub();
+      clearTimeout(fallback);
+    };
+  }, [autoOpenMflLink, mflEnabled, navigation]);
+
   // Onboarding item 6 (F9): exactly one league → skip the picker (free step
   // removal). Once-only per mount; never when the user came here to link
   // ESPN. Failure falls back to this screen's existing inline error +
@@ -170,13 +200,13 @@ export default function LeaguePickerScreen({
   const autoSkipTried = useRef(false);
   useEffect(() => {
     if (autoSkipTried.current) return;
-    if (loading || error || selectingId || autoOpenEspnLink) return;
+    if (loading || error || selectingId || autoOpenEspnLink || autoOpenMflLink) return;
     if (cached.length !== 1) return;
     if (!onboardingEnabled('onboarding.league_autoskip')) return;
     autoSkipTried.current = true;
     void pickLeague(cached[0], { auto: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cached, loading, error, selectingId, autoOpenEspnLink]);
+  }, [cached, loading, error, selectingId, autoOpenEspnLink, autoOpenMflLink]);
 
   // P0-3 — pin the invited league as soon as it appears in the list.
   //

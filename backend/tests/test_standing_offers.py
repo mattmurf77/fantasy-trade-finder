@@ -728,12 +728,12 @@ def test_flag_and_knobs_registered():
     assert "trade.standing_offers" in ff.FLAG_KEYS
     repo = Path(__file__).resolve().parents[2]
     features = json.loads((repo / "config/features.json").read_text())
-    # GRADUATED 2026-08-26 by operator ruling (D-164). This previously pinned
+    # GRADUATED 2026-08-26 by operator ruling (D-165). This previously pinned
     # the flag False ("ships dark"). It was graduated WITHOUT the TestFlight
     # pass the dark posture was waiting on — the #362 checklist is still unrun.
     # The flag remains a deploy-free kill switch in both directions, and
     # standing_offer_inject_cap = 0 kills injection without touching it.
-    assert features["trade.standing_offers"] is True, "graduated — see D-164"
+    assert features["trade.standing_offers"] is True, "graduated — see D-165"
     defaults = {k: v for k, v, _ in db._MODEL_CONFIG_DEFAULTS}
     assert defaults["standing_offer_days"] == 30.0
     assert defaults["standing_offer_inject_cap"] == 2.0

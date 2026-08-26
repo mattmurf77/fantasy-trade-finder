@@ -21,6 +21,7 @@
   "players.profile_pages": false,
   "landing.smart_start_cta": false,
   "landing.try_before_sync": false,
+  "landing.platform_options": true,
   "trade_math.qb_tax": false,
   "trade_math.star_tax": false,
   "trade_math.roster_clogger": false,
