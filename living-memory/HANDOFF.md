@@ -10,6 +10,21 @@
 
 
 
+## 2026-08-26e — v1.16.8 (build 134) SUBMITTED to TestFlight; three checklists now runnable, nothing in flight
+
+**Where:** `main` at `dd2051bc`, clean, no branch open. EAS build `c12643d1-a22b-4dee-9e08-611c01f70366` (v1.16.8, build **134**) **FINISHED**; submission `c6e58906-3cbc-4418-af97-d7a39a6cc6c3` **succeeded**. Apple processing → TestFlight availability is the only remaining step and it is not ours.
+
+**What 134 carries beyond 133** (133 = the concurrent session's 1.16.7, which already had the entry chips #210 and the Apple decoupling #213): entry **v2.1** (#215 — "sign in to ESPN/MFL" as a first-class option beside the league-ID path) and the **platform-aware Analyst beat** (#218 — s0.2 now rings the ESPN/MFL panel button with honest copy instead of telling every user to type a Sleeper username). The tour fix was deliberately pulled into THIS build rather than the next: shipping v2.1 without it would have put a Sleeper-only tour in front of testers on a three-platform entry page.
+
+**Owed — all operator, all runtime, nothing code-side:**
+1. TestFlight checklists on 134: [scope.md](../docs/plans/landing-platform-options/scope.md) §3 (chips), §V2 (claim flows, no Apple prompt anywhere), §V2.1 (login flows) — plus confirm the tour's opening beat points at the ESPN/MFL panel button when a non-Sleeper chip is selected. Log outcomes in TEST_LEDGER.
+2. **Worktree sweep**: `.claude/worktrees/app-entry-platform-options-3e16ac` hosted four shipped branches today and cannot remove itself; also the agent worktree `agent-a9e9f68b6d1f24bbe` (guided-onboarding work, fully merged via #218).
+3. Standing consequence from [D-164]: entry sessions are unverified — if `auth.enforce_verified_writes` ever flips on, entry users lose the write-grace path.
+
+**Blocking:** nothing. **Rollback without a build:** `landing.platform_options: false` + flag reload kills the whole entry surface; `espn.league_picker` / `mfl.auth_link` kill just the two login actions.
+
+**Unrelated and still open from the 1.16.7 session:** Q-031 — `bakeoff_serve_interleaved` is live at 1.0, so `trade_gen_v2` serves a third of every organic deck while ignoring Chasing/Shopping preferences. That is a live user-facing defect, untouched by today's entry work, and it is the thing to pick up next.
+
 ## 2026-08-26c — Entry v2.1 (login option) SHIPPED to main; its mobile half needs the build AFTER v1.16.7
 
 **Where:** operator saw the entry flow live on v1.16.7 (which carries entry v1+v2, per the entry below) and asked for a login option beside the league-id path. v2.1 shipped: `POST /api/entry/platform` gained sessionless `my_leagues`/`auth_leagues` account-discovery actions (store NOTHING; gated `espn.league_picker`/`mfl.auth_link` on top of the feature flag), and the sheets' entry mode offers "Sign in to ESPN / with MFL" first-class — MFL login mints directly from the account's own franchise, no team-claim step ([scope §V2.1](../docs/plans/landing-platform-options/scope.md)). Built by an **Opus subagent** per operator instruction; lead session reviewed line-by-line, tightened the SignInScreen panel copy, re-ran all gates, shipped. Backend live at deploy; **the v2.1 mobile surface ships with the NEXT EAS build (v1.16.7 does NOT carry it)**.
