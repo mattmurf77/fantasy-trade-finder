@@ -22252,6 +22252,27 @@ def entry_platform():
         re-claiming the same team recovers the same boards, exactly like
         re-typing the same Sleeper username.
 
+    Plus two ACCOUNT-DISCOVERY actions (landing platform options v2.1) that
+    run BEFORE either branch and are mutually exclusive with team_id /
+    franchise_id — "log in instead of knowing a league id":
+
+      • {action:'my_leagues', espn_s2, swid} → the ESPN fan-profile league
+        list for the SUPPLIED cookie pair, in the exact shape
+        GET /api/espn/my-leagues returns. That route reads the session
+        user's STORED credential; this one takes the pair the WebView
+        capture just produced, because at entry time there is no user to
+        have stored one. Additionally gated on `espn.league_picker`.
+      • {action:'auth_leagues', username, password, year?} → the MFL login
+        + myleagues pair POST /api/mfl/auth-link uses, in the same
+        per-league shape (each carrying the user's own franchise_id, which
+        is what lets the client mint DIRECTLY with no team-claim step).
+        Additionally gated on `mfl.auth_link`.
+
+    Both actions STORE NOTHING — no credential row, no users row, no
+    session. They are read-only lookups against the platform, and the
+    password is used for the single MFL login call and never logged or
+    echoed back.
+
     Id namespace — deliberately distinct from the `espn:`/`mfl:` member
     placeholders, which are documented as never-routable (see
     replace_espn_league_members):
@@ -22277,6 +22298,65 @@ def entry_platform():
     if platform not in ("espn", "mfl"):
         return jsonify({"error": "bad_platform",
                         "message": "platform must be 'espn' or 'mfl'."}), 400
+
+    # ── Account-discovery actions (v2.1) ────────────────────────────────────
+    # Sessionless "log in instead of typing a league id". Nothing here is
+    # persisted: no credential row, no users row, no session — these branches
+    # return before any _extension_build_session / upsert reached below.
+    action = str(body.get("action") or "").strip().lower()
+    if action:
+        if platform == "espn":
+            if action != "my_leagues":
+                return jsonify({"error": "bad_action",
+                                "message": "Unknown action for ESPN."}), 400
+            if not is_enabled("espn.link") or not is_enabled("espn.league_picker"):
+                return jsonify({"error": "feature_disabled"}), 404
+            from . import espn_service as _espn
+
+            espn_s2 = (body.get("espn_s2") or "").strip() or None
+            swid = (body.get("swid") or "").strip() or None
+            if not espn_s2 or not swid:
+                return jsonify({
+                    "error": "espn_cookies_incomplete",
+                    "message": "Private leagues need both espn_s2 and SWID.",
+                }), 400
+            try:
+                leagues = _espn.fetch_fan_leagues(espn_s2, swid)
+            except _espn.EspnError as e:
+                return _espn_error_response(e)
+            log.info("entry_platform: espn my_leagues (sessionless) -> %d",
+                     len(leagues))
+            return jsonify({"leagues": leagues})
+
+        if action != "auth_leagues":
+            return jsonify({"error": "bad_action",
+                            "message": "Unknown action for MFL."}), 400
+        if not is_enabled("mfl.link") or not is_enabled("mfl.auth_link"):
+            return jsonify({"error": "feature_disabled"}), 404
+        from . import mfl_service as _mfl
+
+        username = str(body.get("username") or "").strip()
+        password = body.get("password") or ""
+        try:
+            year = int(body.get("year") or _MFL_DEFAULT_YEAR)
+        except (TypeError, ValueError):
+            return jsonify({"error": "mfl_bad_year",
+                            "message": "year must be numeric"}), 400
+        if not username or not password:
+            return jsonify({"error": "mfl_missing_credentials",
+                            "message": "MFL username and password are required."}), 400
+        try:
+            auth = _mfl.login(username, password, year)
+            del password  # transient use only — never persisted, never logged
+            leagues = _mfl.fetch_my_leagues(auth["cookie"], year)
+        except _mfl.MflAuthError:
+            return jsonify({"error": "mfl_bad_credentials",
+                            "message": "MFL didn't accept that username and password."}), 403
+        except _mfl.MflError as e:
+            return _platform_error_response(e, "mfl")
+        log.info("entry_platform: mfl auth_leagues (sessionless) year=%s -> %d",
+                 year, len(leagues))
+        return jsonify({"year": year, "leagues": leagues})
 
     if platform == "espn":
         if not is_enabled("espn.link"):

@@ -175,3 +175,42 @@ Line numbers as of the shipping commit on `claude/platform-entry-decouple-apple`
 IS the sign-in attempt). Value-only addition on the registered `method` prop;
 tracking-plan addendum noted in
 `docs/business/analytics/2026-07-17-tracking-plan-v2.md`.
+
+---
+
+# V2.1 — Login as a first-class entry option (same day)
+
+Built by an Opus subagent; reviewed line-by-line by the lead session. Line
+numbers as of the shipping commit on `claude/entry-platform-login-option`.
+
+- `backend/server.py` — the action block sits at the top of `entry_platform`
+  (~L22303–22368), BEFORE the untouched preview/mint branches: ESPN
+  `my_leagues` calls `espn_service.fetch_fan_leagues(espn_s2, swid)` with the
+  supplied pair and returns `jsonify({"leagues": …})` — verified byte-identical
+  to `GET /api/espn/my-leagues`'s serialization; MFL `auth_leagues` calls the
+  exact `_mfl.login(...)` / `fetch_my_leagues(auth["cookie"], year)` pair the
+  auth-link route uses (verified against its lines), `del password` after the
+  one use, `MflAuthError` → 403 `mfl_bad_credentials`. No `upsert_*`, no
+  `_extension_build_session`, no session anywhere in the block — pinned by the
+  guard and by `_assert_stored_nothing` in the tests.
+- `mobile/src/components/EspnLinkSheet.tsx` — `fetchEntryMyLeagues` (~L181)
+  soft-fails into the manual field; the capture callback's entry branch
+  (~L234) feeds it the fresh pair; the first-class `espn-link.entry-signin`
+  button (~L457) reuses `launchWebViewCapture` and hides once the picker has
+  rows. The picker itself (`showingPicker`) was already keyed on data alone.
+- `mobile/src/components/PlatformLinkSheet.tsx` — `mflAuthEnabled` drops
+  `!entry` (~L98); the sign-in JSX became one `mflAuthBlock` rendered at its
+  ORIGINAL position when `!entry` (linked render output unchanged) and above
+  the league-id field in entry mode; `mflSignIn`'s entry branch (~L313) goes
+  through the sessionless action and into the new single-select `entry-pick`
+  step (~L731); `mflEntryPickLeague` (~L362) = mint → `onEntrySession` →
+  canonical import → best-effort `mflAuthLink` re-store with the password held
+  in `entryMflPassRef` (a ref, never state/`dirty`/logs; dropped before the
+  call, cleared on reset/failure/empty-list). The session-scoped bulk
+  `mflAuthImport` path is never used in entry mode.
+- `mobile/src/api/platformEntry.ts` — `entryEspnMyLeagues` /
+  `entryMflAuthLeagues` (~L76/L99), both `skipAuth`, no analytics: the signin
+  funnel still fires exactly once, at the mint.
+- Lead-session addition: SignInScreen panel explainers updated to name the
+  sign-in option first ("Sign in to ESPN and we'll find your leagues, or
+  enter a league ID").

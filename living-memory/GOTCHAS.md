@@ -14,6 +14,7 @@
 | G-062 | Flipping one flag in `config/features.json` breaks three test fixtures; the chain reveals one link at a time | Backend / feature flags / test fixtures |
 | G-060 | A sabotage-and-restore in the same mtime second at identical size keeps the stale `.pyc` — the test stays red after a byte-clean restore | Python / pytest / bytecode cache |
 | G-061 | The daily tick's Aug-25 `season_start` fan-out `continue`s past every winback — the three winback tests fail exactly one day a year (found live 2026-08-25) | backend / cron / pytest |
+| G-062 | `gh pr checks --watch` right after PR create reports "no checks" and exits 0, and `statusCheckRollup` pending conclusions are `""` not null — either one lets an `&&`-chained `gh pr merge` land before CI | GitHub CLI / ship gate |
 | G-059 | A breaker payload test flakes only on a loaded CI runner — the 250 ms wall-clock budget is a hidden test input | Backend tests / breaker / determinism |
 | G-058 | Loosening a trade-engine knob measures "no effect" three different ways, all of them lies | Trade engine / knob tuning |
 | G-055 | A feedback note over the length cap vanishes: no error, draft cleared, retry loops forever | In-app feedback / silent failure |
@@ -569,3 +570,10 @@ Number sequentially. Don't delete entries even if "obviously fixed by now" — f
 - **Cause:** `server.py` daily tick: `is_aug25 = (now.month == 8 and now.day == 25)` sends every signed-up user the `season_start` fan-out and `continue`s — deliberately skipping every winback that day. The tests read the REAL clock, so on Aug 25 the branch under test is unreachable. G-059's lesson in calendar form: any real-world input a route reads (wall-clock budget, date) is a test input whether the test declares it or not.
 - **Fix:** the winback tests pin the tick's clock (`patch.object(server, "datetime", _clock_at(_TICK_NOW))`, user timestamps derived from the same instant); the Aug-25 branch got its own pinned test (`test_season_start_fanout_on_aug25`) instead of staying dark.
 - **Prevention:** a test driving any `/api/cron/*` tick fakes the clock, never inherits the runner's date.
+
+## 2026-08-26
+
+### G-062 — `gh pr checks --watch` and `statusCheckRollup` both lie about pending CI; chaining `&& gh pr merge` can merge unchecked
+- **Symptom:** Two PRs (#213, #214) squash-merged before their CI finished. #213: `gh pr checks --watch` run seconds after `gh pr create` printed "no checks reported on the branch" and exited 0 (checks hadn't REGISTERED yet), so the `&&`-chained merge fired. #214: a jq wait on `statusCheckRollup` filtered `conclusion != null` — but GraphQL returns pending conclusions as `""`, not null, so three in-progress checks counted as three concluded ones.
+- **Cause:** two different "pending looks like done" shapes: check-runs registering asynchronously after PR creation, and empty-string vs null conclusions. Both make optimistic chains merge-before-green. (Both merges were retro-verified green via the main-push CI runs — `32992723779`, and #214's docs-only change — no code shipped unchecked.)
+- **Fix / prevention:** never chain `gh pr merge` off a single optimistic status read. Either poll until every expected check reports `status == "COMPLETED"` (not conclusion-null tests, not `--watch` straight after create), or merge in a separate step after reading the checks with your own eyes. `gh pr checks --watch` is only trustworthy once at least one check is registered.

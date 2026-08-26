@@ -5,7 +5,14 @@ The route is the platform twin of /api/extension/auth's claim-a-username
 door: preview a league with no session, then mint a session for a
 DETERMINISTIC user id derived from the claimed team. The league import
 itself stays on the canonical /api/{espn,mfl}/link routes, driven by the
-freshly minted token — the last test proves that handoff end-to-end.
+freshly minted token — the mint→import test proves that handoff end-to-end.
+
+v2.1 adds two ACCOUNT-DISCOVERY actions on the same route — ESPN
+`my_leagues` (fan-profile list for a supplied cookie pair) and MFL
+`auth_leagues` (login + myleagues) — so a user can LOG IN instead of
+knowing a league id. The section at the bottom pins their shapes, their
+flag gates, their error vocabulary, and the invariant that matters most:
+they persist absolutely nothing.
 
 Flask test client against an isolated in-memory SQLite DB. No network:
 ESPN payload and MFL bundle come from the existing link-route fixtures,
@@ -40,7 +47,23 @@ MFL_LEAGUE = "10005"
 # MFL franchise 0001 = "Clobberin Time 2".
 ESPN_TEAM_1_SWID = "{A1111111-1111-1111-1111-111111111111}"
 
-ENTRY_FLAGS = {"landing.platform_options", "espn.link", "mfl.link"}
+ENTRY_FLAGS = {"landing.platform_options", "espn.link", "mfl.link",
+               "espn.league_picker", "mfl.auth_link"}
+
+# v2.1 account-discovery actions — what the patched platform lookups return.
+FAN_LEAGUES = [
+    {"league_id": ESPN_LEAGUE, "league_name": "Chalk Dust Dynasty",
+     "season": 2026, "team_name": "Chalk Dusters"},
+    {"league_id": "555", "league_name": "Second League",
+     "season": 2025, "team_name": "Backups"},
+]
+MFL_MY_LEAGUES = [
+    {"league_id": MFL_LEAGUE, "name": "Clobberin League",
+     "host": "www48.myfantasyleague.com", "franchise_id": "0001",
+     "franchise_name": "Clobberin Time 2"},
+    {"league_id": "10009", "name": "No Franchise League",
+     "host": None, "franchise_id": None, "franchise_name": None},
+]
 
 
 def _fake_extension_builder(user_id, username, display_name, avatar,
@@ -288,3 +311,155 @@ def test_espn_private_league_maps_to_auth_required(client):
         r = _entry(c, platform="espn", espn_league_id=ESPN_LEAGUE)
     assert r.status_code == 403
     assert r.get_json()["error"] == "espn_auth_required"
+
+
+# ── v2.1: account-discovery actions (log in instead of typing a league id) ──
+#
+# Both actions are READ-ONLY lookups against the platform: they must return
+# the same league shapes their session-bound twins do
+# (GET /api/espn/my-leagues, POST /api/mfl/auth-link) while persisting
+# nothing at all — no users row, no credential row, no session.
+
+def _assert_stored_nothing(engine, sessions_before):
+    with server._sessions_lock:
+        assert set(server._sessions) == sessions_before
+    with engine.connect() as conn:
+        assert conn.execute(select(db_module.users_table)).fetchall() == []
+        assert conn.execute(
+            select(db_module.espn_credentials_table)).fetchall() == []
+        assert conn.execute(
+            select(db_module.mfl_credentials_table)).fetchall() == []
+        assert conn.execute(select(db_module.leagues_table)).fetchall() == []
+
+
+def test_espn_my_leagues_action_returns_the_my_leagues_shape(client):
+    c, engine = client
+    with server._sessions_lock:
+        sessions_before = set(server._sessions)
+    seen = {}
+
+    def _fan(espn_s2, swid, **kw):
+        seen["pair"] = (espn_s2, swid)
+        return list(FAN_LEAGUES)
+
+    with patch.object(es, "fetch_fan_leagues", _fan):
+        r = _entry(c, platform="espn", action="my_leagues",
+                   espn_s2="s2-cookie", swid=ESPN_TEAM_1_SWID)
+    assert r.status_code == 200, r.get_data(as_text=True)
+    body = r.get_json()
+    assert list(body) == ["leagues"]
+    assert body["leagues"] == FAN_LEAGUES
+    # The SUPPLIED pair is what's used — there is no stored credential to read.
+    assert seen["pair"] == ("s2-cookie", ESPN_TEAM_1_SWID)
+    _assert_stored_nothing(engine, sessions_before)
+
+
+def test_espn_my_leagues_action_requires_both_cookies(client):
+    c, _ = client
+    for body in ({"espn_s2": "only-half"}, {"swid": ESPN_TEAM_1_SWID}, {}):
+        r = _entry(c, platform="espn", action="my_leagues", **body)
+        assert r.status_code == 400
+        assert r.get_json()["error"] == "espn_cookies_incomplete"
+
+
+def test_espn_my_leagues_action_404_when_picker_flag_off(client):
+    c, _ = client
+    with patch.object(server, "is_enabled",
+                      lambda k: k in ENTRY_FLAGS - {"espn.league_picker"}):
+        r = _entry(c, platform="espn", action="my_leagues",
+                   espn_s2="s2-cookie", swid=ESPN_TEAM_1_SWID)
+    assert r.status_code == 404
+    assert r.get_json()["error"] == "feature_disabled"
+
+
+def test_espn_my_leagues_action_maps_espn_errors(client):
+    c, _ = client
+    with patch.object(es, "fetch_fan_leagues",
+                      side_effect=es.EspnAuthError("rejected")):
+        r = _entry(c, platform="espn", action="my_leagues",
+                   espn_s2="s2-cookie", swid=ESPN_TEAM_1_SWID)
+    assert r.status_code == 403
+    assert r.get_json()["error"] == "espn_auth_required"
+    with patch.object(es, "fetch_fan_leagues",
+                      side_effect=es.EspnError("down", kind="http")):
+        r = _entry(c, platform="espn", action="my_leagues",
+                   espn_s2="s2-cookie", swid=ESPN_TEAM_1_SWID)
+    assert r.status_code == 502
+    assert r.get_json()["error"] == "espn_unavailable"
+
+
+def test_espn_unknown_action_400(client):
+    c, _ = client
+    r = _entry(c, platform="espn", action="auth_leagues")
+    assert r.status_code == 400
+    assert r.get_json()["error"] == "bad_action"
+
+
+def test_mfl_auth_leagues_action_returns_leagues_with_franchise_ids(client):
+    c, engine = client
+    with server._sessions_lock:
+        sessions_before = set(server._sessions)
+    seen = {}
+
+    def _login(username, password, year, **kw):
+        seen["login"] = (username, password, year)
+        return {"cookie": "MFL_USER_ID=abc", "mfl_user_id": "abc"}
+
+    def _my(cookie, year, **kw):
+        seen["cookie"] = cookie
+        return list(MFL_MY_LEAGUES)
+
+    with patch.object(mfl, "login", _login), \
+         patch.object(mfl, "fetch_my_leagues", _my):
+        r = _entry(c, platform="mfl", action="auth_leagues",
+                   username="matt", password="hunter2", year=2026)
+    assert r.status_code == 200, r.get_data(as_text=True)
+    body = r.get_json()
+    assert body["year"] == 2026
+    assert body["leagues"] == MFL_MY_LEAGUES
+    assert body["leagues"][0]["franchise_id"] == "0001"
+    assert seen["login"] == ("matt", "hunter2", 2026)
+    assert seen["cookie"] == "MFL_USER_ID=abc"
+    # Never echoed back — the password appears nowhere in the response.
+    assert "hunter2" not in r.get_data(as_text=True)
+    _assert_stored_nothing(engine, sessions_before)
+
+
+def test_mfl_auth_leagues_action_missing_credentials_400(client):
+    c, _ = client
+    for body in ({"username": "matt"}, {"password": "hunter2"}, {}):
+        r = _entry(c, platform="mfl", action="auth_leagues", **body)
+        assert r.status_code == 400
+        assert r.get_json()["error"] == "mfl_missing_credentials"
+
+
+def test_mfl_auth_leagues_action_bad_login_403(client):
+    """Same code + shape POST /api/mfl/auth-link returns for a bad login."""
+    c, engine = client
+    with server._sessions_lock:
+        sessions_before = set(server._sessions)
+    with patch.object(mfl, "login", side_effect=mfl.MflAuthError()):
+        r = _entry(c, platform="mfl", action="auth_leagues",
+                   username="matt", password="wrong")
+    assert r.status_code == 403
+    body = r.get_json()
+    assert body["error"] == "mfl_bad_credentials"
+    assert "wrong" not in r.get_data(as_text=True)
+    _assert_stored_nothing(engine, sessions_before)
+
+
+def test_mfl_auth_leagues_action_404_when_auth_flag_off(client):
+    c, _ = client
+    with patch.object(server, "is_enabled",
+                      lambda k: k in ENTRY_FLAGS - {"mfl.auth_link"}):
+        r = _entry(c, platform="mfl", action="auth_leagues",
+                   username="matt", password="hunter2")
+    assert r.status_code == 404
+    assert r.get_json()["error"] == "feature_disabled"
+
+
+def test_mfl_unknown_action_400(client):
+    c, _ = client
+    r = _entry(c, platform="mfl", action="my_leagues")
+    assert r.status_code == 400
+    assert r.get_json()["error"] == "bad_action"

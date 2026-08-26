@@ -195,10 +195,9 @@ assert(
   /if \(!leaguePicker \|\| entry\) return;/.test(espnSheet),
   'V2: entry mode skips the my-leagues fetch (stored-credential read)',
 );
-assert(
-  /useFlag\('mfl\.auth_link'\) && platform === 'mfl' && !entry/.test(platformSheet),
-  'V2: entry mode suppresses the MFL username/password path',
-);
+// (The V2 "entry suppresses the MFL sign-in path" claim was SUPERSEDED by
+//  v2.1, which routes that path through the sessionless action instead —
+//  pinned in the V2.1 block below.)
 assert(
   /entry\s*\n?\s*\? await entryEspnPreview\(/.test(espnSheet) &&
     /entry\s*\n?\s*\? await entryMflPreview\(/.test(platformSheet),
@@ -216,7 +215,7 @@ assert(
 
 // V2.6 — backend route exists, sessionless, dual-gated, deterministic ids.
 const entryRoute = serverPy.match(
-  /@app\.route\("\/api\/entry\/platform", methods=\["POST"\]\)\s*\ndef entry_platform\(\):[\s\S]{0,9000}?\n@app\.route/,
+  /@app\.route\("\/api\/entry\/platform", methods=\["POST"\]\)\s*\ndef entry_platform\(\):[\s\S]{0,20000}?\n@app\.route/,
 );
 assert(!!entryRoute, 'V2: POST /api/entry/platform route exists');
 assert(
@@ -240,6 +239,191 @@ assert(
 assert(
   !!entryRoute && /_extension_build_session\(/.test(entryRoute[0]),
   'V2: mint goes through the one reusable session builder',
+);
+
+// ── V2.1: "log in" as a first-class entry option ─────────────────────────
+//
+// The v2 door led with "enter your league ID". v2.1 adds the account route
+// for both platforms, still sessionless. Each claim below protects a
+// specific failure mode:
+//
+//   a. The two new api fns must be skipAuth POSTs — a session header on an
+//      entry call is at best meaningless and at worst wrong-user.
+//   b. ESPN capture with no league id typed must reach the SESSIONLESS
+//      my-leagues action; the stored-credential fetch can't work pre-mint,
+//      so losing this branch silently restores the dead end.
+//   c. The ESPN sign-in affordance must be first-class on the input step —
+//      buried under "Private league?" is the state v2.1 exists to fix.
+//   d. `mflAuthEnabled` must no longer exclude entry, and the entry sign-in
+//      must mint DIRECTLY (franchise known) rather than reusing the
+//      session-scoped bulk auth-import.
+//   e. Backend: both actions gated on their own flag AND the platform flag,
+//      running before any mint, storing nothing.
+
+// a. api layer
+assert(
+  /export async function entryEspnMyLeagues\(/.test(entryApi) &&
+    /action: 'my_leagues'/.test(entryApi),
+  'V2.1: entryEspnMyLeagues posts the my_leagues action',
+);
+assert(
+  /export async function entryMflAuthLeagues\(/.test(entryApi) &&
+    /action: 'auth_leagues'/.test(entryApi),
+  'V2.1: entryMflAuthLeagues posts the auth_leagues action',
+);
+const espnMyLeaguesFn = entryApi.match(
+  /export async function entryEspnMyLeagues\([\s\S]{0,900}?return res\?\.leagues/,
+);
+const mflAuthLeaguesFn = entryApi.match(
+  /export async function entryMflAuthLeagues\([\s\S]{0,900}?return res\?\.leagues/,
+);
+assert(
+  !!espnMyLeaguesFn && /skipAuth: true/.test(espnMyLeaguesFn[0]) &&
+    !!mflAuthLeaguesFn && /skipAuth: true/.test(mflAuthLeaguesFn[0]),
+  'V2.1: both discovery calls are skipAuth (sessionless)',
+);
+assert(
+  !!espnMyLeaguesFn && !/track\(/.test(espnMyLeaguesFn[0]) &&
+    !!mflAuthLeaguesFn && !/track\(/.test(mflAuthLeaguesFn[0]),
+  'V2.1: discovery calls fire no analytics (the funnel stays on the mint)',
+);
+
+// b. ESPN capture → sessionless my-leagues, populating the SAME picker
+const captureCb = espnSheet.match(
+  /onEspnCookiesCaptured\(\(pair\) => \{[\s\S]{0,1200}?\n    \}\);/,
+);
+assert(
+  !!captureCb &&
+    /\} else if \(entry\) \{[\s\S]{0,400}fetchEntryMyLeagues\(pair\.espnS2, pair\.swid\)/.test(
+      captureCb[0],
+    ),
+  'V2.1: ESPN capture with no league id fetches leagues sessionlessly in entry mode',
+);
+const entryFetchFn = espnSheet.match(
+  /async function fetchEntryMyLeagues\([\s\S]{0,900}?\n  \}/,
+);
+assert(
+  !!entryFetchFn && /await entryEspnMyLeagues\(\{ espnS2: s2, swid: sw \}\)/.test(entryFetchFn[0]) &&
+    /setMyLeagues\(leagues\)/.test(entryFetchFn[0]),
+  'V2.1: fetchEntryMyLeagues populates the existing myLeagues picker state',
+);
+assert(
+  !!entryFetchFn && /catch \{[\s\S]{0,300}setError\(/.test(entryFetchFn[0]),
+  'V2.1: a failed my-leagues fetch is soft (manual league-id stays usable)',
+);
+assert(
+  /showingPicker = leaguePicker && !useManualEntry && !!myLeagues && myLeagues\.length > 0/.test(
+    espnSheet,
+  ),
+  'V2.1: the picker renders on data alone — not gated against entry mode',
+);
+
+// c. first-class ESPN sign-in on the input step, entry mode only
+assert(
+  /\{entry && webviewCapture && !showingPicker \? \(/.test(espnSheet) &&
+    /testID="espn-link\.entry-signin"/.test(espnSheet),
+  'V2.1: ESPN entry input step offers a first-class Sign in to ESPN button',
+);
+assert(
+  /testID="espn-link\.entry-signin"[\s\S]{0,300}onPress=\{launchWebViewCapture\}/.test(espnSheet),
+  'V2.1: the entry sign-in reuses the existing WebView capture launcher',
+);
+assert(
+  /testID="espn-link\.private-toggle"/.test(espnSheet) &&
+    /testID="espn-link\.s2-input"/.test(espnSheet),
+  'V2.1: the manual cookie-paste fallback survives',
+);
+
+// d. MFL entry sign-in: enabled, single-select, mints directly
+assert(
+  /const mflAuthEnabled = useFlag\('mfl\.auth_link'\) && platform === 'mfl';/.test(
+    platformSheet,
+  ),
+  'V2.1: mflAuthEnabled no longer excludes entry mode',
+);
+assert(
+  /testID=\{entry \? 'platform-link\.entry-mfl-signin' : 'platform-link\.mfl-auth-toggle'\}/.test(
+    platformSheet,
+  ),
+  'V2.1: the MFL sign-in entry point is present in entry mode',
+);
+const mflSignInFn = platformSheet.match(
+  /async function mflSignIn\(\)[\s\S]{0,2200}?\n  \}/,
+);
+assert(
+  !!mflSignInFn && /if \(entry\) \{[\s\S]{0,600}await entryMflAuthLeagues\(/.test(mflSignInFn[0]),
+  'V2.1: entry sign-in goes through the sessionless auth_leagues action',
+);
+assert(
+  !!mflSignInFn && /setMflPass\(''\)/.test(mflSignInFn[0]) &&
+    /setStep\('entry-pick'\)/.test(mflSignInFn[0]),
+  'V2.1: entry sign-in clears the password from state and opens the entry list',
+);
+const mflEntryPick = platformSheet.match(
+  /async function mflEntryPickLeague\([\s\S]{0,2200}?\n  \}/,
+);
+assert(
+  !!mflEntryPick && /entryPlatformMint\(\{/.test(mflEntryPick[0]) &&
+    /teamId: franchiseId/.test(mflEntryPick[0]) &&
+    /onEntrySession\?\.\(/.test(mflEntryPick[0]) &&
+    /await linkPlatformLeague\(\{/.test(mflEntryPick[0]),
+  'V2.1: an entry league tap mints directly, then runs the canonical import',
+);
+assert(
+  !!mflEntryPick && !/mflAuthImport/.test(mflEntryPick[0]),
+  'V2.1: the entry path never uses the session-scoped bulk auth-import',
+);
+assert(
+  !!mflEntryPick &&
+    /entryMflPassRef\.current = '';[\s\S]{0,300}await mflAuthLink\(/.test(mflEntryPick[0]) &&
+    /catch \{/.test(mflEntryPick[0]),
+  'V2.1: the credential re-store is best-effort and drops the password first',
+);
+assert(
+  !/useState.{0,40}entryMflPass/.test(platformSheet) &&
+    /const entryMflPassRef = useRef<string>\(''\);/.test(platformSheet),
+  'V2.1: the in-flight password is held in a ref, never React state',
+);
+assert(
+  /testID=\{`platform-link\.entry-league\.\$\{lg\.league_id\}`\}/.test(platformSheet) &&
+    /disabled=\{!bindable \|\| busyTeamId !== null\}/.test(platformSheet),
+  'V2.1: the entry league list is single-select and only franchise-bound rows tap',
+);
+
+// e. backend: both actions, gated, before the mint, storing nothing
+const actionBlock =
+  entryRoute && entryRoute[0].match(
+    /action = str\(body\.get\("action"\)[\s\S]*?\n    if platform == "espn":/,
+  );
+assert(!!actionBlock, 'V2.1: the action branches exist inside the entry route');
+assert(
+  !!actionBlock &&
+    /action != "my_leagues"/.test(actionBlock[0]) &&
+    /action != "auth_leagues"/.test(actionBlock[0]),
+  'V2.1: both actions are handled (unknown action rejected per platform)',
+);
+assert(
+  !!actionBlock &&
+    /is_enabled\("espn\.link"\) or not is_enabled\("espn\.league_picker"\)/.test(actionBlock[0]) &&
+    /is_enabled\("mfl\.link"\) or not is_enabled\("mfl\.auth_link"\)/.test(actionBlock[0]),
+  'V2.1: each action is gated on its platform flag AND its own flag',
+);
+assert(
+  !!actionBlock && !/upsert_/.test(actionBlock[0]) &&
+    !/_extension_build_session\(/.test(actionBlock[0]),
+  'V2.1: the action branches store nothing and mint nothing',
+);
+assert(
+  !!entryRoute && !!actionBlock &&
+    entryRoute[0].indexOf(actionBlock[0]) <
+      entryRoute[0].indexOf('_extension_build_session('),
+  'V2.1: the action branches run BEFORE the mint',
+);
+assert(
+  !!actionBlock && /fetch_fan_leagues\(espn_s2, swid\)/.test(actionBlock[0]) &&
+    /_mfl\.login\(username, password, year\)/.test(actionBlock[0]) &&
+    /_mfl\.fetch_my_leagues\(auth\["cookie"\], year\)/.test(actionBlock[0]),
+  'V2.1: the actions reuse the same service functions the session routes use',
 );
 
 // ── 7. flag registered on both sides ─────────────────────────────────────

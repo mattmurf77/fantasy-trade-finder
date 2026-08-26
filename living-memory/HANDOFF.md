@@ -10,6 +10,14 @@
 
 
 
+## 2026-08-26c — Entry v2.1 (login option) SHIPPED to main; its mobile half needs the build AFTER v1.16.7
+
+**Where:** operator saw the entry flow live on v1.16.7 (which carries entry v1+v2, per the entry below) and asked for a login option beside the league-id path. v2.1 shipped: `POST /api/entry/platform` gained sessionless `my_leagues`/`auth_leagues` account-discovery actions (store NOTHING; gated `espn.league_picker`/`mfl.auth_link` on top of the feature flag), and the sheets' entry mode offers "Sign in to ESPN / with MFL" first-class — MFL login mints directly from the account's own franchise, no team-claim step ([scope §V2.1](../docs/plans/landing-platform-options/scope.md)). Built by an **Opus subagent** per operator instruction; lead session reviewed line-by-line, tightened the SignInScreen panel copy, re-ran all gates, shipped. Backend live at deploy; **the v2.1 mobile surface ships with the NEXT EAS build (v1.16.7 does NOT carry it)**.
+
+**Owed:** (1) operator TestFlight checklists — on v1.16.7: scope §3 (chips) + §V2 (claim flows); on the next build: §V2.1 (3 steps, login flows); log outcomes in TEST_LEDGER. (2) Worktree sweep for `.claude/worktrees/app-entry-platform-options-3e16ac` — it hosted three shipped branches and cannot remove itself; note the #213 branch sweep the entry below flags as open IS done (PR #214, [recovery ledger](../docs/recovery/2026-08-26-landing-platform-options-ship.md)). (3) D-164's standing consequence: entry sessions lose write-grace if `auth.enforce_verified_writes` ever flips on.
+
+**Blocking:** nothing. Revert levers: `landing.platform_options: false` kills chips + the whole entry route; `espn.league_picker` / `mfl.auth_link` individually kill the two login actions, deploy-free.
+
 ## 2026-08-26 — v1.16.7 ships #362 LIT **and carries BOTH entry-page waves**; #360 blocked on a live gen_v2 defect
 
 **Where:** `feat/jon-360-362` merged to `main` and pushed; **v1.16.7** cut for TestFlight. The week-old dark build was merged onto current `main` (123 commits of drift), de-collided twice, re-gated, and shipped.

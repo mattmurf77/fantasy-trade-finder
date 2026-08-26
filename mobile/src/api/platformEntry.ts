@@ -1,7 +1,8 @@
 import { api, setSessionToken } from './client';
 import { track } from './events';
-import type { EspnLinkPreview } from './espn';
+import type { EspnLinkPreview, EspnMyLeague } from './espn';
 import { PlatformLinkPreview, normalizePreview } from './platformLink';
+import type { MflAuthLeague } from './platformLink';
 
 // ── Sessionless platform entry (landing platform options v2, D-164) ─────────
 // POST /api/entry/platform — the platform twin of the Sleeper claim-a-username
@@ -59,6 +60,59 @@ export async function entryMflPreview(args: {
     year: args.year,
   }, { skipAuth: true });
   return normalizePreview(res);
+}
+
+// ── Account discovery (v2.1): "log in" instead of "know your league id" ─────
+// Both are sessionless POSTs against the same /api/entry/platform route, with
+// an `action` discriminator. Neither stores anything server-side — no
+// credential row, no user, no session — and neither carries analytics: the
+// signin funnel still fires exactly once, at the mint below.
+
+/** ESPN: the fan-profile league list for a freshly captured cookie pair.
+ *  Same wire shape as GET /api/espn/my-leagues (which reads the session
+ *  user's STORED pair — nonexistent before the mint). 404 while
+ *  `espn.league_picker` is off; 403 when ESPN rejects the pair. Callers
+ *  treat any rejection as "no picker — type a league id instead". */
+export async function entryEspnMyLeagues(args: {
+  espnS2: string;
+  swid: string;
+}): Promise<EspnMyLeague[]> {
+  const res = await api.post<{ leagues: EspnMyLeague[] }>(
+    '/api/entry/platform',
+    {
+      platform: 'espn',
+      action: 'my_leagues',
+      espn_s2: args.espnS2,
+      swid: args.swid,
+    },
+    { skipAuth: true },
+  );
+  return res?.leagues || [];
+}
+
+/** MFL: sign in and list the account's leagues, each with the user's own
+ *  franchise_id — which is what lets the entry flow mint DIRECTLY (no
+ *  team-claim step). Same per-league shape as POST /api/mfl/auth-link, but
+ *  the backend stores NOTHING here: the password is used for the one MFL
+ *  login call and never persisted, logged, or echoed. 404 while
+ *  `mfl.auth_link` is off; 403 `mfl_bad_credentials` on a rejected login. */
+export async function entryMflAuthLeagues(args: {
+  username: string;
+  password: string;
+  year?: number;
+}): Promise<MflAuthLeague[]> {
+  const res = await api.post<{ year: number; leagues: MflAuthLeague[] }>(
+    '/api/entry/platform',
+    {
+      platform: 'mfl',
+      action: 'auth_leagues',
+      username: args.username,
+      password: args.password,
+      year: args.year,
+    },
+    { skipAuth: true },
+  );
+  return res?.leagues || [];
 }
 
 // Pre-auth funnel analytics: the mint IS the sign-in attempt for a platform
