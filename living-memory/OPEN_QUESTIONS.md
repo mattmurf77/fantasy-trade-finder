@@ -26,7 +26,7 @@
 
 ## 2026-08-19 — Open Items (team review)
 
-### Q-026 — `trade_gen_v2` honors NO positional preferences. Port them, or hold `bakeoff_serve_interleaved` at 0?
+### Q-031 — `trade_gen_v2` honors NO positional preferences. Port them, or hold `bakeoff_serve_interleaved` at 0?
 **Raised:** 2026-08-19 (feedback #360/#361 build, branch `feat/jon-360-362`)
 **The headline is the PRE-EXISTING gap, not the new feature.** `backend/trade_gen_v2.py` reads neither `acquire_positions` nor `trade_away_positions` — **Chasing and Shopping already do not work there today.** It *does* apply `not_interested_ids` and `untouchable_ids`, which makes the omission look deliberate-by-oversight rather than by design, since Avoiding is architecturally the positional twin of `not_interested`.
 **Why it is not currently a live defect:** gen-v2 is dark for normal serving. But `trade.bakeoff` is **ON** and the `gen_v2` arm calls the module directly; serving is gated by a `model_config` knob (`bakeoff_serve_interleaved = 0.0`), **not a flag**. Raising that knob above 0 today would silently stop honoring Chasing and Shopping for the served fraction — and, once #360 ships, Avoiding too. Avoiding is worse in kind: Chasing is a preference, Avoiding is a promise.
@@ -34,7 +34,7 @@
 **What the operator needs to decide:** port all three preference families into gen-v2 as its own scoped piece of work, or formally accept that the knob stays at 0 until someone does. Either is fine; leaving it undecided is what is dangerous, because the knob is one edit away from a silent regression with no flag flip to audit.
 **Status:** OPEN.
 
-### Q-027 — Should `trade.avoid_positions` ship lit, making #360 live on merge? — **RESOLVED 2026-08-19: NO, ship dark**
+### Q-032 — Should `trade.avoid_positions` ship lit, making #360 live on merge? — **RESOLVED 2026-08-19: NO, ship dark**
 **Raised:** 2026-08-19 (branch `feat/jon-360-362`, built and green, unmerged)
 The scope block ships it **`true`**, arguing the flag is a kill switch rather than a dark launch because the feature was directly user-requested (#360/#361, tester `jonbonjourvi`). That matches precedent — `ranks.import` and `league.picks_always_counted` both graduated at ship for the same reason. Against it: this is a CLAUDE.md **bright-line** change (new schema column, new flag, engine behavior) going live to every TestFlight tester the moment it merges, with **no runtime evidence** behind it — D-056 leaves only the manual TestFlight checklist, which is unrun.
 Persistence is deliberately not flag-gated, so shipping dark loses nothing but visibility: the column stores, the API serves, and only the engine read plus the sheet row are gated. Flipping it on later is deploy-free.
@@ -46,11 +46,11 @@ being managed, not the feature. Shipping dark costs only visibility, because per
 deliberately not flag-gated: the column stores and the API serves in both states, so no user
 loses data while it is off and lighting it later is deploy-free.
 **To light it:** flip **four** files (the key + `release.json` + `onboarding-v2.json` +
-`profiles-on.json` — see [G-053](GOTCHAS.md)), after the TestFlight checklist passes. Do **not**
-add it to `LAUNCHED_FLAG_DEFAULTS` ([D-098](DECISIONS.md)).
+`profiles-on.json` — see [G-062](GOTCHAS.md)), after the TestFlight checklist passes. Do **not**
+add it to `LAUNCHED_FLAG_DEFAULTS` ([D-163](DECISIONS.md)).
 **Status:** RESOLVED.
 
-### Q-028 — Should the one-tap outlook confirm stop clearing the position lists? — **RESOLVED 2026-08-19: NO, keep inherited behavior**
+### Q-033 — Should the one-tap outlook confirm stop clearing the position lists? — **RESOLVED 2026-08-19: NO, keep inherited behavior**
 **Raised:** 2026-08-19 (feedback #360 build)
 `confirmOutlookMutation` (`mobile/src/screens/TradesScreen.tsx:1047-1058`) writes empty `acquire_positions`, `trade_away_positions` **and now `avoid_positions`** when the user taps **Confirm** on the inferred-outlook banner. So a user who set Avoiding but never declared an outlook loses that set on one tap.
 **This is inherited, not introduced** — the two sibling lists have always been cleared by that call, and #360 was built as specced rather than "improved" in passing (surgical-changes rule). It is raised because Avoiding reads as a stronger promise than the other two ("never send me this"), so losing it silently is a worse failure than losing a Chasing hint.

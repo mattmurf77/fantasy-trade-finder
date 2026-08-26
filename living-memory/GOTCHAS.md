@@ -398,7 +398,7 @@ signal until the session is re-initialised (~2 Elo points on the affected pair a
 
 ## 2026-08-19
 
-### G-053 — Flipping one flag in `config/features.json` breaks three test fixtures, and the trap is invisible until you fix the obvious one
+### G-062 — Flipping one flag in `config/features.json` breaks three test fixtures, and the trap is invisible until you fix the obvious one
 **Hit:** 2026-08-19 (lighting `outlook.odds`; re-confirmed independently by a parallel session)
 **Symptom:** you flip a single boolean in `config/features.json`, run `pytest backend/tests`, and get failures in files that have nothing to do with your feature — `test_seed_ui_test_db.py::test_onboarding_v2_flags_are_release_plus_the_onboarding_surface` and `::test_profiles_on_flags_turn_on_public_pages_only`.
 **Cause:** there is a **chain** of three assertions, and it only reveals itself one link at a time.

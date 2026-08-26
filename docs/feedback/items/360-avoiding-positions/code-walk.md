@@ -244,7 +244,7 @@ documented:
 
 Pinned by `test_gen_v2_guardrail_note_present`.
 
-Tracked as `living-memory/OPEN_QUESTIONS.md` **Q-026** (renumbered from Q-024
+Tracked as `living-memory/OPEN_QUESTIONS.md` **Q-031** (renumbered from Q-024
 on 2026-08-19: `origin/main` advanced mid-build and took Q-024 and Q-025).
 
 **Not delivered by this agent:** the `living-memory/OPEN_QUESTIONS.md` entry

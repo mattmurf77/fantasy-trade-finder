@@ -133,11 +133,11 @@ the agents' reports: pytest **3631 passed / 1 skipped**, `tsc --noEmit` clean, t
 
 ### Both operator calls are resolved — nothing blocks the merge
 
-- **[Q-027](OPEN_QUESTIONS.md) — ship DARK.** `trade.avoid_positions` is `false`. A bright-line
+- **[Q-032](OPEN_QUESTIONS.md) — ship DARK.** `trade.avoid_positions` is `false`. A bright-line
   change reaching every tester on merge with zero runtime evidence was the risk being managed,
   not the feature. Costs only visibility: persistence is not flag-gated, so the column stores
   and the API serves in both states.
-- **[Q-028](OPEN_QUESTIONS.md) — keep inherited behavior.** The one-tap outlook confirm goes on
+- **[Q-033](OPEN_QUESTIONS.md) — keep inherited behavior.** The one-tap outlook confirm goes on
   clearing all three position lists. No code change; this build alters nothing pre-existing.
 
 **Consequence: merging changes nothing a user can see.** Both features land inert behind dark
@@ -157,19 +157,19 @@ state: nothing proves either feature behaves on a device.
 override — D-093 → D-094. That session shipped it (PR #142, `6a3eab3`); prod serves
 `outlook.odds: true` and EAS build 121 is out. My work was **fully reverted**; the mechanical
 half it was missing (release-fixture chain, three rewritten guard tests, four stale doc
-corrections) was handed over and taken. Post-mortem: [M-005](MISTAKES.md). The commits
+corrections) was handed over and taken. Post-mortem: [M-006](MISTAKES.md). The commits
 `f68eddd`/`56f913b` on the abandoned `feat/jon-357-360-362` are deliberately preserved because
 that session was told to pull from them.
 
 ### Next actions, in order
 
-1. ~~Q-027 / Q-028~~ — **resolved 2026-08-19** (dark; keep inherited behavior).
+1. ~~Q-032 / Q-033~~ — **resolved 2026-08-19** (dark; keep inherited behavior).
 2. Merge `feat/jon-360-362` → `main`. Render auto-deploys the backend. **Both flags dark**, so
    the deploy is inert — no user-visible change.
 3. Run both TestFlight checklists on the next build, each with its flag lit on the test device
    first, then light for real. Lighting either is a **four-file** flip (key + three mirroring
-   fixtures, [G-053](GOTCHAS.md)), deploy-free.
-4. **[Q-026](OPEN_QUESTIONS.md) is the sleeper** — `trade_gen_v2` honors no positional
+   fixtures, [G-062](GOTCHAS.md)), deploy-free.
+4. **[Q-031](OPEN_QUESTIONS.md) is the sleeper** — `trade_gen_v2` honors no positional
    preferences at all, so Chasing and Shopping are **already** broken there. It is only
    masked because `bakeoff_serve_interleaved = 0.0`, a `model_config` knob rather than a
    flag. One edit away from a silent regression with nothing to audit.

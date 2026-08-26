@@ -34,9 +34,9 @@
 Built and unmerged on **`feat/jon-360-362`** (base `2a492b6`; backend `f488616`, mobile
 `705ab2c`). Full pipeline: dual planning agents → contract docs → one backend agent → one
 mobile agent as sole owner of `TradesScreen.tsx`. Evidence:
-[TEST_LEDGER 2026-08-19i](TEST_LEDGER.md) · [D-098](DECISIONS.md).
+[TEST_LEDGER 2026-08-19i](TEST_LEDGER.md) · [D-163](DECISIONS.md).
 
-1. **~~Answer Q-027 / Q-028~~ — RESOLVED 2026-08-19.** Operator ruled: **ship dark**
+1. **~~Answer Q-032 / Q-033~~ — RESOLVED 2026-08-19.** Operator ruled: **ship dark**
    (`trade.avoid_positions` `false`) and **keep the inherited behavior** (the one-tap outlook
    confirm goes on clearing all three position lists). Both features now merge with **nothing
    user-visible changing** — schema, routes and client code land inert behind two dark flags.
@@ -45,8 +45,8 @@ mobile agent as sole owner of `TradesScreen.tsx`. Evidence:
    They are the only runtime evidence under [D-056](DECISIONS.md) and **both are unrun**. BOTH
    flags are now dark, so each checklist needs its flag lit on the test device first or it
    proves nothing. Lighting either one is a **four-file** flip — the key plus the three
-   fixtures that mirror it ([G-053](GOTCHAS.md)) — and is deploy-free.
-3. **[Q-026](OPEN_QUESTIONS.md) — the sleeper.** `trade_gen_v2` honors **no** positional
+   fixtures that mirror it ([G-062](GOTCHAS.md)) — and is deploy-free.
+3. **[Q-031](OPEN_QUESTIONS.md) — the sleeper.** `trade_gen_v2` honors **no** positional
    preferences, so Chasing and Shopping are *already* broken there. Masked only because
    `bakeoff_serve_interleaved = 0.0` — a `model_config` knob, not a flag. One edit from a
    silent regression with nothing to audit.

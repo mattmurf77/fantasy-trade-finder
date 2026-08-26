@@ -635,7 +635,7 @@ new `mobile/tests/check-avoid-positions.js`, `mobile/package.json`.
 
 **Docs** (`scope.md` §4 table) can land with either agent, but the three
 `DECISIONS.md` entries (D-093, D-094, D-095), the `OPEN_QUESTIONS.md` entry
-(Q-026 — renumbered from Q-024 on 2026-08-19 after `origin/main` advanced and took Q-024/Q-025; wording constrained by PRD §5.1) and the two `bakeoff_serve_interleaved`
+(Q-031 — renumbered from Q-024 on 2026-08-19 after `origin/main` advanced and took Q-024/Q-025; wording constrained by PRD §5.1) and the two `bakeoff_serve_interleaved`
 guardrail lines are **backend-agent deliverables** — they carry the reasoning
 that agent is closest to.
 

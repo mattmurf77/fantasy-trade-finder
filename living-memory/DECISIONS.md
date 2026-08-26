@@ -513,7 +513,7 @@
 | D-094 | Operator Lights `outlook.odds`, Reversing D-093; Bands Are Licensed, `title_pct` and Bare Percentages Are Not | 2026-08-19 |
 
 | D-096 | The likes-you Injector Is Gated: the Floor Moves Into the Units the User Reads, and R1 Runs Directionally (Reverses D-055 sub-decision (5) / Q-G6-1) | 2026-08-19 |
-| D-098 | A Kill-Switch or Dark Flag Is Never Listed in `LAUNCHED_FLAG_DEFAULTS` | 2026-08-19 |
+| D-163 | A Kill-Switch or Dark Flag Is Never Listed in `LAUNCHED_FLAG_DEFAULTS` | 2026-08-19 |
 
 | D-090 | A Current-Year Pick Reads as Its Real Slot; the 2026-07-18 "Can't Resolve a Slot" Premise Is Narrowed, Not the Decision | 2026-08-19 |
 
@@ -1037,7 +1037,7 @@ silently. **If the operator disagrees, it is one line.**
 **Consequences:** The flip is **deploy-free on merge** (`POST /api/feature-flags/reload`) and needs **no client release** — the surface has shipped in every build since 2026-08-11. `NEXT.md` item 7 is closed. Team Review ([D-092](DECISIONS.md)) is re-planned to carry a playoff band chip on its `standing` beat, which was already designed as the seam for exactly this — so lighting cost the feature a payload field and a chip, not a redesign; its `test_no_odds_fields` guard is correspondingly narrowed from "no odds at all" to "no `title_pct`, no bare percentage". **The first TestFlight exposure is unverified at flip time:** no one has seen the lit surface on a device, and the operator's own league is the first read. **Two live risks are accepted rather than solved:** a preseason band can still be confidently wrong for an individual league (2 of 6 backtested league-seasons lose to climatology outright, one with an ordering correlation of +0.022), and IDP leagues price a minority of starting slots (7 of 15 in FFV3) so their bands are an offensive-core estimate — `meta.priced_slot_coverage` exists to caption this and **has never been rendered by any client**.
 **Status:** Active. **Flag flipped on `claude/team-review-analysis-plan-1f91e3`, not merged and not deployed** — it goes live on the next merge to `main`.
 
-## D-098 — A Kill-Switch or Dark Flag Is Never Listed in `LAUNCHED_FLAG_DEFAULTS`
+## D-163 — A Kill-Switch or Dark Flag Is Never Listed in `LAUNCHED_FLAG_DEFAULTS`
 **Date:** 2026-08-19 (branch `feat/jon-360-362` — feedback #360/#361/#362)
 **Context:** Both new flags (`trade.avoid_positions`, lit; `trade.standing_offers`, dark) carried a written instruction to appear in mobile's `LAUNCHED_FLAG_DEFAULTS` — #360's PRD hazard A-10 said so outright, and #362's SC-14 said the client default must "agree with `config/features.json`". The instinct has a real defect behind it: `revalidateFlags` does a whole-map `set({ flags })`, so a flag lit in config but absent from that map resolves falsy on frame one and true after the first fetch, and the surface visibly pops in. The same reasoning is already recorded in that file for the #300 pair. It is nevertheless the wrong trade here, and this session made the mistake once on `outlook.odds` before a parallel session caught it.
 **Decision:** **That map fails OPEN by design** (its own `#115` comment: a first-ever boot with no cached map, or a failed revalidate, keeps listed features ON). Listing a flag therefore trades a one-frame cosmetic pop-in for a hole in the kill switch:

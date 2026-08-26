@@ -429,14 +429,14 @@ Add that line to `docs/config-reference.md:779` (the
 `bakeoff_serve_interleaved` row) and to `backend/feature_flags.py:833` (the
 `trade.bakeoff` comment block) — the two places the bake-off arm is documented.
 
-**Deliverable — `living-memory/OPEN_QUESTIONS.md` entry `Q-026`.**
+**Deliverable — `living-memory/OPEN_QUESTIONS.md` entry `Q-031`.**
 **Renumbered 2026-08-19 (was `Q-024`):** `origin/main` advanced mid-build and
 took both `Q-024` (the `check-*.js` CI-contract question) and `Q-025` (Team
 Review waivers), so max is now `Q-025`. **Wording constraint,
 per the ruling:** the headline is the **pre-existing Chasing/Shopping gap**, not
 the Avoiding one. Draft title:
 
-> **Q-026 — `trade_gen_v2` ignores positional preferences entirely; interleaved
+> **Q-031 — `trade_gen_v2` ignores positional preferences entirely; interleaved
 > serving would break Chasing and Shopping today**
 
 with Avoiding named in the body as the reason the question surfaced and as the

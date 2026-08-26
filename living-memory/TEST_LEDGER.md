@@ -13,10 +13,10 @@
 ## 2026-08-19i — Avoiding positions (#360/#361) + standing offers (#362), NOT SHIPPED, on `feat/jon-360-362`
 
 **Branch:** `feat/jon-360-362`, based on `origin/main` `2a492b6`. **Not pushed, not merged.**
-Flags: **both dark** — `trade.avoid_positions` `false` ([Q-027](OPEN_QUESTIONS.md), operator ruled
+Flags: **both dark** — `trade.avoid_positions` `false` ([Q-032](OPEN_QUESTIONS.md), operator ruled
 dark 2026-08-19), `trade.standing_offers` `false`. Nothing user-visible changes on merge.
 Records: [360-avoiding-positions/](../docs/feedback/items/360-avoiding-positions/) ·
-[362-standing-offer/](../docs/feedback/items/362-standing-offer/) · [D-098](DECISIONS.md).
+[362-standing-offer/](../docs/feedback/items/362-standing-offer/) · [D-163](DECISIONS.md).
 
 | Gate | Result |
 |---|---|

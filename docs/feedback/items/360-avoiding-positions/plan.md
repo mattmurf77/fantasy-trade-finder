@@ -659,5 +659,5 @@ is the smaller, more contained change) and rebase #362 on top.
 - **Q-A7 (§7):** Web parity — follow-up item, or same wave? Planned default:
   follow-up (verified no data loss in the meantime).
 
-Next OPEN_QUESTIONS id is **Q-026** (was Q-024 when this plan was written; `origin/main` advanced on 2026-08-19 and took Q-024 + Q-025, so max is now Q-025); next DECISIONS id is
+Next OPEN_QUESTIONS id is **Q-031** (was Q-024 when this plan was written; `origin/main` advanced on 2026-08-19 and took Q-024 + Q-025, so max is now Q-025); next DECISIONS id is
 **D-093** (max today D-092).

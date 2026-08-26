@@ -843,7 +843,7 @@ FLAG_KEYS: tuple[str, ...] = (
     # negative lists (not_interested_ids at trade_gen_v2.py:509/:530,
     # untouchable_ids at :533) but reads NO positional preferences at all, so
     # interleaved serving would break Chasing and Shopping today and Avoiding
-    # the moment it ships. Tracked as OPEN_QUESTIONS Q-026.
+    # the moment it ships. Tracked as OPEN_QUESTIONS Q-031.
     #
     # OFF (default) ⇒ no fan-out, no interleave, no new columns stamped, no
     # bakeoff_runs row, swipe K factors untouched — byte-identical serving.
