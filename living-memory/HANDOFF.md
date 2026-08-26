@@ -533,9 +533,9 @@ raw-vs-package sign-divergence corner. A fairness bar was rejected on the same m
 `f488616`, mobile `705ab2c` — for **Avoiding positions (#360/#361)** and **standing offers
 (#362)**. Built through the full feedback pipeline: dual planning agents → contract docs →
 one backend build agent → one mobile build agent (sole owner of `TradesScreen.tsx`, because
-both features touch it). **All gates green on the merged tree**, run by me and not taken from
-the agents' reports: pytest **3631 passed / 1 skipped**, `tsc --noEmit` clean, testid-lint OK,
-**64** `check-*.js` suites passing. Evidence in [TEST_LEDGER 2026-08-19i](TEST_LEDGER.md).
+both features touch it). **All gates re-run 2026-08-26 on the tree merged with current `origin/main` (`867c3baa`)**:
+pytest **4336 passed / 1 skipped**, `tsc --noEmit` clean, testid-lint OK, **82** `check-*.js`
+suites passing. Evidence in [TEST_LEDGER 2026-08-26](TEST_LEDGER.md).
 
 **Nothing is pushed and nothing is merged.**
 
