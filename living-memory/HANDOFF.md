@@ -10,27 +10,30 @@
 
 
 
-## 2026-08-26b — Platform entry DECOUPLED from Apple (D-164), shipped to main; owed: TestFlight checklist v2 + worktree sweep
+## 2026-08-26 — v1.16.7 ships #362 LIT **and carries BOTH entry-page waves**; #360 blocked on a live gen_v2 defect
 
-**Where:** same-day v2 of the landing platform options: sessionless `POST /api/entry/platform` + entry-mode link sheets ([D-164](DECISIONS.md), [scope §V2](../docs/plans/landing-platform-options/scope.md)). ESPN/MFL users claim their team at the entry page with no Apple account; deterministic `entry:…` identity. Backend route is live on Render at deploy; **the mobile surface reaches users only with the next EAS build**.
+**Where:** `feat/jon-360-362` merged to `main` and pushed; **v1.16.7** cut for TestFlight. The week-old dark build was merged onto current `main` (123 commits of drift), de-collided twice, re-gated, and shipped.
 
-**Owed:**
-1. **Operator TestFlight checklist v2** — scope §V2 (6 steps: public ESPN claim end-to-end with no Apple prompt, private ESPN via the ESPN WebView, MFL claim, relaunch persistence, Sleeper unchanged + Apple link under every chip, sign-out→re-claim recovers the board). Log outcome in TEST_LEDGER.
-2. **Worktree sweep** — `.claude/worktrees/app-entry-platform-options-3e16ac` (now also branch `claude/platform-entry-decouple-apple`) couldn't remove itself; ledger + remove per docs/recovery/CLAUDE.md once verified on `origin/main`.
-3. **Standing consequence to remember:** entry sessions are unverified → if `auth.enforce_verified_writes` ever flips on, entry users lose the write-grace path (noted in D-164).
+**This build carries BOTH entry-page waves — #210's platform chips AND #213's Apple decoupling.** Both of those handoffs said their mobile surface "reaches users only with the next EAS build." **v1.16.7 is that build**, cut from a tree containing both. Their flags (`landing.platform_options`) and the `POST /api/entry/platform` route are already live from their own merges; only the mobile halves were waiting on a binary. So **three** TestFlight checklists are runnable on 1.16.7, not one:
 
-**Blocking:** nothing. Revert lever unchanged: `landing.platform_options: false` + `POST /api/feature-flags/reload` now kills chips AND the entry route.
+1. **#362 standing offers** — the one this branch owes, and shipped without.
+2. **Entry chips v1** — [landing-platform-options/scope.md](../docs/plans/landing-platform-options/scope.md) §3, 6 steps.
+3. **Entry decoupling v2** — same scope §V2, 6 steps (public ESPN claim with no Apple prompt, private ESPN via the WebView, MFL claim, relaunch persistence, Sleeper unchanged, sign-out→re-claim recovers the board).
 
-## 2026-08-26 — Landing platform options SHIPPED to main; owed: TestFlight checklist on the next build + worktree sweep
+Open from #210: a surfaced waiver — no chip-selection analytics event (taxonomy default-deny; signin funnel + `league_selected.platform` cover it). Open from #213: entry sessions are unverified, so if `auth.enforce_verified_writes` ever flips on, entry users lose the write-grace path. #210's worktree sweep is done ([recovery ledger](../docs/recovery/2026-08-26-landing-platform-options-ship.md), PR #211); #213's `claude/platform-entry-decouple-apple` may still need one.
 
-**Where:** entry-page platform options (Sleeper · ESPN · MFL chips on `SignInScreen`, flag `landing.platform_options`, [D-163](DECISIONS.md)) built under full gates in worktree `app-entry-platform-options-3e16ac` and merged to `main`. Backend delta is flag-registry-only (features.json + FLAG_KEYS + the three flag fixtures), so the Render deploy is inert; **the mobile change reaches users only with the next EAS build** — nothing after v1.16.6 (132) carries it yet.
+**What went live from this branch.** `trade.standing_offers` = **true** ([D-165](DECISIONS.md)) — the post-like sheet, the three `/api/trades/standing-offer*` routes, the injector branch and the sender chip. Deploy-free tuning stays available: `standing_offer_inject_cap` (2.0; **0 kills injection without a flag flip**) and `standing_offer_days` (30.0).
 
-**Owed:**
-1. **Operator TestFlight checklist** — [docs/plans/landing-platform-options/scope.md](../docs/plans/landing-platform-options/scope.md) §3 (6 steps: chips render, ESPN chip → Apple → ESPN sheet auto-opens un-wedged, MFL twin, Sleeper flow unchanged, single-league auto-skip yields to the MFL intent) — on the next build that carries this; log the outcome in TEST_LEDGER.
-2. **Worktree sweep** — `.claude/worktrees/app-entry-platform-options-3e16ac` (branch `claude/app-entry-platform-options-3e16ac`) couldn't remove itself; once content is verified on `origin/main`, ledger + remove per docs/recovery/CLAUDE.md.
-3. **Surfaced waiver (scope §1):** no chip-selection analytics event — taxonomy is default-deny for new client events pending a tracking-plan addendum; signin funnel + `league_selected.platform` cover the flow. If selection-level data is wanted, it's a one-event follow-up.
+**What did NOT go live, and why.** `trade.avoid_positions` stays **false**. Checking prod before flipping found `bakeoff_serve_interleaved` = **1.0** live — not the `0.0` its seed and [Q-031](OPEN_QUESTIONS.md) both assumed — with `bakeoff_include_gen_v2` = 1.0. `trade_gen_v2.py` reads **no** positional preference, so it serves a third of every organic deck while ignoring them. #360's contract is "a promise, not a preference", and a promise cannot ship 2/3 true.
 
-**Blocking:** nothing. Revert lever: `landing.platform_options: false` + `POST /api/feature-flags/reload` (config-only, no deploy).
+**The thing to pick up first — this is a live bug, not a nicety.** Chasing and Shopping are silently ignored on the gen_v2 share of every real user's deck **today**, and have been since that knob was raised. Nothing to do with this branch. Q-031 is rewritten as live and escalated; it now offers three real choices (port preferences into gen_v2 / drop the knob to 0 and end the bake-off's serving phase / accept and disclose). **Resolving it also unblocks lighting #360, which is a four-file flip away.**
+
+**Owed runtime evidence, and it is the only kind mobile gets (D-056).** The #362 TestFlight checklist is **UNRUN** — the feature graduated without it, by explicit operator ruling. Two independent guards (mobile SC-14a, backend `test_flag_and_knobs_registered`) had pinned the flag dark with the reason "graduation is an operator action after a TestFlight pass on a real league"; both were changed to assert lit, each carrying an in-file note that the pass did not happen. `SC-14b`, the `LAUNCHED_FLAG_DEFAULTS` absence check that actually protects the kill switch ([D-166](DECISIONS.md)), was deliberately left untouched.
+
+**Sharp edge:** three gate runs are recorded in TEST_LEDGER, not one. The pre-flip run (4336/1, run independently) matched the build agent's claim exactly, which is why its other numbers were trusted. The post-flip run failed on exactly one thing — the dark-posture pin — and no behavior.
+**Two TestFlight checklists are now owed on 1.16.7, and both are the only runtime evidence their feature will get (D-056):** the **#362 standing-offer** checklist ([362-standing-offer/](../docs/feedback/items/362-standing-offer/)) — which the feature shipped *without*, by ruling — and the **landing platform chips** checklist ([landing-platform-options/scope.md](../docs/plans/landing-platform-options/scope.md) §3: chips render, ESPN chip → Apple → ESPN sheet auto-opens un-wedged, MFL twin, Sleeper flow unchanged, single-league auto-skip yields to the MFL intent). Log both outcomes in TEST_LEDGER.
+
+**Revert levers, both config-only + `POST /api/feature-flags/reload`, no deploy:** `trade.standing_offers: false` (or `standing_offer_inject_cap: 0`) and `landing.platform_options: false`.
 
 ## 2026-08-25 — v1.16.6 (132) is on TestFlight; everything owed is now RUNTIME verification, not code
 
@@ -136,6 +139,7 @@ move, and the avatar lab's anchor test models the brief's described layout, not 
 - [2026-08-21 — Serving live; operator iterating; planning fleet converging](#2026-08-21--serving-live-operator-iterating-planning-fleet-converging)
 - [2026-08-20 — Fit-challenger BUILT dark on `claude/trade-suggestions-review-69c9eb`; operator holds 9 decisions](#2026-08-20--fit-challenger-built-dark-on-claudetrade-suggestions-review-69c9eb-operator-holds-9-decisions)
 - [2026-08-20 — Team Review defect batch built on `claude/team-outlook-experience-27a7a1`; TestFlight pass owed](#2026-08-20--team-review-defect-batch-built-on-claudeteam-outlook-experience-27a7a1-testflight-pass-owed)
+- [2026-08-19 — #360/#361 + #362 built and green on a branch; two operator calls block merge](#2026-08-19--360361--362-built-and-green-on-a-branch-two-operator-calls-block-merge)
 - [2026-08-19 — Team Review planned end-to-end (#357/#358/#359); `outlook.odds` LIT by operator override](#2026-08-19--team-review-planned-end-to-end-357358359-outlookodds-lit-by-operator-override)
 
 - [2026-08-19 — likes-you injector gated on `fix/likes-you-quality-gates` (worktree); TestFlight pass owed](#2026-08-19--likes-you-injector-gated-on-fixlikes-you-quality-gates-worktree-testflight-pass-owed)
@@ -545,6 +549,72 @@ raw-vs-package sign-divergence corner. A fairness bar was rejected on the same m
   generator reads; reason recorded in `docs/plans/three-model-bakeoff/scope-phase2.md` § Excluded.
 
 ---
+
+## 2026-08-19 — #360/#361 + #362 built and green on a branch; two operator calls block merge
+
+### Where I am right now
+
+**`feat/jon-360-362`** (base `origin/main` `2a492b6`) carries two commits — backend
+`f488616`, mobile `705ab2c` — for **Avoiding positions (#360/#361)** and **standing offers
+(#362)**. Built through the full feedback pipeline: dual planning agents → contract docs →
+one backend build agent → one mobile build agent (sole owner of `TradesScreen.tsx`, because
+both features touch it). **All gates re-run 2026-08-26 on the tree merged with current `origin/main` (`867c3baa`)**:
+pytest **4336 passed / 1 skipped**, `tsc --noEmit` clean, testid-lint OK, **82** `check-*.js`
+suites passing. Evidence in [TEST_LEDGER 2026-08-26](TEST_LEDGER.md).
+
+**Nothing is pushed and nothing is merged.**
+
+### Both operator calls are resolved — nothing blocks the merge
+
+- **[Q-032](OPEN_QUESTIONS.md) — ship DARK.** `trade.avoid_positions` is `false`. A bright-line
+  change reaching every tester on merge with zero runtime evidence was the risk being managed,
+  not the feature. Costs only visibility: persistence is not flag-gated, so the column stores
+  and the API serves in both states.
+- **[Q-033](OPEN_QUESTIONS.md) — keep inherited behavior.** The one-tap outlook confirm goes on
+  clearing all three position lists. No code change; this build alters nothing pre-existing.
+
+**Consequence: merging changes nothing a user can see.** Both features land inert behind dark
+flags. The schema column, the three routes, and all client code ship unreachable.
+
+### What is NOT owed, and why
+
+No Maestro, no simulator, no captures — [D-056](DECISIONS.md). The runtime net is the two
+manual TestFlight checklists in the item folders, and **both are unrun**. That is the honest
+state: nothing proves either feature behaves on a device.
+
+### What happened to #357
+
+**Handed off and shipped by someone else.** This session was told "re-enable 357" and lit
+`outlook.odds` end to end before discovering a parallel session
+(`claude/team-review-analysis-plan-1f91e3`) had already done it under a direct operator
+override — D-093 → D-094. That session shipped it (PR #142, `6a3eab3`); prod serves
+`outlook.odds: true` and EAS build 121 is out. My work was **fully reverted**; the mechanical
+half it was missing (release-fixture chain, three rewritten guard tests, four stale doc
+corrections) was handed over and taken. Post-mortem: [M-006](MISTAKES.md). The commits
+`f68eddd`/`56f913b` on the abandoned `feat/jon-357-360-362` are deliberately preserved because
+that session was told to pull from them.
+
+### Next actions, in order
+
+1. ~~Q-032 / Q-033~~ — **resolved 2026-08-19** (dark; keep inherited behavior).
+2. Merge `feat/jon-360-362` → `main`. Render auto-deploys the backend. **Both flags dark**, so
+   the deploy is inert — no user-visible change.
+3. Run both TestFlight checklists on the next build, each with its flag lit on the test device
+   first, then light for real. Lighting either is a **four-file** flip (key + three mirroring
+   fixtures, [G-062](GOTCHAS.md)), deploy-free.
+4. **[Q-031](OPEN_QUESTIONS.md) is the sleeper** — `trade_gen_v2` honors no positional
+   preferences at all, so Chasing and Shopping are **already** broken there. It is only
+   masked because `bakeoff_serve_interleaved = 0.0`, a `model_config` knob rather than a
+   flag. One edit away from a silent regression with nothing to audit.
+5. `living-memory-format-check` pass — `DECISIONS.md`'s index table is missing rows for
+   D-095 and D-097 (concurrent-session drift, not from this work).
+
+### Worktrees to sweep
+
+`wt-jon` (abandoned 357 branch, keep until the Team Review session confirms it is done with
+`f68eddd`) and `wt-jon2` (the live branch). Both under the session scratchpad; ledger per
+[docs/recovery/CLAUDE.md](../docs/recovery/CLAUDE.md) before removing.
+
 
 ## 2026-08-19 — Current-year pick slot labels built on `feat/pick-slot-labels` (worktree); operator has a pricing call to make
 

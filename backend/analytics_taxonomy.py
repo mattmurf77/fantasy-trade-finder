@@ -502,6 +502,41 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # (card, guard) with a 50-row session cap — six rows per trapped card,
     # never unbounded. Analysis reads max(blocked_n), NEVER count(rows).
     "swipe_guard_blocked",
+    # ── #362 standing offers, 2026-08-19 ────────────────────────────────
+    # Tracking-plan addendum: docs/feedback/items/362-standing-offer/prd.md
+    # §5 (single-session pipeline; the addendum waiver is scope.md §4).
+    #
+    # A standing offer is a user's generalised, time-boxed, team-targeted
+    # intent to trade one player for any pick of a round in one league.
+    # These four are CLIENT-fired because all four moments happen in the
+    # sheet / manage screen and the server cannot see the prompt at all —
+    # the impression half of the health metric (prompted ÷ posted) exists
+    # nowhere else. The fifth name, `standing_offer_card_shown`, is
+    # SERVER-fired: the client cannot know an injection happened without the
+    # server telling it, which would be a round trip for an impression.
+    #
+    # COUNTS ONLY, NEVER ID LISTS — `seasons` and `teams` are integers and
+    # `team_user_ids` is never an analytics prop. That is R-19 (privacy: the
+    # recipient learns THEY were selected, never who else was, and never who
+    # was excluded) enforced at the taxonomy, not just at the payload.
+    #
+    # NOT in FUNNEL_CRITICAL: a side surface, not a step in the
+    # sign-in → suggestion loop.
+    #
+    # NON_INTENT_EVENTS verdicts (classified in analytics_queries.py in this
+    # SAME commit — INTENT is derived by SUBTRACTION, so an omitted
+    # impression-class name silently inflates DAU/WAU):
+    #   standing_offer_prompted     → NON-INTENT (a passive impression; the
+    #                                 user did nothing but swipe, and the
+    #                                 swipe already counted them)
+    #   standing_offer_skipped      → NON-INTENT (dismissal class, like
+    #                                 quickset_abandoned; every skip is
+    #                                 preceded by a prompted on the same
+    #                                 card in the same session)
+    #   standing_offer_posted       → INTENT (a deliberate broadcast)
+    #   standing_offer_revoked      → INTENT (a deliberate retraction)
+    "standing_offer_prompted", "standing_offer_posted",
+    "standing_offer_skipped", "standing_offer_revoked",
     # ── Receipts, 2026-08-21 (docs/plans/receipts/, PRD DR-9) ────────────
     # Registered in the SAME commit as the emitters
     # (mobile/src/screens/ReceiptsScreen.tsx), the default-deny rule this
@@ -736,6 +771,15 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     # audit trail, and the import-time disjointness assert below would raise
     # (taking the app down at boot) if someone added it to both.
     "pick_assignment_changed",
+    # #362 — one per standing-offer card injected into a served deck.
+    # Props: round (int), seasons (int COUNT). Never team ids and never a
+    # team count (R-19). Server-fired events carry no CLIENT_EVENT_PROPS
+    # entry, so the props are documented here, per awaiting_trade_dismissed.
+    # NOT in ALLOWED_CLIENT_EVENTS: the client cannot know an injection
+    # happened without the server telling it, which would be a round trip
+    # for an impression. NON-INTENT (impression class) — classified in
+    # analytics_queries.NON_INTENT_EVENTS in this same commit.
+    "standing_offer_card_shown",
     # ── Receipts grading job, 2026-08-21 (docs/plans/receipts/, PRD DR-9) ──
     # Registered in the SAME commit as its emitter
     # (`receipts_service._emit_run_event`), the house rule this file's
@@ -1386,6 +1430,18 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     "swipe_guard_blocked": frozenset({"guard", "decision", "trade_id",
                                       "impression_id", "blocked_n",
                                       "ms_since_render"}),
+    # ── #362 standing offers, 2026-08-19 ────────────────────────────────
+    # MANDATORY: the import-time completeness check below raises ValueError
+    # at boot for any ALLOWED_CLIENT_EVENTS member with no entry here.
+    # Counts only — `seasons_offered`/`teams_offered` are the sizes of the
+    # pill/row sets SHOWN, `seasons`/`teams` the sizes SELECTED. No member
+    # ids, no player ids, no free text (R-19).
+    "standing_offer_prompted": frozenset({"round", "seasons_offered",
+                                          "teams_offered"}),
+    "standing_offer_posted":   frozenset({"round", "seasons", "teams",
+                                          "used_all_teams"}),
+    "standing_offer_skipped":  frozenset({"snoozed", "retired"}),
+    "standing_offer_revoked":  frozenset({"age_days"}),
     # ── #384 merged calculator + finder, 2026-08-22 ─────────────────────
     # Addendum: docs/business/analytics/2026-08-22-384-calc-finder-
     # addendum.md, whose props table IS this block and nothing more. An

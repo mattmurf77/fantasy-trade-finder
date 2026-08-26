@@ -182,6 +182,24 @@ function normalizeTradeCard(raw: any): TradeCard {
     //   sweetener — validated above; undefined when absent/malformed.
     basis:              raw?.basis === 'consensus' ? 'consensus' : 'divergence',
     likesYou:           raw?.likes_you === true,
+    // #362 — standing-offer provenance. Same posture as `likesYou`: the
+    // server serializes each key only when set, so flag-off payloads carry
+    // neither and both degrade to undefined.
+    standingOfferReason: typeof raw?.standing_offer_reason === 'string'
+      ? raw.standing_offer_reason
+      : undefined,
+    standingOfferMine:
+      raw?.standing_offer_mine
+      && typeof raw.standing_offer_mine === 'object'
+      && Number.isFinite(Number(raw.standing_offer_mine.round))
+      && Array.isArray(raw.standing_offer_mine.seasons)
+        ? {
+            round: Number(raw.standing_offer_mine.round),
+            seasons: raw.standing_offer_mine.seasons
+              .map((s: any) => Number(s))
+              .filter((s: number) => Number.isFinite(s)),
+          }
+        : undefined,
     // F1 signal spine (flag deck.signal_v2): server sends impression_id per
     // card only when the flag is on; absent → undefined and nothing changes.
     impression_id:      typeof raw?.impression_id === 'string' ? raw.impression_id : undefined,
@@ -713,4 +731,118 @@ export async function dismissAwaitingTrade(row: AwaitingTrade) {
       partner_id: row.counterparty_user_id,
     },
   );
+}
+
+// ── Standing offers (#362, flag trade.standing_offers) ────────────────
+// "I will send player P for any round-R pick, in seasons Y, from teams T,
+// in this league, until expires_at." Written after a right-swipe on a
+// 1-for-1 where the user receives a first; widens the match rule feeding
+// the EXISTING likes-you injector, so the selected teams see that trade
+// near the top of their own deck.
+//
+// FLAG-OFF CONTRACT: all three routes return 404 {"error":"feature_disabled"}
+// before any session work — not a bare Flask 404. Callers must treat that as
+// "the feature is not on", never as "the request was wrong".
+//
+// SESSION WINDOW: create and list take `_require_initialized_session` and
+// will 409 during the sign-in → session-init window; revoke takes
+// `_require_session` and needs no league. Callers on the deck surface
+// fail-closed rather than blocking on either.
+//
+// PRIVACY (R-19): `team_user_ids` and `team_count` are SENDER-OWNED. They
+// appear on these payloads because they are the caller's own data, and must
+// never be rendered from, or forwarded onto, a recipient-facing surface.
+
+export interface StandingOffer {
+  offer_id: number;
+  league_id: string;
+  /** Present only for rows in the session's CURRENT league — the server
+   *  omits it for cross-league rows rather than guessing a name. */
+  league_name?: string;
+  player_id: string;
+  player_name: string;
+  round: number;
+  seasons: number[];
+  /** Sender-owned. Never present on a deck card (R-19). */
+  team_user_ids: string[];
+  team_count: number;
+  created_at: string;
+  expires_at: string;
+  days_left: number;
+  revoked_at: string | null;
+  /** True when the offered player has left the sender's roster — the offer
+   *  is dead regardless of the clock, and the injector enforces the same
+   *  test. Computed ONLY for the session's current league; cross-league
+   *  rows always report `false`, which means "not checked here", NOT
+   *  "verified live". Do not render it as a positive validity claim. */
+  stale: boolean;
+}
+
+function normalizeStandingOffer(raw: any): StandingOffer {
+  return {
+    offer_id:      Number(raw?.offer_id ?? 0),
+    league_id:     String(raw?.league_id ?? ''),
+    league_name:   typeof raw?.league_name === 'string' ? raw.league_name : undefined,
+    player_id:     String(raw?.player_id ?? ''),
+    player_name:   String(raw?.player_name ?? raw?.player_id ?? ''),
+    round:         Number(raw?.round ?? 1),
+    seasons:       Array.isArray(raw?.seasons)
+      ? raw.seasons.map((s: any) => Number(s)).filter((s: number) => Number.isFinite(s))
+      : [],
+    team_user_ids: Array.isArray(raw?.team_user_ids)
+      ? raw.team_user_ids.map((t: any) => String(t))
+      : [],
+    team_count:    Number(raw?.team_count ?? 0),
+    created_at:    String(raw?.created_at ?? ''),
+    expires_at:    String(raw?.expires_at ?? ''),
+    days_left:     Number(raw?.days_left ?? 0),
+    revoked_at:    raw?.revoked_at ? String(raw.revoked_at) : null,
+    stale:         raw?.stale === true,
+  };
+}
+
+/** POST /api/trades/standing-offer.
+ *  → 200 {status, offer} · 400 validation · 409 a live offer already exists
+ *    for this (player, round) · 404 feature_disabled.
+ *  Validation order is round → season horizon → membership, and only the
+ *  FIRST failure is reported: a league with no draft picks answers 400 with
+ *  `allowed_seasons: []` BEFORE membership is ever checked, so a 400 here
+ *  never proves the team ids were accepted. */
+export async function createStandingOffer(body: {
+  league_id: string;
+  player_id: string;
+  round: number;
+  seasons: number[];
+  team_user_ids: string[];
+  source_trade_id?: string;
+}): Promise<{ status: string; offer: StandingOffer }> {
+  const res = await api.post<any>('/api/trades/standing-offer', body);
+  return {
+    status: String(res?.status ?? 'ok'),
+    offer: normalizeStandingOffer(res?.offer),
+  };
+}
+
+/** GET /api/trades/standing-offers — the CALLER's own offers (live, expired
+ *  and revoked), newest first. Unwraps `res.offers`; a malformed payload
+ *  degrades to `[]` (the getAwaitingTrades posture) rather than throwing on
+ *  a manage screen. */
+export async function getStandingOffers(leagueId?: string): Promise<StandingOffer[]> {
+  const qs = leagueId ? `?league_id=${encodeURIComponent(leagueId)}` : '';
+  const res = await api.get<any>(`/api/trades/standing-offers${qs}`);
+  const rows = Array.isArray(res?.offers) ? res.offers : Array.isArray(res) ? res : [];
+  return rows.map(normalizeStandingOffer);
+}
+
+/** POST /api/trades/standing-offer/revoke.
+ *  → 200 {status, revoked} — `revoked:false` on an idempotent repeat or an
+ *  offer the caller does not own. Still 200, never 404 (the
+ *  awaiting/dismiss contract sets this precedent). */
+export async function revokeStandingOffer(
+  offerId: number,
+): Promise<{ status: string; revoked: boolean }> {
+  const res = await api.post<any>('/api/trades/standing-offer/revoke', {
+    offer_id: offerId,
+  });
+  return { status: String(res?.status ?? 'ok'), revoked: res?.revoked === true };
 }

@@ -250,6 +250,14 @@ NON_INTENT_EVENTS = frozenset({
     # (and the apply behind it) does not already account for.
     "rankings_preset_detected",
     "rankings_preset_fallback",
+    # #362 standing offers, 2026-08-19 — added in the SAME commit that added
+    # them to ALLOWED_CLIENT_EVENTS / SERVER_FIRED_EVENTS, for the reason
+    # stated above: INTENT_EVENTS is derived by SUBTRACTION, so omitting an
+    # impression-class name silently inflates DAU/WAU from ship day.
+    # `standing_offer_posted` and `standing_offer_revoked` are deliberately
+    # ABSENT — both are deliberate user actions and belong in INTENT.
+    "standing_offer_prompted", "standing_offer_skipped",
+    "standing_offer_card_shown",
     # ── Receipts, 2026-08-21 (docs/plans/receipts/, PRD DR-9) — added in the
     # SAME commit that registered it in analytics_taxonomy, for the reason
     # stated at the top of this block.

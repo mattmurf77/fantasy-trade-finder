@@ -26,6 +26,9 @@ import {
   getAwaitingTrades,
   dismissMatch,
   dismissAwaitingTrade,
+  getStandingOffers,
+  revokeStandingOffer,
+  type StandingOffer,
 } from '../api/trades';
 import MatchValueSection from '../components/MatchValueSection';
 import {
@@ -64,7 +67,19 @@ import type { TradeMatch, AwaitingTrade, Player } from '../shared/types';
 const UNDO_HOLD_MS = 5000;
 
 type LeagueFilter = string | 'all';
-type Segment = 'mutual' | 'awaiting';
+// #362 — round → ordinal, for the standing-offer rows. v1 only ever writes
+// round 1; the map exists because the column does.
+const ROUND_WORDS: Record<number, string> = { 1: '1st', 2: '2nd', 3: '3rd', 4: '4th' };
+function roundWordFor(round: number): string {
+  return ROUND_WORDS[round] ?? `round ${round}`;
+}
+
+// #362 — 'standing' is the manage surface for the caller's own standing
+// offers. Deliberately THREE members and no more: Edit and Repost from
+// mockup §5 are out of v1 (revoke-then-repost achieves both with no new
+// route and no second entry point into the post-like sheet, and the
+// writer's one-live-offer rule makes that sequence safe).
+type Segment = 'mutual' | 'awaiting' | 'standing';
 
 // Cross-league matches inbox. Pulls /api/trades/matches/all so users can
 // see pending / accepted / declined matches regardless of which league is
@@ -628,6 +643,26 @@ export default function MatchesScreen() {
   // roster. Matches are cross-league, so prefs are fetched per league
   // present in either segment; `combine` memoizes the league→Set map so
   // TradeCard's memo isn't busted every render.
+  // ── #362 standing offers — the manage surface (flag trade.standing_offers)
+  // Cross-league, like the rest of this screen. Two honesty constraints come
+  // straight from the route's contract:
+  //   * `league_name` is OMITTED for rows outside the session's current
+  //     league — the server does not guess a name, so neither do we.
+  //   * `stale` (the offered player has left the sender's roster) is only
+  //     COMPUTED for the session league; cross-league rows always report
+  //     `false`, which means "not checked here", NOT "verified live". So
+  //     `stale` is only ever rendered when true, and no row anywhere claims
+  //     to have been verified. `days_left` and `revoked_at` are computed for
+  //     every row, so the Active / Expired split is honest everywhere.
+  const standingOffersOn = useFlag('trade.standing_offers');
+  const standingQuery = useQuery({
+    queryKey: ['standing-offers', 'all'],
+    queryFn: () => getStandingOffers(),
+    enabled: standingOffersOn,
+    staleTime: 60_000,
+    retry: false,
+  });
+
   const untouchablesEnabled = useFlag('trade.preference_lists');
   const prefLeagueIds = useMemo(() => {
     const ids = new Set<string>();
@@ -731,12 +766,80 @@ export default function MatchesScreen() {
     hiddenAwareMatches === null ? null : visibleMatches.length;
   const awaitingPillCount =
     hiddenAwareAwaiting === null ? null : visibleAwaiting.length;
+  // #362 — the standing-offer rows, split Active / Expired.
+  //
+  // REVOKED rows are dropped entirely rather than grouped: the user killed
+  // them, and a "revoked" bucket is a list of things they already decided
+  // they were done with. A STALE offer (its player has left the roster) is
+  // dead regardless of the clock — the injector enforces exactly that — so
+  // it groups with Expired, never with Active.
+  const allStanding = standingQuery.data ?? [];
+  const standingRows = useMemo(() => {
+    const live: StandingOffer[] = [];
+    const dead: StandingOffer[] = [];
+    for (const o of allStanding) {
+      if (o.revoked_at) continue;
+      if (filterLeagueId !== 'all' && o.league_id !== filterLeagueId) continue;
+      (o.days_left > 0 && !o.stale ? live : dead).push(o);
+    }
+    return { live, dead };
+  }, [allStanding, filterLeagueId]);
+  const standingCounts = useMemo(
+    () =>
+      countsByLeague(
+        standingQuery.data === undefined
+          ? undefined
+          : standingQuery.data.filter((o) => !o.revoked_at),
+      ),
+    [standingQuery.data],
+  );
+  const standingPillCount =
+    standingQuery.data === undefined
+      ? null
+      : standingRows.live.length + standingRows.dead.length;
+
   // League chips count rows in the ACTIVE segment.
-  const segmentChipCounts = segment === 'mutual' ? matchCounts : awaitingCounts;
+  const segmentChipCounts =
+    segment === 'mutual'
+      ? matchCounts
+      : segment === 'awaiting'
+        ? awaitingCounts
+        : standingCounts;
   const segmentChipTotal =
     segment === 'mutual'
       ? (hiddenAwareMatches === null ? null : hiddenAwareMatches.length)
-      : (hiddenAwareAwaiting === null ? null : hiddenAwareAwaiting.length);
+      : segment === 'awaiting'
+        ? (hiddenAwareAwaiting === null ? null : hiddenAwareAwaiting.length)
+        : (standingQuery.data === undefined
+            ? null
+            : standingQuery.data.filter((o) => !o.revoked_at).length);
+
+  // Revoke — the only action on a standing-offer row (R-10). No Edit, no
+  // Repost: both would need a second entry point into the post-like sheet
+  // for no capability revoke-then-repost does not already give.
+  const revokeMutation = useMutation({
+    mutationFn: (offer: StandingOffer) => revokeStandingOffer(offer.offer_id),
+    onSuccess: (_res, offer) => {
+      queryClient.invalidateQueries({ queryKey: ['standing-offers', 'all'] });
+      queryClient.invalidateQueries({ queryKey: ['standing-offers', offer.league_id] });
+      // Counts only, never id lists. `age_days` answers "did users broadcast
+      // more widely than they meant?" — a revoke inside 48h is the signal.
+      const created = Date.parse(offer.created_at);
+      track(
+        'standing_offer_revoked',
+        {
+          age_days: Number.isFinite(created)
+            ? Math.max(0, Math.floor((Date.now() - created) / 86_400_000))
+            : 0,
+        },
+        'Matches',
+      );
+      setToast({ msg: 'Standing offer revoked', tone: 'success' });
+    },
+    onError: () => {
+      setToast({ msg: 'Could not revoke that offer — try again', tone: 'warn' });
+    },
+  });
 
   // Filter chips: "All" + one per league. Default to the cached session
   // leagues so chips are stable even if the user has matches in leagues no
@@ -787,15 +890,17 @@ export default function MatchesScreen() {
         }
       : null;
 
-  const isLoading = segment === 'mutual' ? matchesQuery.isLoading : awaitingQuery.isLoading;
-  const isError   = segment === 'mutual' ? matchesQuery.isError   : awaitingQuery.isError;
-  const isFetching =
+  const activeQuery =
     segment === 'mutual'
-      ? matchesQuery.isFetching && !matchesQuery.isLoading
-      : awaitingQuery.isFetching && !awaitingQuery.isLoading;
+      ? matchesQuery
+      : segment === 'awaiting'
+        ? awaitingQuery
+        : standingQuery;
+  const isLoading = activeQuery.isLoading;
+  const isError   = activeQuery.isError;
+  const isFetching = activeQuery.isFetching && !activeQuery.isLoading;
   const onRefresh = () => {
-    if (segment === 'mutual') matchesQuery.refetch();
-    else                      awaitingQuery.refetch();
+    activeQuery.refetch();
   };
 
   // ── P1-5 (audit A-14) — invite on the mutual-empty state ─────────────
@@ -909,11 +1014,14 @@ export default function MatchesScreen() {
         <Text style={styles.subtitle}>
           {segment === 'mutual'
             ? 'Trades where you and a leaguemate both said yes — across every league.'
-            : "Trades you've liked — waiting on the other owner to swipe."}
+            : segment === 'awaiting'
+              ? "Trades you've liked — waiting on the other owner to swipe."
+              : "Players you've offered around the league, and who can see it."}
         </Text>
         {/* Untouchables affordance hint — long-press is invisible without
             it. Only when the flag is on and there's something to press. */}
         {untouchablesEnabled
+          && segment !== 'standing'
           && (segment === 'mutual' ? visibleMatches.length > 0 : visibleAwaiting.length > 0) ? (
           // S2 PRD-04 ride-along (visual.chalkline_cleanup): content-carrying
           // hint promotes chalk-faint → chalk-dim. S3 PRD-02: with the menu
@@ -948,6 +1056,18 @@ export default function MatchesScreen() {
           }}
           testID="matches.segment.awaiting"
         />
+        {/* #362 — the manage surface. Placed here, not in Settings: this is
+            content, not configuration. Every broadcast needs a revoke, or it
+            becomes a thing users are afraid to use. */}
+        {standingOffersOn ? (
+          <SegmentBtn
+            label="Standing offers"
+            count={standingPillCount}
+            active={segment === 'standing'}
+            onPress={() => setSegment('standing')}
+            testID="matches.segment.standing"
+          />
+        ) : null}
       </View>
 
       {/* League filter chip row. Horizontally scrollable so 5+ leagues
@@ -1011,10 +1131,7 @@ export default function MatchesScreen() {
         })}
       </ScrollView>
 
-      {(segment === 'mutual'
-          ? matchesQuery.data === undefined && matchesQuery.isLoading
-          : awaitingQuery.data === undefined && awaitingQuery.isLoading
-        ) ? (
+      {activeQuery.data === undefined && activeQuery.isLoading ? (
         <View style={styles.list}>
           {[0, 1, 2].map((i) => (
             <View key={i} style={{ gap: space.xs, marginBottom: space.lg }}>
@@ -1030,8 +1147,12 @@ export default function MatchesScreen() {
         <View style={styles.centered}>
           <Text style={styles.errorText}>
             {readErrorCopy(
-              segment === 'mutual' ? matchesQuery.error : awaitingQuery.error,
-              segment === 'mutual' ? 'Could not load matches.' : 'Could not load pending trades.',
+              activeQuery.error,
+              segment === 'mutual'
+                ? 'Could not load matches.'
+                : segment === 'awaiting'
+                  ? 'Could not load pending trades.'
+                  : 'Could not load your standing offers.',
             )}
           </Text>
         </View>
@@ -1194,7 +1315,7 @@ export default function MatchesScreen() {
             ItemSeparatorComponent={() => <View style={{ height: space.lg }} />}
           />
         )
-      ) : (
+      ) : segment === 'awaiting' ? (
         // Awaiting-them segment
         visibleAwaiting.length === 0 ? (
           <View style={styles.centered}>
@@ -1312,6 +1433,106 @@ export default function MatchesScreen() {
             )}
             ItemSeparatorComponent={() => <View style={{ height: space.lg }} />}
           />
+        )
+      ) : (
+        // #362 — Standing offers. Active first, then Expired (read-only).
+        // Revoke is the ONLY action: mockup §5's Edit and Repost are out of
+        // v1, because revoke-then-repost already covers both and the
+        // writer's one-live-offer-per-(player, round) rule makes that
+        // sequence safe. No FeedbackFAB here — the RootNav tab-stack mount
+        // already covers this screen (CLAUDE.md #188).
+        standingRows.live.length + standingRows.dead.length === 0 ? (
+          <View style={styles.centered}>
+            <Text testID="matches.standing-empty" style={styles.emptyTitle}>
+              No standing offers
+            </Text>
+            <Text style={styles.emptyBody}>
+              Like a one-for-one where you get a first, and we'll ask which
+              other teams and years you'd take one from.
+            </Text>
+            <Button label="Refresh" variant="ghost" compact onPress={onRefresh} />
+          </View>
+        ) : (
+          <ScrollView
+            contentContainerStyle={styles.list}
+            refreshControl={
+              <RefreshControl
+                refreshing={isFetching}
+                onRefresh={onRefresh}
+                tintColor={ice.base}
+              />
+            }
+          >
+            {standingRows.live.length > 0 ? (
+              <Text style={styles.standingGroupHdr}>
+                Active · {standingRows.live.length}
+              </Text>
+            ) : null}
+            {standingRows.live.map((o) => (
+              <View key={o.offer_id} style={styles.standingRow}>
+                <View style={styles.standingRowMain}>
+                  {/* The server omits league_name for rows outside the
+                      session league; we render the badge only when it is
+                      actually there rather than guessing a name. */}
+                  {filterLeagueId === 'all' && o.league_name ? (
+                    <View style={styles.leagueBadgeRow}>
+                      <Badge label={o.league_name} />
+                    </View>
+                  ) : null}
+                  <Text style={styles.standingTitle} numberOfLines={1}>
+                    {o.player_name} → any {roundWordFor(o.round)}
+                  </Text>
+                  <Text style={styles.standingMeta}>
+                    {o.seasons.map((s) => `'${String(s).slice(-2)}`).join(' ')}
+                    {' · '}
+                    {o.team_count} {o.team_count === 1 ? 'team' : 'teams'}
+                    {' · '}
+                    {o.days_left} {o.days_left === 1 ? 'day' : 'days'} left
+                  </Text>
+                </View>
+                <Button
+                  testID={`matches.standing-revoke.${o.offer_id}`}
+                  variant="pass"
+                  compact
+                  label="Revoke"
+                  disabled={revokeMutation.isPending}
+                  onPress={() => {
+                    haptics.selection();
+                    revokeMutation.mutate(o);
+                  }}
+                />
+              </View>
+            ))}
+            {standingRows.dead.length > 0 ? (
+              <Text style={styles.standingGroupHdr}>
+                Expired · {standingRows.dead.length}
+              </Text>
+            ) : null}
+            {standingRows.dead.map((o) => (
+              <View key={o.offer_id} style={[styles.standingRow, styles.standingRowDead]}>
+                <View style={styles.standingRowMain}>
+                  {filterLeagueId === 'all' && o.league_name ? (
+                    <View style={styles.leagueBadgeRow}>
+                      <Badge label={o.league_name} />
+                    </View>
+                  ) : null}
+                  <Text style={[styles.standingTitle, styles.standingTitleDead]} numberOfLines={1}>
+                    {o.player_name} → any {roundWordFor(o.round)}
+                  </Text>
+                  <Text style={styles.standingMeta}>
+                    {o.seasons.map((s) => `'${String(s).slice(-2)}`).join(' ')}
+                    {' · '}
+                    {o.team_count} {o.team_count === 1 ? 'team' : 'teams'}
+                    {' · '}
+                    {/* `stale` is only ever TRUE when the server actually
+                        checked (session league); a false value means "not
+                        checked here", so it never renders as a claim. */}
+                    {o.stale ? 'no longer on your roster' : 'expired'}
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </ScrollView>
         )
       )}
 
@@ -1617,6 +1838,41 @@ const styles = StyleSheet.create({
   // #318/#319 — the awaiting card's footer stack: Dismiss row above the
   // value disclosure, spaced on the card's inner rhythm.
   awaitingFooter: { gap: space.sm },
+  // #362 — standing-offer manage rows.
+  standingGroupHdr: {
+    fontFamily: fonts.uiSemi,
+    fontSize: 12,
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+    color: chalk.dim,
+    marginTop: space.lg,
+    marginBottom: space.sm,
+  },
+  standingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    minHeight: 44,
+    padding: space.md,
+    marginBottom: space.sm,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: ink.line,
+    backgroundColor: ink.ink1,
+  },
+  standingRowDead: { opacity: 0.6 },
+  standingRowMain: { flex: 1, gap: space.xs },
+  standingTitle: {
+    fontFamily: fonts.uiSemi,
+    fontSize: 15,
+    color: chalk.base,
+  },
+  standingTitleDead: { color: chalk.dim },
+  standingMeta: {
+    fontFamily: fonts.data,
+    fontSize: 12,
+    color: chalk.dim,
+  },
   centered: {
     flex: 1,
     alignItems: 'center',

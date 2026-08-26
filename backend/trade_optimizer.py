@@ -65,6 +65,7 @@ from .trade_service import (
     mismatch_damp,
     rank_fairness,
     elo_to_value,
+    avoid_ok,
     filler_ok,
     fit_premium_1for1,
     pick_swap_ok,
@@ -214,6 +215,7 @@ def generate_pair_trades_v3(
     scoring_format: str = "1qb_ppr",
     acquire_positions: list[str] | None = None,
     trade_away_positions: list[str] | None = None,
+    avoid_positions: list[str] | None = None,   # #360 — receive-side exclusion
     pinned_give_players: list[str] | None = None,
     pinned_receive_players: list[str] | None = None,
     pinned_give_mode: str = "any",
@@ -374,9 +376,13 @@ def generate_pair_trades_v3(
                   and not (untouchable_ids and p in untouchable_ids)]  # #2
     # #163 — not-interested players never enter the receive pool (dropped at
     # the source; the pinned/target re-adds below iterate this filtered list).
+    # #360 — avoided POSITIONS are dropped at the same source, for the same
+    # reason: an exclusion always wins over a pin (PRD R-8 / D-360-3(b)).
+    _avoid = set(avoid_positions or ())
     known_opp = [p for p in opponent.roster
                  if p in shrunk_user_elo and p in opp_elo
-                 and not (not_interested_ids and p in not_interested_ids)]
+                 and not (not_interested_ids and p in not_interested_ids)
+                 and avoid_ok(p, players, _avoid)]
     # Board-scale calibration for the prune ONLY (flag trade.pool_calibration
     # — field bug 2026-08-15, docs/plans/compressed-board-pool/scope.md).
     # The raw key ``_vo - _uv`` is not invariant to a board-wide scale
@@ -665,6 +671,7 @@ def generate_pair_trades_v3(
                 both_feasible=_both_feasible, players=players,
                 untouchable_ids=untouchable_ids,
                 not_interested_ids=not_interested_ids,               # #163
+                avoid_positions=_avoid,                              # #360
                 filler_ok_fn=lambda g, r: filler_ok(g, r, _uv, _vo),  # #141
                 presentment_ok_fn=presentment_ok_fn,   # G6 — re-validate the
             )                                          # SWEETENED combo (R-6)
@@ -764,8 +771,8 @@ def generate_pair_trades_v3(
 def _try_sweeten(give_ids, recv_ids, *, user_roster, opp_roster, seed_value,
                  fairness_threshold, min_side, surpluses, gap_ok,
                  both_feasible, players, untouchable_ids=None,
-                 not_interested_ids=None, filler_ok_fn=None,
-                 presentment_ok_fn=None):
+                 not_interested_ids=None, avoid_positions=None,
+                 filler_ok_fn=None, presentment_ok_fn=None):
     """3.4 — close a near-miss by adding ONE cheap player from the
     under-paying side's roster.
 
@@ -793,7 +800,9 @@ def _try_sweeten(give_ids, recv_ids, *, user_roster, opp_roster, seed_value,
                          and not (side == "give" and untouchable_ids
                                   and p in untouchable_ids)     # #2 never sweeten with an untouchable
                          and not (side == "receive" and not_interested_ids
-                                  and p in not_interested_ids)),  # #163 never sweeten INTO the user
+                                  and p in not_interested_ids)   # #163 never sweeten INTO the user
+                         and not (side == "receive"
+                                  and not avoid_ok(p, players, avoid_positions))),  # #360
                         key=seed_value)
     for s_pid in candidates:
         if side == "give":

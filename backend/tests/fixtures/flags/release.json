@@ -219,5 +219,7 @@
   "trade.breaker": false,
   "trade.breaker_narrative": false,
   "trade.negmem": false,
-  "trade.full_sweep": true
+  "trade.full_sweep": true,
+  "trade.avoid_positions": false,
+  "trade.standing_offers": true
 }

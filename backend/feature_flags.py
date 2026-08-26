@@ -915,6 +915,14 @@ FLAG_KEYS: tuple[str, ...] = (
     # diversity) are BYPASSED for that deck so nothing reorders the
     # interleaver's output (PLAN.md §3.4 Channel 2).
     #
+    # GUARDRAIL (#360, 2026-08-19): DO NOT raise bakeoff_serve_interleaved
+    # above 0 until trade_gen_v2 honors acquire_positions,
+    # trade_away_positions AND avoid_positions. gen-v2 applies the per-player
+    # negative lists (not_interested_ids at trade_gen_v2.py:509/:530,
+    # untouchable_ids at :533) but reads NO positional preferences at all, so
+    # interleaved serving would break Chasing and Shopping today and Avoiding
+    # the moment it ships. Tracked as OPEN_QUESTIONS Q-031.
+    #
     # OFF (default) ⇒ no fan-out, no interleave, no new columns stamped, no
     # bakeoff_runs row, swipe K factors untouched — byte-identical serving.
     "trade.bakeoff",
@@ -928,6 +936,33 @@ FLAG_KEYS: tuple[str, ...] = (
     # TradeFinderModeBar / TradeHomeUtilityRow render byte-identical to
     # today. The existing deck is never modified either way.
     "trades.presentation_v2",
+    # ── #360/#361 "Avoiding" positions — 2026-08-19, ships DARK (Q-032) ──
+    # docs/feedback/items/360-avoiding-positions/. ON ⇒ the trade job reads
+    # league_preferences.avoid_positions and every receive pool (v3, the v3
+    # sweetener, v2, consensus, asset ideas ×3, the likes-you injector)
+    # drops assets at those positions at POOL CONSTRUCTION — never as a
+    # relaxable gate, so the #189 relaxed pass structurally cannot widen it.
+    # OFF ⇒ the loader leaves the list empty at the single point of entry
+    # (server._run_trade_job) and every generation path is byte-identical to
+    # pre-#360; the mobile sheet renders no Avoiding row.
+    #
+    # PERSISTENCE IS DELIBERATELY NOT GATED: GET/POST /api/league/preferences
+    # always return and accept `avoid_positions` in BOTH flag states. A
+    # kill-switch flip must never destroy user data, and flipping back on
+    # must restore every saved set with no migration and no re-entry.
+    "trade.avoid_positions",
+    # ── #362 standing offers — 2026-08-19, ships DARK ─────────────────────
+    # docs/feedback/items/362-standing-offer/. ON ⇒ the post-like sheet, the
+    # three /api/trades/standing-offer* routes, the standing-offer branch of
+    # _inject_likes_you_cards_impl, and the sender-side chip stamp are live.
+    # Requires trade.likes_you (the receiving half) and trade.picks_in_pool
+    # (picks must be roster assets) — with either off the feature is inert.
+    # OFF (default) ⇒ the routes 404, no prompt, no predicate evaluated, and
+    # no card payload key added, so deck payloads are byte-identical.
+    #
+    # Deploy-free tuning rides model_config: standing_offer_inject_cap (0 =
+    # kill injection without a flag flip) and standing_offer_days.
+    "trade.standing_offers",
     # ── #366 — position-relative tier bands (docs/feedback/items/366-tier-ladder) ──
     # ON ⇒ trade_service.analyze_roster_strengths bands each player by his rank
     # WITHIN HIS POSITION instead of by three absolute dynasty-value cuts, and

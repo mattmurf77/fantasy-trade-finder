@@ -2088,6 +2088,42 @@ def is_pick_asset(p) -> bool:
         or getattr(p, "team", None) == "PICK"))
 
 
+def _pos_for_avoid(p) -> "str | None":
+    """Position key used by the #360 receive-side avoid filter.
+
+    Pick-ness is resolved FIRST, via the canonical is_pick_asset: the generic
+    pick rungs carry a deliberately FAKE player position (_PICK_POS in
+    server.build_universal_pool, {1:"RB",2:"WR",3:"TE",4:"QB"}) so they
+    distribute across the trio tabs. Reading p.position raw here would let
+    "avoid QB" delete every 4th-round pick from the receive pool, which is a
+    defect, not consistency. Avoiding "PICK" — one of the five DNA chips — is
+    the only way to exclude pick assets.
+
+    Deliberately STRICTER AND MORE CORRECT than the neighbouring
+    _positions_ok (trade_optimizer.py / trade_service.py), which reads raw
+    ``position``. Fixing those two is a behavior change to shipped features
+    that nobody asked for; the asymmetry is recorded in
+    docs/cross-client-invariants.md and docs/glossary.md.
+    """
+    if p is None:
+        return None
+    if is_pick_asset(p):
+        return "PICK"
+    return getattr(p, "position", None)
+
+
+def avoid_ok(pid: str, players: dict, avoid) -> bool:
+    """#360 — True when player/asset ``pid`` may enter a RECEIVE pool.
+
+    Unknown ids pass (they cannot be scored anyway and the surrounding pool
+    builders already filter on membership). ``avoid`` is any container of
+    uppercase position strings; falsy ⇒ everything passes.
+    """
+    if not avoid:
+        return True
+    return _pos_for_avoid(players.get(pid)) not in avoid
+
+
 def strip_matched_pick_pairs(give_ids: list[str], recv_ids: list[str],
                              players: dict, seed_value,
                              frac: float) -> tuple[list[str], list[str]]:
@@ -4270,6 +4306,14 @@ class TradeCard:
     meso_variants: Optional[list] = None
     health: Optional[dict] = None
     tier: Optional[str] = None
+    # #362 (flag trade.standing_offers) — "Why you're seeing this" line for a
+    # card produced by a league-mate's standing offer. Server-composed;
+    # serialized only when set. Carries NO team ids and NO counts (R-19).
+    standing_offer_reason: Optional[str] = None
+    # #362 — {"round": int, "seasons": [int]} when one of the DECK OWNER's own
+    # live standing offers covers this card. Display only; never reorders,
+    # never boosts, never filters.
+    standing_offer_mine: Optional[dict] = None
 
 
 @dataclass
@@ -4391,6 +4435,13 @@ class TradeService:
         self._presentment_kills: dict[str, int] = {
             "R1": 0, "R2": 0, "R3": 0, "R5": 0}
         self._r4_excluded_keys: set = set()
+        #   _standing_offer_cap_drops / _organic_like_cap_drops — #362 R-15:
+        #     likes-you candidates dropped for want of a cap slot. COUNTERS,
+        #     never analytics events — one event per dropped card in a chatty
+        #     league is high-cardinality server noise for a question a
+        #     counter answers. Reset per job alongside _r4_excluded_keys.
+        self._standing_offer_cap_drops: int = 0
+        self._organic_like_cap_drops: int = 0
         #   _job_seed_elo — the consensus Elo map of the CURRENT job, so
         #     _dedup_and_sort can derive each card's centerpiece for the C4
         #     headliner cap. Overwritten per call like _exclusion_keys; while
@@ -4430,6 +4481,9 @@ class TradeService:
         fairness_threshold: float = 0.75,    # min package_value ratio (0.5–1.0)
         acquire_positions: list[str] | None = None,    # positions user wants to receive
         trade_away_positions: list[str] | None = None, # positions user wants to give
+        avoid_positions: list[str] | None = None,      # #360: never receive these
+                                                       # positions — receive-pool
+                                                       # exclusion, never relaxed
         pinned_give_players: list[str] | None = None,  # specific players user wants to trade away
         pinned_receive_players: list[str] | None = None,  # specific players user wants to acquire
                                                           # (FB-47; v2-only, legacy ignores it)
@@ -4528,6 +4582,8 @@ class TradeService:
         self._job_seed_elo = seed_elo or {}      # C4 centerpiece derivation
         self._presentment_kills = {"R1": 0, "R2": 0, "R3": 0, "R5": 0}
         self._r4_excluded_keys = set()
+        self._standing_offer_cap_drops = 0        # #362 R-15
+        self._organic_like_cap_drops = 0          # #362 R-15
 
         # #172 — resolve the flag once so both paths below share one check;
         # off ⇒ trade_intent is never read, so flag-off responses stay
@@ -4616,6 +4672,7 @@ class TradeService:
                 fairness_threshold   = fairness_threshold,
                 acquire_positions    = acquire_positions,
                 trade_away_positions = trade_away_positions,
+                avoid_positions      = avoid_positions,          # #360
                 pinned_give_players  = pinned_give_players,
                 pinned_receive_players = pinned_receive_players,
                 pinned_give_mode     = pinned_give_mode,
@@ -4647,7 +4704,8 @@ class TradeService:
             # relaxation only when the normal pass came up empty. Normal
             # jobs and non-empty results are byte-identical.
             targeted = bool(pinned_give_players or pinned_receive_players
-                            or acquire_positions or trade_away_positions)
+                            or acquire_positions or trade_away_positions
+                            or avoid_positions)
             if targeted and not cards:
                 cards = self._relaxed_targeted_pass(_v2_kwargs)
             # #172 — pure post-generation filter, applied last so it never
@@ -4863,7 +4921,12 @@ class TradeService:
              non-negative on both boards).
 
         NEVER relaxed: the #108 user-board gates (user_gain_epsilon,
-        fit_premium_1for1 / user_gain_ok_1for1), untouchable_ids, and the
+        fit_premium_1for1 / user_gain_ok_1for1), untouchable_ids,
+        avoid_positions (#360 — structurally un-relaxable: the exclusion
+        lives in receive-POOL CONSTRUCTION, not in a gate, and this pass
+        re-runs _generate_trades_v2 with the SAME kwargs, so there is
+        nothing here that could relax it. Do not move the filter into a
+        gate — that is what would silently break the guarantee), and the
         G6 presentment rules — construction rules R1 #340 / R2 #341 /
         R3 #339 AND the R5 #304 need gate — those are safety properties,
         not taste (a "relaxed" horrid trade is still horrid; targeted jobs
@@ -4929,6 +4992,8 @@ class TradeService:
         raw_user_elo: dict[str, float] | None = None,
         untouchable_ids: set | None = None,
         not_interested_ids: set | None = None,
+        avoid_positions: list[str] | None = None,   # #360 — receive-side
+                                                    # positional exclusion
         opponent_user_id: str | None = None,  # #250 Specific Team: scope the
                                               # sweep to this one league-mate
     ) -> dict[str, list[dict]]:
@@ -4993,6 +5058,7 @@ class TradeService:
         empty: dict[str, list[dict]] = {"upgrade": [], "lateral": [], "downgrade": []}
         league = self._leagues.get(league_id)
         players = self._players
+        _avoid = set(avoid_positions or ())      # #360
         if not league or asset_id not in players:
             return empty
         if direction not in ("give", "receive"):
@@ -5129,7 +5195,9 @@ class TradeService:
                 pool = _asset_sort(
                     p for p in set(member.roster)
                     if p in players and p != asset_id
-                    and not (not_interested_ids and p in not_interested_ids))
+                    and not (not_interested_ids and p in not_interested_ids)
+                    # #360 — the return side IS the user's receive side.
+                    and avoid_ok(p, players, _avoid))
                 for c in pool:
                     vc = _v(c)
                     # #198 — Upgrade/Lateral counterparts must play the
@@ -5192,6 +5260,10 @@ class TradeService:
         else:   # direction == "receive"
             if not_interested_ids and asset_id in not_interested_ids:
                 return empty     # user said never offer this to them
+            # #360 — same rule at position granularity: an exclusion beats a
+            # pin (PRD R-6.2 / D-360-3(b)), mirroring the #163 guard above.
+            if not avoid_ok(asset_id, players, _avoid):
+                return empty
             owner = next(
                 (m for m in sorted(league.members, key=lambda m: m.user_id)
                  if m.user_id != user_id and asset_id in (m.roster or [])),
@@ -5209,7 +5281,8 @@ class TradeService:
             extras = _asset_sort(
                 p for p in set(owner.roster)
                 if p in players and p != asset_id
-                and not (not_interested_ids and p in not_interested_ids))[:_POOL]
+                and not (not_interested_ids and p in not_interested_ids)
+                and avoid_ok(p, players, _avoid))[:_POOL]      # #360
             for g in give_pool:
                 vg = _v(g)
                 # #198 mirror — the Upgrade headliner and the Lateral swap
@@ -5514,6 +5587,7 @@ class TradeService:
         fairness_threshold: float,
         acquire_positions: list[str] | None,
         trade_away_positions: list[str] | None,
+        avoid_positions: list[str] | None = None,      # #360
         pinned_give_players: list[str] | None,
         pinned_receive_players: list[str] | None = None,
         pinned_give_mode: str = "any",
@@ -5761,6 +5835,7 @@ class TradeService:
                 opp_profile          = opp_profile,
                 acquire_positions    = acquire_positions or [],
                 trade_away_positions = trade_away_positions or [],
+                avoid_positions      = avoid_positions or [],     # #360
                 pinned_give_players  = pinned_give_players,
                 pinned_receive_players = pinned_receive_players,
                 pinned_give_mode     = pinned_give_mode,
@@ -5794,6 +5869,7 @@ class TradeService:
                         scoring_format       = scoring_format,
                         acquire_positions    = acquire_positions or [],
                         trade_away_positions = trade_away_positions or [],
+                        avoid_positions      = avoid_positions or [],     # #360
                         pinned_give_players  = pinned_give_players,
                         pinned_receive_players = pinned_receive_players,
                         pinned_give_mode     = pinned_give_mode,
@@ -5819,6 +5895,7 @@ class TradeService:
                         fairness_threshold   = fairness_threshold,
                         acquire_positions    = acquire_positions or [],
                         trade_away_positions = trade_away_positions or [],
+                        avoid_positions      = avoid_positions or [],     # #360
                         pinned_give_players  = pinned_give_players,
                         pinned_receive_players = pinned_receive_players,
                         pinned_give_mode     = pinned_give_mode,
@@ -6055,6 +6132,7 @@ class TradeService:
         fairness_threshold: float,
         acquire_positions: list[str],
         trade_away_positions: list[str],
+        avoid_positions: list[str] | None = None,      # #360
         pinned_give_players: list[str] | None,
         pinned_receive_players: list[str] | None = None,
         pinned_give_mode: str = "any",
@@ -6393,9 +6471,13 @@ class TradeService:
         # #163 — not-interested players never enter the receive pool (dropped
         # at the source, so no combo — nor the pinned/target re-adds below,
         # which iterate this filtered list — can offer them to the user).
+        # #360 — avoided POSITIONS are dropped at the same source, so an
+        # exclusion always wins over a pin (PRD R-8 / D-360-3(b)).
+        _avoid = set(avoid_positions or ())
         _known_opp  = [p for p in opponent.roster
                        if p in shrunk_user_elo and p in opp_elo
-                       and not (not_interested_ids and p in not_interested_ids)]
+                       and not (not_interested_ids and p in not_interested_ids)
+                       and avoid_ok(p, self._players, _avoid)]
         _PRUNE_MIN_SIZE = 5
         _give = [p for p in _known_user if _vo(p) >= user_value[p] * 0.97]
         _recv = [p for p in _known_opp if user_value[p] >= _vo(p) * 0.97]
@@ -6583,6 +6665,7 @@ class TradeService:
         opp_profile: dict,
         acquire_positions: list[str],
         trade_away_positions: list[str],
+        avoid_positions: list[str] | None = None,      # #360
         pinned_give_players: list[str] | None,
         pinned_receive_players: list[str] | None = None,
         pinned_give_mode: str = "any",
@@ -6640,8 +6723,11 @@ class TradeService:
         # #163 — not-interested players never enter the receive pool (filtered
         # at the source; the target re-add below iterates this filtered list
         # too, so an exclusion always wins).
+        # #360 — avoided POSITIONS ride the same rule, at the same source.
+        _avoid = set(avoid_positions or ())
         _opp_pool = [p for p in opponent.roster
-                     if not (not_interested_ids and p in not_interested_ids)]
+                     if not (not_interested_ids and p in not_interested_ids)
+                     and avoid_ok(p, players, _avoid)]
         recv_pool = list(_opp_pool)
         # FB-47 — player-level acquire targets dominate: restrict the receive
         # pool to the pinned players this opponent actually rosters. (When

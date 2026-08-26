@@ -28,6 +28,18 @@ export interface OnboardingPersisted {
   quicksetPromptRetired: boolean;
   quicksetCompletedPositions: string[]; // e.g. ['WR'] — drives provenance chip flip
 
+  // #362 — standing-offer prompt ladder. Quickset semantics exactly: one
+  // show per session → snooze → exactly one re-offer once sessionCount ≥ 2
+  // → retired for good. PERSISTED, not a session counter: a session counter
+  // resets on every cold start, so a user who dismisses and backgrounds the
+  // app would be prompted again forever. "No" has to eventually mean no.
+  // Additive and read only behind `trade.standing_offers`, so with the flag
+  // dark these stay at their defaults and nothing reads them.
+  standingOfferPromptShows: number;
+  standingOfferPromptSnoozed: boolean;
+  standingOfferPromptSession2Shown: boolean;
+  standingOfferPromptRetired: boolean;
+
   // Item 8 — Apple save-moment ask policy: max ONE auto-modal per class
   applePromptShownFor: { like?: boolean; quickset_save?: boolean; mutual_match?: boolean };
   applePromptDeclined: boolean;
@@ -91,6 +103,11 @@ const DEFAULTS: OnboardingPersisted = {
   quicksetPromptSession2Shown: false,
   quicksetPromptRetired: false,
   quicksetCompletedPositions: [],
+  // #362 — standing-offer prompt ladder (see the interface above).
+  standingOfferPromptShows: 0,
+  standingOfferPromptSnoozed: false,
+  standingOfferPromptSession2Shown: false,
+  standingOfferPromptRetired: false,
   applePromptShownFor: {},
   applePromptDeclined: false,
   appleSession2BannerShown: false,

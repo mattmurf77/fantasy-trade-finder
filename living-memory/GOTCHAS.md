@@ -11,6 +11,7 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-062 | Flipping one flag in `config/features.json` breaks three test fixtures; the chain reveals one link at a time | Backend / feature flags / test fixtures |
 | G-060 | A sabotage-and-restore in the same mtime second at identical size keeps the stale `.pyc` — the test stays red after a byte-clean restore | Python / pytest / bytecode cache |
 | G-061 | The daily tick's Aug-25 `season_start` fan-out `continue`s past every winback — the three winback tests fail exactly one day a year (found live 2026-08-25) | backend / cron / pytest |
 | G-059 | A breaker payload test flakes only on a loaded CI runner — the 250 ms wall-clock budget is a hidden test input | Backend tests / breaker / determinism |
@@ -418,6 +419,16 @@ signal until the session is re-initialised (~2 Elo points on the affected pair a
 - **Prevention:** the harness's docstring now carries the `PYTHONHASHSEED=0` invocation on both the branch and the `origin/main` side. **This also qualifies the numbers already in the ledger:** the TEST_LEDGER 2026-08-21a table was produced unseeded, so single-card deltas in it (notably the ±1 card swings on arm B / arm D) may be seed noise rather than engine effects. The large moves in that table — the −20 % arm-D deck shrink, and arm C's 0 → 3 and 1 → 2 over-the-line rise — are far outside the observed ±1 jitter and stand. Re-run seeded before quoting any single-card delta from it as evidence.
 
 ---
+### G-062 — Flipping one flag in `config/features.json` breaks three test fixtures, and the trap is invisible until you fix the obvious one
+**Hit:** 2026-08-19 (lighting `outlook.odds`; re-confirmed independently by a parallel session)
+**Symptom:** you flip a single boolean in `config/features.json`, run `pytest backend/tests`, and get failures in files that have nothing to do with your feature — `test_seed_ui_test_db.py::test_onboarding_v2_flags_are_release_plus_the_onboarding_surface` and `::test_profiles_on_flags_turn_on_public_pages_only`.
+**Cause:** there is a **chain** of three assertions, and it only reveals itself one link at a time.
+1. `test_release_flags_mirror_features_json` asserts `backend/tests/fixtures/flags/release.json` mirrors `config/features.json` **wholesale**. You fix this one first because it is the obvious one.
+2. Only then do the next two appear: `onboarding-v2.json` and `profiles-on.json` each assert they differ from `release.json` by **exactly one key**. Moving `release.json` alone adds your flag to both diffs and breaks both.
+**Why it stays hidden:** the set-equality check in step 1 fails *before* the two profile fixtures ever diverge, so a first run shows a small, misleading failure count. Fixing the obvious thing is what exposes the real trap.
+**Fix:** flip the flag in **four** files together — `config/features.json`, `release.json`, `onboarding-v2.json`, `profiles-on.json`. Deliberately **not** `all-on.json`: that is release + the 13 inventory-gated *client* flags, and a per-flag test asserts the absence of anything that is not one of those. `release-300.json` and `release-espn-send-off.json` are partial scenario snapshots (186 and 163 keys vs release's 200) that nothing asserts — leave them.
+**Cost:** a full ~10-minute suite cycle if you fix only the obvious failure and re-run. Two sessions hit this on the same day.
+**Corollary:** never validate a flag flip with a targeted `pytest -k`. Run the whole suite.
 
 ### G-052 — two value→Elo maps exist; using the wrong inverse is silent near a 1st and grows downward
 - **Symptom:** a draft pick badges one tier too high on the picks screen / in-league calculator, and the error looks band-shaped rather than arithmetic — a current-year 3rd reads `second`, a current-year 4th reads `third`. Round-1 picks look fine, which is what makes it read as "the cheap end of the ladder is mispriced" rather than "the conversion is wrong".

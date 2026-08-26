@@ -44,6 +44,17 @@ The living-memory layer was just adopted; the project has shipped substantial fe
 **Cost of the mistake:** ongoing low-grade risk until cleaned up.
 **Cross-reference:** [`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md) Q-001.
 
+### M-006 — Building a feature a concurrent session had already shipped, and overriding a standing instruction I had read
+**Date:** 2026-08-19 (feedback #357, branch `feat/jon-357-360-362`, fully reverted)
+**What happened:** told "re-enable 357", this session lit `outlook.odds` end to end — four config touches, three rewritten guard tests, a new enforcement test, four doc corrections, a decision record, a TestFlight checklist. A parallel session (`claude/team-review-analysis-plan-1f91e3`) had **already** lit it hours earlier under a direct operator override, recorded as D-093 → D-094, and mapped #357/#358/#359 to Team Review. The whole thing was duplicated work; it was reverted in full and the mechanical half handed over.
+**Two distinct failures:**
+1. **No check for concurrent work before building.** `CLAUDE.md` says outright that multiple sessions run concurrently in this repo. The cost of looking is one `git branch -a` plus a glance at `docs/feedback/items/`; the cost of not looking was a full build-and-revert cycle and a colliding `D-092`.
+2. **Overrode a standing instruction I had already read.** I added `outlook.odds` to `LAUNCHED_FLAG_DEFAULTS` to fix a one-frame paint-in. `mobile/src/api/league.ts:709` says "Never add `outlook.odds` to the launched-flag defaults" — and I had printed that exact comment block earlier in the same session while investigating. The map **fails open**, so listing it punches a hole in the kill switch that [D-094](DECISIONS.md) explicitly relies on being total. The peer session rejected the change with that reasoning.
+**Rules taken from it:**
+- Before building anything non-trivial here: check `git branch -a`, `git worktree list`, and whether a `docs/feedback/items/<id>-*` folder already exists for the id. Concurrent work is the norm, not the exception.
+- When a comment in the code says "never do X", treat it as a constraint with a reason, not as advice — find the reason before overriding it. Generalized as [D-166](DECISIONS.md).
+- ID collisions (`D-`/`Q-`/`G-`/`M-`) are the visible symptom of the first failure. Grep for the max **immediately before writing**, not at the start of the session — a peer may have taken the number in between. This session collided on `D-092` and then on `Q-024`.
+
 ### M-004 — Assuming DynastyProcess player names match Sleeper exactly
 **Tried:** Initial Elo seeding relied on player-name string equality between DynastyProcess CSV and Sleeper.
 **Failed because:** non-trivial number of mismatches (apostrophes, abbreviated initials, edge cases). Players with mismatched names silently got default Elo seeds instead of consensus-value-derived seeds.

@@ -16,6 +16,7 @@
 - [2026-08-21 — Receipts: the P0 prod read, then grade dark, then the screen](#2026-08-21--receipts-the-p0-prod-read-then-grade-dark-then-the-screen)
 - [2026-08-20 — Fit-challenger: operator decisions, then the W1 re-light](#2026-08-20--fit-challenger-operator-decisions-then-the-w1-re-light)
 - [2026-08-20 — Team Review defect batch: TestFlight pass, merge, then the four planned reports](#2026-08-20--team-review-defect-batch-testflight-pass-merge-then-the-four-planned-reports)
+- [2026-08-19 — #360/#361 + #362 built and green; blocked on two operator calls](#2026-08-19--360361--362-built-and-green-blocked-on-two-operator-calls)
 - [2026-08-19 — likes-you gates: TestFlight pass, merge, then watch the volume](#2026-08-19--likes-you-gates-testflight-pass-merge-then-watch-the-volume)
 - [2026-08-19 — Settings IA follow-ups (branch `feat/settings-ia-hub`)](#2026-08-19--settings-ia-follow-ups-branch-featsettings-ia-hub)
 - [Queue cap status — the 7-item cap is blown; proposed drops](#queue-cap-status--the-7-item-cap-is-blown-proposed-drops)
@@ -166,6 +167,28 @@ and offering their best buys under "Skip these."
    ingests an NFL depth chart → #369 → #371 (decide alongside #365, not before it).
 
 ---
+## 2026-08-19 — #360/#361 + #362 built and green; blocked on two operator calls
+
+Built and unmerged on **`feat/jon-360-362`** (base `2a492b6`; backend `f488616`, mobile
+`705ab2c`). Full pipeline: dual planning agents → contract docs → one backend agent → one
+mobile agent as sole owner of `TradesScreen.tsx`. Evidence:
+[TEST_LEDGER 2026-08-26](TEST_LEDGER.md) · [D-166](DECISIONS.md). Rebuilt on current
+`origin/main` (`867c3baa`) 2026-08-26; all gates re-run green on the merged tree.
+
+1. **~~Answer Q-032 / Q-033~~ — RESOLVED 2026-08-19.** Operator ruled: **ship dark**
+   (`trade.avoid_positions` `false`) and **keep the inherited behavior** (the one-tap outlook
+   confirm goes on clearing all three position lists). Both features now merge with **nothing
+   user-visible changing** — schema, routes and client code land inert behind two dark flags.
+
+2. **Run both TestFlight checklists** on the next build, then light `trade.avoid_positions`.
+   They are the only runtime evidence under [D-056](DECISIONS.md) and **both are unrun**. BOTH
+   flags are now dark, so each checklist needs its flag lit on the test device first or it
+   proves nothing. Lighting either one is a **four-file** flip — the key plus the three
+   fixtures that mirror it ([G-062](GOTCHAS.md)) — and is deploy-free.
+3. **[Q-031](OPEN_QUESTIONS.md) — the sleeper.** `trade_gen_v2` honors **no** positional
+   preferences, so Chasing and Shopping are *already* broken there. Masked only because
+   `bakeoff_serve_interleaved = 0.0` — a `model_config` knob, not a flag. One edit from a
+   silent regression with nothing to audit.
 
 ## 2026-08-19 — likes-you gates: TestFlight pass, merge, then watch the volume
 

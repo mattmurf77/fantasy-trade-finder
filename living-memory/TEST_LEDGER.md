@@ -11,9 +11,69 @@
 
 ---
 
+## 2026-08-26 — #360/#361 + #362 REBUILT on current main; #362 SHIPPED LIT, #360 held dark
 
+**Branch:** `feat/jon-360-362` — the 2026-08-19 build (base `2a492b6`) merged with
+`origin/main` `867c3baa` (123 commits: knockout refine D-159, full sweep, #384, package
+pricing honesty #162, pick YoY floor, receipts/breaker/negmem).
+This entry REPLACES the stale 2026-08-19i entry — those were the pre-rebase numbers.
+Flags at ship: **`trade.standing_offers` `true`** (graduated, [D-165](DECISIONS.md)) ·
+**`trade.avoid_positions` `false`** (held — [Q-031](OPEN_QUESTIONS.md) gen_v2 gap is live in
+prod, [Q-032](OPEN_QUESTIONS.md) upheld). Records:
+[360-avoiding-positions/](../docs/feedback/items/360-avoiding-positions/) ·
+[362-standing-offer/](../docs/feedback/items/362-standing-offer/) · [D-166](DECISIONS.md).
 
+**Gates were run THREE times and all three runs are reported here**, because the flag flip
+was made between them and the middle run failed:
 
+1. **Pre-flip (both flags dark), run by this session independently of the build agent:**
+   `4336 passed, 1 skipped` in 364.57s, exit 0 — matching the build agent's reported number
+   exactly. That cross-check is why the agent's other claims were taken as measured.
+2. **Post-flip, first run:** `1 failed, 4335 passed, 1 skipped` (443.25s). The single failure
+   was `test_standing_offers.py::test_flag_and_knobs_registered`, which asserted
+   `features["trade.standing_offers"] is False, "ships dark"`. **No behavior broke — the only
+   thing that failed was a pin on the dark posture itself.**
+3. **Final, after updating the two dark-posture pins:** the numbers in the table below.
+
+**Two independent guards pinned this flag dark and BOTH were changed to ship it lit** —
+`mobile/tests/check-standing-offer-362.js` SC-14a ("graduation is an operator action after a
+TestFlight pass on a real league") and the backend assertion above. Each now asserts `true`
+and carries an in-file comment recording that graduation happened **without** the TestFlight
+pass, per [D-165](DECISIONS.md). A repo-wide search found no third pin. `SC-14b` — the
+`LAUNCHED_FLAG_DEFAULTS` absence check, which is the assertion that actually protects the
+kill switch ([D-166](DECISIONS.md)) — was **not** touched and holds in both flag states.
+
+| Gate | Result (final run, measured 2026-08-26 on the merged tree, flag lit) |
+|---|---|
+| `python3 -m pytest backend/tests -q` | **4336 passed, 1 skipped, 0 failed** (320.07s) |
+| `npx tsc --noEmit` (mobile) | **exit 0, zero errors** |
+| `bash mobile/scripts/testid-lint.sh` | **testid-lint OK**, exit 0 |
+| all `mobile/tests/check-*.js` | **82 passed, 0 failed** (80 pre-existing + `check-avoid-positions.js` + `check-standing-offer-362.js`) |
+| Sim gate | `FTF_SKIP_SIM_GATE=1` — D-056 standing posture; substitute evidence: post-merge code-walks with merged-tree line cites (`360-avoiding-positions/code-walk.md` addendum, `362-standing-offer/code-walk.md`) |
+| **Runtime evidence** | **NONE. Both TestFlight checklists remain UNRUN.** |
+
+**Three merged-tree failures found and fixed (first full run: 4333 passed / 3 failed):**
+1. `test_breaker_seam::test_bulk_readers_match_the_singular_loaders` — main's breaker
+   added `load_league_preferences_bulk` promising per-row shape identity with the
+   singular loader; it predated `avoid_positions`. The bulk row now carries the key.
+2. `test_avoid_positions::test_no_avoided_position_received[v2]` and
+   `::test_avoid_qb_keeps_pick_rungs` — NOT the avoid filter: main's `d42872f2`
+   ("package pricing honesty + gap auto-sweetener", #162, bisected on pristine main)
+   stopped admitting 1-for-1s that lose seed value for the giver, starving the tests'
+   BASELINE premise. Fixture now seeds coveted receive assets at parity (1540);
+   assertions unchanged.
+Also: the merge union dropped `seasonSpan`'s closing brace in `TradeCard.tsx`
+(caught by `tsc`, restored).
+
+**ID de-collisions this session** (parallel sessions took the branch's IDs on main):
+D-098→**D-166**, Q-026/027/028→**Q-031/032/033**, G-053→**G-062** (+ its missing
+GOTCHAS index row added), M-005→**M-006**; PRD-local decisions renumbered item-scoped
+D-093…D-096→**D-360-1…D-360-4**, #362's D-093→**D-362-1** (the D-306-1 convention —
+main took D-093–D-097). Every cross-reference updated; `feature_flags.py` /
+`features.json` stale "ships ON" comments corrected to the Q-032 dark ruling.
+
+**Not claimed:** that either feature behaves correctly on a device — no runtime
+evidence exists until the two TestFlight checklists run with the flags lit.
 
 ## 2026-08-26b — Platform entry decoupled from Apple (D-164) — full gates
 

@@ -30,6 +30,20 @@ export interface LeaguePreferences {
   team_outlook: Outlook;
   acquire_positions: string[];
   trade_away_positions: string[];
+  /** #360/#361 — positions the user will not accept on the RECEIVE side.
+   *  Always present on GET (never null, never absent), in both states of
+   *  `trade.avoid_positions`: the flag gates only whether the ENGINE reads
+   *  the list, so a kill-switch flip never destroys user data. Uppercase,
+   *  drawn from QB|RB|WR|TE|PICK.
+   *
+   *  REQUIRED, deliberately. `saveLeaguePreferences` spreads this object
+   *  into the POST body, and the backend leaves the stored value untouched
+   *  when the key is absent (while echoing `[]` back — the echo is NOT
+   *  authoritative on an omit). A required field turns every object-literal
+   *  call site into a `tsc --noEmit` error, which is the only mechanical
+   *  guard against a payload that silently fails to persist a cleared
+   *  position. Do not make it optional. */
+  avoid_positions: string[];
   /** Phase-2: backend's roster-derived outlook guess. Additive — present
    *  on GET only when no team_outlook is declared. Never POSTed back. */
   inferred_outlook?: Outlook;

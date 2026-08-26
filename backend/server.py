@@ -85,6 +85,9 @@ from .database import (
     save_ranking_swipes, save_trade_swipes,
     save_trade_decision, load_swipe_decisions, load_trade_decisions,
     load_recent_league_likes, find_live_trade_like, log_trade_impressions,
+    # #362 standing offers
+    create_standing_offer, load_standing_offers, load_user_standing_offers,
+    revoke_standing_offer, league_pick_seasons,
     load_trade_decision_shape_counts, load_recent_impression_target_user_counts,
     load_engine_telemetry,
     # F1 (deck.signal_v2) — impression_id spine
@@ -3038,6 +3041,110 @@ def _fuzzy_match_enabled() -> bool:
     return getattr(FLAGS, "trade_fuzzy_match", False)
 
 
+def _standing_offers_enabled() -> bool:
+    """#362 — flag trade.standing_offers. OFF ⇒ the three routes 404, the
+    injector's standing-offer branch is never entered, and no card payload
+    key is added, so deck payloads are byte-identical."""
+    return getattr(FLAGS, "trade_standing_offers", False)
+
+
+def _standing_offer_inject_cap() -> int:
+    """model_config 'standing_offer_inject_cap' (default 2) — the max of the
+    3 likes-you slots a deck may spend on standing offers. `0` is the kill
+    switch that stops injection without a flag flip. Defensive in the
+    _likes_you_min_user_delta style: a missing key can never break deck
+    generation."""
+    try:
+        from .trade_service import _cfg as _ts_cfg
+        return max(0, int(_ts_cfg.get("standing_offer_inject_cap", 2)))
+    except Exception:
+        return 2
+
+
+_ROUND_WORD = {1: "1st", 2: "2nd", 3: "3rd", 4: "4th"}
+
+
+def _seasons_phrase(seasons) -> str:
+    """#362 R-16 — "2027" / "2027 or 2028" / "2027, 2028 or 2029".
+    Comma-joined, final ` or `, no Oxford comma. Ascending."""
+    ss = [str(x) for x in sorted(seasons)]
+    if not ss:
+        return ""
+    if len(ss) == 1:
+        return ss[0]
+    return ", ".join(ss[:-1]) + " or " + ss[-1]
+
+
+def _standing_offer_reason(opp, offer: dict, player_name: str,
+                           matched_pick_label: str) -> str:
+    """#362 R-16 — the "Why you're seeing this" line, composed SERVER-SIDE
+    from (sender, player, round, seasons) ONLY. No count, no roster list, no
+    team names (R-19). Without this line a boosted card is indistinguishable
+    from a lucky generation."""
+    return (f"@{opp.username} posted a standing offer: {player_name} for any "
+            f"{_seasons_phrase(offer.get('seasons') or [])} "
+            f"{_ROUND_WORD.get(int(offer.get('round') or 1), '1st')}, and you "
+            f"hold a {matched_pick_label}.")
+
+
+def _stamp_own_standing_offers(cards: list, user_id: str,
+                               league_id: str) -> None:
+    """#362 R-9 — mark the SENDER's own cards that their live standing offers
+    would cover, so the client can render the `Open to 1sts · '27-'28` chip
+    without a client-side join.
+
+    Mutates cards in place. NEVER reorders, never boosts, never filters —
+    display only. The chip is bound to the offer record and dies with it;
+    there is deliberately no global "open to 1sts" player badge anywhere
+    (R-9/R-19: a permanent badge outlives the intent that created it and
+    would leak the offer to every league-mate, including the excluded ones).
+    """
+    offers = [o for o in load_user_standing_offers(user_id=user_id,
+                                                   league_id=league_id)
+              if not o.get("revoked_at")
+              and (o.get("expires_at") or "") > datetime.now(timezone.utc).isoformat()]
+    if not offers:
+        return
+    for card in cards:
+        give = set(getattr(card, "give_player_ids", []) or [])
+        recv = list(getattr(card, "receive_player_ids", []) or [])
+        for offer in offers:
+            if offer["player_id"] not in give:
+                continue
+            _round   = int(offer.get("round") or 1)
+            _seasons = set(int(x) for x in (offer.get("seasons") or []))
+            hit = False
+            for pid in recv:
+                parsed = _parse_owned_pick_id(pid, league_id)
+                if parsed is None:
+                    continue
+                if parsed[1] == _round and parsed[0] in _seasons:
+                    hit = True
+                    break
+            if hit:
+                card.standing_offer_mine = {"round": _round,
+                                            "seasons": sorted(_seasons)}
+                break
+
+
+def _parse_owned_pick_id(pid: str, league_id: str):
+    """#362 — (season, round) for an OWNED league pick id of `league_id`, or
+    None. Format pinned at database.make_pick_id:
+    ``{league_id}_{season}_{round}_{original_roster_id}``. Generic ladder
+    rungs are ``generic_pick_*`` and fail the prefix test, so they can never
+    satisfy an offer."""
+    prefix = f"{league_id}_"
+    if not isinstance(pid, str) or not pid.startswith(prefix):
+        return None
+    parts = pid[len(prefix):].split("_")
+    if len(parts) < 3:
+        return None
+    try:
+        return int(parts[0]), int(parts[1])
+    except (TypeError, ValueError):
+        return None
+
+
 def _fuzzy_match_tau() -> float:
     """model_config key 'fuzzy_match_tau' (default 0.8), read through
     trade_service's live config dict so database.py stays config-free.
@@ -3222,6 +3329,7 @@ def _inject_likes_you_cards_impl(
     untouchable_ids: set | None = None,
     not_interested_ids: set | None = None,
     exclusion_keys: set | None = None,   # G6 R4 #336 — dedup only (Q-G6-1)
+    avoid_positions: set | None = None,  # #360 — position twin of not_interested
 ) -> list:
     """Tier 2 work item 2.3a — surface trades the counterparty already liked.
 
@@ -3257,7 +3365,11 @@ def _inject_likes_you_cards_impl(
     likes = load_recent_league_likes(
         league_id=league_id, exclude_user_id=user_id, days=90,
     )
-    if not likes:
+    # #362 — standing offers are a SECOND candidate source in the SAME union.
+    # Flag off ⇒ [] and every line below behaves exactly as it did pre-#362.
+    _offers = (load_standing_offers(league_id=league_id, exclude_user_id=user_id)
+               if _standing_offers_enabled() else [])
+    if not likes and not _offers:
         return cards
 
     members_by_id   = {m.user_id: m for m in league.members}
@@ -3275,8 +3387,19 @@ def _inject_likes_you_cards_impl(
     min_user_delta = _likes_you_min_user_delta()      # level 0 — raw sums
     min_user_gain  = _likes_you_min_user_gain()       # levels >= 1 — package
     seed_value     = _likes_you_seed_value(seed_map)
-    for like in likes:
+    # `enumerate` is #362 R-15: the cap-drop counter below needs the index to
+    # report how many remaining organic likes the cap cost us. D-096's gate
+    # variables above are untouched by that.
+    for _i, like in enumerate(likes):
         if injected >= _LIKES_YOU_CAP:
+            # #362 R-15 — count what the cap cost us. A COUNTER, never an
+            # analytics event: one event per dropped card in a chatty league
+            # is high-cardinality server noise for a question a counter
+            # answers.
+            try:
+                trade_service._organic_like_cap_drops += len(likes) - _i
+            except Exception:
+                pass
             break
         opp = members_by_id.get(like["user_id"])
         if opp is None or opp.user_id == user_id:
@@ -3299,6 +3422,16 @@ def _inject_likes_you_cards_impl(
         # #163 — not-interested players are never offered TO the user, even
         # via a counterparty like. Their give side IS the user's receive side.
         if not_interested_ids and set(their_give) & not_interested_ids:
+            continue
+        # #360 — a position the user avoids is never offered TO them, even via
+        # a counterparty like. Their give side IS the user's receive side.
+        # This is a USER CONSTRAINT, not a deck-quality rule, so the G6 Q21
+        # likes-you exemption (R1/R2/R3/R5) does not reach it — same side of
+        # that line as untouchables, #163 and the R4 dedup.
+        if avoid_positions and any(
+                _trade_service_mod._pos_for_avoid(trade_service._players.get(p))
+                in avoid_positions
+                for p in their_give):
             continue
 
         my_give, my_recv = list(their_recv), list(their_give)
@@ -3399,6 +3532,142 @@ def _inject_likes_you_cards_impl(
         trade_service._trade_cards[card.trade_id] = card
         new_cards.append(card)
         injected += 1
+
+    # ── #362 — standing offers, the second candidate source ───────────────
+    # The organic loop above is NOT modified, reordered or copy-pasted. This
+    # branch shares `seen_keys`, `existing_by_key`, `boost_score` and
+    # `injected` with it, so a standing offer can never double-inject a
+    # package an organic mirror already covered, and BOTH sources pass the
+    # identical filter sequence (untouchables → not-interested → seen_keys →
+    # _past_decision_keys → G6 R4 → D-055 user-gain floor). Forking that
+    # sequence is the failure mode this shape exists to prevent.
+    so_injected = 0
+    if _offers:
+        so_cap = min(max(0, _LIKES_YOU_CAP - injected), _standing_offer_inject_cap())
+        for offer in _offers:
+            if so_injected >= so_cap:
+                trade_service._standing_offer_cap_drops += 1
+                continue
+            if offer.get("user_id") == user_id:
+                continue                     # never mirror your own offer back
+            opp = members_by_id.get(offer.get("user_id"))
+            if opp is None:
+                continue
+            # THE selection test (R-19: team_user_ids is read HERE and
+            # nowhere that reaches a payload).
+            if user_id not in (offer.get("team_user_ids") or []):
+                continue
+            # The sender still holds the player — the same containment the
+            # organic loop applies, and what makes R-11's staleness free.
+            if offer.get("player_id") not in set(opp.roster or []):
+                continue
+            _round   = int(offer.get("round") or 1)
+            _seasons = set(int(x) for x in (offer.get("seasons") or []))
+            # Candidate give-side picks: the VIEWER's own owned league picks
+            # of THIS league matching (round, season). Generic rungs are
+            # `generic_pick_*` and fail the prefix test in _parse_owned_pick_id.
+            _cands = []
+            for pid in user_roster_set:
+                parsed = _parse_owned_pick_id(pid, league_id)
+                if parsed is None:
+                    continue
+                _season, _rnd = parsed
+                if _rnd == _round and _season in _seasons:
+                    _cands.append((_season, pid))
+            if not _cands:
+                continue
+            # Deterministic: (season ASC, pick_id ASC) — two runs of the same
+            # deck must produce the same card (R-12 / UT-10).
+            _cands.sort()
+            _give_pick = _cands[0][1]
+
+            my_give, my_recv = [_give_pick], [offer["player_id"]]
+            key = (frozenset(my_give), frozenset(my_recv), opp.user_id)
+            if untouchable_ids and set(my_give) & untouchable_ids:
+                continue                                              # #95
+            if not_interested_ids and set(my_recv) & not_interested_ids:
+                continue                                              # #163
+            if avoid_positions and any(
+                    _trade_service_mod._pos_for_avoid(
+                        trade_service._players.get(p)) in avoid_positions
+                    for p in my_recv):
+                continue                                              # #360
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            if (key[0], key[1]) in trade_service._past_decision_keys:
+                continue
+            if (exclusion_keys and not _r4_bypassed()
+                    and (key[0], key[1]) in exclusion_keys):          # G6 R4
+                try:
+                    trade_service._r4_excluded_keys.add((key[0], key[1]))
+                except Exception:
+                    pass
+                continue
+            if _likes_you_user_delta(my_give, my_recv, seed_map) < min_user_delta:
+                continue                                              # D-055
+
+            _pname = getattr(trade_service._players.get(offer["player_id"]),
+                             "name", None) or offer["player_id"]
+            _plabel = _pick_labels_by_id([_give_pick]).get(_give_pick, _give_pick)
+            _reason = _standing_offer_reason(opp, offer, _pname, _plabel)
+
+            existing = existing_by_key.get(key)
+            if existing is not None:
+                existing.likes_you             = True
+                existing.composite_score       = boost_score
+                existing.standing_offer_reason = _reason
+                injected     += 1
+                so_injected  += 1
+            else:
+                give_val = sum(seed_map.get(pid, 1500.0) for pid in my_give)
+                recv_val = sum(seed_map.get(pid, 1500.0) for pid in my_recv)
+                fairness = (round(min(give_val, recv_val) / max(give_val, recv_val), 3)
+                            if give_val > 0 and recv_val > 0 else 0.0)
+                from .trade_optimizer import _consensus_packages as _cp
+                _e2v2 = _trade_service_mod.elo_to_value
+                _gv2, _rv2 = _cp(my_give, my_recv,
+                                 lambda pid: _e2v2(seed_map.get(pid, 1500.0)))
+                card = TradeCard(
+                    # `standing_` rather than `likesyou_` so a swipe row's
+                    # provenance is readable.
+                    trade_id           = f"standing_{uuid.uuid4().hex[:12]}",
+                    league_id          = league_id,
+                    proposing_user_id  = user_id,
+                    target_user_id     = opp.user_id,
+                    target_username    = opp.username,
+                    give_player_ids    = my_give,
+                    receive_player_ids = my_recv,
+                    mismatch_score     = 0.0,
+                    fairness_score     = fairness,
+                    composite_score    = boost_score,
+                    basis              = "consensus",
+                    likes_you          = True,
+                    give_value         = round(_gv2, 1),
+                    receive_value      = round(_rv2, 1),
+                    standing_offer_reason = _reason,
+                )
+                trade_service._trade_cards[card.trade_id] = card
+                new_cards.append(card)
+                injected    += 1
+                so_injected += 1
+
+            # Server-fired impression. Counts only, never ids (R-19).
+            # Analytics must never break deck generation.
+            try:
+                record_event(user_id, "standing_offer_card_shown",
+                             league_id=league_id, source="api",
+                             props={"round": _round, "seasons": len(_seasons)})
+            except Exception as _ev_err:
+                log.warning("record_event(standing_offer_card_shown) failed: %s",
+                            _ev_err)
+
+    if _offers or trade_service._organic_like_cap_drops:
+        log.info("likes-you injection: injected=%d (organic=%d standing=%d) "
+                 "cap_drops(organic=%d standing=%d)",
+                 injected, injected - so_injected, so_injected,
+                 trade_service._organic_like_cap_drops,
+                 trade_service._standing_offer_cap_drops)
 
     if injected == 0:
         return cards
@@ -4193,6 +4462,16 @@ def _log_deck_signal_impressions(
             "last_board_update_at": last_board_update,
             "user_value_basis":     "personal" if ranked_count > 0 else "consensus",
         }
+        # #362 — separates the two likes-you injection sources (organic
+        # mirror vs standing offer) in the deck-outcome corpus. A BOOLEAN,
+        # never the reason string: the corpus must not carry copy. Added
+        # ONLY when the card actually came from a standing offer — same
+        # key-only-when-set discipline as deck_source below and for the same
+        # reason: with `trade.standing_offers` off no card can carry the
+        # attribute, so flag-off features_json stays byte-identical (pinned
+        # by test_bakeoff_serving's flag-off golden).
+        if getattr(card, "standing_offer_reason", None):
+            features["standing_offer"] = True
         # trade.negmem — the §3.4 stamp trichotomy. ON-condition is
         # `nm_map is not None` (flag ON *and* the league allowlisted), and it
         # is checked here, not per card, so the key exists on EVERY row this
@@ -5576,14 +5855,39 @@ def _run_trade_job(
         outlook_value        = None
         acquire_positions    = []
         trade_away_positions = []
+        avoid_positions      = []          # #360
         try:
             prefs = load_league_preference(user_id=g_user_id, league_id=league_id)
             if prefs:
                 outlook_value        = prefs.get("team_outlook")
                 acquire_positions    = prefs.get("acquire_positions",    []) or []
                 trade_away_positions = prefs.get("trade_away_positions", []) or []
+                # #360 — the flag read lives HERE, at the single point of
+                # entry, so every downstream consumer sees [] when the flag
+                # is off and no other site needs a flag check. That is what
+                # makes "flag off ⇒ byte-identical" a one-line property.
+                if FLAGS.trade_avoid_positions:
+                    avoid_positions  = prefs.get("avoid_positions",      []) or []
         except Exception as pref_err:
             log.warning("trade-job: could not load league preference: %s", pref_err)
+
+        # #360 R-9 — avoid ⊕ chase is unsatisfiable and fails SILENTLY: the
+        # pool exclusion empties every receive pool of the position while
+        # _positions_ok still demands at least one received player at it, so
+        # every opponent yields zero cards with no error. The UI makes this
+        # state unreachable, but an older client, a replayed request or a
+        # direct POST can still send both. AVOID WINS — a negative promise is
+        # the stronger commitment and the cheaper one to honor. This must run
+        # BEFORE _presentment_need_gate_bypass and before _generate_kwargs,
+        # so nothing downstream ever sees the contradictory pair.
+        if avoid_positions and acquire_positions:
+            _avoid_set = set(avoid_positions)
+            _dropped = [p for p in acquire_positions if p in _avoid_set]
+            if _dropped:
+                acquire_positions = [p for p in acquire_positions
+                                     if p not in _avoid_set]
+                log.info("trade-job: #360 avoid⊕chase — dropped %s from acquire "
+                         "(user=%s league=%s)", _dropped, g_user_id, league_id)
 
         # Backlog #8 — no declared outlook ⇒ seed from the user's own roster
         # (flag-gated). Must mirror the generate-route pre-read exactly so the
@@ -5794,6 +6098,7 @@ def _run_trade_job(
             fairness_threshold   = fairness_threshold,
             acquire_positions    = acquire_positions,
             trade_away_positions = trade_away_positions,
+            avoid_positions      = avoid_positions,          # #360
             pinned_give_players  = pinned_give or None,
             pinned_receive_players = pinned_receive or None,
             pinned_give_mode     = pinned_give_mode,
@@ -5909,6 +6214,7 @@ def _run_trade_job(
                     untouchable_ids = untouchable_ids or None,
                     not_interested_ids = not_interested_ids or None,
                     exclusion_keys = exclusion_keys or None,   # G6 R4 #336
+                    avoid_positions = set(avoid_positions) or None,   # #360
                 )
                 # trade.bakeoff §3.4 Channel 2 — the injector returns the deck
                 # RE-SORTED by composite_score, which would silently destroy
@@ -5930,6 +6236,16 @@ def _run_trade_job(
                         j["cards"] = snapshot
             except Exception as ly_err:
                 log.warning("likes-you injection failed (non-fatal): %s", ly_err)
+
+        # #362 R-9 — stamp the deck owner's OWN cards that their live standing
+        # offers cover. Display only: never reorders, never boosts, never
+        # filters. Non-fatal — a failure serves the deck unchanged. Flag off
+        # ⇒ never entered, so no payload key is added.
+        if _standing_offers_enabled():
+            try:
+                _stamp_own_standing_offers(final_cards, g_user_id, league_id)
+            except Exception as so_err:
+                log.warning("standing-offer stamp failed (non-fatal): %s", so_err)
 
         # F3 (flag deck.fatigue) — per-user layer, applied AFTER likes-you
         # injection and BEFORE ordering/impressions: (1) decline-window
@@ -11405,6 +11721,16 @@ def trade_card_to_dict(card, players: dict) -> dict:
     # cards stay byte-identical to the pre-likes-you shape.
     if getattr(card, "likes_you", False):
         out["likes_you"] = True
+    # #362 — standing-offer provenance. Recipient-facing; composed
+    # server-side and carries NO team ids and NO counts (R-19). Serialized
+    # only when set, so flag-off payloads stay byte-identical.
+    _so_reason = getattr(card, "standing_offer_reason", None)
+    if _so_reason:
+        out["standing_offer_reason"] = _so_reason
+    # #362 — the SENDER's own chip. Present only on the sender's own deck.
+    _so_mine = getattr(card, "standing_offer_mine", None)
+    if _so_mine:
+        out["standing_offer_mine"] = _so_mine
     # Tier 3 (3.4) — sweetener annotation, only when present. The sweetener
     # player is already inside the give/receive arrays; this identifies it.
     sweetener = getattr(card, "sweetener", None)
@@ -11791,6 +12117,21 @@ def asset_trade_ideas():
         except Exception as ap_err:
             log.warning("asset-ideas: asset prefs load failed: %s", ap_err)
 
+    # #360 — Avoiding applies exactly where not-interested applies (D-360-3(a)),
+    # and not-interested IS applied on this route's three receive-side guards.
+    # This is NEW plumbing, not a mirror: the route above loads ASSET prefs
+    # only and passes no positional prefs at all. Best-effort, in the same
+    # style as its neighbour. The resulting asymmetry (asset ideas honor
+    # Avoiding but not Chasing/Shopping) is intended — Chasing/Shopping were
+    # never applied here, and asset ideas are already scoped by the pin.
+    avoid_positions: list = []
+    if FLAGS.trade_avoid_positions:
+        try:
+            _lp = load_league_preference(user_id=g_user_id, league_id=league_id)
+            avoid_positions = (_lp or {}).get("avoid_positions", []) or []
+        except Exception as lp_err:
+            log.warning("asset-ideas: league prefs load failed: %s", lp_err)
+
     # #170/#171/#185 — owned-pick injection, THE SAME guard as the generate
     # job (one helper since W3 M-C, so the two can no longer drift), so a pick
     # can be the pinned asset, a sweetener or a downgrade piece.
@@ -11825,6 +12166,7 @@ def asset_trade_ideas():
         raw_user_elo       = raw_user_elo,
         untouchable_ids    = untouchable_ids or None,
         not_interested_ids = not_interested_ids or None,
+        avoid_positions    = avoid_positions or None,      # #360
         opponent_user_id   = opponent_user_id,
     )
 
@@ -16270,6 +16612,283 @@ def dismiss_awaiting_trade():
     return jsonify({"status": "ok", "dismissed_likes": dismissed})
 
 
+# ---------------------------------------------------------------------------
+# Standing offers (#362) — flag trade.standing_offers
+# ---------------------------------------------------------------------------
+# All three routes 404 when the flag is off, so the surface does not exist
+# flag-off (R-24). Both writes take @_gate_unverified_write, stacked UNDER
+# @app.route, matching every sibling.
+# ---------------------------------------------------------------------------
+
+def _standing_offer_days() -> float:
+    """model_config 'standing_offer_days' (default 30). STORED on the row at
+    create time (R-23) — a derived expiry would let a knob change silently
+    move the deadline on an offer the user was already shown "18 days left"
+    for."""
+    try:
+        return float(get_config().get("standing_offer_days", 30.0))
+    except Exception:
+        return 30.0
+
+
+def _standing_offer_days_left(expires_at: str | None) -> int:
+    """ceil((expires_at - now) / 1 day), floored at 0."""
+    if not expires_at:
+        return 0
+    try:
+        exp = datetime.fromisoformat(expires_at)
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return 0
+    delta = exp - datetime.now(timezone.utc)
+    secs = delta.total_seconds()
+    if secs <= 0:
+        return 0
+    return int(math.ceil(secs / 86400.0))
+
+
+def _standing_offer_public(offer: dict, *, player_name: str,
+                           league_name: str | None = None,
+                           stale: bool = False) -> dict:
+    """SENDER-OWNED payload shape. `team_user_ids` and `team_count` appear
+    here because this is the sender's own data — they must NEVER appear on a
+    deck card (R-19 clauses 1 and 3)."""
+    out = {
+        "offer_id":        offer["id"],
+        "league_id":       offer["league_id"],
+        "player_id":       offer["player_id"],
+        "player_name":     player_name,
+        "round":           offer["round"],
+        "seasons":         offer["seasons"],
+        "team_user_ids":   offer["team_user_ids"],
+        "team_count":      len(offer["team_user_ids"]),
+        "created_at":      offer["created_at"],
+        "expires_at":      offer["expires_at"],
+        "days_left":       _standing_offer_days_left(offer.get("expires_at")),
+        "revoked_at":      offer.get("revoked_at"),
+        "stale":           bool(stale),
+    }
+    if league_name is not None:
+        out["league_name"] = league_name
+    return out
+
+
+def _standing_offer_player_name(sess, player_id: str) -> str:
+    """Display name for the offered player; falls back to the id."""
+    try:
+        for p in (sess.get("players") or []):
+            if p.id == player_id:
+                return p.name
+    except Exception:
+        pass
+    return player_id
+
+
+@app.route("/api/trades/standing-offer", methods=["POST"])
+@_gate_unverified_write
+def create_standing_offer_route():
+    """POST /api/trades/standing-offer                                (#362)
+
+    Body: {league_id, player_id, round, seasons: [int], team_user_ids: [str],
+           source_trade_id?: str}
+
+    Creates a standing offer: "I will send player P for any round-R pick, in
+    seasons Y, from teams T, in this league, until expires_at."
+
+    `source_trade_id` is provenance only and is NEVER validated against the
+    deck — an FB-46-reconstructed card carries a synthetic id and must still
+    work (R-18).
+
+    200 {"status": "ok", "offer": {...}}
+    400 session not initialised / missing fields / round != 1 /
+        seasons outside the league's pick horizon / non-member team ids
+    403 verification_required · 404 flag off · 409 a live offer exists
+    """
+    if not _standing_offers_enabled():
+        # House pattern (backend/server.py:8141, :11941): a flag-off route
+        # 404s `feature_disabled` BEFORE any session work.
+        return jsonify({"error": "feature_disabled"}), 404
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess.get("user_id")
+    if not g_user_id:
+        return jsonify({"error": "session not initialised"}), 400
+    g_league = sess.get("league")
+
+    body            = request.get_json(silent=True) or {}
+    league_id       = body.get("league_id") or (g_league.league_id if g_league else None)
+    player_id       = body.get("player_id")
+    round_          = body.get("round")
+    seasons         = body.get("seasons")
+    team_user_ids   = body.get("team_user_ids")
+    source_trade_id = body.get("source_trade_id")
+
+    if (not league_id or not player_id or round_ is None
+            or not isinstance(seasons, list) or not seasons
+            or not isinstance(team_user_ids, list) or not team_user_ids):
+        return jsonify({"error": "league_id, player_id, round, seasons, "
+                                 "team_user_ids are required"}), 400
+    try:
+        round_ = int(round_)
+        seasons = sorted({int(x) for x in seasons})
+    except (TypeError, ValueError):
+        return jsonify({"error": "league_id, player_id, round, seasons, "
+                                 "team_user_ids are required"}), 400
+    if round_ != 1:
+        return jsonify({"error": "round must be 1"}), 400          # v1 (D-d)
+
+    # R-22 — every season must be present in the league's REAL pick horizon.
+    # Derived from draft_picks, never a hardcoded N-year window: that is the
+    # #355 defect D-091 fixed at the writer.
+    allowed = league_pick_seasons(league_id=str(league_id), round=round_)
+    bad_seasons = [s for s in seasons if s not in allowed]
+    if bad_seasons:
+        return jsonify({"error": "seasons must be within the league's pick horizon",
+                        "allowed_seasons": allowed}), 400
+
+    # R-22 — every team id must be a CURRENT league member, and never the
+    # caller. Trusting the client's member list is the sabotage UT-3 catches.
+    member_ids = {m.user_id for m in (g_league.members if g_league else [])}
+    team_user_ids = sorted({str(x) for x in team_user_ids})
+    invalid = [t for t in team_user_ids
+               if t == g_user_id or t not in member_ids]
+    if invalid:
+        return jsonify({"error": "team_user_ids must be current league members",
+                        "invalid": invalid}), 400
+
+    try:
+        offer = create_standing_offer(
+            user_id         = g_user_id,
+            league_id       = str(league_id),
+            player_id       = str(player_id),
+            round           = round_,
+            seasons         = seasons,
+            team_user_ids   = team_user_ids,
+            source_trade_id = str(source_trade_id) if source_trade_id else None,
+            days            = _standing_offer_days(),
+        )
+    except Exception as e:
+        log.error("create_standing_offer error: %s", e)
+        return jsonify({"error": "internal_error"}), 500
+
+    if offer is None:
+        # R-21 — one live offer per (user, league, player, round), enforced
+        # at the WRITER with a revoked_at IS NULL predicate (not a
+        # UniqueConstraint, which would make revoke-then-repost collide).
+        live = [o for o in load_user_standing_offers(user_id=g_user_id,
+                                                     league_id=str(league_id))
+                if o["player_id"] == str(player_id) and o["round"] == round_
+                and not o.get("revoked_at")]
+        return jsonify({"error": "a live standing offer already exists for "
+                                 "this player and round",
+                        "offer_id": live[0]["id"] if live else None}), 409
+
+    return jsonify({"status": "ok",
+                    "offer": _standing_offer_public(
+                        offer,
+                        player_name=_standing_offer_player_name(sess, str(player_id)))})
+
+
+@app.route("/api/trades/standing-offers", methods=["GET"])
+@_gate_unverified_read
+def get_standing_offers_route():
+    """GET /api/trades/standing-offers?league_id=...                  (#362)
+
+    The CALLER's own offers — live, expired AND revoked — newest first, so
+    the manage screen can group Active / Expired. Empty list ⇒ {"offers": []},
+    never 404.
+
+    `stale: true` when the offered player is no longer on the sender's
+    roster: the offer is dead regardless of the clock, and the injector
+    already enforces exactly that via roster containment (R-11), so the two
+    surfaces can never disagree. Fail-open on a display-only field — when the
+    roster is unavailable, `stale` is false rather than failing the read.
+    """
+    if not _standing_offers_enabled():
+        # House pattern (backend/server.py:8141, :11941): a flag-off route
+        # 404s `feature_disabled` BEFORE any session work.
+        return jsonify({"error": "feature_disabled"}), 404
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess.get("user_id")
+    if not g_user_id:
+        return jsonify({"error": "session not initialised"}), 400
+    g_league  = sess.get("league")
+    league_id = request.args.get("league_id")
+
+    try:
+        rows = load_user_standing_offers(user_id=g_user_id,
+                                         league_id=league_id or None)
+    except Exception as e:
+        log.error("get_standing_offers error: %s", e)
+        return jsonify({"error": "internal_error"}), 500
+
+    # Sender's own roster, from the cached league session state.
+    own_roster: set | None = None
+    try:
+        if g_league is not None:
+            for m in g_league.members:
+                if m.user_id == g_user_id:
+                    own_roster = set(m.roster or [])
+                    break
+    except Exception:
+        own_roster = None
+    league_name = getattr(g_league, "name", None) if g_league else None
+
+    out = []
+    for o in rows:
+        same_league = g_league is not None and o["league_id"] == g_league.league_id
+        stale = bool(own_roster is not None and same_league
+                     and o["player_id"] not in own_roster)
+        out.append(_standing_offer_public(
+            o,
+            player_name=_standing_offer_player_name(sess, o["player_id"]),
+            league_name=league_name if same_league else None,
+            stale=stale))
+    return jsonify({"offers": out})
+
+
+@app.route("/api/trades/standing-offer/revoke", methods=["POST"])
+@_gate_unverified_write
+def revoke_standing_offer_route():
+    """POST /api/trades/standing-offer/revoke                         (#362)
+
+    Body: {"offer_id": int}. POST, not DELETE — matching
+    /api/trades/awaiting/dismiss, the nearest sibling and also a "retract my
+    own outbound intent" operation.
+
+    200 {"status": "ok", "revoked": true|false} — false on an idempotent
+    repeat or an offer the caller does not own. STILL 200, never 404 (the
+    awaiting/dismiss contract sets this precedent: 0 is still "ok").
+    """
+    if not _standing_offers_enabled():
+        # House pattern (backend/server.py:8141, :11941): a flag-off route
+        # 404s `feature_disabled` BEFORE any session work.
+        return jsonify({"error": "feature_disabled"}), 404
+    sess = _require_session()
+    sess["last_active"] = time.time()
+    g_user_id = sess.get("user_id")
+    if not g_user_id:
+        return jsonify({"error": "session not initialised"}), 400
+
+    body = request.get_json(silent=True) or {}
+    offer_id = body.get("offer_id")
+    if offer_id is None:
+        return jsonify({"error": "offer_id is required"}), 400
+    try:
+        offer_id = int(offer_id)
+    except (TypeError, ValueError):
+        return jsonify({"error": "offer_id is required"}), 400
+
+    try:
+        revoked = revoke_standing_offer(user_id=g_user_id, offer_id=offer_id)
+    except Exception as e:
+        log.error("revoke_standing_offer error: %s", e)
+        return jsonify({"error": "internal_error"}), 500
+    return jsonify({"status": "ok", "revoked": bool(revoked)})
+
+
 @app.route("/api/trades/matches/<int:match_id>/dismiss", methods=["POST"])
 @_gate_unverified_write
 def dismiss_trade_match(match_id):
@@ -16741,6 +17360,44 @@ def submit_rankings():
         return jsonify({"error": "internal_error"}), 500
 
 
+# #360/#361 — the five DNA position chips. This is the ONLY validated set for
+# `avoid_positions`; the dead `valid_positions` literal further down in
+# set_league_preferences omits PICK and is deliberately left alone (it is
+# unreferenced, and wiring it up would newly reject payloads the shipped
+# client sends).
+_AVOID_POSITIONS = ("QB", "RB", "WR", "TE", "PICK")
+
+
+def _normalize_avoid_positions(raw: list) -> "tuple[list[str], list]":
+    """#360 — normalize a POSTed avoid_positions list.
+
+    Order of operations is pinned by lld-delta.md §3.3: drop non-strings,
+    strip+upper, drop tokens outside _AVOID_POSITIONS, dedupe preserving
+    first-seen order, cap at len(_AVOID_POSITIONS).
+
+    Returns (normalized, dropped) — `dropped` is every input element that did
+    not survive, so the caller can log it. Unknown tokens are DROPPED, not
+    rejected: a 400 would discard the user's whole valid save over one bad
+    token, and storing an unknown token would let the UI render a promise the
+    engine cannot keep.
+    """
+    out: list[str] = []
+    dropped: list = []
+    allowed = set(_AVOID_POSITIONS)
+    for tok in raw:
+        if not isinstance(tok, str):
+            dropped.append(tok)
+            continue
+        norm = tok.strip().upper()
+        if norm not in allowed:
+            dropped.append(tok)
+            continue
+        if norm in out:
+            continue          # duplicate, not a drop
+        out.append(norm)
+    return out[:len(_AVOID_POSITIONS)], dropped
+
+
 @app.route("/api/league/preferences", methods=["GET"])
 @_gate_unverified_read
 def get_league_preferences():
@@ -16756,8 +17413,14 @@ def get_league_preferences():
         {
           "team_outlook":          "championship" | null,
           "acquire_positions":     ["WR", "TE"],
-          "trade_away_positions":  ["QB"]
+          "trade_away_positions":  ["QB"],
+          "avoid_positions":       ["TE"]
         }
+
+    #360 — `avoid_positions` is ALWAYS present, always an array, never null,
+    in BOTH states of the `trade.avoid_positions` flag and whether or not a
+    preference row exists. The flag gates only whether the ENGINE reads it;
+    a kill-switch flip must never destroy user data.
     """
     sess = _require_initialized_session()
     sess["last_active"] = time.time()
@@ -16772,6 +17435,7 @@ def get_league_preferences():
             "team_outlook":          None,
             "acquire_positions":     [],
             "trade_away_positions":  [],
+            "avoid_positions":       [],      # #360 — never absent, never null
         }
         # Backlog #8 — when no outlook is declared, surface the inferred one
         # (+ signals) so the client can render a one-tap confirm. Additive and
@@ -16816,8 +17480,19 @@ def set_league_preferences():
         "league_id":             "...",
         "team_outlook":          "championship|contender|rebuilder|jets|not_sure",
         "acquire_positions":     ["WR", "TE"],   (optional)
-        "trade_away_positions":  ["QB"]           (optional)
+        "trade_away_positions":  ["QB"],          (optional)
+        "avoid_positions":       ["QB", "TE"]     (optional, #360)
     }
+
+    #360 avoid_positions semantics: absent or null => the stored value is left
+    UNCHANGED (this is what makes a web save, which omits the field, non-
+    destructive); [] => cleared; a non-list => 400. Values are uppercased,
+    trimmed, deduped order-preserving, and any token outside
+    {QB,RB,WR,TE,PICK} is DROPPED rather than rejected — a 400 would discard
+    the user's whole valid save over one bad token, and storing an unknown
+    token would make the UI render "Avoiding DEF", a lie about a promise.
+    The drop is not silent: the response echoes the NORMALIZED, STORED list
+    and an INFO log names the dropped tokens.
 
     Sets the user's team outlook and optional positional preferences for the
     given league. Persisted in DB.
@@ -16837,6 +17512,7 @@ def set_league_preferences():
     outlook              = body.get("team_outlook")
     acquire_positions    = body.get("acquire_positions")    # may be None or list
     trade_away_positions = body.get("trade_away_positions") # may be None or list
+    avoid_positions      = body.get("avoid_positions")      # #360; None|list
 
     valid = {"championship", "contender", "rebuilder", "jets", "not_sure"}
     if not outlook or outlook not in valid:
@@ -16848,6 +17524,15 @@ def set_league_preferences():
         return jsonify({"error": "acquire_positions must be an array"}), 400
     if trade_away_positions is not None and not isinstance(trade_away_positions, list):
         return jsonify({"error": "trade_away_positions must be an array"}), 400
+    # #360 — bool is a subclass of int, not list, so `True` lands here too.
+    if avoid_positions is not None and not isinstance(avoid_positions, list):
+        return jsonify({"error": "avoid_positions must be an array"}), 400
+    if avoid_positions is not None:
+        avoid_positions, _avoid_dropped = _normalize_avoid_positions(avoid_positions)
+        if _avoid_dropped:
+            log.info("league_preferences/set — #360 dropped unknown avoid "
+                     "tokens %s (user=%s league=%s)",
+                     _avoid_dropped, g_user_id, league_id)
 
     try:
         upsert_league_preference(
@@ -16856,9 +17541,12 @@ def set_league_preferences():
             team_outlook         = outlook,
             acquire_positions    = acquire_positions,
             trade_away_positions = trade_away_positions,
+            avoid_positions      = avoid_positions,
         )
-        log.info("league_preferences/set — user=%s league=%s outlook=%s acquire=%s away=%s",
-                 user_id, league_id, outlook, acquire_positions, trade_away_positions)
+        log.info("league_preferences/set — user=%s league=%s outlook=%s acquire=%s "
+                 "away=%s avoid=%s",
+                 user_id, league_id, outlook, acquire_positions,
+                 trade_away_positions, avoid_positions)
         # Outlook drives the trade-engine's preference multiplier — any
         # cached deck for THIS league is now stale. Drop the league-scoped
         # cache entry so the next /api/trades/generate spawns a fresh job.
@@ -16871,6 +17559,10 @@ def set_league_preferences():
             "team_outlook":          outlook,
             "acquire_positions":     acquire_positions or [],
             "trade_away_positions":  trade_away_positions or [],
+            # #360 — the NORMALIZED, STORED list, so a client that sent
+            # ["te","DEF"] gets back ["TE"] and can reconcile. An omitted
+            # field echoes [] here while leaving the stored value untouched.
+            "avoid_positions":       avoid_positions or [],
         })
     except Exception as e:
         log.error("set_league_preferences error: %s", e)
