@@ -39,6 +39,7 @@
     "test:inline-home": "node tests/check-inline-home.js",
     "test:invite-social-proof": "node tests/check-invite-social-proof.js",
     "test:keychain-accessible": "node tests/check-keychain-accessible.js",
+    "test:landing-platform-options": "node tests/check-landing-platform-options.js",
     "test:league-candidates-300": "node tests/check-league-candidates-300.js",
     "test:league-drill-in": "node tests/check-league-drill-in.js",
     "test:league-unlocks": "node tests/check-league-unlocks.js",
