@@ -1,4 +1,4 @@
-# LLD delta — #403 "Shop a player"
+# LLD delta — #402/#403 "More offers = shop a player"
 
 > Exact interfaces. Every endpoint below either **exists** with a `file:line`
 > cite or is marked **NEW**. Request/response JSON carries field types and
@@ -10,6 +10,7 @@
 
 ## Contents
 
+- [0. Revision 2 (2026-08-27) — the ruled mechanism](#0-revision-2-2026-08-27--the-ruled-mechanism-this-section-wins-every-conflict-below)
 - [1. Endpoint inventory](#1-endpoint-inventory)
 - [2. `POST /api/trades/asset-ideas` — the `swap_positions` field](#2-post-apitradesasset-ideas--the-swap_positions-field)
 - [3. `TradeService._generate_asset_ideas_impl` — the predicate split](#3-tradeservice_generate_asset_ideas_impl--the-predicate-split)
@@ -22,6 +23,125 @@
 - [10. Function-level touch points](#10-function-level-touch-points)
 
 ---
+
+## 0. Revision 2 (2026-08-27) — the ruled mechanism. This section wins every conflict below.
+
+Operator rulings (`rulings-2026-08-27.md`) replaced the surface and the entry
+point after this document was written. §4 (pushed `ShopAssetScreen`, Matches
+long-press) is **superseded**; this section is the buildable replacement.
+Everything about the **generator** (§3, `swap_positions`), the **dismiss/undo**
+(§6) and the **flag** (§7) carries over with only host renames.
+
+### 0.1 Entry — fork inside `handleKeepSide` (`TradesScreen.tsx:2880`)
+
+The give-side `Keep · more offers` tap becomes the shop entry. The fork sits
+at the **top** of the existing handler so flag-off is the untouched path:
+
+```ts
+function handleKeepSide(card: TradeCard, side: 'give' | 'receive') {
+  haptics.selection();
+  if (side === 'give' && shopEnabled) {
+    // #402/#403 — give-side "more offers" IS shop. No pin write, no deck
+    // reset, no #288 snapshot: the deck underneath must not move.
+    if (card.give_players.length === 1) {
+      openShopStrip(card, card.give_players[0]);
+    } else {
+      setShopChooser(card);            // "Shop which player?" sheet (§0.2)
+    }
+    track('shop_opened', {
+      asset_position: card.give_players[0]?.position,   // chooser re-emits
+      source: 'more_offers',
+      give_count: card.give_players.length,
+    }, 'Trades');
+    return;
+  }
+  // ── receive side, or flag off: today's path, byte-identical ──
+  … existing body unchanged (snapshot, setSide, track, reset, generate) …
+}
+```
+
+`shopEnabled = useFlag('trade.shop_asset') && useFlag('trade.asset_ideas')` —
+same conjunction §4 specced. **Flag off ⇒ the early-return branch is dead and
+the function body is today's, byte-for-byte after the `if`.** The
+`trade_keep_side_tapped` event keeps firing only on the paths that still do
+what its name says (receive side / flag off).
+
+**Button label under the flag:** the give-side button reads **"More offers"**
+(the "Keep ·" prefix describes the pin that no longer happens); receive side
+keeps "Keep · more offers". Flag off keeps today's label on both. One design
+call, logged in §0.5.
+
+### 0.2 The chooser (give side > 1) — `PlayerContextMenu` construction
+
+A bottom sheet titled **"Shop which player?"**, one row per give-side player
+(PositionChip + name + consensus value), tap → `openShopStrip(card, player)`
+and re-emit `shop_opened` with the picked position; Cancel → nothing. It is a
+`Modal` sheet, **never navigation** (the deck stays mounted — same rule
+`MockTeamSheet` documents). No FeedbackFAB (modal exception).
+
+### 0.3 The strip — `mobile/src/components/ShopOffersStrip.tsx` (**NEW**, replaces `ShopAssetScreen`)
+
+Mounted by `TradesScreen` **directly below the top deck card** while
+`shopOpen`. Contract:
+
+```ts
+interface Props {
+  leagueId: string;
+  asset: Player;                       // the shopped give-side player
+  onClose(): void;                     // ✕ in the strip header
+  onQueued(desc: QueueToastDescriptor): void;  // host owns the toast
+}
+```
+
+- **Header:** "Shopping {asset.name}" + close ✕. Close = unmount; the deck
+  never moved, so nothing restores.
+- **Mode chips:** Tier up / Tier down / Same value — single-select,
+  `tier_up` default, mapping via the exported `SHOP_MODE_GROUP` constant
+  (§4's `shopMode.ts` spec survives verbatim). Each chip carries its group's
+  idea **count** from the response (an empty mode is navigable, not a dead
+  end — promoted from the rev-1 mockup calls).
+- **Pager:** `FlatList horizontal pagingEnabled` (HLD D-2 verbatim — no
+  `Gesture.Pan`, no new dependency), `1 / X` as a chalk-dim `TickLabel`,
+  `X` derived from the same array the `data` prop renders.
+- **Tiles:** compact idea tiles — give → receive, counterparty handle,
+  signed diff chip (the `AssetIdeasPanel` row vocabulary) — each with
+  **✓ like** and **✕ dismiss**.
+- **Like:** `utils/queueCalcTrade.ts` → `POST /api/trades/queue`, **as-is**
+  (ruling A: Elo moves; `record_elo` not built; §5.2 void). Idempotent;
+  refusals render `queueRefusalLine` copy; `calc_trade_queued` fires with
+  `screen: 'Trades'`.
+- **Dismiss:** §6 verbatim — deferred `POST /api/trades/swipe`
+  `decision:'pass'`, `UNDO_HOLD_MS` 5000, at most one pending, unmount/close
+  flushes (a disposition is never silently lost). `shop_dismiss_undone`
+  screen prop becomes `'Trades'`.
+- **Data:** the existing `POST /api/trades/asset-ideas` with
+  `direction:'give'`; W1 sends no `swap_positions`; W2 adds the position
+  chips inside the Same-value mode pane (§3's backend spec unchanged).
+- **Empty modes:** the rev-1 empty-state designs carry (named copy per mode,
+  "Clear positions" escape in W2).
+
+### 0.4 Deck statics while shopping
+
+While `shopOpen`, the top card's like/pass pan wrapper renders with
+`enabled={false}` — the deck holds still; the strip's pager is the only
+horizontal gesture on the screen. The card stays visible above the strip as
+context (it is the trade being shopped around). Closing the strip re-enables
+the pan. Mechanically assertable (`check-shop-deck.js` re-keys A-7/A-9 to
+this: no `Gesture.Pan` in the strip, and the `enabled` expression must
+reference the shop-open state).
+
+### 0.5 Deltas to the rev-1 tables
+
+| Rev-1 item | Rev-2 state |
+|---|---|
+| `ShopAssetScreen.tsx`, RootNav registration, `gestureEnabled:false`, FeedbackFAB mount | **Dead** — no pushed screen. |
+| §4.4 Matches long-press row | **Dropped from the build** (secondary entry, future option; give-side guard still binds if revived). |
+| `ShopPositionPicker.tsx` (W2) | Survives; folds into the strip's Same-value pane. |
+| §5.2 `record_elo` + `server.py` rows in §10 | **Void** (ruling A). W1 backend diff: **zero**. |
+| `shop_opened` props | `source` domain becomes `'more_offers'` (+ chooser re-emit); add `give_count: int`. Still INTENT. |
+| `shop_mode_selected`, `shop_positions_selected`, `shop_dismiss_undone` | Unchanged; `screen` prop `'Trades'`. |
+| File ownership §10 | `TradesScreen.tsx` moves from "NOT touched (#402's)" to **owned by this joint item** — the contention dissolved with the merge of the two items. |
+| Open design calls | (a) give-side label "More offers" vs unchanged — **specced: relabel**; (b) chooser vs old-behavior fallback when give>1 — **specced: chooser**; (c) receive-side shop ("shop their player") — out of scope, noted for a future item. |
 
 ## 1. Endpoint inventory
 

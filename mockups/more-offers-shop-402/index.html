@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>#403 — Shop a player</title>
+<title>#402+#403 — More offers = shop</title>
 <style>
   /* ── Chalkline tokens (docs/design/design-system.md, ADR-005) ──────────
      Self-contained: no scripts, no external fonts, no network. The ONE
@@ -76,6 +76,27 @@
   .tag.real{background:var(--ink-3);color:var(--chalk-dim);border:1px solid var(--line-a11y)}
   .tag.recon{background:var(--ink-2);color:var(--flare);border:1px solid var(--flare)}
   .tag.prop{background:var(--ink-2);color:var(--ice);border:1px solid var(--ice)}
+
+
+  /* ── rev-2 additions ─────────────────────────────────────────────── */
+  .tag.dead{background:var(--ink-2);color:var(--warn);border:1px solid var(--warn)}
+  .keepchip{border:1px solid var(--line-strong);border-radius:2px;background:var(--ink-1);
+            min-height:32px;display:flex;align-items:center;justify-content:center;
+            font:600 12px var(--ui);color:var(--chalk);padding:0 10px;margin-top:6px}
+  .keepchip.hot{box-shadow:inset 3px 0 0 var(--ice)}
+  .shopstrip{border:1px solid var(--line-strong);border-radius:8px;background:var(--ink-1);
+             padding:12px;margin-top:10px;display:flex;flex-direction:column;gap:10px}
+  .shophdr{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .shophdr .t{font:600 16px var(--cond);letter-spacing:.04em;text-transform:uppercase;color:var(--chalk);
+              display:flex;align-items:center;gap:8px}
+  .shophdr .t::before{content:"";width:3px;height:14px;background:var(--ice)}
+  .itile{background:var(--ink-2);border:1px solid var(--line);border-radius:8px;padding:12px;
+         display:flex;flex-direction:column;gap:8px}
+  .diffchip{font:500 11px var(--mono);border:1px solid var(--line-strong);border-radius:2px;
+            padding:1px 5px;color:var(--pos)}
+  .diffchip.neg{color:var(--neg)}
+  .cpline{display:flex;align-items:center;justify-content:space-between;font:400 13px var(--ui);
+          color:var(--chalk-dim)}
 
   /* ── phone frame ──────────────────────────────────────────────────── */
   .phone{width:390px;background:var(--ink-0);border:1px solid var(--line-a11y);
@@ -270,12 +291,12 @@
 <div class="wrap">
 
 <div class="note">
-  <h1>#403 — Shop a player</h1>
+  <h1>#402 + #403 — More offers = shop a player</h1>
   <p><b>Design lab for feedback item #403.</b> Pick one player, "shop" him, and browse
   trade ideas in three modes — <b>Tier up</b> / <b>Tier down</b> / <b>Same value</b> — as a
   horizontal pager of cards with a <code>1 / X</code> counter and a per-card like/dismiss pair.
   Drawn against the Phase&nbsp;1 doc round, which is the contract:
-  <code>docs/feedback/items/403-shop-a-player/{prd,lld-delta,hld-delta,scope,reconciliation-log}.md</code>.
+  <code>docs/feedback/items/402-more-offers-shop/{prd,lld-delta,hld-delta,scope,reconciliation-log,rulings-2026-08-27}.md</code>.
   This lab does not re-open any decision those documents settled.</p>
 
   <p><b>This is a mockup. It is not shipped code and must never be cited as current app
@@ -335,7 +356,320 @@
   the <code>TradeValueBar</code>.</p>
 </div>
 
-<div class="sec">1 · Entry point — the long-press menu on Matches (R-1)</div>
+
+<div class="note">
+  <h1>Rev 2 · 2026-08-27 — the ruled experience</h1>
+  <p><b>The operator ruled #402 and #403 one experience</b>
+  (<code>rulings-2026-08-27.md</code>): shop is what the deck's give-side
+  <b>"more offers"</b> button does, presented <b>inline below the trade chip</b> — #402's own
+  words. There is <b>no pushed screen and no Matches long-press entry</b>. The frames in this
+  block are the buildable surface; the rev-1 sections below keep their content designs
+  (modes, tiles, empties, undo — all carried into the strip) but their <b>entry and surface
+  frames are superseded</b> and are tagged as such.</p>
+  <div class="icebox"><p><b>What a tap no longer does:</b> no finder pin, no deck reset, no
+  #288 snapshot. The deck holds still — its like/pass pan is disabled while the strip is
+  open — and closing the strip restores nothing because nothing moved.
+  <span class="rq">R-1′ · R-2′</span></p></div>
+</div>
+
+<div class="sec">R2 · 1 — Entry: the give-side button is the front door (R-1′)</div>
+<div class="row">
+  <div class="col">
+    <span class="tag recon">reconstructed from source</span>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span class="bars"><i></i><i></i><i></i></span></div>
+      <div class="navbar"><div class="navtitle">Trades</div></div>
+      <div class="screen">
+        
+      <div class="tcard">
+        <div class="split">
+          <div class="side">
+            <div class="ticklab"><i></i><span>You send</span></div>
+            <div class="stack"><div class="prow wr"><div class="pn">Tee Higgins</div><div class="pmeta">WR · CIN</div></div></div>
+            <div class="keepchip hot">More offers</div>
+          </div>
+          <div class="vrule"></div>
+          <div class="side">
+            <div class="ticklab"><i></i><span>You get</span></div>
+            <div class="stack"><div class="prow rb"><div class="pn">D'Andre Swift</div><div class="pmeta">RB · CHI</div></div></div>
+            <div class="keepchip">Keep · more offers</div>
+          </div>
+        </div>
+      </div>
+        <div class="hint" style="margin-top:10px">Deck card, top of the stack. Both keep
+        controls as they ship today (<code>TradeCard.tsx:431-446</code>) — except the
+        give-side label.</div>
+      </div>
+    </div>
+    <div class="caption"><b>Flag on.</b> The 3px ice edge on the give-side chip is <b>lab annotation only</b> — it marks the changed control for the reviewer; the shipped chip keeps the bordered-chalk construction (ice stays rationed to the deck's primary actions, per the <code>TradeCard.tsx</code> comment). The control relabels to <b>"More
+    offers"</b> (the "Keep ·" prefix described a pin that no longer happens); tapping it opens
+    the strip — frame R2·2. The receive-side button keeps today's label and today's
+    pin-and-regenerate behavior, byte-identical. Flag off: both sides read and behave exactly
+    as today. <span class="rq">R-1′ · R-17</span></div>
+  </div>
+
+  <div class="col">
+    <span class="tag prop">proposed · give side &gt; 1 → chooser</span>
+    <div class="phone">
+      <div class="scrimwrap">
+        <div style="filter:brightness(.42)">
+          <div class="status"><span>9:41</span><span class="bars"><i></i><i></i><i></i></span></div>
+          <div class="navbar"><div class="navtitle">Trades</div></div>
+          <div class="screen" style="min-height:520px">
+      <div class="tcard">
+        <div class="split">
+          <div class="side">
+            <div class="ticklab"><i></i><span>You send</span></div>
+            <div class="stack"><div class="prow wr"><div class="pn">Tee Higgins</div><div class="pmeta">WR · CIN</div></div></div>
+            <div class="keepchip">More offers</div>
+          </div>
+          <div class="vrule"></div>
+          <div class="side">
+            <div class="ticklab"><i></i><span>You get</span></div>
+            <div class="stack"><div class="prow rb"><div class="pn">D'Andre Swift</div><div class="pmeta">RB · CHI</div></div></div>
+            <div class="keepchip">Keep · more offers</div>
+          </div>
+        </div>
+      </div></div>
+        </div>
+        <div class="sheetwrap">
+          <div class="sheet">
+            <div class="grab"></div>
+            <div class="sheethdr"><div class="pintext"><div class="pinname">Shop which player?</div>
+              <div class="pinmeta">Offers are built around one player at a time</div></div></div>
+            <div class="mrow"><div class="l"><span class="poschip wr">WR</span>&nbsp; Tee Higgins</div>
+              <div class="h">CIN · 27 yo · consensus 5,410</div></div>
+            <div class="mrow"><div class="l"><span class="poschip" style="border-color:var(--pick)">PICK</span>&nbsp; 2027 2nd (yours)</div>
+              <div class="h">consensus 1,880</div></div>
+            <div class="cancel">Cancel</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="caption"><b>Several give-side assets → the chooser.</b> A modal bottom sheet
+    (<code>PlayerContextMenu</code> construction, never navigation — the deck stays mounted).
+    Pick a row → the strip opens for that asset; Cancel → nothing.
+    Give-side only, always (<code>rulings-2026-08-27.md</code> §C).
+    <span class="rq">LLD §0.2</span></div>
+  </div>
+</div>
+
+<div class="sec">R2 · 2 — The strip, below the trade chip (R-2′ · R-3 · R-4 · R-5)</div>
+<div class="row">
+  <div class="col">
+    <span class="tag prop">proposed · tier up, 1 of 4</span>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span class="bars"><i></i><i></i><i></i></span></div>
+      <div class="navbar"><div class="navtitle">Trades</div></div>
+      <div class="screen tall">
+        
+      <div class="tcard">
+        <div class="split">
+          <div class="side">
+            <div class="ticklab"><i></i><span>You send</span></div>
+            <div class="stack"><div class="prow wr"><div class="pn">Tee Higgins</div><div class="pmeta">WR · CIN</div></div></div>
+            <div class="keepchip">More offers</div>
+          </div>
+          <div class="vrule"></div>
+          <div class="side">
+            <div class="ticklab"><i></i><span>You get</span></div>
+            <div class="stack"><div class="prow rb"><div class="pn">D'Andre Swift</div><div class="pmeta">RB · CHI</div></div></div>
+            <div class="keepchip">Keep · more offers</div>
+          </div>
+        </div>
+      </div>
+        <div class="shopstrip">
+          <div class="shophdr"><span class="t">Shopping Tee Higgins</span>
+            <div class="iconbtn"><svg class="i" width="14" height="14" viewBox="0 0 14 14"><path d="M2 2l10 10M12 2L2 12"/></svg></div></div>
+          <div class="modes"><div class="mchip on">Tier up <span class="n">· 4</span></div><div class="mchip">Tier down <span class="n">· 3</span></div><div class="mchip">Same value <span class="n">· 2</span></div></div>
+          <div class="counterrow"><div class="counter"><span class="tick"></span><span class="cnum">1 / 4</span></div></div>
+          
+        <div class="itile">
+          <div class="split">
+            <div class="side"><div class="ticklab"><i></i><span>You send</span></div><div class="stack"><div class="prow wr"><div class="pn">Tee Higgins</div><div class="pmeta">WR · CIN · 27 yo</div></div><div class="prow pick"><div class="pn">2027 2nd</div><div class="pmeta">yours</div></div></div></div>
+            <div class="vrule"></div>
+            <div class="side"><div class="ticklab"><i></i><span>You get</span></div><div class="stack"><div class="prow wr"><div class="pn">A.J. Brown</div><div class="pmeta">WR · PHI · 29 yo</div></div></div></div>
+          </div>
+          <div class="cpline"><span>with <b style="color:var(--chalk)">@LambeauLeap</b></span><span class="diffchip">+3.1%</span></div>
+          <div class="decide">
+            <div class="btn secondary" style="flex:0 0 84px">✕</div>
+            <div class="btn primary">✓ &nbsp;Send this offer</div>
+          </div>
+          <div class="hint faintish" style="text-align:center">Swipe for the next offer →</div>
+        </div>
+        </div>
+      </div>
+    </div>
+    <div class="caption"><b>The whole surface, one frame.</b> The trade card stays visible
+    above the strip as context — <b>its swipe pan is disabled while the strip is open</b>, so
+    the pager below is the only horizontal gesture on screen. Mode chips carry per-mode
+    counts (an empty mode is navigable, not a dead end). Pager = <code>FlatList horizontal
+    pagingEnabled</code>, no <code>Gesture.Pan</code> anywhere (HLD D-2). The
+    <code>1 / X</code> is chalk-dim, never flare. <span class="rq">R-2′ · R-4 · R-5</span></div>
+  </div>
+
+  <div class="col">
+    <span class="tag prop">proposed · same value + positions (W2)</span>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span class="bars"><i></i><i></i><i></i></span></div>
+      <div class="navbar"><div class="navtitle">Trades</div></div>
+      <div class="screen tall">
+        
+      <div class="tcard">
+        <div class="split">
+          <div class="side">
+            <div class="ticklab"><i></i><span>You send</span></div>
+            <div class="stack"><div class="prow wr"><div class="pn">Tee Higgins</div><div class="pmeta">WR · CIN</div></div></div>
+            <div class="keepchip">More offers</div>
+          </div>
+          <div class="vrule"></div>
+          <div class="side">
+            <div class="ticklab"><i></i><span>You get</span></div>
+            <div class="stack"><div class="prow rb"><div class="pn">D'Andre Swift</div><div class="pmeta">RB · CHI</div></div></div>
+            <div class="keepchip">Keep · more offers</div>
+          </div>
+        </div>
+      </div>
+        <div class="shopstrip">
+          <div class="shophdr"><span class="t">Shopping Tee Higgins</span>
+            <div class="iconbtn"><svg class="i" width="14" height="14" viewBox="0 0 14 14"><path d="M2 2l10 10M12 2L2 12"/></svg></div></div>
+          <div class="modes"><div class="mchip">Tier up <span class="n">· 4</span></div><div class="mchip">Tier down <span class="n">· 3</span></div><div class="mchip on">Same value <span class="n">· 2</span></div></div>
+          <div class="picker">
+            <div class="pickrow">
+              <div class="pchip qb">QB</div><div class="pchip rb sel">RB</div>
+              <div class="pchip te sel">TE</div><div class="pchip" style="color:var(--pick);border-color:var(--pick)">PICK</div>
+            </div>
+            <div class="hint">Positions offered back · WR is where he plays — leave all clear for same-position swaps</div>
+          </div>
+          <div class="counterrow"><div class="counter"><span class="tick"></span><span class="cnum">1 / 2</span></div></div>
+          
+        <div class="itile">
+          <div class="split">
+            <div class="side"><div class="ticklab"><i></i><span>You send</span></div><div class="stack"><div class="prow wr"><div class="pn">Tee Higgins</div><div class="pmeta">WR · CIN</div></div></div></div>
+            <div class="vrule"></div>
+            <div class="side"><div class="ticklab"><i></i><span>You get</span></div><div class="stack"><div class="prow te"><div class="pn">Kyle Pitts</div><div class="pmeta">TE · ATL</div></div><div class="prow pick"><div class="pn">2026 3rd</div><div class="pmeta">theirs</div></div></div></div>
+          </div>
+          <div class="cpline"><span>with <b style="color:var(--chalk)">@GridironGrit</b></span><span class="diffchip neg">−0.8%</span></div>
+          <div class="decide">
+            <div class="btn secondary" style="flex:0 0 84px">✕</div>
+            <div class="btn primary">✓ &nbsp;Send this offer</div>
+          </div>
+          <div class="hint faintish" style="text-align:center">Swipe for the next offer →</div>
+        </div>
+        </div>
+      </div>
+    </div>
+    <div class="caption"><b>Same value, positions picked.</b> The W2 position chips live
+    inside the Same-value pane; selection swaps the lateral predicate for
+    <code>swap_positions</code> (HLD D-3, unchanged by rev 2). Multi-select; invalid
+    positions are a 400, not a silent empty. <span class="rq">R-10 · R-11 · R-12</span></div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="col">
+    <span class="tag prop">proposed · honest empty mode (R-15)</span>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span class="bars"><i></i><i></i><i></i></span></div>
+      <div class="navbar"><div class="navtitle">Trades</div></div>
+      <div class="screen tall">
+        
+      <div class="tcard">
+        <div class="split">
+          <div class="side">
+            <div class="ticklab"><i></i><span>You send</span></div>
+            <div class="stack"><div class="prow wr"><div class="pn">Tee Higgins</div><div class="pmeta">WR · CIN</div></div></div>
+            <div class="keepchip">More offers</div>
+          </div>
+          <div class="vrule"></div>
+          <div class="side">
+            <div class="ticklab"><i></i><span>You get</span></div>
+            <div class="stack"><div class="prow rb"><div class="pn">D'Andre Swift</div><div class="pmeta">RB · CHI</div></div></div>
+            <div class="keepchip">Keep · more offers</div>
+          </div>
+        </div>
+      </div>
+        <div class="shopstrip">
+          <div class="shophdr"><span class="t">Shopping Tee Higgins</span>
+            <div class="iconbtn"><svg class="i" width="14" height="14" viewBox="0 0 14 14"><path d="M2 2l10 10M12 2L2 12"/></svg></div></div>
+          <div class="modes"><div class="mchip">Tier up <span class="n">· 4</span></div><div class="mchip on">Tier down <span class="n">· 0</span></div><div class="mchip">Same value <span class="n">· 2</span></div></div>
+          <div class="empty">
+            <div class="h">No tier-down offers cleared the bar</div>
+            <div class="b">Nobody in this league holds a cheaper piece that still makes the
+            trade worth your while under the fairness rules.</div>
+            <div class="s">The other modes have offers — the counts on the chips are live.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="caption"><b>Empty is a state, not a dead end.</b> The chip counts keep the
+    other modes one tap away — the rev-1 lab's headline call, promoted into the contract.
+    Copy is named per mode and never blames the user. <span class="rq">R-15</span></div>
+  </div>
+
+  <div class="col">
+    <span class="tag prop">proposed · after a dismiss — held write + take-back (R-8 · R-9)</span>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span class="bars"><i></i><i></i><i></i></span></div>
+      <div class="navbar"><div class="navtitle">Trades</div></div>
+      <div class="screen tall">
+        <div class="toastwrap"><div class="toast"><span class="rail3 pos"></span>
+          <span class="msg">Dismissed</span><span class="act">Undo</span></div></div>
+        
+      <div class="tcard">
+        <div class="split">
+          <div class="side">
+            <div class="ticklab"><i></i><span>You send</span></div>
+            <div class="stack"><div class="prow wr"><div class="pn">Tee Higgins</div><div class="pmeta">WR · CIN</div></div></div>
+            <div class="keepchip">More offers</div>
+          </div>
+          <div class="vrule"></div>
+          <div class="side">
+            <div class="ticklab"><i></i><span>You get</span></div>
+            <div class="stack"><div class="prow rb"><div class="pn">D'Andre Swift</div><div class="pmeta">RB · CHI</div></div></div>
+            <div class="keepchip">Keep · more offers</div>
+          </div>
+        </div>
+      </div>
+        <div class="shopstrip">
+          <div class="shophdr"><span class="t">Shopping Tee Higgins</span>
+            <div class="iconbtn"><svg class="i" width="14" height="14" viewBox="0 0 14 14"><path d="M2 2l10 10M12 2L2 12"/></svg></div></div>
+          <div class="modes"><div class="mchip on">Tier up <span class="n">· 3</span></div><div class="mchip">Tier down <span class="n">· 3</span></div><div class="mchip">Same value <span class="n">· 2</span></div></div>
+          <div class="counterrow"><div class="counter"><span class="tick"></span><span class="cnum">1 / 3</span></div></div>
+          
+        <div class="itile">
+          <div class="split">
+            <div class="side"><div class="ticklab"><i></i><span>You send</span></div><div class="stack"><div class="prow wr"><div class="pn">Tee Higgins</div><div class="pmeta">WR · CIN</div></div><div class="prow pick"><div class="pn">2027 3rd</div><div class="pmeta">yours</div></div></div></div>
+            <div class="vrule"></div>
+            <div class="side"><div class="ticklab"><i></i><span>You get</span></div><div class="stack"><div class="prow wr"><div class="pn">DK Metcalf</div><div class="pmeta">WR · PIT</div></div></div></div>
+          </div>
+          <div class="cpline"><span>with <b style="color:var(--chalk)">@TitleTownTom</b></span><span class="diffchip">+1.4%</span></div>
+          <div class="decide">
+            <div class="btn secondary" style="flex:0 0 84px">✕</div>
+            <div class="btn primary">✓ &nbsp;Send this offer</div>
+          </div>
+          <div class="hint faintish" style="text-align:center">Swipe for the next offer →</div>
+        </div>
+        </div>
+      </div>
+    </div>
+    <div class="caption"><b>The dismiss is held, so Undo is true.</b> The pass POST waits
+    5&nbsp;s; Undo cancels the timer and the request is never sent. The tile leaves the pager
+    at once and <code>X</code> decrements (the counter cannot lie). Rev-1 section 6's full
+    state walk still applies — only the host changed. <span class="rq">R-8 · R-9</span></div>
+  </div>
+</div>
+
+<div class="note">
+  <h2>Rev-1 sections below — what still binds</h2>
+  <div class="warnbox"><p><b>Sections 1 and 2 are superseded</b> (Matches long-press entry;
+  pushed full-screen surface) — kept for the record and tagged. <b>Sections 3–7 carry</b>:
+  the position picker, empties, like/refusal rails, dismiss/undo walk and the open design
+  calls all apply to the strip unchanged, except that every "screen" becomes the strip and
+  every <code>screen</code> analytics prop becomes <code>'Trades'</code>.</p></div>
+</div>
+
+<div class="sec">1 · REV 1 — SUPERSEDED · Entry via long-press on Matches (was R-1)</div>
 <div class="row">
 
   <div class="col">
@@ -440,7 +774,7 @@
   </div>
 </div>
 
-<div class="sec">2 · The shop surface — loading, then the pager (R-2 · R-3 · R-4 · R-5 · R-13 · R-14)</div>
+<div class="sec">2 · REV 1 — SUPERSEDED SURFACE · pushed screen (was R-2) — pager/modes/counter designs carry into the strip (R-3 · R-4 · R-5 · R-13 · R-14)</div>
 <div class="row">
 
   <div class="col">

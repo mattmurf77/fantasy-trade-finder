@@ -1,4 +1,4 @@
-# HLD delta — #403 "Shop a player"
+# HLD delta — #402/#403 "More offers = shop a player"
 
 > A **delta against [`docs/architecture.md`](../../../architecture.md)**, not a
 > rewrite. What changes in the shape of the system, which components are
@@ -11,6 +11,7 @@ was read in the current tree. Anything not in the tree is marked **NEW**.
 
 ## Contents
 
+- [0. Revision 2 (2026-08-27) — the ruled architecture](#0-revision-2-2026-08-27--the-ruled-architecture-read-this-before-anything-below)
 - [1. The shape of the change](#1-the-shape-of-the-change)
 - [2. Components touched](#2-components-touched)
 - [3. Decisions, with alternatives rejected](#3-decisions-with-alternatives-rejected)
@@ -19,6 +20,69 @@ was read in the current tree. Anything not in the tree is marked **NEW**.
 - [6. Architecture-doc impact](#6-architecture-doc-impact)
 
 ---
+
+## 0. Revision 2 (2026-08-27) — the ruled architecture. Read this before anything below.
+
+The operator ruled (`rulings-2026-08-27.md`): **#402 and #403 are one
+experience.** "Shop a player" is not a separate destination with its own front
+door — it is what the deck's **"more offers"** control does. That reverses
+this document's central surface decision and dissolves two of its constraints:
+
+**What the surface now is.** There is **no pushed `ShopAssetScreen`**. The
+shop is an **inline strip on `TradesScreen`, rendered directly below the top
+deck card** — exactly where #402's report put it ("below the trade chip …
+presented in line"). Entry is the **give-side** `Keep · more offers` button
+(`TradeCard.tsx:431-446`):
+
+- give side has **one** player → the strip opens anchored on that player;
+- give side has **several** → a chooser sheet ("Shop which player?", the
+  `PlayerContextMenu` bottom-sheet construction) picks one, then the strip
+  opens;
+- the **receive-side** button is untouched — it keeps today's pin-and-
+  regenerate behavior. Shop is give-side only (ruling C).
+- flag off → the give-side tap behaves **byte-identically to today** (pin +
+  regenerate + #288 snapshot). The pin machinery is not deleted; the flag
+  forks in front of it.
+
+**Why D-1's rejection of "inline block" no longer binds.**
+D-1 rejected inline for three load-bearing reasons; each has changed state:
+
+1. *"It is #402's contended file"* — void. #402 and #403 are one item; the
+   joint item owns `TradesScreen.tsx`. There is no second agent to collide
+   with, and the D-1 alternative table's first objection was ownership, not
+   physics.
+2. *Gesture arbitration with the deck pan* — solved by construction rather
+   than mitigated: **while the strip is open, the top card's like/pass pan is
+   not attached** (`enabled={!shopOpen}` on the pan wrapper — the deck holds
+   still while you shop). The strip's `FlatList` pager (D-2, which survives
+   verbatim) is then the only horizontal gesture on the screen. Spike S-1
+   stays unnecessary.
+3. *FeedbackFAB #188 coverage* — inverted. `TradesScreen` is a tab screen
+   covered by the global FAB mount in `RootNav`; the strip mounts **no** FAB
+   (a second one is the #196/#197 double-FAB bug). The pushed screen's FAB
+   requirement dies with the pushed screen.
+
+**What the tap no longer does.** The give-side path writes **no finder pin,
+runs no deck regenerate, takes no #288 snapshot** — the strip queries
+`POST /api/trades/asset-ideas` (`direction:"give"`), the same request the
+single-pin panel makes today, and the deck underneath is untouched. Closing
+the strip restores nothing because nothing moved. The #288
+snapshot/restore machinery remains, reached by the receive-side button.
+
+**Decisions that survive unchanged:** D-2 (FlatList pager, no `Gesture.Pan`),
+D-3 (`swap_positions` replaces the lateral predicate, W2), D-4 (no server
+flag on `swap_positions`), D-6 (deferred dismiss + undo), D-7 (two waves,
+re-scoped: W1 = entry fork + strip + tier up/down + same-position laterals;
+W2 = position picker + `swap_positions`).
+
+**Decisions voided:** D-1 (pushed screen — superseded above) and D-5
+(`record_elo` — the operator ruled the like **does** move the Elo board;
+`POST /api/trades/queue` is consumed as-is, zero backend diff in W1).
+
+**One honesty note carried from the report.** #402 announces "a two part
+change" and describes only one part. The ruling — shop rides the more-offers
+button — is treated as the second part. If the operator had a different
+second part in mind, it is not in any document and should be filed.
 
 ## 1. The shape of the change
 
@@ -82,6 +146,13 @@ owns the board; the mobile client still consumes JSON over `api.post`.
 ## 3. Decisions, with alternatives rejected
 
 ### D-1 — The shop surface is a root-stack **pushed screen**, not a sheet and not an inline block
+
+> **SUPERSEDED 2026-08-27 by §0.** The operator ruled shop rides the deck's
+> more-offers control, presented inline below the trade chip (#402's own
+> words). The ownership objection is void (one joint item), the gesture
+> objection is solved by pausing the deck pan while the strip is open, and
+> the FAB point inverts (tab screen ⇒ global mount, no new FAB). Kept for
+> the record.
 
 **Decision.** `ShopAssetScreen`, registered unconditionally in
 `RootNav.tsx` (the house rule: *the flag gates the entry point, not the route*,
@@ -200,6 +271,10 @@ strictly a policy call, not an engineering one. Recorded in `prd.md` §Open as
 a non-blocking note rather than silently decided.
 
 ### D-5 — The like is `POST /api/trades/queue`, and the "no Elo" half of Q-A needs one additive field
+
+> **RULED 2026-08-27 — VOID.** The like **does** move the Elo board
+> (`rulings-2026-08-27.md` §A). The route is consumed as-is; `record_elo`
+> is not built. Kept for the record.
 
 **Decision.** Per Q-A the like maps to `POST /api/trades/queue` — idempotent
 per (user, league, opponent, give SET, receive SET) via `_calc_queue_trade_id`

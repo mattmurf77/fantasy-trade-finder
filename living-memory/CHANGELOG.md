@@ -15,6 +15,31 @@
 
 
 
+## 2026-08-27 — #402/#403 ruled one experience; rev-2 doc round + mockups (branch `claude/new-feedback-71436e`, held unmerged)
+
+**Operator rulings** (recorded in `docs/feedback/items/402-more-offers-shop/rulings-2026-08-27.md`):
+the shop like **does** move the Elo board (`/api/trades/queue` consumed as-is — `record_elo`
+never built, W1 backend diff zero); **shop = the give-side "more offers" button** presented
+as an inline strip below the trade chip (#402's own words), give-side only, several assets →
+chooser sheet; #402 and #403 are **one item** — folder renamed
+`403-shop-a-player` → `402-more-offers-shop` (lowest-ID convention), pointer README left.
+Calc/guided merge direction (audit D1) deliberately **not** ruled; operator intent logged:
+one guided page hosting both build and find, two-column canvas kept. **Branch merges held**
+("until we finish this experience").
+
+**Rev 2 written into all four artifacts**: HLD §0 (inline strip supersedes D-1's pushed
+screen — the contended-file objection dissolved with the item merge; deck pan disabled while
+the strip is open; D-5 void), LLD §0 (`handleKeepSide` fork sketch, `ShopOffersStrip`
+contract, chooser, label fork "More offers", analytics deltas, ownership table), PRD §0a
+(R-1'/R-2'/R-7' replace R-1/R-2/R-7; waves re-scoped), scope.md rev-2 block. Mockup lab
+renamed `more-offers-shop-402/`, six Rev-2 frames added (entry, chooser, strip ×4), rev-1
+sections 1–2 tagged superseded, Chalkline re-audited mechanically (annotation ring uses the
+`mrow.new` inset-edge construction, ice stays rationed).
+
+Also this session (separate worktree, commit `2be71bd0` on `claude/ftf-file-continuation-c9185e`,
+unpushed): three docs corrected 70/15/15 → the shipped 50/30/20 D-157 action row — including
+the #384 TestFlight checklist step 12, which was testing a layout no build ships.
+
 ## 2026-08-27 — Feedback backlog status hygiene: 5 items closed, 1 stale `in_progress` reverted
 
 The open list read 45 rows against ~35 actionable items, because this pipeline only flips

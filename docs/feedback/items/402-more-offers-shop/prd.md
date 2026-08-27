@@ -1,4 +1,4 @@
-# PRD — #403 "Shop a player"
+# PRD — #402/#403 "More offers = shop a player"
 
 > Numbered requirements, success criteria, out-of-scope, guardrails, and the
 > full D-056 test plan. Architecture: [`hld-delta.md`](hld-delta.md).
@@ -12,6 +12,7 @@ explicit confirming yes. None declared — full gates apply.
 
 ## Contents
 
+- [0a. Revision 2 (2026-08-27) — ruled requirements](#0a-revision-2-2026-08-27--ruled-requirements-these-replace-r-1-r-2-and-r-7-below)
 - [0. Read this first](#0-read-this-first)
 - [1. Open questions needing an operator ruling](#1-open-questions-needing-an-operator-ruling)
 - [2. Requirements](#2-requirements)
@@ -38,6 +39,60 @@ one file (`mobile/src/screens/TradesScreen.tsx:107`) and renders only when
 `trade.finder_targeting` + `trade.asset_ideas` are on **and exactly one finder
 target is pinned**. #403 was filed from `TradeCalculator`, where the live
 feature is invisible. That is the actual problem this item solves.
+
+## 0a. Revision 2 (2026-08-27) — ruled requirements. These replace R-1, R-2 and R-7 below.
+
+The operator ruled #402 and #403 one experience (`rulings-2026-08-27.md`).
+Requirement deltas, at PRD altitude:
+
+**R-1′ [W1] — The give-side "more offers" button IS the shop entry.**
+With `trade.shop_asset` **and** `trade.asset_ideas` on, tapping the deck
+card's **give-side** `Keep · more offers` control opens the shop strip inline
+below the card — anchored directly on the give player when there is exactly
+one, via a "Shop which player?" chooser sheet when there are several. It
+writes **no finder pin, resets no deck, takes no #288 snapshot**. The
+**receive-side** button and the flag-off give-side tap behave byte-identically
+to today (pin + regenerate + snapshot). Give-side label becomes **"More
+offers"** under the flag; today's label everywhere else.
+*Pass:* `check-shop-deck.js` re-keyed A-5 (fork present, flag-off arm
+untouched) · TestFlight: tap give-side more offers on a 1-give card → strip
+below the card, deck card still visible above it, deck not regenerated.
+
+**R-2′ [W1] — The shop surface is an inline strip on `TradesScreen`, and the
+deck holds still while it is open.** No pushed screen, no route registration,
+no new FeedbackFAB (tab screen ⇒ global mount covers it). While the strip is
+open the top card's like/pass pan is disabled; the strip's `FlatList` pager
+is the only horizontal gesture on screen. Closing the strip (✕) re-enables
+the pan and restores nothing — nothing moved.
+*Pass:* re-keyed A-9 (pan `enabled` expression references shop-open state;
+no `Gesture.Pan` import in the strip) · TestFlight: open strip → try to
+swipe the deck card → it does not move; close → swipe works.
+
+**R-7′ [W1] — The like moves the Elo board. RULED.** The ✓ calls
+`POST /api/trades/queue` exactly as it ships — `record_elo` is **not** built,
+W1's backend diff is **zero**. R-6 (real, idempotent, honest refusal copy)
+stands unchanged; only its "no Elo" companion flips.
+*Pass:* the rev-1 `test_shop_queue_elo.py` tests are **not written**; the
+existing route tests stand.
+
+**Unchanged by revision 2:** R-3 (modes + `SHOP_MODE_GROUP`), R-4/R-5 (pager +
+honest `1 / X`), R-6, R-8/R-9 (dismiss semantics + held undo), R-10–R-12
+(W2 positions), R-13 (vocabulary — now doubly ruled: #402's report says
+"tier up / tier down" verbatim), R-14 (Chalkline), R-15 (honest empties —
+plus per-mode counts on the chips), R-16 (glossary), R-17 (flag OFF
+byte-identical), R-18 (single-pin surface untouched — note it is now also
+**unreachable from the give-side button** while the flag is on; reachable
+still from the target board and receive-side keeps).
+
+**Waves (D-7 re-scoped):** W1 = entry fork + chooser + strip + tier up/down +
+same-position laterals + like/dismiss/undo. W2 = position chips +
+`swap_positions` (+ spike S-2 before the picker UI, unchanged).
+
+**Test plan note:** §6's `check-shop-deck.js` assertion letters were written
+against the pushed screen; the build re-derives them from R-1′/R-2′ (fork,
+pan-disable, no-`Gesture.Pan`, label fork, chooser) and §6.3's code-walk
+covers the `handleKeepSide` fork in place of the RootNav walk. The §6.5
+TestFlight checklist is rewritten at build time against the strip.
 
 ## 1. Open questions needing an operator ruling
 
@@ -104,7 +159,7 @@ Wave in brackets. Every requirement names its mechanical pass criterion.
 
 ### Entry and surface
 
-**R-1 [W1] — A flag-gated entry point launches the shop surface for one player.**
+**R-1 [W1] — ~~A flag-gated entry point launches the shop surface for one player.~~ SUPERSEDED — see R-1′ in §0a.**
 A `PlayerMenuAction` row labeled **"Shop this player"** appears in
 `PlayerContextMenu` when `trade.shop_asset` **and** `trade.asset_ideas` are
 both on. Tapping it pushes `ShopAsset` with `{assetId, assetName, leagueId,
@@ -112,7 +167,7 @@ source}`. With either flag off the row is **not pushed into the actions
 array** — the menu maps an identical list.
 *Pass:* `check-shop-deck.js` A-5 · TestFlight steps 1, 8.
 
-**R-2 [W1] — The shop surface is a root-stack pushed screen with
+**R-2 [W1] — ~~SUPERSEDED — see R-2′ in §0a.~~ The shop surface is a root-stack pushed screen with
 `gestureEnabled: false`.** Registered unconditionally (the flag gates the entry
 point, not the route — `RootNav.tsx:762-766`). It mounts
 `<FeedbackFAB activeScreen="ShopAsset" aboveTabBar={false} />` (#188).
@@ -155,7 +210,7 @@ idempotent per (user, league, opponent, give SET, receive SET); a
 analytics event — `calc_trade_queued` with `screen: 'ShopAsset'`.
 *Pass:* TestFlight steps 5, 6 · `check-shop-deck.js` A-3.
 
-**R-7 [W1, pending O-1] — The like does not move the user's Elo board.**
+**R-7 [W1, pending O-1] — ~~The like does not move the user's Elo board.~~ RULED THE OTHER WAY — see R-7′ in §0a.**
 The client sends `record_elo: false`; the route skips `record_trade_signal` and
 `save_trade_swipes` while still writing the `trade_decisions` row that makes
 the offer visible to the counterparty. Every existing caller that omits the key

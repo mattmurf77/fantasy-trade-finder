@@ -1,11 +1,21 @@
-# `shop-a-player-403/` — design lab for feedback #403 "Shop a player"
+# `more-offers-shop-402/` — design lab for #402/#403 "More offers = shop a player"
+
+> **Rev 2 (2026-08-27).** The operator ruled #402 and #403 one experience
+> (`docs/feedback/items/402-more-offers-shop/rulings-2026-08-27.md`): shop is what the
+> deck's **give-side "more offers" button** does, presented as an **inline strip below the
+> trade chip** on `TradesScreen` — no pushed screen, no Matches long-press entry, no
+> `record_elo`. The page now leads with the six **Rev 2** frames (entry + chooser, the
+> strip in tier-up / same-value / empty / post-dismiss states); rev-1 sections 1–2 are
+> tagged superseded, sections 3–7 (picker, empties, like/refusal rails, undo walk, design
+> calls) carry into the strip unchanged. Folder renamed from `shop-a-player-403/`
+> (multi-ID fixes live under the lowest ID).
 
 > One page: [`index.html`](index.html). Self-contained HTML, Chalkline tokens, no scripts,
 > no external fonts, no network. **Not shipped code** — never import from it and never cite
 > it as current app behavior (`mockups/CLAUDE.md`).
 
 **Binding docs (this lab designs against them and re-opens nothing):**
-`docs/feedback/items/403-shop-a-player/{prd,lld-delta,hld-delta,scope,reconciliation-log}.md`.
+`docs/feedback/items/402-more-offers-shop/{prd,lld-delta,hld-delta,scope,reconciliation-log,rulings-2026-08-27}.md`.
 Vocabulary is the one the doc round settled: **Tier up · Tier down · Same value**.
 
 **Viewing note.** Open `index.html` over `file://` to see the embedded real capture. The

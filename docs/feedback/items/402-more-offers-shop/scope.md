@@ -1,4 +1,4 @@
-# Feature Scope — #403 "Shop a player"
+# Feature Scope — #402/#403 "More offers = shop a player"
 
 <!-- Filled copy of docs/templates/feature-scope.md. Every section is answered
      or explicitly WAIVED with a reason — silence is not a waiver.
@@ -14,6 +14,30 @@ v1.16.8, filed 2026-08-26T21:54Z, severity `polish`)
 bright line and needs a confirming yes.
 
 **Tree verified against:** `origin/main` @ `6e94ff71`.
+
+
+> **Revision 2 (2026-08-27).** The operator ruled #402 and #403 one experience
+> (`rulings-2026-08-27.md`): the surface is an **inline strip on
+> `TradesScreen`** entered from the give-side "more offers" button — no pushed
+> `ShopAssetScreen`, no Matches long-press, no `record_elo`. Scope deltas
+> against the sections below:
+>
+> - **§1 events:** `shop_opened.source` domain becomes `{more_offers}` (the
+>   chooser re-emit included) and gains `give_count` (int). The three other
+>   events keep their shapes; every `screen` prop is `'Trades'`. Registration
+>   rules unchanged (same-commit taxonomy + props).
+> - **§2 flags:** `trade.shop_asset` unchanged (ships `false`); the
+>   `record_elo` request-field row is **void** (ruled). W1 backend diff: zero.
+> - **§2 API:** no route change at all in W1; W2's `swap_positions` on
+>   `/api/trades/asset-ideas` stands as written.
+> - **§3 evidence:** `check-shop-deck.js` assertions re-key to the
+>   `handleKeepSide` fork, the pan-disable expression, the label fork and the
+>   chooser (PRD §0a); the TestFlight checklist is rewritten against the
+>   strip at build time. Waivers unchanged.
+> - **Open questions:** O-1 and O-2 are RULED (see rulings file); O-3
+>   accepted; O-4 (spike S-2 before W2's picker) stands.
+> - **Ownership:** `TradesScreen.tsx` is owned by this joint item — the
+>   #402-contention constraint that shaped rev 1 no longer exists.
 
 ---
 
