@@ -424,6 +424,13 @@ it must call it (`CLAUDE.md` §Conventions).
 
 ### 4.4 Entry point — `mobile/src/screens/MatchesScreen.tsx`
 
+> **RULED 2026-08-27 — SUPERSEDED as the front door.** The operator ruled
+> shop and #402's "more offers" are one concept: the primary entry is the
+> **more offers** control, conditioned on the give side's player count, and
+> #402/#403 are planned as one experience. Whether this long-press row
+> survives as a secondary entry is open; if it does, it is guarded to the
+> give side. See `rulings-2026-08-27.md` §B–C.
+
 One `PlayerMenuAction` pushed into the array `menuActionsFor` returns
 (`MatchesScreen.tsx:1568` (mounted at `:1544`)), inside a truthy-flag branch:
 
@@ -484,6 +491,11 @@ the toast is `queueCalcTrade`'s returned descriptor. `already_queued: true`
 renders the same success copy — the offer *is* live.
 
 ### 5.2 Server — `record_elo` (pending O-1)
+
+> **RULED 2026-08-27 — VOID.** The operator chose option (B): the like
+> **does** move the Elo board. `record_elo` is not built; `/api/trades/queue`
+> is consumed as-is, zero backend diff. See `rulings-2026-08-27.md` §A.
+> This section is kept for the record only.
 
 `backend/server.py:13029`, `queue_trade_for_opponent`. **Additive, optional,
 default = today.**

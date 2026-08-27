@@ -59,10 +59,17 @@ almost certainly what the ruling was made against.
 | **(A) Recommended — add `record_elo: false`** (`lld-delta.md` §5.2) | ~6 lines of backend, additive, default = today. **An API contract change, so it needs a confirming yes.** | Both halves of Q-A honored. The offer is real, idempotent and visible; the board does not learn from browsing. |
 | (B) Drop `record_elo`, accept the movement | **Zero** backend diff. | The like teaches the board at `trade_k_like` (8.0). Defensible — a ✓ on a specific package is as deliberate as the calculator's ✓, which already does this — but it is not what the ruling said. |
 
-**The build proceeds on (A).** If the operator prefers (B), delete the
-`record_elo` rows from `lld-delta.md` §5 and §10 and R-6 becomes "n/a — ruled".
+~~**The build proceeds on (A).**~~ **RULED 2026-08-27: (B).** The like moves
+the board; `record_elo` is not built; R-6's Elo clause is n/a — ruled. See
+`rulings-2026-08-27.md` §A.
 
 ### O-2 — W1's only entry point is a long-press on the Matches screen
+
+> **RULED 2026-08-27:** neither listed option. Shop and #402's "more offers"
+> are one concept — the entry point IS the more-offers control, keyed to the
+> give side's player count, and #402/#403 are planned as one experience with
+> #402's swipeable per-trade tiles as the liked presentation. See
+> `rulings-2026-08-27.md` §B.
 
 `TradesScreen.tsx` is #402's and contended, so #403 does not open it. The
 consequence, stated plainly rather than buried: **in W1, "Shop a player" is
