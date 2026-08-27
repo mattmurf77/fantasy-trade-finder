@@ -10,6 +10,23 @@
 
 
 
+## 2026-08-27 — #384 partner shape-summary regression FIXED on a branch; unmerged, unpushed, one TestFlight checklist owed
+
+**Where:** branch `claude/calc-merged-partner-summary` at `02833155`, one commit off `origin/main` `30070f36`, in worktree `.claude/worktrees/goofy-perlman-490e49`. **Not pushed, not merged** — the operator did not ask to ship, only to fix.
+
+**What it is:** a live shipped regression, not new work. The In-league calculator's partner list has shown a per-partner QB/RB/WR/TE + picks shape line since 2026-07-27; #384 W1 swapped the partner chip row for the #333 Team dropdown + sheet and did not carry the line across, so with `calc.merged_layout` true (all users, since v1.16.0) the sheet has been handle + R-badge only. Found by the [2026-08-27 calc-vs-guided-finder parity audit](../docs/reviews/2026-08-27-calc-vs-guided-finder-audit.md) row 24 — **note that audit doc is not on `main`**; it lives in the `new-feedback-71436e` worktree. Verified against the #384 rulings first: nothing there removes the partner list.
+
+**Evidence done:** `check-calc-merged-layout.js` section 22 (a–h), proven to fail 6 assertions against `origin/main`'s component and to catch three targeted sabotages; `tsc --noEmit` clean; all 84 structural guards pass; testid-lint OK. Backend untouched, pytest not run. Scope block + code-walk + checklist: [docs/feedback/items/384-calc-finder-merge/partner-summary-regression.md](../docs/feedback/items/384-calc-finder-merge/partner-summary-regression.md).
+
+**Owed:**
+1. **Operator decision:** merge this to `main` (Render + next EAS build) or hold it.
+2. **Operator, runtime, after the next build:** the 8-step TestFlight checklist in the scope doc §B — step 7 (VoiceOver announces the shape, not just draws it) is the one a structural guard cannot cover.
+3. **Sweep this worktree** per the recovery-ledger rule once the branch's content is verified on `origin/main`.
+
+**Still owed from 2026-08-26e** (unchanged by this session — see the next section down): the three v1.16.8 TestFlight checklists.
+
+**The other four `partial` rows from that audit are untouched** — swipe undo on the merged Clear (the audit calls it "destructive, one tap, unrecoverable" and worth fixing on its own), per-asset swap suggestions, untouchable-from-the-asset, and the calculator's empty states. Only row 24 was in scope here.
+
 ## 2026-08-26e — v1.16.8 (build 134) SUBMITTED to TestFlight; three checklists now runnable, nothing in flight
 
 **Where:** `main` at `dd2051bc`, clean, no branch open. EAS build `c12643d1-a22b-4dee-9e08-611c01f70366` (v1.16.8, build **134**) **FINISHED**; submission `c6e58906-3cbc-4418-af97-d7a39a6cc6c3` **succeeded**. Apple processing → TestFlight availability is the only remaining step and it is not ours.
@@ -150,6 +167,7 @@ move, and the avatar lab's anchor test models the brief's described layout, not 
 **none**, so the bubble reads "The Analyst" above a ram, which is D-155's recorded default). Higgsfield credits ~4.35.
 
 ## Table of Contents
+- [2026-08-27 — #384 partner shape-summary regression FIXED on a branch; unmerged, unpushed, one TestFlight checklist owed](#2026-08-27--384-partner-shape-summary-regression-fixed-on-a-branch-unmerged-unpushed-one-testflight-checklist-owed)
 - [2026-08-25 — v1.16.6 (132) is on TestFlight; everything owed is now RUNTIME verification, not code](#2026-08-25--v1166-132-is-on-testflight-everything-owed-is-now-runtime-verification-not-code)
 - [2026-08-24 — Waves A + B0 SHIPPED (1.16.4 / EAS 130); Wave B is the next build; do NOT light `calc.inline_home` before it](#2026-08-24--waves-a--b0-shipped-1164--eas-130-wave-b-is-the-next-build-do-not-light-calcinline_home-before-it)
 - [2026-08-24 — Fleeced on TestFlight (v1.16.3 build 129), dark; one production write left](#2026-08-24--fleeced-on-testflight-v1163-build-129-dark-one-production-write-left)
