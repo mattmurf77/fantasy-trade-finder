@@ -1,0 +1,7 @@
+{
+  "url": "https://claude.ai/code/artifact/e3bcf296-853d-4511-9e6f-b1cf20b6ab58",
+  "title": "Fleeced Feedback Board",
+  "favicon": "📋",
+  "first_published": "2026-08-27",
+  "_comment": "The ONE artifact this skill owns. Always pass this url to the Artifact tool so the board updates in place and the operator's link never changes. Never publish board.html without it — that mints a second artifact and the operator's bookmark goes stale."
+}

@@ -14,6 +14,31 @@
 
 
 
+
+## 2026-08-27 — Feedback backlog status hygiene: 5 items closed, 1 stale `in_progress` reverted
+
+The open list read 45 rows against ~35 actionable items, because this pipeline only flips
+statuses for work IT ships and several items closed via other pipelines. Audited all 45 against
+three independent signals — a shipped CHANGELOG entry, the live flag in `config/features.json`,
+and the code present on `origin/main` `30070f36`. Closed as `fixed`: **#384** (merged calculator,
+v1.16.0, `calc.merged_layout` true), **#333** (side-by-side league/team dropdowns,
+`InLeagueCalculator.tsx:830`), **#380** (partner collapse, `calc.partner-collapsed` mounts in the
+same shipped surface), **#362** (standing offers, shipped LIT v1.16.7), **#369** (plan beat, PRs
+#152–158 / builds 124–125, inside the lit `trades.team_review`). **#344** reverted `in_progress` →
+`new`: zero code refs, zero work folder — nothing was ever built.
+
+**Deliberately NOT closed.** The five remaining `in_progress` rows (#360/#361/#365/#371/#372) are
+built-but-DARK — `trade.avoid_positions`, `trade.outlook_net_firsts`, `trades.window_from_odds`,
+`trade.outlook_composite` all `false`, and #372 is in no build. Dark is not fixed; a tester still
+sees the reported behavior. **#310** is only PARTIALLY delivered (the league-free calculator ships
+— `TradeCalculatorScreen.tsx:74` — but the 3-tab nav simplification and the rankings value-prop
+link do not) and stays open. **#205** is a design-tenets interview that never advanced past
+questions; it needs an operator disposition, not a status flip.
+
+Open list: 45 → **40** (35 `new`, 5 `in_progress`). Also confirmed v1.16.8 (build 134) is live
+with testers — three items arrived filed against it, closing the handoff's one open unknown.
+
+
 ## 2026-08-26d — The guided tour stops assuming Sleeper is the only door
 
 The Analyst's S0.2 beat still said "Type your Sleeper username" and rang the username field — on an entry page that now offers Sleeper · ESPN · MFL and can mint a session with no Sleeper identity at all (D-163/D-164). Built by an **Opus subagent** in an isolated worktree, reviewed and shipped by the lead session. S0.2 becomes ONE beat with three renderings (`s0_2(platform)`) — same id, so the seen/retired ledgers stay about one thing — targeting the username field for Sleeper and the panel's `signin.platform-link-btn` for ESPN/MFL ("Sign in to ESPN or paste a league ID — then pick your team"). `SignInScreen` registers the panel button as a guide target and, on ANY chip switch, ends an in-flight s0.2 **and re-arms it** (`patchOnboardingState({guideSeen:{'s0.2':false}})` — verified to deep-merge, so no other beat's seen-mark is touched) so the beat is re-offered against the control that replaced it; the old code only handled the Sleeper→platform direction and `once:true` would otherwise have spent the beat on the door the user just closed. Tapping the panel button advances it, the same contract submit carries for the username field. Left deliberately alone with reasons recorded in the script: `s0.1`/`s1.1` (already platform-neutral) and the two Sleeper error beats (their only call site IS the username path; a platform failure surfaces inside an RN Modal the guide yields to). Script doc updated in lockstep. Guard 61→66 assertions + 5 new guide-script probes; 83 structural guards green; tsc + lint clean. Lead also refreshed two SignInScreen comments left stale by the v2 Apple decoupling.
