@@ -1,0 +1,1646 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#403 — Shop a player</title>
+<style>
+  /* ── Chalkline tokens (docs/design/design-system.md, ADR-005) ──────────
+     Self-contained: no scripts, no external fonts, no network. The ONE
+     cross-directory reference in this lab is the real capture at
+     ../../screens/mobile/matches/populated--mutual.png (2026-08-10) — a
+     relative path from a real file, so it resolves over file:// and over
+     the mockups-preview server alike.
+     Position + tier hexes are cross-client invariants
+     (docs/cross-client-invariants.md) and are data encodings only. */
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#3D4654; --line-a11y:#59647A;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013;
+    --flare:#F0508C;
+    --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7; --pick:#7A7F96;
+    --t-1st:#2dd4bf;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;padding:24px 16px 90px;
+       display:flex;flex-direction:column;align-items:center;gap:14px}
+  .wrap{max-width:1500px;width:100%}
+
+  /* ── prose blocks ─────────────────────────────────────────────────── */
+  .note{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:16px 20px;margin-bottom:4px}
+  .note h1{font-family:var(--cond);font-weight:700;font-size:26px;line-height:1.15;
+           letter-spacing:.02em;text-transform:uppercase;margin:0 0 10px;display:flex;
+           align-items:center;gap:10px}
+  .note h1::before{content:"";width:16px;height:3px;background:var(--ice);flex:none}
+  .note h2{font-family:var(--cond);font-weight:600;font-size:16px;letter-spacing:.03em;
+           text-transform:uppercase;margin:18px 0 8px;display:flex;align-items:center;gap:8px}
+  .note h2::before{content:"";width:3px;height:14px;background:var(--ice)}
+  .note p,.note ul,.note ol{margin:0;font-size:13px;line-height:1.6;color:var(--chalk-dim)}
+  .note ul,.note ol{padding-left:18px;margin-top:6px}
+  .note li{margin-bottom:5px}
+  .note p+p{margin-top:8px}
+  .note strong,.note b{color:var(--chalk);font-weight:600}
+  .note code{font-family:var(--mono);font-size:12px;color:var(--chalk);background:var(--ink-2);
+             padding:1px 4px;border-radius:2px}
+  .icebox{border-left:3px solid var(--ice);padding-left:10px;margin:10px 0;color:var(--chalk-dim)}
+  .warnbox{border-left:3px solid var(--warn);padding-left:10px;margin:10px 0;color:var(--chalk-dim)}
+  .flarebox{border-left:3px solid var(--flare);padding-left:10px;margin:10px 0;color:var(--chalk-dim)}
+  .negbox{border-left:3px solid var(--neg);padding-left:10px;margin:10px 0;color:var(--chalk-dim)}
+
+  table{border-collapse:collapse;width:100%;margin-top:8px;font-size:12.5px}
+  th,td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top;color:var(--chalk-dim)}
+  th{background:var(--ink-2);color:var(--chalk);font:600 11px var(--ui);
+     letter-spacing:.06em;text-transform:uppercase}
+  td code{font-size:11.5px}
+  td b{color:var(--chalk)}
+
+  .sec{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+       color:var(--chalk-dim);display:flex;align-items:center;gap:8px;margin:34px 0 6px;width:100%}
+  .sec::before{content:"";width:3px;height:14px;background:var(--ice);flex:none}
+
+  .row{display:flex;flex-wrap:wrap;gap:26px;align-items:flex-start;width:100%;margin-top:10px}
+  .col{display:flex;flex-direction:column;gap:9px;flex:none;width:390px}
+  .col.wide{width:430px}
+  .caption{font-size:12px;line-height:1.55;color:var(--chalk-dim)}
+  .caption b{color:var(--chalk)}
+  .caption .rq{font-family:var(--mono);font-size:11px;color:var(--ice)}
+  .tag{display:inline-block;font:600 10px var(--mono);letter-spacing:.08em;text-transform:uppercase;
+       padding:2px 7px;border-radius:2px;margin-bottom:2px;align-self:flex-start}
+  .tag.real{background:var(--ink-3);color:var(--chalk-dim);border:1px solid var(--line-a11y)}
+  .tag.recon{background:var(--ink-2);color:var(--flare);border:1px solid var(--flare)}
+  .tag.prop{background:var(--ink-2);color:var(--ice);border:1px solid var(--ice)}
+
+  /* ── phone frame ──────────────────────────────────────────────────── */
+  .phone{width:390px;background:var(--ink-0);border:1px solid var(--line-a11y);
+         border-radius:22px;overflow:hidden;flex:none;position:relative}
+  .phone img{display:block;width:100%;height:auto}
+  .status{height:30px;display:flex;align-items:center;justify-content:space-between;
+          padding:0 20px;font:500 12px var(--mono);color:var(--chalk-dim)}
+  .status .bars{display:flex;gap:3px;align-items:flex-end}
+  .status .bars i{display:block;width:3px;background:var(--chalk-dim)}
+  .status .bars i:nth-child(1){height:5px}.status .bars i:nth-child(2){height:8px}
+  .status .bars i:nth-child(3){height:11px}
+  /* native stack header (RootNav: ink-0 bar, 32x32 icon back, condensed caps title) */
+  .navbar{height:52px;display:flex;align-items:center;gap:8px;padding:0 10px;
+          border-bottom:1px solid var(--line)}
+  .iconbtn{width:32px;height:32px;border-radius:4px;display:flex;align-items:center;
+           justify-content:center;color:var(--chalk);flex:none}
+  .navtitle{font:600 18px var(--cond);letter-spacing:.03em;text-transform:uppercase;color:var(--chalk)}
+  .screen{padding:12px 12px 24px;position:relative;min-height:560px}
+  .screen.tall{min-height:700px}
+
+  svg.i{fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:square}
+
+  /* ── shop surface ─────────────────────────────────────────────────── */
+  .pinrow{display:flex;align-items:center;gap:12px;padding:8px 0 10px;
+          border-bottom:1px solid var(--line);margin-bottom:10px}
+  .poschip{border:1px solid var(--line-strong);color:var(--chalk);border-radius:2px;
+           padding:1px 4px;font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+           display:inline-block;line-height:14px}
+  .poschip.qb{border-color:var(--qb)} .poschip.rb{border-color:var(--rb)}
+  .poschip.wr{border-color:var(--wr)} .poschip.te{border-color:var(--te)}
+  .pintext{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .pinname{font:600 16px/22px var(--ui);color:var(--chalk)}
+  .pinmeta{font:400 13px/18px var(--ui);color:var(--chalk-dim)}
+
+  .modes{display:flex;gap:8px;margin-bottom:10px}
+  .mchip{flex:1;min-height:36px;border:1px solid var(--line);background:var(--ink-1);
+         border-radius:2px;padding:8px 10px;display:flex;align-items:center;justify-content:center;
+         gap:6px;font:600 13px var(--ui);color:var(--chalk-dim);white-space:nowrap}
+  .mchip.on{border-color:var(--ice);background:var(--ink-2);color:var(--chalk)}
+  .mchip .n{font:500 11px var(--mono);color:var(--chalk-dim);letter-spacing:.02em}
+  .mchip.on .n{color:var(--chalk-dim)}
+  .mchip.dim .n{visibility:hidden}
+
+  .picker{margin-bottom:10px}
+  .pickrow{display:flex;gap:8px;margin-bottom:6px}
+  .pchip{min-width:46px;min-height:36px;border:1px solid var(--line);border-radius:2px;
+         background:var(--ink-1);display:flex;align-items:center;justify-content:center;
+         font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase}
+  .pchip.qb{color:var(--qb);border-color:var(--qb)}
+  .pchip.rb{color:var(--rb);border-color:var(--rb)}
+  .pchip.wr{color:var(--wr);border-color:var(--wr)}
+  .pchip.te{color:var(--te);border-color:var(--te)}
+  .pchip.sel{background:var(--ink-3);box-shadow:0 0 0 1px var(--ice);border-color:var(--ice)}
+  .hint{font:400 13px/18px var(--ui);color:var(--chalk-dim)}
+  .hint.faintish{color:var(--chalk-faint)}
+
+  .counterrow{display:flex;align-items:center;justify-content:space-between;margin:2px 0 8px}
+  .counter{display:flex;align-items:center;gap:8px}
+  .counter .tick{width:3px;height:14px;background:var(--ice);display:block}
+  .counter .cnum{font:500 11px var(--mono);letter-spacing:.06em;color:var(--chalk-dim)}
+  .step{width:36px;height:36px;border-radius:4px;border:1px solid var(--line);
+        background:var(--ink-1);color:var(--chalk-dim);display:flex;align-items:center;
+        justify-content:center}
+  .step.off{opacity:.45}
+
+  /* trade card (reconstruction of the shipped TradeCard) */
+  .tcard{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:12px;
+         display:flex;flex-direction:column;gap:8px}
+  .tlabel{font:600 11px/14px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim)}
+  .tname{font:600 16px/22px var(--ui);color:var(--chalk)}
+  .split{display:flex;gap:12px;align-items:stretch}
+  .side{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
+  .vrule{width:1px;background:var(--line);align-self:stretch}
+  .ticklab{display:flex;align-items:center;gap:8px}
+  .ticklab i{width:3px;height:14px;background:var(--ice);display:block;flex:none}
+  .ticklab span{font:600 11px/14px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim)}
+  .stack{display:flex;flex-direction:column;gap:4px}
+  .prow{position:relative;background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:12px;overflow:hidden}
+  .prow::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--wr)}
+  .prow.qb::before{background:var(--qb)} .prow.rb::before{background:var(--rb)}
+  .prow.te::before{background:var(--te)} .prow.pick::before{background:var(--pick)}
+  .badges{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px}
+  .badge{border:1px solid var(--line-strong);color:var(--chalk);border-radius:2px;padding:2px 6px;
+         font:600 11px/14px var(--ui);letter-spacing:.08em;text-transform:uppercase}
+  .badge.qb{border-color:var(--qb)} .badge.rb{border-color:var(--rb)}
+  .badge.wr{border-color:var(--wr)} .badge.te{border-color:var(--te)}
+  .pn{font:600 16px/22px var(--ui);color:var(--chalk);margin-bottom:4px;white-space:nowrap;
+      overflow:hidden;text-overflow:ellipsis}
+  .pmeta{font:400 13px/18px var(--ui);color:var(--chalk-dim)}
+  .pmeta .dot{color:var(--chalk-faint);margin:0 4px}
+
+  /* TradeValueBar */
+  .vbar{display:flex;flex-direction:column;gap:8px}
+  .vhead{font:600 11px/14px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim)}
+  .vwin{font:600 16px/22px var(--ui);margin-top:4px}
+  .vmargin{font:400 13px/18px var(--ui);color:var(--chalk-dim)}
+  .vmargin .d{font:500 13px var(--mono)}
+  .vmargin .pk{font:600 13px var(--ui);color:var(--t-1st)}
+  .track{position:relative;height:16px;margin-top:8px;display:flex;align-items:center}
+  .rail{position:absolute;left:0;right:0;height:14px;background:var(--ink-3);border-radius:2px}
+  .fill{position:absolute;height:14px;border-radius:2px}
+  .vtick{position:absolute;top:-4px;height:24px;width:1px;background:var(--line)}
+  .vcenter{position:absolute;left:50%;margin-left:-1px;top:-4px;height:24px;width:1px;background:var(--line-a11y)}
+  .scalerow{display:flex;align-items:center;margin-top:8px;position:relative}
+  .scaleend{font:500 11px var(--mono);color:var(--chalk-faint);width:30px}
+  .scaleend.r{text-align:right}
+  .scalemid{flex:1;height:12px;position:relative}
+  .slab{position:absolute;width:44px;margin-left:-22px;text-align:center;
+        font:500 11px var(--mono);color:var(--chalk-faint)}
+  .endrow{display:flex;justify-content:space-between;margin-top:4px}
+  .endlbl{font:600 11px/14px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim)}
+  .why{display:flex;align-items:center;justify-content:space-between;min-height:32px;color:var(--chalk-dim)}
+  .why span{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase}
+
+  /* stretch (relaxed) hint — fitRow construction */
+  .stretch{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .stretch i{width:6px;height:6px;border:1px solid var(--chalk-dim);display:block;flex:none}
+  .stretch span{font:400 13px/18px var(--ui);color:var(--chalk-dim)}
+
+  /* decision row */
+  .decide{display:flex;gap:12px;margin-top:12px}
+  .btn{height:44px;border-radius:4px;border:1px solid transparent;display:flex;align-items:center;
+       justify-content:center;gap:6px;font:600 14px var(--ui);padding:0 16px;min-width:44px}
+  .btn.ghost{background:transparent;color:var(--chalk-dim)}
+  .btn.primary{background:var(--ice);color:var(--on-ice);flex:1}
+  .btn.secondary{background:transparent;border-color:var(--line-a11y);color:var(--chalk)}
+  .btn.off{opacity:.45}
+
+  /* empty / error */
+  .empty{border:1px solid var(--line);border-radius:8px;background:var(--ink-1);padding:16px;
+         display:flex;flex-direction:column;gap:8px}
+  .empty .h{font:600 22px/26px var(--cond);letter-spacing:.03em;text-transform:uppercase;color:var(--chalk)}
+  .empty .b{font:400 14px/21px var(--ui);color:var(--chalk)}
+  .empty .s{font:400 13px/18px var(--ui);color:var(--chalk-dim)}
+  .empty .rule{height:1px;background:var(--line);margin:4px 0}
+  .empty .kv{display:flex;justify-content:space-between;align-items:center;
+             font:400 13px/18px var(--ui);color:var(--chalk-dim);min-height:28px}
+  .empty .kv b{color:var(--chalk);font-weight:600}
+  .empty .kv .n{font:500 11px var(--mono);color:var(--chalk-dim)}
+
+  /* loading */
+  .loadcard{border:1px solid var(--line);border-radius:8px;background:var(--ink-1);
+            padding:16px;display:flex;align-items:center;gap:8px;min-height:220px;
+            justify-content:center}
+  .spin{width:14px;height:14px;border:2px solid var(--line-a11y);border-top-color:var(--chalk-dim);
+        border-radius:999px;display:block}
+  .loadcard span{font:400 13px/18px var(--ui);color:var(--chalk-dim)}
+
+  /* toast — top-anchored, per Toast.tsx (top: space.xxl = 32) */
+  .toastwrap{position:absolute;left:0;right:0;top:82px;display:flex;justify-content:center;z-index:5}
+  .toast{display:flex;align-items:stretch;background:var(--ink-2);border:1px solid var(--line);
+         border-radius:4px;max-width:88%;overflow:hidden;box-shadow:0 12px 32px rgba(0,0,0,.55)}
+  .toast .rail3{width:3px;background:var(--ice);flex:none}
+  .toast .rail3.pos{background:var(--pos)} .toast .rail3.warn{background:var(--warn)}
+  .toast .rail3.neg{background:var(--neg)}
+  .toast .msg{font:400 14px/21px var(--ui);color:var(--chalk);padding:10px 16px;flex-shrink:1}
+  .toast .act{display:flex;align-items:center;padding:0 12px;border-left:1px solid var(--line);
+              font:600 14px var(--ui);color:var(--ice)}
+
+  /* FeedbackFAB — 52x52, radius 8, ink-2, hairline (FeedbackFAB.tsx) */
+  .fab{position:absolute;right:16px;bottom:16px;width:52px;height:52px;border-radius:8px;
+       background:var(--ink-2);border:1px solid var(--line);display:flex;align-items:center;
+       justify-content:center;color:var(--chalk-dim);box-shadow:0 12px 32px rgba(0,0,0,.55)}
+
+  /* context-menu sheet */
+  .scrimwrap{position:relative}
+  .dimmed{filter:brightness(.42)}
+  .sheetwrap{position:absolute;left:0;right:0;bottom:0;z-index:2}
+  .sheet{background:var(--ink-2);border:1px solid var(--line);border-top-left-radius:8px;
+         border-top-right-radius:8px;padding:0 16px 12px;box-shadow:0 12px 32px rgba(0,0,0,.55)}
+  .grab{width:32px;height:4px;border-radius:2px;background:var(--line-strong);margin:8px auto}
+  .sheethdr{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);
+            margin-bottom:4px}
+  .mrow{min-height:48px;display:flex;flex-direction:column;justify-content:center;padding:8px 0;
+        border-bottom:1px solid var(--line)}
+  .mrow .l{font:400 14px/21px var(--ui);color:var(--chalk)}
+  .mrow .h{font:400 13px/18px var(--ui);color:var(--chalk-dim);margin-top:2px}
+  .mrow.new{box-shadow:inset 3px 0 0 var(--ice);padding-left:8px}
+  .cancel{height:44px;display:flex;align-items:center;justify-content:center;margin-top:8px;
+          font:600 14px var(--ui);color:var(--chalk-dim)}
+
+  /* detail strips */
+  .strip{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:14px;width:100%}
+  .strip h3{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim);
+            margin:0 0 10px}
+  .strip .grp{margin-bottom:16px}
+  .strip .grp:last-child{margin-bottom:0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="note">
+  <h1>#403 — Shop a player</h1>
+  <p><b>Design lab for feedback item #403.</b> Pick one player, "shop" him, and browse
+  trade ideas in three modes — <b>Tier up</b> / <b>Tier down</b> / <b>Same value</b> — as a
+  horizontal pager of cards with a <code>1 / X</code> counter and a per-card like/dismiss pair.
+  Drawn against the Phase&nbsp;1 doc round, which is the contract:
+  <code>docs/feedback/items/403-shop-a-player/{prd,lld-delta,hld-delta,scope,reconciliation-log}.md</code>.
+  This lab does not re-open any decision those documents settled.</p>
+
+  <p><b>This is a mockup. It is not shipped code and must never be cited as current app
+  behavior</b> (<code>mockups/CLAUDE.md</code>). The engine behind it already ships —
+  <code>POST /api/trades/asset-ideas</code>, flag <code>trade.asset_ideas</code> = true.
+  #403 is a front door and a browser, plus one narrow parameter.</p>
+
+  <h2>The "before" pane is reconstructed from source, not captured</h2>
+  <div class="flarebox">
+    <p><b>Written waiver, honored.</b> <code>scope.md</code> §3 records that the
+    <code>screens/</code> capture library is <b>frozen at 2026-08-11</b> (D-056 retired the
+    simulator entirely) and holds <b>no capture of the single-pin / asset-ideas surface</b>
+    and none of the long-press player menu — <code>screens/mobile/trades/</code> has only
+    <code>empty</code>, <code>empty--cold</code>, <code>error</code>, <code>format-gate</code>,
+    <code>generating</code>, <code>loading</code>, <code>populated</code>, and there is no
+    <code>sheets-player-menu</code> directory at all. No capture can be requested; the harness
+    that made them is retired.</p>
+    <p><b>Substitute, per the waiver:</b> the code-walk. Every frame on this page marked
+    <span class="tag recon" style="margin:0">reconstructed</span> was drawn by reading the
+    live source — <code>PlayerContextMenu.tsx</code>, <code>MatchesScreen.tsx</code>
+    (<code>menuActionsFor</code> at <code>:1568</code>), <code>TradeCard.tsx</code>,
+    <code>PlayerCard.tsx</code>, <code>TradeValueBar.tsx</code>, <code>Toast.tsx</code>,
+    <code>FeedbackFAB.tsx</code>, <code>RootNav.tsx</code> and
+    <code>chalkline/{Button,Badge,TickLabel,Icon,Card}.tsx</code> — and is
+    <b>a reconstruction, not a capture</b>. It is never presented as one.</p>
+    <p><b>Deliberately not used as a substitute:</b>
+    <code>mockups/polish-lab-2026-08/asset-ideas-layout{,-v2,-v3}.html</code>.
+    <code>scope.md</code> names them as not-a-substitute and they are not consulted here.</p>
+  </div>
+  <div class="icebox">
+    <p><b>One real capture IS embedded</b>, because one exists: §1's host screen,
+    <code>screens/mobile/matches/populated--mutual.png</code>, captured
+    <b>2026-08-10T15:03Z</b>. That satisfies rule 1 of the interim posture in
+    <code>mockups/CLAUDE.md</code> ("embed a real capture whenever one exists"). Drift to
+    declare: <code>MatchesScreen.tsx</code> has <b>7 commits since the capture date</b>
+    (<code>9d983be4</code>, <code>14a4ce47</code>, <code>248ad68e</code>, <code>88278100</code>,
+    <code>7057d861</code>, <code>151e3e29</code>, <code>ae0ec6b4</code>) — chiefly #334/#335
+    segment counts and #362 standing offers. Read it as ground truth for its own build, not as
+    today's pixel truth.</p>
+  </div>
+
+  <h2>Chalkline is enforced on every frame</h2>
+  <p>No emoji anywhere · no gradients · no blur / glassmorphism / translucent surfaces ·
+  no <code>backdrop-filter</code> · fonts are Barlow&nbsp;Condensed / Archivo / IBM&nbsp;Plex&nbsp;Mono
+  only · no radius above 8px except true pills · <b>ice</b> <code>#56D9EC</code> on actions
+  (active mode chip, Like, Undo) · <b>flare never appears on this surface at all</b> (R-14) —
+  the only flare on this page is in the lab's own prose chrome, never inside a phone frame.
+  Position hexes are data encodings from <code>docs/cross-client-invariants.md</code>, used on
+  position chips and player rails only, never as chrome.</p>
+
+  <h2>The fixture</h2>
+  <p>One pin — <b>Tee Higgins</b> (WR, CIN, 27&nbsp;yo) — shopped from the Matches tile he
+  actually appears on in the embedded capture, so §1's real pane and every reconstructed pane
+  after it are talking about the same player. Real players, plausible values, no placeholders.
+  Per-player value numbers are deliberately absent from the cards: <code>PlayerCard</code>
+  stopped rendering them app-wide (<code>PlayerCard.tsx:55-58</code>), and the swing lives in
+  the <code>TradeValueBar</code>.</p>
+</div>
+
+<div class="sec">1 · Entry point — the long-press menu on Matches (R-1)</div>
+<div class="row">
+
+  <div class="col">
+    <span class="tag real">real capture · 2026-08-10</span>
+    <div class="phone">
+      <img src="../../screens/mobile/matches/populated--mutual.png" alt="Matches, mutual matches, captured 2026-08-10">
+    </div>
+    <div class="caption"><b>The host screen, as captured.</b>
+      <code>screens/mobile/matches/populated--mutual.png</code>. The affordance line
+      "Hold a player for options — info and untouchable." is already on screen, and Tee Higgins
+      sits in the <b>YOU SEND</b> column of the mutual-match tile — a player the caller owns,
+      which is the only side where shopping him means anything (<code>direction:'give'</code>).
+      7 commits have touched <code>MatchesScreen.tsx</code> since this capture.</div>
+  </div>
+
+  <div class="col">
+    <span class="tag recon">reconstructed from source</span>
+    <div class="phone">
+      <div class="scrimwrap">
+        <img src="../../screens/mobile/matches/populated--mutual.png" alt="Matches beneath the menu">
+        <div style="position:absolute;left:0;top:0;right:0;bottom:0;background:rgba(7,9,12,0.78)"></div>
+        <div class="sheetwrap">
+          <div class="sheet">
+            <div class="grab"></div>
+            <div class="sheethdr">
+              <span class="poschip wr">WR</span>
+              <div class="pintext">
+                <div class="pinname">Tee Higgins</div>
+                <div class="pinmeta">CIN · 27 yo</div>
+              </div>
+            </div>
+            <div class="mrow">
+              <div class="l">Mark untouchable</div>
+              <div class="h">Never offered from your roster in trade ideas</div>
+            </div>
+            <div class="cancel">Cancel</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="caption"><b>Today, flag off.</b> Reconstructed from
+      <code>PlayerContextMenu.tsx</code> + <code>MatchesScreen.tsx</code>'s
+      <code>menuActionsFor</code> (<code>:1568</code>), over the real capture dimmed by the
+      app's own scrim <code>rgba(7,9,12,0.78)</code>. <b>The menu on Matches has exactly one
+      row today</b>, and only on the give side. Nothing here changes with
+      <code>trade.shop_asset</code> off — the row is not pushed into the array, so
+      <code>PlayerContextMenu</code> maps an identical list. <span class="rq">R-17</span></div>
+  </div>
+
+  <div class="col">
+    <span class="tag prop">proposed · flag on</span>
+    <div class="phone">
+      <div class="scrimwrap">
+        <img src="../../screens/mobile/matches/populated--mutual.png" alt="Matches beneath the menu">
+        <div style="position:absolute;left:0;top:0;right:0;bottom:0;background:rgba(7,9,12,0.78)"></div>
+        <div class="sheetwrap">
+          <div class="sheet">
+            <div class="grab"></div>
+            <div class="sheethdr">
+              <span class="poschip wr">WR</span>
+              <div class="pintext">
+                <div class="pinname">Tee Higgins</div>
+                <div class="pinmeta">CIN · 27 yo</div>
+              </div>
+            </div>
+            <div class="mrow">
+              <div class="l">Mark untouchable</div>
+              <div class="h">Never offered from your roster in trade ideas</div>
+            </div>
+            <div class="mrow new">
+              <div class="l">Shop this player</div>
+              <div class="h">See tier-up, tier-down and same-value offers</div>
+            </div>
+            <div class="cancel">Cancel</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="caption"><b>With <code>trade.shop_asset</code> on.</b> One appended
+      <code>PlayerMenuAction</code>, copy verbatim from <code>lld-delta.md</code> §4.4, testID
+      <code>player-menu.shop</code>. The 3px ice edge on the row is <b>lab annotation only</b>
+      — it marks the new row for the reviewer and is not proposed UI; the shipped row is an
+      ordinary menu row. <span class="rq">R-1</span></div>
+  </div>
+</div>
+
+<div class="note">
+  <h2>Two things §1 surfaces that the PRD does not settle</h2>
+  <div class="warnbox">
+    <p><b>(a) The row is not restricted to the give side.</b>
+    <code>lld-delta.md</code> §4.4's snippet appends the action inside the flag branch with no
+    <code>side === 'give'</code> guard, but <code>menuActionsFor</code> is called for
+    <b>both</b> columns of a match tile (<code>MatchesScreen.tsx:1568</code>), and today's only
+    row <i>is</i> guarded that way. With the snippet as written, long-pressing a league-mate's
+    player in <b>YOU GET</b> would offer "Shop this player" for a player the caller does not
+    own — and <code>direction</code> is hard-coded <code>'give'</code> (Q-C), so the sweep would
+    ask "what can I get for a player that isn't mine". <b>This lab draws the row on the give
+    side only.</b> An operator/build call is needed: guard it, or accept the row on both sides.</p>
+    <p><b>(b) Placement.</b> The LLD appends, so "Shop this player" lands <i>below</i>
+    "Mark untouchable". Drawn as specced. If the operator wants the item's headline feature
+    first in the menu, that is a one-line reorder — flagged, not decided here.</p>
+  </div>
+</div>
+
+<div class="sec">2 · The shop surface — loading, then the pager (R-2 · R-3 · R-4 · R-5 · R-13 · R-14)</div>
+<div class="row">
+
+  <div class="col">
+    <span class="tag prop">proposed · loading</span>
+    <div class="phone">
+      <div class="status"><span>10:52</span><span class="bars"><i></i><i></i><i></i></span></div>
+      <div class="navbar">
+        <div class="iconbtn"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg></div>
+        <div class="navtitle">Shop a player</div>
+      </div>
+      <div class="screen">
+        <div class="pinrow">
+          <span class="poschip wr">WR</span>
+          <div class="pintext"><div class="pinname">Tee Higgins</div><div class="pinmeta">CIN · 27 yo</div></div>
+        </div>
+        <div class="modes">
+          <div class="mchip on dim">Tier up <span class="n">0</span></div>
+          <div class="mchip dim">Tier down <span class="n">0</span></div>
+          <div class="mchip dim">Same value <span class="n">0</span></div>
+        </div>
+        <div class="loadcard"><span class="spin"></span><span>Sweeping rosters…</span></div>
+        <div class="decide">
+          <div class="btn ghost off"><svg class="i" width="16" height="16" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg>Dismiss</div>
+          <div class="btn primary off"><svg class="i" width="16" height="16" viewBox="0 0 20 20"><path d="M4 10l4 4 8-8"/></svg>Like</div>
+        </div>
+        <div class="fab"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M5 3v14M5 4h9l-2 3 2 3H5"/></svg></div>
+      </div>
+    </div>
+    <div class="caption"><b>Loading.</b> Pin identity and mode chips are up immediately — they
+      need no network. <b>The counter is absent, not "1 / 0"</b>, and the mode chips carry no
+      counts yet: a fabricated zero is the thing <code>components.md</code> §335 forbids
+      ("count renders only once the list's first fetch resolves"). Copy is the shipped
+      string for this exact sweep — <code>AssetIdeasPanel.tsx:175</code>'s
+      <b>"Sweeping rosters…"</b> — not a new one. Decision pair renders disabled at 45%
+      opacity rather than disappearing, so the layout does not jump.</div>
+  </div>
+
+  <div class="col">
+    <span class="tag prop">proposed · tier up, card 1 of 6</span>
+    <div class="phone">
+      <div class="status"><span>10:52</span><span class="bars"><i></i><i></i><i></i></span></div>
+      <div class="navbar">
+        <div class="iconbtn"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg></div>
+        <div class="navtitle">Shop a player</div>
+      </div>
+      <div class="screen tall">
+        <div class="pinrow">
+          <span class="poschip wr">WR</span>
+          <div class="pintext"><div class="pinname">Tee Higgins</div><div class="pinmeta">CIN · 27 yo</div></div>
+        </div>
+        <div class="modes">
+          <div class="mchip on">Tier up <span class="n">6</span></div>
+          <div class="mchip">Tier down <span class="n">4</span></div>
+          <div class="mchip">Same value <span class="n">3</span></div>
+        </div>
+        <div class="counterrow">
+          <div class="step off"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg></div>
+          <div class="counter"><i class="tick"></i><span class="cnum">1 / 6</span></div>
+          <div class="step"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></div>
+        </div>
+        <div class="tcard">
+          <div>
+            <div class="tlabel">Trade with</div>
+            <div class="tname">@stackedends</div>
+          </div>
+          <div class="split">
+            <div class="side">
+              <div class="ticklab"><i></i><span>You send</span></div>
+              <div class="stack">
+                <div class="prow">
+                  <div class="badges"><span class="badge wr">WR</span></div>
+                  <div class="pn">Tee Higgins</div>
+                  <div class="pmeta">CIN<span class="dot">·</span>27 yo</div>
+                </div>
+                <div class="prow">
+                  <div class="badges"><span class="badge wr">WR</span></div>
+                  <div class="pn">Rome Odunze</div>
+                  <div class="pmeta">CHI<span class="dot">·</span>24 yo</div>
+                </div>
+              </div>
+            </div>
+            <div class="vrule"></div>
+            <div class="side">
+              <div class="ticklab"><i></i><span>You get</span></div>
+              <div class="stack">
+                <div class="prow">
+                  <div class="badges"><span class="badge wr">WR</span></div>
+                  <div class="pn">Malik Nabers</div>
+                  <div class="pmeta">NYG<span class="dot">·</span>23 yo</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="vbar">
+            <div class="vhead">Dynasty value swing</div>
+            <div class="vwin" style="color:var(--warn)">@stackedends win</div>
+            <div class="vmargin">by <span class="d" style="color:var(--warn)">−310</span>&nbsp; · &nbsp;<span class="pk">a Mid 3rd</span> (≈ 0.2 firsts)</div>
+            <div class="track">
+              <div class="rail"></div>
+              <div class="fill" style="left:40%;width:10%;background:var(--warn)"></div>
+              <div class="vtick" style="left:21.5%"></div>
+              <div class="vtick" style="left:78.5%"></div>
+              <div class="vcenter"></div>
+            </div>
+            <div class="scalerow">
+              <span class="scaleend">−1st</span>
+              <span class="scalemid">
+                <span class="slab" style="left:21.5%">−2nd</span>
+                <span class="slab" style="left:50%">Even</span>
+                <span class="slab" style="left:78.5%">+2nd</span>
+              </span>
+              <span class="scaleend r">+1st</span>
+            </div>
+            <div class="endrow">
+              <span class="endlbl" style="color:var(--warn)">@stackedends win</span>
+              <span class="endlbl">You win</span>
+            </div>
+            <div class="why"><span>Why?</span><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M4 8l6 6 6-6"/></svg></div>
+          </div>
+        </div>
+        <div class="decide">
+          <div class="btn ghost"><svg class="i" width="16" height="16" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg>Dismiss</div>
+          <div class="btn primary"><svg class="i" width="16" height="16" viewBox="0 0 20 20"><path d="M4 10l4 4 8-8"/></svg>Like</div>
+        </div>
+        <div class="fab"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M5 3v14M5 4h9l-2 3 2 3H5"/></svg></div>
+      </div>
+    </div>
+    <div class="caption"><b>Populated, mode <code>tier_up</code> (the default on open).</b>
+      Card body is the shipped <code>TradeCard</code> mounted exactly as
+      <code>FeaturedTradeWindow.tsx:91-95</code> mounts it — <code>hideMatchStrength</code>,
+      and <b>no <code>disposition</code> prop</b>, so the card renders none of its own like/pass controls and
+      #403's row below is the only decision surface <span class="rq">A-11</span>. Counter is
+      TickLabel construction (3×14 ice tick) with the numerals in Plex Mono chalk-dim —
+      <b>never flare</b> <span class="rq">R-5 · R-14</span>. Header is the native stack header
+      with <code>gestureEnabled:false</code>; the chevron is the only back control
+      <span class="rq">R-2</span>. FeedbackFAB bottom-right,
+      <code>activeScreen="ShopAsset"</code> <span class="rq">R-2</span>.</div>
+  </div>
+
+  <div class="col">
+    <span class="tag prop">proposed · tier down, card 3 of 4</span>
+    <div class="phone">
+      <div class="status"><span>10:52</span><span class="bars"><i></i><i></i><i></i></span></div>
+      <div class="navbar">
+        <div class="iconbtn"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg></div>
+        <div class="navtitle">Shop a player</div>
+      </div>
+      <div class="screen tall">
+        <div class="pinrow">
+          <span class="poschip wr">WR</span>
+          <div class="pintext"><div class="pinname">Tee Higgins</div><div class="pinmeta">CIN · 27 yo</div></div>
+        </div>
+        <div class="modes">
+          <div class="mchip">Tier up <span class="n">6</span></div>
+          <div class="mchip on">Tier down <span class="n">4</span></div>
+          <div class="mchip">Same value <span class="n">3</span></div>
+        </div>
+        <div class="counterrow">
+          <div class="step"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg></div>
+          <div class="counter"><i class="tick"></i><span class="cnum">3 / 4</span></div>
+          <div class="step"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></div>
+        </div>
+        <div class="tcard">
+          <div class="stretch"><i></i><span>Stretch — outside your fairness band</span></div>
+          <div>
+            <div class="tlabel">Trade with</div>
+            <div class="tname">@waiverwire_wes</div>
+          </div>
+          <div class="split">
+            <div class="side">
+              <div class="ticklab"><i></i><span>You send</span></div>
+              <div class="stack">
+                <div class="prow">
+                  <div class="badges"><span class="badge wr">WR</span></div>
+                  <div class="pn">Tee Higgins</div>
+                  <div class="pmeta">CIN<span class="dot">·</span>27 yo</div>
+                </div>
+              </div>
+            </div>
+            <div class="vrule"></div>
+            <div class="side">
+              <div class="ticklab"><i></i><span>You get</span></div>
+              <div class="stack">
+                <div class="prow">
+                  <div class="badges"><span class="badge wr">WR</span></div>
+                  <div class="pn">Ladd McConkey</div>
+                  <div class="pmeta">LAC<span class="dot">·</span>24 yo</div>
+                </div>
+                <div class="prow">
+                  <div class="badges"><span class="badge wr">WR</span></div>
+                  <div class="pn">Tetairoa McMillan</div>
+                  <div class="pmeta">CAR<span class="dot">·</span>23 yo</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="vbar">
+            <div class="vhead">Dynasty value swing</div>
+            <div class="vwin" style="color:var(--pos)">You win</div>
+            <div class="vmargin">by <span class="d" style="color:var(--pos)">+240</span>&nbsp; · &nbsp;<span class="pk">a Late 3rd</span> (≈ 0.2 firsts)</div>
+            <div class="track">
+              <div class="rail"></div>
+              <div class="fill" style="left:50%;width:10%;background:var(--pos)"></div>
+              <div class="vtick" style="left:21.5%"></div>
+              <div class="vtick" style="left:78.5%"></div>
+              <div class="vcenter"></div>
+            </div>
+            <div class="scalerow">
+              <span class="scaleend">−1st</span>
+              <span class="scalemid">
+                <span class="slab" style="left:21.5%">−2nd</span>
+                <span class="slab" style="left:50%">Even</span>
+                <span class="slab" style="left:78.5%">+2nd</span>
+              </span>
+              <span class="scaleend r">+1st</span>
+            </div>
+            <div class="endrow">
+              <span class="endlbl">@waiverwire_wes win</span>
+              <span class="endlbl" style="color:var(--pos)">You win</span>
+            </div>
+            <div class="why"><span>Why?</span><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M4 8l6 6-6 6"/></svg></div>
+          </div>
+        </div>
+        <div class="decide">
+          <div class="btn ghost"><svg class="i" width="16" height="16" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg>Dismiss</div>
+          <div class="btn primary"><svg class="i" width="16" height="16" viewBox="0 0 20 20"><path d="M4 10l4 4 8-8"/></svg>Like</div>
+        </div>
+        <div class="fab"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M5 3v14M5 4h9l-2 3 2 3H5"/></svg></div>
+      </div>
+    </div>
+    <div class="caption"><b>Mid-pager, and a <code>relaxed</code> idea.</b> The counter tracks
+      the page — a mode switch reloads the pager and resets it to <code>1 / N</code>
+      <span class="rq">R-5</span>. <b>The hairline "Stretch — outside your fairness band" line
+      is a design call the PRD does not make:</b> the response carries
+      <code>relaxed</code> (#189 refill) and the panel this surface replaces already prints
+      that exact sentence (<code>AssetIdeasPanel.tsx:112</code>), but <code>TradeCard</code>
+      does not render it and #403 must not edit <code>TradeCard</code>. Drawn here in the
+      pager cell above the card, in the shipped <code>fitRow</code> construction (6px hollow
+      chalk-dim square + <code>bodySm</code>). Strike it and relaxed ideas become
+      indistinguishable from band-passing ones.</div>
+  </div>
+</div>
+
+<div class="sec">3 · Same value + the position picker (R-10 · R-11 · W2)</div>
+<div class="row">
+
+  <div class="col">
+    <span class="tag prop">proposed · same value, default (nothing picked)</span>
+    <div class="phone">
+      <div class="status"><span>10:52</span><span class="bars"><i></i><i></i><i></i></span></div>
+      <div class="navbar">
+        <div class="iconbtn"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg></div>
+        <div class="navtitle">Shop a player</div>
+      </div>
+      <div class="screen tall">
+        <div class="pinrow">
+          <span class="poschip wr">WR</span>
+          <div class="pintext"><div class="pinname">Tee Higgins</div><div class="pinmeta">CIN · 27 yo</div></div>
+        </div>
+        <div class="modes">
+          <div class="mchip">Tier up <span class="n">6</span></div>
+          <div class="mchip">Tier down <span class="n">4</span></div>
+          <div class="mchip on">Same value <span class="n">3</span></div>
+        </div>
+        <div class="picker">
+          <div class="ticklab" style="margin-bottom:8px"><i></i><span>Same value at</span></div>
+          <div class="pickrow">
+            <span class="pchip qb">QB</span><span class="pchip rb">RB</span>
+            <span class="pchip wr">WR</span><span class="pchip te">TE</span>
+          </div>
+          <div class="hint">Nothing picked — ideas come back at WR, the position you're shopping.</div>
+        </div>
+        <div class="counterrow">
+          <div class="step off"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg></div>
+          <div class="counter"><i class="tick"></i><span class="cnum">1 / 3</span></div>
+          <div class="step"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></div>
+        </div>
+        <div class="tcard">
+          <div>
+            <div class="tlabel">Trade with</div>
+            <div class="tname">@gridiron_gus</div>
+          </div>
+          <div class="split">
+            <div class="side">
+              <div class="ticklab"><i></i><span>You send</span></div>
+              <div class="stack">
+                <div class="prow">
+                  <div class="badges"><span class="badge wr">WR</span></div>
+                  <div class="pn">Tee Higgins</div>
+                  <div class="pmeta">CIN<span class="dot">·</span>27 yo</div>
+                </div>
+              </div>
+            </div>
+            <div class="vrule"></div>
+            <div class="side">
+              <div class="ticklab"><i></i><span>You get</span></div>
+              <div class="stack">
+                <div class="prow">
+                  <div class="badges"><span class="badge wr">WR</span></div>
+                  <div class="pn">Nico Collins</div>
+                  <div class="pmeta">HOU<span class="dot">·</span>27 yo</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="vbar">
+            <div class="vhead">Dynasty value swing</div>
+            <div class="vwin">Even</div>
+            <div class="vmargin">Within a rounding error — <span class="d">90</span> apart (≈ 0.1 firsts)</div>
+            <div class="track">
+              <div class="rail"></div>
+              <div class="fill" style="left:50%;width:6px;margin-left:-3px;background:var(--ice)"></div>
+              <div class="vtick" style="left:21.5%"></div>
+              <div class="vtick" style="left:78.5%"></div>
+              <div class="vcenter"></div>
+            </div>
+            <div class="scalerow">
+              <span class="scaleend">−1st</span>
+              <span class="scalemid">
+                <span class="slab" style="left:21.5%">−2nd</span>
+                <span class="slab" style="left:50%">Even</span>
+                <span class="slab" style="left:78.5%">+2nd</span>
+              </span>
+              <span class="scaleend r">+1st</span>
+            </div>
+            <div class="endrow">
+              <span class="endlbl">@gridiron_gus win</span>
+              <span class="endlbl">You win</span>
+            </div>
+            <div class="why"><span>Why?</span><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M4 8l6 6-6 6"/></svg></div>
+          </div>
+        </div>
+        <div class="decide">
+          <div class="btn ghost"><svg class="i" width="16" height="16" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg>Dismiss</div>
+          <div class="btn primary"><svg class="i" width="16" height="16" viewBox="0 0 20 20"><path d="M4 10l4 4 8-8"/></svg>Like</div>
+        </div>
+        <div class="fab"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M5 3v14M5 4h9l-2 3 2 3H5"/></svg></div>
+      </div>
+    </div>
+    <div class="caption"><b>The picker's default state: nothing selected.</b> It appears
+      <b>only</b> in <code>same_value</code> — the two tier modes never show it
+      <span class="rq">R-10</span>. An empty selection is the shipped #198 behavior
+      (same position back) and the hint line says so in words, because a row of four
+      un-selected chips otherwise reads as "no results filter applied" rather than
+      "WR for WR". <code>swap_positions</code> is <b>omitted from the request body</b>, never
+      sent as <code>[]</code> <span class="rq">R-17 · A-6</span>.</div>
+  </div>
+
+  <div class="col">
+    <span class="tag prop">proposed · same value at RB or TE</span>
+    <div class="phone">
+      <div class="status"><span>10:52</span><span class="bars"><i></i><i></i><i></i></span></div>
+      <div class="navbar">
+        <div class="iconbtn"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg></div>
+        <div class="navtitle">Shop a player</div>
+      </div>
+      <div class="screen tall">
+        <div class="pinrow">
+          <span class="poschip wr">WR</span>
+          <div class="pintext"><div class="pinname">Tee Higgins</div><div class="pinmeta">CIN · 27 yo</div></div>
+        </div>
+        <div class="modes">
+          <div class="mchip">Tier up <span class="n">6</span></div>
+          <div class="mchip">Tier down <span class="n">4</span></div>
+          <div class="mchip on">Same value <span class="n">2</span></div>
+        </div>
+        <div class="picker">
+          <div class="ticklab" style="margin-bottom:8px"><i></i><span>Same value at</span></div>
+          <div class="pickrow">
+            <span class="pchip qb">QB</span><span class="pchip rb sel">RB</span>
+            <span class="pchip wr">WR</span><span class="pchip te sel">TE</span>
+          </div>
+          <div class="hint">Ideas come back at RB or TE.</div>
+        </div>
+        <div class="counterrow">
+          <div class="step off"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg></div>
+          <div class="counter"><i class="tick"></i><span class="cnum">1 / 2</span></div>
+          <div class="step"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></div>
+        </div>
+        <div class="tcard">
+          <div>
+            <div class="tlabel">Trade with</div>
+            <div class="tname">@brady12</div>
+          </div>
+          <div class="split">
+            <div class="side">
+              <div class="ticklab"><i></i><span>You send</span></div>
+              <div class="stack">
+                <div class="prow">
+                  <div class="badges"><span class="badge wr">WR</span></div>
+                  <div class="pn">Tee Higgins</div>
+                  <div class="pmeta">CIN<span class="dot">·</span>27 yo</div>
+                </div>
+              </div>
+            </div>
+            <div class="vrule"></div>
+            <div class="side">
+              <div class="ticklab"><i></i><span>You get</span></div>
+              <div class="stack">
+                <div class="prow rb">
+                  <div class="badges"><span class="badge rb">RB</span></div>
+                  <div class="pn">De'Von Achane</div>
+                  <div class="pmeta">MIA<span class="dot">·</span>25 yo</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="vbar">
+            <div class="vhead">Dynasty value swing</div>
+            <div class="vwin" style="color:var(--pos)">You win</div>
+            <div class="vmargin">by <span class="d" style="color:var(--pos)">+120</span>&nbsp; · &nbsp;<span class="pk">a Late 4th</span></div>
+            <div class="track">
+              <div class="rail"></div>
+              <div class="fill" style="left:50%;width:5%;background:var(--pos)"></div>
+              <div class="vtick" style="left:21.5%"></div>
+              <div class="vtick" style="left:78.5%"></div>
+              <div class="vcenter"></div>
+            </div>
+            <div class="scalerow">
+              <span class="scaleend">−1st</span>
+              <span class="scalemid">
+                <span class="slab" style="left:21.5%">−2nd</span>
+                <span class="slab" style="left:50%">Even</span>
+                <span class="slab" style="left:78.5%">+2nd</span>
+              </span>
+              <span class="scaleend r">+1st</span>
+            </div>
+            <div class="endrow">
+              <span class="endlbl">@brady12 win</span>
+              <span class="endlbl" style="color:var(--pos)">You win</span>
+            </div>
+            <div class="why"><span>Why?</span><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M4 8l6 6-6 6"/></svg></div>
+          </div>
+        </div>
+        <div class="decide">
+          <div class="btn ghost"><svg class="i" width="16" height="16" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg>Dismiss</div>
+          <div class="btn primary"><svg class="i" width="16" height="16" viewBox="0 0 20 20"><path d="M4 10l4 4 8-8"/></svg>Like</div>
+        </div>
+        <div class="fab"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M5 3v14M5 4h9l-2 3 2 3H5"/></svg></div>
+      </div>
+    </div>
+    <div class="caption"><b>Two positions picked; the return side obeys.</b>
+      <code>swap_positions:["RB","TE"]</code> <b>replaces</b> the same-position predicate for
+      <code>lateral</code> and touches nothing else — the Tier up / Tier down counts on the
+      chips are unchanged from the frames above <span class="rq">R-11</span>. The
+      <b>Same value count drops 3 → 2</b>, which is the honest consequence of a narrower
+      band: cross-position laterals are structurally rarer (spike S-2). Selected chip =
+      <code>ink-3</code> well + ice ring, with the position hex kept on the <b>text and
+      border</b> so the data encoding survives selection.</div>
+  </div>
+
+  <div class="col wide">
+    <span class="tag prop">proposed · picker states</span>
+    <div class="strip">
+      <div class="grp">
+        <h3>a · default — nothing picked</h3>
+        <div class="pickrow">
+          <span class="pchip qb">QB</span><span class="pchip rb">RB</span>
+          <span class="pchip wr">WR</span><span class="pchip te">TE</span>
+        </div>
+        <div class="hint">Nothing picked — ideas come back at WR, the position you're shopping.</div>
+      </div>
+      <div class="grp">
+        <h3>b · two picked</h3>
+        <div class="pickrow">
+          <span class="pchip qb">QB</span><span class="pchip rb sel">RB</span>
+          <span class="pchip wr">WR</span><span class="pchip te sel">TE</span>
+        </div>
+        <div class="hint">Ideas come back at RB or TE.</div>
+      </div>
+      <div class="grp">
+        <h3>c · a position you're avoiding is not offered</h3>
+        <div class="pickrow">
+          <span class="pchip rb sel">RB</span><span class="pchip wr">WR</span>
+          <span class="pchip te">TE</span>
+        </div>
+        <div class="hint">Ideas come back at RB.</div>
+        <div class="hint faintish" style="margin-top:4px">QB isn't offered — you're avoiding QB in this league.</div>
+      </div>
+    </div>
+    <div class="caption"><b>Three picker states, at size.</b> Chips are
+      <code>PositionChip</code>/<code>posColor</code>, reused and never restyled
+      (<code>docs/cross-client-invariants.md</code>) <span class="rq">R-14</span>. Order is
+      fixed QB→RB→WR→TE. <b>The pin's own position stays selectable</b> (picking WR here is
+      the same request as picking nothing, and both are legal — <code>lld-delta.md</code>
+      §3.4 row 4). <b>(c) is a design call:</b> the LLD says an avoided position is
+      <i>omitted</i> from the row (#360), which silently shortens it — a second chalk-faint
+      line says why, so a missing chip is never mistaken for a bug. Strike the line and the
+      omission is invisible.</div>
+  </div>
+</div>
+
+<div class="sec">4 · Empty and error (R-15)</div>
+<div class="row">
+
+  <div class="col">
+    <span class="tag prop">proposed · empty, a selection returned nothing</span>
+    <div class="phone">
+      <div class="status"><span>10:52</span><span class="bars"><i></i><i></i><i></i></span></div>
+      <div class="navbar">
+        <div class="iconbtn"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg></div>
+        <div class="navtitle">Shop a player</div>
+      </div>
+      <div class="screen">
+        <div class="pinrow">
+          <span class="poschip wr">WR</span>
+          <div class="pintext"><div class="pinname">Tee Higgins</div><div class="pinmeta">CIN · 27 yo</div></div>
+        </div>
+        <div class="modes">
+          <div class="mchip">Tier up <span class="n">6</span></div>
+          <div class="mchip">Tier down <span class="n">4</span></div>
+          <div class="mchip on">Same value <span class="n">0</span></div>
+        </div>
+        <div class="picker">
+          <div class="ticklab" style="margin-bottom:8px"><i></i><span>Same value at</span></div>
+          <div class="pickrow">
+            <span class="pchip qb">QB</span><span class="pchip rb">RB</span>
+            <span class="pchip wr">WR</span><span class="pchip te sel">TE</span>
+          </div>
+          <div class="hint">Ideas come back at TE.</div>
+        </div>
+        <div class="empty">
+          <div class="h">Nothing at TE</div>
+          <div class="b">No same-value ideas for Tee Higgins right now.</div>
+          <div class="s">You picked TE.</div>
+          <div class="rule"></div>
+          <div class="s">A same-value idea has to land within 10% of his consensus value
+            <b>and</b> leave both rosters better off. Across a position line that band is
+            narrow, so an empty answer here is a normal result, not a failure.</div>
+          <div class="btn secondary" style="margin-top:4px">Clear positions — 3 at WR</div>
+          <div class="s">Tier up (6) and Tier down (4) still have ideas — the chips above switch.</div>
+        </div>
+        <div class="fab"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M5 3v14M5 4h9l-2 3 2 3H5"/></svg></div>
+      </div>
+    </div>
+    <div class="caption"><b>The state the PRD warns will be common.</b> Honest, and useful
+      rather than apologetic: it names the mode, names the selection, says <b>why</b> in one
+      sentence of plain language, and hands over the two recoveries that actually exist —
+      clear the positions (a real count, 3, from the same payload) or switch mode (real
+      counts on the chips above). <b>The counter and the decision row are gone, not
+      disabled</b>: there is no card to count or act on, and "1 / 0" is a lie
+      <span class="rq">R-5 · R-15</span>. Never a fabricated card, never an endless spinner.
+      testID <code>shop.empty</code>.</div>
+  </div>
+
+  <div class="col">
+    <span class="tag prop">proposed · error</span>
+    <div class="phone">
+      <div class="status"><span>10:52</span><span class="bars"><i></i><i></i><i></i></span></div>
+      <div class="navbar">
+        <div class="iconbtn"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg></div>
+        <div class="navtitle">Shop a player</div>
+      </div>
+      <div class="screen">
+        <div class="toastwrap">
+          <div class="toast">
+            <span class="rail3 warn"></span>
+            <span class="msg">Unexpected server error.</span>
+          </div>
+        </div>
+        <div class="pinrow">
+          <span class="poschip wr">WR</span>
+          <div class="pintext"><div class="pinname">Tee Higgins</div><div class="pinmeta">CIN · 27 yo</div></div>
+        </div>
+        <div class="modes">
+          <div class="mchip on dim">Tier up <span class="n">0</span></div>
+          <div class="mchip dim">Tier down <span class="n">0</span></div>
+          <div class="mchip dim">Same value <span class="n">0</span></div>
+        </div>
+        <div class="empty" style="margin-top:60px">
+          <div class="h">Couldn't load ideas</div>
+          <div class="b">The sweep didn't come back.</div>
+          <div class="s">Nothing was sent to anyone, and nothing on your board moved.</div>
+          <div class="btn secondary" style="margin-top:4px">Try again</div>
+        </div>
+        <div class="fab"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M5 3v14M5 4h9l-2 3 2 3H5"/></svg></div>
+      </div>
+    </div>
+    <div class="caption"><b>Error.</b> The toast copy and its warn rail are the shipped
+      behavior for a failed trades fetch — <b>"Unexpected server error."</b>, visible in the
+      real capture <code>screens/mobile/trades/error.png</code> (2026-08-10). <b>The inline
+      block beneath it is a design call:</b> a toast expires and would leave a blank screen
+      with no way forward, so the recovery lives on the screen. Mode chips show no counts —
+      nothing resolved, so nothing may be claimed. The third line exists because this screen
+      queues real offers and moves a real board; after a failure the user deserves to be told
+      neither happened.</div>
+  </div>
+
+  <div class="col wide">
+    <span class="tag prop">proposed · the other two empties</span>
+    <div class="strip">
+      <div class="grp">
+        <h3>a · a whole mode is empty, no selection involved</h3>
+        <div class="empty">
+          <div class="h">Nothing at same value</div>
+          <div class="b">No same-value ideas for Tee Higgins right now.</div>
+          <div class="rule"></div>
+          <div class="s">Nobody's roster lines up inside the ±10% band this week. Tier up (6)
+            and Tier down (4) still have ideas — the chips above switch.</div>
+        </div>
+        <div class="caption" style="margin-top:8px">No <b>Clear positions</b> button, because
+          nothing is selected to clear — offering one would be a dead control. The second
+          line names the only recovery that exists.</div>
+      </div>
+      <div class="grp">
+        <h3>b · the whole sweep is empty — all three modes zero</h3>
+        <div class="empty">
+          <div class="h">No packages around Tee Higgins</div>
+          <div class="b">No defensible packages found around this asset right now.</div>
+          <div class="rule"></div>
+          <div class="s">Every league-mate's roster was checked. Nothing clears the fairness
+            floor in either direction today — try again after the next round of moves.</div>
+        </div>
+        <div class="caption" style="margin-top:8px">The <code>type.body</code> line is the
+          shipped sentence for exactly this outcome (<code>AssetIdeasPanel.tsx:179</code>),
+          reused rather than rewritten, so the two surfaces cannot drift. All three mode
+          chips read <code>0</code>; the pager, counter and decision row are absent.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="sec">5 · After the like — a real offer, or an honest refusal (R-6 · R-7)</div>
+<div class="row">
+
+  <div class="col">
+    <span class="tag prop">proposed · liked</span>
+    <div class="phone">
+      <div class="status"><span>10:52</span><span class="bars"><i></i><i></i><i></i></span></div>
+      <div class="navbar">
+        <div class="iconbtn"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg></div>
+        <div class="navtitle">Shop a player</div>
+      </div>
+      <div class="screen tall">
+        <div class="toastwrap">
+          <div class="toast">
+            <span class="rail3 pos"></span>
+            <span class="msg">Queued for @stackedends — it'll show in their suggestions.</span>
+          </div>
+        </div>
+        <div class="pinrow">
+          <span class="poschip wr">WR</span>
+          <div class="pintext"><div class="pinname">Tee Higgins</div><div class="pinmeta">CIN · 27 yo</div></div>
+        </div>
+        <div class="modes">
+          <div class="mchip on">Tier up <span class="n">6</span></div>
+          <div class="mchip">Tier down <span class="n">4</span></div>
+          <div class="mchip">Same value <span class="n">3</span></div>
+        </div>
+        <div class="counterrow">
+          <div class="step off"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg></div>
+          <div class="counter"><i class="tick"></i><span class="cnum">1 / 6</span></div>
+          <div class="step"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></div>
+        </div>
+        <div class="tcard">
+          <div>
+            <div class="tlabel">Trade with</div>
+            <div class="tname">@stackedends</div>
+          </div>
+          <div class="split">
+            <div class="side">
+              <div class="ticklab"><i></i><span>You send</span></div>
+              <div class="stack">
+                <div class="prow">
+                  <div class="badges"><span class="badge wr">WR</span></div>
+                  <div class="pn">Tee Higgins</div>
+                  <div class="pmeta">CIN<span class="dot">·</span>27 yo</div>
+                </div>
+                <div class="prow">
+                  <div class="badges"><span class="badge wr">WR</span></div>
+                  <div class="pn">Rome Odunze</div>
+                  <div class="pmeta">CHI<span class="dot">·</span>24 yo</div>
+                </div>
+              </div>
+            </div>
+            <div class="vrule"></div>
+            <div class="side">
+              <div class="ticklab"><i></i><span>You get</span></div>
+              <div class="stack">
+                <div class="prow">
+                  <div class="badges"><span class="badge wr">WR</span></div>
+                  <div class="pn">Malik Nabers</div>
+                  <div class="pmeta">NYG<span class="dot">·</span>23 yo</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="vbar">
+            <div class="vhead">Dynasty value swing</div>
+            <div class="vwin" style="color:var(--warn)">@stackedends win</div>
+            <div class="vmargin">by <span class="d" style="color:var(--warn)">−310</span>&nbsp; · &nbsp;<span class="pk">a Mid 3rd</span> (≈ 0.2 firsts)</div>
+            <div class="track">
+              <div class="rail"></div>
+              <div class="fill" style="left:40%;width:10%;background:var(--warn)"></div>
+              <div class="vtick" style="left:21.5%"></div>
+              <div class="vtick" style="left:78.5%"></div>
+              <div class="vcenter"></div>
+            </div>
+            <div class="scalerow">
+              <span class="scaleend">−1st</span>
+              <span class="scalemid">
+                <span class="slab" style="left:21.5%">−2nd</span>
+                <span class="slab" style="left:50%">Even</span>
+                <span class="slab" style="left:78.5%">+2nd</span>
+              </span>
+              <span class="scaleend r">+1st</span>
+            </div>
+            <div class="endrow">
+              <span class="endlbl" style="color:var(--warn)">@stackedends win</span>
+              <span class="endlbl">You win</span>
+            </div>
+            <div class="why"><span>Why?</span><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M4 8l6 6-6 6"/></svg></div>
+          </div>
+        </div>
+        <div class="decide">
+          <div class="btn ghost"><svg class="i" width="16" height="16" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg>Dismiss</div>
+          <div class="btn primary off"><svg class="i" width="16" height="16" viewBox="0 0 20 20"><path d="M4 10l4 4 8-8"/></svg>Like</div>
+        </div>
+        <div class="fab"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M5 3v14M5 4h9l-2 3 2 3H5"/></svg></div>
+      </div>
+    </div>
+    <div class="caption"><b>A like is a real, queued offer — and the card stays put.</b>
+      Nothing is consumed: the counter still reads <code>1 / 6</code> and the same card is on
+      screen, because a like is not a disposition that advances a deck
+      <span class="rq">R-4</span>. <b>No optimistic UI</b>: the Like button disables until the
+      server answers (<code>busyKey</code>), then the toast is
+      <code>queueCalcTrade</code>'s own returned descriptor — reused, never re-written
+      <span class="rq">R-6</span>. Toast is top-anchored with a <code>--pos</code> rail, per
+      <code>Toast.tsx</code>.</div>
+  </div>
+
+  <div class="col wide">
+    <span class="tag prop">proposed · every toast this surface can show</span>
+    <div class="strip">
+      <div class="grp">
+        <h3>a · queued (success rail)</h3>
+        <div class="toast" style="max-width:100%">
+          <span class="rail3 pos"></span>
+          <span class="msg">Queued for @stackedends — it'll show in their suggestions.</span>
+        </div>
+      </div>
+      <div class="grp">
+        <h3>b · liked the same card twice — idempotent (success rail)</h3>
+        <div class="toast" style="max-width:100%">
+          <span class="rail3 pos"></span>
+          <span class="msg">Already queued for @stackedends.</span>
+        </div>
+      </div>
+      <div class="grp">
+        <h3>c · refused, and it names who and why (warn rail)</h3>
+        <div class="toast" style="max-width:100%;margin-bottom:8px">
+          <span class="rail3 warn"></span>
+          <span class="msg">@stackedends has someone in this trade marked untouchable.</span>
+        </div>
+        <div class="toast" style="max-width:100%;margin-bottom:8px">
+          <span class="rail3 warn"></span>
+          <span class="msg">@stackedends isn't interested in one of the players you're offering.</span>
+        </div>
+        <div class="toast" style="max-width:100%">
+          <span class="rail3 warn"></span>
+          <span class="msg">@stackedends's board reads this as a loss for them, so it won't surface.</span>
+        </div>
+      </div>
+      <div class="grp">
+        <h3>d · dismissed, with the take-back (success rail + ice action)</h3>
+        <div class="toast" style="max-width:100%">
+          <span class="rail3 pos"></span>
+          <span class="msg">Dismissed</span>
+          <span class="act">Undo</span>
+        </div>
+      </div>
+    </div>
+    <div class="caption">Every line above is a <b>shipped string</b>, taken from
+      <code>queueCalcTrade.ts</code> (<code>:79-99</code> and <code>queueRefusalLine</code>
+      <code>:31-49</code>) — the whole point of reusing that helper is that the six refusal
+      reasons cannot drift between the calculator's like cell and this one. <b>#403 writes no new
+      refusal copy.</b> The Undo action is <b>ice</b>, hairline-separated, full bubble height
+      (<code>Toast.tsx:117-130</code>): flare would be wrong on an actionable control
+      <span class="rq">R-14</span>.</div>
+  </div>
+</div>
+
+<div class="sec">6 · After the dismiss — the held write and the take-back (R-8 · R-9)</div>
+<div class="row">
+
+  <div class="col">
+    <span class="tag prop">proposed · dismissed, hold window open</span>
+    <div class="phone">
+      <div class="status"><span>10:52</span><span class="bars"><i></i><i></i><i></i></span></div>
+      <div class="navbar">
+        <div class="iconbtn"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg></div>
+        <div class="navtitle">Shop a player</div>
+      </div>
+      <div class="screen tall">
+        <div class="toastwrap">
+          <div class="toast">
+            <span class="rail3 pos"></span>
+            <span class="msg">Dismissed</span>
+            <span class="act">Undo</span>
+          </div>
+        </div>
+        <div class="pinrow">
+          <span class="poschip wr">WR</span>
+          <div class="pintext"><div class="pinname">Tee Higgins</div><div class="pinmeta">CIN · 27 yo</div></div>
+        </div>
+        <div class="modes">
+          <div class="mchip on">Tier up <span class="n">5</span></div>
+          <div class="mchip">Tier down <span class="n">4</span></div>
+          <div class="mchip">Same value <span class="n">3</span></div>
+        </div>
+        <div class="counterrow">
+          <div class="step off"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg></div>
+          <div class="counter"><i class="tick"></i><span class="cnum">1 / 5</span></div>
+          <div class="step"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></div>
+        </div>
+        <div class="tcard">
+          <div>
+            <div class="tlabel">Trade with</div>
+            <div class="tname">@dynasty_dez</div>
+          </div>
+          <div class="split">
+            <div class="side">
+              <div class="ticklab"><i></i><span>You send</span></div>
+              <div class="stack">
+                <div class="prow">
+                  <div class="badges"><span class="badge wr">WR</span></div>
+                  <div class="pn">Tee Higgins</div>
+                  <div class="pmeta">CIN<span class="dot">·</span>27 yo</div>
+                </div>
+                <div class="prow">
+                  <div class="badges"><span class="badge wr">WR</span></div>
+                  <div class="pn">Jaxon Smith-Njigba</div>
+                  <div class="pmeta">SEA<span class="dot">·</span>24 yo</div>
+                </div>
+              </div>
+            </div>
+            <div class="vrule"></div>
+            <div class="side">
+              <div class="ticklab"><i></i><span>You get</span></div>
+              <div class="stack">
+                <div class="prow te">
+                  <div class="badges"><span class="badge te">TE</span></div>
+                  <div class="pn">Brock Bowers</div>
+                  <div class="pmeta">LV<span class="dot">·</span>23 yo</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="vbar">
+            <div class="vhead">Dynasty value swing</div>
+            <div class="vwin" style="color:var(--warn)">@dynasty_dez win</div>
+            <div class="vmargin">by <span class="d" style="color:var(--warn)">−180</span>&nbsp; · &nbsp;<span class="pk">a Late 3rd</span> (≈ 0.1 firsts)</div>
+            <div class="track">
+              <div class="rail"></div>
+              <div class="fill" style="left:43.5%;width:6.5%;background:var(--warn)"></div>
+              <div class="vtick" style="left:21.5%"></div>
+              <div class="vtick" style="left:78.5%"></div>
+              <div class="vcenter"></div>
+            </div>
+            <div class="scalerow">
+              <span class="scaleend">−1st</span>
+              <span class="scalemid">
+                <span class="slab" style="left:21.5%">−2nd</span>
+                <span class="slab" style="left:50%">Even</span>
+                <span class="slab" style="left:78.5%">+2nd</span>
+              </span>
+              <span class="scaleend r">+1st</span>
+            </div>
+            <div class="endrow">
+              <span class="endlbl" style="color:var(--warn)">@dynasty_dez win</span>
+              <span class="endlbl">You win</span>
+            </div>
+            <div class="why"><span>Why?</span><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M4 8l6 6-6 6"/></svg></div>
+          </div>
+        </div>
+        <div class="decide">
+          <div class="btn ghost"><svg class="i" width="16" height="16" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg>Dismiss</div>
+          <div class="btn primary"><svg class="i" width="16" height="16" viewBox="0 0 20 20"><path d="M4 10l4 4 8-8"/></svg>Like</div>
+        </div>
+        <div class="fab"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M5 3v14M5 4h9l-2 3 2 3H5"/></svg></div>
+      </div>
+    </div>
+    <div class="caption"><b>The card is gone, the write is not sent.</b> Counter drops
+      <code>1 / 6</code> → <code>1 / 5</code> and the Tier up chip drops <b>6 → 5</b> with it:
+      the counter, the chip count and the pager all read the <b>same locally-filtered list</b>
+      <span class="rq">R-5 · A-8</span>. The next idea is already on screen. For five seconds
+      the only thing that has happened is local.</div>
+  </div>
+
+  <div class="col">
+    <span class="tag prop">proposed · Undo tapped, within 5 s</span>
+    <div class="phone">
+      <div class="status"><span>10:52</span><span class="bars"><i></i><i></i><i></i></span></div>
+      <div class="navbar">
+        <div class="iconbtn"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg></div>
+        <div class="navtitle">Shop a player</div>
+      </div>
+      <div class="screen tall">
+        <div class="pinrow">
+          <span class="poschip wr">WR</span>
+          <div class="pintext"><div class="pinname">Tee Higgins</div><div class="pinmeta">CIN · 27 yo</div></div>
+        </div>
+        <div class="modes">
+          <div class="mchip on">Tier up <span class="n">6</span></div>
+          <div class="mchip">Tier down <span class="n">4</span></div>
+          <div class="mchip">Same value <span class="n">3</span></div>
+        </div>
+        <div class="counterrow">
+          <div class="step off"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></svg></div>
+          <div class="counter"><i class="tick"></i><span class="cnum">1 / 6</span></div>
+          <div class="step"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></svg></div>
+        </div>
+        <div class="tcard">
+          <div>
+            <div class="tlabel">Trade with</div>
+            <div class="tname">@stackedends</div>
+          </div>
+          <div class="split">
+            <div class="side">
+              <div class="ticklab"><i></i><span>You send</span></div>
+              <div class="stack">
+                <div class="prow">
+                  <div class="badges"><span class="badge wr">WR</span></div>
+                  <div class="pn">Tee Higgins</div>
+                  <div class="pmeta">CIN<span class="dot">·</span>27 yo</div>
+                </div>
+                <div class="prow">
+                  <div class="badges"><span class="badge wr">WR</span></div>
+                  <div class="pn">Rome Odunze</div>
+                  <div class="pmeta">CHI<span class="dot">·</span>24 yo</div>
+                </div>
+              </div>
+            </div>
+            <div class="vrule"></div>
+            <div class="side">
+              <div class="ticklab"><i></i><span>You get</span></div>
+              <div class="stack">
+                <div class="prow">
+                  <div class="badges"><span class="badge wr">WR</span></div>
+                  <div class="pn">Malik Nabers</div>
+                  <div class="pmeta">NYG<span class="dot">·</span>23 yo</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="vbar">
+            <div class="vhead">Dynasty value swing</div>
+            <div class="vwin" style="color:var(--warn)">@stackedends win</div>
+            <div class="vmargin">by <span class="d" style="color:var(--warn)">−310</span>&nbsp; · &nbsp;<span class="pk">a Mid 3rd</span> (≈ 0.2 firsts)</div>
+            <div class="track">
+              <div class="rail"></div>
+              <div class="fill" style="left:40%;width:10%;background:var(--warn)"></div>
+              <div class="vtick" style="left:21.5%"></div>
+              <div class="vtick" style="left:78.5%"></div>
+              <div class="vcenter"></div>
+            </div>
+            <div class="scalerow">
+              <span class="scaleend">−1st</span>
+              <span class="scalemid">
+                <span class="slab" style="left:21.5%">−2nd</span>
+                <span class="slab" style="left:50%">Even</span>
+                <span class="slab" style="left:78.5%">+2nd</span>
+              </span>
+              <span class="scaleend r">+1st</span>
+            </div>
+            <div class="endrow">
+              <span class="endlbl" style="color:var(--warn)">@stackedends win</span>
+              <span class="endlbl">You win</span>
+            </div>
+            <div class="why"><span>Why?</span><svg class="i" width="14" height="14" viewBox="0 0 20 20"><path d="M4 8l6 6-6 6"/></svg></div>
+          </div>
+        </div>
+        <div class="decide">
+          <div class="btn ghost"><svg class="i" width="16" height="16" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg>Dismiss</div>
+          <div class="btn primary"><svg class="i" width="16" height="16" viewBox="0 0 20 20"><path d="M4 10l4 4 8-8"/></svg>Like</div>
+        </div>
+        <div class="fab"><svg class="i" width="20" height="20" viewBox="0 0 20 20"><path d="M5 3v14M5 4h9l-2 3 2 3H5"/></svg></div>
+      </div>
+    </div>
+    <div class="caption"><b>Back exactly where it was.</b> The card returns
+      <b>at its old index</b> (<code>restoreIndex</code>), the counter and the chip count go
+      back to 6, and the toast is gone. No new toast fires — a confirmation that nothing
+      happened would itself be noise. <b>Nothing needs reversing:</b> the POST was never sent,
+      so <code>swipe_decisions</code>, <code>trade_decisions</code> and the Elo board were
+      never touched <span class="rq">R-9</span>.</div>
+  </div>
+
+  <div class="col wide">
+    <span class="tag prop">the hold window, stated plainly</span>
+    <div class="strip">
+      <h3>What "Dismissed · Undo" actually promises</h3>
+      <table>
+        <tr><th>When</th><th>What has happened</th></tr>
+        <tr><td><b>t = 0</b><br>Dismiss tapped</td>
+            <td>Card removed from the pager. Counter and chip count drop by one. Toast shows
+                with <b>Undo</b>. <b>No network call is made on this path at all.</b></td></tr>
+        <tr><td><b>t &lt; 5 s</b><br>Undo tapped</td>
+            <td>The pending timer is cleared and the card comes back at its old index.
+                <b>Nothing is reversed, because nothing was written.</b> That is why the copy
+                needs no caveat.</td></tr>
+        <tr><td><b>t = 5 s</b><br>window closes</td>
+            <td><code>POST /api/trades/swipe · decision:'pass'</code> fires under the
+                <code>asset-idea:&lt;key&gt;</code> id. Elo moves at <code>trade_k_pass</code>
+                and the permanent dismiss-cooldown binds — the package will not be served
+                again <span class="rq">R-8</span>.</td></tr>
+        <tr><td><b>Second dismiss</b><br>before the window closes</td>
+            <td>The older pending write is flushed <b>first</b>, then the new one arms. At
+                most one pending dismiss ever exists, and only the newest offers Undo.</td></tr>
+        <tr><td><b>Back / mode switch / refetch</b></td>
+            <td>Flushes the pending write early. <b>Leaving commits</b> — a disposition is
+                never silently lost.</td></tr>
+      </table>
+      <div class="caption" style="margin-top:10px"><b>The one-word copy is the design call
+      here.</b> "Dismissed" describes the state the user can see; the alternative considered —
+      spelling out the hold ("Dismissed — 5s to undo") — puts a countdown in front of a
+      decision that is already reversible by the affordance sitting next to it, and would go
+      stale the moment <code>UNDO_HOLD_MS</code> changed. A promise-flavoured line
+      ("Won't be offered again") was rejected outright: it is <b>false for five seconds</b>,
+      which is precisely the failure mode #403 was warned about.</div>
+    </div>
+  </div>
+</div>
+
+<div class="sec">7 · Design calls the PRD did not make</div>
+<div class="note">
+  <p>Everything in this table is a call this lab made because the contract is silent, not a
+  decision the doc round handed down. Each is independently strikeable.</p>
+  <table>
+    <tr><th>#</th><th>Call</th><th>Why</th><th>If struck</th></tr>
+    <tr><td>D1</td><td><b>Mode chips carry a live idea count</b> (mono numeral, chalk-dim)</td>
+        <td>All three groups arrive in one response (<code>lld-delta.md</code> §4.3), so the
+            counts are free and already in hand. They make the empty state navigable instead
+            of a dead end.</td>
+        <td>The empty state has to name the other modes' counts in prose, or stop claiming
+            them.</td></tr>
+    <tr><td>D2</td><td><b>Counts are suppressed until the first fetch resolves</b></td>
+        <td><code>components.md</code> §335: "count renders only once the list's first fetch
+            resolves (no fabricated <code>0</code>)".</td><td>—</td></tr>
+    <tr><td>D3</td><td><b>‹ › step buttons flanking the counter</b>, disabled at the ends</td>
+        <td>Horizontal paging is invisible until you try it, and this screen has no other
+            hint that a swipe does anything. They are ordinary <code>scrollToIndex</code>
+            calls — no gesture handler, so <span class="rq">A-7</span> is untouched — and
+            they give the pager a 44pt non-gestural control.
+            <b>Beyond the PRD: they are not in R-4 and have no testID in
+            <code>lld-delta.md</code> §9</b> (they would need <code>shop.prev</code> /
+            <code>shop.next</code>).</td>
+        <td>The pager is swipe-only. Nothing else changes.</td></tr>
+    <tr><td>D4</td><td><b>Counter numerals in Plex Mono</b>, not a pure Archivo
+        <code>label</code></td>
+        <td>R-5 says "<code>label</code>-type TickLabel in chalk-dim"; the design system says
+            data numerals are always Plex Mono, and <code>components.md</code>'s mono-count
+            convention is exactly "label text + bare <code>data</code> numeral at the 11px
+            floor". The ice tick and chalk-dim colour are kept, and it is
+            <b>not flare</b>.</td>
+        <td>Set the numerals in Archivo 600 11. The A-8 assertion is unaffected either
+            way.</td></tr>
+    <tr><td>D5</td><td><b>Picker header reads "Same value at"</b> (TickLabel)</td>
+        <td>Uses the settled vocabulary and completes the sentence the chips finish. "Swap"
+            was avoided on purpose — <code>reconciliation-log.md</code> rejected it for
+            colliding with <code>SwapPlayerSheet</code>.</td>
+        <td>Chips stand alone under the Same value chip.</td></tr>
+    <tr><td>D6</td><td><b>Picker hint copy</b> — "Nothing picked — ideas come back at WR, the
+        position you're shopping." / "Ideas come back at RB or TE."</td>
+        <td>The LLD requires a hint for the empty selection but does not write one; the
+            selected-state line is symmetric and stops the row from being the only signal.</td>
+        <td>Falls back to whatever the build agent writes — a copy divergence waiting to
+            happen.</td></tr>
+    <tr><td>D7</td><td><b>A chalk-faint line explains an omitted position</b> ("QB isn't
+        offered — you're avoiding QB in this league.")</td>
+        <td>#360 omits avoided positions from the row, which silently shortens it. A missing
+            chip and a bug look identical without this.</td>
+        <td>The row just has three chips and no explanation.</td></tr>
+    <tr><td>D8</td><td><b>Selected chip = <code>ink-3</code> well + ice ring, position hex
+        kept on border and text</b></td>
+        <td>The LLD says "filled well + ice ring"; this resolves how that coexists with the
+            position colour, which is a data encoding and may not be replaced by
+            selection.</td><td>—</td></tr>
+    <tr><td>D9</td><td><b>Loading reuses "Sweeping rosters…"</b>; counter absent; decision
+        pair disabled rather than hidden</td>
+        <td>The string already ships for this exact sweep
+            (<code>AssetIdeasPanel.tsx:175</code>). A disabled pair keeps the layout from
+            jumping when data lands.</td><td>—</td></tr>
+    <tr><td>D10</td><td><b>Empty state gains a heading, a one-sentence "why", a
+        <code>Clear positions — 3 at WR</code> button, and a pointer to the mode chips</b></td>
+        <td>R-15 fixes the two honest lines but stops there, and the PRD itself predicts this
+            state will be common. An empty screen that only apologises is the failure mode.
+            The count in the button label follows the shipped
+            <code>RankImportSheet</code> pattern ("Apply N ranks — M to resolve").</td>
+        <td>Two lines and no way forward.</td></tr>
+    <tr><td>D11</td><td><b>Three empty variants, not one</b> (selection-empty ·
+        mode-empty · sweep-empty), the last reusing the shipped
+        "No defensible packages found around this asset right now."</td>
+        <td>The three have different causes and different recoveries; one generic line would
+            offer a <code>Clear positions</code> button with nothing to clear.</td><td>—</td></tr>
+    <tr><td>D12</td><td><b>Error = the shipped warn toast <i>plus</i> an inline recovery
+        block</b>, including "Nothing was sent to anyone, and nothing on your board moved."</td>
+        <td>A toast expires and leaves a blank screen. On a surface that queues real offers
+            and moves a real Elo board, the user is owed the statement that a failure wrote
+            nothing.</td><td>Toast only, then an empty screen.</td></tr>
+    <tr><td>D13</td><td><b>"Stretch — outside your fairness band" above a
+        <code>relaxed</code> card</b></td>
+        <td><b>The PRD never says what happens to <code>relaxed</code> ideas on this
+            surface.</b> They exist in the payload (#189 refill), the panel this browser
+            replaces prints that exact sentence, and <code>TradeCard</code> — which #403 may
+            not edit — does not render it.</td>
+        <td>Relaxed ideas become indistinguishable from band-passing ones. This is the call
+            on the list most worth an operator answer.</td></tr>
+    <tr><td>D14</td><td><b>Decision row: labelled "Dismiss" / "Like", ghost left + ice
+        primary flexed right, scrolling with content</b></td>
+        <td>The chalkline <code>Button</code> requires a label; the TestFlight checklist
+            already names them "Like" and "Dismiss". Not pinned, so
+            <code>setPinnedBottomBarHeight</code> is correctly <b>not</b> called
+            (<code>lld-delta.md</code> §4.3).</td>
+        <td>If a build agent pins the row, it must register the height with the FAB.</td></tr>
+    <tr><td>D15</td><td><b>The entry row is drawn on the give side only</b>, appended below
+        "Mark untouchable"</td>
+        <td>See §1. <code>menuActionsFor</code> runs for both columns; a give-side-only guard
+            is what today's row does and what <code>direction:'give'</code> implies.</td>
+        <td>The row appears on league-mates' players too, where it means nothing.</td></tr>
+    <tr><td>D16</td><td><b>A like does not consume or advance the card</b>; the toast is the
+        whole feedback</td>
+        <td>R-4 says horizontal navigation is non-destructive and nothing is consumed; a like
+            is not a deck disposition. Liking then dismissing the same card stays possible on
+            purpose.</td><td>—</td></tr>
+    <tr><td>D17</td><td><b>Toasts are pushed down past the pin identity row</b> via
+        <code>Toast</code>'s existing <code>topOffset</code> prop</td>
+        <td><code>Toast.tsx</code> defaults to <code>top: space.xxl</code> (32), which on this
+            screen lands on top of the player being shopped — the one piece of context that
+            must never be obscured while a decision toast is up. <code>topOffset</code> ships
+            already; no component change.</td>
+        <td>The toast covers the pin row for its whole hold window.</td></tr>
+    <tr><td>D18</td><td><b>No next-card "peek"</b> at the pager's right edge</td>
+        <td><code>FlatList pagingEnabled</code> snaps by viewport width; a peek needs
+            <code>snapToInterval</code> and a narrower item, which is a different component
+            from the one the LLD specs. D3 carries the discoverability instead.</td><td>—</td></tr>
+  </table>
+
+  <h2>Open against the contract — things a build agent will hit</h2>
+  <div class="negbox">
+    <ul>
+      <li><b>The entry-point snippet has no side guard.</b> <code>lld-delta.md</code> §4.4
+        appends the row for any long-pressed player; <code>MatchesScreen.tsx:1568</code> is
+        called for both the YOU SEND and YOU GET columns, and its existing row is guarded
+        <code>side === 'give'</code>. Needs a ruling.</li>
+      <li><b><code>relaxed</code> is unspecified</b> (D13). The data is on the wire and the
+        surface it replaces shows it.</li>
+      <li><b>R-5's counter styling is internally under-determined.</b> "A <code>label</code>-type
+        <code>TickLabel</code> in chalk-dim" — but <code>TickLabel</code> has no types, its
+        text is already <code>type.label</code> in chalk-dim, and it always draws an ice tick.
+        Drawn as: ice tick + chalk-dim numerals (D4). Nothing about R-14 is violated —
+        the tick is ice, not flare.</li>
+      <li><b>A-8 must tolerate the counter being absent.</b> The counter is removed on an
+        empty group (there is no "1 / 0"), so the structural assertion has to check the
+        expression where it renders, not that it always renders.</li>
+      <li><b>Chip counts and the <code>X</code> in <code>1 / X</code> must be one
+        expression for the active mode</b> (D1). Two expressions can disagree the moment a
+        local dismiss lands — the same class of bug A-8 exists to catch.</li>
+      <li><b>Mode-chip radius.</b> The LLD specs <code>radii.xs</code> (2px) while the shipped
+        <code>TradeFinderModeBar</code> uses <code>radii.pill</code>. Drawn per the LLD;
+        the two trade-finder surfaces will not match.</li>
+      <li><b>O-1 (<code>record_elo</code>) has no visual consequence</b> and is not drawable.
+        It is verifiable only by TestFlight step 9 (check the two players' Elo after a like).
+        Nothing on this page depends on which way it is ruled.</li>
+      <li><b>Long asset names.</b> Neither the header ("Shop a player" is fixed) nor the pin
+        row specifies truncation. The pin row is drawn <code>numberOfLines={1}</code>, matching
+        <code>PlayerContextMenu</code>'s header.</li>
+    </ul>
+  </div>
+
+  <h2>Chalkline audit of this page</h2>
+  <ul>
+    <li><b>Emoji:</b> none, anywhere. Every glyph is inline SVG on a 20×20 viewBox,
+      <code>stroke-width 1.75</code>, square caps, no fill.</li>
+    <li><b>Gradients / blur / <code>backdrop-filter</code> / translucent surfaces:</b> none.
+      The one <code>rgba()</code> in a phone frame is the app's own specced scrim
+      <code>rgba(7,9,12,0.78)</code> behind the context menu, and the one shadow is
+      <code>--shadow-sheet</code> on the sheet, the toast and the FAB — the only places it is
+      allowed.</li>
+    <li><b>Radius:</b> 8 max inside every frame (cards, sheet top, FAB), 4 on buttons and
+      toast, 2 on chips and badges. The 22px phone bezel and the circular spinner are lab
+      chrome / a true circle, not app surfaces.</li>
+    <li><b>Fonts:</b> Barlow Condensed (screen title, empty-state headings), Archivo (all UI
+      copy), IBM Plex Mono (counter, swing numbers, scale labels, counts). No Inter, Roboto or
+      bare system stack.</li>
+    <li><b>Ice:</b> active mode chip border, the Like button fill, the Undo action, the
+      TickLabel ticks, the "even" value-bar fill. <b>Flare:</b> zero occurrences inside any
+      phone frame <span class="rq">R-14</span> — it appears only on this lab's own
+      "reconstructed" tag.</li>
+    <li><b>Position colours</b> QB <code>#F97316</code> · RB <code>#22C55E</code> ·
+      WR <code>#3B82F6</code> · TE <code>#A855F7</code> appear only on position chips, badges
+      and 3px player rails — data encodings, never chrome
+      (<code>docs/cross-client-invariants.md</code>). The tier teal <code>#2dd4bf</code>
+      appears only on the value bar's pick phrase, which is where
+      <code>TradeValueBar.tsx:205</code> puts it.</li>
+    <li><b>Semantic colours</b> are used as the shipped components use them: <code>--pos</code>
+      for a you-win swing and the success toast rail, <code>--warn</code> for a they-win swing
+      and the refusal rail, <code>--neg</code> nowhere on this surface.</li>
+  </ul>
+</div>
+
+</div>
+</body>
+</html>
