@@ -11,6 +11,16 @@
 
 ---
 
+## 2026-08-27 — #384 partner team-shape summary restored to the merged calculator layout — full gates
+
+Live shipped regression found by the [2026-08-27 calc-vs-guided-finder parity audit](../docs/reviews/2026-08-27-calc-vs-guided-finder-audit.md) (row 24, one of its five `partial` rows). Branch `claude/calc-merged-partner-summary` off `origin/main` `30070f36`. Scope block + code-walk + TestFlight checklist: [docs/feedback/items/384-calc-finder-merge/partner-summary-regression.md](../docs/feedback/items/384-calc-finder-merge/partner-summary-regression.md).
+
+- **The defect, and that it was a regression:** the per-partner QB/RB/WR/TE + picks shape line has been on the In-league calculator's partner chips since `fbd55611` (2026-07-27), relabelled to pick-equivalents by #306 in `780c035c`. #384 W1 (`dfcd5321`) replaced the chip row with the #333 Team dropdown + sheet and did not carry the line across — its own commit message describes the new sheet as listing leaguemates "with their R/R*/NR rank state". `calc.merged_layout` is `true` in `config/features.json`, so every user since v1.16.0 has seen handle + badge only. **Checked before fixing:** neither the ten #384 operator rulings nor the four round-2 rulings touch the partner list (6/7 remove the utility row and the subnav), and `plan.md` §15 lists `calc.partner-summary.<id>` among the controls the page already had. Omission, not ruling.
+- **Structural guard — extended, and proven falsifiable.** `mobile/tests/check-calc-merged-layout.js` gains section 22 (a–h): one shared implementation, the merged sheet mounts it, fed from the same memo, the sheet row *speaks* the shape, the row can shrink so the R-badge is never pushed off, and the flag-off stacked page keeps it. Four sabotages applied to the working tree and reverted — **against `origin/main`'s component verbatim (the shipped bug): 6 FAILED**; drop the mount from the sheet only: 22d; strip the spoken shape (sighted-only restore): 22f; hand-copy a block instead of the shared helper: 22a + 22d. The guard fails on the build that shipped the defect.
+- **Suites (run in this worktree after `npm ci` — no symlinked node_modules):** `npx tsc --noEmit` exit 0 · **all 84 `mobile/tests/check-*.js` guards, 0 failures** (83 pre-existing + this one's new assertions) · `bash mobile/scripts/testid-lint.sh` → `testid-lint OK`. **`pytest backend/tests` not run — backend untouched**, the diff is `InLeagueCalculator.tsx` + `check-calc-merged-layout.js` plus docs.
+- **No new data cost:** `powerQ` (`getPowerRankings(leagueId, 'consensus')`) is unconditional and already feeds `needsByTeam` in the merged layout, so the summaries were being computed and discarded. No route, flag, schema, analytics event or testID added.
+- **Owed (operator):** the 8-step TestFlight checklist in the scope doc §B — the shape line's presence, per-team variation, the no-picks and picks tails, Dynamic Type / landscape two-line clamp with the badge still on screen, tap-to-select, and the **VoiceOver** row announcement (the sighted-only failure mode). Runtime is the only evidence left for layout truth under D-056.
+
 ## 2026-08-26e — v1.16.8 (EAS build 134) BUILT for TestFlight
 
 Release run by the lead session at operator instruction ("push to testflight via EAS"), following the `ops-release` pre-flight.
@@ -3085,6 +3095,7 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-08-27 — #384 partner team-shape summary restored to the merged calculator layout — full gates](#2026-08-27--384-partner-team-shape-summary-restored-to-the-merged-calculator-layout--full-gates)
 - [2026-08-26e — v1.16.8 (EAS build 134) BUILT for TestFlight](#2026-08-26e--v1168-eas-build-134-built-for-testflight)
 - [2026-08-26c — Entry v2.1: login option (Opus subagent build, lead-session review) — full gates](#2026-08-26c--entry-v21-login-option-opus-subagent-build-lead-session-review--full-gates)
 - [2026-08-26b — Platform entry decoupled from Apple (D-164) — full gates](#2026-08-26b--platform-entry-decoupled-from-apple-d-164--full-gates)

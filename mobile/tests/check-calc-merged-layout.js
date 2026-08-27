@@ -272,6 +272,56 @@ assert(/showMeAroundTap: \{ minHeight: 44/.test(calc),
   '21. "Show me around" clears the 44pt touch floor',
   'hitSlop widens the touch area but not the control');
 
+// 22 — the partner TEAM-SHAPE summary survived the merge.
+//
+// This is a shipped regression, found by the 2026-08-27 calc-vs-guided
+// parity audit (row 24) and fixed here. The stacked page has carried a
+// per-partner QB/RB/WR/TE + picks line under each partner chip since the DTF
+// teardown (2026-07-27); #384 W1 replaced that chip row with a Team dropdown
+// and a sheet, and the sheet shipped with a handle and an R-badge only. It
+// was an omission, not a ruling — the #384 rulings that removed things
+// (6, 7: utility row, subnav) never touched the partner shape.
+//
+// Same failure class as 13/14 above: the merged branch silently dropping
+// evidence the stacked page shows. The sabotage each assertion detects is
+// named on the line.
+{
+  // 22a — ONE implementation. A hand-copied block in the sheet is how the
+  // a11y/label drift that check-calc-partner-labels.js guards against gets
+  // reintroduced on one surface only.
+  assert((calc.match(/calc\.partner-summary\./g) || []).length === 1,
+    '22a. exactly one partner-summary implementation (the shared PartnerSummaryLine)',
+    'a second literal testID means a hand-copied block that can drift from the first');
+  assert(/function PartnerSummaryLine\(/.test(calc),
+    '22b. the shared line component exists');
+
+  // 22c — the MERGED team sheet mounts it. Scoped to the sheet region by
+  // slicing between its two testIDs, so deleting the mount from the sheet
+  // fails here even though the stacked page still has one.
+  const sheetAt = calc.indexOf('testID="calc.team-sheet"');
+  const sheetEnd = calc.indexOf('</Modal>', sheetAt);
+  assert(sheetAt > 0 && sheetEnd > sheetAt, '22c. the merged team sheet region is locatable');
+  const sheet = calc.slice(sheetAt, sheetEnd);
+  assert(/<PartnerSummaryLine\s/.test(sheet),
+    '22d. the merged team sheet renders the partner shape line',
+    'the merged layout is back to handle + R-badge only — the regression this fixed');
+  assert(/partnerSummaries\[o\.user_id\]/.test(sheet),
+    '22e. …fed from the same partnerSummaries memo as the stacked page');
+  assert(/partnerSummarySpoken\(summary\)/.test(sheet),
+    '22f. …and the sheet row SPEAKS the shape too',
+    'a sighted-only restore leaves VoiceOver on handle + rank state alone');
+
+  // 22g — the row had to become a two-line stack; without a shrinking main
+  // column the shape line pushes the R-badge off the sheet.
+  assert(/teamRowMain: \{[^}]*minWidth: 0/.test(calc),
+    '22g. the sheet row main column can shrink, so the badge is never pushed out');
+
+  // 22h — and the stacked page did not lose it in the extraction.
+  assert(/<PartnerSummaryLine\s/.test(flagOffSource),
+    '22h. the stacked (flag-off) partner chips still render the shape line',
+    'the rollback path must keep what it always had');
+}
+
 console.log(failures === 0
   ? 'check-calc-merged-layout: all assertions passed'
   : `check-calc-merged-layout: ${failures} FAILED`);
