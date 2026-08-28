@@ -47,8 +47,15 @@
   - `tier_down` (downgrade): incoming headline piece plays P ∈ {P…}.
   - `same_value` (lateral): as today (swap_positions).
   - Empty selection = each mode's default: upgrade/downgrade at his own
-    position (today's #198 behavior, byte-identical request), same-value
-    per §3 below.
+    position (today's #198 behavior, byte-identical request); same-value
+    = his own position under tier scope (§3), **with auto-widen on zero**
+    (OPERATOR-RULED 2026-08-28, multiple-choice answer): if the
+    own-position tier sweep returns zero laterals, the client
+    automatically re-requests with ALL offerable positions and renders a
+    visible notice line ("Nothing at WR — showing all positions"); the
+    user's own chip selections always win over the auto-widen (any
+    explicit selection disables it). Client-side only — no backend
+    change; the widened request simply sends the full position set.
 - **Backend:** `swap_positions` now also constrains the `upgrade` and
   `downgrade` groups when present (supersedes HLD D-3's lateral-only rule
   and PRD R-11's "never affected"). Absent ⇒ all three groups behave
@@ -103,6 +110,16 @@
   differ from his value noticeably — that is the tier, and the card's
   verdict prices it honestly").
 - Sabotage: ≥4 per agent, red→green, snapshots not `git checkout --`.
+
+## 4a. Ruling confirmations (2026-08-28 multiple choice)
+
+Item 2 (window) CONFIRMED · item 3 default = **own position, auto-widen on
+zero** (changed from the plain own-position assumption) · item 4 scope
+CONFIRMED (shop-only parameter). Item 1 (merge/Wave B) remains parked; the
+operator asked for confirmation that `calc.inline_home` reuses the manual
+calc UI — verified: `TradeBuildCanvas.tsx:4` imports and mounts the SAME
+`InLeagueCalculator`, per D-158's functionality-by-construction rule, and
+the parity audit is `docs/reviews/2026-08-27-calc-vs-guided-finder-audit.md`.
 
 ## 5. Sequencing
 
