@@ -1,6 +1,9 @@
 import { create } from 'zustand';
 import Constants from 'expo-constants';
-import { onboardingEnabled } from './useFeatureFlags';
+// #402/#403 rev-3 / D-158 — `useFeatureFlags` (the store, not just the
+// onboarding helpers) is imported for the ONE non-onboarding flag this
+// engine reads: `calc.inline_home` (see `inlineHomeTradesTourFree`).
+import { onboardingEnabled, useFeatureFlags } from './useFeatureFlags';
 import {
   getOnboardingState,
   patchOnboardingState,
@@ -205,6 +208,25 @@ export function guideV2Active(): boolean {
   return onboardingEnabled('onboarding.guide_v2');
 }
 
+/** #402/#403 rev-3 / D-158 — the merged Trades page is tour-free.
+ *
+ *  Operator ruling (2026-08-27, rev3-spec §4a context): with `calc.inline_home`
+ *  live the guided Trades landing hosts the manual calculator inline and
+ *  supersedes both the pushed calculator and the standalone finder — "disable
+ *  the tour for the find a trade and manual calc since both pages are retired
+ *  in favor of this one for now." TradeCalculatorScreen already self-
+ *  suppresses under the flag (its D-158 auto-start/re-entry guards); this is
+ *  the Trades-screen half, and it is what lets `onboarding.guide_v2` flip back
+ *  true globally without re-lighting guidance on the merged page.
+ *
+ *  Deliberately a bare flag read, not `onboardingEnabled`: `calc.inline_home`
+ *  is a layout flag, not an onboarding feature, and ANDing in `onboarding.v2`
+ *  would un-suppress the merged page's beats the moment the onboarding master
+ *  was killed — the opposite of what the ruling asks. */
+function inlineHomeTradesTourFree(): boolean {
+  return useFeatureFlags.getState().flags['calc.inline_home'] === true;
+}
+
 const GUIDE_SURFACE = 'guide_step' as const;
 
 function appVersion(): string {
@@ -361,6 +383,29 @@ export const useGuide = create<GuideStore>((set, get) => {
 
     requestStep: (step, handlers) => {
       if (!guidedAvatarActive()) return false;
+      // #402/#403 rev-3 / D-158 — no guided or tour beat runs on the merged
+      // Trades page (operator ruling 2026-08-27; see
+      // `inlineHomeTradesTourFree`). Same shape as the calculator's D-158
+      // guard: suppressing at the START is the whole suppression — the beat
+      // is never begun, so there is no bubble, no arbiter claim, and no
+      // degraded fallback to strand. Refused with NO side effects (no `seen`
+      // mark, no retirement, no suppression episode), for the #384 §20
+      // reason: the beat was not eligible-and-lost, the page it teaches
+      // merged away — and re-lighting `onboarding.guide_v2` must find every
+      // Trades beat unspent for Wave B to retarget.
+      //
+      // This is the ONE choke point on purpose: every path that can put a
+      // `screen: 'Trades'` beat up — TradesScreen's auto-start and chain
+      // effects, a spine sequence arriving from another screen, and the
+      // calc-tour runner's deck half (`calcTourDeckArrived` → `requestAt`)
+      // — funnels through here. It sits ABOVE the tour-owned exemption
+      // below so a running tour's own deck beats (n19–n24) are refused too;
+      // the runner survives that by design (`requestAt` steps over a
+      // refusal and `endTour` releases the hold and tears down any standing
+      // bubble), so a cross-screen arrival ends the run cleanly instead of
+      // stranding a half-open overlay. Beats on every other screen are
+      // untouched.
+      if (step.screen === 'Trades' && inlineHomeTradesTourFree()) return false;
       // #384 review §20 — a scripted tour owns the floor for its whole run.
       // A beat that is not the tour's is refused with NO side effects: no
       // retirement, no suppression episode, no `seen` mark. The step was

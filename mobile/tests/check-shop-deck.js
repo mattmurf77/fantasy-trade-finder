@@ -1647,6 +1647,240 @@ for (const rel of [BODY_REL, MODE_REL]) {
   );
 }
 
+// ── t: the scoped tour gate (#402/#403 rev-3 / D-158, rev3-spec §6) ───────
+//
+// Operator ruling 2026-08-27: with `calc.inline_home` on, NO guided or tour
+// beat runs on the merged Trades page — so `onboarding.guide_v2` can flip
+// back true globally without re-lighting guidance there. The gate lives in
+// `useGuide.requestStep` (the one choke point every Trades-beat path funnels
+// through: TradesScreen's auto-start/chain effects, spine arrivals, and the
+// calc-tour runner's deck half). This section lives HERE rather than in
+// check-guide-script.js because the gate is a property of the rev-3 merged
+// page, not of the beat data that suite polices — and it EXECUTES the real
+// engine (the check-tour-suppression.js pattern): a sabotage that empties
+// the gate must go red because the store ran, not because a regex matched.
+{
+  const guideSrc = fs.readFileSync(
+    path.join(__dirname, '..', 'src/state/useGuide.ts'), 'utf8');
+  const tourSrc = fs.readFileSync(
+    path.join(__dirname, '..', 'src/utils/calcTour.ts'), 'utf8');
+  const scriptSrc = fs.readFileSync(
+    path.join(__dirname, '..', 'src/components/analystScript.ts'), 'utf8');
+
+  // -- behavioural: run the real requestStep under a controllable flag map --
+  function makeZustandCreate() {
+    return function create(initializer) {
+      let state;
+      const setState = (partial) => {
+        const next = typeof partial === 'function' ? partial(state) : partial;
+        state = Object.assign({}, state, next);
+      };
+      const getState = () => state;
+      state = initializer(setState, getState, { setState, getState });
+      const hook = (selector) => (selector ? selector(state) : state);
+      hook.getState = getState;
+      hook.setState = setState;
+      return hook;
+    };
+  }
+
+  const flags = {
+    'onboarding.v2': true,
+    'onboarding.guided_avatar': true,
+    'onboarding.guide_v2': true,
+    'calc.inline_home': true,
+  };
+  const ob = {
+    guideDismissed: false,
+    guideTourCompleted: false,
+    guideScriptVersion: 2,
+    guideV1Upgrader: false,
+    guideSeen: {},
+    guideDisplayCounts: {},
+    guideReceipts: {},
+    guideRetired: {},
+  };
+  const patches = [];
+  const events = [];
+  const coordState = {
+    tourHold: false,
+    claim: () => true,
+    release: () => {},
+  };
+
+  let guideMod = null;
+  try {
+    const js = ts.transpileModule(guideSrc, {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 },
+    }).outputText;
+    const shim = { exports: {} };
+    const stubs = {
+      zustand: { create: makeZustandCreate() },
+      'expo-constants': { default: { expoConfig: { version: 'test' } } },
+      './useFeatureFlags': {
+        useFeatureFlags: { getState: () => ({ flags }) },
+        onboardingEnabled: (key) => !!flags['onboarding.v2'] && !!flags[key],
+      },
+      './useOnboardingState': {
+        getOnboardingState: () => ob,
+        patchOnboardingState: (p) => {
+          patches.push(p);
+          for (const [k, v] of Object.entries(p)) {
+            if (v && typeof v === 'object' && ob[k] && typeof ob[k] === 'object') {
+              Object.assign(ob[k], v);
+            } else ob[k] = v;
+          }
+        },
+        resetGuideProgress: () => {},
+        resetGuideProgressV2: () => {},
+      },
+      './useInterruptCoordinator': {
+        useInterruptCoordinator: { getState: () => coordState },
+      },
+      './guideTargets': { measureGuideTarget: () => Promise.resolve(null) },
+      '../api/events': { track: (name, props, screen) => events.push({ name, props, screen }) },
+    };
+    new Function('module', 'exports', 'require', js)(shim, shim.exports, (name) => {
+      if (name in stubs) return stubs[name];
+      throw new Error(
+        `useGuide gained an unexpected runtime import ("${name}") — ` +
+          'add a stub deliberately; do not let the behavioural section skip.',
+      );
+    });
+    guideMod = shim.exports;
+  } catch (e) {
+    fail('t0: useGuide.ts transpiles and executes', String(e && e.message));
+  }
+
+  if (guideMod) {
+    const store = guideMod.useGuide;
+    const mkStep = (id, screen) => ({
+      id, screen, line: 'x', pose: 'neutral', advance: 'tap',
+    });
+
+    // t1 — START suppressed: flag on, a Trades beat is refused before it
+    // begins — no active bubble, no guide_step_shown, and NO side effects
+    // (no seen mark / retirement / display count), so re-lighting guide_v2
+    // finds every Trades beat unspent.
+    const r1 = store.getState().requestStep(mkStep('s2.1', 'Trades'));
+    assert(
+      r1 === false && store.getState().active === null,
+      't1: with calc.inline_home on, a Trades-screen beat never begins (refused at the START)',
+      `returned ${r1}, active=${JSON.stringify(store.getState().active)}`,
+    );
+    assert(
+      events.length === 0 && patches.length === 0,
+      't1a: …and the refusal is SILENT — no event, no persisted state (the beat is unspent)',
+      `events=${JSON.stringify(events)} patches=${JSON.stringify(patches)}`,
+    );
+
+    // t2 — scope: the gate covers Trades ONLY. A beat on any other screen
+    // still shows under the same flag map (the re-lit guide_v2 must restore
+    // guidance everywhere except the merged page).
+    const r2 = store.getState().requestStep(mkStep('n9', 'Matches'));
+    assert(
+      r2 === true && store.getState().active?.id === 'n9' &&
+        events.some((e) => e.name === 'guide_step_shown' && e.props.screen === 'Matches'),
+      't2: the gate is scoped — a Matches beat still shows with calc.inline_home on',
+      `returned ${r2}, active=${JSON.stringify(store.getState().active)}`,
+    );
+    store.getState().advance('tap'); // clean the slot for the next scenario
+
+    // t3 — the cross-screen ARRIVAL path: a running calc tour that hands off
+    // to the deck (`calcTourDeckArrived` → `requestAt`) requests its deck
+    // beats as TOUR-OWNED steps under the tour hold. The gate must refuse
+    // those too — it sits above the tour-owned exemption — and the runner's
+    // own step-over + endTour then close the run without a stranded overlay
+    // (pinned structurally in t7/t8).
+    coordState.tourHold = true;
+    store.getState().setTourOwnedIds(new Set(['n19']));
+    const r3 = store.getState().requestStep(mkStep('n19', 'Trades'));
+    assert(
+      r3 === false && store.getState().active === null,
+      't3: a tour-owned deck beat arriving cross-screen is refused too (the arrival path is gated)',
+      `returned ${r3}`,
+    );
+    coordState.tourHold = false;
+    store.getState().setTourOwnedIds(new Set());
+
+    // t4 — the re-light plan: flag off, the same Trades beat shows again.
+    // This is what makes the gate the SCOPED replacement for the temporary
+    // global guide_v2 kill.
+    flags['calc.inline_home'] = false;
+    const r4 = store.getState().requestStep(mkStep('s2.1', 'Trades'));
+    assert(
+      r4 === true && store.getState().active?.id === 's2.1',
+      't4: with calc.inline_home off, Trades beats run again (nothing was spent while gated)',
+      `returned ${r4}`,
+    );
+    store.getState().advance('tap');
+    flags['calc.inline_home'] = true;
+  }
+
+  // -- structural: the pieces the executed model cannot see ----------------
+
+  // t5 — the choke point reads THE flag, by name, through a bare flag read
+  // (deliberately not onboardingEnabled: killing the onboarding master must
+  // not un-suppress the merged page).
+  assert(
+    /function inlineHomeTradesTourFree\(\)/.test(guideSrc) &&
+      /flags\['calc\.inline_home'\] === true/.test(guideSrc) &&
+      /if \(step\.screen === 'Trades' && inlineHomeTradesTourFree\(\)\) return false;/.test(guideSrc),
+    "t5: requestStep's gate references calc.inline_home and compares exactly screen 'Trades'",
+  );
+
+  // t6 — placement: the gate refuses BEFORE the tour-owned exemption and
+  // before any side-effect path inside requestStep, mirroring the #384 §20
+  // no-side-effect refusal it sits beside.
+  {
+    const req = guideSrc.slice(
+      guideSrc.indexOf('requestStep: (step, handlers) =>'),
+      guideSrc.indexOf('trackSpotlightFrame: (frame)'),
+    );
+    const gate = req.indexOf('inlineHomeTradesTourFree()');
+    assert(
+      gate >= 0 && gate < req.indexOf('tourHold') && gate < req.indexOf('noteSuppressed('),
+      't6: the gate sits above the tour-owned exemption and every side effect',
+      'below the tourHold block a tour-owned deck beat would slip past; below a side effect the refusal spends the beat',
+    );
+  }
+
+  // t7 — the arrival path funnels through the choke: every beat the runner's
+  // deck half can request declares screen 'Trades' in the script, so t3's
+  // refusal covers the whole `calcTourDeckArrived` sequence (n23b rides via
+  // beatIdFor). A deck beat redeclared to another screen would tunnel under
+  // the gate.
+  {
+    const deckList = tourSrc.slice(
+      tourSrc.indexOf('export const CALC_TOUR_DECK'),
+      tourSrc.indexOf('CALC_TOUR_ORDER'),
+    );
+    const deckIds = [...deckList.matchAll(/'(n\d+)'/g)].map((m) => m[1]).concat('n23b');
+    let allTrades = deckIds.length >= 6;
+    for (const id of deckIds) {
+      const at = scriptSrc.indexOf(`id: '${id}',`);
+      if (at < 0 || !/screen: 'Trades'/.test(scriptSrc.slice(at, at + 120))) allTrades = false;
+    }
+    assert(
+      allTrades,
+      "t7: every deck-half beat (incl. n23b) declares screen 'Trades' — the arrival path cannot tunnel under the gate",
+      `deck ids: ${deckIds.join(', ')}`,
+    );
+  }
+
+  // t8 — the refusal degrades CLEANLY at the runner: a refused beat is
+  // stepped over (never a stall), and endTour both tears down any standing
+  // bubble and releases the hold — so a run that crosses into gated
+  // territory ends, it does not strand a half-open overlay or a mute.
+  assert(
+    /if \(shown\) \{\s*beatsShown \+= 1;\s*return;\s*\}\s*[\s\S]{0,200}?requestAt\(i \+ 1\);/.test(tourSrc) &&
+      /dismissActiveTourBubble\(\);[\s\S]{0,400}?endTourHold\(\)/.test(
+        tourSrc.slice(tourSrc.indexOf('function endTour'), tourSrc.indexOf('function beatIdFor')),
+      ),
+    't8: the runner steps over refused beats and endTour tears down + releases — no stranded overlay',
+  );
+}
+
 // ── verdict ───────────────────────────────────────────────────────────────
 
 if (failures > 0) {

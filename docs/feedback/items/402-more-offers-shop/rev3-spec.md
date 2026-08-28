@@ -128,3 +128,47 @@ suite) are file-disjoint and run in parallel. QA static pass after both.
 Ship = PR → CI green → operator's word (NOT auto-merged; the operator
 explicitly gates this one). Version 1.16.10 bump rides the PR.
 Wave B / `calc.inline_home` remains PARKED — not in this round.
+
+## 6. Scoped tour gate (2026-08-28, post-ruling addition)
+
+Context: after §4a was written the operator lit `calc.inline_home` (the
+guided Trades page hosts the manual calculator inline, live in prod) and
+ruled it tour-free — "disable the tour for the find a trade and manual calc
+since both pages are retired in favor of this one for now." The only lever
+at the time was flipping `onboarding.guide_v2` false **globally**, which
+also killed guidance on unrelated screens (Rank, Matches, LeagueSummary,
+QuickSetTiers, …). That global off is live and recorded as temporary in
+`config/features.json` (`_comment_inline_home`) and the pinned test in
+`backend/tests/test_events_api.py`.
+
+**Shipped mechanism** — one choke point, D-158's shape (suppress at the
+START; the beat is never begun):
+
+- `useGuide.requestStep` refuses any beat declaring `screen: 'Trades'`
+  while `calc.inline_home` is on (`inlineHomeTradesTourFree()` in
+  `mobile/src/state/useGuide.ts` — a bare flag read on purpose, so killing
+  the onboarding master can never un-suppress the merged page). The refusal
+  is silent and side-effect-free: no bubble, no arbiter claim, no `seen`
+  mark, no retirement, no suppression episode — every Trades beat stays
+  unspent for Wave B to retarget.
+- Every start/advance path funnels through it: TradesScreen's auto-start
+  and chain effects, spine sequences arriving from other screens, and the
+  calc-tour runner's deck half (`calcTourDeckArrived` → `requestAt`). The
+  gate sits **above** the #384 tour-owned exemption, so a mid-run tour
+  crossing into Trades has its deck beats (n19–n24/n23b) refused too; the
+  runner steps over each refusal and `endTour` tears down any standing
+  bubble and releases the interrupt hold — the run ends cleanly, never a
+  half-open overlay. The pushed calculator keeps its own D-158 guards
+  (auto-start + "Show me around" both suppressed); beats on every other
+  screen are untouched.
+- Suite: `check-shop-deck.js` §t (t1–t8) transpiles and **executes** the
+  real engine — start suppression + silence, Trades-only scope, the
+  tour-owned arrival path, the flag-off re-light, gate placement, and the
+  deck-half → `screen: 'Trades'` linkage.
+
+**Re-light plan**: once v1.16.10 is the installed base, flip
+`onboarding.guide_v2` back to true in `config/features.json` and flip the
+pinned expectation in `backend/tests/test_events_api.py` with it (one
+operator-gated change, not part of this build). Guidance then returns
+everywhere **except** the merged Trades page, which this gate keeps
+tour-free until Wave B retargets its beats.
