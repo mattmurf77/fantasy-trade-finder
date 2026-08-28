@@ -114,7 +114,7 @@ interface Props {
   // give-side chip reads "More offers" — the "Keep ·" prefix described a
   // pin that no longer happens on that side. A PROP, never a flag read:
   // the card keeps its prop discipline and only the deck host (which owns
-  // the handleKeepSide fork) knows whether the tap opens the shop strip.
+  // the handleKeepSide fork) knows whether the tap opens the shop window.
   // Absent/false ⇒ both sides read today's "Keep · more offers",
   // byte-identically. Receive side never forks.
   shopGiveEntry?: boolean;

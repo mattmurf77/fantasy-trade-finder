@@ -1,55 +1,56 @@
 #!/usr/bin/env node
-// #402/#403 — "More offers" = shop a player (W1 structural guard).
+// #402/#403 — "More offers" = shop a player (rev-3 structural guard: the
+// PUSHED WINDOW, rev3-spec.md §1/§2 + §4a, superseding the inline strip).
 //
-// WHY THIS EXISTS. The operator ruled #402 and #403 one experience
-// (docs/feedback/items/402-more-offers-shop/rulings-2026-08-27.md): the deck
-// card's give-side "More offers" control opens an inline shop strip below the
-// top card instead of the pin + regenerate path. Nearly every failure mode of
-// that design is invisible to tsc:
+// WHY THIS EXISTS. The operator ruled #402 and #403 one experience, and the
+// rev-3 rulings (docs/feedback/items/402-more-offers-shop/
+// rulings-2026-08-28b.md) re-shaped it: the deck card's give-side "More
+// offers" control NAVIGATES to a pushed `ShopAssetScreen` (back returns to
+// the untouched deck), the position filter row applies to ALL THREE modes
+// with one shared selection, and Same value runs on `lateral_scope:"tier"`
+// with an auto-widen-on-zero default (§4a operator ruling). Nearly every
+// failure mode of that design is invisible to tsc:
 //
 //   • the fork could lose its give-side or flag guard (receive side, or a
-//     flag-off user, silently loses the shipped pin path — R-1′/R-17);
-//   • the flag-off arm could lose the pin/regenerate/#288-snapshot calls it
-//     must keep byte-identical;
-//   • the strip's pager could be rebuilt on a Gesture.Pan / PanResponder and
-//     reopen the deck-pan arbitration the design removed (HLD D-2, R-4);
-//   • the deck pan's `.enabled()` could stop referencing the shop-open state
-//     (the deck must hold still while the strip is open — R-2′);
+//     flag-off user, silently loses the shipped pin path — R-1′/R-17), or
+//     stop navigating and quietly rebuild inline state;
+//   • the route could get flag-gated (the house rule is the flag gates the
+//     ENTRY, not the route), or lose `gestureEnabled: false` and reopen
+//     the iOS edge-drag vs pager fight rev-1 D-1 closed;
+//   • the screen could lose its FeedbackFAB (#188 — a root-stack push
+//     mounts its own), or the body could grow a second one (#196/#197);
+//   • TradesScreen could re-grow an inline mount / shopAsset state — the
+//     machinery rev3-spec §1 explicitly DELETES;
+//   • the pager could be rebuilt on Gesture.Pan / PanResponder (HLD D-2
+//     held even inline: a plain FlatList, no gesture arbitration);
 //   • SHOP_MODE_GROUP could silently cross tier_up ↔ tier_down — all three
-//     values are string literals of one union, so tsc cannot tell them apart
-//     (R-3): it is EXECUTED here, not pattern-matched;
-//   • the `1 / X` counter could read a different list than the pager renders
-//     and lie after a dismiss (R-5);
-//   • the ✓ and ✕ could get crossed (both are () => void — dismissing would
-//     queue a real offer to a league-mate), or the dismiss could POST
-//     immediately and make the "Undo" copy a lie (R-6/R-8/R-9);
-//   • TradeCard's give-side label fork could drift from the exact shipped
-//     flag-off literal (R-1′);
-//   • the strip could mount its own FeedbackFAB (the #196/#197 double-FAB
-//     bug — TradesScreen is a tab screen covered by the global mount);
-//   • the four client events could go unregistered (props silently dropped
-//     behind a 200), or land in NON_INTENT_EVENTS (they are all deliberate
-//     taps — lld-delta.md §8);
-//   • (W2, section j) the Same-value position chips could leak into the tier
-//     modes (a filter the server never applies there — R-11), offer PICK
-//     (the server 400s it — R-12) or DROP the pin's own position (ruling
-//     R-2026-08-28-B inverted the original exclusion: the own-position chip
-//     IS offered so "WR laterals plus RB laterals" is expressible; empty
-//     selection still means same-position swaps), send `swap_positions` on
-//     an empty selection (breaking the byte-identical wire state), leak the
-//     selected SET into `shop_positions_selected` (count only — lld §8),
-//     drop the Clear-positions escape from the filtered empty state, or
-//     bypass the held-dismiss flush on a selection change;
-//   • (QA round 1, sections k–m) the deck could hold still for the PAN only
-//     while the #169 buttons / VoiceOver actions / decline-reason tiles /
-//     bad-trade flag still disposition the card under an open strip (B-1);
-//     the shop state could survive a deck wipe (resetDeckForNewTargets), a
-//     pin clear's snapshot restore, a top-card change, or the
-//     `trade.shop_asset` kill switch, or leak internal strip state across
-//     assets without the asset-keyed remount (B-2 + Reviewer A's
-//     stale-selection trap); an EARLY commit of the held dismiss could
-//     leave the "Dismissed · Undo" toast on screen with a dead Undo button
-//     (B-4 — the retract-by-reference contract).
+//     values are string literals of one union, so tsc cannot tell them
+//     apart (R-3): it is EXECUTED here, not pattern-matched;
+//   • the `1 / X` counter could read a different list than the pager
+//     renders and lie after a dismiss (R-5);
+//   • the ✓ and ✕ could get crossed (both are () => void — dismissing
+//     would queue a real offer to a league-mate), or the dismiss could
+//     POST immediately and make the "Undo" copy a lie (R-6/R-8/R-9);
+//   • the filter row could get re-scoped to Same value only (rev-3 §2 puts
+//     it on every mode), grow a per-mode selection (it is ONE shared
+//     state), offer PICK (server 400s it — R-12), DROP the pin's own
+//     position (ruling R-2026-08-28-B), send `swap_positions` on an empty
+//     selection (breaking each mode's byte-identical default request), or
+//     drop `lateral_scope:"tier"` (silently reverting Same value to the
+//     ±band the operator ruled out);
+//   • the auto-widen could fire against an explicit selection (user
+//     selections always win), widen the TIER modes (only the lateral group
+//     widens), or widen SILENTLY (the notice line is the ruling's
+//     honest-notice half);
+//   • the four client events could go unregistered, land in
+//     NON_INTENT_EVENTS, double-emit shop_opened (P-3: one emitter, at the
+//     navigate call site), or mislabel their screens (the window's events
+//     say 'ShopAsset'; shop_opened names the TAP on Trades — the taxonomy
+//     comment and the emit sites agree on that split);
+//   • a committed dismiss could be resurrected by a cache tick (Fix A: the
+//     suppression set is commit-only, never cleared by data), or an early
+//     commit could leave a dead "Undo" button on screen (B-4 —
+//     retract-by-reference, now wired on the SCREEN's toast mount).
 //
 // Structural, not textual where it matters: parses the real TSX with the
 // project's own TypeScript and walks the AST (the check-single-pin-actions.js
@@ -73,9 +74,12 @@ try {
 }
 
 const HOST_REL = 'src/screens/TradesScreen.tsx';
-const STRIP_REL = 'src/components/ShopOffersStrip.tsx';
+const BODY_REL = 'src/components/ShopOffersBody.tsx';
+const SCREEN_REL = 'src/screens/ShopAssetScreen.tsx';
+const NAV_REL = 'src/navigation/RootNav.tsx';
 const MODE_REL = 'src/utils/shopMode.ts';
 const CARD_REL = 'src/components/TradeCard.tsx';
+const API_REL = 'src/api/trades.ts';
 const TAXONOMY_ABS = path.join(__dirname, '..', '..', 'backend', 'analytics_taxonomy.py');
 const QUERIES_ABS = path.join(__dirname, '..', '..', 'backend', 'analytics_queries.py');
 
@@ -147,7 +151,64 @@ function functionNamed(sf, name) {
   )[0];
 }
 
-// ── (a) the handleKeepSide fork ───────────────────────────────────────────
+function nearestAncestor(node, pred) {
+  let cur = node.parent;
+  while (cur) {
+    if (pred(cur)) return cur;
+    cur = cur.parent;
+  }
+  return null;
+}
+
+function unwrapAs(n) {
+  while (n && (ts.isAsExpression(n) || ts.isParenthesizedExpression(n))) {
+    n = n.expression;
+  }
+  return n;
+}
+
+/** testID attr containing `tid` → the owning JSX element's opening tag. */
+function elementByTestId(sf, tid) {
+  const attr = findAll(
+    sf,
+    (n) =>
+      ts.isJsxAttribute(n) &&
+      n.name.getText(sf) === 'testID' &&
+      txt(sf, n).includes(tid),
+  )[0];
+  if (!attr) return null;
+  let el = attr.parent;
+  while (el && !ts.isJsxSelfClosingElement(el) && !ts.isJsxOpeningElement(el)) {
+    el = el.parent;
+  }
+  return el || null;
+}
+
+/** testID attr → owning element's onPress text (the (i)/(j) helper). */
+function jsxHandler(sf, tid) {
+  const el = elementByTestId(sf, tid);
+  if (!el) return null;
+  const onPress = el.attributes.properties.find(
+    (p) => ts.isJsxAttribute(p) && p.name.getText(sf) === 'onPress',
+  );
+  return onPress ? txt(sf, onPress) : null;
+}
+
+/** All track('<eventName>', …) calls in a file. */
+function trackCallsFor(sf, eventName) {
+  return findAll(
+    sf,
+    (n) =>
+      ts.isCallExpression(n) &&
+      ts.isIdentifier(n.expression) &&
+      n.expression.text === 'track' &&
+      n.arguments.length > 0 &&
+      ts.isStringLiteral(n.arguments[0]) &&
+      n.arguments[0].text === eventName,
+  );
+}
+
+// ── (a) the handleKeepSide fork — entry navigates, flag-off arm intact ────
 
 {
   const sf = parse(HOST_REL);
@@ -178,9 +239,9 @@ function functionNamed(sf, name) {
         'a3: the shop branch returns early (flag-off arm untouched below it)',
       );
       assert(
-        referencesIdentifier(sf, fork, 'openShopStrip') &&
+        referencesIdentifier(sf, fork, 'openShopWindow') &&
           referencesIdentifier(sf, fork, 'setShopChooserCard'),
-        'a4: the shop branch opens the strip (1 give) or the chooser (several)',
+        'a4: the shop branch navigates (1 give) or opens the chooser (several)',
       );
       // The flag-off arm still carries the shipped pin path: every one of
       // these must appear in handleKeepSide but OUTSIDE the shop branch.
@@ -214,11 +275,33 @@ function functionNamed(sf, name) {
       }
     }
   }
+  // a7 — the entry NAVIGATES: openShopWindow calls navigation.navigate with
+  // the 'ShopAsset' route literal (rev3-spec §1).
+  const fnOpen = functionNamed(sf, 'openShopWindow');
+  const navCall =
+    fnOpen &&
+    findAll(
+      sf,
+      (n) =>
+        ts.isCallExpression(n) &&
+        ts.isPropertyAccessExpression(n.expression) &&
+        n.expression.name.text === 'navigate' &&
+        n.getStart(sf) >= fnOpen.getStart(sf) &&
+        n.getEnd() <= fnOpen.getEnd() &&
+        n.arguments.length > 0 &&
+        ts.isStringLiteral(n.arguments[0]) &&
+        n.arguments[0].text === 'ShopAsset',
+    )[0];
+  assert(
+    !!navCall,
+    "a7: openShopWindow navigates to 'ShopAsset' (the window, not inline state)",
+    fnOpen ? 'no navigate(\'ShopAsset\', …) inside openShopWindow' : 'openShopWindow not found',
+  );
 }
 
-// ── (b) no pan machinery in the strip or the mode map (AST, not text) ─────
+// ── (b) no pan machinery in the body or the mode map (AST, not text) ──────
 
-for (const rel of [STRIP_REL, MODE_REL]) {
+for (const rel of [BODY_REL, MODE_REL]) {
   const sf = parse(rel);
   const badImport = findAll(
     sf,
@@ -242,24 +325,159 @@ for (const rel of [STRIP_REL, MODE_REL]) {
   );
 }
 
-// ── (c) the deck pan is gated on the shop-open state ──────────────────────
+// ── (c) rev-3 §1 — the route: registered unconditionally, gesture off ─────
+
+{
+  const sf = parse(NAV_REL);
+  // The <Stack.Screen name="ShopAsset" …> element.
+  const nameAttr = findAll(
+    sf,
+    (n) =>
+      ts.isJsxAttribute(n) &&
+      n.name.getText(sf) === 'name' &&
+      n.initializer &&
+      ts.isStringLiteral(n.initializer) &&
+      n.initializer.text === 'ShopAsset',
+  )[0];
+  assert(!!nameAttr, 'c1: RootNav registers a Stack.Screen named "ShopAsset"');
+  if (nameAttr) {
+    let el = nameAttr.parent;
+    while (el && !ts.isJsxSelfClosingElement(el) && !ts.isJsxOpeningElement(el)) {
+      el = el.parent;
+    }
+    const elFull = el && ts.isJsxOpeningElement(el) ? el.parent : el;
+    // c2 — UNCONDITIONAL: no conditional or && ancestor between the element
+    // and the navigator (the house rule: the flag gates the entry point,
+    // not the route). Every registration in RootNav is a flat child today,
+    // so ANY conditional wrapper is a regression.
+    const conditionalWrap =
+      elFull &&
+      nearestAncestor(
+        elFull,
+        (n) =>
+          ts.isConditionalExpression(n) ||
+          (ts.isBinaryExpression(n) &&
+            n.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken),
+      );
+    assert(
+      !!elFull && !conditionalWrap,
+      'c2: the ShopAsset registration is UNCONDITIONAL (no flag/conditional wrapper)',
+      conditionalWrap ? `wrapped by: ${txt(sf, conditionalWrap).slice(0, 80)}…` : 'element not resolved',
+    );
+    // c3 — gestureEnabled: false inside THIS element's options (rev-1 D-1:
+    // the iOS interactive-pop edge drag would fight the FlatList pager).
+    const gestureOff =
+      elFull &&
+      findAll(
+        sf,
+        (n) =>
+          ts.isPropertyAssignment(n) &&
+          n.name.getText(sf) === 'gestureEnabled' &&
+          n.initializer.kind === ts.SyntaxKind.FalseKeyword &&
+          n.getStart(sf) >= elFull.getStart(sf) &&
+          n.getEnd() <= elFull.getEnd(),
+      )[0];
+    assert(
+      !!gestureOff,
+      'c3: the ShopAsset screen options set gestureEnabled: false',
+      'the interactive pop would fight the horizontal pager (rev-1 D-1)',
+    );
+  }
+}
+
+// ── (s) rev-3 §1 — the screen: FAB, body, screen-owned toast ─────────────
+
+{
+  const sf = parse(SCREEN_REL);
+  // s1 — exactly one FeedbackFAB, activeScreen="ShopAsset",
+  // aboveTabBar={false} (#188: root-stack push mounts its own).
+  const fabs = findAll(
+    sf,
+    (n) =>
+      (ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n)) &&
+      n.tagName.getText(sf) === 'FeedbackFAB',
+  );
+  assert(fabs.length === 1, 's1a: ShopAssetScreen mounts exactly one FeedbackFAB', `found ${fabs.length}`);
+  if (fabs.length === 1) {
+    const attrs = fabs[0].attributes.properties.filter(ts.isJsxAttribute);
+    const active = attrs.find((a) => a.name.getText(sf) === 'activeScreen');
+    const above = attrs.find((a) => a.name.getText(sf) === 'aboveTabBar');
+    assert(
+      !!active &&
+        ts.isStringLiteral(active.initializer) &&
+        active.initializer.text === 'ShopAsset',
+      's1b: the FAB reports activeScreen="ShopAsset"',
+      active ? txt(sf, active) : 'activeScreen attr missing',
+    );
+    assert(
+      !!above && /false/.test(txt(sf, above)),
+      's1c: the FAB is mounted aboveTabBar={false} (no tab bar under a root push)',
+      above ? txt(sf, above) : 'aboveTabBar attr missing',
+    );
+  }
+  // s2 — the screen mounts the body component.
+  const body = findAll(
+    sf,
+    (n) =>
+      (ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n)) &&
+      n.tagName.getText(sf) === 'ShopOffersBody',
+  );
+  assert(body.length === 1, 's2: ShopAssetScreen mounts ShopOffersBody (the re-hosted internals)');
+  // s3 — the screen owns the Toast mount and retracts BY REFERENCE (QA
+  // B-4, relocated from the inline host — rev3-spec §1: "the window owns
+  // its own Toast mount now — same retraction semantics").
+  const toastEl = findAll(
+    sf,
+    (n) =>
+      (ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n)) &&
+      n.tagName.getText(sf) === 'Toast',
+  );
+  assert(toastEl.length === 1, 's3a: ShopAssetScreen mounts its own Toast');
+  const retractAttr = findAll(
+    sf,
+    (n) => ts.isJsxAttribute(n) && n.name.getText(sf) === 'onToastRetract',
+  );
+  assert(
+    retractAttr.length === 1 &&
+      referencesIdentifier(sf, retractAttr[0], 'setToast') &&
+      /===/.test(txt(sf, retractAttr[0])),
+    's3b: the screen retracts by reference (setToast keeps any newer toast in the slot)',
+    retractAttr.length
+      ? `attr: ${txt(sf, retractAttr[0]).replace(/\s+/g, ' ')}`
+      : 'onToastRetract not passed at the mount',
+  );
+}
+
+// ── (del) rev3-spec §1's delete list — the inline machinery is GONE ──────
 
 {
   const sf = parse(HOST_REL);
-  const enabledCalls = findAll(
+  const bodyMounts = findAll(
     sf,
     (n) =>
-      ts.isCallExpression(n) &&
-      ts.isPropertyAccessExpression(n.expression) &&
-      n.expression.name.text === 'enabled' &&
-      /Gesture\s*\.\s*Pan\s*\(/.test(txt(sf, n)),
+      (ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n)) &&
+      /^ShopOffers(Strip|Body)$/.test(n.tagName.getText(sf)),
   );
   assert(
-    enabledCalls.length > 0 &&
-      enabledCalls.every((c) => referencesIdentifier(sf, c.arguments[0], 'shopOpen')),
-    "c: the top-card pan chain's .enabled() references shopOpen",
-    'the deck must hold still while the strip is open (R-2 prime)',
+    bodyMounts.length === 0,
+    'del1: TradesScreen mounts NO shop strip/body (the window replaced the inline mount)',
+    `found ${bodyMounts.length} mount(s)`,
   );
+  for (const id of ['setShopAsset', 'shopOpen']) {
+    assert(
+      findAll(sf, (n) => ts.isIdentifier(n) && n.text === id).length === 0,
+      `del2: no '${id}' identifier survives in TradesScreen (inline shop state deleted)`,
+    );
+  }
+  // The chooser is the ONE inline piece that stays (a Modal sheet over the
+  // mounted deck; its pick navigates).
+  const chooser = findAll(
+    sf,
+    (n) =>
+      (ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n)) &&
+      n.tagName.getText(sf) === 'ShopWhichPlayerSheet',
+  );
+  assert(chooser.length === 1, 'del3: the ShopWhichPlayerSheet chooser stays mounted on TradesScreen');
 }
 
 // ── (d) SHOP_MODE_GROUP is executed, not pattern-matched ──────────────────
@@ -305,7 +523,7 @@ for (const rel of [STRIP_REL, MODE_REL]) {
 // ── (e) the 1/X counter and the pager render the SAME list ────────────────
 
 {
-  const sf = parse(STRIP_REL);
+  const sf = parse(BODY_REL);
   // The FlatList's data prop — must be a bare identifier so the counter can
   // be proven to read the very same binding.
   const dataAttr = findAll(
@@ -407,13 +625,13 @@ for (const rel of [STRIP_REL, MODE_REL]) {
   );
 }
 
-// ── (g) no FeedbackFAB in the strip (tab screen — #196/#197) ─────────────
+// ── (g) no FeedbackFAB in the body (the SCREEN owns the one FAB) ─────────
 
 {
-  const sf = parse(STRIP_REL);
+  const sf = parse(BODY_REL);
   assert(
     findAll(sf, (n) => ts.isIdentifier(n) && n.text === 'FeedbackFAB').length === 0,
-    'g: ShopOffersStrip mounts no FeedbackFAB (global tab mount covers it)',
+    'g: ShopOffersBody mounts no FeedbackFAB (ShopAssetScreen owns the single mount — #188)',
   );
 }
 
@@ -444,27 +662,15 @@ for (const rel of [STRIP_REL, MODE_REL]) {
   );
 }
 
-// ── (h4) P-3 (rulings 2026-08-28) — shop_opened has exactly ONE emitter ──
+// ── (h4) P-3 — shop_opened has exactly ONE emitter, at the navigate site ──
 // The rule: an event fires once, where the thing it names happens. The one
-// place a strip opens is openShopStrip, so the one emit lives there —
-// direct 1-asset entry emits once, a chooser pick emits once (at pick
-// time, with the picked asset's position), a chooser Cancel emits nothing.
-// Round 1 had TWO emitters (the handleKeepSide fork + the chooser's
-// onPick), which double-fired chooser entries and phantom-fired Cancels.
+// place the window opens is openShopWindow (the navigate call site), so the
+// one emit lives there — direct 1-asset entry emits once, a chooser pick
+// emits once (at pick time, with the picked asset's position), a chooser
+// Cancel emits nothing. Round 1 had TWO emitters, which double-fired
+// chooser entries and phantom-fired Cancels.
 
 {
-  const trackCallsFor = (sf, eventName) =>
-    findAll(
-      sf,
-      (n) =>
-        ts.isCallExpression(n) &&
-        ts.isIdentifier(n.expression) &&
-        n.expression.text === 'track' &&
-        n.arguments.length > 0 &&
-        ts.isStringLiteral(n.arguments[0]) &&
-        n.arguments[0].text === eventName,
-    );
-
   const host = parse(HOST_REL);
   const emits = trackCallsFor(host, 'shop_opened');
   assert(
@@ -472,17 +678,17 @@ for (const rel of [STRIP_REL, MODE_REL]) {
     'h4a: shop_opened is emitted from exactly ONE call site in TradesScreen',
     `found ${emits.length} emitter(s) — the round-1 double-emit is back`,
   );
-  const fnOpen = functionNamed(host, 'openShopStrip');
+  const fnOpen = functionNamed(host, 'openShopWindow');
   assert(
     emits.length === 1 &&
       !!fnOpen &&
       emits[0].getStart(host) >= fnOpen.getStart(host) &&
       emits[0].getEnd() <= fnOpen.getEnd(),
-    'h4b: the one emitter sits inside openShopStrip (the single strip-open path)',
-    'the emit must live where the strip actually opens, not in an entry fork',
+    'h4b: the one emitter sits inside openShopWindow (the single window-open path)',
+    'the emit must live where the window actually opens, not in an entry fork',
   );
   // Neither entry re-emits: handleKeepSide and the chooser onPick reach the
-  // event only THROUGH openShopStrip.
+  // event only THROUGH openShopWindow.
   const fnKeep = functionNamed(host, 'handleKeepSide');
   assert(
     !!fnKeep &&
@@ -496,40 +702,79 @@ for (const rel of [STRIP_REL, MODE_REL]) {
       ).length,
     'h4c: handleKeepSide carries no shop_opened emit of its own',
   );
-  const strip = parse(STRIP_REL);
+  for (const rel of [BODY_REL, SCREEN_REL]) {
+    const sf = parse(rel);
+    assert(
+      trackCallsFor(sf, 'shop_opened').length === 0,
+      `h4d: ${path.basename(rel)} emits no shop_opened (the host's navigate path owns it)`,
+    );
+  }
+}
+
+// ── (h5) rev-3 §1 — the screen labels: emit sites and taxonomy AGREE ─────
+// shop_opened names the "More offers" TAP (a control tap on the Trades
+// deck), so its screen stays 'Trades' — exactly what the taxonomy comment
+// says. The window's own events say where THEY happen: 'ShopAsset'.
+
+{
+  const host = parse(HOST_REL);
+  const opened = trackCallsFor(host, 'shop_opened')[0];
   assert(
-    trackCallsFor(strip, 'shop_opened').length === 0,
-    'h4d: the strip/chooser file emits no shop_opened (the host path owns it)',
+    !!opened &&
+      opened.arguments.length >= 3 &&
+      ts.isStringLiteral(opened.arguments[2]) &&
+      opened.arguments[2].text === 'Trades',
+    "h5a: shop_opened fires with screen 'Trades' (it names the tap, per the taxonomy comment)",
+    opened ? `third arg: ${txt(host, opened.arguments[2])}` : 'no emitter found',
+  );
+  const taxonomy = fs.readFileSync(TAXONOMY_ABS, 'utf8');
+  assert(
+    /shop_opened[\s\S]{0,400}screen\s*\n?\s*#\s*'Trades'|names the TAP[\s\S]{0,200}'Trades'/.test(taxonomy),
+    "h5b: the taxonomy comment states the 'Trades' screen choice for shop_opened",
+    'emit site and taxonomy comment must agree (rev3-spec §1)',
+  );
+  const body = parse(BODY_REL);
+  for (const ev of ['shop_mode_selected', 'shop_positions_selected', 'shop_dismiss_undone']) {
+    const calls = trackCallsFor(body, ev);
+    assert(
+      calls.length === 1 &&
+        calls[0].arguments.length >= 3 &&
+        ts.isStringLiteral(calls[0].arguments[2]) &&
+        calls[0].arguments[2].text === 'ShopAsset',
+      `h5c: ${ev} fires once from the body with screen 'ShopAsset'`,
+      calls.length !== 1
+        ? `found ${calls.length} emitter(s)`
+        : `third arg: ${txt(body, calls[0].arguments[2])}`,
+    );
+  }
+  // The ✓'s calc_trade_queued rides queueCalcTrade's screen arg — honest
+  // about where the tap happened.
+  const fnLike = functionNamed(body, 'handleLike');
+  const screenProp =
+    fnLike &&
+    findAll(
+      body,
+      (n) =>
+        ts.isPropertyAssignment(n) &&
+        n.name.getText(body) === 'screen' &&
+        ts.isStringLiteral(n.initializer) &&
+        n.initializer.text === 'ShopAsset' &&
+        n.getStart(body) >= fnLike.getStart(body) &&
+        n.getEnd() <= fnLike.getEnd(),
+    )[0];
+  assert(
+    !!screenProp,
+    "h5d: the like's queueCalcTrade call reports screen 'ShopAsset'",
+    'calc_trade_queued would otherwise claim a screen the user is not on',
   );
 }
 
 // ── (i) uncrossed ✓/✕, and the dismiss is HELD (the copy stays true) ─────
 
 {
-  const sf = parse(STRIP_REL);
-  const btnHandler = (tid) => {
-    const attr = findAll(
-      sf,
-      (n) =>
-        ts.isJsxAttribute(n) &&
-        n.name.getText(sf) === 'testID' &&
-        /^["'`{]*/.test(txt(sf, n)) &&
-        txt(sf, n).includes(tid),
-    )[0];
-    if (!attr) return null;
-    // The owning JSX element's opening tag.
-    let el = attr.parent;
-    while (el && !ts.isJsxSelfClosingElement(el) && !ts.isJsxOpeningElement(el)) {
-      el = el.parent;
-    }
-    if (!el) return null;
-    const onPress = el.attributes.properties.find(
-      (p) => ts.isJsxAttribute(p) && p.name.getText(sf) === 'onPress',
-    );
-    return onPress ? txt(sf, onPress) : null;
-  };
-  const like = btnHandler('shop.like-btn');
-  const dismiss = btnHandler('shop.dismiss-btn');
+  const sf = parse(BODY_REL);
+  const like = jsxHandler(sf, 'shop.like-btn');
+  const dismiss = jsxHandler(sf, 'shop.dismiss-btn');
   assert(
     !!like && /handleLike/.test(like) && !/handleDismiss/.test(like),
     'i1: shop.like-btn dispatches handleLike',
@@ -581,103 +826,96 @@ for (const rel of [STRIP_REL, MODE_REL]) {
   );
 }
 
-// ── (j) W2 — position multi-select in the Same-value pane ────────────────
-// R-10/R-11/R-12 client half: chips render ONLY in same_value mode; the
-// domain excludes PICK (server 400s it) and the pin's own position ("leave
-// all clear" = same-position swaps); an empty selection OMITS swap_positions
-// from the request body (byte-identical wire state); the analytics event
-// carries a count, never the set; the filtered empty state offers the
+// ── (j) rev-3 §2 — the position filter row, on ALL modes ─────────────────
+// One shared multi-select at the top of the window: domain excludes PICK
+// (server 400s it) and includes the pin's own position (R-2026-08-28-B);
+// an empty selection OMITS swap_positions from the BASE request (each
+// mode's default request stays byte-identical); the analytics event carries
+// a count, never the set; the filtered empty state offers the
 // Clear-positions escape; and a selection change flushes the held dismiss.
 
-const API_REL = 'src/api/trades.ts';
-
-// The (i) helper, re-scoped: testID attr → owning element's onPress text.
-function jsxHandler(sf, tid) {
-  const attr = findAll(
-    sf,
-    (n) =>
-      ts.isJsxAttribute(n) &&
-      n.name.getText(sf) === 'testID' &&
-      txt(sf, n).includes(tid),
-  )[0];
-  if (!attr) return null;
-  let el = attr.parent;
-  while (el && !ts.isJsxSelfClosingElement(el) && !ts.isJsxOpeningElement(el)) {
-    el = el.parent;
-  }
-  if (!el) return null;
-  const onPress = el.attributes.properties.find(
-    (p) => ts.isJsxAttribute(p) && p.name.getText(sf) === 'onPress',
-  );
-  return onPress ? txt(sf, onPress) : null;
-}
-
-function nearestAncestor(node, pred) {
-  let cur = node.parent;
-  while (cur) {
-    if (pred(cur)) return cur;
-    cur = cur.parent;
-  }
-  return null;
-}
-
-function unwrapAs(n) {
-  while (n && (ts.isAsExpression(n) || ts.isParenthesizedExpression(n))) {
-    n = n.expression;
-  }
-  return n;
-}
-
-// j0 — the API layer: fetchAssetIdeas takes an OPTIONAL swap_positions.
+// j0 — the API layer: optional swap_positions AND optional lateral_scope.
 {
   const sf = parse(API_REL);
   const fn = functionNamed(sf, 'fetchAssetIdeas');
   assert(!!fn, 'j0a: fetchAssetIdeas exists in api/trades.ts');
   if (fn) {
-    const sig = findAll(
-      sf,
-      (n) =>
-        ts.isPropertySignature(n) &&
-        n.name.getText(sf) === 'swap_positions' &&
-        n.getStart(sf) >= fn.getStart(sf) &&
-        n.getEnd() <= fn.getEnd(),
-    )[0];
-    assert(
-      !!sig && !!sig.questionToken,
-      'j0b: fetchAssetIdeas body type has swap_positions?: (optional)',
-      sig ? 'present but REQUIRED — every W1 caller would have to send it' : 'missing',
-    );
+    for (const [field, label] of [
+      ['swap_positions', 'j0b'],
+      ['lateral_scope', 'j0c'],
+    ]) {
+      const sig = findAll(
+        sf,
+        (n) =>
+          ts.isPropertySignature(n) &&
+          n.name.getText(sf) === field &&
+          n.getStart(sf) >= fn.getStart(sf) &&
+          n.getEnd() <= fn.getEnd(),
+      )[0];
+      assert(
+        !!sig && !!sig.questionToken,
+        `${label}: fetchAssetIdeas body type has ${field}?: (optional)`,
+        sig ? 'present but REQUIRED — every pre-rev-3 caller would have to send it' : 'missing',
+      );
+    }
   }
 }
 
 {
-  const sf = parse(STRIP_REL);
+  const sf = parse(BODY_REL);
 
-  // j1 — the picker mounts ONLY inside a same_value guard.
-  const pickerAttr = findAll(
-    sf,
-    (n) =>
-      ts.isJsxAttribute(n) &&
-      n.name.getText(sf) === 'testID' &&
-      txt(sf, n).includes('shop.picker'),
-  )[0];
-  assert(!!pickerAttr, 'j1a: the picker container (shop.picker) exists');
-  let pickerGuard = null;
-  if (pickerAttr) {
-    pickerGuard = nearestAncestor(
-      pickerAttr,
+  // j1 — the picker is SHARED across modes: it renders at the top, gated
+  // only by pickerApplies (real-position pin), NEVER by the active mode.
+  // (Rev-3 §2 inverts the rev-2 same-value-only mount — R-10 superseded.)
+  const pickerEl = elementByTestId(sf, 'shop.picker');
+  assert(!!pickerEl, 'j1a: the picker container (shop.picker) exists');
+  if (pickerEl) {
+    const modeGuard = nearestAncestor(
+      pickerEl,
       (n) =>
-        ts.isConditionalExpression(n) &&
-        /mode\s*===\s*'same_value'/.test(txt(sf, n.condition)),
+        ts.isConditionalExpression(n) && /mode\s*===/.test(txt(sf, n.condition)),
     );
     assert(
-      !!pickerGuard,
-      "j1b: the picker is guarded by mode === 'same_value' (chips never render in tier modes)",
-      'no enclosing conditional tests same_value',
+      !modeGuard,
+      'j1b: NO mode guard wraps the picker (the row applies to every mode — rev3 §2)',
+      modeGuard ? `guard: ${txt(sf, modeGuard.condition).replace(/\s+/g, ' ')}` : undefined,
+    );
+    const applyGuard = nearestAncestor(
+      pickerEl,
+      (n) =>
+        ts.isConditionalExpression(n) &&
+        referencesIdentifier(sf, n.condition, 'pickerApplies'),
+    );
+    assert(
+      !!applyGuard,
+      'j1c: the picker is gated on pickerApplies only (no dead chips for a pick pin)',
     );
   }
+  // j1d — ONE shared selection state, kept across mode switches: a single
+  // `positions` useState, and handleSelectMode never writes it.
+  const posStates = findAll(
+    sf,
+    (n) =>
+      ts.isVariableDeclaration(n) &&
+      ts.isArrayBindingPattern(n.name) &&
+      /\bpositions\b/.test(txt(sf, n.name)) &&
+      /setPositions/.test(txt(sf, n.name)) &&
+      n.initializer &&
+      /useState/.test(txt(sf, n.initializer)),
+  );
+  assert(
+    posStates.length === 1,
+    'j1d: exactly one [positions, setPositions] state (one selection shared across modes)',
+    `found ${posStates.length}`,
+  );
+  const fnMode = functionNamed(sf, 'handleSelectMode');
+  assert(
+    !!fnMode && !referencesIdentifier(sf, fnMode, 'setPositions'),
+    'j1e: handleSelectMode never touches the selection (switching modes keeps it)',
+  );
 
-  // j2 — the chip domain: exactly {QB,RB,WR,TE}, minus the pin's position.
+  // j2 — the chip domain: exactly {QB,RB,WR,TE}; own position INCLUDED;
+  // only the #360 avoided-set filters it.
   const domainDecl = findAll(
     sf,
     (n) =>
@@ -700,7 +938,7 @@ function unwrapAs(n) {
   );
   assert(
     findAll(sf, (n) => ts.isStringLiteral(n) && n.text === 'PICK').length === 0,
-    "j2b: no 'PICK' string literal anywhere in the strip (server 400s it — R-12)",
+    "j2b: no 'PICK' string literal anywhere in the body (server 400s it — R-12)",
   );
   const offeredDecl = findAll(
     sf,
@@ -710,16 +948,12 @@ function unwrapAs(n) {
       n.name.text === 'offeredPositions' &&
       n.initializer,
   )[0];
-  // INVERTED 2026-08-28 (ruling R-2026-08-28-B, "Offer it"): this assertion
-  // used to PIN the own-position exclusion; it now pins the INCLUSION. The
-  // only legal filter over the domain is the #360 avoided-set — a pinPos
-  // term in the filter would silently re-remove the ruled-in chip.
   assert(
     !!offeredDecl &&
       referencesIdentifier(sf, offeredDecl.initializer, 'SWAP_POSITIONS') &&
       referencesIdentifier(sf, offeredDecl.initializer, 'avoided') &&
       !referencesIdentifier(sf, offeredDecl.initializer, 'pinPos'),
-    "j2c: offeredPositions offers the pin's OWN position (filters only by avoided — ruling R-2026-08-28-B)",
+    "j2c: offeredPositions offers the pin's OWN position (filters only by avoided — R-2026-08-28-B)",
     'the own-position chip must render; only #360 avoided positions are omitted',
   );
   const pinDecl = findAll(
@@ -734,12 +968,6 @@ function unwrapAs(n) {
     !!pinDecl && /asset\s*\.\s*position/.test(txt(sf, pinDecl.initializer)),
     "j2d: pinPos reads asset.position (the shopped player's real position)",
   );
-  assert(
-    !!pickerGuard && referencesIdentifier(sf, pickerGuard, 'offeredPositions'),
-    'j2e: the picker renders offeredPositions (the filtered domain, not the raw one)',
-  );
-  // The shop.pos testID template exists exactly once — inside SwapPosChip —
-  // so no second, unfiltered chip row can exist.
   const posTids = findAll(
     sf,
     (n) => ts.isTemplateExpression(n) && txt(sf, n).includes('shop.pos.'),
@@ -750,11 +978,14 @@ function unwrapAs(n) {
       !!chipFn &&
       posTids[0].getStart(sf) >= chipFn.getStart(sf) &&
       posTids[0].getEnd() <= chipFn.getEnd(),
-    'j2f: shop.pos.<POS> is minted exactly once, inside SwapPosChip',
+    'j2e: shop.pos.<POS> is minted exactly once, inside SwapPosChip',
     `found ${posTids.length} template(s)`,
   );
 
-  // j3 — an empty selection OMITS the field from the request body.
+  // j3 — the request layer. TWO swap_positions writers exist by design in
+  // rev-3: the BASE query's conditional spread (empty selection ⇒ key
+  // OMITTED — byte-identical default request) and the auto-widen re-request
+  // (which sends the full offerable set EXPLICITLY — rev3 §2/§4a).
   const swapProps = findAll(
     sf,
     (n) =>
@@ -762,42 +993,81 @@ function unwrapAs(n) {
       n.name.getText(sf) === 'swap_positions',
   );
   assert(
-    swapProps.length === 1,
-    'j3a: swap_positions is assigned in exactly one place in the strip',
+    swapProps.length === 2,
+    'j3a: swap_positions is assigned in exactly two places (base conditional + widened re-request)',
     `found ${swapProps.length}`,
   );
-  if (swapProps.length === 1) {
-    const cond = nearestAncestor(swapProps[0], ts.isConditionalExpression);
+  const baseProp = swapProps.find((p) =>
+    referencesIdentifier(sf, p, 'debouncedSwapKey'),
+  );
+  const widenProp = swapProps.find((p) => referencesIdentifier(sf, p, 'widenKey'));
+  assert(
+    !!baseProp && !!widenProp,
+    'j3b: one writer reads the settled selection, the other the widen set',
+    `base: ${!!baseProp}, widen: ${!!widenProp}`,
+  );
+  if (baseProp) {
+    const cond = nearestAncestor(baseProp, ts.isConditionalExpression);
     const whenFalse = cond ? unwrapAs(cond.whenFalse) : null;
     assert(
       !!cond &&
         !!whenFalse &&
         ts.isObjectLiteralExpression(whenFalse) &&
         whenFalse.properties.length === 0,
-      'j3b: the assignment sits in a conditional whose false arm is {} (key OMITTED, not undefined/[])',
+      'j3c: the base assignment sits in a conditional whose false arm is {} (key OMITTED, not undefined/[])',
       cond ? `false arm: ${txt(sf, cond.whenFalse)}` : 'no enclosing conditional',
     );
     assert(
       !!cond && referencesIdentifier(sf, cond.condition, 'debouncedSwapKey'),
-      'j3c: the guard is the SETTLED selection (debouncedSwapKey), so the wire state tracks what settled',
+      'j3d: the guard is the SETTLED selection (debouncedSwapKey), so the wire state tracks what settled',
     );
     assert(
       !!cond && !!nearestAncestor(cond, ts.isSpreadAssignment),
-      'j3d: the conditional is spread into the body (no swap_positions key survives the empty arm)',
+      'j3e: the conditional is spread into the body (no swap_positions key survives the empty arm)',
     );
   }
 
-  // j4 — shop_positions_selected carries a COUNT (n), never the set.
-  const posTracks = findAll(
+  // j3f — lateral_scope: "tier" is sent by EVERY fetchAssetIdeas call in
+  // the body, unconditionally (rev3 §3: the shop client always sends it;
+  // "band" stays the wire default for every other caller by omission).
+  const ideaCalls = findAll(
     sf,
     (n) =>
       ts.isCallExpression(n) &&
       ts.isIdentifier(n.expression) &&
-      n.expression.text === 'track' &&
-      n.arguments.length > 0 &&
-      ts.isStringLiteral(n.arguments[0]) &&
-      n.arguments[0].text === 'shop_positions_selected',
+      n.expression.text === 'fetchAssetIdeas',
   );
+  assert(ideaCalls.length >= 1, 'j3f-pre: the body calls fetchAssetIdeas', 'no calls found');
+  for (const call of ideaCalls) {
+    const scopeProp = findAll(
+      sf,
+      (n) =>
+        ts.isPropertyAssignment(n) &&
+        n.name.getText(sf) === 'lateral_scope' &&
+        ts.isStringLiteral(n.initializer) &&
+        n.initializer.text === 'tier' &&
+        n.getStart(sf) >= call.getStart(sf) &&
+        n.getEnd() <= call.getEnd(),
+    )[0];
+    const conditionalWrap =
+      scopeProp &&
+      (() => {
+        let cur = scopeProp.parent;
+        while (cur && cur !== call) {
+          if (ts.isConditionalExpression(cur) || ts.isSpreadAssignment(cur)) return cur;
+          cur = cur.parent;
+        }
+        return null;
+      })();
+    assert(
+      !!scopeProp && !conditionalWrap,
+      `j3g: fetchAssetIdeas call at offset ${call.getStart(sf)} sends lateral_scope: 'tier' unconditionally`,
+      scopeProp ? 'present but conditionally' : 'lateral_scope missing from the call body',
+    );
+  }
+
+  // j4 — shop_positions_selected carries a COUNT (n), never the set.
+  const posTracks = trackCallsFor(sf, 'shop_positions_selected');
   assert(
     posTracks.length === 1,
     'j4a: shop_positions_selected is emitted from exactly one call site',
@@ -860,7 +1130,7 @@ function unwrapAs(n) {
     !!fnClear &&
       referencesIdentifier(sf, fnClear, 'setPositions') &&
       /new Set\(\)/.test(txt(sf, fnClear)),
-    'j5b: clearPositions resets the selection to empty (back to shipped same-position laterals)',
+    "j5b: clearPositions resets the selection to empty (back to each mode's default)",
   );
   assert(
     !!fnClear && referencesIdentifier(sf, fnClear, 'flushPendingDismiss'),
@@ -877,172 +1147,146 @@ function unwrapAs(n) {
   );
 }
 
-// ── (k) QA B-1 — the deck holds still through ALL disposition paths ──────
-// The pan gate (section c) was never the whole story: the #169 in-card
-// Pass/Like row, the VoiceOver custom actions, the decline-reason layer-1
-// tiles and the bad-trade flag can all disposition the fronted card too.
-// Every one of them must reference the shop-open state.
+// ── (w) rev-3 §2/§4a — auto-widen on zero (OPERATOR-RULED 2026-08-28) ────
+// Empty selection + the own-position tier sweep answers ZERO laterals ⇒
+// the client re-requests with ALL offerable positions and SAYS SO (the
+// honest-notice pattern). Explicit selections always win; only the lateral
+// group widens; the notice renders only while widened results are showing.
 
 {
-  const sf = parse(HOST_REL);
+  const sf = parse(BODY_REL);
 
-  // The JSX attribute named `name`, asserted unique, returned whole.
-  const soleJsxAttr = (name) => {
-    const attrs = findAll(
-      sf,
-      (n) => ts.isJsxAttribute(n) && n.name.getText(sf) === name,
-    );
-    return attrs.length === 1 ? attrs[0] : null;
-  };
-
-  const dispAttr = soleJsxAttr('dispositionDisabled');
+  // w1 — the eligibility gate: settled selection EMPTY + server's raw
+  // lateral answer zero. (The explicit-selection immunity IS the
+  // `debouncedSwapKey === ''` term.)
+  const eligDecl = findAll(
+    sf,
+    (n) =>
+      ts.isVariableDeclaration(n) &&
+      ts.isIdentifier(n.name) &&
+      n.name.text === 'widenEligible' &&
+      n.initializer,
+  )[0];
+  const eligText = eligDecl ? txt(sf, eligDecl.initializer) : '';
   assert(
-    !!dispAttr && referencesIdentifier(sf, dispAttr, 'shopOpen'),
-    'k1: the dispositionDisabled expression references shopOpen (#169 row inert while shopping)',
-    dispAttr ? 'attribute found but no shopOpen term' : 'expected exactly one dispositionDisabled attribute',
+    !!eligDecl &&
+      /debouncedSwapKey\s*===\s*''/.test(eligText) &&
+      /lateral/.test(eligText) &&
+      /\.length/.test(eligText),
+    "w1a: widenEligible requires the settled selection to be EMPTY and the raw lateral group to be zero",
+    eligText ? eligText.replace(/\s+/g, ' ').slice(0, 120) : 'widenEligible not found',
   );
-
-  const actionsAttr = soleJsxAttr('accessibilityActions');
-  assert(
-    !!actionsAttr && referencesIdentifier(sf, actionsAttr, 'shopOpen'),
-    'k2: the VoiceOver custom-action LIST is gated on shopOpen (delisted while shopping)',
-    actionsAttr ? 'attribute found but no shopOpen term' : 'expected exactly one accessibilityActions attribute',
-  );
-
-  const handlerAttr = soleJsxAttr('onAccessibilityAction');
-  assert(
-    !!handlerAttr && referencesIdentifier(sf, handlerAttr, 'shopOpen'),
-    'k3: the VoiceOver action HANDLER is gated on shopOpen (a11y path matches the sighted path)',
-    handlerAttr ? 'attribute found but no shopOpen term' : 'expected exactly one onAccessibilityAction attribute',
-  );
-
-  // An if whose condition references `id` and whose branch returns, inside fn.
-  const guardedReturn = (fn, id) =>
-    !!fn &&
+  // w2 — the re-request is gated on that eligibility (enabled:), and its
+  // swap_positions come from the offerable set.
+  const widenQueryDecl = findAll(
+    sf,
+    (n) =>
+      ts.isVariableDeclaration(n) &&
+      ts.isIdentifier(n.name) &&
+      n.name.text === 'widenedQuery' &&
+      n.initializer,
+  )[0];
+  const enabledProp =
+    widenQueryDecl &&
     findAll(
       sf,
       (n) =>
-        ts.isIfStatement(n) &&
-        n.getStart(sf) >= fn.getStart(sf) &&
-        n.getEnd() <= fn.getEnd() &&
-        referencesIdentifier(sf, n.expression, id) &&
-        findAll(sf, ts.isReturnStatement).some(
-          (r) => r.getStart(sf) >= n.getStart(sf) && r.getEnd() <= n.getEnd(),
-        ),
-    ).length > 0;
-
+        ts.isPropertyAssignment(n) &&
+        n.name.getText(sf) === 'enabled' &&
+        n.getStart(sf) >= widenQueryDecl.getStart(sf) &&
+        n.getEnd() <= widenQueryDecl.getEnd(),
+    )[0];
   assert(
-    guardedReturn(functionNamed(sf, 'handleReasonLayer1'), 'shopOpen'),
-    'k4: handleReasonLayer1 early-returns on shopOpen (layer-1 tile banks a pass — a disposition)',
-    'no shopOpen-guarded return in handleReasonLayer1',
+    !!enabledProp && referencesIdentifier(sf, enabledProp.initializer, 'widenEligible'),
+    'w2a: the widened query is enabled ONLY by widenEligible (never fires against an explicit selection)',
+    enabledProp ? `enabled: ${txt(sf, enabledProp.initializer)}` : 'widenedQuery or its enabled gate not found',
   );
-
-  // The bad-trade flag button: its Pressable's disabled prop must carry
-  // shopOpen (flagging advances the deck like a pass).
-  const flagPress = findAll(
+  const widenKeyDecl = findAll(
     sf,
     (n) =>
-      ts.isJsxAttribute(n) &&
-      n.name.getText(sf) === 'onPress' &&
-      txt(sf, n).includes('handleFlagBadTrade'),
+      ts.isVariableDeclaration(n) &&
+      ts.isIdentifier(n.name) &&
+      n.name.text === 'widenKey' &&
+      n.initializer,
   )[0];
-  let flagDisabled = null;
-  if (flagPress) {
-    let el = flagPress.parent;
-    while (el && !ts.isJsxSelfClosingElement(el) && !ts.isJsxOpeningElement(el)) {
-      el = el.parent;
-    }
-    flagDisabled =
-      el &&
-      el.attributes.properties.find(
-        (p) => ts.isJsxAttribute(p) && p.name.getText(sf) === 'disabled',
-      );
-  }
   assert(
-    !!flagDisabled && referencesIdentifier(sf, flagDisabled, 'shopOpen'),
-    'k5: the bad-trade flag button is disabled while shopping (it advances the deck like a pass)',
-    flagDisabled ? 'disabled prop found but no shopOpen term' : 'flag button or its disabled prop not found',
+    !!widenKeyDecl && referencesIdentifier(sf, widenKeyDecl.initializer, 'offeredPositions'),
+    'w2b: the widened set is the OFFERABLE positions (#360 avoided stays out even when widening)',
   );
-}
 
-// ── (l) QA B-2 — the shop state dies with its context ────────────────────
-
-{
-  const sf = parse(HOST_REL);
-
-  for (const fnName of ['resetDeckForNewTargets', 'handleClearPin']) {
-    const fn = functionNamed(sf, fnName);
+  // w3 — only the LATERAL group widens: the composed groups swap in the
+  // widened lateral and nothing else (tier modes keep their own-position
+  // default from the base payload).
+  const groupsDecl = findAll(
+    sf,
+    (n) =>
+      ts.isVariableDeclaration(n) &&
+      ts.isIdentifier(n.name) &&
+      n.name.text === 'groups' &&
+      n.initializer &&
+      referencesIdentifier(sf, n.initializer, 'widenShowing'),
+  )[0];
+  assert(!!groupsDecl, 'w3a: a composed groups value exists, keyed on widenShowing');
+  if (groupsDecl) {
+    const lateralProp = findAll(
+      sf,
+      (n) =>
+        ts.isPropertyAssignment(n) &&
+        n.name.getText(sf) === 'lateral' &&
+        n.getStart(sf) >= groupsDecl.getStart(sf) &&
+        n.getEnd() <= groupsDecl.getEnd(),
+    )[0];
     assert(
-      !!fn &&
-        referencesIdentifier(sf, fn, 'setShopAsset') &&
-        referencesIdentifier(sf, fn, 'setShopChooserCard'),
-      `l1: ${fnName} clears the shop state (strip AND chooser)`,
-      fn ? 'function found but a setShop* call is missing' : `${fnName} not found`,
+      !!lateralProp && referencesIdentifier(sf, lateralProp.initializer, 'widenedQuery'),
+      'w3b: the widened payload replaces the lateral group',
     );
+    for (const other of ['upgrade', 'downgrade']) {
+      const prop = findAll(
+        sf,
+        (n) =>
+          ts.isPropertyAssignment(n) &&
+          n.name.getText(sf) === other &&
+          n.getStart(sf) >= groupsDecl.getStart(sf) &&
+          n.getEnd() <= groupsDecl.getEnd(),
+      );
+      assert(
+        prop.length === 0,
+        `w3c: the ${other} group is never rebuilt from the widened payload (spread of the base only)`,
+        `found an explicit ${other}: assignment in the composed groups`,
+      );
+    }
   }
 
-  // The strip mount: guarded by shopEnabled (kill switch closes an open
-  // strip) and keyed on the shopped asset (remount = full internal reset;
-  // the old instance's unmount cleanup flushes its held dismiss).
-  const stripEl = findAll(
-    sf,
-    (n) =>
-      (ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n)) &&
-      n.tagName.getText(sf) === 'ShopOffersStrip',
-  )[0];
-  assert(!!stripEl, 'l2a: TradesScreen mounts ShopOffersStrip');
-  if (stripEl) {
+  // w4 — the visible notice: renders ONLY in the widened state, in the
+  // Same value results area. Never silent, never on the tier modes, never
+  // for an explicit selection (widenShowing ⊆ widenEligible ⊆ empty key).
+  const noticeEl = elementByTestId(sf, 'shop.widen-notice');
+  assert(!!noticeEl, 'w4a: the widen notice (shop.widen-notice) exists');
+  if (noticeEl) {
     const guard = nearestAncestor(
-      stripEl,
+      noticeEl,
       (n) =>
         ts.isConditionalExpression(n) &&
-        referencesIdentifier(sf, n.condition, 'shopAsset'),
+        referencesIdentifier(sf, n.condition, 'widenShowing'),
     );
     assert(
-      !!guard && referencesIdentifier(sf, guard.condition, 'shopEnabled'),
-      'l2b: the strip mount condition references shopEnabled (kill switch closes an open strip)',
-      guard ? `guard: ${txt(sf, guard.condition).replace(/\s+/g, ' ')}` : 'no enclosing conditional tests shopAsset',
-    );
-    const keyAttr = stripEl.attributes.properties.find(
-      (p) => ts.isJsxAttribute(p) && p.name.getText(sf) === 'key',
-    );
-    assert(
-      !!keyAttr && referencesIdentifier(sf, keyAttr, 'shopAsset'),
-      'l2c: the strip mount is keyed on the shopped asset (internal state resets per asset)',
-      keyAttr ? `key: ${txt(sf, keyAttr)}` : 'no key attribute on the mount',
+      !!guard && /mode\s*===\s*'same_value'/.test(txt(sf, guard.condition)),
+      "w4b: the notice is guarded by widenShowing AND mode === 'same_value'",
+      guard ? `guard: ${txt(sf, guard.condition).replace(/\s+/g, ' ')}` : 'no widenShowing guard',
     );
   }
-
-  // The catch-all: a useEffect keyed on the raw top-card id clears both
-  // shop-state slots, so any path that changes or removes the fronted card
-  // (undo rewind, swipe-error rewind, lane filter, a deck wipe that skips
-  // resetDeckForNewTargets) closes the strip instead of stranding it.
-  const closeEffect = findAll(
-    sf,
-    (n) =>
-      ts.isCallExpression(n) &&
-      ts.isIdentifier(n.expression) &&
-      n.expression.text === 'useEffect' &&
-      n.arguments.length === 2 &&
-      referencesIdentifier(sf, n.arguments[0], 'setShopAsset') &&
-      referencesIdentifier(sf, n.arguments[0], 'setShopChooserCard') &&
-      referencesIdentifier(sf, n.arguments[1], 'topRawId'),
-  );
-  assert(
-    closeEffect.length === 1,
-    'l3: a topRawId-keyed effect closes the shop when the fronted card changes or leaves',
-    `found ${closeEffect.length} matching effects`,
-  );
 }
 
-// ── (m) QA B-4 — an early commit retracts the Undo toast ─────────────────
+// ── (m) QA B-4 — an early commit retracts the Undo toast (body half) ─────
 // The held dismiss's "Dismissed · Undo" toast must never outlive the undo
 // window as a dead button: every early flush retracts it BY REFERENCE (a
 // newer toast that already replaced it is left alone), and only the natural
 // UNDO_HOLD_MS expiry — whose toast dismisses itself — skips the retract.
+// (The host half — the reference-equality setToast — is asserted on the
+// SCREEN in s3b: rev3-spec §1 moved the Toast mount there.)
 
 {
-  const sf = parse(STRIP_REL);
+  const sf = parse(BODY_REL);
 
   const propsSig = findAll(
     sf,
@@ -1050,7 +1294,7 @@ function unwrapAs(n) {
   );
   assert(
     propsSig.length === 1 && !propsSig[0].questionToken,
-    'm1: the strip contract has a REQUIRED onToastRetract prop',
+    'm1: the body contract has a REQUIRED onToastRetract prop',
     propsSig.length ? 'present but optional' : 'missing from Props',
   );
 
@@ -1104,39 +1348,24 @@ function unwrapAs(n) {
   );
   assert(
     !!fnDismiss && referencesIdentifier(sf, fnDismiss, 'undoToastRef'),
-    'm4a: handleDismiss stores the undo-toast descriptor it hands the host',
+    'm4a: handleDismiss stores the undo-toast descriptor it hands the screen',
   );
   const fnUndo = functionNamed(sf, 'undoDismiss');
   assert(
     !!fnUndo && referencesIdentifier(sf, fnUndo, 'undoToastRef'),
     'm4b: undoDismiss drops the descriptor (the toast dismissed itself — nothing to retract later)',
   );
-
-  // Host half: the mount wires onToastRetract into the toast slot with the
-  // reference-equality guard (retract only OUR toast; never a newer one).
-  const host = parse(HOST_REL);
-  const retractAttr = findAll(
-    host,
-    (n) => ts.isJsxAttribute(n) && n.name.getText(host) === 'onToastRetract',
-  );
-  assert(
-    retractAttr.length === 1 &&
-      referencesIdentifier(host, retractAttr[0], 'setToast') &&
-      /===/.test(txt(host, retractAttr[0])),
-    'm5: the host retracts by reference (setToast keeps any newer toast in the slot)',
-    retractAttr.length ? `attr: ${txt(host, retractAttr[0]).replace(/\s+/g, ' ')}` : 'onToastRetract not passed at the mount',
-  );
 }
 
-// ── (n) QA round 2 (rulings 2026-08-28) — the three universal rules ──────
-// R-A/Fix A: a COMMITTED dismissal is client-authoritative for the strip
+// ── (n) the three universal rules + Chalkline + label source ─────────────
+// R-A/Fix A: a COMMITTED dismissal is client-authoritative for the shop
 // session (one suppression set, added to only at commit, never cleared by
 // data ticks — B-3 + P-2). R-C/P-1: the pager position derives from the
 // rendered data — scrolls react to data changes, never race them.
 // R-C/P-4: the entry is gated on every flag its actions require.
 
 {
-  const sf = parse(STRIP_REL);
+  const sf = parse(BODY_REL);
 
   // n1 (P-4) — shopEnabled is the FULL conjunction: the feature key, the
   // data route's flag, and the ✓'s queue-route flag.
@@ -1188,7 +1417,7 @@ function unwrapAs(n) {
   );
   assert(
     suppDecl.length === 1,
-    'n2a: a [suppressed, setSuppressed] useState pair exists in the strip',
+    'n2a: a [suppressed, setSuppressed] useState pair exists in the body',
     `found ${suppDecl.length}`,
   );
   const fnCommit2 = functionNamed(sf, 'commitDismiss');
@@ -1247,14 +1476,14 @@ function unwrapAs(n) {
     (n) =>
       ts.isVariableDeclaration(n) &&
       ts.isIdentifier(n.name) &&
-      n.name.text === 'baselineLateralCount' &&
+      n.name.text === 'baselineModeCount' &&
       n.initializer,
   )[0];
   assert(
     !!baseDecl &&
       referencesIdentifier(sf, baseDecl.initializer, 'suppressed') &&
       referencesIdentifier(sf, baseDecl.initializer, 'locallyRemoved'),
-    'n2f: baselineLateralCount runs the same filter (the Clear-positions label never counts a dismissed tile)',
+    'n2f: baselineModeCount runs the same filter (the Clear-positions label never counts a dismissed tile)',
   );
 
   // n3 (P-1) — one reactive scroll: scrollToOffset exists exactly once,
@@ -1293,43 +1522,10 @@ function unwrapAs(n) {
     );
   }
 
-  // n4 (reviewer A pin) — Chalkline scan over the strip: no emoji in
+  // n4 — Chalkline scan over the body AND the new screen: no emoji in
   // rendered copy, no gradient/blur, every corner radius ≤ 8 (ADR-004 —
-  // no specced pill exists on this surface, so radii.pill is illegal too).
+  // no specced pill exists on these surfaces, so radii.pill is illegal).
   const emojiRe = /\p{Extended_Pictographic}/u;
-  const renderedText = [];
-  walk(sf, (n) => {
-    if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) {
-      renderedText.push(n.text);
-    } else if (ts.isTemplateExpression(n)) {
-      renderedText.push(n.head.text);
-      for (const s of n.templateSpans) renderedText.push(s.literal.text);
-    } else if (n.kind === ts.SyntaxKind.JsxText) {
-      renderedText.push(n.getText(sf));
-    }
-  });
-  const emojiHits = renderedText.filter((t) => emojiRe.test(t));
-  assert(
-    emojiHits.length === 0,
-    'n4a: no emoji anywhere in the strip strings/copy (Chalkline: never emoji as icons)',
-    emojiHits.slice(0, 3).join(' | '),
-  );
-  const gradientIds = findAll(
-    sf,
-    (n) => ts.isIdentifier(n) && /gradient/i.test(n.text),
-  );
-  const blurProps = findAll(
-    sf,
-    (n) =>
-      (ts.isPropertyAssignment(n) || ts.isJsxAttribute(n)) &&
-      /blur/i.test(n.name.getText(sf)),
-  );
-  assert(
-    gradientIds.length === 0 && blurProps.length === 0,
-    'n4b: no gradient identifiers and no blur props (Chalkline: no gradients, no glassmorphism)',
-    `${gradientIds.length} gradient id(s), ${blurProps.length} blur prop(s)`,
-  );
-  const CORNER = /^border(TopLeft|TopRight|BottomLeft|BottomRight)?Radius$/;
   const radiiTheme = fs.readFileSync(
     path.join(__dirname, '..', 'src/theme/chalkline.ts'),
     'utf8',
@@ -1341,31 +1537,68 @@ function unwrapAs(n) {
       radiiVals[m[1]] = Number(m[2]);
     }
   }
-  const badRadii = [];
-  walk(sf, (n) => {
-    if (!ts.isPropertyAssignment(n) || !CORNER.test(n.name.getText(sf))) return;
-    const init = unwrapAs(n.initializer);
-    if (ts.isNumericLiteral(init)) {
-      if (Number(init.text) > 8) badRadii.push(txt(sf, n));
-    } else if (
-      ts.isPropertyAccessExpression(init) &&
-      ts.isIdentifier(init.expression) &&
-      init.expression.text === 'radii'
-    ) {
-      const v = radiiVals[init.name.text];
-      if (!(typeof v === 'number' && v <= 8)) badRadii.push(txt(sf, n));
-    } else {
-      badRadii.push(txt(sf, n)); // unresolvable radius — must be auditable
-    }
-  });
-  assert(
-    Object.keys(radiiVals).length > 0 && badRadii.length === 0,
-    'n4c: every corner radius in the strip resolves to ≤ 8 (Chalkline radius rule; no pill on this surface)',
-    badRadii.join(' | ') || 'could not resolve radii tokens from the theme',
-  );
+  for (const rel of [BODY_REL, SCREEN_REL]) {
+    const scanSf = parse(rel);
+    const base = path.basename(rel);
+    const renderedText = [];
+    walk(scanSf, (n) => {
+      if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) {
+        renderedText.push(n.text);
+      } else if (ts.isTemplateExpression(n)) {
+        renderedText.push(n.head.text);
+        for (const s of n.templateSpans) renderedText.push(s.literal.text);
+      } else if (n.kind === ts.SyntaxKind.JsxText) {
+        renderedText.push(n.getText(scanSf));
+      }
+    });
+    const emojiHits = renderedText.filter((t) => emojiRe.test(t));
+    assert(
+      emojiHits.length === 0,
+      `n4a: no emoji anywhere in ${base} strings/copy (Chalkline: never emoji as icons)`,
+      emojiHits.slice(0, 3).join(' | '),
+    );
+    const gradientIds = findAll(
+      scanSf,
+      (n) => ts.isIdentifier(n) && /gradient/i.test(n.text),
+    );
+    const blurProps = findAll(
+      scanSf,
+      (n) =>
+        (ts.isPropertyAssignment(n) || ts.isJsxAttribute(n)) &&
+        /blur/i.test(n.name.getText(scanSf)),
+    );
+    assert(
+      gradientIds.length === 0 && blurProps.length === 0,
+      `n4b: no gradient identifiers and no blur props in ${base} (Chalkline: no gradients, no glassmorphism)`,
+      `${gradientIds.length} gradient id(s), ${blurProps.length} blur prop(s)`,
+    );
+    const CORNER = /^border(TopLeft|TopRight|BottomLeft|BottomRight)?Radius$/;
+    const badRadii = [];
+    walk(scanSf, (n) => {
+      if (!ts.isPropertyAssignment(n) || !CORNER.test(n.name.getText(scanSf))) return;
+      const init = unwrapAs(n.initializer);
+      if (ts.isNumericLiteral(init)) {
+        if (Number(init.text) > 8) badRadii.push(txt(scanSf, n));
+      } else if (
+        ts.isPropertyAccessExpression(init) &&
+        ts.isIdentifier(init.expression) &&
+        init.expression.text === 'radii'
+      ) {
+        const v = radiiVals[init.name.text];
+        if (!(typeof v === 'number' && v <= 8)) badRadii.push(txt(scanSf, n));
+      } else {
+        badRadii.push(txt(scanSf, n)); // unresolvable radius — must be auditable
+      }
+    });
+    assert(
+      Object.keys(radiiVals).length > 0 && badRadii.length === 0,
+      `n4c: every corner radius in ${base} resolves to ≤ 8 (Chalkline radius rule; no pill on this surface)`,
+      badRadii.join(' | ') || 'could not resolve radii tokens from the theme',
+    );
+  }
 
   // n5 (reviewer A pin) — label sources: the two tier labels READ the
-  // shipped TRADE_INTENT_LABEL constant (the DNA sheet and the strip can
+  // shipped TRADE_INTENT_LABEL constant (the DNA sheet and the window can
   // never diverge), and each mode label exists exactly once — 'Same value'
   // as the one new literal, the tier labels never re-hardcoded.
   const modeLabelDecl = findAll(

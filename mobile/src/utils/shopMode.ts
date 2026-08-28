@@ -19,7 +19,7 @@ export const SHOP_MODE_GROUP = {
   same_value: 'lateral',
 } as const;
 
-// NOTE — chip labels live in `ShopOffersStrip.tsx`, NOT here: PRD R-13 reads
+// NOTE — chip labels live in `ShopOffersBody.tsx`, NOT here: PRD R-13 reads
 // the two tier labels from the shipped `TRADE_INTENT_LABEL` constant
 // (TradeDnaSheet.tsx) so #402/#403 can never diverge from the DNA sheet's
 // vocabulary, and that constant is a runtime import this file must not take.

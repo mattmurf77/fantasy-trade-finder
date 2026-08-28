@@ -37,6 +37,9 @@ import TestStagesScreen from '../screens/TestStagesScreen';
 import LeagueSummaryScreen from '../screens/LeagueSummaryScreen';
 import FreeAgentsScreen from '../screens/FreeAgentsScreen';
 import ReceiptsScreen from '../screens/ReceiptsScreen';
+// #402/#403 rev-3 — the shop window (rev3-spec.md §1): give-side "More
+// offers" on the Trades deck pushes this screen.
+import ShopAssetScreen from '../screens/ShopAssetScreen';
 import DraftRoomScreen from '../screens/DraftRoomScreen';
 import MockDraftScreen from '../screens/MockDraftScreen';
 import PickAssignmentScreen from '../screens/PickAssignmentScreen';
@@ -58,6 +61,8 @@ import {
 // Capture-harness launch-argument entry. Inert in production — the gate is
 // a build-time constant documented at the top of utils/testRouteEntry.ts.
 import { applyTestRouteEntry } from '../utils/testRouteEntry';
+// #402/#403 — the ShopAsset route's `asset` param is the resolved Player.
+import type { Player } from '../shared/types';
 import { useLeagueFormatDefault } from '../hooks/useScoringFormat';
 import { getProgress } from '../api/rankings';
 import { track } from '../api/events';
@@ -138,6 +143,23 @@ type AuthStack = {
   // session's league and the session's own user, because cross-user receipts
   // are a non-goal (PLAN NG-3) and a league param would invite one.
   Receipts: undefined;
+  // #402/#403 rev-3 (rev3-spec.md §1) — the shop WINDOW. Pushed from the
+  // Trades deck's give-side "More offers" entry (directly for one give
+  // asset; via the "Shop which player?" chooser for several). Registered
+  // UNCONDITIONALLY per the house rule (the `trade.shop_asset` conjunction
+  // gates the ENTRY POINT, not the route). `asset` is the RESOLVED Player
+  // from the deck card — the screen fetches nothing to know what it is
+  // shopping; `assetId`/`assetName`/`source` ride along for parity and
+  // debuggability. The screen options set `gestureEnabled: false` (rev-1
+  // D-1: the iOS interactive-pop edge drag would fight the body's
+  // horizontal FlatList pager) — back is the header control.
+  ShopAsset: {
+    assetId: string;
+    assetName: string;
+    leagueId: string;
+    source: 'more_offers';
+    asset: Player;
+  };
   // rookie-draft M4 (flag `draft.room`) — read-only Draft Room, entered
   // from the League tab's Explore tile and (placement wave) the Acquire
   // tab's leading Draft chip. `leagueId` is an OVERRIDE used only by the
@@ -800,6 +822,47 @@ export default function RootNav({ booted }: { booted: boolean }) {
             headerLeft: () => (
               <HeaderBack
                 testID="receipts.back-btn"
+                onPress={() =>
+                  navigation.canGoBack()
+                    ? navigation.goBack()
+                    : navigation.navigate('Main')
+                }
+              />
+            ),
+          })}
+        />
+        {/* #402/#403 rev-3 — the shop WINDOW (rev3-spec.md §1; rulings
+            2026-08-28b R-2). Pushed from the Trades deck's give-side "More
+            offers" entry. Registered UNCONDITIONALLY (the flag conjunction
+            gates the entry point, not the route — the Receipts rule above).
+
+            gestureEnabled: false — rev-1 D-1: the iOS interactive pop is a
+            left-edge horizontal drag that would fight the body's FlatList
+            pager; the header back control is the one way out, returning to
+            the untouched deck.
+
+            A ROOT-STACK push, so ShopAssetScreen mounts its own
+            FeedbackFAB (#188). */}
+        <Stack.Screen
+          name="ShopAsset"
+          component={ShopAssetScreen}
+          options={({ navigation, route }) => ({
+            headerShown: true,
+            gestureEnabled: false,
+            title: 'Shop offers',
+            headerTitle: () => (
+              <HeaderTitle>
+                {`Shopping ${(route.params as AuthStack['ShopAsset'])?.assetName ?? ''}`}
+              </HeaderTitle>
+            ),
+            headerStyle: { backgroundColor: ink.ink0 },
+            headerTintColor: chalk.base,
+            // Same iOS 26 back-control workaround as FreeAgents/Receipts
+            // above (react-native-screens#3294).
+            headerBackVisible: false,
+            headerLeft: () => (
+              <HeaderBack
+                testID="shop.back-btn"
                 onPress={() =>
                   navigation.canGoBack()
                     ? navigation.goBack()

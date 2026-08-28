@@ -631,22 +631,25 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # widening after an exhausted deck), and reachable only from a deck the
     # user reached by tapping Find a Trade, so it opens no DAU seam.
     "deck_back_to_calculator", "deck_unpin_retry", "deck_search_all_tapped",
-    # #402/#403 — the inline shop strip (screen 'Trades'; flag
-    # trade.shop_asset, docs/feedback/items/402-more-offers-shop/). All
-    # four are INTENT and deliberately absent from NON_INTENT_EVENTS
-    # (scope.md §1): each is a deliberate tap — `shop_opened` fires
-    # exactly once per strip open, at the single open path (TradesScreen's
-    # `openShopStrip`; QA round 2 P-3): the give-side "More offers" press
-    # when one give asset opens the strip directly, or the "Shop which
-    # player?" chooser row pick (carrying the PICKED asset's position) —
-    # the chooser's own open and its Cancel emit nothing (a control tap
-    # that opened a strip, never an impression),
-    # `shop_mode_selected` a mode-chip tap, `shop_positions_selected` the
-    # W2 picker's selection settling into a fetch (registered now, W2
-    # emits it), and `shop_dismiss_undone` the Undo tap inside the held
+    # #402/#403 — the shop-a-player window (rev-3: a pushed ShopAsset
+    # screen, rev3-spec.md §1; flag trade.shop_asset,
+    # docs/feedback/items/402-more-offers-shop/). All four are INTENT and
+    # deliberately absent from NON_INTENT_EVENTS (scope.md §1): each is a
+    # deliberate tap — `shop_opened` names the TAP that opens the window
+    # (a control tap, never an impression), so it fires with screen
+    # 'Trades' — where the tap happens — exactly once per open, at the
+    # single open path (TradesScreen's `openShopWindow`, the navigate call
+    # site; QA round 2 P-3): the give-side "More offers" press when one
+    # give asset navigates directly, or the "Shop which player?" chooser
+    # row pick (carrying the PICKED asset's position) — the chooser's own
+    # open and its Cancel emit nothing. The other three fire from inside
+    # the window and carry screen 'ShopAsset': `shop_mode_selected` a
+    # mode-chip tap, `shop_positions_selected` the position filter's
+    # selection settling into a fetch (rev-3: the row filters all three
+    # modes), and `shop_dismiss_undone` the Undo tap inside the held
     # window — its sibling `swipe_undone` is likewise not in the
-    # non-intent set. The strip's like reuses `calc_trade_queued` (screen
-    # 'Trades') and its dismiss lands as the server-fired `match_swiped`
+    # non-intent set. The window's like reuses `calc_trade_queued` (screen
+    # 'ShopAsset') and its dismiss lands as the server-fired `match_swiped`
     # — neither needs registration here.
     "shop_opened", "shop_mode_selected", "shop_positions_selected",
     "shop_dismiss_undone",
@@ -1548,7 +1551,7 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # `find_trades_tapped` with the source. A prop here would be a second
     # source of truth for a fact two other rows already carry.
     "deck_search_all_tapped":      frozenset(),
-    # #402/#403 — the shop strip. `asset_position` is the shopped asset's
+    # #402/#403 — the shop window. `asset_position` is the shopped asset's
     # position (QB/RB/WR/TE, or PICK for a pick pseudo-asset — shopping a
     # pick is legitimate); `source` is a closed enum, 'more_offers' in W1;
     # `give_count` (int ≥ 1) is how many give-side assets the tapped card
