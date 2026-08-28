@@ -634,8 +634,13 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # #402/#403 — the inline shop strip (screen 'Trades'; flag
     # trade.shop_asset, docs/feedback/items/402-more-offers-shop/). All
     # four are INTENT and deliberately absent from NON_INTENT_EVENTS
-    # (scope.md §1): each is a deliberate tap — `shop_opened` is the
-    # give-side "More offers" press (a control tap, not an impression),
+    # (scope.md §1): each is a deliberate tap — `shop_opened` fires
+    # exactly once per strip open, at the single open path (TradesScreen's
+    # `openShopStrip`; QA round 2 P-3): the give-side "More offers" press
+    # when one give asset opens the strip directly, or the "Shop which
+    # player?" chooser row pick (carrying the PICKED asset's position) —
+    # the chooser's own open and its Cancel emit nothing (a control tap
+    # that opened a strip, never an impression),
     # `shop_mode_selected` a mode-chip tap, `shop_positions_selected` the
     # W2 picker's selection settling into a fetch (registered now, W2
     # emits it), and `shop_dismiss_undone` the Undo tap inside the held

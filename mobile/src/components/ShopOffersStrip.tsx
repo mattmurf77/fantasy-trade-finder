@@ -89,9 +89,12 @@ const UNDO_HOLD_MS = 5000;
 // W2 — the swap-position chip domain: exactly the server's VALID_POSITIONS
 // (R-12). "PICK" is deliberately absent — the server 400s it (the lateral
 // predicate reads raw `position`, which generic pick rungs fake; see the
-// route comment at server.py:12095). The pin's OWN position is excluded at
-// render instead: "leave all clear" already means same-position swaps, per
-// the approved mockup hint line.
+// route comment at server.py:12095). The pin's OWN position IS offered as a
+// chip like any other (ruling R-2026-08-28-B, lld-delta.md §3.4 row 4):
+// "WR laterals plus RB laterals" must be expressible. Empty selection keeps
+// its meaning — same-position swaps, field omitted — and selecting ONLY the
+// own position sends swap_positions:[own], server-equivalent to the default
+// (consistent on purpose, not a special case).
 const SWAP_POSITIONS = ['QB', 'RB', 'WR', 'TE'] as const;
 type SwapPos = (typeof SWAP_POSITIONS)[number];
 
@@ -258,10 +261,26 @@ export default function ShopOffersStrip({
 }: Props) {
   const [mode, setMode] = useState<ShopMode>('tier_up');
   const [index, setIndex] = useState(0);
-  // Optimistic local removals (pending + committed dismisses) — keys are
-  // `assetIdeaKey`. Cleared on every fresh fetch (committed dismisses are
-  // cooldowned server-side and drop out of fresh data on their own).
+  // PENDING local removals only — keys are `assetIdeaKey` for a held
+  // dismiss whose tile has already left the pager. An entry either returns
+  // via Undo or is promoted into `suppressed` the moment the held POST
+  // commits; nothing else adds or clears here.
   const [locallyRemoved, setLocallyRemoved] = useState<Set<string>>(new Set());
+  // Fix A (rulings 2026-08-28 R-A — B-3 + P-2, ONE mechanism).
+  // UNIVERSAL RULE: a COMMITTED dismissal is client-authoritative for the
+  // strip session. Keys enter this set only when a held dismiss COMMITS
+  // (never while merely pending — that's `locallyRemoved` above), and
+  // NOTHING clears it: not dataUpdatedAt, not a warm cache row on a
+  // selection switch, not a racing refetch, not a fresh payload. It dies
+  // only with the strip instance — close/unmount, including the host's
+  // `key={asset.id}` remount (a new shop session starts clean; the server
+  // dismiss-cooldown is authoritative across sessions). An UNDONE dismiss
+  // never enters: Undo nulls `pendingDismissRef` and cancels the timer
+  // before any flush path can reach `commitDismiss`, so the key never
+  // leaves `locallyRemoved` for here. The one subtraction is the
+  // commit-failure path in `commitDismiss`, where the server never
+  // recorded the pass and honesty requires the tile back.
+  const [suppressed, setSuppressed] = useState<Set<string>>(new Set());
   // Per-idea in-flight guard for the ✓ — disables the pair while queueing.
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [pagerW, setPagerW] = useState(0);
@@ -307,14 +326,13 @@ export default function ShopOffersStrip({
   // laterals), so the picker renders only for a real-position pin: dead
   // chips that change nothing would be worse than no chips.
   const pickerApplies = (SWAP_POSITIONS as readonly string[]).includes(pinPos);
-  const offeredPositions = SWAP_POSITIONS.filter(
-    (p) => p !== pinPos && !avoided.has(p),
-  );
+  // Ruling R-2026-08-28-B ("Offer it"): the pin's own position is in the
+  // row like any other — only the #360 avoided-position omission applies,
+  // and it applies to the own position exactly like the rest.
+  const offeredPositions = SWAP_POSITIONS.filter((p) => !avoided.has(p));
   // Mockup D7 — a silently shortened row and a bug look identical, so an
   // avoid-omitted chip gets one chalk-faint line of explanation.
-  const avoidOmitted = SWAP_POSITIONS.filter(
-    (p) => p !== pinPos && avoided.has(p),
-  );
+  const avoidOmitted = SWAP_POSITIONS.filter((p) => avoided.has(p));
 
   const ideasQuery = useQuery({
     // Same query/key pattern as TradesScreen's `assetIdeasQuery`; distinct
@@ -346,31 +364,41 @@ export default function ShopOffersStrip({
     [debouncedSwapKey],
   );
 
-  // Last-known UNFILTERED lateral count, read straight from the
+  // Last-known unfiltered-SELECTION lateral count, read straight from the
   // empty-selection cache row (the strip opens with no selection, so it is
   // nearly always warm). Powers the honest count on the Clear-positions
   // escape (mockup D10 — the RankImportSheet "Apply N ranks" pattern); when
   // the row is cold the label simply drops the count, never invents one.
-  const baselineLateralCount =
+  // Fix A rider: the count runs through the SAME pending-removal +
+  // suppression filter as the pager, so the "Clear positions — N at X"
+  // label never counts a just-dismissed tile (QA reviewer nit).
+  const baselineLateralCount = (
     queryClient.getQueryData<AssetIdeasResponse>([
       'shop-ideas',
       leagueId,
       asset.id,
       '',
-    ])?.groups.lateral.length ?? 0;
+    ])?.groups.lateral ?? []
+  ).filter((i) => {
+    const k = assetIdeaKey(i);
+    return !locallyRemoved.has(k) && !suppressed.has(k);
+  }).length;
 
   // The pager's list AND the `1 / X` counter AND the chip counts all derive
-  // from this one shape — locally dismissed tiles excluded everywhere, so
-  // the counter cannot lie (R-5) and an emptied chip count is honest.
+  // from this one shape — pending removals AND session-suppressed commits
+  // excluded everywhere (Fix A), so the counter cannot lie (R-5), an
+  // emptied chip count is honest, and no cache row or refetch ordering can
+  // resurrect a committed dismiss anywhere counts, pager, or labels look.
   const visibleByMode = useMemo(() => {
     const out = {} as Record<ShopMode, AssetIdea[]>;
     for (const m of SHOP_MODES) {
-      out[m] = (groups?.[SHOP_MODE_GROUP[m]] ?? []).filter(
-        (i) => !locallyRemoved.has(assetIdeaKey(i)),
-      );
+      out[m] = (groups?.[SHOP_MODE_GROUP[m]] ?? []).filter((i) => {
+        const k = assetIdeaKey(i);
+        return !locallyRemoved.has(k) && !suppressed.has(k);
+      });
     }
     return out;
-  }, [groups, locallyRemoved]);
+  }, [groups, locallyRemoved, suppressed]);
   const visibleIdeas = visibleByMode[mode];
 
   // ── Dismiss: held POST + true undo (lld-delta.md §6, host renamed) ────
@@ -387,16 +415,28 @@ export default function ShopOffersStrip({
   const undoToastRef = useRef<ShopToast | null>(null);
 
   function commitDismiss(idea: AssetIdea) {
+    const key = assetIdeaKey(idea);
+    // Fix A — the commit is the ONE gate into the suppression set: from
+    // here the dismissal is client-authoritative for the strip session
+    // (B-3/P-2), and the pending entry is dropped in the same breath so
+    // the two sets stay disjoint (pending vs committed).
+    setSuppressed((s) => new Set(s).add(key));
+    setLocallyRemoved((s) => {
+      const n = new Set(s);
+      n.delete(key);
+      return n;
+    });
     // The real POST — full deck-pass semantics (Elo at trade_k_pass + the
     // D-067 dismiss-cooldown), reconstructed server-side from the echoed
     // context under the deterministic `asset-idea:<key>` id `ideaToCard`
-    // mints (FB-46). Failure after the window closed: refetch so the card
-    // reappears rather than staying invisibly un-dismissed (the S-9
-    // honesty rule MatchesScreen states for the same shape).
+    // mints (FB-46). Failure after the window closed: un-suppress and
+    // refetch so the card reappears rather than staying invisibly
+    // un-dismissed (the S-9 honesty rule MatchesScreen states for the
+    // same shape) — the one legal subtraction from the suppression set.
     swipeTrade(ideaToCard(idea, leagueId), 'pass').catch(() => {
-      setLocallyRemoved((s) => {
+      setSuppressed((s) => {
         const n = new Set(s);
-        n.delete(assetIdeaKey(idea));
+        n.delete(key);
         return n;
       });
       ideasQuery.refetch();
@@ -439,12 +479,17 @@ export default function ShopOffersStrip({
     // reference so a later flush can't retract a toast that already left.
     undoToastRef.current = null;
     clearTimeout(p.timer);
+    // P-1 — restore the DATA first, then let the reactive scroll effect
+    // move the pager once the list actually contains the restored tile
+    // (see the universal rule at requestPagerScroll). Calling the scroll
+    // here directly raced the FlatList's data growth and could clamp on a
+    // last-tile undo.
+    requestPagerScroll(p.restoreIndex);
     setLocallyRemoved((s) => {
       const n = new Set(s);
       n.delete(p.key);
       return n;
     });
-    jumpToIndex(p.restoreIndex);
     track('shop_dismiss_undone', { mode }, 'Trades');
   }
 
@@ -455,9 +500,12 @@ export default function ShopOffersStrip({
     flushPendingDismiss(); // at-most-one pending
     const restoreIndex = index;
     // Optimistic removal — the tile leaves the pager at once and X
-    // decrements; the counter reads the same filtered list (R-5).
+    // decrements; the counter reads the same filtered list (R-5). The
+    // pager holds its index against the SHRUNK list: the request below is
+    // clamped by the reactive scroll effect after the data change lands
+    // (P-1 — never race the FlatList).
+    requestPagerScroll(index);
     setLocallyRemoved((s) => new Set(s).add(key));
-    jumpToIndex(Math.min(index, Math.max(0, visibleIdeas.length - 2)));
     pendingDismissRef.current = {
       idea,
       key,
@@ -486,12 +534,17 @@ export default function ShopOffersStrip({
   useEffect(() => () => flushPendingDismissRef.current(), []);
 
   // A fresh payload invalidates old idea references: flush any pending
-  // dismiss first, then reset the local removals and rewind the pager.
+  // dismiss first (R-9), then rewind the pager — via the reactive scroll
+  // request, never a direct scroll (P-1). What this effect deliberately
+  // does NOT do any more (Fix A): reset the removal/suppression sets. A
+  // committed dismissal is client-authoritative for the strip session, so
+  // a dataUpdatedAt tick — warm cache row, racing refetch, fresh payload —
+  // must never resurrect it; only Undo (pending) or the commit-failure
+  // path restores a tile.
   const ideasUpdatedAt = ideasQuery.dataUpdatedAt;
   useEffect(() => {
     flushPendingDismissRef.current();
-    setLocallyRemoved(new Set());
-    jumpToIndexRef.current(0);
+    requestPagerScroll(0);
   }, [ideasUpdatedAt]);
 
   // W2 — `shop_positions_selected` fires when a selection change SETTLES
@@ -531,21 +584,43 @@ export default function ShopOffersStrip({
   }
 
   // ── Pager mechanics ───────────────────────────────────────────────────
-  function jumpToIndex(i: number) {
-    setIndex(i);
-    if (pagerW > 0) {
-      listRef.current?.scrollToOffset({ offset: i * pagerW, animated: false });
-    }
+  // P-1 UNIVERSAL RULE (rulings 2026-08-28 R-C): the pager position
+  // derives from the rendered data — scrolls REACT to data changes, they
+  // never race them. Nothing in the strip calls scrollToOffset at event
+  // time; every mover (dismiss advance, last-tile undo restore, mode-
+  // change rewind, fresh-payload rewind) REQUESTS a target index here and
+  // makes its data/state change, and the single effect below performs the
+  // scroll on the render whose FlatList already holds the new content,
+  // clamped to what is actually on screen — so the pager, the counter,
+  // and the data can never disagree.
+  const pendingScrollRef = useRef<number | null>(null);
+  function requestPagerScroll(i: number) {
+    pendingScrollRef.current = i;
   }
-  const jumpToIndexRef = useRef(jumpToIndex);
-  jumpToIndexRef.current = jumpToIndex;
+  useEffect(() => {
+    const want = pendingScrollRef.current;
+    if (want == null) return;
+    pendingScrollRef.current = null;
+    const clamped = Math.min(want, Math.max(0, visibleIdeas.length - 1));
+    setIndex(clamped);
+    if (pagerW > 0) {
+      listRef.current?.scrollToOffset({
+        offset: clamped * pagerW,
+        animated: false,
+      });
+    }
+    // ideasUpdatedAt is a dep on purpose: react-query's structural sharing
+    // can keep visibleIdeas reference-stable across an identical refetch,
+    // and a rewind requested for that payload must still be consumed here
+    // rather than fire as a stale jump on some later data change.
+  }, [visibleIdeas, pagerW, ideasUpdatedAt]);
 
   function handleSelectMode(m: ShopMode) {
     if (m === mode) return;
     haptics.selection();
     flushPendingDismiss(); // mode change flushes the pending dismiss (R-9)
+    requestPagerScroll(0); // consumed when the new mode's list renders (P-1)
     setMode(m);
-    jumpToIndex(0);
     track('shop_mode_selected', { mode: m, n_ideas: visibleByMode[m].length }, 'Trades');
   }
 
@@ -644,7 +719,7 @@ export default function ShopOffersStrip({
           </View>
           <Text style={[type.bodySm, styles.pickerHint]}>
             {positions.size === 0
-              ? `Positions offered back · ${pinPos} is where he plays — leave all clear for same-position swaps`
+              ? `Positions offered back · leave all clear for same-position swaps at ${pinPos}`
               : `Ideas come back at ${humanList([...positions].sort(), 'and')}.`}
           </Text>
           {avoidOmitted.length > 0 ? (
@@ -849,8 +924,10 @@ export default function ShopOffersStrip({
 // ── "Shop which player?" chooser (lld-delta.md §0.2) ─────────────────────
 // Give side > 1: a modal bottom sheet — the PlayerContextMenu construction,
 // NEVER navigation (the deck stays mounted underneath). Pick a row → the
-// host opens the strip for that asset (and re-emits `shop_opened` with the
-// picked position); Cancel → nothing. No FeedbackFAB (modal exception).
+// host opens the strip for that asset through its single strip-open path,
+// which is where `shop_opened` fires with the picked position (P-3: the
+// chooser itself emits nothing — not on open, not on Cancel). No
+// FeedbackFAB (modal exception).
 export function ShopWhichPlayerSheet({
   visible,
   card,

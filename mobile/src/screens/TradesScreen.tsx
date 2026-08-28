@@ -1465,27 +1465,54 @@ export default function TradesScreen({ navigation, route }: any) {
   // refetches. Tap-through hands the package to the calculator via the
   // #190 prefill param — the least-invasive full-detail view.
   const assetIdeasOn = useFlag('trade.asset_ideas');
-  // #402/#403 (rulings 2026-08-27) — give-side "More offers" IS the shop
-  // entry (lld-delta.md §0.1). Conjunction, not a lone read: trade.asset_ideas
-  // is a hard prerequisite (its route 404s when off), so the fork must never
-  // fire without it. Flag off ⇒ the give-side tap runs today's pin +
-  // regenerate + #288 snapshot path byte-identically.
+  // #402/#403 (rulings 2026-08-27 + 2026-08-28 P-4) — give-side "More
+  // offers" IS the shop entry (lld-delta.md §0.1). P-4 UNIVERSAL RULE: the
+  // entry is gated on EVERY flag its actions require. Three-way
+  // conjunction: trade.shop_asset (the feature's own kill switch),
+  // trade.asset_ideas (the strip's data — POST /api/trades/asset-ideas
+  // 404s without it), and calc.merged_layout (the strip's ✓ posts
+  // POST /api/trades/queue, which 404s without it). A fourth prerequisite
+  // is structural rather than part of this conjunction:
+  // trade.finder_targeting — the keep chips this entry rides on render
+  // only under it (onKeepSide is threaded to TradeCard only when
+  // targetingEnabled; see the mount below). Any conjunction flag dying
+  // mid-session closes an open strip via the mount condition (the QA B-2
+  // kill-switch semantics, now covering all three). Off ⇒ the give-side
+  // tap runs today's pin + regenerate + #288 snapshot path byte-identically.
   const shopAssetOn = useFlag('trade.shop_asset');
-  const shopEnabled = shopAssetOn && assetIdeasOn;
+  // #384 — the merged calculator flow. Two consumers on this screen: the
+  // deck's exhausted state offers the two calculator-first exits (ruling
+  // 8), and — QA round 2 P-4 — the shop conjunction right below (the
+  // strip's ✓ queues through this flag's route).
+  const calcMergedOn = useFlag('calc.merged_layout');
+  const shopEnabled = shopAssetOn && assetIdeasOn && calcMergedOn;
   // The shopped give-side asset — non-null ⇒ the strip is mounted below the
   // top deck card and the deck pan is disabled (§0.4). The chooser card is
   // set instead when the give side holds >1 asset (§0.2).
   const [shopAsset, setShopAsset] = useState<Player | null>(null);
   const [shopChooserCard, setShopChooserCard] = useState<TradeCard | null>(null);
   const shopOpen = shopAsset != null;
-  function openShopStrip(asset: Player) {
+  // QA round 2 P-3 (rulings 2026-08-28) — UNIVERSAL RULE: an event fires
+  // once, where the thing it names happens. This is the ONE code path
+  // that opens the strip, so `shop_opened` is emitted here and nowhere
+  // else: direct 1-asset entry → one event; chooser entry → one event AT
+  // PICK TIME with the picked asset's real position; chooser Cancel →
+  // zero events. `give_count` is the source card's give-side count,
+  // threaded by the caller (a chooser pick still reports the full card's
+  // count, not 1).
+  function openShopStrip(asset: Player, giveCount: number) {
     setShopChooserCard(null);
     setShopAsset(asset);
+    track(
+      'shop_opened',
+      {
+        asset_position: asset.position,
+        source: 'more_offers',
+        give_count: giveCount,
+      },
+      'Trades',
+    );
   }
-  // #384 — the merged calculator flow. Read here only to decide whether
-  // the deck's exhausted state offers the two calculator-first exits
-  // (ruling 8). Nothing else on this screen branches on it.
-  const calcMergedOn = useFlag('calc.merged_layout');
   // #384 ruling 10 — the four in-flow notices below are not arbiter
   // surfaces (they never claimed a slot, and enrolling them now would make
   // them defer to each other in ordinary use). They take the tour-only
@@ -2915,20 +2942,15 @@ export default function TradesScreen({ navigation, route }: any) {
     // `trade_keep_side_tapped`, which keeps firing only on the paths that
     // still do what its name says.
     if (side === 'give' && shopEnabled) {
+      // P-3 — no event here: `shop_opened` fires inside openShopStrip,
+      // the single strip-open path, so a chooser that gets cancelled
+      // never phantom-emits and a chooser pick emits exactly once with
+      // the PICKED asset's real position.
       if (card.give_players.length === 1) {
-        openShopStrip(card.give_players[0]);
+        openShopStrip(card.give_players[0], card.give_players.length);
       } else {
         setShopChooserCard(card);
       }
-      track(
-        'shop_opened',
-        {
-          asset_position: card.give_players[0]?.position,
-          source: 'more_offers',
-          give_count: card.give_players.length,
-        },
-        'Trades',
-      );
       return;
     }
     // #288 — snapshot the deck before resetDeckForNewTargets wipes it, so
@@ -7101,8 +7123,9 @@ export default function TradesScreen({ navigation, route }: any) {
                   nothing about the deck moved, so closing restores nothing.
                   QA B-2 — `shopEnabled` is part of the mount condition, so
                   the `trade.shop_asset` kill switch closes an open strip
-                  mid-session and killing `trade.asset_ideas` can never
-                  leave a 404-looping orphan strip behind. */}
+                  mid-session, and killing `trade.asset_ideas` or (P-4)
+                  `calc.merged_layout` can never leave behind an orphan
+                  strip whose fetch or ✓ 404-loops. */}
               {shopEnabled && shopAsset && leagueId ? (
                 <ShopOffersStrip
                   // QA B-2 — asset-keyed (the SwipableTopCard
@@ -7856,26 +7879,19 @@ export default function TradesScreen({ navigation, route }: any) {
 
       {/* #402/#403 (lld-delta.md §0.2) — "Shop which player?" chooser for a
           give side holding more than one asset. A Modal sheet, never
-          navigation (the deck stays mounted); picking re-emits shop_opened
-          with the picked position. shopChooserCard is only ever set while
-          shopEnabled is true (the handleKeepSide fork); QA B-2 — the
-          conjunction here additionally closes an already-open chooser if
-          the kill switch flips mid-session. */}
+          navigation (the deck stays mounted); picking routes through
+          openShopStrip, whose single emitter fires shop_opened with the
+          picked position — the chooser itself emits nothing, on open or on
+          Cancel (P-3). shopChooserCard is only ever set while shopEnabled
+          is true (the handleKeepSide fork); QA B-2 — the conjunction here
+          additionally closes an already-open chooser if any of the three
+          prerequisite flags flips mid-session. */}
       <ShopWhichPlayerSheet
         visible={shopEnabled && !!shopChooserCard}
         card={shopChooserCard}
         onPick={(asset) => {
           haptics.selection();
-          track(
-            'shop_opened',
-            {
-              asset_position: asset.position,
-              source: 'more_offers',
-              give_count: shopChooserCard?.give_players.length ?? 0,
-            },
-            'Trades',
-          );
-          openShopStrip(asset);
+          openShopStrip(asset, shopChooserCard?.give_players.length ?? 0);
         }}
         onClose={() => setShopChooserCard(null)}
       />

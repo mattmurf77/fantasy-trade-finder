@@ -1,7 +1,8 @@
 # TestFlight checklist — #402/#403 "More offers = shop a player"
 
 > **Operator, on the first build carrying branch `claude/new-feedback-71436e`
-> (commits `5115265b` + `4b71f036` + `bc21ee0f` + `472f6649`).**
+> (commits `5115265b` + `4b71f036` + `bc21ee0f` + `472f6649` + the
+> 2026-08-28 QA round-2 fix commit).**
 > Under D-056 this checklist is the ONLY runtime evidence mobile gets — every
 > step names the regression it would catch. The feature ships **dark**
 > (`trade.shop_asset: false`); Part A needs the flag flipped on (plus
@@ -44,13 +45,19 @@
 8. **Undo never lies.** Dismiss a tile, then immediately tap a different
    mode chip → the Undo toast disappears AT THAT MOMENT (the dismiss is
    committed; a dead Undo button must never linger). *(QA B-4.)* ☐
-9. **Positions (Same value).** Chips show every league position EXCEPT the
-   shopped player's own position; no PICK chip; hint line reads "Positions
-   offered back · <POS> is where he plays — leave all clear for
-   same-position swaps". Select one position → ideas re-sweep to that
-   position; select none → same-position swaps return. A filtered zero
-   result shows "Nothing at <positions>" with a **Clear positions** button
-   that works (and shows the unfiltered count when known). ☐
+9. **Positions (Same value).** Chips show all four positions — QB, RB, WR,
+   TE — INCLUDING the shopped player's own position (ruling
+   R-2026-08-28-B: "WR laterals plus RB laterals" must be expressible);
+   still no PICK chip. Hint line reads "Positions offered back · leave all
+   clear for same-position swaps at <POS>". Select one position → ideas
+   re-sweep to that position; selecting ONLY the own position behaves like
+   no selection (same-position swaps — that equivalence is deliberate);
+   select none → same-position swaps return. A filtered zero result shows
+   "Nothing at <positions>" with a **Clear positions** button that works
+   (and shows the unfiltered count when known). Dismiss a tile, then
+   switch position filters away and back within a minute → the dismissed
+   tile does NOT come back (the round-1 B-3 cache resurrection is fixed;
+   only Undo restores a tile, until the strip is closed and reopened). ☐
 10. **Shop a pick.** Open shop on a card whose give side is a draft pick →
     the strip works but NO position chips render in Same value (the engine
     ignores them for picks; dead chips would lie). ☐
@@ -75,13 +82,12 @@
 
 ## Known-open at checklist authoring (not blockers for a dark merge)
 
-- **B-3 (unfixed by operator selection):** within 60 s, switching position
-  filters away and back can briefly resurrect a dismissed tile from cache;
-  it is already permanently passed server-side. If you see it in step 9's
-  flow, that is the known issue.
-- **Own-position chip ruling open:** "WR swaps plus RB swaps" is not
-  expressible — the shopped player's own position is never offered as a
-  chip (mockup and LLD disagree; awaiting ruling).
-- P-1..P-4 runtime concerns from QA reviewer B (pager/counter desync on
-  last-tile undo; dismiss-vs-sweep race; doubled `shop_opened` on chooser
-  entries; `calc.merged_layout` must stay ON for the ✓ to queue).
+Nothing. The three items previously listed here were all resolved by the
+2026-08-28 rulings and the QA round-2 fix commit: B-3 and the P-2 race by
+the universal dismiss-suppression rule (a committed dismissal stays
+suppressed for the strip session — step 9 now verifies the fix instead of
+excusing the bug); the own-position chip ruling by "Offer it" (step 9); and
+P-1/P-3/P-4 by the react-don't-race pager rule, the single `shop_opened`
+emitter, and the three-flag `shopEnabled` conjunction (which now includes
+`calc.merged_layout`, so a build with that flag off simply shows no shop
+entry rather than a ✓ that 404s).

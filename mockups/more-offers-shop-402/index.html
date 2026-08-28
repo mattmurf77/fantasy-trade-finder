@@ -537,9 +537,9 @@
           <div class="picker">
             <div class="pickrow">
               <div class="pchip qb">QB</div><div class="pchip rb sel">RB</div>
-              <div class="pchip te sel">TE</div><div class="pchip" style="color:var(--pick);border-color:var(--pick)">PICK</div>
+              <div class="pchip wr">WR</div><div class="pchip te sel">TE</div>
             </div>
-            <div class="hint">Positions offered back · WR is where he plays — leave all clear for same-position swaps</div>
+            <div class="hint">Positions offered back · leave all clear for same-position swaps at WR</div>
           </div>
           <div class="counterrow"><div class="counter"><span class="tick"></span><span class="cnum">1 / 2</span></div></div>
           
@@ -561,8 +561,12 @@
     </div>
     <div class="caption"><b>Same value, positions picked.</b> The W2 position chips live
     inside the Same-value pane; selection swaps the lateral predicate for
-    <code>swap_positions</code> (HLD D-3, unchanged by rev 2). Multi-select; invalid
-    positions are a 400, not a silent empty. <span class="rq">R-10 · R-11 · R-12</span></div>
+    <code>swap_positions</code> (HLD D-3, unchanged by rev 2). Updated to the
+    2026-08-28 ruling ("Offer it"): the shopped player's <b>own position (WR) is a
+    selectable chip</b> — "WR laterals plus RB laterals" is expressible; selecting
+    only WR is server-equivalent to no selection; PICK is never offered (the server
+    400s it). Multi-select; invalid positions are a 400, not a silent empty.
+    <span class="rq">R-10 · R-11 · R-12 · R-2026-08-28-B</span></div>
   </div>
 </div>
 

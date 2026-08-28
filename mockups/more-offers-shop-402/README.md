@@ -24,6 +24,12 @@ escapes that root and the three §1 images render broken there. Every other fram
 HTML/CSS and renders identically either way. This is the standard path prescribed by
 `mockups/CLAUDE.md` and is what the other labs use.
 
+**2026-08-28 update.** The Rev-2 "same value + positions" frame was updated to the
+2026-08-28 ruling (R-2026-08-28-B, "Offer it"): the shopped player's own position now
+renders as a selectable chip (WR, unselected, in the QB→RB→WR→TE row — the PICK chip is
+gone, matching the shipped picker, which never offers it), and the hint/caption carry the
+shipped semantics.
+
 ---
 
 ## The reconstructed-not-captured caveat (read first)
