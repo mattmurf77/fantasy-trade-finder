@@ -11,6 +11,16 @@
 
 ---
 
+## 2026-08-27b — Trade-model review (community-gripe plan): mirror, guardrails, arm reads, H1–H8 — all measured, read-only
+
+Executed [docs/plans/trade-model-review/plan-2026-08-27.md](../docs/plans/trade-model-review/plan-2026-08-27.md); deliverables in the same folder. No source file changed; prod accessed read-only.
+
+- **Mirror (measured):** prod Postgres SELECT-copied to a scratch SQLite mirror per the deck-eval-2026-08-15 method (`DATABASE_URL` pointed at the mirror before importing `backend.database`; `backend.server` never imported). 69 tables; headline rows: `trade_impressions` 18,830 · `deck_impressions` 16,675 · `swipe_decisions` 5,693 · `trade_decisions` 1,452 · `deck_outcomes` 1,454 · `model_config` 234. ~3× the 08-15 copy.
+- **Deck-eval guardrails recomputed on served data (measured):** empty-deck (`trades_generated.count==0`) 4.89% all-time, **5.05% August — MARGINAL vs the <5% gate**, concentrated in targeted (non-bakeoff) jobs. Insult (08-15 rule, I1+I2, floor 500) on served non-ghost first-5: **consensus-basis 1.48% (25/1,693) PASS — identical to the 08-15 offline run**; divergence-basis 8.18% by the same arithmetic, flagged as rule-premise-mismatch (needs its own partner-anchor rule), not as a gate failure. I2 fired zero times.
+- **Interleaved arm read (measured, ≥08-21 only — arm `current`'s earlier decided cards are dark-mode and not comparable):** current 15/32, challenger 33/74, gen_v2 19/47 liked; CIs fully overlap; ~385 decided/arm for ±5 pp ⇒ ~5–7 weeks at current traffic. Offline logged-card profiles: gen_v2 3.6% 1:1, 58.2% consolidation, **46.4% give-far-1st**; challenger worst first-5 raw-rule insult (7.98%).
+- **H1–H8 verdicts (measured + code-verified):** headline numbers — give-far-1st cards **9.3%** liked vs 38.8% player-only; recv-age monotone (u23 47.8% → 30+ 15.0%); QB-centerpiece 8.9%; sf_tep leagues 16.4% vs 35.5%; consensus-basis ≥ divergence-basis for every user (H7 not supported yet). Live-config diff found 16 rows off seed incl. `bakeoff_serve_interleaved=1.0` and `overpay_adjusted=0.0` (→ [Q-034](OPEN_QUESTIONS.md)).
+- **Caveats pinned in the readout:** 3 users supply 95% of decisions; only 3.7% of logged cards ever get a decision; seams at 07-27 / 08-21 / 08-24 — nothing trended across them.
+
 ## 2026-08-27 — #384 partner team-shape summary restored to the merged calculator layout — full gates
 
 Live shipped regression found by the [2026-08-27 calc-vs-guided-finder parity audit](../docs/reviews/2026-08-27-calc-vs-guided-finder-audit.md) (row 24, one of its five `partial` rows). Branch `claude/calc-merged-partner-summary` off `origin/main` `30070f36`. Scope block + code-walk + TestFlight checklist: [docs/feedback/items/384-calc-finder-merge/partner-summary-regression.md](../docs/feedback/items/384-calc-finder-merge/partner-summary-regression.md).
