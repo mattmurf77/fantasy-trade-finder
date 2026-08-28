@@ -4994,6 +4994,10 @@ class TradeService:
         not_interested_ids: set | None = None,
         avoid_positions: list[str] | None = None,   # #360 — receive-side
                                                     # positional exclusion
+        swap_positions: list[str] | None = None,    # #403 W2 — replaces the
+                                                    # #198 same-position
+                                                    # predicate for the
+                                                    # `lateral` group ONLY
         opponent_user_id: str | None = None,  # #250 Specific Team: scope the
                                               # sweep to this one league-mate
     ) -> dict[str, list[dict]]:
@@ -5014,6 +5018,14 @@ class TradeService:
         the fairness band, within the same position). For a PICK pin
         "same position" doesn't apply — all three groups fall back to pure
         value bands (better picks/value up, band swaps across).
+
+        #403 W2 — `swap_positions` (optional, validated by the route):
+        when non-empty it REPLACES the same-position predicate for the
+        LATERAL group only — lateral counterparts must play a position in
+        the set (the pin's own position included only if selected).
+        `upgrade` and `downgrade` are unaffected under every value of the
+        field; absent/empty is byte-identical to #198. PICK pins ignore it
+        (pos_constrained is False — pure value bands already).
 
         direction="give" (pinned asset leaves the user's roster — "what can
         I get for X?"): ideas enumerate the RETURN. A same-position
@@ -5093,6 +5105,20 @@ class TradeService:
 
         def _same_pos(pid: str) -> bool:
             return getattr(players.get(pid), "position", None) == pin_pos
+
+        # #403 W2 — which counterparts may fill the LATERAL band.
+        _swap = {str(p).upper() for p in (swap_positions or ())}
+
+        def _lateral_pos_ok(pid: str) -> bool:
+            """Empty selection ⇒ #198 verbatim (the pin's own position).
+            Non-empty ⇒ the user's set REPLACES it. Never a filter over
+            _same_pos's results: `lateral` is already hard-locked to the
+            pin's position, so intersecting the two is empty for every
+            position but the pin's — a control that always shows
+            "nothing found"."""
+            if not _swap:
+                return _same_pos(pid)
+            return getattr(players.get(pid), "position", None) in _swap
 
         def _eval(give_ids: list[str], recv_ids: list[str]):
             """All non-fairness gates + the WIDENED fairness band. Returns
@@ -5202,8 +5228,15 @@ class TradeService:
                     vc = _v(c)
                     # #198 — Upgrade/Lateral counterparts must play the
                     # pin's position (semantic constraint, never relaxed).
-                    if pos_constrained and not _same_pos(c) and vc >= lo:
-                        continue
+                    # #403 W2 — the shipped single gate covered BOTH bands
+                    # (vc >= lo = lateral ∪ upgrade); it is split by band so
+                    # swap_positions can widen LATERAL without ever touching
+                    # upgrade. Equivalence with swap_positions absent is
+                    # proved boundary-by-boundary in the item's lld-delta §3.3.
+                    if pos_constrained and not _same_pos(c) and vc > hi:
+                        continue      # upgrade band — #198 verbatim
+                    if pos_constrained and lo <= vc <= hi and not _lateral_pos_ok(c):
+                        continue      # lateral band — swap_positions applies
                     if lo <= vc <= hi:
                         res = _eval([asset_id], [c])
                         if res:
@@ -5288,8 +5321,12 @@ class TradeService:
                 # #198 mirror — the Upgrade headliner and the Lateral swap
                 # must play the pin's position (upgrading/swapping AT that
                 # position); the Downgrade give may be any position.
-                if pos_constrained and not _same_pos(g) and vg <= hi:
-                    continue
+                # #403 W2 — same band split as the give direction (mirrored:
+                # vg < lo = tier UP into the pin, lo..hi = lateral).
+                if pos_constrained and not _same_pos(g) and vg < lo:
+                    continue      # upgrade headliner — #198 verbatim
+                if pos_constrained and lo <= vg <= hi and not _lateral_pos_ok(g):
+                    continue      # lateral band — swap_positions applies
                 if lo <= vg <= hi:
                     res = _eval([g], [asset_id])
                     if res:

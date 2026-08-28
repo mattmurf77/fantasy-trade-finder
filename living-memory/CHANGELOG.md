@@ -14,6 +14,83 @@
 
 
 
+
+## 2026-08-28b — #402/#403 QA round 2 closes every open finding
+
+Operator ruled: fix B-3, offer the own-position chip (LLD wins over the mockup), resolve
+P-1..P-4 with universal rules. Shipped in `23b0cdf6`: committed dismissals are
+client-authoritative for the strip session (one suppression mechanism covers B-3 and the
+refetch race); the shopped player's own position is a selectable chip ("WR plus RB laterals"
+now expressible, mockup updated); `shop_opened` fires exactly once where the strip opens;
+`shopEnabled` gates on the full flag chain incl. `calc.merged_layout`; the pager reacts to
+data, never races it. Suite grown to 100 assertions incl. the Chalkline and label-source
+pins reviewer A wanted. All gates green; TestFlight checklist's Known-open section now
+empty. Branch still held unmerged.
+
+## 2026-08-28 — #402/#403 built end-to-end behind a dark flag; QA'd twice; held unmerged
+
+Four code commits on `claude/new-feedback-71436e` (atop the rev-2 doc round): the give-side
+"More offers" button now opens an inline shop strip below the deck card (modes with live
+counts, 1/X pager, ✓ real offer via the untouched queue route — Elo moves by ruling A — and
+a held-write dismiss whose Undo is literally true), a "Shop which player?" chooser for
+multi-asset sends, and the W2 position multi-select wired to the new additive
+`swap_positions` on `/api/trades/asset-ideas`. Spike S-2 shaped the picker
+(multi-select-first; single positions empty 30–60%). Redundant static QA found 4 seam bugs;
+operator ruled fix B-1/B-2/B-4 (deck now holds still through swipe + buttons + VoiceOver;
+shop state dies with its context incl. the kill switch; the Undo toast retracts on early
+commit) — B-3, the own-position-chip ruling, and P-1..P-4 stay open by selection. All gates
+green on the combined tree (pytest 4,377 · tsc · 84 structural suites · testid-lint);
+14-step TestFlight checklist authored. Evidence: TEST_LEDGER 2026-08-28. **Merges held by
+the operator "until we finish this experience."**
+
+## 2026-08-27 — #402/#403 ruled one experience; rev-2 doc round + mockups (branch `claude/new-feedback-71436e`, held unmerged)
+
+**Operator rulings** (recorded in `docs/feedback/items/402-more-offers-shop/rulings-2026-08-27.md`):
+the shop like **does** move the Elo board (`/api/trades/queue` consumed as-is — `record_elo`
+never built, W1 backend diff zero); **shop = the give-side "more offers" button** presented
+as an inline strip below the trade chip (#402's own words), give-side only, several assets →
+chooser sheet; #402 and #403 are **one item** — folder renamed
+`403-shop-a-player` → `402-more-offers-shop` (lowest-ID convention), pointer README left.
+Calc/guided merge direction (audit D1) deliberately **not** ruled; operator intent logged:
+one guided page hosting both build and find, two-column canvas kept. **Branch merges held**
+("until we finish this experience").
+
+**Rev 2 written into all four artifacts**: HLD §0 (inline strip supersedes D-1's pushed
+screen — the contended-file objection dissolved with the item merge; deck pan disabled while
+the strip is open; D-5 void), LLD §0 (`handleKeepSide` fork sketch, `ShopOffersStrip`
+contract, chooser, label fork "More offers", analytics deltas, ownership table), PRD §0a
+(R-1'/R-2'/R-7' replace R-1/R-2/R-7; waves re-scoped), scope.md rev-2 block. Mockup lab
+renamed `more-offers-shop-402/`, six Rev-2 frames added (entry, chooser, strip ×4), rev-1
+sections 1–2 tagged superseded, Chalkline re-audited mechanically (annotation ring uses the
+`mrow.new` inset-edge construction, ice stays rationed).
+
+Also this session (separate worktree, commit `2be71bd0` on `claude/ftf-file-continuation-c9185e`,
+unpushed): three docs corrected 70/15/15 → the shipped 50/30/20 D-157 action row — including
+the #384 TestFlight checklist step 12, which was testing a layout no build ships.
+
+## 2026-08-27 — Feedback backlog status hygiene: 5 items closed, 1 stale `in_progress` reverted
+
+The open list read 45 rows against ~35 actionable items, because this pipeline only flips
+statuses for work IT ships and several items closed via other pipelines. Audited all 45 against
+three independent signals — a shipped CHANGELOG entry, the live flag in `config/features.json`,
+and the code present on `origin/main` `30070f36`. Closed as `fixed`: **#384** (merged calculator,
+v1.16.0, `calc.merged_layout` true), **#333** (side-by-side league/team dropdowns,
+`InLeagueCalculator.tsx:830`), **#380** (partner collapse, `calc.partner-collapsed` mounts in the
+same shipped surface), **#362** (standing offers, shipped LIT v1.16.7), **#369** (plan beat, PRs
+#152–158 / builds 124–125, inside the lit `trades.team_review`). **#344** reverted `in_progress` →
+`new`: zero code refs, zero work folder — nothing was ever built.
+
+**Deliberately NOT closed.** The five remaining `in_progress` rows (#360/#361/#365/#371/#372) are
+built-but-DARK — `trade.avoid_positions`, `trade.outlook_net_firsts`, `trades.window_from_odds`,
+`trade.outlook_composite` all `false`, and #372 is in no build. Dark is not fixed; a tester still
+sees the reported behavior. **#310** is only PARTIALLY delivered (the league-free calculator ships
+— `TradeCalculatorScreen.tsx:74` — but the 3-tab nav simplification and the rankings value-prop
+link do not) and stays open. **#205** is a design-tenets interview that never advanced past
+questions; it needs an operator disposition, not a status flip.
+
+Open list: 45 → **40** (35 `new`, 5 `in_progress`). Also confirmed v1.16.8 (build 134) is live
+with testers — three items arrived filed against it, closing the handoff's one open unknown.
+
 ## 2026-08-27 — The merged calculator gets its partner team-shape summary back (a live regression, not a redesign)
 
 The In-league calculator's partner list has shown a per-partner **QB/RB/WR/TE + picks shape line** since the DTF teardown (`fbd55611`, 2026-07-27), relabelled to pick-equivalents by #306. **#384 W1 (`dfcd5321`) replaced the partner chip row with the #333 Team dropdown + sheet and did not carry the line across** — its own commit message describes the new sheet as listing leaguemates "with their R/R*/NR rank state". `calc.merged_layout` is `true`, so every user since **v1.16.0** has been picking a trade partner from handle + R-badge alone. Found by the 2026-08-27 calc-vs-guided-finder parity audit (row 24 of its five `partial` rows). Verified as an omission, not a ruling, before fixing: none of #384's ten operator rulings or four round-2 rulings touch the partner list (6/7 remove the utility row and the subnav), and `plan.md` §15 inventories `calc.partner-summary.<id>` among the controls the page already had. The visible line and its spoken form are now **one module-scope pair** (`PartnerSummaryLine` / `partnerSummarySpoken`) rendered by both layouts — a hand-copied second block is precisely the drift `check-calc-partner-labels.js` exists to catch. The merged sheet row stacks handle + line in a shrinkable column so the badge is never pushed off. No new request (`powerQ` was already unconditional and feeding `needsByTeam`), no new route/flag/schema/event/testID/colour. `check-calc-merged-layout.js` gains section 22 (a–h), **proven to fail 6 assertions against `origin/main`'s own component** plus three targeted sabotages. PR #221, squashed to `3119eece`; CI green on all three checks. **Reaches users only on the next EAS build** — the 8-step TestFlight checklist (step 7: VoiceOver must *speak* the shape) is owed.

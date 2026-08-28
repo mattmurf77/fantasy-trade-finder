@@ -293,3 +293,25 @@ files. Seeded from history before this skill existed:
   resume before re-launching the fleet, and doing well-specified round-3 doc edits
   inline from the critics' logged objections (the orchestrator's own calls kept
   succeeding). Agents resumed cleanly from disk state each time.
+- 2026-08-27 [triage] `git grep -E` silently does NOT support `\b` — a scan for
+  `#384\b` across the whole audit trail returned ZERO hits for every id and read
+  as "no prior work anywhere", which would have re-planned five shipped items.
+  Use `-P`, `[^0-9]`, or scan in Python; and sanity-check any all-zero grep
+  result against one case you already know is non-zero.
+- 2026-08-27 [triage] Close a status on THREE agreeing signals, never one: a
+  shipped CHANGELOG entry, the flag's live value in `config/features.json`, and
+  the code present on current `origin/main`. Doc-only evidence lies in both
+  directions here — `369-plan-beat/status.md` still read "committed but NOT
+  pushed" for an item that had merged and shipped in build 124, while the 364
+  batch status listed #365/#369/#370/#371 as "planned only" the same week the
+  CHANGELOG recorded them shipped.
+- 2026-08-27 [triage] **Built-but-dark is not fixed.** Five `in_progress` items
+  (#360/#361/#365/#371/#372) have full PRDs, code-walks and merged code, and a
+  tester still sees the reported behavior because their flags are `false`. Check
+  the flag value before closing anything whose folder looks complete — the
+  finished paperwork is the trap.
+- 2026-08-27 [triage] A multi-part report is closed only when EVERY part ships.
+  #310 (unlock the manual calc · simplify nav to 3 tabs · add a rankings
+  value-prop link) reads as delivered from the #384 status line "folds in #310",
+  but only part one shipped; `TabNav.tsx` still registers five tabs. Grep the
+  report's own clauses, not the batch doc's summary of them.

@@ -55,6 +55,9 @@ import TradeCardComp, { type DispositionReasons } from '../components/TradeCard'
 import SendInSleeperButton from '../components/SendInSleeperButton';
 import Toast from '../components/Toast';
 import PlayerContextMenu, { type PlayerMenuAction } from '../components/PlayerContextMenu';
+// #402/#403 — give-side "More offers" opens the inline shop strip
+// (lld-delta.md §0; flag trade.shop_asset && trade.asset_ideas).
+import ShopOffersStrip, { ShopWhichPlayerSheet } from '../components/ShopOffersStrip';
 import HelpSheet, { InfoButton } from '../components/HelpSheet';
 import { registerScrollToTop } from '../navigation/scrollToTop';
 import OutlookSheet from '../components/OutlookSheet';
@@ -1462,10 +1465,54 @@ export default function TradesScreen({ navigation, route }: any) {
   // refetches. Tap-through hands the package to the calculator via the
   // #190 prefill param — the least-invasive full-detail view.
   const assetIdeasOn = useFlag('trade.asset_ideas');
-  // #384 — the merged calculator flow. Read here only to decide whether
-  // the deck's exhausted state offers the two calculator-first exits
-  // (ruling 8). Nothing else on this screen branches on it.
+  // #402/#403 (rulings 2026-08-27 + 2026-08-28 P-4) — give-side "More
+  // offers" IS the shop entry (lld-delta.md §0.1). P-4 UNIVERSAL RULE: the
+  // entry is gated on EVERY flag its actions require. Three-way
+  // conjunction: trade.shop_asset (the feature's own kill switch),
+  // trade.asset_ideas (the strip's data — POST /api/trades/asset-ideas
+  // 404s without it), and calc.merged_layout (the strip's ✓ posts
+  // POST /api/trades/queue, which 404s without it). A fourth prerequisite
+  // is structural rather than part of this conjunction:
+  // trade.finder_targeting — the keep chips this entry rides on render
+  // only under it (onKeepSide is threaded to TradeCard only when
+  // targetingEnabled; see the mount below). Any conjunction flag dying
+  // mid-session closes an open strip via the mount condition (the QA B-2
+  // kill-switch semantics, now covering all three). Off ⇒ the give-side
+  // tap runs today's pin + regenerate + #288 snapshot path byte-identically.
+  const shopAssetOn = useFlag('trade.shop_asset');
+  // #384 — the merged calculator flow. Two consumers on this screen: the
+  // deck's exhausted state offers the two calculator-first exits (ruling
+  // 8), and — QA round 2 P-4 — the shop conjunction right below (the
+  // strip's ✓ queues through this flag's route).
   const calcMergedOn = useFlag('calc.merged_layout');
+  const shopEnabled = shopAssetOn && assetIdeasOn && calcMergedOn;
+  // The shopped give-side asset — non-null ⇒ the strip is mounted below the
+  // top deck card and the deck pan is disabled (§0.4). The chooser card is
+  // set instead when the give side holds >1 asset (§0.2).
+  const [shopAsset, setShopAsset] = useState<Player | null>(null);
+  const [shopChooserCard, setShopChooserCard] = useState<TradeCard | null>(null);
+  const shopOpen = shopAsset != null;
+  // QA round 2 P-3 (rulings 2026-08-28) — UNIVERSAL RULE: an event fires
+  // once, where the thing it names happens. This is the ONE code path
+  // that opens the strip, so `shop_opened` is emitted here and nowhere
+  // else: direct 1-asset entry → one event; chooser entry → one event AT
+  // PICK TIME with the picked asset's real position; chooser Cancel →
+  // zero events. `give_count` is the source card's give-side count,
+  // threaded by the caller (a chooser pick still reports the full card's
+  // count, not 1).
+  function openShopStrip(asset: Player, giveCount: number) {
+    setShopChooserCard(null);
+    setShopAsset(asset);
+    track(
+      'shop_opened',
+      {
+        asset_position: asset.position,
+        source: 'more_offers',
+        give_count: giveCount,
+      },
+      'Trades',
+    );
+  }
   // #384 ruling 10 — the four in-flow notices below are not arbiter
   // surfaces (they never claimed a slot, and enrolling them now would make
   // them defer to each other in ordinary use). They take the tour-only
@@ -2006,6 +2053,8 @@ export default function TradesScreen({ navigation, route }: any) {
     setSuggestTarget(null);
     clearTargets(); // store also self-clears via its league subscription
     setTargetPickerOpen(false);
+    setShopAsset(null); // #402/#403 — a shopped asset is league-specific
+    setShopChooserCard(null);
     // Onboarding item 4 — reset the first-run auto-start lifecycle so a
     // league switch mid-first-run can auto-start against the new league.
     if (autoRetryTimer.current) {
@@ -2596,6 +2645,12 @@ export default function TradesScreen({ navigation, route }: any) {
     setEdits({});
     setSwapTarget(null);
     setPinIdeaResumed(false); // #317 — the next deck re-takes the slot
+    // #402/#403 QA B-2 — a deck wipe/regenerate invalidates the shop
+    // strip's context (the card it sat under is gone): close the strip and
+    // the chooser. Unmounting the strip flushes its held dismiss (its own
+    // unmount cleanup), so no disposition is lost.
+    setShopAsset(null);
+    setShopChooserCard(null);
   }
 
   // FB #156 — entering or changing a hub finder mode/scope starts a clean
@@ -2879,6 +2934,25 @@ export default function TradesScreen({ navigation, route }: any) {
   // receive pins the get side (cards must return ≥1 of them).
   function handleKeepSide(card: TradeCard, side: 'give' | 'receive') {
     haptics.selection();
+    // #402/#403 (lld-delta.md §0.1) — give-side "more offers" IS shop. No
+    // finder pin, no deck reset, no #288 snapshot: the deck underneath must
+    // not move. One give asset opens the strip on it directly; several open
+    // the "Shop which player?" chooser sheet (§0.2). Receive side, or flag
+    // off, falls through to today's path byte-identically — including
+    // `trade_keep_side_tapped`, which keeps firing only on the paths that
+    // still do what its name says.
+    if (side === 'give' && shopEnabled) {
+      // P-3 — no event here: `shop_opened` fires inside openShopStrip,
+      // the single strip-open path, so a chooser that gets cancelled
+      // never phantom-emits and a chooser pick emits exactly once with
+      // the PICKED asset's real position.
+      if (card.give_players.length === 1) {
+        openShopStrip(card.give_players[0], card.give_players.length);
+      } else {
+        setShopChooserCard(card);
+      }
+      return;
+    }
     // #288 — snapshot the deck before resetDeckForNewTargets wipes it, so
     // the found-trade-card → "other options for that player" flow this
     // action enters can be undone. Captured only from a clean, unpinned
@@ -2915,6 +2989,11 @@ export default function TradesScreen({ navigation, route }: any) {
     setLaneFilter(null);
     setEdits({});
     setSwapTarget(null);
+    // #402/#403 QA B-2 — a snapshot restore (or the empty-deck fallback) is
+    // a different deck: the strip's context died with the one it sat under.
+    // The strip's unmount cleanup flushes any held dismiss.
+    setShopAsset(null);
+    setShopChooserCard(null);
     if (snap) {
       setDeck(snap.deck);
       setDeckIdx(snap.deckIdx);
@@ -3218,6 +3297,30 @@ export default function TradesScreen({ navigation, route }: any) {
   // carries the MODIFIED package into every payload.
   const rawTopCard = sortedDeck[deckIdx];
   const topCard = rawTopCard ? edits[rawTopCard.trade_id] ?? rawTopCard : undefined;
+
+  // #402/#403 QA B-1/B-2 — the shop strip's context is the fronted card's
+  // give side. The primary disposition paths are BLOCKED while the strip is
+  // open (pan `.enabled`, the #169 row's `dispositionDisabled`, the
+  // VoiceOver actions, the decline-reason layer-1 tiles, the bad-trade
+  // flag), but a few paths can still legitimately change or remove the
+  // fronted card: a pre-strip pass undone from its toast (undoPass
+  // rewinds), a pre-strip swipe POST failing (swipeMutation.onError
+  // rewinds), layer 2 completing on a card whose pass was banked BEFORE the
+  // strip opened (commitReasonAdvance bumps), a lane-filter change, and the
+  // deck wipes that don't route through resetDeckForNewTargets (fairness
+  // toggle, league switch, quickset regeneration, a fair-package sweep).
+  // Rather than strand those flows, the strip follows its card out: when
+  // the RAW top-card identity changes (or the deck empties), the shop
+  // context is dead — close the strip and the chooser. Unmounting the strip
+  // flushes its held dismiss, so no disposition is lost. Raw id, not the
+  // edited variant's derived id: an in-place edit (swap/remove/re-price)
+  // keeps the card fronted and must not close the strip. This also stops a
+  // stale `shopAsset` resurrecting an orphan strip under a future deck.
+  const topRawId = rawTopCard?.trade_id ?? null;
+  useEffect(() => {
+    setShopAsset(null);
+    setShopChooserCard(null);
+  }, [topRawId]);
 
   // #357 — lineup movement + playoff-odds shift for the FRONTED card only
   // (operator, 2026-08-19: "compute on the fronted card only"). The with-trade
@@ -5042,6 +5145,13 @@ export default function TradesScreen({ navigation, route }: any) {
   }
 
   function handleReasonLayer1(reason: Layer1Code, switchedFrom: Layer1Code | 'none') {
+    // #402/#403 QA B-1 (§0.4) — the layer-1 tile IS a disposition (it banks
+    // the pass; layer 2 then advances the deck). While the shop strip is
+    // open the deck holds still through ALL disposition paths, so the tiles
+    // are inert exactly like the ✓/✕ pair, the pan, and the VoiceOver
+    // actions. (A pass banked BEFORE the strip opened may still complete
+    // layer 2 — the top-card-change effect closes the strip then.)
+    if (shopOpen) return;
     if (!topCard) return;
     const rawId = rawTopCard?.trade_id ?? topCard.trade_id;
     const firstForThisCard = reasonBankedIdRef.current !== rawId;
@@ -6943,12 +7053,26 @@ export default function TradesScreen({ navigation, route }: any) {
                 key={topCard.trade_id}
                 card={topCard}
                 cardImpact={topCardImpact}
+                // #402/#403 §0.4 — while the shop strip is open the top
+                // card's like/pass pan is disabled (the deck holds still;
+                // the strip's FlatList pager is the only horizontal gesture
+                // on screen). Closing the strip re-enables it.
+                shopOpen={shopOpen}
+                // #402/#403 — give-side keep chip relabels to "More offers"
+                // while the shop entry is live (host-read flag, threaded as
+                // a prop per TradeCard's prop discipline).
+                shopGiveEntry={shopEnabled}
                 nudge={swipeHintActive}
                 onFirstTouch={dismissSwipeHint}
                 onCardLayout={(e) => setTopCardH(e.nativeEvent.layout.height)}
                 onLike={() => advance('like')}
                 onPass={() => advance('pass')}
                 dispositionDisabled={
+                  // #402/#403 QA B-1 (§0.4) — while the shop strip is open
+                  // the in-card #169 Pass/Like row is inert (dimmed, the
+                  // same rendering an in-flight swipe gets): the deck holds
+                  // still through ALL disposition paths, not just the pan.
+                  shopOpen ||
                   swipeMutation.isPending ||
                   // Decline reasons: once the pass is banked the ✓ is inert —
                   // layer 2 owns what happens next on this card.
@@ -6993,6 +7117,35 @@ export default function TradesScreen({ navigation, route }: any) {
                 onEditInCalculator={() => handleEditInCalculator(topCard)}
                 onRemoveAsset={handleRemoveAsset}
               />
+              {/* #402/#403 (lld-delta.md §0.3) — the inline shop strip,
+                  directly below the top deck card. The card above stays
+                  visible as context (it is the trade being shopped around);
+                  nothing about the deck moved, so closing restores nothing.
+                  QA B-2 — `shopEnabled` is part of the mount condition, so
+                  the `trade.shop_asset` kill switch closes an open strip
+                  mid-session, and killing `trade.asset_ideas` or (P-4)
+                  `calc.merged_layout` can never leave behind an orphan
+                  strip whose fetch or ✓ 404-loops. */}
+              {shopEnabled && shopAsset && leagueId ? (
+                <ShopOffersStrip
+                  // QA B-2 — asset-keyed (the SwipableTopCard
+                  // key={trade_id} convention): shopping a different player
+                  // unmounts the old instance — whose cleanup flushes any
+                  // held dismiss — and mounts a fresh one, so mode, pager
+                  // index, local removals and the position selection can
+                  // never leak from one asset to the next (the
+                  // stale-invisible-selection trap).
+                  key={shopAsset.id}
+                  leagueId={leagueId}
+                  asset={shopAsset}
+                  onClose={() => setShopAsset(null)}
+                  onToast={(t) => setToast(t)}
+                  // QA B-4 — retract-by-reference: clear the toast slot only
+                  // if it still holds the exact descriptor the strip issued;
+                  // a newer toast that replaced it is left alone.
+                  onToastRetract={(t) => setToast((cur) => (cur === t ? null : cur))}
+                />
+              ) : null}
               {/* Queue action — Pass / Interested are driven by swipe
                   gestures on the top card; Queue is a third option that
                   stashes the trade for "Send All" later. Flag-gated so the
@@ -7076,11 +7229,14 @@ export default function TradesScreen({ navigation, route }: any) {
                   deck like a pass. */}
               <Pressable
                 onPress={handleFlagBadTrade}
-                disabled={swipeMutation.isPending}
+                // #402/#403 QA B-1 — flagging advances the deck like a
+                // pass, so it is inert while the shop strip is open (same
+                // dimmed rendering as an in-flight swipe).
+                disabled={swipeMutation.isPending || shopOpen}
                 style={({ pressed }) => [
                   styles.badTradeBtn,
                   pressed && styles.badTradeBtnPressed,
-                  swipeMutation.isPending && styles.dispositionDisabled,
+                  (swipeMutation.isPending || shopOpen) && styles.dispositionDisabled,
                 ]}
                 accessibilityLabel="Flag as a bad trade suggestion"
                 accessibilityRole="button"
@@ -7721,6 +7877,25 @@ export default function TradesScreen({ navigation, route }: any) {
         />
       ) : null}
 
+      {/* #402/#403 (lld-delta.md §0.2) — "Shop which player?" chooser for a
+          give side holding more than one asset. A Modal sheet, never
+          navigation (the deck stays mounted); picking routes through
+          openShopStrip, whose single emitter fires shop_opened with the
+          picked position — the chooser itself emits nothing, on open or on
+          Cancel (P-3). shopChooserCard is only ever set while shopEnabled
+          is true (the handleKeepSide fork); QA B-2 — the conjunction here
+          additionally closes an already-open chooser if any of the three
+          prerequisite flags flips mid-session. */}
+      <ShopWhichPlayerSheet
+        visible={shopEnabled && !!shopChooserCard}
+        card={shopChooserCard}
+        onPick={(asset) => {
+          haptics.selection();
+          openShopStrip(asset, shopChooserCard?.give_players.length ?? 0);
+        }}
+        onClose={() => setShopChooserCard(null)}
+      />
+
       {/* S3 PRD-02 (ux.player_context_menu) — shared long-press menu.
           menuTarget is only ever set while the flag is on. */}
       <PlayerContextMenu
@@ -7868,6 +8043,13 @@ interface SwipableProps {
   onEditInCalculator?: () => void;
   // #194 — pass-through: remove one asset from the card and re-price.
   onRemoveAsset?: (player: Player, side: 'give' | 'receive') => void;
+  // #402/#403 §0.4 — true while the shop strip is open below this card.
+  // Gates the like/pass pan's `.enabled()`: the deck holds still while the
+  // user shops; the strip's FlatList pager owns horizontal gestures.
+  shopOpen?: boolean;
+  // #402/#403 — pass-through to TradeCard's give-side keep-chip label fork
+  // ("More offers" while the shop entry is live).
+  shopGiveEntry?: boolean;
   // Onboarding guided layer (v2.1): swipe-gesture hint. While `nudge` is
   // true the card runs a subtle translateX nudge (twice, then rests);
   // the first touch anywhere on the card calls `onFirstTouch` — the
@@ -7895,6 +8077,8 @@ function SwipableTopCard({
   onKeepSide,
   onEditInCalculator,
   onRemoveAsset,
+  shopOpen,
+  shopGiveEntry,
   nudge,
   onFirstTouch,
 }: SwipableProps) {
@@ -7924,6 +8108,10 @@ function SwipableTopCard({
   const pan = useMemo(
     () =>
       Gesture.Pan()
+        // #402/#403 §0.4 — the pan is not attached while the shop strip is
+        // open: the deck holds still and the strip's pager is the only
+        // horizontal gesture on screen. Closing the strip re-enables it.
+        .enabled(!shopOpen)
         .activeOffsetX([-12, 12])
         .failOffsetY([-30, 30])
         .onUpdate((e) => {
@@ -7944,7 +8132,7 @@ function SwipableTopCard({
             translateX.value = withTiming(0, { duration: 180 });
           }
         }),
-    [onLike, onPass, translateX],
+    [onLike, onPass, translateX, shopOpen],
   );
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -7964,11 +8152,23 @@ function SwipableTopCard({
         // S8 PRD-01 (inert a11y): the swipe gesture's power path — like/
         // pass as VoiceOver custom actions on the card itself, mirroring
         // the visible check/X buttons (identical advance() handlers).
-        accessibilityActions={[
-          { name: 'like', label: 'Like this trade' },
-          { name: 'pass', label: 'Pass on this trade' },
-        ]}
+        // #402/#403 QA B-1 (§0.4) — the accessibility path matches the
+        // sighted path: while the shop strip is open the actions are
+        // delisted from the rotor (the sighted buttons are dimmed/inert),
+        // so VoiceOver can never disposition the card out from under an
+        // open strip.
+        accessibilityActions={
+          shopOpen
+            ? []
+            : [
+                { name: 'like', label: 'Like this trade' },
+                { name: 'pass', label: 'Pass on this trade' },
+              ]
+        }
         onAccessibilityAction={({ nativeEvent }) => {
+          // QA B-1 — same gate as the list above; covers an action fired on
+          // the frame the strip opens, before the delisting propagates.
+          if (shopOpen) return;
           if (nativeEvent.actionName === 'like') onLike();
           else if (nativeEvent.actionName === 'pass') onPass();
         }}
@@ -7991,6 +8191,7 @@ function SwipableTopCard({
           repricing={repricing}
           fitTargetPositions={fitTargetPositions}
           onKeepSide={onKeepSide}
+          shopGiveEntry={shopGiveEntry}
           onEditInCalculator={onEditInCalculator}
           onRemoveAsset={onRemoveAsset}
           cardImpact={cardImpact}
