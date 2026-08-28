@@ -1079,6 +1079,19 @@ export default function SettingsScreen({ navigation }: any) {
         </View>
         <Icon name="chevron-right" color={chalk.dim} size={16} />
       </Pressable>
+      <Pressable
+        testID="settings-tip-row"
+        accessibilityRole="button"
+        accessibilityLabel="Support Fleeced. Tip jar"
+        onPress={() => navigation.navigate?.('TipJar', { source: 'settings' })}
+        style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={styles.rowKey}>Support Fleeced</Text>
+          <Text style={styles.rowSub}>Tip jar</Text>
+        </View>
+        <Icon name="chevron-right" color={chalk.dim} size={16} />
+      </Pressable>
     </>
   ) : null;
 

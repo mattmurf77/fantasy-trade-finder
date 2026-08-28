@@ -13,6 +13,7 @@
 | RootNav | `Profile` | `ProfileScreen.tsx` |
 | RootNav | `FeedbackInbox` | `FeedbackInboxScreen.tsx` |
 | RootNav | `Paywall` | `PaywallScreen.tsx` (modal; flag `monetize.paywall`, dark) |
+| RootNav | `TipJar` | `TipJarScreen.tsx` (modal; flag `monetize.paywall`, dark) |
 | RootNav | `LeagueSummary` | `LeagueSummaryScreen.tsx` (legacy push; primary registration is the League tab root) |
 | RootNav | `FreeAgents` | `FreeAgentsScreen.tsx` |
 | RootNav + Draft tab | `DraftRoom` | `DraftRoomScreen.tsx` |

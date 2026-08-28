@@ -14,6 +14,10 @@
 
 
 
+## 2026-08-28f — Tip jar: money with no entitlement (operator request)
+
+"Can users donate?" → yes, as guideline-3.1.1 tip-jar consumables, built same-day under the iap-enablement scope (addendum in its scope.md). Three SKUs `ftf_tip_199/499/999` served in `/api/paywall/config` `tips[]`; new `TipJarScreen` modal (Chalkline, `settings-tip-row` entry on both settings surfaces, same double self-guard as the paywall, **no** Restore/auto-renew copy — consumables carry neither) purchasing via `getProducts`/`purchaseStoreProduct` through the same single SDK seam. **The load-bearing piece is the backend guard**: RevenueCat delivers consumables as activating event types, so without `entitlements.is_tip_product()` short-circuiting the projector, the default `apple_iap → pro` mapping would have granted every tipper Pro — the guard stores the event to the ledger (`process_error` = "tip: no entitlement (by design)") and writes nothing, proven by a red-then-green sabotage. The screen keeps the same promise client-side: no entitlement-store usage, copy says a tip unlocks nothing (both pinned by `check-tipjar.js`, 9 assertions). Events reuse the `paywall_*` taxonomy (`source: 'tip_jar'`). Same flag, still dark. Operator: create the three SKUs as **Consumable** in ASC, attach to no RevenueCat entitlement; checklist step 10b covers the sandbox pass.
+
 ## 2026-08-28e — Monthly gets a 3-day trial (operator ruling on the paywall config)
 
 Operator ruling on review of the shipped IAP rail: `ftf_pro_monthly` carries a **3-day free-trial** introductory offer (was no-trial per the LLD). Values-only delta: `_PAYWALL_PRODUCTS` `trial_days` 0→3, test assertion, LLD §3 JSON, sandbox checklist P2 (which now also reminds that Apple allows **one intro-offer redemption per subscription group per person** — a monthly-trial redeemer never sees the annual 14-day trial, and vice versa). No mobile change: `PaywallScreen` already renders trial copy generically from `trial_days` ("3 days free, then $4.99/month"). ASC side: pick the 3-day duration when creating the monthly SKU's intro offer.

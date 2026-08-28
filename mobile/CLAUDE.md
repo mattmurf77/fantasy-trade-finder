@@ -34,7 +34,7 @@ Also mounted here: TanStack Query `focusManager` ← AppState, `onlineManager` �
 | `src/hooks/` | Cross-cutting React hooks | [src/hooks/CLAUDE.md](src/hooks/CLAUDE.md) |
 | `src/navigation/` | Stacks, tabs, re-tap registry, rank chooser model | [src/navigation/CLAUDE.md](src/navigation/CLAUDE.md) |
 | `src/observability/` | `sentry.ts` — init wrapper, no-ops without a DSN | — |
-| `src/screens/` | One file per route (37) | [src/screens/CLAUDE.md](src/screens/CLAUDE.md) |
+| `src/screens/` | One file per route (38) | [src/screens/CLAUDE.md](src/screens/CLAUDE.md) |
 | `src/shared/` | `types.ts` — wire types shared across api/screens/components | [src/shared/CLAUDE.md](src/shared/CLAUDE.md) |
 | `src/state/` | 12 zustand stores, 3 module buses, the QueryClient | [src/state/CLAUDE.md](src/state/CLAUDE.md) |
 | `src/theme/` | Chalkline tokens + data-encoding hexes | [src/theme/CLAUDE.md](src/theme/CLAUDE.md) |

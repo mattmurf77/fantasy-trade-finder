@@ -23,6 +23,15 @@ wins over the runbook on conflict.
   tappable Privacy Policy + Terms links). One flag-gated entry point (Settings row) so the
   operator can reach it in TestFlight sandbox after flipping `monetize.paywall`.
 
+**Addendum (2026-08-28, operator rulings after the ship):** (1) `ftf_pro_monthly` carries a
+**3-day free-trial** intro offer (`trial_days` 0→3; values-only delta, PR #231). (2) **Tip jar**
+added under this same scope: three `ftf_tip_*` consumables served in the config's `tips[]`,
+`TipJarScreen` modal + `settings-tip-row` on both settings surfaces, and the projector guard
+`entitlements.is_tip_product()` so a tip stores to the ledger and grants **nothing** — the
+default `apple_iap → pro` mapping would otherwise hand every tipper Pro. Same flag
+(`monetize.paywall`), same dark posture. Guard: `mobile/tests/check-tipjar.js` (9 pins);
+tests extended in `test_entitlements.py` §(h) + `test_paywall_config.py` §(f).
+
 **Out of scope (later builds, per handoff):** Pro gate applications (`@_require_pro` on
 portfolio/knobs/league-cap), referrals/share cards, engine-knob UI, web `pro.html` + Stripe
 checkout-session route, extension upsell, Apple-side ASC configuration (operator's lane).
