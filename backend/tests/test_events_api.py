@@ -1093,5 +1093,10 @@ def test_guided_onboarding_v2_flag_is_registered_and_lit():
     release = json.loads(
         (repo / "backend/tests/fixtures/flags/release.json").read_text())
     assert "onboarding.guide_v2" in FLAG_KEYS
-    assert features["onboarding.guide_v2"] is True
+    # 2026-08-28 operator ruling: calc.inline_home LIT tour-free ("I'm good
+    # merging the combined UI without the tour") — guide_v2 OFF is now the
+    # pinned contract, until the scoped merged-page gate ships in v1.16.10
+    # and this flips back to True with the re-light (the deliberate-revert
+    # rule above cuts both ways).
+    assert features["onboarding.guide_v2"] is False
     assert release["onboarding.guide_v2"] == features["onboarding.guide_v2"]
