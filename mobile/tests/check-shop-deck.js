@@ -29,7 +29,15 @@
 //     bug — TradesScreen is a tab screen covered by the global mount);
 //   • the four client events could go unregistered (props silently dropped
 //     behind a 200), or land in NON_INTENT_EVENTS (they are all deliberate
-//     taps — lld-delta.md §8).
+//     taps — lld-delta.md §8);
+//   • (W2, section j) the Same-value position chips could leak into the tier
+//     modes (a filter the server never applies there — R-11), offer PICK or
+//     the pin's own position (the server 400s PICK; the pin's position IS
+//     the empty selection — R-10/R-12), send `swap_positions` on an empty
+//     selection (breaking the byte-identical wire state), leak the selected
+//     SET into `shop_positions_selected` (count only — lld §8), drop the
+//     Clear-positions escape from the filtered empty state, or bypass the
+//     held-dismiss flush on a selection change.
 //
 // Structural, not textual where it matters: parses the real TSX with the
 // project's own TypeScript and walks the AST (the check-single-pin-actions.js
@@ -499,6 +507,296 @@ for (const rel of [STRIP_REL, MODE_REL]) {
       !referencesIdentifier(sf, fnUndo, 'commitDismiss') &&
       !referencesIdentifier(sf, fnUndo, 'flushPendingDismiss'),
     'i6: undo cancels the timer — the request is never sent (the copy is true)',
+  );
+}
+
+// ── (j) W2 — position multi-select in the Same-value pane ────────────────
+// R-10/R-11/R-12 client half: chips render ONLY in same_value mode; the
+// domain excludes PICK (server 400s it) and the pin's own position ("leave
+// all clear" = same-position swaps); an empty selection OMITS swap_positions
+// from the request body (byte-identical wire state); the analytics event
+// carries a count, never the set; the filtered empty state offers the
+// Clear-positions escape; and a selection change flushes the held dismiss.
+
+const API_REL = 'src/api/trades.ts';
+
+// The (i) helper, re-scoped: testID attr → owning element's onPress text.
+function jsxHandler(sf, tid) {
+  const attr = findAll(
+    sf,
+    (n) =>
+      ts.isJsxAttribute(n) &&
+      n.name.getText(sf) === 'testID' &&
+      txt(sf, n).includes(tid),
+  )[0];
+  if (!attr) return null;
+  let el = attr.parent;
+  while (el && !ts.isJsxSelfClosingElement(el) && !ts.isJsxOpeningElement(el)) {
+    el = el.parent;
+  }
+  if (!el) return null;
+  const onPress = el.attributes.properties.find(
+    (p) => ts.isJsxAttribute(p) && p.name.getText(sf) === 'onPress',
+  );
+  return onPress ? txt(sf, onPress) : null;
+}
+
+function nearestAncestor(node, pred) {
+  let cur = node.parent;
+  while (cur) {
+    if (pred(cur)) return cur;
+    cur = cur.parent;
+  }
+  return null;
+}
+
+function unwrapAs(n) {
+  while (n && (ts.isAsExpression(n) || ts.isParenthesizedExpression(n))) {
+    n = n.expression;
+  }
+  return n;
+}
+
+// j0 — the API layer: fetchAssetIdeas takes an OPTIONAL swap_positions.
+{
+  const sf = parse(API_REL);
+  const fn = functionNamed(sf, 'fetchAssetIdeas');
+  assert(!!fn, 'j0a: fetchAssetIdeas exists in api/trades.ts');
+  if (fn) {
+    const sig = findAll(
+      sf,
+      (n) =>
+        ts.isPropertySignature(n) &&
+        n.name.getText(sf) === 'swap_positions' &&
+        n.getStart(sf) >= fn.getStart(sf) &&
+        n.getEnd() <= fn.getEnd(),
+    )[0];
+    assert(
+      !!sig && !!sig.questionToken,
+      'j0b: fetchAssetIdeas body type has swap_positions?: (optional)',
+      sig ? 'present but REQUIRED — every W1 caller would have to send it' : 'missing',
+    );
+  }
+}
+
+{
+  const sf = parse(STRIP_REL);
+
+  // j1 — the picker mounts ONLY inside a same_value guard.
+  const pickerAttr = findAll(
+    sf,
+    (n) =>
+      ts.isJsxAttribute(n) &&
+      n.name.getText(sf) === 'testID' &&
+      txt(sf, n).includes('shop.picker'),
+  )[0];
+  assert(!!pickerAttr, 'j1a: the picker container (shop.picker) exists');
+  let pickerGuard = null;
+  if (pickerAttr) {
+    pickerGuard = nearestAncestor(
+      pickerAttr,
+      (n) =>
+        ts.isConditionalExpression(n) &&
+        /mode\s*===\s*'same_value'/.test(txt(sf, n.condition)),
+    );
+    assert(
+      !!pickerGuard,
+      "j1b: the picker is guarded by mode === 'same_value' (chips never render in tier modes)",
+      'no enclosing conditional tests same_value',
+    );
+  }
+
+  // j2 — the chip domain: exactly {QB,RB,WR,TE}, minus the pin's position.
+  const domainDecl = findAll(
+    sf,
+    (n) =>
+      ts.isVariableDeclaration(n) &&
+      ts.isIdentifier(n.name) &&
+      n.name.text === 'SWAP_POSITIONS' &&
+      n.initializer,
+  )[0];
+  const domainArr = domainDecl ? unwrapAs(domainDecl.initializer) : null;
+  const domain =
+    domainArr && ts.isArrayLiteralExpression(domainArr)
+      ? domainArr.elements.filter(ts.isStringLiteral).map((e) => e.text)
+      : null;
+  assert(
+    !!domain &&
+      domain.length === 4 &&
+      ['QB', 'RB', 'WR', 'TE'].every((p) => domain.includes(p)),
+    'j2a: SWAP_POSITIONS is exactly {QB,RB,WR,TE}',
+    domain ? domain.join(',') : 'SWAP_POSITIONS array not found',
+  );
+  assert(
+    findAll(sf, (n) => ts.isStringLiteral(n) && n.text === 'PICK').length === 0,
+    "j2b: no 'PICK' string literal anywhere in the strip (server 400s it — R-12)",
+  );
+  const offeredDecl = findAll(
+    sf,
+    (n) =>
+      ts.isVariableDeclaration(n) &&
+      ts.isIdentifier(n.name) &&
+      n.name.text === 'offeredPositions' &&
+      n.initializer,
+  )[0];
+  assert(
+    !!offeredDecl &&
+      referencesIdentifier(sf, offeredDecl.initializer, 'SWAP_POSITIONS') &&
+      referencesIdentifier(sf, offeredDecl.initializer, 'pinPos'),
+    "j2c: offeredPositions filters SWAP_POSITIONS against the pin's own position",
+  );
+  const pinDecl = findAll(
+    sf,
+    (n) =>
+      ts.isVariableDeclaration(n) &&
+      ts.isIdentifier(n.name) &&
+      n.name.text === 'pinPos' &&
+      n.initializer,
+  )[0];
+  assert(
+    !!pinDecl && /asset\s*\.\s*position/.test(txt(sf, pinDecl.initializer)),
+    "j2d: pinPos reads asset.position (the shopped player's real position)",
+  );
+  assert(
+    !!pickerGuard && referencesIdentifier(sf, pickerGuard, 'offeredPositions'),
+    'j2e: the picker renders offeredPositions (the filtered domain, not the raw one)',
+  );
+  // The shop.pos testID template exists exactly once — inside SwapPosChip —
+  // so no second, unfiltered chip row can exist.
+  const posTids = findAll(
+    sf,
+    (n) => ts.isTemplateExpression(n) && txt(sf, n).includes('shop.pos.'),
+  );
+  const chipFn = functionNamed(sf, 'SwapPosChip');
+  assert(
+    posTids.length === 1 &&
+      !!chipFn &&
+      posTids[0].getStart(sf) >= chipFn.getStart(sf) &&
+      posTids[0].getEnd() <= chipFn.getEnd(),
+    'j2f: shop.pos.<POS> is minted exactly once, inside SwapPosChip',
+    `found ${posTids.length} template(s)`,
+  );
+
+  // j3 — an empty selection OMITS the field from the request body.
+  const swapProps = findAll(
+    sf,
+    (n) =>
+      (ts.isPropertyAssignment(n) || ts.isShorthandPropertyAssignment(n)) &&
+      n.name.getText(sf) === 'swap_positions',
+  );
+  assert(
+    swapProps.length === 1,
+    'j3a: swap_positions is assigned in exactly one place in the strip',
+    `found ${swapProps.length}`,
+  );
+  if (swapProps.length === 1) {
+    const cond = nearestAncestor(swapProps[0], ts.isConditionalExpression);
+    const whenFalse = cond ? unwrapAs(cond.whenFalse) : null;
+    assert(
+      !!cond &&
+        !!whenFalse &&
+        ts.isObjectLiteralExpression(whenFalse) &&
+        whenFalse.properties.length === 0,
+      'j3b: the assignment sits in a conditional whose false arm is {} (key OMITTED, not undefined/[])',
+      cond ? `false arm: ${txt(sf, cond.whenFalse)}` : 'no enclosing conditional',
+    );
+    assert(
+      !!cond && referencesIdentifier(sf, cond.condition, 'debouncedSwapKey'),
+      'j3c: the guard is the SETTLED selection (debouncedSwapKey), so the wire state tracks what settled',
+    );
+    assert(
+      !!cond && !!nearestAncestor(cond, ts.isSpreadAssignment),
+      'j3d: the conditional is spread into the body (no swap_positions key survives the empty arm)',
+    );
+  }
+
+  // j4 — shop_positions_selected carries a COUNT (n), never the set.
+  const posTracks = findAll(
+    sf,
+    (n) =>
+      ts.isCallExpression(n) &&
+      ts.isIdentifier(n.expression) &&
+      n.expression.text === 'track' &&
+      n.arguments.length > 0 &&
+      ts.isStringLiteral(n.arguments[0]) &&
+      n.arguments[0].text === 'shop_positions_selected',
+  );
+  assert(
+    posTracks.length === 1,
+    'j4a: shop_positions_selected is emitted from exactly one call site',
+    `found ${posTracks.length}`,
+  );
+  if (posTracks.length === 1) {
+    const props = posTracks[0].arguments[1];
+    const isObj = props && ts.isObjectLiteralExpression(props);
+    assert(
+      isObj &&
+        props.properties.length === 1 &&
+        !props.properties.some(ts.isSpreadAssignment) &&
+        props.properties[0].name &&
+        props.properties[0].name.getText(sf) === 'n',
+      'j4b: the props object is exactly { n } — count only, no set, no spread',
+      isObj ? txt(sf, props) : 'second arg is not an object literal',
+    );
+    // Resolve what n IS: shorthand → its local declaration; assignment →
+    // the initializer. Either way it must be a count (.length/.size), so a
+    // saboteur passing the selection itself (a string/array) is caught.
+    let countExpr = null;
+    const prop = isObj ? props.properties[0] : null;
+    if (prop && ts.isShorthandPropertyAssignment(prop)) {
+      const enclosing = nearestAncestor(
+        posTracks[0],
+        (x) =>
+          ts.isArrowFunction(x) || ts.isFunctionDeclaration(x) || ts.isFunctionExpression(x),
+      );
+      const decl =
+        enclosing &&
+        findAll(
+          sf,
+          (x) =>
+            ts.isVariableDeclaration(x) &&
+            ts.isIdentifier(x.name) &&
+            x.name.text === 'n' &&
+            x.getStart(sf) >= enclosing.getStart(sf) &&
+            x.getEnd() <= enclosing.getEnd(),
+        )[0];
+      countExpr = decl && decl.initializer ? txt(sf, decl.initializer) : null;
+    } else if (prop && ts.isPropertyAssignment(prop)) {
+      countExpr = txt(sf, prop.initializer);
+    }
+    assert(
+      !!countExpr && /\.(length|size)\b/.test(countExpr),
+      'j4c: n is a count (.length/.size), never the selection itself',
+      countExpr || 'could not resolve what n is bound to',
+    );
+  }
+
+  // j5 — the filtered empty state's Clear-positions escape.
+  const clearPress = jsxHandler(sf, 'shop.clear-positions');
+  assert(
+    !!clearPress && /clearPositions/.test(clearPress),
+    'j5a: shop.clear-positions exists and dispatches clearPositions',
+    clearPress || 'button or onPress not found',
+  );
+  const fnClear = functionNamed(sf, 'clearPositions');
+  assert(
+    !!fnClear &&
+      referencesIdentifier(sf, fnClear, 'setPositions') &&
+      /new Set\(\)/.test(txt(sf, fnClear)),
+    'j5b: clearPositions resets the selection to empty (back to shipped same-position laterals)',
+  );
+  assert(
+    !!fnClear && referencesIdentifier(sf, fnClear, 'flushPendingDismiss'),
+    'j5c: clearPositions flushes the held dismiss (its refetch is a payload change — R-9)',
+  );
+
+  // j6 — a selection change goes through the dismiss-flush contract.
+  const fnToggle = functionNamed(sf, 'handleTogglePosition');
+  assert(
+    !!fnToggle &&
+      referencesIdentifier(sf, fnToggle, 'flushPendingDismiss') &&
+      referencesIdentifier(sf, fnToggle, 'setPositions'),
+    'j6: handleTogglePosition flushes the held dismiss before mutating the selection',
   );
 }
 

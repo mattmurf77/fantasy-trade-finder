@@ -391,6 +391,14 @@ export async function fetchAssetIdeas(body: {
   // #250 — Specific Team mode: scope the sweep to this league-mate so every
   // idea's counterparty (and its acquire side) is that team.
   opponent_user_id?: string;
+  // #403 W2 — replaces the #198 same-position predicate for the `lateral`
+  // group ONLY (upgrade/downgrade are byte-identical under every value of
+  // this field). Uppercase tokens from {QB,RB,WR,TE}; the server 400s
+  // anything else, including "PICK". The key must be OMITTED — never sent
+  // as undefined or [] — when the user has selected nothing, so the
+  // no-selection request body stays byte-identical to today over the wire
+  // (lld-delta.md §2.4; `api.post` forwards this object verbatim).
+  swap_positions?: string[];
 }): Promise<AssetIdeasResponse> {
   const res = await api.post<any>('/api/trades/asset-ideas', body);
   const g = res?.groups ?? {};

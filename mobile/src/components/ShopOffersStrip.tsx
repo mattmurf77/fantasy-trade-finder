@@ -9,9 +9,10 @@ import {
   type LayoutChangeEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   chalk,
+  fonts,
   ice,
   ink,
   radii,
@@ -26,7 +27,14 @@ import { Button, Icon, Text, TickLabel } from './chalkline';
 import PositionChip from './PositionChip';
 import { TRADE_INTENT_LABEL } from './TradeDnaSheet';
 import { useReducedMotionSafe } from '../hooks/useReducedMotionSafe';
-import { fetchAssetIdeas, swipeTrade, type AssetIdea } from '../api/trades';
+import { useFlag } from '../state/useFeatureFlags';
+import { getLeaguePreferences } from '../api/league';
+import {
+  fetchAssetIdeas,
+  swipeTrade,
+  type AssetIdea,
+  type AssetIdeasResponse,
+} from '../api/trades';
 import { track } from '../api/events';
 import { haptics } from '../utils/haptics';
 import { assetIdeaKey, ideaToCard } from '../utils/ideaToCard';
@@ -47,8 +55,9 @@ import type { Player, TradeCard } from '../shared/types';
 // Tier down / Same value — R-13 vocabulary, tier labels read from the shipped
 // TRADE_INTENT_LABEL so the DNA sheet and this strip can never diverge) select
 // one group of the existing `POST /api/trades/asset-ideas` response
-// (direction 'give'; W1 sends no `swap_positions`); a `FlatList horizontal
-// pagingEnabled` pages the group's idea tiles — deliberately NO `Gesture.Pan`,
+// (direction 'give'; W2 adds the position multi-select inside the Same-value
+// pane, sent as `swap_positions` and OMITTED when nothing is selected); a
+// `FlatList horizontal pagingEnabled` pages the tiles — deliberately NO `Gesture.Pan`,
 // no `PanResponder`, no react-native-gesture-handler import (HLD D-2: the
 // pager must never arbitrate with the deck's pan, so it isn't a pan at all).
 //
@@ -73,6 +82,35 @@ import type { Player, TradeCard } from '../shared/types';
 // MatchesScreen.tsx, TradeCalculatorScreen.tsx): how long the dismiss POST
 // is held (and the Undo toast shown) before committing.
 const UNDO_HOLD_MS = 5000;
+
+// W2 — the swap-position chip domain: exactly the server's VALID_POSITIONS
+// (R-12). "PICK" is deliberately absent — the server 400s it (the lateral
+// predicate reads raw `position`, which generic pick rungs fake; see the
+// route comment at server.py:12095). The pin's OWN position is excluded at
+// render instead: "leave all clear" already means same-position swaps, per
+// the approved mockup hint line.
+const SWAP_POSITIONS = ['QB', 'RB', 'WR', 'TE'] as const;
+type SwapPos = (typeof SWAP_POSITIONS)[number];
+
+// How long a chip tap sits before the selection settles into a fetch — the
+// shipped calculator convention (TradeCalculatorScreen / InLeagueCalculator
+// both debounce their evaluate keys 250ms; each keeps a local copy of this
+// helper, neither exports it).
+const SWAP_SETTLE_MS = 250;
+function useDebounced<T>(value: T, ms: number): T {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setV(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return v;
+}
+
+/** "RB", "RB and TE", "QB, RB and TE" — copy-grade position lists. */
+function humanList(ps: readonly string[], conj: 'and' | 'or'): string {
+  if (ps.length <= 1) return ps[0] ?? '';
+  return `${ps.slice(0, -1).join(', ')} ${conj} ${ps[ps.length - 1]}`;
+}
 
 /** Toast descriptor the host renders — the strip owns no Toast mount.
  *  Subsumes §0.3's `onQueued` (queue results) plus the dismiss-undo toast. */
@@ -157,6 +195,51 @@ function TileSide({ label, players }: { label: string; players: Player[] }) {
   );
 }
 
+// W2 — one swap-position chip. The DnaToggle construction from TradeDnaSheet
+// (the app's SHIPPED selected-position-chip pattern — Chasing/Shopping/
+// Avoiding rows): selected = solid position-color fill + check glyph + bold
+// on-ice text; unselected = hairline chip with the position-color dot. NOT
+// the mockup's ink-well + ice-ring — on component construction the app wins
+// over the mockup's CSS, and the position hex stays a pure data encoding
+// (docs/cross-client-invariants.md) on fill/dot in both states.
+function SwapPosChip({
+  pos,
+  selected,
+  onPress,
+}: {
+  pos: SwapPos;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  const color = posColor(pos as any) ?? ink.lineStrong;
+  return (
+    <Pressable
+      testID={`shop.pos.${pos}`}
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked: selected }}
+      accessibilityLabel={`Offer ${pos} back`}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.posChip,
+        selected
+          ? { backgroundColor: color, borderColor: color }
+          : pressed
+            ? { backgroundColor: ink.ink3 }
+            : null,
+      ]}
+    >
+      {selected ? (
+        <Icon name="check" size={12} color={ice.on} />
+      ) : (
+        <View style={[styles.posChipDot, { backgroundColor: color }]} />
+      )}
+      <Text style={[styles.posChipText, selected && styles.posChipTextSel]}>
+        {pos}
+      </Text>
+    </Pressable>
+  );
+}
+
 export default function ShopOffersStrip({ leagueId, asset, onClose, onToast }: Props) {
   const [mode, setMode] = useState<ShopMode>('tier_up');
   const [index, setIndex] = useState(0);
@@ -168,21 +251,98 @@ export default function ShopOffersStrip({ leagueId, asset, onClose, onToast }: P
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [pagerW, setPagerW] = useState(0);
   const listRef = useRef<FlatList<AssetIdea>>(null);
+  const queryClient = useQueryClient();
+
+  // ── W2: the Same-value position multi-select (R-10/R-11/R-12) ─────────
+  // Multi-select posture on purpose: spike S-2 measured single-position
+  // selections empty 30–60% of the time, but 89–97% of pins find a lateral
+  // at SOME other position — the chips are checkboxes, not radios.
+  const [positions, setPositions] = useState<Set<SwapPos>>(new Set());
+  // The settled selection key: sorted so {RB,TE} and {TE,RB} share a cache
+  // row, debounced so a chip flurry coalesces into ONE fetch. A picker
+  // change refetches; a mode change does NOT (all three groups arrive in
+  // one response — the rev-1 `swapKey` spec, lld-delta.md §4.3).
+  const swapKey = useMemo(() => [...positions].sort().join('+'), [positions]);
+  const debouncedSwapKey = useDebounced(swapKey, SWAP_SETTLE_MS);
+
+  // #360 — a position the user is AVOIDING is never offered as a chip
+  // (lld-delta.md §3.5 client rule; the server enforces the same outcome
+  // at pool construction either way). Same query key as TradesScreen's
+  // prefsQuery, so this reads the warm cache and adds no request; the flag
+  // is dark today (`trade.avoid_positions` false), making this latent.
+  const avoidOn = useFlag('trade.avoid_positions');
+  const prefsQuery = useQuery({
+    queryKey: ['league-prefs', leagueId],
+    queryFn: () => getLeaguePreferences(leagueId),
+    staleTime: 5 * 60_000,
+    enabled: avoidOn,
+  });
+  const avoided = useMemo(
+    () =>
+      new Set(
+        (avoidOn ? prefsQuery.data?.avoid_positions ?? [] : []).map((p) =>
+          String(p).toUpperCase(),
+        ),
+      ),
+    [avoidOn, prefsQuery.data],
+  );
+  const pinPos = String(asset.position || '').toUpperCase();
+  // A pick pseudo-asset pin runs pure value bands server-side and IGNORES
+  // swap_positions (spike S-2 — pick pins already return cross-position
+  // laterals), so the picker renders only for a real-position pin: dead
+  // chips that change nothing would be worse than no chips.
+  const pickerApplies = (SWAP_POSITIONS as readonly string[]).includes(pinPos);
+  const offeredPositions = SWAP_POSITIONS.filter(
+    (p) => p !== pinPos && !avoided.has(p),
+  );
+  // Mockup D7 — a silently shortened row and a bug look identical, so an
+  // avoid-omitted chip gets one chalk-faint line of explanation.
+  const avoidOmitted = SWAP_POSITIONS.filter(
+    (p) => p !== pinPos && avoided.has(p),
+  );
 
   const ideasQuery = useQuery({
     // Same query/key pattern as TradesScreen's `assetIdeasQuery`; distinct
     // key ('shop-ideas') so shopping never evicts the single-pin panel's
-    // cache entry.
-    queryKey: ['shop-ideas', leagueId, asset.id],
+    // cache entry. The settled swap key is the fourth element ('' = no
+    // selection), so every selection owns its own cache row.
+    queryKey: ['shop-ideas', leagueId, asset.id, debouncedSwapKey],
     queryFn: () =>
       fetchAssetIdeas({
         league_id: leagueId,
         asset_id: asset.id,
         direction: 'give',
+        // W2 (lld-delta.md §2.4) — the key is OMITTED, never sent as
+        // undefined/[], when nothing is selected: the no-selection request
+        // stays byte-identical to W1 (and to the flag-off state) over the
+        // wire. One or more chips ⇒ the settled tokens go up verbatim.
+        ...(debouncedSwapKey
+          ? { swap_positions: debouncedSwapKey.split('+') }
+          : {}),
       }),
     staleTime: 60_000,
   });
   const groups = ideasQuery.data?.groups;
+
+  // Settled selection as a list, for copy that must describe the DATA on
+  // screen (the fetched payload), not a chip tapped 100ms ago.
+  const settledSelection = useMemo(
+    () => (debouncedSwapKey ? debouncedSwapKey.split('+') : []),
+    [debouncedSwapKey],
+  );
+
+  // Last-known UNFILTERED lateral count, read straight from the
+  // empty-selection cache row (the strip opens with no selection, so it is
+  // nearly always warm). Powers the honest count on the Clear-positions
+  // escape (mockup D10 — the RankImportSheet "Apply N ranks" pattern); when
+  // the row is cold the label simply drops the count, never invents one.
+  const baselineLateralCount =
+    queryClient.getQueryData<AssetIdeasResponse>([
+      'shop-ideas',
+      leagueId,
+      asset.id,
+      '',
+    ])?.groups.lateral.length ?? 0;
 
   // The pager's list AND the `1 / X` counter AND the chip counts all derive
   // from this one shape — locally dismissed tiles excluded everywhere, so
@@ -290,6 +450,20 @@ export default function ShopOffersStrip({ leagueId, asset, onClose, onToast }: P
     jumpToIndexRef.current(0);
   }, [ideasUpdatedAt]);
 
+  // W2 — `shop_positions_selected` fires when a selection change SETTLES
+  // into a fetch (the debounced key committing is exactly that moment; a
+  // 4-tap flurry emits once). COUNT ONLY, never the set — the taxonomy's
+  // closed prop set is {n}; the selected positions are user preference
+  // data (lld-delta.md §8). The initial '' key matches the ref's initial
+  // value, so nothing fires on mount; clearing back to '' fires n: 0.
+  const lastTrackedSwapKeyRef = useRef('');
+  useEffect(() => {
+    if (debouncedSwapKey === lastTrackedSwapKeyRef.current) return;
+    lastTrackedSwapKeyRef.current = debouncedSwapKey;
+    const n = debouncedSwapKey ? debouncedSwapKey.split('+').length : 0;
+    track('shop_positions_selected', { n }, 'Trades');
+  }, [debouncedSwapKey]);
+
   // ── Like: the calculator's ✓, verbatim (ruling A) ─────────────────────
   async function handleLike(idea: AssetIdea) {
     const key = assetIdeaKey(idea);
@@ -329,6 +503,29 @@ export default function ShopOffersStrip({ leagueId, asset, onClose, onToast }: P
     setMode(m);
     jumpToIndex(0);
     track('shop_mode_selected', { mode: m, n_ideas: visibleByMode[m].length }, 'Trades');
+  }
+
+  // W2 — a selection change IS a refetch (once it settles), so it goes
+  // through the same R-9 contract as a mode change: flush the held dismiss
+  // NOW, at tap time — never let it race the debounce window. The settled
+  // key then lands in the ideasUpdatedAt effect above like any fresh
+  // payload (reset removals, rewind pager).
+  function handleTogglePosition(p: SwapPos) {
+    haptics.selection();
+    flushPendingDismiss();
+    setPositions((prev) => {
+      const next = new Set(prev);
+      if (next.has(p)) next.delete(p);
+      else next.add(p);
+      return next;
+    });
+  }
+
+  // The empty state's escape (mockup D10): back to the shipped
+  // same-position laterals in one tap.
+  function clearPositions() {
+    flushPendingDismiss();
+    setPositions(new Set());
   }
 
   const shown = Math.min(index + 1, visibleIdeas.length);
@@ -385,6 +582,41 @@ export default function ShopOffersStrip({ leagueId, asset, onClose, onToast }: P
         })}
       </View>
 
+      {/* W2 (R-10) — the position multi-select lives INSIDE the Same-value
+          pane only (chips for tier up/down would claim a filter the server
+          never applies — R-11). Mounted outside the loading/empty ternary
+          so the user's chips stay visible while a re-sweep is in flight. */}
+      {mode === 'same_value' && pickerApplies ? (
+        <View style={styles.picker} testID="shop.picker">
+          <View style={styles.pickerRow}>
+            {offeredPositions.map((p) => (
+              <SwapPosChip
+                key={p}
+                pos={p}
+                selected={positions.has(p)}
+                onPress={() => handleTogglePosition(p)}
+              />
+            ))}
+          </View>
+          <Text style={[type.bodySm, styles.pickerHint]}>
+            {positions.size === 0
+              ? `Positions offered back · ${pinPos} is where he plays — leave all clear for same-position swaps`
+              : `Ideas come back at ${humanList([...positions].sort(), 'and')}.`}
+          </Text>
+          {avoidOmitted.length > 0 ? (
+            // Mockup D7 — an omitted chip and a bug look identical without
+            // this line (#360 latent: `trade.avoid_positions` ships dark).
+            <Text style={[type.bodySm, styles.pickerHint]}>
+              {`${humanList(avoidOmitted, 'and')} ${
+                avoidOmitted.length > 1 ? "aren't" : "isn't"
+              } offered — you're avoiding ${
+                avoidOmitted.length > 1 ? 'those positions' : avoidOmitted[0]
+              } in this league.`}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
       {ideasQuery.isLoading ? (
         <View style={styles.loadingRow}>
           <ActivityIndicator color={chalk.dim} size="small" />
@@ -403,19 +635,62 @@ export default function ShopOffersStrip({ leagueId, asset, onClose, onToast }: P
           />
         </View>
       ) : visibleIdeas.length === 0 ? (
-        // R-15 — honest empty, named per mode; the second line renders only
-        // when it is TRUE (another mode actually has offers).
-        <View style={styles.empty} testID="shop.empty">
-          <Text style={[type.body, styles.emptyHead]}>{EMPTY_HEAD[mode]}</Text>
-          <Text style={[type.bodySm, styles.emptyBody]}>
-            {emptyBody(mode, asset.name)}
-          </Text>
-          {SHOP_MODES.some((m) => m !== mode && visibleByMode[m].length > 0) ? (
-            <Text style={[type.bodySm, styles.emptyHint]}>
-              The other modes have offers — the counts on the chips are live.
+        mode === 'same_value' && settledSelection.length > 0 ? (
+          // W2 (R-15 + mockup D10/D11) — the FILTERED empty is first-class,
+          // not an edge: spike S-2 measured single-position selections empty
+          // 30–60% of the time. Name the selection, say why in one plain
+          // sentence, and hand over the real escapes: clear the positions
+          // (with the baseline count when the unfiltered payload can vouch
+          // for it) or switch mode (live counts on the chips above).
+          <View style={styles.empty} testID="shop.empty">
+            <Text style={[type.body, styles.emptyHead]}>
+              {`Nothing at ${humanList(settledSelection, 'or')}`}
             </Text>
-          ) : null}
-        </View>
+            <Text style={[type.bodySm, styles.emptyBody]}>
+              {`No same-value offer for ${asset.name} comes back at ${humanList(
+                settledSelection,
+                'or',
+              )} right now.`}
+            </Text>
+            <Text style={[type.bodySm, styles.emptyHint]}>
+              A same-value offer has to land close to his value and leave both
+              rosters better off — across a position line that window is
+              narrow, so an empty answer here is normal, not a failure.
+            </Text>
+            <Button
+              testID="shop.clear-positions"
+              label={
+                baselineLateralCount > 0
+                  ? `Clear positions — ${baselineLateralCount} at ${pinPos}`
+                  : 'Clear positions'
+              }
+              variant="ghost"
+              compact
+              onPress={clearPositions}
+            />
+            {SHOP_MODES.some((m) => m !== mode && visibleByMode[m].length > 0) ? (
+              <Text style={[type.bodySm, styles.emptyHint]}>
+                The other modes have offers — the counts on the chips are live.
+              </Text>
+            ) : null}
+          </View>
+        ) : (
+          // R-15 — honest empty, named per mode; the second line renders
+          // only when it is TRUE (another mode actually has offers). No
+          // Clear-positions button here: nothing is selected to clear, and
+          // a dead control is worse than none (mockup D11).
+          <View style={styles.empty} testID="shop.empty">
+            <Text style={[type.body, styles.emptyHead]}>{EMPTY_HEAD[mode]}</Text>
+            <Text style={[type.bodySm, styles.emptyBody]}>
+              {emptyBody(mode, asset.name)}
+            </Text>
+            {SHOP_MODES.some((m) => m !== mode && visibleByMode[m].length > 0) ? (
+              <Text style={[type.bodySm, styles.emptyHint]}>
+                The other modes have offers — the counts on the chips are live.
+              </Text>
+            ) : null}
+          </View>
+        )
       ) : (
         <>
           {/* R-5 — `1 / X` from the SAME array the pager renders. Chalk-dim
@@ -648,6 +923,26 @@ const styles = StyleSheet.create({
   modeChipText: { ...type.label, color: chalk.dim },
   modeChipTextActive: { color: chalk.base },
   modeChipCount: { ...type.label, color: chalk.faint },
+  // W2 picker — chips follow the DnaToggle (ptb) construction from
+  // TradeDnaSheet, compacted to the strip's 36px control height.
+  picker: { gap: space.xs },
+  pickerRow: { flexDirection: 'row', gap: space.xs },
+  posChip: {
+    flex: 1,
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    borderColor: ink.lineStrong,
+    paddingHorizontal: 2,
+  },
+  posChipDot: { width: 7, height: 7, borderRadius: radii.xs },
+  posChipText: { ...type.bodySm, color: chalk.base, fontFamily: fonts.uiSemi },
+  posChipTextSel: { color: ice.on, fontFamily: fonts.uiBold },
+  pickerHint: { color: chalk.faint },
   loadingRow: {
     flexDirection: 'row',
     alignItems: 'center',
