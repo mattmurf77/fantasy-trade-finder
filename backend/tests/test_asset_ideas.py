@@ -402,6 +402,147 @@ def test_receive_direction_position_locked():
     assert [i["give_player_ids"] for i in groups["lateral"]] == [["G_lat"]]
 
 
+# ── #403 W2 — swap_positions (lateral-only predicate replacement) ─────────
+#
+# `swap_positions` REPLACES the #198 same-position predicate for the LATERAL
+# group only; `upgrade` and `downgrade` are byte-identical under every value
+# of the field, and absent/None/[] is byte-identical to today. Invalid tokens
+# are a 400 at the route, never a silent drop.
+
+def test_swap_positions_absent_is_identical():
+    """Absent, None and [] all reproduce today's behavior exactly — asserted
+    against the SAME expected shapes the pre-#403 tests pin, not fresh
+    snapshots."""
+    base = _give_ideas()
+    assert _give_ideas(swap_positions=None) == base
+    assert _give_ideas(swap_positions=[]) == base
+    # The pre-#403 expected shapes still hold on the equal objects.
+    assert [i["receive_player_ids"] for i in base["lateral"]] == [["L"]]
+    assert [i["receive_player_ids"] for i in base["upgrade"]] == [["U"]]
+    # Receive direction, same three-way identity.
+    rbase = _recv_ideas()
+    assert _recv_ideas(swap_positions=None) == rbase
+    assert _recv_ideas(swap_positions=[]) == rbase
+    assert [i["give_player_ids"] for i in rbase["lateral"]] == [["G_lat"]]
+
+
+def test_swap_positions_present_changes_lateral():
+    """RB pin + swap_positions=["WR"]: the in-band WR (WL) fills lateral and
+    the pin's OWN position is excluded unless selected (replacement, not a
+    filter). Selecting both returns both."""
+    svc, elos = _cross_pos_service()
+    kw = dict(user_id="user", user_roster=["P", "S1"], league_id="L1",
+              seed_elo=dict(elos), asset_id="P", direction="give",
+              fairness_threshold=0.50, raw_user_elo=dict(elos))
+    wr_only = svc.generate_asset_ideas(**kw, swap_positions=["WR"])
+    assert [i["receive_player_ids"] for i in wr_only["lateral"]] == [["WL"]]
+    both = svc.generate_asset_ideas(**kw, swap_positions=["RB", "WR"])
+    got = {tuple(i["receive_player_ids"]) for i in both["lateral"]}
+    assert got == {("L",), ("WL",)}
+    # Selecting only the pin's own position ≡ the #198 default.
+    rb_only = svc.generate_asset_ideas(**kw, swap_positions=["RB"])
+    assert rb_only == svc.generate_asset_ideas(**kw)
+
+
+def test_swap_positions_does_not_widen_upgrade_or_downgrade():
+    """The higher-value WR (XW) never becomes an 'upgrade' for the RB pin,
+    and the downgrade group is untouched, under every value of the field."""
+    svc, elos = _cross_pos_service()
+    kw = dict(user_id="user", user_roster=["P", "S1"], league_id="L1",
+              seed_elo=dict(elos), asset_id="P", direction="give",
+              fairness_threshold=0.50, raw_user_elo=dict(elos))
+    base = svc.generate_asset_ideas(**kw)
+    for swap in (["WR"], ["RB", "WR"], ["QB", "RB", "WR", "TE"]):
+        groups = svc.generate_asset_ideas(**kw, swap_positions=swap)
+        assert groups["upgrade"] == base["upgrade"]      # RB-only, verbatim
+        assert groups["downgrade"] == base["downgrade"]
+        for idea in groups["upgrade"]:
+            assert "XW" not in idea["receive_player_ids"]
+
+
+def test_swap_positions_receive_direction_mirror():
+    """Receive mirror: swap widens the user's lateral GIVE side only; the
+    tier-up headliner stays position-locked (WU never headlines)."""
+    elos = {**RECV_ELO, "WU": 1650.0, "WLat": 1690.0}
+    players = {pid: _Player(pid) for pid in RECV_ELO}
+    players["WU"] = _Player("WU", position="WR")
+    players["WLat"] = _Player("WLat", position="WR")
+    owner = LeagueMember(user_id="opp2", username="Owner",
+                         roster=["T", "E"], elo_ratings={})
+    svc = TradeService(players=players)
+    svc.add_league(League(league_id="L1", name="T", platform="demo",
+                          members=[owner]))
+    kw = dict(user_id="user",
+              user_roster=["G_up", "G2", "G_lat", "G_down", "WU", "WLat"],
+              league_id="L1", seed_elo=dict(elos), asset_id="T",
+              direction="receive", fairness_threshold=0.50,
+              raw_user_elo=dict(elos))
+    groups = svc.generate_asset_ideas(**kw, swap_positions=["WR"])
+    assert [i["give_player_ids"] for i in groups["lateral"]] == [["WLat"]]
+    base = svc.generate_asset_ideas(**kw)
+    assert groups["upgrade"] == base["upgrade"]
+    assert groups["downgrade"] == base["downgrade"]
+    for idea in groups["upgrade"]:
+        assert idea["give_player_ids"][0] not in ("WU", "WLat")
+
+
+def test_relaxed_refill_never_widens_positions():
+    """The #189 refill widens the FAIRNESS band only: at a strict 0.75
+    threshold the upgrade group refills relaxed — and is still RB-only even
+    with swap_positions selecting WR (lateral is where the set applies)."""
+    svc, elos = _cross_pos_service()
+    groups = svc.generate_asset_ideas(
+        user_id="user", user_roster=["P", "S1"], league_id="L1",
+        seed_elo=dict(elos), asset_id="P", direction="give",
+        fairness_threshold=0.75, raw_user_elo=dict(elos),
+        swap_positions=["RB", "WR"])
+    assert [i["receive_player_ids"] for i in groups["upgrade"]] == [["U"]]
+    assert groups["upgrade"][0]["relaxed"] is True
+    for idea in groups["upgrade"]:
+        assert "XW" not in idea["receive_player_ids"]
+
+
+def test_avoided_position_beats_swap_selection():
+    """#360 × #403 — an avoided position wins structurally (excluded at
+    pool-build), producing an honest empty lateral, never a silent
+    override."""
+    svc, elos = _cross_pos_service()
+    kw = dict(user_id="user", user_roster=["P", "S1"], league_id="L1",
+              seed_elo=dict(elos), asset_id="P", direction="give",
+              fairness_threshold=0.50, raw_user_elo=dict(elos))
+    with_wr = svc.generate_asset_ideas(**kw, swap_positions=["WR"])
+    assert [i["receive_player_ids"] for i in with_wr["lateral"]] == [["WL"]]
+    avoided = svc.generate_asset_ideas(**kw, swap_positions=["WR"],
+                                       avoid_positions=["WR"])
+    assert avoided["lateral"] == []
+    for g in avoided.values():
+        for idea in g:
+            assert "WL" not in idea["receive_player_ids"]
+            assert "XW" not in idea["receive_player_ids"]
+
+
+def test_swap_positions_ignored_for_pick_pin():
+    """A PICK pin has pos_constrained False — pure value bands already —
+    so swap_positions changes nothing."""
+    elos = {"PK": 1560.0, "S1": 1610.0, "U": 1700.0, "L": 1570.0}
+    players = {
+        "PK": _Player("PK", position="PICK"),
+        "S1": _Player("S1"),
+        "U":  _Player("U", position="WR"),
+        "L":  _Player("L", position="QB"),
+    }
+    opp = LeagueMember(user_id="opp", username="OppTeam",
+                       roster=["U", "L"], elo_ratings={})
+    svc = TradeService(players=players)
+    svc.add_league(League(league_id="L1", name="T", platform="demo",
+                          members=[opp]))
+    kw = dict(user_id="user", user_roster=["PK", "S1"], league_id="L1",
+              seed_elo=dict(elos), asset_id="PK", direction="give",
+              fairness_threshold=0.50, raw_user_elo=dict(elos))
+    assert (svc.generate_asset_ideas(**kw, swap_positions=["WR"])
+            == svc.generate_asset_ideas(**kw))
+
+
 # ── #250 — Specific-Team scope (opponent_user_id) ─────────────────────────
 
 def _two_opponent_service():
@@ -593,6 +734,72 @@ def test_route_validation(route_client):
     assert _post(route_client,
                  {"asset_id": "P", "direction": "sideways"}).status_code == 400
     assert _post(route_client, {"asset_id": "zzz"}).status_code == 404
+
+
+# ── #403 W2 — route validation for swap_positions ─────────────────────────
+
+def test_route_swap_positions_omitted_null_empty_identical(route_client):
+    """Absent, null and [] produce byte-identical 200 responses (R-11)."""
+    ff._flags_cache = {**ff.DEFAULT_FLAGS, "trade.asset_ideas": True}
+    plain = _post(route_client, {"asset_id": "P", "direction": "give"})
+    as_null = _post(route_client, {"asset_id": "P", "direction": "give",
+                                   "swap_positions": None})
+    as_empty = _post(route_client, {"asset_id": "P", "direction": "give",
+                                    "swap_positions": []})
+    assert plain.status_code == as_null.status_code == as_empty.status_code == 200
+    assert plain.get_json() == as_null.get_json() == as_empty.get_json()
+
+
+def test_route_threads_swap_positions(route_client):
+    """The field reaches the generator: the give fixture's league is
+    all-RB, so selecting WR empties lateral (honest empty) while
+    upgrade/downgrade stay verbatim; selecting the pin's own position
+    reproduces the plain response."""
+    ff._flags_cache = {**ff.DEFAULT_FLAGS, "trade.asset_ideas": True}
+    plain = _post(route_client,
+                  {"asset_id": "P", "direction": "give"}).get_json()
+    wr = _post(route_client, {"asset_id": "P", "direction": "give",
+                              "swap_positions": ["WR"]})
+    assert wr.status_code == 200, wr.get_json()
+    wr_groups = wr.get_json()["groups"]
+    assert wr_groups["lateral"] == []
+    assert wr_groups["upgrade"] == plain["groups"]["upgrade"]
+    assert wr_groups["downgrade"] == plain["groups"]["downgrade"]
+    rb = _post(route_client, {"asset_id": "P", "direction": "give",
+                              "swap_positions": ["RB"]})
+    assert rb.get_json()["groups"] == plain["groups"]
+    # Normalization: strip+upper and first-seen dedupe.
+    messy = _post(route_client, {"asset_id": "P", "direction": "give",
+                                 "swap_positions": [" rb ", "RB", "rb"]})
+    assert messy.status_code == 200
+    assert messy.get_json()["groups"] == plain["groups"]
+
+
+@pytest.mark.parametrize("swap,status,err,value", [
+    (["K"],           400, "invalid_position", "K"),
+    (["PICK"],        400, "invalid_position", "PICK"),      # rejected on
+                                                             # purpose — see
+                                                             # the route
+    (["QB", "FLEX"],  400, "invalid_position", "FLEX"),
+    ([1],             400, "invalid_position", "1"),
+    ([None],          400, "invalid_position", "None"),
+    ("RB",            400, "swap_positions must be an array", None),
+    (True,            400, "swap_positions must be an array", None),
+    ({"pos": "RB"},   400, "swap_positions must be an array", None),
+    ([" rb "],        200, None, None),      # must-succeed leg (R-12)
+])
+def test_invalid_position_is_400(route_client, swap, status, err, value):
+    """R-12 — invalid positions are a named 400, never a silent empty;
+    " rb " normalizes to RB and succeeds."""
+    ff._flags_cache = {**ff.DEFAULT_FLAGS, "trade.asset_ideas": True}
+    r = _post(route_client, {"asset_id": "P", "direction": "give",
+                             "swap_positions": swap})
+    assert r.status_code == status, r.get_json()
+    if err is not None:
+        body = r.get_json()
+        assert body["error"] == err
+        if value is not None:
+            assert body["value"] == value
 
 
 # ── #286 — balanced mix under the PRODUCTION-DEFAULT stud-tax mode ────────
