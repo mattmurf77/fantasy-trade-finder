@@ -12050,11 +12050,34 @@ def asset_trade_ideas():
                                  this one league-mate — every idea's
                                  counterparty is that member; a receive pin
                                  owned by anyone else returns empty groups)
-      swap_positions?: [str]    (#403 W2 — replaces the #198 same-position
-                                 predicate for the LATERAL group only;
-                                 upgrade/downgrade never affected. Domain
-                                 {QB,RB,WR,TE}; absent/null/[] = today's
-                                 behavior; invalid tokens are a 400)
+      swap_positions?: [str]    (#403 W2, widened by #402 rev-3 §2, forked
+                                 by QA-B F1 — replaces the #198
+                                 same-position predicate. Reach depends on
+                                 the request shape: with lateral_scope
+                                 PRESENT in the body (any valid value —
+                                 the rev-3 client always sends it) it
+                                 constrains EVERY group's incoming
+                                 headline piece; with lateral_scope absent
+                                 (every pre-rev-3 caller, v1.16.9's
+                                 Same-value-only picker included) it
+                                 filters the LATERAL group only —
+                                 byte-identical to the v1.16.9 deploy.
+                                 Domain {QB,RB,WR,TE}; absent/null/[]
+                                 = today's behavior for all three groups;
+                                 invalid tokens are a 400)
+      lateral_scope?: "band"|"tier"  (#402 rev-3 §3 — absent = "band"
+                                 semantics = today for every existing
+                                 caller (but see swap_positions above:
+                                 the field's PRESENCE is the rev-3
+                                 request signature). "tier":
+                                 the LATERAL group is every counterpart on
+                                 the pin's rung of the 8-tier ladder
+                                 (ranking_service.tier_for_elo) instead of
+                                 the ±band, with the #108 gain gates and
+                                 the fairness floor removed for that group
+                                 only — tier-mates, not band-mates; the
+                                 card's verdict still prices each idea.
+                                 Invalid values are a named 400)
     }
 
     Response: {
@@ -12070,6 +12093,11 @@ def asset_trade_ideas():
     untouchables / not-interested, fairness band); a group that would be
     empty refills from the widened #189 band, labeled `relaxed`. 404 when
     the flag is off.
+
+    #402 rev-3 QA-B F2 — the D-067 dismiss cooldown binds this route too:
+    ideas whose (give-set, receive-set) key matches a live dismiss
+    ("pass", pass_cooldown_days window) for the caller are excluded from
+    every group, under either lateral_scope. Likes never exclude here.
     """
     if not is_enabled("trade.asset_ideas"):
         return jsonify({"error": "not found"}), 404
@@ -12090,8 +12118,14 @@ def asset_trade_ideas():
         return jsonify({"error": "asset_id required"}), 400
     if direction not in ("give", "receive"):
         return jsonify({"error": "direction must be 'give' or 'receive'"}), 400
-    # #403 W2 — swap_positions replaces the #198 same-position predicate for
-    # the LATERAL group only (upgrade/downgrade are never affected). Absent,
+    # #403 W2 / #402 rev-3 §2 + QA-B F1 — swap_positions replaces the #198
+    # same-position predicate; its REACH is conditional on the request
+    # shape: with `lateral_scope` present in the body (the rev-3 client
+    # always sends it) the set constrains EVERY group's headline piece;
+    # absent (every pre-rev-3 caller, the fielded v1.16.9 inline strip
+    # included) it filters the LATERAL group only — byte-identical to the
+    # v1.16.9 deploy, because that client sends swap_positions from a
+    # picker whose UI promised Same-value-only. Absent,
     # null or [] means "no selection" and is byte-identical to today. Invalid
     # tokens are a 400, never a silent drop: unlike the persisted #360
     # avoid_positions preference (where dropping preserves the user's other
@@ -12118,6 +12152,25 @@ def asset_trade_ideas():
             if _norm not in _swap_norm:      # dedupe, first-seen order
                 _swap_norm.append(_norm)
         swap_positions = _swap_norm or None  # [] = "no selection"
+    # #402 rev-3 §3 — lateral_scope: "band" (default; today's ±band lateral
+    # semantics for every existing caller, the single-pin panel included —
+    # the scoping ruling in rulings-2026-08-28b §R-4) | "tier" (the shop
+    # client always sends it: the lateral group becomes the pin's tier-mates
+    # per ranking_service.tier_for_elo, with the #108 gain gates and the
+    # fairness floor removed for that group only — a user-facing semantics
+    # change the card's verdict prices honestly). Anything else is a named
+    # 400, same honesty rule as swap_positions above: a silently-defaulted
+    # scope looks exactly like a toggle that did nothing.
+    #
+    # QA-B F1 — None (absent/null) is passed through AS None, not defaulted
+    # to "band": the field's PRESENCE is the rev-3 request signature that
+    # unlocks swap_positions' all-groups reach in the generator (see the
+    # comment above). Behavior is otherwise identical — the generator
+    # treats None as band scope.
+    lateral_scope = body.get("lateral_scope")
+    if lateral_scope is not None and lateral_scope not in ("band", "tier"):
+        return jsonify({"error": "invalid_lateral_scope",
+                        "value": repr(lateral_scope)[:32]}), 400
     # Same wide-net default as pinned generate jobs.
     fairness_threshold = float(body.get("fairness_threshold", 0.50))
 
@@ -12200,7 +12253,9 @@ def asset_trade_ideas():
         untouchable_ids    = untouchable_ids or None,
         not_interested_ids = not_interested_ids or None,
         avoid_positions    = avoid_positions or None,      # #360
-        swap_positions     = swap_positions,               # #403 W2
+        swap_positions     = swap_positions,               # #403 W2 / rev-3 §2
+        lateral_scope      = lateral_scope,                # #402 rev-3 §3
+        scoring_format     = fmt,                          # tier bucketing
         opponent_user_id   = opponent_user_id,
     )
 
@@ -12679,9 +12734,16 @@ def swipe_trade():
                 if trade_service is not None and trade_service not in _svcs:
                     _svcs.append(trade_service)
                 for _svc in _svcs:
-                    keys = getattr(_svc, "_past_decision_keys", None)
-                    if keys is not None:
-                        keys.add(_dismiss_key)
+                    # #402 rev-3 QA-B F2 — the dismiss ALSO binds the
+                    # pass-only subset the asset-ideas sweep consults, so a
+                    # package dismissed in the shop is gone from the very
+                    # next asset-ideas fetch (D-067: "the cooldown binds
+                    # every live service immediately"), not just the deck.
+                    for _attr in ("_past_decision_keys",
+                                  "_dismissed_decision_keys"):
+                        keys = getattr(_svc, _attr, None)
+                        if keys is not None:
+                            keys.add(_dismiss_key)
             except Exception as _mem_err:
                 log.warning("dismiss cooldown: in-memory update skipped: %s",
                             _mem_err)
@@ -18982,6 +19044,12 @@ def session_init():
     # matured into a match/awaiting is already excluded windowlessly by #336's
     # R4, so this window only covers likes the counterparty never reciprocated.
     past_decision_keys: set = set()
+    # #402 rev-3 QA-B F2 — the pass-only subset (same keys, dismisses only,
+    # already pass_cooldown_days-windowed by the loop below). The deck path
+    # keeps consulting the mixed set; generate_asset_ideas consults ONLY
+    # this one, because there a like is a queued proposal, never a
+    # suppression. One shared set object across formats, like its parent.
+    past_pass_keys: set = set()
     try:
         pass_days = float(_deck_cfg("pass_cooldown_days", 14.0))
         like_days = 7.0
@@ -19014,7 +19082,8 @@ def session_init():
                 pass  # unparseable stamp ⇒ keep excluding (fail closed)
             key = (frozenset(td["give_player_ids"]), frozenset(td["receive_player_ids"]))
             past_decision_keys.add(key)
-            if td.get("decision") == "pass":
+            if is_pass:
+                past_pass_keys.add(key)     # QA-B F2 — asset-ideas subset
                 n_pass += 1
             else:
                 n_like += 1
@@ -19031,7 +19100,9 @@ def session_init():
     for fmt in DB_SCORING_FORMATS:
         fmt_pool, _ = _get_universal_pool(fmt)
         fmt_players_dict = {p.id: p for p in fmt_pool}
-        tsvc = TradeService(players=fmt_players_dict, past_decision_keys=past_decision_keys)
+        tsvc = TradeService(players=fmt_players_dict,
+                            past_decision_keys=past_decision_keys,
+                            dismissed_keys=past_pass_keys)   # QA-B F2
         tsvc.add_league(new_league)
         new_trade_svcs[fmt] = tsvc
 
@@ -20242,11 +20313,20 @@ def _build_replenish_session(user_id: str, league_id: str) -> str | None:
 
         # 7-day deck memory, same as session_init.
         past_decision_keys: set = set()
+        # QA-B F2 — the pass-only subset asset-ideas consults (this path's
+        # sessions serve deck jobs, but the exclusion travels with the
+        # service either way). Cut from the same 7-day query this path has
+        # always used — a narrower window than session_init's 14-day
+        # pass_cooldown_days cut, a pre-existing gap of this builder.
+        past_pass_keys: set = set()
         try:
             for td in load_trade_decisions(user_id=user_id,
                                            league_id=league_id, since_days=7):
-                past_decision_keys.add((frozenset(td["give_player_ids"]),
-                                        frozenset(td["receive_player_ids"])))
+                _k = (frozenset(td["give_player_ids"]),
+                      frozenset(td["receive_player_ids"]))
+                past_decision_keys.add(_k)
+                if td.get("decision") == "pass":
+                    past_pass_keys.add(_k)
         except Exception:
             pass
 
@@ -20256,7 +20336,8 @@ def _build_replenish_session(user_id: str, league_id: str) -> str | None:
             fmt = DEFAULT_SCORING
         fmt_pool, _ = _get_universal_pool(fmt)
         tsvc = TradeService(players={p.id: p for p in fmt_pool},
-                            past_decision_keys=past_decision_keys)
+                            past_decision_keys=past_decision_keys,
+                            dismissed_keys=past_pass_keys)   # QA-B F2
         tsvc.add_league(league)
 
         payload.update({

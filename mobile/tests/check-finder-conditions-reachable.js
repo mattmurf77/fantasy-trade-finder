@@ -11,13 +11,26 @@
 // could stay green while a variant/flag conjunct re-stranded a cohort (the
 // original #394 failure mode). The core assertion here is a WHITELIST:
 // the row's render condition must EQUAL
-//   consolidateOn && !outlookReceiptShown && !firstRun
+//   consolidateOn && !outlookReceiptShown && !firstRun && canvasHost !== 'flag'
 // — nothing added, nothing dropped. Any extra conjunct (showInlineHome,
 // homeInlineVariant !== 'control', outlookDirectionOn, presentationV2On,
 // any derived boolean) turns this red WITHOUT being named, and each of the
-// three whitelisted predicates has a verified covering surface when false
-// (legacy Controls Card row / the receipt itself / the first-run banner+
-// next-mount latch), which is what makes the Filters-button removal safe.
+// four whitelisted predicates has a verified covering surface when it
+// suppresses the row (legacy Controls Card row / the receipt itself / the
+// first-run banner+next-mount latch / the hosted calculator's own
+// `calc.outlook-row` section), which is what makes the Filters-button
+// removal safe.
+//
+// The fourth conjunct is T-1 of the merged-view trim (operator ruling
+// 2026-08-28, docs/feedback/items/402-more-offers-shop/merged-view-trim-
+// 2026-08-28.md): when `calc.inline_home`'s flag path hosts the inline
+// calculator on the guided landing, that calculator carries its own outlook
+// section (OutlookBiasReceipt or its `calc.outlook-fallback` twin, each
+// with a Change control into its own TradeDnaSheet), and this row rendering
+// too was the operator's "duplicate outlook bar". It is the HOST
+// (`canvasHost !== 'flag'`), not the bare flag: flag-on team/player deck
+// modes mount no calculator, and `!inlineHomeOn` there would re-strand
+// them — the exact defect this guard exists to catch.
 //
 // Run: node tests/check-finder-conditions-reachable.js
 'use strict';
@@ -110,17 +123,20 @@ let rowSpan = null; // saved for assertion 4
       'must be the literal inline conditional so it stays auditable.');
   } else {
     const norm = m[1].replace(/[()\s]+/g, '');
-    const want = 'consolidateOn&&!outlookReceiptShown&&!firstRun';
+    const want = "consolidateOn&&!outlookReceiptShown&&!firstRun&&canvasHost!=='flag'";
     if (norm !== want) {
       bad('2. row gate equals the whitelist',
         `row condition is \`${m[1].trim()}\` — the gate must EQUAL ` +
-        '`consolidateOn && !outlookReceiptShown && !firstRun`, nothing ' +
-        'added, nothing dropped. An added conjunct (showInlineHome, ' +
+        "`consolidateOn && !outlookReceiptShown && !firstRun && canvasHost !== 'flag'`, " +
+        'nothing added, nothing dropped. An added conjunct (showInlineHome, ' +
         "homeInlineVariant !== 'control', outlookDirectionOn, or any " +
         'derived boolean) re-strands a cohort with the Filters button ' +
-        'already deleted; a dropped one double-renders or hits first-run.');
+        'already deleted; a dropped one double-renders, hits first-run, or ' +
+        "— for the canvasHost conjunct — re-renders the operator's " +
+        '"duplicate outlook bar" beside the hosted calculator (T-1, ruling ' +
+        '2026-08-28).');
     } else {
-      ok('2. row gate equals `consolidateOn && !outlookReceiptShown && !firstRun`');
+      ok("2. row gate equals `consolidateOn && !outlookReceiptShown && !firstRun && canvasHost !== 'flag'`");
       // Extract the true-branch span (the row's JSX) for assertion 4.
       const openIdx = screen.indexOf('(', m.index + m[0].indexOf('?'));
       const end = spanFrom(screen, openIdx);

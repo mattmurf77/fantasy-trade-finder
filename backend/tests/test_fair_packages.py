@@ -435,3 +435,12 @@ def test_both_surfaces_use_the_one_gate_function():
         assert "package_value_v2(" not in src, who
         assert "filler_ok(" not in src, who
         assert "user_gain_ok_1for1(" not in src, who
+    # QA-B F4 hardening — `price_consensus_package` is the SANCTIONED
+    # gate-free entry (asset-ideas' tier-scope laterals price without the
+    # gate set, by rev-3 §3 design). Fair-packages has no such carve-out:
+    # every idea it returns is gated, so the pricing half appearing in its
+    # impl would be a silent gate bypass, exactly the drift this test
+    # exists to catch.
+    assert "price_consensus_package(" not in fair_src, "fair-packages"
+    assert "price_consensus_package(" in ideas_src, \
+        "asset-ideas' tier-scope lateral pricing rides the shared pricing half"

@@ -209,16 +209,39 @@ assert(/merged \? null : <Button label="Clear trade"/.test(calc),
   '12. the legacy Clear button is suppressed in the merged layout',
   'both the action-row Clear and the ghost Clear would render');
 
-// 13 — the scoring-format control survived the merge. The #166/#167 session
-// override is the one thing on this page that changes what every value MEANS;
-// dropping it silently is a worse regression than any layout shift.
+// 13 — the scoring-format control survived the merge ON THE PUSHED PAGE.
+// The #166/#167 session override is the one thing on this page that changes
+// what every value MEANS; dropping it silently is a worse regression than
+// any layout shift (#384 W1 dropped it; W5 restored it on review §11).
+//
+// RE-KEYED HOST-AWARE 2026-08-28 (merged-view trim T-3, operator ruling in
+// docs/feedback/items/402-more-offers-shop/merged-view-trim-2026-08-28.md):
+// having seen the live merged page, the operator ruled the chips OFF the
+// inline-hosted calculator. The mechanism is a host prop
+// (`hideFormatChips`), NOT a flag read, precisely so this assertion's
+// original claim stays true where it matters: every mount that does not
+// pass the prop — the pushed page above all — keeps its chips exactly as
+// today. 13c/13d pin the component half; the host half (TradesScreen →
+// TradeBuildCanvas threading) is check-inline-home.js 11d–f.
 assert(/calc\.merged-format\./.test(calc) && /setFormatChoice\(f\.key\)/.test(calc),
-  '13. the merged header renders the scoring-format chips',
+  '13. the merged header renders the scoring-format chips (pushed page)',
   'the merged branch dropped them entirely — no way to override the detected format');
 {
   const at = calc.indexOf('calc.merged-format.');
   assert(at >= 0 && !flagOffSource.includes('calc.merged-format.'),
     '13b. the merged format chips render only behind the flag');
+  // 13c — the chips AND the #191 note sit inside ONE `{!hideFormatChips ?`
+  // gate within the merged branch: chips shown with the note dropped (or
+  // vice versa) would decouple the override from its honesty line.
+  const gateAt = calc.indexOf('{!hideFormatChips ? (');
+  assert(gateAt >= 0 && gateAt < at
+    && calc.indexOf('values converted to {FORMAT_LABEL[format]}') > gateAt,
+    '13c. chips + #191 note are host-gated together on `!hideFormatChips`',
+    'the inline host must be able to drop BOTH (T-3), and only both');
+  assert(/hideFormatChips = false,/.test(calc) && /hideFormatChips\?: boolean/.test(calc),
+    '13d. the host prop is optional and defaults FALSE',
+    'a default of true silently strips the pushed page\'s chips — the exact '
+    + 'regression review §11 caught in W1');
 }
 assert(/values converted to \{FORMAT_LABEL\[format\]\}/.test(calc),
   '14. the #191 cross-format conversion note is kept in the merged layout',

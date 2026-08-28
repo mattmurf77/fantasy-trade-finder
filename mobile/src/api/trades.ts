@@ -391,14 +391,26 @@ export async function fetchAssetIdeas(body: {
   // #250 — Specific Team mode: scope the sweep to this league-mate so every
   // idea's counterparty (and its acquire side) is that team.
   opponent_user_id?: string;
-  // #403 W2 — replaces the #198 same-position predicate for the `lateral`
-  // group ONLY (upgrade/downgrade are byte-identical under every value of
-  // this field). Uppercase tokens from {QB,RB,WR,TE}; the server 400s
-  // anything else, including "PICK". The key must be OMITTED — never sent
-  // as undefined or [] — when the user has selected nothing, so the
-  // no-selection request body stays byte-identical to today over the wire
-  // (lld-delta.md §2.4; `api.post` forwards this object verbatim).
+  // #403 W2, widened by rev-3 (rev3-spec.md §2) — when present, constrains
+  // ALL THREE groups: the lateral swap position, and the incoming headline
+  // piece's position for upgrade/downgrade. Uppercase tokens from
+  // {QB,RB,WR,TE}; the server 400s anything else, including "PICK". The
+  // key must be OMITTED — never sent as undefined or [] — when the user
+  // has selected nothing, so the no-selection request body stays
+  // byte-identical to today over the wire (lld-delta.md §2.4; `api.post`
+  // forwards this object verbatim; absent ⇒ all three groups behave
+  // exactly as before rev-3).
   swap_positions?: string[];
+  // #402/#403 rev-3 (rev3-spec.md §3) — how wide the `lateral` group's
+  // pool is. "band" (the default when omitted — every pre-rev-3 caller,
+  // including the single-pin panel, keeps it by not sending the field) =
+  // the ±10% fairness band + the #108 gain gate, exactly as today. "tier"
+  // = every asset in the pinned asset's tier of the 8-tier valuation
+  // ladder (`tier_for_elo` / tier_config.json); the band and the gain gate
+  // do NOT apply. The shop client ALWAYS sends "tier" (operator ruling
+  // R-2026-08-28b-4: "present all players in the same tier of pick
+  // valuations rather than the fairness gate").
+  lateral_scope?: 'band' | 'tier';
 }): Promise<AssetIdeasResponse> {
   const res = await api.post<any>('/api/trades/asset-ideas', body);
   const g = res?.groups ?? {};

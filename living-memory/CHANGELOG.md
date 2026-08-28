@@ -14,6 +14,16 @@
 
 
 
+## 2026-08-28d — v1.16.10: the shop becomes a window; the merged page gets trimmed; tour gate ships
+
+The day's second ship: shop re-hosted as a pushed window with back navigation (operator
+surprise ruling), position filters on all three modes with tier-based Same value and
+auto-widen, the scoped tour gate that lets guide_v2 re-light after rollout, the operator's
+merged-view trim (one outlook bar, one primary, no format chips inline), and the QA-B fix
+round — headlined by the field-client compat fork that keeps v1.16.9 phones semantically
+untouched by the new backend, and D-067 cooldown compliance on asset-ideas so dismissals
+finally stick server-side. Two-reviewer QA both rounds; every confirmed finding fixed.
+
 ## 2026-08-28f — Tip jar: money with no entitlement (operator request)
 
 "Can users donate?" → yes, as guideline-3.1.1 tip-jar consumables, built same-day under the iap-enablement scope (addendum in its scope.md). Three SKUs `ftf_tip_199/499/999` served in `/api/paywall/config` `tips[]`; new `TipJarScreen` modal (Chalkline, `settings-tip-row` entry on both settings surfaces, same double self-guard as the paywall, **no** Restore/auto-renew copy — consumables carry neither) purchasing via `getProducts`/`purchaseStoreProduct` through the same single SDK seam. **The load-bearing piece is the backend guard**: RevenueCat delivers consumables as activating event types, so without `entitlements.is_tip_product()` short-circuiting the projector, the default `apple_iap → pro` mapping would have granted every tipper Pro — the guard stores the event to the ledger (`process_error` = "tip: no entitlement (by design)") and writes nothing, proven by a red-then-green sabotage. The screen keeps the same promise client-side: no entitlement-store usage, copy says a tip unlocks nothing (both pinned by `check-tipjar.js`, 9 assertions). Events reuse the `paywall_*` taxonomy (`source: 'tip_jar'`). Same flag, still dark. Operator: create the three SKUs as **Consumable** in ASC, attach to no RevenueCat entitlement; checklist step 10b covers the sandbox pass.

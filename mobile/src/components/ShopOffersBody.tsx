@@ -46,55 +46,74 @@ import {
 } from '../utils/shopMode';
 import type { Player, TradeCard } from '../shared/types';
 
-// #402/#403 — the inline shop strip (lld-delta.md §0.3, rulings 2026-08-27).
+// #402/#403 — the shop window's body (rev3-spec.md §1, superseding the
+// inline strip of lld-delta.md §0.3; rulings-2026-08-28b.md R-2).
 //
 // "Shop a player" IS what the deck's give-side "More offers" button does:
-// TradesScreen mounts this strip directly below the top deck card while
-// shopping is open (no pushed screen, no route — the deck stays put and its
-// like/pass pan is disabled by the host, §0.4). Three mode chips (Tier up /
-// Tier down / Same value — R-13 vocabulary, tier labels read from the shipped
-// TRADE_INTENT_LABEL so the DNA sheet and this strip can never diverge) select
-// one group of the existing `POST /api/trades/asset-ideas` response
-// (direction 'give'; W2 adds the position multi-select inside the Same-value
-// pane, sent as `swap_positions` and OMITTED when nothing is selected); a
-// `FlatList horizontal pagingEnabled` pages the tiles — deliberately NO `Gesture.Pan`,
-// no `PanResponder`, no react-native-gesture-handler import (HLD D-2: the
-// pager must never arbitrate with the deck's pan, so it isn't a pan at all).
+// TradesScreen NAVIGATES to `ShopAssetScreen` (a root-stack push), whose
+// body this component is. The deck underneath was never touched — the
+// native back header returns to it and nothing restores because nothing
+// moved. The inline era's pan gating / deck-holds-still machinery is gone
+// with the inline mount (rev3-spec §1's delete list); what this file keeps
+// is the internals that were always right: three mode chips (Tier up /
+// Tier down / Same value — R-13 vocabulary, tier labels read from the
+// shipped TRADE_INTENT_LABEL so the DNA sheet and this surface can never
+// diverge) selecting one group of the `POST /api/trades/asset-ideas`
+// response (direction 'give'), a `FlatList horizontal pagingEnabled` pager
+// — deliberately NO `Gesture.Pan`, no `PanResponder`, no
+// react-native-gesture-handler import (HLD D-2 held even inline; a plain
+// FlatList stays the simplest correct pager) — the held dismiss + honest
+// Undo + session suppression set, and the honest per-mode empties.
+//
+// Rev-3 §2 (UI half): the position chip row moved to the TOP of the window,
+// ABOVE the mode chips, and applies to whichever mode is active — one
+// shared multi-select selection across modes (switching modes keeps it).
+// The request layer sends `swap_positions` when non-empty (the backend now
+// constrains all three groups with it) and always sends
+// `lateral_scope: "tier"` (rev3-spec §3 — the shop's Same value pool is
+// tier membership, not the ±band).
 //
 // Decisions per tile:
 //   ✓ like    — `queueCalcTrade` → POST /api/trades/queue AS-IS (ruling A:
 //               the like moves the Elo board exactly like the calculator's ✓;
 //               `record_elo` was ruled out). Refusals render the shipped
 //               `queueRefusalLine` copy; `calc_trade_queued` fires with
-//               screen 'Trades'. The HOST owns the Toast mount (`onToast`).
+//               screen 'ShopAsset'. The SCREEN owns the Toast mount
+//               (`onToast` — host = ShopAssetScreen, rev3-spec §1).
 //   ✕ dismiss — full deck-pass semantics via POST /api/trades/swipe
 //               `decision:'pass'`, but the POST is HELD for UNDO_HOLD_MS and
 //               Undo cancels the timer so the request is never sent — the
 //               "Dismissed · Undo" copy is true unconditionally (lld §6).
 //               At most ONE pending dismiss: a second dismiss, a mode
-//               change, a refetch, close or unmount flushes the pending one
-//               first — a disposition is never silently lost. An EARLY
-//               flush (anything but the natural expiry / the Undo itself)
-//               also retracts the "Dismissed · Undo" toast if it is still
-//               on screen (QA B-4): a dead Undo button is never shown.
+//               change, a refetch, or unmount (leaving the screen) flushes
+//               the pending one first — a disposition is never silently
+//               lost. An EARLY flush (anything but the natural expiry / the
+//               Undo itself) also retracts the "Dismissed · Undo" toast if
+//               it is still on screen (QA B-4): a dead Undo button is never
+//               shown.
 //
-// NO FeedbackFAB here: TradesScreen is a tab screen covered by the global
-// mount in RootNav (#188); a second FAB is the #196/#197 double-FAB bug.
+// NO FeedbackFAB in this component: `ShopAssetScreen` (the root-stack push)
+// mounts the one FAB the window gets (#188) — a second mount here would be
+// the #196/#197 double-FAB bug in new clothes.
 
 // Same value as the three shipped precedents (TradesScreen.tsx,
 // MatchesScreen.tsx, TradeCalculatorScreen.tsx): how long the dismiss POST
 // is held (and the Undo toast shown) before committing.
 const UNDO_HOLD_MS = 5000;
 
-// W2 — the swap-position chip domain: exactly the server's VALID_POSITIONS
-// (R-12). "PICK" is deliberately absent — the server 400s it (the lateral
-// predicate reads raw `position`, which generic pick rungs fake; see the
-// route comment at server.py:12095). The pin's OWN position IS offered as a
-// chip like any other (ruling R-2026-08-28-B, lld-delta.md §3.4 row 4):
-// "WR laterals plus RB laterals" must be expressible. Empty selection keeps
-// its meaning — same-position swaps, field omitted — and selecting ONLY the
-// own position sends swap_positions:[own], server-equivalent to the default
-// (consistent on purpose, not a special case).
+// The position-filter chip domain: exactly the server's VALID_POSITIONS
+// (R-12). "PICK" is deliberately absent — the server 400s it (the filter
+// predicates read raw `position`, which generic pick rungs fake; see the
+// route comment in server.py). The pin's OWN position IS offered as a chip
+// like any other (ruling R-2026-08-28-B): "WR laterals plus RB laterals"
+// must be expressible. Rev-3 §2: the row now filters ALL THREE modes — for
+// the tier modes a selection means "the incoming headline piece plays one
+// of these", for Same value it is the swap position. Empty selection keeps
+// each mode's DEFAULT — upgrade/downgrade at his own position (today's
+// #198 behavior, byte-identical request: the key is omitted), Same value
+// at his own position under the tier scope, auto-widening to all offerable
+// positions with a visible notice when that sweep answers zero (rev3 §2 +
+// §4a operator ruling — see the widen block below).
 const SWAP_POSITIONS = ['QB', 'RB', 'WR', 'TE'] as const;
 type SwapPos = (typeof SWAP_POSITIONS)[number];
 
@@ -118,7 +137,7 @@ function humanList(ps: readonly string[], conj: 'and' | 'or'): string {
   return `${ps.slice(0, -1).join(', ')} ${conj} ${ps[ps.length - 1]}`;
 }
 
-/** Toast descriptor the host renders — the strip owns no Toast mount.
+/** Toast descriptor the screen renders — the body owns no Toast mount.
  *  Subsumes §0.3's `onQueued` (queue results) plus the dismiss-undo toast. */
 export interface ShopToast extends QueueToast {
   holdMs?: number;
@@ -129,16 +148,14 @@ interface Props {
   leagueId: string;
   /** The shopped give-side asset (player or pick pseudo-asset). */
   asset: Player;
-  /** ✕ in the strip header. Close = unmount; the deck never moved, so
-   *  nothing restores. */
-  onClose: () => void;
-  /** Host-owned toast mount (queue outcomes + the Dismissed·Undo toast). */
+  /** Screen-owned toast mount (queue outcomes + the Dismissed·Undo toast).
+   *  Host = ShopAssetScreen (rev3-spec §1 — the window owns its Toast). */
   onToast: (t: ShopToast) => void;
-  /** QA B-4 — retract ONE toast this strip issued, IF it is still the one
-   *  on screen. The host compares by reference (`cur === t`) so a newer
+  /** QA B-4 — retract ONE toast this body issued, IF it is still the one
+   *  on screen. The screen compares by reference (`cur === t`) so a newer
    *  toast that already replaced it is never clobbered. Called only when a
    *  held dismiss commits EARLY (mode chip, position toggle, clear, fresh
-   *  payload, close/unmount) while its Undo toast may still be showing. */
+   *  payload, unmount) while its Undo toast may still be showing. */
   onToastRetract: (t: ShopToast) => void;
 }
 
@@ -170,7 +187,28 @@ function emptyBody(mode: ShopMode, name: string): string {
   if (mode === 'tier_down') {
     return 'Nobody in this league holds a cheaper piece that still makes the trade worth your while under the fairness rules.';
   }
-  return `No like-for-like swap for ${name} clears the fairness band right now.`;
+  // Rev-3 §3 — Same value is TIER membership now (lateral_scope:"tier"),
+  // so the honest empty names the tier, not the retired fairness band.
+  return `Nobody in this league holds a piece in ${name}'s tier that works for both rosters right now.`;
+}
+
+// Rev-3 §2 — the FILTERED empty, per mode: a selection is live and the
+// active mode has nothing at it. Named per mode because the filter MEANS
+// something different per mode (incoming headline piece vs swap position).
+function filteredEmptyBody(mode: ShopMode, name: string, sel: string): string {
+  if (mode === 'tier_up') {
+    return `No tier-up offer for ${name} brings back ${sel} right now.`;
+  }
+  if (mode === 'tier_down') {
+    return `No tier-down offer for ${name} brings back ${sel} right now.`;
+  }
+  return `No same-value offer for ${name} comes back at ${sel} right now.`;
+}
+function filteredEmptyHint(mode: ShopMode, name: string): string {
+  if (mode === 'same_value') {
+    return `A same-value offer comes from ${name}'s tier of the valuation ladder — at a specific position that pool can be empty, which is normal, not a failure.`;
+  }
+  return 'Offers here still have to clear the fairness rules — an empty answer at a specific position is normal, not a failure.';
 }
 
 function sideLabel(players: Player[]): string {
@@ -207,7 +245,7 @@ function TileSide({ label, players }: { label: string; players: Player[] }) {
   );
 }
 
-// W2 — one swap-position chip. The DnaToggle construction from TradeDnaSheet
+// One position-filter chip. The DnaToggle construction from TradeDnaSheet
 // (the app's SHIPPED selected-position-chip pattern — Chasing/Shopping/
 // Avoiding rows): selected = solid position-color fill + check glyph + bold
 // on-ice text; unselected = hairline chip with the position-color dot. NOT
@@ -229,7 +267,7 @@ function SwapPosChip({
       testID={`shop.pos.${pos}`}
       accessibilityRole="checkbox"
       accessibilityState={{ checked: selected }}
-      accessibilityLabel={`Offer ${pos} back`}
+      accessibilityLabel={`Offers bringing back ${pos}`}
       onPress={onPress}
       style={({ pressed }) => [
         styles.posChip,
@@ -252,10 +290,9 @@ function SwapPosChip({
   );
 }
 
-export default function ShopOffersStrip({
+export default function ShopOffersBody({
   leagueId,
   asset,
-  onClose,
   onToast,
   onToastRetract,
 }: Props) {
@@ -268,18 +305,24 @@ export default function ShopOffersStrip({
   const [locallyRemoved, setLocallyRemoved] = useState<Set<string>>(new Set());
   // Fix A (rulings 2026-08-28 R-A — B-3 + P-2, ONE mechanism).
   // UNIVERSAL RULE: a COMMITTED dismissal is client-authoritative for the
-  // strip session. Keys enter this set only when a held dismiss COMMITS
+  // shop session. Keys enter this set only when a held dismiss COMMITS
   // (never while merely pending — that's `locallyRemoved` above), and
   // NOTHING clears it: not dataUpdatedAt, not a warm cache row on a
   // selection switch, not a racing refetch, not a fresh payload. It dies
-  // only with the strip instance — close/unmount, including the host's
-  // `key={asset.id}` remount (a new shop session starts clean; the server
-  // dismiss-cooldown is authoritative across sessions). An UNDONE dismiss
-  // never enters: Undo nulls `pendingDismissRef` and cancels the timer
-  // before any flush path can reach `commitDismiss`, so the key never
-  // leaves `locallyRemoved` for here. The one subtraction is the
-  // commit-failure path in `commitDismiss`, where the server never
-  // recorded the pass and honesty requires the tile back.
+  // only with this instance — i.e. with the pushed ShopAssetScreen: back
+  // navigation unmounts it, and every "More offers" tap pushes a fresh
+  // screen, so a new shop session starts clean. Cross-session memory is
+  // the SERVER's: each committed ✕ posts a real deck pass, and asset-ideas
+  // consults the D-067 dismiss-cooldown when building its pools (QA-B
+  // backend fix 2, 2026-08-28 — landed this round), so the next fetch
+  // simply doesn't offer a recently dismissed idea. This set only bridges
+  // the in-instance gap between a commit and that next fetch. An UNDONE
+  // dismiss never enters:
+  // Undo nulls `pendingDismissRef` and cancels the timer before any flush
+  // path can reach `commitDismiss`, so the key never leaves
+  // `locallyRemoved` for here. The one subtraction is the commit-failure
+  // path in `commitDismiss`, where the server never recorded the pass and
+  // honesty requires the tile back.
   const [suppressed, setSuppressed] = useState<Set<string>>(new Set());
   // Per-idea in-flight guard for the ✓ — disables the pair while queueing.
   const [busyKey, setBusyKey] = useState<string | null>(null);
@@ -287,15 +330,18 @@ export default function ShopOffersStrip({
   const listRef = useRef<FlatList<AssetIdea>>(null);
   const queryClient = useQueryClient();
 
-  // ── W2: the Same-value position multi-select (R-10/R-11/R-12) ─────────
+  // ── Rev-3 §2: the shared position multi-select (all modes) ────────────
   // Multi-select posture on purpose: spike S-2 measured single-position
   // selections empty 30–60% of the time, but 89–97% of pins find a lateral
-  // at SOME other position — the chips are checkboxes, not radios.
+  // at SOME other position — the chips are checkboxes, not radios. ONE
+  // selection state shared across modes: switching modes keeps it (rev3
+  // §2 — "Selection is one state shared across modes").
   const [positions, setPositions] = useState<Set<SwapPos>>(new Set());
   // The settled selection key: sorted so {RB,TE} and {TE,RB} share a cache
   // row, debounced so a chip flurry coalesces into ONE fetch. A picker
   // change refetches; a mode change does NOT (all three groups arrive in
-  // one response — the rev-1 `swapKey` spec, lld-delta.md §4.3).
+  // one response, each filtered server-side by the same `swap_positions` —
+  // rev3 §2's backend half).
   const swapKey = useMemo(() => [...positions].sort().join('+'), [positions]);
   const debouncedSwapKey = useDebounced(swapKey, SWAP_SETTLE_MS);
 
@@ -323,7 +369,7 @@ export default function ShopOffersStrip({
   const pinPos = String(asset.position || '').toUpperCase();
   // A pick pseudo-asset pin runs pure value bands server-side and IGNORES
   // swap_positions (spike S-2 — pick pins already return cross-position
-  // laterals), so the picker renders only for a real-position pin: dead
+  // ideas), so the filter row renders only for a real-position pin: dead
   // chips that change nothing would be worse than no chips.
   const pickerApplies = (SWAP_POSITIONS as readonly string[]).includes(pinPos);
   // Ruling R-2026-08-28-B ("Offer it"): the pin's own position is in the
@@ -345,17 +391,88 @@ export default function ShopOffersStrip({
         league_id: leagueId,
         asset_id: asset.id,
         direction: 'give',
-        // W2 (lld-delta.md §2.4) — the key is OMITTED, never sent as
-        // undefined/[], when nothing is selected: the no-selection request
-        // stays byte-identical to W1 (and to the flag-off state) over the
-        // wire. One or more chips ⇒ the settled tokens go up verbatim.
+        // Rev-3 §3 — the shop client ALWAYS sends the tier scope: the Same
+        // value pool is tier membership, not the ±band. Unconditional on
+        // purpose (never keyed to the active mode or the selection): the
+        // single-pin panel and every other caller keep the "band" default
+        // by not sending the field at all.
+        lateral_scope: 'tier',
+        // The key is OMITTED, never sent as undefined/[], when nothing is
+        // selected: the no-selection request stays byte-identical to the
+        // shipped defaults over the wire (lld-delta.md §2.4; each mode's
+        // default is his own position — rev3 §2). One or more chips ⇒ the
+        // settled tokens go up verbatim and the server filters all three
+        // groups with them.
         ...(debouncedSwapKey
           ? { swap_positions: debouncedSwapKey.split('+') }
           : {}),
       }),
     staleTime: 60_000,
   });
-  const groups = ideasQuery.data?.groups;
+
+  // ── Rev-3 §2 auto-widen on zero (OPERATOR-RULED 2026-08-28, §4a) ──────
+  // The Same value EMPTY-selection default is "own position, auto-widen on
+  // zero": when the own-position tier sweep comes back with ZERO laterals
+  // (the SERVER's raw answer — dismissals don't count; a user who cleared
+  // the pool sees the honest empty, never a silent widen), the client
+  // re-requests with ALL offerable positions and says so in a visible
+  // notice line (the mockup-D7 honest-notice pattern — never a silent
+  // widen). An EXPLICIT chip selection disables this entirely (the enabled
+  // gate requires the settled key to be empty — user selections always
+  // win); clearing back to empty re-enables it. Client-side only: the
+  // widened request just sends the full offerable set, sorted like
+  // `swapKey` so it SHARES a cache row with the same explicit selection.
+  // Only the LATERAL group is swapped in below — the tier modes keep their
+  // own-position default from the base payload (rev3 §2's per-mode
+  // defaults), and the suppression set + dismiss semantics apply to
+  // widened tiles through the same `visibleByMode` filter as everything
+  // else.
+  const widenKey = useMemo(
+    () => [...offeredPositions].sort().join('+'),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [avoided],
+  );
+  const widenEligible =
+    debouncedSwapKey === '' &&
+    pickerApplies &&
+    widenKey !== '' &&
+    ideasQuery.isSuccess &&
+    (ideasQuery.data?.groups.lateral.length ?? 0) === 0;
+  const widenedQuery = useQuery({
+    queryKey: ['shop-ideas', leagueId, asset.id, widenKey],
+    queryFn: () =>
+      fetchAssetIdeas({
+        league_id: leagueId,
+        asset_id: asset.id,
+        direction: 'give',
+        lateral_scope: 'tier',
+        swap_positions: widenKey.split('+'),
+      }),
+    staleTime: 60_000,
+    enabled: widenEligible,
+  });
+  // QA-B plausible 6 (2026-08-28) — ONE derivation for the widen seam:
+  // the notice flag and the composed groups are two fields of a single
+  // memo snapshot, so "showing all positions" and the tiles it describes
+  // can never be computed from differently-composed state. `widenShowing`
+  // is no longer an independently-derived boolean — it IS a field of what
+  // the pager renders. Residual (accepted): the base row and the widened
+  // row are still two cache entries that refetch on their own clocks; the
+  // snapshot guarantees the UI reads ONE consistent view of them per
+  // render, not that the rows themselves share an age.
+  const rendered = useMemo(() => {
+    const base = ideasQuery.data?.groups;
+    if (!base || !widenEligible || !widenedQuery.data) {
+      return { groups: base, widenShowing: false };
+    }
+    // Lateral ONLY — upgrade/downgrade keep the own-position default.
+    return {
+      groups: { ...base, lateral: widenedQuery.data.groups.lateral },
+      widenShowing: true,
+    };
+  }, [ideasQuery.data, widenEligible, widenedQuery.data]);
+  const groups = rendered.groups;
+  const widenShowing = rendered.widenShowing;
 
   // Settled selection as a list, for copy that must describe the DATA on
   // screen (the fetched payload), not a chip tapped 100ms ago.
@@ -364,21 +481,21 @@ export default function ShopOffersStrip({
     [debouncedSwapKey],
   );
 
-  // Last-known unfiltered-SELECTION lateral count, read straight from the
-  // empty-selection cache row (the strip opens with no selection, so it is
-  // nearly always warm). Powers the honest count on the Clear-positions
-  // escape (mockup D10 — the RankImportSheet "Apply N ranks" pattern); when
-  // the row is cold the label simply drops the count, never invents one.
-  // Fix A rider: the count runs through the SAME pending-removal +
-  // suppression filter as the pager, so the "Clear positions — N at X"
-  // label never counts a just-dismissed tile (QA reviewer nit).
-  const baselineLateralCount = (
+  // Last-known unfiltered-SELECTION count for the ACTIVE mode, read straight
+  // from the empty-selection cache row (the window opens with no selection,
+  // so it is nearly always warm). Powers the honest count on the
+  // Clear-positions escape (mockup D10 — the RankImportSheet "Apply N ranks"
+  // pattern); when the row is cold the label simply drops the count, never
+  // invents one. Fix A rider: the count runs through the SAME
+  // pending-removal + suppression filter as the pager, so the
+  // "Clear positions — N at X" label never counts a just-dismissed tile.
+  const baselineModeCount = (
     queryClient.getQueryData<AssetIdeasResponse>([
       'shop-ideas',
       leagueId,
       asset.id,
       '',
-    ])?.groups.lateral ?? []
+    ])?.groups[SHOP_MODE_GROUP[mode]] ?? []
   ).filter((i) => {
     const k = assetIdeaKey(i);
     return !locallyRemoved.has(k) && !suppressed.has(k);
@@ -401,23 +518,23 @@ export default function ShopOffersStrip({
   }, [groups, locallyRemoved, suppressed]);
   const visibleIdeas = visibleByMode[mode];
 
-  // ── Dismiss: held POST + true undo (lld-delta.md §6, host renamed) ────
+  // ── Dismiss: held POST + true undo (lld-delta.md §6) ──────────────────
   const pendingDismissRef = useRef<{
     idea: AssetIdea;
     key: string;
     restoreIndex: number;
     timer: ReturnType<typeof setTimeout>;
   } | null>(null);
-  // QA B-4 — the exact "Dismissed · Undo" descriptor the host is (as far as
-  // this strip knows) currently showing for the pending dismiss. Kept so an
-  // early flush can retract it BY REFERENCE; nulled the moment the pending
-  // dismiss resolves any way at all (undo, expiry, early flush).
+  // QA B-4 — the exact "Dismissed · Undo" descriptor the screen is (as far
+  // as this body knows) currently showing for the pending dismiss. Kept so
+  // an early flush can retract it BY REFERENCE; nulled the moment the
+  // pending dismiss resolves any way at all (undo, expiry, early flush).
   const undoToastRef = useRef<ShopToast | null>(null);
 
   function commitDismiss(idea: AssetIdea) {
     const key = assetIdeaKey(idea);
     // Fix A — the commit is the ONE gate into the suppression set: from
-    // here the dismissal is client-authoritative for the strip session
+    // here the dismissal is client-authoritative for the shop session
     // (B-3/P-2), and the pending entry is dropped in the same breath so
     // the two sets stay disjoint (pending vs committed).
     setSuppressed((s) => new Set(s).add(key));
@@ -451,13 +568,14 @@ export default function ShopOffersStrip({
     // QA B-4 — every flush except the natural UNDO_HOLD_MS expiry is an
     // EARLY commit: the "Dismissed · Undo" toast may still be on screen
     // with a now-dead Undo button, so it is retracted at the moment the
-    // affordance dies. Retraction is by reference (the host no-ops when a
-    // NEWER toast already holds the slot — e.g. a ✓ queue success), which
-    // pins the shipped semantic: the commit follows the DISAPPEARANCE of
-    // the Undo affordance. If a later toast replaced it, the affordance is
-    // already gone and the pending dismiss simply keeps its timer until a
-    // flush path (or the expiry) commits it — the harm B-4 names was the
-    // dead button on screen, never the replacement itself.
+    // affordance dies. Retraction is by reference (the screen no-ops when
+    // a NEWER toast already holds the slot — e.g. a ✓ queue success),
+    // which pins the shipped semantic: the commit follows the
+    // DISAPPEARANCE of the Undo affordance. If a later toast replaced it,
+    // the affordance is already gone and the pending dismiss simply keeps
+    // its timer until a flush path (or the expiry) commits it — the harm
+    // B-4 names was the dead button on screen, never the replacement
+    // itself.
     if (!opts?.expired && undoToastRef.current) {
       onToastRetract(undoToastRef.current);
     }
@@ -490,7 +608,7 @@ export default function ShopOffersStrip({
       n.delete(p.key);
       return n;
     });
-    track('shop_dismiss_undone', { mode }, 'Trades');
+    track('shop_dismiss_undone', { mode }, 'ShopAsset');
   }
 
   function handleDismiss(idea: AssetIdea) {
@@ -529,36 +647,49 @@ export default function ShopOffersStrip({
     onToast(undoToast);
   }
 
-  // Close/unmount flushes — leaving the strip ends the undo window; the
-  // disposition must not be silently lost (lld §6.1).
+  // Unmount flushes — leaving the window (back navigation) ends the undo
+  // window; the disposition must not be silently lost (lld §6.1).
   useEffect(() => () => flushPendingDismissRef.current(), []);
 
   // A fresh payload invalidates old idea references: flush any pending
   // dismiss first (R-9), then rewind the pager — via the reactive scroll
   // request, never a direct scroll (P-1). What this effect deliberately
   // does NOT do any more (Fix A): reset the removal/suppression sets. A
-  // committed dismissal is client-authoritative for the strip session, so
+  // committed dismissal is client-authoritative for the shop session, so
   // a dataUpdatedAt tick — warm cache row, racing refetch, fresh payload —
   // must never resurrect it; only Undo (pending) or the commit-failure
   // path restores a tile.
-  const ideasUpdatedAt = ideasQuery.dataUpdatedAt;
+  // QA-B finding 2 (2026-08-28) — RULE: only the tick of the query
+  // actually FEEDING THE RENDERED TILES drives the flush + rewind. The
+  // widen probe runs regardless of mode (reviewer A D5 kept it for the
+  // chip counts), so an unconditional max over both ticks let a widened
+  // payload landing 0.5–2 s after a tier-mode dismiss commit it EARLY
+  // (Undo toast retracted mid-window) and yank that pager to page 1. In
+  // the tier modes and in unwidened Same value the base query alone is
+  // the tick; the widened tick participates only while the widened row is
+  // what the pager renders (same_value + widenShowing) — where its
+  // landing genuinely is a fresh payload for the pager.
+  const ideasUpdatedAt =
+    mode === 'same_value' && widenShowing
+      ? Math.max(ideasQuery.dataUpdatedAt, widenedQuery.dataUpdatedAt)
+      : ideasQuery.dataUpdatedAt;
   useEffect(() => {
     flushPendingDismissRef.current();
     requestPagerScroll(0);
   }, [ideasUpdatedAt]);
 
-  // W2 — `shop_positions_selected` fires when a selection change SETTLES
-  // into a fetch (the debounced key committing is exactly that moment; a
-  // 4-tap flurry emits once). COUNT ONLY, never the set — the taxonomy's
-  // closed prop set is {n}; the selected positions are user preference
-  // data (lld-delta.md §8). The initial '' key matches the ref's initial
-  // value, so nothing fires on mount; clearing back to '' fires n: 0.
+  // `shop_positions_selected` fires when a selection change SETTLES into a
+  // fetch (the debounced key committing is exactly that moment; a 4-tap
+  // flurry emits once). COUNT ONLY, never the set — the taxonomy's closed
+  // prop set is {n}; the selected positions are user preference data
+  // (lld-delta.md §8). The initial '' key matches the ref's initial value,
+  // so nothing fires on mount; clearing back to '' fires n: 0.
   const lastTrackedSwapKeyRef = useRef('');
   useEffect(() => {
     if (debouncedSwapKey === lastTrackedSwapKeyRef.current) return;
     lastTrackedSwapKeyRef.current = debouncedSwapKey;
     const n = debouncedSwapKey ? debouncedSwapKey.split('+').length : 0;
-    track('shop_positions_selected', { n }, 'Trades');
+    track('shop_positions_selected', { n }, 'ShopAsset');
   }, [debouncedSwapKey]);
 
   // ── Like: the calculator's ✓, verbatim (ruling A) ─────────────────────
@@ -575,7 +706,7 @@ export default function ShopOffersStrip({
         },
         giveIds: idea.give_player_ids,
         receiveIds: idea.receive_player_ids,
-        screen: 'Trades',
+        screen: 'ShopAsset',
       });
       onToast(res.toast);
     } finally {
@@ -586,7 +717,7 @@ export default function ShopOffersStrip({
   // ── Pager mechanics ───────────────────────────────────────────────────
   // P-1 UNIVERSAL RULE (rulings 2026-08-28 R-C): the pager position
   // derives from the rendered data — scrolls REACT to data changes, they
-  // never race them. Nothing in the strip calls scrollToOffset at event
+  // never race them. Nothing in the body calls scrollToOffset at event
   // time; every mover (dismiss advance, last-tile undo restore, mode-
   // change rewind, fresh-payload rewind) REQUESTS a target index here and
   // makes its data/state change, and the single effect below performs the
@@ -621,14 +752,16 @@ export default function ShopOffersStrip({
     flushPendingDismiss(); // mode change flushes the pending dismiss (R-9)
     requestPagerScroll(0); // consumed when the new mode's list renders (P-1)
     setMode(m);
-    track('shop_mode_selected', { mode: m, n_ideas: visibleByMode[m].length }, 'Trades');
+    // Rev-3 §2 — deliberately NO setPositions here: the selection is one
+    // state shared across modes, and switching modes keeps it.
+    track('shop_mode_selected', { mode: m, n_ideas: visibleByMode[m].length }, 'ShopAsset');
   }
 
-  // W2 — a selection change IS a refetch (once it settles), so it goes
-  // through the same R-9 contract as a mode change: flush the held dismiss
-  // NOW, at tap time — never let it race the debounce window. The settled
-  // key then lands in the ideasUpdatedAt effect above like any fresh
-  // payload (reset removals, rewind pager).
+  // A selection change IS a refetch (once it settles), so it goes through
+  // the same R-9 contract as a mode change: flush the held dismiss NOW, at
+  // tap time — never let it race the debounce window. The settled key then
+  // lands in the ideasUpdatedAt effect above like any fresh payload
+  // (flush + rewind pager).
   function handleTogglePosition(p: SwapPos) {
     haptics.selection();
     flushPendingDismiss();
@@ -640,8 +773,8 @@ export default function ShopOffersStrip({
     });
   }
 
-  // The empty state's escape (mockup D10): back to the shipped
-  // same-position laterals in one tap.
+  // The empty state's escape (mockup D10): back to each mode's default —
+  // his own position — in one tap.
   function clearPositions() {
     flushPendingDismiss();
     setPositions(new Set());
@@ -650,23 +783,42 @@ export default function ShopOffersStrip({
   const shown = Math.min(index + 1, visibleIdeas.length);
 
   return (
-    <View style={styles.strip} testID="shop.strip">
-      {/* Header: "Shopping {asset}" + close ✕ */}
-      <View style={styles.header}>
-        <View style={styles.headerTitle}>
-          <TickLabel>{`Shopping ${asset.name}`}</TickLabel>
+    <View style={styles.body} testID="shop.body">
+      {/* Rev-3 §2 — the position filter row: TOP of the window, ABOVE the
+          mode chips, applies to whichever mode is active. Mounted outside
+          the loading/empty ternary so the user's chips stay visible while
+          a re-sweep is in flight. Absent for a pick pseudo-asset pin (the
+          server ignores the filter for picks — dead chips would lie). */}
+      {pickerApplies ? (
+        <View style={styles.picker} testID="shop.picker">
+          <View style={styles.pickerRow}>
+            {offeredPositions.map((p) => (
+              <SwapPosChip
+                key={p}
+                pos={p}
+                selected={positions.has(p)}
+                onPress={() => handleTogglePosition(p)}
+              />
+            ))}
+          </View>
+          <Text style={[type.bodySm, styles.pickerHint]}>
+            {positions.size === 0
+              ? `Positions you get back · leave all clear for ${pinPos}`
+              : `Ideas come back at ${humanList([...positions].sort(), 'and')}.`}
+          </Text>
+          {avoidOmitted.length > 0 ? (
+            // Mockup D7 — an omitted chip and a bug look identical without
+            // this line (#360 latent: `trade.avoid_positions` ships dark).
+            <Text style={[type.bodySm, styles.pickerHint]}>
+              {`${humanList(avoidOmitted, 'and')} ${
+                avoidOmitted.length > 1 ? "aren't" : "isn't"
+              } offered — you're avoiding ${
+                avoidOmitted.length > 1 ? 'those positions' : avoidOmitted[0]
+              } in this league.`}
+            </Text>
+          ) : null}
         </View>
-        <Pressable
-          testID="shop.close-btn"
-          onPress={onClose}
-          accessibilityRole="button"
-          accessibilityLabel="Close shop"
-          hitSlop={8}
-          style={({ pressed }) => [styles.closeBtn, pressed && styles.closeBtnPressed]}
-        >
-          <Icon name="x" size={14} color={chalk.dim} />
-        </Pressable>
-      </View>
+      ) : null}
 
       {/* Mode chips — single-select, ice = the active (actionable) one;
           per-mode counts keep an empty mode navigable, not a dead end. */}
@@ -701,42 +853,12 @@ export default function ShopOffersStrip({
         })}
       </View>
 
-      {/* W2 (R-10) — the position multi-select lives INSIDE the Same-value
-          pane only (chips for tier up/down would claim a filter the server
-          never applies — R-11). Mounted outside the loading/empty ternary
-          so the user's chips stay visible while a re-sweep is in flight. */}
-      {mode === 'same_value' && pickerApplies ? (
-        <View style={styles.picker} testID="shop.picker">
-          <View style={styles.pickerRow}>
-            {offeredPositions.map((p) => (
-              <SwapPosChip
-                key={p}
-                pos={p}
-                selected={positions.has(p)}
-                onPress={() => handleTogglePosition(p)}
-              />
-            ))}
-          </View>
-          <Text style={[type.bodySm, styles.pickerHint]}>
-            {positions.size === 0
-              ? `Positions offered back · leave all clear for same-position swaps at ${pinPos}`
-              : `Ideas come back at ${humanList([...positions].sort(), 'and')}.`}
-          </Text>
-          {avoidOmitted.length > 0 ? (
-            // Mockup D7 — an omitted chip and a bug look identical without
-            // this line (#360 latent: `trade.avoid_positions` ships dark).
-            <Text style={[type.bodySm, styles.pickerHint]}>
-              {`${humanList(avoidOmitted, 'and')} ${
-                avoidOmitted.length > 1 ? "aren't" : "isn't"
-              } offered — you're avoiding ${
-                avoidOmitted.length > 1 ? 'those positions' : avoidOmitted[0]
-              } in this league.`}
-            </Text>
-          ) : null}
-        </View>
-      ) : null}
-
-      {ideasQuery.isLoading ? (
+      {ideasQuery.isLoading ||
+      (mode === 'same_value' && widenEligible && widenedQuery.isLoading) ? (
+        // The second arm: the own-position sweep already answered zero and
+        // the auto-widen re-request is in flight — showing the zero for a
+        // beat and then swapping in results would read as a glitch, so the
+        // widened sweep gets the same honest spinner.
         <View style={styles.loadingRow}>
           <ActivityIndicator color={chalk.dim} size="small" />
           <Text style={type.bodySm}>Sweeping rosters…</Text>
@@ -754,33 +876,33 @@ export default function ShopOffersStrip({
           />
         </View>
       ) : visibleIdeas.length === 0 ? (
-        mode === 'same_value' && settledSelection.length > 0 ? (
-          // W2 (R-15 + mockup D10/D11) — the FILTERED empty is first-class,
-          // not an edge: spike S-2 measured single-position selections empty
-          // 30–60% of the time. Name the selection, say why in one plain
-          // sentence, and hand over the real escapes: clear the positions
-          // (with the baseline count when the unfiltered payload can vouch
-          // for it) or switch mode (live counts on the chips above).
+        settledSelection.length > 0 ? (
+          // Rev-3 §2 (R-15 + mockup D10/D11) — the FILTERED empty is
+          // first-class, not an edge, and it exists for EVERY mode now
+          // that the filter applies to every mode: name the selection, say
+          // why in one plain mode-appropriate sentence, and hand over the
+          // real escapes: clear the positions (with the active mode's
+          // baseline count when the unfiltered payload can vouch for it)
+          // or switch mode (live counts on the chips above).
           <View style={styles.empty} testID="shop.empty">
             <Text style={[type.body, styles.emptyHead]}>
               {`Nothing at ${humanList(settledSelection, 'or')}`}
             </Text>
             <Text style={[type.bodySm, styles.emptyBody]}>
-              {`No same-value offer for ${asset.name} comes back at ${humanList(
-                settledSelection,
-                'or',
-              )} right now.`}
+              {filteredEmptyBody(
+                mode,
+                asset.name,
+                humanList(settledSelection, 'or'),
+              )}
             </Text>
             <Text style={[type.bodySm, styles.emptyHint]}>
-              A same-value offer has to land close to his value and leave both
-              rosters better off — across a position line that window is
-              narrow, so an empty answer here is normal, not a failure.
+              {filteredEmptyHint(mode, asset.name)}
             </Text>
             <Button
               testID="shop.clear-positions"
               label={
-                baselineLateralCount > 0
-                  ? `Clear positions — ${baselineLateralCount} at ${pinPos}`
+                baselineModeCount > 0
+                  ? `Clear positions — ${baselineModeCount} at ${pinPos}`
                   : 'Clear positions'
               }
               variant="ghost"
@@ -812,6 +934,19 @@ export default function ShopOffersStrip({
         )
       ) : (
         <>
+          {/* Rev-3 §2 auto-widen — the visible notice (mockup-D7 honest-
+              notice pattern): renders ONLY while the widened laterals are
+              what's on screen (same_value mode, empty selection, widened
+              payload showing) — never for an explicit selection, never in
+              the tier modes. */}
+          {mode === 'same_value' && widenShowing ? (
+            <Text
+              style={[type.bodySm, styles.widenNotice]}
+              testID="shop.widen-notice"
+            >
+              {`Nothing at ${pinPos} — showing all positions`}
+            </Text>
+          ) : null}
           {/* R-5 — `1 / X` from the SAME array the pager renders. Chalk-dim
               label, never flare (informational, but the counter sits inside
               an actionable surface — Ice/Flare division of labor). */}
@@ -921,13 +1056,14 @@ export default function ShopOffersStrip({
   );
 }
 
-// ── "Shop which player?" chooser (lld-delta.md §0.2) ─────────────────────
+// ── "Shop which player?" chooser (lld-delta.md §0.2; entry unchanged in
+// rev-3 — rev3-spec §1 "Entry unchanged") ─────────────────────────────────
 // Give side > 1: a modal bottom sheet — the PlayerContextMenu construction,
-// NEVER navigation (the deck stays mounted underneath). Pick a row → the
-// host opens the strip for that asset through its single strip-open path,
-// which is where `shop_opened` fires with the picked position (P-3: the
-// chooser itself emits nothing — not on open, not on Cancel). No
-// FeedbackFAB (modal exception).
+// NEVER navigation-as-chooser (the deck stays mounted underneath). Pick a
+// row → the host navigates to ShopAssetScreen through its single
+// window-open path, which is where `shop_opened` fires with the picked
+// position (P-3: the chooser itself emits nothing — not on open, not on
+// Cancel). No FeedbackFAB (modal exception).
 export function ShopWhichPlayerSheet({
   visible,
   card,
@@ -994,32 +1130,11 @@ export function ShopWhichPlayerSheet({
 }
 
 const styles = StyleSheet.create({
-  // The strip — a card-like well directly below the deck card (mockup R2·2).
-  strip: {
-    marginTop: space.sm,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: ink.lineStrong,
-    backgroundColor: ink.ink1,
-    padding: space.md,
+  // The window body — the screen provides the page padding; this keeps the
+  // internal rhythm the strip had (mockup R2·2 vocabulary, re-hosted).
+  body: {
     gap: space.sm,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.sm,
-  },
-  headerTitle: { flex: 1, minWidth: 0 },
-  closeBtn: {
-    width: 28,
-    height: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radii.sm,
-    borderWidth: 1,
-    borderColor: ink.line,
-  },
-  closeBtnPressed: { backgroundColor: ink.ink3 },
   modes: {
     flexDirection: 'row',
     gap: space.xs,
@@ -1044,8 +1159,8 @@ const styles = StyleSheet.create({
   modeChipText: { ...type.label, color: chalk.dim },
   modeChipTextActive: { color: chalk.base },
   modeChipCount: { ...type.label, color: chalk.faint },
-  // W2 picker — chips follow the DnaToggle (ptb) construction from
-  // TradeDnaSheet, compacted to the strip's 36px control height.
+  // Filter chips follow the DnaToggle (ptb) construction from
+  // TradeDnaSheet, compacted to the 36px control height.
   picker: { gap: space.xs },
   pickerRow: { flexDirection: 'row', gap: space.xs },
   posChip: {
@@ -1064,6 +1179,10 @@ const styles = StyleSheet.create({
   posChipText: { ...type.bodySm, color: chalk.base, fontFamily: fonts.uiSemi },
   posChipTextSel: { color: ice.on, fontFamily: fonts.uiBold },
   pickerHint: { color: chalk.faint },
+  // The auto-widen notice — chalk-faint informational line (the D7
+  // explanation-line construction), never flare: it explains the data on
+  // screen rather than highlighting a value.
+  widenNotice: { color: chalk.faint },
   loadingRow: {
     flexDirection: 'row',
     alignItems: 'center',

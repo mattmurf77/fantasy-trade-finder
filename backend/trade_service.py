@@ -2022,6 +2022,36 @@ def filler_ok(give_ids: list[str], recv_ids: list[str],
     return True
 
 
+def price_consensus_package(
+    give_ids: list[str],
+    recv_ids: list[str],
+    *,
+    value_of,
+):
+    """The PRICING half of `eval_consensus_package`, gate-free:
+    `package_value_v2` on both sides in the shared value space, nothing
+    else. Returns `(fairness, gv, rv)`, or None when a side prices
+    non-positive.
+
+    Split out of `eval_consensus_package` on 2026-08-28 (#402 rev-3 §3) so
+    the tier-scope lateral path — whose membership rule is tier equality,
+    with the ±band, the #108 gain gates and the fairness floor deliberately
+    removed — still prices ideas through the SAME math as every gated
+    surface instead of re-stating it. `eval_consensus_package` calls this
+    first, so the two can never drift (the one-gate-function guard in
+    test_fair_packages.py is the enforcement)."""
+    gvals = [value_of(p) for p in give_ids]
+    rvals = [value_of(p) for p in recv_ids]
+    v_max = max(gvals + rvals)
+    gv = package_value_v2(gvals, v_max, n_other=len(recv_ids),
+                          other_values=rvals)
+    rv = package_value_v2(rvals, v_max, n_other=len(give_ids),
+                          other_values=gvals)
+    if gv <= 0 or rv <= 0:
+        return None
+    return min(gv, rv) / max(gv, rv), gv, rv
+
+
 def eval_consensus_package(
     give_ids: list[str],
     recv_ids: list[str],
@@ -2050,28 +2080,22 @@ def eval_consensus_package(
     afterwards whether a pass was strict or relaxed, because that split is a
     presentation convention (#189), not a gate.
     """
-    gvals = [value_of(p) for p in give_ids]
-    rvals = [value_of(p) for p in recv_ids]
-    v_max = max(gvals + rvals)
-    gv = package_value_v2(gvals, v_max, n_other=len(recv_ids),
-                          other_values=rvals)
-    rv = package_value_v2(rvals, v_max, n_other=len(give_ids),
-                          other_values=gvals)
-    if gv <= 0 or rv <= 0:
+    priced = price_consensus_package(give_ids, recv_ids, value_of=value_of)
+    if priced is None:
         return None
+    fairness, gv, rv = priced
     # #108 — consensus IS the user's board here (never relaxed).
     if rv - gv < _c("user_gain_epsilon"):
         return None
     frac = _c("consolidation_raw_loss_frac")
     if frac > 0 and len(give_ids) > len(recv_ids):
-        raw_give = sum(gvals)
-        if raw_give - sum(rvals) > frac * raw_give:
+        raw_give = sum(value_of(p) for p in give_ids)
+        if raw_give - sum(value_of(p) for p in recv_ids) > frac * raw_give:
             return None
     if not user_gain_ok_1for1(give_ids, recv_ids, raw_user_elo):
         return None
     if not filler_ok(give_ids, recv_ids, raw_value_of, value_of):
         return None
-    fairness = min(gv, rv) / max(gv, rv)
     if fairness < relaxed_thr:
         return None
     return fairness, gv, rv
@@ -4412,16 +4436,25 @@ class TradeService:
     (Sleeper API etc.). For the demo, leagues are simulated.
     """
 
-    def __init__(self, players: dict, past_decision_keys: set | None = None):
+    def __init__(self, players: dict, past_decision_keys: set | None = None,
+                 dismissed_keys: set | None = None):
         """
         players: { player_id: Player } — full player pool
         past_decision_keys: set of (frozenset(give_ids), frozenset(receive_ids))
             from past trade decisions — used to filter out already-swiped trades.
+        dismissed_keys: the DISMISS ("pass") subset of past_decision_keys,
+            same key derivation, D-067 windowed (pass_cooldown_days) — the
+            only decisions that exclude on the asset-ideas sweep (#402 rev-3
+            QA-B F2: a like is a queued proposal, never a suppression there).
+            The caller shares ONE set object across formats so the swipe
+            route's in-memory bind reaches every service.
         """
         self._players     = players
         self._trade_cards: dict[str, TradeCard] = {}    # trade_id → TradeCard
         self._leagues:     dict[str, League]    = {}    # league_id → League
         self._past_decision_keys = past_decision_keys or set()
+        self._dismissed_decision_keys = (dismissed_keys
+                                         if dismissed_keys is not None else set())
         # G6 presentment rules (flag trade.presentment_rules) — per-job
         # state, reset by every _generate_trades_impl call:
         #   _exclusion_keys — R4 #336 windowless awaiting/matched exclusion
@@ -4994,10 +5027,19 @@ class TradeService:
         not_interested_ids: set | None = None,
         avoid_positions: list[str] | None = None,   # #360 — receive-side
                                                     # positional exclusion
-        swap_positions: list[str] | None = None,    # #403 W2 — replaces the
-                                                    # #198 same-position
-                                                    # predicate for the
-                                                    # `lateral` group ONLY
+        swap_positions: list[str] | None = None,    # #403 W2 / #402 rev-3 §2 —
+                                                    # replaces the #198 same-
+                                                    # position predicate; scope
+                                                    # depends on lateral_scope
+                                                    # presence (QA-B F1, below)
+        lateral_scope: str | None = None,    # #402 rev-3 §3 — None (absent
+                                             # from the request: pre-rev-3
+                                             # caller — band semantics AND the
+                                             # lateral-only swap rule) |
+                                             # "band" | "tier" (lateral =
+                                             # tier-mates)
+        scoring_format: str = "1qb_ppr",     # #402 rev-3 §3 — tier bucketing
+                                             # format for lateral_scope="tier"
         opponent_user_id: str | None = None,  # #250 Specific Team: scope the
                                               # sweep to this one league-mate
     ) -> dict[str, list[dict]]:
@@ -5019,13 +5061,51 @@ class TradeService:
         "same position" doesn't apply — all three groups fall back to pure
         value bands (better picks/value up, band swaps across).
 
-        #403 W2 — `swap_positions` (optional, validated by the route):
-        when non-empty it REPLACES the same-position predicate for the
-        LATERAL group only — lateral counterparts must play a position in
-        the set (the pin's own position included only if selected).
-        `upgrade` and `downgrade` are unaffected under every value of the
-        field; absent/empty is byte-identical to #198. PICK pins ignore it
-        (pos_constrained is False — pure value bands already).
+        #403 W2, widened by #402 rev-3 §2, forked by rev-3 QA-B F1 —
+        `swap_positions` (optional, validated by the route): when
+        non-empty it REPLACES the #198 same-position predicate — but its
+        REACH is keyed on the request shape. `lateral_scope` present
+        (any valid value — the rev-3 client always sends it): the set
+        constrains EVERY group's incoming headline piece (supersedes W2's
+        lateral-only rule / PRD R-11): the upgrade counterpart, the
+        lateral swap, and the downgrade package's headliner (`combo[0]`;
+        the receive-direction mirror constrains the user's variable give
+        piece `g` in all three groups) must play a position in the set —
+        the pin's own position included only if selected. `lateral_scope`
+        absent/None (every pre-rev-3 caller — the shipped v1.16.9 inline
+        strip whose picker promised Same-value-only): the set filters the
+        LATERAL group only; upgrade/downgrade keep #198 byte-identical to
+        the v1.16.9 deploy. Absent/empty `swap_positions` is
+        byte-identical to #198 for all three groups under either shape.
+        PICK pins ignore it (pos_constrained is False — pure value bands
+        already).
+
+        #402 rev-3 QA-B F2 — D-067 dismiss cooldown: ideas whose
+        (frozenset(give), frozenset(receive)) key has a live dismiss
+        cooldown for this user (`self._dismissed_decision_keys` — the
+        "pass" subset of the deck path's `_past_decision_keys`, same key
+        derivation, `pass_cooldown_days` window) are excluded from every
+        group, both directions, both lateral scopes. A LIKE never
+        excludes here: it is a queued proposal, and its deck-side
+        exclusion (#336 R4 / the 7-day like window) stays deck-only.
+        Deliberate consequence: the single-pin panel stops re-serving
+        shop-dismissed packages too — that is D-067 compliance ("the
+        cooldown binds every live service immediately"), not a
+        regression.
+
+        #402 rev-3 §3 — `lateral_scope` (optional, validated by the
+        route): absent/None or `"band"` keeps today's ±band lateral pool
+        (they differ only in the swap_positions reach above);
+        `"tier"` replaces the ±asset_ideas_lateral_band membership AND the
+        #108 gain gates AND the fairness floor for the LATERAL group only
+        with tier equality per `ranking_service.tier_for_elo` — every
+        counterpart on the pin's rung of the 8-tier pick-valuation ladder
+        is returned (still position-filtered, still capped/deduped/
+        ordered, still subject to untouchables / not-interested / #360
+        avoids at pool build). Upgrade and downgrade keep band math
+        byte-identical under either scope. Tier-scope laterals are never
+        labeled `relaxed` — membership is the rule; the card's verdict
+        prices each idea.
 
         direction="give" (pinned asset leaves the user's roster — "what can
         I get for X?"): ideas enumerate the RETURN. A same-position
@@ -5106,19 +5186,105 @@ class TradeService:
         def _same_pos(pid: str) -> bool:
             return getattr(players.get(pid), "position", None) == pin_pos
 
-        # #403 W2 — which counterparts may fill the LATERAL band.
+        # #403 W2 / #402 rev-3 §2 — which counterparts may headline a group.
         _swap = {str(p).upper() for p in (swap_positions or ())}
 
-        def _lateral_pos_ok(pid: str) -> bool:
+        # #402/#403 rev-3 QA-B F1 — the rev-3 client always sends
+        # lateral_scope; its absence identifies a v1.16.9-era request whose
+        # picker UI promised lateral-only. So the rev-3 §2 all-groups
+        # widening is keyed on the request signature: swap_positions
+        # constrains upgrade/downgrade ONLY when lateral_scope was present
+        # in the request (any valid value — the route passes None when the
+        # body omitted it); absent, the set filters the LATERAL group only,
+        # byte-identical to the v1.16.9 deploy, so shipping this backend
+        # cannot silently change Tier up/down for a fielded client holding
+        # a selection.
+        _swap_all_groups = bool(_swap) and lateral_scope is not None
+
+        def _pos_ok(pid: str) -> bool:
             """Empty selection ⇒ #198 verbatim (the pin's own position).
-            Non-empty ⇒ the user's set REPLACES it. Never a filter over
-            _same_pos's results: `lateral` is already hard-locked to the
-            pin's position, so intersecting the two is empty for every
-            position but the pin's — a control that always shows
-            "nothing found"."""
+            Non-empty ⇒ the user's set REPLACES it — always for lateral
+            (that IS the v1.16.9 behavior); for upgrade/downgrade only
+            under the rev-3 request signature (_swap_all_groups — see the
+            QA-B F1 comment above; upgrade/downgrade call _head_ok).
+            Never a filter over _same_pos's results: upgrade/lateral are
+            otherwise hard-locked to the pin's position, so intersecting
+            the two is empty for every position but the pin's — a control
+            that always shows "nothing found"."""
             if not _swap:
                 return _same_pos(pid)
             return getattr(players.get(pid), "position", None) in _swap
+
+        def _head_ok(pid: str) -> bool:
+            """Upgrade-headliner predicate — the QA-B F1 fork: the user's
+            set replaces #198 only on a rev-3-shaped request; an old-shape
+            request keeps the pin's own position, byte-identical."""
+            return _pos_ok(pid) if _swap_all_groups else _same_pos(pid)
+
+        # #402 rev-3 §3 — lateral_scope="tier": the lateral pool is TIER
+        # membership on the 8-tier pick-valuation ladder, not the ±band.
+        _tier_scope = lateral_scope == "tier"
+        if _tier_scope:
+            # Local import, same pattern as the intent filter above —
+            # ranking_service is import-safe here but trade_service loads
+            # before it in some entry paths.
+            from .ranking_service import RankingService
+
+            def _tier_of(pid: str):
+                # #402 rev-3 QA-B F3 — an asset with NO real seed has NO
+                # tier. The 1500.0 default that band math prices at is a
+                # placeholder, not a ranking: bucketing it would land every
+                # seed-missing asset on the 'second' rung and tier scope
+                # would surface default-priced assets the band + #108 gates
+                # used to hide. The spec's own "unranked never matches"
+                # line, extended to seed-missing: None never equals a rung,
+                # so these assets never tier-match (the pin included) while
+                # staying band-eligible exactly as today via _v's default.
+                e = seed_elo.get(pid)
+                if e is None:
+                    return None
+                return RankingService.tier_for_elo(
+                    e,
+                    getattr(players.get(pid), "position", None),
+                    scoring_format)
+
+            # #402 rev-3 §3 — THE EXACT COMPARISON SHIPPED: tier-NAME
+            # equality on the shared ORDERED_TIERS ladder ('firsts_4plus'
+            # … 'waivers'), each asset bucketed by tier_for_elo against
+            # ITS OWN position's bands in the league's scoring format.
+            # The names ARE the spec's tier indices 1..8 — one ordered
+            # ladder shared by every (scoring_format, position) block.
+            # This is sound cross-position because tier_config.json's
+            # bands are pick-value-anchored and byte-identical across all
+            # 8 (format, position) blocks by design ("pick value is
+            # position-uniform by design" — tier_config.json _calibration
+            # + docs/cross-client-invariants.md; verified identical in
+            # the current config on 2026-08-28). And if the bands ever
+            # diverged per position, rung-name equality would STILL be
+            # the honest comparison — the rung of the shared
+            # pick-valuation ladder is what the operator called "the same
+            # tier", not raw ELO overlap. An unranked asset (tier_for_elo
+            # → None, below the waivers floor) has no rung: None never
+            # matches, so an unranked pin has zero tier-mates rather than
+            # "every other unranked asset".
+            _pin_tier = _tier_of(asset_id)
+
+        def _lateral_hit(pid: str, val: float) -> bool:
+            """Lateral-group membership. Band scope = today's ±band on
+            the pin's consensus value; tier scope (#402 rev-3 §3) = same
+            ladder rung as the pin."""
+            if _tier_scope:
+                return _pin_tier is not None and _tier_of(pid) == _pin_tier
+            return lo <= val <= hi
+
+        def _price(give_ids: list[str], recv_ids: list[str]):
+            """#402 rev-3 §3 — pricing WITHOUT the gate set, for
+            tier-scope laterals only: membership (tier equality) is the
+            rule, so the ±band, the #108 gain gates, and the fairness
+            floor do not apply. Rides `price_consensus_package` — the
+            pricing half of the one gate function — so the card's verdict
+            prices these ideas exactly like every gated idea."""
+            return price_consensus_package(give_ids, recv_ids, value_of=_v)
 
         def _eval(give_ids: list[str], recv_ids: list[str]):
             """All non-fairness gates + the WIDENED fairness band. Returns
@@ -5133,12 +5299,40 @@ class TradeService:
                 relaxed_thr   = relaxed_thr,
             )
 
+        # #402 rev-3 QA-B F2 — D-067: the dismiss cooldown binds this sweep
+        # too. Same key derivation as the deck path's _past_decision_keys /
+        # the swipe route's in-memory bind (frozenset(give), frozenset(recv)
+        # in USER orientation — the service instance already scopes user +
+        # league); consulted for every group, both directions, both lateral
+        # scopes — a correctness rule, not a tier feature. Only DISMISSES
+        # ("pass", pass_cooldown_days-windowed at load) live in
+        # _dismissed_decision_keys: a like is a queued proposal and never
+        # suppresses an idea here. Deliberate consequence: the single-pin
+        # panel stops re-serving shop-dismissed packages too — D-067
+        # compliance, not a regression.
+        def _dismissed(give_ids, recv_ids) -> bool:
+            return ((frozenset(give_ids), frozenset(recv_ids))
+                    in self._dismissed_decision_keys)
+
         strict: dict[str, list[dict]] = {"upgrade": [], "lateral": [], "downgrade": []}
         relaxed: dict[str, list[dict]] = {"upgrade": [], "lateral": [], "downgrade": []}
         seen: set[tuple] = set()
 
-        def _emit(member, give_ids, recv_ids, res, group) -> None:
-            key = (frozenset(give_ids), frozenset(recv_ids), member.user_id)
+        def _emit(member, give_ids, recv_ids, res, group, gated=True) -> None:
+            # QA-B F2 backstop — every idea funnels through here; the
+            # _emit_best variant filter and the downgrade combo skip above
+            # exist so a dismissed variant yields its slot to the next-best
+            # instead of silently consuming it.
+            if _dismissed(give_ids, recv_ids):
+                return
+            # Dedupe is GROUP-scoped (#402 rev-3 §3): under band scope the
+            # groups partition the value axis, so adding `group` to the key
+            # is byte-identical; under tier scope a tier-mate above the
+            # band is honestly BOTH an upgrade (band math untouched) and a
+            # lateral tier-mate, and neither group may lose its idea to
+            # the other's earlier emission.
+            key = (frozenset(give_ids), frozenset(recv_ids),
+                   member.user_id, group)
             if key in seen:
                 return
             seen.add(key)
@@ -5153,7 +5347,11 @@ class TradeService:
                 "difference":            round(rv - gv, 1),
                 "fairness":              round(fairness, 3),
             }
-            if fairness >= fairness_threshold:
+            # #402 rev-3 §3 — gated=False is the tier-scope lateral path:
+            # membership (tier equality) is the rule, not fairness, so the
+            # idea is never labeled or suppressed as `relaxed` — the
+            # card's verdict prices it instead.
+            if not gated or fairness >= fairness_threshold:
                 strict[group].append(idea)
             else:
                 idea["relaxed"] = True
@@ -5173,6 +5371,10 @@ class TradeService:
             """variants: [(give_ids, recv_ids, res)]. Emit the best deal —
             strict-band passes over relaxed, then (C2) the fewest pieces among
             near-equivalent fairness, then closest to even."""
+            # QA-B F2 — a dismissed variant is out of the running entirely,
+            # so the next-best variant wins the slot rather than the whole
+            # opponent's idea vanishing with it.
+            variants = [v for v in variants if not _dismissed(v[0], v[1])]
             if not variants:
                 return
             if _min_pkg_band <= 0:
@@ -5228,20 +5430,28 @@ class TradeService:
                     vc = _v(c)
                     # #198 — Upgrade/Lateral counterparts must play the
                     # pin's position (semantic constraint, never relaxed).
-                    # #403 W2 — the shipped single gate covered BOTH bands
-                    # (vc >= lo = lateral ∪ upgrade); it is split by band so
-                    # swap_positions can widen LATERAL without ever touching
-                    # upgrade. Equivalence with swap_positions absent is
-                    # proved boundary-by-boundary in the item's lld-delta §3.3.
-                    if pos_constrained and not _same_pos(c) and vc > hi:
-                        continue      # upgrade band — #198 verbatim
-                    if pos_constrained and lo <= vc <= hi and not _lateral_pos_ok(c):
-                        continue      # lateral band — swap_positions applies
-                    if lo <= vc <= hi:
-                        res = _eval([asset_id], [c])
+                    # #402 rev-3 §2 + QA-B F1 — when swap_positions is
+                    # present the set REPLACES that predicate: for lateral
+                    # always (_pos_ok — v1.16.9 behavior); for upgrade/
+                    # downgrade only on a rev-3-shaped request (_head_ok /
+                    # _swap_all_groups — lateral_scope present in the
+                    # body). Absent keeps #198 verbatim, so old requests
+                    # stay byte-identical.
+                    # #402 rev-3 §3 — lateral membership is _lateral_hit
+                    # (band, or tier equality under lateral_scope="tier").
+                    # Under tier scope a tier-mate above the band is BOTH
+                    # a lateral and an upgrade candidate, so these are two
+                    # independent ifs, not the old if/elif band partition
+                    # (disjoint again under band scope — byte-identical).
+                    if _lateral_hit(c, vc) and \
+                            (not pos_constrained or _pos_ok(c)):
+                        res = (_price([asset_id], [c]) if _tier_scope
+                               else _eval([asset_id], [c]))
                         if res:
-                            _emit(member, [asset_id], [c], res, "lateral")
-                    elif vc > hi:
+                            _emit(member, [asset_id], [c], res, "lateral",
+                                  gated=not _tier_scope)
+                    if vc > hi and \
+                            not (pos_constrained and not _head_ok(c)):
                         variants = []
                         res = _eval([asset_id], [c])
                         if res:
@@ -5274,6 +5484,20 @@ class TradeService:
                 combos = []
                 for r in (2, 3):
                     for combo in combinations(down, r):
+                        # #402 rev-3 §2 + QA-B F1 — downgrade's incoming
+                        # headline piece (combo[0]; `down` is value-sorted
+                        # desc) must play a selected position when the
+                        # filter is present ON A REV-3-SHAPED REQUEST
+                        # (_swap_all_groups). Old-shape requests (and an
+                        # absent filter) keep #198's any-position-with-
+                        # same-position-preference, byte-identical.
+                        if _swap_all_groups and pos_constrained \
+                                and not _pos_ok(combo[0]):
+                            continue
+                        # QA-B F2 — a dismissed combo never consumes one of
+                        # the two headliner slots below.
+                        if _dismissed([asset_id], combo):
+                            continue
                         res = _eval([asset_id], list(combo))
                         if res:
                             combos.append((list(combo), res))
@@ -5321,17 +5545,29 @@ class TradeService:
                 # #198 mirror — the Upgrade headliner and the Lateral swap
                 # must play the pin's position (upgrading/swapping AT that
                 # position); the Downgrade give may be any position.
-                # #403 W2 — same band split as the give direction (mirrored:
-                # vg < lo = tier UP into the pin, lo..hi = lateral).
-                if pos_constrained and not _same_pos(g) and vg < lo:
-                    continue      # upgrade headliner — #198 verbatim
-                if pos_constrained and lo <= vg <= hi and not _lateral_pos_ok(g):
-                    continue      # lateral band — swap_positions applies
-                if lo <= vg <= hi:
-                    res = _eval([g], [asset_id])
+                # #402 rev-3 §2 mirror + QA-B F1 — the user's variable give
+                # piece `g` is what the position set constrains in this
+                # direction (the incoming pin is fixed): when the set is
+                # present, _pos_ok replaces the #198 predicate on lateral
+                # always (v1.16.9 behavior) and _head_ok/_swap_all_groups
+                # extends it to upgrade and the downgrade give below only
+                # on a rev-3-shaped request (lateral_scope present). Absent
+                # keeps #198 verbatim — byte-identical.
+                # #402 rev-3 §3 mirror — lateral membership via
+                # _lateral_hit; two independent ifs for the same
+                # dual-membership reason as the give direction.
+                if _lateral_hit(g, vg) and \
+                        (not pos_constrained or _pos_ok(g)):
+                    res = (_price([g], [asset_id]) if _tier_scope
+                           else _eval([g], [asset_id]))
                     if res:
-                        _emit(owner, [g], [asset_id], res, "lateral")
+                        _emit(owner, [g], [asset_id], res, "lateral",
+                              gated=not _tier_scope)
+                if lo <= vg <= hi:
+                    pass          # lateral band handled above
                 elif vg < lo:
+                    if pos_constrained and not _head_ok(g):
+                        continue  # upgrade headliner — #198 / rev-3 §2 + F1
                     # Tier UP into the pin: this asset headlines, optionally
                     # plus one more own piece (any position) to close the gap.
                     variants = []
@@ -5357,6 +5593,13 @@ class TradeService:
                     # Tier DOWN: give the better own asset, receive the pin
                     # plus 1-2 owner sweeteners (a bare 1-for-1 down always
                     # fails the #108 epsilon, so extras are required).
+                    # #402 rev-3 §2 mirror + QA-B F1 — when the position
+                    # set is present ON A REV-3-SHAPED REQUEST, the
+                    # variable give piece must play a selected position;
+                    # old-shape / absent keeps any-position, byte-identical.
+                    if _swap_all_groups and pos_constrained \
+                            and not _pos_ok(g):
+                        continue
                     variants = []
                     for e in extras:
                         res = _eval([g], [asset_id, e])

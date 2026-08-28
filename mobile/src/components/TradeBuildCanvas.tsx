@@ -91,6 +91,12 @@ interface Props {
    *  Adopted only when `prefillSeq` changes. */
   prefill?: CanvasPrefill | null;
   prefillSeq?: number;
+  /** T-3 (merged-view trim, ruling 2026-08-28) — pass-through to
+   *  `InLeagueCalculator`: the flag path passes true and the merged header
+   *  drops its scoring-format chips + #191 conversion note (the pushed page
+   *  keeps them). Defaults to false so the #270 experiment path is
+   *  byte-identical. */
+  hideFormatChips?: boolean;
 }
 
 function summarizeSwap(card: TradeCard): string {
@@ -111,6 +117,7 @@ export default function TradeBuildCanvas({
   onLikeTrade,
   prefill: hostPrefill,
   prefillSeq,
+  hideFormatChips = false,
 }: Props) {
   // Bumped whenever a suggestion is tapped (or the host pushes a prefill),
   // forcing InLeagueCalculator to remount with fresh `initial*` props (see
@@ -153,6 +160,7 @@ export default function TradeBuildCanvas({
         initialReceiveIds={prefill?.receive}
         onFindATrade={onFindATrade}
         onLikeTrade={onLikeTrade}
+        hideFormatChips={hideFormatChips}
       />
 
       {showSuggestionRail && suggestions.length > 0 ? (
