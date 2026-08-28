@@ -11,6 +11,17 @@
 
 ---
 
+## 2026-08-28b — #402/#403 QA round 2: B-3, own-position chip ruling, P-1..P-4 — universal-rule fixes, gates green
+
+Operator rulings ("Fix B3, 2. Offer it. Resolve the runtime concerns by ensuring consistent/universal approach") recorded in `docs/feedback/items/402-more-offers-shop/rulings-2026-08-28.md`; fixed in `23b0cdf6` on `claude/new-feedback-71436e` (still HELD unmerged).
+
+- **B-3 + P-2, one mechanism:** committed dismissals are client-authoritative for the strip session — a `suppressed` set added to only on commit, cleared by nothing but the strip instance dying (Undo-safety ordering verified; commit-failure un-suppresses). Pager, 1/X, chip counts and the Clear-positions label all filter through it, closing the baselineLateralCount nit with it.
+- **Own-position chip (LLD §3.4 over the mockup, ruled):** offered unselected alongside the others; own-only selection sends `swap_positions:[own]` with no special case; PICK still never offered; suite j2c INVERTED (the pre-round-2 suite run against the new code reds only on j2c — proved by executing the HEAD copy: 78/1). Mockup Same-value frame updated to shipped semantics (WR chip added, its contradictory PICK chip removed).
+- **P-1:** react-don't-race pager — one `pendingScrollRef` consumed by an effect keyed on the rendered data; all four movers request-then-mutate. **P-3:** `shop_opened` emits exactly once, in `openShopStrip` (chooser pick = one event with the real position; Cancel = zero). **P-4:** `shopEnabled` = `trade.shop_asset && trade.asset_ideas && calc.merged_layout`; flag comment names the chain plus the structural `trade.finder_targeting` prerequisite; any flag dying mid-session closes an open strip.
+- **Suite:** 100 assertions (21 added: exactly-one-emitter h4, flag-chain n1, suppression n2, pager n3, and reviewer A's two missing pins — Chalkline scan n4, label-source n5). Sabotage 4/4 red-then-green with byte-identical restores (`cmp`-proved; file snapshots, not `git checkout --`).
+- **Gates (orchestrator re-run):** `tsc --noEmit` clean · shop suite 100/100 · all `check-*.js` zero RED · `testid-lint OK` · `features.json` valid · `pytest test_seed_ui_test_db.py + test_analytics_taxonomy_384.py` 87 passed (backend diff = one taxonomy comment).
+- **Checklist updated:** step 9 covers the chip + B-3 verification; Known-open now empty. Nothing remains open from either QA reviewer.
+
 ## 2026-08-28 — #402/#403 "More offers = shop a player" — full build + redundant QA + fix round, all gates green (branch, HELD unmerged)
 
 Built by three parallel/sequential subagents on `claude/new-feedback-71436e` (docs+mockups branch, first re-based on `origin/main` `69dc0cae` via merge `bf125dac`): `5115265b` W1 mobile (entry fork, ShopOffersStrip, chooser, flag `trade.shop_asset` dark, 4 analytics events, `check-shop-deck.js`), `4b71f036` W2 backend (`swap_positions` on `/api/trades/asset-ideas` + spike S-2), `bc21ee0f` W2 UI (position multi-select), `472f6649` QA fixes. **Operator hold: nothing merged, nothing pushed.**

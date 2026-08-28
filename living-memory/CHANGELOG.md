@@ -15,6 +15,18 @@
 
 
 
+## 2026-08-28b — #402/#403 QA round 2 closes every open finding
+
+Operator ruled: fix B-3, offer the own-position chip (LLD wins over the mockup), resolve
+P-1..P-4 with universal rules. Shipped in `23b0cdf6`: committed dismissals are
+client-authoritative for the strip session (one suppression mechanism covers B-3 and the
+refetch race); the shopped player's own position is a selectable chip ("WR plus RB laterals"
+now expressible, mockup updated); `shop_opened` fires exactly once where the strip opens;
+`shopEnabled` gates on the full flag chain incl. `calc.merged_layout`; the pager reacts to
+data, never races it. Suite grown to 100 assertions incl. the Chalkline and label-source
+pins reviewer A wanted. All gates green; TestFlight checklist's Known-open section now
+empty. Branch still held unmerged.
+
 ## 2026-08-28 — #402/#403 built end-to-end behind a dark flag; QA'd twice; held unmerged
 
 Four code commits on `claude/new-feedback-71436e` (atop the rev-2 doc round): the give-side
