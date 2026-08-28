@@ -655,9 +655,13 @@ for (const rel of [BODY_REL, MODE_REL]) {
       `h2: ${ev} has a CLIENT_EVENT_PROPS row`,
     );
   }
+  // h3 — ENTRIES, not prose: a comment may legitimately mention a shop
+  // event (the QA-B F4 comment fix in analytics_queries does, in
+  // backticks); what must never appear is a QUOTED shop_* string — the
+  // only form that would enroll one in NON_INTENT_EVENTS.
   assert(
-    !/shop_/.test(queries),
-    'h3: no shop_* event in analytics_queries (all four stay INTENT by default)',
+    !/["']shop_\w+["']/.test(queries),
+    'h3: no shop_* event is an entry in analytics_queries (all four stay INTENT by default)',
     'NON_INTENT_EVENTS must not name them — each is a deliberate tap',
   );
 }
@@ -1214,27 +1218,31 @@ for (const rel of [BODY_REL, MODE_REL]) {
     'w2b: the widened set is the OFFERABLE positions (#360 avoided stays out even when widening)',
   );
 
-  // w3 — only the LATERAL group widens: the composed groups swap in the
-  // widened lateral and nothing else (tier modes keep their own-position
-  // default from the base payload).
-  const groupsDecl = findAll(
+  // w3 — only the LATERAL group widens, and the widen seam is ONE
+  // snapshot (QA-B p6): a single `rendered` derivation carries both the
+  // composed groups AND the widenShowing flag, so the notice and the
+  // tiles it describes can never come from independently-derived state.
+  const renderedDecl = findAll(
     sf,
     (n) =>
       ts.isVariableDeclaration(n) &&
       ts.isIdentifier(n.name) &&
-      n.name.text === 'groups' &&
+      n.name.text === 'rendered' &&
       n.initializer &&
-      referencesIdentifier(sf, n.initializer, 'widenShowing'),
+      referencesIdentifier(sf, n.initializer, 'widenEligible'),
   )[0];
-  assert(!!groupsDecl, 'w3a: a composed groups value exists, keyed on widenShowing');
-  if (groupsDecl) {
+  assert(
+    !!renderedDecl,
+    'w3a: ONE composed derivation (rendered) exists, keyed on widenEligible — groups and widenShowing are fields of a single snapshot (QA-B p6)',
+  );
+  if (renderedDecl) {
     const lateralProp = findAll(
       sf,
       (n) =>
         ts.isPropertyAssignment(n) &&
         n.name.getText(sf) === 'lateral' &&
-        n.getStart(sf) >= groupsDecl.getStart(sf) &&
-        n.getEnd() <= groupsDecl.getEnd(),
+        n.getStart(sf) >= renderedDecl.getStart(sf) &&
+        n.getEnd() <= renderedDecl.getEnd(),
     )[0];
     assert(
       !!lateralProp && referencesIdentifier(sf, lateralProp.initializer, 'widenedQuery'),
@@ -1246,13 +1254,32 @@ for (const rel of [BODY_REL, MODE_REL]) {
         (n) =>
           ts.isPropertyAssignment(n) &&
           n.name.getText(sf) === other &&
-          n.getStart(sf) >= groupsDecl.getStart(sf) &&
-          n.getEnd() <= groupsDecl.getEnd(),
+          n.getStart(sf) >= renderedDecl.getStart(sf) &&
+          n.getEnd() <= renderedDecl.getEnd(),
       );
       assert(
         prop.length === 0,
         `w3c: the ${other} group is never rebuilt from the widened payload (spread of the base only)`,
         `found an explicit ${other}: assignment in the composed groups`,
+      );
+    }
+    // w3d — both consumers read OFF the snapshot: `groups` and
+    // `widenShowing` are projections of `rendered`, never re-derived
+    // independently (re-deriving either reopens the p6 seam).
+    for (const field of ['groups', 'widenShowing']) {
+      const proj = findAll(
+        sf,
+        (n) =>
+          ts.isVariableDeclaration(n) &&
+          ts.isIdentifier(n.name) &&
+          n.name.text === field &&
+          n.initializer &&
+          referencesIdentifier(sf, n.initializer, 'rendered'),
+      );
+      assert(
+        proj.length === 1,
+        `w3d: '${field}' is a projection of the rendered snapshot (exactly one decl, reading \`rendered\`)`,
+        `found ${proj.length} qualifying declaration(s)`,
       );
     }
   }
@@ -1275,6 +1302,38 @@ for (const rel of [BODY_REL, MODE_REL]) {
       guard ? `guard: ${txt(sf, guard.condition).replace(/\s+/g, ' ')}` : 'no widenShowing guard',
     );
   }
+
+  // w5 (QA-B finding 2) — RENDERED-MODE TICK DISCIPLINE: the flush/rewind
+  // tick (`ideasUpdatedAt`) derives from the query actually feeding the
+  // rendered tiles. Base alone in the tier modes and in unwidened Same
+  // value; the widened tick participates ONLY while the widened row is
+  // what the pager renders. Re-coupling this to an unconditional
+  // Math.max(base, widened) is exactly the reviewer-B defect: the widen
+  // probe fires in every mode, so a widened payload landing 0.5–2 s after
+  // a tier-mode dismiss would commit it early (Undo toast retracted
+  // mid-window) and rewind the pager under the user.
+  const tickDecl = findAll(
+    sf,
+    (n) =>
+      ts.isVariableDeclaration(n) &&
+      ts.isIdentifier(n.name) &&
+      n.name.text === 'ideasUpdatedAt' &&
+      n.initializer,
+  )[0];
+  const tickInit = tickDecl && unwrapAs(tickDecl.initializer);
+  assert(
+    !!tickInit &&
+      ts.isConditionalExpression(tickInit) &&
+      referencesIdentifier(sf, tickInit.condition, 'widenShowing') &&
+      /mode\s*===\s*'same_value'/.test(txt(sf, tickInit.condition)) &&
+      referencesIdentifier(sf, tickInit.whenTrue, 'widenedQuery') &&
+      referencesIdentifier(sf, tickInit.whenFalse, 'ideasQuery') &&
+      !referencesIdentifier(sf, tickInit.whenFalse, 'widenedQuery'),
+    "w5a: ideasUpdatedAt is conditional on the rendered mode — same_value+widenShowing ? max(base, widened) : base ALONE (the widened tick never drives flush/rewind in the tier modes)",
+    tickDecl
+      ? txt(sf, tickDecl.initializer).replace(/\s+/g, ' ').slice(0, 160)
+      : 'ideasUpdatedAt declaration not found',
+  );
 }
 
 // ── (m) QA B-4 — an early commit retracts the Undo toast (body half) ─────
@@ -1644,6 +1703,64 @@ for (const rel of [BODY_REL, MODE_REL]) {
       literalCount('Tier down') === 0,
     "n5b: 'Same value' appears exactly once; 'Tier up'/'Tier down' are never re-hardcoded (single label source)",
     `Same value ×${literalCount('Same value')}, Tier up ×${literalCount('Tier up')}, Tier down ×${literalCount('Tier down')}`,
+  );
+}
+
+// ── (cs) QA-B plausible 5 — chooser staleness guards on the HOST ─────────
+// `shopChooserCard` holds a whole TradeCard in TradesScreen state. Three
+// ways it goes stale, each with its own clear (asserted individually so
+// dropping any ONE goes red): an async league switch while the Modal is up
+// (a pick would navigate with the NEW leagueId + the OLD league's asset),
+// a deck reset for new targets (the card belongs to a deck that no longer
+// exists), and a flag kill (the sheet's `visible` conjunction only HIDES
+// it — a later re-light must not pop a days-old chooser).
+
+{
+  const sf = parse(HOST_REL);
+  const effects = findAll(
+    sf,
+    (n) =>
+      ts.isCallExpression(n) &&
+      ts.isIdentifier(n.expression) &&
+      n.expression.text === 'useEffect' &&
+      n.arguments.length === 2,
+  );
+
+  // cs1 — the league-switch effect (deps exactly [leagueId], the one that
+  // also drops the deck) clears the chooser.
+  const leagueSwitch = effects.find(
+    (e) =>
+      ts.isArrayLiteralExpression(e.arguments[1]) &&
+      txt(sf, e.arguments[1]).replace(/\s+/g, '') === '[leagueId]' &&
+      referencesIdentifier(sf, e.arguments[0], 'setDeck'),
+  );
+  assert(
+    !!leagueSwitch &&
+      referencesIdentifier(sf, leagueSwitch.arguments[0], 'setShopChooserCard'),
+    "cs1: the league-switch effect clears shopChooserCard (a pick can never pair the new leagueId with the old league's asset)",
+    leagueSwitch ? 'league-switch effect found but it does not clear the chooser' : 'no [leagueId]-keyed deck-reset effect found',
+  );
+
+  // cs2 — resetDeckForNewTargets clears the chooser with the rest of the
+  // deck state (the rev-2 shop-state clear, restored for the chooser).
+  const fnReset = functionNamed(sf, 'resetDeckForNewTargets');
+  assert(
+    !!fnReset && referencesIdentifier(sf, fnReset, 'setShopChooserCard'),
+    'cs2: resetDeckForNewTargets clears shopChooserCard (a stale card cannot outlive its deck)',
+  );
+
+  // cs3 — the flag kill CLEARS, it doesn't just hide: an effect keyed on
+  // shopEnabled nulls the card when the conjunction dies.
+  const killEffect = effects.find(
+    (e) =>
+      referencesIdentifier(sf, e.arguments[1], 'shopEnabled') &&
+      referencesIdentifier(sf, e.arguments[0], 'setShopChooserCard') &&
+      /!shopEnabled/.test(txt(sf, e.arguments[0])),
+  );
+  assert(
+    !!killEffect,
+    'cs3: a !shopEnabled effect CLEARS the chooser card (the visible conjunction only hides; a re-light must never resurrect a stale chooser)',
+    'no useEffect keyed on shopEnabled clears shopChooserCard on !shopEnabled',
   );
 }
 

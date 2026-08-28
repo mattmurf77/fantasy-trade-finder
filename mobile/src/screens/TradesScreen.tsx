@@ -1494,6 +1494,15 @@ export default function TradesScreen({ navigation, route }: any) {
   // card survives here (a give side holding >1 asset picks which player
   // to shop, §0.2 — a Modal sheet, so the deck stays mounted beneath it).
   const [shopChooserCard, setShopChooserCard] = useState<TradeCard | null>(null);
+  // QA-B plausible 5 (2026-08-28) — the flag-kill CLEARS the chooser, it
+  // doesn't just hide it: the sheet's `visible` conjunction below goes
+  // false the moment any of the three prerequisite flags dies, but the
+  // card itself would survive in state, and a later re-light would pop a
+  // stale — possibly days-old — chooser over whatever deck is on screen.
+  // Flag off ⇒ state dead, so a re-light starts from nothing.
+  useEffect(() => {
+    if (!shopEnabled) setShopChooserCard(null);
+  }, [shopEnabled]);
   // QA round 2 P-3 (rulings 2026-08-28) — UNIVERSAL RULE: an event fires
   // once, where the thing it names happens. This is the ONE code path
   // that opens the shop window, so `shop_opened` is emitted here and
@@ -2063,6 +2072,12 @@ export default function TradesScreen({ navigation, route }: any) {
     setEdits({});
     setSwapTarget(null);
     setSuggestTarget(null);
+    // QA-B plausible 5 (2026-08-28) — an async league change can land
+    // while the chooser Modal is up (background refetch, pushed switch):
+    // a pick would then navigate with the NEW leagueId and the OLD
+    // league's asset. rev-2 cleared its shop state here; rev-3 keeps the
+    // chooser's clear.
+    setShopChooserCard(null);
     clearTargets(); // store also self-clears via its league subscription
     setTargetPickerOpen(false);
     // Onboarding item 4 — reset the first-run auto-start lifecycle so a
@@ -2654,6 +2669,11 @@ export default function TradesScreen({ navigation, route }: any) {
     setScopedEmpty(null); // #330 — a reset invalidates the scoped zero-result card
     setEdits({});
     setSwapTarget(null);
+    // QA-B plausible 5 (2026-08-28) — a reset invalidates the deck the
+    // chooser's card came from; a pick off a stale card would shop an
+    // asset the regenerated deck may no longer send (rev-2 cleared its
+    // shop state here too).
+    setShopChooserCard(null);
     setPinIdeaResumed(false); // #317 — the next deck re-takes the slot
   }
 
@@ -7815,7 +7835,11 @@ export default function TradesScreen({ navigation, route }: any) {
           shopChooserCard is only ever set while shopEnabled is true (the
           handleKeepSide fork); QA B-2 — the conjunction here additionally
           closes an already-open chooser if any of the three prerequisite
-          flags flips mid-session. */}
+          flags flips mid-session, and (QA-B p5) the !shopEnabled effect at
+          the state decl CLEARS the card outright, so a later re-light can
+          never resurrect a stale chooser. League switches and deck resets
+          clear it too — a pick must never pair a new leagueId or a
+          regenerated deck with an old card's asset. */}
       <ShopWhichPlayerSheet
         visible={shopEnabled && !!shopChooserCard}
         card={shopChooserCard}

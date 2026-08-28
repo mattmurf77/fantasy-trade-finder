@@ -23,7 +23,11 @@ import { ink, space } from '../theme/chalkline';
 // Params carry the RESOLVED asset (rev3-spec §1): the entry already holds
 // the full Player from the deck card, so the screen fetches nothing to
 // render its header/body context. `assetId`/`assetName`/`source` ride
-// along for deep-link parity and debuggability.
+// along for debuggability and analytics context. Deliberately NO
+// `deepLinks.ts` entry (the Receipts/Paywall precedent): a URL cannot
+// carry the resolved Player object this screen renders from, so a cold
+// deep link could only open a half-broken window — the in-app entry
+// points are the only ways in.
 //
 // This screen OWNS the Toast mount (rev3-spec §1 — the inline era's host
 // wiring on TradesScreen is deleted): `onToast` lands descriptors in local

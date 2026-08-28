@@ -311,8 +311,13 @@ export default function ShopOffersBody({
   // selection switch, not a racing refetch, not a fresh payload. It dies
   // only with this instance — i.e. with the pushed ShopAssetScreen: back
   // navigation unmounts it, and every "More offers" tap pushes a fresh
-  // screen, so a new shop session starts clean (the server dismiss-cooldown
-  // is authoritative across sessions). An UNDONE dismiss never enters:
+  // screen, so a new shop session starts clean. Cross-session memory is
+  // the SERVER's: each committed ✕ posts a real deck pass, and asset-ideas
+  // consults the D-067 dismiss-cooldown when building its pools (QA-B
+  // backend fix 2, 2026-08-28 — landed this round), so the next fetch
+  // simply doesn't offer a recently dismissed idea. This set only bridges
+  // the in-instance gap between a commit and that next fetch. An UNDONE
+  // dismiss never enters:
   // Undo nulls `pendingDismissRef` and cancels the timer before any flush
   // path can reach `commitDismiss`, so the key never leaves
   // `locallyRemoved` for here. The one subtraction is the commit-failure
@@ -446,14 +451,28 @@ export default function ShopOffersBody({
     staleTime: 60_000,
     enabled: widenEligible,
   });
-  const widenShowing = widenEligible && !!widenedQuery.data;
-
-  const groups = useMemo(() => {
+  // QA-B plausible 6 (2026-08-28) — ONE derivation for the widen seam:
+  // the notice flag and the composed groups are two fields of a single
+  // memo snapshot, so "showing all positions" and the tiles it describes
+  // can never be computed from differently-composed state. `widenShowing`
+  // is no longer an independently-derived boolean — it IS a field of what
+  // the pager renders. Residual (accepted): the base row and the widened
+  // row are still two cache entries that refetch on their own clocks; the
+  // snapshot guarantees the UI reads ONE consistent view of them per
+  // render, not that the rows themselves share an age.
+  const rendered = useMemo(() => {
     const base = ideasQuery.data?.groups;
-    if (!base || !widenShowing) return base;
+    if (!base || !widenEligible || !widenedQuery.data) {
+      return { groups: base, widenShowing: false };
+    }
     // Lateral ONLY — upgrade/downgrade keep the own-position default.
-    return { ...base, lateral: widenedQuery.data!.groups.lateral };
-  }, [ideasQuery.data, widenShowing, widenedQuery.data]);
+    return {
+      groups: { ...base, lateral: widenedQuery.data.groups.lateral },
+      widenShowing: true,
+    };
+  }, [ideasQuery.data, widenEligible, widenedQuery.data]);
+  const groups = rendered.groups;
+  const widenShowing = rendered.widenShowing;
 
   // Settled selection as a list, for copy that must describe the DATA on
   // screen (the fetched payload), not a chip tapped 100ms ago.
@@ -640,13 +659,20 @@ export default function ShopOffersBody({
   // a dataUpdatedAt tick — warm cache row, racing refetch, fresh payload —
   // must never resurrect it; only Undo (pending) or the commit-failure
   // path restores a tile.
-  // The widened payload landing IS a fresh payload for the pager's
-  // purposes (same flush + rewind contract), so the tick covers both
-  // queries.
-  const ideasUpdatedAt = Math.max(
-    ideasQuery.dataUpdatedAt,
-    widenedQuery.dataUpdatedAt,
-  );
+  // QA-B finding 2 (2026-08-28) — RULE: only the tick of the query
+  // actually FEEDING THE RENDERED TILES drives the flush + rewind. The
+  // widen probe runs regardless of mode (reviewer A D5 kept it for the
+  // chip counts), so an unconditional max over both ticks let a widened
+  // payload landing 0.5–2 s after a tier-mode dismiss commit it EARLY
+  // (Undo toast retracted mid-window) and yank that pager to page 1. In
+  // the tier modes and in unwidened Same value the base query alone is
+  // the tick; the widened tick participates only while the widened row is
+  // what the pager renders (same_value + widenShowing) — where its
+  // landing genuinely is a fresh payload for the pager.
+  const ideasUpdatedAt =
+    mode === 'same_value' && widenShowing
+      ? Math.max(ideasQuery.dataUpdatedAt, widenedQuery.dataUpdatedAt)
+      : ideasQuery.dataUpdatedAt;
   useEffect(() => {
     flushPendingDismissRef.current();
     requestPagerScroll(0);

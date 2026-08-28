@@ -26,6 +26,15 @@
    opens a **"Shop which player?"** sheet listing every give-side asset
    (players and picks). Cancel closes it with no other effect (you are still
    on the deck); picking a row opens the window for that asset. ☐
+2a. **Chooser pick under pressure — no race, no stale sheet.** *(QA-B
+   p8 — the modal-dismiss-then-push seam.)* On a 2+-asset card, tap a
+   chooser row and watch the transition closely: the window opens exactly
+   ONCE, for exactly the asset you tapped, and the sheet is gone when you
+   land (never lingering over the window or reappearing behind the back
+   navigation). Then: open the chooser, Cancel, and immediately re-tap
+   "More offers" on a DIFFERENT 2+-asset card → the sheet lists the new
+   card's assets, never the previous card's. Repeat the pick a few times
+   fast — double-tapping a row must not push two windows. ☐
 3. **Back returns to the untouched deck.** *(Replaces the rev-2
    deck-holds-still step — the window makes deck interference structurally
    impossible, so what's left to verify is the return trip.)* From the shop
@@ -107,10 +116,24 @@
     Downgrade panel behaves exactly as before — its laterals are still the
     ±band (the tier scope is a shop-only request parameter; §R-4 scoping). ☐
 
+## Part C — old client compat (a device still on v1.16.9, flag back ON)
+
+19. **Tier modes stay position-unfiltered for the old client.** *(B finding
+    1's field case; the backend's compat fork is what makes it pass.)* On a
+    device still running **v1.16.9** (the rev-2 shop, whose position chips
+    exist only under Same value) against this build's backend: select a
+    position chip in Same value → the laterals re-sweep to that position
+    as before. Now check **Tier up and Tier down** with that selection
+    still active: their results must be **unchanged by the selection** —
+    the v1.16.9 client sends `swap_positions` expecting laterals-only
+    semantics, and the server's compat fork keeps the tier groups
+    unfiltered for it. If the tier lists silently shrink to the selected
+    position on the old build, the compat fork regressed. ☐
+
 ## Known-open at checklist authoring (not blockers for a dark merge)
 
 Nothing. The rev-2 list's resolved items stay resolved (suppression-set fix,
 own-position chip, single emitter, three-flag conjunction), and the rev-3
 surface changes — window, all-mode filters, tier scope, auto-widen — are all
 covered by the steps above plus the reworked `mobile/tests/check-shop-deck.js`
-structural suite (136 assertions).
+structural suite (142 assertions).
