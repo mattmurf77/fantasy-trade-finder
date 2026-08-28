@@ -10,6 +10,29 @@
 
 
 
+## 2026-08-27b — Trade-model review COMPLETE on `claude/trade-model-review-101bf7`; owed = operator reads the champion doc and rules Q-034 (+ standing Q-031)
+
+**Where:** worktree `trade-model-review-101bf7`, docs-only branch off `main` `69dc0cae`. All four
+deliverables + plan copy in [docs/plans/trade-model-review/](../docs/plans/trade-model-review/):
+`current-state.md` (Phase 1 map), `data-readout-2026-08-27.md` (Phase 2, fresh prod mirror),
+`hypothesis-results.md` (H1–H8), `champion-recommendation.md` (Phase 4). Living-memory written back
+(CHANGELOG 2026-08-27b, TEST_LEDGER 2026-08-27b, Q-034, NEXT knockout item rewritten). PR to open
+from this branch — no source file touched, CI is docs-only.
+
+**The decision the operator owes:** read
+[champion-recommendation.md](../docs/plans/trade-model-review/champion-recommendation.md) — champion
+stays `current`; the flip list is short: rule **Q-034** (`overpay_adjusted` 0.0 — deliberate or
+mis-flip?), rule the standing **Q-031** (recommendation: keep interleave, drop
+`bakeoff_include_gen_v2` → 0), and hold everything else stable ~5–7 weeks for the powered arm read.
+
+**What the next engine session should pick up (full gates each, not flips):** give-side far-first
+exposure treatment (H1 — 9.3% like on give-far-1st cards), divergence-side partner-anchor insult
+rule (H8 — 8.18% exposure), SF/TEP de-conflation + QB pricing (H5 — QB cards 8.9%). Watch: August
+empty-deck 5.05%, sitting on the <5% gate, concentrated in targeted jobs.
+
+**Prior handoff (2026-08-27, #384 partner-summary):** still owed — the 8-step TestFlight checklist
+on the next EAS build; see the entry below.
+
 ## 2026-08-27 — #384 partner shape-summary regression SHIPPED to main; owed = one TestFlight checklist on the next build
 
 **Where:** `main` at **`3119eece`** (PR [#221](https://github.com/mattmurf77/fantasy-trade-finder/pull/221), squashed). All three CI checks green before merge. **Nothing in flight code-side.**

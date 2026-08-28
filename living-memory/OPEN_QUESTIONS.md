@@ -7,6 +7,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-27 — Open Items (trade-model review)](#2026-08-27--open-items-trade-model-review)
 - [2026-08-22 — Open Items (trade-model restrictiveness)](#2026-08-22--open-items-trade-model-restrictiveness)
 - [2026-08-22 — Open Items (#384 merged calculator)](#2026-08-22--open-items-384-merged-calculator)
 - [2026-08-19 — Open Items (team review)](#2026-08-19--open-items-team-review)
@@ -25,6 +26,14 @@
 - [Conventions](#conventions)
 
 ---
+
+## 2026-08-27 — Open Items (trade-model review)
+
+### Q-034 — `overpay_adjusted` was flipped OFF (1.0 → 0.0) in the same batch that applied the D-159 bundle — deliberate, or a mis-flip?
+- **Why it matters:** [D-159](DECISIONS.md) item (2) makes R1 `overpay_ok` measure the gap in `package_value_v2` — "the currency the fairness bar and the card already use" — and seeds `overpay_adjusted` at 1.0. `model_config_changes` shows the 2026-08-24T04:22Z batch applying the rest of the prod bundle (`filler_min_frac` → 0.15, `trade_elo_gap_max` → 0, `v3_shape_max_delta` → 2) **and, in the same minute, `overpay_adjusted` 1.0 → 0.0** — reverting R1 to raw sums. No living-memory record explains the reversal; [G-058](GOTCHAS.md) ("the rules nest, change them in pairs") could justify it, but if so the reasoning was never written down. Found by the 2026-08-27 trade-model review's live-config diff ([current-state.md](../docs/plans/trade-model-review/current-state.md)).
+- **Action to unblock:** operator says which it was. Deliberate → one line here + DECISIONS closes it, value stands. Accidental → `overpay_adjusted = 1.0` via the admin config API restores D-159 (kill: 0.0), no deploy.
+- **Owner:** operator.
+- **Status:** OPEN.
 
 ## 2026-08-22 — Open Items (trade-model restrictiveness)
 
