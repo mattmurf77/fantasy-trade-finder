@@ -10,6 +10,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-28](#2026-08-28)
 - [2026-08-15](#2026-08-15)
 - [2026-08-08](#2026-08-08)
 - [2026-05-21](#2026-05-21)
@@ -17,6 +18,20 @@
 - [Outstanding / Known Gaps](#outstanding--known-gaps)
 
 ---
+
+## 2026-08-28
+
+### Mobile: `react-native-purchases` (IAP enablement, runbook B1)
+
+| Package | Version | Added | Why |
+|---|---|---|---|
+| `react-native-purchases` | `^10.8.1` | branch `claude/monetization-features-feedback-a6fe77` | RevenueCat SDK behind the Fleeced Pro paywall (`docs/plans/monetization/iap-enablement/scope.md`). Installed with `npx expo install` so the resolution is the Expo SDK 54 / RN 0.81-compatible one. Pulls one transitive package, `@revenuecat/purchases-typescript-internal` (the shared TS types). Wrapped entirely in `mobile/src/api/purchases.ts` — the ONLY module in the app allowed to import it, pinned by `mobile/tests/check-paywall.js` §7a. |
+- **`react-native-purchases-ui` was deliberately NOT installed.** The paywall is a hand-built Chalkline screen (`mobile/src/screens/PaywallScreen.tsx`); RevenueCat's prebuilt paywall UI would ship its own design system straight through the ADR-004/005 prohibitions.
+- **No Expo config plugin is needed** — the native module autolinks through prebuild. `app.json` is untouched.
+- **Native code** ⇒ the next build must be a **full EAS build, not an OTA update**, and the paywall can only be validated in that binary.
+- **In Expo Go the native module is absent** and the SDK falls back to its Preview API Mode, printing "Expo Go app detected. Using RevenueCat in Browser Mode." Client code must never assume the native module works: `purchases.ts` reads `EXPO_PUBLIC_REVENUECAT_IOS_KEY` and returns `null` / no-ops from every export when the key is missing or `configure` throws.
+- **New build-time env var `EXPO_PUBLIC_REVENUECAT_IOS_KEY`** (RevenueCat *publishable* Apple SDK key — not a secret in the `secrets.local.env` sense, but set in EAS env, not committed). Absent ⇒ the whole purchases module is inert and the app behaves exactly as it does today. Documented in `docs/config-reference.md`.
+- **Never call `Purchases.logOut()`.** Per RevenueCat guidance, logOut mints a fresh anonymous app-user-id whose purchases then need aliasing back. Signing out of FTF is not signing out of the App Store account that owns the subscription; the next sign-in calls `logIn(<working key>)`. Pinned by `check-paywall.js` §7b.
 
 ## 2026-08-15
 

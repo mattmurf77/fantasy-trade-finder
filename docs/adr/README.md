@@ -48,3 +48,4 @@ Don't bother for routine code changes, bug fixes, or anything self-evident from 
 - [ADR-013 The Fit Challenger is a Generator, Not a Config Profile of the Live Engine](adr-013-fit-challenger-is-a-generator.md)
 - [ADR-014 Bake-Off Serving Rounds](adr-014-bakeoff-serving-rounds.md)
 - [ADR-015 Negative-Results Memory is a Clamped Soft Prior, Not a Fourth Filter](adr-015-negmem-soft-prior-not-fourth-filter.md)
+- [ADR-016 RevenueCat is the Purchase Layer; the Entitlements Ledger is the Truth](adr-016-revenuecat-with-server-truth-entitlements.md)

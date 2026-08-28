@@ -661,6 +661,21 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # `guide_step_suppressed`; the user chose nothing and, on the tour lane,
     # was not even shown anything.
     "prompt_deferred",
+    # ── Paywall funnel (IAP enablement, 2026-08-28) ──────────────────────
+    # Scope: docs/plans/monetization/iap-enablement/scope.md §1; contract:
+    # pro-subscription/lld.md §3. REGISTERED BEFORE THE EMITTER SHIPS, and
+    # all five land in analytics_queries.NON_INTENT_EVENTS in this same
+    # commit — the discipline stated at the top of the P0 block above.
+    #
+    # These five are the CLIENT ECHO of the purchase funnel, never its
+    # truth. Conversion truth is server-side and already exists:
+    # `entitlement_granted` (SERVER_FIRED, written by entitlements.grant()
+    # off the RevenueCat webhook). A client `paywall_purchase_completed`
+    # with no matching grant is a webhook gap, which is exactly the
+    # reconciliation these rows exist to make visible.
+    "paywall_viewed", "paywall_purchase_initiated",
+    "paywall_purchase_completed", "paywall_purchase_failed",
+    "paywall_restore",
 })
 
 # ---------------------------------------------------------------------------
@@ -1533,6 +1548,37 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # for a calc-tour hold, otherwise the InterruptSurface currently
     # holding the slot. One row per deferral episode, not per retry.
     "prompt_deferred":             frozenset({"surface", "blocked_by"}),
+    # ── Paywall funnel (IAP enablement, 2026-08-28) ──────────────────────
+    # `source` is the paywall ENTRY POINT — the `gate` string of the 402 that
+    # sent the user here (portfolio | league_limit | knobs | …, foundation
+    # §2.2) or a non-gate origin like `settings` / `onboarding`. Low
+    # cardinality, owned by the gate list, never free text.
+    #
+    # `platform` on paywall_viewed is the `?platform=` VARIANT the config
+    # was fetched with (ios | web | extension — server.py
+    # `_PAYWALL_PLATFORMS`), i.e. which server-rendered paywall the user
+    # actually saw. It is NOT the device platform: that is a user_events
+    # COLUMN derived server-side, and duplicating it in props is the
+    # NULL-`platform` incident. The two coincide today and will not once
+    # web/pro.html ships.
+    #
+    # `product_id` is the store SKU (ftf_pro_monthly | ftf_pro_annual |
+    # ftf_founder | ftf_season_pass_2026 — docs/cross-client-invariants.md),
+    # a closed vocabulary. NO price, NO currency, NO transaction or receipt
+    # identifier ever rides in props: the money is the ledger's
+    # (subscription_events) and the receipt is Apple's.
+    #
+    # `user_cancelled` (bool) is the one prop that makes paywall_purchase_
+    # failed readable — an Apple sheet the user backed out of is a decision,
+    # a StoreKit error is a defect, and a single failure count conflates
+    # them. `restored` (bool) is whether Restore Purchases actually found an
+    # entitlement; a false-heavy series is the "I paid and it's gone"
+    # support ticket before it is filed.
+    "paywall_viewed":              frozenset({"source", "platform"}),
+    "paywall_purchase_initiated":  frozenset({"product_id", "source"}),
+    "paywall_purchase_completed":  frozenset({"product_id", "source"}),
+    "paywall_purchase_failed":     frozenset({"product_id", "user_cancelled"}),
+    "paywall_restore":             frozenset({"restored"}),
 }
 
 

@@ -1,6 +1,6 @@
 # mobile/src/screens/
 
-32 screen components, one per route. What each screen *does* — and its sharp edges — is in [CLAUDE.md](CLAUDE.md). This file maps route names to files, because the two rarely match.
+37 screen components, one per route. What each screen *does* — and its sharp edges — is in [CLAUDE.md](CLAUDE.md). This file maps route names to files, because the two rarely match.
 
 ## Route → file
 
@@ -12,6 +12,7 @@
 | RootNav | `Settings` | `SettingsScreen.tsx` |
 | RootNav | `Profile` | `ProfileScreen.tsx` |
 | RootNav | `FeedbackInbox` | `FeedbackInboxScreen.tsx` |
+| RootNav | `Paywall` | `PaywallScreen.tsx` (modal; flag `monetize.paywall`, dark) |
 | RootNav | `LeagueSummary` | `LeagueSummaryScreen.tsx` (legacy push; primary registration is the League tab root) |
 | RootNav | `FreeAgents` | `FreeAgentsScreen.tsx` |
 | RootNav + Draft tab | `DraftRoom` | `DraftRoomScreen.tsx` |

@@ -11,6 +11,7 @@ import { initLeagueSession, startDemoSession as apiStartDemoSession } from '../a
 import { maybePregenTrades } from '../api/tradePregen';
 import { connectLeague as apiConnectLeague } from '../api/league';
 import { getLeagues } from '../api/sleeper';
+import { initPurchases } from '../api/purchases';
 import { setUser as sentrySetUser } from '../observability/sentry';
 import { queryClient } from './queryClient';
 import { getActiveScoringFormat } from '../api/rankings';
@@ -322,6 +323,13 @@ export const useSession = create<SessionState>((set, get) => ({
       // one from a live link — a link tapped THIS launch is fresher.
       ...(get().invitedBy ? {} : invitedByStored ? { invitedBy: invitedByStored } : {}),
     });
+
+    // Purchases identity bridge (iap-enablement). A RESTORED session is the
+    // other half of the sign-in path below: RevenueCat must be configured with
+    // the same working key the backend resolves entitlements against, or a
+    // webhook lands on an app-user-id nothing here knows. Fire-and-forget and
+    // fully no-op without an SDK key — see api/purchases.ts.
+    if (user?.user_id) void initPurchases(user.user_id);
   },
 
   setRankingMethodPref: async (m) => {
@@ -387,6 +395,17 @@ export const useSession = create<SessionState>((set, get) => ({
     // crash triage joins on id via our own DB; the handle never leaves us).
     // No-op when Sentry isn't initialized. Cleared on sign-out.
     sentrySetUser(u ? { id: u.user_id } : null);
+    // Purchases identity bridge (iap-enablement): configure on the first
+    // working key of the launch, `Purchases.logIn(userId)` on any later one.
+    // This is the sign-in half; bootstrap() covers the restored-session half.
+    //
+    // The null branch is deliberately EMPTY. Signing out of FTF is not signing
+    // out of the App Store account that owns the subscription, and
+    // `Purchases.logOut()` would swap RevenueCat onto a fresh anonymous
+    // app-user-id whose purchases then have to be aliased back — so we never
+    // call it (RevenueCat's own guidance). The next sign-in calls logIn with a
+    // real working key, which is the correct identity move.
+    if (u?.user_id) void initPurchases(u.user_id);
   },
 
   setLeague: async (lg) => {

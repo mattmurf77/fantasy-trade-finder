@@ -26663,6 +26663,72 @@ def me_entitlements():
     return jsonify(out)
 
 
+# Paywall presentation config (pro-subscription LLD §3). Static server
+# config on purpose: packaging copy changes without an app release, and the
+# route never recomputes trades (`body_ref: matches_preview` tells the
+# client to reuse matches it already fetched). Enum strings (`kind`,
+# `badge`, feature keys) and the SKU ids are a cross-client contract —
+# docs/cross-client-invariants.md § Paywall config.
+_PAYWALL_PAGES = [
+    {"id": "value_recap", "kind": "trades_found",
+     "title": "Your league has trades waiting",
+     "body_ref": "matches_preview"},
+    {"id": "feature_grid", "kind": "features",
+     "features": ["unlimited_leagues", "portfolio", "engine_knobs",
+                  "extension_overlays", "ad_free"]},
+    {"id": "plans", "kind": "purchase"},
+]
+
+_PAYWALL_PRODUCTS = [
+    {"product_id": "ftf_pro_monthly", "period": "monthly",
+     "display_price": "$4.99", "trial_days": 0, "hero": False},
+    {"product_id": "ftf_pro_annual", "period": "annual",
+     "display_price": "$34.99", "per_month_equiv": "$2.92",
+     "trial_days": 14, "hero": True, "badge": "best_value"},
+]
+
+_PAYWALL_PLATFORMS = ("ios", "web", "extension")
+
+
+@app.route("/api/paywall/config", methods=["GET"])
+def paywall_config():
+    """Server-driven paywall config (pro-subscription LLD §3).
+
+    Session-authed (same layer as /api/me/entitlements). Flag-aware:
+    `monetize.paywall` off → `{"enabled": false}` and nothing else, so a
+    client that ships ahead of the flag renders no purchase UI.
+
+    `?platform=ios|web|extension` is display filtering only; there is no
+    per-platform variation yet, so the resolved value is echoed back and
+    every platform gets the same pages/products. An unknown value falls
+    back to `ios` rather than 400 — a stale client must still be able to
+    render a paywall.
+
+    **Display prices are FALLBACK COPY.** On iOS the client must render the
+    StoreKit-localized price from the RevenueCat offering for the matching
+    `product_id`; these strings are US-English list prices and know nothing
+    about the user's storefront, currency, or an active promotional offer.
+    """
+    _require_session()
+    if not is_enabled("monetize.paywall"):
+        return jsonify({"enabled": False})
+    platform = request.args.get("platform", "ios")
+    if platform not in _PAYWALL_PLATFORMS:
+        platform = "ios"
+    return jsonify({
+        "enabled": True,
+        "platform": platform,
+        "pages": _PAYWALL_PAGES,
+        "products": _PAYWALL_PRODUCTS,
+        # Store-managed: the server never mints trials (pro-subscription
+        # LLD §6). True until the client reads real per-Apple-ID
+        # eligibility off the RevenueCat offering — this field is the
+        # "we offer a trial on this SKU" claim, not a per-user promise.
+        "trial_eligible": True,
+        "dismissible": True,
+    })
+
+
 @app.route("/api/admin/entitlements/grant", methods=["POST"])
 def admin_entitlements_grant():
     """Operator manual grant (foundation §3). Body:
@@ -26741,7 +26807,14 @@ def admin_entitlements_list():
 def billing_revenuecat_webhook():
     """RevenueCat → subscription_events ledger → projector.
     Auth: Authorization: Bearer <REVENUECAT_WEBHOOK_SECRET>. Fails closed
-    in prod when the secret is unset (same posture as CRON_SECRET)."""
+    in prod when the secret is unset (same posture as CRON_SECRET).
+
+    `event.aliases` rides through to the projector: RevenueCat lists every
+    id it knows to be this subscriber, which is how a purchase made before
+    sign-in ($RCAnonymousID:*) reconciles to the acct_* working key rather
+    than stranding a second entitlement row (entitlements.resolve_rc_identity).
+    TRANSFER / BILLING_ISSUE identities and grace timestamps ride in the
+    payload, which is why the whole event object is handed to the ledger."""
     secret = os.environ.get("REVENUECAT_WEBHOOK_SECRET", "")
     if _IS_PROD_ENV and not secret:
         return jsonify({"error": "webhook_secret_unset"}), 503
@@ -26758,6 +26831,7 @@ def billing_revenuecat_webhook():
         user_id=event.get("app_user_id"),
         product_id=event.get("product_id"),
         occurred_at=entl._ms_to_iso(event.get("event_timestamp_ms")),
+        aliases=event.get("aliases"),
     )
     return jsonify(result), 200
 

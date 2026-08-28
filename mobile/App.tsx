@@ -33,6 +33,7 @@ import {
   patchOnboardingState,
 } from './src/state/useOnboardingState';
 import { useFeedback } from './src/state/useFeedback';
+import { initEntitlements, useEntitlements } from './src/state/useEntitlements';
 import {
   hydrateQuicksetProgress,
   refreshQuicksetProgress,
@@ -125,6 +126,13 @@ function App() {
         // queue the same way. Inert (an empty queue) unless a draft was
         // being recorded when the app last closed.
         initRecordedPicksQueue();
+        // Entitlements (iap-enablement): hydrate the cached Pro state, ask
+        // the server, and bind the RevenueCat CustomerInfo listener. DETACHED
+        // on purpose — nothing on the first paint reads `pro` (the only
+        // consumer today is a flag-gated Settings row), so this must not join
+        // the splash gate. bootstrap() has already run, so a restored
+        // session's working key has reached Purchases.configure by now.
+        initEntitlements();
         track('app_opened', { launch_type: 'cold' });
         // Count this cold start (hydration already awaited above).
         patchOnboardingState({
@@ -204,6 +212,12 @@ function App() {
         // bound the analytics kill-switch + experiment pause ride on
         // (FR-19/FR-38). No-op inside the throttle window.
         void useFeatureFlags.getState().maybeRevalidateFlags();
+        // Entitlements on resume (LLD §4): a subscription can start, lapse,
+        // renew or be refunded while the app is backgrounded, and the webhook
+        // that recorded it landed server-side. Re-reading here is what makes
+        // the server authoritative in practice rather than only in principle.
+        // No-ops without a session token.
+        void useEntitlements.getState().refresh();
       }
     };
     const sub = AppState.addEventListener('change', onChange);

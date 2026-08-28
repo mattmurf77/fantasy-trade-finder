@@ -41,6 +41,7 @@ import DraftRoomScreen from '../screens/DraftRoomScreen';
 import MockDraftScreen from '../screens/MockDraftScreen';
 import PickAssignmentScreen from '../screens/PickAssignmentScreen';
 import RecordPicksScreen from '../screens/RecordPicksScreen';
+import PaywallScreen from '../screens/PaywallScreen';
 import PushPrimingModal from '../components/PushPrimingModal';
 import FeedbackFAB from '../components/FeedbackFAB';
 import AnalystGuide from '../components/AnalystGuide';
@@ -166,6 +167,12 @@ type AuthStack = {
   RecordPicks: { leagueId?: string } | undefined;
   // Operator QA (flag testing.stage_users): synthetic adoption-stage users.
   TestStages: undefined;
+  // Monetization (flag `monetize.paywall`, dark) — the ONE purchase surface.
+  // Registered UNCONDITIONALLY like every other flag-gated route; the screen
+  // self-guards on the flag and pops when it is off. `source` names what sent
+  // the user here and rides every paywall_* event, so conversion can be read
+  // per entry point; in this build the only source is 'settings'.
+  Paywall: { source: string };
 };
 
 const Stack = createNativeStackNavigator<AuthStack>();
@@ -690,6 +697,18 @@ export default function RootNav({ booted }: { booted: boolean }) {
               />
             ),
           })}
+        />
+        {/* Monetization paywall (flag `monetize.paywall`, dark). A MODAL: a
+            purchase decision is a detour, not a place in the navigation
+            hierarchy, and dismissing it must land the user exactly where they
+            were. `headerShown: false` because the screen draws its own header
+            with the explicit ✕ (`paywall-close`) that components.md requires
+            of a modal presentation — swipe-dismiss alone is not discoverable.
+            Registered unconditionally; PaywallScreen self-guards on the flag. */}
+        <Stack.Screen
+          name="Paywall"
+          component={PaywallScreen}
+          options={{ presentation: 'modal', headerShown: false }}
         />
         <Stack.Screen
           name="FeedbackInbox"
