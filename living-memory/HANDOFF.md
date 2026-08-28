@@ -10,6 +10,20 @@
 
 
 
+## 2026-08-28b — IAP enablement code half SHIPPED to main, ALL DARK; the ball is in the operator's Apple/RevenueCat lane
+
+**Where:** `main` @ **`766d2261`** (PR [#227](https://github.com/mattmurf77/fantasy-trade-finder/pull/227), squashed, CI green ×3). **Zero user-visible change** — every `monetize.*` flag is false; the operator flips them per runbook B9 (entitlements observe → paywall → enforce), never this side. Recovery: [docs/recovery/2026-08-28-iap-enablement-ship.md](../docs/recovery/2026-08-28-iap-enablement-ship.md); the hosting worktree `monetization-features-feedback-a6fe77` couldn't remove itself — sweep it (+ both `claude/monetization-*`/`claude/iap-enablement-writeback` branches) from the main checkout.
+
+**What shipped** (scope: [docs/plans/monetization/iap-enablement/scope.md](../docs/plans/monetization/iap-enablement/scope.md), evidence: TEST_LEDGER 2026-08-28d): backend webhook delta (`resolve_rc_identity` alias/$RCAnonymousID reconciliation, TRANSFER as a move, BILLING_ISSUE grace, SKU-alias tolerance, `GET /api/paywall/config`, five `paywall_*` taxonomy events) + mobile RevenueCat rail (`react-native-purchases@10.8.1` behind the inert-without-key `api/purchases.ts` seam, `logIn` identity bridge, server-authoritative `useEntitlements`, 3.1.2-complete `PaywallScreen` modal, flag-gated Settings row). ADR-016.
+
+**Owed — operator, in order:**
+1. **Q-034** (OPEN_QUESTIONS): pick ASC SKU ids — recommend the `ftf_*` canon. Decide BEFORE creating SKUs; ids are permanent.
+2. Runbook steps 3–5: RevenueCat project, entitlement id exactly `pro`, Offering marked Current; then `REVENUECAT_WEBHOOK_SECRET` → `secrets.local.env` + Render, and the `appl_` SDK key → EAS env as `EXPO_PUBLIC_REVENUECAT_IOS_KEY` (build-time inlined — needs a new build, not OTA).
+3. Next mobile release **must be a full EAS build** (new native module) — do not OTA v1.16.9.
+4. Once the Paid Apps agreement (signed 2026-08-27) is active: run [sandbox-test-checklist.md](../docs/plans/monetization/iap-enablement/sandbox-test-checklist.md) top-to-bottom and log in TEST_LEDGER. Until then the purchase path has no runtime proof, by design (D-056).
+
+**Explicitly NOT built (later builds):** Pro gate applications (portfolio/league-cap/knobs — nothing is tolled today, honoring §7/§11: no data-generating action gated ever), referrals/share cards, web pro.html + Stripe checkout route, extension upsell.
+
 ## 2026-08-28 — #402/#403 "shop a player" SHIPPED lit; v1.16.9 (build 135) submitted to TestFlight
 
 **Where:** `main` @ **`a9d96435`** (PR [#225](https://github.com/mattmurf77/fantasy-trade-finder/pull/225), squashed, CI green). `trade.shop_asset` **lit and verified live on prod**. EAS build **135** / v1.16.9 built from that exact commit and auto-submitted; Apple processing was the last visible state. Shipped branch swept (recovery: `docs/recovery/2026-08-28-shop-branch-ship.md`). PR [#226](https://github.com/mattmurf77/fantasy-trade-finder/pull/226) (docs: 50/30/20 action-row correction + the recovery ledger + this write-back) may still be open — merge it if so.
