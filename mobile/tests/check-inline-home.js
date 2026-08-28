@@ -43,13 +43,19 @@ const canvasCode = stripComments(canvas);
 console.log('check-inline-home:');
 
 // ═══════════════════════════════════════════════════════════════════════
-// 1 — the flag exists, ships dark, and is mirrored everywhere it must be
+// 1 — the flag exists, is LIT, and is mirrored everywhere it must be
+//     (shipped dark 2026-08-24; LIT 2026-08-28 by operator ruling — "I'm
+//     good merging the combined UI without the tour" — with
+//     onboarding.guide_v2 turned false in the same commit, so the
+//     "unfinished tour story" the dark pin guarded against cannot render.
+//     TRUE is now the pinned contract; a flip back to false is a
+//     deliberate revert and must change these lines with it.)
 // ═══════════════════════════════════════════════════════════════════════
 {
   const features = JSON.parse(readRoot('config/features.json'));
-  assert(features['calc.inline_home'] === false,
-    '1. calc.inline_home ships FALSE in config/features.json',
-    'the whole wave is dark; a true here ships an unfinished tour story');
+  assert(features['calc.inline_home'] === true,
+    '1. calc.inline_home is LIT in config/features.json (2026-08-28 ruling)',
+    'the operator lit the merge tour-free; a false here is an unledgered revert');
   assert(typeof features['_comment_inline_home'] === 'string'
     && /D-158/.test(features['_comment_inline_home'])
     && /kill switch/i.test(features['_comment_inline_home']),
@@ -60,8 +66,8 @@ console.log('check-inline-home:');
   // silently reads `undefined` in a test that thinks it is exercising release.
   for (const f of ['release', 'onboarding-v2', 'profiles-on']) {
     const j = JSON.parse(readRoot(`backend/tests/fixtures/flags/${f}.json`));
-    assert(j['calc.inline_home'] === false,
-      `1b. backend/tests/fixtures/flags/${f}.json mirrors it false`);
+    assert(j['calc.inline_home'] === true,
+      `1b. backend/tests/fixtures/flags/${f}.json mirrors it true`);
   }
   assert(/"calc\.inline_home",/.test(readRoot('backend/feature_flags.py')),
     '1c. the key is registered in backend DEFAULT_FLAGS',
