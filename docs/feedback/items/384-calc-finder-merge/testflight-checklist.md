@@ -107,10 +107,14 @@ defect in the gating, not in the feature.
     values converted to Y"** note appears when the chosen format differs from the league's own.
     *(W1 dropped these entirely; W5 put them back. A merged page with no format control is the
     review-§11 regression.)* ☐
-12. **The 15% cells.** The bottom row reads **Find a Trade · ✕ · ✓** — three cells, 70/15/15.
-    There is **no "Include players" toggle** (W6-B removed it; the canvas is always the anchor).
-    Tap the **✕** — it must be comfortably tappable one-handed. **This is the operator-flagged
-    risk:** at ~53pt wide these are the tightest targets in the app. ☐
+12. **The narrow cells.** The bottom row reads **Find a Trade · Clear · ✓** — three cells,
+    **50/30/20** (`InLeagueCalculator.tsx:1850-1852`). The middle cell is the **labeled
+    "Clear"** button, not a bare ✕ — [D-157](../../../living-memory/DECISIONS.md) amended
+    [D-153](../../../living-memory/DECISIONS.md)'s 70/15/15 row after a tester read the ✕ as
+    "close" and wiped his canvas mid-tour. There is **no "Include players" toggle** (W6-B
+    removed it; the canvas is always the anchor). Tap **✓** — it is now the narrowest cell and
+    must still be comfortably tappable one-handed. **This is the operator-flagged risk:** the
+    ✓ is the tightest target in the app. ☐
 13. **The ✓ QUEUES the trade (W6-A, [D-152]) — the happy path.** With **no partner** picked, or
     with only one side filled, the ✓ is dimmed (~40%) and inert — that part is unchanged. Now
     pick a partner in the **Team** dropdown and fill **both** sides with a trade where **you are

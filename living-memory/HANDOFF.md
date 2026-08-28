@@ -10,6 +10,18 @@
 
 
 
+## 2026-08-28 — #402/#403 "shop a player" SHIPPED lit; v1.16.9 (build 135) submitted to TestFlight
+
+**Where:** `main` @ **`a9d96435`** (PR [#225](https://github.com/mattmurf77/fantasy-trade-finder/pull/225), squashed, CI green). `trade.shop_asset` **lit and verified live on prod**. EAS build **135** / v1.16.9 built from that exact commit and auto-submitted; Apple processing was the last visible state. Shipped branch swept (recovery: `docs/recovery/2026-08-28-shop-branch-ship.md`). PR [#226](https://github.com/mattmurf77/fantasy-trade-finder/pull/226) (docs: 50/30/20 action-row correction + the recovery ledger + this write-back) may still be open — merge it if so.
+
+**What shipped:** the whole #402/#403 arc — operator-ruled rev-2 docs, three build waves (inline shop strip off the give-side "More offers" button, chooser, `swap_positions` backend + S-2 spike, position multi-select incl. the own-position chip), two QA rounds closing every finding from two independent reviewers. Evidence: TEST_LEDGER 2026-08-28 / 28b / 28c. Feedback items #402/#403 should be marked closed on the next `/feedback` pass.
+
+**Owed — operator, runtime, on build 135 (it carries BOTH):**
+1. The 14-step shop checklist: [docs/feedback/items/402-more-offers-shop/testflight-checklist.md](../docs/feedback/items/402-more-offers-shop/testflight-checklist.md) — post-flip verification per the operator's confirmed sequencing (flag is already on).
+2. The 8-step #384 partner-summary checklist, owed "on the next EAS build" since 2026-08-27 — build 135 is that build.
+
+**Nothing else in flight code-side.** A release announcement draft (tester-facing) exists in the 2026-08-28 session transcript; operator was offered a repo copy for TestFlight "What to Test" and had not yet answered.
+
 ## 2026-08-27 — #384 partner shape-summary regression SHIPPED to main; owed = one TestFlight checklist on the next build
 
 **Where:** `main` at **`3119eece`** (PR [#221](https://github.com/mattmurf77/fantasy-trade-finder/pull/221), squashed). All three CI checks green before merge. **Nothing in flight code-side.**
