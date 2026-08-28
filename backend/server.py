@@ -26715,7 +26715,7 @@ _PAYWALL_PAGES = [
 
 _PAYWALL_PRODUCTS = [
     {"product_id": "ftf_pro_monthly", "period": "monthly",
-     "display_price": "$4.99", "trial_days": 0, "hero": False},
+     "display_price": "$4.99", "trial_days": 3, "hero": False},
     {"product_id": "ftf_pro_annual", "period": "annual",
      "display_price": "$34.99", "per_month_equiv": "$2.92",
      "trial_days": 14, "hero": True, "badge": "best_value"},

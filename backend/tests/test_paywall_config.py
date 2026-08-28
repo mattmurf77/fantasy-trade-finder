@@ -102,7 +102,7 @@ def test_products_shape(client, monkeypatch):
 
     assert products[MONTHLY]["period"] == "monthly"
     assert products[MONTHLY]["display_price"] == "$4.99"
-    assert products[MONTHLY]["trial_days"] == 0
+    assert products[MONTHLY]["trial_days"] == 3
     assert products[MONTHLY]["hero"] is False
 
     assert products[ANNUAL]["period"] == "annual"
