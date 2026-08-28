@@ -159,6 +159,60 @@ const segmentText = (s: SummarySegment): string =>
 const segmentSpoken = (s: SummarySegment): string =>
   s.label ? s.label.replace('≈', 'about ') : String(Math.round(s.value));
 
+// The partner's team shape: positional values plus the owned-pick pool.
+// Built once by `partnerSummaries` from the power-rankings read.
+type PartnerSummary = {
+  pos: Record<Position, SummarySegment>;
+  picks: SummarySegment | null;
+};
+
+// ONE rendering of the partner shape line, and ONE spoken form of it, shared
+// by both layouts. The stacked page has shown this since the DTF teardown
+// (2026-07-27); the #384 merged layout replaced the partner CHIP ROW with a
+// Team dropdown + sheet and did not carry the line across, so the merged page
+// shipped a handle and an R-badge only. These two are module-scope so the
+// merged sheet renders exactly what the chip renders — a second hand-copied
+// block is precisely the drift that check-calc-partner-labels.js exists to
+// prevent (a sighted-only relabel, a numeric-first fallback).
+const partnerSummarySpoken = (summary: PartnerSummary): string =>
+  ', ' +
+  POSITIONS.map((pos) => `${pos} ${segmentSpoken(summary.pos[pos])}`).join(', ') +
+  (summary.picks ? `, picks ${segmentSpoken(summary.picks)}` : '');
+
+function PartnerSummaryLine({
+  userId,
+  summary,
+}: {
+  userId: string;
+  summary: PartnerSummary;
+}) {
+  return (
+    // #306 — labels are longer than the raw numbers they replace: two lines
+    // so the tail segments (TE, Picks) aren't ellipsized away; 11px Plex Mono
+    // floor holds.
+    <Text
+      testID={`calc.partner-summary.${userId}`}
+      style={styles.summaryLine}
+      numberOfLines={2}
+      ellipsizeMode="tail"
+    >
+      {POSITIONS.map((pos, i) => (
+        <Text key={pos}>
+          {i > 0 ? ' · ' : ''}
+          <Text style={{ color: posColor(pos) }}>{pos} </Text>
+          {segmentText(summary.pos[pos])}
+        </Text>
+      ))}
+      {summary.picks ? (
+        <Text>
+          {' · Picks '}
+          {segmentText(summary.picks)}
+        </Text>
+      ) : null}
+    </Text>
+  );
+}
+
 function useDebounced<T>(value: T, ms: number): T {
   const [v, setV] = useState(value);
   useEffect(() => {
@@ -296,13 +350,7 @@ export default function InLeagueCalculator({
   // segment's label is the D-306-2 literal-count label, never a client
   // conversion of the dollar `picks.value`.
   const partnerSummaries = useMemo(() => {
-    const m: Record<
-      string,
-      {
-        pos: Record<Position, { value: number; label?: string }>;
-        picks: { value: number; label?: string } | null;
-      }
-    > = {};
+    const m: Record<string, PartnerSummary> = {};
     for (const t of powerQ.data?.teams ?? []) {
       m[t.user_id] = {
         pos: {
@@ -928,13 +976,7 @@ export default function InLeagueCalculator({
           // DTF teardown 2026-07-27 — team-shape line under the handle:
           // color-coded positional values + picks from power-rankings.
           const summary = partnerSummaries[o.user_id];
-          const a11ySummary = summary
-            ? ', ' +
-              POSITIONS.map(
-                (pos) => `${pos} ${segmentSpoken(summary.pos[pos])}`,
-              ).join(', ') +
-              (summary.picks ? `, picks ${segmentSpoken(summary.picks)}` : '')
-            : '';
+          const a11ySummary = summary ? partnerSummarySpoken(summary) : '';
           return (
             <Pressable
               key={o.user_id}
@@ -956,29 +998,7 @@ export default function InLeagueCalculator({
                 />
               </View>
               {summary ? (
-                // #306 — labels are longer than the raw numbers they
-                // replace: two lines so the tail segments (TE, Picks)
-                // aren't ellipsized away; 11px Plex Mono floor holds.
-                <Text
-                  testID={`calc.partner-summary.${o.user_id}`}
-                  style={styles.summaryLine}
-                  numberOfLines={2}
-                  ellipsizeMode="tail"
-                >
-                  {POSITIONS.map((pos, i) => (
-                    <Text key={pos}>
-                      {i > 0 ? ' · ' : ''}
-                      <Text style={{ color: posColor(pos) }}>{pos} </Text>
-                      {segmentText(summary.pos[pos])}
-                    </Text>
-                  ))}
-                  {summary.picks ? (
-                    <Text>
-                      {' · Picks '}
-                      {segmentText(summary.picks)}
-                    </Text>
-                  ) : null}
-                </Text>
+                <PartnerSummaryLine userId={o.user_id} summary={summary} />
               ) : null}
             </Pressable>
           );
@@ -1350,13 +1370,21 @@ export default function InLeagueCalculator({
                 {opponents.map((o) => {
                   const active = o.user_id === opponentId;
                   const state = rankStateFor(o, format);
+                  // The team shape the stacked page's partner chips carry.
+                  // Picking a partner is the decision this sheet exists for,
+                  // and QB/RB/WR/TE + picks is the evidence behind it — the
+                  // merged layout shipped without it (#384 W1) and this is
+                  // the restoration, same helpers, same testID contract.
+                  const summary = partnerSummaries[o.user_id];
                   return (
                     <Pressable
                       key={o.user_id}
                       testID={`calc.team-sheet.${o.user_id}`}
                       accessibilityRole="button"
                       accessibilityState={{ selected: active }}
-                      accessibilityLabel={`@${o.username}, ${RANK_STATE_A11Y[state]}`}
+                      accessibilityLabel={`@${o.username}, ${RANK_STATE_A11Y[state]}${
+                        summary ? partnerSummarySpoken(summary) : ''
+                      }`}
                       onPress={() => {
                         haptics.selection();
                         setOpponentId(o.user_id);
@@ -1367,9 +1395,14 @@ export default function InLeagueCalculator({
                         pressed && styles.actionBtnPressed,
                       ]}
                     >
-                      <Text style={[styles.dropdownValue, active && { color: ice.base }]}>
-                        @{o.username}
-                      </Text>
+                      <View style={styles.teamRowMain}>
+                        <Text style={[styles.dropdownValue, active && { color: ice.base }]}>
+                          @{o.username}
+                        </Text>
+                        {summary ? (
+                          <PartnerSummaryLine userId={o.user_id} summary={summary} />
+                        ) : null}
+                      </View>
                       <Badge
                         label={state}
                         color={state === 'NR' ? chalk.dim : semantic.pos}
@@ -1852,6 +1885,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: ink.line,
   },
+  // The handle + its shape line stack; the R/R*/NR badge stays on the right.
+  // flexBasis 0 + minWidth 0 lets the shape line ellipsize inside the row
+  // instead of pushing the badge off the sheet.
+  teamRowMain: { flex: 1, flexBasis: 0, minWidth: 0, gap: 2, paddingVertical: space.xs },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   chip: {

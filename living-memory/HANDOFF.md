@@ -10,6 +10,19 @@
 
 
 
+## 2026-08-27 — #384 partner shape-summary regression SHIPPED to main; owed = one TestFlight checklist on the next build
+
+**Where:** `main` at **`3119eece`** (PR [#221](https://github.com/mattmurf77/fantasy-trade-finder/pull/221), squashed). All three CI checks green before merge. **Nothing in flight code-side.**
+
+**What shipped:** the In-league calculator's per-partner QB/RB/WR/TE + picks shape line, restored to the `calc.merged_layout` Team sheet. It had been on the stacked page since 2026-07-27; #384 W1 swapped the partner chips for the #333 dropdown + sheet and dropped it, so every user since v1.16.0 picked a partner from handle + R-badge alone. Verified against the #384 rulings first — an omission, not a ruling. Both layouts now render ONE module-scope `PartnerSummaryLine` / `partnerSummarySpoken` pair. Full record: [docs/feedback/items/384-calc-finder-merge/partner-summary-regression.md](../docs/feedback/items/384-calc-finder-merge/partner-summary-regression.md).
+
+**Owed — operator, runtime, on the next EAS build (this is mobile-only; Render carries nothing):**
+- The 8-step TestFlight checklist in the scope doc §B. **Step 7 is the one that matters**: VoiceOver must *announce* the shape (`"@handle, ranked, QB about 1 first, RB about 2 firsts, …"`), not just draw it — a sighted-only restore is the failure mode no structural guard can reach. Steps 5 (Dynamic Type / landscape: two-line clamp with the badge still on screen) and 3/4 (the no-picks and picks tails) are the other runtime-only ones.
+
+**The audit's other four `partial` rows are untouched and still open.** Deliberately NOT added to [NEXT.md](NEXT.md) — its 7-item cap is already blown (see its own "Queue cap status" section), so they are parked here rather than made worse there. The sharpest is **swipe undo**: the merged layout's `Clear` has none, which the audit calls "destructive, one tap, unrecoverable" and flags as worth fixing on its own. Also: per-asset swap suggestions, untouchable-from-the-asset, and the calculator's missing empty states.
+
+**Note for whoever picks this up:** the audit doc itself is **not on `main`** — it lives only in the `new-feedback-71436e` worktree at `docs/reviews/2026-08-27-calc-vs-guided-finder-audit.md`. Worth landing on main before acting on the rest of it.
+
 ## 2026-08-26e — v1.16.8 (build 134) SUBMITTED to TestFlight; three checklists now runnable, nothing in flight
 
 **Where:** `main` at `dd2051bc`, clean, no branch open. EAS build `c12643d1-a22b-4dee-9e08-611c01f70366` (v1.16.8, build **134**) **FINISHED**; submission `c6e58906-3cbc-4418-af97-d7a39a6cc6c3` **succeeded**. Apple processing → TestFlight availability is the only remaining step and it is not ours.
@@ -150,6 +163,7 @@ move, and the avatar lab's anchor test models the brief's described layout, not 
 **none**, so the bubble reads "The Analyst" above a ram, which is D-155's recorded default). Higgsfield credits ~4.35.
 
 ## Table of Contents
+- [2026-08-27 — #384 partner shape-summary regression SHIPPED to main; owed = one TestFlight checklist on the next build](#2026-08-27--384-partner-shape-summary-regression-shipped-to-main-owed--one-testflight-checklist-on-the-next-build)
 - [2026-08-25 — v1.16.6 (132) is on TestFlight; everything owed is now RUNTIME verification, not code](#2026-08-25--v1166-132-is-on-testflight-everything-owed-is-now-runtime-verification-not-code)
 - [2026-08-24 — Waves A + B0 SHIPPED (1.16.4 / EAS 130); Wave B is the next build; do NOT light `calc.inline_home` before it](#2026-08-24--waves-a--b0-shipped-1164--eas-130-wave-b-is-the-next-build-do-not-light-calcinline_home-before-it)
 - [2026-08-24 — Fleeced on TestFlight (v1.16.3 build 129), dark; one production write left](#2026-08-24--fleeced-on-testflight-v1163-build-129-dark-one-production-write-left)
