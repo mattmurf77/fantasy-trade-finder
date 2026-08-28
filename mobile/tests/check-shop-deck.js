@@ -37,7 +37,17 @@
 //     selection (breaking the byte-identical wire state), leak the selected
 //     SET into `shop_positions_selected` (count only — lld §8), drop the
 //     Clear-positions escape from the filtered empty state, or bypass the
-//     held-dismiss flush on a selection change.
+//     held-dismiss flush on a selection change;
+//   • (QA round 1, sections k–m) the deck could hold still for the PAN only
+//     while the #169 buttons / VoiceOver actions / decline-reason tiles /
+//     bad-trade flag still disposition the card under an open strip (B-1);
+//     the shop state could survive a deck wipe (resetDeckForNewTargets), a
+//     pin clear's snapshot restore, a top-card change, or the
+//     `trade.shop_asset` kill switch, or leak internal strip state across
+//     assets without the asset-keyed remount (B-2 + Reviewer A's
+//     stale-selection trap); an EARLY commit of the held dismiss could
+//     leave the "Dismissed · Undo" toast on screen with a dead Undo button
+//     (B-4 — the retract-by-reference contract).
 //
 // Structural, not textual where it matters: parses the real TSX with the
 // project's own TypeScript and walks the AST (the check-single-pin-actions.js
@@ -797,6 +807,257 @@ function unwrapAs(n) {
       referencesIdentifier(sf, fnToggle, 'flushPendingDismiss') &&
       referencesIdentifier(sf, fnToggle, 'setPositions'),
     'j6: handleTogglePosition flushes the held dismiss before mutating the selection',
+  );
+}
+
+// ── (k) QA B-1 — the deck holds still through ALL disposition paths ──────
+// The pan gate (section c) was never the whole story: the #169 in-card
+// Pass/Like row, the VoiceOver custom actions, the decline-reason layer-1
+// tiles and the bad-trade flag can all disposition the fronted card too.
+// Every one of them must reference the shop-open state.
+
+{
+  const sf = parse(HOST_REL);
+
+  // The JSX attribute named `name`, asserted unique, returned whole.
+  const soleJsxAttr = (name) => {
+    const attrs = findAll(
+      sf,
+      (n) => ts.isJsxAttribute(n) && n.name.getText(sf) === name,
+    );
+    return attrs.length === 1 ? attrs[0] : null;
+  };
+
+  const dispAttr = soleJsxAttr('dispositionDisabled');
+  assert(
+    !!dispAttr && referencesIdentifier(sf, dispAttr, 'shopOpen'),
+    'k1: the dispositionDisabled expression references shopOpen (#169 row inert while shopping)',
+    dispAttr ? 'attribute found but no shopOpen term' : 'expected exactly one dispositionDisabled attribute',
+  );
+
+  const actionsAttr = soleJsxAttr('accessibilityActions');
+  assert(
+    !!actionsAttr && referencesIdentifier(sf, actionsAttr, 'shopOpen'),
+    'k2: the VoiceOver custom-action LIST is gated on shopOpen (delisted while shopping)',
+    actionsAttr ? 'attribute found but no shopOpen term' : 'expected exactly one accessibilityActions attribute',
+  );
+
+  const handlerAttr = soleJsxAttr('onAccessibilityAction');
+  assert(
+    !!handlerAttr && referencesIdentifier(sf, handlerAttr, 'shopOpen'),
+    'k3: the VoiceOver action HANDLER is gated on shopOpen (a11y path matches the sighted path)',
+    handlerAttr ? 'attribute found but no shopOpen term' : 'expected exactly one onAccessibilityAction attribute',
+  );
+
+  // An if whose condition references `id` and whose branch returns, inside fn.
+  const guardedReturn = (fn, id) =>
+    !!fn &&
+    findAll(
+      sf,
+      (n) =>
+        ts.isIfStatement(n) &&
+        n.getStart(sf) >= fn.getStart(sf) &&
+        n.getEnd() <= fn.getEnd() &&
+        referencesIdentifier(sf, n.expression, id) &&
+        findAll(sf, ts.isReturnStatement).some(
+          (r) => r.getStart(sf) >= n.getStart(sf) && r.getEnd() <= n.getEnd(),
+        ),
+    ).length > 0;
+
+  assert(
+    guardedReturn(functionNamed(sf, 'handleReasonLayer1'), 'shopOpen'),
+    'k4: handleReasonLayer1 early-returns on shopOpen (layer-1 tile banks a pass — a disposition)',
+    'no shopOpen-guarded return in handleReasonLayer1',
+  );
+
+  // The bad-trade flag button: its Pressable's disabled prop must carry
+  // shopOpen (flagging advances the deck like a pass).
+  const flagPress = findAll(
+    sf,
+    (n) =>
+      ts.isJsxAttribute(n) &&
+      n.name.getText(sf) === 'onPress' &&
+      txt(sf, n).includes('handleFlagBadTrade'),
+  )[0];
+  let flagDisabled = null;
+  if (flagPress) {
+    let el = flagPress.parent;
+    while (el && !ts.isJsxSelfClosingElement(el) && !ts.isJsxOpeningElement(el)) {
+      el = el.parent;
+    }
+    flagDisabled =
+      el &&
+      el.attributes.properties.find(
+        (p) => ts.isJsxAttribute(p) && p.name.getText(sf) === 'disabled',
+      );
+  }
+  assert(
+    !!flagDisabled && referencesIdentifier(sf, flagDisabled, 'shopOpen'),
+    'k5: the bad-trade flag button is disabled while shopping (it advances the deck like a pass)',
+    flagDisabled ? 'disabled prop found but no shopOpen term' : 'flag button or its disabled prop not found',
+  );
+}
+
+// ── (l) QA B-2 — the shop state dies with its context ────────────────────
+
+{
+  const sf = parse(HOST_REL);
+
+  for (const fnName of ['resetDeckForNewTargets', 'handleClearPin']) {
+    const fn = functionNamed(sf, fnName);
+    assert(
+      !!fn &&
+        referencesIdentifier(sf, fn, 'setShopAsset') &&
+        referencesIdentifier(sf, fn, 'setShopChooserCard'),
+      `l1: ${fnName} clears the shop state (strip AND chooser)`,
+      fn ? 'function found but a setShop* call is missing' : `${fnName} not found`,
+    );
+  }
+
+  // The strip mount: guarded by shopEnabled (kill switch closes an open
+  // strip) and keyed on the shopped asset (remount = full internal reset;
+  // the old instance's unmount cleanup flushes its held dismiss).
+  const stripEl = findAll(
+    sf,
+    (n) =>
+      (ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n)) &&
+      n.tagName.getText(sf) === 'ShopOffersStrip',
+  )[0];
+  assert(!!stripEl, 'l2a: TradesScreen mounts ShopOffersStrip');
+  if (stripEl) {
+    const guard = nearestAncestor(
+      stripEl,
+      (n) =>
+        ts.isConditionalExpression(n) &&
+        referencesIdentifier(sf, n.condition, 'shopAsset'),
+    );
+    assert(
+      !!guard && referencesIdentifier(sf, guard.condition, 'shopEnabled'),
+      'l2b: the strip mount condition references shopEnabled (kill switch closes an open strip)',
+      guard ? `guard: ${txt(sf, guard.condition).replace(/\s+/g, ' ')}` : 'no enclosing conditional tests shopAsset',
+    );
+    const keyAttr = stripEl.attributes.properties.find(
+      (p) => ts.isJsxAttribute(p) && p.name.getText(sf) === 'key',
+    );
+    assert(
+      !!keyAttr && referencesIdentifier(sf, keyAttr, 'shopAsset'),
+      'l2c: the strip mount is keyed on the shopped asset (internal state resets per asset)',
+      keyAttr ? `key: ${txt(sf, keyAttr)}` : 'no key attribute on the mount',
+    );
+  }
+
+  // The catch-all: a useEffect keyed on the raw top-card id clears both
+  // shop-state slots, so any path that changes or removes the fronted card
+  // (undo rewind, swipe-error rewind, lane filter, a deck wipe that skips
+  // resetDeckForNewTargets) closes the strip instead of stranding it.
+  const closeEffect = findAll(
+    sf,
+    (n) =>
+      ts.isCallExpression(n) &&
+      ts.isIdentifier(n.expression) &&
+      n.expression.text === 'useEffect' &&
+      n.arguments.length === 2 &&
+      referencesIdentifier(sf, n.arguments[0], 'setShopAsset') &&
+      referencesIdentifier(sf, n.arguments[0], 'setShopChooserCard') &&
+      referencesIdentifier(sf, n.arguments[1], 'topRawId'),
+  );
+  assert(
+    closeEffect.length === 1,
+    'l3: a topRawId-keyed effect closes the shop when the fronted card changes or leaves',
+    `found ${closeEffect.length} matching effects`,
+  );
+}
+
+// ── (m) QA B-4 — an early commit retracts the Undo toast ─────────────────
+// The held dismiss's "Dismissed · Undo" toast must never outlive the undo
+// window as a dead button: every early flush retracts it BY REFERENCE (a
+// newer toast that already replaced it is left alone), and only the natural
+// UNDO_HOLD_MS expiry — whose toast dismisses itself — skips the retract.
+
+{
+  const sf = parse(STRIP_REL);
+
+  const propsSig = findAll(
+    sf,
+    (n) => ts.isPropertySignature(n) && n.name.getText(sf) === 'onToastRetract',
+  );
+  assert(
+    propsSig.length === 1 && !propsSig[0].questionToken,
+    'm1: the strip contract has a REQUIRED onToastRetract prop',
+    propsSig.length ? 'present but optional' : 'missing from Props',
+  );
+
+  const fnFlush = functionNamed(sf, 'flushPendingDismiss');
+  const retractIf =
+    fnFlush &&
+    findAll(
+      sf,
+      (n) =>
+        ts.isIfStatement(n) &&
+        n.getStart(sf) >= fnFlush.getStart(sf) &&
+        n.getEnd() <= fnFlush.getEnd() &&
+        /expired/.test(txt(sf, n.expression)) &&
+        referencesIdentifier(sf, n.expression, 'undoToastRef') &&
+        referencesIdentifier(sf, n, 'onToastRetract'),
+    )[0];
+  assert(
+    !!retractIf,
+    'm2: flushPendingDismiss retracts the undo toast on every non-expired flush',
+    'no if in flushPendingDismiss gating onToastRetract on the expired opt + undoToastRef',
+  );
+
+  // The natural expiry is the ONE caller that passes expired: true.
+  const fnDismiss = functionNamed(sf, 'handleDismiss');
+  const expiredArgs = findAll(
+    sf,
+    (n) =>
+      ts.isPropertyAssignment(n) &&
+      n.name.getText(sf) === 'expired' &&
+      n.initializer.kind === ts.SyntaxKind.TrueKeyword,
+  );
+  const inTimer =
+    expiredArgs.length === 1 &&
+    !!nearestAncestor(
+      expiredArgs[0],
+      (n) =>
+        ts.isCallExpression(n) &&
+        ts.isIdentifier(n.expression) &&
+        n.expression.text === 'setTimeout',
+    );
+  assert(
+    expiredArgs.length === 1 &&
+      !!fnDismiss &&
+      expiredArgs[0].getStart(sf) >= fnDismiss.getStart(sf) &&
+      expiredArgs[0].getEnd() <= fnDismiss.getEnd() &&
+      inTimer,
+    'm3: exactly one flush passes expired: true — the UNDO_HOLD_MS timer in handleDismiss',
+    `found ${expiredArgs.length} expired: true site(s)${
+      expiredArgs.length === 1 && !inTimer ? ' (not inside a setTimeout)' : ''
+    }`,
+  );
+  assert(
+    !!fnDismiss && referencesIdentifier(sf, fnDismiss, 'undoToastRef'),
+    'm4a: handleDismiss stores the undo-toast descriptor it hands the host',
+  );
+  const fnUndo = functionNamed(sf, 'undoDismiss');
+  assert(
+    !!fnUndo && referencesIdentifier(sf, fnUndo, 'undoToastRef'),
+    'm4b: undoDismiss drops the descriptor (the toast dismissed itself — nothing to retract later)',
+  );
+
+  // Host half: the mount wires onToastRetract into the toast slot with the
+  // reference-equality guard (retract only OUR toast; never a newer one).
+  const host = parse(HOST_REL);
+  const retractAttr = findAll(
+    host,
+    (n) => ts.isJsxAttribute(n) && n.name.getText(host) === 'onToastRetract',
+  );
+  assert(
+    retractAttr.length === 1 &&
+      referencesIdentifier(host, retractAttr[0], 'setToast') &&
+      /===/.test(txt(host, retractAttr[0])),
+    'm5: the host retracts by reference (setToast keeps any newer toast in the slot)',
+    retractAttr.length ? `attr: ${txt(host, retractAttr[0]).replace(/\s+/g, ' ')}` : 'onToastRetract not passed at the mount',
   );
 }
 

@@ -73,7 +73,10 @@ import type { Player, TradeCard } from '../shared/types';
 //               "Dismissed · Undo" copy is true unconditionally (lld §6).
 //               At most ONE pending dismiss: a second dismiss, a mode
 //               change, a refetch, close or unmount flushes the pending one
-//               first — a disposition is never silently lost.
+//               first — a disposition is never silently lost. An EARLY
+//               flush (anything but the natural expiry / the Undo itself)
+//               also retracts the "Dismissed · Undo" toast if it is still
+//               on screen (QA B-4): a dead Undo button is never shown.
 //
 // NO FeedbackFAB here: TradesScreen is a tab screen covered by the global
 // mount in RootNav (#188); a second FAB is the #196/#197 double-FAB bug.
@@ -128,6 +131,12 @@ interface Props {
   onClose: () => void;
   /** Host-owned toast mount (queue outcomes + the Dismissed·Undo toast). */
   onToast: (t: ShopToast) => void;
+  /** QA B-4 — retract ONE toast this strip issued, IF it is still the one
+   *  on screen. The host compares by reference (`cur === t`) so a newer
+   *  toast that already replaced it is never clobbered. Called only when a
+   *  held dismiss commits EARLY (mode chip, position toggle, clear, fresh
+   *  payload, close/unmount) while its Undo toast may still be showing. */
+  onToastRetract: (t: ShopToast) => void;
 }
 
 // R-13 — labels: the two tier labels come from the shipped constant; only
@@ -240,7 +249,13 @@ function SwapPosChip({
   );
 }
 
-export default function ShopOffersStrip({ leagueId, asset, onClose, onToast }: Props) {
+export default function ShopOffersStrip({
+  leagueId,
+  asset,
+  onClose,
+  onToast,
+  onToastRetract,
+}: Props) {
   const [mode, setMode] = useState<ShopMode>('tier_up');
   const [index, setIndex] = useState(0);
   // Optimistic local removals (pending + committed dismisses) — keys are
@@ -365,6 +380,11 @@ export default function ShopOffersStrip({ leagueId, asset, onClose, onToast }: P
     restoreIndex: number;
     timer: ReturnType<typeof setTimeout>;
   } | null>(null);
+  // QA B-4 — the exact "Dismissed · Undo" descriptor the host is (as far as
+  // this strip knows) currently showing for the pending dismiss. Kept so an
+  // early flush can retract it BY REFERENCE; nulled the moment the pending
+  // dismiss resolves any way at all (undo, expiry, early flush).
+  const undoToastRef = useRef<ShopToast | null>(null);
 
   function commitDismiss(idea: AssetIdea) {
     // The real POST — full deck-pass semantics (Elo at trade_k_pass + the
@@ -383,11 +403,25 @@ export default function ShopOffersStrip({ leagueId, asset, onClose, onToast }: P
     });
   }
 
-  function flushPendingDismiss() {
+  function flushPendingDismiss(opts?: { expired?: boolean }) {
     const p = pendingDismissRef.current;
     if (!p) return;
     pendingDismissRef.current = null;
     clearTimeout(p.timer);
+    // QA B-4 — every flush except the natural UNDO_HOLD_MS expiry is an
+    // EARLY commit: the "Dismissed · Undo" toast may still be on screen
+    // with a now-dead Undo button, so it is retracted at the moment the
+    // affordance dies. Retraction is by reference (the host no-ops when a
+    // NEWER toast already holds the slot — e.g. a ✓ queue success), which
+    // pins the shipped semantic: the commit follows the DISAPPEARANCE of
+    // the Undo affordance. If a later toast replaced it, the affordance is
+    // already gone and the pending dismiss simply keeps its timer until a
+    // flush path (or the expiry) commits it — the harm B-4 names was the
+    // dead button on screen, never the replacement itself.
+    if (!opts?.expired && undoToastRef.current) {
+      onToastRetract(undoToastRef.current);
+    }
+    undoToastRef.current = null;
     commitDismiss(p.idea);
   }
   // Latest-instance ref (the TradesScreen `pendingPassRef` convention) so
@@ -400,7 +434,10 @@ export default function ShopOffersStrip({ leagueId, asset, onClose, onToast }: P
     if (!p) return;
     pendingDismissRef.current = null;
     // The ENTIRE undo — the POST never fired, so nothing needs reversing
-    // and the toast copy needs no caveat.
+    // and the toast copy needs no caveat. The toast dismisses itself after
+    // the action press (Toast.tsx), so no retraction here — just drop the
+    // reference so a later flush can't retract a toast that already left.
+    undoToastRef.current = null;
     clearTimeout(p.timer);
     setLocallyRemoved((s) => {
       const n = new Set(s);
@@ -426,15 +463,22 @@ export default function ShopOffersStrip({ leagueId, asset, onClose, onToast }: P
       key,
       restoreIndex,
       // Timer armed BEFORE any network call — Undo cancels it and the
-      // request is never sent (R-9).
-      timer: setTimeout(() => flushPendingDismissRef.current(), UNDO_HOLD_MS),
+      // request is never sent (R-9). The natural expiry is the ONE flush
+      // that must not retract the toast: it dismisses itself at the same
+      // holdMs, and yanking it a frame early would flicker (QA B-4).
+      timer: setTimeout(
+        () => flushPendingDismissRef.current({ expired: true }),
+        UNDO_HOLD_MS,
+      ),
     };
-    onToast({
+    const undoToast: ShopToast = {
       msg: 'Dismissed',
       tone: 'success',
       holdMs: UNDO_HOLD_MS,
       action: { label: 'Undo', onPress: undoDismiss },
-    });
+    };
+    undoToastRef.current = undoToast;
+    onToast(undoToast);
   }
 
   // Close/unmount flushes — leaving the strip ends the undo window; the
