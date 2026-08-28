@@ -109,6 +109,15 @@ interface Props {
   // (the existing pinned_give/pinned_receive machinery) and regenerates
   // the deck, so a user who likes ONE side sees other offers around it.
   onKeepSide?: (side: 'give' | 'receive') => void;
+  // #402/#403 — give-side keep-chip label fork. TRUE while the shop entry
+  // is live (host reads trade.shop_asset && trade.asset_ideas): the
+  // give-side chip reads "More offers" — the "Keep ·" prefix described a
+  // pin that no longer happens on that side. A PROP, never a flag read:
+  // the card keeps its prop discipline and only the deck host (which owns
+  // the handleKeepSide fork) knows whether the tap opens the shop strip.
+  // Absent/false ⇒ both sides read today's "Keep · more offers",
+  // byte-identically. Receive side never forks.
+  shopGiveEntry?: boolean;
   // #190 — "Edit in calculator": opens the manual calculator prefilled
   // with this card's opponent + both sides (swipe deck only).
   onEditInCalculator?: () => void;
@@ -195,6 +204,7 @@ function TradeCardComp({
   onPlayerMenu,
   fitTargetPositions,
   onKeepSide,
+  shopGiveEntry = false,
   onEditInCalculator,
   onRemoveAsset,
   hideMatchStrength = false,
@@ -427,6 +437,11 @@ function TradeCardComp({
   // #186 — per-side keep affordance (swipe deck only): pins that side's
   // players and regenerates, so the OTHER side gets re-shopped. Compact
   // bordered-chalk construction (ice stays on the deck's primary actions).
+  // #402/#403 — the give-side chip forks to "More offers" while the shop
+  // entry is live (`shopGiveEntry`); the construction stays bordered chalk
+  // (ice stays on the deck's primary actions). Receive side and flag-off
+  // keep today's label and copy byte-identically.
+  const shopFork = (side: 'give' | 'receive') => side === 'give' && shopGiveEntry;
   const keepSlot = (side: 'give' | 'receive') =>
     variant === 'swipe' && onKeepSide ? (
       <Pressable
@@ -434,13 +449,17 @@ function TradeCardComp({
         accessibilityRole="button"
         accessibilityLabel={
           side === 'give'
-            ? 'Keep the players you send and see other returns'
+            ? shopFork(side)
+              ? 'See more offers built around the players you send'
+              : 'Keep the players you send and see other returns'
             : 'Keep the players you get and see other offers'
         }
         onPress={() => onKeepSide(side)}
         style={({ pressed }) => [styles.keepBtn, pressed && styles.keepBtnPressed]}
       >
-        <Text style={styles.keepBtnText}>Keep · more offers</Text>
+        <Text style={styles.keepBtnText}>
+          {shopFork(side) ? 'More offers' : 'Keep · more offers'}
+        </Text>
       </Pressable>
     ) : null;
 

@@ -1,0 +1,517 @@
+<title>Fleeced Feedback Board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+:root{
+  --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+  --line:#262C35; --line-strong:#59647A;
+  --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+  --ice:#56D9EC; --flare:#F0508C; --warn:#F59E0B; --pos:#22C55E; --neg:#EF4444;
+  --r-xs:2px; --r-sm:4px; --r-md:8px;
+}
+*{box-sizing:border-box;}
+body{
+  margin:0; background:var(--ink-0); color:var(--chalk);
+  font-family:Archivo,'Helvetica Neue',Arial,sans-serif; font-size:14px; line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:820px; margin:0 auto; padding:48px 24px 64px; display:flex; flex-direction:column; gap:32px;}
+.head{display:flex; flex-direction:column; gap:8px;}
+.eyebrow{
+  margin:0; font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--chalk-dim); display:flex; align-items:center; gap:8px;
+}
+.tick{display:inline-block; width:3px; height:12px; background:var(--ice); border-radius:var(--r-xs);}
+h1{
+  margin:0; font-family:'Barlow Condensed',Arial,sans-serif; font-weight:700;
+  font-size:44px; line-height:1.05; letter-spacing:.02em; text-transform:uppercase;
+  text-wrap:balance;
+}
+.sub{margin:0; color:var(--chalk-dim); max-width:62ch;}
+.reporters{
+  margin:-16px 0 0; font-family:'IBM Plex Mono',monospace; font-size:12px;
+  color:var(--chalk-faint); font-variant-numeric:tabular-nums;
+}
+.stats{display:flex; flex-wrap:wrap; gap:1px; background:var(--line); border:1px solid var(--line); border-radius:var(--r-md); overflow:hidden;}
+.stat{flex:1 1 120px; background:var(--ink-1); padding:16px; display:flex; flex-direction:column; gap:4px;}
+.stat-num{
+  font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:26px; line-height:1;
+  font-variant-numeric:tabular-nums; color:var(--chalk);
+}
+.stat-num.hot{color:var(--flare);}
+.stat-num.sev-bug{color:var(--neg);} .stat-num.sev-polish{color:var(--ice);} .stat-num.sev-idea{color:var(--warn);}
+.stat-label{font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--chalk-dim);}
+.callout{
+  border:1px solid var(--flare); border-left-width:3px; border-radius:var(--r-md);
+  background:var(--ink-1); padding:16px; display:flex; flex-direction:column; gap:6px;
+}
+.callout.warn{border-color:var(--warn);}
+.callout p{margin:0; color:var(--chalk-dim);}
+.callout .callout-title{
+  font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--flare);
+}
+.callout.warn .callout-title{color:var(--warn);}
+.area{display:flex; flex-direction:column; gap:12px;}
+h2{
+  margin:0; font-family:'Barlow Condensed',Arial,sans-serif; font-weight:600; font-size:22px;
+  line-height:1.2; letter-spacing:.03em; text-transform:uppercase;
+  display:flex; align-items:center; gap:10px;
+  padding-bottom:8px; border-bottom:1px solid var(--line);
+}
+.area-count{
+  font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:500;
+  color:var(--chalk-faint); font-variant-numeric:tabular-nums;
+}
+.items{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px;}
+.item{
+  background:var(--ink-1); border:1px solid var(--line); border-left:3px solid var(--line-strong);
+  border-radius:var(--r-md); padding:14px 16px; display:flex; flex-direction:column; gap:8px;
+}
+.item.state-dark{border-left-color:var(--flare);}
+.item.state-partial{border-left-color:var(--warn);}
+.item.state-discuss{border-left-color:var(--chalk-faint);}
+.item-top{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
+.id{
+  font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:13px;
+  color:var(--chalk-dim); font-variant-numeric:tabular-nums;
+}
+.chip{
+  font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase;
+  padding:2px 7px; border-radius:999px; border:1px solid currentColor;
+}
+.sev-bug{color:var(--neg);} .sev-polish{color:var(--ice);} .sev-idea{color:var(--warn);}
+.st-dark{color:var(--flare);} .st-partial{color:var(--warn);} .st-discuss{color:var(--chalk-dim);}
+.plain{margin:0; color:var(--chalk); max-width:66ch;}
+.meta{
+  margin:0; font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--chalk-faint);
+  font-variant-numeric:tabular-nums; display:flex; flex-wrap:wrap; gap:8px; align-items:baseline;
+}
+.note{color:var(--flare); font-family:Archivo,sans-serif; font-size:12px;}
+.state-partial .note{color:var(--warn);}
+.state-open .note, .state-discuss .note{color:var(--chalk-dim);}
+.foot{border-top:1px solid var(--line); padding-top:16px;}
+.foot p{margin:0; color:var(--chalk-faint); font-size:13px;}
+code{font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--chalk-dim);}
+@media (max-width:600px){
+  .wrap{padding:32px 16px 48px;} h1{font-size:34px;} .stat{flex-basis:100px;}
+}
+</style>
+<div class="wrap">
+<header class="head">
+<p class="eyebrow"><span class="tick"></span>Fleeced · Dynasty Trade Finder</p>
+<h1>Open tester feedback</h1>
+<p class="sub">Every open item from the in-app feedback queue, in plain language. Generated 27 August 2026, 04:29 UTC.</p>
+</header>
+<section class="stats" aria-label="Summary">
+<div class="stat">
+<span class="stat-num ">40</span>
+<span class="stat-label">Open items</span>
+</div>
+<div class="stat">
+<span class="stat-num sev-bug">21</span>
+<span class="stat-label">Bugs</span>
+</div>
+<div class="stat">
+<span class="stat-num sev-polish">13</span>
+<span class="stat-label">Polish</span>
+</div>
+<div class="stat">
+<span class="stat-num sev-idea">6</span>
+<span class="stat-label">Ideas</span>
+</div>
+<div class="stat">
+<span class="stat-num hot">5</span>
+<span class="stat-label">Built but off</span>
+</div>
+</section>
+<p class="reporters">Reported by mattmurf77 27 · jonbonjourvi 8 · Boston Brawlers 3 · gdubs10 2</p>
+<aside class="callout">
+<p class="callout-title">Cheapest value on the board</p>
+<p>5 of these are already built and merged — they sit behind feature flags that are switched off. A tester still sees exactly what they reported, so they read as open, but the work is done. Check each one's flag note before flipping: one of them is not in any shipped app build yet.</p>
+</aside>
+<section class="area">
+<h2>Trade finder<span class="area-count">18</span></h2>
+<ul class="items">
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#402</span>
+<span class="chip sev-polish">Polish</span>
+</div>
+<p class="plain">Change what the &#x27;more offers&#x27; button does: instead of its current behaviour, drop the user to tier-up and tier-down choices presented inline below the trade chip.</p>
+<p class="meta">Boston Brawlers · v1.16.8 · 2026-08-26 · TradesHome</p>
+</li>
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#401</span>
+<span class="chip sev-idea">Idea</span>
+</div>
+<p class="plain">Stop suggesting trades that swap similarly valued players at the same position — &#x27;trim the fluff a bit&#x27;.</p>
+<p class="meta">gdubs10 · v1.16.7 · 2026-08-26 · TradesHome<span class="note">same cluster as #350, #363, #393</span></p>
+</li>
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#400</span>
+<span class="chip sev-polish">Polish</span>
+</div>
+<p class="plain">Take &#x27;Getting too much&#x27; out of the list of reasons for declining a trade.</p>
+<p class="meta">gdubs10 · v1.16.7 · 2026-08-26 · TradesHome</p>
+</li>
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#393</span>
+<span class="chip sev-polish">Polish</span>
+</div>
+<p class="plain">Rank and evaluate trade cards the way League Home already identifies buyers and sellers: target the positions you&#x27;re weakest at from the teams deepest there, while the package you give up comes from your surplus and fills their hole. He calls this by far the strongest way to produce trades that actually get accepted.</p>
+<p class="meta">mattmurf77 · v1.16.2 · 2026-08-24 · TradesHome<span class="note">his own proposed fix for the suggestion-quality cluster</span></p>
+</li>
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#392</span>
+<span class="chip sev-bug">Bug</span>
+</div>
+<p class="plain">On a first visit the screen implies trades are already being found in the background, but nothing actually runs until you press &#x27;Find a trade&#x27;.</p>
+<p class="meta">mattmurf77 · v1.16.2 · 2026-08-23 · TradesHome</p>
+</li>
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#370</span>
+<span class="chip sev-bug">Bug</span>
+</div>
+<p class="plain">Trades you already liked in an earlier session come back around again in a new one.</p>
+<p class="meta">mattmurf77 · v1.15.0 · 2026-08-20 · TradesHome</p>
+</li>
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#363</span>
+<span class="chip sev-bug">Bug</span>
+</div>
+<p class="plain">&#x27;Tier up&#x27; came back as nothing but one-for-one swaps, a lot of them low-value players only worth a 2nd or 3rd.</p>
+<p class="meta">jonbonjourvi · v1.15.0 · 2026-08-19 · TradesHome<span class="note">same root cause as #401</span></p>
+</li>
+<li class="item state-dark">
+<div class="item-top">
+<span class="id">#361</span>
+<span class="chip sev-polish">Polish</span>
+<span class="chip st-dark">Built, switched off</span>
+</div>
+<p class="plain">Follow-up to #360 — he grants he could just pick the positions he does want, but says the no-flag is cheap because the logic already exists.</p>
+<p class="meta">jonbonjourvi · v1.15.0 · 2026-08-19 · TradesHome<span class="note">built · same flag as #360</span></p>
+</li>
+<li class="item state-dark">
+<div class="item-top">
+<span class="id">#360</span>
+<span class="chip sev-polish">Polish</span>
+<span class="chip st-dark">Built, switched off</span>
+</div>
+<p class="plain">Add an &#x27;avoiding&#x27; row beside shopping-for and willing-to-sell: positions you never want sent to you at all.</p>
+<p class="meta">jonbonjourvi · v1.15.0 · 2026-08-19 · TradesHome<span class="note">built · flag trade.avoid_positions is off</span></p>
+</li>
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#356</span>
+<span class="chip sev-polish">Polish</span>
+</div>
+<p class="plain">2026 picks show as a generic &#x27;2026 2nd&#x27; instead of the real slot the pick actually is, like 2.05.</p>
+<p class="meta">mattmurf77 · v1.15.0 · 2026-08-19 · TradesHome</p>
+</li>
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#354</span>
+<span class="chip sev-bug">Bug</span>
+</div>
+<p class="plain">You can lock your own players into a package so they stay put, but the lock button is missing on the opponent&#x27;s players.</p>
+<p class="meta">mattmurf77 · v1.14.0 · 2026-08-19 · TradesHome</p>
+</li>
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#350</span>
+<span class="chip sev-bug">Bug</span>
+</div>
+<p class="plain">The same two or three players keep reappearing across suggestion after suggestion, because the app prices them too high. Same guy, bad package, over and over.</p>
+<p class="meta">mattmurf77 · v1.14.0 · 2026-08-17 · TradesHome<span class="note">one of four reports on suggestion quality</span></p>
+</li>
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#349</span>
+<span class="chip sev-bug">Bug</span>
+</div>
+<p class="plain">Draft picks on the tiles don&#x27;t show the pick number.</p>
+<p class="meta">jonbonjourvi · v1.14.0 · 2026-08-17 · TradesHome<span class="note">filed as a follow-on to #348</span></p>
+</li>
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#348</span>
+<span class="chip sev-polish">Polish</span>
+</div>
+<p class="plain">Player names are cut off on the trade tiles — show the full name.</p>
+<p class="meta">jonbonjourvi · v1.14.0 · 2026-08-17 · TradesHome</p>
+</li>
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#347</span>
+<span class="chip sev-bug">Bug</span>
+</div>
+<p class="plain">The trade tiles don&#x27;t show which tier each player belongs to.</p>
+<p class="meta">mattmurf77 · v1.14.0 · 2026-08-17 · TradesHome</p>
+</li>
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#342</span>
+<span class="chip sev-bug">Bug</span>
+</div>
+<p class="plain">The give side and the get side of a suggested trade card aren&#x27;t the same size, and the gaps between them are uneven.</p>
+<p class="meta">mattmurf77 · v1.13.4 · 2026-08-16 · TradesHome</p>
+</li>
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#338</span>
+<span class="chip sev-bug">Bug</span>
+</div>
+<p class="plain">&#x27;Send in Sleeper&#x27; delivered the trade, but the other owner never got a Sleeper direct message about it.</p>
+<p class="meta">mattmurf77 · v1.13.4 · 2026-08-16 · TradesHome</p>
+</li>
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#337</span>
+<span class="chip sev-bug">Bug</span>
+</div>
+<p class="plain">The Draft tab disappeared from the Acquire tab while a draft was actually live — the bottom navigation was still showing it. The two disagree.</p>
+<p class="meta">mattmurf77 · v1.13.4 · 2026-08-16 · TradesHome</p>
+</li>
+</ul>
+</section>
+<section class="area">
+<h2>Team review<span class="area-count">3</span></h2>
+<ul class="items">
+<li class="item state-dark">
+<div class="item-top">
+<span class="id">#372</span>
+<span class="chip sev-bug">Bug</span>
+<span class="chip st-dark">Built, switched off</span>
+</div>
+<p class="plain">Age distribution alone is too weak a signal — fold in starter dynasty value and playoff likelihood, and keep age as a lighter driver.</p>
+<p class="meta">mattmurf77 · v1.15.0 · 2026-08-20 · TeamReview<span class="note">built · flag trade.outlook_composite off AND not in any shipped build</span></p>
+</li>
+<li class="item state-dark">
+<div class="item-top">
+<span class="id">#371</span>
+<span class="chip sev-bug">Bug</span>
+<span class="chip st-dark">Built, switched off</span>
+</div>
+<p class="plain">Let playoff odds be the primary decider for the contend-or-rebuild window, rather than a side input.</p>
+<p class="meta">mattmurf77 · v1.15.0 · 2026-08-20 · TeamReview<span class="note">built · flag trades.window_from_odds is off</span></p>
+</li>
+<li class="item state-dark">
+<div class="item-top">
+<span class="id">#365</span>
+<span class="chip sev-bug">Bug</span>
+<span class="chip st-dark">Built, switched off</span>
+</div>
+<p class="plain">Your contend-or-rebuild window is judged on roster age alone — he&#x27;s all-in in FFV3 and the app calls him a rebuilder. Suggests counting first-round picks owned versus traded away as a second signal.</p>
+<p class="meta">mattmurf77 · v1.15.0 · 2026-08-20 · TeamReview<span class="note">built · flag trade.outlook_net_firsts is off</span></p>
+</li>
+</ul>
+</section>
+<section class="area">
+<h2>Calculator<span class="area-count">3</span></h2>
+<ul class="items">
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#403</span>
+<span class="chip sev-polish">Polish</span>
+</div>
+<p class="plain">Let users &#x27;shop&#x27; a player: pick someone, then choose to tier up, tier down, or explore same-value swaps at positions you select. Offers come back as small tiles or as swipeable cards with a &#x27;1 of X&#x27; counter, each carrying its own like and dismiss button. He is explicit that this is an idea, not a design yet.</p>
+<p class="meta">Boston Brawlers · v1.16.8 · 2026-08-26 · TradeCalculator<span class="note">overlaps #402 — both want the same tier-up/down pattern</span></p>
+</li>
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#385</span>
+<span class="chip sev-idea">Idea</span>
+</div>
+<p class="plain">Quick stats on each player without leaving the screen — baseline points per game, where they finished the season, maybe a wins-above-replacement style number.</p>
+<p class="meta">jonbonjourvi · v1.15.0 · 2026-08-22 · TradeCalculator</p>
+</li>
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#352</span>
+<span class="chip sev-idea">Idea</span>
+</div>
+<p class="plain">Let users like and dislike individual players so favourites surface more often and unwanted ones stop appearing — and the same control by position.</p>
+<p class="meta">jonbonjourvi · v1.14.0 · 2026-08-18 · TradeCalculator</p>
+</li>
+</ul>
+</section>
+<section class="area">
+<h2>Player info<span class="area-count">2</span></h2>
+<ul class="items">
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#332</span>
+<span class="chip sev-idea">Idea</span>
+</div>
+<p class="plain">An in-season breakout finder: snap counts and target counts per player, plus a section showing who&#x27;s trending up and down across opportunity metrics.</p>
+<p class="meta">mattmurf77 · v1.13.4 · 2026-08-15 · Matches</p>
+</li>
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#331</span>
+<span class="chip sev-idea">Idea</span>
+</div>
+<p class="plain">Make every player tile tappable, opening a card with age, year-by-year stats, per-game numbers, and a weekly game log when you tap into a season.</p>
+<p class="meta">mattmurf77 · v1.13.4 · 2026-08-15 · Matches</p>
+</li>
+</ul>
+</section>
+<section class="area">
+<h2>League home<span class="area-count">4</span></h2>
+<ul class="items">
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#390</span>
+<span class="chip sev-polish">Polish</span>
+</div>
+<p class="plain">Swap one of the tiles for playoff projections.</p>
+<p class="meta">mattmurf77 · v1.16.2 · 2026-08-23 · LeagueHome</p>
+</li>
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#389</span>
+<span class="chip sev-bug">Bug</span>
+</div>
+<p class="plain">Remove the free agents and draft links.</p>
+<p class="meta">mattmurf77 · v1.16.2 · 2026-08-23 · LeagueHome</p>
+</li>
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#388</span>
+<span class="chip sev-polish">Polish</span>
+</div>
+<p class="plain">Add a minimised league-ranks view — the little bar-graph thumbnail — to this page and make it the primary home again, which is what frees up room on the rankings page.</p>
+<p class="meta">mattmurf77 · v1.16.2 · 2026-08-23 · LeagueHome<span class="note">paired with #387</span></p>
+</li>
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#343</span>
+<span class="chip sev-bug">Bug</span>
+</div>
+<p class="plain">The leaderboard is showing Greg with an absurdly large number.</p>
+<p class="meta">mattmurf77 · v1.13.4 · 2026-08-16 · LeagueHome</p>
+</li>
+</ul>
+</section>
+<section class="area">
+<h2>League rankings<span class="area-count">3</span></h2>
+<ul class="items">
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#399</span>
+<span class="chip sev-bug">Bug</span>
+</div>
+<p class="plain">The avatar on &#x27;filter the league by one position&#x27; faces the wrong way and should be flipped.</p>
+<p class="meta">mattmurf77 · v1.16.3 · 2026-08-24 · LeagueRankings</p>
+</li>
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#387</span>
+<span class="chip sev-bug">Bug</span>
+</div>
+<p class="plain">The page spends too much room on other information. He wants mockups for a redesign that gives the rankings themselves more of the screen.</p>
+<p class="meta">mattmurf77 · v1.16.2 · 2026-08-23 · LeagueRankings<span class="note">asks for mockups, not a build</span></p>
+</li>
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#382</span>
+<span class="chip sev-bug">Bug</span>
+</div>
+<p class="plain">The team order doesn&#x27;t match the pick values shown next to them — he suspects a pick-value adjustment issue.</p>
+<p class="meta">mattmurf77 · v1.15.0 · 2026-08-22 · LeagueRankings</p>
+</li>
+</ul>
+</section>
+<section class="area">
+<h2>Rank<span class="area-count">2</span></h2>
+<ul class="items">
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#404</span>
+<span class="chip sev-bug">Bug</span>
+</div>
+<p class="plain">&#x27;Add a league&#x27; in the header dropdown drops you on the ranking page instead of the add-a-league flow.</p>
+<p class="meta">Boston Brawlers · v1.16.8 · 2026-08-26 · QuickSetTiers</p>
+</li>
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#345</span>
+<span class="chip sev-polish">Polish</span>
+</div>
+<p class="plain">Delete the &#x27;more ways to rank&#x27; sheet and make that button go straight to Build Your Board.</p>
+<p class="meta">mattmurf77 · v1.13.4 · 2026-08-16 · RankHome</p>
+</li>
+</ul>
+</section>
+<section class="area">
+<h2>Mock draft<span class="area-count">2</span></h2>
+<ul class="items">
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#353</span>
+<span class="chip sev-bug">Bug</span>
+</div>
+<p class="plain">Add each player&#x27;s NFL draft position to the tiles.</p>
+<p class="meta">mattmurf77 · v1.14.0 · 2026-08-18 · MockDraft</p>
+</li>
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#351</span>
+<span class="chip sev-polish">Polish</span>
+</div>
+<p class="plain">Jordan Tyson came off the board at 1.01 in a mock — implausible enough to point at a valuation problem.</p>
+<p class="meta">jonbonjourvi · v1.14.0 · 2026-08-17 · MockDraft</p>
+</li>
+</ul>
+</section>
+<section class="area">
+<h2>Navigation<span class="area-count">1</span></h2>
+<ul class="items">
+<li class="item state-partial">
+<div class="item-top">
+<span class="id">#310</span>
+<span class="chip sev-idea">Idea</span>
+<span class="chip st-partial">Partly done</span>
+</div>
+<p class="plain">Don&#x27;t lock the manual calculator behind trades; cut the navigation down to just Rank, Calculator and League; and put a value-prop line on both surfaces linking to rankings — &#x27;we can now tailor trades to your exact valuations&#x27;.</p>
+<p class="meta">mattmurf77 · v1.13.0 · 2026-08-12 · TradeCalculator<span class="note">calculator unlocked; nav + value-prop not done</span></p>
+</li>
+</ul>
+</section>
+<section class="area">
+<h2>Settings<span class="area-count">1</span></h2>
+<ul class="items">
+<li class="item state-open">
+<div class="item-top">
+<span class="id">#344</span>
+<span class="chip sev-bug">Bug</span>
+</div>
+<p class="plain">Too many settings stacked on one flat layer — group them into nested pages.</p>
+<p class="meta">mattmurf77 · v1.13.4 · 2026-08-16 · LeagueRankings<span class="note">stale &#x27;in progress&#x27; corrected 2026-08-27</span></p>
+</li>
+</ul>
+</section>
+<section class="area">
+<h2>Design<span class="area-count">1</span></h2>
+<ul class="items">
+<li class="item state-discuss">
+<div class="item-top">
+<span class="id">#205</span>
+<span class="chip sev-polish">Polish</span>
+<span class="chip st-discuss">Needs a decision</span>
+</div>
+<p class="plain">Not a feature request — three design tenets (simple beats complex; too much information is worse than none; build for people who aren&#x27;t technical) plus a request to sit down and align on them. He names the trade calculator as the worst offender.</p>
+<p class="meta">mattmurf77 · v1.11.0 · 2026-07-28 · TradeCalculator<span class="note">never advanced past questions</span></p>
+</li>
+</ul>
+</section>
+<footer class="foot"><p>Generated from the live feedback admin API. States are verified against the code on <code>origin/main</code>, not just the stored status field.</p></footer>
+</div>

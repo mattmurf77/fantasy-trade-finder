@@ -11,7 +11,7 @@
 
 ---
 
-## 2026-08-28 — IAP enablement code half (runbook 6–7): webhook delta + RevenueCat paywall — full gates, ALL DARK
+## 2026-08-28d — IAP enablement code half (runbook 6–7): webhook delta + RevenueCat paywall — full gates, ALL DARK
 
 Operator-directed cross-session handoff; two Opus build subagents (backend/mobile, disjoint file ownership), lead-session review of every load-bearing hunk. Branch `claude/monetization-features-feedback-a6fe77` off `origin/main` `69dc0cae`. Scope block: [docs/plans/monetization/iap-enablement/scope.md](../docs/plans/monetization/iap-enablement/scope.md). **Zero user-visible change until the operator flips `monetize.*` flags** — no route gained `@_require_pro`, no flag changed, no schema changed.
 
@@ -20,6 +20,36 @@ Operator-directed cross-session handoff; two Opus build subagents (backend/mobil
 - **Evidence (D-056):** `pytest backend/tests` **4397 passed, 1 skipped, 0 failed** (lead-run on the combined tree; targeted new coverage: 47 entitlements + 12 paywall-config tests, 7 named backend sabotages RED-then-green) · `npx tsc --noEmit` clean · `testid-lint OK` · new `mobile/tests/check-paywall.js` **11/11** (3 mutations verified failing) · full structural suite **84 guards, 0 failing** · code-walk proof + operator sandbox checklist in [docs/plans/monetization/iap-enablement/](../docs/plans/monetization/iap-enablement/).
 - **Runtime evidence OWED (operator, blocked on Apple):** [sandbox-test-checklist.md](../docs/plans/monetization/iap-enablement/sandbox-test-checklist.md) — cannot run until the Paid Apps agreement (signed 2026-08-27) is active and RevenueCat/ASC are configured (runbook steps 3–5). The mobile purchase path has **no** runtime proof until then, by design.
 - **Open for the operator:** Q-034 (ASC SKU naming — recommend `ftf_*`), `REVENUECAT_WEBHOOK_SECRET` absent from `secrets.local.env` + Render, `EXPO_PUBLIC_REVENUECAT_IOS_KEY` needed in EAS env before the next build, and note the next mobile release **must be a full EAS build, not OTA** (native module).
+
+## 2026-08-28c — v1.16.9 (EAS build 135) BUILT + SUBMITTED to TestFlight; trade.shop_asset LIT in prod
+
+Release run at operator order ("push, open PR, merge, push to testflight and flip the flags on").
+
+- **Merge:** PR [#225](https://github.com/mattmurf77/fantasy-trade-finder/pull/225) squash-merged to `main` @ `a9d96435` on green CI (backend-tests 8m52s · mobile-typecheck · testid-lint). Branch `claude/new-feedback-71436e` @ `823bfb2d` content-verified (empty diff vs main), recovery-ledgered (`docs/recovery/2026-08-28-shop-branch-ship.md`), then swept — worktree removed clean, local + remote branch deleted.
+- **Flag:** `trade.shop_asset` flipped `true` in the same PR (features.json + all three mirror fixtures; mirror suite 76 passed). **Verified LIVE on prod post-deploy** via `GET /api/feature-flags`: shop_asset / asset_ideas / calc.merged_layout / finder_targeting all `true`. Inert for pre-1.16.9 clients (no code reads the flag).
+- **Build:** EAS `21504c65-a3ff-4003-8dee-9e902cdf792d` — v1.16.9, build **135**, status **finished**, from git commit `a9d96435` (the merged main squash — verified via `eas build:list`, not assumed). `--auto-submit` chained: *"Submitted your app to Apple App Store Connect!"* — Apple-side processing then TestFlight availability is the only remaining step and is not ours. Version bumped in BOTH `mobile/app.json` and `Info.plist` (G-012), `plutil` clean; build number from EAS remote autoIncrement (134 → 135).
+- **Owed — operator, runtime, on build 135 (this build carries BOTH):** the 14-step #402/#403 shop checklist ([docs/feedback/items/402-more-offers-shop/testflight-checklist.md](../docs/feedback/items/402-more-offers-shop/testflight-checklist.md)) — now post-flip verification per the operator's confirmed sequencing — **and** the still-unrun 8-step #384 partner-summary checklist owed "on the next EAS build" since 2026-08-27, which this is.
+
+## 2026-08-28b — #402/#403 QA round 2: B-3, own-position chip ruling, P-1..P-4 — universal-rule fixes, gates green
+
+Operator rulings ("Fix B3, 2. Offer it. Resolve the runtime concerns by ensuring consistent/universal approach") recorded in `docs/feedback/items/402-more-offers-shop/rulings-2026-08-28.md`; fixed in `23b0cdf6` on `claude/new-feedback-71436e` (still HELD unmerged).
+
+- **B-3 + P-2, one mechanism:** committed dismissals are client-authoritative for the strip session — a `suppressed` set added to only on commit, cleared by nothing but the strip instance dying (Undo-safety ordering verified; commit-failure un-suppresses). Pager, 1/X, chip counts and the Clear-positions label all filter through it, closing the baselineLateralCount nit with it.
+- **Own-position chip (LLD §3.4 over the mockup, ruled):** offered unselected alongside the others; own-only selection sends `swap_positions:[own]` with no special case; PICK still never offered; suite j2c INVERTED (the pre-round-2 suite run against the new code reds only on j2c — proved by executing the HEAD copy: 78/1). Mockup Same-value frame updated to shipped semantics (WR chip added, its contradictory PICK chip removed).
+- **P-1:** react-don't-race pager — one `pendingScrollRef` consumed by an effect keyed on the rendered data; all four movers request-then-mutate. **P-3:** `shop_opened` emits exactly once, in `openShopStrip` (chooser pick = one event with the real position; Cancel = zero). **P-4:** `shopEnabled` = `trade.shop_asset && trade.asset_ideas && calc.merged_layout`; flag comment names the chain plus the structural `trade.finder_targeting` prerequisite; any flag dying mid-session closes an open strip.
+- **Suite:** 100 assertions (21 added: exactly-one-emitter h4, flag-chain n1, suppression n2, pager n3, and reviewer A's two missing pins — Chalkline scan n4, label-source n5). Sabotage 4/4 red-then-green with byte-identical restores (`cmp`-proved; file snapshots, not `git checkout --`).
+- **Gates (orchestrator re-run):** `tsc --noEmit` clean · shop suite 100/100 · all `check-*.js` zero RED · `testid-lint OK` · `features.json` valid · `pytest test_seed_ui_test_db.py + test_analytics_taxonomy_384.py` 87 passed (backend diff = one taxonomy comment).
+- **Checklist updated:** step 9 covers the chip + B-3 verification; Known-open now empty. Nothing remains open from either QA reviewer.
+
+## 2026-08-28 — #402/#403 "More offers = shop a player" — full build + redundant QA + fix round, all gates green (branch, HELD unmerged)
+
+Built by three parallel/sequential subagents on `claude/new-feedback-71436e` (docs+mockups branch, first re-based on `origin/main` `69dc0cae` via merge `bf125dac`): `5115265b` W1 mobile (entry fork, ShopOffersStrip, chooser, flag `trade.shop_asset` dark, 4 analytics events, `check-shop-deck.js`), `4b71f036` W2 backend (`swap_positions` on `/api/trades/asset-ideas` + spike S-2), `bc21ee0f` W2 UI (position multi-select), `472f6649` QA fixes. **Operator hold: nothing merged, nothing pushed.**
+
+- **Gates, run by the orchestrator on the combined tree (not delegated claims):** full `pytest backend/tests` → **4,377 passed / 1 skipped / 0 failed** (5:12); `npx tsc --noEmit` exit 0; **all 84 `mobile/tests/check-*.js` suites green** including the new shop suite (90 assertions after the fix round) and a byte-untouched `check-single-pin-actions.js` (R-18); `testid-lint OK`; `features.json` valid. Re-run after every commit.
+- **Spike S-2 (`docs/feedback/items/402-more-offers-shop/spike-s2-yield.md`):** single-position swap selections empty 30–60% of the time (TE worst), multi-select finds a lateral 89–97% — the picker ships multi-select-first with live counts and first-class empty copy. Generator output matched the analytic ±band window in all 32 grid cells.
+- **Sabotage evidence (suite falsifiability proven by every agent):** W1 9 edits / 9 red (give-side guard, Gesture.Pan import, counter decoupled, mode-map corruption, pan gate deleted, label drift, ✕→like, undo-lie, taxonomy drop); W2 backend 2 (lateral leak into upgrade → 3 red; silent invalid-position accept → 3 red); W2 UI 4 (PICK chip, analytics position-set, `[]` sent, flush dropped); fix round 4 (k1/l1/m2/l2c). All restored green.
+- **Redundant static QA (2 reviewers, independent):** A (spec) — every requirement PASS, flag-OFF byte-identical proven (early-return fork, exact legacy literal, zero diff on `/api/trades/queue`); B (regression) — 4 confirmed seam bugs B-1..B-4 + 4 plausible P-1..P-4. **Operator selected B-1/B-2/B-4 → fixed in `472f6649`** (deck holds still through buttons + VoiceOver + reason tiles + flag button + a topRawId close-on-card-change effect; shop state cleared by `resetDeckForNewTargets`/`handleClearPin`/kill-switch mount gate/`key={asset.id}`; Undo toast retracted by reference on every early commit). **Open by explicit selection:** B-3 (≤60 s warm-cache resurrection of a committed dismiss), A-1 (own-position chip — mockup vs LLD §3.4 contradiction, needs a ruling), P-1..P-4, plus two unpinned mechanical guards (Chalkline scan, label-source assertion) and two doc rows (api-reference "pending" note now stale; components.md row).
+- **Owed (operator, runtime):** the 14-step checklist in [docs/feedback/items/402-more-offers-shop/testflight-checklist.md](../docs/feedback/items/402-more-offers-shop/testflight-checklist.md) on the first build carrying the branch — steps 3/8/11/12 are the QA-fix regressions, Part B is the flag-off byte-identity check. Elo note for the operator: the shop ✓ moves the board by explicit ruling A.
 
 ## 2026-08-27 — #384 partner team-shape summary restored to the merged calculator layout — full gates
 
@@ -3105,7 +3135,10 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
-- [2026-08-28 — IAP enablement code half (runbook 6–7): webhook delta + RevenueCat paywall — full gates, ALL DARK](#2026-08-28--iap-enablement-code-half-runbook-67-webhook-delta--revenuecat-paywall--full-gates-all-dark)
+- [2026-08-28d — IAP enablement code half (runbook 6–7): webhook delta + RevenueCat paywall — full gates, ALL DARK](#2026-08-28d--iap-enablement-code-half-runbook-67-webhook-delta--revenuecat-paywall--full-gates-all-dark)
+- [2026-08-28c — v1.16.9 (EAS build 135) BUILT + SUBMITTED to TestFlight; trade.shop_asset LIT in prod](#2026-08-28c--v1169-eas-build-135-built--submitted-to-testflight-tradeshop_asset-lit-in-prod)
+- [2026-08-28b — #402/#403 QA round 2: B-3, own-position chip ruling, P-1..P-4 — universal-rule fixes, gates green](#2026-08-28b--402403-qa-round-2-b-3-own-position-chip-ruling-p-1p-4--universal-rule-fixes-gates-green)
+- [2026-08-28 — #402/#403 "More offers = shop a player" — full build + redundant QA + fix round, all gates green (branch, HELD unmerged)](#2026-08-28--402403-more-offers--shop-a-player--full-build--redundant-qa--fix-round-all-gates-green-branch-held-unmerged)
 - [2026-08-27 — #384 partner team-shape summary restored to the merged calculator layout — full gates](#2026-08-27--384-partner-team-shape-summary-restored-to-the-merged-calculator-layout--full-gates)
 - [2026-08-26e — v1.16.8 (EAS build 134) BUILT for TestFlight](#2026-08-26e--v1168-eas-build-134-built-for-testflight)
 - [2026-08-26c — Entry v2.1: login option (Opus subagent build, lead-session review) — full gates](#2026-08-26c--entry-v21-login-option-opus-subagent-build-lead-session-review--full-gates)

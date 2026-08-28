@@ -12050,6 +12050,11 @@ def asset_trade_ideas():
                                  this one league-mate — every idea's
                                  counterparty is that member; a receive pin
                                  owned by anyone else returns empty groups)
+      swap_positions?: [str]    (#403 W2 — replaces the #198 same-position
+                                 predicate for the LATERAL group only;
+                                 upgrade/downgrade never affected. Domain
+                                 {QB,RB,WR,TE}; absent/null/[] = today's
+                                 behavior; invalid tokens are a 400)
     }
 
     Response: {
@@ -12085,6 +12090,34 @@ def asset_trade_ideas():
         return jsonify({"error": "asset_id required"}), 400
     if direction not in ("give", "receive"):
         return jsonify({"error": "direction must be 'give' or 'receive'"}), 400
+    # #403 W2 — swap_positions replaces the #198 same-position predicate for
+    # the LATERAL group only (upgrade/downgrade are never affected). Absent,
+    # null or [] means "no selection" and is byte-identical to today. Invalid
+    # tokens are a 400, never a silent drop: unlike the persisted #360
+    # avoid_positions preference (where dropping preserves the user's other
+    # choices), this is a per-request parameter whose only job is to change
+    # what comes back — a silently dropped token returns the pin's own
+    # laterals and looks exactly like a picker that did nothing. "PICK" is
+    # rejected on purpose: the lateral predicate reads raw `position`, and
+    # generic pick rungs carry a deliberately fake one (#360); a PICK pin
+    # already gets pure value bands in all three groups.
+    swap_positions = body.get("swap_positions")
+    if swap_positions is not None:
+        # #360 — bool is a subclass of int, not list, so `true` lands here.
+        if not isinstance(swap_positions, list):
+            return jsonify({"error": "swap_positions must be an array"}), 400
+        _swap_norm: list = []
+        for _tok in swap_positions:
+            if not isinstance(_tok, str):
+                return jsonify({"error": "invalid_position",
+                                "value": repr(_tok)[:32]}), 400
+            _norm = _tok.strip().upper()
+            if _norm not in VALID_POSITIONS:
+                return jsonify({"error": "invalid_position",
+                                "value": _norm}), 400
+            if _norm not in _swap_norm:      # dedupe, first-seen order
+                _swap_norm.append(_norm)
+        swap_positions = _swap_norm or None  # [] = "no selection"
     # Same wide-net default as pinned generate jobs.
     fairness_threshold = float(body.get("fairness_threshold", 0.50))
 
@@ -12167,6 +12200,7 @@ def asset_trade_ideas():
         untouchable_ids    = untouchable_ids or None,
         not_interested_ids = not_interested_ids or None,
         avoid_positions    = avoid_positions or None,      # #360
+        swap_positions     = swap_positions,               # #403 W2
         opponent_user_id   = opponent_user_id,
     )
 

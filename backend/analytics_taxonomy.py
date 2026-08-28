@@ -631,6 +631,25 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # widening after an exhausted deck), and reachable only from a deck the
     # user reached by tapping Find a Trade, so it opens no DAU seam.
     "deck_back_to_calculator", "deck_unpin_retry", "deck_search_all_tapped",
+    # #402/#403 — the inline shop strip (screen 'Trades'; flag
+    # trade.shop_asset, docs/feedback/items/402-more-offers-shop/). All
+    # four are INTENT and deliberately absent from NON_INTENT_EVENTS
+    # (scope.md §1): each is a deliberate tap — `shop_opened` fires
+    # exactly once per strip open, at the single open path (TradesScreen's
+    # `openShopStrip`; QA round 2 P-3): the give-side "More offers" press
+    # when one give asset opens the strip directly, or the "Shop which
+    # player?" chooser row pick (carrying the PICKED asset's position) —
+    # the chooser's own open and its Cancel emit nothing (a control tap
+    # that opened a strip, never an impression),
+    # `shop_mode_selected` a mode-chip tap, `shop_positions_selected` the
+    # W2 picker's selection settling into a fetch (registered now, W2
+    # emits it), and `shop_dismiss_undone` the Undo tap inside the held
+    # window — its sibling `swipe_undone` is likewise not in the
+    # non-intent set. The strip's like reuses `calc_trade_queued` (screen
+    # 'Trades') and its dismiss lands as the server-fired `match_swiped`
+    # — neither needs registration here.
+    "shop_opened", "shop_mode_selected", "shop_positions_selected",
+    "shop_dismiss_undone",
     # The #384-local pass overlay (plan.md W2 — this page only; the shipped
     # deck keeps DeclineReasonPanel's inline tiles). BOTH are NON_INTENT and
     # both land in NON_INTENT_EVENTS in this same commit.
@@ -1529,6 +1548,21 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # `find_trades_tapped` with the source. A prop here would be a second
     # source of truth for a fact two other rows already carry.
     "deck_search_all_tapped":      frozenset(),
+    # #402/#403 — the shop strip. `asset_position` is the shopped asset's
+    # position (QB/RB/WR/TE, or PICK for a pick pseudo-asset — shopping a
+    # pick is legitimate); `source` is a closed enum, 'more_offers' in W1;
+    # `give_count` (int ≥ 1) is how many give-side assets the tapped card
+    # held — the chooser-vs-direct split in one number. `mode` is the
+    # shop-mode enum (tier_up/tier_down/same_value) and `n_ideas` the
+    # selected mode's visible idea count. `shop_positions_selected` carries
+    # the COUNT only — the selected set is user preference data and would
+    # raise prop cardinality for no analytic gain (lld-delta.md §8). NO
+    # player ids anywhere.
+    "shop_opened":                 frozenset({"asset_position", "source",
+                                              "give_count"}),
+    "shop_mode_selected":          frozenset({"mode", "n_ideas"}),
+    "shop_positions_selected":     frozenset({"n"}),
+    "shop_dismiss_undone":         frozenset({"mode"}),
     # The overlay pair. `opened` carries NO props on purpose: the card it
     # belongs to is already identified by the trade_pass_layer* rows and by
     # trade_card_viewed on the same card, and a trade_id here would be a

@@ -14,9 +14,93 @@
 
 
 
-## 2026-08-28 — The IAP rail exists in code: RevenueCat webhook delta + a 3.1.2-complete paywall, everything dark
+## 2026-08-28d — The IAP rail exists in code: RevenueCat webhook delta + a 3.1.2-complete paywall, everything dark
 
 The code half of the IAP runbook (2026-08-27, steps 6–7), operator-directed, two Opus subagents + lead review. **Nothing user-visible: all `monetize.*` flags false, no route gained a Pro gate, no data-generating action tolled (timing doc §7/§11).** Backend: the shipped webhook/projector gains `$RCAnonymousID:*`/`aliases[]` reconciliation onto `acct_*` (`resolve_rc_identity`, re-keying anon-written billing rows), `TRANSFER` as a *move*, `BILLING_ISSUE` grace extension, `GET /api/paywall/config` (off-flag → `{"enabled": false}`), five `paywall_*` events in the taxonomy. Mobile: `react-native-purchases@10.8.1` behind one fail-safe seam (inert without `EXPO_PUBLIC_REVENUECAT_IOS_KEY`; `logOut` never called), `configure`/`logIn` bridge on both session halves, server-authoritative `useEntitlements` (CustomerInfo raise-only), `PaywallScreen` modal with the full 3.1.2 set + Restore + /privacy + /terms, flag-gated Settings row. Evidence: pytest 4397/0 · tsc clean · testid-lint OK · `check-paywall.js` 11/11 · structural 84/0; proofs + operator sandbox checklist in `docs/plans/monetization/iap-enablement/`; ADR-016. **Q-034 surfaced:** runbook ASC SKU names diverge from `ftf_*` canon — projector tolerates both, operator picks. Owed: `REVENUECAT_WEBHOOK_SECRET` + `EXPO_PUBLIC_REVENUECAT_IOS_KEY` (operator); next release = **full EAS build** (native module).
+
+## 2026-08-28c — v1.16.9 ships: shop-a-player live end to end
+
+PR #225 squash-merged (`a9d96435`), `trade.shop_asset` lit and verified live on prod,
+EAS build **135** (v1.16.9) built from the merge commit and auto-submitted to App Store
+Connect. Shipped branch recovery-ledgered and swept. Operator owes the runtime pass on
+build 135: the 14-step shop checklist plus the outstanding 8-step #384 partner-summary
+checklist — the first TestFlight build carrying both.
+
+## 2026-08-28b — #402/#403 QA round 2 closes every open finding
+
+Operator ruled: fix B-3, offer the own-position chip (LLD wins over the mockup), resolve
+P-1..P-4 with universal rules. Shipped in `23b0cdf6`: committed dismissals are
+client-authoritative for the strip session (one suppression mechanism covers B-3 and the
+refetch race); the shopped player's own position is a selectable chip ("WR plus RB laterals"
+now expressible, mockup updated); `shop_opened` fires exactly once where the strip opens;
+`shopEnabled` gates on the full flag chain incl. `calc.merged_layout`; the pager reacts to
+data, never races it. Suite grown to 100 assertions incl. the Chalkline and label-source
+pins reviewer A wanted. All gates green; TestFlight checklist's Known-open section now
+empty. Branch still held unmerged.
+
+## 2026-08-28 — #402/#403 built end-to-end behind a dark flag; QA'd twice; held unmerged
+
+Four code commits on `claude/new-feedback-71436e` (atop the rev-2 doc round): the give-side
+"More offers" button now opens an inline shop strip below the deck card (modes with live
+counts, 1/X pager, ✓ real offer via the untouched queue route — Elo moves by ruling A — and
+a held-write dismiss whose Undo is literally true), a "Shop which player?" chooser for
+multi-asset sends, and the W2 position multi-select wired to the new additive
+`swap_positions` on `/api/trades/asset-ideas`. Spike S-2 shaped the picker
+(multi-select-first; single positions empty 30–60%). Redundant static QA found 4 seam bugs;
+operator ruled fix B-1/B-2/B-4 (deck now holds still through swipe + buttons + VoiceOver;
+shop state dies with its context incl. the kill switch; the Undo toast retracts on early
+commit) — B-3, the own-position-chip ruling, and P-1..P-4 stay open by selection. All gates
+green on the combined tree (pytest 4,377 · tsc · 84 structural suites · testid-lint);
+14-step TestFlight checklist authored. Evidence: TEST_LEDGER 2026-08-28. **Merges held by
+the operator "until we finish this experience."**
+
+## 2026-08-27 — #402/#403 ruled one experience; rev-2 doc round + mockups (branch `claude/new-feedback-71436e`, held unmerged)
+
+**Operator rulings** (recorded in `docs/feedback/items/402-more-offers-shop/rulings-2026-08-27.md`):
+the shop like **does** move the Elo board (`/api/trades/queue` consumed as-is — `record_elo`
+never built, W1 backend diff zero); **shop = the give-side "more offers" button** presented
+as an inline strip below the trade chip (#402's own words), give-side only, several assets →
+chooser sheet; #402 and #403 are **one item** — folder renamed
+`403-shop-a-player` → `402-more-offers-shop` (lowest-ID convention), pointer README left.
+Calc/guided merge direction (audit D1) deliberately **not** ruled; operator intent logged:
+one guided page hosting both build and find, two-column canvas kept. **Branch merges held**
+("until we finish this experience").
+
+**Rev 2 written into all four artifacts**: HLD §0 (inline strip supersedes D-1's pushed
+screen — the contended-file objection dissolved with the item merge; deck pan disabled while
+the strip is open; D-5 void), LLD §0 (`handleKeepSide` fork sketch, `ShopOffersStrip`
+contract, chooser, label fork "More offers", analytics deltas, ownership table), PRD §0a
+(R-1'/R-2'/R-7' replace R-1/R-2/R-7; waves re-scoped), scope.md rev-2 block. Mockup lab
+renamed `more-offers-shop-402/`, six Rev-2 frames added (entry, chooser, strip ×4), rev-1
+sections 1–2 tagged superseded, Chalkline re-audited mechanically (annotation ring uses the
+`mrow.new` inset-edge construction, ice stays rationed).
+
+Also this session (separate worktree, commit `2be71bd0` on `claude/ftf-file-continuation-c9185e`,
+unpushed): three docs corrected 70/15/15 → the shipped 50/30/20 D-157 action row — including
+the #384 TestFlight checklist step 12, which was testing a layout no build ships.
+
+## 2026-08-27 — Feedback backlog status hygiene: 5 items closed, 1 stale `in_progress` reverted
+
+The open list read 45 rows against ~35 actionable items, because this pipeline only flips
+statuses for work IT ships and several items closed via other pipelines. Audited all 45 against
+three independent signals — a shipped CHANGELOG entry, the live flag in `config/features.json`,
+and the code present on `origin/main` `30070f36`. Closed as `fixed`: **#384** (merged calculator,
+v1.16.0, `calc.merged_layout` true), **#333** (side-by-side league/team dropdowns,
+`InLeagueCalculator.tsx:830`), **#380** (partner collapse, `calc.partner-collapsed` mounts in the
+same shipped surface), **#362** (standing offers, shipped LIT v1.16.7), **#369** (plan beat, PRs
+#152–158 / builds 124–125, inside the lit `trades.team_review`). **#344** reverted `in_progress` →
+`new`: zero code refs, zero work folder — nothing was ever built.
+
+**Deliberately NOT closed.** The five remaining `in_progress` rows (#360/#361/#365/#371/#372) are
+built-but-DARK — `trade.avoid_positions`, `trade.outlook_net_firsts`, `trades.window_from_odds`,
+`trade.outlook_composite` all `false`, and #372 is in no build. Dark is not fixed; a tester still
+sees the reported behavior. **#310** is only PARTIALLY delivered (the league-free calculator ships
+— `TradeCalculatorScreen.tsx:74` — but the 3-tab nav simplification and the rankings value-prop
+link do not) and stays open. **#205** is a design-tenets interview that never advanced past
+questions; it needs an operator disposition, not a status flip.
+
+Open list: 45 → **40** (35 `new`, 5 `in_progress`). Also confirmed v1.16.8 (build 134) is live
+with testers — three items arrived filed against it, closing the handoff's one open unknown.
 
 ## 2026-08-27 — The merged calculator gets its partner team-shape summary back (a live regression, not a redesign)
 
