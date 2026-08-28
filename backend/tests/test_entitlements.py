@@ -587,3 +587,41 @@ def test_webhook_alias_garbage_is_tolerated(client, eng):
     r = client.post("/api/billing/revenuecat/webhook", json={"event": ev})
     assert r.status_code == 200 and r.get_json()["projected"] is True
     assert entl.get_entitlements(USER)["pro"] is True
+
+
+# ── (h) tip jar — money with NO entitlement ────────────────────────────────
+# Tips are consumables and RevenueCat delivers them as NON_RENEWING_PURCHASE,
+# an *activating* event type — without entitlements.is_tip_product() the
+# default product mapping would grant every tipper `pro`.
+
+def test_tip_purchase_stores_but_grants_nothing(eng):
+    r = _ingest(_rc_event("tip1", "NON_RENEWING_PURCHASE",
+                          product="ftf_tip_499"))
+    # stored for the revenue ledger, deliberately not projected
+    assert r == {"stored": True, "projected": False, "duplicate": False}
+    assert entl.get_entitlements(USER)["pro"] is False
+    assert entl.list_for_user(USER) == []
+
+
+def test_tip_initial_purchase_variant_grants_nothing(eng):
+    # some store configs deliver consumables as INITIAL_PURCHASE — the guard
+    # must sit ahead of the whole activating set, not one event type
+    _ingest(_rc_event("tip2", "INITIAL_PURCHASE", product="ftf_tip_199"))
+    assert entl.get_entitlements(USER)["pro"] is False
+
+
+def test_tip_refund_touches_no_rows(eng):
+    # a real pro entitlement must survive an unrelated tip refund
+    _ingest(_rc_event("p1", "INITIAL_PURCHASE"))
+    _ingest(_rc_event("tip3", "NON_RENEWING_PURCHASE", product="ftf_tip_999"))
+    r = _ingest(_rc_event("tip4", "REFUND", product="ftf_tip_999"))
+    assert r["projected"] is False
+    assert entl.get_entitlements(USER)["pro"] is True
+
+
+def test_is_tip_product_predicate():
+    assert entl.is_tip_product("ftf_tip_199")
+    assert entl.is_tip_product("FTF_TIP_999")
+    assert not entl.is_tip_product("ftf_pro_annual")
+    assert not entl.is_tip_product("ftf_founder")
+    assert not entl.is_tip_product(None)

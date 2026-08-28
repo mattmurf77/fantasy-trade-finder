@@ -164,3 +164,29 @@ def test_unknown_platform_degrades_to_ios(client, monkeypatch):
     _flags(monkeypatch, "monetize.paywall")
     assert _get(client, "?platform=nintendo").get_json()["platform"] == "ios"
     assert _get(client).get_json()["platform"] == "ios"
+
+
+# ── (f) tip jar ────────────────────────────────────────────────────────────
+
+def test_tips_served_when_on(client, monkeypatch):
+    _flags(monkeypatch, "monetize.paywall")
+    tips = _get(client).get_json()["tips"]
+    assert [t["product_id"] for t in tips] == [
+        "ftf_tip_199", "ftf_tip_499", "ftf_tip_999"]
+    assert all(t["display_price"].startswith("$") for t in tips)
+    # tips never claim entitlement fields — they buy nothing
+    assert all("trial_days" not in t and "period" not in t for t in tips)
+
+
+def test_tip_skus_are_tip_products(client, monkeypatch):
+    """Every served tip SKU must hit the projector's no-entitlement guard —
+    a tip id drifting out of the ftf_tip_ prefix would grant Pro."""
+    from backend import entitlements as entl
+    _flags(monkeypatch, "monetize.paywall")
+    for t in _get(client).get_json()["tips"]:
+        assert entl.is_tip_product(t["product_id"])
+
+
+def test_flag_off_leaks_no_tips(client, monkeypatch):
+    _flags(monkeypatch)
+    assert "ftf_tip" not in _get(client).get_data(as_text=True)

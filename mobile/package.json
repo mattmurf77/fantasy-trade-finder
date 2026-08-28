@@ -61,6 +61,7 @@
     "test:offer-prefill-330-unit": "node tests/check-offer-prefill-330-unit.js",
     "test:outlook-bands": "node tests/check-outlook-bands.js",
     "test:paywall": "node tests/check-paywall.js",
+    "test:tipjar": "node tests/check-tipjar.js",
     "test:picker-chip-alignment": "node tests/check-picker-chip-alignment.js",
     "test:picker-pick-filter": "node tests/check-picker-pick-filter.js",
     "test:picker-server-pick-flag": "node tests/check-picker-server-pick-flag.js",

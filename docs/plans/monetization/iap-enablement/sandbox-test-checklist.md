@@ -25,7 +25,7 @@ runbook wins** — flag order especially.
 | # | Item | Where | Done when |
 |---|---|---|---|
 | P1 | **Paid Apps agreement active** | App Store Connect → Business | Status reads Active. Nothing below works before this — sandbox purchases fail with an opaque StoreKit error. |
-| P2 | **ASC subscription SKUs created** and in a subscription group | ASC → Subscriptions | `ftf_pro_monthly` ($4.99/mo, **3-day free trial** introductory offer — operator ruling 2026-08-28) and `ftf_pro_annual` ($34.99/yr, **14-day free trial** introductory offer) exist and are "Ready to Submit". Reminder: Apple grants **one intro-offer redemption per subscription group per person**, so a sandbox account that redeems one trial will not see the other — and the same is true for real users. **The ids must match `backend/server.py` `_PAYWALL_PRODUCTS` exactly** — if ASC was configured with the runbook's `pro_monthly_499` / `pro_annual_3499` names instead, see the SKU-naming conflict in [scope.md](scope.md) and reconcile BEFORE testing, not after. |
+| P2 | **ASC subscription SKUs created** and in a subscription group | ASC → Subscriptions | `ftf_pro_monthly` ($4.99/mo, **3-day free trial** introductory offer — operator ruling 2026-08-28) and `ftf_pro_annual` ($34.99/yr, **14-day free trial** introductory offer) exist and are "Ready to Submit". Reminder: Apple grants **one intro-offer redemption per subscription group per person**, so a sandbox account that redeems one trial will not see the other — and the same is true for real users. Also create the three tip **consumables** `ftf_tip_199` ($1.99), `ftf_tip_499` ($4.99), `ftf_tip_999` ($9.99) — type Consumable, since tips are repeatable; they attach to NO RevenueCat entitlement (a tip grants nothing). **The ids must match `backend/server.py` `_PAYWALL_PRODUCTS` / `_PAYWALL_TIPS` exactly** — if ASC was configured with the runbook's `pro_monthly_499` / `pro_annual_3499` names instead, see the SKU-naming conflict in [scope.md](scope.md) and reconcile BEFORE testing, not after. |
 | P3 | **RevenueCat project + app** created, App Store shared secret uploaded | app.revenuecat.com | The two products are imported and attached to an **entitlement whose identifier is exactly `pro`** (`mobile/src/api/purchases.ts` `PRO_ENTITLEMENT_ID`, and `backend/entitlements.ENTITLEMENTS`), inside an **Offering marked Current** with an `annual` and a `monthly` package. Offerings not marked Current will not reach the app. |
 | P4 | **`EXPO_PUBLIC_REVENUECAT_IOS_KEY`** = the RevenueCat **Apple public/SDK key** (starts `appl_`), set as an EAS environment variable for the `production` profile | EAS project env | **Build-time inlining** — this is baked into the JS bundle by babel-preset-expo. Setting it later, or changing it, requires a **new EAS build**. It cannot be fixed by a flag flip or an OTA update. Never the RevenueCat *secret* key. |
 | P5 | **`REVENUECAT_WEBHOOK_SECRET`** set in **Render** env AND in the local `secrets.local.env` | Render dashboard (NOT `render.yaml` — [G-018](../../../../living-memory/GOTCHAS.md): blueprint `envVars` never reach a dashboard-created service) | `POST /api/billing/revenuecat/webhook` returns 401 for a wrong bearer and 200 for the right one. With the secret unset in prod the route **503s by design** (`backend/server.py`, `billing_revenuecat_webhook`). |
@@ -198,11 +198,23 @@ Open the paywall, tap the CTA, and dismiss the StoreKit sheet with **Cancel**.
 selected. (A `paywall_purchase_failed {user_cancelled: true}` event is emitted, but the user sees
 nothing — a cancel is a decision, not a failure.)
 
+### 10b. Tip jar — pays, thanks, and grants NOTHING (added 2026-08-28)
+
+From Settings, tap **Support Fleeced** (`settings-tip-row`). The tip sheet lists three amounts
+with StoreKit-localized prices. Tap one and complete the sandbox purchase.
+
+**Expect:** the thank-you state renders (`tipjar-thanks`) — and *nothing unlocks*. Then verify the
+promise server-side: the webhook event for the `ftf_tip_*` product lands in `subscription_events`
+with `process_error` = `tip: no entitlement (by design)`, and
+`GET /api/admin/entitlements?user=<you>` shows **no new row** (the same curl as step 7). If this
+account already has Pro from step 5, confirm the tip changed neither `expires_at` nor `status`.
+Also confirm a cancelled tip is silent, like step 10.
+
 ### 11. The dark state really is dark
 
 Set `monetize.paywall` back to `false`, reload flags, force-quit, relaunch.
 
-**Expect:** the Fleeced Pro row is gone from Settings; nothing anywhere offers a purchase; the app
+**Expect:** the Fleeced Pro row AND the Support Fleeced row are gone from Settings; nothing anywhere offers a purchase; the app
 is v1.16.8's behavior. The **entitlement row is still in the database** and
 `GET /api/me/entitlements` still reports `pro: true` — that is correct. Flags gate the surface, not
 the grant, and a paying user's grant must survive a kill switch.

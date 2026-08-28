@@ -59,6 +59,8 @@ export interface PaywallConfig {
   products?: PaywallProduct[];
   trial_eligible?: boolean;
   dismissible?: boolean;
+  /** Tip-jar consumables (support-the-platform; no entitlement). */
+  tips?: PaywallTip[];
 }
 
 export function getEntitlements(): Promise<EntitlementsResponse> {
@@ -72,4 +74,12 @@ export function getPaywallConfig(
   platform: 'ios' | 'web' | 'extension' = 'ios',
 ): Promise<PaywallConfig> {
   return api.get<PaywallConfig>(`/api/paywall/config?platform=${platform}`);
+}
+
+/** One tip-jar consumable. Display metadata ONLY — a tip grants nothing
+ *  (the backend projector stores the event and deliberately never writes an
+ *  entitlement row; entitlements.is_tip_product). */
+export interface PaywallTip {
+  product_id: string;          // ftf_tip_* — enum in cross-client-invariants
+  display_price: string;       // fallback when StoreKit products are unavailable
 }

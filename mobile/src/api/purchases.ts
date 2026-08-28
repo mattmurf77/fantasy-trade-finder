@@ -29,9 +29,10 @@ import type {
   MakePurchaseResult,
   PurchasesOfferings,
   PurchasesPackage,
+  PurchasesStoreProduct,
 } from 'react-native-purchases';
 
-export type { CustomerInfo, PurchasesOfferings, PurchasesPackage };
+export type { CustomerInfo, PurchasesOfferings, PurchasesPackage, PurchasesStoreProduct };
 
 /** Static side of the SDK's default export, as a type only — `import type`
  *  is erased at compile time, so this costs no runtime require. */
@@ -223,4 +224,37 @@ export function hasProEntitlement(info: CustomerInfo | null | undefined): boolea
  *  error and must never surface an error message. */
 export function isUserCancelled(err: unknown): boolean {
   return !!(err && typeof err === 'object' && (err as { userCancelled?: boolean }).userCancelled);
+}
+
+// ── Tip jar (consumables) ───────────────────────────────────────────────────
+// Tips are NOT packages in an offering — they are plain consumable products
+// fetched by id (the ids come from /api/paywall/config `tips`). They buy
+// nothing: backend/entitlements.is_tip_product() short-circuits the webhook
+// projector, so a tip can never grant `pro`, and no CustomerInfo/entitlement
+// handling belongs anywhere near this path.
+
+/** Fetch the tip consumables by product id. Empty array when purchases are
+ *  unavailable or the store lookup fails — the tip jar renders server
+ *  `display_price` strings display-only in that case. */
+export async function getTipProducts(
+  productIds: string[],
+): Promise<PurchasesStoreProduct[]> {
+  const P = sdk();
+  if (!P || !_configured || productIds.length === 0) return [];
+  try {
+    return await P.getProducts(productIds, P.PRODUCT_CATEGORY?.NON_SUBSCRIPTION);
+  } catch {
+    return [];
+  }
+}
+
+/** Purchase one tip. Same contract as purchasePackage: null when purchases
+ *  are unavailable; a StoreKit rejection THROWS so the caller can separate a
+ *  user cancel (silent) from a failure (visible) via isUserCancelled. */
+export async function purchaseTip(
+  product: PurchasesStoreProduct,
+): Promise<MakePurchaseResult | null> {
+  const P = sdk();
+  if (!P || !_configured) return null;
+  return P.purchaseStoreProduct(product);
 }

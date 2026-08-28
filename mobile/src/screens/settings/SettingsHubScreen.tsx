@@ -298,6 +298,12 @@ export default function SettingsHubScreen({ navigation }: any) {
               preview={proLoaded ? (isPro ? 'Pro' : 'Free') : null}
               onPress={() => navigation?.navigate?.('Paywall', { source: 'settings' })}
             />
+            <NavRow
+              testID="settings-tip-row"
+              title="Support Fleeced"
+              preview="Tip jar"
+              onPress={() => navigation?.navigate?.('TipJar', { source: 'settings' })}
+            />
           </>
         ) : null}
 
