@@ -15,6 +15,22 @@
 
 
 
+## 2026-08-28 — #402/#403 built end-to-end behind a dark flag; QA'd twice; held unmerged
+
+Four code commits on `claude/new-feedback-71436e` (atop the rev-2 doc round): the give-side
+"More offers" button now opens an inline shop strip below the deck card (modes with live
+counts, 1/X pager, ✓ real offer via the untouched queue route — Elo moves by ruling A — and
+a held-write dismiss whose Undo is literally true), a "Shop which player?" chooser for
+multi-asset sends, and the W2 position multi-select wired to the new additive
+`swap_positions` on `/api/trades/asset-ideas`. Spike S-2 shaped the picker
+(multi-select-first; single positions empty 30–60%). Redundant static QA found 4 seam bugs;
+operator ruled fix B-1/B-2/B-4 (deck now holds still through swipe + buttons + VoiceOver;
+shop state dies with its context incl. the kill switch; the Undo toast retracts on early
+commit) — B-3, the own-position-chip ruling, and P-1..P-4 stay open by selection. All gates
+green on the combined tree (pytest 4,377 · tsc · 84 structural suites · testid-lint);
+14-step TestFlight checklist authored. Evidence: TEST_LEDGER 2026-08-28. **Merges held by
+the operator "until we finish this experience."**
+
 ## 2026-08-27 — #402/#403 ruled one experience; rev-2 doc round + mockups (branch `claude/new-feedback-71436e`, held unmerged)
 
 **Operator rulings** (recorded in `docs/feedback/items/402-more-offers-shop/rulings-2026-08-27.md`):
