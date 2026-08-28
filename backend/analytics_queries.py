@@ -330,6 +330,39 @@ NON_INTENT_EVENTS = frozenset({
     "trade_pass_overlay_opened",
     "trade_pass_overlay_dismissed",
     "prompt_deferred",
+    # ── Paywall funnel (IAP enablement, 2026-08-28) — added in the SAME
+    # commit that registered the five in ALLOWED_CLIENT_EVENTS, for the
+    # reason stated at the top of this block. Scope:
+    # docs/plans/monetization/iap-enablement/scope.md §1.
+    #
+    # ALL FIVE are NON_INTENT, which is deliberate and worth the paragraph
+    # because two of them look like conversions:
+    #
+    #   paywall_viewed — the IMPRESSION of a surface the user did not ask
+    #     for. The paywall is pushed at them (a 402 gate, an onboarding
+    #     beat), which is the `invite_cta_shown` / `prompt_shown` class
+    #     exactly. Admitting it would let one interstitial mint a user-day.
+    #   paywall_purchase_initiated / _completed / _failed — the purchase
+    #     itself is a real decision, but it is NOT OURS TO COUNT: the
+    #     authoritative row is the server-fired `entitlement_granted` the
+    #     RevenueCat webhook writes (INTENT, and it cannot be spoofed by a
+    #     client). These three are the UI echo used to reconcile against it
+    #     — admitting them would double-count every purchaser's user-day
+    #     and, worse, let a client mint one for a purchase that never
+    #     cleared the store. `_failed` is a defect signal, not a decision.
+    #   paywall_restore — an outcome the STORE produced, the
+    #     `share_package_created` class: the tap that provoked it happens
+    #     inside a session that already counted the user (Settings, or the
+    #     paywall itself), and a restore that finds nothing is the opposite
+    #     of a conversion.
+    #
+    # Nothing on this surface is deliberately INTENT — the whole paywall
+    # funnel is measured against the server's grant row, on purpose.
+    "paywall_viewed",
+    "paywall_purchase_initiated",
+    "paywall_purchase_completed",
+    "paywall_purchase_failed",
+    "paywall_restore",
 })
 # INTENT is a deny-list in SQL so taxonomy growth is intent-by-default.
 INTENT_EVENTS = (SERVER_FIRED_EVENTS | ALLOWED_CLIENT_EVENTS) - NON_INTENT_EVENTS

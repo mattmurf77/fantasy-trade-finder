@@ -1117,3 +1117,35 @@ This is registered here because pick values reach users through five surfaces th
 **Deploy-free revert:** set all four keys to 0.85 and `POST /api/feature-flags/reload`-equivalent for config (`PUT /api/admin/config/<key>`, which calls `trade_service.reload_config`). Pinned by `test_pick_year_decay.py::test_all_rates_at_the_old_constant_reproduce_the_old_behaviour`.
 
 **Analysis, measured prod impact, and the external sources that DISAGREE with the round-1 call:** [docs/reviews/2026-08-19-pick-year-valuation.md](reviews/2026-08-19-pick-year-valuation.md).
+
+---
+
+## Monetization SKU ids, entitlement values & paywall config enums (2026-08-28, flags `monetize.*`, all dark)
+
+Plan of record: [00-platform-foundation.md](plans/monetization/00-platform-foundation.md) §2.1/§4 + [pro-subscription/lld.md](plans/monetization/pro-subscription/lld.md) §3. Every string below is read by at least two of {backend projector, RevenueCat offering config, App Store Connect, mobile paywall, web `pro.html`, extension upsell} — a rename in one place is a silent no-sale in another.
+
+**Store SKU ids (canonical).** These are what `GET /api/paywall/config` serves and what the RevenueCat offering's product identifiers must be:
+
+| `product_id` | What it is | Projects to (`entitlement`, `source`) |
+|---|---|---|
+| `ftf_pro_monthly` | Pro, auto-renewing monthly | `pro`, `apple_iap` |
+| `ftf_pro_annual` | Pro, auto-renewing annual (hero SKU) | `pro`, `apple_iap` |
+| `ftf_founder` | Founder Lifetime, non-renewing; `expires_at` NULL = perpetual | `pro`, `founder_iap` |
+| `ftf_season_pass_2026` | Season pass, year-labeled (`ftf_rookie_pass_*` is the rookie-season variant) | `pro`, `season_pass_iap` |
+
+**Tolerated aliases.** The 2026-08-27 IAP runbook named divergent App Store Connect ids. The canonical names above win (foundation doc), but `backend/entitlements._product_mapping` additionally accepts `founder_lifetime*` → `founder_iap` and `season_pass_*` → `season_pass_iap` so either ASC choice reconciles without a deploy. `pro_monthly_499` / `pro_annual_3499` need no alias — they fall through to the `apple_iap` default like any unrecognised subscription SKU. Aliases are a **reconciliation safety net, not a second vocabulary**: the paywall config, the client, and the docs use the `ftf_*` ids only. Conflict record: [iap-enablement/scope.md](plans/monetization/iap-enablement/scope.md) § "Surfaced conflict".
+
+**Entitlement values** (the `entitlement` column, and the booleans in `GET /api/me/entitlements`): `pro` | `ad_free`. `ad_free` is implied by `pro` — a client must never compute one from the other beyond that implication. Statuses: `active` | `expired` | `revoked` | `refunded`.
+
+**RevenueCat identity.** The `app_user_id` the client passes to `Purchases.logIn()` is the **working key** (`acct_*`, or the sleeper_user_id for pre-account users) — the same id `sess["user_id"]` carries, never the league identity. A pre-sign-in purchase arrives under RevenueCat's own `$RCAnonymousID:<uuid>`; the server reconciles it off `event.aliases` (`entitlements.resolve_rc_identity`), so the client's only obligation is to call `logIn` with the working key as soon as it has one.
+
+**Paywall config enums** (`GET /api/paywall/config`, flag `monetize.paywall`; off → `{"enabled": false}` and nothing else):
+
+- Page `id` / `kind` pairs, rendered in array order: `value_recap`/`trades_found`, `feature_grid`/`features`, `plans`/`purchase`.
+- `body_ref`: `matches_preview` — the client substitutes 2–3 matches it has **already fetched**; the config route never recomputes trades.
+- Feature keys (page 2): `unlimited_leagues`, `portfolio`, `engine_knobs`, `extension_overlays`, `ad_free`.
+- Product `badge`: `best_value` (the only value today). `period`: `monthly` | `annual`. `hero`: exactly one product carries it.
+- `?platform=`: `ios` | `web` | `extension`; echoed back as `platform`. Unknown values degrade to `ios` rather than 400.
+- **`display_price` / `per_month_equiv` are FALLBACK COPY.** On iOS the client renders the StoreKit-localized price from the matching RevenueCat offering; the server strings are US-English list prices that know nothing about storefront, currency, or promotional offers. `trial_eligible` is a claim about the SKU, not a per-Apple-ID promise — real eligibility is store-managed.
+
+**Paywall analytics event names** (client-fired; registered in `backend/analytics_taxonomy.py` and all five classified NON_INTENT in `analytics_queries.NON_INTENT_EVENTS`): `paywall_viewed` {`source`, `platform`}, `paywall_purchase_initiated` {`product_id`, `source`}, `paywall_purchase_completed` {`product_id`, `source`}, `paywall_purchase_failed` {`product_id`, `user_cancelled`}, `paywall_restore` {`restored`}. `source` is the 402's `gate` string or a non-gate origin (`settings`, `onboarding`); `platform` is the config **variant** rendered, not the device platform (that is a `user_events` column derived server-side). Conversion truth is the server-fired `entitlement_granted` row, never these echoes.

@@ -11,6 +11,10 @@ Covers:
   (e) billing ingestion — idempotency, projector activate/renew/expire,
       manual grants untouched by billing deactivation
   (f) routes — manual-grant admin surface + /api/me/entitlements + webhooks
+  (g) RevenueCat alias reconciliation ($RCAnonymousID:* → acct_*),
+      TRANSFER, BILLING_ISSUE grace, tolerant SKU aliases, and webhook
+      sabotage (auth, malformed payload, replay) — IAP enablement,
+      docs/plans/monetization/iap-enablement/scope.md §3
 
 In-memory SQLite via the same patched-engine harness as
 test_events_api.py; flags forced via patched is_enabled.
@@ -319,3 +323,267 @@ def test_stripe_webhook_metadata_path(client):
     assert entl.get_entitlements(USER)["pro"] is True
     rows = entl.list_for_user(USER)
     assert rows[0]["source"] == "stripe"
+
+
+# ── (g) alias reconciliation ───────────────────────────────────────────────
+# RevenueCat addresses each event to one app_user_id and lists every id it
+# knows to be the same subscriber in `aliases`. A purchase made before
+# sign-in arrives under $RCAnonymousID:<uuid>; Purchases.logIn(<working key>)
+# is what makes the acct_* id show up in that array afterwards.
+
+ANON = "$RCAnonymousID:9f2c4a1e"
+ACCT = "acct_abc123"
+
+
+def _account_row(eng):
+    with eng.begin() as conn:
+        conn.execute(insert(accounts_table).values(
+            account_id="abc123", sleeper_user_id=USER, created_at=_iso(0)))
+
+
+def _ingest_rc(ev, aliases=None):
+    return entl.ingest_billing_event(
+        "revenuecat", ev["id"], ev["type"], ev,
+        user_id=ev.get("app_user_id"), product_id=ev.get("product_id"),
+        aliases=aliases)
+
+
+def test_alias_anon_only_stored_under_anon_key(eng):
+    """Nothing recognisable in the payload → keep the purchase under the
+    anon id rather than dropping a real transaction on the floor."""
+    ev = _rc_event("a1", "INITIAL_PURCHASE")
+    ev["app_user_id"] = ANON
+    _ingest_rc(ev)
+    rows = entl.list_for_user(ANON)
+    assert len(rows) == 1 and rows[0]["user_id"] == ANON
+    assert entl.get_entitlements(USER)["pro"] is False
+
+
+def test_alias_resolves_to_account_key(eng):
+    _account_row(eng)
+    ev = _rc_event("a2", "INITIAL_PURCHASE")
+    ev["app_user_id"] = ANON
+    _ingest_rc(ev, aliases=[ANON, ACCT])
+    rows = entl.list_for_user(ACCT)
+    assert len(rows) == 1
+    assert rows[0]["user_id"] == ACCT and rows[0]["account_id"] == "abc123"
+    # and the account bridge means the bound sleeper id sees it too
+    assert entl.get_entitlements(USER)["pro"] is True
+
+
+def test_alias_rekeys_prior_anon_rows_single_row_survives(eng):
+    """The real sequence: purchase while signed out, sign in, renew."""
+    _account_row(eng)
+    ev = _rc_event("a3", "INITIAL_PURCHASE")
+    ev["app_user_id"] = ANON
+    _ingest_rc(ev)
+    assert len(entl.list_for_user(ANON)) == 1
+
+    ev2 = _rc_event("a4", "RENEWAL", expires_days=730)
+    ev2["app_user_id"] = ACCT
+    _ingest_rc(ev2, aliases=[ACCT, ANON])
+
+    rows = entl.list_for_user(ACCT)
+    assert len(rows) == 1, "anon row must merge, not duplicate"
+    assert rows[0]["user_id"] == ACCT and rows[0]["status"] == "active"
+    assert entl.list_for_user(ANON) == []
+
+
+def test_alias_garbage_does_not_crash_and_falls_back(eng):
+    ev = _rc_event("a5", "INITIAL_PURCHASE")
+    ev["app_user_id"] = ANON
+    _ingest_rc(ev, aliases=[None, 42, "", "   ", "unknown-id-xyz", ANON])
+    rows = entl.list_for_user(ANON)
+    assert len(rows) == 1 and rows[0]["user_id"] == ANON
+
+
+def test_alias_rekey_never_touches_manual_grants(eng):
+    """The merge is billing-source only — an operator comp written under
+    one id is not swept onto another by provider traffic."""
+    _account_row(eng)
+    entl.grant(ANON, "pro", source="manual_grant", note="comp")
+    ev = _rc_event("a6", "INITIAL_PURCHASE")
+    ev["app_user_id"] = ACCT
+    _ingest_rc(ev, aliases=[ACCT, ANON])
+    manual = entl.list_for_user(ANON)
+    assert len(manual) == 1 and manual[0]["source"] == "manual_grant"
+
+
+def test_resolve_rc_identity_prefers_first_known_candidate(eng):
+    _account_row(eng)
+    assert entl.resolve_rc_identity(ANON, [ANON, ACCT]) == ACCT
+    assert entl.resolve_rc_identity(ANON, None) == ANON
+    assert entl.resolve_rc_identity(USER, ["ghost"]) == USER
+    # an acct_* whose account row does NOT exist is not a working key
+    assert entl.resolve_rc_identity(ANON, ["acct_nope"]) == ANON
+
+
+# ── (g) TRANSFER ───────────────────────────────────────────────────────────
+
+USER2 = "ent_user_2"
+
+
+def _second_user(eng):
+    with eng.begin() as conn:
+        conn.execute(insert(users_table).values(
+            sleeper_user_id=USER2, username="entuser2", created_at=_iso(0)))
+
+
+def test_transfer_moves_active_entitlement(eng):
+    _second_user(eng)
+    _ingest(_rc_event("t0", "INITIAL_PURCHASE"))
+    assert entl.get_entitlements(USER)["pro"] is True
+
+    ev = {"id": "t1", "type": "TRANSFER", "product_id": "ftf_pro_annual",
+          "transferred_from": [USER], "transferred_to": [USER2]}
+    r = _ingest_rc(ev)
+    assert r["projected"] is True
+    assert entl.get_entitlements(USER)["pro"] is False
+    assert entl.get_entitlements(USER2)["pro"] is True
+    rows = entl.list_for_user(USER2)
+    assert len(rows) == 1 and rows[0]["granted_by"] == "t1"
+    assert entl.list_for_user(USER) == []
+
+
+def test_transfer_without_matching_rows_is_noted(eng):
+    _second_user(eng)
+    ev = {"id": "t2", "type": "TRANSFER", "product_id": "ftf_pro_annual",
+          "transferred_from": [USER], "transferred_to": [USER2]}
+    r = _ingest_rc(ev)
+    assert r["stored"] is True and r["projected"] is False
+    with eng.begin() as conn:
+        row = conn.execute(select(subscription_events_table)).fetchone()
+    assert row.process_error and "TRANSFER" in row.process_error
+
+
+def test_transfer_missing_arrays_is_noted(eng):
+    r = _ingest_rc({"id": "t3", "type": "TRANSFER"})
+    assert r["projected"] is False
+    with eng.begin() as conn:
+        row = conn.execute(select(subscription_events_table)).fetchone()
+    assert "transferred_from" in row.process_error
+
+
+# ── (g) BILLING_ISSUE grace ────────────────────────────────────────────────
+
+def test_billing_issue_grace_extends_expiry(eng):
+    _ingest(_rc_event("b1", "INITIAL_PURCHASE", expires_days=1))
+    before = entl.list_for_user(USER)[0]["expires_at"]
+    grace_ms = (datetime.now(timezone.utc)
+                + timedelta(days=17)).timestamp() * 1000
+    ev = {"id": "b2", "type": "BILLING_ISSUE", "app_user_id": USER,
+          "product_id": "ftf_pro_annual",
+          "grace_period_expiration_at_ms": grace_ms}
+    r = _ingest_rc(ev)
+    assert r["projected"] is True
+    row = entl.list_for_user(USER)[0]
+    assert row["status"] == "active"          # access persists through grace
+    assert row["expires_at"] > before
+    assert entl.get_entitlements(USER)["pro"] is True
+
+
+def test_billing_issue_without_grace_is_noop(eng):
+    _ingest(_rc_event("b3", "INITIAL_PURCHASE", expires_days=30))
+    before = entl.list_for_user(USER)[0]
+    ev = {"id": "b4", "type": "BILLING_ISSUE", "app_user_id": USER,
+          "product_id": "ftf_pro_annual"}
+    r = _ingest_rc(ev)
+    assert r["stored"] is True and r["projected"] is False
+    after = entl.list_for_user(USER)[0]
+    assert after["expires_at"] == before["expires_at"]
+    assert after["status"] == "active"
+    with eng.begin() as conn:
+        rows = conn.execute(select(subscription_events_table)).fetchall()
+    assert [r_.process_error for r_ in rows if r_.event_id == "b4"] == [None]
+
+
+def test_billing_issue_grace_never_shortens(eng):
+    _ingest(_rc_event("b5", "INITIAL_PURCHASE", expires_days=90))
+    before = entl.list_for_user(USER)[0]["expires_at"]
+    grace_ms = (datetime.now(timezone.utc)
+                + timedelta(days=2)).timestamp() * 1000
+    _ingest_rc({"id": "b6", "type": "BILLING_ISSUE", "app_user_id": USER,
+                "product_id": "ftf_pro_annual",
+                "grace_period_expiration_at_ms": grace_ms})
+    assert entl.list_for_user(USER)[0]["expires_at"] == before
+
+
+# ── (g) tolerant SKU mapping ───────────────────────────────────────────────
+# Canonical ids are the ftf_* ones (00-platform-foundation.md §2.1); the
+# 2026-08-27 IAP runbook named divergent ASC ids. The mapping accepts both
+# so either App Store Connect choice reconciles to the right source —
+# conflict recorded in iap-enablement/scope.md § "Surfaced conflict".
+
+@pytest.mark.parametrize("pid,expected_source", [
+    ("ftf_founder", "founder_iap"),
+    ("founder_lifetime", "founder_iap"),
+    ("ftf_season_pass_2026", "season_pass_iap"),
+    ("season_pass_2026", "season_pass_iap"),
+    ("ftf_rookie_pass_2026", "season_pass_iap"),
+    ("ftf_pro_monthly", "apple_iap"),
+    ("pro_annual_3499", "apple_iap"),
+])
+def test_product_mapping_tolerates_runbook_skus(pid, expected_source):
+    entitlement, source = entl._product_mapping(pid)
+    assert (entitlement, source) == ("pro", expected_source)
+
+
+def test_runbook_founder_sku_projects_as_perpetual(eng):
+    ev = _rc_event("s1", "NON_RENEWING_PURCHASE", product="founder_lifetime")
+    ev["expiration_at_ms"] = None
+    _ingest(ev)
+    rows = entl.list_for_user(USER)
+    assert rows[0]["source"] == "founder_iap" and rows[0]["expires_at"] is None
+
+
+# ── (g) webhook sabotage ───────────────────────────────────────────────────
+
+def test_webhook_rejects_wrong_bearer(client, monkeypatch):
+    monkeypatch.setenv("REVENUECAT_WEBHOOK_SECRET", "rc-secret")
+    r = client.post("/api/billing/revenuecat/webhook",
+                    json={"event": _rc_event("sab1", "INITIAL_PURCHASE")},
+                    headers={"Authorization": "Bearer wrong"})
+    assert r.status_code == 401
+    assert entl.get_entitlements(USER)["pro"] is False
+
+
+def test_webhook_rejects_missing_bearer_when_secret_set(client, monkeypatch):
+    monkeypatch.setenv("REVENUECAT_WEBHOOK_SECRET", "rc-secret")
+    r = client.post("/api/billing/revenuecat/webhook",
+                    json={"event": _rc_event("sab2", "INITIAL_PURCHASE")})
+    assert r.status_code == 401
+
+
+def test_webhook_accepts_correct_bearer(client, monkeypatch):
+    monkeypatch.setenv("REVENUECAT_WEBHOOK_SECRET", "rc-secret")
+    r = client.post("/api/billing/revenuecat/webhook",
+                    json={"event": _rc_event("sab3", "INITIAL_PURCHASE")},
+                    headers={"Authorization": "Bearer rc-secret"})
+    assert r.status_code == 200 and r.get_json()["projected"] is True
+
+
+def test_webhook_replay_writes_no_second_row(client, eng):
+    ev = _rc_event("sab4", "INITIAL_PURCHASE")
+    client.post("/api/billing/revenuecat/webhook", json={"event": ev})
+    r = client.post("/api/billing/revenuecat/webhook", json={"event": ev})
+    assert r.get_json() == {"stored": False, "projected": False,
+                            "duplicate": True}
+    with eng.begin() as conn:
+        n = len(conn.execute(select(subscription_events_table)).fetchall())
+    assert n == 1
+    assert len(entl.list_for_user(USER)) == 1
+
+
+def test_webhook_malformed_event_400(client):
+    r = client.post("/api/billing/revenuecat/webhook", json={"event": {}})
+    assert r.status_code == 400
+    r = client.post("/api/billing/revenuecat/webhook", json={})
+    assert r.status_code == 400
+
+
+def test_webhook_alias_garbage_is_tolerated(client, eng):
+    ev = _rc_event("sab5", "INITIAL_PURCHASE")
+    ev["aliases"] = ["", None, {"nope": 1}, "unknown-xyz"]
+    r = client.post("/api/billing/revenuecat/webhook", json={"event": ev})
+    assert r.status_code == 200 and r.get_json()["projected"] is True
+    assert entl.get_entitlements(USER)["pro"] is True

@@ -48,6 +48,7 @@ import { track } from '../api/events';
 import SteerSlider from '../components/SteerSlider';
 import { useSession, type RankMethodPref } from '../state/useSession';
 import { useFlag, useOnboardingFeature } from '../state/useFeatureFlags';
+import { useEntitlements } from '../state/useEntitlements';
 import { guideToggleTitle, guideToggleDescriptionOff } from '../utils/mascotCopy';
 import { useOnboardingState } from '../state/useOnboardingState';
 import { useGuide } from '../state/useGuide';
@@ -103,6 +104,11 @@ export default function SettingsScreen({ navigation }: any) {
   const profileToggleEnabled    = useFlag('profiles.user_toggle');
   const denialRecoveryEnabled   = useFlag('notif.denial_recovery');
   const helpSurfaceEnabled      = useFlag('ux.help_surface');
+  // Monetization (iap-enablement, flag `monetize.paywall`, dark). This screen
+  // is the flag-OFF twin of SettingsHubScreen; the row is carried in BOTH so
+  // the paywall stays reachable whichever `account.settings_hub` state the
+  // build runs in — exactly one of the two ever mounts.
+  const paywallEnabled          = useFlag('monetize.paywall');
   // (The pick-pricing segmented control and its `trade.slot_pricing` flag
   // read were REMOVED 2026-08-21, D-144 — pick pricing is no longer a
   // setting. See TradeValuesSection.tsx, which owns this block in v2.)
@@ -111,6 +117,9 @@ export default function SettingsScreen({ navigation }: any) {
   // failure there never blocks or reverts the slider. With settings v2 on,
   // the pref also applies IMMEDIATELY (S6B-07: "next launch" made the
   // setting look broken) by resetting the mounted Rank stack.
+  // Entitlement state for the Pro row — zustand, already in memory, no query.
+  const proLoaded = useEntitlements((s) => s.loaded);
+  const isPro     = useEntitlements((s) => s.pro);
   const rankingPref    = useSession((s) => s.rankingMethodPref);
   const setRankingPref = useSession((s) => s.setRankingMethodPref);
   // #187 — The Analyst guided-tour opt-out, surfaced as a Settings toggle
@@ -1043,6 +1052,36 @@ export default function SettingsScreen({ navigation }: any) {
     </>
   );
 
+  // Subscription entry point (iap-enablement, flag `monetize.paywall`). One
+  // row, one destination — the flag gates the row, never the Paywall route.
+  // The status value is only stated once some source has answered; printing
+  // "Free" before the entitlements fetch lands would read as a downgrade to
+  // every subscriber who opened Settings too fast.
+  const proSection = paywallEnabled ? (
+    <>
+      <View style={styles.section}>
+        <TickLabel>Subscription</TickLabel>
+      </View>
+      <Pressable
+        testID="settings-pro-row"
+        accessibilityRole="button"
+        accessibilityLabel={
+          proLoaded ? `Fleeced Pro. ${isPro ? 'Pro' : 'Free'}` : 'Fleeced Pro'
+        }
+        onPress={() => navigation.navigate?.('Paywall', { source: 'settings' })}
+        style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={styles.rowKey}>Fleeced Pro</Text>
+          {proLoaded ? (
+            <Text style={styles.rowSub}>{isPro ? 'Pro' : 'Free'}</Text>
+          ) : null}
+        </View>
+        <Icon name="chevron-right" color={chalk.dim} size={16} />
+      </Pressable>
+    </>
+  ) : null;
+
   // Sleeper-sending status/disconnect row (flag `account.sleeper_disconnect`).
   // Hidden entirely when the link status can't be read (feature dark / error).
   const sleeperLink = sleeperLinkQuery.data;
@@ -1422,6 +1461,7 @@ export default function SettingsScreen({ navigation }: any) {
             {notifToggleRows}
             {quietHoursRows}
 
+            {proSection}
             {accountSection}
             {aboutSection}
             {__DEV__ || stageUsersEnabled ? testingSection : null}
@@ -1463,6 +1503,7 @@ export default function SettingsScreen({ navigation }: any) {
             {quietHoursRows}
 
             {testingSection}
+            {proSection}
             {accountSection}
             {aboutSection}
             {signOutBlock}

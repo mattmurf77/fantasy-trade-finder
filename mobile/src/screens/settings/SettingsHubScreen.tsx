@@ -40,6 +40,7 @@ import { chalk } from '../../theme/chalkline';
 import { Icon, TickLabel } from '../../components/chalkline';
 import { NO_LEAGUE_ID, useSession, type RankMethodPref } from '../../state/useSession';
 import { useFlag } from '../../state/useFeatureFlags';
+import { useEntitlements } from '../../state/useEntitlements';
 import type { AccountInfo } from '../../api/auth';
 import type { NotificationPrefs } from '../../shared/types';
 import FeedbackFAB from '../../components/FeedbackFAB';
@@ -89,6 +90,15 @@ export default function SettingsHubScreen({ navigation }: any) {
   // About page actually has an FAQ link to advertise.
   const stageUsersEnabled = useFlag('testing.stage_users');
   const helpSurfaceOn = useFlag('ux.help_surface');
+  // Monetization (iap-enablement, flag `monetize.paywall`, dark). The flag
+  // gates this ROW, not the Paywall route — same rule as Testing above.
+  const paywallOn = useFlag('monetize.paywall');
+  // Entitlements come from the zustand store, already in memory: no query, so
+  // rule 1 (zero network) survives. `loaded` is what keeps rule 2: before any
+  // source has answered we say NOTHING rather than printing "Free", which
+  // would be a guess that happens to be wrong for every paying user.
+  const proLoaded = useEntitlements((s) => s.loaded);
+  const isPro = useEntitlements((s) => s.pro);
 
   const go = (route: string) => () => navigation?.navigate?.(route);
 
@@ -272,6 +282,24 @@ export default function SettingsHubScreen({ navigation }: any) {
           preview={notifPreview}
           onPress={go('SettingsNotifications')}
         />
+
+        {/* Monetization entry point (iap-enablement). The ONLY route to the
+            paywall in this build — gate-driven sources land here in a later
+            wave. Hidden entirely while `monetize.paywall` is false, which is
+            everywhere today. */}
+        {paywallOn ? (
+          <>
+            <View style={styles.section}>
+              <TickLabel>Subscription</TickLabel>
+            </View>
+            <NavRow
+              testID="settings-pro-row"
+              title="Fleeced Pro"
+              preview={proLoaded ? (isPro ? 'Pro' : 'Free') : null}
+              onPress={() => navigation?.navigate?.('Paywall', { source: 'settings' })}
+            />
+          </>
+        ) : null}
 
         <View style={styles.section}>
           <TickLabel>Account</TickLabel>

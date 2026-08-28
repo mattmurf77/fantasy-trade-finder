@@ -40,6 +40,7 @@
 - [Append-only, version-stamped measurement tables (2026-08-21, D-144, `receipts_*`)](#append-only-version-stamped-measurement-tables-2026-08-21-d-144-receipts_)
 - [The opponent sweep is complete; a generation budget is never a deck cap (2026-08-22, D-154, `trade.full_sweep`)](#the-opponent-sweep-is-complete-a-generation-budget-is-never-a-deck-cap-2026-08-22-d-154-tradefull_sweep)
 - [Tiers-save route contract shrank: `demoted_pids` is an ignored legacy key (2026-08-24, D-160)](#tiers-save-route-contract-shrank-demoted_pids-is-an-ignored-legacy-key-2026-08-24-d-160)
+- [Provider identity is reconciled server-side; presentation is server config (2026-08-28, ADR-016)](#provider-identity-is-reconciled-server-side-presentation-is-server-config-2026-08-28-adr-016)
 
 ---
 
@@ -684,3 +685,43 @@ and `backend/trade_gen_fit.py`. Plan: [`../docs/plans/full-sweep/`](../docs/plan
   no-value and the D-085 goldens; only the quickset writer path was removed.
 - Rollback is a code revert, not a flag; and a backend revert cannot restore demote behavior
   for post-fix clients (they no longer send the key).
+
+## Provider identity is reconciled server-side; presentation is server config (2026-08-28, ADR-016)
+
+Conventions from the IAP-enablement build (`backend/entitlements.py`,
+`server.py /api/billing/revenuecat/webhook` + `/api/paywall/config`). Everything ships
+dark — all `monetize.*` flags false, no route wears `@_require_pro`.
+
+- **A third-party subscriber id is never assumed to be our key.** RevenueCat addresses
+  each event to one `app_user_id` and lists every id it believes is the same subscriber
+  in `aliases[]`. `resolve_rc_identity(app_user_id, aliases)` picks the first candidate
+  that is a key we already recognise — an `acct_*` with an account row, or a known
+  `sleeper_user_id` — `app_user_id` first, then aliases in order. **Unrecognised falls
+  back to `app_user_id` verbatim, never to dropping the event:** a pre-sign-in purchase
+  is real money, and it merges the moment an alias identifies it.
+- **Reconcile before you upsert.** When the event names more than one candidate, the
+  projector re-keys prior rows onto the canonical key *before* looking for a row to
+  update — otherwise the anonymous purchase and the account purchase become two rows and
+  the user is billed once but entitled twice. The re-key is `_BILLING_SOURCES`-only and
+  product-scoped, the same rule the upsert already followed: manual grants and promo
+  rewards are never moved by provider traffic.
+- **Project a store event by its meaning, not by mapping it to the nearest status.**
+  `TRANSFER` *moves* the entitlement (re-key `transferred_from` → resolved
+  `transferred_to`); `expired` would claim it lapsed and `revoked` would claim we took
+  it, and both are false. `BILLING_ISSUE` *extends* `expires_at` to
+  `grace_period_expiration_at_ms` — extends only, never shortens, never touches a
+  perpetual row. `CANCELLATION` stays a no-op (access runs to period end). Anything
+  unmatched is stored with a `process_error` note, never silently applied.
+- **Tolerate the vendor's SKU spelling; keep one canonical vocabulary.** `_product_mapping`
+  accepts the runbook's ASC ids (`founder_lifetime*`, `season_pass_*`) alongside the
+  canonical `ftf_*` ones so either App Store Connect choice reconciles without a deploy.
+  The aliases are a reconciliation net only — docs, paywall config and clients use the
+  `ftf_*` ids. A mis-sourced founder row is a perpetual grant priced as a subscription.
+- **Server-driven presentation, client-driven price.** `GET /api/paywall/config` serves
+  pages/features/SKUs so packaging changes without an app release, but its
+  `display_price` strings are explicitly **fallback copy**: only StoreKit knows the
+  user's storefront and currency, so the client renders the RevenueCat offering's price
+  and falls back to ours. A flag-off config returns `{"enabled": false}` and *nothing
+  else* — a dark paywall must not ship SKUs or prices.
+- **Session auth is checked before the flag gate.** A dark route must never be an open
+  one; `test_paywall_config.py` pins both orders.

@@ -7,6 +7,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-28 — Open Items (IAP enablement)](#2026-08-28--open-items-iap-enablement)
 - [2026-08-22 — Open Items (trade-model restrictiveness)](#2026-08-22--open-items-trade-model-restrictiveness)
 - [2026-08-22 — Open Items (#384 merged calculator)](#2026-08-22--open-items-384-merged-calculator)
 - [2026-08-19 — Open Items (team review)](#2026-08-19--open-items-team-review)
@@ -25,6 +26,16 @@
 - [Conventions](#conventions)
 
 ---
+
+## 2026-08-28 — Open Items (IAP enablement)
+
+### Q-034 — ASC SKU product IDs: runbook names diverge from the foundation doc; operator is creating SKUs now
+- **Why it matters:** product IDs are effectively permanent in App Store Connect, and the backend projector maps `product_id` → (entitlement, source). Two docs disagree: the IAP runbook (2026-08-27, A3/A4) suggests `pro_monthly_499`, `pro_annual_3499`, `season_pass_2026`, `founder_lifetime`; the foundation doc §2.1/§4, the pro-subscription LLD §3, and `entitlements._product_mapping` all use `ftf_pro_monthly`, `ftf_pro_annual`, `ftf_season_pass_2026`, `ftf_founder` (+ `ftf_founder_b` A/B arm in the founder LLD).
+- **What the code does meanwhile:** the `ftf_*` names are canonical (foundation wins per the 2026-08-28 handoff rule); `_product_mapping` was additionally made tolerant of `founder_lifetime*` and `season_pass_*` so either ASC choice reconciles to the right source. `GET /api/paywall/config` serves the `ftf_*` ids.
+- **Action to unblock:** operator picks one set when creating the SKUs in ASC — **recommend the `ftf_*` names** so every doc, test, and the paywall config agree without further change. If the runbook names are chosen instead, say so and we update `docs/cross-client-invariants.md` + paywall config in one pass.
+- **Also needed from the operator (same lane):** `REVENUECAT_WEBHOOK_SECRET` is not yet in `secrets.local.env` (checked 2026-08-28) — fill it there + Render env when the RevenueCat webhook is configured (runbook step 5), and put the RevenueCat Apple SDK key in EAS env as `EXPO_PUBLIC_REVENUECAT_IOS_KEY` before the next EAS build if purchases should initialize.
+- **Discovered by:** 2026-08-28 IAP enablement build (scope: `docs/plans/monetization/iap-enablement/scope.md`).
+- **Owner:** operator.
 
 ## 2026-08-22 — Open Items (trade-model restrictiveness)
 

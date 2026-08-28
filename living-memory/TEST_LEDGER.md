@@ -11,6 +11,16 @@
 
 ---
 
+## 2026-08-28d — IAP enablement code half (runbook 6–7): webhook delta + RevenueCat paywall — full gates, ALL DARK
+
+Operator-directed cross-session handoff; two Opus build subagents (backend/mobile, disjoint file ownership), lead-session review of every load-bearing hunk. Branch `claude/monetization-features-feedback-a6fe77` off `origin/main` `69dc0cae`. Scope block: [docs/plans/monetization/iap-enablement/scope.md](../docs/plans/monetization/iap-enablement/scope.md). **Zero user-visible change until the operator flips `monetize.*` flags** — no route gained `@_require_pro`, no flag changed, no schema changed.
+
+- **Backend** (`entitlements.py`, `server.py`): `resolve_rc_identity()` alias reconciliation (`$RCAnonymousID:*` → `acct_*`, prior anon-keyed billing rows re-keyed before upsert), `TRANSFER` projected as a move (not expire/revoke), `BILLING_ISSUE` grace extension (extend-only, never perpetual rows), `_product_mapping` tolerant of the runbook's divergent SKU spellings (Q-034), new `GET /api/paywall/config` (session-authed, `monetize.paywall` off → `{"enabled": false}` only). Five `paywall_*` client events registered in taxonomy + `NON_INTENT_EVENTS` same-commit.
+- **Mobile**: `react-native-purchases@10.8.1` (single-seam `api/purchases.ts`, inert without `EXPO_PUBLIC_REVENUECAT_IOS_KEY`; never calls `logOut`), `initPurchases`/`logIn` identity bridge in `useSession` (bootstrap + sign-in halves), `useEntitlements` store (server-authoritative, CustomerInfo raise-only UI cache, 72h offline grace), `PaywallScreen` root-stack modal (3.1.2-complete: price+period, 14-day trial terms, auto-renew + cancel copy, working Restore, tappable /privacy + /terms; server `enabled:false` beats stale client flags; no FeedbackFAB per #188), flag-gated `settings-pro-row` on both settings surfaces.
+- **Evidence (D-056):** `pytest backend/tests` **4397 passed, 1 skipped, 0 failed** (lead-run on the combined tree; targeted new coverage: 47 entitlements + 12 paywall-config tests, 7 named backend sabotages RED-then-green) · `npx tsc --noEmit` clean · `testid-lint OK` · new `mobile/tests/check-paywall.js` **11/11** (3 mutations verified failing) · full structural suite **84 guards, 0 failing** · code-walk proof + operator sandbox checklist in [docs/plans/monetization/iap-enablement/](../docs/plans/monetization/iap-enablement/).
+- **Runtime evidence OWED (operator, blocked on Apple):** [sandbox-test-checklist.md](../docs/plans/monetization/iap-enablement/sandbox-test-checklist.md) — cannot run until the Paid Apps agreement (signed 2026-08-27) is active and RevenueCat/ASC are configured (runbook steps 3–5). The mobile purchase path has **no** runtime proof until then, by design.
+- **Open for the operator:** Q-034 (ASC SKU naming — recommend `ftf_*`), `REVENUECAT_WEBHOOK_SECRET` absent from `secrets.local.env` + Render, `EXPO_PUBLIC_REVENUECAT_IOS_KEY` needed in EAS env before the next build, and note the next mobile release **must be a full EAS build, not OTA** (native module).
+
 ## 2026-08-28c — v1.16.9 (EAS build 135) BUILT + SUBMITTED to TestFlight; trade.shop_asset LIT in prod
 
 Release run at operator order ("push, open PR, merge, push to testflight and flip the flags on").
@@ -3125,6 +3135,10 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-08-28d — IAP enablement code half (runbook 6–7): webhook delta + RevenueCat paywall — full gates, ALL DARK](#2026-08-28d--iap-enablement-code-half-runbook-67-webhook-delta--revenuecat-paywall--full-gates-all-dark)
+- [2026-08-28c — v1.16.9 (EAS build 135) BUILT + SUBMITTED to TestFlight; trade.shop_asset LIT in prod](#2026-08-28c--v1169-eas-build-135-built--submitted-to-testflight-tradeshop_asset-lit-in-prod)
+- [2026-08-28b — #402/#403 QA round 2: B-3, own-position chip ruling, P-1..P-4 — universal-rule fixes, gates green](#2026-08-28b--402403-qa-round-2-b-3-own-position-chip-ruling-p-1p-4--universal-rule-fixes-gates-green)
+- [2026-08-28 — #402/#403 "More offers = shop a player" — full build + redundant QA + fix round, all gates green (branch, HELD unmerged)](#2026-08-28--402403-more-offers--shop-a-player--full-build--redundant-qa--fix-round-all-gates-green-branch-held-unmerged)
 - [2026-08-27 — #384 partner team-shape summary restored to the merged calculator layout — full gates](#2026-08-27--384-partner-team-shape-summary-restored-to-the-merged-calculator-layout--full-gates)
 - [2026-08-26e — v1.16.8 (EAS build 134) BUILT for TestFlight](#2026-08-26e--v1168-eas-build-134-built-for-testflight)
 - [2026-08-26c — Entry v2.1: login option (Opus subagent build, lead-session review) — full gates](#2026-08-26c--entry-v21-login-option-opus-subagent-build-lead-session-review--full-gates)

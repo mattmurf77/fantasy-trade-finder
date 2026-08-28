@@ -14,6 +14,9 @@
 
 
 
+## 2026-08-28d — The IAP rail exists in code: RevenueCat webhook delta + a 3.1.2-complete paywall, everything dark
+
+The code half of the IAP runbook (2026-08-27, steps 6–7), operator-directed, two Opus subagents + lead review. **Nothing user-visible: all `monetize.*` flags false, no route gained a Pro gate, no data-generating action tolled (timing doc §7/§11).** Backend: the shipped webhook/projector gains `$RCAnonymousID:*`/`aliases[]` reconciliation onto `acct_*` (`resolve_rc_identity`, re-keying anon-written billing rows), `TRANSFER` as a *move*, `BILLING_ISSUE` grace extension, `GET /api/paywall/config` (off-flag → `{"enabled": false}`), five `paywall_*` events in the taxonomy. Mobile: `react-native-purchases@10.8.1` behind one fail-safe seam (inert without `EXPO_PUBLIC_REVENUECAT_IOS_KEY`; `logOut` never called), `configure`/`logIn` bridge on both session halves, server-authoritative `useEntitlements` (CustomerInfo raise-only), `PaywallScreen` modal with the full 3.1.2 set + Restore + /privacy + /terms, flag-gated Settings row. Evidence: pytest 4397/0 · tsc clean · testid-lint OK · `check-paywall.js` 11/11 · structural 84/0; proofs + operator sandbox checklist in `docs/plans/monetization/iap-enablement/`; ADR-016. **Q-034 surfaced:** runbook ASC SKU names diverge from `ftf_*` canon — projector tolerates both, operator picks. Owed: `REVENUECAT_WEBHOOK_SECRET` + `EXPO_PUBLIC_REVENUECAT_IOS_KEY` (operator); next release = **full EAS build** (native module).
 
 ## 2026-08-28c — v1.16.9 ships: shop-a-player live end to end
 
