@@ -55,6 +55,9 @@ import TradeCardComp, { type DispositionReasons } from '../components/TradeCard'
 import SendInSleeperButton from '../components/SendInSleeperButton';
 import Toast from '../components/Toast';
 import PlayerContextMenu, { type PlayerMenuAction } from '../components/PlayerContextMenu';
+// #402/#403 — give-side "More offers" opens the inline shop strip
+// (lld-delta.md §0; flag trade.shop_asset && trade.asset_ideas).
+import ShopOffersStrip, { ShopWhichPlayerSheet } from '../components/ShopOffersStrip';
 import HelpSheet, { InfoButton } from '../components/HelpSheet';
 import { registerScrollToTop } from '../navigation/scrollToTop';
 import OutlookSheet from '../components/OutlookSheet';
@@ -1462,6 +1465,23 @@ export default function TradesScreen({ navigation, route }: any) {
   // refetches. Tap-through hands the package to the calculator via the
   // #190 prefill param — the least-invasive full-detail view.
   const assetIdeasOn = useFlag('trade.asset_ideas');
+  // #402/#403 (rulings 2026-08-27) — give-side "More offers" IS the shop
+  // entry (lld-delta.md §0.1). Conjunction, not a lone read: trade.asset_ideas
+  // is a hard prerequisite (its route 404s when off), so the fork must never
+  // fire without it. Flag off ⇒ the give-side tap runs today's pin +
+  // regenerate + #288 snapshot path byte-identically.
+  const shopAssetOn = useFlag('trade.shop_asset');
+  const shopEnabled = shopAssetOn && assetIdeasOn;
+  // The shopped give-side asset — non-null ⇒ the strip is mounted below the
+  // top deck card and the deck pan is disabled (§0.4). The chooser card is
+  // set instead when the give side holds >1 asset (§0.2).
+  const [shopAsset, setShopAsset] = useState<Player | null>(null);
+  const [shopChooserCard, setShopChooserCard] = useState<TradeCard | null>(null);
+  const shopOpen = shopAsset != null;
+  function openShopStrip(asset: Player) {
+    setShopChooserCard(null);
+    setShopAsset(asset);
+  }
   // #384 — the merged calculator flow. Read here only to decide whether
   // the deck's exhausted state offers the two calculator-first exits
   // (ruling 8). Nothing else on this screen branches on it.
@@ -2006,6 +2026,8 @@ export default function TradesScreen({ navigation, route }: any) {
     setSuggestTarget(null);
     clearTargets(); // store also self-clears via its league subscription
     setTargetPickerOpen(false);
+    setShopAsset(null); // #402/#403 — a shopped asset is league-specific
+    setShopChooserCard(null);
     // Onboarding item 4 — reset the first-run auto-start lifecycle so a
     // league switch mid-first-run can auto-start against the new league.
     if (autoRetryTimer.current) {
@@ -2879,6 +2901,30 @@ export default function TradesScreen({ navigation, route }: any) {
   // receive pins the get side (cards must return ≥1 of them).
   function handleKeepSide(card: TradeCard, side: 'give' | 'receive') {
     haptics.selection();
+    // #402/#403 (lld-delta.md §0.1) — give-side "more offers" IS shop. No
+    // finder pin, no deck reset, no #288 snapshot: the deck underneath must
+    // not move. One give asset opens the strip on it directly; several open
+    // the "Shop which player?" chooser sheet (§0.2). Receive side, or flag
+    // off, falls through to today's path byte-identically — including
+    // `trade_keep_side_tapped`, which keeps firing only on the paths that
+    // still do what its name says.
+    if (side === 'give' && shopEnabled) {
+      if (card.give_players.length === 1) {
+        openShopStrip(card.give_players[0]);
+      } else {
+        setShopChooserCard(card);
+      }
+      track(
+        'shop_opened',
+        {
+          asset_position: card.give_players[0]?.position,
+          source: 'more_offers',
+          give_count: card.give_players.length,
+        },
+        'Trades',
+      );
+      return;
+    }
     // #288 — snapshot the deck before resetDeckForNewTargets wipes it, so
     // the found-trade-card → "other options for that player" flow this
     // action enters can be undone. Captured only from a clean, unpinned
@@ -6943,6 +6989,15 @@ export default function TradesScreen({ navigation, route }: any) {
                 key={topCard.trade_id}
                 card={topCard}
                 cardImpact={topCardImpact}
+                // #402/#403 §0.4 — while the shop strip is open the top
+                // card's like/pass pan is disabled (the deck holds still;
+                // the strip's FlatList pager is the only horizontal gesture
+                // on screen). Closing the strip re-enables it.
+                shopOpen={shopOpen}
+                // #402/#403 — give-side keep chip relabels to "More offers"
+                // while the shop entry is live (host-read flag, threaded as
+                // a prop per TradeCard's prop discipline).
+                shopGiveEntry={shopEnabled}
                 nudge={swipeHintActive}
                 onFirstTouch={dismissSwipeHint}
                 onCardLayout={(e) => setTopCardH(e.nativeEvent.layout.height)}
@@ -6993,6 +7048,18 @@ export default function TradesScreen({ navigation, route }: any) {
                 onEditInCalculator={() => handleEditInCalculator(topCard)}
                 onRemoveAsset={handleRemoveAsset}
               />
+              {/* #402/#403 (lld-delta.md §0.3) — the inline shop strip,
+                  directly below the top deck card. The card above stays
+                  visible as context (it is the trade being shopped around);
+                  nothing about the deck moved, so closing restores nothing. */}
+              {shopAsset && leagueId ? (
+                <ShopOffersStrip
+                  leagueId={leagueId}
+                  asset={shopAsset}
+                  onClose={() => setShopAsset(null)}
+                  onToast={(t) => setToast(t)}
+                />
+              ) : null}
               {/* Queue action — Pass / Interested are driven by swipe
                   gestures on the top card; Queue is a third option that
                   stashes the trade for "Send All" later. Flag-gated so the
@@ -7721,6 +7788,30 @@ export default function TradesScreen({ navigation, route }: any) {
         />
       ) : null}
 
+      {/* #402/#403 (lld-delta.md §0.2) — "Shop which player?" chooser for a
+          give side holding more than one asset. A Modal sheet, never
+          navigation (the deck stays mounted); picking re-emits shop_opened
+          with the picked position. shopChooserCard is only ever set while
+          shopEnabled is true (the handleKeepSide fork). */}
+      <ShopWhichPlayerSheet
+        visible={!!shopChooserCard}
+        card={shopChooserCard}
+        onPick={(asset) => {
+          haptics.selection();
+          track(
+            'shop_opened',
+            {
+              asset_position: asset.position,
+              source: 'more_offers',
+              give_count: shopChooserCard?.give_players.length ?? 0,
+            },
+            'Trades',
+          );
+          openShopStrip(asset);
+        }}
+        onClose={() => setShopChooserCard(null)}
+      />
+
       {/* S3 PRD-02 (ux.player_context_menu) — shared long-press menu.
           menuTarget is only ever set while the flag is on. */}
       <PlayerContextMenu
@@ -7868,6 +7959,13 @@ interface SwipableProps {
   onEditInCalculator?: () => void;
   // #194 — pass-through: remove one asset from the card and re-price.
   onRemoveAsset?: (player: Player, side: 'give' | 'receive') => void;
+  // #402/#403 §0.4 — true while the shop strip is open below this card.
+  // Gates the like/pass pan's `.enabled()`: the deck holds still while the
+  // user shops; the strip's FlatList pager owns horizontal gestures.
+  shopOpen?: boolean;
+  // #402/#403 — pass-through to TradeCard's give-side keep-chip label fork
+  // ("More offers" while the shop entry is live).
+  shopGiveEntry?: boolean;
   // Onboarding guided layer (v2.1): swipe-gesture hint. While `nudge` is
   // true the card runs a subtle translateX nudge (twice, then rests);
   // the first touch anywhere on the card calls `onFirstTouch` — the
@@ -7895,6 +7993,8 @@ function SwipableTopCard({
   onKeepSide,
   onEditInCalculator,
   onRemoveAsset,
+  shopOpen,
+  shopGiveEntry,
   nudge,
   onFirstTouch,
 }: SwipableProps) {
@@ -7924,6 +8024,10 @@ function SwipableTopCard({
   const pan = useMemo(
     () =>
       Gesture.Pan()
+        // #402/#403 §0.4 — the pan is not attached while the shop strip is
+        // open: the deck holds still and the strip's pager is the only
+        // horizontal gesture on screen. Closing the strip re-enables it.
+        .enabled(!shopOpen)
         .activeOffsetX([-12, 12])
         .failOffsetY([-30, 30])
         .onUpdate((e) => {
@@ -7944,7 +8048,7 @@ function SwipableTopCard({
             translateX.value = withTiming(0, { duration: 180 });
           }
         }),
-    [onLike, onPass, translateX],
+    [onLike, onPass, translateX, shopOpen],
   );
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -7991,6 +8095,7 @@ function SwipableTopCard({
           repricing={repricing}
           fitTargetPositions={fitTargetPositions}
           onKeepSide={onKeepSide}
+          shopGiveEntry={shopGiveEntry}
           onEditInCalculator={onEditInCalculator}
           onRemoveAsset={onRemoveAsset}
           cardImpact={cardImpact}

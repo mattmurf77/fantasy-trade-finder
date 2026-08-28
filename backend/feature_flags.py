@@ -463,6 +463,18 @@ FLAG_KEYS: tuple[str, ...] = (
     # the mobile grouped-ideas panel never renders. Default ON in
     # config/features.json (operator ask); this flag is the kill switch.
     "trade.asset_ideas",
+    # ── #402/#403 — give-side "more offers" opens the inline shop strip ──
+    # (docs/feedback/items/402-more-offers-shop/, rulings 2026-08-27.)
+    # Client-side surface flag: ON relabels the deck card's give-side keep
+    # chip to "More offers" and forks its tap to an inline shop strip
+    # (Tier up / Tier down / Same value over the EXISTING asset-ideas
+    # groups; like = /api/trades/queue as-is, dismiss = deferred
+    # /api/trades/swipe pass with a true undo). No backend behavior
+    # branches on it — registered so the JSON loader accepts the key.
+    # Only live as the conjunction with trade.asset_ideas (route 404s
+    # without it). OFF (shipped default) ⇒ byte-identical give-side
+    # pin + regenerate + #288 snapshot.
+    "trade.shop_asset",
     # ── Feedback #175 — directional outlook weighting ────────────────────
     # When the user's resolved outlook is rebuild-side (rebuilder/jets),
     # cards acquiring win-now/older production are strongly penalized and
