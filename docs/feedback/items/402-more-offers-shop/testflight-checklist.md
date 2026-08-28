@@ -102,6 +102,21 @@
     and a mode; go back; shop player B → the window opens clean (Tier up,
     no selection, page 1). *(QA/A-2 — a stale filter could become
     invisible and un-clearable.)* ☐
+15a. **Merged-view trim (T-1..T-3, operator ruling 2026-08-28 — needs
+    `calc.inline_home` lit, as it is in prod; rides this build, not the
+    shop flag).** On the guided Find-a-Trade landing (the merged In-league
+    page): exactly **one outlook bar** — the calculator's own row with its
+    working Change control (the page's minimized "Outlook & filters" row
+    is gone); exactly **one Find a Trade** — the canvas action row's cell
+    (no full-width page bar anywhere on the page; with an EMPTY canvas the
+    cell still runs the model search, and a finished deck's "Deck done"
+    card says "tap Find a Trade", naming that cell); **no 1QB PPR / SF TEP
+    format chips** and no "values converted" note anywhere on the merged
+    page. Then open the **Real values** page (mode-bar chip) → its format
+    chips render exactly as before. Also flip to a team- or player-mode
+    deck (no inline canvas there) → the page-level Find a Trade bar and
+    the minimized outlook row are STILL present — the trim is host-scoped,
+    not flag-wide. ☐
 
 ## Part B — flag OFF (flip back, reload flags)
 

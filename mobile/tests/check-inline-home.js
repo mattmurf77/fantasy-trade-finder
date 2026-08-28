@@ -299,6 +299,81 @@ console.log('check-inline-home:');
     '10b. the spoken label follows the visible one');
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// 11 — the merged-view trim (T-1..T-3, operator ruling 2026-08-28)
+// ═══════════════════════════════════════════════════════════════════════
+// docs/feedback/items/402-more-offers-shop/merged-view-trim-2026-08-28.md:
+// looking at the LIVE merged page, the operator ruled out the duplicate
+// outlook bar (T-1), the page-level Find a Trade bar (T-2) and the
+// scoring-format chips (T-3). All three are scoped to the flag path's
+// canvas host (`canvasHost === 'flag'`), never the bare flag — flag-on
+// team/player deck modes mount no calculator and must keep their surfaces —
+// so flag-off stays byte-identical by construction.
+{
+  // T-1 — TradesScreen's minimized outlook row steps aside for the hosted
+  // calculator's own outlook section. The full gate equality (nothing
+  // added, nothing dropped) is check-finder-conditions-reachable.js
+  // assertion 2; pinned here is the trim's own conjunct, so a "cleanup"
+  // that drops it goes red in the wave's own suite too.
+  {
+    const at = trades.indexOf('testID="trades.outlook-fallback"');
+    const gate = trades.slice(trades.lastIndexOf('{', at) - 260, at);
+    assert(at > -1 && /canvasHost !== 'flag'/.test(gate),
+      "11. T-1: the minimized outlook row is suppressed when the flag path hosts the canvas",
+      'the operator\'s "duplicate outlook bar": the hosted calculator\'s '
+      + 'calc.outlook-row (receipt or fallback twin, own Change control) is '
+      + 'the one survivor on the merged page');
+  }
+  // T-2 — BOTH page-level Find a Trade bars are host-gated, and both still
+  // exist (the flag-off page keeps its CTA — deleting one changes flag-off
+  // behavior, which this wave may not do).
+  {
+    const mounts = [...tradesCode.matchAll(/testID="trades\.find-btn"/g)];
+    assert(mounts.length === 2,
+      '11a. T-2: both trades.find-btn mounts survive for the flag-off page',
+      `found ${mounts.length} — the bar must still render whenever the canvas does not`);
+    const gated = mounts.filter((m) => {
+      const before = tradesCode.slice(Math.max(0, m.index - 400), m.index);
+      return /\{canvasHost !== 'flag' \? \(\s*<Button/.test(before);
+    });
+    assert(gated.length === 2,
+      "11b. T-2: …and each is gated on `canvasHost !== 'flag'`",
+      'an ungated copy re-renders the second primary the ruling removed — '
+      + "the canvas action row's Find a Trade covers both search paths "
+      + '(fair sweep with a give side, model deck on empty canvas, D-153)');
+    // The deck-summary copy quotes the CTA's label verbatim (#316); with
+    // the bar gone on the merged view it must quote the canvas cell's
+    // fixed "Find a Trade" instead — and keep the flag-off quote.
+    assert(/canvasHost === 'flag'\s*\n?\s*\? 'Fresh ideas land every week — or tap Find a Trade to search again now\.'/.test(trades)
+      && /: 'Fresh ideas land every week — or tap Find more trades to search again now\.'/.test(trades),
+      '11c. T-2: the deck-summary copy quotes whichever control renders',
+      'copy naming a control that is not on the page is a #316-class lie');
+  }
+  // T-3 — the format chips leave the merged header when hosted inline, via
+  // a HOST prop threaded TradesScreen → TradeBuildCanvas →
+  // InLeagueCalculator (never a flag read inside the component — the
+  // pushed page must keep its chips; see check-calc-merged-layout.js 13c/d
+  // for the component-side gate).
+  {
+    const at = trades.indexOf('<TradeBuildCanvas');
+    const seg = trades.slice(at, at + 1100);
+    assert(/hideFormatChips=\{canvasHost === 'flag'\}/.test(seg),
+      "11d. T-3: the mount passes hideFormatChips on the flag path only",
+      'the #270 experiment path must keep today\'s chips');
+    assert(/hideFormatChips\?: boolean/.test(canvas)
+      && /hideFormatChips = false/.test(canvas)
+      && /hideFormatChips=\{hideFormatChips\}/.test(canvas),
+      '11e. T-3: TradeBuildCanvas threads the prop, defaulting to false',
+      'a default of true (or a dropped pass-through) strips the chips from '
+      + 'the experiment variant or leaves the flag path with chips');
+    const calcComp = read('components/InLeagueCalculator.tsx');
+    assert(!/useFlag\(\s*['"]calc\.inline_home['"]\s*\)/.test(calcComp),
+      '11f. T-3: InLeagueCalculator reads NO inline-home flag',
+      'the contract mechanism is a host prop; a flag read inside the '
+      + 'component would also strip the pushed page\'s chips');
+  }
+}
+
 console.log(failures === 0
   ? 'check-inline-home: all assertions passed'
   : `check-inline-home: ${failures} FAILED`);

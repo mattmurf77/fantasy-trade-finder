@@ -110,6 +110,19 @@ interface Props {
     opponent: { userId: string; name: string };
   }) => void | Promise<void>;
   initialReceiveIds?: string[];
+  /** T-3 (merged-view trim, operator ruling 2026-08-28,
+   *  docs/feedback/items/402-more-offers-shop/merged-view-trim-2026-08-28.md)
+   *  — a HOST prop, deliberately not a flag read: when the calculator is
+   *  hosted inline on the guided landing (TradesScreen → TradeBuildCanvas,
+   *  `calc.inline_home` path), the merged header's scoring-format chips and
+   *  the #191 conversion note they drive do not render. The scoring-format
+   *  override's remaining homes are the pushed Real-values page and league
+   *  settings. Defaults to false, so the pushed page (its In-league branch
+   *  where still reachable, and every other mount) keeps its chips exactly
+   *  as today. History, on the record: #384 W1 dropped these once and W5
+   *  restored them after review §11 called the absence a regression; the
+   *  operator has since seen the live merged page and ruled the other way. */
+  hideFormatChips?: boolean;
 }
 
 const FORMATS: { key: ScoringFormat; label: string }[] = [
@@ -235,6 +248,7 @@ export default function InLeagueCalculator({
   onInLeagueGone,
   onOutlookClosed,
   onLikeTrade,
+  hideFormatChips = false,
 }: Props) {
   // #384 — the merged calculator layout. OFF is byte-identical to the
   // shipped stacked page; every branch below reads this one flag.
@@ -840,39 +854,49 @@ export default function InLeagueCalculator({
           {/* #384 review §11 — the scoring format is the #166/#167 session
               override, and the merged layout dropped it entirely. Same chips,
               same handler, same honesty note as the stacked page; only the
-              slot moved. */}
-          <TickLabel>Scoring format</TickLabel>
-          <View style={styles.chipRow}>
-            {FORMATS.map((f) => {
-              const active = format === f.key;
-              return (
-                <Pressable
-                  key={f.key}
-                  testID={`calc.merged-format.${f.key}`}
-                  style={[styles.chip, active && styles.chipActive]}
-                  onPress={() => {
-                    if (f.key !== format) {
-                      haptics.selection();
-                      setFormatChoice(f.key);
-                    }
-                  }}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: active }}
-                >
-                  <Text style={[styles.chipText, active && styles.chipTextActive]}>{f.label}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          {opponent && rankStateFor(opponent, format) === 'R*' ? (
-            // #191 — the conversion note is an honesty line, not decoration:
-            // their side of the verdict was value-mapped from another format.
-            <Text style={styles.note}>
-              @{opponent.username} ranked in{' '}
-              {FORMAT_LABEL[(opponent.ranked_formats ?? []).find((f) => f !== format) ?? ''] ??
-                'another format'}{' '}
-              — values converted to {FORMAT_LABEL[format]} for this read.
-            </Text>
+              slot moved.
+              T-3 (ruling 2026-08-28) — host-gated, not flag-gated: the
+              inline host passes `hideFormatChips` and this whole block
+              (chips AND the #191 note the choice drives) steps off the
+              merged page there; every other mount renders it unchanged.
+              See the prop's doc comment for the #384 W1/W5 history. */}
+          {!hideFormatChips ? (
+            <>
+              <TickLabel>Scoring format</TickLabel>
+              <View style={styles.chipRow}>
+                {FORMATS.map((f) => {
+                  const active = format === f.key;
+                  return (
+                    <Pressable
+                      key={f.key}
+                      testID={`calc.merged-format.${f.key}`}
+                      style={[styles.chip, active && styles.chipActive]}
+                      onPress={() => {
+                        if (f.key !== format) {
+                          haptics.selection();
+                          setFormatChoice(f.key);
+                        }
+                      }}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                    >
+                      <Text style={[styles.chipText, active && styles.chipTextActive]}>{f.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {opponent && rankStateFor(opponent, format) === 'R*' ? (
+                // #191 — the conversion note is an honesty line, not
+                // decoration: their side of the verdict was value-mapped
+                // from another format.
+                <Text style={styles.note}>
+                  @{opponent.username} ranked in{' '}
+                  {FORMAT_LABEL[(opponent.ranked_formats ?? []).find((f) => f !== format) ?? ''] ??
+                    'another format'}{' '}
+                  — values converted to {FORMAT_LABEL[format]} for this read.
+                </Text>
+              ) : null}
+            </>
           ) : null}
 
           {/* #333 — league and team as side-by-side dropdowns, beneath the

@@ -5699,11 +5699,25 @@ export default function TradesScreen({ navigation, route }: any) {
                 so the control cohort gets a sheet entry too (they had
                 none). Guarded by check-finder-conditions-reachable.js:
                 the condition below must EQUAL the whitelist
-                `consolidateOn && !outlookReceiptShown && !firstRun` —
-                add or drop a conjunct and the guard goes red. Deliberately
-                mortal: Wave B0's inline calculator carries its own outlook
-                surface and deletes this row (prd.md §5). */}
-            {consolidateOn && !outlookReceiptShown && !firstRun ? (
+                `consolidateOn && !outlookReceiptShown && !firstRun &&
+                canvasHost !== 'flag'` — add or drop a conjunct and the
+                guard goes red.
+
+                T-1 (merged-view trim, operator ruling 2026-08-28,
+                docs/feedback/items/402-more-offers-shop/merged-view-trim-
+                2026-08-28.md): the mortality screens/CLAUDE.md promised
+                ("deliberately mortal — retire it when calc.inline_home
+                lights") is honored here. When the flag path hosts the
+                inline calculator (`canvasHost === 'flag'`), that
+                calculator's own outlook section (`calc.outlook-row`:
+                OutlookBiasReceipt or its `calc.outlook-fallback` twin,
+                each with a Change control opening its own TradeDnaSheet)
+                is the covering surface, and this row rendering too was
+                the operator's "duplicate outlook bar". The conjunct is
+                the HOST, not the bare flag: flag-on team/player deck
+                modes mount no calculator, so `!inlineHomeOn` there would
+                leave no outlook surface at all — the #394 stranding. */}
+            {consolidateOn && !outlookReceiptShown && !firstRun && canvasHost !== 'flag' ? (
               <View testID="trades.outlook-fallback" style={styles.outlookFallback}>
                 <View style={styles.outlookFallbackRow}>
                   <Text style={styles.outlookFallbackText} numberOfLines={1}>
@@ -6363,7 +6377,14 @@ export default function TradesScreen({ navigation, route }: any) {
               accept/declinable trade from a pinned surface at all. This is
               the `!consolidateOn` legacy layout's copy of the CTA — the
               consolidated layout has its own below; they are the two arms of
-              one ternary and never render together. */}
+              one ternary and never render together.
+              T-2 (merged-view trim, ruling 2026-08-28): gated on the canvas
+              host like the consolidated copy below — see the comment there.
+              This arm needs the same gate because `consolidateOn` also reads
+              `trades.edit_full_sheet`; were that ever off with
+              `calc.inline_home` on, this copy would render beside the hosted
+              canvas. Flag off, `canvasHost` is never 'flag' — unchanged. */}
+          {canvasHost !== 'flag' ? (
           <Button
             variant="primary"
             testID="trades.find-btn"
@@ -6380,6 +6401,7 @@ export default function TradesScreen({ navigation, route }: any) {
             }}
             style={styles.findBtn}
           />
+          ) : null}
 
           {/* Progress strip — visible only during a running job. Cards are
               streaming into the deck above; this just narrates the work.
@@ -6549,7 +6571,24 @@ export default function TradesScreen({ navigation, route }: any) {
             there left the pinned surface with no way to get a swipeable,
             accept/declinable trade at all. In that mode it reads "Find more
             trades" from the start, because the featured window is already
-            showing one (V1 mock: "CTA relabelled for the pinned context"). */}
+            showing one (V1 mock: "CTA relabelled for the pinned context").
+
+            T-2 (merged-view trim, operator ruling 2026-08-28,
+            docs/feedback/items/402-more-offers-shop/merged-view-trim-
+            2026-08-28.md; predicted by the 2026-08-27 parity audit §7 item
+            3): this page-level bar does NOT render when the flag path hosts
+            the inline canvas — the canvas action row's own Find a Trade
+            (`calc.action.find-a-trade`, InLeagueCalculator) is the page's
+            ONLY primary (ice-rationing rule). That cell covers BOTH search
+            paths this bar served: a canvas with a give side runs the fair
+            sweep, and an EMPTY canvas runs the model deck (D-153 fork via
+            `handleInlineFindATrade`), so the "Find more trades" relabel
+            state and the empty-deck "Hit Find a Trade to start" recovery
+            both still have a live entry. The deck-summary card's copy
+            quotes whichever control renders (see #316 note there). The
+            progress strip below stays — it narrates the inline search too.
+            Flag off, `canvasHost` is never 'flag' — byte-identical. */}
+        {canvasHost !== 'flag' ? (
         <Button
           variant="primary"
           testID="trades.find-btn"
@@ -6562,6 +6601,7 @@ export default function TradesScreen({ navigation, route }: any) {
           onPress={() => handleFindTrades()}
           style={styles.findBtn}
         />
+        ) : null}
 
         {job?.status === 'running' && (
           <View testID="trades.progress-strip" style={styles.progressStrip}>
@@ -6641,6 +6681,9 @@ export default function TradesScreen({ navigation, route }: any) {
               }
               prefill={canvasHost === 'flag' ? canvasPrefill : undefined}
               prefillSeq={canvasHost === 'flag' ? canvasPrefillSeq : undefined}
+              // T-3 (ruling 2026-08-28) — the merged page drops the
+              // scoring-format chips; the experiment path keeps today's.
+              hideFormatChips={canvasHost === 'flag'}
             />
           </View>
         ) : null}
@@ -7264,10 +7307,15 @@ export default function TradesScreen({ navigation, route }: any) {
                     replenishment cron + the always-mounted Find-more-trades
                     CTA above. "Find more trades" is quoted verbatim from
                     that CTA's label in this exact state. Pinned by the
-                    smoke/12 flow's deck-done step. */}
+                    smoke/12 flow's deck-done step.
+                    T-2 (ruling 2026-08-28): with the page bar gone on the
+                    merged view, the quoted control is the canvas action
+                    row's cell, whose label is a fixed "Find a Trade" —
+                    the copy follows whichever control actually renders. */}
                 <Text style={styles.emptyBody}>
-                  Fresh ideas land every week — or tap Find more trades to
-                  search again now.
+                  {canvasHost === 'flag'
+                    ? 'Fresh ideas land every week — or tap Find a Trade to search again now.'
+                    : 'Fresh ideas land every week — or tap Find more trades to search again now.'}
                 </Text>
                 {/* N4 (PRD §5.3) — the pin line reads as content on the
                     card, not chrome, and its verb has a reachable control:
