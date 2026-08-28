@@ -3,10 +3,11 @@
 > **Operator, on the first build carrying branch `feat/shop-window-rework-402`
 > (the rev-3 mobile + backend commits; ships as v1.16.10).**
 > Under D-056 this checklist is the ONLY runtime evidence mobile gets — every
-> step names the regression it would catch. The feature ships **dark**
-> (`trade.shop_asset: false`); Part A needs the flag flipped on (plus
-> `trade.asset_ideas` already true) via `config/features.json` +
-> `POST /api/feature-flags/reload`. Part B is run with the flag OFF.
+> step names the regression it would catch. The feature is **LIVE**
+> (`trade.shop_asset: true` in prod since v1.16.9, 2026-08-28), so Part A runs
+> as-is on the new build with no flag work. Part B needs the flag flipped OFF
+> for its duration (`config/features.json` + `POST /api/feature-flags/reload`),
+> then back ON.
 >
 > What changed since the rev-2 checklist: the shop is a **pushed window**
 > (rev3-spec §1 — no inline strip, no deck gating to verify), the position
@@ -112,4 +113,4 @@ Nothing. The rev-2 list's resolved items stay resolved (suppression-set fix,
 own-position chip, single emitter, three-flag conjunction), and the rev-3
 surface changes — window, all-mode filters, tier scope, auto-widen — are all
 covered by the steps above plus the reworked `mobile/tests/check-shop-deck.js`
-structural suite (127 assertions).
+structural suite (136 assertions).
