@@ -10,6 +10,23 @@
 
 
 
+## 2026-08-27c — Outlook/age PLAN authored on the same branch; owed = operator reads the plan and answers its OQ table (esp. the M3.2 age ruling)
+
+**Where:** same branch/PR as the review (`claude/trade-model-review-101bf7`, PR #224). New:
+[outlook-age-plan.md](../docs/plans/trade-model-review/outlook-age-plan.md) (+ grounding + code
+map). Dual-agent authored, 4 adversarial rounds, both lenses signed off; no unresolved items.
+
+**The plan in one line:** build generation-level pick-flow steering dark during the freeze (the
+rebuilder pick-flow inversion is generation-level — a reranker never fixed it), recommend HOLDING
+the age-bias build (consensus already carries age, F1; user boards lean against more youth
+premium, F2), wire the composite classifier into the engine as the inferred-coverage
+prerequisite, and batch every flip at the arm-read round boundary.
+
+**Operator owes:** the OQ table in §8 — headline: M3.2 (hold vs overturn the 2026-07-17
+age-tiebreak ruling; recommendation = hold), OQ-4 (does the F8/`outlook_direction` workstream run
+at all; default no), OQ-1/OQ-3 at packet review. First build session starts at WS0/M0.2 once the
+operator green-lights the plan.
+
 ## 2026-08-27b — Trade-model review COMPLETE on `claude/trade-model-review-101bf7`; owed = operator reads the champion doc and rules Q-034 (+ standing Q-031)
 
 **Where:** worktree `trade-model-review-101bf7`, docs-only branch off `main` `69dc0cae`. All four
