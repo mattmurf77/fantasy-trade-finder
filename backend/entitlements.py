@@ -360,6 +360,17 @@ _RC_NOOP = {"CANCELLATION", "SUBSCRIBER_ALIAS", "TEST"}
 # ASC choice reconciles to the right source without a code change — a
 # mis-sourced founder row is a perpetual grant silently priced as a
 # subscription.
+def is_tip_product(product_id: str | None) -> bool:
+    """Tip-jar consumables (`ftf_tip_*`) are money with NO entitlement.
+
+    They arrive through the same webhook (RevenueCat sends consumables as
+    NON_RENEWING_PURCHASE — an *activating* type), so without this guard the
+    default `_product_mapping` branch would silently hand every tipper `pro`.
+    The projector stores the event for the revenue ledger and grants nothing.
+    """
+    return (product_id or "").lower().startswith("ftf_tip_")
+
+
 def _product_mapping(product_id: str) -> tuple[str, str]:
     pid = (product_id or "").lower()
     if pid.startswith("ftf_founder") or pid.startswith("founder_lifetime"):
@@ -506,6 +517,11 @@ def _project(source: str, event_id: str, event_type: str, payload: dict, *,
 
     if not user_id or not product_id:
         return False, "ignored: missing user_id/product_id"
+
+    # Tips: ledger-only, before BOTH the activating and deactivating paths —
+    # a tip REFUND has no entitlement row to touch either.
+    if is_tip_product(product_id):
+        return False, "tip: no entitlement (by design)"
 
     # Alias reconciliation. `user_id` is already the canonical key (resolved
     # in ingest_billing_event); anything else RevenueCat calls this

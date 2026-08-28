@@ -45,6 +45,7 @@ import MockDraftScreen from '../screens/MockDraftScreen';
 import PickAssignmentScreen from '../screens/PickAssignmentScreen';
 import RecordPicksScreen from '../screens/RecordPicksScreen';
 import PaywallScreen from '../screens/PaywallScreen';
+import TipJarScreen from '../screens/TipJarScreen';
 import PushPrimingModal from '../components/PushPrimingModal';
 import FeedbackFAB from '../components/FeedbackFAB';
 import AnalystGuide from '../components/AnalystGuide';
@@ -195,6 +196,9 @@ type AuthStack = {
   // the user here and rides every paywall_* event, so conversion can be read
   // per entry point; in this build the only source is 'settings'.
   Paywall: { source: string };
+  // Tip jar (same flag, same dark posture). Money with NO entitlement — see
+  // screens/TipJarScreen.tsx.
+  TipJar: { source: string };
 };
 
 const Stack = createNativeStackNavigator<AuthStack>();
@@ -730,6 +734,13 @@ export default function RootNav({ booted }: { booted: boolean }) {
         <Stack.Screen
           name="Paywall"
           component={PaywallScreen}
+          options={{ presentation: 'modal', headerShown: false }}
+        />
+        {/* Tip jar (flag `monetize.paywall`, dark). Same modal conventions as
+            Paywall: own header with the explicit ✕, self-guards on the flag. */}
+        <Stack.Screen
+          name="TipJar"
+          component={TipJarScreen}
           options={{ presentation: 'modal', headerShown: false }}
         />
         <Stack.Screen

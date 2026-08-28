@@ -26796,10 +26796,20 @@ _PAYWALL_PAGES = [
 
 _PAYWALL_PRODUCTS = [
     {"product_id": "ftf_pro_monthly", "period": "monthly",
-     "display_price": "$4.99", "trial_days": 0, "hero": False},
+     "display_price": "$4.99", "trial_days": 3, "hero": False},
     {"product_id": "ftf_pro_annual", "period": "annual",
      "display_price": "$34.99", "per_month_equiv": "$2.92",
      "trial_days": 14, "hero": True, "badge": "best_value"},
+]
+
+# Tip jar (operator request 2026-08-28): consumable "support the platform"
+# SKUs. Money with NO entitlement — entitlements.is_tip_product() short-
+# circuits the projector, so a tip can never grant `pro`. Guideline 3.1.1:
+# in-app tips to the developer must be IAP.
+_PAYWALL_TIPS = [
+    {"product_id": "ftf_tip_199", "display_price": "$1.99"},
+    {"product_id": "ftf_tip_499", "display_price": "$4.99"},
+    {"product_id": "ftf_tip_999", "display_price": "$9.99"},
 ]
 
 _PAYWALL_PLATFORMS = ("ios", "web", "extension")
@@ -26841,6 +26851,12 @@ def paywall_config():
         # "we offer a trial on this SKU" claim, not a per-user promise.
         "trial_eligible": True,
         "dismissible": True,
+        # Tip-jar consumables — display metadata only; purchases run through
+        # StoreKit and the webhook ledger like everything else, but grant
+        # nothing (entitlements.is_tip_product). Rides monetize.paywall: tips
+        # are purchase UI, and the flag's contract is "no purchase UI anywhere"
+        # when off.
+        "tips": _PAYWALL_TIPS,
     })
 
 
