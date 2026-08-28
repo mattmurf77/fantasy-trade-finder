@@ -11,6 +11,16 @@
 
 ---
 
+## 2026-08-28d — rev-3 shop window + merged-view trim: built, QA'd twice, fixed, shipping as v1.16.10
+
+Branch `feat/shop-window-rework-402` (ships via the v1.16.10 PR). Full arc on top of the four operator surprise-rulings (`rulings-2026-08-28b.md` + `merged-view-trim-2026-08-28.md`, both in the item folder):
+
+- **Build commits:** `6d95a1ab` backend (swap_positions all groups + lateral_scope tier), `33ce1534` mobile (pushed ShopAssetScreen window, filters all modes, auto-widen; TradesScreen net −89), `5c510a44` scoped tour gate (one choke point in useGuide.requestStep; nothing spent, re-light-safe), `702e4d11` QA-A doc fixes + 1.16.10 bump, `a8a5e56e` QA-B backend fixes, `3545205c` QA-B mobile fixes, `2fd3b746` merged-view trim (T-1 one outlook bar · T-2 one primary · T-3 no format chips inline; page-level bar consumer audit incl. the #316 deck-summary copy made flag-aware), `afe63727` merge of main (tip-jar #233 rode in; features.json conflict resolved keeping main's lit value + both comment additions).
+- **Redundant QA:** reviewer A — zero code defects, four doc defects (fixed same session), and it MATERIALIZED the merge with main and ran everything green on it. Reviewer B — 4 confirmed regressions, all fixed: field-client compat (the v1.16.9 strip sends swap_positions on the shared fetch — all-groups filtering now keys on `lateral_scope` presence, the rev-3 request signature; old wire shape byte-identical, pinned by `test_old_shape_swap_positions_filters_lateral_only`), auto-widen tick early-committing held dismisses (rendered-mode tick discipline), dismissed-tile resurrection (asset-ideas now consults the D-067 cooldown — compliance with D-067's own "every live service" rule; likes never exclude), stale kill-switch prose (rewritten; the open-window-survives-flip truth on the record). Plus: unseeded assets have no tier; chooser staleness guards; honest comment sweep.
+- **Suite:** `check-shop-deck.js` at 142 assertions + trim assertions in `check-inline-home.js` §11 and `check-calc-merged-layout.js` 13c/13d; sabotage across the session: 21 more deliberate breaks, every one red-then-green with snapshot restores.
+- **Gates on the MERGED tree (orchestrator-run):** `tsc --noEmit` clean · all 86 `check-*.js` suites green · `testid-lint OK` · full pytest [recorded at ship below].
+- **Owed (operator, runtime, on the v1.16.10 build):** the rewritten checklist — now 19 steps + 2a/15a inserts across Parts A/B/C, incl. the multi-asset chooser race, the tier-width honesty step, the auto-widen step, the merged-view trim step, and Part C's v1.16.9-device compat check.
+
 ## 2026-08-28d — IAP enablement code half (runbook 6–7): webhook delta + RevenueCat paywall — full gates, ALL DARK
 
 Operator-directed cross-session handoff; two Opus build subagents (backend/mobile, disjoint file ownership), lead-session review of every load-bearing hunk. Branch `claude/monetization-features-feedback-a6fe77` off `origin/main` `69dc0cae`. Scope block: [docs/plans/monetization/iap-enablement/scope.md](../docs/plans/monetization/iap-enablement/scope.md). **Zero user-visible change until the operator flips `monetize.*` flags** — no route gained `@_require_pro`, no flag changed, no schema changed.
