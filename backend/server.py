@@ -12050,11 +12050,23 @@ def asset_trade_ideas():
                                  this one league-mate — every idea's
                                  counterparty is that member; a receive pin
                                  owned by anyone else returns empty groups)
-      swap_positions?: [str]    (#403 W2 — replaces the #198 same-position
-                                 predicate for the LATERAL group only;
-                                 upgrade/downgrade never affected. Domain
-                                 {QB,RB,WR,TE}; absent/null/[] = today's
-                                 behavior; invalid tokens are a 400)
+      swap_positions?: [str]    (#403 W2, widened by #402 rev-3 §2 —
+                                 replaces the #198 same-position predicate
+                                 for EVERY group's incoming headline piece
+                                 when present (supersedes W2's lateral-only
+                                 rule). Domain {QB,RB,WR,TE}; absent/null/[]
+                                 = today's behavior for all three groups;
+                                 invalid tokens are a 400)
+      lateral_scope?: "band"|"tier"  (#402 rev-3 §3 — default "band" =
+                                 today for every existing caller. "tier":
+                                 the LATERAL group is every counterpart on
+                                 the pin's rung of the 8-tier ladder
+                                 (ranking_service.tier_for_elo) instead of
+                                 the ±band, with the #108 gain gates and
+                                 the fairness floor removed for that group
+                                 only — tier-mates, not band-mates; the
+                                 card's verdict still prices each idea.
+                                 Invalid values are a named 400)
     }
 
     Response: {
@@ -12118,6 +12130,21 @@ def asset_trade_ideas():
             if _norm not in _swap_norm:      # dedupe, first-seen order
                 _swap_norm.append(_norm)
         swap_positions = _swap_norm or None  # [] = "no selection"
+    # #402 rev-3 §3 — lateral_scope: "band" (default; today's ±band lateral
+    # semantics for every existing caller, the single-pin panel included —
+    # the scoping ruling in rulings-2026-08-28b §R-4) | "tier" (the shop
+    # client always sends it: the lateral group becomes the pin's tier-mates
+    # per ranking_service.tier_for_elo, with the #108 gain gates and the
+    # fairness floor removed for that group only — a user-facing semantics
+    # change the card's verdict prices honestly). Anything else is a named
+    # 400, same honesty rule as swap_positions above: a silently-defaulted
+    # scope looks exactly like a toggle that did nothing.
+    lateral_scope = body.get("lateral_scope")
+    if lateral_scope is None:
+        lateral_scope = "band"
+    if lateral_scope not in ("band", "tier"):
+        return jsonify({"error": "invalid_lateral_scope",
+                        "value": repr(lateral_scope)[:32]}), 400
     # Same wide-net default as pinned generate jobs.
     fairness_threshold = float(body.get("fairness_threshold", 0.50))
 
@@ -12200,7 +12227,9 @@ def asset_trade_ideas():
         untouchable_ids    = untouchable_ids or None,
         not_interested_ids = not_interested_ids or None,
         avoid_positions    = avoid_positions or None,      # #360
-        swap_positions     = swap_positions,               # #403 W2
+        swap_positions     = swap_positions,               # #403 W2 / rev-3 §2
+        lateral_scope      = lateral_scope,                # #402 rev-3 §3
+        scoring_format     = fmt,                          # tier bucketing
         opponent_user_id   = opponent_user_id,
     )
 
