@@ -322,8 +322,11 @@ NON_INTENT_EVENTS = frozenset({
     # because it fires on a REFUSAL too. The tap is the user's decision to
     # offer the trade; the server's `queued: false` is the answer to that
     # decision, not an unbidden impression — the `sleeper_send_attempted`
-    # class, not `prompt_deferred`. And it is unreachable without a filled
-    # canvas, so `calc_asset_added` has already counted the user-day.
+    # class, not `prompt_deferred`. ("Unreachable without a filled canvas"
+    # stopped being true with #402 rev-3: the ShopAsset window's ✓ queue
+    # tap reaches it canvas-free — but that path opens with `shop_opened`,
+    # which is INTENT, so the user-day is still already counted on every
+    # route to this event. QA-B F4, comment-only.)
     "calc_tour_started",
     "calc_tour_ended",
     "calc_tour_beat_missing",
