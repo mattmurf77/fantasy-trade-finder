@@ -15,6 +15,14 @@
 
 
 
+## 2026-08-28c — v1.16.9 ships: shop-a-player live end to end
+
+PR #225 squash-merged (`a9d96435`), `trade.shop_asset` lit and verified live on prod,
+EAS build **135** (v1.16.9) built from the merge commit and auto-submitted to App Store
+Connect. Shipped branch recovery-ledgered and swept. Operator owes the runtime pass on
+build 135: the 14-step shop checklist plus the outstanding 8-step #384 partner-summary
+checklist — the first TestFlight build carrying both.
+
 ## 2026-08-28b — #402/#403 QA round 2 closes every open finding
 
 Operator ruled: fix B-3, offer the own-position chip (LLD wins over the mockup), resolve

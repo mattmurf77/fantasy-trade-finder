@@ -11,6 +11,15 @@
 
 ---
 
+## 2026-08-28c — v1.16.9 (EAS build 135) BUILT + SUBMITTED to TestFlight; trade.shop_asset LIT in prod
+
+Release run at operator order ("push, open PR, merge, push to testflight and flip the flags on").
+
+- **Merge:** PR [#225](https://github.com/mattmurf77/fantasy-trade-finder/pull/225) squash-merged to `main` @ `a9d96435` on green CI (backend-tests 8m52s · mobile-typecheck · testid-lint). Branch `claude/new-feedback-71436e` @ `823bfb2d` content-verified (empty diff vs main), recovery-ledgered (`docs/recovery/2026-08-28-shop-branch-ship.md`), then swept — worktree removed clean, local + remote branch deleted.
+- **Flag:** `trade.shop_asset` flipped `true` in the same PR (features.json + all three mirror fixtures; mirror suite 76 passed). **Verified LIVE on prod post-deploy** via `GET /api/feature-flags`: shop_asset / asset_ideas / calc.merged_layout / finder_targeting all `true`. Inert for pre-1.16.9 clients (no code reads the flag).
+- **Build:** EAS `21504c65-a3ff-4003-8dee-9e902cdf792d` — v1.16.9, build **135**, status **finished**, from git commit `a9d96435` (the merged main squash — verified via `eas build:list`, not assumed). `--auto-submit` chained: *"Submitted your app to Apple App Store Connect!"* — Apple-side processing then TestFlight availability is the only remaining step and is not ours. Version bumped in BOTH `mobile/app.json` and `Info.plist` (G-012), `plutil` clean; build number from EAS remote autoIncrement (134 → 135).
+- **Owed — operator, runtime, on build 135 (this build carries BOTH):** the 14-step #402/#403 shop checklist ([docs/feedback/items/402-more-offers-shop/testflight-checklist.md](../docs/feedback/items/402-more-offers-shop/testflight-checklist.md)) — now post-flip verification per the operator's confirmed sequencing — **and** the still-unrun 8-step #384 partner-summary checklist owed "on the next EAS build" since 2026-08-27, which this is.
+
 ## 2026-08-28b — #402/#403 QA round 2: B-3, own-position chip ruling, P-1..P-4 — universal-rule fixes, gates green
 
 Operator rulings ("Fix B3, 2. Offer it. Resolve the runtime concerns by ensuring consistent/universal approach") recorded in `docs/feedback/items/402-more-offers-shop/rulings-2026-08-28.md`; fixed in `23b0cdf6` on `claude/new-feedback-71436e` (still HELD unmerged).
