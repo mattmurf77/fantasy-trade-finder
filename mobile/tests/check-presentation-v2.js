@@ -186,8 +186,17 @@ assert(
   'a redeclared signal type silently drops any field added upstream',
 );
 assert(
-  /swipeTrade\(card, decision, signal\)/.test(sigNoComments),
-  'dispositions ride swipeTrade(card, decision, signal) — the deck\'s own call',
+  /swipeTrade\(\s*card,\s*decision,\s*signal,/.test(sigNoComments),
+  'dispositions ride swipeTrade(card, decision, signal, …) — the deck\'s own call',
+);
+// Propose-label spine (scope-propose-label.md): the 4th argument is the
+// surface, mapped from the mounted screen — 'today' for TodaysTrade,
+// 'browse' for TradeBrowseAll — so the server-fired trade_proposed /
+// match_swiped rows carry props.source per surface, never one merged bucket
+// (the same failure §4 guards against for `screen`).
+assert(
+  /screen === 'TodaysTrade' \? 'today' : 'browse'/.test(sigNoComments),
+  "dispatch declares its surface: 'today' vs 'browse' by mounted screen",
 );
 assert(
   /postDeclineReason/.test(sigNoComments),

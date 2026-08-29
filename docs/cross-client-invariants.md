@@ -507,6 +507,34 @@ the pair), and any future web/extension deck surface.
 
 ---
 
+## Swipe surface enum (`POST /api/trades/swipe` `surface`) — propose-label spine, 2026-08-29
+
+Which surface produced a like/pass disposition, recorded into the
+server-fired `trade_proposed` / `match_swiped` props as `source`
+(scope: [`docs/plans/three-model-bakeoff/scope-propose-label.md`](plans/three-model-bakeoff/scope-propose-label.md)).
+
+Canonical client-declared set: `deck` · `browse` · `today` · `shop`.
+
+- The server validates against `server._SWIPE_SURFACES`; absent or unknown
+  records **null** — never a raw passthrough (the NULL-`platform` lesson:
+  null means "old client", a forged string means nothing).
+- `calculator` is a **server-stamped** fifth member, written only by
+  `POST /api/trades/queue`'s emitter — clients never send it on the swipe
+  body.
+- Mobile senders: `TradesScreen`'s swipe mutation (`deck` — the whole
+  advance() spine, including merged-canvas cell dispositions),
+  `usePresentationSignals.dispatch` (`today` / `browse` by mounted screen),
+  `ShopOffersBody` (`shop`).
+- Analytics `user_events.screen` remains the client-fired attribution
+  column; this enum exists because these two events are server-fired and
+  never carry `screen`.
+
+**Locations to update together:** `backend/server.py` (`_SWIPE_SURFACES`),
+`backend/analytics_taxonomy.py` (props comment), `mobile/src/api/trades.ts`
+(`SwipeSurface`), and any future web/extension swipe surface.
+
+---
+
 ## Team outlook modes
 
 Canonical set: `championship`, `contender`, `rebuilder`, `jets`, `not_sure`.

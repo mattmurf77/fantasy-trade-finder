@@ -728,6 +728,15 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     # session, so no DAU seam is expected.
     "rankings_import_applied",
     # Trades
+    # trade_proposed / match_swiped props gained `source` (2026-08-29,
+    # propose-label spine — docs/plans/three-model-bakeoff/
+    # scope-propose-label.md): which surface produced the disposition.
+    # Closed enum 'deck' | 'browse' | 'today' | 'shop' (client-declared via
+    # the swipe body's `surface` field, server-validated against
+    # server._SWIPE_SURFACES) | 'calculator' (server-stamped on the
+    # /api/trades/queue emitter) | null (pre-surface client / unknown —
+    # never a raw passthrough; the NULL-`platform` lesson says null must
+    # mean "old client", not "we trusted a string").
     "trade_proposed", "match_swiped", "match_viewed", "match_dismissed",
     "trade_accepted", "trade_declined", "trade_ratified", "counter_sent",
     "trade_match", "trades_generated", "calc_trade_evaluated",

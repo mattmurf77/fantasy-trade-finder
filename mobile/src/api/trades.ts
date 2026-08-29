@@ -509,11 +509,19 @@ export interface SwipeSignal {
   calc_opened?: boolean;      // edit-in-calculator (#190) from this card
 }
 
+// Propose-label spine — which surface produced the disposition. Server
+// validates against the same closed enum (server._SWIPE_SURFACES) and
+// records it into the server-fired trade_proposed / match_swiped props as
+// `source`; omitted/unknown records null. Cross-client value set —
+// docs/cross-client-invariants.md.
+export type SwipeSurface = 'deck' | 'browse' | 'today' | 'shop';
+
 // POST /api/trades/swipe  body: { trade_id, decision: 'like' | 'pass' }
 export async function swipeTrade(
   card: TradeCard,
   decision: 'like' | 'pass',
   signal?: SwipeSignal,
+  surface?: SwipeSurface,
 ) {
   // FB-46: echo the card context so the server can reconstruct the card
   // when its in-memory deck was lost (Render deploy / session re-init)
@@ -526,6 +534,7 @@ export async function swipeTrade(
     receive_player_ids: card.receive_player_ids,
     target_user_id:     card.opponent_user_id || undefined,
     target_username:    card.opponent_username || undefined,
+    ...(surface ? { surface } : {}),
     ...(signal ?? {}),
   });
 }
@@ -653,6 +662,10 @@ function normalizeTradeMatch(raw: any): TradeMatch {
     // mobile is a NEXT.md item, not a missing call site.
     my_disposition:              decisionToDisposition(raw?.my_decision),
     their_disposition:           decisionToDisposition(raw?.their_decision),
+    // Propose-label spine: server-recovered originating impression (flag
+    // deck.signal_v2) — threads into the send button so a propose from the
+    // Matches tile appends the `propose` deck outcome.
+    impression_id:               typeof raw?.impression_id === 'string' ? raw.impression_id : undefined,
   };
 }
 
@@ -714,6 +727,10 @@ function normalizeAwaitingTrade(raw: any): AwaitingTrade {
     counterparty_user_id:    String(raw?.partner_id ?? ''),
     counterparty_username:   String(raw?.partner_name ?? raw?.partner_id ?? ''),
     liked_at:                String(raw?.liked_at ?? ''),
+    // Propose-label spine: server-recovered originating impression (flag
+    // deck.signal_v2) — threads into the send button so a propose from the
+    // awaiting tile appends the `propose` deck outcome.
+    impression_id:           typeof raw?.impression_id === 'string' ? raw.impression_id : undefined,
   };
 }
 

@@ -442,3 +442,133 @@ def test_outcome_action_enum(mem_engine):
         save_deck_outcome("imp_1", "clicked")   # not a legal action
     rows = _outcome_rows(mem_engine)
     assert [(r.impression_id, r.action) for r in rows] == [("imp_1", "propose")]
+
+
+# ---------------------------------------------------------------------------
+# Propose-label spine (docs/plans/three-model-bakeoff/scope-propose-label.md)
+# — swipe `surface` → trade_proposed/match_swiped props.source, and the
+# matches/awaiting impression_id recovery that lets a Matches send append
+# the `propose` outcome.
+# ---------------------------------------------------------------------------
+
+def _user_event_rows(mem_engine, event_type):
+    from backend.database import user_events_table
+    with mem_engine.connect() as conn:
+        return conn.execute(
+            select(user_events_table)
+            .where(user_events_table.c.event_type == event_type)
+            .order_by(user_events_table.c.id)
+        ).fetchall()
+
+
+def test_swipe_surface_recorded_as_props_source(harness):
+    client, job, trade_svc, eng = harness
+    with _signal(True):
+        cards = _run_job(eng, job)
+        res = _post(client, "/api/trades/swipe", {
+            "trade_id": cards[0]["trade_id"], "decision": "like",
+            "surface": "browse",
+        })
+    assert res.status_code == 200, res.get_data(as_text=True)
+    rows = _user_event_rows(eng, "trade_proposed")
+    assert len(rows) == 1
+    assert json.loads(rows[0].props)["source"] == "browse"
+
+
+def test_swipe_unknown_or_absent_surface_records_null_source(harness):
+    client, job, trade_svc, eng = harness
+    with _signal(True):
+        cards = _run_job(eng, job)
+        res = _post(client, "/api/trades/swipe", {
+            "trade_id": cards[0]["trade_id"], "decision": "pass",
+            "surface": "totally_made_up",     # never a raw passthrough
+        })
+    assert res.status_code == 200, res.get_data(as_text=True)
+    rows = _user_event_rows(eng, "match_swiped")
+    assert len(rows) == 1
+    assert json.loads(rows[0].props)["source"] is None
+
+
+def _insert_impression_with_hash(conn, iid, trade_hash, *, user_id=ME,
+                                 league_id=LEAGUE, age_days=0.0,
+                                 is_ghost=None):
+    served = (datetime.now(timezone.utc) - timedelta(days=age_days)).isoformat()
+    conn.execute(text(
+        "INSERT INTO deck_impressions "
+        "(impression_id, user_id, league_id, deck_job_id, card_index, "
+        " trade_hash, features_json, propensity, shape_bucket, served_at, "
+        " is_ghost) "
+        "VALUES (:iid, :uid, :lid, 'job-x', 0, :th, '{}', 1.0, '1x1', "
+        "        :served, :ghost)"
+    ), {"iid": iid, "uid": user_id, "lid": league_id, "th": trade_hash,
+        "served": served, "ghost": is_ghost})
+
+
+def _insert_member(conn, user_id, roster_ids, league_id=LEAGUE):
+    conn.execute(text(
+        "INSERT INTO league_members "
+        "(league_id, user_id, username, roster_data) "
+        "VALUES (:lid, :uid, :uname, :roster)"
+    ), {"lid": league_id, "uid": user_id, "uname": user_id,
+        "roster": json.dumps(roster_ids)})
+
+
+def test_awaiting_returns_recovered_impression_id(harness):
+    client, job, trade_svc, eng = harness
+    give, recv = ["g1"], ["r1"]
+    iid = uuid.uuid4().hex
+    with eng.begin() as conn:
+        _insert_decision(conn, ME, give, recv, "like")
+        _insert_member(conn, OPP, ["r1", "r2"])   # partner resolution
+        _insert_impression_with_hash(
+            conn, iid, server._deck_trade_hash(give, recv, OPP))
+    with _signal(True):
+        res = client.get("/api/trades/awaiting",
+                         headers={"X-Session-Token": TOKEN,
+                                  "X-Device-Id": "dev_test"})
+    assert res.status_code == 200
+    rows = res.get_json()
+    assert len(rows) == 1
+    assert rows[0]["impression_id"] == iid
+
+
+def test_awaiting_flag_off_omits_impression_id(harness):
+    client, job, trade_svc, eng = harness
+    give, recv = ["g1"], ["r1"]
+    with eng.begin() as conn:
+        _insert_decision(conn, ME, give, recv, "like")
+        _insert_member(conn, OPP, ["r1", "r2"])
+        _insert_impression_with_hash(
+            conn, uuid.uuid4().hex, server._deck_trade_hash(give, recv, OPP))
+    with _signal(False):
+        res = client.get("/api/trades/awaiting",
+                         headers={"X-Session-Token": TOKEN,
+                                  "X-Device-Id": "dev_test"})
+    assert res.status_code == 200
+    rows = res.get_json()
+    assert len(rows) == 1
+    assert "impression_id" not in rows[0]   # payload byte-identical flag-off
+
+
+def test_latest_impressions_by_hash_prefers_latest_non_ghost(mem_engine):
+    th = server._deck_trade_hash(["g1"], ["r1"], OPP)
+    old, new, ghost, stale = (uuid.uuid4().hex for _ in range(4))
+    with mem_engine.begin() as conn:
+        _insert_impression_with_hash(conn, old,   th, age_days=5)
+        _insert_impression_with_hash(conn, new,   th, age_days=1)
+        _insert_impression_with_hash(conn, ghost, th, age_days=0, is_ghost=1)
+        _insert_impression_with_hash(conn, stale, th, age_days=45)
+    with _signal(True):
+        got = server._latest_impressions_by_hash(ME, {(LEAGUE, th)})
+    # Ghost rows were never shown; the newest SERVED row wins; >30d rows
+    # (which _save_deck_outcome_safe would reject anyway) never surface.
+    assert got == {(LEAGUE, th): new}
+
+
+def test_latest_impressions_by_hash_scopes_to_user(mem_engine):
+    th = server._deck_trade_hash(["g1"], ["r1"], OPP)
+    with mem_engine.begin() as conn:
+        _insert_impression_with_hash(conn, uuid.uuid4().hex, th,
+                                     user_id="somebody_else")
+    with _signal(True):
+        assert server._latest_impressions_by_hash(ME, {(LEAGUE, th)}) == {}
