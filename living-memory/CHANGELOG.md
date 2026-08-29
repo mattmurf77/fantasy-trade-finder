@@ -14,6 +14,12 @@
 
 
 
+## 2026-08-29b — guided onboarding off by ruling
+
+`onboarding.guided_avatar` flipped false (PR #239, verified live): no Analyst avatar, no
+tour, anywhere. The account-ask and quick-set prompts deliberately stay on in their plain
+forms. Wave B-prime's scope shrinks accordingly.
+
 ## 2026-08-29 — v1.16.11 ships: the calculator becomes the results surface; Trades becomes the front door
 
 PR #237 squash-merged on green; EAS build **138** from the merge commit, auto-submitted; both

@@ -11,6 +11,10 @@
 
 ---
 
+## 2026-08-29b — guided onboarding DISABLED (onboarding.guided_avatar off) — config flip, verified live
+
+Operator ruling ("Disable the guided onboarding"), scoped and confirmed: the Analyst avatar experience off everywhere (`guide_v2` already off since 2026-08-28); the activation prompts (`apple_save_moment`, `quickset_prompt`) stay ON per the explicit "activation moment: yes" and run their plain avatar-free arms (the queue-path fork resolves to `maybeAskApple` directly). PR [#239](https://github.com/mattmurf77/fantasy-trade-finder/pull/239) squash → `main` @ `06a5ef67`, all three checks SUCCESS pre-merge (verified via statusCheckRollup after a network blip interrupted the watch). Full pytest on the flip: **4,450 / 0**; parity fixtures + the `test_seed_ui_test_db.py` pin updated per its deliberate-revert rule with the ruling in the docstring. **Live verification post-deploy:** guided_avatar False · guide_v2 False · apple_save_moment True · quickset_prompt True. Effect immediate for all clients; revert = the key + the pin. Consequence noted in HANDOFF: Wave B-prime shrinks to "decide if/when any guided experience returns."
+
 ## 2026-08-29 — v1.16.11 (EAS build 138): canvas-results + trades-landing + activation moments — full round, shipped
 
 Branch `feat/canvas-results`, squash PR [#237](https://github.com/mattmurf77/fantasy-trade-finder/pull/237) → `main` @ `21989cda` on green CI. Operator rulings: canvas-results-spec.md header (deck hidden / ✕ = decline flow / edits stick) + trades-landing-ruling.md + "activation moment: yes".
