@@ -185,10 +185,15 @@ assert(
   /autoRunPendingRef\.current = false;/.test(chokeEffect),
   'S-2 the ref is cleared inside the dispatch branch — one generation per handoff',
 );
+// Re-keyed 2026-08-29 (canvas-results QA round): every dispatch now routes
+// through the single dispatchGenerate helper (session lifecycle at every
+// dispatch — check-canvas-results §12 owns the 8-site census). The invariant
+// here is the same: no new dispatch site.
 assert(
-  countOf(tradesCode, 'generateMutation.mutate(') === 8,
-  'S-2 the count of generateMutation.mutate call sites does not increase over base (8)',
-  `saw ${countOf(tradesCode, 'generateMutation.mutate(')} — a new dispatch site is a second generation per handoff waiting to happen`,
+  countOf(tradesCode, 'generateMutation.mutate(') === 1
+    && countOf(tradesCode, 'dispatchGenerate(') === 9,
+  'S-2 the count of generate dispatch sites does not increase over base (1 raw mutate; 8 routed + definition)',
+  `saw mutate=${countOf(tradesCode, 'generateMutation.mutate(')} helper=${countOf(tradesCode, 'dispatchGenerate(')} — a new dispatch site is a second generation per handoff waiting to happen`,
 );
 assert(
   countOf(tradesCode, 'setAutoRunSeq(') === 1,

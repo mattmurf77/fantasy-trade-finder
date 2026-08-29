@@ -603,9 +603,22 @@ export default function TabNav() {
   // once at mount (initialRouteName is only honored then); the App.tsx boot
   // gate awaits ftf_onboarding_state hydration, so this read never races
   // defaults. Flags-off → 'Rank', byte-identical to before.
+  // Trades-landing (operator ruling 2026-08-28, docs/feedback/items/
+  // 402-more-offers-shop/trades-landing-ruling.md): with `nav.trades_landing`
+  // on, EVERY launch lands on the Trades tab — the merged build-or-find page
+  // is the app's front door. The onboarding.trades_first special case below
+  // is subsumed while the flag is on (kept, not deleted: it is the flag-off
+  // behavior and other clients' contract). Read IMPERATIVELY like
+  // `showDraftTab` below — a mid-session flag revalidation must not rewrite
+  // the launch tab under the user; decided once at mount, same
+  // initialRouteName contract as everything in this navigator. Flag off ⇒
+  // today's logic byte-identical. #244's Rank-stack launch routing is
+  // untouched — it governs where Rank opens when the user goes there, not
+  // which tab the app opens on.
   const [initialTab] = useState(() =>
-    onboardingEnabled('onboarding.trades_first') &&
-    !getOnboardingState().firstSwipeDone
+    !!useFeatureFlags.getState().flags['nav.trades_landing'] ||
+    (onboardingEnabled('onboarding.trades_first') &&
+      !getOnboardingState().firstSwipeDone)
       ? 'Trades'
       : 'Rank',
   );

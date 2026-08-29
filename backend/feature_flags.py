@@ -298,6 +298,21 @@ FLAG_KEYS: tuple[str, ...] = (
     # therefore a prerequisite. Registered here so the flag ships through
     # /api/feature-flags like every other key.
     "calc.inline_home",
+    # #402 canvas-results (2026-08-28) — found ideas browse inside the merged
+    # calculator canvas (browse session + pager; deck retires from that page).
+    # CLIENT-ONLY: no route reads this key; the two routes the session calls
+    # (POST /api/trades/fair-packages, POST /api/trades/queue) stay gated on
+    # `calc.merged_layout`, which — with `calc.inline_home` — is a
+    # prerequisite. Registered here so the flag ships through
+    # /api/feature-flags like every other key.
+    "calc.canvas_results",
+    # Trades-landing (2026-08-28 operator ruling, docs/feedback/items/
+    # 402-more-offers-shop/trades-landing-ruling.md) — the app opens on the
+    # Trades tab for ALL users; the onboarding.trades_first special case is
+    # subsumed while on (its code kept as the flag-off behavior). CLIENT-ONLY:
+    # no route reads this key; TabNav decides once at mount. Registered here
+    # so the flag ships through /api/feature-flags like every other key.
+    "nav.trades_landing",
     "ux.sheet_guard",
     "ux.rank_tab_destination",
     "ux.retap_active_tab",

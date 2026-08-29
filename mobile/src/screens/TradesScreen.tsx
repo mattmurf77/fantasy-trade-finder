@@ -14,6 +14,7 @@ import {
   Platform,
   Share,
   Keyboard,
+  KeyboardAvoidingView,
   type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -52,6 +53,7 @@ import {
 import { posColor } from '../theme/colors';
 import { TickLabel, Button, Meter, Icon, Card } from '../components/chalkline';
 import TradeCardComp, { type DispositionReasons } from '../components/TradeCard';
+import DeclineReasonPanel from '../components/DeclineReasonPanel';
 import SendInSleeperButton from '../components/SendInSleeperButton';
 import Toast from '../components/Toast';
 import PlayerContextMenu, { type PlayerMenuAction } from '../components/PlayerContextMenu';
@@ -698,6 +700,12 @@ export default function TradesScreen({ navigation, route }: any) {
   // keep their variant verbatim while this is off, which is the whole of
   // "graduates/closes when this lands" (D-158 rollout).
   const inlineHomeOn = useFlag('calc.inline_home');
+  // #402 canvas-results (canvas-results-spec.md §1) — found ideas browse
+  // INSIDE the merged canvas; the deck retires from the flag-hosted merged
+  // landing. Read once; live only as `canvasResultsLive` (the conjunction
+  // with `canvasHost === 'flag'`, declared beside canvasHost below) so
+  // flag-on team/player deck modes keep their decks untouched.
+  const canvasResultsOn = useFlag('calc.canvas_results');
 
   // ── FB #156/#246 — finder modes (flag `trades.finder_hub`) ────────────
   // route.params carries which mode this screen is in and (team mode) the
@@ -766,6 +774,38 @@ export default function TradesScreen({ navigation, route }: any) {
   // what lets a load scroll the canvas back into view.
   const [canvasPrefill, setCanvasPrefill] = useState<CanvasPrefill | null>(null);
   const [canvasPrefillSeq, setCanvasPrefillSeq] = useState(0);
+  // ── #402 canvas-results (flag `calc.canvas_results`) — the browse session ──
+  // Spec: docs/feedback/items/402-more-offers-shop/canvas-results-spec.md.
+  // The session's WORKING SET stays in the existing `deck` state and its
+  // cursor IS `deckIdx`: the whole pass path — advance(), the decline-reason
+  // machinery, the swipe POST, D-067 server state — reads
+  // `sortedDeck[deckIdx]`, so browsing rides the deck's own disposition
+  // engine instead of forking a parallel one. This object adds only what the
+  // deck doesn't have: whether a session EXISTS at all (deck hidden, the
+  // canvas is the results surface), where its ideas came from ('fair' sweep
+  // vs 'model' job — the honest empties differ), how many ideas were passed
+  // OUT of it (exhausted-by-passes vs zero-results copy), and the per-idea
+  // edit map (ruling 3: edits stick to their idea while browsing; keyed by
+  // the idea's stable trade_id — `fairpk_…` ids are deterministic, model ids
+  // are job-stable). Dies with its context (the rev-3 hygiene rule): league
+  // switch, every deck reset, host loss, flag kill — all null it.
+  const [browseSession, setBrowseSession] = useState<{
+    origin: 'fair' | 'model';
+    passed: number;
+    edits: Record<string, { give: string[]; receive: string[] }>;
+  } | null>(null);
+  // The idea the canvas is currently SEEDED with — written by the seeding
+  // effect in the same commit as the prefill, read by the onSidesChange
+  // handler so an edit is attributed to the idea actually on the canvas.
+  const browseSeededIdRef = useRef<string | null>(null);
+  // QA-B nit (see removeBrowsedIdea) — a render-fresh mirror of `deck`,
+  // advanced synchronously per browse removal so same-batch splices compose
+  // instead of each counting against the stale render closure.
+  const browseDeckSyncRef = useRef<TradeCard[]>([]);
+  // The browse ✕'s reason overlay. The deck's own overlay lives inside its
+  // top card (TradeCard `reasonsAsOverlay`), which never mounts while a
+  // session exists — so the session mounts the same presentation itself.
+  const [browseReasonOpen, setBrowseReasonOpen] = useState(false);
   // D-158 — bumping this re-fires the ONE #330 choke point below, which is
   // also the one place a deck dispatch happens. The inline Find a Trade arms
   // exactly the refs a calculator hand-off used to arrive with and then bumps
@@ -1042,7 +1082,7 @@ export default function TradesScreen({ navigation, route }: any) {
     setFairDeck(false); // #384 W6-B — this dispatch is the MODEL's, so the
                         // deck that lands is not a fair deck
     pendingScrollToDeckRef.current = true; // #276
-    generateMutation.mutate({});
+    dispatchGenerate({});
   }
 
   function handleToggleFairness(next: boolean) {
@@ -1064,6 +1104,14 @@ export default function TradesScreen({ navigation, route }: any) {
     setEdits({});
     setSwapTarget(null);
     setSuggestTarget(null);
+    // #402 QA B-C2 — this toggle's inline reset predates
+    // resetDeckForNewTargets and stays inline (it must not clear pins), so
+    // it kills the browse session explicitly: an emptied deck under a live
+    // session would otherwise front the results-area empty states over
+    // ideas that were never searched under the new fairness mode.
+    setBrowseSession(null);
+    setBrowseReasonOpen(false);
+    browseSeededIdRef.current = null;
   }
 
   // #172 — trade intent modes. Tapping the active chip clears it (single-
@@ -1826,35 +1874,19 @@ export default function TradesScreen({ navigation, route }: any) {
         // is the single surface for that state.
         const { pinnedGive: pg, pinnedReceive: pr } = useFinderTargets.getState();
         if (pg.length + pr.length > 0 && scopedOpponent) return;
-        // #172 — an active intent gets its own honest empty-state copy
-        // (same mechanism as the existing fairness-aware message, not a
-        // new one) so "no results" reads as "no results for THIS shape",
-        // not "the finder is broken".
-        const intentCopy: Record<NonNullable<TradeIntent>, string> = {
-          consolidate: 'No consolidation trades found right now.',
-          tier_up: 'No tier-up trades found right now.',
-          tier_down: 'No tier-down trades found right now.',
-        };
-        // #360 R-9 — an empty deck while Avoiding is set must NAME
-        // Avoiding as a possible cause. Avoiding is a hard receive-pool
-        // exclusion, so it is the likeliest reason a deck came back empty,
-        // and "no trades found" alone reads as "the finder is broken".
-        // Sits BELOW the intent branch (a live intent is the more specific
-        // shape) and ABOVE the fairness fallback.
-        const avoiding = prefsQuery.data?.avoid_positions ?? [];
-        const posLabel = (p: string) => (p === 'PICK' ? 'Picks' : p);
-        setToast({
-          msg: tradeIntent
-            ? intentCopy[tradeIntent]
-            : avoidOn && avoiding.length > 0
-              ? `No trades found that avoid ${avoiding
-                  .map(posLabel)
-                  .join(', ')}. Try un-avoiding one.`
-              : fairnessOn
-                ? 'No fair trades found. Try turning Trade fairness off.'
-                : 'No trades found. Rank more players or try again later.',
-          tone: 'warn',
-        });
+        // #172 / #360 R-9 — the honest zero-result copy (intent shape >
+        // Avoiding > fairness > generic) moved verbatim into modelZeroCopy()
+        // below, which the #402 browse results area renders as a CARD when a
+        // session is live — one copy source, two surfaces, no drift. Under a
+        // live session the toast stands aside (the card is the surface,
+        // spec §5); flag off or any non-canvas host, the toast fires with
+        // the exact strings it always carried.
+        if (!canvasResultsLive) {
+          setToast({
+            msg: modelZeroCopy(),
+            tone: 'warn',
+          });
+        }
       }
     },
     onError: (e: Error, vars, ctx) => {
@@ -1875,7 +1907,7 @@ export default function TradesScreen({ navigation, route }: any) {
           autoGenRef.current = 'retrying';
           autoRetryTimer.current = setTimeout(() => {
             autoRetryTimer.current = null;
-            generateMutation.mutate({ auto: true });
+            dispatchGenerate({ auto: true });
           }, 4000);
         } else {
           autoGenRef.current = 'failed';
@@ -1888,6 +1920,54 @@ export default function TradesScreen({ navigation, route }: any) {
       setDeckFailure({ kind: 'generate', message: readErrorCopy(e, DECK_FAIL_GENERIC) });
     },
   });
+
+  // ── #402 QA round (B-C1 P0 / B-C2 / B-P6 / A-D2) — session lifecycle at
+  // EVERY dispatch ────────────────────────────────────────────────────────
+  // The browse session used to be created only at the #330 choke point, so
+  // every OTHER dispatch on the live canvas host streamed a deck this host
+  // never renders — the first-run AUTO-START was the P0: under
+  // nav.trades_landing every new user's first search filled an invisible
+  // deck. Every `generateMutation.mutate` in this file now routes through
+  // here. On the live host the dispatch creates a model-origin session — or
+  // ADOPTS the one that exists (a mid-session re-dispatch keeps its pass
+  // tally and edits; the origin flips to 'model' because the model is what
+  // is searching now). Flag off / non-canvas hosts: a bare mutate,
+  // byte-identical.
+  //
+  // DISPATCH CENSUS — every mutate site in this file, all routed through
+  // this helper (check-canvas-results §12 pins `generateMutation.mutate(`
+  // to exactly ONE occurrence — the call below — so a future site cannot
+  // bypass silently):
+  //   1. handleFindTrades              — manual CTA, prefs-changed strip,
+  //                                      browse retry / search-all / unpin
+  //   2. generateMutation.onError      — the auto-start's silent retry
+  //   3. first-run auto-start effect   — the P0 site: a new user's first deck
+  //                                      must be a VISIBLE browse session
+  //   4. the #330 choke point          — handoffs, scoped picks, the inline
+  //                                      canvas's own Find a Trade
+  //   5. handleKeepSide (receive keep) — deck-tree entry; unreachable while
+  //                                      the host is live, routed anyway (the
+  //                                      rule is every site, no exceptions)
+  //   6. handleSuppressionUndo         — F3 deck-note undo (deck-tree, ditto)
+  //   7. QuickSet regen focus effect   — board-change forced regen (its
+  //                                      inline clear kills the old session
+  //                                      first — see the effect)
+  //   8. legacy !consolidateOn CTA     — renders only when
+  //                                      canvasHost !== 'flag', so its live
+  //                                      branch is dead; routed anyway
+  function dispatchGenerate(
+    vars: { auto?: boolean; force?: boolean },
+    mutateOpts?: Parameters<typeof generateMutation.mutate>[1],
+  ) {
+    if (canvasResultsLive) {
+      // Adopt-or-create (see header). ONE session-creation literal for the
+      // model path — a second one is a census bypass.
+      setBrowseSession((s) =>
+        s ? { ...s, origin: 'model' } : { origin: 'model', passed: 0, edits: {} },
+      );
+    }
+    generateMutation.mutate(vars, mutateOpts);
+  }
 
   // Poll while a job is running. Self-scheduling setTimeout loop with
   // exponential backoff (INIT-13): starts at 800ms, resets on progress,
@@ -2072,6 +2152,12 @@ export default function TradesScreen({ navigation, route }: any) {
     setEdits({});
     setSwapTarget(null);
     setSuggestTarget(null);
+    // #402 canvas-results — rev-3 hygiene: the browse session is
+    // league-scoped context and dies with it, per-idea edits included
+    // (ruling 3: "clearing results discards the working set").
+    setBrowseSession(null);
+    setBrowseReasonOpen(false);
+    browseSeededIdRef.current = null;
     // QA-B plausible 5 (2026-08-28) — an async league change can land
     // while the chooser Modal is up (background refetch, pushed switch):
     // a pick would then navigate with the NEW leagueId and the OLD
@@ -2110,7 +2196,11 @@ export default function TradesScreen({ navigation, route }: any) {
     if (autoGenRef.current !== 'idle') return;
     if (job || generateMutation.isPending || deck.length > 0) return;
     autoGenRef.current = 'kicked';
-    generateMutation.mutate({ auto: true });
+    // QA B-C1 (the P0) — this dispatch goes through dispatchGenerate so the
+    // first-run deck is a VISIBLE browse session on the live canvas host
+    // (progress narration, then the pager) instead of streaming into the
+    // deck tree this host never mounts.
+    dispatchGenerate({ auto: true });
     // generateMutation identity churns per render; keying on the inputs
     // that matter keeps this a mount/league-scoped one-shot.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2365,6 +2455,75 @@ export default function TradesScreen({ navigation, route }: any) {
     setAdaptationMoment(null);
   }, [firstSessionOn, job?.job_id, leagueId]);
 
+  // F9 — the like half of the tally: attrs (+ counterparty) for the
+  // dominant-attribute trigger, plus the one-shot first_session_like event
+  // (position = 1-based disposition ordinal). Extracted from advance()'s
+  // like branch VERBATIM so the canvas ✓ queue-success path (G22,
+  // recordCanvasQueueLike) feeds the SAME refs — never a parallel tally.
+  // Callers gate on `firstSessionOn && job?.first_deck` and bump
+  // fsDispositionsRef first, exactly as advance() always has.
+  function recordFirstSessionLike(
+    card: TradeCard,
+    rawId: string,
+    impressionId?: string,
+  ) {
+    fsLikesRef.current.push({
+      attrs: extractCardAttributes(card),
+      opponentUsername: card.opponent_username,
+      opponentUserId: card.opponent_user_id,
+    });
+    if (!fsFirstLikeTrackedRef.current) {
+      fsFirstLikeTrackedRef.current = true;
+      track(
+        'first_session_like',
+        {
+          position: fsDispositionsRef.current,
+          trade_id: rawId,
+          ...(impressionId ? { impression_id: impressionId } : {}),
+        },
+        'Trades',
+      );
+    }
+  }
+
+  // F9 — the adaptation moment. Trigger conditions ARE the card's claims
+  // (PRD: never claim adaptation that didn't happen): ≥5 dispositions, ≥3
+  // likes sharing a phraseable dominant attribute, AND ≥1 unseen card ahead
+  // carrying it — "ahead" is past the cursor, which under a live browse
+  // session is exactly the un-browsed ideas. Variant: 'rerank' only when
+  // deck.session_rerank is actually operating on this display order
+  // (applySessionRerank skips reorders under a lane filter or the
+  // fairness-off client sort); otherwise the honest descriptive copy.
+  // Extracted from advance() VERBATIM (G22): it keeps firing on browse
+  // passes — which route through advance() with deferDeckAdvance — and now
+  // also fires from the queue-success like path.
+  function maybeShowAdaptationMoment() {
+    if (adaptationMomentShownThisSession) return;
+    if (
+      fsDispositionsRef.current < FIRST_SESSION_MIN_DISPOSITIONS ||
+      fsLikesRef.current.length < FIRST_SESSION_MIN_SHARED_LIKES
+    ) {
+      return;
+    }
+    const signal = findDominantLikedAttribute(fsLikesRef.current);
+    if (!signal) return;
+    const ahead = sortedDeckRef.current
+      .slice(deckIdx + 1)
+      .some((c) => cardMatchesAttribute(c, signal.attribute));
+    if (!ahead) return;
+    adaptationMomentShownThisSession = true;
+    const variant =
+      rerankOn && fairnessOn && !laneFilter
+        ? ('rerank' as const)
+        : ('descriptive' as const);
+    setAdaptationMoment({ ...signal, variant });
+    track(
+      'first_session_adaptation_shown',
+      { variant, attribute: signal.attribute, likes: signal.likes },
+      'Trades',
+    );
+  }
+
   // Served-order bookkeeping: cards enter `deck` in served order (the
   // append effect above dedups + appends), so first-sight index == served
   // index. Later reorders never touch existing entries.
@@ -2430,7 +2589,11 @@ export default function TradesScreen({ navigation, route }: any) {
     // different projection and deck indices aren't screen positions, so
     // moving deck entries could violate the next-card guard. The vector
     // keeps accumulating either way.
-    if (!fairnessOn || laneFilter) return;
+    // #402 QA B-P5 — and never while a browse session is live: browse
+    // passes route through advance() and would otherwise reorder the
+    // un-browsed ideas behind the pager (frozen-order rule; the vector
+    // still accumulates so a post-session deck keeps learning).
+    if (!fairnessOn || laneFilter || browseLive) return;
     const boost = buildBoostVector(events);
     if (isZeroVector(boost)) return;
     setDeck((prev) => {
@@ -2654,6 +2817,18 @@ export default function TradesScreen({ navigation, route }: any) {
   // Any target change invalidates the current deck — the next "Find a
   // Trade" tap regenerates through the normal job flow (pinned jobs bypass
   // the server cache). Deliberately NOT auto-firing a job per chip change.
+  // #402 QA B-C2 — INLINE-RESET CENSUS. Every `setDeck([])` outside this
+  // function either already kills the browse session or now does so
+  // explicitly (check-canvas-results §12 pins the count so a new inline
+  // reset cannot ship un-audited):
+  //   1. handleToggleFairness    — inline reset, kills the session inline
+  //   2. league-switch effect    — kills the session (rev-3 hygiene block)
+  //   3. handleClearPin          — inline (snapshot-restore or empty), kills
+  //                                the session inline
+  //   4. QuickSet regen effect   — inline clear, kills the session inline
+  //                                before dispatchGenerate creates the new one
+  //   (this function is the 5th `setDeck([])` and owns the session kill for
+  //   every path that routes through it)
   function resetDeckForNewTargets() {
     // #330 R-10 — every reset opens a new generation epoch; results from
     // dispatches stamped under an older epoch are dropped on arrival.
@@ -2669,6 +2844,14 @@ export default function TradesScreen({ navigation, route }: any) {
     setScopedEmpty(null); // #330 — a reset invalidates the scoped zero-result card
     setEdits({});
     setSwapTarget(null);
+    // #402 canvas-results — every deck reset is a context death for the
+    // browse session (target chips, prefs, regenerate, Clear): the working
+    // set, its cursor and its per-idea edits die together (spec §2, rev-3
+    // hygiene). A canvas run that should START a session re-creates one
+    // right after this call, at the choke point's own dispatch site.
+    setBrowseSession(null);
+    setBrowseReasonOpen(false);
+    browseSeededIdRef.current = null;
     // QA-B plausible 5 (2026-08-28) — a reset invalidates the deck the
     // chooser's card came from; a pick off a stale card would shop an
     // asset the regenerated deck may no longer send (rev-2 cleared its
@@ -2791,6 +2974,12 @@ export default function TradesScreen({ navigation, route }: any) {
       fairAnchorRef.current = null;
       autoRunPendingRef.current = false;
       autoRunOriginRef.current = null;
+      // #402 canvas-results — the sweep about to land is a BROWSE SESSION
+      // (spec §2), created at the single fair dispatch site right after the
+      // reset above killed any previous one. Flag off / other hosts: dead.
+      if (canvasResultsLive) {
+        setBrowseSession({ origin: 'fair', passed: 0, edits: {} });
+      }
       runFairPackages(fairAnchor);
       prefsChangedSinceGenerateRef.current = false;
       setShowPrefsChangedStrip(false);
@@ -2822,7 +3011,10 @@ export default function TradesScreen({ navigation, route }: any) {
           'Trades',
         );
       }
-      generateMutation.mutate({});
+      // #402 QA round — the model-origin session for this dispatch is
+      // created inside dispatchGenerate (the one session-creation site for
+      // the model path), same rule as the fair branch above.
+      dispatchGenerate({});
       // The sweep about to land IS the current prefs — don't leave the #257
       // "Preferences changed" nudge armed by the pick that triggered it
       // (handleFindTrades clears these on the manual path).
@@ -2871,7 +3063,9 @@ export default function TradesScreen({ navigation, route }: any) {
     fairAnchorRef.current = fork.anchor;
     autoRunPendingRef.current = !fork.anchor;
     autoRunOriginRef.current = 'calculator';
-    pendingScrollToDeckRef.current = true; // #276 — results, not the canvas
+    // #276 — results, not the canvas (#402: skipped live — the results
+    // render in the canvas section itself; deckCardY is unmeasured there).
+    pendingScrollToDeckRef.current = !canvasResultsLive;
     setCanvasRunSeq((n) => n + 1);
   }
 
@@ -2883,7 +3077,7 @@ export default function TradesScreen({ navigation, route }: any) {
     opponent: { userId: string; name: string };
   }) {
     if (!leagueId) return;
-    const { toast: t } = await queueCalcTrade({
+    const { queued, alreadyQueued, toast: t } = await queueCalcTrade({
       leagueId,
       opponent: args.opponent,
       giveIds: args.giveIds,
@@ -2891,6 +3085,71 @@ export default function TradesScreen({ navigation, route }: any) {
       screen: 'Trades',
     });
     setToast(t);
+    // G22 — a real first queue on the live canvas host is this page's like
+    // moment (see recordCanvasQueueLike). A refused queue is not a like;
+    // neither is a re-✓ of an already-queued package (the server's own
+    // idempotence signal). Every other host: dead code, byte-identical.
+    if (queued && !alreadyQueued && canvasResultsLive) recordCanvasQueueLike();
+  }
+
+  // ── G22 — activation moments follow the results surface ────────────────
+  // Under the live canvas host (`canvasResultsLive`) the deck never renders,
+  // so a swipe-right no longer exists on this page — the ✓ queue success
+  // (D-152's calc_trade_queued moment) IS this host's like. This feeds the
+  // EXISTING moment machinery — the same persisted onboarding swipe
+  // counters items 7/8 read, the same Quick-Set prompt trigger, the same F9
+  // first-session tallies, and the same save-moment Apple chain advance()'s
+  // like branch runs — never a parallel trigger or a new counter. The ✕
+  // half needs no twin: browse passes already route through
+  // advance('pass'), which does all of this itself.
+  function recordCanvasQueueLike() {
+    // Onboarding item 4's persisted counters — advance()'s patch, verbatim,
+    // under the same any-consumer flag gate.
+    if (
+      onboardingEnabled('onboarding.trades_first') ||
+      onboardingEnabled('onboarding.quickset_prompt') ||
+      onboardingEnabled('onboarding.apple_save_moment')
+    ) {
+      patchOnboardingState({
+        firstSwipeDone: true,
+        totalSwipes: getOnboardingState().totalSwipes + 1,
+      });
+    }
+    // Item 7 — the contextual Quick Set prompt: a queue is this host's like
+    // disposition (same trigger math, same session/snooze ladder).
+    maybeShowQuicksetPrompt('like');
+    // F9 — first-session tally + the adaptation moment, browse likes only:
+    // outside a live session there is no fronted idea to attribute the
+    // like's attributes to. Same gate and ordinal bump as advance()'s
+    // block; the fair path never sets a job, so `job?.first_deck` keeps
+    // this to the server-marked first MODEL deck exactly as shipped.
+    if (browseLive && topCard && firstSessionOn && job?.first_deck) {
+      fsDispositionsRef.current += 1;
+      recordFirstSessionLike(
+        topCard,
+        rawTopCard?.trade_id ?? topCard.trade_id,
+        signalForCard(rawTopCard)?.impression_id,
+      );
+      maybeShowAdaptationMoment();
+    }
+    // Item 8 — the save-moment Apple ask (the account-creation moment).
+    // v2RunLikeChain is the arm-agnostic s6.2-setup + ask chain BOTH guided
+    // arms of advance()'s like branch run; the plain arm asks directly.
+    // Every path re-checks appleAskEligible itself, and maybeAskApple's own
+    // 700 ms delay keeps the win-then-ask ordering behind the queue toast.
+    if (guidedAvatarActive()) v2RunLikeChain();
+    else maybeAskApple('like');
+    // #362 QA nit — the post-like standing-offer prompt rode ONLY
+    // advance()'s like branch, and its sheet mounts PAGE-LEVEL (not in the
+    // deck tree), so a browse ✓ could never reach it. Same ladder position
+    // (LAST — everything above owns its moment; the prompt's own eleven
+    // conditions gate the rest), same browse gate as the F9 block: a
+    // fronted idea is what the prompt's card fields read.
+    if (browseLive && topCard) {
+      maybeShowStandingOfferPrompt(topCard, {
+        firstLike: !getOnboardingState().celebrationsShown.first_like,
+      });
+    }
   }
 
   // D-158 — the receipt's "Change": the canvas still HOLDS the assets (this
@@ -2905,6 +3164,19 @@ export default function TradesScreen({ navigation, route }: any) {
   // Replaces `navigate('TradeCalculator', {prefill})` on this screen's three
   // hand-off paths when the flag is on.
   function loadCanvasPrefill(p: CanvasPrefill) {
+    // #402 QA B-C3 — SCENARIO: a prefill hand-off (Matches' "edit in
+    // calculator" route param, an asset-idea tap, a deck exit) arrives while
+    // a browse session is live. Seeding the canvas without ending the
+    // session would leave ✕ / edits / ✓ addressed to sortedDeck[deckIdx] — a
+    // DIFFERENT trade than the canvas shows (a ✕ would silently pass an idea
+    // the user cannot see). So the session ends FIRST — endBrowseSession
+    // reuses the one reset (epoch bump, deck/job/anchor cleared, seeded-id
+    // ref nulled) and lands the prefill as the restored canvas.
+    if (browseLive) {
+      endBrowseSession(p);
+      mainScrollRef.current?.scrollTo({ y: canvasY.current, animated: true });
+      return;
+    }
     setCanvasPrefill(p);
     setCanvasPrefillSeq((n) => n + 1);
     mainScrollRef.current?.scrollTo({ y: canvasY.current, animated: true });
@@ -2956,6 +3228,20 @@ export default function TradesScreen({ navigation, route }: any) {
   // shortcut into the existing FB-47 targeting machinery: keep-give pins
   // the send side (packageMode then holds it together per #174), keep-
   // receive pins the get side (cards must return ≥1 of them).
+  // #402/#403 QA B-C4 — the ONE give-side shop entry fork, shared by the
+  // deck's "More offers" chip (handleKeepSide below) and the browse pager's
+  // "More offers" affordance: one give asset navigates straight to the
+  // window; several open the "Shop which player?" chooser, whose pick
+  // navigates. No parallel entry path — `shop_opened` still fires exactly
+  // once, inside openShopWindow, at the navigate site (P-3).
+  function openShopForCard(card: TradeCard) {
+    if (card.give_players.length === 1) {
+      openShopWindow(card.give_players[0], card.give_players.length);
+    } else {
+      setShopChooserCard(card);
+    }
+  }
+
   function handleKeepSide(card: TradeCard, side: 'give' | 'receive') {
     haptics.selection();
     // #402/#403 rev-3 (rev3-spec.md §1) — give-side "more offers" IS shop.
@@ -2972,11 +3258,7 @@ export default function TradesScreen({ navigation, route }: any) {
       // the single window-open path, so a chooser that gets cancelled
       // never phantom-emits and a chooser pick emits exactly once with
       // the PICKED asset's real position.
-      if (card.give_players.length === 1) {
-        openShopWindow(card.give_players[0], card.give_players.length);
-      } else {
-        setShopChooserCard(card);
-      }
+      openShopForCard(card);
       return;
     }
     // #288 — snapshot the deck before resetDeckForNewTargets wipes it, so
@@ -2995,7 +3277,7 @@ export default function TradesScreen({ navigation, route }: any) {
       .setSide(side, side === 'give' ? card.give_players : card.receive_players);
     track('trade_keep_side_tapped', { side }, 'Trades');
     resetDeckForNewTargets();
-    generateMutation.mutate({});
+    dispatchGenerate({});
   }
 
   // #288 — the pin-summary row's clear/back affordance: unpin and, when
@@ -3011,6 +3293,15 @@ export default function TradesScreen({ navigation, route }: any) {
     const snap = preSinglePinSnapshotRef.current;
     flushPendingPassRef.current();
     lastDispositionedRef.current = null;
+    // #402 QA B-C2 — both arms below write `deck` inline (snapshot restore
+    // or empty), and neither deck is a browse working set: a restored
+    // snapshot predates the session, and an emptied deck has nothing to
+    // browse. Kill the session explicitly (unreachable while the host is
+    // live — the pin chrome lives in the deck tree — but the inline-reset
+    // census rule is every site, no exceptions).
+    setBrowseSession(null);
+    setBrowseReasonOpen(false);
+    browseSeededIdRef.current = null;
     clearTargets();
     setLaneFilter(null);
     setEdits({});
@@ -3169,7 +3460,7 @@ export default function TradesScreen({ navigation, route }: any) {
     try {
       await undoDeckSuppression(leagueId);
       resetDeckForNewTargets();
-      generateMutation.mutate({ force: true });
+      dispatchGenerate({ force: true });
     } catch {
       setToast({ msg: 'Could not undo — try again', tone: 'warn' });
     } finally {
@@ -3288,14 +3579,26 @@ export default function TradesScreen({ navigation, route }: any) {
   // below operates on the filtered pool (pinned lane cards stay pinned).
   const sortedDeck = useMemo(() => {
     const pool = laneFilter ? deck.filter((c) => c.lane === laneFilter) : deck;
+    // #402 QA B-P5 — ORDER IS FROZEN while a browse session exists: the
+    // working set renders in deck order (streaming appends land at the END
+    // even with fairness OFF), and the likes-you pinning / match-score
+    // re-sort below must not re-front or shuffle it — the seeding effect
+    // keys the canvas on sortedDeck[deckIdx]'s id, so a background re-sort
+    // would remount the canvas onto a DIFFERENT idea under the user's
+    // fingers. (`canvasResultsOn && browseSession` is `browseLive` before
+    // the host conjunction exists in this scope; a session can only outlive
+    // the host for the one render the hygiene effect needs to kill it, and
+    // freezing that render too is harmless.)
+    if (canvasResultsOn && browseSession) return pool;
     if (fairnessOn) return pool;
     const pinned = pool.filter((c) => c.likesYou);
     const rest = pool
       .filter((c) => !c.likesYou)
       .sort((a, b) => (b.match_score || 0) - (a.match_score || 0));
     return [...pinned, ...rest];
-  }, [deck, fairnessOn, laneFilter]);
+  }, [deck, fairnessOn, laneFilter, canvasResultsOn, browseSession]);
   sortedDeckRef.current = sortedDeck;
+  browseDeckSyncRef.current = deck; // QA-B nit — see removeBrowsedIdea
 
   // Lane pills render only when the engine actually laned this deck.
   const deckHasLanes = useMemo(() => deck.some((c) => !!c.lane), [deck]);
@@ -3457,6 +3760,10 @@ export default function TradesScreen({ navigation, route }: any) {
   const topTradeId = rawTopCard?.trade_id;
   useEffect(() => {
     if (!topTradeId) return;
+    // #402 canvas-results — paging a browse session fronts a new raw id, but
+    // browsing is not viewing a deck card (spec §2: "paging emits nothing").
+    // Flag off / no session, `browseLive` is constant false — unchanged.
+    if (browseLive) return;
     const props: Record<string, unknown> = {
       card_index: deckIdx,
       trade_id: topTradeId,
@@ -3497,6 +3804,10 @@ export default function TradesScreen({ navigation, route }: any) {
       viewedTimerRef.current = null;
     }
     if (!topImpressionId || !topTradeId) return;
+    // #402 canvas-results — same suppression as trade_card_viewed above: the
+    // dwell reset above stays (pass classification reads it), but the
+    // impression-joined viewed event must not fire per PAGED idea.
+    if (browseLive) return;
     const impressionId = topImpressionId;
     const tradeId = topTradeId;
     const cardIndex = deckIdx;
@@ -4048,10 +4359,18 @@ export default function TradesScreen({ navigation, route }: any) {
       // deck-invalidating path does — see resetDeckForNewTargets below.
       deckEpochRef.current += 1;
       lastDispositionedRef.current = null; // regenerated decks can reuse ids
+      // #402 QA B-C2 — this inline clear bypasses resetDeckForNewTargets on
+      // purpose (it must not clear pins/lane state), so it kills the browse
+      // session EXPLICITLY: without this, a stale session would adopt the
+      // regenerated deck mid-stream — its cursor, pass tally and per-idea
+      // edits all keyed against packages that no longer exist.
+      setBrowseSession(null);
+      setBrowseReasonOpen(false);
+      browseSeededIdRef.current = null;
       setDeck([]);
       setDeckIdx(0);
       setJob(null); // stop the old job's poller refilling the deck we just cleared
-      generateMutation.mutate(
+      dispatchGenerate(
         { force: true },
         {
           // Late-bind the reveal to the job this handoff forced. Without
@@ -4926,69 +5245,23 @@ export default function TradesScreen({ navigation, route }: any) {
     }
     // F9 (deck.first_session): first-deck activation tallies + the
     // adaptation moment. Only on the server-marked FIRST deck for this
-    // league; flag off or any prior deck ⇒ this block never runs.
+    // league; flag off or any prior deck ⇒ this block never runs. The tally
+    // and trigger bodies live in recordFirstSessionLike /
+    // maybeShowAdaptationMoment (G22) so the canvas ✓ queue-success path
+    // feeds the SAME refs; behavior here is the shipped block, verbatim.
+    // maybeShowAdaptationMoment is deliberately OUTSIDE the
+    // deferDeckAdvance fork: a browse ✕ (which defers the deck advance) is
+    // still a disposition, and the moment must keep firing on it.
     if (firstSessionOn && job?.first_deck) {
       fsDispositionsRef.current += 1;
       if (decision === 'like') {
-        fsLikesRef.current.push({
-          attrs: extractCardAttributes(topCard),
-          opponentUsername: topCard.opponent_username,
-          opponentUserId: topCard.opponent_user_id,
-        });
-        if (!fsFirstLikeTrackedRef.current) {
-          fsFirstLikeTrackedRef.current = true;
-          // position = 1-based disposition ordinal of the session's first
-          // like (the PRD's first_session_like_position metric).
-          track(
-            'first_session_like',
-            {
-              position: fsDispositionsRef.current,
-              trade_id: dispatchRawId,
-              ...(dispatchSignal?.impression_id
-                ? { impression_id: dispatchSignal.impression_id }
-                : {}),
-            },
-            'Trades',
-          );
-        }
+        recordFirstSessionLike(
+          topCard,
+          dispatchRawId,
+          dispatchSignal?.impression_id,
+        );
       }
-      // Adaptation moment — trigger conditions ARE the card's claims (PRD:
-      // never claim adaptation that didn't happen): ≥5 dispositions, ≥3
-      // likes sharing a phraseable dominant attribute, AND ≥1 unseen card
-      // ahead carrying it. Variant: 'rerank' only when deck.session_rerank
-      // is also on (the deck literally re-ranks toward the liked
-      // attribute); otherwise the honest descriptive copy.
-      if (
-        !adaptationMomentShownThisSession &&
-        fsDispositionsRef.current >= FIRST_SESSION_MIN_DISPOSITIONS &&
-        fsLikesRef.current.length >= FIRST_SESSION_MIN_SHARED_LIKES
-      ) {
-        const signal = findDominantLikedAttribute(fsLikesRef.current);
-        if (signal) {
-          const ahead = sortedDeckRef.current
-            .slice(deckIdx + 1)
-            .some((c) => cardMatchesAttribute(c, signal.attribute));
-          if (ahead) {
-            adaptationMomentShownThisSession = true;
-            // 'rerank' only when the F4 re-rank is actually operating on
-            // this display order (flag on AND deck order is the display
-            // order — applySessionRerank skips reorders under a lane
-            // filter or the fairness-off client sort). Otherwise the
-            // descriptive variant, whose only claim is the remaining
-            // cards (verified above).
-            const variant =
-              rerankOn && fairnessOn && !laneFilter
-                ? ('rerank' as const)
-                : ('descriptive' as const);
-            setAdaptationMoment({ ...signal, variant });
-            track(
-              'first_session_adaptation_shown',
-              { variant, attribute: signal.attribute, likes: signal.likes },
-              'Trades',
-            );
-          }
-        }
-      }
+      maybeShowAdaptationMoment();
     }
     // Decline reasons suppress the undo window: the tile tap is a deliberate,
     // reasoned gesture (like the bad-trade flag), and an "Undo" toast under a
@@ -5135,9 +5408,18 @@ export default function TradesScreen({ navigation, route }: any) {
 
   // The deferred half of the pass: layer 2 answered, so front the next card.
   // No receipt, no toast — the next trade is the confirmation (SPEC §1).
+  // #402 canvas-results — in a live browse session the passed idea LEAVES
+  // the working set instead (spec §4: X decrements; the splice slides the
+  // next idea into the cursor). Flag off / no session, the deck advance
+  // below runs byte-identically.
   function commitReasonAdvance() {
+    const rawId = reasonBankedIdRef.current;
     reasonBankedIdRef.current = null;
     setReasonBankedId(null);
+    if (browseLive && rawId) {
+      removeBrowsedIdea(rawId);
+      return;
+    }
     setDeckIdx((i) => i + 1);
   }
 
@@ -5270,6 +5552,282 @@ export default function TradesScreen({ navigation, route }: any) {
   // cleared by every path that starts or invalidates a model search, so a
   // "Built around" line can never outlive the deck it describes.
   const inlineAnchorShown = canvasHost === 'flag' && fairDeck && !!inlineAnchor;
+
+  // ── #402 canvas-results — derived gates ─────────────────────────────────
+  // `canvasResultsLive`: the feature is on AND this render is the flag-hosted
+  // merged landing. Everything #402 adds gates on THIS conjunction, never the
+  // bare flag — flag-on team/player deck modes and the #270 experiment path
+  // keep their decks (spec §1). Flag off it is constant false, so every
+  // branch reading it is dead and the page renders byte-identically.
+  const canvasResultsLive = canvasResultsOn && canvasHost === 'flag';
+  // `browseLive`: a browse session exists. The deck is hidden under the live
+  // host either way; this decides whether the canvas is showing IDEAS
+  // (pager, ✕, results states) or is the blank build surface.
+  const browseLive = canvasResultsLive && browseSession !== null;
+
+  // #402 — the model path's zero-results copy, shared between the flag-off
+  // toast (generateMutation.onSuccess) and the browse results area's card —
+  // one copy source, two surfaces, no drift. The branch order is the
+  // shipped toast's, verbatim: #172 intent shape (the most specific claim)
+  // > #360 R-9 Avoiding (a hard receive-pool exclusion, the likeliest
+  // reason for an empty deck) > fairness > generic.
+  function modelZeroCopy(): string {
+    const intentCopy: Record<NonNullable<TradeIntent>, string> = {
+      consolidate: 'No consolidation trades found right now.',
+      tier_up: 'No tier-up trades found right now.',
+      tier_down: 'No tier-down trades found right now.',
+    };
+    const avoiding = prefsQuery.data?.avoid_positions ?? [];
+    const posLabel = (p: string) => (p === 'PICK' ? 'Picks' : p);
+    return tradeIntent
+      ? intentCopy[tradeIntent]
+      : avoidOn && avoiding.length > 0
+        ? `No trades found that avoid ${avoiding
+            .map(posLabel)
+            .join(', ')}. Try un-avoiding one.`
+        : fairnessOn
+          ? 'No fair trades found. Try turning Trade fairness off.'
+          : 'No trades found. Rank more players or try again later.';
+  }
+
+  // #402 §4 — a completed pass removes the browsed idea from the working
+  // set. The swipe POST already went out via advance() — the same server
+  // state as a deck pass (decision row, D-067 cooldown), so a passed idea
+  // never reappears in a later session. This is session-side bookkeeping
+  // only. Degradation contract: if that POST later fails,
+  // swipeMutation.onError's rewind looks for the card one slot behind the
+  // cursor and won't find a spliced card — it toasts without rewinding,
+  // exactly like today's "user already swiped past it" branch, and the
+  // un-saved pass means the idea can honestly return in a future session.
+  function removeBrowsedIdea(rawId: string) {
+    // QA-B nit — `remaining` was computed from the render-closure `deck`,
+    // so a same-batch double removal (two ✕ commits before a re-render)
+    // counted the second splice against the un-spliced list and clamped the
+    // cursor one high. `browseDeckSyncRef` mirrors `deck` at render and is
+    // advanced synchronously here, so each removal in a batch sees the one
+    // before it; the setDeck updater stays functional (it re-derives from
+    // React's own prev).
+    const next = browseDeckSyncRef.current.filter((c) => c.trade_id !== rawId);
+    if (next.length === browseDeckSyncRef.current.length) return; // already removed this batch
+    browseDeckSyncRef.current = next;
+    const remaining = next.length;
+    setDeck((prev) => prev.filter((c) => c.trade_id !== rawId));
+    // Clamp the cursor: a mid-set splice slides the next idea into the same
+    // index; splicing the LAST idea steps back onto the new last — never
+    // wraps, mirroring the pager.
+    setDeckIdx((i) => Math.min(i, Math.max(0, remaining - 1)));
+    // Re-arm the double-fire guard (the every-rewind invariant,
+    // check-swipe-failure-recovery). Not a formality: fairpk_ ids are
+    // DETERMINISTIC, so a later session over the same canvas re-serves the
+    // exact id just passed, and a stale guard would silently no-op the
+    // pass control on it.
+    lastDispositionedRef.current = null;
+    setBrowseSession((s) => {
+      if (!s) return s;
+      const edits = { ...s.edits };
+      delete edits[rawId];
+      return { ...s, passed: s.passed + 1, edits };
+    });
+    if (remaining === 0) {
+      // §5 — exhausted by passes: restore the blank canvas so the action
+      // row's Find a Trade cell honestly reads as the restart. A canvas
+      // still holding the just-passed idea would fair-sweep the exact
+      // package the user just rejected.
+      browseSeededIdRef.current = null;
+      setCanvasPrefill({ give: [], receive: [] });
+      setCanvasPrefillSeq((n) => n + 1);
+    }
+  }
+
+  // #402 §2 — end the session and restore the canvas (blank by default; the
+  // receipt's Change hands the anchor build back instead).
+  // resetDeckForNewTargets owns the heavy lifting — epoch bump (in-flight
+  // results die on arrival), deck/job/fairDeck cleared, and the session +
+  // edit map with them (the rev-3 hygiene line added there) — reused, not
+  // forked. A mid-run server-side model worker keeps running so its results
+  // land in the warm cache for the next search, the same contract the
+  // progress strip's Hide has always had.
+  function endBrowseSession(restore?: CanvasPrefill) {
+    resetDeckForNewTargets();
+    setInlineAnchor(null);
+    browseSeededIdRef.current = null;
+    setCanvasPrefill(restore ?? { give: [], receive: [] });
+    setCanvasPrefillSeq((n) => n + 1);
+  }
+
+  // #402 §2 — the model-path session's "matching control" for the anchor
+  // receipt's Clear (fair sessions use the receipt's own, forked below).
+  // Deliberately NO analytics: clearing results is a dismissal, not a
+  // search or a judgment, and the spec's reuse-only rule leaves no existing
+  // event that honestly fits (deck_search_all_tapped would claim a search
+  // this control no longer runs).
+  function handleBrowseClear() {
+    haptics.selection();
+    endBrowseSession();
+  }
+
+  // #402 — the receipt's Change, forked for a live session: the canvas no
+  // longer "still holds the assets" (it holds the browsed idea), so Change
+  // ends the session and hands the ANCHOR build back to the canvas — the
+  // control's promise ("change the players this search is built around")
+  // kept under the new layout. Flag off, handleAnchorChange scrolls as
+  // today, byte-identically.
+  function handleBrowseAnchorChange() {
+    haptics.selection();
+    const a = inlineAnchor;
+    endBrowseSession(
+      a
+        ? {
+            ...(scopedOpponent ? { opponentId: scopedOpponent } : {}),
+            give: a.giveIds,
+            receive: a.receiveIds,
+          }
+        : undefined,
+    );
+    mainScrollRef.current?.scrollTo({ y: canvasY.current, animated: true });
+  }
+
+  // #402 §2 — the pager. Paging is browsing, not judging: NO analytics, no
+  // disposition guards touched, ends stop (the chevrons disable), never
+  // wraps.
+  function handleBrowseStep(delta: 1 | -1) {
+    haptics.selection();
+    // Every non-forward cursor move re-arms the double-fire guard (the
+    // check-swipe-failure-recovery invariant). Passed ideas are spliced out
+    // so paging can never re-front one — but the guard is a ref that
+    // outlives the working set, and clearing costs nothing.
+    lastDispositionedRef.current = null;
+    setDeckIdx((i) =>
+      Math.min(Math.max(i + delta, 0), Math.max(sortedDeck.length - 1, 0)),
+    );
+  }
+
+  // #402 §3 — per-idea edit capture: InLeagueCalculator announces side
+  // changes (its new optional onSidesChange), and the host snapshots them
+  // under the SEEDED idea's key so paging away and back remounts the edited
+  // version. The partner is NOT part of the snapshot — it is the idea's
+  // counterparty and reseeds from the idea itself (ruling 3).
+  function handleBrowseSidesChange(give: string[], receive: string[]) {
+    const id = browseSeededIdRef.current;
+    if (!id) return;
+    setBrowseSession((s) =>
+      s ? { ...s, edits: { ...s.edits, [id]: { give, receive } } } : s,
+    );
+  }
+
+  // #402 §4 — the ✕ with the pager. Routes into the SAME decline-reason
+  // machinery the calculator-origin deck uses: handleReasonOverlayOpened's
+  // trade_pass_overlay_opened, the same layer handlers (which read the card
+  // at the cursor), the same banked-pass and dismiss semantics, the same
+  // /api/trades/pass-reason writes. The card the machinery passes on is
+  // sortedDeck[deckIdx] — the ORIGINAL idea's card (ideaToCard output on
+  // the fair path, the engine's card on the model path), never the user's
+  // edited variant: the pass signal is about the engine's suggestion, not
+  // the user's edit. The edit map only ever feeds the canvas prefill and
+  // the ✓ queue.
+  function handleBrowsePass() {
+    if (!rawTopCard) return;
+    if (!declineReasonProps) return; // unreachable — the ✕ only renders with the machinery mounted (see the pager)
+    haptics.selection();
+    // #402 QA round (A-D3 + B-P7) — ruling 2 is UNQUALIFIED: under browse
+    // the ✕ IS the decline-reason flow, regardless of where the session's
+    // ideas came from (`deckOrigin` / `reasonsAsOverlay` gate the DECK's
+    // presentation choice, not this one — a model session started by the
+    // first-run auto-start has no calculator origin and still captures
+    // reasons). The old bare-advance fallback branch is deleted, and with
+    // it its lying "Passed — Undo" toast: the branch flushed the POST
+    // immediately, so Undo was a no-op the moment it appeared.
+    setBrowseReasonOpen(true);
+    handleReasonOverlayOpened();
+  }
+
+  // #402 §4 — same contract as TradeCard's dismissReasonOverlay, stated
+  // here because matching it exactly is a spec requirement: the dismiss
+  // reports whether a layer-1 tile was banked, and
+  // handleReasonOverlayDismissed then commits the deferred advance
+  // (dismiss-after-bank ⇒ the pass stands, the idea leaves the set via the
+  // browse-aware commitReasonAdvance) or does nothing
+  // (dismiss-without-answering ⇒ the idea stays, unpassed) — exactly what
+  // today's deck overlay does. The host's own banked marker
+  // (reasonBankedIdRef, stamped by handleReasonLayer1) is the source of
+  // truth; TradeCard's card-local ref mirrors the same fact.
+  function dismissBrowseReasonOverlay() {
+    const banked =
+      !!rawTopCard && reasonBankedIdRef.current === rawTopCard.trade_id;
+    setBrowseReasonOpen(false);
+    handleReasonOverlayDismissed(banked);
+  }
+
+  // #402 §5 — the failure card's retry re-runs the search that failed: the
+  // fair sweep around the still-standing anchor, or the model dispatch.
+  function handleBrowseRetry() {
+    if (browseSession?.origin === 'fair' && inlineAnchor) {
+      setBrowseSession({ origin: 'fair', passed: 0, edits: {} });
+      void runFairPackages({
+        giveIds: inlineAnchor.giveIds,
+        receiveIds: inlineAnchor.receiveIds,
+      });
+      return;
+    }
+    // Anchor lost (or a model session): the model search is the honest
+    // retry. Re-mark the origin so the empties that follow tell the truth,
+    // and drop the #276 scroll arming — the results render in the canvas
+    // section, not a deck below.
+    setBrowseSession((s) => (s ? { ...s, origin: 'model' } : s));
+    handleFindTrades('deck_error_retry');
+    pendingScrollToDeckRef.current = false;
+  }
+
+  // #402 §2 — seed the canvas with the browsed idea (its edited version
+  // when one is snapshotted): the #287 remount-per-idea technique through
+  // the existing prefill/prefillSeq pair (TradeBuildCanvas bumps its key on
+  // every seq change). Keyed on the CURRENT RAW ID only — an edit to the
+  // idea on screen must NOT remount the canvas out from under the user's
+  // fingers; the snapshot is replayed only when they page away and back.
+  // Deliberately no scroll: paging must not move the page.
+  const browseCurrentId = browseLive ? rawTopCard?.trade_id : undefined;
+  useEffect(() => {
+    if (!browseLive || !rawTopCard) return;
+    const edited = browseSession?.edits[rawTopCard.trade_id];
+    browseSeededIdRef.current = rawTopCard.trade_id;
+    setCanvasPrefill({
+      opponentId: rawTopCard.opponent_user_id,
+      give: edited ? edited.give : rawTopCard.give_player_ids,
+      receive: edited ? edited.receive : rawTopCard.receive_player_ids,
+    });
+    setCanvasPrefillSeq((n) => n + 1);
+    // Keyed on the fronted idea's identity only — see the comment above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [browseLive, browseCurrentId]);
+
+  // #402 — flag-kill / host-loss hygiene (spec §2): a session whose host or
+  // flag disappears mid-flight dies rather than freezing over a hidden
+  // deck. League switches and deck resets clear their own; this catches the
+  // two context deaths that pass through neither.
+  useEffect(() => {
+    if (!canvasResultsLive && browseSession) {
+      setBrowseSession(null);
+      setBrowseReasonOpen(false);
+      browseSeededIdRef.current = null;
+    }
+    // #402 QA A-D2 — the ARRIVAL direction. The flag flipping true (or the
+    // host re-forming) over a flag-off page that already holds a deck — or a
+    // still-running job — must not orphan it: the deck tree unmounts on this
+    // host, so without a session those cards would exist invisibly, exactly
+    // the P0 shape. ADOPT them (honest choice over clearing: the cards are
+    // results the user may be mid-review on — the same working set, in the
+    // new presentation; clearing would silently discard found trades). A
+    // fair deck adopts as a fair session so its empties stay honest.
+    if (canvasResultsLive && !browseSession && (deck.length > 0 || !!job)) {
+      setBrowseSession({
+        origin: fairDeck ? 'fair' : 'model',
+        passed: 0,
+        edits: {},
+      });
+    }
+    // Session presence is read, not depended on — this reacts to the HOST.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvasResultsLive]);
 
   // Bad-trade flag (feedback #85): file the engine-quality flag, then move
   // past the card exactly like a pass — flagging implies "not interested",
@@ -6115,7 +6673,9 @@ export default function TradesScreen({ navigation, route }: any) {
               moves": the window lane is win-now for a contender and
               youth+picks for a rebuilder, so that label would lie to half
               the users. */}
-          {!firstRun && deckHasLanes && (
+          {/* #402 canvas-results — lane chrome belongs to the deck; the
+              browse session has no lanes surface (spec §2). */}
+          {!firstRun && deckHasLanes && !canvasResultsLive && (
             <View style={styles.targetDirRow}>
               {(
                 [
@@ -6397,7 +6957,7 @@ export default function TradesScreen({ navigation, route }: any) {
             onPress={() => {
               track('find_trades_tapped', { mode: deckMode }, 'Trades');
               setPinIdeaResumed(false); // #317 — parity with handleFindTrades
-              generateMutation.mutate({});
+              dispatchGenerate({});
             }}
             style={styles.findBtn}
           />
@@ -6408,7 +6968,9 @@ export default function TradesScreen({ navigation, route }: any) {
               Opponent coverage renders as a ice Meter with mono counts.
               #298: shown in single-pin mode too, now that a generate there
               lands somewhere. */}
-          {job?.status === 'running' && (
+          {/* #402 canvas-results — the strip narrates in the RESULTS AREA under
+              the live canvas host (spec §2); everywhere else, unchanged. */}
+          {job?.status === 'running' && !canvasResultsLive && (
             <View testID="trades.progress-strip" style={styles.progressStrip}>
               <View style={styles.progressInfo}>
                 <ActivityIndicator color={chalk.dim} size="small" />
@@ -6603,7 +7165,9 @@ export default function TradesScreen({ navigation, route }: any) {
         />
         ) : null}
 
-        {job?.status === 'running' && (
+        {/* #402 canvas-results — the strip narrates in the RESULTS AREA under
+              the live canvas host (spec §2); everywhere else, unchanged. */}
+          {job?.status === 'running' && !canvasResultsLive && (
           <View testID="trades.progress-strip" style={styles.progressStrip}>
             <View style={styles.progressInfo}>
               <ActivityIndicator color={chalk.dim} size="small" />
@@ -6663,10 +7227,182 @@ export default function TradesScreen({ navigation, route }: any) {
               • experiment path (#270 `trades_home_inline.canvas`): unchanged,
                 rail and all, for its assigned units — but only when the flag
                 path did not already claim the mount. */}
+        {/* G22 — activation-moment surfaces on the live canvas host. The
+            deck tree below owns both of these mounts everywhere else and is
+            nulled under `canvasResultsLive`, so exactly one mount can ever
+            render. Gates are the shipped ones plus the host; components,
+            copy and testIDs are the deck slot's, untouched (the
+            do-not-redesign rule). They sit here — the top-of-results slot,
+            directly above the canvas — because "top of deck" is where both
+            have always interrupted. */}
+        {canvasResultsLive && quicksetPromptShown ? (
+          <QuickSetPromptCard
+            onAccept={() => acceptQuicksetPrompt('prompt')}
+            onDismiss={snoozeQuicksetPrompt}
+          />
+        ) : canvasResultsLive && adaptationMoment && topCard && !mutedForTour ? (
+          <Card>
+            <View style={styles.emptyInner} testID="trades.adaptation-moment">
+              <Text style={styles.adaptationTitle}>
+                Noticed you're liking {adaptationMoment.phrase}
+              </Text>
+              <Text style={styles.emptyBody}>
+                {adaptationMoment.variant === 'rerank'
+                  ? 'More of those ahead.'
+                  : 'There are more of those in this deck.'}
+              </Text>
+              <Button
+                testID="trades.adaptation-moment.dismiss"
+                label="Keep swiping"
+                compact
+                onPress={() => {
+                  haptics.selection();
+                  setAdaptationMoment(null);
+                }}
+              />
+            </View>
+          </Card>
+        ) : null}
         {canvasHost ? (
           <View
             onLayout={(e) => { canvasY.current = e.nativeEvent.layout.y; }}
           >
+            {/* #402 canvas-results §2 — the browse pager, adjacent to the
+                canvas header: chevron steps + a chalk-dim `N / X` TickLabel,
+                the pass control at the row's end, and — for model-path
+                sessions, which have no anchor receipt — a Clear. Renders
+                only while the session actually holds ideas; paging emits
+                NOTHING and never wraps (the chevrons disable at the ends).
+                Placement ruling: the pass control lives HERE, never in the
+                canvas action row — its 50/30/20 proportions are D-157 and
+                unchanged. */}
+            {browseLive && sortedDeck.length > 0 ? (
+              <View testID="trades.canvas-results.pager" style={styles.browsePagerRow}>
+                <Pressable
+                  testID="trades.canvas-results.prev"
+                  accessibilityRole="button"
+                  accessibilityLabel="Previous trade idea"
+                  disabled={deckIdx === 0}
+                  hitSlop={8}
+                  onPress={() => handleBrowseStep(-1)}
+                  style={styles.browsePagerBtn}
+                >
+                  <Icon
+                    name="chevron-left"
+                    size={16}
+                    color={deckIdx === 0 ? ink.line : chalk.base}
+                  />
+                </Pressable>
+                <TickLabel>{`${deckIdx + 1} / ${sortedDeck.length}`}</TickLabel>
+                <Pressable
+                  testID="trades.canvas-results.next"
+                  accessibilityRole="button"
+                  accessibilityLabel="Next trade idea"
+                  disabled={deckIdx >= sortedDeck.length - 1}
+                  hitSlop={8}
+                  onPress={() => handleBrowseStep(1)}
+                  style={styles.browsePagerBtn}
+                >
+                  <Icon
+                    name="chevron-right"
+                    size={16}
+                    color={deckIdx >= sortedDeck.length - 1 ? ink.line : chalk.base}
+                  />
+                </Pressable>
+                <View style={styles.browsePagerSpacer} />
+                {/* #402 QA B-C4 (operator-flagged design call, built under
+                    the ship order) — the browsed idea's shop entry. The
+                    deck's "More offers" chip retired from this host with the
+                    deck tree, so the pager row carries the SAME entry:
+                    openShopForCard — one give asset navigates, several open
+                    the chooser; `shop_opened` fires once, at the navigate
+                    site (P-3). Bordered chalk, not ice (ice stays rationed
+                    to primary actions). Renders only with the browsed card's
+                    give side non-empty and the shop flags lit — a canvas-only
+                    page with no session has no idea to shop (the deck chip
+                    remains the flag-off entry). */}
+                {shopEnabled && rawTopCard && rawTopCard.give_players.length > 0 ? (
+                  <Pressable
+                    testID="trades.canvas-results.more-offers"
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      rawTopCard.give_players.length === 1
+                        ? `More offers for ${rawTopCard.give_players[0].name}`
+                        : 'More offers for a player you send'
+                    }
+                    hitSlop={8}
+                    onPress={() => {
+                      haptics.selection();
+                      openShopForCard(rawTopCard);
+                    }}
+                    style={({ pressed }) => [
+                      styles.browseMoreOffersBtn,
+                      pressed && styles.browseMoreOffersBtnPressed,
+                    ]}
+                  >
+                    <Text style={styles.browseMoreOffersText}>More offers</Text>
+                  </Pressable>
+                ) : null}
+                {browseSession?.origin === 'model' ? (
+                  <Pressable
+                    testID="trades.canvas-results.clear"
+                    accessibilityRole="button"
+                    accessibilityLabel="Clear these trade ideas"
+                    hitSlop={8}
+                    onPress={handleBrowseClear}
+                  >
+                    {({ pressed }) => (
+                      <Text style={[styles.anchorAction, pressed && { color: ice.press }]}>
+                        Clear
+                      </Text>
+                    )}
+                  </Pressable>
+                ) : null}
+                {/* #402 QA A-D3 — under browse the ✕ IS the two-layer
+                    decline-reason flow (ruling 2, unqualified), so it only
+                    renders while that machinery exists: under the
+                    feedback.decline_reasons kill switch the control steps
+                    aside (the route 404s anyway) rather than degrading to
+                    the deleted bare-pass fallback and its no-op Undo. */}
+                {declineReasonProps ? (
+                  <Pressable
+                    testID="trades.canvas-results.pass"
+                    accessibilityRole="button"
+                    accessibilityLabel="Pass on this trade idea"
+                    hitSlop={8}
+                    onPress={handleBrowsePass}
+                    style={styles.browsePassBtn}
+                  >
+                    <Icon name="x" size={16} color={semantic.neg} />
+                  </Pressable>
+                ) : null}
+              </View>
+            ) : null}
+            {/* #402 QA A-D4 — a model session whose job is STILL RUNNING
+                after ideas landed: the pager's X grows as opponents finish,
+                and silent growth reads as a glitch. This slim line narrates
+                it in the existing progress vocabulary (chalk-dim, mono
+                counts) beside the pager; it disappears with the job. The
+                zero-idea running state keeps the full progress strip in the
+                results area below — this line exists only WITH ideas. */}
+            {browseLive &&
+            sortedDeck.length > 0 &&
+            browseSession?.origin === 'model' &&
+            job?.status === 'running' ? (
+              <View
+                testID="trades.canvas-results.streaming"
+                style={styles.browseStreamingRow}
+              >
+                <ActivityIndicator color={chalk.dim} size="small" />
+                <Text style={styles.progressText}>
+                  {'Searching… '}
+                  <Text style={type.data}>
+                    {`${job.opponents_done ?? 0}/${job.opponents_total || '?'}`}
+                  </Text>
+                  {' opponents'}
+                </Text>
+              </View>
+            ) : null}
             <TradeBuildCanvas
               leagueId={leagueId!}
               userId={userId}
@@ -6684,6 +7420,18 @@ export default function TradesScreen({ navigation, route }: any) {
               // T-3 (ruling 2026-08-28) — the merged page drops the
               // scoring-format chips; the experiment path keeps today's.
               hideFormatChips={canvasHost === 'flag'}
+              // #402 canvas-results §3 — per-idea edit capture; undefined for
+              // every other state so the component stays byte-identical.
+              onSidesChange={browseLive ? handleBrowseSidesChange : undefined}
+              // #402 QA A-D5 — spec §3: the partner is the browsed idea's
+              // COUNTERPARTY and stays fixed while that idea is shown, so
+              // the canvas's partner "Change"/Team control goes dimmed and
+              // inert (not hidden — the layout must not jump) for the
+              // session. This also kills the QA-B snapshot-corruption nit:
+              // a partner change clears the receive side, and onSidesChange
+              // would snapshot that corrupted {give, receive: []} under the
+              // idea's key. False everywhere else — byte-identical.
+              partnerLocked={browseLive}
             />
           </View>
         ) : null}
@@ -6707,7 +7455,12 @@ export default function TradesScreen({ navigation, route }: any) {
                 accessibilityRole="button"
                 accessibilityLabel="Change the players this search is built around"
                 hitSlop={8}
-                onPress={handleAnchorChange}
+                // #402 canvas-results — while a session is live the canvas
+                // holds the browsed IDEA, not the anchor assets, so Change
+                // ends the session and hands the anchor build back to the
+                // canvas (handleBrowseAnchorChange). Off/no session: the
+                // shipped scroll, byte-identical.
+                onPress={canvasResultsLive ? handleBrowseAnchorChange : handleAnchorChange}
               >
                 {({ pressed }) => (
                   <Text style={[styles.anchorAction, pressed && { color: ice.press }]}>
@@ -6720,7 +7473,11 @@ export default function TradesScreen({ navigation, route }: any) {
                 accessibilityRole="button"
                 accessibilityLabel="Clear the anchor and search all trades"
                 hitSlop={8}
-                onPress={handleSearchAllTrades}
+                // #402 canvas-results §2 (ruling 1) — under a live session
+                // Clear ENDS the session and restores the blank canvas; it no
+                // longer runs the model. Off/no session: the shipped
+                // search-all handler, byte-identical.
+                onPress={canvasResultsLive ? handleBrowseClear : handleSearchAllTrades}
               >
                 {({ pressed }) => (
                   <Text style={[styles.anchorAction, pressed && { color: ice.press }]}>
@@ -6729,6 +7486,148 @@ export default function TradesScreen({ navigation, route }: any) {
                 )}
               </Pressable>
             </View>
+          </View>
+        ) : null}
+
+
+        {/* #402 canvas-results §5 — the results area: what renders below the
+            canvas while a browse session exists but holds NO browsable idea.
+            With ideas, the canvas above IS the result (pager beside its
+            header) and this area renders nothing. Order of claims: a failed
+            search says so first (the P0-2 rule — the one state that admits
+            failure); a running model job narrates progress in the existing
+            vocabulary (never a bare spinner); a set exhausted by passes says
+            so, with the canvas action row's Find a Trade cell as the
+            restart; then the per-origin honest zeros — including the
+            fair-zero card that kills the audit-Q5 fall-through: fair-zero
+            can never show the idle "Hit Find a Trade to start" card here,
+            because the deck tree that owns that card is gated off this host
+            entirely (see the deck gate below). */}
+        {browseLive && sortedDeck.length === 0 ? (
+          <View testID="trades.canvas-results">
+            {deckFailure ? (
+              <Card>
+                <View style={styles.emptyInner} testID="trades.canvas-results.error">
+                  <Text style={styles.deckErrorTitle}>Search failed</Text>
+                  <Text style={styles.emptyBody}>{deckFailure.message}</Text>
+                  <Button
+                    testID="trades.canvas-results.retry"
+                    label="Try again"
+                    variant="secondary"
+                    compact
+                    onPress={handleBrowseRetry}
+                  />
+                </View>
+              </Card>
+            ) : browseSession!.origin === 'model' &&
+              (generateMutation.isPending || job?.status === 'running') ? (
+              // The model job's progress, rendered where the results will be
+              // (spec §2): same strip construction, Meter and counts as the
+              // deck's. "Hide" ends the session here — this strip is the
+              // session's only surface — while the server-side worker keeps
+              // running so its results land in the warm cache, the same
+              // contract the deck strip documents.
+              <View testID="trades.canvas-results.progress" style={styles.progressStrip}>
+                <View style={styles.progressInfo}>
+                  <ActivityIndicator color={chalk.dim} size="small" />
+                  <Text style={styles.progressText}>
+                    {'Searching… '}
+                    <Text style={type.data}>
+                      {`${job?.opponents_done ?? 0}/${job?.opponents_total || '?'}`}
+                    </Text>
+                    {' opponents'}
+                  </Text>
+                  <Button
+                    variant="ghost"
+                    compact
+                    label="Hide"
+                    onPress={handleBrowseClear}
+                  />
+                </View>
+                <Meter
+                  value={(job?.opponents_done ?? 0) / Math.max(job?.opponents_total || 0, 1)}
+                />
+              </View>
+            ) : browseSession!.passed > 0 ? (
+              <Card>
+                <View style={styles.emptyInner} testID="trades.canvas-results.exhausted">
+                  <Text style={styles.emptyTitle}>You've been through every idea</Text>
+                  <Text style={styles.emptyBody}>
+                    Build a trade on the canvas — or leave it empty — and tap
+                    Find a Trade to search again.
+                  </Text>
+                </View>
+              </Card>
+            ) : scopedEmpty ? (
+              // #330 R-6's honest scoped-zero, re-rendered here because the
+              // deck slot that owned it is retired on this host. Copy and
+              // recovery are the deck card's, verbatim.
+              <Card>
+                <View style={styles.emptyInner} testID="trades.canvas-results.scoped-empty">
+                  <Text style={styles.emptyTitle}>No trade found</Text>
+                  <Text style={styles.emptyBody}>
+                    {scopedEmpty.direction === 'give'
+                      ? `We couldn't build a trade that sends ${scopedEmpty.playerName} to ${scopedEmpty.teamName} — even after stretching the fairness band. Your player and team stayed locked.`
+                      : `We couldn't build a trade that gets ${scopedEmpty.playerName} from ${scopedEmpty.teamName} — even after stretching the fairness band. Your target and team stayed locked.`}
+                  </Text>
+                  <Button
+                    testID="trades.canvas-results.scoped-empty-back"
+                    label="Back to league rankings"
+                    variant="secondary"
+                    compact
+                    onPress={() =>
+                      navigation.navigate('League', { screen: 'LeagueRankings' })
+                    }
+                  />
+                </View>
+              </Card>
+            ) : browseSession!.origin === 'fair' ? (
+              fairDeck ? (
+                // §5 — the fair sweep completed with ZERO ideas. This card IS
+                // the audit-Q5 fix: an honest zero, never the idle card.
+                <Card>
+                  <View style={styles.emptyInner} testID="trades.canvas-results.fair-zero">
+                    <Text style={styles.emptyTitle}>No fair package for this canvas</Text>
+                    <Text style={styles.emptyBody}>
+                      We couldn't build a fair package around what's on the
+                      canvas right now. Change the assets or the partner and
+                      tap Find a Trade again.
+                    </Text>
+                  </View>
+                </Card>
+              ) : (
+                // The sweep is in flight — the existing search vocabulary.
+                <Card>
+                  <View style={styles.emptyInner} testID="trades.canvas-results.looking">
+                    <ActivityIndicator color={ice.base} />
+                    <Text style={[styles.emptyTitle, { marginTop: space.sm }]}>
+                      Looking for trades…
+                    </Text>
+                  </View>
+                </Card>
+              )
+            ) : job?.status === 'complete' ? (
+              // §5 — the model path's zero, with its existing copy (the
+              // intent/Avoiding/fairness-aware strings the flag-off toast
+              // carries — one source, modelZeroCopy), rendered in the
+              // results area instead of toasted.
+              <Card>
+                <View style={styles.emptyInner} testID="trades.canvas-results.model-zero">
+                  <Text style={styles.emptyTitle}>No trades found</Text>
+                  <Text style={styles.emptyBody}>{modelZeroCopy()}</Text>
+                </View>
+              </Card>
+            ) : (
+              // Dispatched, no job snapshot yet (the POST round trip).
+              <Card>
+                <View style={styles.emptyInner} testID="trades.canvas-results.looking">
+                  <ActivityIndicator color={ice.base} />
+                  <Text style={[styles.emptyTitle, { marginTop: space.sm }]}>
+                    Looking for trades…
+                  </Text>
+                </View>
+              </Card>
+            )}
           </View>
         ) : null}
 
@@ -6744,7 +7643,12 @@ export default function TradesScreen({ navigation, route }: any) {
             steps aside: two trade summaries stacked on one screen is exactly
             the "which one am I looking at?" confusion #241 removed. The
             alternates rail follows whichever card is leading. */}
-        {singlePinFeatured ? (
+        {/* #402 canvas-results — under the live canvas host the page is
+            canvas-only outside a session (spec §2): the featured window is
+            its own results surface (and mounts a SECOND calculator when
+            trades.player_offers_calc is on), so it retires here with the
+            deck. Every other host keeps it byte-identically. */}
+        {!canvasResultsLive && singlePinFeatured ? (
           <>
             {featuredShown && !singlePinDeckActive ? (
               <View
@@ -7004,7 +7908,16 @@ export default function TradesScreen({ navigation, route }: any) {
             (nothing generated yet) the block stays out entirely: the pinned
             surface must not show "Hit Find a Trade to start" under a
             featured trade it is already showing. */}
-        {singlePinFeatured && !singlePinDeckActive ? null : (
+        {/* #402 canvas-results §2 — under the live canvas host the deck
+            retires from this page entirely, session or not: the canvas (plus
+            the pager and results states above) is the results surface. The
+            whole tree below — cards, swipe, chrome, the summary / exhausted /
+            failure / scoped-empty / idle cards — stays INTACT for flag-off
+            and for every non-canvas host, byte-identically. This gate is
+            also the other half of the audit-Q5 fix: the idle "Hit Find a
+            Trade to start" card lives in this tree and structurally cannot
+            render on the host where the fair-zero card owns that state. */}
+        {canvasResultsLive ? null : singlePinFeatured && !singlePinDeckActive ? null : (
         <View
           style={styles.deckWrap}
           ref={deckWrapRef}
@@ -7530,7 +8443,62 @@ export default function TradesScreen({ navigation, route }: any) {
         {/* #298 — second mount point for the single instance built above:
             with a pinned deck leading, the Upgrade / Lateral / Downgrade
             alternates read as "more trades" underneath it. */}
-        {singlePinDeckActive ? assetIdeasPanel : null}
+        {!canvasResultsLive && singlePinDeckActive ? assetIdeasPanel : null}
+
+        {/* #402 canvas-results §4 — the browse pass control's reason overlay.
+            The deck's overlay lives inside TradeCard and only its TOP CARD
+            mounts it — and no card renders while a session exists — so the
+            session mounts the SAME presentation host-side: Modal shell,
+            KeyboardAvoidingView (the "Other" composer's send button opens
+            below its text box and the page ScrollView cannot reach inside a
+            Modal), backdrop dismiss, sheet — mirrored from TradeCard's
+            `reasonsAsOverlay` block and pinned against drift by
+            check-canvas-results.js. The HANDLERS are the deck's own
+            declineReasonProps: one pass path, one set of events, one write
+            surface. The sheet stays up through layer 1 (the tile BANKS the
+            pass and defers the advance — closing would strand the idea with
+            layer 2 unreachable); only the two ADVANCING callbacks close; a
+            backdrop dismiss reports whether a tile was banked
+            (dismissBrowseReasonOverlay), exactly as the deck's overlay
+            does. */}
+        {browseLive && declineReasonProps ? (
+          <Modal
+            visible={browseReasonOpen}
+            transparent
+            animationType="fade"
+            onRequestClose={() => dismissBrowseReasonOverlay()}
+          >
+            <KeyboardAvoidingView
+              style={styles.reasonOverlayFill}
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            >
+              <Pressable
+                style={styles.reasonOverlayBackdrop}
+                onPress={() => dismissBrowseReasonOverlay()}
+                accessibilityRole="button"
+                accessibilityLabel="Dismiss the decline reasons"
+              />
+              <View
+                style={styles.reasonOverlaySheet}
+                testID="trades.canvas-results.reason-overlay"
+              >
+                <DeclineReasonPanel
+                  onLayer1={(r, from) => declineReasonProps.onLayer1(r, from)}
+                  onLayer2Select={(r, d) => {
+                    setBrowseReasonOpen(false);
+                    declineReasonProps.onLayer2Select(r, d);
+                  }}
+                  onLayer2Bank={(r, d) => declineReasonProps.onLayer2Bank(r, d)}
+                  onLayer2Send={(r, d, t) => {
+                    setBrowseReasonOpen(false);
+                    declineReasonProps.onLayer2Send(r, d, t);
+                  }}
+                  onRevealRequest={declineReasonProps.onRevealRequest}
+                />
+              </View>
+            </KeyboardAvoidingView>
+          </Modal>
+        ) : null}
         </>
         )}
 
@@ -8552,6 +9520,58 @@ const styles = StyleSheet.create({
   anchorText: { ...type.bodySm, flex: 1, color: chalk.dim },
   anchorStrong: { color: chalk.base, fontFamily: fonts.uiSemi },
   anchorAction: { ...type.bodySm, color: ice.base, fontFamily: fonts.uiSemi },
+  // #402 canvas-results — the browse pager row (44pt touch floor on the
+  // chevrons and the pass control) and the browse reason overlay. The
+  // overlay trio mirrors TradeCard's reasonOverlay* styles verbatim — same
+  // sheet presentation, host-side mount.
+  browsePagerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+  },
+  browsePagerBtn: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  browsePagerSpacer: { flex: 1 },
+  // QA B-C4 — bordered-chalk construction (ice rationed to primary actions).
+  browseMoreOffersBtn: {
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.sm,
+    paddingHorizontal: space.sm,
+    paddingVertical: 4,
+  },
+  browseMoreOffersBtnPressed: { backgroundColor: ink.ink3 },
+  browseMoreOffersText: {
+    ...type.bodySm,
+    color: chalk.base,
+    fontFamily: fonts.uiSemi,
+  },
+  // QA A-D4 — slim streaming narration beside the pager.
+  browseStreamingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    paddingBottom: space.xs,
+  },
+  browsePassBtn: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reasonOverlayFill: { flex: 1 },
+  reasonOverlayBackdrop: { flex: 1, backgroundColor: '#0009' },
+  reasonOverlaySheet: {
+    maxHeight: '80%',
+    padding: space.md,
+    backgroundColor: ink.ink2,
+    borderTopWidth: 1,
+    borderTopColor: ink.line,
+  },
   progressStrip: {
     marginTop: space.sm,
     paddingHorizontal: space.md,

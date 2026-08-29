@@ -307,7 +307,10 @@ assert(
 if (handoffs.length === 1) {
   const src = stripComments(handoffs[0].getText(host));
   const clearAt = src.indexOf('setDeck([])');
-  const mutateAt = src.indexOf('generateMutation.mutate(');
+  // Re-keyed 2026-08-29 (canvas-results QA round): the forced generate now
+  // routes through dispatchGenerate (session lifecycle at every dispatch);
+  // the clear-before-dispatch ordering is the same invariant.
+  const mutateAt = src.indexOf('dispatchGenerate(');
   assert(
     clearAt !== -1,
     '4b — the handoff clears the deck',
