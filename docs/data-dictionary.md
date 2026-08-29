@@ -412,6 +412,8 @@ Indexes: `ix_deck_impressions_user_league` on `(user_id, league_id)`; `ix_deck_i
 
 F1 labels, **append-only**, joined to `deck_impressions` by `impression_id` (soft reference, no FK — late/duplicate labels legal, rows never mutated). Written by `server._save_deck_outcome_safe` from: `/api/trades/swipe` (`like`/`pass` + dwell/engagement fields), `/api/trades/flag` (`not_interested`), `/api/trades/propose` (`propose`), and the `/api/events` side-channel (`deck_card_viewed` → `viewed` — client fires it after a card is front-of-deck ≥500 ms — and `swipe_undone` → `undo`). An undo **appends alongside** whatever the original outcome was. All writes require flag `deck.signal_v2` on AND a client-supplied `impression_id`; absent either, zero rows (old clients unaffected).
 
+**One exception to duplicates-are-legal (2026-08-29):** `pass` is a disposition and an impression gets at most one *live* pass row. Flag-on clients fire both the decline-reason tile tap (`/api/trades/pass-reason` writes the pass server-side) and the unchanged swipe POST for the same gesture, which double-wrote passes on ~30% of passed impressions in prod; `_save_deck_outcome_safe` now skips a `pass` while `database.deck_pass_outcome_recorded` is true (more `pass` rows than `undo` rows), counted as `dup_pass` in the `/api/admin/analytics/health` reject counters. An undone pass may be passed again.
+
 | Column | Type | Notes |
 |---|---|---|
 | `id` | int PK | autoincrement |
