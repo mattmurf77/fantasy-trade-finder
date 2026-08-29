@@ -10,6 +10,12 @@
 
 
 
+## 2026-08-29c — NULL-dwell decline-pass fix BUILT on `claude/zealous-mirzakhani-f1664e`; awaiting merge
+
+**Where:** worktree branch `claude/zealous-mirzakhani-f1664e` @ `49d3d033` — committed, NOT pushed/merged. Client-only companion to the backend first-pass-wins guard (`deck_pass_outcome_recorded`, shipped from `claude/unruffled-meitner-3596cb`): the layer-1 decline reason POST lands before the swipe POST and now carries the same `dwell_ms`/`detail_expanded`/`calc_opened` the swipe sends, so the surviving pass row keeps its dwell. Three files: `mobile/src/api/declineReasons.ts` (optional fields + wire mapping), `mobile/src/screens/TradesScreen.tsx` (`handleReasonLayer1`, first-tap-only), `mobile/src/hooks/usePresentationSignals.ts` (same defect on the presentation-v2 surface, same fix). Evidence + code-walk: TEST_LEDGER 2026-08-29c. Gates green (tsc, 3 pinning guards, testid-lint).
+
+**Owed:** merge to `main` (mobile-only — reaches users with the next EAS build, nothing to flip), then sweep this worktree per the recovery-ledger rule. Until merged, every layer-1 reasoned pass in prod keeps writing NULL dwell.
+
 ## 2026-08-29 — v1.16.11 (build 138) shipped: canvas-results + trades-landing + activation moments
 
 **Where:** `main` @ `21989cda` (PR #237). Prod flags: `calc.canvas_results` TRUE, `nav.trades_landing` TRUE (verified), `calc.inline_home` TRUE, `trade.shop_asset` TRUE, `onboarding.guide_v2` FALSE (awaiting Wave B-prime). TestFlight: build **138** (v1.16.11) submitted; 137 superseded for checklist purposes except its Part C compat step. Branch `feat/canvas-results` swept (recovery: docs/recovery/2026-08-29-canvas-results-ship.md).
