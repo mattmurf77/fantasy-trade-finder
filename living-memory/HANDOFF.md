@@ -10,6 +10,17 @@
 
 
 
+## 2026-08-28 (end of day) — v1.16.10 shipped: shop window + tier same-value + merged-view trim; merge lit tour-free
+
+**Where:** `main` @ `6d9e6dc0` (PR #234). **Prod flags:** `calc.inline_home` TRUE (merged page live), `trade.shop_asset` TRUE, `onboarding.guide_v2` FALSE (temporary — see owed). **TestFlight:** build **137** (v1.16.10, from `6d9e6dc0`) submitted; build 136 (v1.16.9+dark IAP) superseded. All session branches swept (recovery: `docs/recovery/2026-08-28-shop-branch-ship.md`).
+
+**Owed, in order:**
+1. Operator runtime pass on build 137: the item checklist (19 steps + 2a/15a, Parts A/B/C — Part C needs a v1.16.9 device) + the #384 partner-summary 8-step (still unrun since 2026-08-27).
+2. **`onboarding.guide_v2` re-light** once 1.16.10 is the installed base: flip features.json + the three fixtures + the `test_events_api.py` pin (its docstring says so) together. The rev-3 tour gate (useGuide.requestStep) keeps the merged page beat-free; guidance returns everywhere else. Wave B (re-targeting the calc tour at the inline module) remains unbuilt and optional after this.
+3. Known-open, low: reviewer-B plausible 6 residual (widen notice vs tile row ages — one-render consistency shipped, shared-age not), replenish-path 7-day query gap (pre-existing, noted in code), feedback items #402/#403 should be marked closed on the next /feedback pass.
+
+**Context for a future session:** the whole arc (rulings ×4 files, rev3-spec, QA reports, S-2 spike) lives in `docs/feedback/items/402-more-offers-shop/`. TEST_LEDGER 2026-08-28 a–e is the evidence chain.
+
 ## 2026-08-28b — IAP enablement code half SHIPPED to main, ALL DARK; the ball is in the operator's Apple/RevenueCat lane
 
 **Where:** `main` @ **`766d2261`** (PR [#227](https://github.com/mattmurf77/fantasy-trade-finder/pull/227), squashed, CI green ×3). **Zero user-visible change** — every `monetize.*` flag is false; the operator flips them per runbook B9 (entitlements observe → paywall → enforce), never this side. Recovery: [docs/recovery/2026-08-28-iap-enablement-ship.md](../docs/recovery/2026-08-28-iap-enablement-ship.md); the hosting worktree `monetization-features-feedback-a6fe77` couldn't remove itself — sweep it (+ both `claude/monetization-*`/`claude/iap-enablement-writeback` branches) from the main checkout.
