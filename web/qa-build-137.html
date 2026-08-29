@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Build 137 Runtime Pass</title>
+<style>
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35; --line-strong:#3D4654; --line-a11y:#59647A;
+    --chalk:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+    --ice:#56D9EC; --on-ice:#071013; --ok:#22C55E; --warn:#F59E0B;
+    --cond:'Barlow Condensed','Arial Narrow',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html{background:var(--ink-0)}
+  body{margin:0;background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;line-height:1.55;font-size:15px}
+  .wrap{max-width:700px;margin:0 auto;padding:0 16px 96px}
+
+  /* ── sticky progress ── */
+  .bar{position:sticky;top:0;z-index:10;background:var(--ink-0);border-bottom:1px solid var(--line);
+       padding:10px 16px;margin:0 -16px 20px}
+  .bar-inner{max-width:668px;margin:0 auto;display:flex;align-items:center;gap:12px}
+  .bar h1{font:700 20px/1.1 var(--cond);letter-spacing:.03em;text-transform:uppercase;margin:0;flex:1}
+  .bar h1 i{display:inline-block;width:14px;height:3px;background:var(--ice);vertical-align:middle;margin-right:8px}
+  .count{font:500 12px var(--mono);color:var(--dim);letter-spacing:.04em;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .track{height:3px;background:var(--ink-3);margin-top:8px;max-width:668px;margin-left:auto;margin-right:auto}
+  .fill{height:3px;background:var(--ice);width:0%;transition:width .25s ease}
+  @media (prefers-reduced-motion: reduce){.fill{transition:none}}
+
+  /* ── intro ── */
+  .lede{color:var(--dim);font-size:14px;margin:0 0 6px}
+  .lede b{color:var(--chalk);font-weight:600}
+  .meta{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 4px}
+  .chip{border:1px solid var(--line-strong);border-radius:2px;padding:2px 8px;
+        font:600 11px var(--ui);letter-spacing:.07em;text-transform:uppercase;color:var(--dim)}
+  .chip b{color:var(--chalk);font-weight:600}
+
+  /* ── sections ── */
+  .sec{margin:30px 0 4px;display:flex;align-items:baseline;gap:10px}
+  .sec::before{content:"";width:3px;height:15px;background:var(--ice);flex:none;align-self:center}
+  .sec h2{font:600 17px var(--cond);letter-spacing:.05em;text-transform:uppercase;margin:0}
+  .sec .n{font:500 11px var(--mono);color:var(--faint);letter-spacing:.04em;font-variant-numeric:tabular-nums}
+  .note{border-left:3px solid var(--warn);background:var(--ink-1);padding:10px 14px;margin:10px 0 14px;
+        font-size:13px;color:var(--dim);border-radius:0 4px 4px 0}
+  .note b{color:var(--chalk)}
+  .note code, .step code, .lede code{font-family:var(--mono);font-size:12px;color:var(--chalk);
+        background:var(--ink-2);padding:1px 4px;border-radius:2px}
+
+  /* ── steps ── */
+  .steps{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+  .step{display:flex;gap:12px;background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+        padding:12px 14px;align-items:flex-start}
+  .step.done{border-color:var(--line)}
+  .step.done .body, .step.done .t{color:var(--faint)}
+  .step.done .num{color:var(--faint);border-color:var(--line)}
+  .box{flex:none;width:28px;height:28px;margin-top:1px;border:1.5px solid var(--line-a11y);border-radius:4px;
+       background:var(--ink-2);display:flex;align-items:center;justify-content:center;cursor:pointer;
+       position:relative}
+  .box input{position:absolute;inset:-8px;opacity:0;cursor:pointer;width:calc(100% + 16px);height:calc(100% + 16px)}
+  .box svg{display:none;stroke:var(--ok);stroke-width:2.5;fill:none;stroke-linecap:square}
+  .step.done .box{border-color:var(--ok)}
+  .step.done .box svg{display:block}
+  .box:focus-within{outline:2px solid var(--ice);outline-offset:2px}
+  .stext{min-width:0;flex:1}
+  .head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+  .num{font:500 11px var(--mono);color:var(--dim);border:1px solid var(--line-strong);border-radius:2px;
+       padding:0 5px;line-height:17px;letter-spacing:.04em}
+  .t{font-weight:600;font-size:14.5px}
+  .why{font:500 10px var(--mono);color:var(--faint);letter-spacing:.05em;text-transform:uppercase}
+  .body{color:var(--dim);font-size:13.5px;margin-top:4px}
+  .body b{color:var(--chalk);font-weight:600}
+  .body em{color:var(--chalk);font-style:normal;font-weight:600}
+
+  .reset{margin-top:28px;display:flex;justify-content:space-between;align-items:center;gap:12px;
+         border-top:1px solid var(--line);padding-top:14px}
+  .reset span{font-size:12px;color:var(--faint)}
+  button.ghost{background:transparent;border:1px solid var(--line-strong);border-radius:4px;color:var(--dim);
+         font:600 12px var(--ui);letter-spacing:.05em;text-transform:uppercase;padding:8px 14px;cursor:pointer;min-height:36px}
+  button.ghost:hover{color:var(--chalk);border-color:var(--line-a11y)}
+  button.ghost:focus-visible{outline:2px solid var(--ice);outline-offset:2px}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Archivo:wght@400;600&family=IBM+Plex+Mono:wght@500&display=swap">
+</head>
+<body>
+
+<div class="bar"><div class="bar-inner">
+  <h1><i></i>Build 137 Runtime Pass</h1>
+  <span class="count" id="count">0 / 0</span>
+</div><div class="track"><div class="fill" id="fill"></div></div></div>
+
+<div class="wrap">
+  <p class="lede"><b>Fleeced v1.16.10 · TestFlight build 137.</b> Under the repo's D-056 posture this
+  pass is the <b>only runtime evidence</b> the mobile app gets — every step names the regression it
+  would catch. Ticks save on this device.</p>
+  <div class="meta">
+    <span class="chip">shop flag <b>LIVE</b></span>
+    <span class="chip">merged page <b>LIVE</b></span>
+    <span class="chip">tour <b>off</b> (by ruling)</span>
+    <span class="chip">commit <b>6d9e6dc0</b></span>
+  </div>
+
+  <!-- ════════ PART A ════════ -->
+  <div class="sec"><h2>Part A — Shop, flag on</h2><span class="n" id="na"></span></div>
+  <p class="lede" style="font-size:13px">The flag is already on in prod — run as-is on the new build. What changed since rev-2:
+  the shop is a <b>pushed window</b>, the position filter row sits at the <b>top and applies to every mode</b>,
+  Same value pools by <b>tier</b> with an auto-widen default, and the window mounts its own feedback button.</p>
+
+  <div class="steps" id="listA">
+    <div class="step" data-k="a1"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">1</span><span class="t">Entry, one give asset</span></div>
+      <div class="body">On the Trades deck, the button under the players you <em>send</em> reads <b>"More offers"</b>; under the players you <em>get</em> it still reads <b>"Keep · more offers"</b>. Tap the give-side button on a card with ONE give asset → a <b>new screen</b> opens ("Shopping &lt;name&gt;" in the header) — the deck did <b>not</b> clear or regenerate behind it.</div></div></div>
+
+    <div class="step" data-k="a2"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">2</span><span class="t">Entry, several give assets</span></div>
+      <div class="body">On a card sending 2+ assets, the same tap opens a <b>"Shop which player?"</b> sheet listing every give-side asset (players <em>and</em> picks). Cancel closes it with no other effect — you're still on the deck. Picking a row opens the window for that asset.</div></div></div>
+
+    <div class="step" data-k="a2a"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">2a</span><span class="t">Chooser under pressure — no race, no stale sheet</span><span class="why">QA-B P8</span></div>
+      <div class="body">Tap a chooser row and watch the transition: the window opens exactly <b>once</b>, for exactly the asset you tapped, and the sheet is gone when you land — never lingering over the window or reappearing behind back navigation. Then: open the chooser, Cancel, immediately re-tap "More offers" on a <em>different</em> 2+-asset card → the sheet lists the <b>new</b> card's assets. Double-tap a row fast — never two windows.</div></div></div>
+
+    <div class="step" data-k="a3"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">3</span><span class="t">Back returns to the untouched deck</span></div>
+      <div class="body">Tap the header back ("‹") → you land on the <b>same deck card</b> you left, same position, still swipeable. Also: an <b>edge swipe from the left does not pop the screen</b> — the horizontal pager owns that gesture; paging tiles near the left edge must never accidentally navigate back.</div></div></div>
+
+    <div class="step" data-k="a4"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">4</span><span class="t">The window has a feedback button</span><span class="why">#188</span></div>
+      <div class="body">The feedback button renders bottom-right on the shop window. Exactly <b>one</b> — never two stacked.</div></div></div>
+
+    <div class="step" data-k="a5"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">5</span><span class="t">Modes and counts</span></div>
+      <div class="body">Three chips — <b>Tier up / Tier down / Same value</b> — each with a live count; Tier up selected on open. A zero-count mode shows named copy ("No tier-down offers cleared the bar"), and the "other modes have offers" pointer renders <b>only if that's true</b>.</div></div></div>
+
+    <div class="step" data-k="a6"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">6</span><span class="t">The pager is honest</span></div>
+      <div class="body">Swipe through the tiles: the <b>"1 / X"</b> counter tracks exactly, X = tiles actually present. Reaching the end doesn't advance, dispose, or wrap.</div></div></div>
+
+    <div class="step" data-k="a7"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">7</span><span class="t">Filters on every mode, one selection</span></div>
+      <div class="body">The position chip row sits at the <b>top of the window</b>, above the modes. Select RB in Tier up → tier-up offers re-sweep to ones bringing back an RB. Switch to Tier down, then Same value → <b>the RB selection is still applied</b>. The row shows QB · RB · WR · TE <b>including the shopped player's own position</b>; still no PICK chip.</div></div></div>
+
+    <div class="step" data-k="a8"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">8</span><span class="t">Same value = the tier, priced honestly</span><span class="why">new semantics</span></div>
+      <div class="body">A Same-value offer may sit noticeably above or below the shopped player's value — <b>that is the tier</b>: the pool is his whole rung of the pick-valuation ladder now, not a ±10% band. Each card's signed diff still shows its real gap. If every idea looks suspiciously identical in value, the tier scope regressed to the band.</div></div></div>
+
+    <div class="step" data-k="a9"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">9</span><span class="t">Auto-widen is loud, never silent</span><span class="why">new</span></div>
+      <div class="body">With <b>no chips selected</b>, if Same value would be empty at his position it re-sweeps all positions and shows <b>"Nothing at &lt;POS&gt; — showing all positions"</b> above the results. Select any chip explicitly → the notice disappears and <b>only your selection</b> is searched; clear it → the default (and notice, if needed) returns. Tier up / Tier down never auto-widen.</div></div></div>
+
+    <div class="step" data-k="a10"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">10</span><span class="t">Like = a real offer</span></div>
+      <div class="body">Tap ✓ on a tile → success toast <em>in the window</em>; the trade appears queued in the usual counterparty flow. ✓ the <b>same tile again</b> → same success copy (idempotent), not an error. A refusal (e.g. an untouchable involved) <b>names the reason</b>. Ruled: this like <b>does</b> move your Elo board.</div></div></div>
+
+    <div class="step" data-k="a11"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">11</span><span class="t">Dismiss + Undo, the honest version</span></div>
+      <div class="body">Tap ✕ → the tile leaves the pager, X drops, "Dismissed · Undo" toast appears. Tap <b>Undo</b> within 5 s → the tile returns exactly where it was, counter restored.</div></div></div>
+
+    <div class="step" data-k="a12"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">12</span><span class="t">Undo never lies</span><span class="why">QA B-4</span></div>
+      <div class="body">Dismiss a tile, then immediately tap a different mode chip → the Undo toast disappears <b>at that moment</b> (the dismiss committed; a dead Undo button must never linger). Leaving the window inside the 5 s also commits.</div></div></div>
+
+    <div class="step" data-k="a13"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">13</span><span class="t">Dismissals stick</span></div>
+      <div class="body">Dismiss a tile, switch position filters away and back (or switch modes) within a minute → it does <b>not</b> come back — only Undo restores a tile. Go back and reopen shop on the same player → a fresh session; the <b>server cooldown</b> governs what returns (a dismissed package stays gone).</div></div></div>
+
+    <div class="step" data-k="a14"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">14</span><span class="t">Shop a pick</span></div>
+      <div class="body">Open shop on a card whose give side is a draft pick → the window works but <b>no position chips render in any mode</b> (the engine ignores them for picks; dead chips would lie).</div></div></div>
+
+    <div class="step" data-k="a15"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">15</span><span class="t">A fresh window per player</span><span class="why">QA A-2</span></div>
+      <div class="body">Shop player A, select a filter and a mode; go back; shop player B → the window opens <b>clean</b> (Tier up, no selection, page 1). A stale filter must never become invisible and un-clearable.</div></div></div>
+
+    <div class="step" data-k="a15a"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">15a</span><span class="t">Merged-view trim</span><span class="why">T-1 · T-2 · T-3</span></div>
+      <div class="body">On the merged Find-a-Trade page: exactly <b>one outlook bar</b> (the calculator's own, with a working Change control); exactly <b>one Find a Trade</b> (the canvas action-row cell — no full-width page bar anywhere; with an <em>empty</em> canvas the cell still runs the model search, and a finished deck's "Deck done" card says "tap Find a Trade"); <b>no 1QB PPR / SF TEP chips</b> and no "values converted" note. Then open <b>Real values</b> → its chips render as before. Then a team- or player-mode deck → the page bar and outlook row are <b>still there</b> (the trim is scoped to the merged page only).</div></div></div>
+  </div>
+
+  <!-- ════════ PART B ════════ -->
+  <div class="sec"><h2>Part B — Shop, flag off</h2><span class="n" id="nb"></span></div>
+  <div class="note"><b>Flag work:</b> flip <code>trade.shop_asset</code> to <code>false</code> in
+  <code>config/features.json</code> + <code>POST /api/feature-flags/reload</code> for these three steps,
+  then flip it back on when done.</div>
+
+  <div class="steps" id="listB">
+    <div class="step" data-k="b16"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">16</span><span class="t">Byte-identical deck</span></div>
+      <div class="body">Both keep buttons read <b>"Keep · more offers"</b>; the give-side tap pins your players and regenerates the deck exactly as before this feature existed — progress state, re-shopped return side, pin summary row, and clearing the pin restores the prior deck.</div></div></div>
+
+    <div class="step" data-k="b17"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">17</span><span class="t">No shop anywhere</span></div>
+      <div class="body">Nothing labeled "Shop", no shop window reachable, no chooser, on any screen.</div></div></div>
+
+    <div class="step" data-k="b18"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">18</span><span class="t">Single-pin panel unchanged</span></div>
+      <div class="body">The single-pin Upgrade / Lateral / Downgrade panel behaves exactly as before — its laterals are still the ±band (the tier scope is a shop-only request parameter).</div></div></div>
+  </div>
+
+  <!-- ════════ PART C ════════ -->
+  <div class="sec"><h2>Part C — Old-client compat</h2><span class="n" id="nc"></span></div>
+  <div class="note"><b>Needs a device still on v1.16.9</b> (the rev-2 inline shop), with the flag back <b>on</b>.</div>
+
+  <div class="steps" id="listC">
+    <div class="step" data-k="c19"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">19</span><span class="t">Tier modes stay unfiltered for the old client</span><span class="why">QA B-1</span></div>
+      <div class="body">On the v1.16.9 device (whose position chips exist only under Same value), against the new backend: select a position chip in Same value → laterals re-sweep to that position as before. Now check <b>Tier up and Tier down</b> with the selection still active → their results must be <b>unchanged by it</b>. If the tier lists silently shrink to the selected position on the old build, the compat fork regressed.</div></div></div>
+  </div>
+
+  <!-- ════════ #384 ════════ -->
+  <div class="sec"><h2>Also owed — partner shape lines (#384)</h2><span class="n" id="nd"></span></div>
+  <p class="lede" style="font-size:13px">The Aug 27 fix, waiting for its first on-device look. <b>Prereq:</b> a league with 3+
+  leaguemates whose rosters differ by position, at least one owning draft picks. A "shape line" looks like:
+  <code>QB ≈1 first · RB ≈2 firsts · WR ≈3 firsts · TE ≈0.5 firsts · Picks ≈2 firsts</code>.</p>
+
+  <div class="steps" id="listD">
+    <div class="step" data-k="d1"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">1</span><span class="t">The shape line exists</span><span class="why">the regression</span></div>
+      <div class="body">Open the In-league calculator → tap the <b>Team</b> dropdown. Every leaguemate row shows the handle on line 1 and a <b>shape line on line 2</b>, QB/RB/WR/TE in position colors; the R / R* / NR badge fully visible on the right. Before the fix, line 2 was absent.</div></div></div>
+
+    <div class="step" data-k="d2"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">2</span><span class="t">The numbers differ and make sense</span></div>
+      <div class="body">Read three rows: numbers <b>differ between teams</b> and track the rosters (a QB-heavy team's QB segment leads). All-identical or all-zero means the rankings feed is failing, not this fix — report that separately.</div></div></div>
+
+    <div class="step" data-k="d3"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">3</span><span class="t">No-picks tail</span></div>
+      <div class="body">A member with no future picks (or the ESPN case): their line ends at <b>TE</b> — no trailing "· Picks", no empty separator.</div></div></div>
+
+    <div class="step" data-k="d4"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">4</span><span class="t">Picks tail, pick-equivalent wording</span></div>
+      <div class="body">A member with picks: a <b>"· Picks ≈N firsts"</b> tail in the same wording as the rest. <b>No raw numbers like 4,200</b> anywhere on the line — a numeric means the server dropped the label; note which member and segment.</div></div></div>
+
+    <div class="step" data-k="d5"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">5</span><span class="t">Landscape / large text</span></div>
+      <div class="body">Rotate to landscape, or set Larger Text two steps up, and reopen the sheet: the shape line wraps to <b>at most two lines</b> and ellipsizes with "…"; the badge stays on screen; rows stay tappable.</div></div></div>
+
+    <div class="step" data-k="d6"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">6</span><span class="t">Tap still selects</span></div>
+      <div class="body">Tap a member → sheet closes, the Team dropdown shows that handle, the calculator re-prices for them exactly as before (the reflow must not have broken the tap target).</div></div></div>
+
+    <div class="step" data-k="d7"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">7</span><span class="t">VoiceOver speaks the shape</span><span class="why">the sighted-only failure</span></div>
+      <div class="body">VoiceOver on, swipe through the rows: each row is announced as one element — <em>"@handle, ranked, QB about 1 first, RB about 2 firsts, … picks about 2 firsts, button"</em>. A row read as only "@handle, ranked, button" is the failure — report it.</div></div></div>
+
+    <div class="step" data-k="d8"><label class="box"><input type="checkbox"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 4"/></svg></label><div class="stext">
+      <div class="head"><span class="num">8</span><span class="t">Long sheet scrolls</span></div>
+      <div class="body">With 8+ leaguemates: the sheet scrolls, doesn't grow past ~60% of the screen, and nothing hides under the home indicator.</div></div></div>
+  </div>
+
+  <div class="reset">
+    <span>When done, log the outcome in <code>living-memory/TEST_LEDGER.md</code>. Anything that fails: the feedback button, right from the failing screen.</span>
+    <button class="ghost" id="resetBtn" type="button">Reset ticks</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  var KEY='ftf-b137-pass';
+  var saved={};
+  try{ saved=JSON.parse(localStorage.getItem(KEY)||'{}'); }catch(e){}
+  var steps=[].slice.call(document.querySelectorAll('.step'));
+  function persist(){ try{ localStorage.setItem(KEY, JSON.stringify(saved)); }catch(e){} }
+  function refresh(){
+    var done=0;
+    steps.forEach(function(s){ if(s.classList.contains('done')) done++; });
+    document.getElementById('count').textContent=done+' / '+steps.length;
+    document.getElementById('fill').style.width=(steps.length?100*done/steps.length:0)+'%';
+    [['na','listA'],['nb','listB'],['nc','listC'],['nd','listD']].forEach(function(p){
+      var rows=[].slice.call(document.getElementById(p[1]).querySelectorAll('.step'));
+      var d=rows.filter(function(r){return r.classList.contains('done');}).length;
+      document.getElementById(p[0]).textContent=d+' / '+rows.length;
+    });
+  }
+  steps.forEach(function(s){
+    var k=s.getAttribute('data-k');
+    var cb=s.querySelector('input');
+    if(saved[k]){ cb.checked=true; s.classList.add('done'); }
+    cb.addEventListener('change',function(){
+      s.classList.toggle('done',cb.checked);
+      saved[k]=cb.checked; if(!cb.checked) delete saved[k];
+      persist(); refresh();
+    });
+  });
+  document.getElementById('resetBtn').addEventListener('click',function(){
+    if(!confirm('Clear every tick?')) return;
+    saved={}; persist();
+    steps.forEach(function(s){ s.querySelector('input').checked=false; s.classList.remove('done'); });
+    refresh();
+  });
+  refresh();
+})();
+</script>
+
+</body>
+</html>
