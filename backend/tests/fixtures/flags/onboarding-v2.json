@@ -125,6 +125,7 @@
   "calc.merged_layout": true,
   "calc.inline_home": true,
   "calc.canvas_results": true,
+  "nav.trades_landing": true,
   "ux.sheet_guard": true,
   "ux.rank_tab_destination": true,
   "ux.retap_active_tab": true,

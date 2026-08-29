@@ -396,6 +396,35 @@ console.log('check-canvas-results:');
     'fairpk_ ids are deterministic — a stale guard would no-op the ✕ on a re-served idea');
 }
 
+
+// ═══════════════════════════════════════════════════════════════════════
+// 10 — trades-landing (nav.trades_landing, operator ruling 2026-08-28):
+//      the launch tab is Trades for all users; flag-off is today's logic.
+// ═══════════════════════════════════════════════════════════════════════
+{
+  const tabNav = fs.readFileSync(path.join(SRC, 'navigation/TabNav.tsx'), 'utf8');
+  const at = tabNav.indexOf('const [initialTab]');
+  const seg = at >= 0 ? tabNav.slice(at, at + 400) : '';
+  assert(/useFeatureFlags\.getState\(\)\.flags\['nav\.trades_landing'\]/.test(seg),
+    '10a. initialTab reads nav.trades_landing imperatively (decide-once)',
+    'a useFlag read here could rewrite the launch tab mid-session');
+  assert(/onboardingEnabled\('onboarding\.trades_first'\)/.test(seg)
+    && /firstSwipeDone/.test(seg) && /'Rank'/.test(seg),
+    "10b. the flag-off arm keeps today's trades_first/Rank logic verbatim");
+  const features = JSON.parse(fs.readFileSync(path.join(ROOT, 'config/features.json'), 'utf8'));
+  assert(features['nav.trades_landing'] === true
+    && typeof features['_comment_nav_trades_landing'] === 'string',
+    '10c. nav.trades_landing is true in features.json with a house comment');
+  for (const f of ['release', 'onboarding-v2', 'profiles-on']) {
+    const j = JSON.parse(fs.readFileSync(
+      path.join(ROOT, `backend/tests/fixtures/flags/${f}.json`), 'utf8'));
+    assert(j['nav.trades_landing'] === true, `10d. ${f}.json mirrors it true`);
+  }
+  assert(/"nav\.trades_landing",/.test(
+      fs.readFileSync(path.join(ROOT, 'backend/feature_flags.py'), 'utf8')),
+    '10e. registered in FLAG_KEYS');
+}
+
 console.log(failures === 0
   ? 'check-canvas-results: all assertions passed'
   : `check-canvas-results: ${failures} FAILED`);

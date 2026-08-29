@@ -306,6 +306,7 @@ FLAG_KEYS: tuple[str, ...] = (
     # prerequisite. Registered here so the flag ships through
     # /api/feature-flags like every other key.
     "calc.canvas_results",
+    "nav.trades_landing",
     "ux.sheet_guard",
     "ux.rank_tab_destination",
     "ux.retap_active_tab",
