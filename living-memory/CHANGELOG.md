@@ -14,6 +14,16 @@
 
 
 
+## 2026-08-29 — v1.16.11 ships: the calculator becomes the results surface; Trades becomes the front door
+
+PR #237 squash-merged on green; EAS build **138** from the merge commit, auto-submitted; both
+new flags verified live. Found ideas now browse inside the calculator canvas (editable,
+per-idea sticky edits, ✓ queues, ✕ runs the full decline-reason capture); the deck retires
+from the merged page; the app opens on Trades for everyone; the account-ask/quickset/
+adaptation/standing-offer moments re-fire off canvas events; shop's "More offers" returns on
+the browsed idea. Two-reviewer QA, 12 findings fixed incl. the invisible-first-deck P0.
+Next: Wave B-prime (onboarding rebuild + guide_v2 re-light).
+
 ## 2026-08-28e — v1.16.10 ships (build 137); day closed with three squash-merges swept
 
 PR #234 merged on green; EAS build 137 from the merge commit, auto-submitted. All three of
