@@ -11,6 +11,17 @@
 
 ---
 
+## 2026-08-29 — v1.16.11 (EAS build 138): canvas-results + trades-landing + activation moments — full round, shipped
+
+Branch `feat/canvas-results`, squash PR [#237](https://github.com/mattmurf77/fantasy-trade-finder/pull/237) → `main` @ `21989cda` on green CI. Operator rulings: canvas-results-spec.md header (deck hidden / ✕ = decline flow / edits stick) + trades-landing-ruling.md + "activation moment: yes".
+
+- **Build:** EAS `b8cc4523-588b-4abb-8ef3-aef02ba4106d` — v1.16.11, build **138**, finished, from `21989cda` exactly (verified via `eas build:list`), auto-submitted to App Store Connect. **Flags verified LIVE post-deploy:** `calc.canvas_results` + `nav.trades_landing` both true; inert until 138 installs (no shipped client reads them).
+- **What shipped:** ideas browse in the calculator (per-idea edit map + `onSidesChange`; ✓ queues the edited trade; ✕ = the two-layer decline capture on EVERY browse session; five honest empties, audit-Q5 idle-card structurally unreachable); Trades as the launch tab for all users (imperative decide-once, baked LAUNCHED_FLAG_DEFAULTS); G22 activation moments re-triggered off canvas events (+#362 standing-offer); "More offers" restored to the front door on the browsed idea; session lifecycle riding all 8 dispatch + 5 inline-reset sites (censuses suite-pinned).
+- **QA:** two independent reviewers; A = spec pass with 6 defects, B = HOLD with 4 confirmed (C1 P0 invisible first-run deck — the trades-landing audience; C2 QuickSet handoff; C3 prefill attribution corruption; C4 shop entry orphaned) + 4 plausible. **All 12 fixed in one round** (`e9cd523a`); 7 sabotage cycles red→green; frozen browse ordering; flag-arrival adoption; partner locked while browsing; no-op Undo toast deleted.
+- **Gates (orchestrator-run on the shipped tree):** full `pytest backend/tests` **4,450 / 0 failed** · `tsc --noEmit` clean · **all 87 `check-*.js` suites green** (check-canvas-results 104+ assertions) · `testid-lint OK` · CI green pre-merge.
+- **Owed (operator, runtime, build 138):** checklist Parts D/E (steps 20–32 + 20a/22a/22b/23c) — headline steps: first-run new-user visible session (the P0's regression test), ✕ reason capture, edits-stick, More offers from the browsed idea, Trades landing on a fresh install. Plus everything still owed on 137 if unrun.
+- **Queued next round:** Wave B-prime — onboarding script rebuild against the new page, then the `onboarding.guide_v2` re-light (flip flag + fixtures + the test_events_api pin together).
+
 ## 2026-08-28e — v1.16.10 (EAS build 137) BUILT + SUBMITTED; the merged tree's gates all green
 
 - **Merge:** PR [#234](https://github.com/mattmurf77/fantasy-trade-finder/pull/234) squash-merged @ `6d9e6dc0` on green CI (backend 9m46s · typecheck · lint). Pre-push gates on the merged tree: pytest **4,450/0**, tsc clean, 86 suites, lint.

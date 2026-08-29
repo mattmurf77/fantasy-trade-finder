@@ -10,6 +10,17 @@
 
 
 
+## 2026-08-29 — v1.16.11 (build 138) shipped: canvas-results + trades-landing + activation moments
+
+**Where:** `main` @ `21989cda` (PR #237). Prod flags: `calc.canvas_results` TRUE, `nav.trades_landing` TRUE (verified), `calc.inline_home` TRUE, `trade.shop_asset` TRUE, `onboarding.guide_v2` FALSE (awaiting Wave B-prime). TestFlight: build **138** (v1.16.11) submitted; 137 superseded for checklist purposes except its Part C compat step. Branch `feat/canvas-results` swept (recovery: docs/recovery/2026-08-29-canvas-results-ship.md).
+
+**Owed:**
+1. Operator runtime pass on build 138 — the item checklist Parts A–E (the rev-3 window steps + canvas-results steps 20–32 with inserts; local interactive copy: feedback-workspace/402/build-137-checklist.html covers only through 137 — the artifact + repo checklist are current).
+2. **Wave B-prime (queued, next round):** rebuild the Trades-page onboarding script against the new surface (canvas browse, ✕ reason flow, Find a Trade cell, More offers), then re-light `onboarding.guide_v2` (features.json + 3 fixtures + the test_events_api pin together). The rev-3 tour gate makes the re-light safe for the merged page.
+3. Known-open, low: N6.1 first-like router unreachable from queue path (ledgered); browse likes don't feed session_rerank's vector; adaptation card copy still says "Keep swiping" (two-word copy follow-up available); config-reference row for canvas_results could carry the census note.
+
+**Context:** the whole arc lives in docs/feedback/items/402-more-offers-shop/ (specs, rulings ×6 files, QA reports in session transcripts, TEST_LEDGER 2026-08-28a–e + 2026-08-29).
+
 ## 2026-08-28 (end of day) — v1.16.10 shipped: shop window + tier same-value + merged-view trim; merge lit tour-free
 
 **Where:** `main` @ `6d9e6dc0` (PR #234). **Prod flags:** `calc.inline_home` TRUE (merged page live), `trade.shop_asset` TRUE, `onboarding.guide_v2` FALSE (temporary — see owed). **TestFlight:** build **137** (v1.16.10, from `6d9e6dc0`) submitted; build 136 (v1.16.9+dark IAP) superseded. All session branches swept (recovery: `docs/recovery/2026-08-28-shop-branch-ship.md`).
