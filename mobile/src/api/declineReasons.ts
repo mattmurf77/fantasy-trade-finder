@@ -69,6 +69,17 @@ export interface DeclineReasonWrite {
   detail?: Layer2Code;
   /** Layer 2 only, on the free-text send. */
   freeText?: string;
+  /** Layer 1 only, on the FIRST tile tap — the tap that carries the pass
+   *  disposition. The backend keeps only the first `pass` outcome row per
+   *  impression, and this write lands BEFORE the swipe POST, so the reason
+   *  row must carry the same dwell/engagement signal the swipe sends
+   *  (SwipeSignal in api/trades.ts) or the surviving row has NULL dwell.
+   *  Omitted on tile switches (the disposition-time signal already landed)
+   *  and whenever the swipe itself would send none (deck.signal_v2 off or
+   *  no impression_id). */
+  dwellMs?: number;
+  detailExpanded?: boolean;
+  calcOpened?: boolean;
 }
 
 /**
@@ -87,6 +98,11 @@ export async function postDeclineReason(w: DeclineReasonWrite): Promise<boolean>
       switched_from: w.switchedFrom || undefined,
       detail: w.detail || undefined,
       free_text: w.freeText ? w.freeText.slice(0, FREE_TEXT_MAX) : undefined,
+      // Booleans are sent faithfully (a `|| undefined` would drop `false`,
+      // and the swipe POST sends `detail_expanded: false` explicitly).
+      dwell_ms: typeof w.dwellMs === 'number' ? w.dwellMs : undefined,
+      detail_expanded: typeof w.detailExpanded === 'boolean' ? w.detailExpanded : undefined,
+      calc_opened: typeof w.calcOpened === 'boolean' ? w.calcOpened : undefined,
     });
     return true;
   } catch {

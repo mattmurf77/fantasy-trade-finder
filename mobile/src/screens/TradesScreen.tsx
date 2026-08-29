@@ -5432,7 +5432,26 @@ export default function TradesScreen({ navigation, route }: any) {
       { reason, switched_from: switchedFrom, ...reasonEventProps() },
       'Trades',
     );
-    void postDeclineReason({ ...reasonWriteTarget(), layer: 1, reason, switchedFrom });
+    // The FIRST tile tap carries the pass disposition, and this POST lands
+    // before the swipe POST — the backend keeps only the first `pass` outcome
+    // row per impression, so this row must carry the same dwell/engagement
+    // signal the swipe sends or the surviving row has NULL dwell. Switches
+    // omit it: the disposition-time signal already landed, and dwell read at
+    // switch time would include the layer-2 panel.
+    const signal = firstForThisCard ? signalForCard(rawTopCard) : undefined;
+    void postDeclineReason({
+      ...reasonWriteTarget(),
+      layer: 1,
+      reason,
+      switchedFrom,
+      ...(signal
+        ? {
+            dwellMs: signal.dwell_ms,
+            detailExpanded: signal.detail_expanded,
+            calcOpened: signal.calc_opened,
+          }
+        : {}),
+    });
     // A tile switch refines the existing answer; only the FIRST tile tap on a
     // card carries the disposition.
     if (!firstForThisCard) return;

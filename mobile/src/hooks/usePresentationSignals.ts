@@ -220,9 +220,27 @@ export default function usePresentationSignals(screen: PresentationScreen): Pres
   const reasonLayer1 = useCallback(
     (card: TradeCard, reason: Layer1Code, switchedFrom: Layer1Code | 'none') => {
       track('trade_pass_layer1', { reason, switched_from: switchedFrom, ...reasonEventProps(card) }, screen);
-      void postDeclineReason({ ...writeTarget(card), layer: 1, reason, switchedFrom });
+      // Same as the deck: the FIRST tile tap carries the pass disposition and
+      // this POST lands before the swipe POST, whose row the backend drops as
+      // a duplicate — so the reason row carries the same dwell/engagement
+      // signal `dispatch` would send. Switches omit it (their signal already
+      // landed at disposition time).
+      const signal = switchedFrom === 'none' ? signalForCard(card) : undefined;
+      void postDeclineReason({
+        ...writeTarget(card),
+        layer: 1,
+        reason,
+        switchedFrom,
+        ...(signal
+          ? {
+              dwellMs: signal.dwell_ms,
+              detailExpanded: signal.detail_expanded,
+              calcOpened: signal.calc_opened,
+            }
+          : {}),
+      });
     },
-    [reasonEventProps, writeTarget],
+    [reasonEventProps, writeTarget, signalForCard],
   );
 
   const reasonLayer2Select = useCallback(
