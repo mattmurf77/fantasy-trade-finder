@@ -14,6 +14,12 @@
 
 
 
+## 2026-08-28e — v1.16.10 ships (build 137); day closed with three squash-merges swept
+
+PR #234 merged on green; EAS build 137 from the merge commit, auto-submitted. All three of
+the day's branches content-verified, recovery-ledgered, swept. Owed: the operator's runtime
+pass on 137, and the guide_v2 re-light once 1.16.10 is the installed base.
+
 ## 2026-08-28d — v1.16.10: the shop becomes a window; the merged page gets trimmed; tour gate ships
 
 The day's second ship: shop re-hosted as a pushed window with back navigation (operator

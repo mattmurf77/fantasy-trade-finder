@@ -11,6 +11,12 @@
 
 ---
 
+## 2026-08-28e — v1.16.10 (EAS build 137) BUILT + SUBMITTED; the merged tree's gates all green
+
+- **Merge:** PR [#234](https://github.com/mattmurf77/fantasy-trade-finder/pull/234) squash-merged @ `6d9e6dc0` on green CI (backend 9m46s · typecheck · lint). Pre-push gates on the merged tree: pytest **4,450/0**, tsc clean, 86 suites, lint.
+- **Build:** EAS `536d68b1-cdb0-4a3a-b05f-20f39342fac5` — v1.16.10, build **137**, finished, from `6d9e6dc0` exactly (verified via `eas build:list`), auto-submitted to App Store Connect. Earlier same day: build **136** (v1.16.9 + dark IAP, `3a73a46b`) also submitted — superseded by 137 for the checklist pass.
+- **Owed (operator):** the 19-step + inserts checklist on build 137 (Parts A/B/C incl. the v1.16.9-device compat step), plus the still-unrun #384 partner-summary 8-step. **Deferred by design:** the `onboarding.guide_v2` re-light once 1.16.10 is the installed base (the branch's tour gate makes it safe; flip the flag + the `test_events_api.py` pin + the fixtures together).
+
 ## 2026-08-28d — rev-3 shop window + merged-view trim: built, QA'd twice, fixed, shipping as v1.16.10
 
 Branch `feat/shop-window-rework-402` (ships via the v1.16.10 PR). Full arc on top of the four operator surprise-rulings (`rulings-2026-08-28b.md` + `merged-view-trim-2026-08-28.md`, both in the item folder):
