@@ -2391,6 +2391,75 @@ export default function TradesScreen({ navigation, route }: any) {
     setAdaptationMoment(null);
   }, [firstSessionOn, job?.job_id, leagueId]);
 
+  // F9 — the like half of the tally: attrs (+ counterparty) for the
+  // dominant-attribute trigger, plus the one-shot first_session_like event
+  // (position = 1-based disposition ordinal). Extracted from advance()'s
+  // like branch VERBATIM so the canvas ✓ queue-success path (G22,
+  // recordCanvasQueueLike) feeds the SAME refs — never a parallel tally.
+  // Callers gate on `firstSessionOn && job?.first_deck` and bump
+  // fsDispositionsRef first, exactly as advance() always has.
+  function recordFirstSessionLike(
+    card: TradeCard,
+    rawId: string,
+    impressionId?: string,
+  ) {
+    fsLikesRef.current.push({
+      attrs: extractCardAttributes(card),
+      opponentUsername: card.opponent_username,
+      opponentUserId: card.opponent_user_id,
+    });
+    if (!fsFirstLikeTrackedRef.current) {
+      fsFirstLikeTrackedRef.current = true;
+      track(
+        'first_session_like',
+        {
+          position: fsDispositionsRef.current,
+          trade_id: rawId,
+          ...(impressionId ? { impression_id: impressionId } : {}),
+        },
+        'Trades',
+      );
+    }
+  }
+
+  // F9 — the adaptation moment. Trigger conditions ARE the card's claims
+  // (PRD: never claim adaptation that didn't happen): ≥5 dispositions, ≥3
+  // likes sharing a phraseable dominant attribute, AND ≥1 unseen card ahead
+  // carrying it — "ahead" is past the cursor, which under a live browse
+  // session is exactly the un-browsed ideas. Variant: 'rerank' only when
+  // deck.session_rerank is actually operating on this display order
+  // (applySessionRerank skips reorders under a lane filter or the
+  // fairness-off client sort); otherwise the honest descriptive copy.
+  // Extracted from advance() VERBATIM (G22): it keeps firing on browse
+  // passes — which route through advance() with deferDeckAdvance — and now
+  // also fires from the queue-success like path.
+  function maybeShowAdaptationMoment() {
+    if (adaptationMomentShownThisSession) return;
+    if (
+      fsDispositionsRef.current < FIRST_SESSION_MIN_DISPOSITIONS ||
+      fsLikesRef.current.length < FIRST_SESSION_MIN_SHARED_LIKES
+    ) {
+      return;
+    }
+    const signal = findDominantLikedAttribute(fsLikesRef.current);
+    if (!signal) return;
+    const ahead = sortedDeckRef.current
+      .slice(deckIdx + 1)
+      .some((c) => cardMatchesAttribute(c, signal.attribute));
+    if (!ahead) return;
+    adaptationMomentShownThisSession = true;
+    const variant =
+      rerankOn && fairnessOn && !laneFilter
+        ? ('rerank' as const)
+        : ('descriptive' as const);
+    setAdaptationMoment({ ...signal, variant });
+    track(
+      'first_session_adaptation_shown',
+      { variant, attribute: signal.attribute, likes: signal.likes },
+      'Trades',
+    );
+  }
+
   // Served-order bookkeeping: cards enter `deck` in served order (the
   // append effect above dedups + appends), so first-sight index == served
   // index. Later reorders never touch existing entries.
@@ -2934,7 +3003,7 @@ export default function TradesScreen({ navigation, route }: any) {
     opponent: { userId: string; name: string };
   }) {
     if (!leagueId) return;
-    const { toast: t } = await queueCalcTrade({
+    const { queued, alreadyQueued, toast: t } = await queueCalcTrade({
       leagueId,
       opponent: args.opponent,
       giveIds: args.giveIds,
@@ -2942,6 +3011,60 @@ export default function TradesScreen({ navigation, route }: any) {
       screen: 'Trades',
     });
     setToast(t);
+    // G22 — a real first queue on the live canvas host is this page's like
+    // moment (see recordCanvasQueueLike). A refused queue is not a like;
+    // neither is a re-✓ of an already-queued package (the server's own
+    // idempotence signal). Every other host: dead code, byte-identical.
+    if (queued && !alreadyQueued && canvasResultsLive) recordCanvasQueueLike();
+  }
+
+  // ── G22 — activation moments follow the results surface ────────────────
+  // Under the live canvas host (`canvasResultsLive`) the deck never renders,
+  // so a swipe-right no longer exists on this page — the ✓ queue success
+  // (D-152's calc_trade_queued moment) IS this host's like. This feeds the
+  // EXISTING moment machinery — the same persisted onboarding swipe
+  // counters items 7/8 read, the same Quick-Set prompt trigger, the same F9
+  // first-session tallies, and the same save-moment Apple chain advance()'s
+  // like branch runs — never a parallel trigger or a new counter. The ✕
+  // half needs no twin: browse passes already route through
+  // advance('pass'), which does all of this itself.
+  function recordCanvasQueueLike() {
+    // Onboarding item 4's persisted counters — advance()'s patch, verbatim,
+    // under the same any-consumer flag gate.
+    if (
+      onboardingEnabled('onboarding.trades_first') ||
+      onboardingEnabled('onboarding.quickset_prompt') ||
+      onboardingEnabled('onboarding.apple_save_moment')
+    ) {
+      patchOnboardingState({
+        firstSwipeDone: true,
+        totalSwipes: getOnboardingState().totalSwipes + 1,
+      });
+    }
+    // Item 7 — the contextual Quick Set prompt: a queue is this host's like
+    // disposition (same trigger math, same session/snooze ladder).
+    maybeShowQuicksetPrompt('like');
+    // F9 — first-session tally + the adaptation moment, browse likes only:
+    // outside a live session there is no fronted idea to attribute the
+    // like's attributes to. Same gate and ordinal bump as advance()'s
+    // block; the fair path never sets a job, so `job?.first_deck` keeps
+    // this to the server-marked first MODEL deck exactly as shipped.
+    if (browseLive && topCard && firstSessionOn && job?.first_deck) {
+      fsDispositionsRef.current += 1;
+      recordFirstSessionLike(
+        topCard,
+        rawTopCard?.trade_id ?? topCard.trade_id,
+        signalForCard(rawTopCard)?.impression_id,
+      );
+      maybeShowAdaptationMoment();
+    }
+    // Item 8 — the save-moment Apple ask (the account-creation moment).
+    // v2RunLikeChain is the arm-agnostic s6.2-setup + ask chain BOTH guided
+    // arms of advance()'s like branch run; the plain arm asks directly.
+    // Every path re-checks appleAskEligible itself, and maybeAskApple's own
+    // 700 ms delay keeps the win-then-ask ordering behind the queue toast.
+    if (guidedAvatarActive()) v2RunLikeChain();
+    else maybeAskApple('like');
   }
 
   // D-158 — the receipt's "Change": the canvas still HOLDS the assets (this
@@ -4985,69 +5108,23 @@ export default function TradesScreen({ navigation, route }: any) {
     }
     // F9 (deck.first_session): first-deck activation tallies + the
     // adaptation moment. Only on the server-marked FIRST deck for this
-    // league; flag off or any prior deck ⇒ this block never runs.
+    // league; flag off or any prior deck ⇒ this block never runs. The tally
+    // and trigger bodies live in recordFirstSessionLike /
+    // maybeShowAdaptationMoment (G22) so the canvas ✓ queue-success path
+    // feeds the SAME refs; behavior here is the shipped block, verbatim.
+    // maybeShowAdaptationMoment is deliberately OUTSIDE the
+    // deferDeckAdvance fork: a browse ✕ (which defers the deck advance) is
+    // still a disposition, and the moment must keep firing on it.
     if (firstSessionOn && job?.first_deck) {
       fsDispositionsRef.current += 1;
       if (decision === 'like') {
-        fsLikesRef.current.push({
-          attrs: extractCardAttributes(topCard),
-          opponentUsername: topCard.opponent_username,
-          opponentUserId: topCard.opponent_user_id,
-        });
-        if (!fsFirstLikeTrackedRef.current) {
-          fsFirstLikeTrackedRef.current = true;
-          // position = 1-based disposition ordinal of the session's first
-          // like (the PRD's first_session_like_position metric).
-          track(
-            'first_session_like',
-            {
-              position: fsDispositionsRef.current,
-              trade_id: dispatchRawId,
-              ...(dispatchSignal?.impression_id
-                ? { impression_id: dispatchSignal.impression_id }
-                : {}),
-            },
-            'Trades',
-          );
-        }
+        recordFirstSessionLike(
+          topCard,
+          dispatchRawId,
+          dispatchSignal?.impression_id,
+        );
       }
-      // Adaptation moment — trigger conditions ARE the card's claims (PRD:
-      // never claim adaptation that didn't happen): ≥5 dispositions, ≥3
-      // likes sharing a phraseable dominant attribute, AND ≥1 unseen card
-      // ahead carrying it. Variant: 'rerank' only when deck.session_rerank
-      // is also on (the deck literally re-ranks toward the liked
-      // attribute); otherwise the honest descriptive copy.
-      if (
-        !adaptationMomentShownThisSession &&
-        fsDispositionsRef.current >= FIRST_SESSION_MIN_DISPOSITIONS &&
-        fsLikesRef.current.length >= FIRST_SESSION_MIN_SHARED_LIKES
-      ) {
-        const signal = findDominantLikedAttribute(fsLikesRef.current);
-        if (signal) {
-          const ahead = sortedDeckRef.current
-            .slice(deckIdx + 1)
-            .some((c) => cardMatchesAttribute(c, signal.attribute));
-          if (ahead) {
-            adaptationMomentShownThisSession = true;
-            // 'rerank' only when the F4 re-rank is actually operating on
-            // this display order (flag on AND deck order is the display
-            // order — applySessionRerank skips reorders under a lane
-            // filter or the fairness-off client sort). Otherwise the
-            // descriptive variant, whose only claim is the remaining
-            // cards (verified above).
-            const variant =
-              rerankOn && fairnessOn && !laneFilter
-                ? ('rerank' as const)
-                : ('descriptive' as const);
-            setAdaptationMoment({ ...signal, variant });
-            track(
-              'first_session_adaptation_shown',
-              { variant, attribute: signal.attribute, likes: signal.likes },
-              'Trades',
-            );
-          }
-        }
-      }
+      maybeShowAdaptationMoment();
     }
     // Decline reasons suppress the undo window: the tile tap is a deliberate,
     // reasoned gesture (like the bad-trade flag), and an "Undo" toast under a
@@ -6991,6 +7068,42 @@ export default function TradesScreen({ navigation, route }: any) {
               • experiment path (#270 `trades_home_inline.canvas`): unchanged,
                 rail and all, for its assigned units — but only when the flag
                 path did not already claim the mount. */}
+        {/* G22 — activation-moment surfaces on the live canvas host. The
+            deck tree below owns both of these mounts everywhere else and is
+            nulled under `canvasResultsLive`, so exactly one mount can ever
+            render. Gates are the shipped ones plus the host; components,
+            copy and testIDs are the deck slot's, untouched (the
+            do-not-redesign rule). They sit here — the top-of-results slot,
+            directly above the canvas — because "top of deck" is where both
+            have always interrupted. */}
+        {canvasResultsLive && quicksetPromptShown ? (
+          <QuickSetPromptCard
+            onAccept={() => acceptQuicksetPrompt('prompt')}
+            onDismiss={snoozeQuicksetPrompt}
+          />
+        ) : canvasResultsLive && adaptationMoment && topCard && !mutedForTour ? (
+          <Card>
+            <View style={styles.emptyInner} testID="trades.adaptation-moment">
+              <Text style={styles.adaptationTitle}>
+                Noticed you're liking {adaptationMoment.phrase}
+              </Text>
+              <Text style={styles.emptyBody}>
+                {adaptationMoment.variant === 'rerank'
+                  ? 'More of those ahead.'
+                  : 'There are more of those in this deck.'}
+              </Text>
+              <Button
+                testID="trades.adaptation-moment.dismiss"
+                label="Keep swiping"
+                compact
+                onPress={() => {
+                  haptics.selection();
+                  setAdaptationMoment(null);
+                }}
+              />
+            </View>
+          </Card>
+        ) : null}
         {canvasHost ? (
           <View
             onLayout={(e) => { canvasY.current = e.nativeEvent.layout.y; }}

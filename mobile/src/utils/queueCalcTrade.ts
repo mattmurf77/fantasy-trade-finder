@@ -57,7 +57,7 @@ export async function queueCalcTrade(args: {
   /** Analytics screen label — the only thing that differs between the two
    *  hosts of the canvas. */
   screen: string;
-}): Promise<{ queued: boolean; toast: QueueToast }> {
+}): Promise<{ queued: boolean; alreadyQueued?: boolean; toast: QueueToast }> {
   let res: Awaited<ReturnType<typeof queueTradeForOpponent>> | null = null;
   try {
     res = await queueTradeForOpponent({
@@ -81,6 +81,10 @@ export async function queueCalcTrade(args: {
     haptics.success();
     return {
       queued: true,
+      // The server's own idempotence signal, surfaced so a host can tell a
+      // real first queue from a re-✓ of the same package (G22 — the
+      // activation-moment hook must not count a repeat as a second like).
+      alreadyQueued: !!res?.already_queued,
       toast: {
         msg: res?.already_queued
           ? `Already queued for @${args.opponent.name}.`

@@ -425,6 +425,87 @@ console.log('check-canvas-results:');
     '10e. registered in FLAG_KEYS');
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// 11 — G22: the activation moments follow the results surface. Three
+//      moments fired off deck behavior (the Apple save-moment ask off the
+//      first like, the Quick-Set prompt off swipe counts, the F9
+//      adaptation moment off disposition tallies inside advance()); the
+//      deck does not render on the live host, so each is re-triggered off
+//      the canvas-era equivalent — by feeding the EXISTING counters and
+//      chains, never a fork — and re-homed host-gated in the page flow.
+// ═══════════════════════════════════════════════════════════════════════
+{
+  // The queue-success hook: a real first queue on the live host is the like.
+  const rec = functionNamed(host, 'recordCanvasQueueLike');
+  assert(!!rec, '11. recordCanvasQueueLike exists');
+  const like = functionNamed(host, 'handleInlineLikeTrade');
+  assert(!!like
+    && /if \(queued && !alreadyQueued && canvasResultsLive\) recordCanvasQueueLike\(\);/.test(like.getText()),
+    '11a. the ✓ queue-success path reaches it — host-gated, refusals and already-queued repeats excluded',
+    'a refused queue is not a like; a re-✓ of the same package is not a second one');
+  assert(/alreadyQueued\?: boolean/.test(stripComments(read('utils/queueCalcTrade.ts'))),
+    '11b. queueCalcTrade surfaces the server\'s own idempotence signal for that exclusion');
+  // The save moment: the SAME two arms advance()'s like branch runs.
+  assert(!!rec && referencesIdentifier(host, rec, 'v2RunLikeChain')
+    && referencesIdentifier(host, rec, 'maybeAskApple')
+    && referencesIdentifier(host, rec, 'guidedAvatarActive'),
+    '11c. the Apple save-moment chain is reachable from queue success (guided s6.2 chain / direct ask)',
+    'this is the account-creation moment — losing it on the merged landing is the G22 launch blocker');
+  // The counters: browse ✓ feeds the SAME persisted swipe counter the deck
+  // swipes feed (advance()\'s patch, verbatim — twice in the file, no third
+  // counter and no fork).
+  assert(count(tradesCode, /totalSwipes: getOnboardingState\(\)\.totalSwipes \+ 1,/g) === 2
+    && !!rec && referencesIdentifier(host, rec, 'patchOnboardingState')
+    && /firstSwipeDone: true/.test(rec.getText()),
+    '11d. the queue-success path bumps the SAME onboarding swipe counter advance() bumps',
+    'items 7 (Quick-Set prompt) and 8 (session-2 Apple banner) read totalSwipes');
+  assert(!!rec && referencesIdentifier(host, rec, 'maybeShowQuicksetPrompt'),
+    '11e. …and runs the existing item-7 Quick-Set prompt trigger (a queue is a like disposition)');
+  // The F9 tally is shared, not twinned: ONE push site, called from both
+  // like paths, with the same first-deck gate and ordinal bump.
+  const fsLike = functionNamed(host, 'recordFirstSessionLike');
+  const adv = functionNamed(host, 'advance');
+  assert(!!fsLike && count(tradesCode, /fsLikesRef\.current\.push\(/g) === 1,
+    '11f. exactly ONE first-session like tally site (recordFirstSessionLike)',
+    'a second push site is a parallel tally that can drift from the deck\'s');
+  assert(!!adv && referencesIdentifier(host, adv, 'recordFirstSessionLike')
+    && !!rec && referencesIdentifier(host, rec, 'recordFirstSessionLike')
+    && /firstSessionOn && job\?\.first_deck/.test(rec.getText())
+    && /fsDispositionsRef\.current \+= 1;/.test(rec.getText()),
+    '11g. BOTH like paths feed it — same refs, same first-deck gate, same disposition ordinal');
+  // The adaptation moment: one trigger, fired from advance() OUTSIDE the
+  // deferDeckAdvance fork (browse passes defer the deck advance but are
+  // still dispositions) and from the queue-success like path.
+  const adapt = functionNamed(host, 'maybeShowAdaptationMoment');
+  assert(!!adapt && count(tradesCode, /adaptationMomentShownThisSession = true;/g) === 1
+    && /FIRST_SESSION_MIN_DISPOSITIONS/.test(adapt.getText())
+    && /FIRST_SESSION_MIN_SHARED_LIKES/.test(adapt.getText()),
+    '11h. ONE adaptation trigger with the shipped thresholds (maybeShowAdaptationMoment)');
+  assert(!!adv && referencesIdentifier(host, adv, 'maybeShowAdaptationMoment')
+    && count(stripComments(adv.getText()), /deferDeckAdvance/g) === 3,
+    '11i. advance() fires it on EVERY disposition — the deferDeckAdvance fork must not grow a guard around it',
+    'exactly 3 deferDeckAdvance mentions in advance(): the param, the reason guard, the deck-advance line — a 4th means the browse-pass path was forked out');
+  assert(!!rec && referencesIdentifier(host, rec, 'maybeShowAdaptationMoment'),
+    '11j. …and the queue-success like path fires it too');
+  // Render homes on the live host — shipped gates plus the host, the deck
+  // slot\'s components/copy untouched, and the deck-slot originals intact.
+  assert(/\{canvasResultsLive && quicksetPromptShown \? \(/.test(trades)
+    && count(trades, /<QuickSetPromptCard/g) === 2,
+    '11k. the Quick-Set prompt card has a host-gated mount above the canvas (deck-slot mount intact)',
+    'the deck tree is nulled on this host, so exactly one of the two can ever render');
+  assert(/: canvasResultsLive && adaptationMoment && topCard && !mutedForTour \? \(/.test(trades)
+    && count(trades, /testID="trades\.adaptation-moment"/g) === 2,
+    '11l. the adaptation moment has a host-gated mount with the shipped gate verbatim (plus the host)');
+  // The Apple surfaces were already page-level — they must STAY ungated by
+  // the host (the sheet is a root modal; the banner rides the page strip).
+  assert(/\{appleBannerShown \? \(/.test(trades)
+    && /<AppleSaveMomentSheet\s[\s\S]{0,200}?visible=\{!!appleAsk\}/.test(trades),
+    '11m. the session-2 Apple banner and the save-moment sheet render page-level, host or not');
+  // Reuse-only still holds: the hook fires no event of its own.
+  assert(!!rec && !referencesIdentifier(host, rec, 'track'),
+    '11n. recordCanvasQueueLike emits nothing itself — every event it causes is an existing moment\'s own');
+}
+
 console.log(failures === 0
   ? 'check-canvas-results: all assertions passed'
   : `check-canvas-results: ${failures} FAILED`);

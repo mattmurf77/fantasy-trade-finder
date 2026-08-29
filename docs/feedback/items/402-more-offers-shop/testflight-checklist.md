@@ -191,6 +191,27 @@ structural suite (142 assertions).
     the action row's ✓ → the same queue toast as today (idempotent —
     a second tap refuses politely), and the pager stays on the same idea
     (actions don't navigate). ☐
+23a. **First ✓ triggers the account ask (G22).** On a fresh, UNVERIFIED
+    Sleeper-username session (no Apple ID linked, not the demo league):
+    the first successful ✓ queue on the merged landing shows the queue
+    toast, then — about a beat later — the **"Sign in with Apple"
+    save-moment sheet** (win-then-ask ordering; under the guided tour the
+    Analyst's setup line comes first). Decline it; it must not re-ask this
+    session. Regression this catches: the ask historically fired only off
+    a deck swipe-right, and no deck renders on this page — an unverified
+    user could otherwise browse, queue and leave without ever being asked
+    to create an account. A ✓ that comes back "Already queued" or refused
+    must NOT trigger the ask. ☐
+23b. **The prompts count browse dispositions (G22).** Fresh session, no
+    Quick-Set board: pass ✕ (or ✓) through 2–3 ideas → the **Quick Set
+    prompt card** renders above the canvas (first ✕ after 2 dispositions,
+    else after 3 — the deck's own trigger math), and dismissing it behaves
+    exactly as on the deck (snooze → one session-2 re-offer). In a later
+    session with ≥5 total browse dispositions and still unverified, the
+    softer **"N swipes on this board" Apple banner** shows in the page
+    strip. Regression: browse ✕/✓ must feed the SAME swipe counters deck
+    swipes fed — if the card and banner never appear on this page no
+    matter how many ideas you disposition, the counters were bypassed. ☐
 24. **✕ = the decline-reason pass (ruling 2).** Tap the pager's ✕ → the
     SAME two-layer reason overlay the deck's calculator ✕ shows today
     (Value · Fit · Neither tiles, then the detail layer, free-text under
