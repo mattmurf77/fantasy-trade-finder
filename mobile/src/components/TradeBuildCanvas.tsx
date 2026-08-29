@@ -91,6 +91,11 @@ interface Props {
    *  Adopted only when `prefillSeq` changes. */
   prefill?: CanvasPrefill | null;
   prefillSeq?: number;
+  /** #402 canvas-results — pass-through to `InLeagueCalculator` (see its
+   *  Props comment): fired when either side's ids change after mount, so
+   *  the browse-session host can snapshot per-idea edits. Absent (the #270
+   *  experiment path and every pre-#402 mount) ⇒ byte-identical. */
+  onSidesChange?: (give: string[], receive: string[]) => void;
   /** T-3 (merged-view trim, ruling 2026-08-28) — pass-through to
    *  `InLeagueCalculator`: the flag path passes true and the merged header
    *  drops its scoring-format chips + #191 conversion note (the pushed page
@@ -117,6 +122,7 @@ export default function TradeBuildCanvas({
   onLikeTrade,
   prefill: hostPrefill,
   prefillSeq,
+  onSidesChange,
   hideFormatChips = false,
 }: Props) {
   // Bumped whenever a suggestion is tapped (or the host pushes a prefill),
@@ -160,6 +166,7 @@ export default function TradeBuildCanvas({
         initialReceiveIds={prefill?.receive}
         onFindATrade={onFindATrade}
         onLikeTrade={onLikeTrade}
+        onSidesChange={onSidesChange}
         hideFormatChips={hideFormatChips}
       />
 

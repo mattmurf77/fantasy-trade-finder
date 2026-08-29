@@ -48,6 +48,11 @@ import type { ScoringFormat, StarterImpactSlot, StarterSlotPlayer, Tier } from '
 // rankings (POST /api/trade/evaluate with league_id + opponent_user_id). It's
 // the one calculator surface with a real league + opponent, so it carries the
 // "Send in Sleeper" button.
+//
+// #402 canvas-results — `onSidesChange` (optional): fired after mount when
+// either side's ids change, so a browse-session host can snapshot per-idea
+// edits. Additive; every host that omits it gets the pre-#402 component
+// byte-identically. Full contract at the Props comment below.
 
 interface Props {
   leagueId: string;
@@ -110,6 +115,17 @@ interface Props {
     opponent: { userId: string; name: string };
   }) => void | Promise<void>;
   initialReceiveIds?: string[];
+  /** #402 canvas-results (`calc.canvas_results`) — optional side-change
+   *  listener. Fired AFTER mount whenever either side's id list changes
+   *  (user add/remove, evener adoption, the opponent-change receive clear),
+   *  with the current `giveIds`/`receiveIds`. NOT fired for the initial
+   *  seed: the `initial*` props are the host's own data, and the browse
+   *  session only wants to know what the user CHANGED. This component
+   *  still owns all state after mount — the host only listens (it never
+   *  writes sides back through props; a re-seed is a remount, per the
+   *  file's prefill convention). Absent (every pre-#402 host) the
+   *  component is byte-identical. */
+  onSidesChange?: (give: string[], receive: string[]) => void;
   /** T-3 (merged-view trim, operator ruling 2026-08-28,
    *  docs/feedback/items/402-more-offers-shop/merged-view-trim-2026-08-28.md)
    *  — a HOST prop, deliberately not a flag read: when the calculator is
@@ -248,6 +264,7 @@ export default function InLeagueCalculator({
   onInLeagueGone,
   onOutlookClosed,
   onLikeTrade,
+  onSidesChange,
   hideFormatChips = false,
 }: Props) {
   // #384 — the merged calculator layout. OFF is byte-identical to the
@@ -317,6 +334,20 @@ export default function InLeagueCalculator({
   const [giveIds, setGiveIds] = useState<string[]>(initialGiveIds ?? []);
   const [receiveIds, setReceiveIds] = useState<string[]>(initialReceiveIds ?? []);
   const [picker, setPicker] = useState<'give' | 'receive' | null>(null);
+  // #402 canvas-results — announce side changes to the host (see the Props
+  // comment). A ref for the callback so a host re-render can never re-fire
+  // the effect; a mount guard so the initial seed is silent — the first run
+  // of the effect IS the initial values, and only later runs are changes.
+  const onSidesChangeRef = useRef(onSidesChange);
+  onSidesChangeRef.current = onSidesChange;
+  const sidesAnnouncedRef = useRef(false);
+  useEffect(() => {
+    if (!sidesAnnouncedRef.current) {
+      sidesAnnouncedRef.current = true;
+      return;
+    }
+    onSidesChangeRef.current?.(giveIds, receiveIds);
+  }, [giveIds, receiveIds]);
   // #202 — a prefilled mount (deck "Edit in calculator") already made the
   // partner decision, so the picker section collapses to one compact row
   // ("Trading with @x · Change") and the trade itself leads. "Change"

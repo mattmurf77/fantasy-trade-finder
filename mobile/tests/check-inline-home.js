@@ -242,16 +242,26 @@ console.log('check-inline-home:');
     'gated on `fairDeck`, which every path that starts or invalidates a model '
     + 'search already clears — so the label cannot outlive its deck');
   {
+    // RE-KEYED by #402 canvas-results (spec §2, ruling 1): under a LIVE
+    // browse session Clear ENDS the session (handleBrowseClear → the blank
+    // canvas), it no longer runs the model — while the flag-off / no-session
+    // arm must still be the fair deck's own Search-all handler, verbatim.
+    // Both halves pinned so neither semantics can silently absorb the other.
     const at = trades.indexOf('testID="trades.anchor-receipt.clear"');
-    const seg = trades.slice(at, at + 420);
-    assert(/onPress=\{handleSearchAllTrades\}/.test(seg),
-      '8c. Clear reuses the fair deck\'s own Search-all handler',
-      'a second "drop the anchor" implementation is a second set of semantics');
+    const seg = trades.slice(at, at + 900);
+    assert(/onPress=\{canvasResultsLive \? handleBrowseClear : handleSearchAllTrades\}/.test(seg),
+      '8c. Clear: browse sessions end (handleBrowseClear); otherwise the fair deck\'s own Search-all handler, verbatim',
+      'a second "drop the anchor" implementation is a second set of semantics — '
+      + 'and a session Clear that still model-searches ignores ruling 1');
   }
-  assert(/onPress=\{handleAnchorChange\}/.test(trades)
+  // RE-KEYED by #402 canvas-results: while a session is live the canvas holds
+  // the browsed IDEA, so Change forks to handleBrowseAnchorChange (end the
+  // session, hand the ANCHOR build back to the canvas); the flag-off arm
+  // keeps the shipped scroll-to-canvas behavior byte-identically.
+  assert(/onPress=\{canvasResultsLive \? handleBrowseAnchorChange : handleAnchorChange\}/.test(trades)
     && /mainScrollRef\.current\?\.scrollTo\(\{ y: canvasY\.current, animated: true \}\)/
       .test(trades),
-    '8d. Change scrolls to the canvas, which still holds the assets');
+    '8d. Change: browse sessions restore the anchor build; otherwise the shipped scroll to the canvas that still holds the assets');
   // The receipt REPLACES the end-of-deck exit for an inline-anchored deck —
   // the same action twice on one screen is what this stands aside for.
   assert(/calcMergedOn && fairDeck && !inlineAnchorShown \?/.test(trades),

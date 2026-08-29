@@ -298,6 +298,14 @@ FLAG_KEYS: tuple[str, ...] = (
     # therefore a prerequisite. Registered here so the flag ships through
     # /api/feature-flags like every other key.
     "calc.inline_home",
+    # #402 canvas-results (2026-08-28) — found ideas browse inside the merged
+    # calculator canvas (browse session + pager; deck retires from that page).
+    # CLIENT-ONLY: no route reads this key; the two routes the session calls
+    # (POST /api/trades/fair-packages, POST /api/trades/queue) stay gated on
+    # `calc.merged_layout`, which — with `calc.inline_home` — is a
+    # prerequisite. Registered here so the flag ships through
+    # /api/feature-flags like every other key.
+    "calc.canvas_results",
     "ux.sheet_guard",
     "ux.rank_tab_destination",
     "ux.retap_active_tab",

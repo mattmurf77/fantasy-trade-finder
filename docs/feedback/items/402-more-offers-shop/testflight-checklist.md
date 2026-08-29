@@ -152,3 +152,97 @@ own-position chip, single emitter, three-flag conjunction), and the rev-3
 surface changes — window, all-mode filters, tier scope, auto-widen — are all
 covered by the steps above plus the reworked `mobile/tests/check-shop-deck.js`
 structural suite (142 assertions).
+
+---
+
+# Canvas-results (flag `calc.canvas_results` — branch `feat/canvas-results`, ships as v1.16.11)
+
+> **Operator, on the first build carrying the canvas-results commit.** The
+> flag ships **TRUE** (operator cadence; the spec is
+> [`canvas-results-spec.md`](canvas-results-spec.md) — rulings 1/2/3 in its
+> header). Everything below happens on the **merged guided landing** (the
+> Acquire tab's default page with the inline calculator). Part D runs as-is;
+> Part E needs the flag flipped OFF for its duration (`config/features.json`
+> + `POST /api/feature-flags/reload`), then back ON. Under D-056 this list is
+> the only runtime evidence the feature gets — every step names the
+> regression it would catch.
+
+## Part D — flag ON
+
+20. **Fair path lands IN the canvas, no deck.** Put 1–2 of your players on
+    the canvas's send side and tap the action row's **Find a Trade** → the
+    canvas itself re-fills with the first found idea (partner set to the
+    counterparty, both sides loaded), a **‹ 1 / X ›** counter row appears
+    just above the canvas header with a **✕** at its end, and **no deck of
+    swipe cards renders anywhere below** — the old card stack must be gone
+    from this page. The "Built around …" receipt still shows above the
+    results. ☐
+21. **Paging browses without judging.** Tap **›** and **‹** through several
+    ideas: the counter steps, each idea loads as an editable canvas
+    (partner + both sides swap correctly), the page does NOT scroll-jump,
+    and nothing else changes — no toasts, no Elo movement, no idea
+    disappears. At `1 / X` the ‹ chevron is disabled; at `X / X` the ›
+    chevron is disabled (it must stop, never wrap to the first idea). ☐
+22. **Edits stick to their idea (ruling 3).** On idea 1, remove one player
+    and add a different one. Page to idea 2 (it shows ITS package,
+    untouched), then page back to idea 1 → your **edited** version is
+    still there, exactly as you left it. ☐
+23. **✓ queues the edited version.** With idea 1 showing your edit, tap
+    the action row's ✓ → the same queue toast as today (idempotent —
+    a second tap refuses politely), and the pager stays on the same idea
+    (actions don't navigate). ☐
+24. **✕ = the decline-reason pass (ruling 2).** Tap the pager's ✕ → the
+    SAME two-layer reason overlay the deck's calculator ✕ shows today
+    (Value · Fit · Neither tiles, then the detail layer, free-text under
+    Other). Answer both layers → the overlay closes, the idea **leaves
+    the set** (X drops by one) and the next idea fronts. That idea must
+    NOT reappear if you immediately re-run the same canvas search
+    (server pass state / D-067 cooldown). ☐
+25. **✕ dismissed without answering.** Open the ✕ overlay and tap the
+    backdrop **before** touching any tile → nothing happens: the idea
+    stays, X unchanged. Open it again, tap ONE layer-1 tile, then dismiss
+    via the backdrop → the pass stands (the idea leaves, X drops) — the
+    same dismiss-after-bank behavior the deck overlay has today. ☐
+26. **Model path (empty canvas) browses too.** Clear the canvas and tap
+    Find a Trade → the search progress ("Searching… N/M opponents",
+    meter) renders **below the canvas in the results area** — not above
+    the canvas, and never a bare spinner — and as ideas land they become
+    the same ‹ 1 / X › browse, X growing while the job streams. ☐
+27. **Clear ends the session (ruling 1).** Fair session: the receipt's
+    **Clear** → the ideas, pager and receipt disappear and the canvas is
+    blank (no model search fires in their place). Model session: the
+    pager-row **Clear** does the same. **Change** on the receipt →
+    session ends and the canvas holds the anchor assets you searched
+    around, ready to edit. ☐
+28. **Honest empties, no idle-card lie (audit Q5).** Build a canvas
+    package so lopsided no fair package exists (e.g. send your best
+    player for nothing) and tap Find a Trade → the results area shows
+    the **"No fair package for this canvas"** card — it must NEVER show
+    the idle "Hit Find a Trade to start" card. Then pass ✕ through every
+    idea of a small session → **"You've been through every idea"** with
+    the Find a Trade cell as the restart. ☐
+29. **Session dies with its context.** Mid-session, switch leagues via
+    the top bar → the session, pager and edits are gone (blank canvas
+    page for the new league). Start another session, change a
+    finder-target chip or re-run Find a Trade → the old session's edits
+    are discarded with it (page back — original packages only in the
+    NEW session). ☐
+30. **Untouched surfaces.** Team mode and player mode still show their
+    swipe decks exactly as today; the pushed **Real values** page and the
+    shop window ("More offers") are unchanged; the single-pin featured
+    window no longer renders on the merged landing (the browse canvas is
+    the one results surface there) but pins still work via search. ☐
+
+## Part E — flag OFF (flip back, reload flags)
+
+31. **Byte-identical v1.16.10 page.** The merged landing renders the deck
+    below the canvas exactly as before this build: canvas search → card
+    stack with swipe/✓/✕ on the cards, "Built around" receipt with
+    Change=scroll / Clear=search-all, progress strip above the canvas,
+    deck-done summary with its exits. No pager row, no ✕ beside a
+    counter, anywhere. ☐
+32. **Fair-zero still falls through (known, accepted).** With the flag
+    off, a fair sweep returning zero ideas still lands on the idle
+    "Hit Find a Trade" card — the Q5 fix is scoped to the flag-on
+    surface (byte-identical rule wins). Confirm no crash, then flip the
+    flag back ON. ☐
