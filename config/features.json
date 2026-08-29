@@ -116,7 +116,7 @@
   "onboarding.rank_routing": false,
   "onboarding.demo_bridge": false,
   "onboarding.guided_layer": false,
-  "onboarding.guided_avatar": true,
+  "onboarding.guided_avatar": false,
   "onboarding.keep_warm": false,
   "_comment_guide_v2": "Guided Onboarding v2 (docs/plans/guided-onboarding-v2/scope.md \u00a72). onboarding.guide_v2 gates EVERY v2 addition to The Analyst tour: the declarative eligibility layer, the guide's membership in the interrupt arbiter, all new beats (N1, N2, N4, N5, N6.1, N8, N9) and the copy changes riding the new script fields. It sits UNDER the onboarding.v2 master like its siblings, and it is the rollback lever: false = byte-identical to pre-v2-build behavior, config-only (POST /api/feature-flags/reload, no deploy). Shipped FALSE; LIT true 2026-08-22 by operator decision together with calc.merged_layout (#384 — the merged-calculator tour requires the v2 layer), ahead of the original graduation criteria (TestFlight checklist + first-cohort diagnostics M1-M8). Note the blast radius: this lights EVERY v2 beat for all users, not only the calculator tour. Note this is NOT onboarding.guided_layer (the v2.1 coach-mark surface, still dark) or onboarding.guided_avatar (the v1 tour, already true).",
   "onboarding.guide_v2": false,

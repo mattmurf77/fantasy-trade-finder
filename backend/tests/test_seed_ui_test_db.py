@@ -818,7 +818,14 @@ def test_onboarding_v2_flags_are_release_plus_the_onboarding_surface():
     # onboarding.v2 is the master kill-switch — a sub-feature is live iff BOTH
     # it and its own flag are on.
     assert onboarding["onboarding.v2"] is True
-    assert onboarding["onboarding.guided_avatar"] is True
+    # 2026-08-29 operator ruling: "Disable the guided onboarding" — the
+    # Analyst guided-avatar experience is OFF (the tour, guide_v2, was
+    # already off since the 2026-08-28 merge-lit ruling; the activation
+    # prompts — apple_save_moment, quickset_prompt — stay ON by the
+    # operator's explicit "activation moment: yes" and run their plain,
+    # avatar-free arms). FALSE is the pinned contract; a flip back is a
+    # deliberate revert and must change this line with it.
+    assert onboarding["onboarding.guided_avatar"] is False
     # THE LAUNCH PAIRING IS OVER (2026-08-24, Wave A of
     # docs/plans/onboarding-tour-merge/plan.md §2 item 2). It used to read
     # `is True` here, on the reasoning that /api/session/demo 404s without the
