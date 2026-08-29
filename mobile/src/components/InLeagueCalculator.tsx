@@ -126,6 +126,16 @@ interface Props {
    *  file's prefill convention). Absent (every pre-#402 host) the
    *  component is byte-identical. */
   onSidesChange?: (give: string[], receive: string[]) => void;
+  /** #402 QA A-D5 — while the hosting browse session shows an idea, the
+   *  partner is that idea's COUNTERPARTY and stays fixed (spec §3: "change
+   *  partner is NOT part of an idea"). True renders the partner controls
+   *  (merged Team dropdown / #202 collapsed-row Change) dimmed and INERT —
+   *  never hidden, so the layout doesn't jump — and so the opponent-change
+   *  receive-side clear can never fire `onSidesChange` with a corrupted
+   *  {give, receive: []} snapshot under the browsed idea's key. A host
+   *  prop, deliberately not a flag read (the hideFormatChips precedent).
+   *  Defaults to false: every existing host is byte-identical. */
+  partnerLocked?: boolean;
   /** T-3 (merged-view trim, operator ruling 2026-08-28,
    *  docs/feedback/items/402-more-offers-shop/merged-view-trim-2026-08-28.md)
    *  — a HOST prop, deliberately not a flag read: when the calculator is
@@ -265,6 +275,7 @@ export default function InLeagueCalculator({
   onOutlookClosed,
   onLikeTrade,
   onSidesChange,
+  partnerLocked = false,
   hideFormatChips = false,
 }: Props) {
   // #384 — the merged calculator layout. OFF is byte-identical to the
@@ -956,11 +967,19 @@ export default function InLeagueCalculator({
               accessibilityLabel={
                 opponent ? `Team: @${opponent.username}. Change team` : 'Choose a team'
               }
+              // #402 QA A-D5 — see the partnerLocked prop comment: dimmed
+              // and inert while the host browses an idea, never hidden.
+              disabled={partnerLocked}
+              accessibilityState={partnerLocked ? { disabled: true } : undefined}
               onPress={() => {
                 haptics.selection();
                 setTeamPickerOpen(true);
               }}
-              style={({ pressed }) => [styles.dropdown, pressed && styles.dropdownPressed]}
+              style={({ pressed }) => [
+                styles.dropdown,
+                pressed && !partnerLocked && styles.dropdownPressed,
+                partnerLocked && styles.controlLocked,
+              ]}
             >
               <Text style={styles.dropdownLabel}>Team</Text>
               <View style={styles.dropdownValueRow}>
@@ -981,6 +1000,9 @@ export default function InLeagueCalculator({
           </Text>
           <Pressable
             testID="calc.partner-change"
+            // #402 QA A-D5 — same lock as the merged Team dropdown above.
+            disabled={partnerLocked}
+            accessibilityState={partnerLocked ? { disabled: true } : undefined}
             onPress={() => {
               haptics.selection();
               setPartnerCollapsed(false);
@@ -988,7 +1010,11 @@ export default function InLeagueCalculator({
             accessibilityRole="button"
             accessibilityLabel={`Change trade partner, currently @${opponent!.username}`}
             hitSlop={6}
-            style={({ pressed }) => [styles.changeBtn, pressed && styles.changeBtnPressed]}
+            style={({ pressed }) => [
+              styles.changeBtn,
+              pressed && !partnerLocked && styles.changeBtnPressed,
+              partnerLocked && styles.controlLocked,
+            ]}
           >
             <Text style={styles.changeText}>Change</Text>
           </Pressable>
@@ -1984,6 +2010,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.md,
   },
   partnerCollapsedText: { ...type.bodySm, flex: 1, color: chalk.dim },
+  // #402 QA A-D5 — the partner controls' locked (dimmed, inert) state.
+  controlLocked: { opacity: 0.4 },
   partnerCollapsedName: { color: chalk.base, fontFamily: fonts.uiSemi },
   changeBtn: {
     minHeight: 32,

@@ -306,6 +306,12 @@ FLAG_KEYS: tuple[str, ...] = (
     # prerequisite. Registered here so the flag ships through
     # /api/feature-flags like every other key.
     "calc.canvas_results",
+    # Trades-landing (2026-08-28 operator ruling, docs/feedback/items/
+    # 402-more-offers-shop/trades-landing-ruling.md) — the app opens on the
+    # Trades tab for ALL users; the onboarding.trades_first special case is
+    # subsumed while on (its code kept as the flag-off behavior). CLIENT-ONLY:
+    # no route reads this key; TabNav decides once at mount. Registered here
+    # so the flag ships through /api/feature-flags like every other key.
     "nav.trades_landing",
     "ux.sheet_guard",
     "ux.rank_tab_destination",

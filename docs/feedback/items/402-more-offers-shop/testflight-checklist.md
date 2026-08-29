@@ -177,6 +177,15 @@ structural suite (142 assertions).
     swipe cards renders anywhere below** — the old card stack must be gone
     from this page. The "Built around …" receipt still shows above the
     results. ☐
+20a. **First run = a visible browse session (QA round, the P0).** Fresh
+    install (or a reset first-run state): the app opens on the **Trades
+    tab** (`nav.trades_landing` — this must hold even on the first-ever
+    cold launch, before any flag fetch: the default is baked client-side)
+    and the first-run auto-search is VISIBLE — "Searching… N/M opponents"
+    progress in the results area below the canvas, then the ‹ 1 / X ›
+    pager as ideas land. A blank page with a search silently running (or
+    a deck that never appears) is the invisible-first-deck P0 this round
+    fixed. ☐
 21. **Paging browses without judging.** Tap **›** and **‹** through several
     ideas: the counter steps, each idea loads as an editable canvas
     (partner + both sides swap correctly), the page does NOT scroll-jump,
@@ -187,6 +196,21 @@ structural suite (142 assertions).
     and add a different one. Page to idea 2 (it shows ITS package,
     untouched), then page back to idea 1 → your **edited** version is
     still there, exactly as you left it. ☐
+22a. **The partner is fixed while an idea is shown (spec §3).** With an
+    idea on the canvas, the partner control (the Team dropdown / the
+    "Change" row) is **dimmed and inert** — tapping it does nothing, and
+    it is still visible (not hidden; the layout must not jump). Clear the
+    session → the control works again. Regression this catches: changing
+    the partner mid-idea used to clear the receive side and could snapshot
+    that corrupted package as the idea's "edit". ☐
+22b. **"More offers" shops the browsed idea (QA B-C4).** While an idea
+    that sends ≥1 of your players is showing, a bordered **"More offers"**
+    control renders in the pager row (chalk border, not ice). One give
+    asset → the shop window opens directly; several → the "Shop which
+    player?" chooser, whose pick opens the window. Back returns to the
+    SAME browsed idea, session intact, and no second search ran. With no
+    session (blank canvas) — and on the flag-off deck page — this control
+    does not exist (the deck's own chip is the flag-off entry). ☐
 23. **✓ queues the edited version.** With idea 1 showing your edit, tap
     the action row's ✓ → the same queue toast as today (idempotent —
     a second tap refuses politely), and the pager stays on the same idea
@@ -212,6 +236,13 @@ structural suite (142 assertions).
     strip. Regression: browse ✕/✓ must feed the SAME swipe counters deck
     swipes fed — if the card and banner never appear on this page no
     matter how many ideas you disposition, the counters were bypassed. ☐
+23c. **Quick Set accept → the regen is a NEW session (QA B-C2).** From the
+    Quick Set prompt card, accept, save a board, and return to Trades →
+    the previous session's ideas and edits are GONE and the forced
+    re-search shows as a fresh browse session (progress narration, then
+    the pager at 1 / X). The old session must never keep its cursor or
+    edits over the regenerated set — that was the stale-session-adopts-
+    mismatched-deck bug. ☐
 24. **✕ = the decline-reason pass (ruling 2).** Tap the pager's ✕ → the
     SAME two-layer reason overlay the deck's calculator ✕ shows today
     (Value · Fit · Neither tiles, then the detail layer, free-text under
@@ -224,11 +255,14 @@ structural suite (142 assertions).
     stays, X unchanged. Open it again, tap ONE layer-1 tile, then dismiss
     via the backdrop → the pass stands (the idea leaves, X drops) — the
     same dismiss-after-bank behavior the deck overlay has today. ☐
-26. **Model path (empty canvas) browses too.** Clear the canvas and tap
-    Find a Trade → the search progress ("Searching… N/M opponents",
-    meter) renders **below the canvas in the results area** — not above
-    the canvas, and never a bare spinner — and as ideas land they become
-    the same ‹ 1 / X › browse, X growing while the job streams. ☐
+26. **Model path (empty canvas) browses too — and streaming narrates.**
+    Clear the canvas and tap Find a Trade → the search progress
+    ("Searching… N/M opponents", meter) renders **below the canvas in the
+    results area** — not above the canvas, and never a bare spinner. As
+    ideas land they become the same ‹ 1 / X › browse — and while the job
+    is STILL running, a slim chalk-dim **"Searching… N/M opponents"** line
+    renders with the pager, so X never grows silently; the line disappears
+    when the job completes. ☐
 27. **Clear ends the session (ruling 1).** Fair session: the receipt's
     **Clear** → the ideas, pager and receipt disappear and the canvas is
     blank (no model search fires in their place). Model session: the

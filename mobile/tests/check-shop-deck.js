@@ -238,10 +238,21 @@ function trackCallsFor(sf, eventName) {
         ),
         'a3: the shop branch returns early (flag-off arm untouched below it)',
       );
+      // Re-keyed 2026-08-29 (canvas-results QA round B-C4): the 1-vs-many
+      // fork moved into openShopForCard so the browse pager's "More offers"
+      // shares the EXACT entry (no parallel path). The branch reaches
+      // navigate-vs-chooser through it; the helper's own shape is pinned
+      // below and by check-canvas-results §12i.
       assert(
-        referencesIdentifier(sf, fork, 'openShopWindow') &&
-          referencesIdentifier(sf, fork, 'setShopChooserCard'),
-        'a4: the shop branch navigates (1 give) or opens the chooser (several)',
+        referencesIdentifier(sf, fork, 'openShopForCard'),
+        'a4: the shop branch routes through openShopForCard (navigate 1 give / chooser several)',
+      );
+      const forkFn = functionNamed(sf, 'openShopForCard');
+      assert(
+        !!forkFn &&
+          referencesIdentifier(sf, forkFn, 'openShopWindow') &&
+          referencesIdentifier(sf, forkFn, 'setShopChooserCard'),
+        'a4b: openShopForCard navigates (1 give) or opens the chooser (several)',
       );
       // The flag-off arm still carries the shipped pin path: every one of
       // these must appear in handleKeepSide but OUTSIDE the shop branch.
@@ -249,7 +260,10 @@ function trackCallsFor(sf, eventName) {
         'preSinglePinSnapshotRef',
         'setSide',
         'resetDeckForNewTargets',
-        'generateMutation',
+        // Re-keyed 2026-08-29: the flag-off arm dispatches through
+        // dispatchGenerate (the QA round's session-lifecycle helper) — the
+        // same single generateMutation underneath.
+        'dispatchGenerate',
       ]) {
         const inFn = findAll(
           sf,

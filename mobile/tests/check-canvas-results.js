@@ -205,14 +205,27 @@ console.log('check-canvas-results:');
   const pass = functionNamed(host, 'handleBrowsePass');
   assert(!!pass, '4. handleBrowsePass exists');
   const passText = pass ? pass.getText() : '';
-  assert(/declineReasonProps && reasonsAsOverlay/.test(passText)
-    && /handleReasonOverlayOpened\(\)/.test(passText),
-    '4a. the ✕ opens the reason capture through the SAME gate and the SAME opened-event emitter the deck uses',
-    'a private overlay-open would fork trade_pass_overlay_opened semantics');
-  assert(/advance\('pass', \{ deferDeckAdvance: true \}\)/.test(passText)
-    && /flushPendingPass\(\)/.test(passText)
-    && /removeBrowsedIdea\(rawTopCard\.trade_id\)/.test(passText),
-    '4b. the reasons-off fallback is a plain deck pass (advance + immediate commit) plus the set removal');
+  // QA round A-D3 + B-P7 (re-keyed 2026-08-29; was: overlay only for
+  // `declineReasonProps && reasonsAsOverlay`, with a bare-advance fallback).
+  // The operator's ruling 2 is UNQUALIFIED — the ✕ IS the decline flow on
+  // every browse session — so the deckOrigin/reasonsAsOverlay gate and the
+  // fallback branch (whose "Passed — Undo" toast lied: the immediate flush
+  // made Undo a no-op) are both gone.
+  assert(/setBrowseReasonOpen\(true\)/.test(passText)
+    && /handleReasonOverlayOpened\(\)/.test(passText)
+    && !/reasonsAsOverlay/.test(stripComments(passText)),
+    '4a. the ✕ ALWAYS opens the reason capture — no deckOrigin/reasonsAsOverlay gate (ruling 2, unqualified)',
+    'a re-grown origin gate silently drops reason capture on auto-start/model sessions');
+  assert(!!pass && !referencesIdentifier(host, pass, 'advance')
+    && !referencesIdentifier(host, pass, 'flushPendingPass')
+    && !referencesIdentifier(host, pass, 'removeBrowsedIdea')
+    && !referencesIdentifier(host, pass, 'setToast'),
+    '4b. the bare-advance fallback (and its no-op-Undo toast) stays deleted',
+    'the only removal paths are the reason machinery\'s own commit and dismiss handlers');
+  assert(/\{declineReasonProps \? \(/.test(trades)
+    && trades.indexOf('{declineReasonProps ? (') < trades.indexOf('testID="trades.canvas-results.pass"'),
+    '4b2. the ✕ renders only while the reason machinery exists (decline_reasons kill switch ⇒ control steps aside)',
+    'an ✕ with no machinery would be a dead control — or worse, a re-grown fallback');
   assert(!/\.edits/.test(passText),
     '4c. the pass never touches the edit map — the ORIGINAL idea is what gets passed',
     'the pass signal is about the engine\'s suggestion, not the user\'s edit');
@@ -359,10 +372,20 @@ console.log('check-canvas-results:');
 {
   assert(/setBrowseSession\(\{ origin: 'fair', passed: 0, edits: \{\} \}\);\s*\}\s*runFairPackages\(fairAnchor\);/.test(trades),
     '8. the fair sweep creates a fair-origin session at its single dispatch site');
-  assert(count(tradesCode, /setBrowseSession\(\{ origin: 'model', passed: 0, edits: \{\} \}\)/g) === 1,
-    '8a. the choke point\'s model dispatch creates a model-origin session (exactly once)');
-  assert(count(tradesCode, /generateMutation\.mutate\(/g) === 8,
-    '8b. no new generate dispatch site was added (the check-inline-home 7f census holds)');
+  // QA round B-C1/B-C2/B-P6 (re-keyed 2026-08-29; was: the choke point's
+  // own literal + a count of 8 raw mutate sites). Session lifecycle now
+  // rides EVERY dispatch through dispatchGenerate — the model-origin
+  // adopt-or-create updater lives there, once.
+  const dispatch = functionNamed(host, 'dispatchGenerate');
+  assert(!!dispatch
+    && /s \? \{ \.\.\.s, origin: 'model' \} : \{ origin: 'model', passed: 0, edits: \{\} \}/.test(dispatch.getText())
+    && count(tradesCode, /origin: 'model', passed: 0, edits: \{\}/g) === 1,
+    '8a. dispatchGenerate adopts-or-creates the model-origin session — the ONE model session-creation site',
+    'a second creation literal is a census bypass');
+  assert(count(tradesCode, /generateMutation\.mutate\(/g) === 1
+    && !!dispatch && referencesIdentifier(host, dispatch, 'canvasResultsLive'),
+    '8b. exactly ONE raw generateMutation.mutate — inside dispatchGenerate, gated on the live host',
+    'every dispatch site must route through the helper (census in its header comment)');
   assert(/onPress=\{canvasResultsLive \? handleBrowseClear : handleSearchAllTrades\}/.test(trades),
     '8c. the anchor receipt\'s Clear ends a live session (ruling 1) and keeps its shipped handler otherwise');
   assert(/onPress=\{canvasResultsLive \? handleBrowseAnchorChange : handleAnchorChange\}/.test(trades),
@@ -504,6 +527,137 @@ console.log('check-canvas-results:');
   // Reuse-only still holds: the hook fires no event of its own.
   assert(!!rec && !referencesIdentifier(host, rec, 'track'),
     '11n. recordCanvasQueueLike emits nothing itself — every event it causes is an existing moment\'s own');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 12 — QA round (2026-08-29): session lifecycle at every dispatch,
+//      inline-reset census, arrival adoption, prefill-ends-session, the
+//      shop entry, frozen order, streaming narration, partner lock, baked
+//      defaults. Each pin names the sabotage it would catch.
+// ═══════════════════════════════════════════════════════════════════════
+{
+  // (a) DISPATCH CENSUS — 8 call sites + the definition, nothing raw.
+  const calls = count(tradesCode, /dispatchGenerate\(/g);
+  assert(calls === 9,
+    '12a. dispatchGenerate: 8 routed dispatch sites + 1 definition (census pinned)',
+    `saw ${calls} — a new site must be added to the helper's census table AND this count`);
+  // (b) the first-run auto-start is the P0: it must create a session.
+  assert(/autoGenRef\.current = 'kicked';[\s\S]{0,500}?dispatchGenerate\(\{ auto: true \}\)/.test(tradesCode),
+    '12b. the first-run AUTO-START routes through dispatchGenerate (the B-C1 P0)',
+    'a raw mutate here streams every new user\'s first deck into an invisible tree');
+  assert(/autoRetryTimer\.current = null;\s*dispatchGenerate\(\{ auto: true \}\)/.test(tradesCode),
+    '12c. …and so does its silent retry');
+  // (d) the QuickSet regen kills the stale session BEFORE its inline clear.
+  {
+    const at = tradesCode.indexOf('consumePendingQuicksetRegen()');
+    const seg = tradesCode.slice(at, at + 1600);
+    const kill = seg.indexOf('setBrowseSession(null)');
+    const clear = seg.indexOf('setDeck([])');
+    const disp = seg.indexOf('dispatchGenerate(');
+    assert(at > 0 && kill > -1 && clear > -1 && disp > -1 && kill < clear && clear < disp,
+      '12d. QuickSet regen: session killed → deck cleared → dispatch (a stale session never adopts the regen deck)',
+      'order matters: kill before clear before dispatch');
+  }
+  // (e) INLINE-RESET CENSUS — every setDeck([]) accounted for.
+  assert(count(tradesCode, /setDeck\(\[\]\)/g) === 5,
+    '12e. exactly 5 setDeck([]) sites (fairness toggle, league switch, clear-pin, QuickSet regen, the reset fn)',
+    'a 6th inline reset shipped un-audited — add it to the census and kill the session there');
+  for (const fn of ['handleToggleFairness', 'handleClearPin']) {
+    const f = functionNamed(host, fn);
+    assert(!!f && /setBrowseSession\(null\)/.test(f.getText())
+      && /browseSeededIdRef\.current = null/.test(f.getText()),
+      `12f. ${fn}'s inline reset explicitly kills the session (+ seeded-id ref)`);
+  }
+  // (g) A-D2 — the ARRIVAL direction adopts, never orphans.
+  assert(/if \(canvasResultsLive && !browseSession && \(deck\.length > 0 \|\| !!job\)\) \{/.test(tradesCode)
+    && /origin: fairDeck \? 'fair' : 'model',/.test(tradesCode),
+    '12g. flag/host ARRIVAL over an existing deck (or live job) adopts it into a session',
+    'without this the flag flipping true orphans a visible deck — the P0 shape again');
+  // (h) B-C3 — a prefill over a live session ends the session first.
+  {
+    const f = functionNamed(host, 'loadCanvasPrefill');
+    assert(!!f && /if \(browseLive\) \{\s*endBrowseSession\(p\);/.test(f.getText()),
+      '12h. loadCanvasPrefill ends a live session (via the ONE reset) before seeding the canvas',
+      'otherwise ✕/edits/✓ address a different trade than the canvas shows');
+  }
+  // (i) B-C4 — the shop entry on the browsed idea, one fork, one emitter.
+  assert(trades.includes('testID="trades.canvas-results.more-offers"'),
+    '12i. the browse "More offers" affordance exists in the pager row');
+  {
+    const pagerAt = trades.indexOf('{browseLive && sortedDeck.length > 0 ? (');
+    const moreAt = trades.indexOf('testID="trades.canvas-results.more-offers"');
+    const canvasAt = trades.indexOf('<TradeBuildCanvas');
+    assert(pagerAt > 0 && moreAt > pagerAt && moreAt < canvasAt,
+      '12i2. …inside the browse-gated pager block — absent with no session (canvas-only page has no idea to shop)');
+    const fork = functionNamed(host, 'openShopForCard');
+    assert(!!fork && referencesIdentifier(host, fork, 'openShopWindow')
+      && referencesIdentifier(host, fork, 'setShopChooserCard')
+      && !referencesIdentifier(host, fork, 'track'),
+      '12i3. openShopForCard is the ONE entry fork (navigate vs chooser) and emits nothing itself');
+    const keep = functionNamed(host, 'handleKeepSide');
+    assert(!!keep && referencesIdentifier(host, keep, 'openShopForCard'),
+      '12i4. the deck chip routes through the SAME fork — no parallel entry path');
+    assert(count(tradesCode, /openShopForCard\(/g) === 3,
+      '12i5. exactly two fork callers (deck chip + browse entry) + the definition',
+      'shop_opened stays a single emitter inside openShopWindow (P-3; check-shop-deck h4)');
+  }
+  // (j) B-P5 — frozen order under browse.
+  assert(/if \(canvasResultsOn && browseSession\) return pool;/.test(tradesCode),
+    '12j. sortedDeck freezes to deck order while a session exists (appends land at the END, likes-you pinning stands down)',
+    'a background re-sort remounts the canvas onto a DIFFERENT idea');
+  {
+    const f = functionNamed(host, 'applySessionRerank');
+    assert(!!f && /if \(!fairnessOn \|\| laneFilter \|\| browseLive\) return;/.test(f.getText()),
+      '12j2. session_rerank never reorders the browsed set (vector still accumulates)');
+  }
+  // (k) A-D4 — streaming narration while ideas already browse.
+  {
+    const at = trades.indexOf('testID="trades.canvas-results.streaming"');
+    const seg = trades.slice(Math.max(0, at - 900), at + 600);
+    assert(at > 0
+      && /browseSession\?\.origin === 'model'/.test(seg)
+      && /job\?\.status === 'running'/.test(seg)
+      && /Searching… /.test(seg) && /opponents/.test(seg),
+      '12k. a running model job with ideas on screen narrates ("Searching… N/M") beside the pager',
+      'the X must never silently grow with no narration');
+  }
+  // (l) A-D5 — the partner is fixed while an idea is shown.
+  assert(/partnerLocked=\{browseLive\}/.test(tradesCode),
+    '12l. the host locks the partner exactly while browsing');
+  assert(/partnerLocked\?: boolean;/.test(canvas) && /partnerLocked=\{partnerLocked\}/.test(canvasCode),
+    '12l2. TradeBuildCanvas threads partnerLocked through (optional — every other host byte-identical)');
+  assert(/partnerLocked\?: boolean;/.test(calc)
+    && /testID="calc\.team-dropdown"[\s\S]{0,700}?disabled=\{partnerLocked\}/.test(calc)
+    && /testID="calc\.partner-change"[\s\S]{0,700}?disabled=\{partnerLocked\}/.test(calc),
+    '12l3. both partner controls go INERT (disabled), dimmed not hidden, under the lock',
+    'this also kills the corrupted {give, receive: []} edit snapshot on partner change');
+  // (m) QA-B nit — same-batch-safe browse removal.
+  {
+    const f = functionNamed(host, 'removeBrowsedIdea');
+    assert(!!f && /browseDeckSyncRef\.current/.test(f.getText())
+      && /setDeck\(\(prev\) => prev\.filter/.test(f.getText()),
+      '12m. removeBrowsedIdea derives `remaining` from the synchronous mirror + functional setDeck',
+      'a same-batch double-✕ against the render closure clamps the cursor one high');
+  }
+  // (n) #362 QA nit — the standing-offer prompt reaches browse likes.
+  {
+    const f = functionNamed(host, 'recordCanvasQueueLike');
+    assert(!!f && referencesIdentifier(host, f, 'maybeShowStandingOfferPrompt'),
+      '12n. queue success re-triggers the standing-offer ladder (its sheet mounts page-level)');
+  }
+  // (o) A-D1 — the launched pair is BAKED into the mobile defaults.
+  {
+    const flagsStore = read('state/useFeatureFlags.ts');
+    const seg = flagsStore.slice(
+      flagsStore.indexOf('LAUNCHED_FLAG_DEFAULTS'),
+      flagsStore.indexOf('export const useFeatureFlags'),
+    );
+    assert(/'nav\.trades_landing': true,/.test(seg),
+      '12o. nav.trades_landing baked true — the first-ever cold launch honors trades-landing',
+      'the #115 convention: launched flags fail OPEN on fresh-install first boot / stale-cache first paint');
+    assert(/'calc\.canvas_results': true,/.test(seg),
+      '12o2. calc.canvas_results baked true — no deck-layout paint flip on first boot');
+  }
 }
 
 console.log(failures === 0

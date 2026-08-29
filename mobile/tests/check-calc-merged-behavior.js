@@ -316,7 +316,10 @@ assert(/autoRunOrigin === ['"]calculator['"]/.test(trades),
   assert(/scopedOpponent \|\| \(autoRun && autoRunOrigin === ['"]calculator['"]\)/.test(seg),
     '17a. a calculator hand-off generates with no scoped opponent',
     'gated on scopedOpponent alone, an unscoped canvas search never fires');
-  assert(/generateMutation\.mutate\(\{\}\)/.test(seg),
+  // Re-keyed 2026-08-29 (canvas-results QA round): the choke point's
+  // dispatch is dispatchGenerate — the same single mutate wrapped with the
+  // browse-session lifecycle. Still the one choke point, still no new site.
+  assert(/dispatchGenerate\(\{\}\)/.test(seg),
     '17b. it dispatches through the existing #330 choke point, not a new mutate site');
 }
 

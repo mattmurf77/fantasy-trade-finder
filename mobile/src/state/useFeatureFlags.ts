@@ -86,6 +86,21 @@ const LAUNCHED_FLAG_DEFAULTS: FlagMap = {
   // import sheet; the CSV-upload and paste rows are NOT gated by these.
   'ranks.source.dynasty_nerds': false,
   'ranks.source.dlf': false,
+  // ── v1.16.11 canvas-era pair (QA A-D1; both LAUNCHED true, operator
+  // cadence — see config/features.json) ──────────────────────────────────
+  // `nav.trades_landing`: the launch tab is Trades for everyone. TabNav
+  // reads it imperatively ONCE at mount, so this baked default is the whole
+  // of what a fresh install's first boot (no cached map) and a stale-cache
+  // first paint see — absent here, the first-ever cold launch would open on
+  // Rank despite the ruling. A server `false` still kill-switches on the
+  // next successful revalidate.
+  'nav.trades_landing': true,
+  // `calc.canvas_results`: found ideas browse inside the merged canvas.
+  // Launched true; absent here a first boot would render the deck-below-
+  // canvas layout for one session (or one frame, on a stale cache) and then
+  // flip — the #115 paint-flip this list exists to prevent. Same kill-
+  // switch contract as every launched key above.
+  'calc.canvas_results': true,
 };
 
 export const useFeatureFlags = create<FlagState>((set, get) => ({

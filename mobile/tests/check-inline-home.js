@@ -217,8 +217,13 @@ console.log('check-inline-home:');
     'the two arms stay mutually exclusive at the source');
   assert(/setCanvasRunSeq\(\(n\) => n \+ 1\);/.test(seg),
     '7e. …and triggers the ONE #330 choke point rather than dispatching itself');
-  assert(count(tradesCode, /generateMutation\.mutate\(/g) === 8,
-    '7f. no new generate dispatch site was added',
+  // Re-keyed 2026-08-29 (canvas-results QA round): the 8 dispatch sites now
+  // route through the ONE dispatchGenerate helper so the browse-session
+  // lifecycle rides every dispatch (check-canvas-results §12 census). The
+  // no-new-site invariant is unchanged — it just counts the helper's calls.
+  assert(count(tradesCode, /generateMutation\.mutate\(/g) === 1
+    && count(tradesCode, /dispatchGenerate\(/g) === 9,
+    '7f. no new generate dispatch site was added (1 raw mutate in the helper; 8 routed sites + definition)',
     'a second site is a second search per tap waiting to happen');
   assert(/\}, \[finderMode, scopedOpponent, autoRunSeq, canvasRunSeq\]\);/.test(trades),
     '7g. the choke point lists the inline trigger as a dep');
