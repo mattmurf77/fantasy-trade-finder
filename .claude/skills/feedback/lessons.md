@@ -357,3 +357,26 @@ files. Seeded from history before this skill existed:
   it: the living-memory entries went in naming build 139 and had to be swept for "139"
   across seven files once it errored. Cheaper: land the merge record first, add the
   build number in the sweep-ledger commit.
+- 2026-08-30b [triage] A tester's "I started noticing this yesterday" is the single most
+  valuable triage input available and it REDIRECTED the whole investigation: it cleared the
+  ship that had gone out hours earlier and pointed at the day before, where the real answer
+  was a route that had been 100% broken for 8 days and had merely become REACHABLE (a flag
+  lit 8/28 + a landing-page change 8/29). Ask "when did you first see it?" before assuming
+  the newest deploy; and separate "when did the code change" from "when did the path become
+  reachable" — they were 6 days apart here.
+- 2026-08-30b [qa] The fixture that hides a bug will also hide it from the FIX's tests. #409's
+  suite was green for 8 days at a 100% production failure rate because every case put the
+  caller inside `league.members`, a shape prod never builds. Make "is this fixture a shape
+  production actually produces?" an explicit QA question, and require the new tests to be
+  proven red against the ORIGINAL defect, not just against a mutation of the new code.
+- 2026-08-30b [qa] QA-B's most valuable finding was not a bug but an UNDISCLOSED COST: the
+  operator picked "shrink the name" over "wrap to two lines" having been told the cost was
+  name truncation, and nobody had measured that the same change squeezes team/age off
+  top-tier rows entirely. When an operator picks between options, re-audit the chosen one for
+  costs the comparison did not mention — and when one surfaces after they've stepped away,
+  ship it with disclosure (a checklist step that asks for a ruling), never silently and never
+  by substituting your own design call.
+- 2026-08-30b [ship] Bundling a backend fix with mobile work is the right call when the
+  backend half fixes fielded builds: one merge put #409 live on Render for every phone
+  already installed (verified deploy CREATED for the sha, then polled to `live`), while the
+  mobile half waits on TestFlight. Don't split the PR just because the platforms differ.
