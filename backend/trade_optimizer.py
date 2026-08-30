@@ -64,6 +64,7 @@ from .trade_service import (
     _value_uncertainty,
     mismatch_damp,
     rank_fairness,
+    age_pref_value,
     elo_to_value,
     avoid_ok,
     filler_ok,
@@ -330,7 +331,10 @@ def generate_pair_trades_v3(
     def _sv(pid: str) -> float:
         v = _sv_cache.get(pid)
         if v is None:
-            v = elo_to_value(seed_elo.get(pid, 1500.0))
+            # Age-preference adjusted (2026-08-29) — mirrors v2's _vs so the
+            # two engines cannot price an age band differently.
+            v = age_pref_value(elo_to_value(seed_elo.get(pid, 1500.0)),
+                               players.get(pid))
             _sv_cache[pid] = v
         return v
 

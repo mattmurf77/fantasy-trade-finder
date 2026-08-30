@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-29 — Age-pref multiplier live: re-measure dispositions in ~2 weeks](#2026-08-29--age-pref-multiplier-live-re-measure-dispositions-in-2-weeks)
 - [2026-08-24 — Quick Set `via` gap PR: operator confirm + merge, then the TestFlight check](#2026-08-24--quick-set-via-gap-pr-operator-confirm--merge-then-the-testflight-check)
 - [2026-08-23 — Onboarding × calc tour merge: operator decisions, then Wave A](#2026-08-23--onboarding--calc-tour-merge-operator-decisions-then-wave-a)
 - [2026-08-22 — Full sweep: merge the review PR, then the build, then the operator flips](#2026-08-22-full-sweep-merge-the-review-pr-then-the-build-then-the-operator-flips)
@@ -35,6 +36,10 @@
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## 2026-08-29 — Age-pref multiplier live: re-measure dispositions in ~2 weeks
+
+**Why now:** D-167 shipped the age-preference consensus multiplier (u23 up/capped, 30+ down) off the [2026-08-29 disposition review](../docs/business/analytics/2026-08-29-trade-disposition-review.md). The claim it must earn: `value_giving` declines shrink and give-u23 / receive-30plus shapes stop dominating passes — without like-rate collapse from lost supply. Re-run the review's per-arm query set (windowed to post-ship serves only) once ~2 weeks of serve data accumulate; tune `age_pref_mult_*` / `age_pref_boost_cap` via `PUT /api/admin/config/<key>` from what it shows. Also verify post-deploy that the three knobs seeded into prod `model_config` (INSERT OR IGNORE runs at boot).
 
 ## 2026-08-24 — Quick Set `via` gap PR: operator confirm + merge, then the TestFlight check
 

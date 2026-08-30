@@ -2421,6 +2421,10 @@ _MODEL_CONFIG_DEFAULTS = [
     ("outlook_alpha_not_sure",   0.5,   "2.2: now-value weight for not-sure/unknown outlook"),
     ("outlook_alpha_rebuilder",  0.25,  "2.2: now-value weight for rebuilder outlook"),
     ("outlook_alpha_jets",       0.1,   "2.2: now-value weight for jets (extreme rebuild) outlook"),
+    # ── Age-preference consensus multiplier (2026-08-29 disposition review) ──
+    ("age_pref_mult_u23",        1.10,  "age pref: consensus-value multiplier for players under 23 (deck generation accessors only); 1.0 = off"),
+    ("age_pref_mult_30plus",     0.90,  "age pref: consensus-value multiplier for players 30 and older; 1.0 = off"),
+    ("age_pref_boost_cap",       500.0, "age pref: max absolute value-space INCREASE an age boost may add (~half a mid-1st); <=0 = uncapped; never caps decreases"),
     ("fuzzy_match_tau",          0.8,   "2.3b: Jaccard threshold per side for fuzzy mirror matching"),
     ("likes_you_min_user_delta", -500.0, "2.3a/D-055: min net consensus value (receive - give, summed player values) the VIEWER must clear for a leaguemate's liked trade to be injected into their deck; very negative disables the floor"),
     # ── FB-47 finder targeting (flag trade.finder_targeting) ─────────────

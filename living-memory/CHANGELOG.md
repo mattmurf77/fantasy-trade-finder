@@ -14,6 +14,20 @@
 
 
 
+## 2026-08-29f — age-preference consensus multiplier (D-167)
+
+Follow-through on the trade-disposition review's biggest decline cluster: testers price by
+age (give-u23 like rate 9%, receive-30plus 14%; mirrors are the deck's best) and the engine
+didn't. Operator ruling mid-analysis: re-price, don't filter, cap the increase. New
+`trade_service.age_pref_value()` applied inside all three deck consensus accessors
+(`_vs`/`_sv`/`cval` — arms current/challenger/gen_v2 priced identically): u23 ×1.10 with
+the boost capped at 500 value pts (`age_pref_boost_cap`), 30plus ×0.90, 23–29/picks
+untouched. Knobs hot-tunable; both mults at 1.0 = byte-identical off. Arm A pins 1.0 in
+MODEL_A_PROFILE (golden un-recaptured). 10 new pytests (`test_age_pref.py`, sabotage-proven);
+age knobs pinned neutral in the three golden-comparison test files. Full suite 4,471/0.
+Scope: docs/plans/age-pref-value/scope.md · decision D-167 · config-reference updated.
+Re-measure with the disposition review's query set once fresh serve data accumulates.
+
 ## 2026-08-29e — layer-1 decline pass carries dwell (client half of the dup-pass guard)
 
 PR #246 squash-merged on green CI → `main` @ `293b5f80`. Client companion to #242 below:
