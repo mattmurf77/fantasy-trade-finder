@@ -26,10 +26,16 @@ Covers:
     re-tap at will).
   • VALIDATION — missing fields and a foreign league_id are 400s.
   • ANALYTICS — `calc_trade_queued` is registered, prop-bounded, and INTENT.
+  • THE PRODUCTION SHAPE (FB-409) — the same route driven through the session
+    `/api/session/init` actually builds, where `league.members` EXCLUDES the
+    caller. Every case above predates this and runs against a shape production
+    never produces, which is how a 100% refusal rate stayed green for 8 days.
 
 Harness follows test_swipe_reconstruct.py: Flask test client, a real
 in-memory session, isolated in-memory SQLite, `record_event` mocked.
 `save_trade_swipes` is deliberately REAL so the Elo rows can be counted.
+TWO fixtures, one per session shape: `harness` (caller in `members`) and
+`prod_harness` (caller absent — the real one). Both are kept on purpose.
 """
 
 import json
@@ -84,8 +90,7 @@ def _players():
             for pid in SEED]
 
 
-@pytest.fixture()
-def harness():
+def _harness_ctx(*, caller_in_members: bool):
     engine = create_engine("sqlite:///:memory:",
                            connect_args={"check_same_thread": False})
     metadata.create_all(engine)
@@ -94,17 +99,18 @@ def harness():
     service = RankingService(players=players)
     service._seed = dict(SEED)
     trade_svc = TradeService(players={p.id: p for p in players})
+    members = [LeagueMember(user_id=OPP, username="opp",
+                            roster=list(THEIR_ROSTER), elo_ratings={})]
+    if caller_in_members:
+        members.insert(0, LeagueMember(user_id=ME, username="me",
+                                       roster=list(MY_ROSTER), elo_ratings={}))
     league = League(
         league_id=LEAGUE, name="Calc Queue League", platform="sleeper",
-        members=[
-            LeagueMember(user_id=ME, username="me",
-                         roster=list(MY_ROSTER), elo_ratings={}),
-            LeagueMember(user_id=OPP, username="opp",
-                         roster=list(THEIR_ROSTER), elo_ratings={}),
-        ])
+        members=members)
 
     sess = {
         "user_id":       ME,
+        "username":      "me",
         "league":        league,
         "players":       players,
         "user_roster":   list(MY_ROSTER),
@@ -139,6 +145,33 @@ def harness():
             with server._sessions_lock:
                 server._sessions.pop(TOKEN, None)
             ff._flags_cache = old_flags
+
+
+@pytest.fixture()
+def harness():
+    """THE TEST-ONLY SHAPE — the caller sits INSIDE `league.members`.
+
+    Production never builds this session (see `prod_harness`), but a session
+    that *did* carry the caller must keep working, so this shape is kept and
+    the whole original suite still runs against it.
+    """
+    yield from _harness_ctx(caller_in_members=True)
+
+
+@pytest.fixture()
+def prod_harness():
+    """THE PRODUCTION SHAPE (FB-409) — the caller is ABSENT from
+    `league.members`, and their roster arrives only as `sess["user_roster"]`.
+
+    This is what `/api/session/init` actually builds: members come from the
+    client's `opponent_rosters` (which the clients filter the caller out of)
+    and the DB merge explicitly refuses to re-add the caller. Because every
+    case in this file used to run against the `harness` shape only, the route
+    could — and did — refuse 100% of real ✓ taps with `not_league_member` for
+    eight days with a fully green suite. Anything asserting "the caller is in
+    this league" belongs here, not there.
+    """
+    yield from _harness_ctx(caller_in_members=False)
 
 
 def _queue(client, **over):
@@ -237,6 +270,109 @@ def test_the_queued_like_reaches_the_opponents_deck(harness):
     # Mirrored: they give what I asked for, they receive what I offered.
     assert mirrored.give_player_ids == GOOD_RECV
     assert mirrored.receive_player_ids == GOOD_GIVE
+
+
+# ---------------------------------------------------------------------------
+# The production shape — caller NOT in `league.members` (FB-409)
+#
+# The caller-exclusion convention has now bitten four times (FB #41 → #291 →
+# #295/#296/#305 → #409), and three of the four were hidden by a fixture that
+# put the caller in `members`. These cases are the regression guard: they must
+# be RED with `not_league_member` on any revert of the synthesized
+# `caller_member` in `queue_trade_for_opponent`.
+# ---------------------------------------------------------------------------
+
+def test_prod_shape_queue_succeeds(prod_harness):
+    """THE FB-409 GUARD. Identical to `test_queue_records_the_like`, run
+    against the session production actually builds. Before the fix this
+    returned `{queued: false, reason: "not_league_member"}` — the 100% refusal
+    every fielded ✓ tap got from 2026-08-22 to 2026-08-30."""
+    client, engine, _sess, service, trade_svc, _league = prod_harness
+    res = _queue(client)
+    assert res.status_code == 200, res.get_data(as_text=True)
+    body = res.get_json()
+    assert body["queued"] is True, body
+    assert body["already_queued"] is False
+
+    rows = _decision_rows(engine)
+    assert len(rows) == 1
+    assert rows[0].user_id == ME
+    assert rows[0].decision == "like"
+    card = trade_svc._trade_cards[body["trade_id"]]
+    assert card.target_user_id == OPP
+    assert len(service._trade_swipes) == 1
+
+
+def test_prod_shape_does_not_mutate_league_members(prod_harness):
+    """The synthesized caller is LOCAL to the route. `league.members` is
+    shared session state read by the trade engine, the mock draft, power
+    rankings and the likes-you injector, all of which assume the exclusion —
+    a caller left behind in it is a phantom 13th team."""
+    client, _engine, _sess, _service, _trade_svc, league = prod_harness
+    assert _queue(client).get_json()["queued"] is True
+    assert [m.user_id for m in league.members] == [OPP]
+
+
+def test_prod_shape_give_side_still_checked_against_my_roster(prod_harness):
+    """The synthesized roster is the session's real one, not an empty list or
+    a wildcard — offering an asset I do not own is still refused."""
+    client, engine, _sess, service, *_ = prod_harness
+    _assert_refused(_queue(client, give_player_ids=["r2"]), engine, service,
+                    "assets_not_on_roster")
+
+
+def test_prod_shape_receive_side_still_checked_against_their_roster(prod_harness):
+    client, engine, _sess, service, *_ = prod_harness
+    _assert_refused(_queue(client, receive_player_ids=["g2"]), engine, service,
+                    "assets_not_on_roster")
+
+
+def test_prod_shape_cannot_queue_a_trade_with_yourself(prod_harness):
+    """Same refusal, different branch: in this shape the caller is not in
+    `members`, so it is the OPPONENT lookup that misses. `not_league_member`
+    either way, which is all the client switches on."""
+    client, engine, _sess, service, *_ = prod_harness
+    _assert_refused(_queue(client, opponent_user_id=ME), engine, service,
+                    "not_league_member")
+
+
+def test_prod_shape_unknown_opponent_still_refused(prod_harness):
+    """The fix synthesizes the CALLER only — a genuinely foreign
+    `opponent_user_id` must still be refused."""
+    client, engine, _sess, service, *_ = prod_harness
+    _assert_refused(_queue(client, opponent_user_id=STRANGER), engine, service,
+                    "not_league_member")
+
+
+def test_prod_shape_like_reaches_the_opponents_deck(prod_harness):
+    """End to end in the real shape: the row this route writes is the row
+    `_inject_likes_you_cards` reads. This is the surface FB-409 starved — no
+    calculator-built proposal had ever reached a counterparty's deck.
+
+    The opponent's deck is generated from the OPPONENT's session, whose own
+    `league.members` excludes them and includes the caller — so it is built
+    here explicitly rather than reusing the caller's league object. (Sharing
+    one league across both perspectives is exactly the fixture shortcut that
+    hid this bug; `test_the_queued_like_reaches_the_opponents_deck` only gets
+    away with it because its fixture happens to hold both members.)"""
+    client, _engine, *_ = prod_harness
+    assert _queue(client).get_json()["queued"] is True
+
+    their_league = League(
+        league_id=LEAGUE, name="Calc Queue League", platform="sleeper",
+        members=[LeagueMember(user_id=ME, username="me",
+                              roster=list(MY_ROSTER), elo_ratings={})])
+    their_svc = TradeService(players={p.id: p for p in _players()})
+    cards = server._inject_likes_you_cards(
+        cards=[], trade_service=their_svc, user_id=OPP, league_id=LEAGUE,
+        league=their_league, user_roster=list(THEIR_ROSTER),
+        seed_map=dict(SEED),
+    )
+    assert len(cards) == 1, "the queued like did not surface in their deck"
+    assert cards[0].likes_you is True
+    assert cards[0].target_user_id == ME
+    assert cards[0].give_player_ids == GOOD_RECV
+    assert cards[0].receive_player_ids == GOOD_GIVE
 
 
 # ---------------------------------------------------------------------------
