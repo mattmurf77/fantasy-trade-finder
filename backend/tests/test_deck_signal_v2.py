@@ -433,6 +433,51 @@ def test_events_flag_off_ignores_impression_props(harness):
 
 
 # ---------------------------------------------------------------------------
+# One live pass disposition per impression (2026-08-29 prod audit)
+# ---------------------------------------------------------------------------
+
+def test_second_swipe_pass_is_skipped(harness):
+    """A replayed/double-fired pass (the reason-less 10 of the 120 prod
+    duplicates) appends no second pass row — save_trade_decision already
+    deduped the Elo side; deck_outcomes now matches it."""
+    client, job, trade_svc, eng = harness
+    with _signal(True):
+        cards = _run_job(eng, job)
+        iid = cards[0]["impression_id"]
+        for dwell in (1000, 2000):
+            res = _post(client, "/api/trades/swipe", {
+                "trade_id": cards[0]["trade_id"], "decision": "pass",
+                "impression_id": iid, "dwell_ms": dwell,
+            })
+            assert res.status_code == 200
+    rows = _outcome_rows(eng)
+    assert [(r.action, r.dwell_ms) for r in rows] == [("pass", 1000)]
+
+
+def test_pass_after_undo_is_recorded_again(harness):
+    """The guard counts undos: pass → undo → pass is three honest rows, not
+    a duplicate — an undone pass may be re-decided."""
+    client, job, trade_svc, eng = harness
+    with _signal(True):
+        cards = _run_job(eng, job)
+        iid = cards[0]["impression_id"]
+        _post(client, "/api/trades/swipe", {
+            "trade_id": cards[0]["trade_id"], "decision": "pass",
+            "impression_id": iid, "dwell_ms": 800,
+        })
+        _post(client, "/api/events", {"events": [
+            {"event_type": "swipe_undone", "props": {"impression_id": iid}},
+        ]})
+        _post(client, "/api/trades/swipe", {
+            "trade_id": cards[0]["trade_id"], "decision": "pass",
+            "impression_id": iid, "dwell_ms": 900,
+        })
+    rows = _outcome_rows(eng)
+    assert [(r.action, r.dwell_ms) for r in rows] == \
+        [("pass", 800), ("undo", None), ("pass", 900)]
+
+
+# ---------------------------------------------------------------------------
 # save_deck_outcome — closed action enum
 # ---------------------------------------------------------------------------
 

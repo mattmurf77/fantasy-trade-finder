@@ -14,6 +14,19 @@
 
 
 
+## 2026-08-29c — deck_outcomes duplicate-pass guard ships
+
+PR #242 squash-merged on green → `main` @ `e9992195` (Render auto-deploy). Prod audit had
+120/410 passed impressions carrying 2–3 `pass` rows: the decline tile tap fires BOTH
+`/api/trades/pass-reason` (server writes the pass, NULL dwell) and the unchanged swipe POST
+(dwell set). Fix is server-side so every client version is covered at once:
+`deck_pass_outcome_recorded` (live pass = passes > undos, so undo→re-pass stays legal) +
+a `dup_pass`-counted skip in `_save_deck_outcome_safe`, which also stops the taste vector
+learning one pass twice. Elo was already safe (`elo_signal_at` claim + decision dedupe).
+5 new pytests; suite 4,455/0. **Gap:** historical rows not backfilled — pre-fix windows
+dedupe on read (NULL-dwell twin). Follow-up task spawned: client sends `dwell_ms` with the
+layer-1 reason POST so the surviving row carries dwell.
+
 ## 2026-08-29b — guided onboarding off by ruling
 
 `onboarding.guided_avatar` flipped false (PR #239, verified live): no Analyst avatar, no
@@ -45,6 +58,10 @@ merged-view trim (one outlook bar, one primary, no format chips inline), and the
 round — headlined by the field-client compat fork that keeps v1.16.9 phones semantically
 untouched by the new backend, and D-067 cooldown compliance on asset-ideas so dismissals
 finally stick server-side. Two-reviewer QA both rounds; every confirmed finding fixed.
+
+## 2026-08-29 — Trials lengthened: 14-day monthly, 30-day annual (operator ruling on the research)
+
+Follow-up to the trial-conversion research (RevenueCat SOSA 2026: ≤4-day trials convert ~25.5% per start vs ~42.5% for 17–32-day; most cancellations land on day 0 regardless of length). Operator ruled monthly 3→**14 days**, annual 14→**30 days**. Values-only delta: `_PAYWALL_PRODUCTS`, tests, LLD §3, checklist P2 (ASC durations: "2 weeks" / "1 month"). Mobile untouched — trial copy renders generically from `trial_days`. Standing reminder: one intro-offer redemption per subscription group per Apple ID.
 
 ## 2026-08-28f — Tip jar: money with no entitlement (operator request)
 

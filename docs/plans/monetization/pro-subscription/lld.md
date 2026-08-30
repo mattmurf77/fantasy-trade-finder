@@ -114,12 +114,12 @@ as `/api/me/entitlements`). Flag-aware: `monetize.paywall` OFF → `{"enabled": 
   ],
   "products": [
     {"product_id": "ftf_pro_monthly", "period": "monthly",
-     "display_price": "$4.99", "trial_days": 3, "hero": false},
+     "display_price": "$4.99", "trial_days": 14, "hero": false},
     {"product_id": "ftf_pro_annual",  "period": "annual",
      "display_price": "$34.99", "per_month_equiv": "$2.92",
-     "trial_days": 14, "hero": true, "badge": "best_value"}
+     "trial_days": 30, "hero": true, "badge": "best_value"}
   ],
-  "trial_eligible": true,   // ← monthly trial_days 0→3 by operator ruling 2026-08-28
+  "trial_eligible": true,   // ← trials 14d/30d by operator ruling 2026-08-29 (was 0/14, then 3/14)
   "dismissible": true
 }
 ```

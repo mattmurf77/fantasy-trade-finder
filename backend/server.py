@@ -92,6 +92,7 @@ from .database import (
     load_engine_telemetry,
     # F1 (deck.signal_v2) — impression_id spine
     save_deck_impressions, save_deck_outcome, load_deck_impression,
+    deck_pass_outcome_recorded,
     load_board_state,
     # Decline-reason capture (feedback.decline_reasons) — one upsert row per
     # passed card, keyed on impression_id
@@ -4720,6 +4721,7 @@ _deck_outcome_rejects: dict[str, int] = {
     "unknown":    0,   # impression_id not in deck_impressions
     "foreign":    0,   # impression exists but belongs to another user
     "stale":      0,   # served_at older than _DECK_OUTCOME_MAX_AGE_DAYS
+    "dup_pass":   0,   # impression already carries a live pass disposition
 }
 
 
@@ -4773,6 +4775,16 @@ def _save_deck_outcome_safe(
             imp.get("served_at"), datetime.now(timezone.utc))
         if age_days > _DECK_OUTCOME_MAX_AGE_DAYS:
             _deck_outcome_reject("stale", impression_id)
+            return
+        # 2026-08-29 prod audit — one live pass disposition per impression.
+        # Flag-on clients fire BOTH the decline-reason tile tap (whose route
+        # writes the pass server-side) and the unchanged swipe POST for the
+        # same gesture, ~20-90ms apart, so without this a reasoned pass lands
+        # twice (~30% overcount). A pass that was undone re-arms (undo rows
+        # balance pass rows in deck_pass_outcome_recorded). Skipping here
+        # also skips the taste update, which must not learn one pass twice.
+        if action == "pass" and deck_pass_outcome_recorded(impression_id[:64]):
+            _deck_outcome_reject("dup_pass", impression_id)
             return
         dw = int(dwell_ms) if isinstance(dwell_ms, (int, float)) and not isinstance(dwell_ms, bool) else None
         save_deck_outcome(
@@ -26898,10 +26910,10 @@ _PAYWALL_PAGES = [
 
 _PAYWALL_PRODUCTS = [
     {"product_id": "ftf_pro_monthly", "period": "monthly",
-     "display_price": "$4.99", "trial_days": 3, "hero": False},
+     "display_price": "$4.99", "trial_days": 14, "hero": False},
     {"product_id": "ftf_pro_annual", "period": "annual",
      "display_price": "$34.99", "per_month_equiv": "$2.92",
-     "trial_days": 14, "hero": True, "badge": "best_value"},
+     "trial_days": 30, "hero": True, "badge": "best_value"},
 ]
 
 # Tip jar (operator request 2026-08-28): consumable "support the platform"
