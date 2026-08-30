@@ -94,10 +94,16 @@ Teach the payload the difference between a chosen partner and the default. All i
 
 1. Add `const opponentChosenRef = useRef(!!initialOpponentId);` beside the
    `opponentId` state (:344). `initialOpponentId` counts as chosen because — after
-   this fix — every source of it is deliberate: an idea prefill
-   (`TradeBuildCanvas.tsx:152` `prefill?.opponentId`, always from a tapped
+   this fix — its sources are deliberate in the main: an idea prefill
+   (`TradeBuildCanvas.tsx:152` `prefill?.opponentId`, normally from a tapped
    idea/card) or `scopedOpponent`, which post-fix only becomes non-null via an
-   explicit pick, a LeagueSummary Offer/Target handoff, or legacy team-mode params.
+   explicit pick, a LeagueSummary/TeamReview Offer/Target handoff, or legacy
+   team-mode params. **One exception, found by QA-B (B-1, non-blocking):** the
+   #402 browse-session seeding effect (`TradesScreen.tsx:5811-5823`) auto-loads
+   the top result's counterparty as a prefill with no tap, so after an unscoped
+   search → Clear → Find a Trade, the seeded (never-chosen) team scopes the
+   second search. Pre-existing behavior, out of this fast-track's scope — see
+   "Known limitation" below.
 2. Set `opponentChosenRef.current = true` in the two user-tap sites:
    the partner chip row (:1066-1068) and the team-picker sheet row (:1470-1472).
    The auto-default effect (:538-541) does **not** set it.
@@ -180,3 +186,20 @@ Trace the tap end-to-end at the fixed sha, citing file:line for each hop:
 5. **Regression sentinel:** repeat step 1 once more after step 3-4 (relaunch first).
    *Expect:* all-teams again — the earlier explicit pick did not stick to a fresh
    session.
+6. **Known-limitation probe (B-1, expected to still misbehave):** after step 1's
+   results land (the top idea auto-seeds the canvas), tap **Clear**, then **Find a
+   Trade** on the now-empty canvas. *Today's expected outcome:* the search scopes to
+   the seeded idea's counterparty — this is the documented B-1 limitation, not a
+   regression of this fix. If it instead searches all teams, the follow-up item can
+   be closed.
+
+## Known limitation (QA-B finding B-1, 2026-08-30 — non-blocking, follow-up filed)
+
+The browse-session seeding effect (`TradesScreen.tsx:5811-5823`, from #402) prefills
+the canvas with the top result's counterparty without any user tap; the remount path
+initializes `opponentChosenRef` true for that team (and `partnerLocked` makes it
+un-clearable from the dropdown). Consequence: unscoped search → Clear → Find a Trade
+runs a single-team sweep of the seeded counterparty. Pre-fix behavior was identical,
+and the filed repro (fresh untouched canvas) is fully fixed — hence non-blocking.
+Candidate fix belongs with the FB-406 build (same surface): distinguish seed-prefill
+from tap-prefill when initializing the ref.

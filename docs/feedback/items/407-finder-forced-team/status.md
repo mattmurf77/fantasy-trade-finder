@@ -36,3 +36,4 @@
   - **Left for ship phase:** operator's 5-step TestFlight checklist (mini-prd.md);
     TEST_LEDGER + CHANGELOG entries; the scope.md DECISIONS.md row ("a partner counts as
     the search scope only when chosen — the auto-default never scopes").
+- 2026-08-30: Phase 3 QA complete — QA-A PASS (independent mechanical battery: tsc clean, 86/86 structural suites, testid-lint OK, all 5 sabotage cycles re-proven + full-revert probe; [qa-a-2026-08-30.md](qa-a-2026-08-30.md)) and QA-B APPROVE FOR SHIP ([qa-b-2026-08-30.md](qa-b-2026-08-30.md)) with one NON-BLOCKING finding B-1 (browse-seed prefill marks a never-tapped team chosen; Clear → Find a Trade scopes to it — pre-existing, not a regression). B-1: mini-PRD softened, TestFlight checklist step 6 added, candidate fix routed to the FB-406 build (same surface). No Phase 4 loop needed — zero blocking findings.
