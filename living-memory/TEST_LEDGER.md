@@ -11,12 +11,12 @@
 
 ---
 
-## 2026-08-29f — age-preference consensus multiplier (D-167): built, full suite green, ready for PR
+## 2026-08-29f — age-preference consensus multiplier (D-167): SHIPPED via PR [#248](https://github.com/mattmurf77/fantasy-trade-finder/pull/248) → `main` @ `750abb6a` on green CI; branch swept (docs/recovery/2026-08-29-age-pref-value-ship.md)
 
 Branch `feat/age-pref-value` (worktree `goofy-perlman-490e49`), rebased onto `main` @ `d5c926fd`.
 Scope: [docs/plans/age-pref-value/scope.md](../docs/plans/age-pref-value/scope.md) — full gates, no waivers, backend-only.
 
-- **Backend pytest:** full suite **4,471 / 0 failed** (1 skipped — the standing `FTF_OUTLOOK_BACKTEST` opt-in) pre-rebase; combined-tree re-run post-rebase in flight at ledger time (result recorded in the PR).
+- **Backend pytest:** full suite **4,471 / 0 failed** (1 skipped — the standing `FTF_OUTLOOK_BACKTEST` opt-in) pre-rebase; combined-tree re-run post-rebase: **4,471 / 0 failed** (1 skipped) on `main` @ `d5c926fd` + this branch. CI green ×3 (backend-tests · mobile-typecheck · maestro-testid-lint) on `11c167e4`, squash-merged.
 - **New tests:** `backend/tests/test_age_pref.py` — 10 tests: band boundaries (22/23/29/30 at the taste_service cut points), boost-cap engagement, cap-≤0 disable, discount-never-capped, >1.0-on-any-band capped (future-proof), exact identity at the 1.0 kill values, pick/no-age pass-through, MODEL_A_PROFILE pin (both mults 1.0, cap absent), dual-store default registration. **Sabotage-proven:** `cap-dropped` (boost-cap branch deleted) → 2 red (`test_boost_cap_engages_on_large_values`, `test_future_boost_on_30plus_band_is_capped_too`), green on revert.
 - **Arm-A golden:** `test_bakeoff_arm_a_golden.py` + `test_bakeoff_challenger.py` — 45/45 green with the identity pins in place; golden **un-recaptured** (the pins are identity values, same precedent as `package_bench_trade_wide`).
 - **Test-only adaptations:** the three golden-comparison files (`test_bakeoff_serving.py`, `test_breaker_seam.py`, `test_outlook_direction.py`) pin the two age mults at 1.0 in their fixtures — their goldens/premises were captured age-neutral and they guard OTHER seams; each carries a D-167 comment.
