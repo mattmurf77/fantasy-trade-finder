@@ -8,6 +8,20 @@
 
 ---
 
+## 2026-08-30 — feedback batch #407 + #406 BUILT + dual-QA green, waiting on operator go/no-go
+
+**Where:** branch `claude/new-user-feedback-5fa613` (worktree of the same name, cut from `main` @ `e89eebb0`), tip = the living-memory commit carrying this entry. Version bumped to **1.16.12** (Info.plist + app.json + both pbxproj `MARKETING_VERSION`s, which had been stale at 1.16.6). Not yet pushed at the time of writing — the ship step is: push branch → PR → CI green → operator go → squash-merge → EAS build/submit → set #406/#407 `fixed`.
+
+**What's on the branch:** #407 fix `8f722676` (auto-defaulted calculator partner no longer scopes Find a Trade; `opponentChosenRef` gate + `check-calc-merged-behavior` 20a-20d) and #406 build `c138507c` ("Any league mate" targeting — client-only, `partnerAny` + honest labels + scope-truth note + stale-verdict `ev` gate + `seeded` prefill marker closing #407's QA edge; new `check-any-partner.js` 15 assertions; D-168). Statuses already flipped in prod DB: #402/#403 → `fixed` (had shipped without flips); #406/#407 → `in_progress`.
+
+**Evidence:** TEST_LEDGER 2026-08-30 (pytest 4,471/0 · tsc clean · 87/87 suites · testid-lint OK · QA-A 20 sabotage cycles · QA-B zero blocking). Batch plan: docs/feedback/items/406-target-any-leaguemate/plan.md; QA reports qa-a/qa-b-2026-08-30.md in both item folders.
+
+**Owed:**
+1. **Operator go/no-go** (presented in-session) → then push/PR/merge, Render deploy verify (by content per the 08-17 lesson — confirm a deploy was CREATED for the sha), EAS 1.16.12 build + submit, `fixed` flips AFTER push confirms.
+2. **Operator TestFlight checklists on the 1.16.12 build:** #407 mini-PRD 6 steps (step 6 = the closed B-1 probe, expect all-teams after Clear) + #406 E-4 8 steps. Only runtime evidence under D-056.
+3. Follow-ups queued in NEXT: `test:mascot-ram` npm wiring (pre-existing gap QA-A found); QA-B B-1 host-key zero-result canvas-wipe corner (documented, E-4 step 8).
+4. Sweep this worktree from the main checkout after merge (ledger first — docs/recovery/2026-08-30-qa-a-fb407-sweep.md already carries the QA sweeps).
+
 ## 2026-08-29b — propose-label spine SHIPPED (bright line confirmed; operator merged via "PR only" ruling)
 
 **Where:** `main` @ `1f87ec16` (PR [#241](https://github.com/mattmurf77/fantasy-trade-finder/pull/241), squash on green CI ×3; Render auto-deploy). The operator answered the analytics bright line **yes ("PR only")**, then said "Merge it" — merged after re-running the full gates on the tree combined with same-day PRs #242/#243/#244 (pytest **4,461/0**, tsc clean, 87 suites, testid-lint). Branch `claude/elastic-matsumoto-e3860c` swept by content (recovery: [docs/recovery/2026-08-29-propose-label-ship.md](../docs/recovery/2026-08-29-propose-label-ship.md)).

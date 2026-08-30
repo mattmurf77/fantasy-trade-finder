@@ -60,6 +60,12 @@ export interface CanvasPrefill {
   opponentId?: string;
   give: string[];
   receive: string[];
+  /** FB-406 R-10 — true ONLY on the #402 browse-session SEEDING effect's
+   *  write (the one prefill that is not a user choice); forwarded to
+   *  `InLeagueCalculator` as `seededPrefill` so a seeded partner never
+   *  counts as chosen. Tap/handoff prefills and the blank/anchor restores
+   *  leave it unset. */
+  seeded?: boolean;
 }
 
 interface Props {
@@ -175,6 +181,7 @@ export default function TradeBuildCanvas({
         onLikeTrade={onLikeTrade}
         onSidesChange={onSidesChange}
         partnerLocked={partnerLocked}
+        seededPrefill={!!prefill?.seeded}
         hideFormatChips={hideFormatChips}
       />
 

@@ -14,6 +14,22 @@
 
 
 
+## 2026-08-30 — feedback batch: #407 finder-forced-team fix + #406 "Anyone" targeting (v1.16.12, at go/no-go)
+
+Feedback pipeline run on the two newest tester reports. **#407** (filed hours after
+1.16.11): the merged calculator auto-defaults its partner to the first leaguemate and
+Find a Trade treated that default as a pick — every untouched canvas ran a single-team
+sweep. Fix `8f722676`: `opponentChosenRef` gates the payload; explicit picks still scope
+(#384 checklist-23). **#406** (jonbonjourvi): "Any league mate" row in the team sheet —
+client-only, the league-wide sweep already existed server-side; plus honest labels, a
+scope-truth note, the stale-verdict `ev` gate, and the `seeded` marker closing #407's
+QA-found browse-seed edge. D-168. Dual-agent specs (every review round caught real
+defects), dual QA green both items (QA-A 20 sabotage cycles; QA-B zero blocking). Full
+pytest 4,471/0 · tsc clean · 87/87 suites · testid-lint OK. Version → 1.16.12 (all three
+files; pbxproj had been stale at 1.16.6 since build ~132). Statuses: #402/#403 → fixed
+(shipped earlier, never flipped); #406/#407 in_progress pending ship. Evidence:
+TEST_LEDGER same date; batch plan docs/feedback/items/406-target-any-leaguemate/plan.md.
+
 ## 2026-08-29f — age-preference consensus multiplier (D-167)
 
 Follow-through on the trade-disposition review's biggest decline cluster: testers price by

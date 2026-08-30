@@ -404,6 +404,51 @@ assert(!/swipeTrade\(/.test(calc) && !/swipeTrade\(/.test(screen),
   'the queue route owns the record path; a client-side swipe would skip the '
   + 'counterparty-preference check entirely');
 
+// ── FB-407: the auto-defaulted partner never scopes a Find a Trade ────────
+//
+// The calculator defaults `opponentId` to the first leaguemate the moment the
+// list loads (evaluate needs a roster to browse), and the merged canvas made
+// that default the ONLY search entry's scope: an untouched canvas searched
+// exactly one team. The fix is `opponentChosenRef` — set by the two user-tap
+// sites and by an initialOpponentId (prefill/scope, always deliberate), never
+// by the default effect — gating the payload's `opponent`. A receive side
+// still scopes without a tap: those assets came off the partner's roster.
+{
+  assert(/const opponentChosenRef = useRef\(!!initialOpponentId && !seededPrefill\);/.test(calc),
+    '20a. opponentChosenRef exists and an initialOpponentId counts as chosen',
+    'every source of initialOpponentId is deliberate — prefill or explicit scope — '
+    + 'except the browse-session seed, which arrives with `seededPrefill` (FB-406 R-10)');
+  // 20b — the default effect is not a choice. Its setter is the one keyed on
+  // `opponents[0].user_id`; a ref write in that effect would re-promote the
+  // auto-default to a pick and silently revert the whole fix.
+  const at = calc.indexOf('setOpponentId(opponents[0].user_id)');
+  assert(at >= 0, '20b. the default-opponent effect still exists');
+  assert(!/opponentChosenRef/.test(calc.slice(Math.max(0, at - 400), at + 400)),
+    '20b-bis. the default-opponent effect never marks the partner as chosen',
+    'the default exists for the evaluate UX — it must not scope a search');
+  // 20c — BOTH user-tap sites mark the choice. Anchored to the pairing inside
+  // each onPress: dropping either write brings back a partner the payload
+  // treats as unchosen even after the user tapped them.
+  const taps = calc.split('setOpponentId(o.user_id)').length - 1;
+  assert(taps === 2, '20c. there are exactly the two user-tap setOpponentId sites',
+    `found ${taps} — a new site must decide whether its set is a choice`);
+  let paired = 0;
+  for (let i = calc.indexOf('setOpponentId(o.user_id)'); i >= 0;
+       i = calc.indexOf('setOpponentId(o.user_id)', i + 1)) {
+    if (/opponentChosenRef\.current = true/.test(calc.slice(Math.max(0, i - 200), i))) paired++;
+  }
+  assert(paired === 2,
+    '20c-bis. both user-tap sites set opponentChosenRef.current = true',
+    'an unpaired tap site makes a real pick read as the auto-default');
+  // 20d — the payload gate, anchored end to end (`: null,` included) so the
+  // unconditional pass-through — the shipped bug — cannot come back.
+  assert(/opponent: opponent && \(opponentChosenRef\.current \|\| receiveIds\.length > 0\)\s*\n?\s*\? \{ userId: opponent\.user_id, name: opponent\.username \}\s*\n?\s*: null,/
+    .test(calc),
+    '20d. the find-a-trade payload gates `opponent` on chosen-or-receive-side',
+    'ungated, every fresh canvas hands the finder the first leaguemate as a '
+    + 'hard single-team scope');
+}
+
 console.log(failures === 0
   ? 'check-calc-merged-behavior: all assertions passed'
   : `check-calc-merged-behavior: ${failures} FAILED`);

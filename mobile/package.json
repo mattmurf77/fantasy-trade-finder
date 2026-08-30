@@ -10,6 +10,7 @@
     "test:analytics-297-302": "node tests/check-analytics-297-302.js",
     "test:analytics-300": "node tests/check-analytics-300.js",
     "test:anchor-labels": "node tests/check-anchor-labels.js",
+    "test:any-partner": "node tests/check-any-partner.js",
     "test:avoid-positions": "node tests/check-avoid-positions.js",
     "test:awaiting-dismiss": "node tests/check-awaiting-dismiss.js",
     "test:breaker-card": "node tests/check-breaker-card.js",

@@ -144,3 +144,11 @@ Every screen listed in the audit maps to the above: Login (Auth), League select 
 - **TradingWithStrip** — two pills (League / "Trading with") positioned BELOW the receipt (+ the prefs-changed nudge), outside `modeBarWrap` (#314). A third "Players" pill is a reserved seam, HELD for an operator decision.
 - **Deck-done summary** — a tile tap on the ideas rail re-presents the featured window (user gesture only — never auto; #317, preserving #241/#298 invariants).
 
+## In-league calculator partner scope (FB-406, 2026-08-30)
+
+Three constructions on the merged calculator (`InLeagueCalculator`, flag `calc.merged_layout`), all Chalkline-minimal — no icons, no new tokens, ice for the active state only:
+
+- **"Any league mate" sheet row** (`calc.team-sheet.any`) — leads the Team sheet, above the member rows, same `teamRow` construction (44pt min, hairline bottom border): primary text "Any league mate" in the member handles' `dropdownValue` treatment (semibold `body-sm`), **ice when active** (matching the member rows' active color), over a chalk-dim `body-sm` sub-line "See offers from every team" (content-carrying hint ⇒ chalk-dim, never chalk-faint). No R-badge, no team-shape line — the row names a scope, not a team. `accessibilityState.selected` mirrors the active state; label speaks the full promise.
+- **Scope-truth note** (`calc.search-scope-note`) — one chalk-dim `body-sm` line directly under the action row: "Find a Trade searches all teams — pick a team to target one." Renders **iff** the search payload's partner would be null (explicit Anyone, or the untouched default with an empty receive side); its disappearance IS the scoped signal — no scoped-state caption (the action row's frame budget is contested, D-157).
+- **Receive-column hint** (`calc.receive-any-hint`) — chalk-dim `body-sm` line under the receive `TradeSide` while Anyone is active: "Pick a team to add specific players — Find a Trade already shows offers from everyone." Pairs with the receive Add redirect (Add opens the team sheet, never an empty picker). The column header reads "any team" in the same state.
+
