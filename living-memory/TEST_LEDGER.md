@@ -11,7 +11,7 @@
 
 ---
 
-## 2026-08-30 — feedback batch #407 (finder forced team) + #406 (Anyone targeting): built, dual-QA green, at operator go/no-go
+## 2026-08-30 — feedback batch #407 (finder forced team) + #406 (Anyone targeting): SHIPPED via PR [#250](https://github.com/mattmurf77/fantasy-trade-finder/pull/250) → `main` @ `287aed09` on green CI ×3; EAS build 139 (v1.16.12) auto-submitting to TestFlight
 
 Branch `claude/new-user-feedback-5fa613` (worktree of the same name, cut from `main` @ `e89eebb0`). Full gates, no waivers beyond the written analytics/schema/flag waivers in both scope blocks (no bright-line surface touched). Specs: [407-finder-forced-team/mini-prd.md](../docs/feedback/items/407-finder-forced-team/mini-prd.md) · [406-target-any-leaguemate/prd.md](../docs/feedback/items/406-target-any-leaguemate/prd.md) (3-round dual-agent loop + targeted verification pass; every review round caught real defects — see reconciliation logs).
 
