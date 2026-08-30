@@ -342,6 +342,13 @@ export default function InLeagueCalculator({
   const format: ScoringFormat = formatChoice ?? sessionFormat ?? '1qb_ppr';
   // #190 — "Edit in calculator" prefill from a suggested trade card.
   const [opponentId, setOpponentId] = useState<string | null>(initialOpponentId ?? null);
+  // FB-407 — whether the partner was ever CHOSEN (a chip/sheet tap, or an
+  // initialOpponentId, which only ever comes from a deliberate source: an
+  // idea prefill or an explicit scope). The default-opponent effect below
+  // does NOT set this — its pick exists for the evaluate UX, and letting it
+  // count as a choice made Find a Trade force the first leaguemate onto
+  // every fresh canvas. A ref, not state: nothing renders from it.
+  const opponentChosenRef = useRef(!!initialOpponentId);
   const [giveIds, setGiveIds] = useState<string[]>(initialGiveIds ?? []);
   const [receiveIds, setReceiveIds] = useState<string[]>(initialReceiveIds ?? []);
   const [picker, setPicker] = useState<'give' | 'receive' | null>(null);
@@ -1064,6 +1071,7 @@ export default function InLeagueCalculator({
               style={[styles.chip, active && styles.chipActive]}
               onPress={() => {
                 haptics.selection();
+                opponentChosenRef.current = true; // FB-407 — a tap IS a choice
                 setOpponentId(o.user_id);
               }}
               accessibilityRole="button"
@@ -1212,7 +1220,13 @@ export default function InLeagueCalculator({
               onFindATrade({
                 give: giveIds.map((id) => playerById[id]).filter(Boolean) as CalcPlayer[],
                 receive: receiveIds.map((id) => playerById[id]).filter(Boolean) as CalcPlayer[],
-                opponent: opponent
+                // FB-407 — the partner scopes the search only when it was
+                // actually chosen (tap/prefill) or the canvas holds their
+                // players (receive-side assets come off their roster, so the
+                // trade is materially with them). The auto-default alone
+                // never scopes: an untouched canvas searches ALL teams, as
+                // the pre-merge Find a Trade always did.
+                opponent: opponent && (opponentChosenRef.current || receiveIds.length > 0)
                   ? { userId: opponent.user_id, name: opponent.username }
                   : null,
               });
@@ -1468,6 +1482,7 @@ export default function InLeagueCalculator({
                       }`}
                       onPress={() => {
                         haptics.selection();
+                        opponentChosenRef.current = true; // FB-407 — a tap IS a choice
                         setOpponentId(o.user_id);
                         setTeamPickerOpen(false);
                       }}
