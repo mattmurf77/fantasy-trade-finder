@@ -1666,6 +1666,10 @@ function matchToTradeCardShape(m: TradeMatch, fallbackLeague: string | undefined
     opponent_username:  m.counterparty_username,
     match_score:        100,
     fairness:           1,
+    // Propose-label spine: server-recovered originating impression —
+    // TradeCard forwards it into the send button so a propose from this
+    // tile appends the `propose` deck outcome.
+    impression_id:      m.impression_id,
   };
 }
 
@@ -1698,6 +1702,8 @@ function awaitingToTradeCardShape(a: AwaitingTrade, fallbackLeague: string | und
     opponent_username:  a.counterparty_username,
     match_score:        100,
     fairness:           1,
+    // Propose-label spine — same threading as matchToTradeCardShape.
+    impression_id:      a.impression_id,
   };
 }
 

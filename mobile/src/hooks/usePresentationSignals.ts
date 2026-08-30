@@ -191,10 +191,18 @@ export default function usePresentationSignals(screen: PresentationScreen): Pres
       const signal = signalForCard(card);
       // Fire-and-forget like the deck's mutation: a failed swipe must not
       // wedge the surface. The server is idempotent per (user, trade).
-      void swipeTrade(card, decision, signal).catch(() => undefined);
+      // Propose-label spine: the body's `surface` mirrors the screen this
+      // hook was mounted with, so the server-fired trade_proposed /
+      // match_swiped rows carry props.source without the impression join.
+      void swipeTrade(
+        card,
+        decision,
+        signal,
+        screen === 'TodaysTrade' ? 'today' : 'browse',
+      ).catch(() => undefined);
       return signal;
     },
-    [signalForCard],
+    [signalForCard, screen],
   );
 
   // ── Decline reasons — the deck's exact three commit moments ─────────────

@@ -2222,7 +2222,10 @@ export default function TradesScreen({ navigation, route }: any) {
       // populated by advance() when the flag is on AND the card carries an
       // impression_id. Absent ⇒ the POST body is byte-identical to pre-F1.
       signal?: SwipeSignal;
-    }) => swipeTrade(card, decision, signal),
+      // Propose-label spine: every disposition routed through this mutation
+      // is the deck spine (advance() — swipes, browse-cell ✕/✓ on the merged
+      // landing, held passes); props.source on the server-fired event.
+    }) => swipeTrade(card, decision, signal, 'deck'),
     onMutate: ({ card }) => {
       const tradeId = card.trade_id;
       // Edited cards (player swap, feedback #86) carry a derived trade_id

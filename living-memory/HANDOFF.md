@@ -8,7 +8,16 @@
 
 ---
 
+## 2026-08-29b — propose-label spine BUILT, all gates green, HELD on the analytics bright line
 
+**Where:** branch `claude/elastic-matsumoto-e3860c` @ `5b79a13a` in worktree `.claude/worktrees/app-entry-platform-options-3e16ac` (cut from `main` @ `af91d6f8`). Committed locally, **not pushed, no PR** — the `trade_proposed`/`match_swiped` `source` prop is an analytics-event change, so ship waits for the operator's confirming yes (their ask flagged this itself).
+
+**What it is:** the fix for "463 `trade_proposed` but zero `deck_outcomes` `action='propose'` ever." Diagnosis + full build in [docs/plans/three-model-bakeoff/scope-propose-label.md](../docs/plans/three-model-bakeoff/scope-propose-label.md): matches/awaiting API rows now carry a server-recovered `impression_id` (F1 trade-hash join, flag `deck.signal_v2`), mobile threads it into the Matches/awaiting send mounts, and the swipe body gains a closed-enum `surface` recorded as `props.source` (`deck`/`browse`/`today`/`shop` + server-stamped `calculator` on the queue route).
+
+**Owed, in order:**
+1. **Operator:** the bright-line yes (or no) on shipping the analytics prop + the rest.
+2. On yes: push branch → PR → CI green → squash-merge → sweep the worktree through the recovery ledger; then the 3-step TestFlight checklist in scope §3, and after the next build watch prod for the first `action='propose'` rows.
+3. Evidence chain: TEST_LEDGER 2026-08-29c (pytest 4,456/0 · tsc clean · 87 suites · testid-lint OK).
 
 ## 2026-08-29 — v1.16.11 (build 138) shipped: canvas-results + trades-landing + activation moments
 

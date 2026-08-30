@@ -550,7 +550,7 @@ export default function ShopOffersBody({
     // refetch so the card reappears rather than staying invisibly
     // un-dismissed (the S-9 honesty rule MatchesScreen states for the
     // same shape) — the one legal subtraction from the suppression set.
-    swipeTrade(ideaToCard(idea, leagueId), 'pass').catch(() => {
+    swipeTrade(ideaToCard(idea, leagueId), 'pass', undefined, 'shop').catch(() => {
       setSuppressed((s) => {
         const n = new Set(s);
         n.delete(key);

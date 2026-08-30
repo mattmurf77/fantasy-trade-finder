@@ -4246,6 +4246,52 @@ def _deck_trade_hash(give: list, recv: list, target) -> str:
         .encode()).hexdigest()[:16]
 
 
+def _latest_impressions_by_hash(user_id: str, keys: set) -> dict:
+    """Propose-label spine (scope-propose-label.md): recover the caller's most
+    recent SERVED impression for a set of (league_id, trade_hash) keys, so the
+    matches/awaiting list routes can hand the client an `impression_id` and a
+    send from those surfaces can finally append the `propose` outcome.
+
+    Non-ghost rows only (a withheld card was never shown, so it cannot be what
+    the user is re-acting on) and nothing older than
+    _DECK_OUTCOME_MAX_AGE_DAYS (the outcome writer would reject it anyway).
+    Best-effort display enrichment: any failure returns {} and the routes ship
+    their pre-existing payload unchanged."""
+    if not user_id or not keys or not _deck_signal_v2_enabled():
+        return {}
+    try:
+        from sqlalchemy import select as _sa_select
+        from .database import deck_impressions_table as _imp, engine as _engine
+        cutoff = (datetime.now(timezone.utc)
+                  - timedelta(days=_DECK_OUTCOME_MAX_AGE_DAYS)).isoformat()
+        hashes = {h for (_lid, h) in keys}
+        with _engine.connect() as _conn:
+            rows = _conn.execute(
+                _sa_select(
+                    _imp.c.league_id, _imp.c.trade_hash,
+                    _imp.c.impression_id, _imp.c.served_at,
+                ).where(
+                    (_imp.c.user_id == user_id)
+                    & _imp.c.trade_hash.in_(hashes)
+                    & (_imp.c.served_at >= cutoff)
+                    & ((_imp.c.is_ghost.is_(None)) | (_imp.c.is_ghost != 1))
+                )
+            ).fetchall()
+        best: dict = {}
+        for r in rows:
+            key = (r.league_id, r.trade_hash)
+            if key not in keys:
+                continue
+            prev = best.get(key)
+            # ISO-UTC strings compare chronologically; latest serve wins.
+            if prev is None or (r.served_at or "") > prev[1]:
+                best[key] = (r.impression_id, r.served_at or "")
+        return {k: v[0] for k, v in best.items()}
+    except Exception as e:
+        log.warning("_latest_impressions_by_hash failed (skipping): %s", e)
+        return {}
+
+
 # ── suggestion.telemetry — ghost-suggestion holdout ─────────────────────────
 # Scope block: docs/plans/matchmaking-engine/telemetry-scope.md. A ghost is a
 # generated card deterministically withheld from display (per league × ISO
@@ -12625,6 +12671,14 @@ def _reconstruct_swipe_card(trade_service, body: dict, user_id: str, league_id: 
     return card
 
 
+# Propose-label spine (scope-propose-label.md) — the closed set of surfaces a
+# client may declare on POST /api/trades/swipe, recorded into the server-fired
+# trade_proposed / match_swiped props as `source`. `calculator` is deliberately
+# absent: the ✓ cell rides /api/trades/queue, which stamps it server-side.
+# Cross-client value set — docs/cross-client-invariants.md.
+_SWIPE_SURFACES = frozenset({"deck", "browse", "today", "shop"})
+
+
 @app.route("/api/trades/swipe", methods=["POST"])
 @_gate_unverified_write
 def swipe_trade():
@@ -12646,6 +12700,14 @@ def swipe_trade():
     body     = request.get_json(force=True) or {}
     trade_id = body.get("trade_id")
     decision = body.get("decision")
+    # Propose-label spine (scope-propose-label.md): optional client-declared
+    # surface for the server-fired like/pass events. Closed enum, validated
+    # here — unknown or absent (every pre-existing client) records null,
+    # never a raw passthrough (the NULL-`platform` lesson, inverted: null is
+    # the honest value for "old client", a forged string is not).
+    surface = body.get("surface")
+    if surface not in _SWIPE_SURFACES:
+        surface = None
 
     if not trade_id or not decision:
         return jsonify({"error": "trade_id and decision required"}), 400
@@ -12799,6 +12861,10 @@ def swipe_trade():
                         "give":       card.give_player_ids,
                         "receive":    card.receive_player_ids,
                         "target":     card.target_user_id,
+                        # Propose-label spine — which surface produced the
+                        # disposition (client-declared, enum-validated
+                        # above; null = pre-surface client).
+                        "source":     surface,
                         # Interview phase 2 — join swipe outcomes to the
                         # aggression bucket / lane / fit-premium flag.
                         "aggression_variant": getattr(card, "aggression_variant", None),
@@ -13336,6 +13402,10 @@ def queue_trade_for_opponent():
                 "give":     card.give_player_ids,
                 "receive":  card.receive_player_ids,
                 "target":   opponent.user_id,
+                # Propose-label spine — server-stamped: the ✓ cell is the
+                # calculator, no client declaration needed. Keeps
+                # props.source one closed enum across both emitters.
+                "source":   "calculator",
             },
             **(getattr(g, "device_info", {}) or {}),
         )
@@ -16529,10 +16599,26 @@ def get_trade_matches_all():
         def _name(pid):
             return player_name_by_id.get(pid) or pick_label_by_id.get(pid) or pid
 
+        # Propose-label spine (scope-propose-label.md): recover each match's
+        # originating impression by the F1 trade_hash identity (my_give /
+        # my_receive / partner is exactly the give|receive|target triple the
+        # impression writer hashed) so a send from the Matches tile carries
+        # impression_id and appends the `propose` deck_outcome. Flag-off /
+        # no-match ⇒ field absent, payload byte-identical.
+        imp_by_key = _latest_impressions_by_hash(g_user_id, {
+            (m["league_id"], _deck_trade_hash(
+                m.get("my_give") or [], m.get("my_receive") or [],
+                m.get("partner_id")))
+            for m in matches
+        })
+
         enriched = []
         for m in matches:
             give_ids    = m.get("my_give")    or []
             receive_ids = m.get("my_receive") or []
+            imp_id = imp_by_key.get(
+                (m["league_id"],
+                 _deck_trade_hash(give_ids, receive_ids, m.get("partner_id"))))
             enriched.append({
                 **m,
                 "league_name":         league_name_by_id.get(m["league_id"], ""),
@@ -16542,6 +16628,7 @@ def get_trade_matches_all():
                 "my_receive_teams":    [player_team_by_id.get(pid, "") for pid in receive_ids],
                 "my_give_positions":   [player_pos_by_id.get(pid, "")  for pid in give_ids],
                 "my_receive_positions":[player_pos_by_id.get(pid, "")  for pid in receive_ids],
+                **({"impression_id": imp_id} if imp_id else {}),
             })
         return jsonify(enriched)
     except Exception as e:
@@ -16624,15 +16711,30 @@ def get_awaiting_trades():
         def _name(pid):
             return player_name_by_id.get(pid) or pick_label_by_id.get(pid) or pid
 
+        # Propose-label spine — same impression recovery as
+        # /api/trades/matches/all (see the comment there): an awaiting tile
+        # IS the user's own past like, so its give/receive/partner triple is
+        # the impression's hash identity verbatim.
+        imp_by_key = _latest_impressions_by_hash(g_user_id, {
+            (a["league_id"], _deck_trade_hash(
+                a.get("my_give") or [], a.get("my_receive") or [],
+                a.get("partner_id")))
+            for a in awaiting
+        })
+
         enriched = []
         for a in awaiting:
             give_ids    = a.get("my_give")    or []
             receive_ids = a.get("my_receive") or []
+            imp_id = imp_by_key.get(
+                (a["league_id"],
+                 _deck_trade_hash(give_ids, receive_ids, a.get("partner_id"))))
             enriched.append({
                 **a,
                 "league_name":      league_name_by_id.get(a["league_id"], ""),
                 "my_give_names":    [_name(pid) for pid in give_ids],
                 "my_receive_names": [_name(pid) for pid in receive_ids],
+                **({"impression_id": imp_id} if imp_id else {}),
             })
         return jsonify(enriched)
     except Exception as e:

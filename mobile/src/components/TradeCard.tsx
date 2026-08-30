@@ -985,6 +985,11 @@ function TradeCardComp({
               opponentUsername={data.opponent_username}
               leagueName={leagueName}
               surface="match"
+              // Propose-label spine: matches/awaiting payloads now carry the
+              // server-recovered originating impression; a send from here
+              // finally appends the `propose` deck outcome. Undefined (old
+              // server / flag off / no match) changes nothing.
+              impressionId={data.impression_id}
               style={styles.actionBtn}
             />
           )}
@@ -1002,6 +1007,8 @@ function TradeCardComp({
               opponentUsername={data.opponent_username}
               leagueName={leagueName}
               surface="awaiting"
+              // Propose-label spine — same threading as the match variant.
+              impressionId={data.impression_id}
             />
           </View>
         )

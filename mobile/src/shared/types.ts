@@ -299,6 +299,12 @@ export interface TradeMatch {
   created_at: string;
   my_disposition?: 'pending' | 'accepted' | 'declined';
   their_disposition?: 'pending' | 'accepted' | 'declined';
+  /** Propose-label spine: the caller's originating deck impression for this
+   *  package, recovered server-side by trade-hash join (flag deck.signal_v2).
+   *  Threads into the send button so a propose from Matches appends the
+   *  `propose` deck outcome. Absent flag-off, on old servers, or when no
+   *  served impression matches. */
+  impression_id?: string;
 }
 
 // Trades the user has liked that have NOT yet matured into a mutual
@@ -316,6 +322,9 @@ export interface AwaitingTrade {
   counterparty_user_id: string;
   counterparty_username: string;
   liked_at: string;
+  /** Same server-side recovery as TradeMatch.impression_id — the awaiting
+   *  tile IS the user's own past like, so the trade-hash join is exact. */
+  impression_id?: string;
 }
 
 // Returned by /api/trades/generate and /api/trades/status. The actual
