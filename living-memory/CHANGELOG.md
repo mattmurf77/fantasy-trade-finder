@@ -14,6 +14,21 @@
 
 
 
+## 2026-08-29d — propose-label spine ships (bright line confirmed)
+
+PR #241 squash-merged on green CI → `main` @ `1f87ec16` (Render auto-deploy). Fixes the
+disposition review's headline gap: zero `deck_outcomes` `action='propose'` rows ever.
+Real cause: sends happen from MatchesScreen and the matches/awaiting payloads carried no
+`impression_id` (the deck mount has passed one since 2026-07-26). Now: both list routes
+recover the caller's latest non-ghost impression via the F1 trade-hash join (flag
+`deck.signal_v2`, ≤30d) and mobile threads it into the Matches/awaiting send mounts.
+Plus the operator-confirmed analytics change: swipe body `surface` (closed enum
+`deck`/`browse`/`today`/`shop`) → `trade_proposed`/`match_swiped` `props.source`;
+`/api/trades/queue` stamps `calculator`; absent/unknown → null. 6 new pytests; combined
+tree 4,461/0. Scope: docs/plans/three-model-bakeoff/scope-propose-label.md. **Owed:**
+scope §3 TestFlight checklist needs the NEXT mobile build (client half is inert until
+then); server enrichment is live now — watch prod for the first `propose` row.
+
 ## 2026-08-29c — deck_outcomes duplicate-pass guard ships
 
 PR #242 squash-merged on green → `main` @ `e9992195` (Render auto-deploy). Prod audit had
