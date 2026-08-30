@@ -1,0 +1,79 @@
+# External scheduler for the cron-gated endpoints that Render's native
+# blueprint `type: cron` can't run on this account.
+#
+# WHY THIS EXISTS: Render blueprint cron services are billable resources
+# that require account approval — adding one breaks blueprint sync
+# ("cannot ... requires approval") rather than degrading gracefully. That
+# bit both the notif-*-tick jobs (render.yaml, since removed here), the
+# value-snapshot-daily cron (added + reverted same-day 2026-07-26, see
+# commit 1e50d3e), and players-refresh (rookie-draft M0 — runbook says to
+# provision it "by hand in the Render dashboard, never via render.yaml").
+# See docs/runbook.md → "Cron schedule" and living-memory/GOTCHAS.md.
+#
+# This mirrors the keep-warm.yml pattern: GitHub Actions cron hitting a
+# prod endpoint with the shared secret. Best-effort only — GitHub cron can
+# drift/skip under Actions load, and scheduled workflows auto-disable
+# after 60 days of repo inactivity (re-enable in the Actions UI).
+#
+# Requires a `CRON_SECRET` repo secret (Settings → Secrets and variables →
+# Actions) matching the CRON_SECRET env var on the Render web service —
+# this is a SEPARATE value store from secrets.local.env and from Render's
+# own env var; set it independently here.
+
+name: render-cron
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # realtime-tick
+    - cron: "0 * * * *"      # hourly-tick, value-snapshot fallback lives inside it
+    - cron: "0 5 * * *"      # players-refresh — ahead of value-snapshot so the day's
+                              # snapshot reflects the refreshed pool
+    - cron: "0 6 * * *"      # value-snapshot (dedicated, ahead of daily-tick)
+    - cron: "30 13 * * *"    # daily-tick
+  workflow_dispatch:
+    inputs:
+      endpoint:
+        description: "Single endpoint to hit (realtime-tick | hourly-tick | players-refresh | value-snapshot | daily-tick). Leave blank to run all five."
+        required: false
+        type: string
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: ${{ vars.FTF_PROD_URL || 'https://fantasy-trade-finder.onrender.com' }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+    steps:
+      - name: Determine which endpoint(s) this run should hit
+        id: pick
+        run: |
+          case "${{ github.event.schedule }}" in
+            "*/15 * * * *") echo "endpoints=realtime-tick" >> "$GITHUB_OUTPUT" ;;
+            "0 * * * *")    echo "endpoints=hourly-tick" >> "$GITHUB_OUTPUT" ;;
+            "0 5 * * *")    echo "endpoints=players-refresh" >> "$GITHUB_OUTPUT" ;;
+            "0 6 * * *")    echo "endpoints=value-snapshot" >> "$GITHUB_OUTPUT" ;;
+            "30 13 * * *")  echo "endpoints=daily-tick" >> "$GITHUB_OUTPUT" ;;
+            *)
+              if [ -n "${{ inputs.endpoint }}" ]; then
+                echo "endpoints=${{ inputs.endpoint }}" >> "$GITHUB_OUTPUT"
+              else
+                echo "endpoints=realtime-tick hourly-tick players-refresh value-snapshot daily-tick" >> "$GITHUB_OUTPUT"
+              fi
+              ;;
+          esac
+
+      - name: Hit cron endpoint(s)
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "CRON_SECRET repo secret not set — skipping (see workflow header for setup)."
+            exit 0
+          fi
+          for ep in ${{ steps.pick.outputs.endpoints }}; do
+            status=$(curl -sS -o /dev/null -w '%{http_code}' \
+              --max-time 60 \
+              -X POST \
+              -H "X-Cron-Secret: $CRON_SECRET" \
+              -A 'ftf-render-cron' \
+              "$BASE_URL/api/cron/$ep") || true
+            echo "render-cron: $BASE_URL/api/cron/$ep -> HTTP ${status:-timeout}"
+          done
