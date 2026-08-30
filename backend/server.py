@@ -13293,9 +13293,12 @@ def queue_trade_for_opponent():
     # asset-ideas run, so `member.roster` and `seed_map` carry priced picks and
     # a pick on the canvas is judged exactly as the opponent's own deck will
     # judge it. Best-effort, same as both existing call sites.
+    # The caller's pick-injected roster is KEPT (not discarded): the caller has
+    # no member object to have been rewritten in place — see below.
+    caller_roster = list(sess.get("user_roster") or [])
     if _owned_picks_available(league_id, g_league):
         try:
-            seed_map, _ur, _n = _inject_owned_picks(
+            seed_map, caller_roster, _n = _inject_owned_picks(
                 league_id      = league_id,
                 scoring_format = _active_format(sess),
                 trade_service  = trade_service,
@@ -13311,7 +13314,25 @@ def queue_trade_for_opponent():
                         pick_err)
 
     members_by_id = {m.user_id: m for m in g_league.members}
-    caller_member = members_by_id.get(caller_league_id)
+    # FB-409 — `league.members` is CALLER-EXCLUDED by app convention:
+    # `/api/session/init` builds it from the client's `opponent_rosters` and
+    # the DB merge refuses to re-add the caller. So this lookup ALWAYS misses
+    # in production and the caller must be synthesized from the session — the
+    # #295 `_mock_owner_ids` / `_mock_rosters` pattern: session for the caller,
+    # members list for everyone else. Deliberately LOCAL to this route; the
+    # engine, the mock draft, power rankings and the likes-you injector all
+    # read `league.members` expecting the exclusion, and adding the caller
+    # there would hand them a phantom extra team.
+    caller_member = members_by_id.get(caller_league_id) or LeagueMember(
+        user_id     = caller_league_id,
+        # `display_name` is the key a real league session carries; `username`
+        # only exists on the browser-extension payload, which this route
+        # rejects for lacking `g_league`. Never read for the caller today
+        # (only `opponent.username` is) — populated so it isn't a lie.
+        username    = str(sess.get("display_name") or sess.get("username") or caller_league_id),
+        roster      = list(caller_roster),
+        elo_ratings = {},
+    )
     opponent      = members_by_id.get(opponent_user_id)
 
     reason, detail = _calc_queue_mirror_reason(

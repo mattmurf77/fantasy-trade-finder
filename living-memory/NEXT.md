@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-30b — Second feedback batch (#409/#410/#411/#412): checklist + the G-063 sweep](#2026-08-30b--second-feedback-batch-409410411412-checklist--the-g-063-sweep)
 - [2026-08-30 — Feedback batch #407/#406 SHIPPED; run the two checklists, then two small follow-ups](#2026-08-30--feedback-batch-407406-shipped-run-the-two-checklists-then-two-small-follow-ups)
 - [2026-08-29 — Age-pref multiplier live: re-measure dispositions in ~2 weeks](#2026-08-29--age-pref-multiplier-live-re-measure-dispositions-in-2-weeks)
 - [2026-08-24 — Quick Set `via` gap PR: operator confirm + merge, then the TestFlight check](#2026-08-24--quick-set-via-gap-pr-operator-confirm--merge-then-the-testflight-check)
@@ -37,6 +38,13 @@
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## 2026-08-30b — Second feedback batch (#409/#410/#411/#412): checklist + the G-063 sweep
+
+**Why now:** #409 was a **100% production failure of the ✓ queue control since 2026-08-22** — shipped as v1.16.13. Two things are owed:
+
+1. **Operator: the 14-step checklist** (`docs/feedback/items/410-found-trade-decline-position/testflight-checklist.md`). **Step 9** proves #409 (a ✓ actually queues — no other runtime evidence exists that the feature works at all). **Step 11b is a ruling request:** the #411 tag move squeezes team · age off top-tier rows (QA-B F-1, ~1.9pt residual); if that costs more than the name truncation it cured, reverting is chip-back-to-line-1 or a wrapping meta line.
+2. **Sweep the rest of the G-063 defect class** — the caller-exclusion convention's 4th bite left three known siblings, each with the diagnosis already written in `docs/feedback/items/409-like-not-league-member/qa-2026-08-30.md`: `GET /api/trades/standing-offers` (`stale` permanently false, so an offer whose player was traded away still reads Active); the match-accept push showing a raw `acct_` id instead of a display name; and the **co-owner mirror gap** (a co-owner's queued package returns `queued: true` but is silently dropped by the injector, because the decision row is keyed on the account id while the opponent's members list carries the roster's primary `owner_id`). Also queued: PRD §6.6 F-2 (with `calc.merged_layout` OFF but `inline_home`/`canvas_results` ON, the stacked ghost `Clear trade` still corrupts the edit map **and** that state has no decline control), and wiring `test:mascot-ram` into `mobile/package.json`.
 
 ## 2026-08-30 — Feedback batch #407/#406 SHIPPED; run the two checklists, then two small follow-ups
 

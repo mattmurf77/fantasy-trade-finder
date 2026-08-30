@@ -53,6 +53,11 @@ import type { ScoringFormat, StarterImpactSlot, StarterSlotPlayer, Tier } from '
 // either side's ids change, so a browse-session host can snapshot per-idea
 // edits. Additive; every host that omits it gets the pre-#402 component
 // byte-identically. Full contract at the Props comment below.
+//
+// #410 / #412 — `browseDecline` and `giveBelowAdd` (both optional) follow the
+// same rule: the HOST declares that a browse session is fronting an idea, and
+// this component only changes what the middle action cell renders and what
+// sits under the give column's Add button. No flag is read here for either.
 
 interface Props {
   leagueId: string;
@@ -126,6 +131,16 @@ interface Props {
    *  file's prefill convention). Absent (every pre-#402 host) the
    *  component is byte-identical. */
   onSidesChange?: (give: string[], receive: string[]) => void;
+  /** #410 — host-declared browse state. Absent/null ⇒ today's Clear cell,
+   *  byte-identical for every pre-#410 host. The host owns the predicate
+   *  (browseLive && sortedDeck.length > 0 && declineReasonProps); this
+   *  component reads no flag — the two-host contract (check-canvas-results 4l). */
+  browseDecline?: { onPress: () => void } | null;
+  /** #412 — content rendered inside the GIVE column's card, directly under
+   *  its "Add player" button (the browsed idea's "More offers" entry). The
+   *  host owns the gate, the handler and the analytics; this component only
+   *  places it. Absent ⇒ byte-identical for every other host. */
+  giveBelowAdd?: React.ReactNode;
   /** #402 QA A-D5 — while the hosting browse session shows an idea, the
    *  partner is that idea's COUNTERPARTY and stays fixed (spec §3: "change
    *  partner is NOT part of an idea"). True renders the partner controls
@@ -285,6 +300,8 @@ export default function InLeagueCalculator({
   onOutlookClosed,
   onLikeTrade,
   onSidesChange,
+  browseDecline,
+  giveBelowAdd,
   partnerLocked = false,
   seededPrefill = false,
   hideFormatChips = false,
@@ -1181,6 +1198,11 @@ export default function InLeagueCalculator({
             addRef={giveAddRef}
             leagueId={leagueId}
             compact={merged}
+            // #412 — the browsed idea's shop entry, under THIS column's Add
+            // button. Give-side only: shopping is a give-side verb
+            // (canvas-results rev-3 §1), so the receive mount below does not
+            // get one.
+            belowAdd={giveBelowAdd}
             onAdd={() => setPicker('give')}
             onRemove={(id) => {
               haptics.warning();
@@ -1299,24 +1321,60 @@ export default function InLeagueCalculator({
             <Text style={styles.actionPrimaryText} numberOfLines={1}>Find a Trade</Text>
           </Pressable>
 
-          <Pressable
-            ref={clearBtnRef}
-            testID="calc.action.clear"
-            accessibilityRole="button"
-            accessibilityLabel="Clear the trade"
-            disabled={!anySide}
-            onPress={() => {
-              haptics.warning();
-              clear();
-            }}
-            style={({ pressed }) => [
-              styles.actionClear, styles.actionBtn,
-              pressed && styles.actionBtnPressed,
-              !anySide && styles.actionBtnDisabled,
-            ]}
-          >
-            <Text style={styles.actionClearText} numberOfLines={1}>Clear</Text>
-          </Pressable>
+          {/* #410 / D-169 — the middle cell forks on HOST-DECLARED browse
+              state. While the host says a browse session is fronting an idea
+              the cell is the DECLINE control, a bare cross glyph (operator
+              ruling, 2026-08-30: "It does mean pass / Keep the x button");
+              in every other state — empty canvas, hand-built canvas, flag
+              off, the pushed Real-values page, FeaturedTradeWindow, the #270
+              experiment, and under the feedback.decline_reasons kill switch,
+              where the host passes null — it stays D-157's labeled Clear,
+              byte-identical. The 50/30/20 proportions are untouched: this
+              swaps the cell's CONTENT, never its flex.
+
+              TWO Pressables, not one with conditional props: testid-lint
+              needs static literal ids, and one shared cell is how the
+              decline silently inherits Clear's `disabled={!anySide}` (dead
+              control on a canvas emptied row-by-row mid-session) and how one
+              id ends up carrying two verbs.
+
+              The decline branch fires no haptic and calls nothing else —
+              `handleBrowsePass` owns the selection haptic and the whole
+              reason flow. It must NOT also call `clear()`: that is what
+              wrote {give: [], receive: []} into the browsed idea's edit map
+              and made paging back restore a wiped idea (PRD R-6). */}
+          {browseDecline ? (
+            <Pressable
+              testID="calc.action.decline"
+              accessibilityRole="button"
+              accessibilityLabel="Pass on this trade idea"
+              onPress={browseDecline.onPress}
+              style={({ pressed }) => [
+                styles.actionClear, styles.actionBtn,
+                pressed && styles.actionBtnPressed,
+              ]}
+            >
+              <Icon name="x" size={16} color={semantic.neg} />
+            </Pressable>
+          ) : (
+            <Pressable
+              ref={clearBtnRef}
+              testID="calc.action.clear"
+              accessibilityRole="button"
+              accessibilityLabel="Clear the trade"
+              disabled={!anySide}
+              // `clear` owns the warning haptic (:843) — calling one here
+              // too fired it twice on every tap.
+              onPress={clear}
+              style={({ pressed }) => [
+                styles.actionClear, styles.actionBtn,
+                pressed && styles.actionBtnPressed,
+                !anySide && styles.actionBtnDisabled,
+              ]}
+            >
+              <Text style={styles.actionClearText} numberOfLines={1}>Clear</Text>
+            </Pressable>
+          )}
 
           {/* #384 W6-A — the confirm/queue control (D-152). Disabled only for the
               three reasons a tap could not mean anything: no host handler,

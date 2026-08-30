@@ -379,6 +379,27 @@ for (const r of ['likes_you_off', 'not_league_member', 'assets_not_on_roster',
   assert(new RegExp(`'${r}'`).test(api),
     `18g. CalcQueueReason declares '${r}'`);
 }
+// 18j (FB-409) — `not_league_member` is the ONE reason that may not name a
+// side. The server raises it for three causes and two of them are CALLER-side
+// (backend/server.py:13139-13143), and the caller was the dominant one in
+// production — which is how a user who WAS in the league got told the partner
+// was not. Any wording that still points at @name is wrong, hedged or not.
+{
+  const at = queueUtil.indexOf("case 'not_league_member':");
+  const end = queueUtil.indexOf("case '", at + 10);
+  const seg = at > -1 && end > at ? queueUtil.slice(at, end) : '';
+  assert(seg !== '' && !/\$\{name\}/.test(seg) && !/@/.test(seg),
+    '18j. the not_league_member line names no side',
+    'the server cannot tell the client WHICH side failed, so the client must not claim to know');
+}
+// 18k — and the file's own contract carries the carve-out. The header
+// promises every line names whose preference refused it; left unamended, the
+// next editor reads that, sees this case violating it, and "fixes" it back.
+assert(/FB-409/.test(queueUtil)
+  && /caller-side/.test(queueUtil)
+  && /backend\/server\.py:13139-13143/.test(queueUtil),
+  '18k. the header comment records the exception, its cause and its citation',
+  'an undocumented exception to a stated contract is a regression waiting on the next reader');
 
 // 19 — the disabled rule. Anchored to the whole expression: an unconditional
 // `disabled` (or an `|| true`, or dropping the `onLikeTrade` term so a

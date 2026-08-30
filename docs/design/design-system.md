@@ -99,6 +99,7 @@ Web: load via Google Fonts (`Barlow Condensed:600,700`, `Archivo:400,500,600,700
 | `heading` | Barlow Condensed 600 | 22/26 | UPPER, +0.03em | Section headers, sheet titles |
 | `label` | Archivo 600 | 11/14 | UPPER, +0.08em | Section labels (with ice tick), badge text |
 | `title` | Archivo 600 | 16/22 | Sentence | Card titles, player names |
+| `title-compact` | Archivo 600 | 13/18 | Sentence | Player names in the **two-column** trade canvas only (#411 / FB-411, 2026-08-30) — `title`'s family and weight at `body-sm`'s metrics, because a 97.5pt column ellipsized 99 of the top 100 dynasty names at 16/22. Not a new token in `chalkline.ts`: composed as `[type.title, { fontSize: type.bodySm.fontSize, lineHeight: type.bodySm.lineHeight }]`, so it inherits `title`'s Dynamic Type cap. Never used outside the compact arm — the stacked page keeps `title`. |
 | `body` | Archivo 400 | 14/21 | Sentence | Default copy |
 | `body-sm` | Archivo 400 | 13/18 | Sentence | Secondary copy, help text |
 | `data-lg` | IBM Plex Mono 600 | 22/26 | — | Hero numbers (Elo, fairness %) |

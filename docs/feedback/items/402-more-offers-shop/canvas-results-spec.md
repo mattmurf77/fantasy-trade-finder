@@ -67,9 +67,11 @@
 
 ## 4. The ✕ — decline reasons, verbatim semantics (ruling 2)
 
-- A ✕ control on the browsed idea (placement: with the pager, never inside
-  the action row's 50/30/20 cells — that row's proportions are D-157 and
-  unchanged). Tapping it opens the existing two-layer decline-reason
+- A ✕ control on the browsed idea (placement: the action row's middle cell
+  during a live browse session — amended 2026-08-30 by D-169 on the
+  operator's ruling; the row's 50/30/20 proportions are D-157 and remain
+  unchanged, which is the part of this clause that was load-bearing. Before
+  D-169 this control lived with the pager). Tapping it opens the existing two-layer decline-reason
   capture — the same overlay presentation the calculator-origin deck
   already uses (`trade_pass_overlay_*`), the same layer-1 tiles, layer-2
   detail, and free text, wired to the same `/api/trades/pass-reason`

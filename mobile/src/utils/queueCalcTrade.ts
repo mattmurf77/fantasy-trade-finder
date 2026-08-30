@@ -27,6 +27,13 @@ export type QueueToast = {
 // line names whose preference refused it and why, because the alternative —
 // a generic "couldn't queue that" — is the dishonest state the cell was
 // disabled to avoid. `name` is the counterparty's username, already @-less.
+//
+// …with one exception: `not_league_member` is a single server reason covering
+// three causes, two of them caller-side (backend/server.py:13139-13143 — the
+// CALLER not being a member, the opponent not being a member, or a trade with
+// yourself), so the client cannot honestly name a side and deliberately does
+// not (FB-409). Do not "restore" the @name there: the dominant production
+// cause was the caller, and the line blamed the partner for it.
 export function queueRefusalLine(
   reason: CalcQueueReason | undefined,
   name: string,
@@ -41,7 +48,7 @@ export function queueRefusalLine(
     case 'assets_not_on_roster':
       return 'Those assets are no longer on the rosters this trade needs.';
     case 'not_league_member':
-      return `@${name} isn't in this league.`;
+      return "Couldn't queue that — one side isn't showing as a league member.";
     case 'likes_you_off':
       return 'Queueing trades for other managers is turned off right now.';
     default:

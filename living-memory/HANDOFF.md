@@ -8,6 +8,17 @@
 
 ---
 
+## 2026-08-30b — second feedback batch (#409/#410/#411/#412) built + dual-QA green, shipping as v1.16.13
+
+**Where:** branch `claude/fb-410-412-trade-card-polish` off `main` @ `bd83fe94`. Commits: `11c8903c` + `14d06ba2` (#409 backend), `966df00a` (specs), `03a90652` (mobile), plus the ledger commit carrying this entry. Version 1.16.13 in all three files.
+
+**What it is:** #409 — the ✓ queue control had a **100% production refusal rate since 2026-08-22** (caller resolved out of the caller-excluded `league.members`); fixed by local synthesis, G-063. #410 — D-169 bare-✕ decline cell during a browse session, closing the edit-map data-loss defect. #411 — chip to the meta line, name at 13/18. #412 — More offers under the give Add. Plus #409's client copy no longer blaming the counterparty.
+
+**Owed:**
+1. **Operator TestFlight checklist (14 steps)** — `docs/feedback/items/410-found-trade-decline-position/testflight-checklist.md`. **Step 9 is the #409 proof** (the ✓ actually queues) and **step 11b is a ruling request**: QA-B found the #411 tag move squeezes team · age off top-tier rows (~1.9pt residual). Shipped by disclosure, not silently — if that trade is wrong, reverting is chip-back-to-line-1 or a wrapping meta line.
+2. **Follow-ups queued in NEXT** — three more sites with the G-063 defect (standing-offers `stale` permanently false; match-accept push showing a raw account id; the co-owner mirror gap), the `calc.merged_layout`-off ghost-Clear combination (PRD §6.6 F-2), and the `test:mascot-ram` npm wiring.
+3. Sweep the branch + this worktree once merged; `docs/recovery/2026-08-30-qa-a-fb407-sweep.md` carries the QA sweeps.
+
 ## 2026-08-30 — feedback batch #407 + #406 SHIPPED (v1.16.12, EAS build 140)
 
 **Where:** `main` @ `287aed09` (PR [#250](https://github.com/mattmurf77/fantasy-trade-finder/pull/250), squash on green CI ×3 — backend-tests · mobile-typecheck · maestro-testid-lint). EAS build **140 / v1.16.12** queued from the content-identical branch tree with `--auto-submit` (submission `3da45aef` scheduled to fire on build completion). Prod healthy post-merge (`/` and `/api/feature-flags` both 200); **backend diff is literally zero** for this batch, so there is nothing server-side to verify by content — the whole change is client.

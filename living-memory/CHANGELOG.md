@@ -14,6 +14,24 @@
 
 
 
+## 2026-08-30b — feedback batch: the ✓ button that never worked, + three trade-card fixes (v1.16.13)
+
+Four reports filed against v1.16.12 the morning it shipped. The headline is **#409**: the ✓
+"queue this trade for them" control had been refused **100% of the time in production since
+2026-08-22** — `POST /api/trades/queue` looked the caller up in `league.members`, which is
+caller-excluded by convention, so it always answered "not a league member" and the client
+blamed the *partner* for it. Fixed by synthesizing the caller locally from the session
+(G-063, the convention's 4th bite; 3 of 4 hidden by a fixture that put the caller in
+`members`). Collateral now unblocked: every calculator-built proposal since 8/22 had been
+silently dropped and the G22 activation moments had never fired. **#410** (D-169, operator
+ruling "it does mean pass"): the merged action row's middle cell becomes a bare ✕ while
+browsing a found idea — which also closes a data-loss defect where Clear mid-session wrote an
+empty trade into the browsed idea's edit map. **#411**: position chip → meta line, name at
+13/18; top-100 one-line fit 1/100 → 83/100 — with the honest cost that team · age is squeezed
+out on top-tier rows (QA-B F-1, disclosed in PRD §6.2b + checklist step 11b for an on-device
+ruling). **#412**: More offers returns under the give column's Add. Backend 4478/0 · tsc clean
+· 87/87 suites · 32 + 27 sabotage cycles. Evidence: TEST_LEDGER 2026-08-30b.
+
 ## 2026-08-30 — feedback batch: #407 finder-forced-team fix + #406 "Anyone" targeting (v1.16.12, SHIPPED)
 
 Feedback pipeline run on the two newest tester reports. **#407** (filed hours after
