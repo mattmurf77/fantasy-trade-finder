@@ -30,3 +30,4 @@ operator ruling. Searching `docs/` for `B-C4` returns only a verification step i
 `402-more-offers-shop/testflight-checklist.md`. **The operator is right that it
 was a reversion**, and moving it under the give column's "Add player" button
 contradicts nothing on the record.
+- 2026-08-30: built + dual-QA green, shipping in v1.16.13. Canonical: [410-found-trade-decline-position](../410-found-trade-decline-position/status.md).

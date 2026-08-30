@@ -58,3 +58,15 @@ The fix contradicts two prior rulings — see [plan.md §5](plan.md#5-prior-ruli
 Neither is a hard blocker on the operator's own authority — but both must be
 surfaced and confirmed rather than silently reversed. A new `D-###` amending both
 is owed if the change ships.
+
+## 2026-08-30 — QA complete, shipping in v1.16.13
+
+QA-A (mechanical): **17/17 PASS**, 27 sabotage cycles re-proven independently, no green
+assertion silently edited, `check-any-partner.js` byte-identical
+([qa-a-2026-08-30.md](qa-a-2026-08-30.md)). QA-B (adversarial): **17/17 PASS** with one
+BLOCKING **disclosure** finding ([qa-b-2026-08-30.md](qa-b-2026-08-30.md)) — **F-1**: the #411
+tag move squeezes the meta line's team · age to ≈1.9pt on top-tier rows, a cost the operator
+was not shown when choosing "tag move + shrink". Resolved by disclosure, not code: PRD §6.2b
+records it and **TestFlight step 11b asks for an on-device ruling**; reverting is
+chip-back-to-line-1 or a wrapping meta line. F-2 narrowed D-169's "closed" wording, F-3/F-4
+recorded in PRD §6.6, F-5 fixed in `docs/design/design-system.md` (`title-compact` row).

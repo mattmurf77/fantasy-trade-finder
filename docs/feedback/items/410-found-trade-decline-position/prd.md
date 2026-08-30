@@ -543,6 +543,33 @@ Accepted. The realistic worst case is 0.1pt. The TestFlight checklist has an
 explicit step (§9 step 11) to look at a top-tier player row and an early first,
 because this is the one prediction here that a device could falsify.
 
+### 6.2b #411 — the team · age text is squeezed out on high-tier rows (QA-B F-1, post-build)
+
+**Found by QA-B after the operator's ruling; they chose "tag move + shrink" without this
+on the table, so it is disclosed here and probed on device (checklist step 11b).**
+
+The compact meta line is `[chip] [team · age] [tier badge]` in 97.5pt with two 4pt gaps.
+The chip and the badge are data encodings and never shrink (R-13); the text is the sole
+yielder and now carries `minWidth: 0`, so it can reach **zero**. Using this PRD's own §3.2
+measurements:
+
+| Row | chip | badge (`sm`) | gaps | residual for `WAS · 24 yrs` (74.2 wanted) |
+|---|---|---|---|---|
+| WR at `4+ 1sts` | 30.1 | 59.5 | 8 | **≈1.9pt — nothing renders** |
+| WR at `1 1st` | 30.1 | 43.4 | 8 | ≈18pt — `W…` |
+| WR at `FA` | 30.1 | 26.3 | 8 | ≈35pt — `WAS…` |
+| PICK `Draft capital` at `1 1st` | 39.6 | 43.4 | 8 | ≈6.5pt — `…` |
+
+Before #411 the same line held text + `md` badge only: **≈30pt**. So the tag move buys the
+name its room by spending the team/age line, worst exactly on the top-tier assets. The
+information is not moved — it is pushed under `Card`'s `overflow: 'hidden'`.
+
+**Why it ships anyway:** the operator's goal was name legibility (1/100 → 83/100 one-line
+fit) and the means was theirs; reversing it or adding wrapping would substitute a design
+decision they did not make. **It is reversible** — the reverting change is `compactChipSlot`
+back to line 1, or letting the meta line wrap. Worst on 375pt devices; a 430pt Pro Max
+leaves ~29pt. Checklist step 11b asks the operator to read team and age on a top-tier row.
+
 ### 6.3 #411 — Dynamic Type
 
 `type.title` caps at the `body` tier, ×2.0 (`mobile/src/theme/chalkline.ts:175`),
@@ -550,6 +577,28 @@ and R-12 does not change that. At 200% text scaling a 13pt name renders at 26pt
 and holds roughly 5–6 characters in 97.5pt — truncation returns for almost every
 name. **The structural guards must therefore assert the structural change, never
 "names do not truncate".**
+
+### 6.6 Residuals recorded post-build from QA-B (F-2 · F-3 · F-4)
+
+- **F-2 — R-6 is closed for the action row, not for every flag combination.** `canvasHost` /
+  `canvasResultsLive` do not AND in `calc.merged_layout`, but the merged tree does. With
+  `calc.merged_layout` OFF and `calc.inline_home` + `calc.canvas_results` still ON, the stacked
+  page's ghost `Clear trade` (`InLeagueCalculator.tsx:1558`) is reachable and reproduces the
+  edit-map corruption verbatim — and because #410 removed the pager ✕, that state has **no**
+  decline control. Kill-switch-only combination, not a shipped state (all three ship ON), but
+  the "closed" wording in R-6 and D-169 is narrowed accordingly. Follow-up: gate the ghost
+  Clear on browse state too, or AND `merged_layout` into `canvasHost`.
+- **F-3 — "More offers" changed parents, so its render changed even though its style object
+  did not.** It moved from a `row` (`browsePagerRow`) into a `column` (`TradeSide.styles.inner`),
+  so it now stretches the full column width with a left-aligned label beneath a centred
+  "Add player". The claim "visual construction carried over unchanged" is true of the style
+  object and false of the rendered result. Cosmetic; the operator sees it at checklist step 13.
+- **F-4 — the new #409 copy is still not true for one of the three causes it covers.**
+  "one side isn't showing as a league member" is accurate for the caller-side and
+  opponent-side misses but not for the self-trade refusal. That path is not reachable from
+  the UI (the ✓ addresses the browsed idea's counterparty), so it is accepted rather than
+  split — splitting `CalcQueueReason` is the cross-client contract change this batch
+  deliberately excluded.
 
 ### 6.4 #412 — the entry shops the original, not the edited give side
 

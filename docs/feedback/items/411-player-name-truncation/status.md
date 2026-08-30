@@ -29,3 +29,4 @@ pairs the operator's ask (**R-6**, move the chip to the meta line) with **R-7**,
 a two-line clamp on the compact name, which is what actually closes the
 complaint. Full per-name width table in
 [plan.md §3.2](../410-found-trade-decline-position/plan.md#32-quantified-what-truncates-now-and-what-still-truncates-after-the-move).
+- 2026-08-30: built + dual-QA green, shipping in v1.16.13. Canonical: [410-found-trade-decline-position](../410-found-trade-decline-position/status.md).

@@ -371,3 +371,13 @@ both members — the same shortcut that hid the bug.
 5. **`docs/feedback/items/INDEX.md`** still has no rows past #286 (documented drift). This folder was
    not added — carry it forward if the index is regenerated.
 6. **The suite-wide `_cleanup_loop` session-eviction race** above is worth its own item.
+
+## 2026-08-30 — QA PASS, shipping in v1.16.13
+
+Independent QA re-derived the full suite (**4478 passed, 1 skipped**), re-proved the sabotage
+(5 of 7 new tests red on revert, both no-over-permit tests correctly green), and audited every
+new test for production shape — all seven are prod-shaped, five would have caught the original
+bug. Report: [qa-2026-08-30.md](qa-2026-08-30.md). Orchestrator follow-ups applied in
+`14d06ba2` (`display_name` for the synthesized caller; three corrected G-063 cites).
+Client copy (R-17) ships with the mobile batch: `not_league_member` no longer names a side.
+**Owed: checklist step 9** — the only runtime proof the ✓ has ever worked.
