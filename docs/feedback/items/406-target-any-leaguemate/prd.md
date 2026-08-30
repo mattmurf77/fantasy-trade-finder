@@ -609,3 +609,13 @@ deliberately).
 3. Operator completes E-4 with all seven expectations met, logged in `TEST_LEDGER.md`.
 4. Docs follow-through per [scope.md](scope.md) §4 (components/CLAUDE.md row,
    design components entry, DECISIONS.md entry).
+
+## E-4 addendum (post-QA, QA-B B-1 — 2026-08-30)
+
+8. **Zero-result wipe probe (known limitation):** end a *scoped* browse session
+   (pick a manager, search, Done), then choose **Anyone**, hand-add 2+ give-side
+   players WITHOUT searching, and tap **Find a Trade**. *Known limitation:* the
+   canvas remounts as the search dispatches; if the sweep returns zero ideas the
+   hand-built package is lost (the anchor receipt's "canvas still holds the
+   assets" promise does not hold on this path). Wire scope and the scope note
+   stay honest throughout. Host-key fix queued as a follow-up item.
