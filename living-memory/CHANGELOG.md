@@ -14,6 +14,19 @@
 
 
 
+## 2026-08-29c — deck_outcomes duplicate-pass guard ships
+
+PR #242 squash-merged on green → `main` @ `e9992195` (Render auto-deploy). Prod audit had
+120/410 passed impressions carrying 2–3 `pass` rows: the decline tile tap fires BOTH
+`/api/trades/pass-reason` (server writes the pass, NULL dwell) and the unchanged swipe POST
+(dwell set). Fix is server-side so every client version is covered at once:
+`deck_pass_outcome_recorded` (live pass = passes > undos, so undo→re-pass stays legal) +
+a `dup_pass`-counted skip in `_save_deck_outcome_safe`, which also stops the taste vector
+learning one pass twice. Elo was already safe (`elo_signal_at` claim + decision dedupe).
+5 new pytests; suite 4,455/0. **Gap:** historical rows not backfilled — pre-fix windows
+dedupe on read (NULL-dwell twin). Follow-up task spawned: client sends `dwell_ms` with the
+layer-1 reason POST so the surviving row carries dwell.
+
 ## 2026-08-29b — guided onboarding off by ruling
 
 `onboarding.guided_avatar` flipped false (PR #239, verified live): no Analyst avatar, no
