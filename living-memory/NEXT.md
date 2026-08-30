@@ -9,7 +9,7 @@
 ---
 
 ## Table of Contents
-- [2026-08-30 — Feedback batch #407/#406 at go/no-go; two small follow-ups](#2026-08-30--feedback-batch-407406-at-gono-go-two-small-follow-ups)
+- [2026-08-30 — Feedback batch #407/#406 SHIPPED; run the two checklists, then two small follow-ups](#2026-08-30--feedback-batch-407406-shipped-run-the-two-checklists-then-two-small-follow-ups)
 - [2026-08-29 — Age-pref multiplier live: re-measure dispositions in ~2 weeks](#2026-08-29--age-pref-multiplier-live-re-measure-dispositions-in-2-weeks)
 - [2026-08-24 — Quick Set `via` gap PR: operator confirm + merge, then the TestFlight check](#2026-08-24--quick-set-via-gap-pr-operator-confirm--merge-then-the-testflight-check)
 - [2026-08-23 — Onboarding × calc tour merge: operator decisions, then Wave A](#2026-08-23--onboarding--calc-tour-merge-operator-decisions-then-wave-a)
@@ -38,9 +38,9 @@
 
 ---
 
-## 2026-08-30 — Feedback batch #407/#406 at go/no-go; two small follow-ups
+## 2026-08-30 — Feedback batch #407/#406 SHIPPED; run the two checklists, then two small follow-ups
 
-**Why now:** both items are built + dual-QA green on `claude/new-user-feedback-5fa613` (v1.16.12); the batch is one operator "go" from ship (see HANDOFF same date). After ship: run the two TestFlight checklists (#407 mini-PRD 6 steps, #406 E-4 8 steps). Follow-ups, both small: (1) wire `test:mascot-ram` into mobile/package.json — `tests/check-mascot-ram.js` has NEVER had an npm script, so it gates nothing (QA-A find, pre-existing since #186); (2) QA-B B-1: the merged host's canvas key remounts mid-search after a scoped→Anyone transition, wiping a hand-built give side when the sweep returns zero ideas — documented + E-4 step 8 probes it; fix is a host-key change, own small item.
+**Why now:** both shipped in PR #250 → `main` @ `287aed09`, EAS build **139 / v1.16.12** auto-submitting (HANDOFF same date). **Operator: run the two TestFlight checklists on 139** — #407 mini-PRD 6 steps, #406 PRD §E-4 8 steps — the only runtime evidence either item gets, and neither has been seen on a device. Then two small follow-ups: (1) wire `test:mascot-ram` into mobile/package.json — `tests/check-mascot-ram.js` has NEVER had an npm script, so it gates nothing (QA-A find, pre-existing since #186); (2) QA-B B-1: the merged host's canvas key remounts mid-search after a scoped→Anyone transition, wiping a hand-built give side when the sweep returns zero ideas — documented + E-4 step 8 probes it; fix is a host-key change, own small item.
 
 ## 2026-08-29 — Age-pref multiplier live: re-measure dispositions in ~2 weeks
 
