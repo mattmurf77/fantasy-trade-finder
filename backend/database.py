@@ -749,6 +749,12 @@ Index(
 # `viewed` = card was front-of-deck ≥500ms client-side (served ≠ viewed);
 # `not_interested` rides the bad-trade flag; `undo` appends alongside (not
 # instead of) whatever the original outcome row was.
+# ONE exception to duplicates-are-legal (2026-08-29): `pass` is a
+# DISPOSITION, and an impression gets at most one live pass — flag-on
+# clients fire the decline-reason tile tap AND the swipe POST for the same
+# gesture, so a second pass while `deck_pass_outcome_recorded` is True is
+# skipped by `server._save_deck_outcome_safe` (counted as `dup_pass` on the
+# analytics-health rejects). An undone pass may be passed again.
 deck_outcomes_table = Table("deck_outcomes", metadata,
     Column("id",              Integer, primary_key=True, autoincrement=True),
     Column("impression_id",   String,  nullable=False),  # deck_impressions.impression_id
@@ -5966,6 +5972,29 @@ def save_deck_outcome(
                                else (1 if calc_opened else 0)),
             acted_at        = datetime.now(timezone.utc).isoformat(),
         ))
+
+
+def deck_pass_outcome_recorded(impression_id: str) -> bool:
+    """True when the impression already carries a LIVE pass disposition —
+    strictly more 'pass' rows than 'undo' rows.
+
+    The one-pass-per-impression guard (2026-08-29 prod audit): flag-on
+    clients fire both the decline-reason tile tap (whose route writes the
+    pass disposition server-side) and the unchanged swipe POST for the same
+    gesture, and each path appended a pass row — 120 of 410 passed
+    impressions carried 2-3. The caller (`server._save_deck_outcome_safe`)
+    skips a pass write when this returns True. Counting undos keeps a
+    genuine re-pass legal: pass → undo → pass balances to one live pass at
+    each step, while a duplicate label never does.
+    """
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(deck_outcomes_table.c.action)
+            .where(deck_outcomes_table.c.impression_id == impression_id)
+            .where(deck_outcomes_table.c.action.in_(("pass", "undo")))
+        ).fetchall()
+    passes = sum(1 for r in rows if r[0] == "pass")
+    return passes > len(rows) - passes
 
 
 # ── Decline-reason capture (flag feedback.decline_reasons) — storage ────────

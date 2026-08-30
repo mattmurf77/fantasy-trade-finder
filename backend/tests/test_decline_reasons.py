@@ -285,6 +285,78 @@ def test_swipe_pass_is_unchanged_even_with_the_flag_on(harness):
 
 
 # ---------------------------------------------------------------------------
+# One pass disposition per impression (2026-08-29 prod audit)
+#
+# The shipped mobile client fires BOTH halves for one tile tap:
+# handleReasonLayer1 → postDeclineReason (POST /api/trades/pass-reason, no
+# dwell_ms in its payload) AND advance('pass') → the unchanged swipe POST
+# (impression_id + dwell_ms), ~20-90ms apart. Each route writes the pass
+# disposition — pass-reason via _apply_reasoned_pass, swipe via its own
+# _save_deck_outcome_safe call — which put 2-3 action='pass' rows on 120 of
+# 410 passed impressions in prod (one NULL-dwell, one dwell-set).
+# deck_pass_outcome_recorded now makes the second write a counted skip.
+# ---------------------------------------------------------------------------
+
+def _outcome_rows(eng):
+    with eng.connect() as conn:
+        return conn.execute(
+            select(db_module.deck_outcomes_table)
+            .order_by(db_module.deck_outcomes_table.c.id)).fetchall()
+
+
+def test_tile_tap_then_swipe_writes_one_pass_outcome(harness):
+    """The prod double-write, client order: reason POST lands first (its
+    payload carries no dwell), the swipe POST arrives ~20-90ms later with
+    dwell set. One pass row survives — the first."""
+    client, _service, _svc, eng = harness
+    r1 = _post(client, _reason({"reason": "value"}))
+    assert r1.status_code == 200 and r1.get_json()["passed"] is True
+    r2 = _post(client, {"trade_id": TRADE, "decision": "pass",
+                        "impression_id": IMP, "dwell_ms": 4300},
+               path="/api/trades/swipe")
+    assert r2.status_code == 200
+    rows = _outcome_rows(eng)
+    assert [(r.impression_id, r.action, r.dwell_ms) for r in rows] == \
+        [(IMP, "pass", None)]
+    # The reason row and the decision are still single too, and layer-1-only
+    # Elo suppression survives the swipe replay (dedupe skips its Elo write).
+    assert _row_count(eng) == 1
+    assert len(_decision_rows(eng)) == 1
+    assert _swipe_rows(eng) == []
+
+
+def test_swipe_then_tile_tap_writes_one_pass_outcome(harness):
+    """The same double-write with the network race reversed: the swipe POST
+    lands first (dwell set), then the reason POST. Still one pass row — the
+    swipe's — and the reasoned path still banks the reason on its own row."""
+    client, _service, _svc, eng = harness
+    r1 = _post(client, {"trade_id": TRADE, "decision": "pass",
+                        "impression_id": IMP, "dwell_ms": 2100},
+               path="/api/trades/swipe")
+    assert r1.status_code == 200
+    r2 = _post(client, _reason({"reason": "fit"}))
+    assert r2.status_code == 200
+    rows = _outcome_rows(eng)
+    assert [(r.impression_id, r.action, r.dwell_ms) for r in rows] == \
+        [(IMP, "pass", 2100)]
+    assert load_trade_pass_reason(IMP)["reason"] == "fit"
+    assert len(_decision_rows(eng)) == 1
+    # The swipe path (first) wrote its unconditional Elo signal; the reason
+    # path must not add a second (save_trade_decision dedupe).
+    assert len(_swipe_rows(eng)) == 1
+
+
+def test_retapped_layer1_does_not_write_a_second_pass_outcome(harness):
+    """Re-sending layer 1 (retry, re-tap) was already pass-once at the
+    trade_pass_reasons upsert; the deck_outcomes row is now pass-once too."""
+    client, _service, _svc, eng = harness
+    _post(client, _reason({"reason": "value"}))
+    _post(client, _reason({"reason": "value"}))
+    rows = _outcome_rows(eng)
+    assert [r.action for r in rows] == ["pass"]
+
+
+# ---------------------------------------------------------------------------
 # Progressive writes (SPEC §3)
 # ---------------------------------------------------------------------------
 
