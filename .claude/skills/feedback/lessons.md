@@ -315,3 +315,28 @@ files. Seeded from history before this skill existed:
   value-prop link) reads as delivered from the #384 status line "folds in #310",
   but only part one shipped; `TabNav.tsx` still registers five tabs. Grep the
   report's own clauses, not the batch doc's summary of them.
+- 2026-08-30 [qa] The Agent tool's `isolation:"worktree"` cuts from origin/main, NOT
+  the session branch — verified twice in one run. Recovery that WORKS: the agent
+  runs `git worktree add <scratchpad>/wt-<name> -b <branch> <spec-sha>` itself (the
+  shared object store has the commits). Recovery that BREAKS things: launching a QA
+  agent WITHOUT isolation and telling it to `git checkout -b` — it switches the
+  SESSION tree's branch under the orchestrator and any concurrent readers. Always
+  pass isolation for QA agents that mutate (sabotage cycles), and put the
+  make-your-own-worktree recovery in the prompt up front.
+- 2026-08-30 [plan] The targeted "verify only the round-3-new material" pass earned
+  its cost: it caught the new spec turning the SIBLING item's just-shipped guard
+  assertion red (20a re-spec undeclared) and an "always two-sided" claim that
+  edited snapshots falsify. Rule: material added during incorporation has never
+  been reviewed — give it one bounded verification pass, not a full round.
+- 2026-08-30 [qa] Serialized same-surface items pay off at QA: #407's QA-B found a
+  non-blocking edge (seed-prefill chosen-ness) that became a hard requirement
+  (R-10) of the #406 build on the same file — route cross-item findings into the
+  serialized sibling's PRD instead of opening a new item.
+- 2026-08-30 [ship] Info.plist's literal CFBundleShortVersionString is what ships —
+  pbxproj MARKETING_VERSION sat at 1.16.6 through five 1.16.7-11 releases. Bump all
+  three anyway (lesson 2026-08-10), but read Info.plist as the authority when they
+  disagree; `eas build:list` confirmed no version race before the bump.
+- 2026-08-30 [qa] QA agents in worktrees cannot write findings into the session
+  tree (writes blocked cross-worktree) — QA-B correctly left its report at the
+  repo-relative path in ITS worktree and said so. Copy it out BEFORE sweeping
+  (`--force` needed for the untracked file; inspect first), and ledger the sweep.

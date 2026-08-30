@@ -11,6 +11,16 @@
 
 ---
 
+## 2026-08-30 — feedback batch #407 (finder forced team) + #406 (Anyone targeting): built, dual-QA green, at operator go/no-go
+
+Branch `claude/new-user-feedback-5fa613` (worktree of the same name, cut from `main` @ `e89eebb0`). Full gates, no waivers beyond the written analytics/schema/flag waivers in both scope blocks (no bright-line surface touched). Specs: [407-finder-forced-team/mini-prd.md](../docs/feedback/items/407-finder-forced-team/mini-prd.md) · [406-target-any-leaguemate/prd.md](../docs/feedback/items/406-target-any-leaguemate/prd.md) (3-round dual-agent loop + targeted verification pass; every review round caught real defects — see reconciliation logs).
+
+- **#407 fix `8f722676`** (1 production file): `opponentChosenRef` gates the Find-a-Trade payload — the calculator's auto-defaulted first-leaguemate partner no longer forces a single-team sweep on an untouched canvas; an explicit pick still scopes both forks (#384 checklist-23 preserved). Guard: `check-calc-merged-behavior` 20a-20d, 5 sabotage cycles proven red/green by the builder AND independently re-proven by QA-A (+ a full-revert probe: 3 assertions red on the pre-fix build). QA-B adversarial code-walk: APPROVE, 1 non-blocking (B-1 browse-seed prefill counted as chosen — closed by the #406 build).
+- **#406 build `c138507c`** (3 production files + new guard suite): "Any league mate" sheet row (`partnerAny` + null opponentId, no sentinel), honest dropdown/receive labels, scope-truth note pinned to the exact complement of the #407 payload gate, partner-gated `ev` (closes the `placeholderData` stale-verdict leak), `seeded` prefill marker (browse-seed never counts as chosen; re-specced 20a proven two-sided). Zero backend diff — the league-wide sweep already ships (`/api/trades/fair-packages` with `opponent_user_id` omitted). D-168.
+- **Batteries:** backend `pytest backend/tests` **4,471 / 0 failed** (1 skipped) on the session tree · `tsc --noEmit` clean · **87/87 npm-run structural suites** green in QA-A's clean worktree (88 files incl. new `check-any-partner`; `check-mascot-ram.js` has no npm script — pre-existing gap, follow-up queued) · `testid-lint OK` · **QA-A #406: 20 sabotage cycles** each red on the named assertion, self-satisfaction audit clean · QA-B #406: APPROVE, zero blocking (B-1 zero-result canvas-wipe corner documented + E-4 addendum; B-2 flag-kill-only stale state documented).
+- **Version:** 1.16.12 in all three files (Info.plist authoritative + app.json + both stale-since-1.16.6 `MARKETING_VERSION`s aligned); EAS confirms latest is 1.16.11 build 138 — no race at bump time.
+- **Owed at ship:** CI green on the pushed sha; operator TestFlight checklists — #407 6 steps ([mini-prd §checklist](../docs/feedback/items/407-finder-forced-team/mini-prd.md)) + #406 E-4 8 steps ([prd §E-4](../docs/feedback/items/406-target-any-leaguemate/prd.md)) — the only runtime evidence under D-056.
+
 ## 2026-08-29f — age-preference consensus multiplier (D-167): SHIPPED via PR [#248](https://github.com/mattmurf77/fantasy-trade-finder/pull/248) → `main` @ `750abb6a` on green CI; branch swept (docs/recovery/2026-08-29-age-pref-value-ship.md)
 
 Branch `feat/age-pref-value` (worktree `goofy-perlman-490e49`), rebased onto `main` @ `d5c926fd`.
