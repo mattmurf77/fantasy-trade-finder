@@ -54,6 +54,13 @@ def _isolate_flags_and_cfg():
     ff._flags_cache = dict(ff.DEFAULT_FLAGS)
     ts._cfg.clear()
     ts._cfg.update(ts._DEFAULT_CFG)
+    # D-167 (2026-08-29): the age-preference consensus multiplier joined the
+    # DEFAULT engine after this file was authored. These tests give
+    # o_old/o_young real ages and assert they are interchangeable when
+    # trade.outlook_direction is OFF — a premise that requires age-neutral
+    # pricing, so the age knobs ride their identity values here.
+    ts._cfg["age_pref_mult_u23"] = 1.0
+    ts._cfg["age_pref_mult_30plus"] = 1.0
     try:
         yield
     finally:

@@ -516,7 +516,16 @@ def test_r4_bypass_is_thread_local():
 #: guard the plan's §8 risk row ("arm A drifts and stops being original")
 #: actually needs: the golden only catches a new knob if that knob happens to
 #: move THIS fixture, whereas this catches it the moment it is declared.
+#: `age_pref_mult_u23` / `age_pref_mult_30plus` (2026-08-29, age-preference
+#: consensus multiplier — docs/plans/age-pref-value/scope.md): generation
+#: logic post-dating the reference SHA, so both are PINNED at the identity
+#: value 1.0 in MODEL_A_PROFILE — `age_pref_value` short-circuits at exactly
+#: 1.0, the consensus accessors are byte-identical, and the golden stands
+#: un-recaptured. `age_pref_boost_cap` is EXCLUDED from the profile: it is
+#: never read while both mults are 1.0 (the `package_floor_cross` rule).
+#: Disposition in docs/plans/three-model-bakeoff/scope-phase2.md.
 _PINNED_KNOBS = frozenset("""
+age_pref_mult_u23 age_pref_mult_30plus age_pref_boost_cap
 aggression_weight asset_floor_abs asset_ideas_group_cap
 bakeoff_deck_limit bakeoff_serve_interleaved bakeoff_group_size
 bakeoff_group_value_slots bakeoff_fill_policy bakeoff_include_baseline

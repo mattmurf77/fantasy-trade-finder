@@ -76,6 +76,24 @@ def _restore_flags(monkeypatch):
     ff.reload()
 
 
+@pytest.fixture(autouse=True)
+def _age_pref_neutral():
+    """D-167 (2026-08-29): the age-preference consensus multiplier joined the
+    DEFAULT engine after flag_off_golden.json was captured, and this file's
+    byte-identical assertions compare live generation against that capture.
+    The knobs ride their identity values here so the comparison stays about
+    the breaker seam (identity is the documented byte-identical off)."""
+    import backend.trade_service as ts
+    old = dict(ts._cfg)
+    ts._cfg["age_pref_mult_u23"] = 1.0
+    ts._cfg["age_pref_mult_30plus"] = 1.0
+    try:
+        yield
+    finally:
+        ts._cfg.clear()
+        ts._cfg.update(old)
+
+
 def _flags(monkeypatch, **over):
     flags = dict(ff.flags_dict())
     flags.update(over)

@@ -286,6 +286,25 @@ _DEFAULT_CFG: dict[str, float] = {
     "outlook_alpha_not_sure":     0.50,   # also used for outlook=None/unknown
     "outlook_alpha_rebuilder":    0.25,
     "outlook_alpha_jets":         0.10,
+    # ------------------------------------------------------------------
+    # Age-preference consensus multiplier — 2026-08-29 (operator decision,
+    # evidence docs/business/analytics/2026-08-29-trade-disposition-review.md:
+    # give-u23 cards ran a 9% like rate, receive-30plus 14%, while the
+    # mirror shapes were the deck's best performers). Applied inside the
+    # three consensus accessors (_vs here, trade_optimizer._sv,
+    # trade_gen_v2.cval) via age_pref_value() below — cards are RE-PRICED,
+    # never filtered. Band cut points mirror taste_service._age_band
+    # (u23 = age<23, 30plus = age>=30) so tuning maps onto the same buckets
+    # the evidence is measured in. Both mults at 1.0 = byte-identical
+    # accessors (the helper short-circuits) — the deploy-free kill; arm A
+    # pins them there in MODEL_A_PROFILE (the pre-wave engine had no age
+    # preference). The cap bounds only INCREASES (operator: "a maximum
+    # value increase"), is unread while both mults are 1.0, and <= 0
+    # disables it.
+    # ------------------------------------------------------------------
+    "age_pref_mult_u23":          1.10,
+    "age_pref_mult_30plus":       0.90,
+    "age_pref_boost_cap":         500.0,
     # Backlog #1 — opponent outlook inference (flag: trade.outlook_infer).
     # Weights on the three contend↔rebuild signals + the score cutoffs that
     # bucket into contender / not_sure / rebuilder. See infer_team_outlook.
@@ -3184,6 +3203,37 @@ def age_future_mult(pos: str | None, age) -> float:
     return fn(age) if fn else 1.0
 
 
+def age_pref_value(value: float, player) -> float:
+    """Age-preference adjustment on a CONSENSUS value (2026-08-29 —
+    see the _DEFAULT_CFG block for the evidence and knob semantics).
+
+    u23 (age < 23) rides `age_pref_mult_u23` with the INCREASE capped at
+    `age_pref_boost_cap` value points; 30plus (age >= 30) rides
+    `age_pref_mult_30plus` uncapped (only increases are capped — the knob
+    is "a maximum value increase", so a future >1.0 setting on either band
+    is capped too). Ages 23–29, picks, and anything without a positive
+    `age` attribute pass through untouched. A mult of exactly 1.0 returns
+    the input unchanged (byte-identical — the arm-A pin relies on this).
+    """
+    age = getattr(player, "age", None) if player is not None else None
+    if not age or age <= 0:
+        return value
+    if age < 23:
+        mult = _c("age_pref_mult_u23")
+    elif age >= 30:
+        mult = _c("age_pref_mult_30plus")
+    else:
+        return value
+    if mult == 1.0:
+        return value
+    adj = value * mult
+    if adj > value:
+        cap = _c("age_pref_boost_cap")
+        if cap > 0:
+            adj = min(adj, value + cap)
+    return adj
+
+
 _OUTLOOK_ALPHA_CFG_KEY = {
     "championship": "outlook_alpha_championship",
     "contender":    "outlook_alpha_contender",
@@ -5946,10 +5996,13 @@ class TradeService:
 
         _vs_cache: dict[str, float] = {}
         def _vs(pid: str) -> float:
-            """Consensus (seed) value of a player in the v2 value space."""
+            """Consensus (seed) value of a player in the v2 value space.
+            Age-preference adjusted (2026-08-29) — both mults at 1.0 make
+            age_pref_value the identity, restoring the pre-feature value."""
             v = _vs_cache.get(pid)
             if v is None:
-                v = elo_to_value(seed_elo.get(pid, 1500.0))
+                v = age_pref_value(elo_to_value(seed_elo.get(pid, 1500.0)),
+                                   self._players.get(pid))
                 _vs_cache[pid] = v
             return v
 

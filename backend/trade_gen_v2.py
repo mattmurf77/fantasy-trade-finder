@@ -116,6 +116,7 @@ from .trade_service import (
     _c,
     _harmonic_mean,
     _shrink_user_elo,
+    age_pref_value,
     analyze_roster_strengths,
     elo_to_value,
     filler_ok,
@@ -1082,7 +1083,10 @@ def generate_league_suggestions(
     def cval(pid: str) -> float:
         v = _cv_cache.get(pid)
         if v is None:
-            v = elo_to_value(seed_elo.get(pid, 1500.0))
+            # Age-preference adjusted (2026-08-29) — mirrors trade_service's
+            # _vs so the arms cannot price an age band differently.
+            v = age_pref_value(elo_to_value(seed_elo.get(pid, 1500.0)),
+                               players.get(pid))
             _cv_cache[pid] = v
         return v
 

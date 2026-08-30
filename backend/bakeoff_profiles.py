@@ -114,6 +114,16 @@ MODEL_A_PROFILE: dict[str, float] = {
     # `gen2_accept_prior_strength`, and an arm overlay pin is expressly not
     # the sanctioned M2 kill (HLD §5.3).
     "negmem_strength":           0.0,   # M1 seam off (pre-negmem engine)
+    # Age-preference consensus multiplier — 2026-08-29 (docs/business/
+    # analytics/2026-08-29-trade-disposition-review.md). Post-dates the
+    # reference SHA and re-prices the consensus accessors (_vs/_sv/cval),
+    # so arm A pins both mults at the IDENTITY value: age_pref_value
+    # short-circuits at exactly 1.0 and the accessors are byte-identical,
+    # so the golden stands un-recaptured. `age_pref_boost_cap` is
+    # deliberately absent — it is never read while both mults are 1.0
+    # (same rule as `package_floor_cross`).
+    "age_pref_mult_u23":         1.0,   # age boost off (pre-wave pricing)
+    "age_pref_mult_30plus":      1.0,   # age discount off
 }
 
 

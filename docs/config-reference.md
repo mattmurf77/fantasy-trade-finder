@@ -802,6 +802,10 @@ Both knobs shape the **baseline consensus seed values** (the DP→Elo pool seeds
 | `outlook_alpha_rebuilder` | 0.25 | |
 | `outlook_alpha_jets` | 0.10 | |
 
+| `age_pref_mult_u23` | 1.10 | Age-preference consensus multiplier (2026-08-29, evidence `docs/business/analytics/2026-08-29-trade-disposition-review.md`): players under 23 are re-priced UP inside the three deck-generation consensus accessors (`trade_service._vs`, `trade_optimizer._sv`, `trade_gen_v2.cval`) so giving them requires more back. 1.0 = byte-identical off (arm A pins this in `MODEL_A_PROFILE`) |
+| `age_pref_mult_30plus` | 0.90 | Players 30+ re-priced DOWN in the same accessors, so cards delivering them credit less user gain. 1.0 = off |
+| `age_pref_boost_cap` | 500.0 | Max absolute value-space INCREASE any age boost may add (~half a mid-1st at value 1000 = mid-1st). Caps increases only — discounts are never capped. <= 0 disables the cap |
+
 The per-position age NOW/FUTURE curves are deliberately a code constant table (`_AGE_NOW_CURVE` / `_AGE_FUTURE_CURVE` in `trade_service.py`), not config keys — the breakpoints were calibrated as a set.
 
 ### Tier 2 — deck ordering, diversification, fuzzy matching, likes-you

@@ -69,6 +69,24 @@ NEW_COLUMNS = ("model_arm", "arm_rank", "fairness_threshold",
 # Helpers
 # ---------------------------------------------------------------------------
 
+@pytest.fixture(autouse=True)
+def _age_pref_neutral():
+    """D-167 (2026-08-29): the age-preference consensus multiplier joined the
+    DEFAULT engine after flag_off_golden.json was captured, and the two
+    golden tests here compare live generation against that capture. The knobs
+    ride their identity values (the documented byte-identical off) so the
+    comparison stays about the bake-off serving seam."""
+    import backend.trade_service as ts
+    old = dict(ts._cfg)
+    ts._cfg["age_pref_mult_u23"] = 1.0
+    ts._cfg["age_pref_mult_30plus"] = 1.0
+    try:
+        yield
+    finally:
+        ts._cfg.clear()
+        ts._cfg.update(old)
+
+
 def _strip_new_columns(capture: dict) -> dict:
     out = dict(capture)
     out["impressions"] = [
