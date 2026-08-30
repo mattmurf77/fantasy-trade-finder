@@ -14,6 +14,20 @@
 
 
 
+## 2026-08-29e — layer-1 decline pass carries dwell (client half of the dup-pass guard)
+
+PR #246 squash-merged on green CI → `main` @ `293b5f80`. Client companion to #242 below:
+with first-pass-wins live, the layer-1 decline reason POST landed before the swipe POST,
+so the surviving `deck_outcomes` pass row had NULL `dwell_ms` on every reasoned pass.
+`DeclineReasonWrite` gains optional `dwellMs`/`detailExpanded`/`calcOpened` (wire keys
+exactly what `_apply_reasoned_pass` reads; booleans sent faithfully), populated on the
+FIRST tile tap only — the disposition — from the same `signalForCard` the swipe path
+uses, at both layer-1 sites: `TradesScreen.handleReasonLayer1` and
+`usePresentationSignals.reasonLayer1` (both presentation screens fire reasonLayer1
+before their pass dispatch — same defect, same fix). Switches/layer-2/flag-off:
+byte-identical. Evidence: TEST_LEDGER 2026-08-29e (tsc, 87/87 suites, testid-lint on
+the #241/#242-merged tree). Mobile-only — inert for users until the next EAS build.
+
 ## 2026-08-29d — propose-label spine ships (bright line confirmed)
 
 PR #241 squash-merged on green CI → `main` @ `1f87ec16` (Render auto-deploy). Fixes the
