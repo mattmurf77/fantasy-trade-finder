@@ -5737,7 +5737,9 @@ export default function TradesScreen({ navigation, route }: any) {
     );
   }
 
-  // #402 §4 — the ✕ with the pager. Routes into the SAME decline-reason
+  // #402 §4 — the browse session's ✕ (#410/D-169 moved it from the pager to
+  // the canvas action row's middle cell; this handler is unchanged, and is
+  // still its ONE caller). Routes into the SAME decline-reason
   // machinery the calculator-origin deck uses: handleReasonOverlayOpened's
   // trade_pass_overlay_opened, the same layer handlers (which read the card
   // at the cursor), the same banked-pass and dismiss semantics, the same
@@ -5749,7 +5751,7 @@ export default function TradesScreen({ navigation, route }: any) {
   // the ✓ queue.
   function handleBrowsePass() {
     if (!rawTopCard) return;
-    if (!declineReasonProps) return; // unreachable — the ✕ only renders with the machinery mounted (see the pager)
+    if (!declineReasonProps) return; // unreachable — browseDecline is null without the machinery, so the cell is Clear (see the canvas mount)
     haptics.selection();
     // #402 QA round (A-D3 + B-P7) — ruling 2 is UNQUALIFIED: under browse
     // the ✕ IS the decline-reason flow, regardless of where the session's
@@ -7292,13 +7294,17 @@ export default function TradesScreen({ navigation, route }: any) {
           >
             {/* #402 canvas-results §2 — the browse pager, adjacent to the
                 canvas header: chevron steps + a chalk-dim `N / X` TickLabel,
-                the pass control at the row's end, and — for model-path
-                sessions, which have no anchor receipt — a Clear. Renders
-                only while the session actually holds ideas; paging emits
-                NOTHING and never wraps (the chevrons disable at the ends).
-                Placement ruling: the pass control lives HERE, never in the
-                canvas action row — its 50/30/20 proportions are D-157 and
-                unchanged. */}
+                and — for model-path sessions, which have no anchor receipt —
+                a Clear. Renders only while the session actually holds ideas;
+                paging emits NOTHING and never wraps (the chevrons disable at
+                the ends).
+
+                #410 / D-169 amends the placement ruling this row used to
+                carry: the pass control moved OUT of here into the canvas
+                action row's middle cell (and the #412 shop entry moved into
+                the give column), so exactly one of each is ever mounted. The
+                50/30/20 proportions are still D-157 and still untouched —
+                that is the half of the old clause that was load-bearing. */}
             {browseLive && sortedDeck.length > 0 ? (
               <View testID="trades.canvas-results.pager" style={styles.browsePagerRow}>
                 <Pressable
@@ -7333,39 +7339,6 @@ export default function TradesScreen({ navigation, route }: any) {
                   />
                 </Pressable>
                 <View style={styles.browsePagerSpacer} />
-                {/* #402 QA B-C4 (operator-flagged design call, built under
-                    the ship order) — the browsed idea's shop entry. The
-                    deck's "More offers" chip retired from this host with the
-                    deck tree, so the pager row carries the SAME entry:
-                    openShopForCard — one give asset navigates, several open
-                    the chooser; `shop_opened` fires once, at the navigate
-                    site (P-3). Bordered chalk, not ice (ice stays rationed
-                    to primary actions). Renders only with the browsed card's
-                    give side non-empty and the shop flags lit — a canvas-only
-                    page with no session has no idea to shop (the deck chip
-                    remains the flag-off entry). */}
-                {shopEnabled && rawTopCard && rawTopCard.give_players.length > 0 ? (
-                  <Pressable
-                    testID="trades.canvas-results.more-offers"
-                    accessibilityRole="button"
-                    accessibilityLabel={
-                      rawTopCard.give_players.length === 1
-                        ? `More offers for ${rawTopCard.give_players[0].name}`
-                        : 'More offers for a player you send'
-                    }
-                    hitSlop={8}
-                    onPress={() => {
-                      haptics.selection();
-                      openShopForCard(rawTopCard);
-                    }}
-                    style={({ pressed }) => [
-                      styles.browseMoreOffersBtn,
-                      pressed && styles.browseMoreOffersBtnPressed,
-                    ]}
-                  >
-                    <Text style={styles.browseMoreOffersText}>More offers</Text>
-                  </Pressable>
-                ) : null}
                 {browseSession?.origin === 'model' ? (
                   <Pressable
                     testID="trades.canvas-results.clear"
@@ -7379,24 +7352,6 @@ export default function TradesScreen({ navigation, route }: any) {
                         Clear
                       </Text>
                     )}
-                  </Pressable>
-                ) : null}
-                {/* #402 QA A-D3 — under browse the ✕ IS the two-layer
-                    decline-reason flow (ruling 2, unqualified), so it only
-                    renders while that machinery exists: under the
-                    feedback.decline_reasons kill switch the control steps
-                    aside (the route 404s anyway) rather than degrading to
-                    the deleted bare-pass fallback and its no-op Undo. */}
-                {declineReasonProps ? (
-                  <Pressable
-                    testID="trades.canvas-results.pass"
-                    accessibilityRole="button"
-                    accessibilityLabel="Pass on this trade idea"
-                    hitSlop={8}
-                    onPress={handleBrowsePass}
-                    style={styles.browsePassBtn}
-                  >
-                    <Icon name="x" size={16} color={semantic.neg} />
                   </Pressable>
                 ) : null}
               </View>
@@ -7446,6 +7401,56 @@ export default function TradesScreen({ navigation, route }: any) {
               // #402 canvas-results §3 — per-idea edit capture; undefined for
               // every other state so the component stays byte-identical.
               onSidesChange={browseLive ? handleBrowseSidesChange : undefined}
+              // #410 / D-169 — the session's decline control, now the canvas
+              // action row's middle cell instead of the pager's ✕. The
+              // predicate is the pager ✕'s own, unchanged: a live session
+              // holding ideas AND the decline-reason machinery mounted. Under
+              // the feedback.decline_reasons kill switch `declineReasonProps`
+              // is undefined, this is null, and the cell falls back to Clear —
+              // handleBrowsePass early-returns there, so a ✕ would be a dead
+              // control. Null everywhere else ⇒ byte-identical.
+              browseDecline={
+                browseLive && sortedDeck.length > 0 && declineReasonProps
+                  ? { onPress: handleBrowsePass }
+                  : null
+              }
+              // #412 — the browsed idea's shop entry, moved out of the pager
+              // row and under the GIVE column's "Add player" button (the
+              // report's own words). Same fork, same gate, same single
+              // `shop_opened` emitter inside openShopWindow (P-3): a move,
+              // not a behavior change. A canvas-only page with no session has
+              // no idea to shop, and the deck's own chip stays the flag-off
+              // entry.
+              //
+              // `rawTopCard` is the ENGINE'S give side, not the edited canvas
+              // — the same original-vs-edited rule handleBrowsePass states
+              // above. If the user swaps the give asset mid-session this
+              // still shops the one the engine proposed (accepted, PRD §6.4).
+              giveBelowAdd={
+                shopEnabled && browseLive && sortedDeck.length > 0
+                && rawTopCard && rawTopCard.give_players.length > 0 ? (
+                  <Pressable
+                    testID="calc.give.more-offers"
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      rawTopCard.give_players.length === 1
+                        ? `More offers for ${rawTopCard.give_players[0].name}`
+                        : 'More offers for a player you send'
+                    }
+                    hitSlop={8}
+                    onPress={() => {
+                      haptics.selection();
+                      openShopForCard(rawTopCard);
+                    }}
+                    style={({ pressed }) => [
+                      styles.moreOffersBtn,
+                      pressed && styles.moreOffersBtnPressed,
+                    ]}
+                  >
+                    <Text style={styles.moreOffersText}>More offers</Text>
+                  </Pressable>
+                ) : null
+              }
               // #402 QA A-D5 — spec §3: the partner is the browsed idea's
               // COUNTERPARTY and stays fixed while that idea is shown, so
               // the canvas's partner "Change"/Team control goes dimmed and
@@ -9544,7 +9549,7 @@ const styles = StyleSheet.create({
   anchorStrong: { color: chalk.base, fontFamily: fonts.uiSemi },
   anchorAction: { ...type.bodySm, color: ice.base, fontFamily: fonts.uiSemi },
   // #402 canvas-results — the browse pager row (44pt touch floor on the
-  // chevrons and the pass control) and the browse reason overlay. The
+  // chevrons) and the browse reason overlay. The
   // overlay trio mirrors TradeCard's reasonOverlay* styles verbatim — same
   // sheet presentation, host-side mount.
   browsePagerRow: {
@@ -9560,15 +9565,18 @@ const styles = StyleSheet.create({
   },
   browsePagerSpacer: { flex: 1 },
   // QA B-C4 — bordered-chalk construction (ice rationed to primary actions).
-  browseMoreOffersBtn: {
+  // #412 moved the control it dresses from the pager row into the give
+  // column, under "Add player"; the construction is carried over unchanged,
+  // so it still reads as the quieter sibling of the secondary Add button.
+  moreOffersBtn: {
     borderWidth: 1,
     borderColor: ink.line,
     borderRadius: radii.sm,
     paddingHorizontal: space.sm,
     paddingVertical: 4,
   },
-  browseMoreOffersBtnPressed: { backgroundColor: ink.ink3 },
-  browseMoreOffersText: {
+  moreOffersBtnPressed: { backgroundColor: ink.ink3 },
+  moreOffersText: {
     ...type.bodySm,
     color: chalk.base,
     fontFamily: fonts.uiSemi,
@@ -9579,12 +9587,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: space.sm,
     paddingBottom: space.xs,
-  },
-  browsePassBtn: {
-    minWidth: 44,
-    minHeight: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   reasonOverlayFill: { flex: 1 },
   reasonOverlayBackdrop: { flex: 1, backgroundColor: '#0009' },

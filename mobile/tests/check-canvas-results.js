@@ -73,12 +73,25 @@ const canvas = read('components/TradeBuildCanvas.tsx');
 const canvasCode = stripComments(canvas);
 const featured = read('components/FeaturedTradeWindow.tsx');
 const card = read('components/TradeCard.tsx');
+// #410 — the pushed Real-values page, the calculator's OTHER host. It must
+// stay byte-identical: no decline cell, no shop slot.
+const calcScreen = read('screens/TradeCalculatorScreen.tsx');
 
 // ── AST helpers (check-shop-deck.js pattern) ──────────────────────────────
 
 const host = ts.createSourceFile(
   'TradesScreen.tsx',
   trades,
+  ts.ScriptTarget.ES2019,
+  /* setParentNodes */ true,
+  ts.ScriptKind.TSX,
+);
+// #410 — the calculator is parsed too: §4m asks what the middle cell's two
+// BRANCHES each contain, and "does the decline branch also call clear()" is a
+// question about a subtree, not about text near a string.
+const calcSf = ts.createSourceFile(
+  'InLeagueCalculator.tsx',
+  calc,
   ts.ScriptTarget.ES2019,
   /* setParentNodes */ true,
   ts.ScriptKind.TSX,
@@ -170,10 +183,16 @@ console.log('check-canvas-results:');
     'trades.canvas-results.pager',
     'trades.canvas-results.prev',
     'trades.canvas-results.next',
-    'trades.canvas-results.pass',
   ]) {
     assert(trades.includes(`testID="${id}"`), `3. ${id} exists`);
   }
+  // #410 / D-169 — the decline control MOVED to the canvas action row's
+  // middle cell (`calc.action.decline`, §4m below). The pager itself is
+  // unchanged; what is pinned here is the ABSENCE, so the old ✕ cannot be
+  // re-added beside the new one and leave the report's "replace" unhonored.
+  assert(!trades.includes('testID="trades.canvas-results.pass"'),
+    '3-bis. the pager no longer carries a pass control — exactly one is mounted (D-169)',
+    'a second ✕ here means the action-row cell ADDED a decline instead of replacing one');
   assert(/\{browseLive && sortedDeck\.length > 0 \? \(/.test(trades),
     '3a. the pager renders only while the session actually holds ideas');
   const step = functionNamed(host, 'handleBrowseStep');
@@ -222,10 +241,25 @@ console.log('check-canvas-results:');
     && !referencesIdentifier(host, pass, 'setToast'),
     '4b. the bare-advance fallback (and its no-op-Undo toast) stays deleted',
     'the only removal paths are the reason machinery\'s own commit and dismiss handlers');
-  assert(/\{declineReasonProps \? \(/.test(trades)
-    && trades.indexOf('{declineReasonProps ? (') < trades.indexOf('testID="trades.canvas-results.pass"'),
-    '4b2. the ✕ renders only while the reason machinery exists (decline_reasons kill switch ⇒ control steps aside)',
-    'an ✕ with no machinery would be a dead control — or worse, a re-grown fallback');
+  // 4b2 re-specced by #410/D-169: the kill-switch rule is unchanged, but its
+  // home moved from the pager's own `{declineReasonProps ? (` wrapper to the
+  // `browseDecline` prop expression. Gating on `browseLive && sortedDeck` ALONE
+  // would render a ✕ that `handleBrowsePass` early-returns out of — a dead
+  // control, which is exactly what the pager wrapper existed to prevent.
+  {
+    const at = tradesCode.indexOf('browseDecline={');
+    const seg = at > -1 ? tradesCode.slice(at, at + 220).replace(/\s+/g, ' ') : '';
+    assert(/^browseDecline=\{ browseLive && sortedDeck\.length > 0 && declineReasonProps \? \{ onPress: handleBrowsePass \} : null \}/
+      .test(seg),
+      '4b2. the decline cell renders only while the reason machinery exists (decline_reasons kill switch ⇒ the cell falls back to Clear)',
+      'an ✕ with no machinery would be a dead control — or worse, a re-grown fallback');
+  }
+  // 4b3 — and the handler it reaches has exactly ONE caller. Leaving the
+  // pager ✕ in place beside the new cell would give the page two decline
+  // controls and leave the ✕ the report asked to REPLACE still standing.
+  assert(count(tradesCode, /handleBrowsePass/g) === 2,
+    '4b3. handleBrowsePass is defined once and called from exactly one place',
+    'the definition + one reference; a third occurrence is a second decline control');
   assert(!/\.edits/.test(passText),
     '4c. the pass never touches the edit map — the ORIGINAL idea is what gets passed',
     'the pass signal is about the engine\'s suggestion, not the user\'s edit');
@@ -266,9 +300,112 @@ console.log('check-canvas-results:');
     && /reasonBankedIdRef\.current === rawTopCard\.trade_id/.test(trades),
     '4k. a backdrop dismiss reports banked-ness through the deck\'s own dismissed handler',
     'dismiss-after-bank must commit the deferred advance; dismiss-without-answering must do nothing');
-  // The pass control lives with the pager — never in the D-157 action row.
+  // 4l — the assertion is unchanged; only the sentence it advertised was
+  // overturned. D-169 moved the decline control INTO the action row's middle
+  // cell, but it arrives as a PROP: this component still reads no
+  // canvas-results flag, which is what makes the two-host contract hold (the
+  // pushed page and FeaturedTradeWindow mount the same file).
   assert(!/canvas-results/.test(calcCode),
-    '4l. InLeagueCalculator carries NO canvas-results surface — the action row\'s 50/30/20 is untouched (D-157)');
+    '4l. InLeagueCalculator reads no canvas-results flag — the decline cell arrives as a PROP (D-169 amends the placement clause; the 50/30/20 is still untouched)');
+  assert(/browseDecline\?: \{ onPress: \(\) => void \} \| null;/.test(calc)
+    && /browseDecline\?: \{ onPress: \(\) => void \} \| null;/.test(canvas),
+    '4l2. …and it is declared OPTIONAL in both the component and the canvas it is threaded through',
+    'a required prop forces every other host to pass something, breaking byte-identity');
+  assert(!/browseDecline/.test(featured) && !/browseDecline/.test(calcScreen),
+    '4l3. …and is absent at FeaturedTradeWindow and the pushed Real-values page',
+    'those two mounts must stay byte-identical — Clear, never a decline cell');
+
+  // ── 4m — the action row's middle cell (#410 / D-169) ──────────────────
+  //
+  // The cell FORKS on the host's declaration. Everything here exists because
+  // the tempting wrong builds all typecheck: a local pass path with its own
+  // analytics, a single Pressable with conditional props, a shared `disabled`
+  // that kills the decline on an emptied canvas, and — the one that quietly
+  // re-opens the data-loss defect — a decline branch that "tidies up" by
+  // calling clear() too.
+  {
+    const fork = findAll(calcSf, (n) =>
+      ts.isConditionalExpression(n)
+      && ts.isIdentifier(n.condition)
+      && n.condition.text === 'browseDecline')[0];
+    assert(!!fork,
+      '4m. the middle cell is a two-branch fork on the host prop',
+      'no fork means the cell was disabled-in-place instead of replaced (the report asked for a replacement)');
+    // JSX branches arrive wrapped in parentheses; unwrap so "is this branch a
+    // Pressable of its own?" asks about the element, not the punctuation.
+    const unwrap = (n) =>
+      n && ts.isParenthesizedExpression(n) ? unwrap(n.expression) : n;
+    const declineArm = fork ? stripComments(unwrap(fork.whenTrue).getText()) : '';
+    const clearArm = fork ? stripComments(unwrap(fork.whenFalse).getText()) : '';
+
+    // T-1 — the decline branch reaches the HOST's handler and nothing else.
+    assert(/onPress=\{browseDecline\.onPress\}/.test(declineArm),
+      '4m1. the decline branch presses straight through to the host prop',
+      'a locally-defined pass function is a SECOND pass implementation, with events the taxonomy never classified');
+    assert(!!fork && !referencesIdentifier(calcSf, fork.whenTrue, 'track'),
+      '4m1b. …and emits nothing of its own');
+    for (const p of ['onLikeTrade', 'onFindATrade', 'onSidesChange']) {
+      assert(!!fork && !referencesIdentifier(calcSf, fork.whenTrue, p),
+        `4m1c. …and invokes no other host prop (${p})`);
+    }
+
+    // T-2 — THE data-loss guard. `clear()` empties both sides, which fires
+    // onSidesChange with ([], []) and snapshots {give: [], receive: []} into
+    // the browsed idea's edit map: paging back then restores a WIPED idea.
+    // The decline branch must never reach it.
+    assert(!!fork && !referencesIdentifier(calcSf, fork.whenTrue, 'clear'),
+      '4m2. the decline branch never calls clear() — the browse-session data-loss defect stays closed',
+      'clear() during a session writes {give: [], receive: []} into the idea\'s edit map (PRD R-6)');
+    assert(!!fork && referencesIdentifier(calcSf, fork.whenFalse, 'clear'),
+      '4m2b. …while the Clear branch still does — the D-157 control is intact');
+    assert(count(calcCode, /onPress=\{clear\}/g) === 2,
+      '4m2c. clear() is reachable from exactly two controls: the action row\'s Clear branch and the stacked page\'s ghost button',
+      'a third site is a new way to wipe a browsed idea');
+
+    // T-3 — two Pressables, two static literal ids. One shared cell breaks
+    // testid-lint's static-literal contract and is the shape that produces
+    // the shared-`disabled` and no-decline-branch failures for free.
+    assert(/^<Pressable/.test(declineArm.trim()) && /^<Pressable/.test(clearArm.trim()),
+      '4m3. each branch is its own Pressable');
+    assert(/testID="calc\.action\.decline"/.test(declineArm)
+      && /testID="calc\.action\.clear"/.test(clearArm),
+      '4m3b. …each carrying its own static literal testID');
+    assert(!/testID=\{/.test(declineArm) && !/testID=\{/.test(clearArm),
+      '4m3c. …and neither id is built by an expression',
+      'testid-lint reads literals; a conditional id also makes calc.action.clear ambiguous in the retained flows');
+
+    // T-4 — `disabled` belongs to Clear alone. Hoisting it kills the decline
+    // on a canvas the user emptied row-by-row mid-session.
+    assert(!/disabled=/.test(declineArm),
+      '4m4. the decline branch carries no `disabled`',
+      '`!anySide` would make it dead on an emptied canvas — a state R-6 leaves reachable via per-row removes');
+    assert(/disabled=\{!anySide\}/.test(clearArm),
+      '4m4b. …and the Clear branch keeps its own');
+
+    // T-8 — one warning haptic per tap. `clear()` fires it at :843; the
+    // branch used to fire a second before calling it.
+    assert(!/haptics\./.test(clearArm),
+      '4m5. the Clear branch fires no haptic of its own — clear() owns it',
+      'both firing is the double warning-haptic R-8 resolves in place');
+    assert(!/haptics\./.test(declineArm),
+      '4m5b. …and neither does the decline branch — handleBrowsePass owns the selection haptic');
+
+    // R-2 — the glyph, and the a11y verb the glyph does not carry.
+    assert(/<Icon name="x" size=\{16\} color=\{semantic\.neg\} \/>/.test(declineArm),
+      '4m6. the decline cell is the same bare cross the pager ✕ used (16pt, semantic.neg)');
+    assert(/accessibilityLabel="Pass on this trade idea"/.test(declineArm),
+      '4m6b. …with the pager\'s verbatim label, so VoiceOver still says "pass"');
+    assert(/styles\.actionClear, styles\.actionBtn/.test(declineArm)
+      && !/actionPrimary/.test(declineArm),
+      '4m6c. …in the Clear cell\'s neutral chrome — ice stays rationed to Find a Trade and the ✓');
+
+    // R-3 — the D-157 proportions. The whole narrow reading that lets D-169
+    // amend the spec clause rests on these being untouched.
+    assert(/actionFind: \{ flex: 50 \},/.test(calc)
+      && /actionClear: \{ flex: 30 \},/.test(calc)
+      && /actionSmall: \{ flex: 20 \},/.test(calc),
+      '4m7. the action row is still 50/30/20 — the cell\'s CONTENT forked, not its flex (D-157 survives D-169)');
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -581,14 +718,39 @@ console.log('check-canvas-results:');
       'otherwise ✕/edits/✓ address a different trade than the canvas shows');
   }
   // (i) B-C4 — the shop entry on the browsed idea, one fork, one emitter.
-  assert(trades.includes('testID="trades.canvas-results.more-offers"'),
-    '12i. the browse "More offers" affordance exists in the pager row');
+  // #412 re-spec: the entry MOVED out of the pager row into the give column,
+  // under its "Add player" button. Both halves are pinned — the old id is
+  // gone (one entry, one placement) and the new one exists exactly once.
+  assert(!trades.includes('testID="trades.canvas-results.more-offers"'),
+    '12i. the pager no longer carries the "More offers" entry — it moved to the give column (#412)');
+  assert(count(trades, /testID="calc\.give\.more-offers"/g) === 1,
+    '12i-bis. …and the give-column entry exists exactly once',
+    'two mounts is the double-entry the move was supposed to end');
   {
-    const pagerAt = trades.indexOf('{browseLive && sortedDeck.length > 0 ? (');
-    const moreAt = trades.indexOf('testID="trades.canvas-results.more-offers"');
     const canvasAt = trades.indexOf('<TradeBuildCanvas');
-    assert(pagerAt > 0 && moreAt > pagerAt && moreAt < canvasAt,
-      '12i2. …inside the browse-gated pager block — absent with no session (canvas-only page has no idea to shop)');
+    const moreAt = trades.indexOf('testID="calc.give.more-offers"');
+    assert(canvasAt > 0 && moreAt > canvasAt,
+      '12i2. …handed to the canvas as a prop, not rendered in the pager row');
+    // The GATE is the rule's real content: absent with no session, because a
+    // canvas-only page has no idea to shop (the deck chip stays the flag-off
+    // entry). Whitespace-normalized — this is a multi-line prop expression.
+    const gateAt = tradesCode.indexOf('giveBelowAdd={');
+    const gate = gateAt > -1
+      ? tradesCode.slice(gateAt, gateAt + 200).replace(/\s+/g, ' ')
+      : '';
+    assert(/^giveBelowAdd=\{ shopEnabled && browseLive && sortedDeck\.length > 0 && rawTopCard && rawTopCard\.give_players\.length > 0 \?/
+      .test(gate),
+      '12i2b. …still gated on the shop flags, a live session holding ideas, and a non-empty give side',
+      'dropping the browse terms puts a "More offers" under Add player on every canvas, with no idea behind it');
+    // T-13 — one column only. Shopping is a give-side verb (rev-3 §1); a
+    // symmetric slot produces a meaningless receive-side entry.
+    assert(count(calcCode, /belowAdd=/g) === 1,
+      '12i2c. InLeagueCalculator hands the slot to exactly ONE TradeSide');
+    const belowAt = calcCode.indexOf('belowAdd=');
+    assert(belowAt > calcCode.indexOf('const give = (')
+      && belowAt < calcCode.indexOf('const receive = ('),
+      '12i2d. …and it is the GIVE column',
+      'shop is a give-side verb — a receive-side "More offers" shops nothing');
     const fork = functionNamed(host, 'openShopForCard');
     assert(!!fork && referencesIdentifier(host, fork, 'openShopWindow')
       && referencesIdentifier(host, fork, 'setShopChooserCard')

@@ -47,11 +47,16 @@ interface Props {
    *  registering a target that can never measure is the "points at nothing"
    *  defect the script lint exists to catch. */
   addRef?: React.RefObject<View | null>;
+  /** #412 — host-supplied content rendered directly beneath "Add player",
+   *  inside the same Card. Presentational only: TradeSide reads no flag and
+   *  owns no handler. Absent ⇒ byte-identical for the receive column, the
+   *  stacked page, FeaturedTradeWindow and the #270 experiment. */
+  belowAdd?: React.ReactNode;
 }
 
 // One side of a hand-built trade (You send / You receive) for the Trade
 // Calculator: selected players with their pick-value tier + an add button.
-export default function TradeSide({ title, teamName, players, valueOf, tierOf, accent, onAdd, onRemove, addTestID, leagueId, compact, addRef }: Props) {
+export default function TradeSide({ title, teamName, players, valueOf, tierOf, accent, onAdd, onRemove, addTestID, leagueId, compact, addRef, belowAdd }: Props) {
   return (
     <Card>
       <View style={styles.inner}>
@@ -81,21 +86,34 @@ export default function TradeSide({ title, teamName, players, valueOf, tierOf, a
                 </View>
               )}
               <View style={styles.info}>
+                {/* #411 — line 1 is the NAME ALONE in column mode. The
+                    position chip used to share it, leaving ~67pt for the
+                    name and ellipsizing all but one of the top 100 dynasty
+                    assets; it moved to the meta line below (it is MOVED,
+                    never dropped — the hex is a cross-client data
+                    encoding). Still one line: wrapping was declined. */}
                 {compact ? (
-                  <View style={styles.compactTopLine}>
-                    <PositionChip position={p.pos} size="sm" />
-                    <Text style={[type.title, styles.compactName]} numberOfLines={1}>
-                      {p.name}
-                    </Text>
-                  </View>
+                  <Text style={[type.title, styles.compactName]} numberOfLines={1}>
+                    {p.name}
+                  </Text>
                 ) : (
                   <Text style={type.title}>{p.name}</Text>
                 )}
                 <View style={compact ? styles.compactMetaLine : undefined}>
+                  {compact ? (
+                    // #411 — the chip leads the meta line. flexShrink 0: a
+                    // data encoding is never the thing that yields.
+                    <View style={styles.compactChipSlot}>
+                      <PositionChip position={p.pos} size="sm" />
+                    </View>
+                  ) : null}
                   {/* flexShrink so this line yields before the tier badge:
                       without it the badge is pushed out of the ~97pt of
                       info width a 375pt screen leaves, which is the price
-                      silently disappearing again. */}
+                      silently disappearing again. #411 adds minWidth 0 so
+                      it can actually reach zero — with the chip now sharing
+                      the line, the chip+badge pair is the binding
+                      constraint and the TEXT must be the only yielder. */}
                   <Text
                     style={[type.bodySm, compact && styles.compactMetaText]}
                     numberOfLines={compact ? 1 : undefined}
@@ -105,14 +123,22 @@ export default function TradeSide({ title, teamName, players, valueOf, tierOf, a
                   {/* Column mode has no room for a trailing value column, so
                       the tier/value rides the meta line. It is MOVED, never
                       dropped — a narrower row that silently stops pricing an
-                      asset would be worse than a wrapped one. */}
+                      asset would be worse than a wrapped one. #411: `sm` in
+                      COLUMN MODE ONLY — the chip's arrival costs the line
+                      ~30pt and `md` would push the badge's right edge under
+                      Card's overflow:'hidden'. The stacked mount below keeps
+                      the default `md`. */}
                   {compact
                     ? (() => {
                         const t = tierOf?.(p);
-                        return t ? (
-                          <TierBadge tier={t} />
-                        ) : (
-                          <Text style={type.data}>{valueOf(p).toLocaleString()}</Text>
+                        return (
+                          <View style={styles.compactPriceSlot}>
+                            {t ? (
+                              <TierBadge tier={t} size="sm" />
+                            ) : (
+                              <Text style={type.data}>{valueOf(p).toLocaleString()}</Text>
+                            )}
+                          </View>
                         );
                       })()
                     : null}
@@ -166,6 +192,10 @@ export default function TradeSide({ title, teamName, players, valueOf, tierOf, a
         <View ref={addRef}>
           <Button label="Add player" variant="secondary" compact testID={addTestID} onPress={onAdd} style={styles.addBtn} />
         </View>
+        {/* #412 — the host's slot, UNDER the Add button ("move more offers
+            underneath the add a player button"). Above it would read as a
+            second Add affordance. `styles.inner`'s gap spaces it. */}
+        {belowAdd}
       </View>
     </Card>
   );
@@ -206,9 +236,22 @@ const styles = StyleSheet.create({
   // the row's flow changes — chip+name on line 1, meta+value on line 2.
   headerCompact: { flexDirection: 'column', alignItems: 'flex-start', gap: 2 },
   rowCompact: { alignItems: 'flex-start', gap: space.xs },
-  compactTopLine: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
-  compactName: { flexShrink: 1 },
-  compactMetaText: { flexShrink: 1 },
+  // #411 — one step down the Chalkline scale (16/22 → 13/18) so the compact
+  // name clears the 97.5pt info column on far more rows. Weight and color
+  // stay `type.title`'s: the name is still the row's primary identifier,
+  // just smaller. Sizes come from `type.bodySm`, never a literal — the 11pt
+  // floor (docs/design/design-system.md) is 2pt below this and is not
+  // approached.
+  compactName: {
+    fontSize: type.bodySm.fontSize,
+    lineHeight: type.bodySm.lineHeight,
+    flexShrink: 1,
+  },
+  compactMetaText: { flexShrink: 1, minWidth: 0 },
+  // #411 — the meta line's two DATA ENCODINGS (position hex, tier label).
+  // Neither shrinks or clips: the meta text yields first, always.
+  compactChipSlot: { flexShrink: 0 },
+  compactPriceSlot: { flexShrink: 0 },
   compactMetaLine: {
     flexDirection: 'row',
     alignItems: 'center',

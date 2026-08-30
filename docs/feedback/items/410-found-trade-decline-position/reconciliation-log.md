@@ -239,3 +239,22 @@ Not blockers. Recorded so they land on a known seam if they resurface.
   honestly name a side. Splitting the enum is a cross-client contract change and
   was ruled out of scope; if the ambiguity keeps producing reports, that split is
   the fix and it needs its own scope block. (PRD §11.)
+- **S-6 — tour beat n19's dark spotlight (R-10, re-checked at build time
+  2026-08-30).** Confirmed still true and **nothing was changed**:
+  `mobile/src/components/analystScript.ts:549-558` reads *"Clear became this
+  cross. It records why you passed; the check still accepts."* with
+  `target: 'trades.pass-btn'`. The copy now describes the post-#410 UI more
+  literally than before, so no copy change is owed; the target is registered
+  only by `TradeCard` (`mobile/src/components/TradeCard.tsx:274`, `:792`), which
+  canvas-results retires on this host, so the spotlight was **already dark on
+  this path before #410**. If the tour is ever unsuppressed on the
+  canvas-results host, `n19.target` becomes `calc.action.decline` — that is a
+  tour-merge decision (Wave B), deliberately not taken here. (PRD R-10.)
+- **S-7 — build-time correction to the PRD's re-spec list.** §7.1 named four
+  assertions as becoming false; a **fifth** did, and the PRD missed it:
+  `check-canvas-results.js` **4b2** (`:225-227`) pinned the kill-switch gate to
+  the pager's own `{declineReasonProps ? (` wrapper, which R-4 deletes. It was
+  re-specced in place rather than removed — the rule (no decline control without
+  the reason machinery) is unchanged; only its home moved to the `browseDecline`
+  prop expression, where it is now pinned whitespace-normalized and is the home
+  of the PRD's assertion **T-5**. No assertion was deleted.

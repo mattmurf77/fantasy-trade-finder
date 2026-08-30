@@ -270,9 +270,79 @@ assert(/onHiddenChange\?:/.test(read(path.join(SRC, 'components/OutlookBiasRecei
 }
 assert((side.match(/numberOfLines=\{compact \? 1 : undefined\}/g) || []).length === 2,
   '16b. both clamped lines are gated on compact');
-assert(/compactMetaText: \{ flexShrink: 1 \}/.test(side),
-  '17. the compact meta line yields before the tier badge',
-  'without flexShrink the badge is pushed out of ~97pt of info width — the price disappears');
+// 17 — re-specced by #411. The meta line now carries the position chip too,
+// so the chip + tier badge pair is the binding constraint on 97.5pt of info
+// width; `flexShrink` alone is not enough, because a flex child will not
+// shrink past its intrinsic content width without `minWidth: 0`. The TEXT
+// must be the only thing that yields.
+assert(/compactMetaText: \{[^}]*flexShrink: 1[^}]*minWidth: 0[^}]*\}/.test(side),
+  '17. the compact meta line yields before the tier badge — and can actually reach zero',
+  'without flexShrink+minWidth the badge is pushed out of ~97pt of info width — the price disappears');
+assert(/compactChipSlot: \{[^}]*flexShrink: 0[^}]*\}/.test(side)
+  && /compactPriceSlot: \{[^}]*flexShrink: 0[^}]*\}/.test(side),
+  '17b. the meta line\'s two DATA ENCODINGS never shrink or clip',
+  'position hex and tier label are cross-client encodings (docs/cross-client-invariants.md); '
+  + 'Card sets overflow:hidden, so a shrinking price slot loses the price outright');
+
+// ── #411 — the compact row's re-flow ──────────────────────────────────────
+//
+// Line 1 is the NAME ALONE and one step smaller; the chip moved down to the
+// meta line. Every wrong build here typechecks: hedging by drawing the chip
+// on BOTH lines undoes the whole fix, a hardcoded size walks off the type
+// scale, and passing size="sm" to both TierBadge mounts shrinks the STACKED
+// page's badge — a flag-off visual change, which rule 16 exists to forbid.
+{
+  const chips = [...side.matchAll(/<PositionChip/g)];
+  assert(chips.length === 2,
+    '17c. TradeSide renders the position chip exactly twice — one per layout',
+    `found ${chips.length}; a third is the "draw it on both lines" hedge that undoes #411`);
+  const before = chips.map((m) => side.slice(Math.max(0, m.index - 200), m.index));
+  assert(chips.length === 2
+    && /styles\.chipCol/.test(before[0])
+    && /styles\.compactChipSlot/.test(before[1]),
+    '17d. …the stacked one in its 44pt chipCol, the column one in the meta line\'s chip slot');
+  assert(/\{compact \? \(\s*<Text style=\{\[type\.title, styles\.compactName\]\} numberOfLines=\{1\}>\s*\{p\.name\}\s*<\/Text>\s*\) : \(/.test(side),
+    '17e. compact line 1 holds the name and nothing else',
+    'the chip sharing line 1 is what left ~67pt for the name and ellipsized all but 1 of the top 100 dynasty assets');
+}
+{
+  // Sizes come from the Chalkline token, never a literal — a literal is how
+  // "just squeeze it a bit more" walks below the 11pt floor.
+  assert(/compactName: \{[^}]*fontSize: type\.bodySm\.fontSize[^}]*lineHeight: type\.bodySm\.lineHeight[^}]*\}/.test(side),
+    '17f. the compact name is sized from type.bodySm, not a magic number',
+    'off-scale sizes (12pt) and floor-breaking ones (10pt) are both a literal away');
+  const sizes = [...side.matchAll(/fontSize:\s*(\d+(?:\.\d+)?)/g)].map((m) => Number(m[1]));
+  assert(sizes.every((n) => n >= 11),
+    '17g. no numeric font size below the Chalkline 11pt floor in TradeSide',
+    `found ${sizes.filter((n) => n < 11).join(', ')}`);
+}
+{
+  // The tier badge's compact-only size preset. `sm` buys back the ~4pt the
+  // chip's arrival costs the meta line; applying it globally would change the
+  // stacked page, which must stay byte-identical behind the flag.
+  const cpAt = side.indexOf('styles.compactPriceSlot}');
+  const cpSeg = cpAt > -1 ? side.slice(cpAt, cpAt + 400) : '';
+  assert(/<TierBadge tier=\{t\} size="sm" \/>/.test(cpSeg),
+    '17h. the COLUMN-mode tier badge renders at size="sm"',
+    'at md the WR + "4+ 1sts" row measures 101.6pt against 97.5 and Card clips the badge');
+  const tsAt = side.indexOf('styles.tierSlot}');
+  const tsSeg = tsAt > -1 ? side.slice(tsAt, tsAt + 200) : '';
+  assert(/<TierBadge tier=\{t\} \/>/.test(tsSeg) && !/size=/.test(tsSeg),
+    '17i. …and the STACKED mount keeps the default md',
+    'a global sm is a flag-off visual change — the exact thing rule 16 charters against');
+}
+{
+  // #412 — the host's slot. Presentational only, and UNDER the Add button:
+  // above it reads as a second Add affordance and inverts the report's words.
+  const addAt = side.indexOf('<View ref={addRef}>');
+  const belowAt = side.indexOf('{belowAdd}');
+  const cardAt = side.indexOf('</Card>');
+  assert(addAt > -1 && belowAt > addAt && cardAt > belowAt,
+    '17j. the belowAdd slot renders after the Add button and inside the Card',
+    'the report is literal: "move more offers underneath the add a player button"');
+  assert(!/useFlag|useFeatureFlags/.test(side),
+    '17k. TradeSide reads no flag — the slot is content the host hands down');
+}
 
 // 18 — the calculator remounts on a league switch. Its canvas is LOCAL
 // state; without this the new league renders the old league's players and

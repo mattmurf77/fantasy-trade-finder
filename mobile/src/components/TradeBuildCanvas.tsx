@@ -102,6 +102,14 @@ interface Props {
    *  the browse-session host can snapshot per-idea edits. Absent (the #270
    *  experiment path and every pre-#402 mount) ⇒ byte-identical. */
   onSidesChange?: (give: string[], receive: string[]) => void;
+  /** #410 — pass-through to `InLeagueCalculator`: the host's browse state.
+   *  Non-null makes the action row's middle cell the decline ✕; absent/null
+   *  (every pre-#410 mount, and the kill switch) leaves it the Clear cell,
+   *  byte-identical. Threaded, never derived here. */
+  browseDecline?: { onPress: () => void } | null;
+  /** #412 — pass-through to `InLeagueCalculator`: content for the GIVE
+   *  column, under its "Add player" button. Absent ⇒ byte-identical. */
+  giveBelowAdd?: React.ReactNode;
   /** #402 QA A-D5 — pass-through to `InLeagueCalculator`: while the host's
    *  browse session shows an idea, the partner is that idea's counterparty
    *  and stays fixed (spec §3), so the partner Change/Team control renders
@@ -135,6 +143,8 @@ export default function TradeBuildCanvas({
   prefill: hostPrefill,
   prefillSeq,
   onSidesChange,
+  browseDecline,
+  giveBelowAdd,
   partnerLocked = false,
   hideFormatChips = false,
 }: Props) {
@@ -180,6 +190,8 @@ export default function TradeBuildCanvas({
         onFindATrade={onFindATrade}
         onLikeTrade={onLikeTrade}
         onSidesChange={onSidesChange}
+        browseDecline={browseDecline}
+        giveBelowAdd={giveBelowAdd}
         partnerLocked={partnerLocked}
         seededPrefill={!!prefill?.seeded}
         hideFormatChips={hideFormatChips}
