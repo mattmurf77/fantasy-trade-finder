@@ -102,13 +102,13 @@ def test_products_shape(client, monkeypatch):
 
     assert products[MONTHLY]["period"] == "monthly"
     assert products[MONTHLY]["display_price"] == "$4.99"
-    assert products[MONTHLY]["trial_days"] == 3
+    assert products[MONTHLY]["trial_days"] == 14
     assert products[MONTHLY]["hero"] is False
 
     assert products[ANNUAL]["period"] == "annual"
     assert products[ANNUAL]["display_price"] == "$34.99"
     assert products[ANNUAL]["per_month_equiv"] == "$2.92"
-    assert products[ANNUAL]["trial_days"] == 14
+    assert products[ANNUAL]["trial_days"] == 30
     assert products[ANNUAL]["hero"] is True
     assert products[ANNUAL]["badge"] == "best_value"
     # exactly one hero — two would give the client no default selection
