@@ -8,19 +8,19 @@
 
 ---
 
-## 2026-08-30 — feedback batch #407 + #406 BUILT + dual-QA green, waiting on operator go/no-go
+## 2026-08-30 — feedback batch #407 + #406 SHIPPED (v1.16.12, EAS build 139)
 
-**Where:** branch `claude/new-user-feedback-5fa613` (worktree of the same name, cut from `main` @ `e89eebb0`), tip = the living-memory commit carrying this entry. Version bumped to **1.16.12** (Info.plist + app.json + both pbxproj `MARKETING_VERSION`s, which had been stale at 1.16.6). Not yet pushed at the time of writing — the ship step is: push branch → PR → CI green → operator go → squash-merge → EAS build/submit → set #406/#407 `fixed`.
+**Where:** `main` @ `287aed09` (PR [#250](https://github.com/mattmurf77/fantasy-trade-finder/pull/250), squash on green CI ×3 — backend-tests · mobile-typecheck · maestro-testid-lint). EAS build **139 / v1.16.12** queued from the content-identical branch tree with `--auto-submit` (submission `3da45aef` scheduled to fire on build completion). Prod healthy post-merge (`/` and `/api/feature-flags` both 200); **backend diff is literally zero** for this batch, so there is nothing server-side to verify by content — the whole change is client.
 
-**What's on the branch:** #407 fix `8f722676` (auto-defaulted calculator partner no longer scopes Find a Trade; `opponentChosenRef` gate + `check-calc-merged-behavior` 20a-20d) and #406 build `c138507c` ("Any league mate" targeting — client-only, `partnerAny` + honest labels + scope-truth note + stale-verdict `ev` gate + `seeded` prefill marker closing #407's QA edge; new `check-any-partner.js` 15 assertions; D-168). Statuses already flipped in prod DB: #402/#403 → `fixed` (had shipped without flips); #406/#407 → `in_progress`.
+**What shipped:** #407 fix `8f722676` (the auto-defaulted calculator partner no longer scopes Find a Trade — `opponentChosenRef` gate; guard `check-calc-merged-behavior` 20a-20d) and #406 build `c138507c` ("Any league mate" targeting — client-only `partnerAny` state + honest labels + scope-truth note + stale-verdict `ev` gate + the `seeded` prefill marker that closed #407's QA finding B-1; new `check-any-partner.js`, 15 assertions; [D-168](DECISIONS.md)). Feedback statuses: **#406/#407 → `fixed`**; #402/#403 → `fixed` this run too (they had shipped across 1.16.9–1.16.11 without ever being flipped).
 
-**Evidence:** TEST_LEDGER 2026-08-30 (pytest 4,471/0 · tsc clean · 87/87 suites · testid-lint OK · QA-A 20 sabotage cycles · QA-B zero blocking). Batch plan: docs/feedback/items/406-target-any-leaguemate/plan.md; QA reports qa-a/qa-b-2026-08-30.md in both item folders.
+**Evidence:** TEST_LEDGER 2026-08-30 (pytest 4,471/0 · tsc clean · 87/87 structural suites · testid-lint OK · QA-A 25 sabotage cycles across both items · QA-B zero blocking on either). Batch plan: docs/feedback/items/406-target-any-leaguemate/plan.md; QA reports `qa-a/qa-b-2026-08-30.md` in both item folders.
 
 **Owed:**
-1. **Operator go/no-go** (presented in-session) → then push/PR/merge, Render deploy verify (by content per the 08-17 lesson — confirm a deploy was CREATED for the sha), EAS 1.16.12 build + submit, `fixed` flips AFTER push confirms.
-2. **Operator TestFlight checklists on the 1.16.12 build:** #407 mini-PRD 6 steps (step 6 = the closed B-1 probe, expect all-teams after Clear) + #406 E-4 8 steps. Only runtime evidence under D-056.
-3. Follow-ups queued in NEXT: `test:mascot-ram` npm wiring (pre-existing gap QA-A found); QA-B B-1 host-key zero-result canvas-wipe corner (documented, E-4 step 8).
-4. Sweep this worktree from the main checkout after merge (ledger first — docs/recovery/2026-08-30-qa-a-fb407-sweep.md already carries the QA sweeps).
+1. **Operator TestFlight checklists on build 139** — #407 mini-PRD **6 steps** (step 6 = the now-closed B-1 probe: after Clear, expect ALL teams) + #406 PRD **§E-4, 8 steps** (step 8 = the documented zero-result canvas-wipe corner). The only runtime evidence under D-056, and nothing in this batch has been seen on a device.
+2. **Confirm the auto-submit landed** — `eas build:list` / App Store Connect; if the submission failed, `eas submit --platform ios --profile production --latest --non-interactive` from `mobile/`.
+3. Follow-ups queued in NEXT: `test:mascot-ram` npm wiring (pre-existing — that suite has never gated anything); the QA-B B-1 host-key fix (scoped→Anyone mid-search remount wipes a hand-built give side when the sweep returns zero).
+4. **Sweep this worktree from the main checkout** — `claude/new-user-feedback-5fa613` is content-contained in `main` (squash-merged); ledger the tip, `git worktree remove .claude/worktrees/new-user-feedback-5fa613`, delete the branch by explicit name. The QA-agent sweeps are already recorded in docs/recovery/2026-08-30-qa-a-fb407-sweep.md.
 
 ## 2026-08-29b — propose-label spine SHIPPED (bright line confirmed; operator merged via "PR only" ruling)
 
