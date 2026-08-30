@@ -19,6 +19,12 @@
 2. **Next mobile build carries the client half** — until then only the server enrichment is live; scope §3's 3-step TestFlight checklist runs on that build, and prod's first `action='propose'` row is the success signal (`SELECT action, acted_at FROM deck_outcomes ORDER BY id DESC LIMIT 5;`).
 3. Evidence chain: TEST_LEDGER 2026-08-29d.
 
+## 2026-08-29c — NULL-dwell decline-pass fix (client half of the #242 guard) SHIPPING via PR
+
+**Where:** worktree branch `claude/zealous-mirzakhani-f1664e` (fix `49d3d033` + post-#241/#242 main merged in, gates re-run on the combined tree) — PR to `main` in flight per operator "merge to main". Client-only companion to the #242 `deck_pass_outcome_recorded` guard (`main` @ `e9992195`): the layer-1 decline reason POST lands before the swipe POST and now carries the same `dwell_ms`/`detail_expanded`/`calc_opened` the swipe sends, so the surviving pass row keeps its dwell. Three files: `mobile/src/api/declineReasons.ts` (optional fields + wire mapping), `mobile/src/screens/TradesScreen.tsx` (`handleReasonLayer1`, first-tap-only), `mobile/src/hooks/usePresentationSignals.ts` (same defect on the presentation-v2 surface, same fix). Evidence + code-walk: TEST_LEDGER 2026-08-29e. Gates green on the merged tree (tsc, 3 pinning guards, testid-lint).
+
+**Owed after merge:** this worktree cannot remove itself — sweep `.claude/worktrees/zealous-mirzakhani-f1664e` + branch from the main checkout (recovery ledger first). Mobile-only change: reaches users with the next EAS build, nothing to flip; until an installed build carries it, layer-1 reasoned passes keep writing NULL dwell.
+
 ## 2026-08-29 — v1.16.11 (build 138) shipped: canvas-results + trades-landing + activation moments
 
 **Where:** `main` @ `21989cda` (PR #237). Prod flags: `calc.canvas_results` TRUE, `nav.trades_landing` TRUE (verified), `calc.inline_home` TRUE, `trade.shop_asset` TRUE, `onboarding.guide_v2` FALSE (awaiting Wave B-prime). TestFlight: build **138** (v1.16.11) submitted; 137 superseded for checklist purposes except its Part C compat step. Branch `feat/canvas-results` swept (recovery: docs/recovery/2026-08-29-canvas-results-ship.md).
