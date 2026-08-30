@@ -13325,7 +13325,11 @@ def queue_trade_for_opponent():
     # there would hand them a phantom extra team.
     caller_member = members_by_id.get(caller_league_id) or LeagueMember(
         user_id     = caller_league_id,
-        username    = str(sess.get("username") or caller_league_id),
+        # `display_name` is the key a real league session carries; `username`
+        # only exists on the browser-extension payload, which this route
+        # rejects for lacking `g_league`. Never read for the caller today
+        # (only `opponent.username` is) — populated so it isn't a lie.
+        username    = str(sess.get("display_name") or sess.get("username") or caller_league_id),
         roster      = list(caller_roster),
         elo_ratings = {},
     )
