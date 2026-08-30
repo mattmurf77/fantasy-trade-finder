@@ -340,3 +340,20 @@ files. Seeded from history before this skill existed:
   tree (writes blocked cross-worktree) — QA-B correctly left its report at the
   repo-relative path in ITS worktree and said so. Copy it out BEFORE sweeping
   (`--force` needed for the untracked file; inspect first), and ledger the sweep.
+- 2026-08-30 [ship] `eas build --auto-submit` is the submission that counts. Build 139
+  died on EAS's own `SERVER_ERROR: Failed to upload application archive` (after a clean
+  compile — not a code fault); the retry (140) finished and ITS auto-submit reached
+  status FINISHED. Two follow-up `eas submit --latest` calls then ERRORED as redundant
+  binaries and the CLI prints only "Something went wrong", which reads as a failed ship.
+  Verify submissions by STATUS, not by the CLI's last line: this eas-cli has no
+  `submit:list`, so query api.expo.dev/graphql with the `expo-session` secret from
+  ~/.expo/state.json — `submissions{byId(submissionId:$id){status logsUrl}}`. Don't
+  re-submit to "make sure"; check first.
+- 2026-08-30 [ship] After a squash-merge, follow-up docs commits on the SAME branch
+  conflict with main (add/add on the files the squash already rewrote) — PR #251 came
+  up CONFLICTING. Cut the ledger branch fresh from origin/main and `git checkout <old
+  branch> -- <files>` instead of trying to merge the branch twice.
+- 2026-08-30 [ship] Write the ship record AFTER the artifact exists, or plan to correct
+  it: the living-memory entries went in naming build 139 and had to be swept for "139"
+  across seven files once it errored. Cheaper: land the merge record first, add the
+  build number in the sweep-ledger commit.

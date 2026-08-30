@@ -27,10 +27,10 @@ QA-found browse-seed edge. D-168. Dual-agent specs (every review round caught re
 defects), dual QA green both items (QA-A 20 sabotage cycles; QA-B zero blocking). Full
 pytest 4,471/0 · tsc clean · 87/87 suites · testid-lint OK. Version → 1.16.12 (all three
 files; pbxproj had been stale at 1.16.6 since build ~132). Shipped: PR #250 squash →
-`main` @ `287aed09`, EAS build **139** auto-submitting. Statuses all four → `fixed`
+`main` @ `287aed09`, EAS build **140** submitted to TestFlight (139 errored on an EAS archive-upload failure, retried). Statuses all four → `fixed`
 (#402/#403 had shipped earlier without flips). Evidence: TEST_LEDGER same date; batch
 plan docs/feedback/items/406-target-any-leaguemate/plan.md. Owed: the two operator
-TestFlight checklists on 139 — the only runtime evidence under D-056.
+TestFlight checklists on build 140 — the only runtime evidence under D-056.
 
 ## 2026-08-29f — age-preference consensus multiplier (D-167)
 
