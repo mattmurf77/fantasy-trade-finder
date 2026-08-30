@@ -33,6 +33,6 @@ file ownership must be checked for overlap before parallel build (if both need
 | #407 | Fast-track bug | **SHIPPED** — fix `8f722676`, 1 production file; QA-A PASS + QA-B approve (1 non-blocking, closed by #406's R-10) |
 | #406 | Polish (client-only) | **SHIPPED** — build `c138507c`, 3 production files + new `check-any-partner.js`; QA-A PASS all 10 R + QA-B approve, zero blocking; D-168 |
 
-Both merged in PR [#250](https://github.com/mattmurf77/fantasy-trade-finder/pull/250) → `main` @ `287aed09`; EAS build 139 (v1.16.12) auto-submitting to TestFlight. Statuses `fixed`.
+Both merged in PR [#250](https://github.com/mattmurf77/fantasy-trade-finder/pull/250) → `main` @ `287aed09`; EAS build **140** (v1.16.12) submitted to TestFlight — build 139 errored on an EAS-side archive-upload failure and was retried. Statuses `fixed`.
 Status corrections applied this run: #402/#403 → `fixed` (shipped 1.16.9–1.16.11, never flipped).
 Evidence: [TEST_LEDGER 2026-08-30](../../../living-memory/TEST_LEDGER.md) · QA reports in both item folders.

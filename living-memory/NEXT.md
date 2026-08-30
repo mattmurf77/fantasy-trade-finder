@@ -40,7 +40,7 @@
 
 ## 2026-08-30 — Feedback batch #407/#406 SHIPPED; run the two checklists, then two small follow-ups
 
-**Why now:** both shipped in PR #250 → `main` @ `287aed09`, EAS build **139 / v1.16.12** auto-submitting (HANDOFF same date). **Operator: run the two TestFlight checklists on 139** — #407 mini-PRD 6 steps, #406 PRD §E-4 8 steps — the only runtime evidence either item gets, and neither has been seen on a device. Then two small follow-ups: (1) wire `test:mascot-ram` into mobile/package.json — `tests/check-mascot-ram.js` has NEVER had an npm script, so it gates nothing (QA-A find, pre-existing since #186); (2) QA-B B-1: the merged host's canvas key remounts mid-search after a scoped→Anyone transition, wiping a hand-built give side when the sweep returns zero ideas — documented + E-4 step 8 probes it; fix is a host-key change, own small item.
+**Why now:** both shipped in PR #250 → `main` @ `287aed09`, EAS build **140 / v1.16.12** auto-submitting (HANDOFF same date). **Operator: run the two TestFlight checklists on build 140** — #407 mini-PRD 6 steps, #406 PRD §E-4 8 steps — the only runtime evidence either item gets, and neither has been seen on a device. Then two small follow-ups: (1) wire `test:mascot-ram` into mobile/package.json — `tests/check-mascot-ram.js` has NEVER had an npm script, so it gates nothing (QA-A find, pre-existing since #186); (2) QA-B B-1: the merged host's canvas key remounts mid-search after a scoped→Anyone transition, wiping a hand-built give side when the sweep returns zero ideas — documented + E-4 step 8 probes it; fix is a host-key change, own small item.
 
 ## 2026-08-29 — Age-pref multiplier live: re-measure dispositions in ~2 weeks
 
