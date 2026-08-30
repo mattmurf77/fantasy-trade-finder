@@ -414,9 +414,10 @@ assert(!/swipeTrade\(/.test(calc) && !/swipeTrade\(/.test(screen),
 // by the default effect — gating the payload's `opponent`. A receive side
 // still scopes without a tap: those assets came off the partner's roster.
 {
-  assert(/const opponentChosenRef = useRef\(!!initialOpponentId\);/.test(calc),
+  assert(/const opponentChosenRef = useRef\(!!initialOpponentId && !seededPrefill\);/.test(calc),
     '20a. opponentChosenRef exists and an initialOpponentId counts as chosen',
-    'every source of initialOpponentId is deliberate — prefill or explicit scope');
+    'every source of initialOpponentId is deliberate — prefill or explicit scope — '
+    + 'except the browse-session seed, which arrives with `seededPrefill` (FB-406 R-10)');
   // 20b — the default effect is not a choice. Its setter is the one keyed on
   // `opponents[0].user_id`; a ref write in that effect would re-promote the
   // auto-default to a pick and silently revert the whole fix.

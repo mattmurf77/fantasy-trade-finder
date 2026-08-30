@@ -136,6 +136,16 @@ interface Props {
    *  prop, deliberately not a flag read (the hideFormatChips precedent).
    *  Defaults to false: every existing host is byte-identical. */
   partnerLocked?: boolean;
+  /** FB-406 R-10 — true when this mount was seeded by the host's BROWSE
+   *  SESSION (TradesScreen's #402 seeding effect): the one prefill that is
+   *  NOT a user choice, because the fronted idea loads with no tap. It
+   *  negates the chosen-ness initializers only — while the intact idea's
+   *  receive side sits on the canvas the search still scopes via the FB-407
+   *  receive clause, but after a canvas Clear the next Find a Trade
+   *  honestly restarts league-wide instead of silently sweeping the seeded
+   *  counterparty (FB-407's known limitation, QA-B-1). Defaults to false:
+   *  every other host and prefill counts as chosen, exactly as before. */
+  seededPrefill?: boolean;
   /** T-3 (merged-view trim, operator ruling 2026-08-28,
    *  docs/feedback/items/402-more-offers-shop/merged-view-trim-2026-08-28.md)
    *  — a HOST prop, deliberately not a flag read: when the calculator is
@@ -276,6 +286,7 @@ export default function InLeagueCalculator({
   onLikeTrade,
   onSidesChange,
   partnerLocked = false,
+  seededPrefill = false,
   hideFormatChips = false,
 }: Props) {
   // #384 — the merged calculator layout. OFF is byte-identical to the
@@ -343,12 +354,25 @@ export default function InLeagueCalculator({
   // #190 — "Edit in calculator" prefill from a suggested trade card.
   const [opponentId, setOpponentId] = useState<string | null>(initialOpponentId ?? null);
   // FB-407 — whether the partner was ever CHOSEN (a chip/sheet tap, or an
-  // initialOpponentId, which only ever comes from a deliberate source: an
-  // idea prefill or an explicit scope). The default-opponent effect below
-  // does NOT set this — its pick exists for the evaluate UX, and letting it
-  // count as a choice made Find a Trade force the first leaguemate onto
-  // every fresh canvas. A ref, not state: nothing renders from it.
-  const opponentChosenRef = useRef(!!initialOpponentId);
+  // initialOpponentId, which comes from a deliberate source — an idea
+  // prefill or an explicit scope — for every prefill EXCEPT the browse-
+  // session seed, which arrives with `seededPrefill` and no tap (FB-406
+  // R-10). The default-opponent effect below does NOT set this — its pick
+  // exists for the evaluate UX, and letting it count as a choice made Find
+  // a Trade force the first leaguemate onto every fresh canvas. A ref, not
+  // state: nothing renders from it.
+  const opponentChosenRef = useRef(!!initialOpponentId && !seededPrefill);
+  // FB-406 R-4 — the ref's RENDERABLE mirror, for the scope-truth note
+  // only. Written `true` on the line adjacent to each of the ref's two
+  // write sites and nowhere else; its initializer is textually identical
+  // to the ref's so the pair can never disagree at mount. The ref stays
+  // authoritative for the payload.
+  const [partnerChosen, setPartnerChosen] = useState(!!initialOpponentId && !seededPrefill);
+  // FB-406 R-2 — the explicit unscoped state behind the team sheet's "Any
+  // league mate" row. A boolean plus `opponentId = null`, NEVER a sentinel
+  // id: no 'any'-shaped value may reach state comparisons or request
+  // bodies. Choosing a member row turns it off again (round trip, R-8).
+  const [partnerAny, setPartnerAny] = useState(false);
   const [giveIds, setGiveIds] = useState<string[]>(initialGiveIds ?? []);
   const [receiveIds, setReceiveIds] = useState<string[]>(initialReceiveIds ?? []);
   const [picker, setPicker] = useState<'give' | 'receive' | null>(null);
@@ -542,10 +566,13 @@ export default function InLeagueCalculator({
     [coverageQ.data, myOwner],
   );
 
-  // Default to the first opponent once the list loads.
+  // Default to the first opponent once the list loads. FB-406: guarded on
+  // `!partnerAny` so the explicit unscoped state is STABLE — without the
+  // guard this re-selects the first leaguemate the moment "Any league
+  // mate" nulls the id.
   useEffect(() => {
-    if (!opponentId && opponents.length) setOpponentId(opponents[0].user_id);
-  }, [opponents, opponentId]);
+    if (!partnerAny && !opponentId && opponents.length) setOpponentId(opponents[0].user_id);
+  }, [opponents, opponentId, partnerAny]);
 
   // Wave A (v2 note 12) — announce that the league content is MOUNTED.
   //
@@ -621,7 +648,13 @@ export default function InLeagueCalculator({
   // shortlisted on the consensus board (heuristic), then CONFIRMED through
   // the same Mode B evaluate call that renders the verdict — a card only
   // survives if the evaluator itself scores the sweetened trade as fairer.
-  const ev = evalQ.data;
+  //
+  // FB-406 R-7 — partner-gated: `placeholderData: (prev) => prev` keeps the
+  // PREVIOUS key's data visible across the opponentId key change even while
+  // the query is disabled, so without this gate the old partner's verdict,
+  // eveners, lineup line and Suggested rows would render under "Anyone".
+  // Every evaluate-derived surface hangs off this ONE derivation.
+  const ev = opponentId ? evalQ.data : undefined;
 
   // #203 v1 — "Suggested" rows at the top of the add-player picker: only when
   // the current trade is uneven AND this picker adds to the side gap.add_to
@@ -972,7 +1005,13 @@ export default function InLeagueCalculator({
               testID="calc.team-dropdown"
               accessibilityRole="button"
               accessibilityLabel={
-                opponent ? `Team: @${opponent.username}. Change team` : 'Choose a team'
+                // FB-406 R-3 — the label tells the truth in all three
+                // states; "Anyone" means the search runs league-wide.
+                partnerAny
+                  ? 'Team: Anyone — offers from every team. Change team'
+                  : opponent
+                  ? `Team: @${opponent.username}. Change team`
+                  : 'Choose a team'
               }
               // #402 QA A-D5 — see the partnerLocked prop comment: dimmed
               // and inert while the host browses an idea, never hidden.
@@ -991,7 +1030,7 @@ export default function InLeagueCalculator({
               <Text style={styles.dropdownLabel}>Team</Text>
               <View style={styles.dropdownValueRow}>
                 <Text style={styles.dropdownValue} numberOfLines={1}>
-                  {opponent ? `@${opponent.username}` : 'Choose…'}
+                  {partnerAny ? 'Anyone' : opponent ? `@${opponent.username}` : 'Choose…'}
                 </Text>
                 <Icon name="chevron-down" size={14} />
               </View>
@@ -1072,6 +1111,7 @@ export default function InLeagueCalculator({
               onPress={() => {
                 haptics.selection();
                 opponentChosenRef.current = true; // FB-407 — a tap IS a choice
+                setPartnerChosen(true); // FB-406 R-4 — the ref's renderable mirror
                 setOpponentId(o.user_id);
               }}
               accessibilityRole="button"
@@ -1149,22 +1189,40 @@ export default function InLeagueCalculator({
           />
         );
         const receive = (
-          <TradeSide
-            title="You receive"
-            teamName={opponent ? `@${opponent.username}` : 'their roster'}
-            players={receiveIds.map((id) => playerById[id]).filter(Boolean) as CalcPlayer[]}
-            valueOf={(p) => board[p.id] ?? 0}
-            tierOf={(p) => tierById[p.id] ?? null}
-            accent={semantic.pos}
-            addTestID="calc.league-receive-add"
-            leagueId={leagueId}
-            compact={merged}
-            onAdd={() => setPicker('receive')}
-            onRemove={(id) => {
-              haptics.warning();
-              setReceiveIds((ids) => ids.filter((x) => x !== id));
-            }}
-          />
+          <>
+            <TradeSide
+              title="You receive"
+              // FB-406 R-3 — "their roster" would name a team that no longer
+              // exists while Anyone is active; the column reads honestly.
+              teamName={partnerAny ? 'any team' : opponent ? `@${opponent.username}` : 'their roster'}
+              players={receiveIds.map((id) => playerById[id]).filter(Boolean) as CalcPlayer[]}
+              valueOf={(p) => board[p.id] ?? 0}
+              tierOf={(p) => tierById[p.id] ?? null}
+              accent={semantic.pos}
+              addTestID="calc.league-receive-add"
+              leagueId={leagueId}
+              compact={merged}
+              // FB-406 R-6 — under Anyone the receive pool is empty by
+              // construction (`opponentId ? … : []`), so the picker is a
+              // dead end; the honest Add is the team choice itself. The
+              // user taps Add again after picking — the picker does not
+              // auto-open (accepted seam, PRD N-5).
+              onAdd={() => {
+                if (partnerAny) setTeamPickerOpen(true);
+                else setPicker('receive');
+              }}
+              onRemove={(id) => {
+                haptics.warning();
+                setReceiveIds((ids) => ids.filter((x) => x !== id));
+              }}
+            />
+            {partnerAny ? (
+              <Text testID="calc.receive-any-hint" style={styles.note}>
+                Pick a team to add specific players — Find a Trade already
+                shows offers from everyone.
+              </Text>
+            ) : null}
+          </>
         );
         if (merged) {
           return (
@@ -1207,6 +1265,7 @@ export default function InLeagueCalculator({
           spare; the confirm cell keeps its icon (no one-word label promises
           less than "queue this for them") and is byte-identical to W6-A's. */}
       {merged ? (
+        <>
         <View style={styles.actionRow} testID="calc.action-row">
           <Pressable
             ref={findBtnRef}
@@ -1292,6 +1351,19 @@ export default function InLeagueCalculator({
             <Icon name="check" size={18} color={ice.base} />
           </Pressable>
         </View>
+        {/* FB-406 R-4 — the scope-truth note (OQ-1 honesty mandate): says
+            BEFORE the tap that the search runs league-wide, in both
+            unscoped states (explicit Anyone and the post-FB-407 untouched
+            default). The predicate is the exact complement of the FB-407
+            payload gate above, so the note is visible iff the payload's
+            `opponent` would be null; its disappearance IS the scoped
+            signal (no scoped-state caption — D-157 frame budget). */}
+        {partnerAny || (!partnerChosen && receiveIds.length === 0) ? (
+          <Text testID="calc.search-scope-note" style={styles.note}>
+            Find a Trade searches all teams — pick a team to target one.
+          </Text>
+        ) : null}
+        </>
       ) : null}
 
       {/* #251 (operator, via the featured-trade window's edit-in-calculator
@@ -1353,9 +1425,9 @@ export default function InLeagueCalculator({
         </View>
       ) : null}
 
-      {anySide && evalQ.data ? (
+      {anySide && ev ? (
         <LeagueVerdict
-          ev={evalQ.data}
+          ev={ev}
           oppName={opponent?.username ?? 'them'}
           stale={evalQ.isFetching}
           leagueId={leagueId}
@@ -1462,6 +1534,35 @@ export default function InLeagueCalculator({
             <View style={styles.teamSheet} testID="calc.team-sheet">
               <TickLabel>Trade partner</TickLabel>
               <ScrollView>
+                {/* FB-406 R-1 — the explicit unscoped choice, above the
+                    member rows. Backed by real state (partnerAny + a null
+                    opponentId), never a sentinel id; the existing
+                    partner-change effect clears the receive side, so the
+                    payload's opponent goes null through the untouched
+                    FB-407 gate. */}
+                <Pressable
+                  testID="calc.team-sheet.any"
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: partnerAny }}
+                  accessibilityLabel="Any league mate — see offers from every team"
+                  onPress={() => {
+                    haptics.selection();
+                    setPartnerAny(true);
+                    setOpponentId(null);
+                    setTeamPickerOpen(false);
+                  }}
+                  style={({ pressed }) => [
+                    styles.teamRow,
+                    pressed && styles.actionBtnPressed,
+                  ]}
+                >
+                  <View style={styles.teamRowMain}>
+                    <Text style={[styles.dropdownValue, partnerAny && { color: ice.base }]}>
+                      Any league mate
+                    </Text>
+                    <Text style={styles.note}>See offers from every team</Text>
+                  </View>
+                </Pressable>
                 {opponents.map((o) => {
                   const active = o.user_id === opponentId;
                   const state = rankStateFor(o, format);
@@ -1482,7 +1583,9 @@ export default function InLeagueCalculator({
                       }`}
                       onPress={() => {
                         haptics.selection();
+                        setPartnerAny(false); // FB-406 R-8 — a member tap ends Anyone
                         opponentChosenRef.current = true; // FB-407 — a tap IS a choice
+                        setPartnerChosen(true); // FB-406 R-4 — the ref's renderable mirror
                         setOpponentId(o.user_id);
                         setTeamPickerOpen(false);
                       }}

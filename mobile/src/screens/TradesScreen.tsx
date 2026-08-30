@@ -5814,6 +5814,7 @@ export default function TradesScreen({ navigation, route }: any) {
     browseSeededIdRef.current = rawTopCard.trade_id;
     setCanvasPrefill({
       opponentId: rawTopCard.opponent_user_id,
+      seeded: true, // FB-406 R-10 — the one prefill that is NOT a user choice
       give: edited ? edited.give : rawTopCard.give_player_ids,
       receive: edited ? edited.receive : rawTopCard.receive_player_ids,
     });
