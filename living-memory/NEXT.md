@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-08-31 — Finder gap analysis: P0 likes-you tag on the merged landing, then the P1 batch](#2026-08-31--finder-gap-analysis-p0-likes-you-tag-on-the-merged-landing-then-the-p1-batch)
 - [2026-08-30b — Second feedback batch (#409/#410/#411/#412): checklist + the G-063 sweep](#2026-08-30b--second-feedback-batch-409410411412-checklist--the-g-063-sweep)
 - [2026-08-30 — Feedback batch #407/#406 SHIPPED; run the two checklists, then two small follow-ups](#2026-08-30--feedback-batch-407406-shipped-run-the-two-checklists-then-two-small-follow-ups)
 - [2026-08-29 — Age-pref multiplier live: re-measure dispositions in ~2 weeks](#2026-08-29--age-pref-multiplier-live-re-measure-dispositions-in-2-weeks)
@@ -38,6 +39,10 @@
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## 2026-08-31 — Finder gap analysis: P0 likes-you tag on the merged landing, then the P1 batch
+
+**Why now:** [D-170](DECISIONS.md) removed the ✓'s validation gate so every like records and `calcq_` likes bypass the fairness/preference gates at injection — but the ruling ("any liked trade should surface with a tag") is only complete if the tag actually renders. **P0 — verify/fix:** with `calc.canvas_results` live the merged landing renders results in the canvas (`InLeagueCalculator`), not `TradeCard` — and the "They're interested" pill + likes-you top-pinning live in `TradeCard`. Trace `_inject_likes_you_cards_impl` output through the browse presentation; if the tag is dropped, add the liked-by-owner treatment to the browse tile. **Then the P1 batch** from [docs/reviews/2026-08-31-find-a-trade-gap-analysis.md](../docs/reviews/2026-08-31-find-a-trade-gap-analysis.md): undo on the merged Clear (destructive today, audit D7 pattern), per-asset swap suggestions on canvas rows, and a `trade_card_viewed` equivalent for browse tiles (the session-definition event never fires on the merged landing). P2/P3 rows stay in the doc, not here.
 
 ## 2026-08-30b — Second feedback batch (#409/#410/#411/#412): checklist + the G-063 sweep
 
