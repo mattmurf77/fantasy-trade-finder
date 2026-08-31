@@ -11,6 +11,10 @@
 
 ---
 
+## 2026-08-31 — D-170 ✓ queue validation removed + calcq_ mirror bypass (express)
+
+express: ✓ queue validation removed + calcq_ mirror bypass — gates skipped by operator (2026-08-31). Server-side only; no mobile build. Gates actually run: `pytest backend/tests` **4483 passed, 1 skipped** (baseline 4478 — net +5 from the re-pinned `test_calc_trade_queue.py`, now 38 tests: well-formed ⇒ `queued: true`; the old `fails_fairness_floor` package queues AND surfaces; `calcq_` likes bypass the injector's D-096 ladder and preference-list skips while a non-`calcq_` like of the identical package is still gated; roster actionability kept at mirror time; `not_league_member` is the one surviving refusal) · `npx tsc --noEmit` exit 0 · `testid-lint OK` · `node mobile/tests/check-calc-merged-behavior.js` all assertions passed (client untouched, as expected).
+
 ## 2026-08-30b — feedback batch #409/#410/#411/#412: built, dual-QA green, v1.16.13
 
 Branch `claude/fb-410-412-trade-card-polish`, cut from `main` @ `bd83fe94`. Four tester reports filed against v1.16.12 (build 140) the morning it landed. Full gates; no waivers. Specs: [409-like-not-league-member](../docs/feedback/items/409-like-not-league-member/) · [410-found-trade-decline-position](../docs/feedback/items/410-found-trade-decline-position/) (17 requirements covering all four items).

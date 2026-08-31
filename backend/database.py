@@ -5554,8 +5554,11 @@ def load_recent_league_likes(
     likes-you queue (Tier 2 work item 2.3a): each row is a trade the
     counterparty already wants, from THEIR perspective.
 
-    Returns dicts: {user_id, give_player_ids: list, receive_player_ids: list,
-    created_at}. Rows with undecodable JSON are skipped.
+    Returns dicts: {user_id, trade_id, give_player_ids: list,
+    receive_player_ids: list, created_at}. Rows with undecodable JSON are
+    skipped. `trade_id` (nullable) is how the injector tells a HAND-QUEUED
+    like (`calcq_…`, the calculator ✓ cell) from an engine/deck like — D-170
+    exempts the former from the preference-list and D-096 quality gates.
     """
     cutoff = (datetime.now(timezone.utc).replace(tzinfo=None)
               - timedelta(days=days)).isoformat()
@@ -5563,6 +5566,7 @@ def load_recent_league_likes(
         rows = conn.execute(
             select(
                 trade_decisions_table.c.user_id,
+                trade_decisions_table.c.trade_id,
                 trade_decisions_table.c.give_player_ids,
                 trade_decisions_table.c.receive_player_ids,
                 trade_decisions_table.c.created_at,
@@ -5588,6 +5592,7 @@ def load_recent_league_likes(
             continue
         result.append({
             "user_id":            r.user_id,
+            "trade_id":           r.trade_id,
             "give_player_ids":    give,
             "receive_player_ids": receive,
             "created_at":         r.created_at,
