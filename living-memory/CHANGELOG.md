@@ -14,6 +14,23 @@
 
 
 
+## 2026-08-31 — D-170: the ✓ always records the like; finder-merge gap analysis shipped
+
+The #409 fix un-dammed the ✓'s gate chain, and the next gate promptly fired on real users:
+`fails_fairness_floor` refused hand-built trades ("reads as a loss for them"). The operator
+ruled the whole validation a bug — "the fairness check is taking the decision out of the
+user's hands" — and declared express. **PR #256 → `main` @ `1531a91d`, live on Render,
+server-only (no build needed):** `_calc_queue_mirror_reason` deleted, every well-formed ✓
+records; `calcq_` likes now bypass the untouchable/not-interested/avoid-position skips and
+the whole D-096 ladder at injection so they genuinely surface (engine likes keep all gates).
+One structural refusal survives: an opponent the session can't resolve. [D-170](DECISIONS.md);
+tests 33→38, suite 4483/1; recovery PR #257. **Companion deliverable:** the finder-merge
+**gap analysis** ([docs/reviews/2026-08-31-find-a-trade-gap-analysis.md](../docs/reviews/2026-08-31-find-a-trade-gap-analysis.md))
+— prior guided page vs merged experience: 10 regressions already fixed, 12 open gaps.
+**Sharpest finding (P0, now in NEXT):** the merged landing renders results in the canvas, not
+`TradeCard`, so the likes-you "They're interested" pill + top-pinning may never render on the
+surface most users see — the ruling isn't complete until that's verified/fixed.
+
 ## 2026-08-30b — feedback batch: the ✓ button that never worked, + three trade-card fixes (v1.16.13)
 
 Four reports filed against v1.16.12 the morning it shipped. The headline is **#409**: the ✓
