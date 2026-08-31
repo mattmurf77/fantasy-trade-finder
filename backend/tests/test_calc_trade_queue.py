@@ -1,25 +1,25 @@
-"""#384 W6-A / D-151 — POST /api/trades/queue, the merged calculator's ✓ cell.
+"""#384 W6-A / D-152 / D-170 — POST /api/trades/queue, the calculator's ✓ cell.
 
-The operator's spec for the cell: "queue this trade for the other manager —
-it shows up in their suggested trades if it meets their preferences." The
-route therefore has to do two things and no third thing:
-
-  1. record the hand-built package as the caller's LIKE through the SAME path
-     `/api/trades/swipe` uses (`_reconstruct_swipe_card` → `record_decision` →
-     `save_trade_decision` / `save_trade_swipes`), so the like is
-     indistinguishable from a deck like in every downstream reader;
-  2. refuse — recording NOTHING — when the likes-you injector
-     (`_inject_likes_you_cards_impl`) would not mirror the like into the
-     counterparty's deck, and say which of their preferences refused it.
+D-170 (operator ruling, 2026-08-31) rewrote the contract this file pins.
+The ✓ ALWAYS records the like: D-152's up-front mirror predicate
+(`_calc_queue_mirror_reason` — roster actionability, the opponent's
+preference lists, the D-096 fairness ladder) is deleted, and the likes-you
+injector now surfaces hand-queued (`calcq_`) likes PAST the viewer's
+preference lists and the whole D-096 ladder — "the fairness check was taking
+the decision out of the user's hands." Engine/deck likes keep every gate.
 
 Covers:
   • THE GATE — `calc.merged_layout` off ⇒ 404 before any session work.
   • THE HAPPY PATH — 200 `queued: true`, one `trade_decisions` row, one Elo
-    signal, and — the assertion that actually matters — the recorded like is
-    picked up by `_inject_likes_you_cards` when the OPPONENT's deck generates.
-  • EVERY REFUSAL REASON — `likes_you_off`, `not_league_member`,
-    `assets_not_on_roster`, `opponent_untouchable`, `opponent_not_interested`,
-    `fails_fairness_floor` — each asserted to write NO row and move NO Elo.
+    signal, and the recorded like is picked up by `_inject_likes_you_cards`
+    when the OPPONENT's deck generates.
+  • THE D-170 CONTRACT — a package failing the old D-096 floor queues AND
+    surfaces; the opponent's untouchable/not-interested lists refuse nothing;
+    a `calcq_` like bypasses the injector's gates while a non-calcq like
+    still respects them; the injector KEEPS roster actionability for both.
+  • THE ONE SURVIVING REFUSAL — `not_league_member` (unknown opponent, or
+    yourself): no counterparty identity ⇒ nothing to record a like against.
+    Asserted to write NO row and move NO Elo.
   • IDEMPOTENCY — a second identical POST answers `already_queued: true` with
     no second `trade_decisions` row, no second `swipe_decisions` row and no
     second in-memory Elo signal (the G-049 harm, from a control the user can
@@ -79,8 +79,9 @@ THEIR_ROSTER = ["r1", "r2"]
 # give g1 (2000) for r1 (1400): the caller overpays, so the OPPONENT gains.
 GOOD_GIVE = ["g1"]
 GOOD_RECV = ["r1"]
-# give g2 (1200) for r2 (2200): the caller wins big, so the OPPONENT loses and
-# the D-096 user-gain floor refuses the mirror.
+# give g2 (1200) for r2 (2200): the caller wins big, so the OPPONENT loses —
+# the package the D-096 floor refused pre-D-170. It now queues AND surfaces
+# (calcq_ bypass); a non-calcq like of the same shape still does not.
 GREEDY_GIVE = ["g2"]
 GREEDY_RECV = ["r2"]
 
@@ -277,9 +278,11 @@ def test_the_queued_like_reaches_the_opponents_deck(harness):
 #
 # The caller-exclusion convention has now bitten four times (FB #41 → #291 →
 # #295/#296/#305 → #409), and three of the four were hidden by a fixture that
-# put the caller in `members`. These cases are the regression guard: they must
-# be RED with `not_league_member` on any revert of the synthesized
-# `caller_member` in `queue_trade_for_opponent`.
+# put the caller in `members`. D-170 deleted the mirror predicate that FB-409's
+# synthesized `caller_member` fed, so the route no longer looks the caller up
+# at all — but these cases stay as the regression guard: they must be RED with
+# `not_league_member` on any change that reintroduces a caller lookup against
+# the caller-excluded `league.members`.
 # ---------------------------------------------------------------------------
 
 def test_prod_shape_queue_succeeds(prod_harness):
@@ -313,18 +316,15 @@ def test_prod_shape_does_not_mutate_league_members(prod_harness):
     assert [m.user_id for m in league.members] == [OPP]
 
 
-def test_prod_shape_give_side_still_checked_against_my_roster(prod_harness):
-    """The synthesized roster is the session's real one, not an empty list or
-    a wildcard — offering an asset I do not own is still refused."""
-    client, engine, _sess, service, *_ = prod_harness
-    _assert_refused(_queue(client, give_player_ids=["r2"]), engine, service,
-                    "assets_not_on_roster")
-
-
-def test_prod_shape_receive_side_still_checked_against_their_roster(prod_harness):
-    client, engine, _sess, service, *_ = prod_harness
-    _assert_refused(_queue(client, receive_player_ids=["g2"]), engine, service,
-                    "assets_not_on_roster")
+def test_prod_shape_roster_mismatch_still_queues(prod_harness):
+    """D-170 — the route no longer checks rosters at all: the like records
+    even when a side is not on the roster it must come from. The injector
+    keeps roster actionability at mirror time (a trade whose players left the
+    rosters cannot render honestly), which is where the check now lives —
+    see test_injector_keeps_roster_actionability_for_calcq_likes."""
+    client, engine, *_ = prod_harness
+    assert _queue(client, give_player_ids=["r2"]).get_json()["queued"] is True
+    assert len(_decision_rows(engine)) == 1
 
 
 def test_prod_shape_cannot_queue_a_trade_with_yourself(prod_harness):
@@ -415,7 +415,7 @@ def test_the_id_is_the_package_not_the_call():
 
 
 # ---------------------------------------------------------------------------
-# Every refusal reason. A refusal writes nothing, ever.
+# The one surviving refusal — not_league_member. A refusal writes nothing.
 # ---------------------------------------------------------------------------
 
 def _assert_refused(res, engine, service, reason):
@@ -428,20 +428,9 @@ def _assert_refused(res, engine, service, reason):
     assert service._trade_swipes == [], "a refusal moved the board"
 
 
-def test_likes_you_off(harness):
-    client, engine, _sess, service, *_ = harness
-    ff._flags_cache = {**ff._flags_cache, "trade.likes_you": False}
-    _assert_refused(_queue(client), engine, service, "likes_you_off")
-
-
-def test_demo_league_has_no_mirror(harness):
-    client, engine, sess, service, *_ = harness
-    sess["league"].league_id = "league_demo"
-    _assert_refused(_queue(client, league_id="league_demo"), engine, service,
-                    "likes_you_off")
-
-
 def test_not_league_member(harness):
+    """An opponent this session cannot resolve leaves no counterparty identity
+    to record the like against — the ONE refusal D-170 keeps."""
     client, engine, _sess, service, *_ = harness
     _assert_refused(_queue(client, opponent_user_id=STRANGER), engine, service,
                     "not_league_member")
@@ -453,70 +442,182 @@ def test_cannot_queue_a_trade_with_yourself(harness):
                     "not_league_member")
 
 
-def test_give_side_not_on_my_roster(harness):
-    client, engine, _sess, service, *_ = harness
-    _assert_refused(_queue(client, give_player_ids=["r2"]), engine, service,
-                    "assets_not_on_roster")
+# ---------------------------------------------------------------------------
+# D-170 — the removed refusals. Every one of these used to answer
+# `{queued: false}` and record nothing; each now records the like.
+# ---------------------------------------------------------------------------
+
+def _assert_queued_and_recorded(res, engine):
+    assert res.status_code == 200, res.get_data(as_text=True)
+    body = res.get_json()
+    assert body["queued"] is True, body
+    assert body["trade_id"].startswith("calcq_")
+    rows = _decision_rows(engine)
+    assert len(rows) == 1 and rows[0].decision == "like"
+    return body
 
 
-def test_receive_side_not_on_their_roster(harness):
-    client, engine, _sess, service, *_ = harness
-    _assert_refused(_queue(client, receive_player_ids=["g2"]), engine, service,
-                    "assets_not_on_roster")
+def test_likes_you_flag_off_still_records(harness):
+    """The mirror surface being dark no longer refuses the ✓ — the row is
+    recorded and waits for the surface (pre-D-170: `likes_you_off`)."""
+    client, engine, *_ = harness
+    ff._flags_cache = {**ff._flags_cache, "trade.likes_you": False}
+    _assert_queued_and_recorded(_queue(client), engine)
 
 
-def test_opponent_untouchable(harness):
-    """They marked the player I am asking for untouchable. The injector skips
-    on `untouchable_ids & their_recv`; this is that skip, up front."""
-    client, engine, _sess, service, *_ = harness
+def test_demo_league_still_records(harness):
+    """Pre-D-170: `likes_you_off`. The ✓ always records."""
+    client, engine, sess, *_ = harness
+    sess["league"].league_id = "league_demo"
+    _assert_queued_and_recorded(_queue(client, league_id="league_demo"), engine)
+
+
+def test_give_side_not_on_my_roster_still_queues(harness):
+    """Pre-D-170: `assets_not_on_roster`. The route checks no rosters now;
+    actionability lives (only) in the injector at mirror time."""
+    client, engine, *_ = harness
+    _assert_queued_and_recorded(_queue(client, give_player_ids=["r2"]), engine)
+
+
+def test_receive_side_not_on_their_roster_still_queues(harness):
+    client, engine, *_ = harness
+    _assert_queued_and_recorded(_queue(client, receive_player_ids=["g2"]),
+                                engine)
+
+
+def test_opponent_untouchable_still_queues(harness):
+    """Pre-D-170: `opponent_untouchable`. Their preference no longer takes
+    the ✓ out of the caller's hands — and no longer hides the like from THEM
+    either (see the injector bypass tests below)."""
+    client, engine, *_ = harness
     set_asset_preference(user_id=OPP, league_id=LEAGUE, player_id="r1",
                          list_type="untouchable")
-    _assert_refused(_queue(client), engine, service, "opponent_untouchable")
+    _assert_queued_and_recorded(_queue(client), engine)
 
 
-def test_opponent_not_interested(harness):
-    """They marked the player I am offering not-interested (#163)."""
-    client, engine, _sess, service, *_ = harness
+def test_opponent_not_interested_still_queues(harness):
+    """Pre-D-170: `opponent_not_interested` (#163)."""
+    client, engine, *_ = harness
     set_asset_preference(user_id=OPP, league_id=LEAGUE, player_id="g1",
                          list_type="not_interested")
-    _assert_refused(_queue(client), engine, service, "opponent_not_interested")
+    _assert_queued_and_recorded(_queue(client), engine)
 
 
 def test_my_own_preferences_do_not_refuse_my_own_offer(harness):
-    """The gate reads THEIR lists, not mine. Marking my own guy untouchable
-    and then offering him anyway is my call to make."""
+    """Marking my own guy untouchable and then offering him anyway is my call
+    to make. (Was already true pre-D-170.)"""
     client, _engine, *_ = harness
     set_asset_preference(user_id=ME, league_id=LEAGUE, player_id="g1",
                          list_type="untouchable")
     assert _queue(client).get_json()["queued"] is True
 
 
-def test_fails_fairness_floor(harness):
-    """D-096's user-gain floor, measured from THEIR side: I take their 2200
-    for my 1200, so the mirror would show them a loss and never runs."""
-    client, engine, _sess, service, *_ = harness
-    _assert_refused(
+def test_fails_old_fairness_floor_now_queues(harness):
+    """THE D-170 HEADLINE. The greedy package — I take their 2200 for my 1200,
+    a clear loss on the opponent's value bar — was `fails_fairness_floor`
+    under D-152/D-096. It now records like any other ✓."""
+    client, engine, *_ = harness
+    _assert_queued_and_recorded(
         _queue(client, give_player_ids=GREEDY_GIVE,
-               receive_player_ids=GREEDY_RECV),
-        engine, service, "fails_fairness_floor")
+               receive_player_ids=GREEDY_RECV), engine)
 
 
-def test_the_floor_is_the_shipped_knob_not_a_copy(harness):
-    """Raise `likes_you_min_user_gain` — the D-096 floor the injector itself
-    reads — and the package that just passed is refused. Proof the route
-    consults the live ladder rather than hard-coding a rule of its own, which
-    is the whole reason it can claim to predict the mirror."""
-    import backend.trade_service as ts
-    client, engine, _sess, service, *_ = harness
-    old = dict(ts._cfg)
-    ts._cfg["likes_you_min_user_gain"] = 1e9
-    try:
-        _assert_refused(_queue(client), engine, service, "fails_fairness_floor")
-    finally:
-        ts._cfg.clear()
-        ts._cfg.update(old)
-    # …and with the knob back where it shipped, the same package queues.
-    assert _queue(client).get_json()["queued"] is True
+# ---------------------------------------------------------------------------
+# D-170 — the injector's calcq_ bypass. A hand-queued like SURFACES past the
+# viewer's preference lists and the whole D-096 ladder; an engine/deck like
+# (non-calcq trade_id) keeps every gate.
+# ---------------------------------------------------------------------------
+
+def _inject_for_opponent(league, **kwargs):
+    """Generate the OPPONENT's likes-you injection over an empty deck."""
+    their_svc = TradeService(players={p.id: p for p in _players()})
+    return server._inject_likes_you_cards(
+        cards=[], trade_service=their_svc, user_id=OPP, league_id=LEAGUE,
+        league=league, user_roster=list(THEIR_ROSTER), seed_map=dict(SEED),
+        **kwargs)
+
+
+def _insert_engine_like(give_ids, recv_ids, trade_id="deck1234"):
+    """A like row shaped exactly like a deck swipe writes it — the trade_id
+    carries no `calcq_` prefix, so the injector treats it as an engine like."""
+    from backend.database import save_trade_decision
+    assert save_trade_decision(
+        user_id=ME, league_id=LEAGUE, trade_id=trade_id,
+        give_player_ids=give_ids, receive_player_ids=recv_ids,
+        decision="like")
+
+
+def test_calcq_like_bypasses_the_injector_fairness_gate(harness):
+    """Queue the greedy package (the opponent loses 1000 on raw seed) and it
+    STILL surfaces in their deck, flagged likes_you — the D-096 ladder does
+    not run for calcq_ rows."""
+    client, _engine, _sess, _service, _trade_svc, league = harness
+    res = _queue(client, give_player_ids=GREEDY_GIVE,
+                 receive_player_ids=GREEDY_RECV)
+    assert res.get_json()["queued"] is True
+
+    cards = _inject_for_opponent(league)
+    assert len(cards) == 1, "the hand-queued like did not surface"
+    assert cards[0].likes_you is True
+    assert cards[0].target_user_id == ME
+    # Mirrored: they give what I asked for, they receive what I offered.
+    assert cards[0].give_player_ids == GREEDY_RECV
+    assert cards[0].receive_player_ids == GREEDY_GIVE
+    # The value bar still tells the truth about the package.
+    assert cards[0].give_value > cards[0].receive_value
+
+
+def test_engine_like_still_respects_the_injector_fairness_gate(harness):
+    """The SAME greedy package as a non-calcq like row is still refused by
+    the D-096 ladder — the D-170 narrowing reaches hand-built likes only."""
+    _client, _engine, _sess, _service, _trade_svc, league = harness
+    _insert_engine_like(GREEDY_GIVE, GREEDY_RECV)
+    assert _inject_for_opponent(league) == []
+
+
+def test_calcq_like_bypasses_the_viewer_untouchable_list(harness):
+    """The viewer marked r1 untouchable — r1 is their give side after the
+    mirror. A hand-queued like asking for r1 still surfaces; the identical
+    engine like is still skipped."""
+    client, _engine, _sess, _service, _trade_svc, league = harness
+    assert _queue(client).get_json()["queued"] is True  # GOOD: recv r1
+    cards = _inject_for_opponent(league, untouchable_ids={"r1"})
+    assert len(cards) == 1 and cards[0].likes_you is True
+
+
+def test_engine_like_still_respects_the_viewer_untouchable_list(harness):
+    _client, _engine, _sess, _service, _trade_svc, league = harness
+    _insert_engine_like(GOOD_GIVE, GOOD_RECV)
+    assert _inject_for_opponent(league, untouchable_ids={"r1"}) == []
+
+
+def test_calcq_like_bypasses_the_viewer_not_interested_list(harness):
+    """g1 — what the viewer would RECEIVE — is on their not-interested list.
+    The hand-queued like surfaces anyway; the engine like does not."""
+    client, _engine, _sess, _service, _trade_svc, league = harness
+    assert _queue(client).get_json()["queued"] is True  # GOOD: give g1
+    cards = _inject_for_opponent(league, not_interested_ids={"g1"})
+    assert len(cards) == 1 and cards[0].likes_you is True
+
+
+def test_engine_like_still_respects_the_viewer_not_interested_list(harness):
+    _client, _engine, _sess, _service, _trade_svc, league = harness
+    _insert_engine_like(GOOD_GIVE, GOOD_RECV)
+    assert _inject_for_opponent(league, not_interested_ids={"g1"}) == []
+
+
+def test_injector_keeps_roster_actionability_for_calcq_likes(harness):
+    """D-170 keeps the structural gates: a hand-queued like whose give side
+    has left the liker's roster cannot render honestly and is NOT mirrored."""
+    client, _engine, _sess, _service, _trade_svc, _league = harness
+    assert _queue(client).get_json()["queued"] is True  # GOOD: ME gives g1
+
+    drifted = League(
+        league_id=LEAGUE, name="Calc Queue League", platform="sleeper",
+        members=[LeagueMember(user_id=ME, username="me",
+                              roster=["g2"],  # g1 traded away since the ✓
+                              elo_ratings={})])
+    assert _inject_for_opponent(drifted) == []
 
 
 # ---------------------------------------------------------------------------
