@@ -127,8 +127,15 @@ console.log('check-canvas-results:');
 // ═══════════════════════════════════════════════════════════════════════
 {
   const features = JSON.parse(readRoot('config/features.json'));
-  assert(features['calc.canvas_results'] === true,
-    '1. calc.canvas_results is LIT in config/features.json (operator cadence)');
+  // RE-PINNED 2026-08-31 (operator ruling 1, D-171, docs/plans/
+  // finder-results-push/scope.md): the landing is the BUILDER only — found
+  // ideas moved to the pushed results deck (calc.results_push, guarded by
+  // check-results-push.js), so canvas-results goes DARK. The browse-session
+  // code below stays intact and flag-dormant; restoring it is the two-key
+  // server flip the config comment documents. A future re-light is a
+  // deliberate operator revert, not a drive-by — flip this pin WITH it.
+  assert(features['calc.canvas_results'] === false,
+    '1. calc.canvas_results is DARK in config/features.json (2026-08-31 ruling 1, D-171)');
   assert(typeof features['_comment_canvas_results'] === 'string'
     && /canvas-results-spec\.md/.test(features['_comment_canvas_results'])
     && /kill switch/i.test(features['_comment_canvas_results'])
@@ -137,8 +144,8 @@ console.log('check-canvas-results:');
     '1a. …with a comment naming the spec, the kill switch and both prerequisites');
   for (const f of ['release', 'onboarding-v2', 'profiles-on']) {
     const j = JSON.parse(readRoot(`backend/tests/fixtures/flags/${f}.json`));
-    assert(j['calc.canvas_results'] === true,
-      `1b. backend/tests/fixtures/flags/${f}.json mirrors it true`);
+    assert(j['calc.canvas_results'] === false,
+      `1b. backend/tests/fixtures/flags/${f}.json mirrors it false (G-062 four-file flip)`);
   }
   assert(/"calc\.canvas_results",/.test(readRoot('backend/feature_flags.py')),
     '1c. the key is registered in backend FLAG_KEYS',
@@ -159,20 +166,27 @@ console.log('check-canvas-results:');
     'a bare-flag gate would strip the deck from flag-on team/player modes (spec §1)');
   assert(count(tradesCode, /const browseLive = canvasResultsLive && browseSession !== null;/g) === 1,
     '2b. ONE session-liveness derivation');
-  // The deck tree: the NEW gate wraps the OLD gate verbatim — flag-off (and
-  // every non-canvas host) falls through to exactly the shipped expression.
-  assert(/\{canvasResultsLive \? null : singlePinFeatured && !singlePinDeckActive \? null : \(/.test(trades),
-    '2c. the deck tree is gated off the live host, with the shipped gate as the fallback arm',
-    'the whole deck render tree must survive verbatim for flag-off');
-  assert(/\{!canvasResultsLive && singlePinFeatured \? \(/.test(trades),
-    '2d. the single-pin featured region retires on the live host (a second calculator otherwise)');
-  assert(/\{!canvasResultsLive && singlePinDeckActive \? assetIdeasPanel : null\}/.test(trades),
+  // RE-PINNED 2026-08-31 (D-171 ruling 1): the retire gate widened from
+  // `canvasResultsLive` to `landingDeckRetired` (= canvasResultsLive ||
+  // resultsPushLive) — the landing sheds its deck under EITHER results
+  // posture, and the pushed instance (canvasHost null ⇒ both conjuncts
+  // false) renders the tree classically. The derivation itself is pinned so
+  // it cannot quietly become a bare-flag read.
+  assert(/const landingDeckRetired = canvasResultsLive \|\| resultsPushLive;/.test(trades)
+    && count(tradesCode, /const landingDeckRetired =/g) === 1,
+    '2c0. ONE landing-retire derivation: either results posture, never a bare flag');
+  assert(/\{landingDeckRetired \? null : singlePinFeatured && !singlePinDeckActive \? null : \(/.test(trades),
+    '2c. the deck tree is gated off the retired landing, with the shipped gate as the fallback arm',
+    'the whole deck render tree must survive verbatim for flag-off and the pushed instance');
+  assert(/\{!landingDeckRetired && singlePinFeatured \? \(/.test(trades),
+    '2d. the single-pin featured region retires with the deck (a second calculator otherwise)');
+  assert(/\{!landingDeckRetired && singlePinDeckActive \? assetIdeasPanel : null\}/.test(trades),
     '2e. …and so does the alternates panel second mount');
-  assert(count(tradesCode, /job\?\.status === 'running' && !canvasResultsLive && \(/g) === 2,
-    '2f. BOTH pre-canvas progress strips stand aside on the live host',
-    'their narration moves into the canvas-results area (spec §2)');
-  assert(/\{!firstRun && deckHasLanes && !canvasResultsLive && \(/.test(trades),
-    '2g. the lane pills (deck-only chrome) do not render on the live host');
+  assert(count(tradesCode, /job\?\.status === 'running' && !landingDeckRetired && \(/g) === 2,
+    '2f. BOTH pre-canvas progress strips stand aside on the retired landing',
+    'their narration lives with whichever results surface owns the search');
+  assert(/\{!firstRun && deckHasLanes && !landingDeckRetired && \(/.test(trades),
+    '2g. the lane pills (deck-only chrome) do not render on the retired landing');
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -477,7 +491,7 @@ console.log('check-canvas-results:');
   // gated deck tree, after the gate that removes it from the live host.
   const idleAt = trades.indexOf('Hit "Find a Trade" to start');
   const gateAt = trades.indexOf(
-    '{canvasResultsLive ? null : singlePinFeatured && !singlePinDeckActive ? null : (',
+    '{landingDeckRetired ? null : singlePinFeatured && !singlePinDeckActive ? null : (',
   );
   assert(idleAt > gateAt && gateAt > 0,
     '7c. the flag-off idle card sits inside the gated deck tree',
@@ -525,8 +539,11 @@ console.log('check-canvas-results:');
     'every dispatch site must route through the helper (census in its header comment)');
   assert(/onPress=\{canvasResultsLive \? handleBrowseClear : handleSearchAllTrades\}/.test(trades),
     '8c. the anchor receipt\'s Clear ends a live session (ruling 1) and keeps its shipped handler otherwise');
-  assert(/onPress=\{canvasResultsLive \? handleBrowseAnchorChange : handleAnchorChange\}/.test(trades),
-    '8d. …and Change hands the anchor build back instead of scrolling to a canvas that no longer holds it');
+  // RE-PINNED 2026-08-31 (D-171 ruling 2): Change grew a third arm — on the
+  // PUSHED deck (isResultsPushed) it pops back to the landing whose canvas
+  // still holds the anchor build (handlePushedAnchorChange → popToLanding).
+  assert(/onPress=\{\s*canvasResultsLive\s*\?\s*handleBrowseAnchorChange\s*:\s*isResultsPushed\s*\?\s*handlePushedAnchorChange\s*:\s*handleAnchorChange\s*\}/.test(trades),
+    '8d. …and Change forks: browse restore / pushed-deck pop / shipped scroll');
   assert(/testID="trades\.canvas-results\.clear"/.test(trades)
     && /\{browseSession\?\.origin === 'model' \? \(/.test(trades),
     '8e. model-path sessions get the matching Clear on the pager (they have no receipt)');
@@ -599,9 +616,11 @@ console.log('check-canvas-results:');
   const rec = functionNamed(host, 'recordCanvasQueueLike');
   assert(!!rec, '11. recordCanvasQueueLike exists');
   const like = functionNamed(host, 'handleInlineLikeTrade');
+  // RE-PINNED 2026-08-31 (D-171): the landing ✓ keeps its like moment under
+  // BOTH results postures, so the gate widened to landingDeckRetired.
   assert(!!like
-    && /if \(queued && !alreadyQueued && canvasResultsLive\) recordCanvasQueueLike\(\);/.test(like.getText()),
-    '11a. the ✓ queue-success path reaches it — host-gated, refusals and already-queued repeats excluded',
+    && /if \(queued && !alreadyQueued && landingDeckRetired\) recordCanvasQueueLike\(\);/.test(like.getText()),
+    '11a. the ✓ queue-success path reaches it — gated on the deck-retired landing, refusals and already-queued repeats excluded',
     'a refused queue is not a like; a re-✓ of the same package is not a second one');
   assert(/alreadyQueued\?: boolean/.test(stripComments(read('utils/queueCalcTrade.ts'))),
     '11b. queueCalcTrade surfaces the server\'s own idempotence signal for that exclusion');
@@ -649,13 +668,13 @@ console.log('check-canvas-results:');
     '11j. …and the queue-success like path fires it too');
   // Render homes on the live host — shipped gates plus the host, the deck
   // slot\'s components/copy untouched, and the deck-slot originals intact.
-  assert(/\{canvasResultsLive && quicksetPromptShown \? \(/.test(trades)
+  assert(/\{landingDeckRetired && quicksetPromptShown \? \(/.test(trades)
     && count(trades, /<QuickSetPromptCard/g) === 2,
-    '11k. the Quick-Set prompt card has a host-gated mount above the canvas (deck-slot mount intact)',
-    'the deck tree is nulled on this host, so exactly one of the two can ever render');
-  assert(/: canvasResultsLive && adaptationMoment && topCard && !mutedForTour \? \(/.test(trades)
+    '11k. the Quick-Set prompt card has a retired-landing mount above the canvas (deck-slot mount intact)',
+    'the deck tree is nulled on the retired landing, so exactly one of the two can ever render');
+  assert(/: landingDeckRetired && adaptationMoment && topCard && !mutedForTour \? \(/.test(trades)
     && count(trades, /testID="trades\.adaptation-moment"/g) === 2,
-    '11l. the adaptation moment has a host-gated mount with the shipped gate verbatim (plus the host)');
+    '11l. the adaptation moment has a retired-landing mount with the shipped gate verbatim (plus the host)');
   // The Apple surfaces were already page-level — they must STAY ungated by
   // the host (the sheet is a root modal; the banner rides the page strip).
   assert(/\{appleBannerShown \? \(/.test(trades)
@@ -817,8 +836,11 @@ console.log('check-canvas-results:');
     assert(/'nav\.trades_landing': true,/.test(seg),
       '12o. nav.trades_landing baked true — the first-ever cold launch honors trades-landing',
       'the #115 convention: launched flags fail OPEN on fresh-install first boot / stale-cache first paint');
-    assert(/'calc\.canvas_results': true,/.test(seg),
-      '12o2. calc.canvas_results baked true — no deck-layout paint flip on first boot');
+    // RE-PINNED 2026-08-31 (D-171): the baked default follows the ruling —
+    // FALSE, so a fresh install never paints one browse session before the
+    // fetched map lands. The push flag's own bake is check-results-push's.
+    assert(/'calc\.canvas_results': false,/.test(seg),
+      '12o2. calc.canvas_results baked false — no browse-session paint flip on first boot (D-171)');
   }
 }
 

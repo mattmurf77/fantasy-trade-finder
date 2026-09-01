@@ -448,7 +448,22 @@ function TradesStackNav() {
         initialParams={finderHubOn ? { mode: 'guided' } : undefined}
       />
       {finderHubOn ? (
-        <TradesStack.Screen name="TradeDeck" component={TradesScreen} />
+        // D-171 (2026-08-31 rulings 2+4) — a TradeDeck pushed with the
+        // `resultsPush` param is the merged landing's RESULTS page: it gets
+        // the shared Chalkline header + always-on back control (native back
+        // is dead on iOS 26, RNS#3294 — same reason Calculator/Today carry
+        // it), so "backing out" pops to the landing per ruling 4. A
+        // param-less TradeDeck (the `app/trades/finder` deep link) keeps
+        // its historical headerless render.
+        <TradesStack.Screen
+          name="TradeDeck"
+          component={TradesScreen}
+          options={({ route, navigation }) =>
+            (route.params as any)?.resultsPush
+              ? subScreenOptions('Trade ideas', 'TradesHome')({ navigation })
+              : { headerShown: false }
+          }
+        />
       ) : null}
       {/* Presentation v2 — registered unconditionally (see the import
           comment). Reachable only via the flag-gated "Today" chip. Both use

@@ -706,6 +706,14 @@ export default function TradesScreen({ navigation, route }: any) {
   // with `canvasHost === 'flag'`, declared beside canvasHost below) so
   // flag-on team/player deck modes keep their decks untouched.
   const canvasResultsOn = useFlag('calc.canvas_results');
+  // 2026-08-31 operator rulings 1-5 (D-171, docs/plans/finder-results-push/
+  // scope.md) — Find a Trade on the merged landing PUSHES a full-screen
+  // classic deck page (`TradeDeck` + a `resultsPush` route param) instead of
+  // consuming the search in place. Read once; live only as `resultsPushLive`
+  // (the conjunction with `canvasHost === 'flag'`, beside canvasResultsLive
+  // below) so team/player deck modes and the pushed instance itself are
+  // untouched by the landing-side gates.
+  const resultsPushOn = useFlag('calc.results_push');
 
   // ── FB #156/#246 — finder modes (flag `trades.finder_hub`) ────────────
   // route.params carries which mode this screen is in and (team mode) the
@@ -817,6 +825,25 @@ export default function TradesScreen({ navigation, route }: any) {
   const finderMode: 'guided' | 'team' | 'player' | undefined = finderHubOn
     ? route?.params?.mode
     : undefined;
+  // D-171 (2026-08-31 rulings) — the pushed results deck's arrival payload.
+  // The landing's Find a Trade (and a forwarded store handoff) pushes
+  // `TradeDeck` carrying this param; its PRESENCE is what makes this
+  // instance the pushed deck: `canvasHost` resolves to null (ruling 2 — the
+  // pushed page mounts no canvas), so the classic TradeCard deck renders
+  // (rulings 2+4), while the payload itself is consumed once (seq-guarded)
+  // into exactly the refs a calculator hand-off used to arrive with. The
+  // param is deliberately never cleared — clearing it would flip canvasHost
+  // back to 'flag' mid-session and mount a canvas over a live deck.
+  const resultsPushParam = route?.params?.resultsPush as
+    | {
+        seq: number;
+        opponent: { userId: string; name: string } | null;
+        origin: 'calculator' | null;
+        fairAnchor: { giveIds: string[]; receiveIds: string[] } | null;
+        anchorLabel: string | null;
+      }
+    | undefined;
+  const isResultsPushed = finderHubOn && !!resultsPushParam;
   // #270/#272 — both `trades_home_inline` variants are scoped to the guided
   // landing only; team/player deck modes (already rare post-#269, reachable
   // only via a stored deep link since the mode-bar's chips are hidden) keep
@@ -2193,6 +2220,12 @@ export default function TradesScreen({ navigation, route }: any) {
   // One kick per league; the silent retry lives in generateMutation.onError.
   useEffect(() => {
     if (!firstRun || !leagueId || gateState) return;
+    // D-171 ruling 1 (2026-08-31) — no auto-start on the push-posture
+    // LANDING (builder only: a kicked generate would stream into the
+    // retired deck tree — the QA B-C1 invisible-deck shape) and none on the
+    // PUSHED instance (it arrives with its own explicit search, consumed
+    // above). Flag off ⇒ both false, byte-identical.
+    if (resultsPushLive || isResultsPushed) return;
     if (autoGenRef.current !== 'idle') return;
     if (job || generateMutation.isPending || deck.length > 0) return;
     autoGenRef.current = 'kicked';
@@ -2924,6 +2957,37 @@ export default function TradesScreen({ navigation, route }: any) {
   useEffect(() => {
     if (!navFocused || !finderHandoff) return;
     useFinderTargets.getState().setHandoff(null); // one-shot: consume first
+    // D-171 (2026-08-31 ruling 1) — under the push posture the LANDING
+    // renders no results, so an armed handoff (a league-rankings Offer, or
+    // the flag-off calculator page's own Find a Trade) FORWARDS into the
+    // pushed deck instead of dispatching into a tree this host no longer
+    // mounts (the same invisible-deck shape QA B-C1 was). The opponent is
+    // still adopted here so the landing's canvas scope stays in sync when
+    // the user pops back. Only the flag-hosted landing forwards: the
+    // pushed instance and team/player modes consume exactly as before.
+    if (resultsPushLive && finderHubOn && finderMode) {
+      const fwdOrigin =
+        finderHandoff.origin === 'calculator' ? ('calculator' as const) : null;
+      const fwdFair =
+        fwdOrigin && finderHandoff.fairAnchor?.giveIds?.length
+          ? finderHandoff.fairAnchor
+          : null;
+      setSheetOpponent(finderHandoff.opponent);
+      navigation?.push?.('TradeDeck', {
+        mode: 'guided',
+        resultsPush: {
+          seq: finderHandoff.seq,
+          opponent: finderHandoff.opponent,
+          origin: fwdOrigin,
+          fairAnchor: fwdFair,
+          // A store handoff carries ids, not display names — no receipt
+          // label to build here (the calculator's own path labels via
+          // anchorSummary at the push site).
+          anchorLabel: null,
+        },
+      });
+      return;
+    }
     setSheetOpponent(finderHandoff.opponent);
     const origin = finderHandoff.origin === 'calculator' ? 'calculator' : null;
     setDeckOrigin(origin);
@@ -2963,6 +3027,21 @@ export default function TradesScreen({ navigation, route }: any) {
   useEffect(() => {
     if (!finderHubOn || !finderMode) return;
     resetDeckForNewTargets();
+    // D-171 ruling 1 (2026-08-31) — the LANDING dispatches nothing under the
+    // push posture: Find a Trade and forwarded handoffs push `TradeDeck`
+    // (whose own instance runs this same effect with canvasHost null and
+    // dispatches there), and a bare scope change here (a DNA-sheet team
+    // pick) only resets — the user's next Find a Trade carries the scope to
+    // the pushed deck. Refs are cleared defensively so nothing armed can
+    // detonate after a later posture flip. Flag off ⇒ dead branch,
+    // byte-identical dispatch behavior.
+    if (resultsPushLive) {
+      fairAnchorRef.current = null;
+      autoRunPendingRef.current = false;
+      autoRunOriginRef.current = null;
+      finderScopeSeen.current = true;
+      return;
+    }
     // #330 — an armed handoff widens the fresh-mount gate (generate even on
     // the first observation) and, via the `autoRunSeq` dep, re-fires this
     // effect for a repeat Offer to the SAME team (`scopedOpponent` is a
@@ -3032,6 +3111,50 @@ export default function TradesScreen({ navigation, route }: any) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [finderMode, scopedOpponent, autoRunSeq, canvasRunSeq]);
 
+  // ── D-171 (2026-08-31 rulings 2+4) — the pushed results deck's arrival ──
+  //
+  // Consumes the `resultsPush` route param ONCE (seq-guarded; the param
+  // itself stays on the route — see its declaration) into exactly the refs
+  // a calculator hand-off used to arrive with, then bumps `canvasRunSeq` so
+  // the ONE #330 choke point above forks and dispatches (D-153: anchor ⇒
+  // fair sweep, none ⇒ model auto-run). DECLARED AFTER the choke effect on
+  // purpose: on the mount commit the choke's first run sees un-armed refs
+  // (plain reset, finderScopeSeen latches), this effect then arms and its
+  // batched setters re-fire the choke exactly once with the refs armed —
+  // the same one-refire shape a store-handoff consumption has always had.
+  // Arming during the mount run instead would double-dispatch: the fair
+  // sweep would fire, then the setSheetOpponent re-render would reset it
+  // away and dispatch the model.
+  const consumedResultsPushSeqRef = useRef<number | null>(null);
+  useEffect(() => {
+    const rp = resultsPushParam;
+    if (!rp || !finderHubOn || consumedResultsPushSeqRef.current === rp.seq) {
+      return;
+    }
+    consumedResultsPushSeqRef.current = rp.seq;
+    setSheetOpponent(rp.opponent ?? null);
+    // Ruling 4 — a calculator-origin push keeps the calculator's deck
+    // semantics (✕ → overlay, calculator-first exits); a forwarded league
+    // offer keeps its own (inline tiles), exactly as its direct
+    // consumption always has.
+    setDeckOrigin(rp.origin === 'calculator' ? 'calculator' : null);
+    const anchor = rp.fairAnchor?.giveIds?.length ? rp.fairAnchor : null;
+    setInlineAnchor(
+      anchor && rp.anchorLabel
+        ? {
+            label: rp.anchorLabel,
+            giveIds: anchor.giveIds,
+            receiveIds: anchor.receiveIds,
+          }
+        : null,
+    );
+    fairAnchorRef.current = anchor;
+    autoRunPendingRef.current = !anchor;
+    autoRunOriginRef.current = rp.origin === 'calculator' ? 'calculator' : null;
+    setCanvasRunSeq((n) => n + 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resultsPushParam?.seq]);
+
   // ── D-158 — the inline canvas's own Find a Trade (no navigation) ────────
   //
   // The pushed page's handler wrote a `FinderHandoff` and `popTo`'d here; on
@@ -3049,6 +3172,29 @@ export default function TradesScreen({ navigation, route }: any) {
     opponent: { userId: string; name: string } | null;
   }) {
     const fork = forkCanvasSearch(opts, 'Trades');
+    // D-171 rulings 1+2 (2026-08-31) — under the push posture the landing
+    // does not consume its own search: the D-153 verdict (and the anchor,
+    // on the fair path) rides a route param into a PUSHED TradeDeck
+    // instance, which renders the classic deck. `navigation.push`, not
+    // navigate: TradeDeck may already sit in the stack (a repeat search
+    // from a popped-back landing must serve a FRESH instance, and G-056
+    // documents navigate's reuse rules as a trap). The landing's canvas
+    // keeps the build — Change/Edit-in-calculator pop back to it.
+    if (resultsPushLive) {
+      const summary = anchorSummary(opts.give);
+      setSheetOpponent(fork.opponent);
+      navigation?.push?.('TradeDeck', {
+        mode: 'guided',
+        resultsPush: {
+          seq: Date.now(),
+          opponent: fork.opponent,
+          origin: 'calculator',
+          fairAnchor: fork.anchor,
+          anchorLabel: fork.anchor && summary ? summary : null,
+        },
+      });
+      return;
+    }
     // The canvas's Team dropdown is the search scope, exactly as the hand-off
     // carried it — adopting it here is what `setSheetOpponent(handoff.opponent)`
     // did on arrival.
@@ -3088,11 +3234,13 @@ export default function TradesScreen({ navigation, route }: any) {
       screen: 'Trades',
     });
     setToast(t);
-    // G22 — a real first queue on the live canvas host is this page's like
-    // moment (see recordCanvasQueueLike). A refused queue is not a like;
-    // neither is a re-✓ of an already-queued package (the server's own
-    // idempotence signal). Every other host: dead code, byte-identical.
-    if (queued && !alreadyQueued && canvasResultsLive) recordCanvasQueueLike();
+    // G22 — a real first queue on the deck-retired landing is this page's
+    // like moment (see recordCanvasQueueLike) — under BOTH results postures
+    // (D-171 keeps the landing ✓'s current behavior, ruling text verbatim).
+    // A refused queue is not a like; neither is a re-✓ of an already-queued
+    // package (the server's own idempotence signal). Every other host: dead
+    // code, byte-identical.
+    if (queued && !alreadyQueued && landingDeckRetired) recordCanvasQueueLike();
   }
 
   // ── G22 — activation moments follow the results surface ────────────────
@@ -3163,10 +3311,45 @@ export default function TradesScreen({ navigation, route }: any) {
     mainScrollRef.current?.scrollTo({ y: canvasY.current, animated: true });
   }
 
+  // ── D-171 (2026-08-31 ruling 3) — the pushed deck's way back ────────────
+  // G-056 — `navigate('TradesHome')` from a pushed Trades-stack screen
+  // PUSHES a second instance (routers 7.5.3 StackRouter NAVIGATE reuses a
+  // route only when current / `pop` / `getId`); `popTo` (StackRouter.js
+  // :349-421, POP_TO) walks DOWN to the existing TradesHome — the landing
+  // this deck was pushed from, canvas state intact. With a prefill, the
+  // params ride the same `canvasPrefill`/`canvasPrefillSeq` route-param
+  // bridge MatchesScreen uses (consumed above into loadCanvasPrefill);
+  // POP_TO rebuilds params from initialParams + payload, so `mode:'guided'`
+  // survives the trip.
+  function popToLanding(prefill?: CanvasPrefill) {
+    navigation?.popTo?.(
+      'TradesHome',
+      prefill
+        ? { canvasPrefill: prefill, canvasPrefillSeq: Date.now() }
+        : undefined,
+    );
+  }
+
+  // D-171 ruling 2 — on the pushed deck the canvas lives one screen down and
+  // still holds the anchor build: the receipt's "Change" POPS back to it
+  // (no prefill — nothing was cleared).
+  function handlePushedAnchorChange() {
+    haptics.selection();
+    popToLanding();
+  }
+
   // D-158 — load a package into the inline canvas and bring it into view.
   // Replaces `navigate('TradeCalculator', {prefill})` on this screen's three
   // hand-off paths when the flag is on.
   function loadCanvasPrefill(p: CanvasPrefill) {
+    // D-171 ruling 3 (2026-08-31) — the pushed deck mounts no canvas: every
+    // "edit in calculator" hand-off on it (a card's edit action, an asset-
+    // idea tap) POPS to the landing carrying the package. This is the
+    // build → results → tweak → results loop's return leg.
+    if (isResultsPushed) {
+      popToLanding(p);
+      return;
+    }
     // #402 QA B-C3 — SCENARIO: a prefill hand-off (Matches' "edit in
     // calculator" route param, an asset-idea tap, a deck exit) arrives while
     // a browse session is live. Seeding the canvas without ending the
@@ -3394,6 +3577,13 @@ export default function TradesScreen({ navigation, route }: any) {
   function handleBackToCalculator() {
     haptics.selection();
     track('deck_back_to_calculator', { pin_count: pinCount }, 'Trades');
+    // D-171 ruling 4 (2026-08-31) — from the pushed deck this is a plain
+    // pop: the landing's canvas still holds what the user built, and a fair
+    // deck has no pins, so the pin-derived prefill below would CLEAR it.
+    if (isResultsPushed) {
+      popToLanding();
+      return;
+    }
     // D-158 — "back to calculator" on the merged landing is a scroll: the
     // canvas is already on this page and still holds what the user built, so
     // the prefill only has to re-assert the pins the deck was generated
@@ -5560,7 +5750,12 @@ export default function TradesScreen({ navigation, route }: any) {
   // is #270's per-unit variant with its original gates intact; `null` is
   // today's landing, canvas-free.
   const canvasHost: 'flag' | 'experiment' | null =
-    inlineHomeOn && finderMode === 'guided' && leagueId
+    // D-171 ruling 2 — the pushed results deck mounts NO canvas: param
+    // presence (not the flag) suppresses both arms, so an instance pushed
+    // before a kill-switch flip stays a coherent deck page.
+    isResultsPushed
+      ? null
+      : inlineHomeOn && finderMode === 'guided' && leagueId
       ? 'flag'
       : homeInlineVariant === 'canvas' &&
           finderMode === 'guided' &&
@@ -5573,7 +5768,11 @@ export default function TradesScreen({ navigation, route }: any) {
   // fair (anchored) deck, and the anchor is one this page built. `fairDeck` is
   // cleared by every path that starts or invalidates a model search, so a
   // "Built around" line can never outlive the deck it describes.
-  const inlineAnchorShown = canvasHost === 'flag' && fairDeck && !!inlineAnchor;
+  // D-171 ruling 2 — the receipt also tops the PUSHED deck (the anchor rode
+  // the push param into this instance's fair sweep), so the pushed arm joins
+  // the gate. `fairDeck` still guarantees the label cannot outlive its deck.
+  const inlineAnchorShown =
+    (canvasHost === 'flag' || isResultsPushed) && fairDeck && !!inlineAnchor;
 
   // ── #402 canvas-results — derived gates ─────────────────────────────────
   // `canvasResultsLive`: the feature is on AND this render is the flag-hosted
@@ -5586,6 +5785,19 @@ export default function TradesScreen({ navigation, route }: any) {
   // host either way; this decides whether the canvas is showing IDEAS
   // (pager, ✕, results states) or is the blank build surface.
   const browseLive = canvasResultsLive && browseSession !== null;
+  // ── D-171 (2026-08-31 rulings) — derived gates ──────────────────────────
+  // `resultsPushLive`: the push posture is on AND this render is the
+  // flag-hosted merged LANDING (never the pushed instance — its canvasHost
+  // is null by construction). This is the gate on every landing-side push
+  // behavior; flag off it is constant false and every branch reading it is
+  // dead, which is the kill switch.
+  const resultsPushLive = resultsPushOn && canvasHost === 'flag';
+  // `landingDeckRetired`: ruling 1 — the landing is the BUILDER only. The
+  // deck tree (and its chrome) retires from the flag-hosted landing under
+  // EITHER results posture: the #402 in-canvas browse, or the pushed deck.
+  // Non-canvas hosts (team/player modes, the pushed instance, flag-off) are
+  // false on both conjuncts and render the classic deck byte-identically.
+  const landingDeckRetired = canvasResultsLive || resultsPushLive;
 
   // #402 — the model path's zero-results copy, shared between the flag-off
   // toast (generateMutation.onSuccess) and the browse results area's card —
@@ -6700,7 +6912,7 @@ export default function TradesScreen({ navigation, route }: any) {
               the users. */}
           {/* #402 canvas-results — lane chrome belongs to the deck; the
               browse session has no lanes surface (spec §2). */}
-          {!firstRun && deckHasLanes && !canvasResultsLive && (
+          {!firstRun && deckHasLanes && !landingDeckRetired && (
             <View style={styles.targetDirRow}>
               {(
                 [
@@ -6995,7 +7207,7 @@ export default function TradesScreen({ navigation, route }: any) {
               lands somewhere. */}
           {/* #402 canvas-results — the strip narrates in the RESULTS AREA under
               the live canvas host (spec §2); everywhere else, unchanged. */}
-          {job?.status === 'running' && !canvasResultsLive && (
+          {job?.status === 'running' && !landingDeckRetired && (
             <View testID="trades.progress-strip" style={styles.progressStrip}>
               <View style={styles.progressInfo}>
                 <ActivityIndicator color={chalk.dim} size="small" />
@@ -7192,7 +7404,7 @@ export default function TradesScreen({ navigation, route }: any) {
 
         {/* #402 canvas-results — the strip narrates in the RESULTS AREA under
               the live canvas host (spec §2); everywhere else, unchanged. */}
-          {job?.status === 'running' && !canvasResultsLive && (
+          {job?.status === 'running' && !landingDeckRetired && (
           <View testID="trades.progress-strip" style={styles.progressStrip}>
             <View style={styles.progressInfo}>
               <ActivityIndicator color={chalk.dim} size="small" />
@@ -7260,12 +7472,12 @@ export default function TradesScreen({ navigation, route }: any) {
             do-not-redesign rule). They sit here — the top-of-results slot,
             directly above the canvas — because "top of deck" is where both
             have always interrupted. */}
-        {canvasResultsLive && quicksetPromptShown ? (
+        {landingDeckRetired && quicksetPromptShown ? (
           <QuickSetPromptCard
             onAccept={() => acceptQuicksetPrompt('prompt')}
             onDismiss={snoozeQuicksetPrompt}
           />
-        ) : canvasResultsLive && adaptationMoment && topCard && !mutedForTour ? (
+        ) : landingDeckRetired && adaptationMoment && topCard && !mutedForTour ? (
           <Card>
             <View style={styles.emptyInner} testID="trades.adaptation-moment">
               <Text style={styles.adaptationTitle}>
@@ -7486,9 +7698,17 @@ export default function TradesScreen({ navigation, route }: any) {
                 // #402 canvas-results — while a session is live the canvas
                 // holds the browsed IDEA, not the anchor assets, so Change
                 // ends the session and hands the anchor build back to the
-                // canvas (handleBrowseAnchorChange). Off/no session: the
-                // shipped scroll, byte-identical.
-                onPress={canvasResultsLive ? handleBrowseAnchorChange : handleAnchorChange}
+                // canvas (handleBrowseAnchorChange). D-171 — on the PUSHED
+                // deck the canvas is one screen down and still holds the
+                // anchor: Change pops back to it. Off/no session/landing:
+                // the shipped scroll, byte-identical.
+                onPress={
+                  canvasResultsLive
+                    ? handleBrowseAnchorChange
+                    : isResultsPushed
+                      ? handlePushedAnchorChange
+                      : handleAnchorChange
+                }
               >
                 {({ pressed }) => (
                   <Text style={[styles.anchorAction, pressed && { color: ice.press }]}>
@@ -7676,7 +7896,7 @@ export default function TradesScreen({ navigation, route }: any) {
             its own results surface (and mounts a SECOND calculator when
             trades.player_offers_calc is on), so it retires here with the
             deck. Every other host keeps it byte-identically. */}
-        {!canvasResultsLive && singlePinFeatured ? (
+        {!landingDeckRetired && singlePinFeatured ? (
           <>
             {featuredShown && !singlePinDeckActive ? (
               <View
@@ -7936,16 +8156,19 @@ export default function TradesScreen({ navigation, route }: any) {
             (nothing generated yet) the block stays out entirely: the pinned
             surface must not show "Hit Find a Trade to start" under a
             featured trade it is already showing. */}
-        {/* #402 canvas-results §2 — under the live canvas host the deck
-            retires from this page entirely, session or not: the canvas (plus
-            the pager and results states above) is the results surface. The
-            whole tree below — cards, swipe, chrome, the summary / exhausted /
-            failure / scoped-empty / idle cards — stays INTACT for flag-off
-            and for every non-canvas host, byte-identically. This gate is
-            also the other half of the audit-Q5 fix: the idle "Hit Find a
-            Trade to start" card lives in this tree and structurally cannot
-            render on the host where the fair-zero card owns that state. */}
-        {canvasResultsLive ? null : singlePinFeatured && !singlePinDeckActive ? null : (
+        {/* #402 canvas-results §2 / D-171 ruling 1 — on the flag-hosted
+            LANDING the deck retires entirely under either results posture
+            (`landingDeckRetired`): in-canvas browse made the canvas the
+            results surface; the 2026-08-31 push posture makes the landing
+            the builder only, with results on the pushed TradeDeck instance
+            (where this very tree renders classically — its canvasHost is
+            null). The whole tree below — cards, swipe, chrome, the summary /
+            exhausted / failure / scoped-empty / idle cards — stays INTACT
+            for flag-off and for every non-canvas host, byte-identically.
+            This gate is also the other half of the audit-Q5 fix: the idle
+            "Hit Find a Trade to start" card lives in this tree and
+            structurally cannot render on the retired landing. */}
+        {landingDeckRetired ? null : singlePinFeatured && !singlePinDeckActive ? null : (
         <View
           style={styles.deckWrap}
           ref={deckWrapRef}
@@ -8471,7 +8694,7 @@ export default function TradesScreen({ navigation, route }: any) {
         {/* #298 — second mount point for the single instance built above:
             with a pinned deck leading, the Upgrade / Lateral / Downgrade
             alternates read as "more trades" underneath it. */}
-        {!canvasResultsLive && singlePinDeckActive ? assetIdeasPanel : null}
+        {!landingDeckRetired && singlePinDeckActive ? assetIdeasPanel : null}
 
         {/* #402 canvas-results §4 — the browse pass control's reason overlay.
             The deck's overlay lives inside TradeCard and only its TOP CARD

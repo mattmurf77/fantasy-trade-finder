@@ -2,7 +2,7 @@
   "expo": {
     "name": "Fleeced",
     "slug": "dtf-dynasty-trade-finder",
-    "version": "1.16.13",
+    "version": "1.16.14",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "dtf",
@@ -16,7 +16,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.fantasytradefinder.app",
-      "buildNumber": "1",
+      "buildNumber": "2",
       "usesAppleSignIn": true,
       "associatedDomains": [
         "applinks:fantasy-trade-finder.onrender.com"

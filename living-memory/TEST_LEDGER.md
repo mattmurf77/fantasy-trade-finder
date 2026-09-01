@@ -11,6 +11,17 @@
 
 ---
 
+## 2026-08-31b — D-171 finder results push: built, gates green, v1.16.14
+
+Branch `claude/finder-results-push`, cut from `main` @ `2ceff988`. Full gates, no waivers ([scope](../docs/plans/finder-results-push/scope.md) — the five 2026-08-31 operator rulings; ruling 5b shipped it LIT over the dark-flag recommendation).
+
+- **Flags (G-062 four-file flip + FLAG_KEYS + baked defaults):** `calc.results_push` NEW true everywhere; `calc.canvas_results` true → false everywhere. `pytest backend/tests` **4483 passed, 1 skipped** (the fixture-mirror chain — release wholesale + the two one-key diffs — validates the flip; no backend behavior changed).
+- **Mobile:** `npx tsc --noEmit` exit 0 · `testid-lint OK` (no testIDs added — the pushed deck reuses the classic deck's) · **all `mobile/tests/check-*.js` suites green** including the re-pinned `check-canvas-results.js` (dark pins + `landingDeckRetired` gates), `check-inline-home.js` (push-fork re-key, receipt re-pins), `check-calc-merged-behavior.js` (§10b2 plain-pop arm).
+- **New guard `check-results-push.js`** (`npm run test:results-push`, ~45 assertions): push payload carries the D-153 verdict/anchor/scope/origin/label; landing mounts no browse session and dispatches nothing; pushed instance mounts no canvas and adds no dispatch site (mutate census 1 raw / 9 routed unchanged); edit-in-calculator pops with the canvasPrefill bridge, Back-to-calculator pops plain; popTo never navigate (G-056); kill-switch fallback intact; flag registration + baked default; no new analytics. **Sabotage-proven 5/5** (each red, restore green): S1 canvas remounts on the pushed instance → §4; S2 popTo→navigate → §5a/5b; S3 Back-to-calculator carries the canvas-clearing empty prefill → §5e; S4 payload drops `fairAnchor` → §3d; S5 flag flipped dark → §1.
+- **Code-walk proof:** scope §6 (push hand-off, both fork paths, the one-refire consumption ordering, POP_TO params cite from routers 7.5.3 source).
+- **Version:** 1.16.14 build 2 in `mobile/app.json` + `Info.plist` (D-057/G-012 pair-bump; `test_app_version_consistency` in the green suite above).
+- **Owed:** the operator's 8-step TestFlight checklist (scope §7) on the v1.16.14 build — step 5's second-account "They're interested" mirror is the C1 close's runtime proof; step 8 is the kill-switch drill.
+
 ## 2026-08-31 — D-170 ✓ queue validation removed + calcq_ mirror bypass (express)
 
 express: ✓ queue validation removed + calcq_ mirror bypass — gates skipped by operator (2026-08-31). Server-side only; no mobile build. Gates actually run: `pytest backend/tests` **4483 passed, 1 skipped** (baseline 4478 — net +5 from the re-pinned `test_calc_trade_queue.py`, now 38 tests: well-formed ⇒ `queued: true`; the old `fails_fairness_floor` package queues AND surfaces; `calcq_` likes bypass the injector's D-096 ladder and preference-list skips while a non-`calcq_` like of the identical package is still gated; roster actionability kept at mirror time; `not_league_member` is the one surviving refusal) · `npx tsc --noEmit` exit 0 · `testid-lint OK` · `node mobile/tests/check-calc-merged-behavior.js` all assertions passed (client untouched, as expected).
