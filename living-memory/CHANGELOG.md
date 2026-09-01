@@ -14,6 +14,23 @@
 
 
 
+## 2026-08-31b — D-171: Find a Trade pushes the classic deck; the landing is the builder only (v1.16.14)
+
+Five verbatim operator rulings ([D-171](DECISIONS.md), scope
+[docs/plans/finder-results-push/scope.md](../docs/plans/finder-results-push/scope.md)):
+the merged landing keeps the builder canvas but stops showing results — Find a Trade
+**pushes a full-screen classic `TradeDeck` page** carrying the D-153 fork (`resultsPush`
+param: verdict/anchor/scope/origin/label; empty ⇒ model job, give side ⇒ fair sweep), the
+anchor receipt tops the pushed deck (Change pops back; Clear = search all), "Edit in
+calculator" **pops** to the landing pre-filled (canvasPrefill bridge, popTo per G-056),
+✓/✕/end-of-deck are the classic deck's, and it ships **LIT** (`calc.results_push` true —
+ruling 5b explicitly overrode the dark-flag recommendation; `calc.canvas_results` → false,
+browse code dormant; kill switch = the pair). Closes gap C1/C4/C10 + the NEXT P0 by design:
+`TradeCard` is the results surface again, so the likes-you pill / `trade_card_viewed` /
+tally just render. New guard `check-results-push.js` (sabotage ×5 red); three guards
+re-pinned with dated notes. Suite: pytest green, tsc green, all check-*.js green,
+testid-lint OK. v1.16.14 build 2 → EAS/TestFlight.
+
 ## 2026-08-31 — D-170: the ✓ always records the like; finder-merge gap analysis shipped
 
 The #409 fix un-dammed the ✓'s gate chain, and the next gate promptly fired on real users:

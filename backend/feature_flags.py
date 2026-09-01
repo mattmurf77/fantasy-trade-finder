@@ -306,6 +306,15 @@ FLAG_KEYS: tuple[str, ...] = (
     # prerequisite. Registered here so the flag ships through
     # /api/feature-flags like every other key.
     "calc.canvas_results",
+    # Finder results push (2026-08-31 operator rulings, docs/plans/
+    # finder-results-push/scope.md, D-171) — Find a Trade on the merged
+    # landing pushes a full-screen classic deck page; the landing stays the
+    # builder. CLIENT-ONLY: no route reads this key; the routes the pushed
+    # deck calls (POST /api/trades/generate via the model job, POST
+    # /api/trades/fair-packages, the swipe/queue writes) are gated exactly
+    # as before. Registered here so the flag ships through
+    # /api/feature-flags like every other key. Ships LIT (ruling 5).
+    "calc.results_push",
     # Trades-landing (2026-08-28 operator ruling, docs/feedback/items/
     # 402-more-offers-shop/trades-landing-ruling.md) — the app opens on the
     # Trades tab for ALL users; the onboarding.trades_first special case is

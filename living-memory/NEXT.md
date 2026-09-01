@@ -42,6 +42,8 @@
 
 ## 2026-08-31 — Finder gap analysis: P0 likes-you tag on the merged landing, then the P1 batch
 
+**P0 RESOLVED-BY-DESIGN 2026-08-31 ([D-171](DECISIONS.md), v1.16.14):** the operator's finder-results-push rulings made `TradeCard` the results surface again (Find a Trade pushes the classic deck; `calc.canvas_results` off), so the "They're interested" pill, top-pinning, `trade_card_viewed` (P1 item 3 / C4) and the end-of-deck tally render on the main flow with no re-homing work — C1/C4/C10 close together. The remaining P1 items (undo on Clear, canvas swap suggestions) stand.
+
 **Why now:** [D-170](DECISIONS.md) removed the ✓'s validation gate so every like records and `calcq_` likes bypass the fairness/preference gates at injection — but the ruling ("any liked trade should surface with a tag") is only complete if the tag actually renders. **P0 — verify/fix:** with `calc.canvas_results` live the merged landing renders results in the canvas (`InLeagueCalculator`), not `TradeCard` — and the "They're interested" pill + likes-you top-pinning live in `TradeCard`. Trace `_inject_likes_you_cards_impl` output through the browse presentation; if the tag is dropped, add the liked-by-owner treatment to the browse tile. **Then the P1 batch** from [docs/reviews/2026-08-31-find-a-trade-gap-analysis.md](../docs/reviews/2026-08-31-find-a-trade-gap-analysis.md): undo on the merged Clear (destructive today, audit D7 pattern), per-asset swap suggestions on canvas rows, and a `trade_card_viewed` equivalent for browse tiles (the session-definition event never fires on the merged landing). P2/P3 rows stay in the doc, not here.
 
 ## 2026-08-30b — Second feedback batch (#409/#410/#411/#412): checklist + the G-063 sweep

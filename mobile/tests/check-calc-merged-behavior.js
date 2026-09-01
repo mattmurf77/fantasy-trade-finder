@@ -177,7 +177,15 @@ assert(/pinCount === 1\s*\?\s*`Search without \$\{[^`]*\}`\s*:\s*'Search without
 {
   const at = trades.indexOf('function handleBackToCalculator()');
   assert(at >= 0, '10b. handleBackToCalculator is the single back-to-calc handler');
-  const seg = trades.slice(at, at + 1400);
+  // Window widened 1400 → 2100 on 2026-08-31 (D-171 ruling 4): the handler
+  // grew a pushed-deck arm FIRST — a plain popToLanding(), because the
+  // landing's canvas still holds the build and a fair deck has no pins to
+  // rebuild a prefill from. The two shipped arms below it are unchanged and
+  // stay pinned by 10c-10e; the pop arm itself is check-results-push §5's.
+  const seg = trades.slice(at, at + 2100);
+  assert(/if \(isResultsPushed\) \{\s*popToLanding\(\);\s*return;\s*\}/.test(seg),
+    '10b2. the pushed-deck arm pops WITHOUT a prefill (D-171 ruling 4)',
+    'a pin-derived prefill from a pushed fair deck is empty — it would CLEAR the landing canvas');
   assert(/navigate\?\.\('TradeCalculator',\s*\{\s*prefill:/.test(seg),
     '10c. it navigates with a `prefill` object',
     'a bare navigate resets the calculator to Real values with an empty canvas');

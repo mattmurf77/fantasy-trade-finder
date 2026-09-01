@@ -96,11 +96,20 @@ const LAUNCHED_FLAG_DEFAULTS: FlagMap = {
   // next successful revalidate.
   'nav.trades_landing': true,
   // `calc.canvas_results`: found ideas browse inside the merged canvas.
-  // Launched true; absent here a first boot would render the deck-below-
-  // canvas layout for one session (or one frame, on a stale cache) and then
-  // flip — the #115 paint-flip this list exists to prevent. Same kill-
-  // switch contract as every launched key above.
-  'calc.canvas_results': true,
+  // 2026-08-31 operator ruling 1 (D-171): OFF — the landing is the builder
+  // only and results moved to the pushed deck (`calc.results_push` below).
+  // Baked FALSE so a fresh install / stale cache never paints one browse
+  // session before the fetched map lands; the code stays for the server-
+  // side restore pair (results_push false + this true).
+  'calc.canvas_results': false,
+  // `calc.results_push`: Find a Trade on the merged landing pushes the
+  // full-screen classic results deck (2026-08-31 rulings 1-5, D-171 —
+  // launched LIT by explicit operator call). Absent here a first boot
+  // would run the search in place for one session (with canvas_results
+  // false that is the retired deck-below-canvas layout) and then flip —
+  // the #115 paint-flip this list exists to prevent. A server `false`
+  // still kill-switches on the next successful revalidate.
+  'calc.results_push': true,
 };
 
 export const useFeatureFlags = create<FlagState>((set, get) => ({

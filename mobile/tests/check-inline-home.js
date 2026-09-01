@@ -85,8 +85,16 @@ console.log('check-inline-home:');
   assert(/const canvasHost: 'flag' \| 'experiment' \| null =/.test(trades),
     '2a. the host is resolved once, into a named three-state value');
   const at = trades.indexOf("const canvasHost: 'flag' | 'experiment' | null =");
-  const seg = trades.slice(at, at + 500);
-  // Precedence: the FLAG arm is first, so a unit holding both the flag and the
+  // Window widened 500 → 900 on 2026-08-31: D-171 prepended the pushed-deck
+  // suppression arm (and its comment) ahead of the two shipped arms.
+  const seg = trades.slice(at, at + 900);
+  // D-171 ruling 2 — the pushed results deck mounts NO canvas: param
+  // presence nulls the host ahead of both arms, so the classic deck renders
+  // on the pushed instance even mid-flag-flip.
+  assert(/isResultsPushed\s*\n?\s*\? null/.test(seg),
+    '2b0. the pushed-deck arm nulls the host first (D-171 ruling 2)',
+    'without it the pushed guided instance would mount a second canvas');
+  // Precedence: the FLAG arm is next, so a unit holding both the flag and the
   // #270 assignment renders the layout, not the experiment.
   assert(/inlineHomeOn && finderMode === 'guided' && leagueId\s*\n?\s*\? 'flag'/.test(seg),
     '2b. the flag path wins when both would render',
@@ -200,10 +208,18 @@ console.log('check-inline-home:');
 {
   const at = trades.indexOf('function handleInlineFindATrade(');
   assert(at > -1, '7. the inline Find a Trade handler exists');
-  const seg = trades.slice(at, at + 1600);
-  assert(!/navigation/.test(seg),
-    '7a. it does not navigate',
-    'the canvas and the deck are on ONE screen now — a push is the retired flow');
+  // Window widened 1600 → 2800 on 2026-08-31: D-171 inserted the push fork
+  // (and its comment) ahead of the in-place arm.
+  const seg = trades.slice(at, at + 2800);
+  // RE-KEYED 2026-08-31 (D-171 rulings 1+2): the handler now FORKS — under
+  // the push posture it navigates (navigation.push('TradeDeck', …) carrying
+  // the D-153 verdict as the resultsPush param) and consumes nothing in
+  // place; the in-place arm below the fork survives verbatim as the kill
+  // switch (check-results-push.js pins the push payload's shape). The old
+  // 7a ("it does not navigate") was overturned by ruling 1.
+  assert(/if \(resultsPushLive\) \{[\s\S]{0,900}?navigation\?\.push\?\.\('TradeDeck', \{[\s\S]{0,200}?resultsPush: \{/.test(seg),
+    '7a. the push posture forks FIRST: push TradeDeck with the resultsPush payload (D-171)',
+    'without the early return the landing would push AND consume the same search');
   assert(!/setHandoff\(/.test(seg),
     '7b. it writes no FinderHandoff',
     'the store lane, the consume-once dance and the G-056 popTo trap all retire here');
@@ -241,9 +257,13 @@ console.log('check-inline-home:');
   assert(/testID="trades\.anchor-receipt\.change"/.test(trades)
     && /testID="trades\.anchor-receipt\.clear"/.test(trades),
     '8a. …with both actions');
-  assert(/const inlineAnchorShown = canvasHost === 'flag' && fairDeck && !!inlineAnchor;/
+  // RE-PINNED 2026-08-31 (D-171 ruling 2): the receipt also tops the PUSHED
+  // deck — the anchor rode the push param into that instance's fair sweep —
+  // so the pushed arm joins the flag-host arm. `fairDeck` still guarantees
+  // a label cannot outlive its deck on either surface.
+  assert(/const inlineAnchorShown =\s*\n?\s*\(canvasHost === 'flag' \|\| isResultsPushed\) && fairDeck && !!inlineAnchor;/
     .test(trades),
-    '8b. it renders only for a flag-path, anchored deck',
+    '8b. it renders only for an anchored deck on the flag host OR the pushed deck (D-171)',
     'gated on `fairDeck`, which every path that starts or invalidates a model '
     + 'search already clears — so the label cannot outlive its deck');
   {
@@ -259,14 +279,16 @@ console.log('check-inline-home:');
       'a second "drop the anchor" implementation is a second set of semantics — '
       + 'and a session Clear that still model-searches ignores ruling 1');
   }
-  // RE-KEYED by #402 canvas-results: while a session is live the canvas holds
-  // the browsed IDEA, so Change forks to handleBrowseAnchorChange (end the
-  // session, hand the ANCHOR build back to the canvas); the flag-off arm
-  // keeps the shipped scroll-to-canvas behavior byte-identically.
-  assert(/onPress=\{canvasResultsLive \? handleBrowseAnchorChange : handleAnchorChange\}/.test(trades)
+  // RE-KEYED by #402 canvas-results, and again 2026-08-31 (D-171 ruling 2):
+  // Change is a three-way fork now — a live browse session restores the
+  // anchor build (handleBrowseAnchorChange); the PUSHED deck pops back to
+  // the landing whose canvas still holds it (handlePushedAnchorChange →
+  // popToLanding, per G-056 never navigate); everywhere else the shipped
+  // scroll-to-canvas, byte-identically.
+  assert(/onPress=\{\s*canvasResultsLive\s*\?\s*handleBrowseAnchorChange\s*:\s*isResultsPushed\s*\?\s*handlePushedAnchorChange\s*:\s*handleAnchorChange\s*\}/.test(trades)
     && /mainScrollRef\.current\?\.scrollTo\(\{ y: canvasY\.current, animated: true \}\)/
       .test(trades),
-    '8d. Change: browse sessions restore the anchor build; otherwise the shipped scroll to the canvas that still holds the assets');
+    '8d. Change: browse restore / pushed-deck pop / shipped scroll — and the scroll survives for the landing');
   // The receipt REPLACES the end-of-deck exit for an inline-anchored deck —
   // the same action twice on one screen is what this stands aside for.
   assert(/calcMergedOn && fairDeck && !inlineAnchorShown \?/.test(trades),
