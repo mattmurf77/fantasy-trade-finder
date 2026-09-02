@@ -11,6 +11,37 @@
 
 ---
 
+## 2026-09-02c — post-deploy verification on the LIVE site (PR #263 → `main` `1eb520bd`)
+
+Squash-merged after all four checks went green on `f632023b`
+(backend-tests · web-structure · maestro-testid-lint · mobile-typecheck, all **success**).
+Render auto-deployed; new content served ~90 s after merge. Everything below was measured
+against **production**, not a local server.
+
+| Check | Method | Result |
+|---|---|---|
+| Deploy landed | poll `/js/events.js` for `X-Source` | present after ~90 s |
+| P2-3 renders | `getBoundingClientRect` at 1280x900 | `.lp-step-d` **620px** x4; points grid **`442px 442px`**; **no horizontal overflow** |
+| Structure | DOM query | 1 `<h1>`, both `<h2>`s, 4 steps, 4 points |
+| Console | `read_console_messages` | **clean, 0 errors** |
+| Analytics live | `/api/feature-flags` | `analytics.client_events` **true** in prod |
+| Events accepted | network + `/api/admin/analytics/health` | `POST /api/events` **200**; **2 accepted / 0 rejected / 0 dropped** since deploy |
+| W3 (operator): admin shell blocked | `curl` | `/admin/analytics.html` **404**, `/style-guide.html` **404** |
+| Real pages unaffected | `curl` | `/` `/contact.html` `/robots.txt` `/sitemap.xml` all **200** |
+| HTML 404 handler | `curl /nope-does-not-exist` | **404** |
+| Sitemap no longer advertises a 401 | `git show origin/main:web/sitemap.xml` | **0** `<loc>` entries for `league-rankings`; mentioned only in the explanatory comment |
+
+**Honest limit on the `source` claim.** The end-to-end `source='mobile'` → `source='web'`
+proof was done **locally** against the dev DB (2026-09-02 entry). On prod, what is verified is
+narrower and should be quoted as such: the deployed `events.js` contains the header, the flag
+is on, events are accepted with zero rejects. The prod `user_events.source` column was **not**
+read back — the admin analytics surface exposes health counters and named reports, not a raw
+row dump. First per-client report after this deploy is the confirming read.
+
+**Side effect worth naming:** this verification wrote two real `app_opened` rows to production
+analytics (two page loads from the verifying session). They are indistinguishable from visitor
+traffic and are part of the seam noted in NEXT.md.
+
 ## 2026-09-02b — P2-3 landing below-the-fold: built link-free, verified at two breakpoints
 
 Operator ruling same day: "build it link-free now". `web/index.html` + `web/css/styles.css`

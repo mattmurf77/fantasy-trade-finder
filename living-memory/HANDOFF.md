@@ -8,80 +8,75 @@
 
 ---
 
-## 2026-09-02 — web-parity branch is resynced, runtime-verified, and still waiting on the same merge decision
+## 2026-09-02 — web parity SHIPPED (PR #263, live on Render); what is left is two operator inputs, not code
 
-**Where:** branch `claude/website-updates-continue-c7942b` in worktree
-`.claude/worktrees/trade-model-review-101bf7`, at `e672d7f4`. **Not pushed, not merged, not
-deployed.** Working tree clean. `mobile/node_modules` is deliberately NOT installed here
-([G-022](GOTCHAS.md)).
+**Where:** `main` @ `1eb520bd` (squash of PR
+[#263](https://github.com/mattmurf77/fantasy-trade-finder/pull/263)). Live on Render.
+Working tree clean. `mobile/node_modules` deliberately not installed here ([G-022](GOTCHAS.md)).
 
-**What this session did.** It did not build a feature. It took the web work that had been
-parked since 2026-08-26 and made the merge decision actually answerable again:
+**What shipped.** Web parity **phases 0-2**, parked and unmerged since 2026-08-26 while `main`
+moved 48 commits, plus **P2-3** built this session. Posture is settled: **B, Companion**
+([D-173](DECISIONS.md)) — Phase 3 stops at 3a.
 
-1. **Resync** — merged `fix/web-phase0` onto `main` @ `c65a7998` (48 commits of drift), merge
-   `ba91ca96`. Only the three append-at-top ledger files conflicted. No code conflicted:
-   `main` has not touched `web/js/app.js` or `web/css/` since the last sync.
-2. **ID de-collision, fourth time** — `D-163` → **D-173**, `G-062` → **[G-067](GOTCHAS.md)**.
-   Moved one cross-reference at a time; `HANDOFF.md:854`'s `G-062` is main's flag-fixture
-   gotcha and correctly stayed put.
-3. **The first runtime check this branch has ever had** — served the merged tree and loaded
-   it. Landing renders clean, zero console errors, `GET /api/feature-flags` 200,
-   `POST /api/events` 200, and the Phase 0 fix is confirmed real: an `app_opened` row with
-   `launch_type:"web"` actually lands in `user_events`.
-4. **Which is how the defect surfaced** — that row read `source:"mobile"`. See
-   **[G-068](GOTCHAS.md)**: a missing header lands the ingest DEFAULT, not NULL, and the
-   default is named after another client. Fixed in `e672d7f4`, pinned by two
-   negative-controlled CI checks. Web gate 173 → 175.
+**Two defects caught by verifying rather than reading**, both invisible to CI (the web gate
+parses source and never loads a page) and to a code read:
 
-**Gates on the merged tree:** pytest **4519 passed, 1 skipped** · web structure **175/175** ·
-testid-lint **OK**. `tsc` not run locally and not owed — zero `.ts/.tsx` files change on this
-branch; CI runs it regardless.
+1. **[G-068](GOTCHAS.md) — web analytics were about to ship mislabeled.** `web/js/events.js`
+   set `platform:"web"` in the body but sent no `X-Source` header, and
+   `analytics_ingest.py:376` defaults `source` to `"mobile"`. Not a NULL — a *lie*, in a
+   column next to a correct one. Proven by measurement: `source='mobile'` → `source='web'`.
+   Pinned by two negative-controlled CI checks (web gate 173 → 175).
+2. **The sitemap advertised a 401 to Google.** `league-rankings.html` is dark
+   (`league.power_rankings` false) but was the one dark page listed with no `Disallow`;
+   `player.html`/`profile.html` were already handled. Delisted + disallowed, with
+   restore-when-lit notes on both.
+
+**Live verification after deploy** (~90 s): P2-3 renders (`.lp-step-d` 620px, points
+`442px 442px`, no horizontal overflow at 1280), deployed `events.js` carries `X-Source`,
+`analytics.client_events` is `true` in prod, `POST /api/events` 200, ingest health **2
+accepted / 0 rejected / 0 dropped**. Operator's W3 call live: `/admin/analytics.html` and
+`/style-guide.html` 404 in prod; `/contact.html`, `/robots.txt`, `/sitemap.xml` 200; bogus
+path gets the HTML 404.
+
+**Gates:** pytest **4519 passed, 1 skipped** · web structure **175/175** · testid-lint **OK**
+· tsc green in CI (zero `.ts/.tsx` files changed). Detail in [TEST_LEDGER](TEST_LEDGER.md)
+2026-09-02 and 2026-09-02b.
 
 ### What is next, in order
 
-1. **The merge decision is STILL the operator's, and is now the only thing blocking.**
-   Everything mechanical is done and green. 36 files of web change plus a prod-behavior
-   change (the admin shell 404s in prod), and merging auto-deploys to Render.
-2. **P2-3, the landing page — the last Phase 2 item, and it is blocked on two operator
-   inputs, not on engineering.** The landing is still one viewport with no feature section
-   and no mention of the app (confirmed live this session: `scrollHeight` 749 against a 720
-   viewport, and the page contains no app/TestFlight string at all). Blocked on: **(a) the
-   positioning copy**, which the operator reserved; **(b) a CTA destination — there is no
-   TestFlight or App Store link anywhere in the repo.** `docs/feedback/items/239-invite-universal-links/status.md:79`
-   says so outright: "landing pitches the product but has no `apps.apple.com` link to
-   preserve." Do not invent one. **(c)** a screenshot strip would need assets `web/` does not
-   have; `screens/` is frozen at 2026-08-11, three weeks behind the shipping build, so those
-   captures would misrepresent the product.
-3. **D2 and D3 still open**, gating Phase 3, not this merge. D3 (bundle + minify) is the
+1. **P2-3's missing half is BLOCKED ON YOU, not on engineering.** The landing now has a
+   feature section but still **no app CTA**, because **there is no TestFlight or App Store
+   link anywhere in this repo** to point one at (`docs/feedback/items/239-invite-universal-links/status.md:79`
+   says so outright). Waiver **W6** in [scope.md](../docs/plans/web-parity/scope.md) §6; the
+   CTA's home in `web/index.html` is marked with a comment. Supplying the URL is the whole task.
+2. **No screenshots either (W7)** — `web/` has no image assets and `screens/` is frozen at
+   2026-08-11, weeks behind the shipping build, so those captures would misrepresent the
+   product. D-056 left screen capture without a producer; that gap is now visible on the
+   marketing surface.
+3. **Positioning copy is the operator's to rewrite in place.** What shipped is honest and
+   specific, not final.
+4. **D2 / D3 still open**, gating Phase 3 (which stops at 3a). D3 (bundle + minify) is the
    biggest lever left: 266 KB unminified `app.js` + 133 KB CSS at `no-cache`.
-4. **After deploy, an operator pass on the live site.** Now less critical than it was — this
-   session established that the site boots and instruments correctly against current `main`.
+5. **Phase 4** (Search-Console content-gap loop + site-wide app promotion) is specced and
+   unstarted. P4-1 needs a verified GSC property for the prod domain — if one does not exist,
+   creating it is a same-day task and the data only starts accruing from then.
 
 ### Watch out for
 
-- **`main` carries three pre-existing duplicate-ID defects**, none introduced here and none
-  fixed here: duplicate `## D-039`, `## D-069`, `## D-070` headings in `DECISIONS.md`, and a
-  duplicate **`G-062`** (two different gotchas share the ID, in both the index and the body).
-  A `grep`-the-max ID allocation will mis-count while these stand.
-- **The `DECISIONS.md` index is stale** — 76 of ~139 entries, stopping after D-096. Unclaimed.
-- **The CI web gate never loads a page.** It parses source. G-068 was invisible to it and to
-  a code read; only a real request caught it. Budget a runtime pass for web changes.
+- **Analytics seam, say it before anyone reads a chart:** web `app_opened` volume goes from
+  zero to non-zero as of this deploy, and web rows before it (had there been any) would read
+  `source:"mobile"`. Do not trend per-client splits across 2026-09-02.
+- **`main` carries three pre-existing duplicate-ID defects**, none introduced or fixed here:
+  duplicate `## D-039`, `## D-069`, `## D-070` and a duplicate `G-062` (two different gotchas,
+  same ID, index and body). A grep-the-max ID allocation mis-counts while they stand — and
+  this branch's IDs were claimed out from under it **four** times.
+- **`fix/web-phase0` is ledgered but NOT deleted** —
+  [docs/recovery/2026-09-02-web-parity-ship.md](../docs/recovery/2026-09-02-web-parity-ship.md)
+  carries the tip sha `40390013` and the content-verification command. It is the only place
+  phases 0-2 exist as discrete reviewable commits; the squash flattened them.
+- **The CI web gate never loads a page.** Budget a runtime pass for any web change.
 
 ---
-## 2026-09-02 — D-172 `consensus_fit_weight` LIVE at 0.5; research write-back landed; two prototype worktrees ledgered
-
-**Where:** `main` @ `c65a7998` (PR #261). Knob live via admin PUT at `2026-09-02T18:04:26Z`. Nothing in flight on the engine.
-
-**What it is:** roster fit in the consensus generator's sort key — the 84.5% path where the partner's consensus gain was the exact negative of the user's and fit was absent from the sort. Full story: [D-172](DECISIONS.md), `docs/plans/consensus-fit-sort-key/`.
-
-**Owed, in order:**
-1. **Prod verification (results.md § After the flip):** split `basis == "consensus"` impression counts before/after `2026-09-02T18:04:26Z` (deck-size guardrail — the sweetener `seen` interaction is the one mechanism that can move it); for a viewer with `position_needs == []` and an unboarded partner thin where the viewer is deep, confirm that partner's cards now lead from the partner's deepest position. Rollback if anything looks wrong: `PUT /api/admin/config/consensus_fit_weight` `{"value": 0}` — no deploy.
-2. **Do not read the 2026-09-01→09-07 bake-off window** — censored by the Wednesday flip (D-099). Fix G-066 (arm C hardcodes `basis="divergence"`) before trusting any basis-split readout of arm D — that readout is the next decision input (does letting the partner win on value move match rate?).
-3. **Divergence-path sibling:** pool-fit term at N≤2 alongside a fix to the junk-stuffing surplus inflation (the clean 1-for-1 ranks 53,242nd behind stuffed siblings). Prototype exists: worktree `agent-a9c4c705ebb53fc71` @ `60aa4572`, ledgered in `docs/recovery/2026-09-02-consensus-fit-ship.md` — NOT merged, knob `v3_pool_fit_extra`.
-4. **Sweetener fix** (#414): lower `sweetener_gap_threshold` only WITH a best-effort fallback in `close_value_gap` (all-or-nothing today — a card partially closed to 1,535 at 1,539 ships unsweetened at 1,825 once the line is 750) and a one-line relative band. Measured, not built.
-5. The rest of the open backlog research is in the session brief *Where Trades Die* (local HTML; artifact publish was blocked by the permission classifier) and Q-035/Q-036.
-
-**Blocking / needs operator:** none for D-172. The two questions that gate the next engine work are Q-035 (whose valuation #350 means) and Q-036 (#414's direction).
 
 ## 2026-08-30b — second feedback batch (#409/#410/#411/#412) built + dual-QA green, shipping as v1.16.13
 
@@ -378,7 +373,7 @@ move, and the avatar lab's anchor test models the brief's described layout, not 
 **none**, so the bubble reads "The Analyst" above a ram, which is D-155's recorded default). Higgsfield credits ~4.35.
 
 ## Table of Contents
-- [2026-09-02 — web-parity branch is resynced, runtime-verified, and still waiting on the same merge decision](#2026-09-02--web-parity-branch-is-resynced-runtime-verified-and-still-waiting-on-the-same-merge-decision)
+- [2026-09-02 — web parity SHIPPED (PR #263, live on Render); what is left is two operator inputs, not code](#2026-09-02--web-parity-shipped-pr-263-live-on-render-what-is-left-is-two-operator-inputs-not-code)
 - [2026-09-02 — D-172 `consensus_fit_weight` LIVE at 0.5; research write-back landed; two prototype worktrees ledgered](#2026-09-02--d-172-consensusfitweight-live-at-05-research-write-back-landed-two-prototype-worktrees-ledgered)
 - [2026-08-27 — #384 partner shape-summary regression SHIPPED to main; owed = one TestFlight checklist on the next build](#2026-08-27--384-partner-shape-summary-regression-shipped-to-main-owed--one-testflight-checklist-on-the-next-build)
 - [2026-08-26 — `fix/web-phase0` is caught up, gated green, and waiting on a merge decision](#2026-08-26--fixweb-phase0-is-caught-up-gated-green-and-waiting-on-a-merge-decision)

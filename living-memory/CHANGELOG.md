@@ -36,7 +36,7 @@ columns. Fixed (`e672d7f4`), pinned by two negative-controlled CI checks (web ga
 `check_web_structure.py` **175/175** · testid-lint **OK**. `tsc` not run locally and not
 owed — the branch touches zero `.ts/.tsx` files; CI runs it anyway.
 
-**Still NOT pushed, NOT merged, NOT deployed.** The merge remains the operator's call.
+**SHIPPED.** Operator ruled merge (2026-09-02). PR [#263](https://github.com/mattmurf77/fantasy-trade-finder/pull/263) squash-merged to `main` @ `1eb520bd`, all four CI checks green; Render auto-deployed ~90 s later. **Verified live**, not assumed: the P2-3 section renders (`.lp-step-d` 620px, points `442px 442px`, no horizontal overflow at 1280), the deployed `events.js` carries `X-Source`, `analytics.client_events` is `true` in prod, `POST /api/events` returns 200, and admin analytics health reads **2 accepted / 0 rejected / 0 dropped** since deploy. Operator's W3 call is live too: `/admin/analytics.html` and `/style-guide.html` both 404 in prod while `/contact.html`, `/robots.txt`, `/sitemap.xml` serve 200 and a bogus path gets the HTML 404. Also shipped: **P2-3** (landing below-the-fold, link-free) and the sitemap fix that stopped advertising a 401 page to crawlers.
 
 ## 2026-08-26 — `fix/web-phase0` caught up to `main`, four operator blockers closed (still NOT merged)
 
