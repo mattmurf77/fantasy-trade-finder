@@ -11,10 +11,12 @@ order moves at any knob value.
 
 Four claims, four proofs:
 
-1. **Knob 0 is byte-identical to origin/main** (`02d2eac2`, the tree this
-   branch forked from) — `_GOLDEN_WIRE_JSON` is the FULL `generate_trades`
-   deck on the engine-quality fixture, serialized by `trade_card_to_dict`
-   with the explanations flag ON (prod posture), captured on that tree.
+1. **Knob 0 is byte-identical to origin/main** — `_GOLDEN_WIRE_JSON` is the
+   FULL `generate_trades` deck on the engine-quality fixture, serialized by
+   `trade_card_to_dict` with the explanations flag ON (prod posture),
+   captured on the `02d2eac2` tree the branch forked from and re-verified
+   against `e16bb487`, the tip the branch is rebased on (the intervening
+   commits touch neither the engine nor the serializer).
 2. **The trigger** — the give-side HEADLINER (C4b `deck_give_headliner`),
    the SHRUNK board, the exact copy, and every silent case (5% below at
    0.15, user above market, picks-only give side, zero comparisons, a
@@ -38,7 +40,10 @@ Sabotage recipes (each proven red then green on 2026-09-02; clear
   * fire on ANY give-side player (`any(...)` over give_ids) instead of the
     headliner → test_second_give_player_below_market_is_silent red;
   * drop the `_FLAGS.trade_math_human_explanations` gate in
-    `trade_card_to_dict` → test_wire_flag_off_never_carries_the_reason red.
+    `trade_card_to_dict` → test_wire_flag_off_never_carries_the_reason red;
+  * drop the `team == "PICK"` clause from `is_pick_asset` (the universal
+    pool's generic picks carry a real position)
+    → test_a_generic_pick_never_headlines_and_is_never_named red.
 """
 
 import json
@@ -82,6 +87,15 @@ class _Player:
 class _Pick(_Player):
     def __init__(self, pid, pick_value=60.0):
         super().__init__(pid, position="PICK", team="PICK", age=0)
+        self.pick_value = pick_value
+
+
+class _GenericPick(_Player):
+    """The universal pool's generic-pick shape: a REAL position (it mixes
+    into the trio tabs) with `team == "PICK"` — caught only by the `team`
+    clause of `is_pick_asset`."""
+    def __init__(self, pid, position="WR", pick_value=60.0):
+        super().__init__(pid, position=position, team="PICK", age=21)
         self.pick_value = pick_value
 
 
@@ -145,10 +159,14 @@ def _adams(user_value=2300.0, seed_value=3000.0, *, name="Davante Adams"):
         "adams": _Player("adams", "WR", name=name, age=32),
         "fill": _Player("fill", "RB"),
         "pk": _Pick("pk"),
+        # generic pick: real position "WR", team "PICK", priced 30% BELOW
+        # the market on the user's board — must never headline or be named
+        "gpk": _GenericPick("gpk", "WR"),
     }
-    seed = {"adams": _elo(seed_value), "fill": _elo(1000.0), "pk": _elo(2400.0)}
+    seed = {"adams": _elo(seed_value), "fill": _elo(1000.0),
+            "pk": _elo(2400.0), "gpk": _elo(5000.0)}
     shrunk = {"adams": _elo(user_value), "fill": _elo(1000.0),
-              "pk": _elo(2400.0)}
+              "pk": _elo(2400.0), "gpk": _elo(3500.0)}
     return ["adams", "fill"], seed, shrunk, players
 
 
@@ -182,6 +200,28 @@ def test_picks_only_give_side_is_silent():
     _, seed, shrunk, players = _adams()
     shrunk["pk"] = _elo(1200.0)               # the pick itself 50% below
     assert ts.below_market_reason(["pk"], seed, shrunk, players, 0.15) is None
+    # ...and the generic-pick shape (real position, team "PICK", 30% below)
+    assert ts.below_market_reason(["gpk"], seed, shrunk, players, 0.15) is None
+    assert ts.below_market_reason(["pk", "gpk"], seed, shrunk, players,
+                                  0.15) is None
+
+
+def test_a_generic_pick_never_headlines_and_is_never_named():
+    """Universal-pool generic pick: `position == "WR"`, `team == "PICK"`,
+    out-seeding every player on the give side (5000 vs 3000) and priced 30%
+    below the market on the user's board. Only the `team` clause of
+    `is_pick_asset` knows it is a pick. With Adams AT market it must stay
+    silent (the pick may not headline); with Adams below market the line
+    must name Adams, never the pick. Removing the `team` clause from
+    `is_pick_asset` turns both assertions red."""
+    give, seed, shrunk, players = _adams(3000.0, 3000.0)   # adams at market
+    assert ts.below_market_reason(["gpk", "adams"], seed, shrunk, players,
+                                  0.15) is None
+    give, seed, shrunk, players = _adams(2300.0, 3000.0)   # adams 23% below
+    line = ts.below_market_reason(["gpk", "adams", "fill"], seed, shrunk,
+                                  players, 0.15)
+    assert line == COPY.format(name="Davante Adams")
+    assert "gpk" not in line and "Player gpk" not in line
 
 
 def test_a_pick_never_headlines_a_mixed_give_side():
@@ -479,7 +519,7 @@ def test_the_wire_golden_is_not_vacuous():
 
 
 # ── golden: full generate_trades deck → trade_card_to_dict, flag ON,
-#    captured on origin/main @ 02d2eac2 ─────────────────────────────────────
+#    captured on origin/main @ 02d2eac2, re-verified against e16bb487 ──────
 
 _GOLDEN_WIRE_JSON = """\
 [
