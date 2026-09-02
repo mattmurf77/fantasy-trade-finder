@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-09-02 — Web parity: the merge decision is the only blocker; P2-3 needs two operator inputs](#2026-09-02--web-parity-the-merge-decision-is-the-only-blocker-p2-3-needs-two-operator-inputs)
 - [2026-08-31 — Finder gap analysis: P0 likes-you tag on the merged landing, then the P1 batch](#2026-08-31--finder-gap-analysis-p0-likes-you-tag-on-the-merged-landing-then-the-p1-batch)
 - [2026-08-30b — Second feedback batch (#409/#410/#411/#412): checklist + the G-063 sweep](#2026-08-30b--second-feedback-batch-409410411412-checklist--the-g-063-sweep)
 - [2026-08-30 — Feedback batch #407/#406 SHIPPED; run the two checklists, then two small follow-ups](#2026-08-30--feedback-batch-407406-shipped-run-the-two-checklists-then-two-small-follow-ups)
@@ -39,6 +40,33 @@
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## 2026-09-02 — Web parity: the merge decision is the only blocker; P2-3 needs two operator inputs
+
+**Why now:** the web work (phases 0-2, 36 files) has been built, gated and unmerged since
+2026-08-26, and it drifts further behind `main` every week — this session spent the whole
+resync cost for the second time. It is now caught up to `main` @ `c65a7998`, re-gated green
+(pytest 4519, web 175/175, testid-lint OK) and, for the first time, **runtime-verified**
+against a live server. That pass immediately paid for itself: it caught web analytics about
+to ship stamped `source:"mobile"` ([G-068](GOTCHAS.md), fixed). Nothing is pushed.
+
+1. **Operator: merge or don't.** This is the only blocker. 36 files of web change plus one
+   prod-behavior change (the admin dashboard shell 404s in prod); merging auto-deploys to
+   Render. Branch `claude/website-updates-continue-c7942b` @ `e672d7f4`.
+2. **P2-3, the landing page — blocked on the operator, not on engineering.** Confirmed live:
+   the landing is still one viewport (`scrollHeight` 749 vs a 720 viewport) with no feature
+   section and **no app mention at all**. It needs (a) positioning copy the operator reserved,
+   and (b) a CTA destination — **no TestFlight or App Store link exists anywhere in the
+   repo**, so the "convert visitors into testers" CTA has nowhere to point. Not a thing to
+   invent. A screenshot strip is also blocked: `web/` has no image assets and `screens/` is
+   frozen at 2026-08-11, three weeks behind the shipping build.
+3. **D2 / D3 remain open** and gate Phase 3 (posture B, [D-173](DECISIONS.md) — stop at 3a),
+   not this merge. D3 (bundle + minify) is the largest lever left: 266 KB unminified
+   `app.js` + 133 KB CSS at `no-cache`.
+4. **Housekeeping surfaced, unclaimed:** `main` carries three pre-existing duplicate-ID
+   defects — `## D-039`, `## D-069`, `## D-070`, and a duplicate `G-062` (two different
+   gotchas, same ID, in both index and body). Any grep-the-max ID allocation mis-counts while
+   they stand, and this branch's IDs have now been stolen out from under it four times.
 
 ## 2026-08-31 — Finder gap analysis: P0 likes-you tag on the merged landing, then the P1 batch
 

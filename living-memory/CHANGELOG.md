@@ -11,6 +11,33 @@
 
 ---
 
+## 2026-09-02 — web-parity branch resynced onto `main` (48 commits) and given its FIRST runtime check; one real analytics defect found and fixed
+
+**Resync, not new feature work.** `fix/web-phase0` was merged into
+`claude/website-updates-continue-c7942b` at `main` @ `c65a7998` (merge `ba91ca96`). Only
+the three append-at-top ledger files conflicted; **no code conflicted** — `main` has not
+touched `web/js/app.js` or `web/css/` since 2026-08-26, and `backend/server.py` auto-merged
+with both sides verified by grep on the merged file.
+
+**IDs moved for the FOURTH time.** `D-163` → **D-173** (`main` took D-163/D-164 for the
+entry-page work, then D-165…D-171; D-172 is claimed by the unmerged `claude/ledger-d172`)
+and `G-062` → **[G-067](GOTCHAS.md)** (`main` took G-062…G-066). Cross-references were moved
+one line at a time, not by blanket replace: `HANDOFF.md:854`'s `G-062` is main's flag-fixture
+gotcha and correctly stayed put. This is the same structural race the 2026-08-26 entry named.
+
+**The find: web analytics were about to ship mislabeled.** `web/js/events.js` declared
+`platform: "web"` in the body but sent no `X-Source` header. `source` is a *separate column*
+and `analytics_ingest.py:376` defaults it to `"mobile"` — so web rows would not have landed
+NULL, they would have landed a lie, contaminating per-client splits from the first deploy.
+The extension already declares `'extension'`; `test_events_api` pins web to `"web"` on both
+columns. Fixed (`e672d7f4`), pinned by two negative-controlled CI checks (web gate 173 → 175).
+
+**Gates, all re-run on the merged tree:** pytest **4519 passed, 1 skipped** ·
+`check_web_structure.py` **175/175** · testid-lint **OK**. `tsc` not run locally and not
+owed — the branch touches zero `.ts/.tsx` files; CI runs it anyway.
+
+**Still NOT pushed, NOT merged, NOT deployed.** The merge remains the operator's call.
+
 ## 2026-08-26 — `fix/web-phase0` caught up to `main`, four operator blockers closed (still NOT merged)
 
 **The branch is now mergeable.** It sat 140 commits behind `origin/main`; the merge is `b4f29220`.

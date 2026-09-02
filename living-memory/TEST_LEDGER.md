@@ -11,6 +11,50 @@
 
 ---
 
+## 2026-09-02 — web-parity branch resynced onto `main`: full gates green, plus the first RUNTIME pass web has ever had
+
+Branch `claude/website-updates-continue-c7942b` @ `e672d7f4` (merge `ba91ca96` brings
+`fix/web-phase0` onto `main` @ `c65a7998`). Full gates, **not express** — operator never
+declared it, and analytics stamping is a bright line.
+
+**Static gates, all re-run on the merged tree:**
+
+| Gate | Result |
+|---|---|
+| `pytest backend/tests -q` | **4519 passed, 1 skipped** (336 s) |
+| `python3 qa/web/check_web_structure.py` | **175/175** (was 173; +2 new) |
+| `bash mobile/scripts/testid-lint.sh` | **OK** |
+| `npx tsc --noEmit` | **not run, not owed** — the branch changes zero `.ts/.tsx` files (`git diff --name-only origin/main...HEAD` has no `mobile/` path). CI runs it anyway. `mobile/node_modules` deliberately not installed in this worktree ([G-022](GOTCHAS.md)) |
+
+**Runtime pass — the evidence that did not exist before.** `web/` has no runtime harness and
+the CI gate never loads a page, so everything below is manual and is the only proof of its
+kind on this branch. Server: `ftf-fullstack` (Flask, port 5088) on the merged tree.
+
+| Check | Method | Result |
+|---|---|---|
+| Landing boots against current-`main` backend | load `/`, read console | **clean, 0 errors**; title `Fleeced — Dynasty Trade Finder` (P1-6 rename live) |
+| Flag fetch | network log | `GET /api/feature-flags` → **200** |
+| Phase 0 fix ([G-067](GOTCHAS.md)) is real | network log + `localStorage` | `POST /api/events` → **200**, queue drains to `{"v":1,"events":[]}` |
+| `app_opened` actually persists | `SELECT … FROM user_events` | row present, `props {"launch_type":"web","seq":1}` |
+| Single `<h1>`, a11y | DOM query | **1** |
+| Landing is one viewport, no app mention (P2-3 still owed) | `scrollHeight` vs `innerHeight`; regex over `body.innerText` | **749 vs 720**; **no** testflight/app-store/download string anywhere |
+
+**The defect this found — [G-068](GOTCHAS.md).** The persisted `app_opened` row read
+`source='mobile'`. `web/js/events.js` declared `platform:"web"` in the body but sent no
+`X-Source` header, and `analytics_ingest.py:376` defaults `source` to `"mobile"`. Not a NULL
+— a wrong value that looks like data, in a column adjacent to a correct one.
+
+**Fix verified by re-measurement, not by inspection:** cleared the prior rows, reloaded on a
+fresh tab, re-queried. Before `source='mobile', platform='web'` → after **`source='web',
+platform='web'`**.
+
+**Guard negative-controlled.** `HYG-events-declare-source` was proven to fail before it was
+trusted: sabotaging the header to `X-Nope` turned the gate red (174/175, that one check
+FAIL), restoring it returned 175/175. A guard that has never been seen red is not evidence.
+
+**Not run, and why:** no EAS build, no TestFlight pass, no simulator (retired, [D-056](DECISIONS.md)).
+Nothing on this branch is mobile-visible. Nothing was pushed, merged or deployed.
+
 ## 2026-09-01 — Trade-engine quality research: prod config read, knob-only harness sweep, pool-fit prototype (read-only; nothing shipped)
 
 Context: dual-agent review of open TradesHome quality items #350/#363/#393/#401/#414 (+#370). Brief: session artifact *Where Trades Die*; findings logged as [G-064](GOTCHAS.md)–[G-066](GOTCHAS.md), [Q-035](OPEN_QUESTIONS.md)–[Q-036](OPEN_QUESTIONS.md). No engine line changed on any shipped branch; no flag flipped; no feedback status changed.

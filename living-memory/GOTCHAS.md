@@ -16,6 +16,7 @@
 | G-064 | A bake-off serving knob documented as DARK in four places reads its own inline fallback as `1.0`, so a missing DB row means SERVING — the seed, the `_DEFAULT_CFG`, the docstring and a guardrail comment all say 0.0 | Trade engine / bake-off / config defaults |
 | G-063 | `sess["league"].members` answers NO when you ask "is the CALLER in this league" — it excludes them by design. 4th bite; 3 of the 4 were hidden by a fixture that put the caller in `members` | Backend / session league / test fixtures |
 | G-062 | Flipping one flag in `config/features.json` breaks three test fixtures; the chain reveals one link at a time | Backend / feature flags / test fixtures |
+| G-068 | A missing request header does not land NULL — it lands the DEFAULT, and the default is another client's name. Web events stamped `source:"mobile"` | Analytics / ingest defaults |
 | G-067 | Web analytics emitted zero events for months: a fire-and-forget flag fetch vs a synchronous `boot()` | Web analytics / flag races |
 | G-060 | A sabotage-and-restore in the same mtime second at identical size keeps the stale `.pyc` — the test stays red after a byte-clean restore | Python / pytest / bytecode cache |
 | G-061 | The daily tick's Aug-25 `season_start` fan-out `continue`s past every winback — the three winback tests fail exactly one day a year (found live 2026-08-25) | backend / cron / pytest |
@@ -417,6 +418,42 @@ signal until the session is re-initialised (~2 Elo points on the affected pair a
 ---
 
 ## 2026-08-19
+
+### G-068 — a missing header lands the DEFAULT, not NULL, and the default is named after a different client
+
+**Symptom.** Web `app_opened` rows arrive correctly and look healthy. `platform` reads
+`"web"`. But `source` reads `"mobile"` — web traffic is filed under the mobile client, and
+nothing anywhere errors.
+
+**Why.** `source` and `platform` are two different columns fed by two different mechanisms.
+`web/js/events.js` declared `platform: "web"` **in the body**, which is right and is what the
+comment above the fetch explains. `source` comes from a **header**, and
+`backend/analytics_ingest.py:376` reads:
+
+```python
+source = (request.headers.get("X-Source") or "").strip() or "mobile"
+```
+
+That default exists because mobile is the one client that declares nothing. Every *other*
+client must opt out of it. `extension/background.js` does (`'X-Source': 'extension'`). The
+web SDK — written to mirror `mobile/src/api/events.ts` — inherited mobile's header set, and
+the one header it needed to add was the one that says "I am not mobile."
+
+**Why it hides.** The failure mode of a missing header is usually a NULL, and a NULL is loud:
+it shows up as a gap in a chart and someone asks. A *wrong* value is silent and looks like
+data. Worse, the adjacent column was correct, so any spot-check that confirmed
+`platform='web'` would have read as proof the client was instrumented properly.
+
+**What actually caught it.** Loading the page against a live server and reading the row back
+out of `user_events` — not a code read, and not the CI gate, which parses source and never
+loads a page. The backend's own test (`test_events_api.py::test_platform_from_body_when_no_device_header`)
+had asserted `source == "web"` all along; it passed because the *test* sends the header. A
+test can pin a contract and still not prove the shipped client honors it.
+
+**Rule.** For any column populated from a request header with a non-empty default, the check
+is not "is the value present" but "is the value MINE". Grep the default's other consumers
+before assuming absence is safe. Fixed 2026-09-02 (`e672d7f4`); pinned by
+`HYG-events-declare-source` in `qa/web/check_web_structure.py`.
 
 ### G-067 — a flag map that "resolves before most UI code runs" doesn't, and the events it gates vanish
 - **Symptom:** `analytics.client_events` is **true**, `events.js` loads, `window.FTFTrack` exists, `app.js` calls `FTFTrack('app_opened', …)` unconditionally in `boot()` — and yet after a full page visit `localStorage['ftf.deviceId']` is **null**, `ftf.events.queue.v1` is empty, and **no `POST /api/events` ever fires**. Nothing errors. The console is clean. Checking the flag by hand *after* load returns `true`, which makes the whole thing look impossible.

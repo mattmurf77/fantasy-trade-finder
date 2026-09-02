@@ -8,6 +8,67 @@
 
 ---
 
+## 2026-09-02 — web-parity branch is resynced, runtime-verified, and still waiting on the same merge decision
+
+**Where:** branch `claude/website-updates-continue-c7942b` in worktree
+`.claude/worktrees/trade-model-review-101bf7`, at `e672d7f4`. **Not pushed, not merged, not
+deployed.** Working tree clean. `mobile/node_modules` is deliberately NOT installed here
+([G-022](GOTCHAS.md)).
+
+**What this session did.** It did not build a feature. It took the web work that had been
+parked since 2026-08-26 and made the merge decision actually answerable again:
+
+1. **Resync** — merged `fix/web-phase0` onto `main` @ `c65a7998` (48 commits of drift), merge
+   `ba91ca96`. Only the three append-at-top ledger files conflicted. No code conflicted:
+   `main` has not touched `web/js/app.js` or `web/css/` since the last sync.
+2. **ID de-collision, fourth time** — `D-163` → **D-173**, `G-062` → **[G-067](GOTCHAS.md)**.
+   Moved one cross-reference at a time; `HANDOFF.md:854`'s `G-062` is main's flag-fixture
+   gotcha and correctly stayed put.
+3. **The first runtime check this branch has ever had** — served the merged tree and loaded
+   it. Landing renders clean, zero console errors, `GET /api/feature-flags` 200,
+   `POST /api/events` 200, and the Phase 0 fix is confirmed real: an `app_opened` row with
+   `launch_type:"web"` actually lands in `user_events`.
+4. **Which is how the defect surfaced** — that row read `source:"mobile"`. See
+   **[G-068](GOTCHAS.md)**: a missing header lands the ingest DEFAULT, not NULL, and the
+   default is named after another client. Fixed in `e672d7f4`, pinned by two
+   negative-controlled CI checks. Web gate 173 → 175.
+
+**Gates on the merged tree:** pytest **4519 passed, 1 skipped** · web structure **175/175** ·
+testid-lint **OK**. `tsc` not run locally and not owed — zero `.ts/.tsx` files change on this
+branch; CI runs it regardless.
+
+### What is next, in order
+
+1. **The merge decision is STILL the operator's, and is now the only thing blocking.**
+   Everything mechanical is done and green. 36 files of web change plus a prod-behavior
+   change (the admin shell 404s in prod), and merging auto-deploys to Render.
+2. **P2-3, the landing page — the last Phase 2 item, and it is blocked on two operator
+   inputs, not on engineering.** The landing is still one viewport with no feature section
+   and no mention of the app (confirmed live this session: `scrollHeight` 749 against a 720
+   viewport, and the page contains no app/TestFlight string at all). Blocked on: **(a) the
+   positioning copy**, which the operator reserved; **(b) a CTA destination — there is no
+   TestFlight or App Store link anywhere in the repo.** `docs/feedback/items/239-invite-universal-links/status.md:79`
+   says so outright: "landing pitches the product but has no `apps.apple.com` link to
+   preserve." Do not invent one. **(c)** a screenshot strip would need assets `web/` does not
+   have; `screens/` is frozen at 2026-08-11, three weeks behind the shipping build, so those
+   captures would misrepresent the product.
+3. **D2 and D3 still open**, gating Phase 3, not this merge. D3 (bundle + minify) is the
+   biggest lever left: 266 KB unminified `app.js` + 133 KB CSS at `no-cache`.
+4. **After deploy, an operator pass on the live site.** Now less critical than it was — this
+   session established that the site boots and instruments correctly against current `main`.
+
+### Watch out for
+
+- **`main` carries three pre-existing duplicate-ID defects**, none introduced here and none
+  fixed here: duplicate `## D-039`, `## D-069`, `## D-070` headings in `DECISIONS.md`, and a
+  duplicate **`G-062`** (two different gotchas share the ID, in both the index and the body).
+  A `grep`-the-max ID allocation will mis-count while these stand.
+- **The `DECISIONS.md` index is stale** — 76 of ~139 entries, stopping after D-096. Unclaimed.
+- **The CI web gate never loads a page.** It parses source. G-068 was invisible to it and to
+  a code read; only a real request caught it. Budget a runtime pass for web changes.
+
+---
+
 ## 2026-08-30b — second feedback batch (#409/#410/#411/#412) built + dual-QA green, shipping as v1.16.13
 
 **Where:** branch `claude/fb-410-412-trade-card-polish` off `main` @ `bd83fe94`. Commits: `11c8903c` + `14d06ba2` (#409 backend), `966df00a` (specs), `03a90652` (mobile), plus the ledger commit carrying this entry. Version 1.16.13 in all three files.
@@ -303,6 +364,7 @@ move, and the avatar lab's anchor test models the brief's described layout, not 
 **none**, so the bubble reads "The Analyst" above a ram, which is D-155's recorded default). Higgsfield credits ~4.35.
 
 ## Table of Contents
+- [2026-09-02 — web-parity branch is resynced, runtime-verified, and still waiting on the same merge decision](#2026-09-02--web-parity-branch-is-resynced-runtime-verified-and-still-waiting-on-the-same-merge-decision)
 - [2026-08-27 — #384 partner shape-summary regression SHIPPED to main; owed = one TestFlight checklist on the next build](#2026-08-27--384-partner-shape-summary-regression-shipped-to-main-owed--one-testflight-checklist-on-the-next-build)
 - [2026-08-26 — `fix/web-phase0` is caught up, gated green, and waiting on a merge decision](#2026-08-26--fixweb-phase0-is-caught-up-gated-green-and-waiting-on-a-merge-decision)
 - [2026-08-25 — v1.16.6 (132) is on TestFlight; everything owed is now RUNTIME verification, not code](#2026-08-25--v1166-132-is-on-testflight-everything-owed-is-now-runtime-verification-not-code)
