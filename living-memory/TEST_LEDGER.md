@@ -11,6 +11,37 @@
 
 ---
 
+## 2026-09-02b — P2-3 landing below-the-fold: built link-free, verified at two breakpoints
+
+Operator ruling same day: "build it link-free now". `web/index.html` + `web/css/styles.css`
+(`.lp-*`). Full gates. Web gate **175/175** unchanged (the section adds no new violation
+surface); `node --check` n/a — no JS added.
+
+**Runtime measurement, before and after.** Web has no runtime harness, so this is manual and
+is the only evidence of its kind.
+
+| Check | Before | After |
+|---|---|---|
+| Landing is one viewport | `scrollHeight` **749** vs 720 viewport | below-the-fold section present, 4 steps + 4 points |
+| App/TestFlight mention anywhere in rendered text | **none** | still none — **by design**, see W6 |
+| `<h1>` count (a11y gate) | 1 | **1** (new headings are h2/h3) |
+| Console on load | clean | **clean** |
+
+**A real defect, caught by measuring instead of eyeballing.** `.lp-step` has three children
+against a two-column grid, so auto-placement put each `<p>` in row 2 of the **34px number
+column**: measured `width 34px x height 624px` — one word per line. Fixed by pinning both text
+elements to `grid-column: 2`. Re-measured: **620px wide, 48-96px tall (2-4 lines)** across all
+four steps.
+
+| Breakpoint | Result |
+|---|---|
+| 1280x900 | `.lp-wrap` 900px in a 1250px section; points grid `442px 442px`; no horizontal overflow |
+| 375x812 | points collapse to a single `339px` column; `scrollWidth` 375 == viewport, widest right edge 357 — **no horizontal overflow** |
+
+**Not run, and why:** no EAS build, no TestFlight, no simulator ([D-056](DECISIONS.md)) —
+nothing here is mobile-visible. No screenshot strip shipped (W7): `screens/` is frozen at
+2026-08-11 and `web/` has no image assets.
+
 ## 2026-09-02 — web-parity branch resynced onto `main`: full gates green, plus the first RUNTIME pass web has ever had
 
 Branch `claude/website-updates-continue-c7942b` @ `e672d7f4` (merge `ba91ca96` brings
