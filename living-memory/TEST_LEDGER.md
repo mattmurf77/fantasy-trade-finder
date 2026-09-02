@@ -11,6 +11,24 @@
 
 ---
 
+## 2026-09-02b — D-174 below-market reason (PR #267) and D-175 sweetener band + best-effort (PR #268): shipped and flipped live
+
+Both off `main` @ `e16bb487`, full gates, waivers surfaced and accepted (no new analytics; no `check-*.js`; TestFlight replaced by server-side prod verification). Both QA'd adversarially by independent Opus reviewers; every code claim survived, all fixes were docs/tests.
+
+| Gate | D-174 (`reason_below_market_frac`) | D-175 (`sweetener_gap_frac`, `sweetener_best_effort`) |
+|---|---|---|
+| `pytest backend/tests -q` (branch / clean main) | **4542 / 1** vs 4519 / 1 (+23) | **4541 / 1** vs 4519 / 1 (+22) |
+| QA independent rerun | 4542 / 1 | 4541 / 1 |
+| Goldens at defaults | wire capture (full `generate_trades` → `trade_card_to_dict`, explanations ON) vs `git archive` main — `cmp` identical, 457,236 B | 9 `close_value_gap` fixtures + full v3 decks — `cmp` identical; QA's own 1,600-call fixture identical after stripping the probe column |
+| Invariance | deck identical on every non-`reasons` field at 0.10/0.15/0.25/0.35/1.0 (386 cards) | 4,000 fuzz cases at the triple: 413 partials, 0 lowered a fairness ratio, min gap reduction 103 |
+| Sabotages (byte-copy restore, `cmp`, `__pycache__` cleared) | builder 3 + QA 5 (headliner→centerpiece, stamp at 0, double-stamp, drop pick guard, placeholder name) all red→green; `team="PICK"` + real-position fixture added | builder 6 + QA 5 (strict-reduction guard, floor→replacement, partial branch skipping extra_ok / feasibility / fairness) all red→green |
+| Harness (prod pins incl. `consensus_fit_weight` 0.5, frozen clock, baseline byte-identical twice) | share of cards carrying the line @0.15: 5% standard, 15–22% opinionated boards | `>1539` never raised vs V0, 0 in every arm-B/D v3 cell; sweetened 6.9/0/4.8 → 10.3/11.1/19.1%; sub-450 flat on B; top-5 J 1.0 on B; arm A unmoved 280/280 cells; no cell shrank |
+| Perf | 0.999× per job | `close_value_gap` 0.017 → 0.59 ms worst case; full job +~0.1 s on the 30 s rail |
+| CI | ✓ ×4 on `308d8d90` | ✓ ×4 on `4a66858e` (post-rebase) |
+| **Prod** | deploy landed (row seeded 0.0); `PUT` **0.15** at `2026-09-02T21:30:56Z`; F-1 pre-flip read: operator's Adams n=43, shrunk 61% below market | deploy landed (both rows seeded 0.0); PUTs `sweetener_best_effort` 1 → `sweetener_gap_frac` 0.12 → `sweetener_gap_threshold` 750 at `2026-09-02T21:53:34Z` |
+
+Follow-ups logged (not fixed): consensus-generator `seen` key not discarded on sweeten (`trade_service.py:~7296/~7337`); injectors and arms C/fit never carry the reason line; `reasons` not in `features_json`.
+
 ## 2026-09-02c — post-deploy verification on the LIVE site (PR #263 → `main` `1eb520bd`)
 
 Squash-merged after all four checks went green on `f632023b`
