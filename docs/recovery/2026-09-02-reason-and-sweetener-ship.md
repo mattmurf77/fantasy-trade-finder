@@ -6,7 +6,7 @@ Deleted after squash-merges of PR [#267](https://github.com/mattmurf77/fantasy-t
 |---|---|---|---|
 | `308d8d90` | `claude/below-market-reason` | `.claude/worktrees/agent-a7bfdecc2624e09e6` | merged; branch + worktree deleted |
 | `4a66858e` | `claude/sweetener-relative-band` | `.claude/worktrees/agent-a72491b8d62c05ce8` | merged; branch + worktree deleted |
-| `<LEDGER_HEAD>` | `claude/ledger-d174-d175` | `.claude/worktrees/ledger-d174-d175` | this ledger's own docs-only branch; deleted after its merge — recoverable via `git fetch origin refs/pull/<LEDGER_PR>/head` |
+| PR-head ref | `claude/ledger-d174-d175` | `.claude/worktrees/ledger-d174-d175` | this ledger's own docs-only branch; deleted after its merge — recoverable via `git fetch origin refs/pull/269/head` |
 
 **Why deletion was safe (verified by content, not ancestry):** `git diff <MERGE_SHA> <tip> --stat` empty for each after its merge — the branch tree is byte-identical to `main`. Records live in the PR bodies and `docs/plans/{below-market-reason,sweetener-relative-band}/`.
 
