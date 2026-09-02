@@ -8,7 +8,7 @@ Deleted after squash-merges of PR [#267](https://github.com/mattmurf77/fantasy-t
 | `4a66858e` | `claude/sweetener-relative-band` | `.claude/worktrees/agent-a72491b8d62c05ce8` | merged; branch + worktree deleted |
 | PR-head ref | `claude/ledger-d174-d175` | `.claude/worktrees/ledger-d174-d175` | this ledger's own docs-only branch; deleted after its merge — recoverable via `git fetch origin refs/pull/269/head` |
 
-**Why deletion was safe (verified by content, not ancestry):** `git diff <MERGE_SHA> <tip> --stat` empty for each after its merge — the branch tree is byte-identical to `main`. Records live in the PR bodies and `docs/plans/{below-market-reason,sweetener-relative-band}/`.
+**Why deletion was safe (verified by content, not ancestry):** `git diff 808ff8c4 308d8d90 --stat` and `git diff f9add99c 4a66858e --stat` are both empty after the merges — the branch tree is byte-identical to `main`. Records live in the PR bodies and `docs/plans/{below-market-reason,sweetener-relative-band}/`.
 
 Deletion date: 2026-09-02 (reflog recovery expires ~2026-12-01).
 
