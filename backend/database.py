@@ -2449,6 +2449,7 @@ _MODEL_CONFIG_DEFAULTS = [
     ("cycle_max_results",        3.0,   "v3: max 3-team cycles returned per league"),
     ("v3_diversity_max_overlap", 0.4,   "v3: max asset Jaccard between two cards from one opponent pair"),
     ("consensus_score_scale",    0.3,   "v2: composite multiplier keeping consensus fallback cards below divergence finds"),
+    ("consensus_fit_weight",     0.0,   "2026-09-02 consensus roster-fit sort key: pools sort on seed_value * (1 + w * fit_norm), fit = marginal-value asymmetry (partner lineup minus ours) normalised to [-1,1]; reorders only, never gates; 0 = byte-identical value sort"),
     # ── #170/#171 owned draft picks in the candidate pool (flag trade.picks_in_pool) ──
     ("picks_pool_cap",           6.0,   "#170: max owned picks per team injected into the suggestion candidate pool (top-N by pool_value)"),
     # ── Backlog #1 opponent outlook inference (flag trade.outlook_infer) ──

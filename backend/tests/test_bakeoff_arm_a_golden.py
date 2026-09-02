@@ -718,6 +718,30 @@ v3_pool_size vet_age waiver_baseline_value waiver_slot_cost youth_age
     # `priced_pool_value` is never entered — so no season, no round, and
     # nothing for a market floor to clamp.
     "market_r1_yoy_floor",
+
+    # ── consensus roster-fit sort key, 2026-09-02 ──────────────────────────
+    # docs/plans/consensus-fit-sort-key/scope.md. One knob, one disposition.
+    #
+    # WHERE IT IS READ: `_generate_consensus_for_pair` → `_c` at CALL time,
+    # on the arm's own thread, INSIDE the `_cfg_override` context `model_a()`
+    # opens — so an arm pin is honoured, unlike `exploration_base_per_opp`.
+    # It re-sorts the two candidate pools, and on this path the pool sort IS
+    # the ranking (the emit loops take pool order), so it changes WHICH
+    # consensus cards exist, not just their order — generation logic.
+    #
+    # DECISION: **PINNED at 0.0 in MODEL_A_PROFILE — the identity value.**
+    # Its default is the pre-change engine, which is the D-095 shape ("a pin
+    # would change arm A rather than preserve it") — but that rule is safe
+    # only while the LIVE row keeps sitting at the pre-wave value, and this
+    # knob ships expressly to be flipped live (the recommended value is in
+    # docs/plans/consensus-fit-sort-key/results.md). Unpinned, arm A would
+    # silently start emitting fit-sorted consensus decks the pre-wave engine
+    # never built, with no golden drift. That is exactly the C4
+    # `v3_shape_max_delta` situation one screen up, and it takes the same
+    # remedy. At 0.0 the sort-key factory returns `seed_value` itself, so the
+    # pin equals the default, the pools are byte-identical, and the golden
+    # stands un-recaptured (verified green with the pin in place).
+    "consensus_fit_weight",
 }
 
 

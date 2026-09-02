@@ -1010,6 +1010,23 @@ _DEFAULT_CFG: dict[str, float] = {
     # 1 - 0.75 = 25%. Consensus path only — the divergence path has
     # `fairness_floor_divergence` and a real dual-surplus gate.
     "consensus_fairness_floor":   0.0,
+    # Consensus-path roster-fit SORT KEY (2026-09-02, docs/plans/
+    # consensus-fit-sort-key/). The consensus generator emits the first
+    # `max_cards` combos that clear its gates, in pool order — so the pool
+    # SORT is the ranking, and today that sort is pure `seed_value`. Both
+    # sides are priced by the same consensus functional, so the partner's
+    # gain is the exact negative of the user's and the only modelled reason
+    # a counterparty would accept is roster fit — which was not in the sort
+    # at all. w > 0 blends it in: each pool sorts on
+    # `seed_value * (1 + w * fit_norm)`, where fit is the marginal-value
+    # asymmetry (worth to the partner's lineup minus worth to ours, on the
+    # shared consensus prices; negated on the receive side) normalised to
+    # [-1, 1] by the pool's max |fit|. So w = 0.5 makes a perfect-fit asset
+    # sort as if 50% more valuable. Picks have no lineup slot and get fit 0.
+    # Reorders only — every gate (sign test, fairness, filler, #108) is
+    # untouched, so the user still wins on consensus on every card. 0.0 =
+    # live: the multiplier is exactly 1 and the sort is byte-identical.
+    "consensus_fit_weight":       0.0,
     # ------------------------------------------------------------------
     # Bake-off arm roster (read by bakeoff_runner.arm_roster()).
     # ------------------------------------------------------------------
@@ -4303,6 +4320,13 @@ class TradeCard:
     # the flag is off or no traded asset has a positional profile.
     # Serialized when set.
     need_fit: Optional[float] = None
+    # Consensus roster-fit sort key (`consensus_fit_weight`, 2026-09-02) —
+    # mean normalised fit of the card's traded assets, -1..1 (+ = every
+    # asset moves to the lineup where it is worth more). Stamped by
+    # `_generate_consensus_for_pair` ONLY while the knob is > 0, so the
+    # knob-0 card is byte-identical. In-process/QA record only: never
+    # serialized to clients and not yet in features_json (follow-up).
+    consensus_fit: Optional[float] = None
     # FB-147 engine hook (flag trade.block_boost) — True when this card's
     # ACQUIRE side holds a player the counterparty flagged "on the block",
     # earning the bounded post-gate composite bump. In-process/QA record only;
@@ -7078,7 +7102,46 @@ class TradeService:
             for pid in _opp_pool:
                 if pid in target_ids and pid not in recv_pool:
                     recv_pool.append(pid)
-        recv_pool.sort(key=seed_value, reverse=True)
+
+        # 2026-09-02 roster-fit SORT KEY (`consensus_fit_weight`, see the
+        # _DEFAULT_CFG block). The emit loops below take pool order as the
+        # ranking, so this is where fit enters — as a blend on the value
+        # key, never as a prune or a gate. Read via `_c` at CALL time
+        # (D-098 / G-058 cause 3; the `_cfg_override` overlay is how arm A's
+        # pin and the #189 relaxed pass reach it). No partner board exists
+        # on this path, so BOTH replacement levels come from the rosters at
+        # consensus prices. At w = 0 the factory hands back `seed_value`
+        # itself, so the sort keys are the historical ones, byte-identical.
+        _w_fit = _c("consensus_fit_weight")
+        _fit_norm: dict[str, float] = {}
+
+        def _fit_sort_key(pool: list[str], sign: float):
+            if _w_fit <= 0:
+                return seed_value
+            u_repl = replacement_levels(user_roster, seed_value, players,
+                                        scoring_format)
+            o_repl = replacement_levels(opponent.roster, seed_value, players,
+                                        scoring_format)
+            raw: dict[str, float] = {}
+            for p in pool:
+                # Picks have no lineup slot: neutral, so their order among
+                # themselves is unchanged.
+                if is_pick_asset(players.get(p)):
+                    raw[p] = 0.0
+                    continue
+                # + = worth more in the partner's lineup than in ours
+                # (give side); `sign` = -1 flips it for the receive side.
+                raw[p] = sign * (
+                    marginal_value(p, seed_value, o_repl, players,
+                                   scoring_format)
+                    - marginal_value(p, seed_value, u_repl, players,
+                                     scoring_format))
+            m = max((abs(v) for v in raw.values()), default=0.0)
+            for p, v in raw.items():
+                _fit_norm[p] = (v / m) if m > 0 else 0.0
+            return lambda p: seed_value(p) * (1.0 + _w_fit * _fit_norm[p])
+
+        recv_pool.sort(key=_fit_sort_key(recv_pool, -1.0), reverse=True)
 
         give_pool = list(user_roster)
         # Backlog #2 — untouchables are never given away, consensus path too.
@@ -7087,7 +7150,8 @@ class TradeService:
         if pinned_set:
             give_pool = [p for p in give_pool if p in pinned_set]
         # "Where possible": positions the opponent needs first, best value first.
-        give_pool.sort(key=lambda p: (_pos(p) in shed_positions, seed_value(p)),
+        _give_key = _fit_sort_key(give_pool, +1.0)
+        give_pool.sort(key=lambda p: (_pos(p) in shed_positions, _give_key(p)),
                        reverse=True)
 
         cards: list[TradeCard] = []
@@ -7259,6 +7323,13 @@ class TradeService:
             )
             if _gap_info is not None:
                 card.gap_sweetener = _gap_info
+            # Roster-fit stamp — ONLY while the knob is live, so the knob-0
+            # card is byte-identical. `.get` because a gap-sweetener
+            # equalizer is drawn from the same pools and so is always
+            # present; the default is belt-and-braces, not a code path.
+            if _w_fit > 0:
+                _fits = [_fit_norm.get(p, 0.0) for p in give_ids + recv_ids]
+                card.consensus_fit = round(sum(_fits) / len(_fits), 3)
             cards.append(card)
 
         # 1-for-1 first (most acceptable shape), then 2-for-1.
