@@ -20,6 +20,13 @@
   var BACKOFF = [30000, 120000, 600000];
 
   var queue = [];
+  // Events fired before /api/feature-flags resolves. The flag map starts as {}
+  // and is indistinguishable from "all off", so track() used to silently drop
+  // everything emitted during boot — which is every funnel-critical event,
+  // app_opened included. Buffer instead, then drain once the flag settles.
+  var pending = [];
+  var PENDING_MAX = 100, FLAG_SETTLE_MS = 5000;
+  var flagsSettled = false;
   var sessionId = uuid();
   var seq = 0;
   var lastActivity = Date.now();
@@ -88,18 +95,46 @@
   // --- public API ---
   function track(eventType, props, screen) {
     try {
+      // Hold, don't drop, until the flag map has actually loaded.
+      if (!flagsSettled) {
+        if (pending.length < PENDING_MAX) {
+          pending.push({ t: eventType, p: props, s: screen, ts: Date.now() });
+        }
+        return;
+      }
       if (!flagOn()) return;
-      var now = Date.now();
-      if (now - lastActivity > SESSION_IDLE_MS) { sessionId = uuid(); seq = 0; }
-      lastActivity = now;
-      seq += 1;
-      var e = { event_id: uuid(), event_type: eventType, client_ts: new Date(now).toISOString(),
-                session_id: sessionId, seq: seq };
-      if (screen) e.screen = screen;
-      if (props) e.props = props;
-      queue.push(e); trim(); persist();
-      if (queue.length >= FLUSH_AT) flush();
+      enqueue(eventType, props, screen, Date.now());
     } catch (err) { /* analytics must never break the app */ }
+  }
+
+  // Builds the envelope and queues it. `ts` is the ORIGINAL fire time, so a
+  // buffered event keeps its real client_ts rather than the drain time.
+  function enqueue(eventType, props, screen, ts) {
+    if (ts - lastActivity > SESSION_IDLE_MS) { sessionId = uuid(); seq = 0; }
+    lastActivity = ts;
+    seq += 1;
+    var e = { event_id: uuid(), event_type: eventType, client_ts: new Date(ts).toISOString(),
+              session_id: sessionId, seq: seq };
+    if (screen) e.screen = screen;
+    if (props) e.props = props;
+    queue.push(e); trim(); persist();
+    if (queue.length >= FLUSH_AT) flush();
+  }
+
+  // Called once, from whichever comes first: app.js signalling the flag fetch
+  // settled, or the safety timeout. Pages that never load app.js (they carry
+  // their own FTF_FLAG shim) rely on the timeout.
+  function settleFlags() {
+    if (flagsSettled) return;
+    flagsSettled = true;
+    try {
+      if (flagOn()) {
+        for (var i = 0; i < pending.length; i++) {
+          enqueue(pending[i].t, pending[i].p, pending[i].s, pending[i].ts);
+        }
+      }
+    } catch (e) { /* never break the app */ }
+    pending = [];
   }
 
   function resetBackoff() { backoffIdx = -1; nextFlushAt = 0; }
@@ -167,6 +202,12 @@
 
   window.FTFTrack = track;
   try {
+    document.addEventListener("ftf:flags-ready", settleFlags);
+    // Safety net: settle anyway if the signal never arrives (flag fetch failed,
+    // or this page doesn't load app.js).
+    setTimeout(settleFlags, FLAG_SETTLE_MS);
+    // app.js may have resolved flags before this script's listener existed.
+    if (window.FTF_FLAGS_READY === true) settleFlags();
     loadQueue();
     setInterval(flush, FLUSH_MS);
     document.addEventListener("visibilitychange", function () { if (document.visibilityState === "hidden") flushOnHide(); });

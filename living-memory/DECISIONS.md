@@ -522,6 +522,9 @@
 | D-171 | Find a Trade Pushes a Full-Screen Classic Deck; the Merged Landing Becomes the Builder Only | 2026-08-31 |
 
 | D-090 | A Current-Year Pick Reads as Its Real Slot; the 2026-07-18 "Can't Resolve a Slot" Premise Is Narrowed, Not the Decision | 2026-08-19 |
+| D-173 | Web Posture Is B, Companion: Marketing Front Door Plus Session-Gated Tools, Not Full Parity | 2026-08-26 |
+
+> **This index is stale.** It lists 76 of the 135 entries: coverage runs D-001 … D-096 (D-095 missing), then stops, and D-163 below was appended by hand. Everything D-097 … D-162 exists as a `## D-xxx` heading further down but is absent here. Treat `grep -n '^## D-' living-memory/DECISIONS.md` as the authoritative list, not this table. Backfilling it is unclaimed work.
 
 ---
 
@@ -1652,3 +1655,16 @@ No historical 1100-pin repair — indistinguishable from anchor no-value.
 **Alternatives considered:** (a) keep Apple (D-163 v1) — rejected by the operator; (b) anonymous mint-first then sheets verbatim — smaller, but identity would be device-random: sign-out/reinstall loses boards, worse than the Sleeper bar; (c) extract/refactor the link routes' import bodies into shared helpers for a one-call mint+import — more surface churn in two hot routes for one round-trip saved; (d) platform-native credential auth at entry for public leagues too — needless friction; credentials stay exactly where the link flows already require them.
 
 **Consequences:** Entry sessions are unverified → not server-persisted (client Keychain token + cheap deterministic re-claim is the recovery path); if `auth.enforce_verified_writes` ever flips on, entry users lose write grace — revisit then. Two humans claiming the same team share an identity, same as a shared Sleeper username claim. `signin_*` gains method values `espn`/`mfl` (value-only; addendum `docs/business/analytics/2026-08-26-entry-method-values.md`). `landing.platform_options` is now server-read (gates the route), remaining the one revert lever. The D-163 `platformIntent`/`mflLink` machinery survives on the quiet Apple re-entry link and the Settings CTA.
+## D-173 — Web Posture Is **B, Companion**: Marketing Front Door Plus Session-Gated Tools, Not Full Parity
+
+**Date:** 2026-08-26 · **Status:** decided (operator) · **Scope:** [`docs/plans/web-parity/plan.md`](../docs/plans/web-parity/plan.md) D1, phases 3a
+
+**Context:** The 2026-08-19 web-parity audit found the site badly out of step with the app and offered three postures: A (front door — marketing only), B (companion — marketing plus session-gated tools for existing users), C (full parity — web matches the app feature for feature). Phases 0-2 are unconditional under all three, so the branch could be built before the call; D1 only decides where **Phase 3** stops. Posture A was foreclosed on 2026-08-19 when the operator dropped anonymous web surfaces — A was the posture that depended on them.
+
+**Decision:** **B — Companion.** Phase 3 stops at **3a**. Web is a marketing front door plus session-gated tools that support the app; it is not a second full client and does not chase the app's feature set. This confirms the plan's own recommendation and matches what `fix/web-phase0` already built (the calculator and market pulse are session-gated, per the same operator call that foreclosed A).
+
+**Alternatives considered:** (a) C, full parity — the largest Phase 3 by a wide margin, and it makes every future mobile feature a two-client obligation under a "no framework, no build step" commitment; (b) A, front door — already foreclosed, and it would mean deleting the working session-gated calculator this branch just built.
+
+**Consequences:** Phase 3b/3c are out of scope and should not be picked up without a new decision. Web is permanently allowed to lag the app on features, which means "web doesn't have X" stops being a defect class. **D2 (remediate vs rewrite) and D3 (bundle+minify) remain OPEN** — both gate Phase 3, not the Phase 0-2 merge, so this branch does not wait on them. D3 is the largest item still on the table: 266 KB unminified `app.js` plus 133 KB CSS at `no-cache` is the biggest perf lever the site has.
+
+**Related:** [D-056](#d-056) (gates posture), [G-067](GOTCHAS.md) (the web-analytics race Phase 0 fixed).

@@ -47,6 +47,20 @@ jobs:
       - run: for f in tests/check-*.js; do echo "── $f"; node "$f" || exit 1; done
         working-directory: mobile
 
+  web-structure:
+    # First CI gate that touches web/ (2026-08-19). Until this existed, nothing in
+    # CI checked the web frontend at all — no typecheck, no lint, no tests. Parses
+    # the shipped HTML/CSS/JS and asserts the design-system, SEO and a11y
+    # invariants the 2026-08-19 audit found violated. No browser, no server, no
+    # network — runs in well under a second.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 qa/web/check_web_structure.py
+
   maestro-testid-lint:
     runs-on: ubuntu-latest
     steps:

@@ -7,29 +7,6 @@
       overflow-x: hidden;
     }
 
-    :root {
-      /* ── Chalkline tokens (source of truth: docs/design/design-system.md) ── */
-      --ink-0: #0C0E11; --ink-1: #13161B; --ink-2: #1A1E25; --ink-3: #232833;
-      --line: #262C35; --line-strong: #3D4654;
-      --chalk: #ECEFF4; --chalk-dim: #97A1AE; --chalk-faint: #626C79;
-      --ice: #56D9EC; --ice-press: #3FC2D6; --on-ice: #071013;
-      --flare: #F0508C; --flare-press: #D8437B; --on-flare: #170610;
-      --pos: #22C55E; --neg: #EF4444; --warn: #F59E0B;
-      --qb: #F97316; --rb: #22C55E; --wr: #3B82F6; --te: #A855F7;
-      --r-xs: 2px; --r-sm: 4px; --r-md: 8px; --r-pill: 999px;
-      --shadow-sheet: 0 12px 32px rgba(0,0,0,0.55);
-      --t-fast: 120ms ease-out; --t-base: 180ms ease-out;
-      --t-sheet: 260ms cubic-bezier(0.32, 0.72, 0, 1);
-      --font-ui: 'Archivo', sans-serif;
-      --font-display: 'Barlow Condensed', sans-serif;
-      --font-data: 'IBM Plex Mono', monospace;
-      /* Legacy aliases — pre-Chalkline rules below reference these names. */
-      --bg: var(--ink-0); --surface: var(--ink-1); --border: var(--line);
-      --text: var(--chalk); --muted: var(--chalk-dim);
-      --accent: var(--ice); --green: var(--pos); --red: var(--neg);
-      --gold: var(--warn); --card: var(--ink-1); --panel: var(--ink-1);
-    }
-
     /* Global focus ring — 2px ice, 2px offset (design-system.md:134) */
     :focus-visible { outline: 2px solid var(--ice); outline-offset: 2px; }
 
@@ -241,6 +218,10 @@
 
     .league-list {
       overflow-y: auto;
+      /* Setting only overflow-y makes overflow-x compute to `auto`, not
+         `visible` — which reserved a horizontal scrollbar gutter and painted a
+         light track across the bottom of the card. Pin it. */
+      overflow-x: hidden;
       display: flex;
       flex-direction: column;
       gap: 10px;
@@ -293,6 +274,28 @@
       font-size: 14px;
       line-height: 1.6;
     }
+
+    /* Escape hatch out of the league screen (see index.html #league-screen).
+       44px min-height per the design-system touch target. */
+    .league-escape {
+      display: flex;
+      justify-content: center;
+      padding-top: 4px;
+    }
+
+    .league-escape-btn {
+      background: none;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      color: var(--chalk-dim);
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 13px;
+      min-height: 44px;
+      padding: 0 20px;
+    }
+
+    .league-escape-btn:hover { color: var(--chalk); border-color: var(--chalk-dim); }
 
     /* ── Loading Overlay ── */
     .init-overlay {
@@ -2805,7 +2808,11 @@
       max-width: 420px;
     }
 
-    .cb-connect-wrap { max-width: 380px; }
+    /* width:100% makes this fill the available column instead of sizing to its
+       own content. Without it the row's max-content width (a nowrap button +
+       an unshrinkable input) pinned this at 380px inside a 335px parent at
+       375px viewport, clipping the primary CTA off the right edge. */
+    .cb-connect-wrap { width: 100%; max-width: 380px; }
 
     .cb-input-row {
       display: flex;
@@ -2814,6 +2821,7 @@
     }
     .cb-input {
       flex: 1;
+      min-width: 0;   /* allow shrink below intrinsic width; see .cb-connect-wrap */
       background: var(--ink-2);
       border: 1px solid var(--border);
       border-radius: var(--r-sm);
@@ -2828,6 +2836,7 @@
     .cb-go-btn {
       background: var(--accent);
       border: none;
+      min-height: 44px;   /* design-system touch target; measured 42px */
       border-radius: var(--r-sm);
       color: var(--on-ice);
       font-size: 14px;
@@ -4606,3 +4615,35 @@
         scroll-behavior: auto !important;
       }
     }
+
+
+/* ── Market pulse (#market-pulse) ─────────────────────────────────────────
+   Community 30-day movers inside the League view. Position hexes are data
+   encodings; the up/down colors are --pos/--neg status tokens. */
+.market-pulse {
+  background: var(--ink-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 14px;
+  margin-top: 16px;
+}
+.market-pulse-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.market-pulse-title {
+  font-family: var(--font-display); font-size: 15px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.market-pulse-sub { font-size: 12px; color: var(--chalk-faint); }
+.market-pulse-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 560px) { .market-pulse-cols { grid-template-columns: 1fr; } }
+.market-pulse-label {
+  font-family: var(--font-data); font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;
+}
+.market-pulse-label.up { color: var(--pos); }
+.market-pulse-label.down { color: var(--neg); }
+.market-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 13px; }
+.market-row + .market-row { border-top: 1px solid var(--line); }
+.market-row .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.market-row .pct { font-family: var(--font-data); font-size: 12px; font-weight: 600; }
+.market-row .pct.up { color: var(--pos); }
+.market-row .pct.down { color: var(--neg); }

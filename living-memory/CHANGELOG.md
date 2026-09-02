@@ -11,6 +11,38 @@
 
 ---
 
+## 2026-08-26 — `fix/web-phase0` caught up to `main`, four operator blockers closed (still NOT merged)
+
+**The branch is now mergeable.** It sat 140 commits behind `origin/main`; the merge is `b4f29220`.
+`backend/server.py` and `web/js/app.js` auto-merged and were then verified by hand on the merged
+file — the branch's flag-readiness analytics fix and main's `FAIRNESS_BALANCED_MIN` cross-client
+invariant are both intact. All five conflicts were append-at-top ledger files.
+
+**Gotcha `G-053` → [G-067](GOTCHAS.md).** `origin/main` had taken `G-053`…`G-061` while the branch
+was parked. One cross-reference moved with it; no anchor-style links existed, so the [G-054](GOTCHAS.md)
+heading-vs-anchor trap did not bite.
+
+**Operator closed the four blockers** (2026-08-26):
+- **Posture: B, Companion** — [D-173](DECISIONS.md). Phase 3 stops at 3a; web is a front door plus
+  session-gated tools, not a second full client. Confirms the plan's recommendation.
+- **`web/admin/analytics.html` now 404s in prod** — added to `_PROD_BLOCKED_STATIC` (`6cd163a4`).
+  Its data was already `X-Cron-Secret`-gated, so this removes a public page shell, not an access
+  control; the operator reaches it via a local server. Pinned by a new 10-case backend test.
+- **`[STATE]` in `terms.html` stays a TODO** — operator declined to name a governing-law
+  jurisdiction. Terms ships legally incomplete, knowingly. Waiver W1 stands.
+- **No support email** — `contact.html` remains the single support route. Waiver W2 stands.
+
+**Gates, all re-run on the merged tree:** pytest 4286 passed / 1 skipped · `tsc --noEmit` clean ·
+testid-lint OK · web-structure 173/173 · 81 mobile structural suites pass. Full detail in
+[TEST_LEDGER](TEST_LEDGER.md) 2026-08-26. The branch's older numbers are superseded.
+
+**Still open:** **P2-3, the landing page** — deliberately not done; it is positioning copy that wants
+the operator's voice. And plan decisions **D2** (remediate vs rewrite) and **D3** (bundle + minify —
+266 KB unminified `app.js` + 133 KB CSS at `no-cache` is the biggest perf lever left). Both gate
+Phase 3, not this merge.
+
+**Not pushed, not merged, not deployed.**
+
 
 
 
@@ -1157,6 +1189,67 @@ skipped**; 13 sabotages, 13 caught.
 **Released.** EAS iOS **build 121 (v1.15.0)**, `ccc3cd57`, built from `f1cb03e` (same tree as `main`), **submitted to TestFlight** and accepted by App Store Connect (submission `769a6193`). Awaiting Apple processing. Backend gates re-run on the merged sha with `node_modules` finally installed: `tsc --noEmit` clean and **61** structural suites green — both had been unrunnable in this worktree earlier in the session.
 
 **Watch:** nobody has seen the lit surface on a device; a preseason band can be confidently wrong (2 of 6 backtested seasons lose to climatology); `meta.priced_slot_coverage` is still unrendered, so IDP bands read as whole-lineup on 7-of-15 priced slots.
+## 2026-08-19 — Web Phase 2: session-gated calculator + market pulse (`fix/web-phase0`, NOT merged)
+
+**`web/calculator.html`** — mirrors the app's calculator: asset search over
+`/api/trade/values`, live `POST /api/trade/evaluate`, fairness verdict + meter, the gap
+read in draft-pick terms, one-tap eveners, and the server's own adjustment rationale.
+Both bases: **Real values** (consensus) and **In league** (partner-selected, dual-board).
+**Session-gated, matching the app** — per operator decision there is no anonymous surface,
+so it is `noindex` + `Disallow`-ed and linked from the app's sub-nav.
+
+**Market pulse** — `/api/market/movers` risers/fallers inside the League view, mirroring
+where mobile puts `MarketPulseStrip`. Renders nothing when the snapshot window is cold.
+
+No backend change; the rate-limiter prerequisite died with the anonymous calculator.
+Phase 2's remaining item is the landing page (P2-3) — deliberately not rushed, since it
+is positioning copy that wants the operator's voice.
+
+---
+## 2026-08-19 — Web Phase 1: one token source + the first-ever web CI gate (`fix/web-phase0`, NOT merged)
+
+**`qa/web/check_web_structure.py`** — 161 structural checks over shipped `web/` source
+(design tokens, emoji-as-icons, radii, fonts, SEO, a11y, hygiene). Pure stdlib: no
+browser, no server, no new dependencies, sub-second. Wired as the `web-structure` CI
+job. **Before this, nothing in CI touched `web/` at all.** Baseline 101/161 → **161/161**.
+
+**`web/css/tokens.css` is now the single token source.** The `:root` block had been
+copy-pasted into 12 files; `--line-strong` was corrected to `#59647A` on 2026-07-19 and
+only one copy got it, so a 2.03:1 WCAG 1.4.11 failure shipped on every input and
+secondary-button border. Of 53 union variables only that one diverged, so consolidation
+was value-preserving. A second definer now fails CI.
+
+Also: removed the dead debug drawer (~135-line IIFE + 95 call sites, −13 KB, and with it
+the public bundle's reference to the CRON-gated `/api/debug/log`); replaced the 45-player
+2024-era hardcoded roster in `positional-tiers.html` with an empty pool + honest
+loading/failed states, and **un-nested the public `/api/players` fallback from the token
+guard so signed-out visitors get real players instead of stale fakes**; full SEO metadata
++ `robots.txt` + `sitemap.xml`; `<main>`/`<nav>` landmarks and a real `<h1>` on all 11
+pages; renamed the user-visible surface to **Fleeced** (D-057) and corrected two false
+FAQ claims ("mobile-first", implied App Store availability).
+
+Legal-doc entity naming deliberately left alone — that is an operator/legal call.
+
+---
+## 2026-08-19 — Web audit + Phase 0 breakage fixes (`fix/web-phase0`, NOT merged)
+
+**Four-auditor audit of the live site** → [`docs/reviews/2026-08-19-web-parity-audit.md`](../docs/reviews/2026-08-19-web-parity-audit.md).
+Verdict: the web is a stale fork of a mid-2026 build at ~35-40% of mobile's capability.
+Plan + scope: [`docs/plans/web-parity/`](../docs/plans/web-parity/).
+
+**Phase 0 built on `fix/web-phase0` (from `origin/main` `50e0451`). Not merged, not deployed.**
+Fixed: the demo path that trapped users permanently (synthetic id → 503 *and* an exit-less
+overlay; the demo marker also moved from `sessionStorage` to the saved user so it survives a
+tab close); web analytics emitting **zero** events (`track()` dropped everything fired before
+`/api/feature-flags` resolved — including `app_opened`, on every session); the primary CTA
+clipped at 375px; `profile.html`'s handle parser; no HTML 404 page; design-lab pages served
+in prod. Added `web/contact.html` — the first route a web visitor has to a deletion request.
+
+**Two audit claims were wrong and are corrected in the scope block:** `ranking-method.html`
+is not an orphan (mobile opens it as a read-more explainer — kept, fake controls stripped),
+and the `league-rankings` nav link was already correctly flag-gated.
+
+**Open:** `[STATE]` in `terms.html` and 3 waivers need the operator ([`scope.md`](../docs/plans/web-parity/scope.md) §6).
 
 ---
 ## 2026-08-19 — `account.settings_hub` lit for all TestFlight testers

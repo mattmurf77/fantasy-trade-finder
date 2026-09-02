@@ -293,6 +293,52 @@ Scope: [docs/plans/landing-platform-options/scope.md](../docs/plans/landing-plat
 - **Backend:** `pytest backend/tests` — **4275 passed, 1 skipped** on first run with one failure (`test_release_flags_mirror_features_json` — the new flag key missing from the mirror fixtures); fixed by adding `landing.platform_options: true` to `release.json` / `profiles-on.json` / `onboarding-v2.json`, after which `test_seed_ui_test_db.py` is **76/76 PASS**. No backend behavior changed (FLAG_KEYS + fixtures only).
 - **Owed (operator, next TestFlight build):** the 6-step runtime checklist in scope.md §3 — chips render, ESPN chip → Apple → ESPN sheet auto-opens un-wedged (#266 class), MFL twin, Sleeper flow unchanged, single-league auto-skip yields to the MFL intent.
 
+## 2026-08-26 — `fix/web-phase0` merged with `origin/main`; full gate set re-run green on the merged tree
+
+**Every number below was measured on the merge commit `b4f29220` + `6cd163a4`, on this tree.** The
+stale figures carried on the branch (161/161 web checks, "backend not re-run") are superseded — do
+not quote them.
+
+Full gates, not express: the branch touches API surface and analytics, which `CLAUDE.md` marks as a
+bright line ([D-163](DECISIONS.md) §D5). Express was never available here.
+
+| Gate | Result |
+|---|---|
+| `pytest backend/tests` | **4286 passed, 1 skipped** in 445.16 s (includes the 10 new cases below) |
+| `npx tsc --noEmit` (mobile) | **exit 0**, zero output (after `npm ci` — this worktree had no `node_modules`) |
+| `mobile/scripts/testid-lint.sh` | **`testid-lint OK`** |
+| `python3 qa/web/check_web_structure.py` | **173/173** — DS 80/80 · TOK 1/1 · SEO 50/50 · A11Y 38/38 · HYG 4/4 |
+| `mobile/tests/check-*.js` (81 suites) | **all pass**, zero failures |
+
+**Merge verification, not just "it applied clean".** 140 commits of `origin/main` drift since base
+`50e0451d`. `backend/server.py` and `web/js/app.js` both **auto-merged**, which is exactly the case
+worth distrusting, so both sides were checked present afterward by grep on the merged file: the
+branch's flag-readiness fix (`FTF_FLAGS_READY`, `ftf:flags-ready`, the `pending[]` drain in
+`events.js`) **and** main's `FAIRNESS_BALANCED_MIN = 0.75` cross-client invariant with its
+`consensus-tag` tooltip block. Both intact. The five conflicts were all append-at-top ledger files.
+
+**New: `backend/tests/test_prod_blocked_static.py` (10 cases).** Pins `_PROD_BLOCKED_STATIC` in both
+directions — the four blocked paths 404 when `_IS_PROD_ENV`, all four still serve 200 in dev (that is
+how the operator reaches the dashboard), the set is exactly those four, and `/index.html` is not
+caught by an over-broad block. **Verified non-vacuous:** removing the `/admin/analytics.html` entry
+turns 2 of the 10 red. This is the mechanically-checkable evidence the gates require for the
+admin-block change; no code-walk proof is owed for it.
+
+**Gotcha renumber.** The branch's `G-053` collided with `origin/main`'s `G-053`…`G-061` and was
+renumbered to **[G-067](GOTCHAS.md)**. One cross-reference (`HANDOFF.md`) moved with it. No
+anchor-style `#g-053-…` links existed anywhere in the tree, so the [G-054](GOTCHAS.md) trap — a
+blanket ID replace that rewrites headings but not their anchors — did not apply. Checked, not assumed.
+
+**Not run, and why:** no EAS build, no TestFlight pass, no simulator (retired, D-056). Nothing in
+this merge touches mobile source — the mobile gates were run only to prove the *merge* is green, not
+because mobile behavior changed. `githooks/pre-push` still enforces the retired simulator marker;
+`FTF_SKIP_SIM_GATE=1` is the standing D-056 posture and the five gates above are what was run instead.
+
+**Still owed before this ships to users:** the operator's manual pass on the live site after deploy.
+The web surface has no runtime harness — `check_web_structure.py` parses source and never loads a page.
+
+---
+
 ## 2026-08-25 — v1.16.6 (EAS build 132) BUILT + SUBMITTED to TestFlight
 
 Carries PR #196's `via:'quickset'` tag ([D-162](DECISIONS.md)) — the first build in which the Quick Set funnel can emit anything.
@@ -1905,6 +1951,91 @@ pytest set run, the mutation reverted:
 this work — C1 was run elsewhere and its numbers (0.75 both-ways = 200.5% of the one-way
 baseline, 61.2% user-pays, damage capped at 25.0%) are quoted in the profile and
 config-reference on that authority, not re-derived here.
+## 2026-08-19j — Web Phase 2: calculator + market pulse (NOT SHIPPED, on `fix/web-phase0`)
+
+**Branch:** `fix/web-phase0`. Not pushed, not merged. No flags, no schema, **no backend change**.
+
+| Gate | Result |
+|---|---|
+| `python3 qa/web/check_web_structure.py` | **173/173 pass** (calculator.html registered in PAGES) |
+| `pytest backend/tests` | not re-run — `backend/` untouched since `26d7841` (3524 passed / 1 skipped there) |
+| Mobile gates | n/a — zero mobile files touched |
+
+**Browser-verified** against a local server on this branch, with a real demo session:
+search → add asset → live evaluate; a 1-for-2 priced `fair / Favors them`, gap `1,718 ≈ a
+Late 1st Round Pick`, and the one-tap evener moved it to `even` — matching the same
+engine's prod output for the same package. Adjustments disclosure renders the server's
+`why` copy. At 375px: no horizontal overflow, sides stack, **zero tap targets under 44px**.
+Market pulse verified in both states — hidden when `/api/market/movers` is empty (the real
+local state), and rendering risers/fallers when fed prod-shaped rows.
+
+**Two defects found and fixed during this pass, both mine-or-adjacent:**
+1. A one-sided trade rendered **"even / Even both ways"** — the server returns
+   `verdict: null` and the first draft defaulted it to `even`, stating something false.
+   Now prompts for the missing side, and a null verdict never coerces.
+2. `.league-list` set only `overflow-y`, which makes `overflow-x` compute to `auto` (not
+   `visible`) — it reserved a scrollbar gutter and painted a light track across the league
+   card. Pre-existing; fixed since it sits in a screen this work touched.
+
+**Local-data caveats worth recording:** `/api/trade/values` returns 0 on a cold worktree
+until the process restarts with the Sleeper cache warm, and `/api/market/movers` is empty
+until 30 days of value snapshots exist. Neither is a code defect; both cost time to
+diagnose.
+
+---
+## 2026-08-19i — Web Phase 1 foundation (NOT SHIPPED, on `fix/web-phase0`)
+
+**Branch:** `fix/web-phase0`. **Not pushed, not merged.** No flags, no schema, no backend change.
+
+| Gate | Result |
+|---|---|
+| `python3 qa/web/check_web_structure.py` | **161/161 pass** (baseline at Phase 1 start: 101/161) |
+| `python -m pytest backend/tests -q` | **3524 passed, 1 skipped** at commit `26d7841`; `backend/` untouched since |
+| `npx tsc --noEmit` / `testid-lint.sh` | n/a — zero mobile files touched. Not run, not claimed. |
+| Maestro / simulator | n/a — retired by [D-056](DECISIONS.md) |
+
+**New permanent gate:** `qa/web/check_web_structure.py`, wired as CI job `web-structure`.
+This is the first automated coverage `web/` has ever had. Pure stdlib — Playwright was
+installed and evaluated, then **not** used: the structural layer catches the entire class
+of defect this phase addressed, needs no browser, and cannot flake. A browser-level smoke
+(console errors, layout at 375px, axe) remains unbuilt and is the honest gap.
+
+Browser-verified against a local server on this branch: all 11 pages 200 with exactly one
+`<h1>`, a meta description, and the shared token link; `--line-strong` resolves to
+`#59647A` everywhere; `index.html` has `<main>` wrapping all 7 views with the 3 overlays
+correctly outside it; signed-out `positional-tiers.html` renders **real** players (Josh
+Allen, Lamar Jackson, Joe Burrow) auto-tiered, where it previously rendered 45 stale
+2024-era hardcoded ones.
+
+**Caveat worth recording:** the signed-out player path could not be verified until the
+worktree's throwaway DB was seeded — `/api/players` returns `[]` on an unsynced local DB,
+and its `Cache-Control: max-age=300` made an early empty response persist and look like a
+code bug. It was not one.
+
+---
+## 2026-08-19h — Web Phase 0 breakage fixes (NOT SHIPPED, on `fix/web-phase0`)
+
+**Branch:** `fix/web-phase0` from `origin/main` `50e0451`. **Not pushed, not merged.** No flags added or flipped.
+Scope + full evidence matrix: [`docs/plans/web-parity/scope.md`](../docs/plans/web-parity/scope.md) §3.
+
+| Gate | Result |
+|---|---|
+| `python3 -m pytest backend/tests -q` | **3524 passed, 1 skipped, 0 failed** |
+| `npx tsc --noEmit` / `testid-lint.sh` | **n/a — zero mobile files touched.** Not run, not claimed. |
+| Maestro / simulator / `screens/` | n/a — retired by [D-056](DECISIONS.md) |
+| Sim gate | `FTF_SKIP_SIM_GATE=1`, standing posture under D-056 |
+| **Web automated tests** | **NONE EXIST.** CI never touches `web/` — no Playwright, no axe, no Lighthouse, no root `package.json`. Building one is plan item P1-2. |
+| **Runtime evidence** | **Real browser against a local server running this branch.** Not a code-walk. |
+
+Verified in-browser: `app_opened` now queues (`seq:1`) and `POST /api/events` → 200 (previously
+**zero** ingest requests, `ftf.deviceId` null); CTA at 375px sits `x 155→355` inside the viewport
+(was `20→400`, clipped); the demo trap shows honest copy + a working "Start over" and fires
+**zero** `/api/sleeper/leagues` requests; `/nope` → HTML 404 while `/api/*` and `/og/*` stay JSON;
+`_IS_PROD_ENV=True` 404s the 3 design-lab pages and leaves real pages untouched; the contact form
+landed a note as `web-contact-data-request` with a `[DATA REQUEST]` prefix, anonymous. Plus an
+8-case table test of the rewritten `extractUsername()` (8/8) and `node --check` on all touched JS.
+
+**Not verified:** anything on the deployed host — this never left the branch.
 
 ---
 ## 2026-08-19g — Phantom draft-pick years: the league pick horizon (#355, NOT SHIPPED, on `fix/pick-horizon`)

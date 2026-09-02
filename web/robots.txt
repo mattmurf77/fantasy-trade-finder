@@ -1,0 +1,24 @@
+# Fleeced: Dynasty Trade Finder
+User-agent: *
+Allow: /
+
+# Operator + build-time surfaces. These 404 in production anyway
+# (_PROD_BLOCKED_STATIC in backend/server.py); listed so crawlers don't try.
+Disallow: /admin/
+Disallow: /style-guide.html
+Disallow: /color-lab.html
+Disallow: /color-lab-2.html
+
+# Signed-in tools — nothing to index behind the sign-in.
+Disallow: /calculator.html
+
+# Templates that render nothing without a query param or path segment.
+Disallow: /player.html
+Disallow: /profile.html
+Disallow: /404.html
+
+# Per-user share landings — thin, and there can be very many.
+Disallow: /s/
+Disallow: /og/
+
+Sitemap: https://fantasy-trade-finder.onrender.com/sitemap.xml

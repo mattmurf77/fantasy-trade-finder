@@ -29,8 +29,15 @@
       } catch (_) { /* ignore */ }
       _applyMobilePolishFlags();
       _applyPowerRankingsFlag();
+      // Tell events.js the flag map has settled (success OR failure) so it can
+      // drain the events buffered during boot. Without this, everything fired
+      // before this fetch resolved — app_opened included — was dropped.
+      window.FTF_FLAGS_READY = true;
+      try { document.dispatchEvent(new Event('ftf:flags-ready')); } catch (_) {}
     }
-    // Kick the fetch immediately; it resolves before most UI code runs.
+    // Kick the fetch immediately. It does NOT reliably resolve before boot() —
+    // boot() runs synchronously below while this is still in flight, which is why
+    // flag-dependent work must wait on the 'ftf:flags-ready' signal above.
     _loadFeatureFlags();
 
     // ═══════════════════════════════════════════════════════════════
@@ -93,147 +100,6 @@
       _applyPowerRankingsFlag();
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    //  DEBUG LOG DRAWER
-    //  logDrawer.action / .req / .res / .err / .info — call anywhere
-    // ═══════════════════════════════════════════════════════════════
-
-    const logDrawer = (() => {
-      const MAX   = 500;
-      const buf   = [];     // { ts, kind, raw } — raw is plain text for copy
-      let open    = false;
-
-      function ts() {
-        const d = new Date();
-        return d.toTimeString().slice(0,8) + '.' + String(d.getMilliseconds()).padStart(3,'0');
-      }
-
-      function kindClass(k) {
-        return { action:'action', req:'req', res:'res', reserr:'res-err',
-                 info:'info', error:'error', server:'server' }[k] || 'info';
-      }
-
-      function push(kind, html, raw) {
-        if (buf.length >= MAX) buf.shift();
-        const t = ts();
-        buf.push({ ts: t, kind, html, raw: `[${t}] [${kind.toUpperCase()}] ${raw}` });
-        _render();
-      }
-
-      function _render() {
-        const body  = document.getElementById('log-body');
-        const count = document.getElementById('log-count');
-        if (!body) return;
-        const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
-
-        // Only re-render the last entry if body already has children (fast path)
-        if (buf.length && body.children.length === buf.length - 1) {
-          const e = buf[buf.length - 1];
-          const div = document.createElement('div');
-          div.className = 'log-entry';
-          div.innerHTML = `<span class="log-ts">${e.ts}</span>`
-            + `<span class="log-dot ${kindClass(e.kind)}"></span>`
-            + `<span class="log-msg">${e.html}</span>`;
-          body.appendChild(div);
-        } else {
-          body.innerHTML = buf.map(e =>
-            `<div class="log-entry">`
-            + `<span class="log-ts">${e.ts}</span>`
-            + `<span class="log-dot ${kindClass(e.kind)}"></span>`
-            + `<span class="log-msg">${e.html}</span>`
-            + `</div>`
-          ).join('');
-        }
-
-        count.textContent = `${buf.length} entr${buf.length === 1 ? 'y' : 'ies'}`;
-        if (atBottom || open) body.scrollTop = body.scrollHeight;
-      }
-
-      function h(s) {
-        return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-      }
-
-      return {
-        toggle() {
-          open = !open;
-          document.getElementById('log-handle').classList.toggle('open', open);
-          document.getElementById('log-body').classList.toggle('open', open);
-          if (open) document.getElementById('log-body').scrollTop = 9999;
-        },
-
-        // ── Public log methods ──────────────────────────────────────
-        action(msg) {
-          push('action', `<span class="hi">▶ ${h(msg)}</span>`, msg);
-        },
-
-        req(method, url, body) {
-          const extra = body ? ` <span style="color:#4a4f66">${h(JSON.stringify(body)).slice(0,120)}</span>` : '';
-          push('req', `<span style="color:#f59e0b">${h(method)}</span> <span class="url">${h(url)}</span>${extra}`,
-               `${method} ${url}${body ? ' ' + JSON.stringify(body).slice(0,120) : ''}`);
-        },
-
-        res(status, url, summary) {
-          const ok   = status >= 200 && status < 300;
-          const cls  = ok ? 'ok' : 'err';
-          const kind = ok ? 'res' : 'reserr';
-          push(kind,
-            `<span class="${cls}">${h(status)}</span> <span class="url">${h(url)}</span>`
-            + (summary ? ` → <span class="hi">${h(summary)}</span>` : ''),
-            `${status} ${url}${summary ? ' → ' + summary : ''}`);
-        },
-
-        info(msg) {
-          push('info', h(msg), msg);
-        },
-
-        error(msg) {
-          push('error', `<span class="err">${h(msg)}</span>`, msg);
-        },
-
-        server(entry) {
-          // entry from /api/debug/log: { ts, level, msg }
-          const cls = entry.level === 'ERROR' ? 'err'
-                    : entry.level === 'WARNING' ? 'warn' : '';
-          push('server',
-            `<span style="color:#a855f7">[server]</span> `
-            + `<span class="${cls}">${h(entry.msg)}</span>`,
-            `[server] ${entry.msg}`);
-        },
-
-        async fetchBackend() {
-          this.info('Fetching server log…');
-          try {
-            const res  = await fetch('/api/debug/log?n=80');
-            const data = await res.json();
-            if (data.entries) {
-              data.entries.forEach(e => this.server(e));
-              this.info(`← Loaded ${data.entries.length} server entries (${data.total_buffered} total buffered)`);
-            }
-          } catch(e) {
-            this.error('Could not fetch /api/debug/log: ' + e.message);
-          }
-          if (!open) this.toggle();
-        },
-
-        copy() {
-          const text = buf.map(e => e.raw).join('\n');
-          navigator.clipboard.writeText(text).then(
-            () => showToast('Log copied to clipboard'),
-            () => {
-              // Fallback: open in new tab as text
-              const w = window.open('','_blank');
-              w.document.write('<pre>' + text.replace(/</g,'&lt;') + '</pre>');
-            }
-          );
-        },
-
-        clear() {
-          buf.length = 0;
-          document.getElementById('log-body').innerHTML = '';
-          document.getElementById('log-count').textContent = '0 entries';
-        },
-      };
-    })();
 
     // ── Instrumented fetch wrapper ──────────────────────────────────
     async function apiFetch(url, opts = {}) {
@@ -246,12 +112,10 @@
       if (opts.body) {
         try { bodyPreview = JSON.parse(opts.body); } catch { bodyPreview = opts.body; }
       }
-      logDrawer.req(method, url, bodyPreview);
       let res;
       try {
         res = await fetch(url, opts);
       } catch (e) {
-        logDrawer.error(`Network error on ${method} ${url}: ${e.message}`);
         throw e;
       }
       // Clone so we can read body for logging without consuming it
@@ -275,11 +139,9 @@
           summary = parts.length ? parts.join(' ') : `{${Object.keys(parsed).slice(0,4).join(',')}}`;
         }
       } catch { /* non-JSON – ignore */ }
-      logDrawer.res(res.status, url, summary || (res.ok ? 'ok' : 'error'));
 
       // ── Session expiry handling ─────────────────────────────────────
       if (res.status === 401 && _parsedBody && _parsedBody.error === 'session_expired') {
-        logDrawer.info('Session expired — clearing token and reconnecting…');
         localStorage.removeItem(LS_TOKEN);
         sessionToken = null;
         showToast('Session expired — reconnecting…');
@@ -324,27 +186,22 @@
     // ── Boot: check stored session ──────────────────────────────────
     async function boot() {
       try { if (window.FTFTrack) window.FTFTrack('app_opened', { launch_type: 'web' }); } catch (e) {}
-      logDrawer.info('Page loaded — checking localStorage…');
       const user   = getSavedUser();
       const league = getSavedLeague();
 
       if (!user) {
-        logDrawer.info('No saved user → showing login screen');
         showAuthScreen();
         return;
       }
-      logDrawer.info(`Saved user found: ${user.display_name} (${user.user_id})`);
       // Hide the auth-screen immediately so restored sessions don't flash
       // the login page underneath the init overlay or main app.
       hideAuthScreen();
       renderAccountChip(user);
 
       if (!league) {
-        logDrawer.info('No saved league → showing league picker');
         showLeagueScreen(user);
         return;
       }
-      logDrawer.info(`Saved league: ${league.league_name} (${league.league_id})`);
 
       // If we have a stored session token, ping the server to check liveness.
       // A 401 means the session expired (e.g. server restarted); clear the
@@ -355,30 +212,24 @@
             headers: { 'X-Session-Token': sessionToken },
           });
           if (pingRes.status === 401) {
-            logDrawer.info('Session token expired — will re-init');
             localStorage.removeItem(LS_TOKEN);
             sessionToken = null;
           } else {
-            logDrawer.info('Session token still valid ✓');
           }
         } catch (e) {
-          logDrawer.info(`Session ping failed (${e.message}) — continuing with re-init`);
         }
       }
 
       currentLeagueId = league.league_id;
       currentUserId   = user.user_id || null;
       showInitOverlay('Importing your roster…');
-      logDrawer.info('Re-initialising session from saved league…');
       const ok = await initSession(user, league);
       hideInitOverlay();
 
       if (!ok) {
-        logDrawer.error('initSession failed on reload — clearing league, re-showing picker');
         clearSavedLeague();
         showLeagueScreen(user);
       } else {
-        logDrawer.info('Session restored ✓');
         // Mount the main app — this calls loadTrio() so the Trios screen
         // renders with players on auto-auth instead of an empty state.
         // Also handles initFairnessSlider, _startNotifPolling, scoring
@@ -386,17 +237,20 @@
         // Tiers→Manual cross-page link lands on the correct sub-view.
         _enterMainApp();
         // Populate the league switcher — _cachedLeagues is empty on a fresh page load
-        // so we fetch leagues in the background without blocking the UI
+        // so we fetch leagues in the background without blocking the UI.
+        // Demo users are skipped: their synthetic id 503s, which surfaced as a
+        // console error on every demo boot.
+        if (!_isDemoUser(user)) {
         apiFetch(`/api/sleeper/leagues/${user.user_id}`)
           .then(r => r.json())
           .then(leagues => {
             if (leagues && leagues.length) {
               _cachedLeagues = leagues;
               renderLeagueSwitcher();
-              logDrawer.info(`League switcher populated (${leagues.length} leagues)`);
             }
           })
-          .catch(e => logDrawer.error(`Could not populate league switcher on reload: ${e.message}`));
+          .catch(() => { /* switcher is best-effort; the app works without it */ });
+        }
       }
     }
 
@@ -408,7 +262,6 @@
     function clearSavedLeague() { localStorage.removeItem(LS_LEAGUE); }
 
     function logout() {
-      logDrawer.action('Logout clicked — clearing localStorage');
       localStorage.removeItem(LS_USER);
       localStorage.removeItem(LS_LEAGUE);
       localStorage.removeItem(LS_TOKEN);
@@ -424,6 +277,30 @@
       _updateNotifBadge(0);
       document.getElementById('account-chip-container').innerHTML = '';
       showAuthScreen();
+    }
+
+    // Hard reset out of any stuck state. logout() leaves demo markers and the
+    // ?demo=1 query param behind, both of which can re-enter the same dead end
+    // on the next boot, so this clears everything and reloads a clean landing.
+    function startOver() {
+      try {
+        localStorage.removeItem(LS_USER);
+        localStorage.removeItem(LS_LEAGUE);
+        localStorage.removeItem(LS_TOKEN);
+        localStorage.removeItem('ftf_invited_by');
+        localStorage.removeItem('ftf_invited_league');
+        sessionStorage.removeItem('ftf_demo_mode');
+        sessionStorage.removeItem('ftf_session_token');
+      } catch (_) { /* private mode — the reload below still recovers */ }
+      window.location.href = '/';
+    }
+
+    // Demo users carry a synthetic, non-numeric user_id that the real Sleeper
+    // endpoints reject. The marker lives on the saved user in localStorage —
+    // NOT in sessionStorage — so it survives a tab close alongside the user
+    // record it describes.
+    function _isDemoUser(u) {
+      return !!(u && (u.is_demo === true || String(u.user_id || '').startsWith('demo_user')));
     }
 
     // ── Auth Screen ─────────────────────────────────────────────────
@@ -450,10 +327,8 @@
       const rawInput = input.value;
       const username = rawInput.trim().toLowerCase();
 
-      logDrawer.action(`Login button clicked — raw="${rawInput}" normalised="${username}"`);
 
       if (!username) {
-        logDrawer.error('Empty username — aborting');
         errEl.textContent = 'Please enter your Sleeper username.';
         input.classList.add('error');
         return;
@@ -467,18 +342,14 @@
       btn.textContent = 'Looking up…';
 
       const url = `/api/sleeper/user/${encodeURIComponent(username)}`;
-      logDrawer.info(`Encoded URL: ${url}`);
 
       try {
         const res  = await apiFetch(url);
-        logDrawer.info(`Response status: ${res.status}  ok=${res.ok}`);
 
         let data;
         try {
           data = await res.json();
-          logDrawer.info(`Response body: ${JSON.stringify(data).slice(0, 300)}`);
         } catch (jsonErr) {
-          logDrawer.error(`Failed to parse JSON: ${jsonErr.message}`);
           errEl.textContent = 'Server returned invalid response. Check the debug log.';
           btn.disabled = false;
           btn.textContent = 'Connect with Sleeper →';
@@ -487,7 +358,6 @@
 
         // Diagnose every failure branch individually
         if (!res.ok) {
-          logDrawer.error(`res.ok=false (HTTP ${res.status}) — server rejected the request`);
           // Prefer the human-readable message (e.g. Sleeper-outage 503);
           // fall back to the machine code, then a generic message.
           errEl.textContent = data.message || data.error || `Server error ${res.status}. Check the debug log.`;
@@ -498,7 +368,6 @@
         }
 
         if (data === null) {
-          logDrawer.error('Sleeper returned null — username does not exist on Sleeper');
           errEl.textContent = 'Username not found on Sleeper. Check spelling (usernames are lowercase).';
           input.classList.add('error');
           btn.disabled = false;
@@ -507,7 +376,6 @@
         }
 
         if (data.error) {
-          logDrawer.error(`data.error present: "${data.error}"`);
           errEl.textContent = data.error;
           input.classList.add('error');
           btn.disabled = false;
@@ -516,7 +384,6 @@
         }
 
         if (!data.user_id) {
-          logDrawer.error(`No user_id in response. Keys present: ${Object.keys(data).join(', ')}`);
           errEl.textContent = 'Unexpected response from Sleeper — no user_id. Check debug log.';
           input.classList.add('error');
           btn.disabled = false;
@@ -524,7 +391,6 @@
           return;
         }
 
-        logDrawer.info(`✓ Login success — user_id=${data.user_id}  display_name=${data.display_name}`);
 
         const user = {
           user_id:      data.user_id,
@@ -534,11 +400,9 @@
         saveUser(user);
         renderAccountChip(user);
         hideAuthScreen();
-        logDrawer.info('Moving to league selection…');
         showLeagueScreen(user);
 
       } catch (e) {
-        logDrawer.error(`Fetch exception: ${e.message}`);
         errEl.textContent = 'Could not reach server — is server.py running?';
         btn.disabled = false;
         btn.textContent = 'Connect with Sleeper →';
@@ -552,7 +416,6 @@
 
     // ── League Screen ───────────────────────────────────────────────
     async function showLeagueScreen(user) {
-      logDrawer.info(`Showing league picker for user_id=${user.user_id}`);
       const screen = document.getElementById('league-screen');
       const list   = document.getElementById('league-list');
       const sub    = document.getElementById('league-subtitle');
@@ -561,16 +424,24 @@
       list.innerHTML  = '<div class="league-loading">Loading your leagues…</div>';
       screen.classList.remove('hidden');
 
+      // A demo user_id is synthetic — /api/sleeper/leagues/<id> always 503s for
+      // it. Asking anyway produced a "Couldn't reach Sleeper" dead end that
+      // blamed an outage for what is really "the sample league ended".
+      if (_isDemoUser(user)) {
+        list.innerHTML =
+          '<div class="league-empty">The sample league session has ended.<br>' +
+          'Start over to connect your own Sleeper account.</div>';
+        return;
+      }
+
       try {
         const res     = await apiFetch(`/api/sleeper/leagues/${user.user_id}`);
         const leagues = await res.json();
-        logDrawer.info(`Leagues response: ${JSON.stringify(leagues).slice(0, 200)}`);
 
         // A Sleeper outage now returns a 503 with {error, message} instead
         // of an empty array — show the retry message, not the "wrong username"
         // dead end.
         if (!res.ok) {
-          logDrawer.error(`leagues fetch failed (HTTP ${res.status})`);
           const msg = (leagues && (leagues.message || leagues.error))
                       || 'Couldn\'t reach Sleeper — try again shortly.';
           list.innerHTML = `<div class="league-empty">${msg}</div>`;
@@ -578,12 +449,10 @@
         }
 
         if (!leagues || !leagues.length) {
-          logDrawer.error('No 2024 leagues found for this user');
           list.innerHTML = `<div class="league-empty">No 2024 NFL leagues found for this account.<br>Make sure you're using your Sleeper username (not email).</div>`;
           return;
         }
 
-        logDrawer.info(`Found ${leagues.length} league(s): ${leagues.map(l => l.name).join(', ')}`);
         _cachedLeagues = leagues;
 
         // Auto-select the invited league if the user was referred and the
@@ -592,7 +461,6 @@
         if (invitedLeagueId) {
           const idx = leagues.findIndex(lg => lg.league_id === invitedLeagueId);
           if (idx >= 0) {
-            logDrawer.info(`Auto-selecting invited league: ${leagues[idx].name}`);
             localStorage.removeItem('ftf_invited_league');  // consume the intent
             // Defer slightly so the screen transition is perceptible
             setTimeout(() => selectLeague(idx, null), 200);
@@ -615,7 +483,6 @@
         _loadLeagueRankChips(leagues);
 
       } catch (e) {
-        logDrawer.error(`showLeagueScreen fetch error: ${e.message}`);
         list.innerHTML = `<div class="league-empty">Failed to load leagues. Check your connection.</div>`;
       }
     }
@@ -673,7 +540,7 @@
         const acBtn = document.getElementById('auto-confirm-toggle');
         if (acBtn) {
           acBtn.classList.toggle('active', autoConfirmEnabled);
-          acBtn.textContent = autoConfirmEnabled ? '\u26A1 I AM SPEED \u2014 ON' : '\u26A1 I AM SPEED \u2014 OFF';
+          acBtn.textContent = autoConfirmEnabled ? 'I AM SPEED \u2014 ON' : 'I AM SPEED \u2014 OFF';
         }
         const submitRow = document.querySelector('.submit-row');
         if (submitRow) submitRow.style.display = autoConfirmEnabled ? 'none' : '';
@@ -704,11 +571,10 @@
         if (!res.ok) methodSaved = false;
       } catch (e) {
         methodSaved = false;
-        logDrawer.warn(`Failed to save ranking method: ${e.message}`);
       }
 
       if (!methodSaved) {
-        showToast('\u26A0\uFE0F Could not save your choice — you may see this screen again');
+        showToast('Could not save your choice — you may see this screen again');
       }
 
       hideMethodScreen();
@@ -742,7 +608,6 @@
       const lg         = _cachedLeagues[idx];
       const leagueId   = lg.league_id;
       const leagueName = lg.name || 'Unnamed League';
-      logDrawer.action(`League selected: "${leagueName}" (${leagueId})`);
       if (el) {
         el.classList.add('loading');
         const arrow = el.querySelector('.league-item-arrow');
@@ -756,13 +621,10 @@
       showInitOverlay('Fetching player database…');
 
       // 1. Warm the Sleeper player cache (first call downloads ~5MB)
-      logDrawer.info('Warming player cache (/api/sleeper/players)…');
       try {
         const pr = await apiFetch('/api/sleeper/players');
         if (!pr.ok) throw new Error(`HTTP ${pr.status}`);
-        logDrawer.info('Player cache ready ✓');
       } catch (e) {
-        logDrawer.error(`Player cache failed: ${e.message}`);
         hideInitOverlay();
         showToast('Failed to load player database');
         resetLeagueItem(el);
@@ -771,7 +633,6 @@
       }
 
       setInitLabel('Fetching rosters…');
-      logDrawer.info('Fetching rosters + league users in parallel…');
 
       // 2. Fetch all rosters + league users in parallel
       let rosters, leagueUsers;
@@ -782,9 +643,7 @@
         ]);
         rosters     = await rRes.json();
         leagueUsers = await uRes.json();
-        logDrawer.info(`Rosters: ${rosters?.length ?? 'null'}  League users: ${leagueUsers?.length ?? 'null'}`);
       } catch (e) {
-        logDrawer.error(`Roster/user fetch failed: ${e.message}`);
         hideInitOverlay();
         showToast('Failed to fetch roster data');
         resetLeagueItem(el);
@@ -799,24 +658,18 @@
       }
 
       // 3. Find user's roster (owner OR co-owner)
-      logDrawer.info(`Looking for the roster owned or co-owned by ${user.user_id} among ${rosters?.length} rosters…`);
       const allOwnerIds = (rosters || []).map(r => r.owner_id).join(', ');
-      logDrawer.info(`All owner_ids in league: ${allOwnerIds}`);
 
       const rosterData = buildRosterData(rosters, usernameMap, user.user_id);
       if (!rosterData) {
-        logDrawer.error(`No roster owned or co-owned by ${user.user_id} — owner_ids present: ${allOwnerIds}`);
         hideInitOverlay();
         showToast('Could not find your roster in this league');
         resetLeagueItem(el);
         showLeagueScreen(user);
         return;
       }
-      logDrawer.info(`User roster: ${rosterData.userPlayerIds.length} players — ${rosterData.userPlayerIds.slice(0,5).join(', ')}…`);
       if (rosterData.leagueUserId !== user.user_id) {
-        logDrawer.info(`Co-owned roster — league identity is ${rosterData.leagueUserId}`);
       }
-      logDrawer.info(`Opponent rosters: ${rosterData.opponentRosters.length}`);
 
       setInitLabel('Building your rankings…');
 
@@ -826,7 +679,6 @@
       hideInitOverlay();
 
       if (!ok) {
-        logDrawer.error('initSession returned false — see log above for details');
         showToast('Failed to initialise session');
         resetLeagueItem(el);
         showLeagueScreen(user);
@@ -838,7 +690,6 @@
       currentLeagueId = leagueId;
       currentUserId   = user.user_id || null;
       renderAccountChip(user);
-      logDrawer.info(`League initialised — ${userPlayerIds.length} players imported`);
       showToast(`Roster loaded — ${userPlayerIds.length} players imported`);
 
       // Check if user has unlocked the trade finder — if not, show ranking method selection
@@ -913,15 +764,13 @@
 
     // ── Init Session ────────────────────────────────────────────────
     async function initSession(user, league, rosterData) {
-      logDrawer.info(`initSession — league=${league.league_id}  haveRosterData=${!!rosterData}`);
 
       if (!rosterData) {
         // Page-reload path: need to re-fetch roster data
-        logDrawer.info('No rosterData provided — fetching from Sleeper…');
         try {
           const pr = await apiFetch('/api/sleeper/players');
-          if (!pr.ok) { logDrawer.error(`Player cache HTTP ${pr.status}`); return false; }
-        } catch (e) { logDrawer.error(`Player cache error: ${e.message}`); return false; }
+          if (!pr.ok) return false;
+        } catch (e) { return false; }
 
         setInitLabel('Fetching rosters…');
         try {
@@ -935,15 +784,12 @@
           for (const u of (leagueUsers || [])) {
             usernameMap[u.user_id] = u.display_name || u.username || u.user_id;
           }
-          logDrawer.info(`Reload fetch: ${rosters?.length} rosters, owner_ids: ${(rosters||[]).map(r=>r.owner_id).join(', ')}`);
 
           rosterData = buildRosterData(rosters, usernameMap, user.user_id);
           if (!rosterData) {
-            logDrawer.error(`No roster owned or co-owned by ${user.user_id} on reload`);
             return false;
           }
-          logDrawer.info(`rosterData built: ${rosterData.userPlayerIds.length} user players, ${rosterData.opponentRosters.length} opponents`);
-        } catch (e) { logDrawer.error(`Roster reload error: ${e.message}`); return false; }
+        } catch (e) { return false; }
       }
 
       setInitLabel('Initialising rankings engine…');
@@ -968,7 +814,6 @@
       };
       // Track current user globally so invite URLs can carry ?ref={username}
       window._currentUser = user;
-      logDrawer.info(`POSTing /api/session/init — ${rosterData.userPlayerIds.length} user_player_ids, ${rosterData.opponentRosters.length} opponents`);
 
       try {
         const res  = await apiFetch('/api/session/init', {
@@ -978,27 +823,21 @@
         });
         if (!res) return false;  // session expired mid-flight (handled by apiFetch)
         const data = await res.json();
-        logDrawer.info(`session/init response: ${JSON.stringify(data).slice(0, 200)}`);
         if (data && data.ok) {
           // Persist session token for future requests
           if (data.token) {
             sessionToken = data.token;
             localStorage.setItem(LS_TOKEN, sessionToken);
-            logDrawer.info(`Session token stored (${sessionToken.slice(0, 8)}…)`);
           }
-          logDrawer.info(`session/init OK — ${data.player_count} players, ${data.opponents} opponents`);
           // Store the user's roster for the player picker
           if (data.user_roster && Array.isArray(data.user_roster)) {
             _myRoster = data.user_roster;
-            logDrawer.info(`Cached ${_myRoster.length} roster players for trade picker`);
             renderPlayerPicker();
           }
           return true;
         }
-        logDrawer.error(`session/init returned ok=false: ${JSON.stringify(data)}`);
         return false;
       } catch (e) {
-        logDrawer.error(`session/init exception: ${e.message}`);
         return false;
       }
     }
@@ -1363,6 +1202,7 @@
           user_id:      body.user_id || 'demo_user',
           display_name: body.display_name || 'Demo User',
           avatar_id:    null,
+          is_demo:      true,   // persists in localStorage; see _isDemoUser()
         };
         try {
           if (typeof saveUser === 'function') saveUser(demoUser);
@@ -2538,7 +2378,6 @@
       const user     = getSavedUser();
       if (!user) { logout(); return; }
 
-      logDrawer.action(`League switcher → "${lg.name}" (${lg.league_id})`);
       _setSwitcherDisabled(true);
       if (genBtn) genBtn.disabled = true;
       _setSwitcherStatus('Switching…');
@@ -2548,7 +2387,6 @@
         const pr = await apiFetch('/api/sleeper/players');
         if (!pr.ok) throw new Error(`Player cache HTTP ${pr.status}`);
       } catch (e) {
-        logDrawer.error(`League switch — player cache failed: ${e.message}`);
         _setSwitcherStatus('Failed');
         _setSwitcherDisabled(false);
         if (genBtn) genBtn.disabled = false;
@@ -2567,9 +2405,7 @@
         ]);
         rosters     = await rRes.json();
         leagueUsers = await uRes.json();
-        logDrawer.info(`Switch roster fetch: ${rosters?.length} rosters, ${leagueUsers?.length} users`);
       } catch (e) {
-        logDrawer.error(`League switch — roster fetch failed: ${e.message}`);
         _setSwitcherStatus('Failed');
         _setSwitcherDisabled(false);
         if (genBtn) genBtn.disabled = false;
@@ -2586,7 +2422,6 @@
 
       const rosterData = buildRosterData(rosters, usernameMap, user.user_id);
       if (!rosterData) {
-        logDrawer.error(`League switch — no roster owned or co-owned by ${user.user_id}`);
         _setSwitcherStatus('No roster');
         _setSwitcherDisabled(false);
         if (genBtn) genBtn.disabled = false;
@@ -2607,7 +2442,6 @@
       if (genBtn) genBtn.disabled = false;
 
       if (!ok) {
-        logDrawer.error(`League switch — initSession failed for ${lg.league_id}`);
         _setSwitcherStatus('Failed');
         const revertIdx = _cachedLeagues.findIndex(l => l.league_id === currentLeagueId);
         if (revertIdx >= 0) _setSwitcherSelectedIndex(revertIdx);
@@ -2622,7 +2456,6 @@
       // saved league from localStorage and rebuilds every view cleanly.
       saveLeague({ league_id: lg.league_id, league_name: lg.name });
       _setSwitcherStatus('✓ Switched — reloading…');
-      logDrawer.info(`League switched to "${lg.name}" — reloading`);
       // Small delay so the status text is visible before the reload yanks
       // the page out from under the user.
       setTimeout(() => { location.reload(); }, 400);
@@ -2683,9 +2516,7 @@
         }
 
         row.style.display = 'flex';
-        logDrawer.info(`Coverage: ${ranked}/${total} leaguemates have submitted rankings`);
       } catch (e) {
-        logDrawer.error(`Coverage fetch failed: ${e.message}`);
         document.getElementById('coverage-row').style.display = 'none';
       }
     }
@@ -3127,7 +2958,6 @@
         _leaguematePool = pool;
         _leaguematePoolLeague = leagueId;
       } catch (e) {
-        logDrawer.error(`Leaguemate pool fetch failed: ${e.message}`);
         showToast('Could not load leaguemate rosters');
       } finally {
         _leaguematePoolLoading = false;
@@ -3307,11 +3137,9 @@
         const payload = { league_id: leagueId, fairness_threshold: fairnessThreshold };
         if (pinnedGive.length > 0) {
           payload.pinned_give_players = pinnedGive;
-          logDrawer.info(`Pinned ${pinnedGive.length} player(s) to trade away`);
         }
         if (pinnedReceive.length > 0) {
           payload.pinned_receive_players = pinnedReceive;
-          logDrawer.info(`Pinned ${pinnedReceive.length} player(s) to acquire`);
         }
         const res  = await apiFetch('/api/trades/generate', {
           method:  'POST',
@@ -4481,7 +4309,6 @@
           showOutlookModal(true);   // required — no dismiss
         }
       } catch (e) {
-        logDrawer.warn('checkOutlookPrompt failed: ' + e.message);
       }
     }
 
@@ -4802,6 +4629,7 @@
         // strip on render (titles AND bodies) so history looks clean too.
         // Mirrors the regex in mobile TopBar.tsx.
         const strip = (s) => (s || '').replace(
+          // qa:allow-emoji — this pattern STRIPS legacy emoji from notification copy.
           /^\s*(?:\u{1F91D}|\u2705|\u274C|\u{1F3AF}|\u{1F389}|\u{23F3}|\u{1F4F0}|\u{1F440}|\u{1F3C8}|\u{1F44B}|\u{1F525}|\u{1F513}|\u{1F305}|\u{1F514})\s*/u, '');
         // Fact-first templates (#225) split the fact (title) from the
         // detail (body) - render both lines. Legacy rows restated the
@@ -5079,10 +4907,48 @@
         if (typeof loadMatches === 'function') loadMatches();
       } else if (id === 'view-league') {
         loadLeagueSummary();
+        loadMarketPulse();
       }
       if (id === 'view-trends') {
         loadTrends();
       }
+    }
+
+    // ── Market pulse (#/api/market/movers, flag market.movers) ────────
+    // Community 30-day movers, mirroring mobile's MarketPulseStrip placement
+    // inside the League screen. Public endpoint. Renders nothing at all unless
+    // it has rows — the value-snapshot window is cold for the first 30 days
+    // after a deploy, and an empty "Market pulse" box would read as broken.
+    let _marketPulseLoaded = false;
+    async function loadMarketPulse() {
+      if (_marketPulseLoaded) return;
+      const host = document.getElementById('market-pulse');
+      if (!host) return;
+      if (window.FTF_FLAG && !window.FTF_FLAG('market.movers')) return;
+      try {
+        const res = await fetch('/api/market/movers');
+        if (!res.ok) return;
+        const d = await res.json();
+        const risers = (d && d.risers) || [], fallers = (d && d.fallers) || [];
+        if (!risers.length && !fallers.length) return;
+
+        const row = (p, dir) => {
+          const pos = escapeHtml(p.position || '');
+          const pct = typeof p.pct_30d === 'number'
+            ? (p.pct_30d > 0 ? '+' : '') + p.pct_30d.toFixed(1) + '%' : '';
+          return `<div class="market-row">
+            <span class="pos-badge pos-${pos}">${pos}</span>
+            <span class="nm">${escapeHtml(p.name || '')}${p.team ? ' · ' + escapeHtml(p.team) : ''}</span>
+            <span class="pct ${dir}">${pct}</span>
+          </div>`;
+        };
+        document.getElementById('market-risers').innerHTML  = risers.slice(0, 5).map(p => row(p, 'up')).join('');
+        document.getElementById('market-fallers').innerHTML = fallers.slice(0, 5).map(p => row(p, 'down')).join('');
+        const sub = document.getElementById('market-pulse-sub');
+        if (sub) sub.textContent = `Community values, last ${d.window_days || 30} days`;
+        host.classList.remove('hidden');
+        _marketPulseLoaded = true;
+      } catch (_) { /* optional surface; the League view works without it */ }
     }
 
     // ── League Summary ────────────────────────────────────────────────
@@ -5098,7 +4964,6 @@
         const data = await res.json();
         renderLeagueSummary(data);
       } catch (e) {
-        logDrawer.warn('loadLeagueSummary failed: ' + e.message);
       }
       // Fire the contrarian leaderboard fetch in parallel — independent of
       // the summary response, rendered into its own section below the grid.
@@ -5191,7 +5056,6 @@
         const body = await res.json();
         renderLeagueRoster(body.members || []);
       } catch (e) {
-        if (typeof logDrawer !== 'undefined') logDrawer.warn('loadLeagueRoster failed: ' + e.message);
         list.innerHTML = '<div class="league-roster-empty">Could not load leaguemates.</div>';
       }
     }
@@ -5249,7 +5113,6 @@
         }
         renderLeaguematesUnlockList(body.members || []);
       } catch (e) {
-        if (typeof logDrawer !== 'undefined') logDrawer.warn('loadLeaguematesUnlockList failed: ' + e.message);
         list.innerHTML = '<div class="leaguemates-empty">Could not load leaguemates.</div>';
       }
     }
@@ -5331,7 +5194,6 @@
           `<div class="activity-feed-item">${_escapeHtml(ev.message || '')}</div>`
         ).join('');
       } catch (e) {
-        if (typeof logDrawer !== 'undefined') logDrawer.warn('loadLeagueActivityFeed failed: ' + e.message);
         list.innerHTML = '<div class="activity-feed-empty">Could not load activity.</div>';
       }
     }
@@ -5631,8 +5493,8 @@
       const url        = ctx.url        || buildInviteUrl();
       const leagueName = ctx.leagueName
         || (document.getElementById('league-summary-title')?.textContent || 'our league');
-      const title   = 'Fantasy Trade Finder';
-      let subject   = 'Join me on Fantasy Trade Finder';
+      const title   = 'Fleeced';
+      let subject   = 'Join me on Fleeced';
       let body;
 
       switch (channel) {
@@ -5644,36 +5506,36 @@
           body = `Joined @FantasyTradeFinder to find trades in ${leagueName}. Come ruin the league with me: ${url}`;
           break;
         case 'whatsapp':
-          body = `Hey! Been using Fantasy Trade Finder for ${leagueName} — it finds trades both sides actually like. Join me: ${url}`;
+          body = `Hey! Been using Fleeced for ${leagueName} — it finds trades both sides actually like. Join me: ${url}`;
           break;
         case 'groupme':
           body = `yo who's tired of "What you want for X?" — try this: ${url}`;
           break;
         case 'telegram':
-          body = `Hey! Using Fantasy Trade Finder for ${leagueName} — it finds trades both sides actually like. Join me: ${url}`;
+          body = `Hey! Using Fleeced for ${leagueName} — it finds trades both sides actually like. Join me: ${url}`;
           break;
         case 'email':
-          subject = `Join me on Fantasy Trade Finder — ${leagueName}`;
+          subject = `Join me on Fleeced — ${leagueName}`;
           body = [
             `Hey,`,
             ``,
-            `I've been using Fantasy Trade Finder to work out trades in ${leagueName}.`,
+            `I've been using Fleeced to work out trades in ${leagueName}.`,
             `You rank players how you actually value them, it figures out which of your leaguemates value them differently, and it surfaces trades you'd both say yes to — no more "what you want for X?" back-and-forth.`,
             ``,
             `Takes about 5 minutes to set up. Give it a shot:`,
             url,
             ``,
-            `— sent from Fantasy Trade Finder`,
+            `— sent from Fleeced`,
           ].join('\n');
           break;
         case 'sleeper':
-          body = `Join me on Fantasy Trade Finder for ${leagueName}: ${url}`;
+          body = `Join me on Fleeced for ${leagueName}: ${url}`;
           break;
         case 'copy':
           body = url;
           break;
         default:
-          body = `Join me on Fantasy Trade Finder for ${leagueName}: ${url}`;
+          body = `Join me on Fleeced for ${leagueName}: ${url}`;
           break;
       }
 
@@ -5822,7 +5684,6 @@
         const data = await res.json();
         renderLeagueContrarianLeaderboard(data);
       } catch (e) {
-        logDrawer.warn('loadLeagueContrarianLeaderboard failed: ' + e.message);
         body.innerHTML = '<div class="contrarian-leaderboard-error">Couldn\'t load leaderboard.</div>';
       }
     }
@@ -5933,7 +5794,6 @@
           el.classList.add('hidden');
         }
       } catch (e) {
-        logDrawer.warn('checkFormatEmptyState failed: ' + e.message);
         el.classList.add('hidden');
       }
     }
