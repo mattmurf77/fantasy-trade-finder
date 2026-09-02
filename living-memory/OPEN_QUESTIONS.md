@@ -7,6 +7,7 @@
 ---
 
 ## Table of Contents
+- [2026-09-01 — Open Items (trade-suggestion quality, dual-agent review)](#2026-09-01--open-items-trade-suggestion-quality-dual-agent-review)
 - [2026-08-22 — Open Items (trade-model restrictiveness)](#2026-08-22--open-items-trade-model-restrictiveness)
 - [2026-08-22 — Open Items (#384 merged calculator)](#2026-08-22--open-items-384-merged-calculator)
 - [2026-08-19 — Open Items (team review)](#2026-08-19--open-items-team-review)
@@ -23,6 +24,23 @@
 - [2026-05-21 — Open Items](#2026-05-21--open-items)
 - [Closed Questions (kept for cross-reference)](#closed-questions-kept-for-cross-reference)
 - [Conventions](#conventions)
+
+---
+
+## 2026-09-01 — Open Items (trade-suggestion quality, dual-agent review)
+
+### Q-035 — Does #350's "that player's valuation is way too high" mean FTF's consensus seed, or the user's own board?
+- **Why it matters:** it decides which fix is the right one, and the two do not overlap. The shipped deck caps — C4 `deck_headliner_cap` on `deck_centerpiece` (`backend/trade_service.py:4946`) and C4b `deck_give_headliner_cap` (`:1951`) — both key on the **consensus** `_job_seed_elo`. If the tester means FTF's price is wrong, those caps are the right instrument and the question is whether they bind. If he means his *own* board has an outlier, the caps are **structurally incapable of catching it** — a give-side player the user overrates but consensus does not is never the centerpiece — and the lever is instead `shrink_pseudocount` (currently 4, past which the user's board dominates `_shrink_user_elo`), because `mismatch_damp` (`:1875`) damps by *comparison count*, which a confident-and-wrong user maxes out.
+- **Also unresolved in the same breath:** both deck caps key on headliners only, so a player recurring as a **non-headliner** is uncapped by construction. On a 1×1 the sole give asset is the headliner, so C4b binds on ~75% of served cards; the escape hatch is multi-asset gives.
+- **Action to unblock:** operator says which he meant — or a single replay of his deck showing whether the recurring player's consensus seed or his own board Elo is the outlier.
+- **Discovered by:** 2026-09-01 dual-agent review of the open TradesHome quality items (#350/#363/#393/#401/#414); neither analyst could close it from the code, and the tester's phrasing does not disambiguate.
+- **Owner:** operator.
+
+### Q-036 — Which direction did #414's card run? If the user was GIVING CeeDee, the defect is more serious than diagnosed
+- **Why it matters:** the review's whole mechanism for #414 assumes the user was **receiving** CeeDee and expecting to add a sweetener. On that reading the diagnosis is a gate interaction: R1 `overpay_ok` kills any 1-for-1 with a gap ≥ 25% of the bigger asset, while `close_value_gap` only fires above a flat `sweetener_gap_threshold = 1539` — so the sweetenable window is **provably empty unless the bigger asset prices above ~6,156** (seed Elo ≈ 1,863, between the `firsts_2` and `firsts_3` floors). Below that, any gap large enough to trigger the sweetener was already killed by R1. But if the card ran the **other** way — user gives CeeDee, receives London — then `user_gain_ok_1for1` (#108, `backend/trade_service.py:1981`) should have killed it on the user's raw board unless `fit_premium_1for1` (`:3489`, capped at `fit_premium_max_loss` = 300) paid for it. That is a **different and more serious defect**, and it is not what the proposed sweetener recalibration fixes.
+- **Action to unblock:** pull the card's actual give/receive orientation from telemetry for mattmurf77 around 2026-08-31 (v1.16.13). One query.
+- **Discovered by:** 2026-09-01 dual-agent review. Raised by Analyst B, unresolved after cross-review; Analyst A independently closed its own uncertainty about *which threshold binds* but not about direction.
+- **Owner:** operator or whoever next runs a deck replay.
 
 ---
 
