@@ -68,6 +68,20 @@ branch; CI runs it regardless.
   a code read; only a real request caught it. Budget a runtime pass for web changes.
 
 ---
+## 2026-09-02 — D-172 `consensus_fit_weight` LIVE at 0.5; research write-back landed; two prototype worktrees ledgered
+
+**Where:** `main` @ `c65a7998` (PR #261). Knob live via admin PUT at `2026-09-02T18:04:26Z`. Nothing in flight on the engine.
+
+**What it is:** roster fit in the consensus generator's sort key — the 84.5% path where the partner's consensus gain was the exact negative of the user's and fit was absent from the sort. Full story: [D-172](DECISIONS.md), `docs/plans/consensus-fit-sort-key/`.
+
+**Owed, in order:**
+1. **Prod verification (results.md § After the flip):** split `basis == "consensus"` impression counts before/after `2026-09-02T18:04:26Z` (deck-size guardrail — the sweetener `seen` interaction is the one mechanism that can move it); for a viewer with `position_needs == []` and an unboarded partner thin where the viewer is deep, confirm that partner's cards now lead from the partner's deepest position. Rollback if anything looks wrong: `PUT /api/admin/config/consensus_fit_weight` `{"value": 0}` — no deploy.
+2. **Do not read the 2026-09-01→09-07 bake-off window** — censored by the Wednesday flip (D-099). Fix G-066 (arm C hardcodes `basis="divergence"`) before trusting any basis-split readout of arm D — that readout is the next decision input (does letting the partner win on value move match rate?).
+3. **Divergence-path sibling:** pool-fit term at N≤2 alongside a fix to the junk-stuffing surplus inflation (the clean 1-for-1 ranks 53,242nd behind stuffed siblings). Prototype exists: worktree `agent-a9c4c705ebb53fc71` @ `60aa4572`, ledgered in `docs/recovery/2026-09-02-consensus-fit-ship.md` — NOT merged, knob `v3_pool_fit_extra`.
+4. **Sweetener fix** (#414): lower `sweetener_gap_threshold` only WITH a best-effort fallback in `close_value_gap` (all-or-nothing today — a card partially closed to 1,535 at 1,539 ships unsweetened at 1,825 once the line is 750) and a one-line relative band. Measured, not built.
+5. The rest of the open backlog research is in the session brief *Where Trades Die* (local HTML; artifact publish was blocked by the permission classifier) and Q-035/Q-036.
+
+**Blocking / needs operator:** none for D-172. The two questions that gate the next engine work are Q-035 (whose valuation #350 means) and Q-036 (#414's direction).
 
 ## 2026-08-30b — second feedback batch (#409/#410/#411/#412) built + dual-QA green, shipping as v1.16.13
 
@@ -365,6 +379,7 @@ move, and the avatar lab's anchor test models the brief's described layout, not 
 
 ## Table of Contents
 - [2026-09-02 — web-parity branch is resynced, runtime-verified, and still waiting on the same merge decision](#2026-09-02--web-parity-branch-is-resynced-runtime-verified-and-still-waiting-on-the-same-merge-decision)
+- [2026-09-02 — D-172 `consensus_fit_weight` LIVE at 0.5; research write-back landed; two prototype worktrees ledgered](#2026-09-02--d-172-consensusfitweight-live-at-05-research-write-back-landed-two-prototype-worktrees-ledgered)
 - [2026-08-27 — #384 partner shape-summary regression SHIPPED to main; owed = one TestFlight checklist on the next build](#2026-08-27--384-partner-shape-summary-regression-shipped-to-main-owed--one-testflight-checklist-on-the-next-build)
 - [2026-08-26 — `fix/web-phase0` is caught up, gated green, and waiting on a merge decision](#2026-08-26--fixweb-phase0-is-caught-up-gated-green-and-waiting-on-a-merge-decision)
 - [2026-08-25 — v1.16.6 (132) is on TestFlight; everything owed is now RUNTIME verification, not code](#2026-08-25--v1166-132-is-on-testflight-everything-owed-is-now-runtime-verification-not-code)

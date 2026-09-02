@@ -54,6 +54,24 @@ FAIL), restoring it returned 175/175. A guard that has never been seen red is no
 
 **Not run, and why:** no EAS build, no TestFlight pass, no simulator (retired, [D-056](DECISIONS.md)).
 Nothing on this branch is mobile-visible. Nothing was pushed, merged or deployed.
+## 2026-09-02 — D-172 `consensus_fit_weight` shipped (PR #261), flipped live to 0.5
+
+Branch `claude/consensus-fit-sort-key` off `main` @ `ce3f443c`; merged as `c65a7998`. Full gates, three waivers surfaced and accepted (no new analytics event — existing impression corpus split by `basis` is the measurement; no `check-*.js` — no client file; no TestFlight checklist — replaced by the server-side prod verification in results.md).
+
+| Gate | Result |
+|---|---|
+| `PYTHONHASHSEED=0 pytest backend/tests -q` (builder, tip `e67abe38`) | **4508 passed, 1 skipped** (322 s) vs clean `origin/main` @ `ce3f443c` same day **4483 / 1** — delta = the new tests |
+| QA independent rerun (branch / pristine main) | 4508 / 1 and 4483 / 1 — confirmed |
+| After QA fixes (`1d91acdf`): `test_consensus_fit_sort_key` + `test_bakeoff_arm_a_golden` + `test_engine_quality_golden` | **39 passed** (25 + 11 + 3); neighbouring consensus-path modules 123 passed |
+| Goldens at the default | byte-identical vs a `git archive origin/main` tree, engine-quality fixture (174 rows) and mirror fixture (74 rows) |
+| QA independent w=0 identity | own 37-scenario fixture, 5,307 cards, byte-identical after stripping the probe field; 0 `replacement_levels` / 0 `marginal_value` calls at w=0 |
+| Sabotages (byte-copy restore, `cmp`, `__pycache__` cleared) | S1 blend→`seed_value` (mirror red) · S2 drop shed key (golden red) · S3 stamp at w=0 (red) · S4 hoist read to import (mirror red) · S-C remove `is_pick_asset` guard (red after the `team="PICK", position="RB"` fixture was added — was NOT caught before) · F2 delete the arm-A pin (`test_consensus_fit_pin_is_load_bearing` red; the old golden stayed green — the gap QA reported) |
+| QA fuzz at w=0.5 | 200 random rosters: 0 exceptions, 0 sign-test violations, 0 fairness violations, 0 out-of-range stamps; uncapped set identical 200/200 with the sweetener off, 198/200 at 1539 (order-dependent `seen` dedupe; count unchanged) |
+| Perf | fixed ~0.35 ms per pair at w>0 (2 `replacement_levels` after the hoist); consensus loops have no deadline; 150 capped decks 0 shrank |
+| Harness (prod pins, frozen clock, 120 cells ×3 thresholds) | baseline byte-identical twice; arm A identical at every w; junk<450 unchanged at w=0.5 in every live cell; the only deck shrinks in the corpus are at w=0.25 |
+| CI on final sha `1de37224` | backend-tests ✓ · mobile-typecheck ✓ · maestro-testid-lint ✓ |
+| Sim gate | D-056 posture; substitute evidence: code-walk.md + the above |
+| **Prod** | deploy landed: `GET /api/admin/config` row count 237 → 238 with `consensus_fit_weight = 0.0`; flipped to **0.5** at `2026-09-02T18:04:26Z`; engine-metrics 7-day baseline snapshot taken before the flip (consensus shown 1,358 / divergence 555; decisions n=3 / n=13 — too thin for like-rate reads; compare impression counts and positional mix) |
 
 ## 2026-09-01 — Trade-engine quality research: prod config read, knob-only harness sweep, pool-fit prototype (read-only; nothing shipped)
 
