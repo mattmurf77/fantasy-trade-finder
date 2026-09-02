@@ -3,10 +3,19 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Dynasty Rankings — Fantasy Trade Finder</title>
+  <title>Fleeced — Dynasty Trade Finder</title>
+  <meta name="description" content="Rank your dynasty players, compare boards with your leaguemates, and find trades where both sides come out ahead. Free, works with Sleeper.">
+  <link rel="canonical" href="https://fantasy-trade-finder.onrender.com/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fleeced: Dynasty Trade Finder">
+  <meta property="og:title" content="Fleeced — Dynasty Trade Finder">
+  <meta property="og:description" content="Rank your dynasty players, compare boards with your leaguemates, and find trades where both sides come out ahead. Free, works with Sleeper.">
+  <meta property="og:url" content="https://fantasy-trade-finder.onrender.com/">
+  <meta name="twitter:card" content="summary">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/tokens.css">
   <link rel="stylesheet" href="/css/styles.css">
   <style>
     /* League-card rank chip (#14/#21 — flag league.power_rankings).
@@ -57,7 +66,7 @@
         </h1>
 
         <p class="cb-sub">
-          Fantasy Trade Finder compares how you and your leaguemates value every player,
+          Fleeced compares how you and your leaguemates value every player,
           then finds trades where both sides come out ahead. No more "Hey! What do you want for X player?"
         </p>
 
@@ -124,6 +133,7 @@
           </div>
           <div class="legal-links-row">
             <a href="/faq.html" class="faq-link">FAQ</a>
+            <a href="/contact.html" class="faq-link">Contact</a>
             <a href="/privacy" class="faq-link">Privacy</a>
             <a href="/terms" class="faq-link">Terms</a>
           </div>
@@ -131,6 +141,110 @@
       </div>
 
     </div>
+
+    <!-- ═══════════════════════════════════════════════════
+         P2-3 · Below-the-fold: what this is and how it works.
+         Landing was one viewport with no feature section at all.
+
+         No app-promotion CTA here on purpose: there is no TestFlight or
+         App Store link anywhere in this repo to point one at (see
+         docs/feedback/items/239-invite-universal-links/status.md), and a
+         dead "become a tester" button is worse than none. The moment a
+         link exists, this is where it goes — see plan.md P4-2.
+
+         Every claim below is behavior that actually ships. Do not add a
+         capability here before it is real on the client.
+    ════════════════════════════════════════════════════ -->
+    <section class="lp-below" aria-labelledby="lp-how-title">
+      <div class="lp-wrap">
+
+        <h2 class="lp-title" id="lp-how-title">How it works</h2>
+        <p class="lp-lede">
+          Most trade tools hand everyone the same number and call the argument settled.
+          This one starts from the fact that you and your leaguemate genuinely disagree —
+          and looks for the trades that disagreement makes possible.
+        </p>
+
+        <ol class="lp-steps">
+          <li class="lp-step">
+            <span class="lp-step-n" aria-hidden="true">1</span>
+            <h3 class="lp-step-t">Connect your league</h3>
+            <p class="lp-step-d">
+              Sleeper, ESPN, or MyFantasyLeague. Sleeper needs a username and no password.
+              Your roster, your leaguemates&#8217; rosters, and your league&#8217;s scoring
+              settings come across as they are.
+            </p>
+          </li>
+          <li class="lp-step">
+            <span class="lp-step-n" aria-hidden="true">2</span>
+            <h3 class="lp-step-t">Build your board</h3>
+            <p class="lp-step-d">
+              Answer quick 3-player matchups and an Elo engine turns those comparisons into
+              real valuations. It starts from consensus values, so the board is useful before
+              you answer anything and becomes yours as you go. Prefer to skip the questions?
+              Drag a list, or set positional tiers instead.
+            </p>
+          </li>
+          <li class="lp-step">
+            <span class="lp-step-n" aria-hidden="true">3</span>
+            <h3 class="lp-step-t">Find trades that both sides want</h3>
+            <p class="lp-step-d">
+              Your board gets compared against each leaguemate&#8217;s, and you get packages
+              where <em>both</em> teams gain in their own values &mdash; not deals that are
+              only good if the other manager is asleep.
+            </p>
+          </li>
+          <li class="lp-step">
+            <span class="lp-step-n" aria-hidden="true">4</span>
+            <h3 class="lp-step-t">Send it for real</h3>
+            <p class="lp-step-d">
+              Propose the trade straight into your actual league without leaving the app.
+              No retyping it into Sleeper and hoping you got the pick years right.
+            </p>
+          </li>
+        </ol>
+
+        <h2 class="lp-title lp-title-sep">Why the number is yours</h2>
+        <div class="lp-points">
+          <div class="lp-point">
+            <h3 class="lp-point-t">Your rankings, not a market average</h3>
+            <p class="lp-point-d">
+              A consensus chart tells you what everyone already thinks. It cannot tell you
+              that you are high on a rookie and your leaguemate is not &mdash; which is the
+              only reason a trade ever happens.
+            </p>
+          </div>
+          <div class="lp-point">
+            <h3 class="lp-point-t">Both boards, every time</h3>
+            <p class="lp-point-d">
+              Every suggestion is scored twice: once in your values and once in theirs. A deal
+              that only wins on one board is not a trade, it is a pitch that gets declined.
+            </p>
+          </div>
+          <div class="lp-point">
+            <h3 class="lp-point-t">Picks priced like assets</h3>
+            <p class="lp-point-d">
+              Rookie picks carry real, tiered values that move with the round and the year,
+              so a package with a future second in it gets read honestly instead of rounded off.
+            </p>
+          </div>
+          <div class="lp-point">
+            <h3 class="lp-point-t">Built for dynasty</h3>
+            <p class="lp-point-d">
+              Superflex and TE-premium change what a quarterback is worth, so they change what
+              you get shown. Your league&#8217;s format is an input, not a footnote.
+            </p>
+          </div>
+        </div>
+
+        <p class="lp-foot">
+          Questions about how the values are built? <a href="/ranking-method.html">Read the method</a>,
+          or start with the <a href="/faq.html">FAQ</a>.
+        </p>
+
+      </div>
+    </section>
+
   </div>
 
   <!-- ═══════════════════════════════════════════════════
@@ -144,6 +258,13 @@
       </div>
       <div class="league-list" id="league-list">
         <div class="league-loading">Loading your leagues…</div>
+      </div>
+      <!-- Escape hatch. The league screen is a full-screen overlay with no
+           other exit; without this, any failure to list leagues (Sleeper
+           outage, wrong account, demo session) traps the user permanently
+           because the saved user persists in localStorage across visits. -->
+      <div class="league-escape">
+        <button type="button" class="league-escape-btn" onclick="startOver()">Start over</button>
       </div>
     </div>
   </div>
@@ -241,10 +362,10 @@
   </header>
 
   <!-- Top-level nav — tier 1 -->
-  <div class="nav-tabs nav-tier-1" role="tablist" aria-label="Main sections" style="max-width:980px;width:100%;">
+  <nav class="nav-tabs nav-tier-1" role="tablist" aria-label="Main sections" style="max-width:980px;width:100%;">
     <button class="nav-tab active" role="tab" aria-selected="true"  data-group="rank"   onclick="switchTabGroup('rank', this)">Rank Players</button>
     <button class="nav-tab"         role="tab" aria-selected="false" data-group="trades" onclick="switchTabGroup('trades', this)">Find Trades</button>
-  </div>
+  </nav>
 
   <!-- Tier 2 — contextual sub-nav. Only one is visible at a time. -->
   <div class="nav-subtabs" id="subtabs-rank" role="tablist" aria-label="Rank views" style="max-width:980px;width:100%;">
@@ -270,6 +391,7 @@
   <!-- ═══════════════════════════════════════════════════
        VIEW: RANK
   ════════════════════════════════════════════════════ -->
+  <main id="app-main">
   <div class="view active" id="view-rank">
 
   <!-- Scoring-format toggle (1QB PPR / SF TEP) — mirrored on every ranking view -->
@@ -750,6 +872,7 @@
                _applyPowerRankingsFlag() in web/js/app.js). Mirrors the
                positional-tiers tab-link pattern. -->
           <a class="tab hidden" id="league-rankings-link" href="/league-rankings.html"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 17V9M10 17V3M17 17v-6"/></svg> League rankings</a>
+          <a class="tab" id="calculator-link" href="/calculator.html"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3h12v14H4zM7 7h6M7 11h2M7 14h2M12 11v3"/></svg> Calculator</a>
           <button class="invite-btn" id="invite-btn" onclick="openInviteModal()"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg> Invite</button>
         </div>
       </div>
@@ -769,6 +892,23 @@
       <div class="summary-grid" id="league-summary-grid">
         <!-- Stat cards rendered by loadLeagueSummary() -->
       </div>
+
+      <!-- Market pulse — community 30d risers/fallers (GET /api/market/movers,
+           flag market.movers). Mirrors where mobile puts MarketPulseStrip:
+           inside the League screen, not as a standalone page. Hidden until it
+           has rows, so a cold value-snapshot window renders nothing. -->
+      <section class="market-pulse hidden" id="market-pulse" aria-label="Market pulse">
+        <div class="market-pulse-head">
+          <span class="market-pulse-title">Market pulse</span>
+          <span class="market-pulse-sub" id="market-pulse-sub"></span>
+        </div>
+        <div class="market-pulse-cols">
+          <div class="market-pulse-col"><div class="market-pulse-label up">Rising</div>
+            <div id="market-risers"></div></div>
+          <div class="market-pulse-col"><div class="market-pulse-label down">Falling</div>
+            <div id="market-fallers"></div></div>
+        </div>
+      </section>
 
       <!-- ── League roster (join status) ─────────────────────────────────
            Lists each leaguemate with a joined / not-joined badge.
@@ -852,6 +992,7 @@
       </div>
     </div>
   </div>
+  </main>
 
   <!-- Connect another league modal — URL paste for Sleeper / ESPN / MFL -->
   <div class="invite-modal hidden" id="connect-league-modal" onclick="closeConnectLeagueModalIfBackdrop(event)">

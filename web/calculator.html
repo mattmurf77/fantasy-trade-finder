@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trade calculator — Fleeced: Dynasty Trade Finder</title>
+  <meta name="description" content="Build a dynasty trade by hand and get a fairness verdict, the gap in draft-pick terms, and one-tap suggestions to even it out — priced by the same engine that finds your trades.">
+  <meta name="robots" content="noindex">
+  <link rel="canonical" href="https://fantasy-trade-finder.onrender.com/calculator.html">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fleeced: Dynasty Trade Finder">
+  <meta property="og:title" content="Trade calculator — Fleeced: Dynasty Trade Finder">
+  <meta property="og:description" content="Build a dynasty trade by hand and get a fairness verdict priced by the same engine that finds your trades.">
+  <meta property="og:url" content="https://fantasy-trade-finder.onrender.com/calculator.html">
+  <meta name="twitter:card" content="summary">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/tokens.css">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { max-width: 100vw; overflow-x: hidden; }
+    :focus-visible { outline: 2px solid var(--ice); outline-offset: 2px; }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+    }
+    body { background: var(--ink-0); color: var(--chalk); font-family: var(--font-ui); line-height: 1.5; }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 24px 20px 72px; }
+    .back-link { color: var(--chalk-dim); text-decoration: none; font-size: 13px; display: inline-flex;
+                 align-items: center; min-height: 44px; margin-bottom: 6px; }
+    .back-link:hover { color: var(--chalk); }
+    h1 { font-family: var(--font-display); font-size: clamp(26px,5vw,36px); font-weight: 700;
+         text-transform: uppercase; letter-spacing: .5px; margin: 0 0 6px; }
+    .lede { color: var(--chalk-dim); font-size: 14px; margin-bottom: 20px; }
+
+    .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 18px; }
+    .seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: var(--r-sm); overflow: hidden; }
+    .seg button { background: none; border: none; color: var(--chalk-dim); font-family: inherit; font-size: 13px;
+                  font-weight: 600; padding: 0 14px; min-height: 44px; cursor: pointer; }
+    .seg button[aria-pressed="true"] { background: var(--ice); color: var(--on-ice); }
+    select { background: var(--ink-2); color: var(--chalk); border: 1px solid var(--line-strong);
+             border-radius: var(--r-sm); font-family: inherit; font-size: 13px; min-height: 44px; padding: 0 10px; }
+
+    .sides { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    @media (max-width: 720px) { .sides { grid-template-columns: 1fr; } }
+    .side { background: var(--ink-1); border: 1px solid var(--line); border-radius: var(--r-md); padding: 14px; }
+    .side h2 { font-family: var(--font-display); font-size: 15px; font-weight: 700; text-transform: uppercase;
+               letter-spacing: .5px; margin: 0 0 10px; color: var(--chalk-dim); }
+    .side-total { font-family: var(--font-data); font-size: 13px; color: var(--chalk-dim); float: right; }
+    .search { position: relative; margin-bottom: 10px; }
+    .search input { width: 100%; background: var(--ink-2); color: var(--chalk); border: 1px solid var(--line-strong);
+                    border-radius: var(--r-sm); font-family: inherit; font-size: 14px; min-height: 44px; padding: 0 12px; }
+    .results { position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 4px); background: var(--ink-2);
+               border: 1px solid var(--line-strong); border-radius: var(--r-sm); max-height: 260px; overflow-y: auto; }
+    .results:empty { display: none; }
+    .results button { display: flex; width: 100%; gap: 8px; align-items: center; background: none; border: none;
+                      color: var(--chalk); font-family: inherit; font-size: 13px; text-align: left;
+                      padding: 9px 10px; cursor: pointer; min-height: 44px; }
+    .results button:hover, .results button:focus-visible { background: var(--ink-3); }
+    .asset { display: flex; gap: 8px; align-items: center; background: var(--ink-2); border: 1px solid var(--line);
+             border-radius: var(--r-sm); padding: 8px 10px; margin-bottom: 6px; }
+    .asset .nm { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .asset .val { font-family: var(--font-data); font-size: 12px; color: var(--chalk-dim); }
+    .asset .rm { background: none; border: none; color: var(--chalk-faint); cursor: pointer; font-size: 16px;
+                 min-width: 44px; min-height: 44px; }
+    .asset .rm:hover { color: var(--neg); }
+    .pos { font-family: var(--font-data); font-size: 10px; font-weight: 700; padding: 2px 5px; border-radius: var(--r-xs);
+           color: var(--ink-0); }
+    .pos-QB { background: var(--qb); } .pos-RB { background: var(--rb); }
+    .pos-WR { background: var(--wr); } .pos-TE { background: var(--te); }
+    .pos-PICK { background: var(--picks); }
+    .empty-side { color: var(--chalk-faint); font-size: 13px; padding: 10px 0; }
+
+    .verdict { margin-top: 18px; background: var(--ink-1); border: 1px solid var(--line); border-radius: var(--r-md); padding: 16px; }
+    .verdict-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; }
+    .verdict-label { font-family: var(--font-display); font-size: 22px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; }
+    .v-even { color: var(--pos); } .v-fair { color: var(--ice); } .v-unfair { color: var(--warn); }
+    .verdict-sub { color: var(--chalk-dim); font-size: 13px; }
+    .meter { height: 8px; background: var(--ink-3); border-radius: var(--r-pill); overflow: hidden; margin: 12px 0 6px; }
+    .meter span { display: block; height: 100%; background: var(--ice); }
+    .totals { display: flex; justify-content: space-between; font-family: var(--font-data); font-size: 12px; color: var(--chalk-dim); }
+    .gap { margin-top: 12px; font-size: 13px; color: var(--chalk-dim); }
+    .eveners { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .eveners button { background: none; border: 1px solid var(--line-strong); border-radius: var(--r-pill);
+                      color: var(--chalk); font-family: inherit; font-size: 12px; padding: 0 14px; min-height: 44px; cursor: pointer; }
+    .eveners button:hover { border-color: var(--ice); color: var(--ice); }
+    details { margin-top: 12px; }
+    summary { cursor: pointer; color: var(--chalk-dim); font-size: 13px; min-height: 44px; display: flex; align-items: center; }
+    .adj { font-size: 12px; color: var(--chalk-dim); margin-top: 8px; padding-left: 12px; border-left: 2px solid var(--line-strong); }
+    .adj b { color: var(--chalk); font-weight: 600; }
+    .note { margin-top: 14px; font-size: 12px; color: var(--chalk-faint); }
+    .signin { background: var(--ink-1); border: 1px solid var(--line); border-radius: var(--r-md); padding: 20px; text-align: center; }
+    .signin a { color: var(--ice); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="back-link" href="/?view=trades">‹ Back</a>
+    <h1>Trade calculator</h1>
+    <p class="lede">Build a trade by hand. Priced by the same engine that finds your trades, so the numbers match.</p>
+
+    <div id="gate"></div>
+
+    <div id="app" hidden>
+      <div class="bar">
+        <div class="seg" role="group" aria-label="Pricing basis">
+          <button type="button" id="mode-live" aria-pressed="true">Real values</button>
+          <button type="button" id="mode-league" aria-pressed="false">In league</button>
+        </div>
+        <select id="opponent" hidden aria-label="Trade partner"></select>
+        <div class="seg" role="group" aria-label="Scoring format">
+          <button type="button" id="fmt-1qb_ppr" aria-pressed="true">1QB PPR</button>
+          <button type="button" id="fmt-sf_tep" aria-pressed="false">SF TEP</button>
+        </div>
+      </div>
+
+      <div class="sides">
+        <section class="side">
+          <h2>You give <span class="side-total" id="total-give">0</span></h2>
+          <div class="search">
+            <input type="text" id="search-give" placeholder="Add a player or pick…" autocomplete="off"
+                   aria-label="Search players to give">
+            <div class="results" id="results-give" role="listbox"></div>
+          </div>
+          <div id="list-give"><p class="empty-side">Nothing yet.</p></div>
+        </section>
+
+        <section class="side">
+          <h2>You receive <span class="side-total" id="total-receive">0</span></h2>
+          <div class="search">
+            <input type="text" id="search-receive" placeholder="Add a player or pick…" autocomplete="off"
+                   aria-label="Search players to receive">
+            <div class="results" id="results-receive" role="listbox"></div>
+          </div>
+          <div id="list-receive"><p class="empty-side">Nothing yet.</p></div>
+        </section>
+      </div>
+
+      <div class="verdict" id="verdict" hidden aria-live="polite"></div>
+      <p class="note" id="basis-note"></p>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    'use strict';
+    var LS_TOKEN = 'fumble_session_token', LS_LEAGUE = 'sleeper_league', LS_USER = 'sleeper_user';
+    var token = null, league = null, user = null;
+    try {
+      token  = localStorage.getItem(LS_TOKEN);
+      league = JSON.parse(localStorage.getItem(LS_LEAGUE) || 'null');
+      user   = JSON.parse(localStorage.getItem(LS_USER) || 'null');
+    } catch (_) {}
+
+    var state = { format: '1qb_ppr', mode: 'live', opponent: '', give: [], receive: [], pool: [], evalSeq: 0 };
+    var $ = function (id) { return document.getElementById(id); };
+    var esc = function (s) { return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); };
+    var num = function (n) { return n == null ? '—' : Math.round(n).toLocaleString(); };
+
+    function headers(json) {
+      var h = {};
+      if (json) h['Content-Type'] = 'application/json';
+      if (token) h['X-Session-Token'] = token;   // lets the server apply stud-tax mode
+      return h;
+    }
+
+    // ── Gate: this is a signed-in tool, same as the app ────────────────────
+    if (!token) {
+      $('gate').innerHTML =
+        '<div class="signin"><p>Connect your Sleeper account to use the calculator — ' +
+        'it prices trades against your league and your board.</p>' +
+        '<p style="margin-top:10px"><a href="/">Connect with Sleeper →</a></p></div>';
+      return;
+    }
+    $('gate').hidden = true;
+    $('app').hidden = false;
+
+    // ── Pool ──────────────────────────────────────────────────────────────
+    function loadPool() {
+      state.pool = [];
+      return fetch('/api/trade/values?scoring_format=' + encodeURIComponent(state.format),
+                   { headers: headers(false) })
+        .then(function (r) { return r.ok ? r.json() : { players: [] }; })
+        .then(function (d) { state.pool = (d && d.players) || []; })
+        .catch(function () { state.pool = []; });
+    }
+
+    function search(box, side) {
+      var q = box.value.trim().toLowerCase();
+      var out = $('results-' + side);
+      if (q.length < 2) { out.innerHTML = ''; return; }
+      var chosen = state.give.concat(state.receive).map(function (a) { return a.id; });
+      var hits = state.pool.filter(function (p) {
+        return chosen.indexOf(p.id) === -1 && String(p.name).toLowerCase().indexOf(q) !== -1;
+      }).slice(0, 20);
+      out.innerHTML = hits.map(function (p, i) {
+        return '<button type="button" data-side="' + side + '" data-i="' + i + '">' +
+               '<span class="pos pos-' + esc(p.is_pick ? 'PICK' : p.position) + '">' +
+               esc(p.is_pick ? 'PICK' : p.position) + '</span>' +
+               '<span style="flex:1">' + esc(p.name) + (p.team && !p.is_pick ? ' · ' + esc(p.team) : '') + '</span>' +
+               '<span class="val">' + num(p.value) + '</span></button>';
+      }).join('');
+      out._hits = hits;
+    }
+
+    function addAsset(side, p) {
+      state[side].push(p);
+      $('search-' + side).value = '';
+      $('results-' + side).innerHTML = '';
+      render();
+    }
+    function removeAsset(side, id) {
+      state[side] = state[side].filter(function (a) { return a.id !== id; });
+      render();
+    }
+
+    function renderSide(side) {
+      var list = $('list-' + side), items = state[side];
+      $('total-' + side).textContent = num(items.reduce(function (s, p) { return s + (p.value || 0); }, 0));
+      if (!items.length) { list.innerHTML = '<p class="empty-side">Nothing yet.</p>'; return; }
+      list.innerHTML = items.map(function (p) {
+        var pos = p.is_pick ? 'PICK' : p.position;
+        return '<div class="asset"><span class="pos pos-' + esc(pos) + '">' + esc(pos) + '</span>' +
+               '<span class="nm">' + esc(p.name) + '</span>' +
+               '<span class="val">' + num(p.value) + '</span>' +
+               '<button class="rm" type="button" data-side="' + side + '" data-id="' + esc(p.id) +
+               '" aria-label="Remove ' + esc(p.name) + '">×</button></div>';
+      }).join('');
+    }
+
+    // ── Evaluate ──────────────────────────────────────────────────────────
+    function evaluate() {
+      var box = $('verdict');
+      if (!state.give.length && !state.receive.length) { box.hidden = true; return; }
+      // A one-sided trade has no verdict to give. The server returns verdict:null
+      // here; rendering that as "even" would state something false.
+      if (!state.give.length || !state.receive.length) {
+        var need = state.give.length ? 'receive' : 'give';
+        box.hidden = false;
+        box.innerHTML = '<p class="verdict-sub">Add at least one asset to the <b>' +
+          (need === 'give' ? 'give' : 'receive') + '</b> side to price this trade.</p>';
+        $('basis-note').textContent = '';
+        return;
+      }
+      var body = {
+        give_player_ids:    state.give.map(function (p) { return p.id; }),
+        receive_player_ids: state.receive.map(function (p) { return p.id; }),
+        scoring_format:     state.format
+      };
+      if (state.mode === 'league' && league && state.opponent) {
+        body.league_id = league.league_id;
+        body.opponent_user_id = state.opponent;
+      }
+      var seq = ++state.evalSeq;
+      fetch('/api/trade/evaluate', { method: 'POST', headers: headers(true), body: JSON.stringify(body) })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) { if (seq === state.evalSeq) renderVerdict(d); })
+        .catch(function () { if (seq === state.evalSeq) renderVerdict(null); });
+    }
+
+    function renderVerdict(d) {
+      var box = $('verdict');
+      if (!d) { box.hidden = false; box.innerHTML = '<p class="verdict-sub">Couldn’t price that trade. Try again.</p>'; return; }
+      box.hidden = false;
+      var v = d.verdict || 'even';
+      if (!d.verdict) {
+        box.innerHTML = '<p class="verdict-sub">Couldn’t price that combination.</p>';
+        $('basis-note').textContent = '';
+        return;
+      }
+      var favorsTxt = d.favors === 'even' || !d.favors ? 'Even both ways'
+        : (d.favors === 'give' ? 'Favors you' : 'Favors them');
+      var pct = Math.round(Math.max(0, Math.min(1, d.fairness == null ? 1 : d.fairness)) * 100);
+
+      var html = '<div class="verdict-head"><span class="verdict-label v-' + esc(v) + '">' + esc(v) + '</span>' +
+                 '<span class="verdict-sub">' + esc(favorsTxt) + '</span></div>' +
+                 '<div class="meter"><span style="width:' + pct + '%"></span></div>' +
+                 '<div class="totals"><span>You give ' + num(d.give_value) + '</span>' +
+                 '<span>You receive ' + num(d.receive_value) + '</span></div>';
+
+      if (d.gap && d.gap.value) {
+        var who = d.gap.add_to === 'give' ? 'your side' : 'their side';
+        html += '<p class="gap">Gap of <b>' + num(d.gap.value) + '</b> — add to ' + esc(who);
+        if (d.gap.pick_equivalent) {
+          var lbl = d.gap.pick_equivalent.label;
+          var art = /^[aeiou]/i.test(lbl) ? 'an' : 'a';   // "an Early 3rd", not "a Early 3rd"
+          html += ', about ' + art + ' <b>' + esc(lbl) + '</b>';
+        }
+        html += '.</p>';
+      }
+      if (d.eveners && d.eveners.length) {
+        html += '<div class="eveners">' + d.eveners.slice(0, 4).map(function (e, i) {
+          return '<button type="button" data-evener="' + i + '">+ ' + esc(e.name) + '</button>';
+        }).join('') + '</div>';
+        box._eveners = d.eveners;
+        box._evenerSide = (d.gap && d.gap.add_to) === 'give' ? 'give' : 'receive';
+      }
+      var adj = d.adjustments || {};
+      var rows = (adj.give || []).map(function (a) { return ['Your side', a]; })
+        .concat((adj.receive || []).map(function (a) { return ['Their side', a]; }));
+      if (rows.length) {
+        html += '<details><summary>Why these numbers</summary>' + rows.map(function (r) {
+          return '<p class="adj"><b>' + esc(r[0]) + ' · ' + esc(r[1].label) + '</b> (' +
+                 (r[1].amount > 0 ? '+' : '') + num(r[1].amount) + ')<br>' + esc(r[1].why) + '</p>';
+        }).join('') + '</details>';
+      }
+      box.innerHTML = html;
+
+      $('basis-note').textContent =
+        d.basis === 'divergence'
+          ? 'Priced on both boards — yours and theirs.'
+          : (state.mode === 'league'
+              ? 'Priced on consensus values — your partner hasn’t ranked yet.'
+              : 'Priced on consensus values.');
+    }
+
+    function render() { renderSide('give'); renderSide('receive'); evaluate(); }
+
+    // ── Wiring ────────────────────────────────────────────────────────────
+    ['give', 'receive'].forEach(function (side) {
+      var box = $('search-' + side);
+      box.addEventListener('input', function () { search(box, side); });
+      $('results-' + side).addEventListener('click', function (e) {
+        var b = e.target.closest('button[data-i]'); if (!b) return;
+        addAsset(side, this._hits[+b.dataset.i]);
+      });
+      $('list-' + side).addEventListener('click', function (e) {
+        var b = e.target.closest('button[data-id]'); if (!b) return;
+        removeAsset(side, b.dataset.id);
+      });
+    });
+
+    $('verdict').addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-evener]'); if (!b) return;
+      var ev = (this._eveners || [])[+b.dataset.evener];
+      if (ev) addAsset(this._evenerSide || 'receive', ev);
+    });
+
+    ['1qb_ppr', 'sf_tep'].forEach(function (f) {
+      $('fmt-' + f).addEventListener('click', function () {
+        if (state.format === f) return;
+        state.format = f;
+        $('fmt-1qb_ppr').setAttribute('aria-pressed', String(f === '1qb_ppr'));
+        $('fmt-sf_tep').setAttribute('aria-pressed', String(f === 'sf_tep'));
+        // Values are format-specific; drop selections rather than show stale numbers.
+        state.give = []; state.receive = [];
+        loadPool().then(render);
+      });
+    });
+
+    function setMode(m) {
+      state.mode = m;
+      $('mode-live').setAttribute('aria-pressed', String(m === 'live'));
+      $('mode-league').setAttribute('aria-pressed', String(m === 'league'));
+      $('opponent').hidden = m !== 'league';
+      evaluate();
+    }
+    $('mode-live').addEventListener('click', function () { setMode('live'); });
+    $('mode-league').addEventListener('click', function () {
+      if (!league) { alert('Pick a league in the app first.'); return; }
+      setMode('league');
+    });
+    $('opponent').addEventListener('change', function () { state.opponent = this.value; evaluate(); });
+
+    // League partners — only meaningful in "In league" mode.
+    if (league && league.league_id) {
+      fetch('/api/league/members?league_id=' + encodeURIComponent(league.league_id), { headers: headers(false) })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          var members = (d && (d.members || d)) || [];
+          var me = user && String(user.user_id);
+          var opts = members.filter(function (m) { return String(m.user_id) !== me; });
+          if (!opts.length) return;
+          $('opponent').innerHTML = '<option value="">Choose a partner…</option>' + opts.map(function (m) {
+            return '<option value="' + esc(m.user_id) + '">' +
+                   esc(m.display_name || m.username || m.team_name || m.user_id) + '</option>';
+          }).join('');
+        })
+        .catch(function () { /* partner list is optional; Real values still works */ });
+    } else {
+      $('mode-league').disabled = true;
+      $('mode-league').title = 'Pick a league in the app to price against a partner';
+    }
+
+    loadPool().then(render);
+  })();
+  </script>
+</body>
+</html>

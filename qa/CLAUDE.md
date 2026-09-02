@@ -16,6 +16,7 @@ and the results index: [`README.md`](README.md).
 | Path | Contents |
 |---|---|
 | `lib/harness.py` | Shared harness — copies `data/trade_finder.db` to a scratch DB, boots a local Flask on it, talks HTTP. **The live DB is never written.** |
+| `web/check_web_structure.py` | **Web structural gate** (2026-08-19). Parses shipped `web/` source and asserts design-system, SEO and a11y invariants. Pure stdlib — no browser, no server, no deps. Runs as the `web-structure` CI job. This is the *only* automated coverage `web/` has. |
 | `api/`, `db/`, `e2e/`, `eng/`, `perf/`, `sec/` | `tc_*.py` executable test cases; run directly (`python qa/sec/tc_sec_001.py`), each exits non-zero on failure and drops a run JSON in its scratch dir |
 | `results/` | 17 `TC-*.md` write-ups — the durable record of each executed case |
 | `TEST_CASE_TEMPLATE.md` | Template every new case starts from |

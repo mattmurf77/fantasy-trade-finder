@@ -16,6 +16,8 @@
 | G-064 | A bake-off serving knob documented as DARK in four places reads its own inline fallback as `1.0`, so a missing DB row means SERVING — the seed, the `_DEFAULT_CFG`, the docstring and a guardrail comment all say 0.0 | Trade engine / bake-off / config defaults |
 | G-063 | `sess["league"].members` answers NO when you ask "is the CALLER in this league" — it excludes them by design. 4th bite; 3 of the 4 were hidden by a fixture that put the caller in `members` | Backend / session league / test fixtures |
 | G-062 | Flipping one flag in `config/features.json` breaks three test fixtures; the chain reveals one link at a time | Backend / feature flags / test fixtures |
+| G-068 | A missing request header does not land NULL — it lands the DEFAULT, and the default is another client's name. Web events stamped `source:"mobile"` | Analytics / ingest defaults |
+| G-067 | Web analytics emitted zero events for months: a fire-and-forget flag fetch vs a synchronous `boot()` | Web analytics / flag races |
 | G-060 | A sabotage-and-restore in the same mtime second at identical size keeps the stale `.pyc` — the test stays red after a byte-clean restore | Python / pytest / bytecode cache |
 | G-061 | The daily tick's Aug-25 `season_start` fan-out `continue`s past every winback — the three winback tests fail exactly one day a year (found live 2026-08-25) | backend / cron / pytest |
 | G-062 | `gh pr checks --watch` right after PR create reports "no checks" and exits 0, and `statusCheckRollup` pending conclusions are `""` not null — either one lets an `&&`-chained `gh pr merge` land before CI | GitHub CLI / ship gate |
@@ -416,6 +418,50 @@ signal until the session is re-initialised (~2 Elo points on the affected pair a
 ---
 
 ## 2026-08-19
+
+### G-068 — a missing header lands the DEFAULT, not NULL, and the default is named after a different client
+
+**Symptom.** Web `app_opened` rows arrive correctly and look healthy. `platform` reads
+`"web"`. But `source` reads `"mobile"` — web traffic is filed under the mobile client, and
+nothing anywhere errors.
+
+**Why.** `source` and `platform` are two different columns fed by two different mechanisms.
+`web/js/events.js` declared `platform: "web"` **in the body**, which is right and is what the
+comment above the fetch explains. `source` comes from a **header**, and
+`backend/analytics_ingest.py:376` reads:
+
+```python
+source = (request.headers.get("X-Source") or "").strip() or "mobile"
+```
+
+That default exists because mobile is the one client that declares nothing. Every *other*
+client must opt out of it. `extension/background.js` does (`'X-Source': 'extension'`). The
+web SDK — written to mirror `mobile/src/api/events.ts` — inherited mobile's header set, and
+the one header it needed to add was the one that says "I am not mobile."
+
+**Why it hides.** The failure mode of a missing header is usually a NULL, and a NULL is loud:
+it shows up as a gap in a chart and someone asks. A *wrong* value is silent and looks like
+data. Worse, the adjacent column was correct, so any spot-check that confirmed
+`platform='web'` would have read as proof the client was instrumented properly.
+
+**What actually caught it.** Loading the page against a live server and reading the row back
+out of `user_events` — not a code read, and not the CI gate, which parses source and never
+loads a page. The backend's own test (`test_events_api.py::test_platform_from_body_when_no_device_header`)
+had asserted `source == "web"` all along; it passed because the *test* sends the header. A
+test can pin a contract and still not prove the shipped client honors it.
+
+**Rule.** For any column populated from a request header with a non-empty default, the check
+is not "is the value present" but "is the value MINE". Grep the default's other consumers
+before assuming absence is safe. Fixed 2026-09-02 (`e672d7f4`); pinned by
+`HYG-events-declare-source` in `qa/web/check_web_structure.py`.
+
+### G-067 — a flag map that "resolves before most UI code runs" doesn't, and the events it gates vanish
+- **Symptom:** `analytics.client_events` is **true**, `events.js` loads, `window.FTFTrack` exists, `app.js` calls `FTFTrack('app_opened', …)` unconditionally in `boot()` — and yet after a full page visit `localStorage['ftf.deviceId']` is **null**, `ftf.events.queue.v1` is empty, and **no `POST /api/events` ever fires**. Nothing errors. The console is clean. Checking the flag by hand *after* load returns `true`, which makes the whole thing look impossible.
+- **Cause:** `_loadFeatureFlags()` was fire-and-forget at `web/js/app.js:34` — an `async` function whose promise nobody awaited — while `boot()` ran **synchronously** at the bottom of the same file. `window.FTF_FLAGS` starts as `{}` and is only replaced when the fetch resolves, so `FTF_FLAG(k)` returns `false` for the entire boot tick. `track()` opened with `if (!flagOn()) return;`, so every event fired during boot was **silently discarded** — and `app_opened` is by definition always one of them. The source comment said *"it resolves before most UI code runs"*, which was an assumption stated as a fact and read like a guarantee for months. An empty flag map is indistinguishable from "every flag is off", so there was no state to assert on.
+- **Fix:** don't drop, **buffer**. `track()` now pushes into a capped `pending[]` while flags are unsettled; `app.js` sets `window.FTF_FLAGS_READY` and dispatches `ftf:flags-ready` on **both** the success and failure paths of the fetch; `events.js` drains on that signal, on a 5s safety timeout (pages like `positional-tiers.html` carry their own flag shim and never load `app.js`, so they would otherwise buffer forever), and re-checks the readiness flag at init in case the signal beat its own listener. Buffered events keep their **original** `client_ts`, not the drain time.
+- **Prevention:** a boolean flag map cannot express "not loaded yet" — if a gate reads one, it needs a separate settled/unsettled signal, or it silently means "off" during startup. Verify instrumentation by **observing the wire** (`ftf.deviceId` minted, a `POST /api/events` in the network log), never by reading the flag back after load — that always looks correct. The same shape is latent anywhere `window.FTF_FLAG` is consulted during module init.
+
+---
 
 ### G-053 — the gap-distribution harness is not deterministic; pin `PYTHONHASHSEED` before you compare two trees
 - **Symptom:** you run [`docs/plans/package-benchmark-sweetener/measure_gap_distribution.py`](../docs/plans/package-benchmark-sweetener/measure_gap_distribution.py) on a branch, compare against the same file run on `origin/main`, and an arm you did not touch has moved. While wiring the arm-C sweetener the before/after showed `12t_1qb / v2_only / D_challenger` going from 1 sweetened card to 2 — arm D is generated by `gen(L)` and cannot see `trade_gen_v2` at all, so the diff read as a leak from the change under test. It is not: **running the harness TWICE on the identical tree reproduces the same 1 → 2 flip.**

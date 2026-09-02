@@ -8,6 +8,66 @@
 
 ---
 
+## 2026-09-02 — web-parity branch is resynced, runtime-verified, and still waiting on the same merge decision
+
+**Where:** branch `claude/website-updates-continue-c7942b` in worktree
+`.claude/worktrees/trade-model-review-101bf7`, at `e672d7f4`. **Not pushed, not merged, not
+deployed.** Working tree clean. `mobile/node_modules` is deliberately NOT installed here
+([G-022](GOTCHAS.md)).
+
+**What this session did.** It did not build a feature. It took the web work that had been
+parked since 2026-08-26 and made the merge decision actually answerable again:
+
+1. **Resync** — merged `fix/web-phase0` onto `main` @ `c65a7998` (48 commits of drift), merge
+   `ba91ca96`. Only the three append-at-top ledger files conflicted. No code conflicted:
+   `main` has not touched `web/js/app.js` or `web/css/` since the last sync.
+2. **ID de-collision, fourth time** — `D-163` → **D-173**, `G-062` → **[G-067](GOTCHAS.md)**.
+   Moved one cross-reference at a time; `HANDOFF.md:854`'s `G-062` is main's flag-fixture
+   gotcha and correctly stayed put.
+3. **The first runtime check this branch has ever had** — served the merged tree and loaded
+   it. Landing renders clean, zero console errors, `GET /api/feature-flags` 200,
+   `POST /api/events` 200, and the Phase 0 fix is confirmed real: an `app_opened` row with
+   `launch_type:"web"` actually lands in `user_events`.
+4. **Which is how the defect surfaced** — that row read `source:"mobile"`. See
+   **[G-068](GOTCHAS.md)**: a missing header lands the ingest DEFAULT, not NULL, and the
+   default is named after another client. Fixed in `e672d7f4`, pinned by two
+   negative-controlled CI checks. Web gate 173 → 175.
+
+**Gates on the merged tree:** pytest **4519 passed, 1 skipped** · web structure **175/175** ·
+testid-lint **OK**. `tsc` not run locally and not owed — zero `.ts/.tsx` files change on this
+branch; CI runs it regardless.
+
+### What is next, in order
+
+1. **The merge decision is STILL the operator's, and is now the only thing blocking.**
+   Everything mechanical is done and green. 36 files of web change plus a prod-behavior
+   change (the admin shell 404s in prod), and merging auto-deploys to Render.
+2. **P2-3, the landing page — the last Phase 2 item, and it is blocked on two operator
+   inputs, not on engineering.** The landing is still one viewport with no feature section
+   and no mention of the app (confirmed live this session: `scrollHeight` 749 against a 720
+   viewport, and the page contains no app/TestFlight string at all). Blocked on: **(a) the
+   positioning copy**, which the operator reserved; **(b) a CTA destination — there is no
+   TestFlight or App Store link anywhere in the repo.** `docs/feedback/items/239-invite-universal-links/status.md:79`
+   says so outright: "landing pitches the product but has no `apps.apple.com` link to
+   preserve." Do not invent one. **(c)** a screenshot strip would need assets `web/` does not
+   have; `screens/` is frozen at 2026-08-11, three weeks behind the shipping build, so those
+   captures would misrepresent the product.
+3. **D2 and D3 still open**, gating Phase 3, not this merge. D3 (bundle + minify) is the
+   biggest lever left: 266 KB unminified `app.js` + 133 KB CSS at `no-cache`.
+4. **After deploy, an operator pass on the live site.** Now less critical than it was — this
+   session established that the site boots and instruments correctly against current `main`.
+
+### Watch out for
+
+- **`main` carries three pre-existing duplicate-ID defects**, none introduced here and none
+  fixed here: duplicate `## D-039`, `## D-069`, `## D-070` headings in `DECISIONS.md`, and a
+  duplicate **`G-062`** (two different gotchas share the ID, in both the index and the body).
+  A `grep`-the-max ID allocation will mis-count while these stand.
+- **The `DECISIONS.md` index is stale** — 76 of ~139 entries, stopping after D-096. Unclaimed.
+- **The CI web gate never loads a page.** It parses source. G-068 was invisible to it and to
+  a code read; only a real request caught it. Budget a runtime pass for web changes.
+
+---
 ## 2026-09-02 — D-172 `consensus_fit_weight` LIVE at 0.5; research write-back landed; two prototype worktrees ledgered
 
 **Where:** `main` @ `c65a7998` (PR #261). Knob live via admin PUT at `2026-09-02T18:04:26Z`. Nothing in flight on the engine.
@@ -174,6 +234,58 @@ Open from #210: a surfaced waiver — no chip-selection analytics event (taxonom
 
 **Revert levers, both config-only + `POST /api/feature-flags/reload`, no deploy:** `trade.standing_offers: false` (or `standing_offer_inject_cap: 0`) and `landing.platform_options: false`.
 
+## 2026-08-26 — `fix/web-phase0` is caught up, gated green, and waiting on a merge decision
+
+**Where:** branch `fix/web-phase0` at `6cd163a4`, checked out in worktree
+`.claude/worktrees/wait-instructions-ef2095`. **Not pushed, not merged, not deployed.** Working tree
+clean. `mobile/node_modules` was installed here to run `tsc` — remove it or remove the worktree
+before any EAS build ([G-022](GOTCHAS.md): nested worktrees once broke an upload).
+
+**What changed this session.** Two commits. `b4f29220` merges 140 commits of `origin/main` into the
+branch, which had been parked since base `50e0451d`. `6cd163a4` blocks the operator dashboard shell
+in prod and adds a 10-case test pinning the whole block list.
+
+**The merge is verified, not just clean.** `backend/server.py` and `web/js/app.js` auto-merged —
+the case most worth distrusting — so both sides were grepped on the merged file afterward: the
+branch's flag-readiness analytics fix and main's `FAIRNESS_BALANCED_MIN` cross-client invariant are
+both present. The five real conflicts were all append-at-top ledger files.
+
+**The ID collision is resolved.** The branch's `G-053` became **[G-067](GOTCHAS.md)**; `origin/main`
+had taken `G-053`…`G-061`. No anchor-style links existed, so [G-054](GOTCHAS.md)'s heading-vs-anchor
+trap did not apply — that was checked, not assumed.
+
+**Gates, all re-run here on the merged tree** (branch's older numbers are superseded — do not quote
+161/161): pytest **4286 passed, 1 skipped** · `tsc --noEmit` **exit 0** · testid-lint **OK** ·
+`check_web_structure.py` **173/173** · 81 `mobile/tests/check-*.js` suites **all pass**. Detail in
+[TEST_LEDGER](TEST_LEDGER.md) 2026-08-26. Full gates, not express: API surface + analytics is a
+bright line.
+
+**Operator closed all four blockers** — posture **B, Companion** ([D-173](DECISIONS.md), Phase 3
+stops at 3a); admin dashboard **blocked in prod**; `[STATE]` in Terms **stays a TODO** (ships legally
+incomplete, knowingly); **no support email**, `contact.html` is the only route. Waivers W1/W2 stand
+as decisions, not as work owed — recorded in [`scope.md`](../docs/plans/web-parity/scope.md) §6.
+
+### What is next, in order
+
+1. **The merge decision is the operator's.** Everything mechanical is done and green. Nothing here
+   has been pushed. This is 34+ files of web change plus a prod-behavior change — it wants a look
+   before it goes to `main` and auto-deploys to Render.
+2. **P2-3, the landing page** — still deliberately not done. Positioning copy that wants the
+   operator's voice; everything it needs is in place. This is the last Phase 2 item.
+3. **D2 and D3 are still open** and gate Phase 3, not this merge. D3 (bundle + minify) is the
+   largest item left: 266 KB unminified `app.js` + 133 KB CSS at `no-cache`.
+4. **After deploy, an operator pass on the live site.** `check_web_structure.py` parses source and
+   never loads a page — web has no runtime harness, so this is the only runtime evidence available.
+
+### Watch out for
+
+- **The `DECISIONS.md` index is stale** — 76 of 135 entries; it stops after D-096. A note saying so
+  now sits under the table. Backfilling it is unclaimed work.
+- **This worktree holds the branch.** If it is removed, ledger the tip sha in `docs/recovery/` first,
+  verified by content against `origin/main` (this repo squash-merges).
+
+---
+
 ## 2026-08-25 — v1.16.6 (132) is on TestFlight; everything owed is now RUNTIME verification, not code
 
 **Where:** `main` at `c092f808`+ (release) — nothing in flight, no branch open, working tree clean. EAS build `8925880d` **finished** and submission `b190d30b` **finished**; Apple-side processing then TestFlight availability is the only remaining step and it is not ours.
@@ -266,7 +378,10 @@ move, and the avatar lab's anchor test models the brief's described layout, not 
 **none**, so the bubble reads "The Analyst" above a ram, which is D-155's recorded default). Higgsfield credits ~4.35.
 
 ## Table of Contents
+- [2026-09-02 — web-parity branch is resynced, runtime-verified, and still waiting on the same merge decision](#2026-09-02--web-parity-branch-is-resynced-runtime-verified-and-still-waiting-on-the-same-merge-decision)
+- [2026-09-02 — D-172 `consensus_fit_weight` LIVE at 0.5; research write-back landed; two prototype worktrees ledgered](#2026-09-02--d-172-consensusfitweight-live-at-05-research-write-back-landed-two-prototype-worktrees-ledgered)
 - [2026-08-27 — #384 partner shape-summary regression SHIPPED to main; owed = one TestFlight checklist on the next build](#2026-08-27--384-partner-shape-summary-regression-shipped-to-main-owed--one-testflight-checklist-on-the-next-build)
+- [2026-08-26 — `fix/web-phase0` is caught up, gated green, and waiting on a merge decision](#2026-08-26--fixweb-phase0-is-caught-up-gated-green-and-waiting-on-a-merge-decision)
 - [2026-08-25 — v1.16.6 (132) is on TestFlight; everything owed is now RUNTIME verification, not code](#2026-08-25--v1166-132-is-on-testflight-everything-owed-is-now-runtime-verification-not-code)
 - [2026-08-24 — Waves A + B0 SHIPPED (1.16.4 / EAS 130); Wave B is the next build; do NOT light `calc.inline_home` before it](#2026-08-24--waves-a--b0-shipped-1164--eas-130-wave-b-is-the-next-build-do-not-light-calcinline_home-before-it)
 - [2026-08-24 — Fleeced on TestFlight (v1.16.3 build 129), dark; one production write left](#2026-08-24--fleeced-on-testflight-v1163-build-129-dark-one-production-write-left)
@@ -283,6 +398,7 @@ move, and the avatar lab's anchor test models the brief's described layout, not 
 - [2026-08-19 — Team Review planned end-to-end (#357/#358/#359); `outlook.odds` LIT by operator override](#2026-08-19--team-review-planned-end-to-end-357358359-outlookodds-lit-by-operator-override)
 
 - [2026-08-19 — likes-you injector gated on `fix/likes-you-quality-gates` (worktree); TestFlight pass owed](#2026-08-19--likes-you-injector-gated-on-fixlikes-you-quality-gates-worktree-testflight-pass-owed)
+- [2026-08-19 — Web audited; Phases 0 + 1 built on `fix/web-phase0`, unmerged](#2026-08-19--web-audited-phases-0--1-built-on-fixweb-phase0-unmerged)
 - [2026-08-19 — Current-year pick slot labels built on `feat/pick-slot-labels` (worktree); operator has a pricing call to make](#2026-08-19--current-year-pick-slot-labels-built-on-featpick-slot-labels-worktree-operator-has-a-pricing-call-to-make)
 - [2026-08-19 — Settings IA rebased onto `main` and shipped](#2026-08-19--settings-ia-rebased-onto-main-and-shipped)
 - [2026-08-19 — Round-2 pick recalibration built on `feat/round2-pick-recalibration` (worktree); TestFlight pass owed](#2026-08-19--round-2-pick-recalibration-built-on-featround2-pick-recalibration-worktree-testflight-pass-owed)
@@ -687,6 +803,77 @@ raw-vs-package sign-divergence corner. A fairness bar was rejected on the same m
   `bakeoff_profiles.py` is untouched. Expect a trivial conflict in those two spots and nowhere else.
 - Arm A is **deliberately not pinned** to level 0 — the injector is a serving-layer post-process no
   generator reads; reason recorded in `docs/plans/three-model-bakeoff/scope-phase2.md` § Excluded.
+## 2026-08-19 — Web audited; Phases 0 + 1 built on `fix/web-phase0`, unmerged
+
+### Where I am right now
+
+`fix/web-phase0`, cut from `origin/main` `50e0451`, in a worktree at
+`…/5f1ac8ee-…/scratchpad/web-phase0`. **Nothing committed, pushed, or deployed.**
+Backend suite green (3524 passed, 1 skipped). Every fix verified in a real browser against a
+local server running this branch — evidence in [`TEST_LEDGER.md`](TEST_LEDGER.md) `2026-08-19h`.
+
+Audit: [`../docs/reviews/2026-08-19-web-parity-audit.md`](../docs/reviews/2026-08-19-web-parity-audit.md).
+Plan + scope: [`../docs/plans/web-parity/`](../docs/plans/web-parity/).
+
+### What's done
+
+**Phase 1 (foundation) — complete.** `qa/web/check_web_structure.py`, 161 structural
+checks, wired as CI job `web-structure` — the first automated coverage `web/` has ever
+had. Baseline 101/161 → **161/161**. `web/css/tokens.css` is now the single token source
+(was copy-pasted into 12 files, which is why a 2.03:1 contrast failure shipped on every
+input border). Dead debug drawer removed (−13 KB, and the public bundle no longer names
+the CRON-gated `/api/debug/log`). Stale 2024 hardcoded roster replaced with real data —
+including un-nesting the public `/api/players` fallback so signed-out visitors get real
+players. Full SEO metadata + robots + sitemap. Landmarks and an `<h1>` on every page.
+User-visible surface renamed to **Fleeced**.
+
+**Phase 2 (the logged-in web app) — 2 of 3.** `web/calculator.html` ships the app's
+calculator on web (search, live evaluate, verdict + gap in pick terms, one-tap eveners,
+adjustment rationale; Real-values and In-league bases), session-gated per the operator
+decision. Market pulse renders `/api/market/movers` inside the League view where mobile
+puts it. **P2-3, the landing page, is NOT done** — it is positioning copy and wants the
+operator's voice rather than a rushed pass at the end of a long session. Everything it
+needs is already in place; the audit's specifics are in the plan.
+
+**Phase 0 (breakage) — complete**, commit `26d7841`. 7 of 8 items: the self-trapping demo path (two independent causes), the analytics race
+that dropped **every** web event including `app_opened` ([G-067](GOTCHAS.md)), the clipped 375px
+CTA, `profile.html`'s handle parser, the missing HTML 404, design-lab pages served in prod, and
+a new `web/contact.html` — the first route a web visitor has to a deletion request.
+
+`ranking-method.html` was **kept, not deleted** as the plan said: mobile opens it as a read-more
+explainer (`TradesScreen.tsx` `readMoreUrl`), so deleting it would 404 for installed TestFlight
+builds. Its fake controls were stripped instead.
+
+### What's blocking
+
+**Operator input, 4 items.** `[STATE]` in `web/terms.html:157` (governing law — a legal choice);
+whether to add a support email alongside `contact.html`; whether to block
+`web/admin/analytics.html` in prod (it is the live operator dashboard — left reachable
+deliberately); and the **posture decision** (front door / companion / full parity) that sets how
+far Phase 3 runs. All enumerated in [`scope.md`](../docs/plans/web-parity/scope.md) §6.
+
+### Next
+
+Merge decision on `fix/web-phase0`, then **Phase 2 (the logged-in web app)**.
+
+**Operator decision 2026-08-19: no anonymous surfaces** — mobile has none either
+(`mobile/src/api/client.ts` attaches `X-Session-Token` to every request, so all three
+calculator modes run inside a session). Phase 2 is therefore a session-gated calculator,
+a market-pulse strip inside the League view, and a real landing page. The public
+calculator and SEO player pages are dropped; `players.profile_pages` is false on mobile
+too, so shipping those was never parity.
+
+**The rate-limiter prerequisite is moot** — it existed only to put `/api/trade/evaluate`
+in front of anonymous traffic. Phase 2 now has no backend dependency and no blocker.
+
+Known consequence, recorded deliberately: with no anonymous surfaces **the website cannot
+do acquisition** — everything of value sits behind "type your Sleeper username". That is
+coherent for a companion app; revisit only if acquisition is later expected from web.
+
+Known gap from Phase 1: the harness is structural only. A browser-level smoke (console
+errors, layout at 375px, axe) is still unbuilt — Playwright was evaluated and deliberately
+not adopted, since the structural layer caught this phase's entire defect class with no
+dependencies and no flake.
 
 ---
 

@@ -1,0 +1,97 @@
+/* Chalkline design tokens — THE single source for web.
+ *
+ * Authority: docs/design/design-system.md. Live reference: /style-guide.html.
+ *
+ * Before 2026-08-19 this block was copy-pasted into 12 files, and they drifted:
+ * --line-strong was corrected to #59647A on 2026-07-19 for the WCAG 1.4.11
+ * non-text floor (#3D4654 measures 2.03:1) and only ONE of the twelve copies
+ * ever got the fix. qa/web/check_web_structure.py now fails if a second file
+ * starts defining these.
+ *
+ * Position and tier hexes are DATA ENCODINGS governed by
+ * docs/cross-client-invariants.md — never reuse them as chrome.
+ */
+:root {
+  /* Surfaces */
+  --ink-0: #0C0E11;
+  --ink-1: #13161B;
+  --ink-2: #1A1E25;
+  --ink-3: #232833;
+  --card: var(--ink-1);
+  --panel: var(--ink-1);
+
+  /* Lines */
+  --line: #262C35;
+  --line-strong: #59647A;
+
+  /* Text */
+  --chalk: #ECEFF4;
+  --chalk-dim: #97A1AE;
+  --chalk-faint: #626C79;
+
+  /* Accents */
+  --ice: #56D9EC;
+  --ice-press: #3FC2D6;
+  --on-ice: #071013;
+  --flare: #F0508C;
+  --flare-press: #D8437B;
+  --on-flare: #170610;
+
+  /* Status */
+  --pos: #22C55E;
+  --neg: #EF4444;
+  --warn: #F59E0B;
+  --green: var(--pos);
+  --red: var(--neg);
+  --gold: var(--warn);
+
+  /* Positions (data encodings — docs/cross-client-invariants.md) */
+  --qb: #F97316;
+  --rb: #22C55E;
+  --wr: #3B82F6;
+  --te: #A855F7;
+  --picks: #59647A;
+  --waivers: #7a7f96;
+
+  /* Pick ladder (data encodings) */
+  --firsts-4plus: #f87171;
+  --firsts-3: #e879f9;
+  --firsts-2: #fbbf24;
+  --first-1: #2dd4bf;
+  --second: #38bdf8;
+  --third: #f472b6;
+  --fourth: #a3e635;
+
+  /* Radii */
+  --r-xs: 2px;
+  --r-sm: 4px;
+  --r-md: 8px;
+  --r-pill: 999px;
+
+  /* Type */
+  --font-ui: 'Archivo', sans-serif;
+  --font-display: 'Barlow Condensed', sans-serif;
+  --font-data: 'IBM Plex Mono', monospace;
+
+  /* Motion / elevation */
+  --t-fast: 120ms ease-out;
+  --t-base: 180ms ease-out;
+  --t-sheet: 260ms cubic-bezier(0.32, 0.72, 0, 1);
+  --shadow-sheet: 0 12px 32px rgba(0, 0, 0, 0.55);
+
+  /* Legacy aliases — pre-Chalkline rule names still in active use. */
+  --bg: var(--ink-0);
+  --surface: var(--ink-1);
+  --border: var(--line);
+  --text: var(--chalk);
+  --muted: var(--chalk-dim);
+  --accent: var(--ice);
+  --tier-firsts-4plus: #f87171;
+  --tier-firsts-3: #e879f9;
+  --tier-firsts-2: #fbbf24;
+  --tier-first-1: #2dd4bf;
+  --tier-second: #38bdf8;
+  --tier-third: #f472b6;
+  --tier-fourth: #a3e635;
+  --tier-waivers: #7a7f96;
+}
