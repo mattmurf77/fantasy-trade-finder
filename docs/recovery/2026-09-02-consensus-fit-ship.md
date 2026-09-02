@@ -12,3 +12,5 @@ Deleted after squash-merge of PR [#261](https://github.com/mattmurf77/fantasy-tr
 Deletion date: 2026-09-02 (reflog recovery expires ~2026-12-01).
 
 Recovery: `git branch claude/consensus-fit-sort-key 1de37224` · prototype is still a branch: `git worktree add ../wt-poolfit worktree-agent-a9c4c705ebb53fc71`
+
+**Addendum — this ledger's own branch.** `claude/ledger-d172` (worktree `.claude/worktrees/ledger-d172`, docs-only, PR [#262](https://github.com/mattmurf77/fantasy-trade-finder/pull/262)) is deleted after its own squash-merge. Its commits stay reachable on GitHub via the PR head ref. Recovery: `git fetch origin refs/pull/262/head && git branch claude/ledger-d172 FETCH_HEAD`.
