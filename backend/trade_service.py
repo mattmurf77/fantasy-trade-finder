@@ -557,6 +557,21 @@ _DEFAULT_CFG: dict[str, float] = {
     # 0.30 → 0.15 per interview 2026-07-17: need counting (bodies vs
     # slots) is right but should stay a LIGHT multiplier (±7.5%).
     "need_fit_weight":            0.15,
+    # 2026-09-02 below-market card reason (feedback #350 / Q-035,
+    # docs/plans/below-market-reason/). PRESENTATION ONLY — a plain-English
+    # line in `TradeCard.reasons` when the give side's HEADLINER (the C4b
+    # `deck_give_headliner`: highest-seed give-side PLAYER; a pick never
+    # headlines unless the give side is all picks, and then nothing fires)
+    # is priced on the user's SHRUNK board at least this fraction below his
+    # consensus value: `(seed_value − user_value) / seed_value ≥ frac`. That
+    # gap is the engine's actual reason for picking him (the user's board
+    # makes him cheap currency), and the card never said so. Stamped in the
+    # `_generate_trades_v2` per-member loop AFTER every gate and multiplier,
+    # on every basis (divergence v2/v3 + consensus); never touches ids,
+    # scores, order or count. 0 = off: no read past the guard, no stamp,
+    # wire byte-identical. Read via `_c` at call time (D-098). The value
+    # space is `elo_to_value`, so frac 0.15 ≈ 32.5 shrunk-Elo below seed.
+    "reason_below_market_frac":   0.0,
     # FB-147 engine hook (flag trade.block_boost) — SOFT, acquire-side
     # trade-block boost: a card whose ACQUIRE side holds ≥1 player the
     # counterparty flagged "on the block" gets composite *= 1 + this weight.
@@ -1993,6 +2008,59 @@ def cap_give_headliners(cards: list, seed_elo: dict, players: dict | None,
             seen[head] = seen.get(head, 0) + 1
         kept.append(c)
     return kept
+
+
+#: 2026-09-02 below-market card reason (feedback #350 / Q-035). Deterministic
+#: template, no jargon: a non-technical user reads WHY the engine keeps
+#: asking for this player. ≤ 90 chars with a typical name.
+BELOW_MARKET_REASON = (
+    "You rank {name} below the market — that gap is what this trade cashes in."
+)
+
+
+def below_market_reason(give_ids, seed_elo: dict, shrunk_user_elo: dict,
+                        players: dict, frac: float) -> str | None:
+    """The one-line reason for a card whose give-side HEADLINER the user's
+    own board prices below the market (docs/plans/below-market-reason/).
+
+    Headliner = `deck_give_headliner` — the C4b definition, so the player the
+    line names is the same one the give-headliner cap keys on: the highest-
+    seed give-side PLAYER (players outrank picks). The rule is headliner
+    ONLY: a below-market second give-side player does not fire the line,
+    because the line explains the ask the user feels, not every piece.
+
+    `below = (seed_value − user_value) / seed_value`, both through
+    `elo_to_value` — `user_value` from the SHRUNK board (`_shrink_user_elo`
+    output, the board the engine prices with), so a player the user never
+    compared sits at consensus and never fires, and a user with no board at
+    all (`comparison_counts` empty ⇒ every weight 0 ⇒ shrunk == seed) never
+    fires either. A pid absent from the shrunk map is treated as consensus.
+
+    Returns None — no reason, never a placeholder — when `frac <= 0`, the
+    give side is empty or picks-only, the gap is under `frac`, or the
+    headliner has no name.
+    """
+    if frac is None or frac <= 0:
+        return None
+    head = deck_give_headliner(give_ids, seed_elo, players)
+    if head is None:
+        return None
+    p = players.get(head) if players is not None else None
+    if p is None or is_pick_asset(p):
+        return None
+    seed_v = elo_to_value(float(seed_elo.get(head, 1500.0)))
+    if seed_v <= 0:
+        return None
+    user_e = shrunk_user_elo.get(head) if shrunk_user_elo else None
+    if user_e is None:
+        return None
+    user_v = elo_to_value(float(user_e))
+    if (seed_v - user_v) / seed_v < frac:
+        return None
+    name = getattr(p, "name", None)
+    if not name:
+        return None
+    return BELOW_MARKET_REASON.format(name=name)
 
 
 def user_gain_ok_1for1(
@@ -6446,6 +6514,24 @@ class TradeService:
                     for c in cards:
                         c.negmem_stamp = _stamp
                         c.composite_score = round(c.composite_score * _eff, 3)
+            # 2026-09-02 below-market card reason (feedback #350 / Q-035,
+            # docs/plans/below-market-reason/). PURE STAMP, after every gate
+            # and every multiplier above: when the give side's headliner is
+            # priced on the user's SHRUNK board `reason_below_market_frac`
+            # below his consensus value, say so in `reasons` — that gap is
+            # why the engine picked him. Covers v2-pair, v3 and consensus
+            # cards uniformly (all flow through this loop); never touches
+            # ids, scores, order or count. Knob 0 ⇒ the helper returns None
+            # before any lookup and the wire is byte-identical. Read via
+            # `_c` at call time (D-098) so an arm overlay is honoured.
+            _bm_frac = _c("reason_below_market_frac")
+            if _bm_frac > 0:
+                for c in cards:
+                    _bm = below_market_reason(
+                        c.give_player_ids, seed_elo, shrunk_elo,
+                        self._players, _bm_frac)
+                    if _bm:
+                        c.reasons.append(_bm)
             for c in cards:
                 c.match_context = match_ctx
                 c.narrative = build_narrative(c, match_ctx, self._players)

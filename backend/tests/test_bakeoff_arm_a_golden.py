@@ -747,6 +747,29 @@ v3_pool_size vet_age waiver_baseline_value waiver_slot_cost youth_age
     # mirror fixture, which the knob does move — the same shape as
     # `test_pick_pair_strip_kill_value_is_load_bearing`.
     "consensus_fit_weight",
+
+    # ── below-market card reason, 2026-09-02 ───────────────────────────────
+    # docs/plans/below-market-reason/scope.md (feedback #350 / Q-035). One
+    # knob, one disposition.
+    #
+    # WHERE IT IS READ: the `_generate_trades_v2` per-member loop → `_c` at
+    # CALL time, on the arm's own thread, inside `model_a()`'s overlay — so
+    # a pin WOULD be honoured. But it is read AFTER every gate and every
+    # composite multiplier, and the only thing it does is append a string to
+    # `card.reasons`: no id, score, order or count can move at any value
+    # (`test_below_market_reason.py::test_deck_is_invariant_at_every_knob_
+    # value_on_100_random_leagues`, property-tested under the live flags).
+    #
+    # DECISION: **EXCLUDED from MODEL_A_PROFILE.** Presentation-only, and
+    # its default 0.0 is the identity. A pin at 0.0 would not preserve the
+    # pre-wave DECK (which is unmoved either way) — it would only strip the
+    # explanatory line from arm A's served cards, making arm A the one arm
+    # whose cards cannot explain themselves while B and D can: a
+    # presentation confound the bake-off does not want. The golden rows
+    # (give, receive, target, composite, fairness, mismatch) never carry
+    # `reasons`, so the golden stands un-recaptured and cannot see the knob
+    # by construction. Disposition in scope-phase2.md.
+    "reason_below_market_frac",
 }
 
 

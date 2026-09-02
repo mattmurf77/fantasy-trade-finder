@@ -2433,6 +2433,7 @@ _MODEL_CONFIG_DEFAULTS = [
     # 0.30 → 0.15 per interview 2026-07-17 ("light multiplier"); existing
     # DB rows still at the old default are updated by the seeding pass.
     ("need_fit_weight",          0.15,  "FB-96: composite blend weight for automatic positional-need fit (0 disables the reordering)"),
+    ("reason_below_market_frac", 0.0,   "2026-09-02 below-market card reason (#350/Q-035): stamp a plain-English line in card.reasons when the give-side headliner is priced on the user's shrunk board this fraction below consensus; presentation only, 0 = off (wire byte-identical)"),
     # ── FB-147 engine hook (flag trade.block_boost) ──────────────────────
     ("block_boost_weight",       0.15,  "FB-147: SOFT acquire-side trade-block boost — composite *= 1 + w when a card acquires a counterparty-flagged on-the-block player, applied after all gates (0 disables, composite byte-identical)"),
     ("diversity_window_days",    7.0,   "A6: lookback window for league impression saturation counts"),
