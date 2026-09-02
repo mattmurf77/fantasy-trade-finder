@@ -14,6 +14,10 @@
 
 
 
+## 2026-09-02 — D-172: `consensus_fit_weight` — roster fit in the consensus generator's sort key, deployed at 0 and flipped live to 0.5
+
+PR [#261](https://github.com/mattmurf77/fantasy-trade-finder/pull/261) → `main` @ `c65a7998` (CI green ×3 on the final sha). One engine function changed (`_generate_consensus_for_pair`, +~75 lines): at w>0 both candidate pools sort on `seed_value × (1 + w × fit_norm)`, fit = marginal-value asymmetry between the two lineups on shared consensus prices; picks neutral; give side keeps the shed-position primary key; every gate untouched. This is the generator behind ~84.5% of served cards, where the partner's consensus gain is the exact negative of the user's and roster fit was previously absent from the sort ([D-172](DECISIONS.md)). Knob seeded in `_MODEL_CONFIG_DEFAULTS`; arm A pins 0.0 (load-bearing test added); challenger inherits. Evidence: 4508 passed / 1 skipped (main same day 4483/1), 26 new tests, goldens byte-identical at the default, 5 sabotages red→green, QA fuzz 200 rosters clean, dose-response curve supports 0.5. Docs: scope block, code-walk, results, `docs/config-reference.md` row with the PUT rollback. **Flip:** `PUT /api/admin/config/consensus_fit_weight` 0.5 at `2026-09-02T18:04:26Z` after `GET /api/admin/config` showed the seeded row (deploy-landed check). Wednesday flip censors the current bake-off window per D-099 — accepted, recorded in D-172. Same PR carries the 2026-09-01 research write-back: G-064 (bake-off serve knob's three disagreeing defaults; prod read resolved it), G-065 (harness and prod decks are wall-clock non-deterministic), G-066 (arm C hardcodes `basis`), Q-035/Q-036, and the research TEST_LEDGER entry.
+
 ## 2026-08-31b — D-171: Find a Trade pushes the classic deck; the landing is the builder only (v1.16.14)
 
 Five verbatim operator rulings ([D-171](DECISIONS.md), scope
