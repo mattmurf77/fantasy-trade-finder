@@ -514,6 +514,32 @@ _DEFAULT_CFG: dict[str, float] = {
     # time per-arm, never post-draft. ≤ 0 disables the pass entirely
     # (arm A's pin — the pre-wave engine had no sweetener).
     "sweetener_gap_threshold": 1539.0,
+    # 2026-09-02 relative band for the gap sweetener (#414; docs/plans/
+    # sweetener-relative-band/). The trigger above is a flat absolute, and
+    # the operator's 1x1 (London 5,933 for CeeDee 7,329 — gap 1,396, 19%
+    # of the richer side) sat under it while R1 (`max_overpay_frac` 0.25)
+    # correctly let the card through: the sweetenable window
+    # (1539, 0.25·H) is EMPTY unless the richer side prices above ~6,156.
+    # With this knob the effective trigger inside `close_value_gap` is
+    #   max(sweetener_gap_threshold, sweetener_gap_frac × max(gv, rv))
+    # so it scales with the trade. Read at CALL time via `_c` inside the
+    # helper (arm A's pin and the #189 overlay reach it). 0.0 = live: the
+    # trigger is exactly the absolute threshold, byte-identical. The live
+    # bundle also LOWERS the absolute row to 750 via the admin PUT — the
+    # code default above is deliberately untouched.
+    "sweetener_gap_frac":         0.0,
+    # 2026-09-02 best-effort fallback for the gap sweetener (#414 QA). The
+    # closer is all-or-nothing: an equalizer must bring the recomputed gap
+    # under the trigger or the card ships UNSWEETENED at its ORIGINAL gap —
+    # so lowering the threshold alone REGRESSES (a card partially closable
+    # to 1,535 at 1,539 ships at 1,825 once the line is 750). At 1.0, when
+    # no single asset closes the gap, the gate-passing candidate that
+    # minimises the post-add |gap| is attached instead, provided it
+    # strictly narrows the gap and does not flip which side is richer;
+    # the card's `gap_sweetener` then carries `"partial": true`. 0.0 =
+    # live: the all-or-nothing path, byte-identical. Any threshold cut
+    # ships WITH this at 1.
+    "sweetener_best_effort":      0.0,
     "cycle_edge_min_gain":      100.0,   # min per-transfer marginal gain for a cycle edge
     "cycle_min_net":            200.0,   # min net gain per team for a 3-team cycle
     "cycle_max_results":          3.0,   # max 3-team cycles returned per league
@@ -4376,7 +4402,9 @@ class TradeCard:
     # The player is already included in that side's id list. Distinct from
     # `sweetener` (the 3.4 fairness-band rescue) so measurement can split
     # them; also stamped into features_json on EVERY impression row (null
-    # when absent). None otherwise.
+    # when absent). A best-effort close (`sweetener_best_effort`, 2026-09-02)
+    # that left the gap above the trigger adds `"partial": True`; a full
+    # close carries no such key. None otherwise.
     gap_sweetener: Optional[dict] = None
     # FB-47 (flag trade.finder_targeting) — counterparty positional fit for
     # the user's stated targets, 0..1 (1 = ideal partner). None when the
@@ -7044,8 +7072,8 @@ class TradeService:
                     not_interested_ids=not_interested_ids,
                     extra_ok_fn=_gap_extra_ok)
                 if closed is not None:
-                    s_pid, side, new_give, new_recv, _ngv, _nrv, n_ratio \
-                        = closed
+                    s_pid, side, new_give, new_recv, _ngv, _nrv, n_ratio, \
+                        _partial = closed
                     new_key = (frozenset(new_give), frozenset(new_recv))
                     if new_key not in _picked_keys:
                         _gv0, _rv0 = _consensus_packages(
@@ -7055,6 +7083,8 @@ class TradeService:
                             "gap_before": round(abs(_gv0 - _rv0), 1),
                             "gap_after": round(abs(_ngv - _nrv), 1),
                         }
+                        if _partial:     # best-effort close
+                            _gap_info["partial"] = True
                         _picked_keys.discard(
                             (frozenset(give_ids), frozenset(recv_ids)))
                         _picked_keys.add(new_key)
@@ -7379,7 +7409,8 @@ class TradeService:
                     recv_candidates=recv_pool,
                     extra_ok_fn=_gap_gates_ok)
                 if closed is not None:
-                    s_pid, side, n_give, n_recv, n_gv, n_rv, n_ratio = closed
+                    s_pid, side, n_give, n_recv, n_gv, n_rv, n_ratio, \
+                        _partial = closed
                     n_key = (frozenset(n_give), frozenset(n_recv))
                     if n_key not in seen:
                         _gap_info = {
@@ -7387,6 +7418,8 @@ class TradeService:
                             "gap_before": round(abs(gv - rv), 1),
                             "gap_after": round(abs(n_gv - n_rv), 1),
                         }
+                        if _partial:     # best-effort close
+                            _gap_info["partial"] = True
                         seen.add(n_key)
                         give_ids, recv_ids = n_give, n_recv
                         gv, rv, fairness = n_gv, n_rv, n_ratio

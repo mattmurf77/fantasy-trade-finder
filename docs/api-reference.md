@@ -310,6 +310,15 @@ Shape of each card in `/api/trades`, `/api/trades/status` snapshots, and `/api/t
                                                // reorders, boosts or filters. Serialized only when set
   "sweetener":       { "player_id": "...",     // OPTIONAL — Tier 3 (trade_engine.v3): low-value
                        "side": "give"|"receive" }, // asset already in give/receive, added to balance
+  "gap_sweetener":   { "player_id": "...",     // OPTIONAL — 2026-08-21 gap auto-sweetener
+                       "side": "give"|"receive", // (`sweetener_gap_threshold`): the equalizer asset the
+                       "gap_before": 1396.0,     // RICHER side added to close an absolute consensus gap;
+                       "gap_after": 1058.9,      // already inside that side's id array. Distinct from
+                       "partial": true },        // `sweetener` (the 3.4 fairness-band rescue). `partial`
+                                               // (2026-09-02, #414, `sweetener_best_effort`) is present
+                                               // ONLY on a best-effort close that left the gap above the
+                                               // trigger — absent on a full close. Same dict rides in
+                                               // every impression's `features_json` (null when unsweetened)
   "relaxed":         true,                     // OPTIONAL — #189: present only when the card came from the
                                                // relaxed fallback pass (targeted job, zero cards under normal
                                                // gates). Clients label these ("Stretch idea — outside your

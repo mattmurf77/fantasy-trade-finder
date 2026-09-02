@@ -770,6 +770,32 @@ v3_pool_size vet_age waiver_baseline_value waiver_slot_cost youth_age
     # `reasons`, so the golden stands un-recaptured and cannot see the knob
     # by construction. Disposition in scope-phase2.md.
     "reason_below_market_frac",
+
+    # ── gap-sweetener relative band + best-effort, 2026-09-02 (#414) ──────
+    # docs/plans/sweetener-relative-band/scope.md. Two knobs, one disposition.
+    #
+    # WHERE THEY ARE READ: inside `trade_optimizer.close_value_gap`, via
+    # `_c` at CALL time on the arm's own thread — structurally pinnable.
+    # BUT every caller reaches the helper only under `GAP_THR > 0`
+    # (`trade_optimizer.py` v3 pass, `trade_service.py` v2-divergence and
+    # consensus passes, `trade_gen_v2.py` arm C), and MODEL_A_PROFILE pins
+    # `sweetener_gap_threshold` at 0.0 — so on an arm-A thread neither knob
+    # is read today. By the C1/C2 companion-knob precedent that would argue
+    # EXCLUSION.
+    #
+    # DECISION: **PINNED at 0.0 in MODEL_A_PROFILE — the identity value —
+    # anyway.** The D-172 argument governs: both live rows are flipped the
+    # day they ship (750 / 0.12 / 1), and the only thing standing between
+    # arm A and inheriting them is a sibling pin that a future wave could
+    # lift (the sweetener's own kill value is the operator's lever, not a
+    # law). Pinning the identity costs nothing today (equals the default;
+    # golden un-recaptured) and is the same move `consensus_fit_weight`
+    # made one screen up. Because the read is unreachable under the full
+    # overlay, `test_sweetener_band_pins_are_load_bearing` below proves the
+    # pins on the overlay MINUS the threshold pin — the state in which they
+    # would ever matter — and non-vacuously (the fixture moves without them).
+    "sweetener_gap_frac",
+    "sweetener_best_effort",
 }
 
 
@@ -802,6 +828,52 @@ def test_consensus_fit_pin_is_load_bearing():
     # follows the live row (non-vacuity — the fixture really moves).
     assert run(0.5, unpinned) != run(0.0, unpinned)
     assert run(0.0, unpinned) == run(0.0, pinned)
+
+
+def test_sweetener_band_pins_are_load_bearing():
+    """`sweetener_gap_frac` / `sweetener_best_effort` (2026-09-02, #414) are
+    read inside `close_value_gap`, which every caller reaches only while
+    `sweetener_gap_threshold` > 0 — and MODEL_A_PROFILE pins THAT at 0.0, so
+    under the full overlay the two new knobs are never read and no fixture
+    can move. The pins are therefore proven where they would matter: the
+    overlay MINUS the threshold pin, with the live triple in the
+    process-global row. The #414 consensus card (London for CeeDee) with an
+    equalizer bench of 450/600/900 — under arm A's own-max package math
+    (`package_bench_trade_wide` pinned 0) the 900 piece closes it to 833,
+    which is over the 750 floor but under the 0.12 band's 879.5 — must come
+    out UNSWEETENED under that overlay with the pins (all-or-nothing at the
+    bare floor), and SWEETENED under the same overlay minus the two pins
+    (the band lifts the trigger and the piece closes it). The full
+    `model_a()` overlay is also asserted unmoved at the live triple."""
+    from backend.tests.test_sweetener_relative_band import (
+        _CEEDEE, _LONDON, _consensus_deck, KNOB_BEST, KNOB_FRAC, KNOB_THR,
+        LIVE)
+    from backend.trade_service import _cfg_override, r4_bypass
+
+    def run(live, overlay):
+        with _cfg_override(overlay), r4_bypass():   # == model_a()'s shape
+            cards = _consensus_deck(live, _LONDON, _CEEDEE,
+                                    (450.0, 600.0, 900.0))
+        return [(c.give_player_ids, c.receive_player_ids,
+                 c.gap_sweetener) for c in cards]
+
+    pinned = dict(MODEL_A_PROFILE)
+    assert pinned[KNOB_FRAC] == 0.0 and pinned[KNOB_BEST] == 0.0
+    # 1. The full arm-A overlay is unmoved by the live triple.
+    assert run(LIVE, pinned) == run({}, pinned)
+    assert not any(gs for _g, _r, gs in run(LIVE, pinned))
+    # 2. With the threshold pin lifted, the two pins still hold arm A to the
+    #    unsweetened card...
+    no_thr = {k: v for k, v in pinned.items() if k != KNOB_THR}
+    held = run(LIVE, no_thr)
+    assert not any(gs for _g, _r, gs in held), held
+    # 3. ...and only because of them: the same overlay minus the two pins
+    #    follows the live row (non-vacuity — the fixture really moves).
+    unpinned = {k: v for k, v in no_thr.items()
+                if k not in (KNOB_FRAC, KNOB_BEST)}
+    moved = run(LIVE, unpinned)
+    assert any(gs for _g, _r, gs in moved), moved
+    assert moved != held
 
 
 def test_no_generation_knob_was_added_without_an_arm_a_decision():

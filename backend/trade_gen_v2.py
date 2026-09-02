@@ -793,12 +793,15 @@ def _pair_survivors(
                             recv_candidates=extras_all,
                             extra_ok_fn=_gap_gates_ok)
                         if _closed is not None:
-                            _s_pid, _side, _ng, _nr, _ngv, _nrv, _ = _closed
+                            (_s_pid, _side, _ng, _nr, _ngv, _nrv, _,
+                             _partial) = _closed
                             _gap_info = {
                                 "player_id": _s_pid, "side": _side,
                                 "gap_before": round(abs(_gv - _rv), 1),
                                 "gap_after": round(abs(_ngv - _nrv), 1),
                             }
+                            if _partial:     # best-effort close
+                                _gap_info["partial"] = True
                             s_give, s_recv = _ng, _nr
                             # Rebuild every derived field from the
                             # sweetened ids. Gate b/c already re-passed
