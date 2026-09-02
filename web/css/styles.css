@@ -2814,6 +2814,131 @@
        375px viewport, clipping the primary CTA off the right edge. */
     .cb-connect-wrap { width: 100%; max-width: 380px; }
 
+    /* ══════════════════════════════════════════════════════════════════
+       P2-3 · Landing below-the-fold (how it works / why)
+
+       Lives inside .auth-screen.cb-page, which is already `overflow:auto`
+       with a `min-height:100vh` .cb-hero above it — so this stacks below
+       the fold and scrolls without touching the hero's layout.
+
+       Tokens only (web/css/tokens.css). No gradients, no blur, radius
+       <= 8px: qa/web/check_web_structure.py fails CI on any of those.
+    ══════════════════════════════════════════════════════════════════ */
+
+    .lp-below {
+      border-top: 1px solid var(--line);
+      background: var(--surface);
+      padding: 64px 20px 72px;
+    }
+
+    .lp-wrap { max-width: 900px; margin: 0 auto; }
+
+    .lp-title {
+      font-family: var(--font-display);
+      font-size: 28px;
+      line-height: 1.2;
+      color: var(--text);
+      margin: 0 0 12px;
+    }
+
+    .lp-title-sep { margin-top: 56px; }
+
+    .lp-lede {
+      font-size: 16px;
+      line-height: 1.6;
+      color: var(--muted);
+      max-width: 620px;
+      margin: 0 0 36px;
+    }
+
+    /* Numbered, but the marker is a styled span — list-style would not let the
+       number sit in its own column beside a wrapping paragraph. */
+    .lp-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 20px; }
+
+    .lp-step {
+      display: grid;
+      grid-template-columns: 34px 1fr;
+      gap: 14px;
+      align-items: start;
+    }
+
+    .lp-step-n {
+      font-family: var(--font-data);
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--ice);
+      border: 1px solid var(--line-strong);
+      border-radius: var(--r-sm);
+      width: 34px;
+      height: 34px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* .lp-step has THREE children (number, heading, paragraph) against two
+       columns, so auto-placement would drop the paragraph into row 2 of the
+       34px NUMBER column and wrap it one word per line. Pin both text
+       elements to column 2 explicitly. */
+    .lp-step-t {
+      grid-column: 2;
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text);
+      margin: 6px 0 4px;
+    }
+
+    .lp-step-d {
+      grid-column: 2;
+      font-size: 15px;
+      line-height: 1.6;
+      color: var(--muted);
+      margin: 0;
+      max-width: 620px;
+    }
+
+    .lp-points {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .lp-point {
+      border: 1px solid var(--line);
+      border-radius: var(--r-md);
+      background: var(--card);
+      padding: 18px 18px 20px;
+    }
+
+    .lp-point-t {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+      margin: 0 0 6px;
+    }
+
+    .lp-point-d {
+      font-size: 14px;
+      line-height: 1.6;
+      color: var(--muted);
+      margin: 0;
+    }
+
+    .lp-foot {
+      font-size: 14px;
+      color: var(--muted);
+      margin: 32px 0 0;
+    }
+
+    .lp-foot a { color: var(--ice); }
+
+    @media (max-width: 700px) {
+      .lp-below { padding: 48px 18px 56px; }
+      .lp-title { font-size: 23px; }
+      .lp-title-sep { margin-top: 44px; }
+      .lp-points { grid-template-columns: 1fr; }
+    }
+
     .cb-input-row {
       display: flex;
       gap: 8px;

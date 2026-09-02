@@ -200,10 +200,26 @@ in the app, not a public page.
 
 ### P2-3 — Landing page
 
-Still valid and unaffected: the current landing is one viewport with no feature section, no
-screenshots, no social proof, and **no mention of the mobile app**. Given TestFlight-only
-distribution this is the one place the site should convert visitors into testers. This is
-marketing copy, not an anonymous tool.
+**PARTIALLY SHIPPED 2026-09-02 (operator: "build it link-free now").** The content half is
+built: a below-the-fold `How it works` (4 steps) + `Why the number is yours` (4 points)
+section in `web/index.html`, styled in `web/css/styles.css` (`.lp-*`, tokens only). Every
+claim is behavior that actually ships — connect Sleeper/ESPN/MFL, 3-player-matchup Elo
+seeded from consensus, both-boards scoring, tiered pick values, format sensitivity, and
+propose-back-into-the-league.
+
+**The app-promotion half did NOT ship, and is blocked, not deferred:** there is no
+TestFlight or App Store link anywhere in this repo to point a CTA at
+(`docs/feedback/items/239-invite-universal-links/status.md:79` states this outright), so a
+"become a tester" button would be dead on arrival. A screenshot strip is blocked too —
+`web/` holds no image assets, and `screens/` is frozen at 2026-08-11, weeks behind the
+shipping build, so those captures would misrepresent the product. **When a link exists,
+that CTA belongs in this section** — see P4-2. Positioning copy remains the operator's to
+rewrite; what shipped is honest and specific, not final.
+
+Original framing: the landing was one viewport with no feature section, no screenshots, no
+social proof, and **no mention of the mobile app**. Given TestFlight-only distribution this
+is the one place the site should convert visitors into testers. This is marketing copy, not
+an anonymous tool.
 
 ### Dropped from Phase 2
 
