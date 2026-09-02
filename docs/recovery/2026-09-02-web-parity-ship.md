@@ -17,27 +17,37 @@ git merge-base --is-ancestor fix/web-phase0 claude/website-updates-continue-c794
 ```
 
 — so every commit it carries is reachable from the merge, and its content
-reaches `origin/main` through PR
-[#263](https://github.com/mattmurf77/fantasy-trade-finder/pull/263). Verify by
-content after the squash lands (this repo squash-merges, so ahead/behind counts
-and a `git branch -d` refusal are NOT evidence):
+reached `origin/main` through PR
+[#263](https://github.com/mattmurf77/fantasy-trade-finder/pull/263), squashed as
+`1eb520bd`.
+
+**Verified by content 2026-09-02, after the merge.** Every file the branch
+carried exists on `origin/main`:
 
 ```
-git diff origin/main fix/web-phase0 -- web/ backend/server.py qa/web/   # expect empty
+for f in $(git ls-tree -r --name-only fix/web-phase0 -- web/ qa/web/); do
+  git cat-file -e "origin/main:$f" || echo "MISSING: $f"
+done      # printed nothing
 ```
 
-Two files will legitimately differ outside that path set — `living-memory/` and
-`docs/plans/web-parity/` gained this session's write-back on top.
-
-**Do NOT delete before that diff is empty.** The branch is the only place phases
-0-2 exist as discrete, reviewable commits; the squash flattens them.
+**A plain `git diff origin/main fix/web-phase0` is NOT the check here, and an
+earlier draft of this file wrongly said to expect it empty.** It never will be:
+`main` is a strict superset. Eight files differ, each for a named reason —
+`backend/server.py` (main moved 48+ commits), and seven changed *after* the
+resync by the same ship: `qa/web/check_web_structure.py` (+2 guards),
+`web/js/events.js` (the `X-Source` fix, [G-068](../../living-memory/GOTCHAS.md)),
+`web/index.html` + `web/css/styles.css` (P2-3), `web/robots.txt` +
+`web/sitemap.xml` (the 401-in-sitemap fix), and `web/CLAUDE.md`. Absence of a
+file, not inequality of a file, is the failure signal.
 
 **Evidence trail:** `docs/plans/web-parity/` (plan + scope, waivers W1-W7),
 `docs/reviews/2026-08-19-web-parity-audit.md`, and the
-`living-memory/TEST_LEDGER.md` entries dated 2026-08-26, 2026-09-02 and
-2026-09-02b.
+`living-memory/TEST_LEDGER.md` entries dated 2026-08-26, 2026-09-02, 2026-09-02b
+and 2026-09-02c.
 
 **Recovery:** `git branch fix/web-phase0 40390013` (reflog expiry ~2026-11-30).
 
-**Not yet deleted.** Recorded here first, per `docs/recovery/CLAUDE.md` — capture,
-then delete, never the reverse.
+**Deliberately NOT deleted.** It is local-only, costs nothing, and is the only
+place phases 0-2 exist as discrete reviewable commits — the squash flattened
+them into one. Delete it only if someone wants the tidiness more than the
+history; the sha above is the way back either way.
