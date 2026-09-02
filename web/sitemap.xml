@@ -13,11 +13,11 @@
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
-  <url>
-    <loc>https://fantasy-trade-finder.onrender.com/league-rankings.html</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.7</priority>
-  </url>
+  <!-- league-rankings.html is NOT listed: `league.power_rankings` is false, so
+       the route 401s for an anonymous crawler. Submitting a 401 as an indexable
+       URL is a self-inflicted SEO penalty, and the other two dark pages
+       (player.html, profile.html) are already Disallow-ed in robots.txt. When
+       the flag is lit, restore this entry AND drop the robots.txt Disallow. -->
   <url>
     <loc>https://fantasy-trade-finder.onrender.com/faq.html</loc>
     <changefreq>monthly</changefreq>

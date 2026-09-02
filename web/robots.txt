@@ -12,6 +12,10 @@ Disallow: /color-lab-2.html
 # Signed-in tools — nothing to index behind the sign-in.
 Disallow: /calculator.html
 
+# Dark behind `league.power_rankings` (false): the route 401s for a crawler.
+# Remove this line and restore the sitemap entry when the flag is lit.
+Disallow: /league-rankings.html
+
 # Templates that render nothing without a query param or path segment.
 Disallow: /player.html
 Disallow: /profile.html
