@@ -8,6 +8,16 @@
 
 ---
 
+## 2026-09-02b — D-174 (reason line, 0.15) and D-175 (sweetener band + best-effort, 750/0.12/1) LIVE; Q-035/Q-036 closed
+
+**Where:** `main` @ `f9add99c`. Both knobs live via admin PUT. Nothing in flight on the engine. Three engine-affecting knob changes this week (D-172 Tue, D-174/D-175 Wed) — the 09-01 → 09-07 bake-off window is censored (D-099); do not read it.
+
+**Owed, in order:**
+1. **Prod verification, D-175:** regenerate the operator's deck in league `1312140920132497408`; the London (`8112`) → CeeDee (`6786`) consensus card should carry `gap_sweetener` (`partial: true` unless a ≥1,500 piece exists on his bench). If the card is absent, that is the deck cut (a 0.81 1×1 outranked), not the sweetener. After a week: split by `model_arm` × `basis` — sweetened / partial / `>1539` shares, sub-450 flat, like rate partial vs full vs plain. If partials are liked *less* than the gap cards they replace, roll `sweetener_best_effort` back first (threshold to 1539 in the same breath).
+2. **Prod verification, D-174:** read the same deck — cards giving Davante Adams carry the line; above-market gives do not. Rollback `PUT reason_below_market_frac 0`.
+3. **Follow-ups from QA:** consensus-generator `seen` discard (one-line parity with the v2/v3 paths); decide whether injected cards (likes-you, standing offers) should carry the reason line; consider adding `reasons` to `features_json` so the D-174 effect is measurable without re-deriving boards.
+4. Everything from the 2026-09-02 HANDOFF entry below still stands (D-172 verification, G-066 before reading arm D, pool-fit N≤2 with the junk-stuffing fix).
+
 ## 2026-09-02 — web parity SHIPPED (PR #263, live on Render); what is left is two operator inputs, not code
 
 **Where:** `main` @ `1eb520bd` (squash of PR

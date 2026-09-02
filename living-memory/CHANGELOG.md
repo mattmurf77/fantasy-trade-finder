@@ -11,6 +11,10 @@
 
 ---
 
+## 2026-09-02b — D-174 `reason_below_market_frac` (live 0.15) and D-175 sweetener relative band + best-effort (live 750 / 0.12 / 1)
+
+Two backend-only knob-gated engine changes, both deployed byte-identical and flipped live via the admin API the same day; no client change, no EAS build. **D-174** (PR [#267](https://github.com/mattmurf77/fantasy-trade-finder/pull/267) → `808ff8c4`): a card whose give-side headliner sits ≥ 15% below consensus on the user's shrunk board now carries *"You rank {name} below the market — that gap is what this trade cashes in."* in `reasons` (already rendered by mobile and web under `trade_math.human_explanations`). Closes #350 / [Q-035] as a presentation fix — the model was right. 4542 / 1 vs 4519 / 1 clean main; wire golden byte-identical; 5 QA sabotages red→green. **D-175** (PR [#268](https://github.com/mattmurf77/fantasy-trade-finder/pull/268) → `f9add99c`): `close_value_gap`'s trigger is `max(threshold, 0.12 × max side)` and its closer is best-effort (partial closes stamped `gap_sweetener.partial`), with the flat threshold lowered 1539 → 750 in the load-bearing PUT order best-effort → frac → threshold. Closes #414 / [Q-036] (the card was read from prod: main engine, 19% gap, below the flat floor — no arm bypass). 4541 / 1 vs 4519 / 1; goldens byte-identical at defaults; 6 builder + 5 QA sabotages; on the real #414 card the partial close moves the bar from "≈ Late 1st" to "≈ Early 2nd". Both Wednesday flips censor the bake-off window (D-099) — accepted. Same PR carries [Q-036]'s closure.
+
 ## 2026-09-02 — web-parity branch resynced onto `main` (48 commits) and given its FIRST runtime check; one real analytics defect found and fixed
 
 **Resync, not new feature work.** `fix/web-phase0` was merged into
