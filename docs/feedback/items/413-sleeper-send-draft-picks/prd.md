@@ -35,8 +35,11 @@
 | **A** | *"Send in sleeper isn't correctly identifying draft picks"* | `POST /api/trades/validate` splits picks out of the arrays before the `player_moved` / `roster_limit` math and adds two pick-specific blocking advisories (`asset_unmapped`, `pick_moved`). |
 | **B** | *"…and causing trades with draft picks to fail"* | `POST /api/trades/propose` splits picks, resolves each against the league's `draft_picks` grid (existence) and live `traded_picks` (holder), encodes `"orig,season,round,from,to"` server-side, and refuses the whole send with a 422 on any pick it cannot resolve. Mobile gets two alert branches for the new codes. |
 
-Backend deploy alone fixes every fielded build (1.16.12–1.16.14): the request contract is
-unchanged. The mobile change only improves the refusal copy.
+**Build honesty (one statement, repeated in scope §5):** all seven TestFlight steps run on any
+build ≥ 1.16.12 the moment Render deploys — the request contract is unchanged, and both 422s
+carry `detail`, which the fielded catch-all already renders (`SendInSleeperButton.tsx:305-310`).
+The new build changes only the refusal alert's wording (count-aware, LLD §8.1) — never whether a
+pick send works or whether a refusal is explained.
 
 **No schema. No flag. No new route. No new analytics event.** Two new values in one closed enum
 (`sleeper_send_failed.error_code`) and a semantic correction to `sleeper_send_succeeded` props.
@@ -78,8 +81,8 @@ check in §7.4, **W-n** = a code-walk step in §9, **TF-n** = a TestFlight step 
 server splits with `_is_ftf_pick_asset(league_id, p)` (`server.py:27903-27908`) exactly as the
 MFL route does (`:28188-28191`). No new body key. → T-3, T-4, W-1.
 
-**R-2 — A non-empty `draft_picks` body key is rejected.** `400 {"error":"bad_request","message":…}`
-(LLD §4.1 copy). Absent or `[]` is accepted. No client sends it (`docs/api-reference.md:421`
+**R-2 — A non-empty `draft_picks` body key is rejected.** `400 {"error":"bad_request","message":…,"detail":…}`
+(LLD §4.1 copy; `detail == message`). Absent or `[]` is accepted. No client sends it (`docs/api-reference.md:421`
 documents a producer that does not exist). → T-12.
 
 **R-3 — Existence ground truth is the `draft_picks` grid, by `pick_id`.** `load_draft_picks(league_id)`
@@ -97,16 +100,20 @@ and **no** `load_draft_picks` read. → T-6, T-10, V-3.
 `"{orig},{season},{round},{their},{my}"`. `orig` is the grid row's `original_roster_id`, never
 `from`. → T-1, T-4, T-5, T-6, TF-2, TF-3, TF-4.
 
-**R-6 — `422 sleeper_pick_unmapped`** `{error, picks:[…], message}` when ≥1 pick fails R-3.
-Reported **before** R-7. Copy in LLD §4.2. → T-7, T-8, TF-6.
+**R-6 — `422 sleeper_pick_unmapped`** `{error, picks:[…], message, detail}` when ≥1 pick fails
+R-3. `detail` is byte-equal to `message` — it is what fielded builds render. `picks[]` carries
+every failing id from **both** sides, give-then-receive. Reported **before** R-7. Copy in LLD
+§4.2. → T-7, T-8, T-14, TF-6.
 
-**R-7 — `422 sleeper_pick_not_owned`** `{error, picks:[…], message}` when ≥1 pick fails R-4/R-5's
-holder test. → T-9, TF-5.
+**R-7 — `422 sleeper_pick_not_owned`** `{error, picks:[…], message, detail}` when ≥1 pick fails
+R-4/R-5's holder test. `detail == message`. → T-9, TF-5.
 
 **R-8 — Whole-send refusal, and refusals are invisible to the success spine.** On either 422:
 `sleeper_write.propose_trade` is not called; no `sleeper_send_succeeded` row; no `deck_outcomes`
 row even when `impression_id` is present (`_save_deck_outcome_safe` at `server.py:16264` is only
-reachable after the write). → T-7, T-9, T-11.
+reachable after the write) — **and** a successful pick send still labels its impression
+`propose` exactly once (the positive half; without it a deleted `:16264` call passes every
+negative test). → T-7, T-9, T-11, T-3b.
 
 **R-9 — The adapter receives players-only arrays plus encoded picks.**
 `ProposeTradeRequest(give_player_ids=give_players, receive_player_ids=recv_players, draft_picks=encoded or None)`.
@@ -128,10 +135,13 @@ copy pinned in LLD §5. `player_moved` and `roster_limit` are computed over **pl
 
 ### 3.3 Mobile
 
-**R-13 — Two new alert branches, pinned copy, no reconnect.** In `doPropose`'s catch
+**R-13 — Two new alert branches, count-aware pinned copy, no reconnect.** In `doPropose`'s catch
 (`SendInSleeperButton.tsx:266-310`), `sleeper_pick_unmapped` and `sleeper_pick_not_owned` get their
 own `else if` branches placed after `roster_not_found` and before the catch-all `else`, with the
-exact strings in LLD §8.1. Neither calls `goConnect`; neither renders `picks[]`. → C-7, C-7b, C-7c, C-8, W-2.
+exact strings in LLD §8.1 — `${n || 'Some'} draft pick${n === 1 ? '' : 's'} …`, mirroring
+`SendInMflButton.tsx:141-146`. `n` is `body?.picks?.length`; **counting is not rendering** — no
+pick id reaches the screen. Neither branch calls `goConnect`; neither reads `detail`. → C-7,
+C-7b, C-7c, C-8, W-2.
 
 **R-14 — Comments follow the contract.** `SendInSleeperButton.tsx:252-253` (17 values),
 `sendInSleeper.ts:5-6` (code list), `:214` (warning list). No TypeScript type change. → W-4 (grep-cited).
@@ -172,8 +182,18 @@ two live examples, unconfirmed on a multi-owner pick; closed by TF-3's logged ou
   next sync — the client could not have displayed it either.
 - **Field 1 on acquired picks** is unconfirmed until TF-3 is logged (R-18). Failure mode is
   visible (502 with `detail`), fix is one argument in `encode_draft_pick`.
-- **Mobile copy is generic by design.** The alerts do not list the offending picks; the server's
-  `picks[]` is for logs and the structural test, not for user copy.
+- **Mobile copy counts, never lists.** The alerts say how many picks failed; the ids in `picks[]`
+  are for logs and tests, not user copy.
+- **User-asserted pick rows on a Sleeper league 422 `sleeper_pick_unmapped` by design (Planner
+  ruling 1).** The encoder reads `load_draft_picks(league_id)` with its default platform-only
+  source. A `source='user'` row (ADR-010) can only exist on a Sleeper league via a direct API
+  call — the assignment routes have no platform guard (`server.py:14502-14545`, `:14591-14640`),
+  but the only assignment UI is the ESPN Draft Room (`picks_not_assigned` is ESPN-only, `:10840`,
+  `:11347`). Even if one exists and `picks.assign_tradeable` (ON, `config/features.json:219`)
+  surfaces it on a card, it refuses: its `original_roster_id` is *"an OPAQUE, LEAGUE-LOCAL slot
+  label … never resolved against a platform"* (`database.py:10217-10221`), not a Sleeper
+  roster id, and Sleeper's `traded_picks`/rosters can validate a platform row and nothing else.
+  The default platform source is the containment, not an oversight (guardrail 8).
 
 ---
 
@@ -233,18 +253,24 @@ Stubs per LLD §7: `_sleeper_get` → rosters (existing idiom), `server.load_dra
 | # | Test | Asserts | Named sabotage |
 |---|---|---|---|
 | **T-3** | `test_propose_success_fires_no_trade_sent_on_sleeper` (**the `:288` fixture, fixed**) | body has `give_player_ids: ["100","101", f"{LEAGUE}_2027_2_1"]`, no `draft_picks` key; 200; adapter request has `give_player_ids == ["100","101"]` and `draft_picks == ["1,2027,2,1,2"]`; still no `trade_sent` row | remove the split (pick stays in `give_player_ids`, `draft_picks is None`) — goes red for the right reason |
+| **T-3b** | `test_propose_success_labels_impression_propose` (**the positive spine assertion**) | T-3's body plus `impression_id: "imp-1"`, `server._save_deck_outcome_safe` patched with a `MagicMock` → 200 and `mock.assert_called_once_with("imp-1", "propose", acting_user_id=USER)` (signature `server.py:4759-4767`; call site `:16264-16265`) | delete the `:16264` call — every negative test (T-11 included) stays green without this row |
 | **T-4** | `test_propose_encodes_give_pick_from_to` | give `L_2027_2_1` → `draft_picks == ["1,2027,2,1,2"]` | pass `their_rid` as `from` |
 | **T-5** | `test_propose_encodes_receive_pick_flips_from_to` | receive `L_2026_1_2` (orig 2 = their roster) → `["2,2026,1,2,1"]` | use the give branch for both sides |
 | **T-6** | `test_propose_acquired_pick_uses_traded_picks_holder` | give `L_2027_1_7`, `TRADED` says holder 1 → 200, `["7,2027,1,1,2"]` | ignore the overlay (default holder only) → 422 `not_owned` instead of 200 |
-| **T-7** | `test_propose_hard_blocks_generic_pick` | give `["100", "generic_pick_1_early"]` → 422 `sleeper_pick_unmapped`, `picks == ["generic_pick_1_early"]`, `propose_trade` not called | filter generic rungs out silently and send the player |
-| **T-8** | `test_propose_hard_blocks_pick_missing_from_grid` | well-formed `L_2031_1_1`, no row → 422 `unmapped` | skip the grid membership test (encode straight from `_ftf_pick_parts`) |
-| **T-9** | `test_propose_hard_blocks_pick_not_owned` | give `L_2027_2_1` with `TRADED` overridden to holder 9 → 422 `sleeper_pick_not_owned`, `picks == [...]`, adapter not called | skip the holder comparison |
+| **T-7** | `test_propose_hard_blocks_generic_pick` | give `["100", "generic_pick_1_early"]`, receive `["200", "generic_pick_2_mid"]` → 422 `sleeper_pick_unmapped`, `picks == ["generic_pick_1_early", "generic_pick_2_mid"]` (both sides, give-then-receive), `body["detail"] == body["message"]`, `propose_trade` not called | filter generic rungs out silently and send the players; **or** report the give side only; **or** drop `detail` (fielded builds regress to "Please try again") |
+| **T-8** | `test_propose_hard_blocks_pick_missing_from_grid` | well-formed `L_2031_1_1`, no row → 422 `unmapped` | replace the grid membership test with `if False:` / infer existence from the rosters list (every roster × horizon) instead of `load_draft_picks` rows |
+| **T-9** | `test_propose_hard_blocks_pick_not_owned` | give `L_2027_2_1` with `TRADED` overridden to holder 9 → 422 `sleeper_pick_not_owned`, `picks == [f"{LEAGUE}_2027_2_1"]`, `body["detail"] == body["message"]`, adapter not called | skip the holder comparison; **or** drop `detail` |
 | **T-10** | `test_propose_pick_free_send_makes_no_traded_picks_fetch` | players-only body → `_fetch_sleeper_traded_picks` mock and `load_draft_picks` mock both `assert_not_called()` | fetch unconditionally |
 | **T-11** | `test_propose_422_fires_no_success_event_and_no_deck_outcome` | T-7's body plus `impression_id: "imp-1"` and `_save_deck_outcome_safe` patched → 422; no `sleeper_send_succeeded` `user_events` row; `_save_deck_outcome_safe` not called | move the pick gate below the write / label the impression before refusing |
 | **T-12** | `test_propose_rejects_client_supplied_draft_picks` | body with `draft_picks: ["1,2027,2,1,2"]` → 400 `bad_request`; adapter not called; `draft_picks: []` → proceeds | accept and append (MFL-style pass-through) |
 | **T-13** | `test_propose_success_pick_n_honest` | T-3's body → `sleeper_send_succeeded` props `{give_n: 2, receive_n: 1, pick_n: 1, …}` | keep passing the raw `give` / empty `picks` |
+| **T-14** | `test_propose_reports_unmapped_before_not_owned` | give `["generic_pick_1_early", f"{LEAGUE}_2027_2_1"]` with `TRADED` holder 9 for `(2027,2,"1")` → 422 `sleeper_pick_unmapped`, `picks == ["generic_pick_1_early"]` **only** | check `not_owned` first / merge both lists into one 422 |
 
-Pre-existing tests `:112-330` stay green **unedited** except T-3.
+Pre-existing tests `:112-330` stay green **unedited** except T-3. T-11 uses the same
+`_save_deck_outcome_safe` mock as T-3b (Planner ruling 3: mock, not flag-driving — driving
+`deck.signal_v2` needs an owned, ≤30-day `deck_impressions` row, `server.py:4783-4796`, which this
+fixture does not have and `test_deck_signal_v2.py` already covers). The pair is what makes the
+mock sufficient: T-11 proves "gate before the call", T-3b proves "call not deleted".
 
 ### 7.3 `backend/tests/test_trade_send_validate.py` — validate
 
@@ -270,8 +296,9 @@ branch.
 ### 7.5 Full gate
 
 - `pytest backend/tests` — the three files above plus the untouched suite; baseline
-  4483 passed / 1 skipped (TEST_LEDGER 2026-08-31b); expected delta = +2 (T-1, T-2) +10 (T-4…T-13)
-  +6 (V-1…V-6) = **+18**, with T-3 modified in place.
+  4483 passed / 1 skipped (TEST_LEDGER 2026-08-31b); expected delta = +2 (T-1, T-2) +12 (T-3b,
+  T-4…T-13, T-14) +6 (V-1…V-6) = **+20** → 4503 / 1 skipped, with T-3 modified in place. The
+  build agent records the actual numbers.
 - `node mobile/tests/check-send-button-platform.js` — 8 blocks green.
 - `npx tsc --noEmit` in `mobile/` — no type change, must stay clean.
 - `bash mobile/scripts/testid-lint.sh` — no testIDs added; must stay green.
@@ -299,7 +326,11 @@ branch.
    `build_propose_trade_body`'s player encoding (`sleeper_write.py:286-292`) and the four mounts
    are not edited.
 8. **Default platform source for the grid.** `load_draft_picks(league_id)` — not
-   `_pick_read_source()`; a user-asserted row is not proof a Sleeper pick exists.
+   `_pick_read_source()`; a user-asserted row is not proof a Sleeper pick exists (§4 has the
+   ruling and the code cites).
+9. **`detail` on every refusal this change adds.** Both 422s and the new 400 carry
+   `detail == message`; the fielded catch-all renders `detail`. A refusal without `detail` is a
+   "Please try again" loop for every build before this one (T-7/T-9's drop-`detail` sabotage).
 
 ---
 
@@ -312,8 +343,11 @@ file:line-cited against the post-change tree:
   `TradeCard.tsx:978-982`, `:1000-1004`, `InLeagueCalculator.tsx:1467-1471`) and the pick ids
   they carry are the two shapes the server splits on (`TradesScreen.tsx:4442-4447`,
   `InLeagueCalculator.tsx:493-509`, `backend/pick_values.py:213`).
-- **W-2** `doPropose` catch → `body?.error` → the two new branches → alert copy; both sit inside
-  the chain before the catch-all; neither reaches `goConnect`.
+- **W-2** `doPropose` catch → `body?.error` → the two new branches → count-aware alert copy
+  (`n = body.picks.length`, ids never rendered); both sit inside the chain before the catch-all;
+  neither reaches `goConnect`. Also: on a build **without** these branches, the same 422 falls to
+  the catch-all at `:305-310` and renders the server's `detail` — cite it, because that is the
+  fielded-build path.
 - **W-3** `confirmSend` renders `asset_unmapped` / `pick_moved` through the existing
   `warnings.map(w => w.message)` with `blocking` → "This trade will likely fail" title, with no
   client change.
@@ -328,18 +362,33 @@ file:line-cited against the post-change tree:
 
 ## 10. Operator TestFlight checklist
 
-**This is the only runtime evidence this change gets.** Real Sleeper league, verified session,
-any fielded build ≥ 1.16.12 for steps 1–4 and 7 (server fix), the new build for steps 5–6's
-copy. **Cancel every proposal in Sleeper afterwards.** Log each outcome in TEST_LEDGER.
+**This is the only runtime evidence this change gets.** Real Sleeper league, verified session.
+**Build honesty (same statement as §1 and scope §5):** all seven steps run on any build ≥ 1.16.12
+once Render deploys; the new build changes only the refusal alert's wording (LLD §8.1) — on a
+fielded build the refusal shows the server's `detail` ("Some draft picks …"), on the new build
+the count-aware sentence ("1 draft pick …"). **Cancel every proposal in Sleeper afterwards.** Log
+each outcome in TEST_LEDGER.
+
+**Which steps are which:** TF-1, TF-2, TF-4, TF-7 are **mandatory**. TF-3 is **conditional** —
+run it if the operator holds an acquired pick in any league; otherwise log **"not run — Q-035
+stays open"** as the outcome (a legal result; the operator has sold more firsts than he has
+acquired, so the precondition may be false everywhere). TF-5 and TF-6 are **opportunistic** —
+they need a state the app does not let you build on demand (TF-5: the grid must be stale relative
+to Sleeper, i.e. a real pick trade between the last `session_init` sync and the send, because the
+calculator picker only offers the partner's *current* grid picks, `InLeagueCalculator.tsx:493-509`;
+TF-6: a Sleeper deck card carrying a `generic_pick_*` rung, and with synced owned picks
+`_owned_picks_available` is true for non-ESPN leagues, `server.py:11343-11348`, so the deck injects
+owned picks — no producer of a generic rung on a Sleeper card was found). Run them if the
+situation arises; **the proof of record for those two refusals is T-9/V-3 and T-7/V-2.**
 
 | # | Where | Steps | Expected |
 |---|---|---|---|
 | **TF-1** | Trades deck or Matches → Awaiting | Open a card whose **give** side contains one of **your own original** future picks (e.g. your 2027 2nd). Tap **Send in Sleeper**. | The plain **"Send this trade?"** confirm. **No** "This trade will likely fail" / "no longer on the expected roster" warning. (Half A.) |
 | **TF-2** | same | Tap Send. | **"Trade sent"**. In the Sleeper app, the pending offer lists that exact pick (season + round, "via <your team>") on your side. Cancel it in Sleeper. (Half B; R-5 give orientation.) |
-| **TF-3** | Calculator | **Field-1 proof.** If you hold a pick you **acquired from another team**, build a trade giving that pick. Send. | "Trade sent"; Sleeper shows the pick with the **original** team's name, moving from you to the partner. Cancel. **If it fails** with "Sleeper wouldn't accept the send" / "Couldn't send" plus a detail, **capture the detail text verbatim** — that is the Q-035 falsification and the encoder's field 1 flips to the current holder. |
+| **TF-3** *(conditional)* | Calculator | **Field-1 proof.** Only if you hold a pick you **acquired from another team** in some league: build a trade giving that pick. Send. If you hold none, **log "not run — Q-035 stays open"** and move on. | "Trade sent"; Sleeper shows the pick with the **original** team's name, moving from you to the partner. Cancel. **If it fails** with "Sleeper wouldn't accept the send" / "Couldn't send" plus a detail, **capture the detail text verbatim** — that is the Q-035 falsification and the encoder's field 1 flips to the current holder. |
 | **TF-4** | Calculator | Build a trade **receiving** one of the partner's own picks. Send. | "Trade sent"; Sleeper shows the pick moving from them to you. Cancel. (R-5 receive orientation.) |
-| **TF-5** | Calculator | Build a trade with a pick the partner **no longer holds** (one they traded away — visible in the Draft tab / Sleeper's picks list). Tap Send. | Pre-send warning **"…no longer owned by the expected team (already traded) — Sleeper will reject the offer."** Tap **Send anyway** → alert **"Couldn't send" / "A draft pick in this trade is no longer owned by the team offering it…"**. Nothing appears in Sleeper. |
-| **TF-6** | Trades deck | Find a deck card whose give or receive side is a **generic rung** ("Early 1st", "Mid 2nd"). Tap Send. | Pre-send warning **"…can't be sent to Sleeper (generic picks like 'Early 1st' name no real pick)…"**. Send anyway → **"Couldn't send" / "…isn't a real pick in this Sleeper league…"**. Nothing in Sleeper. |
+| **TF-5** *(opportunistic)* | Calculator | Only if a partner's pick has **changed hands in Sleeper since the app last synced** (you or a leaguemate traded it after opening the app): build a trade with that pick on their side. Tap Send. | Pre-send warning **"…no longer owned by the expected team (already traded) — Sleeper will reject the offer."** Tap **Send anyway** → **"Couldn't send"** with, on a fielded build, *"Some draft picks in this trade have already changed hands, so nothing was sent…"* and on the new build *"1 draft pick in this trade has already changed hands…"*. Nothing appears in Sleeper. Proof of record otherwise: T-9 / V-3. |
+| **TF-6** *(opportunistic)* | Trades deck | Only if a deck card shows a **generic rung** ("Early 1st", "Mid 2nd") on a Sleeper league: tap Send. | Pre-send warning **"…can't be sent to Sleeper (generic picks like “Early 1st” name no real pick)…"**. Send anyway → **"Couldn't send"** with *"Some draft picks in this trade couldn’t be matched to a pick in this Sleeper league… Generic picks like “Early 1st” can’t be sent — use a specific pick."* (fielded) / *"1 draft pick in this trade couldn’t be matched…"* (new build). Nothing in Sleeper. Proof of record otherwise: T-7 / V-2. |
 | **TF-7** | any | A **player-only** trade. Send. | Unchanged: plain confirm, "Trade sent", offer in Sleeper. Cancel. (Regression: the byte-identical path.) |
 
 ---
@@ -364,7 +413,7 @@ Insert above D-171 in `living-memory/DECISIONS.md` and add the index row at the 
 >
 > **Date:** 2026-09-02 (#413) · **Scope:** [`docs/feedback/items/413-sleeper-send-draft-picks/scope.md`](../docs/feedback/items/413-sleeper-send-draft-picks/scope.md) · **Mirrors:** the MFL propose route's split-and-encode (`_mfl_encode_ftf_picks`) and the ESPN route's hard block.
 >
-> **Decision:** `POST /api/trades/propose` keeps its mixed `give_player_ids` / `receive_player_ids` arrays and splits picks server-side (`_is_ftf_pick_asset`). Existence is the league's `draft_picks` grid (platform rows, by `pick_id`); the current holder is the live public `traded_picks` list overlaid on "original roster holds by default"; the give side must be held by the proposer's roster and the receive side by the counterparty's. Encoding `"orig,season,round,from,to"` happens only in `sleeper_write.encode_draft_pick`. Any pick that cannot be resolved refuses the whole send — 422 `sleeper_pick_unmapped` (existence) or 422 `sleeper_pick_not_owned` (holder) — before anything reaches Sleeper. The `draft_picks` body key is rejected when non-empty. Both fetches are skipped for pick-free sends. No feature flag: the change is additive inside `trade.send_in_sleeper`, and rollback is a code revert.
+> **Decision:** `POST /api/trades/propose` keeps its mixed `give_player_ids` / `receive_player_ids` arrays and splits picks server-side (`_is_ftf_pick_asset`). Existence is the league's `draft_picks` grid (platform rows, by `pick_id`); the current holder is the live public `traded_picks` list overlaid on "original roster holds by default"; the give side must be held by the proposer's roster and the receive side by the counterparty's. Encoding `"orig,season,round,from,to"` happens only in `sleeper_write.encode_draft_pick`. Any pick that cannot be resolved refuses the whole send — 422 `sleeper_pick_unmapped` (existence) or 422 `sleeper_pick_not_owned` (holder) — before anything reaches Sleeper; both carry `detail == message` so every fielded build renders the reason. User-asserted (ADR-010) rows are outside the grid the encoder reads and refuse as `unmapped` by design — their `original_roster_id` is an opaque slot label, not a Sleeper roster id. The `draft_picks` body key is rejected when non-empty. Both fetches are skipped for pick-free sends. No feature flag: the change is additive inside `trade.send_in_sleeper`, and rollback is a code revert.
 >
 > **Alternatives considered:** a new `give_pick_ids` key (fielded builds already send mixed arrays; must work on server deploy alone); client-side encoding (the client cannot see `traded_picks`, and a client-asserted `from` is the value the server exists to verify); grid `owner_user_id` as holder (stale between syncs, and a user id, not a roster id); MFL-style pass-through of pre-encoded strings (a second unverified entry point for a producer that does not exist); a strict `traded_picks` variant that 502s on flake (a second failure path for a transient the route already tolerates on rosters — accepted residual instead).
 >

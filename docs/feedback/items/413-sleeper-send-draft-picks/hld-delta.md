@@ -50,9 +50,10 @@ server.propose_trade_to_sleeper           server.py:16156
     └─ sleeper_write.propose_trade        → propose_trade(... draft_picks: ["orig,season,round,from,to", …])
 ```
 
-Mermaid edge to add to the `flowchart LR`: `SRV -->|traded_picks (pick sends only)| SL` is
-already covered by the existing `SL` node; the new edge is **`DB --> SRV` for `draft_picks` on
-the propose path** — the write route now reads a table the sync daemon populates.
+Mermaid, `flowchart LR`: add the label `traded_picks (pick sends)` to the existing `SRV → SL`
+edge — two routes (propose, validate) now hit `/v1/league/{id}/traded_picks` on pick sends — and
+add the new **`DB → SRV` edge for `draft_picks` on the propose path** (the write route now reads a
+table the sync daemon populates).
 
 ---
 
@@ -94,7 +95,7 @@ empty) — nothing there.
 | D-b | **`draft_picks` body key: reject non-empty with 400.** One way in; a pre-encoded string from a client is a client-asserted orientation. | *MFL-style pass-through* (`give_pick_assets`, `server.py:28219-28224`) — keeps a second, unverified entry point alive for a producer that does not exist (`docs/api-reference.md:421`). *Silently ignore* — violates never-drop-an-asset. |
 | D-c | **Existence from the grid, holder from live `traded_picks`, holder defaulting to the original roster.** | *Grid `owner_user_id` alone* — stale between syncs; and it is a user_id, not a roster_id, so it cannot be compared to the roster ids the route resolves. *Live `traded_picks` alone* — proves holder, not existence: a generic rung or a phantom season has no traded row and would default to "original holds it". |
 | D-d | **Any single unresolvable pick refuses the whole send** (422). Same rule as MFL (`:28193-28198`) and ESPN (`:28625-28644`). | *Send the mappable subset* — a partially-mapped trade is a different trade. |
-| D-e | **No feature flag.** The change lives inside `trade.send_in_sleeper`; a pick-free send is byte-identical; both new responses are refusals on a path that today ends in a 502. Rollback is a code revert of an additive contract. | *A `trade.sleeper_pick_send` flag* — would add a second way to keep pick sends broken, gating a fix rather than a behavior. Stated in scope §2, not waived. |
+| D-e | **No feature flag.** The change lives inside `trade.send_in_sleeper`; a pick-free send is byte-identical; both new responses are refusals on a path that today ends in a 502. Rollback is a code revert of an additive contract — the D-063 precedent (*"rollback is a code revert on an additive contract, operator-accepted"*, `living-memory/DECISIONS.md:675-676`). | *A `trade.sleeper_pick_send` flag* — would add a second way to keep pick sends broken, gating a fix rather than a behavior. Stated in scope §2, not waived. |
 | D-f | **`traded_picks` fetch failure degrades, it does not block.** `_fetch_sleeper_traded_picks` returns `[]` on error (`:13906-13908`), indistinguishable from "nothing traded"; holder falls back to the original roster. Outcomes are bounded (LLD §6.9): an acquired pick → 422 `not_owned` (safe refusal); one's own original pick already traded away → encoded with `from = me` → Sleeper rejects → 502 (today's behavior). **Never a silently wrong send.** | *A strict variant returning `None` + 502 on flake* — a second failure path for a transient the route already tolerates on the rosters fetch. Accepted residual, recorded. |
 
 The `DECISIONS.md` entry is **D-172** (next id; `D-171` at `living-memory/DECISIONS.md` is the
@@ -104,11 +105,14 @@ current max, verified 2026-09-02) — text in PRD §12.
 
 ## 6. What the propose-label spine does not see
 
-`_save_deck_outcome_safe(impression_id, "propose")` (`server.py:16264-16265`, F1 `deck.signal_v2`)
+`_save_deck_outcome_safe(impression_id, "propose")` (`server.py:16264-16265`, F1 `deck.signal_v2`;
+shipped as the propose-label spine — `living-memory/CHANGELOG.md` § 2026-08-29d, PR #241)
 and `_record_send_success` (`:16274-16278`) are both **after** the Sleeper write succeeds. Both new
 422s return before the write, so neither an impression is labeled `propose` nor a
 `sleeper_send_succeeded` row is written on a refusal — the same shape as the existing 502 path.
-PRD R-8 pins this with a test.
+PRD R-8 pins both directions: T-11 (a refusal never labels) and T-3b (a success still labels —
+the sabotage that deletes the `:16264` call must go red; a negative-only assertion cannot tell
+"gate before the call" from "call deleted").
 
 ---
 
@@ -120,6 +124,7 @@ Fields 2–5 and both live examples (`"11,2026,1,1,2"`, `"1,2027,4,2,1"`) are ob
 transaction shape corroborates `roster_id (original)` / `previous_owner_id` / `owner_id`
 (`server.py:13900`). If field 1 is instead the current holder, a never-traded pick (orig == from)
 still works and only acquired picks fail — visibly, as 502 `sleeper_write_failed` with `detail`.
-There is no dry run (no Sleeper sandbox; `FTF_TEST_MODE` fail-closes the route at `:16167-16171`),
+The operator may hold no acquired pick in any league, so the device proof is **conditional**:
+"not run — Q-035 stays open" is a legal, logged outcome (PRD §10). There is no dry run (no Sleeper sandbox; `FTF_TEST_MODE` fail-closes the route at `:16167-16171`),
 so the proof is TestFlight step 3 (PRD §10). Logged as **Q-035** in `OPEN_QUESTIONS.md` the way
 Q-016 records `waiver_budget`.

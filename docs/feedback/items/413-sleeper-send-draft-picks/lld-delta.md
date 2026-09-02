@@ -95,6 +95,13 @@ skips the entry. Live rows carry ints for `roster_id`/`owner_id` and a string `s
 (`backend/tests/fixtures/outlook-hypotheses/ffv3-2024.json:6-12`) — the casts above normalize
 both directions.
 
+**Rule (binding):** every roster-id *comparison* is `int` vs `int` — `my_rid`/`their_rid` are
+`int` (`_roster_id_for_owner`, `server.py:15981`; body `their_roster_id` cast at `:16220`), the
+holder is `int`, the default holder is `int(row["original_roster_id"])`. `str` appears **only**
+inside the holder-index key, because the grid column is `String` (`database.py:1100`, written as
+`str` at `:10027`/`:10041`/`:10073`). `encode_draft_pick` re-`int()`s all five fields (T-1's
+string-input case pins that).
+
 ### 3.2 `_sleeper_encode_ftf_picks` — NEW
 
 ```python
@@ -169,11 +176,13 @@ immediately after the existing `bad_request` check at `:16197-16198`:
 
 ```python
 if picks:
-    return jsonify({"error": "bad_request",
-                    "message": "draft_picks is not accepted — put pick ids in "
-                               "give_player_ids / receive_player_ids; the server "
-                               "encodes them."}), 400
+    _msg = ("draft_picks is not accepted — put pick ids in give_player_ids / "
+            "receive_player_ids; the server encodes them.")
+    return jsonify({"error": "bad_request", "message": _msg, "detail": _msg}), 400
 ```
+
+`detail` rides alongside `message` for symmetry with the 422s (§4.2) — no client sends this
+key, so it is never rendered; it exists so the catch-all `detail ||` read stays uniform.
 
 Absent or `[]` is fine (every fielded client). The `picks` local is then dead past this point;
 delete its later uses (`:16231`, `:16275`) rather than leaving a misleading name.
@@ -192,13 +201,16 @@ if give_picks or recv_picks:
     encoded, unmapped, not_owned = _sleeper_encode_ftf_picks(
         league_id, give_picks, recv_picks, my_roster_id, their_rid, grid_rows, traded)
     if unmapped:
+        _msg = ("Some draft picks in this trade couldn’t be matched to a pick in this "
+                "Sleeper league, so nothing was sent. Generic picks like “Early 1st” "
+                "can’t be sent — use a specific pick.")
         return jsonify({"error": "sleeper_pick_unmapped", "picks": unmapped,
-                        "message": "Some draft picks couldn't be matched to a pick in "
-                                   "this Sleeper league, so nothing was sent."}), 422
+                        "message": _msg, "detail": _msg}), 422
     if not_owned:
+        _msg = ("Some draft picks in this trade have already changed hands, so nothing "
+                "was sent. Rebuild the trade and try again.")
         return jsonify({"error": "sleeper_pick_not_owned", "picks": not_owned,
-                        "message": "Some draft picks aren't owned by the team offering "
-                                   "them, so nothing was sent."}), 422
+                        "message": _msg, "detail": _msg}), 422
 ```
 
 Binding details:
@@ -210,6 +222,23 @@ Binding details:
   and no DB read (R-4; the test-harness reason is §7.1).
 - `unmapped` is reported **before** `not_owned` — an unmappable pick has no holder to check.
 - `picks[]` lists the offending **FTF asset ids as received**, in give-then-receive order.
+- **`detail` is mandatory on both 422s and byte-equal to `message`.** Fielded builds
+  1.16.12–1.16.14 render `detail || 'Something went wrong sending to Sleeper. Please try again.'`
+  in the catch-all (`SendInSleeperButton.tsx:305-310`; `detail` read at `:267`). Without `detail`
+  every fielded user would see "Please try again" on a deterministic refusal. The server strings
+  use the "Some" form of the mobile copy (§8.1) verbatim, so a fielded build and the new build
+  read the same sentence; the new build only adds the count. Curly apostrophes / quotes and the
+  em dash are deliberate — the server already ships unicode copy (`server.py:27806`).
+- **User-asserted rows are excluded by design (Planner ruling 1).** A `source='user'` row
+  (ADR-010) has an `original_roster_id` that is *"an OPAQUE, LEAGUE-LOCAL slot label … never
+  resolved against a platform"* (`database.py:10217-10221`, `seed_pick_grid`), so it cannot be
+  encoded into a Sleeper roster id even in principle. Such a row can reach a Sleeper league only
+  by a direct API call (the assignment routes have no platform guard, `server.py:14502-14545`,
+  `:14591-14640`, and `picks.assign_tradeable` is ON, `config/features.json:219`, so
+  `_pick_read_source()` unions them into `/api/league/picks`), because the only assignment UI is
+  the ESPN Draft Room (`picks_not_assigned` is ESPN-only, `:10840`, `:11347`). If one is ever sent
+  it 422s `sleeper_pick_unmapped`. The platform-only default is the containment, not an
+  oversight.
 
 ### 4.3 Request build and success leg
 
@@ -225,9 +254,9 @@ drives the helper directly and stays green.
 
 | Status | `error` | Extra fields | Meaning |
 |---|---|---|---|
-| 400 | `bad_request` | `message` | (new reason) non-empty `draft_picks` in the body. Existing 400 reasons unchanged. |
-| 422 | `sleeper_pick_unmapped` | `picks: string[]`, `message` | ≥1 pick asset is not a concrete pick in this league's grid (generic rung, foreign/malformed id, out-of-horizon or completed-draft season). Nothing sent. |
-| 422 | `sleeper_pick_not_owned` | `picks: string[]`, `message` | ≥1 pick's current holder (live `traded_picks`, default original roster) is not the side offering it. Nothing sent. |
+| 400 | `bad_request` | `message`, `detail` (equal) | (new reason) non-empty `draft_picks` in the body. Existing 400 reasons unchanged. |
+| 422 | `sleeper_pick_unmapped` | `picks: string[]`, `message`, `detail` (equal) | ≥1 pick asset is not a concrete pick in this league's grid (generic rung, foreign/malformed id, out-of-horizon or completed-draft season, user-asserted row). Nothing sent. |
+| 422 | `sleeper_pick_not_owned` | `picks: string[]`, `message`, `detail` (equal) | ≥1 pick's current holder (live `traded_picks`, default original roster) is not the side offering it. Nothing sent. |
 
 Both 422s: no `sleeper_send_succeeded` row, no `deck_outcomes` row (they return before
 `:16264`), no credential change. Docstring `:16157-16166` lists the two new codes and drops
@@ -253,7 +282,7 @@ if give_picks or recv_picks:
         n = len(unmapped)
         warnings.append({"code": "asset_unmapped", "severity": "blocking", "message": (
             f"{n} draft pick{'s' if n != 1 else ''} in this trade can't be sent to Sleeper "
-            "(generic picks like 'Early 1st' name no real pick) — the send will be blocked "
+            "(generic picks like “Early 1st” name no real pick) — the send will be blocked "
             "rather than dropping them.")})
     if not_owned:
         n = len(not_owned)
@@ -271,10 +300,11 @@ Warning contract additions (Sleeper branch):
 
 | `code` | `severity` | Copy (N substituted; singular/plural as above) |
 |---|---|---|
-| `asset_unmapped` | `blocking` | `N draft pick(s) in this trade can't be sent to Sleeper (generic picks like 'Early 1st' name no real pick) — the send will be blocked rather than dropping them.` |
+| `asset_unmapped` | `blocking` | `N draft pick(s) in this trade can't be sent to Sleeper (generic picks like “Early 1st” name no real pick) — the send will be blocked rather than dropping them.` |
 | `pick_moved` | `blocking` | `N pick(s) in this trade are no longer owned by the expected team (already traded) — Sleeper will reject the offer.` |
 
-Both codes already exist in the MFL vocabulary (`:28003`, `:28030`; `api-reference.md:406,432`), so
+The curly quotes match the mobile alert copy (§8.1); both strings can appear in the same alert
+list, so they must not mix quote styles. Both codes already exist in the MFL vocabulary (`:28003`, `:28030`; `api-reference.md:406,432`), so
 `TradeSendWarning.code` (`mobile/src/api/sendInSleeper.ts:214`) needs a comment update only.
 `checked` semantics unchanged; a `traded_picks` flake degrades exactly as §3.3 rows 11–12.
 
@@ -352,25 +382,32 @@ Insert two branches **after** the `roster_not_found || opponent_roster_not_found
 
 ```tsx
 } else if (code === 'sleeper_pick_unmapped') {
-  // #413 — a pick in the trade names no real pick in this Sleeper league
-  // (generic rungs like "Early 1st", or a pick outside the league's grid).
+  // #413 — ≥1 pick could not be matched to a pick in this league's grid
+  // (generic rungs like “Early 1st”, or a pick outside the synced grid).
   // The server refused the WHOLE send rather than dropping the pick.
+  // Count-aware like the MFL twin (SendInMflButton.tsx:141-146); the ids
+  // themselves are never rendered.
+  const n = Array.isArray(body?.picks) ? body.picks.length : 0;
   Alert.alert(
     'Couldn’t send',
-    'A draft pick in this trade isn’t a real pick in this Sleeper league (generic picks like “Early 1st” can’t be sent). Nothing was sent.',
+    `${n || 'Some'} draft pick${n === 1 ? '' : 's'} in this trade couldn’t be matched to a pick in this Sleeper league, so nothing was sent. Generic picks like “Early 1st” can’t be sent — use a specific pick.`,
   );
 } else if (code === 'sleeper_pick_not_owned') {
   // #413 — live traded_picks says the offering team no longer holds it.
+  const n = Array.isArray(body?.picks) ? body.picks.length : 0;
   Alert.alert(
     'Couldn’t send',
-    'A draft pick in this trade is no longer owned by the team offering it (already traded). Nothing was sent — rebuild the trade and try again.',
+    `${n || 'Some'} draft pick${n === 1 ? '' : 's'} in this trade ${n === 1 ? 'has' : 'have'} already changed hands, so nothing was sent. Rebuild the trade and try again.`,
   );
 }
 ```
 
 Binding: neither branch calls `goConnect` (these are not auth errors) and neither reads
-`detail`. `body?.picks` is available (`err.body`) but is **not** rendered — pick ids are
-league-internal strings, not user copy. The `track('sleeper_send_failed', …)` at `:254-264`
+`detail`. `body?.picks` is **counted, never rendered** — pick ids are league-internal strings,
+not user copy; the count is the same idiom `SendInMflButton.tsx:141-146` uses for `unmapped`.
+Sentence case, curly apostrophes, em dash, no emoji (Chalkline body copy,
+`docs/design/design-system.md:103`). With `n = 0` (an old server that omits `picks`) the
+sentence degrades to the server's own "Some …" form. The `track('sleeper_send_failed', …)` at `:254-264`
 runs before the ladder and already carries `error_code: body?.error`, so the two new codes
 arrive with **no emitter change**.
 
@@ -410,10 +447,10 @@ The `npm run test:send-button-platform` script exists (`mobile/package.json:80`)
 ## 9. Contract summary (wire-level, both agents)
 
 ```
-POST /api/trades/propose            request unchanged (mixed arrays); draft_picks non-empty → 400
+POST /api/trades/propose            request unchanged (mixed arrays); draft_picks non-empty → 400 {error, message, detail}
   200 {status, transaction_id}                          picks encoded server-side
-  422 {error:"sleeper_pick_unmapped",  picks:[…], message}   ← checked first
-  422 {error:"sleeper_pick_not_owned", picks:[…], message}
+  422 {error:"sleeper_pick_unmapped",  picks:[…], message, detail}   ← checked first; detail == message
+  422 {error:"sleeper_pick_not_owned", picks:[…], message, detail}   ← detail == message (fielded catch-all renders it)
 POST /api/trades/validate           request unchanged
   200 {ok, checked, warnings:[…{code:"asset_unmapped"|"pick_moved", severity:"blocking", message}]}
 sleeper_send_failed.error_code      += "sleeper_pick_unmapped" | "sleeper_pick_not_owned"   (17 values)

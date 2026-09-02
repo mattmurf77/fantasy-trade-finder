@@ -24,7 +24,7 @@ not express-eligible; full gates apply and no express was declared.
 
 | Event | Change | Question it answers |
 |---|---|---|
-| `sleeper_send_failed` (client) | **`error_code` closed enum: 15 → 17 values.** Adds `sleeper_pick_unmapped`, `sleeper_pick_not_owned`. No emitter change — `SendInSleeperButton.tsx:254-264` already sends `body?.error`. `CLIENT_EVENT_PROPS` constrains keys, not values, so no ingest change; `WAT_LIVE` already lists the event (`backend/analytics_queries.py:53-55`); `NON_INTENT_EVENTS` untouched (it is not an impression/navigation event). Four comment sites must agree on "17": `backend/analytics_taxonomy.py:1055-1058`, `SendInSleeperButton.tsx:252-253`, `docs/business/analytics/2026-08-11-p0-7-addendum.md:64-67`, `docs/cross-client-invariants.md:825` (gains the enum listing — the only place send-event enums are pinned). | How often a pick send is refused, and why — the pre-fix signal for #413 was `sleeper_write_failed` from Sleeper's GraphQL rejection; post-fix the two new codes replace it for pick problems. **Reader warning:** `sleeper_write_failed` rows before this deploy include pick-caused failures; do not read the drop as a Sleeper-side improvement. |
+| `sleeper_send_failed` (client) | **`error_code` closed enum: 15 → 17 values.** Fires with the new codes on fielded builds too (the `body?.error` read predates this change). Adds `sleeper_pick_unmapped`, `sleeper_pick_not_owned`. No emitter change — `SendInSleeperButton.tsx:254-264` already sends `body?.error`. `CLIENT_EVENT_PROPS` constrains keys, not values, so no ingest change; `WAT_LIVE` already lists the event (`backend/analytics_queries.py:53-55`); `NON_INTENT_EVENTS` untouched (it is not an impression/navigation event). Four comment sites must agree on "17": `backend/analytics_taxonomy.py:1055-1058`, `SendInSleeperButton.tsx:252-253`, `docs/business/analytics/2026-08-11-p0-7-addendum.md:64-67`, `docs/cross-client-invariants.md:825` (gains the enum listing — the only place send-event enums are pinned). | How often a pick send is refused, and why — the pre-fix signal for #413 was `sleeper_write_failed` from Sleeper's GraphQL rejection; post-fix the two new codes replace it for pick problems. **Reader warning:** `sleeper_write_failed` rows before this deploy include pick-caused failures; do not read the drop as a Sleeper-side improvement. |
 | `sleeper_send_succeeded` (server) | **Semantic correction, no key change.** `give_n`/`receive_n` counted picks as players and `pick_n` was always 0 (`server.py:16274-16278` passed the raw arrays and an empty `picks`). Post-fix: players only / encoded picks. Dated note in the addendum. | Pick share of confirmed sends — a number that was structurally 0 before this date. |
 | `sleeper_send_attempted` (client) | Unchanged. Its `give_n`/`receive_n` still count mixed arrays (client-side, pre-split) — **stated**, not fixed: the attempt leg cannot know the split without duplicating server logic, and the succeeded leg is the one WAT/funnel read. | Attempt volume. |
 | `deck_outcomes` `propose` label (F1) | Unchanged; only reachable after a successful write (`server.py:16264`). PRD T-11 proves refusals do not label. | — |
@@ -66,7 +66,8 @@ invariants doc are updated per §4.
       `typescript`, like the existing six blocks.
 - [x] **Unit tests:** backend pytest — the primary evidence.
       - `backend/tests/test_sleeper_write.py` +2 (T-1 `encode_draft_pick` shape; T-2 pick-only body).
-      - `backend/tests/test_sleeper_write_route.py` +10 new (T-4…T-13) and **T-3 = the `:288` fixture
+      - `backend/tests/test_sleeper_write_route.py` +12 new (T-3b the positive spine assertion,
+        T-4…T-13, T-14 the unmapped-before-not-owned ordering) and **T-3 = the `:288` fixture
         fixed** — today it sends `"draft_picks": ["2027_1"]`, a string the adapter would reject,
         and passes only because `propose_trade` is mocked (false confidence, flagged in
         investigation.md). Stubs: `server.load_draft_picks`, `server._fetch_sleeper_traded_picks`
@@ -74,16 +75,21 @@ invariants doc are updated per §4.
         the rosters list back as traded picks if the route fetched unconditionally (LLD §7.1).
       - `backend/tests/test_trade_send_validate.py` +6 (V-1 is the #413 repro: an owned pick on the
         give side yields zero `player_moved`; V-5 proves roster-limit math excludes picks).
-      - Expected suite delta **+18** on the 2026-08-31b baseline (4483 / 1 skipped). Every test names
-        its sabotage in PRD §7; each is run RED before acceptance.
+      - Expected suite delta **+20** on the 2026-08-31b baseline (4483 / 1 skipped → 4503 / 1). Every
+        test names its sabotage in PRD §7 (23 named sabotages across T-/V-); each is run RED before
+        acceptance. Two of them guard fielded builds directly: dropping `detail` from a 422 (T-7/T-9)
+        and deleting the propose-label call (T-3b).
 - [x] **Code-walk proof:** `docs/feedback/items/413-sleeper-send-draft-picks/code-walk.md`, five
       targets W-1…W-5 (PRD §9): the four mounts still send mixed arrays; the catch → new branches →
       copy; `confirmSend` renders the new warnings with no client change; comment sites agree with
       the wire contract; the 422 reaches `sleeper_send_failed.error_code` through the existing
       `body?.error` read.
-- [x] **Manual TestFlight checklist:** PRD §10, **7 steps**, run by the operator on a real Sleeper
-      league (every proposal cancelled in Sleeper afterwards). Runtime proof genuinely matters here
-      for one reason that no test can substitute: **step 3 is the field-1 proof** — the pick string's
+- [x] **Manual TestFlight checklist:** PRD §10, **7 steps** — TF-1/2/4/7 mandatory, TF-3
+      conditional (legal outcome: "not run — Q-035 stays open"), TF-5/6 opportunistic (their proof
+      of record is T-9/V-3 and T-7/V-2; the states are not buildable on demand) — run by the
+      operator on a real Sleeper league (every proposal cancelled in Sleeper afterwards). Runtime
+      proof genuinely matters here for one reason that no test can substitute: **step 3 is the
+      field-1 proof** — the pick string's
       first field is captured as the original-owner roster id on two live examples but unconfirmed on
       a pick that has changed hands, and there is no Sleeper dry run (`FTF_TEST_MODE` fail-closes the
       route, `server.py:16167-16171`). Steps 1–2 close the two halves of the report; 4 checks the
@@ -126,7 +132,7 @@ invariants doc are updated per §4.
 
 ## 5. Ship gate declaration
 
-- **CI green** on the pushed sha: `backend-tests` (`pytest backend/tests`, expected 4501 passed / 1
+- **CI green** on the pushed sha: `backend-tests` (`pytest backend/tests`, expected 4503 passed / 1
   skipped on the 2026-08-31b baseline — the build agent records the actual numbers) +
   `mobile-typecheck` (`npx tsc --noEmit`, which also runs the `check-*.js` suites incl. the extended
   `check-send-button-platform.js`) + `maestro-testid-lint` (`mobile/scripts/testid-lint.sh`; no
@@ -135,9 +141,10 @@ invariants doc are updated per §4.
   every named sabotage (T-1…T-13, V-1…V-6, C-7/7b/7c/8) proven RED, the code-walk W-1…W-5, and the
   TestFlight checklist as the runtime evidence.
 - **TestFlight verification:** a checklist **was** written (§3), so it is run by the operator and
-  each step's outcome — **step 3 above all** — is logged in TEST_LEDGER. Steps 1, 2, 4, 5, 7 can be
-  run on the current fielded build the moment Render deploys (server fix); steps 5–6's alert copy
-  needs the new build.
+  each step's outcome — **step 3 above all**, including "not run" — is logged in TEST_LEDGER.
+  **Build honesty (same statement as PRD §1 and §10):** all seven steps run on any build ≥ 1.16.12
+  once Render deploys, because the request contract is unchanged and both 422s carry `detail`,
+  which the fielded catch-all renders; the new build changes only the refusal alert's wording.
 - **Pre-push hook:** `FTF_SKIP_SIM_GATE=1` is the standing posture under D-056; the note records the
   pytest + structural + code-walk + checklist as the evidence run instead. Hooks installed once per
   clone via `git config core.hooksPath githooks`.
