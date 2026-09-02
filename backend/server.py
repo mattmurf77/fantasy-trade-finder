@@ -27858,13 +27858,13 @@ def trades_validate():
         if unmapped:
             n = len(unmapped)
             warnings.append({"code": "asset_unmapped", "severity": "blocking", "message": (
-                f"{n} draft pick{'s' if n != 1 else ''} in this trade can't be sent to Sleeper "
+                f"{n} draft pick{'s' if n != 1 else ''} in this trade can’t be sent to Sleeper "
                 "(generic picks like “Early 1st” name no real pick) — the send will be blocked "
-                "rather than dropping them.")})
+                f"rather than dropping {'them' if n != 1 else 'it'}.")})
         if not_owned:
             n = len(not_owned)
             warnings.append({"code": "pick_moved", "severity": "blocking", "message": (
-                f"{n} pick{'s' if n != 1 else ''} in this trade are no longer owned by the "
+                f"{n} pick{'s' if n != 1 else ''} in this trade {'are' if n != 1 else 'is'} no longer owned by the "
                 "expected team (already traded) — Sleeper will reject the offer.")})
 
     my_players = {str(p) for p in (mine.get("players") or [])}

@@ -281,13 +281,13 @@ if give_picks or recv_picks:
     if unmapped:
         n = len(unmapped)
         warnings.append({"code": "asset_unmapped", "severity": "blocking", "message": (
-            f"{n} draft pick{'s' if n != 1 else ''} in this trade can't be sent to Sleeper "
+            f"{n} draft pick{'s' if n != 1 else ''} in this trade can’t be sent to Sleeper "
             "(generic picks like “Early 1st” name no real pick) — the send will be blocked "
             "rather than dropping them.")})
     if not_owned:
         n = len(not_owned)
         warnings.append({"code": "pick_moved", "severity": "blocking", "message": (
-            f"{n} pick{'s' if n != 1 else ''} in this trade are no longer owned by the "
+            f"{n} pick{'s' if n != 1 else ''} in this trade {'are' if n != 1 else 'is'} no longer owned by the "
             "expected team (already traded) — Sleeper will reject the offer.")})
 ```
 
@@ -300,8 +300,8 @@ Warning contract additions (Sleeper branch):
 
 | `code` | `severity` | Copy (N substituted; singular/plural as above) |
 |---|---|---|
-| `asset_unmapped` | `blocking` | `N draft pick(s) in this trade can't be sent to Sleeper (generic picks like “Early 1st” name no real pick) — the send will be blocked rather than dropping them.` |
-| `pick_moved` | `blocking` | `N pick(s) in this trade are no longer owned by the expected team (already traded) — Sleeper will reject the offer.` |
+| `asset_unmapped` | `blocking` | `N draft pick(s) in this trade can’t be sent to Sleeper (generic picks like “Early 1st” name no real pick) — the send will be blocked rather than dropping them/it.` (count-aware: `them` for n≠1, `it` for n=1 — QA round 1 F-4/F-6) |
+| `pick_moved` | `blocking` | `N pick(s) in this trade are/is no longer owned by the expected team (already traded) — Sleeper will reject the offer.` (`are` for n≠1, `is` for n=1) |
 
 The curly quotes match the mobile alert copy (§8.1); both strings can appear in the same alert
 list, so they must not mix quote styles. Both codes already exist in the MFL vocabulary (`:28003`, `:28030`; `api-reference.md:406,432`), so

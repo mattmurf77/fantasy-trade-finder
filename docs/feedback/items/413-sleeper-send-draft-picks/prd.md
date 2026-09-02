@@ -336,7 +336,7 @@ branch.
 
 ## 9. Code-walk proof targets
 
-Written by the mobile agent to `docs/feedback/items/413-sleeper-send-draft-picks/code-walk.md`,
+Written by the mobile agent to `docs/feedback/items/413-sleeper-send-draft-picks/code-walk-mobile.md`,
 file:line-cited against the post-change tree:
 
 - **W-1** The four mounts still pass mixed arrays unchanged (`TradesScreen.tsx:8351-8355`,
@@ -420,3 +420,17 @@ Insert above D-171 in `living-memory/DECISIONS.md` and add the index row at the 
 > **Consequences:** `sleeper_send_failed.error_code` is 17 values; `sleeper_send_succeeded.pick_n`/`give_n` become honest (dated in the addendum). Validate's Sleeper branch gains `asset_unmapped` / `pick_moved` and counts roster limits over players only. Field 1 of the pick string is captured-not-confirmed on a multi-owner pick — Q-035, closed by the TestFlight step-3 outcome.
 >
 > **Status:** Active.
+
+
+## 13. QA round 1 adjudication (2026-09-02, orchestrator)
+
+Two independent QA agents (reports `qa-round-1-agent-A.md`, `qa-round-1-agent-B.md`) both **PASS** the group tip `8e4e1648`: full suite 4503/1, tsc clean, 89/89 guards, testid-lint OK, every PRD-named sabotage RED except T-8's `if False:` variant (self-satisfying — the `None` row raises inside the `try` and is classified `unmapped` anyway; **T-8's proof of record is the "existence inferred from rosters × horizon" sabotage**, which both agents proved RED). Agreed findings and dispositions:
+
+| Finding (both agents) | Disposition |
+|---|---|
+| Living-memory docs (D-172, Q-035, LLD.md line, HLD.md line) absent at the tip | Orchestrator writes at ship (scope §4 "at ship" rows) — not a code defect |
+| Validate advisory copy: n=1 "pick … are", "dropping them"; straight `can't` beside curly quotes | **Fixed on the group branch** after round 1 (server strings count-aware for the verb/pronoun, curly apostrophe); LLD §5 updated to match. Copy-only delta; V-1…V-6 re-run green |
+| `code-walk.md` vs delivered `code-walk-mobile.md`; PRD cited the calculator under `screens/` | PRD corrected (this commit) |
+| scope §3 said +18; actual +20 | scope corrected |
+| Coverage gaps (mobile "never renders ids / never reads `detail`" unpinned; `encoded` give-then-receive order unpinned; guardrail 8's literal-source value unpinned by the AST guard) | Accepted as code-walk-only for this ship; logged as follow-up candidates in TEST_LEDGER |
+| Doc overstatement: a foreign-league/malformed pick id is treated as a PLAYER by `_ftf_pick_parts` (league-prefixed) and fails as 502 `sleeper_write_failed`, not 422 `unmapped` | Noted here; no client produces such an id. api-reference wording narrowed to "generic rung / pick outside the synced grid" |

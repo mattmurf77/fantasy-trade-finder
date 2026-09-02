@@ -125,7 +125,7 @@ invariants doc are updated per §4.
 | `mobile/src/components/CLAUDE.md:33` | **updated** | `SendInSleeperButton` row: one clause — the two `sleeper_pick_*` refusal branches; pick ids ride the mixed arrays verbatim, the server encodes. |
 | `mobile/src/api/CLAUDE.md:32` | **updated** | `sendInSleeper.ts` row: one clause — propose arrays are mixed; validate's Sleeper codes now include `asset_unmapped` / `pick_moved`. |
 | `living-memory/CHANGELOG.md` | **updated at ship** | Dated H2 for the merge. |
-| `living-memory/TEST_LEDGER.md` | **updated at ship + after TestFlight** | Suite counts (+18), the 21 named sabotages proven RED, the structural checks 7–8, the code-walk, and the 7-step checklist with **step 3's outcome logged explicitly**. |
+| `living-memory/TEST_LEDGER.md` | **updated at ship + after TestFlight** | Suite counts (+20), the 21 named sabotages proven RED, the structural checks 7–8, the code-walk, and the 7-step checklist with **step 3's outcome logged explicitly**. |
 | `living-memory/NEXT.md` | **updated at ship** | #413 closed; if TF-3 fails, a one-line follow-up (flip field 1) is queued. |
 | `docs/feedback/items/413-sleeper-send-draft-picks/status.md` | **updated at ship** | → shipped, with the sha and build. |
 | `docs/plans/sleeper-write-capture-runbook.md:159` | **n/a — deliberately not edited** | It is the capture record. Its "confirm on a multi-owner pick" sentence stays true until TF-3 is logged; the resolution is recorded in Q-035 and `integrations/sleeper.md`, not by rewriting history. |
