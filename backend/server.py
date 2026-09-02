@@ -16250,7 +16250,11 @@ def propose_trade_to_sleeper():
     recv_picks = [p for p in receive if _is_ftf_pick_asset(league_id, p)]
     encoded: list = []
     if give_picks or recv_picks:
-        grid_rows = load_draft_picks(league_id)            # platform rows (default source)
+        # A LITERAL platform read on purpose (the #328 `_mock_owned_pick_overlay`
+        # precedent, sanctioned in test_pick_assignment's AST guard): only a
+        # platform-synced row proves a Sleeper pick exists, and this read must
+        # never follow the `picks.assign_tradeable` pricing flag.
+        grid_rows = load_draft_picks(league_id, source=PICK_SOURCE_PLATFORM)
         traded = _fetch_sleeper_traded_picks(league_id)
         encoded, unmapped, not_owned = _sleeper_encode_ftf_picks(
             league_id, give_picks, recv_picks, my_roster_id, their_rid, grid_rows, traded)
@@ -27846,9 +27850,11 @@ def trades_validate():
     recv_players = [p for p in receive if not _is_ftf_pick_asset(league_id, p)]
     recv_picks = [p for p in receive if _is_ftf_pick_asset(league_id, p)]
     if give_picks or recv_picks:
+        # Literal platform read, same reason as the propose route (#328 precedent).
         _, unmapped, not_owned = _sleeper_encode_ftf_picks(
             league_id, give_picks, recv_picks, my_rid, their_rid,
-            load_draft_picks(league_id), _fetch_sleeper_traded_picks(league_id))
+            load_draft_picks(league_id, source=PICK_SOURCE_PLATFORM),
+            _fetch_sleeper_traded_picks(league_id))
         if unmapped:
             n = len(unmapped)
             warnings.append({"code": "asset_unmapped", "severity": "blocking", "message": (
