@@ -538,8 +538,11 @@ def test_sign_test_still_holds_on_every_card(w, profiles):
 
 
 def test_knob_half_set_of_cards_is_the_same_as_knob0_uncapped():
-    """Uncapped, the knob cannot add or remove a card — the gate stack is
-    untouched — so the two runs emit the same SET in a different ORDER."""
+    """Uncapped, the gate stack is untouched, so on this fixture the two
+    runs emit the same SET in a different ORDER. Not universal: with the
+    live gap sweetener on, the set is the same except where the sweetener's
+    order-dependent `seen` dedupe substitutes one card for another (QA fuzz:
+    198/200 rosters); card COUNT is unchanged either way."""
     def key(c):
         return (frozenset(c.give_player_ids), frozenset(c.receive_player_ids))
     c0 = _mirror_cards(0.0, profiles=False)
@@ -552,24 +555,37 @@ def test_knob_half_set_of_cards_is_the_same_as_knob0_uncapped():
 
 def test_picks_keep_their_relative_order():
     """Picks have no lineup slot and get fit 0, so a pool of picks sorts by
-    value alone at every w — their order among themselves never moves."""
+    value alone at every w — their order among themselves never moves.
+
+    `PKR` is the load-bearing asset: a universal-pool generic rung, i.e.
+    `team == "PICK"` with a REAL position (`RB`, the fake position the trio
+    tabs need — see `_pos_for_avoid`). Only the canonical `is_pick_asset`
+    catches it; `position == "PICK"` does not. The user roster carries three
+    RBs and the partner none, so without the short-circuit `marginal_value`
+    would hand PKR a real RB replacement asymmetry (−750 in value space),
+    sink it below every other receive asset at w = 1, and this test goes
+    red (QA sabotage S-C, proven 2026-09-02)."""
     players, seed = {}, {}
-    for i, e in enumerate((1600.0, 1560.0, 1520.0, 1480.0), 1):
+    for i, e in enumerate((1600.0, 1580.0, 1520.0, 1480.0), 1):
         players[f"PK{i}"] = _Pick(f"PK{i}")
         seed[f"PK{i}"] = e
-    for pid, e in (("uw", 1500.0), ("ow", 1500.0)):
-        players[pid] = _Player(pid, "WR")
-        seed[pid] = e
+    players["PKR"] = _Player("PKR", "RB", team="PICK")   # generic rung
+    seed["PKR"] = 1560.0
+    for pid, pos in (("uw", "WR"), ("ow", "WR"), ("ur1", "RB"),
+                     ("ur2", "RB"), ("ur3", "RB")):
+        players[pid] = _Player(pid, pos)
+        seed[pid] = 1500.0
     opp = LeagueMember(user_id="opp", username="opp",
-                       roster=["PK1", "PK3", "ow"], elo_ratings={},
+                       roster=["PK1", "PKR", "PK3", "ow"], elo_ratings={},
                        has_rankings=False)
     svc = TradeService(players=players)
     svc.add_league(League(league_id="L1", name="T", platform="demo",
                           members=[opp]))
+    user_roster = ["PK2", "PK4", "uw", "ur1", "ur2", "ur3"]
     seen = []
     for w in (0.0, 1.0):
         _setup(w)
-        cards = _consensus(svc, user_roster=["PK2", "PK4", "uw"], seed=seed,
+        cards = _consensus(svc, user_roster=user_roster, seed=seed,
                            opp=opp, fairness=0.5, w=w, profiles=False)
         recv_order = []
         for c in cards:
@@ -579,9 +595,13 @@ def test_picks_keep_their_relative_order():
         seen.append(recv_order)
         if w > 0:
             for c in cards:
-                if all(p.startswith("PK") for p in
+                if all(ts.is_pick_asset(players[p]) for p in
                        c.give_player_ids + c.receive_player_ids):
                     assert c.consensus_fit == 0.0
+    assert "PKR" in seen[0], seen[0]
+    # Value order among the picks — 1600 > 1560 > 1520 — at both w.
+    picks_only = [p for p in seen[1] if ts.is_pick_asset(players[p])]
+    assert picks_only[:3] == ["PK1", "PKR", "PK3"], seen[1]
     assert seen[0] == seen[1]
 
 
@@ -656,7 +676,7 @@ def _harness():
 def test_junk_guard_on_harness_fixtures(league, monkeypatch):
     """D-159 guardrail: the sub-450 body share of emitted consensus cards at
     w = 0.5 may not exceed the w = 0 share by more than 2pp, and the deck
-    must not shrink. Clock frozen for the test only (G-065) — the v2 pair
+    must not shrink. Clock frozen for the test only (G-065 (frozen-clock harness determinism; lands in this PR's living-memory)) — the v2 pair
     generator's 1 s deadline is otherwise a hidden input."""
     h = _harness()
     monkeypatch.setattr(ts.time, "monotonic", lambda: h.FROZEN_CLOCK)

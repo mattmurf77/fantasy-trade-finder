@@ -740,9 +740,45 @@ v3_pool_size vet_age waiver_baseline_value waiver_slot_cost youth_age
     # `v3_shape_max_delta` situation one screen up, and it takes the same
     # remedy. At 0.0 the sort-key factory returns `seed_value` itself, so the
     # pin equals the default, the pools are byte-identical, and the golden
-    # stands un-recaptured (verified green with the pin in place).
+    # stands un-recaptured. The golden is NOT what proves the pin, though:
+    # this fixture is fit-symmetric (QA showed it passes identically with the
+    # pin removed and the live row at 0.5), so
+    # `test_consensus_fit_pin_is_load_bearing` below asserts the pin on the
+    # mirror fixture, which the knob does move — the same shape as
+    # `test_pick_pair_strip_kill_value_is_load_bearing`.
     "consensus_fit_weight",
 }
+
+
+def test_consensus_fit_pin_is_load_bearing():
+    """`consensus_fit_weight` is the one MODEL_A_PROFILE entry this file's
+    deck fixture cannot exercise (fit-symmetric: every lineup mirrors the
+    other side's, so the marginal-value asymmetry is 0 everywhere). Assert
+    the pin on a fixture that DOES move — the consensus-fit mirror — with the
+    live row at 0.5: arm A's output must equal its knob-0 output, and with
+    the pin temporarily removed from the overlay it must NOT, so the pin is
+    proven load-bearing rather than assumed."""
+    from backend.tests.test_consensus_fit_sort_key import (
+        _consensus, _mirror, _setup, KNOB)
+    from backend.trade_service import _cfg_override, r4_bypass
+
+    def run(live, overlay):
+        _setup(live)                       # process-global row := live
+        svc, seed, roster, opp = _mirror()
+        with _cfg_override(overlay), r4_bypass():   # == model_a()'s shape
+            cards = _consensus(svc, user_roster=roster, seed=seed, opp=opp,
+                               fairness=0.75, w=live, profiles=False)
+        return [(c.give_player_ids, c.receive_player_ids) for c in cards]
+
+    pinned = dict(MODEL_A_PROFILE)
+    unpinned = {k: v for k, v in MODEL_A_PROFILE.items() if k != KNOB}
+    assert KNOB in pinned and pinned[KNOB] == 0.0
+    # Arm A is unmoved by the live row...
+    assert run(0.5, pinned) == run(0.0, pinned)
+    # ...and only because of the pin: the same overlay minus this one key
+    # follows the live row (non-vacuity — the fixture really moves).
+    assert run(0.5, unpinned) != run(0.0, unpinned)
+    assert run(0.0, unpinned) == run(0.0, pinned)
 
 
 def test_no_generation_knob_was_added_without_an_arm_a_decision():

@@ -7114,14 +7114,20 @@ class TradeService:
         # itself, so the sort keys are the historical ones, byte-identical.
         _w_fit = _c("consensus_fit_weight")
         _fit_norm: dict[str, float] = {}
+        # The two replacement maps are roster properties, not pool
+        # properties: computed once per pair, lazily, and only while the
+        # knob is live — the w = 0 path makes zero replacement_levels calls.
+        _fit_repl: list[dict[str, float]] = []
 
         def _fit_sort_key(pool: list[str], sign: float):
             if _w_fit <= 0:
                 return seed_value
-            u_repl = replacement_levels(user_roster, seed_value, players,
-                                        scoring_format)
-            o_repl = replacement_levels(opponent.roster, seed_value, players,
-                                        scoring_format)
+            if not _fit_repl:
+                _fit_repl.append(replacement_levels(
+                    user_roster, seed_value, players, scoring_format))
+                _fit_repl.append(replacement_levels(
+                    opponent.roster, seed_value, players, scoring_format))
+            u_repl, o_repl = _fit_repl
             raw: dict[str, float] = {}
             for p in pool:
                 # Picks have no lineup slot: neutral, so their order among
