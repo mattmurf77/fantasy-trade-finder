@@ -1,0 +1,8447 @@
+{
+ "meta": {
+  "pythonhashseed": "0",
+  "prod_pins": {
+   "filler_min_frac": 0.15,
+   "overpay_adjusted": 0.0,
+   "trade_elo_gap_max": 0.0,
+   "v3_shape_max_delta": 2.0,
+   "consensus_fit_weight": 0.5
+  },
+  "sweep": [
+   0.05,
+   0.1,
+   0.15,
+   0.25,
+   0.35
+  ],
+  "fairness_threshold": 0.75,
+  "frozen_clock": 1000000.0
+ },
+ "cells": [
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 30,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 13,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 13,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 5,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 2,
+   "above_market": 4
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 30,
+   "carrying": 11,
+   "share": 0.3667,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 8
+    },
+    "consensus": {
+     "cards": 13,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 13,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 5,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 2,
+   "above_market": 4
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 30,
+   "carrying": 11,
+   "share": 0.3667,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 8
+    },
+    "consensus": {
+     "cards": 13,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 13,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 5,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 2,
+   "above_market": 4
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 30,
+   "carrying": 8,
+   "share": 0.2667,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 5
+    },
+    "consensus": {
+     "cards": 13,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 4,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 13,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 5,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 2,
+   "above_market": 4
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 30,
+   "carrying": 5,
+   "share": 0.1667,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 2
+    },
+    "consensus": {
+     "cards": 13,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 13,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 5,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 2,
+   "above_market": 4
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 30,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 13,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 13,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 5,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 2,
+   "above_market": 4
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 22,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 13,
+    "[0.15,0.25)": 7,
+    "[0.25,0.35)": 4,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 4,
+   "above_market": 5
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 24,
+   "share": 0.4364,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 17
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 7
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 22,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 13,
+    "[0.15,0.25)": 7,
+    "[0.25,0.35)": 4,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 4,
+   "above_market": 5
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 24,
+   "share": 0.4364,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 17
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 7
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 22,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 13,
+    "[0.15,0.25)": 7,
+    "[0.25,0.35)": 4,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 4,
+   "above_market": 5
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 11,
+   "share": 0.2,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 7
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 4
+    }
+   },
+   "distinct_named": 4,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 22,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 13,
+    "[0.15,0.25)": 7,
+    "[0.25,0.35)": 4,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 4,
+   "above_market": 5
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 4,
+   "share": 0.0727,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 1
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 22,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 13,
+    "[0.15,0.25)": 7,
+    "[0.25,0.35)": 4,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 4,
+   "above_market": 5
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 22,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 13,
+    "[0.15,0.25)": 7,
+    "[0.25,0.35)": 4,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 4,
+   "above_market": 5
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 28,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 10,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 13,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 5,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 1
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 28,
+   "carrying": 11,
+   "share": 0.3929,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 8
+    },
+    "consensus": {
+     "cards": 10,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 13,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 5,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 1
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 28,
+   "carrying": 11,
+   "share": 0.3929,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 8
+    },
+    "consensus": {
+     "cards": 10,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 13,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 5,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 1
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 28,
+   "carrying": 11,
+   "share": 0.3929,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 8
+    },
+    "consensus": {
+     "cards": 10,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 13,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 5,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 1
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 28,
+   "carrying": 11,
+   "share": 0.3929,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 8
+    },
+    "consensus": {
+     "cards": 10,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 13,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 5,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 1
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 28,
+   "carrying": 11,
+   "share": 0.3929,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 8
+    },
+    "consensus": {
+     "cards": 10,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 13,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 5,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 1
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 28,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 15,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 13,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 14,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 10,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 2,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 28,
+   "carrying": 10,
+   "share": 0.3571,
+   "by_basis": {
+    "divergence": {
+     "cards": 15,
+     "carrying": 7
+    },
+    "consensus": {
+     "cards": 13,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 14,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 10,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 2,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 28,
+   "carrying": 10,
+   "share": 0.3571,
+   "by_basis": {
+    "divergence": {
+     "cards": 15,
+     "carrying": 7
+    },
+    "consensus": {
+     "cards": 13,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 14,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 10,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 2,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 28,
+   "carrying": 10,
+   "share": 0.3571,
+   "by_basis": {
+    "divergence": {
+     "cards": 15,
+     "carrying": 7
+    },
+    "consensus": {
+     "cards": 13,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 14,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 10,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 2,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 28,
+   "carrying": 10,
+   "share": 0.3571,
+   "by_basis": {
+    "divergence": {
+     "cards": 15,
+     "carrying": 7
+    },
+    "consensus": {
+     "cards": 13,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 14,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 10,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 2,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 28,
+   "carrying": 10,
+   "share": 0.3571,
+   "by_basis": {
+    "divergence": {
+     "cards": 15,
+     "carrying": 7
+    },
+    "consensus": {
+     "cards": 13,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 14,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 10,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 2,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 24,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 24,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 5,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 24,
+   "share": 0.4364,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 16
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 8
+    }
+   },
+   "distinct_named": 6,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 24,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 24,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 5,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 24,
+   "share": 0.4364,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 16
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 8
+    }
+   },
+   "distinct_named": 6,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 24,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 24,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 5,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 24,
+   "share": 0.4364,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 16
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 8
+    }
+   },
+   "distinct_named": 6,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 24,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 24,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 5,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 24,
+   "share": 0.4364,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 16
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 8
+    }
+   },
+   "distinct_named": 6,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 24,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 24,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 5,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 24,
+   "share": 0.4364,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 16
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 8
+    }
+   },
+   "distinct_named": 6,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 24,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 24,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 5,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 28,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 10,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 15,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 10,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 2,
+   "above_market": 1
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 28,
+   "carrying": 10,
+   "share": 0.3571,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 7
+    },
+    "consensus": {
+     "cards": 10,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 15,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 10,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 2,
+   "above_market": 1
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 28,
+   "carrying": 10,
+   "share": 0.3571,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 7
+    },
+    "consensus": {
+     "cards": 10,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 15,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 10,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 2,
+   "above_market": 1
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 28,
+   "carrying": 10,
+   "share": 0.3571,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 7
+    },
+    "consensus": {
+     "cards": 10,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 15,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 10,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 2,
+   "above_market": 1
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 28,
+   "carrying": 10,
+   "share": 0.3571,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 7
+    },
+    "consensus": {
+     "cards": 10,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 15,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 10,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 2,
+   "above_market": 1
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 28,
+   "carrying": 10,
+   "share": 0.3571,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 7
+    },
+    "consensus": {
+     "cards": 10,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 15,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 10,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 2,
+   "above_market": 1
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 31,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 14,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 6,
+    "[0.05,0.10)": 2,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 9,
+    "[0.25,0.35)": 2,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 31,
+   "carrying": 16,
+   "share": 0.5161,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 10
+    },
+    "consensus": {
+     "cards": 14,
+     "carrying": 6
+    }
+   },
+   "distinct_named": 9,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 6,
+    "[0.05,0.10)": 2,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 9,
+    "[0.25,0.35)": 2,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 31,
+   "carrying": 14,
+   "share": 0.4516,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 9
+    },
+    "consensus": {
+     "cards": 14,
+     "carrying": 5
+    }
+   },
+   "distinct_named": 8,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 6,
+    "[0.05,0.10)": 2,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 9,
+    "[0.25,0.35)": 2,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 31,
+   "carrying": 14,
+   "share": 0.4516,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 9
+    },
+    "consensus": {
+     "cards": 14,
+     "carrying": 5
+    }
+   },
+   "distinct_named": 8,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 6,
+    "[0.05,0.10)": 2,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 9,
+    "[0.25,0.35)": 2,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 31,
+   "carrying": 5,
+   "share": 0.1613,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 3
+    },
+    "consensus": {
+     "cards": 14,
+     "carrying": 2
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 6,
+    "[0.05,0.10)": 2,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 9,
+    "[0.25,0.35)": 2,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 31,
+   "carrying": 3,
+   "share": 0.0968,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 3
+    },
+    "consensus": {
+     "cards": 14,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 6,
+    "[0.05,0.10)": 2,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 9,
+    "[0.25,0.35)": 2,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 8,
+    "[0.05,0.10)": 1,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 15,
+    "[0.25,0.35)": 2,
+    "[0.35,0.50)": 11,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 4,
+   "above_market": 14
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 29,
+   "share": 0.5273,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 19
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 10
+    }
+   },
+   "distinct_named": 8,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 8,
+    "[0.05,0.10)": 1,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 15,
+    "[0.25,0.35)": 2,
+    "[0.35,0.50)": 11,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 4,
+   "above_market": 14
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 28,
+   "share": 0.5091,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 19
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 9
+    }
+   },
+   "distinct_named": 7,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 8,
+    "[0.05,0.10)": 1,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 15,
+    "[0.25,0.35)": 2,
+    "[0.35,0.50)": 11,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 4,
+   "above_market": 14
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 28,
+   "share": 0.5091,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 19
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 9
+    }
+   },
+   "distinct_named": 7,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 8,
+    "[0.05,0.10)": 1,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 15,
+    "[0.25,0.35)": 2,
+    "[0.35,0.50)": 11,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 4,
+   "above_market": 14
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 13,
+   "share": 0.2364,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 9
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 4
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 8,
+    "[0.05,0.10)": 1,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 15,
+    "[0.25,0.35)": 2,
+    "[0.35,0.50)": 11,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 4,
+   "above_market": 14
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 11,
+   "share": 0.2,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 9
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 2
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 8,
+    "[0.05,0.10)": 1,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 15,
+    "[0.25,0.35)": 2,
+    "[0.35,0.50)": 11,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 4,
+   "above_market": 14
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 34,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 17,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 4,
+    "[0.05,0.10)": 3,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 8,
+    "[0.25,0.35)": 4,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 5,
+   "above_market": 7
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 34,
+   "carrying": 22,
+   "share": 0.6471,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 8
+    },
+    "consensus": {
+     "cards": 17,
+     "carrying": 14
+    }
+   },
+   "distinct_named": 10,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 4,
+    "[0.05,0.10)": 3,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 8,
+    "[0.25,0.35)": 4,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 5,
+   "above_market": 7
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 34,
+   "carrying": 22,
+   "share": 0.6471,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 8
+    },
+    "consensus": {
+     "cards": 17,
+     "carrying": 14
+    }
+   },
+   "distinct_named": 10,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 4,
+    "[0.05,0.10)": 3,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 8,
+    "[0.25,0.35)": 4,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 5,
+   "above_market": 7
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 34,
+   "carrying": 22,
+   "share": 0.6471,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 8
+    },
+    "consensus": {
+     "cards": 17,
+     "carrying": 14
+    }
+   },
+   "distinct_named": 10,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 4,
+    "[0.05,0.10)": 3,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 8,
+    "[0.25,0.35)": 4,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 5,
+   "above_market": 7
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 34,
+   "carrying": 19,
+   "share": 0.5588,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 8
+    },
+    "consensus": {
+     "cards": 17,
+     "carrying": 11
+    }
+   },
+   "distinct_named": 9,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 4,
+    "[0.05,0.10)": 3,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 8,
+    "[0.25,0.35)": 4,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 5,
+   "above_market": 7
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 34,
+   "carrying": 14,
+   "share": 0.4118,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 5
+    },
+    "consensus": {
+     "cards": 17,
+     "carrying": 9
+    }
+   },
+   "distinct_named": 7,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 4,
+    "[0.05,0.10)": 3,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 8,
+    "[0.25,0.35)": 4,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 5,
+   "above_market": 7
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 27,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 13,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 14,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 10
+   },
+   "picks_only_give": 2,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 27,
+   "carrying": 19,
+   "share": 0.7037,
+   "by_basis": {
+    "divergence": {
+     "cards": 13,
+     "carrying": 7
+    },
+    "consensus": {
+     "cards": 14,
+     "carrying": 12
+    }
+   },
+   "distinct_named": 12,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 10
+   },
+   "picks_only_give": 2,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 27,
+   "carrying": 19,
+   "share": 0.7037,
+   "by_basis": {
+    "divergence": {
+     "cards": 13,
+     "carrying": 7
+    },
+    "consensus": {
+     "cards": 14,
+     "carrying": 12
+    }
+   },
+   "distinct_named": 12,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 10
+   },
+   "picks_only_give": 2,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 27,
+   "carrying": 19,
+   "share": 0.7037,
+   "by_basis": {
+    "divergence": {
+     "cards": 13,
+     "carrying": 7
+    },
+    "consensus": {
+     "cards": 14,
+     "carrying": 12
+    }
+   },
+   "distinct_named": 12,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 10
+   },
+   "picks_only_give": 2,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 27,
+   "carrying": 16,
+   "share": 0.5926,
+   "by_basis": {
+    "divergence": {
+     "cards": 13,
+     "carrying": 7
+    },
+    "consensus": {
+     "cards": 14,
+     "carrying": 9
+    }
+   },
+   "distinct_named": 11,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 10
+   },
+   "picks_only_give": 2,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 27,
+   "carrying": 13,
+   "share": 0.4815,
+   "by_basis": {
+    "divergence": {
+     "cards": 13,
+     "carrying": 6
+    },
+    "consensus": {
+     "cards": 14,
+     "carrying": 7
+    }
+   },
+   "distinct_named": 8,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 10
+   },
+   "picks_only_give": 2,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 4,
+    "[0.25,0.35)": 4,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 32
+   },
+   "picks_only_give": 5,
+   "above_market": 7
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 43,
+   "share": 0.7818,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 25
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 18
+    }
+   },
+   "distinct_named": 12,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 4,
+    "[0.25,0.35)": 4,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 32
+   },
+   "picks_only_give": 5,
+   "above_market": 7
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 43,
+   "share": 0.7818,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 25
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 18
+    }
+   },
+   "distinct_named": 12,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 4,
+    "[0.25,0.35)": 4,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 32
+   },
+   "picks_only_give": 5,
+   "above_market": 7
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 43,
+   "share": 0.7818,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 25
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 18
+    }
+   },
+   "distinct_named": 12,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 4,
+    "[0.25,0.35)": 4,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 32
+   },
+   "picks_only_give": 5,
+   "above_market": 7
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 39,
+   "share": 0.7091,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 25
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 14
+    }
+   },
+   "distinct_named": 11,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 4,
+    "[0.25,0.35)": 4,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 32
+   },
+   "picks_only_give": 5,
+   "above_market": 7
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 35,
+   "share": 0.6364,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 23
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 12
+    }
+   },
+   "distinct_named": 8,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 4,
+    "[0.25,0.35)": 4,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 32
+   },
+   "picks_only_give": 5,
+   "above_market": 7
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 26,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 13,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 13,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 2,
+    "[0.50,1.01)": 10
+   },
+   "picks_only_give": 2,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 26,
+   "carrying": 18,
+   "share": 0.6923,
+   "by_basis": {
+    "divergence": {
+     "cards": 13,
+     "carrying": 7
+    },
+    "consensus": {
+     "cards": 13,
+     "carrying": 11
+    }
+   },
+   "distinct_named": 10,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 2,
+    "[0.50,1.01)": 10
+   },
+   "picks_only_give": 2,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 26,
+   "carrying": 18,
+   "share": 0.6923,
+   "by_basis": {
+    "divergence": {
+     "cards": 13,
+     "carrying": 7
+    },
+    "consensus": {
+     "cards": 13,
+     "carrying": 11
+    }
+   },
+   "distinct_named": 10,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 2,
+    "[0.50,1.01)": 10
+   },
+   "picks_only_give": 2,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 26,
+   "carrying": 18,
+   "share": 0.6923,
+   "by_basis": {
+    "divergence": {
+     "cards": 13,
+     "carrying": 7
+    },
+    "consensus": {
+     "cards": 13,
+     "carrying": 11
+    }
+   },
+   "distinct_named": 10,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 2,
+    "[0.50,1.01)": 10
+   },
+   "picks_only_give": 2,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 26,
+   "carrying": 15,
+   "share": 0.5769,
+   "by_basis": {
+    "divergence": {
+     "cards": 13,
+     "carrying": 7
+    },
+    "consensus": {
+     "cards": 13,
+     "carrying": 8
+    }
+   },
+   "distinct_named": 9,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 2,
+    "[0.50,1.01)": 10
+   },
+   "picks_only_give": 2,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 26,
+   "carrying": 12,
+   "share": 0.4615,
+   "by_basis": {
+    "divergence": {
+     "cards": 13,
+     "carrying": 6
+    },
+    "consensus": {
+     "cards": 13,
+     "carrying": 6
+    }
+   },
+   "distinct_named": 7,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 2,
+    "[0.50,1.01)": 10
+   },
+   "picks_only_give": 2,
+   "above_market": 6
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 35,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 18,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 17,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 5,
+    "[0.25,0.35)": 2,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 5
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 35,
+   "carrying": 7,
+   "share": 0.2,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 3
+    },
+    "consensus": {
+     "cards": 18,
+     "carrying": 4
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 17,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 5,
+    "[0.25,0.35)": 2,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 5
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 35,
+   "carrying": 7,
+   "share": 0.2,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 3
+    },
+    "consensus": {
+     "cards": 18,
+     "carrying": 4
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 17,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 5,
+    "[0.25,0.35)": 2,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 5
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 35,
+   "carrying": 7,
+   "share": 0.2,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 3
+    },
+    "consensus": {
+     "cards": 18,
+     "carrying": 4
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 17,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 5,
+    "[0.25,0.35)": 2,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 5
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 35,
+   "carrying": 2,
+   "share": 0.0571,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 18,
+     "carrying": 2
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 17,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 5,
+    "[0.25,0.35)": 2,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 5
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 35,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 18,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 17,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 5,
+    "[0.25,0.35)": 2,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 5
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 70,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 40,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 37,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 12,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 16,
+   "above_market": 2
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 70,
+   "carrying": 15,
+   "share": 0.2143,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 7
+    },
+    "consensus": {
+     "cards": 40,
+     "carrying": 8
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 37,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 12,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 16,
+   "above_market": 2
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 70,
+   "carrying": 15,
+   "share": 0.2143,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 7
+    },
+    "consensus": {
+     "cards": 40,
+     "carrying": 8
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 37,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 12,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 16,
+   "above_market": 2
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 70,
+   "carrying": 15,
+   "share": 0.2143,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 7
+    },
+    "consensus": {
+     "cards": 40,
+     "carrying": 8
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 37,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 12,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 16,
+   "above_market": 2
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 70,
+   "carrying": 3,
+   "share": 0.0429,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 2
+    },
+    "consensus": {
+     "cards": 40,
+     "carrying": 1
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 37,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 12,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 16,
+   "above_market": 2
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 70,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 40,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 37,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 12,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 16,
+   "above_market": 2
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 27,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 10,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 13,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 4,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 1
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 27,
+   "carrying": 7,
+   "share": 0.2593,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 4
+    },
+    "consensus": {
+     "cards": 10,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 13,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 4,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 1
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 27,
+   "carrying": 7,
+   "share": 0.2593,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 4
+    },
+    "consensus": {
+     "cards": 10,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 13,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 4,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 1
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 27,
+   "carrying": 7,
+   "share": 0.2593,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 4
+    },
+    "consensus": {
+     "cards": 10,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 13,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 4,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 1
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 27,
+   "carrying": 7,
+   "share": 0.2593,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 4
+    },
+    "consensus": {
+     "cards": 10,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 13,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 4,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 1
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 27,
+   "carrying": 7,
+   "share": 0.2593,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 4
+    },
+    "consensus": {
+     "cards": 10,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 13,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 4,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 1
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 34,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 16,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 18,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 8,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 2
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 34,
+   "carrying": 8,
+   "share": 0.2353,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 4
+    },
+    "consensus": {
+     "cards": 16,
+     "carrying": 4
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 18,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 8,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 2
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 34,
+   "carrying": 8,
+   "share": 0.2353,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 4
+    },
+    "consensus": {
+     "cards": 16,
+     "carrying": 4
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 18,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 8,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 2
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 34,
+   "carrying": 8,
+   "share": 0.2353,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 4
+    },
+    "consensus": {
+     "cards": 16,
+     "carrying": 4
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 18,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 8,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 2
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 34,
+   "carrying": 8,
+   "share": 0.2353,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 4
+    },
+    "consensus": {
+     "cards": 16,
+     "carrying": 4
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 18,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 8,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 2
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 34,
+   "carrying": 8,
+   "share": 0.2353,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 4
+    },
+    "consensus": {
+     "cards": 16,
+     "carrying": 4
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 18,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 8,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 2
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 73,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 33,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 40,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 44,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 10,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 18,
+   "above_market": 1
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 73,
+   "carrying": 10,
+   "share": 0.137,
+   "by_basis": {
+    "divergence": {
+     "cards": 33,
+     "carrying": 2
+    },
+    "consensus": {
+     "cards": 40,
+     "carrying": 8
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 44,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 10,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 18,
+   "above_market": 1
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 73,
+   "carrying": 10,
+   "share": 0.137,
+   "by_basis": {
+    "divergence": {
+     "cards": 33,
+     "carrying": 2
+    },
+    "consensus": {
+     "cards": 40,
+     "carrying": 8
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 44,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 10,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 18,
+   "above_market": 1
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 73,
+   "carrying": 10,
+   "share": 0.137,
+   "by_basis": {
+    "divergence": {
+     "cards": 33,
+     "carrying": 2
+    },
+    "consensus": {
+     "cards": 40,
+     "carrying": 8
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 44,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 10,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 18,
+   "above_market": 1
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 73,
+   "carrying": 10,
+   "share": 0.137,
+   "by_basis": {
+    "divergence": {
+     "cards": 33,
+     "carrying": 2
+    },
+    "consensus": {
+     "cards": 40,
+     "carrying": 8
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 44,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 10,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 18,
+   "above_market": 1
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 73,
+   "carrying": 10,
+   "share": 0.137,
+   "by_basis": {
+    "divergence": {
+     "cards": 33,
+     "carrying": 2
+    },
+    "consensus": {
+     "cards": 40,
+     "carrying": 8
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 44,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 10,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 18,
+   "above_market": 1
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 27,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 9,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 13,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 7,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 1
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 27,
+   "carrying": 7,
+   "share": 0.2593,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 4
+    },
+    "consensus": {
+     "cards": 9,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 13,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 7,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 1
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 27,
+   "carrying": 7,
+   "share": 0.2593,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 4
+    },
+    "consensus": {
+     "cards": 9,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 13,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 7,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 1
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 27,
+   "carrying": 7,
+   "share": 0.2593,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 4
+    },
+    "consensus": {
+     "cards": 9,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 13,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 7,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 1
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 27,
+   "carrying": 7,
+   "share": 0.2593,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 4
+    },
+    "consensus": {
+     "cards": 9,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 13,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 7,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 1
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "binary",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 27,
+   "carrying": 7,
+   "share": 0.2593,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 4
+    },
+    "consensus": {
+     "cards": 9,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 13,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 7,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 1
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 42,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 19,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 23,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 1,
+    "[0.15,0.25)": 6,
+    "[0.25,0.35)": 13,
+    "[0.35,0.50)": 1,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 15
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 42,
+   "carrying": 21,
+   "share": 0.5,
+   "by_basis": {
+    "divergence": {
+     "cards": 19,
+     "carrying": 6
+    },
+    "consensus": {
+     "cards": 23,
+     "carrying": 15
+    }
+   },
+   "distinct_named": 9,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 1,
+    "[0.15,0.25)": 6,
+    "[0.25,0.35)": 13,
+    "[0.35,0.50)": 1,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 15
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 42,
+   "carrying": 21,
+   "share": 0.5,
+   "by_basis": {
+    "divergence": {
+     "cards": 19,
+     "carrying": 6
+    },
+    "consensus": {
+     "cards": 23,
+     "carrying": 15
+    }
+   },
+   "distinct_named": 9,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 1,
+    "[0.15,0.25)": 6,
+    "[0.25,0.35)": 13,
+    "[0.35,0.50)": 1,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 15
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 42,
+   "carrying": 20,
+   "share": 0.4762,
+   "by_basis": {
+    "divergence": {
+     "cards": 19,
+     "carrying": 6
+    },
+    "consensus": {
+     "cards": 23,
+     "carrying": 14
+    }
+   },
+   "distinct_named": 8,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 1,
+    "[0.15,0.25)": 6,
+    "[0.25,0.35)": 13,
+    "[0.35,0.50)": 1,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 15
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 42,
+   "carrying": 14,
+   "share": 0.3333,
+   "by_basis": {
+    "divergence": {
+     "cards": 19,
+     "carrying": 3
+    },
+    "consensus": {
+     "cards": 23,
+     "carrying": 11
+    }
+   },
+   "distinct_named": 6,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 1,
+    "[0.15,0.25)": 6,
+    "[0.25,0.35)": 13,
+    "[0.35,0.50)": 1,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 15
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 42,
+   "carrying": 1,
+   "share": 0.0238,
+   "by_basis": {
+    "divergence": {
+     "cards": 19,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 23,
+     "carrying": 1
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 1,
+    "[0.15,0.25)": 6,
+    "[0.25,0.35)": 13,
+    "[0.35,0.50)": 1,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 15
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 75,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 35,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 40,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 2,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 2,
+    "[0.15,0.25)": 5,
+    "[0.25,0.35)": 32,
+    "[0.35,0.50)": 4,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 5,
+   "above_market": 25
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 75,
+   "carrying": 43,
+   "share": 0.5733,
+   "by_basis": {
+    "divergence": {
+     "cards": 35,
+     "carrying": 18
+    },
+    "consensus": {
+     "cards": 40,
+     "carrying": 25
+    }
+   },
+   "distinct_named": 9,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 2,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 2,
+    "[0.15,0.25)": 5,
+    "[0.25,0.35)": 32,
+    "[0.35,0.50)": 4,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 5,
+   "above_market": 25
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 75,
+   "carrying": 43,
+   "share": 0.5733,
+   "by_basis": {
+    "divergence": {
+     "cards": 35,
+     "carrying": 18
+    },
+    "consensus": {
+     "cards": 40,
+     "carrying": 25
+    }
+   },
+   "distinct_named": 9,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 2,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 2,
+    "[0.15,0.25)": 5,
+    "[0.25,0.35)": 32,
+    "[0.35,0.50)": 4,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 5,
+   "above_market": 25
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 75,
+   "carrying": 41,
+   "share": 0.5467,
+   "by_basis": {
+    "divergence": {
+     "cards": 35,
+     "carrying": 18
+    },
+    "consensus": {
+     "cards": 40,
+     "carrying": 23
+    }
+   },
+   "distinct_named": 8,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 2,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 2,
+    "[0.15,0.25)": 5,
+    "[0.25,0.35)": 32,
+    "[0.35,0.50)": 4,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 5,
+   "above_market": 25
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 75,
+   "carrying": 36,
+   "share": 0.48,
+   "by_basis": {
+    "divergence": {
+     "cards": 35,
+     "carrying": 16
+    },
+    "consensus": {
+     "cards": 40,
+     "carrying": 20
+    }
+   },
+   "distinct_named": 6,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 2,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 2,
+    "[0.15,0.25)": 5,
+    "[0.25,0.35)": 32,
+    "[0.35,0.50)": 4,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 5,
+   "above_market": 25
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 75,
+   "carrying": 4,
+   "share": 0.0533,
+   "by_basis": {
+    "divergence": {
+     "cards": 35,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 40,
+     "carrying": 4
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 2,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 2,
+    "[0.15,0.25)": 5,
+    "[0.25,0.35)": 32,
+    "[0.35,0.50)": 4,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 5,
+   "above_market": 25
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 28,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 14,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 14,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 1,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 8,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 8,
+   "above_market": 8
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 28,
+   "carrying": 12,
+   "share": 0.4286,
+   "by_basis": {
+    "divergence": {
+     "cards": 14,
+     "carrying": 6
+    },
+    "consensus": {
+     "cards": 14,
+     "carrying": 6
+    }
+   },
+   "distinct_named": 6,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 1,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 8,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 8,
+   "above_market": 8
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 28,
+   "carrying": 12,
+   "share": 0.4286,
+   "by_basis": {
+    "divergence": {
+     "cards": 14,
+     "carrying": 6
+    },
+    "consensus": {
+     "cards": 14,
+     "carrying": 6
+    }
+   },
+   "distinct_named": 6,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 1,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 8,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 8,
+   "above_market": 8
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 28,
+   "carrying": 12,
+   "share": 0.4286,
+   "by_basis": {
+    "divergence": {
+     "cards": 14,
+     "carrying": 6
+    },
+    "consensus": {
+     "cards": 14,
+     "carrying": 6
+    }
+   },
+   "distinct_named": 6,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 1,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 8,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 8,
+   "above_market": 8
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 28,
+   "carrying": 11,
+   "share": 0.3929,
+   "by_basis": {
+    "divergence": {
+     "cards": 14,
+     "carrying": 6
+    },
+    "consensus": {
+     "cards": 14,
+     "carrying": 5
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 1,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 8,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 8,
+   "above_market": 8
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 28,
+   "carrying": 8,
+   "share": 0.2857,
+   "by_basis": {
+    "divergence": {
+     "cards": 14,
+     "carrying": 3
+    },
+    "consensus": {
+     "cards": 14,
+     "carrying": 5
+    }
+   },
+   "distinct_named": 4,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 1,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 3,
+    "[0.25,0.35)": 8,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 8,
+   "above_market": 8
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 35,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 13,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 22,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 4,
+    "[0.50,1.01)": 14
+   },
+   "picks_only_give": 6,
+   "above_market": 8
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 35,
+   "carrying": 21,
+   "share": 0.6,
+   "by_basis": {
+    "divergence": {
+     "cards": 13,
+     "carrying": 6
+    },
+    "consensus": {
+     "cards": 22,
+     "carrying": 15
+    }
+   },
+   "distinct_named": 9,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 4,
+    "[0.50,1.01)": 14
+   },
+   "picks_only_give": 6,
+   "above_market": 8
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 35,
+   "carrying": 21,
+   "share": 0.6,
+   "by_basis": {
+    "divergence": {
+     "cards": 13,
+     "carrying": 6
+    },
+    "consensus": {
+     "cards": 22,
+     "carrying": 15
+    }
+   },
+   "distinct_named": 9,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 4,
+    "[0.50,1.01)": 14
+   },
+   "picks_only_give": 6,
+   "above_market": 8
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 35,
+   "carrying": 21,
+   "share": 0.6,
+   "by_basis": {
+    "divergence": {
+     "cards": 13,
+     "carrying": 6
+    },
+    "consensus": {
+     "cards": 22,
+     "carrying": 15
+    }
+   },
+   "distinct_named": 9,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 4,
+    "[0.50,1.01)": 14
+   },
+   "picks_only_give": 6,
+   "above_market": 8
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 35,
+   "carrying": 21,
+   "share": 0.6,
+   "by_basis": {
+    "divergence": {
+     "cards": 13,
+     "carrying": 6
+    },
+    "consensus": {
+     "cards": 22,
+     "carrying": 15
+    }
+   },
+   "distinct_named": 9,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 4,
+    "[0.50,1.01)": 14
+   },
+   "picks_only_give": 6,
+   "above_market": 8
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 35,
+   "carrying": 18,
+   "share": 0.5143,
+   "by_basis": {
+    "divergence": {
+     "cards": 13,
+     "carrying": 3
+    },
+    "consensus": {
+     "cards": 22,
+     "carrying": 15
+    }
+   },
+   "distinct_named": 8,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 4,
+    "[0.50,1.01)": 14
+   },
+   "picks_only_give": 6,
+   "above_market": 8
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 75,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 35,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 40,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 1,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 8,
+    "[0.50,1.01)": 42
+   },
+   "picks_only_give": 6,
+   "above_market": 15
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 75,
+   "carrying": 54,
+   "share": 0.72,
+   "by_basis": {
+    "divergence": {
+     "cards": 35,
+     "carrying": 28
+    },
+    "consensus": {
+     "cards": 40,
+     "carrying": 26
+    }
+   },
+   "distinct_named": 10,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 1,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 8,
+    "[0.50,1.01)": 42
+   },
+   "picks_only_give": 6,
+   "above_market": 15
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 75,
+   "carrying": 54,
+   "share": 0.72,
+   "by_basis": {
+    "divergence": {
+     "cards": 35,
+     "carrying": 28
+    },
+    "consensus": {
+     "cards": 40,
+     "carrying": 26
+    }
+   },
+   "distinct_named": 10,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 1,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 8,
+    "[0.50,1.01)": 42
+   },
+   "picks_only_give": 6,
+   "above_market": 15
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 75,
+   "carrying": 54,
+   "share": 0.72,
+   "by_basis": {
+    "divergence": {
+     "cards": 35,
+     "carrying": 28
+    },
+    "consensus": {
+     "cards": 40,
+     "carrying": 26
+    }
+   },
+   "distinct_named": 10,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 1,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 8,
+    "[0.50,1.01)": 42
+   },
+   "picks_only_give": 6,
+   "above_market": 15
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 75,
+   "carrying": 53,
+   "share": 0.7067,
+   "by_basis": {
+    "divergence": {
+     "cards": 35,
+     "carrying": 28
+    },
+    "consensus": {
+     "cards": 40,
+     "carrying": 25
+    }
+   },
+   "distinct_named": 9,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 1,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 8,
+    "[0.50,1.01)": 42
+   },
+   "picks_only_give": 6,
+   "above_market": 15
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 75,
+   "carrying": 50,
+   "share": 0.6667,
+   "by_basis": {
+    "divergence": {
+     "cards": 35,
+     "carrying": 25
+    },
+    "consensus": {
+     "cards": 40,
+     "carrying": 25
+    }
+   },
+   "distinct_named": 8,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 1,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 8,
+    "[0.50,1.01)": 42
+   },
+   "picks_only_give": 6,
+   "above_market": 15
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 26,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 14,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 12,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 1,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 8
+   },
+   "picks_only_give": 7,
+   "above_market": 7
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 26,
+   "carrying": 12,
+   "share": 0.4615,
+   "by_basis": {
+    "divergence": {
+     "cards": 14,
+     "carrying": 6
+    },
+    "consensus": {
+     "cards": 12,
+     "carrying": 6
+    }
+   },
+   "distinct_named": 6,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 1,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 8
+   },
+   "picks_only_give": 7,
+   "above_market": 7
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 26,
+   "carrying": 12,
+   "share": 0.4615,
+   "by_basis": {
+    "divergence": {
+     "cards": 14,
+     "carrying": 6
+    },
+    "consensus": {
+     "cards": 12,
+     "carrying": 6
+    }
+   },
+   "distinct_named": 6,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 1,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 8
+   },
+   "picks_only_give": 7,
+   "above_market": 7
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 26,
+   "carrying": 12,
+   "share": 0.4615,
+   "by_basis": {
+    "divergence": {
+     "cards": 14,
+     "carrying": 6
+    },
+    "consensus": {
+     "cards": 12,
+     "carrying": 6
+    }
+   },
+   "distinct_named": 6,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 1,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 8
+   },
+   "picks_only_give": 7,
+   "above_market": 7
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 26,
+   "carrying": 11,
+   "share": 0.4231,
+   "by_basis": {
+    "divergence": {
+     "cards": 14,
+     "carrying": 6
+    },
+    "consensus": {
+     "cards": 12,
+     "carrying": 5
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 1,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 8
+   },
+   "picks_only_give": 7,
+   "above_market": 7
+  },
+  {
+   "league": "16t_sf@u0",
+   "board": "graded",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 26,
+   "carrying": 8,
+   "share": 0.3077,
+   "by_basis": {
+    "divergence": {
+     "cards": 14,
+     "carrying": 3
+    },
+    "consensus": {
+     "cards": 12,
+     "carrying": 5
+    }
+   },
+   "distinct_named": 4,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 1,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 8
+   },
+   "picks_only_give": 7,
+   "above_market": 7
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 9,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 9,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 9,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 9,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 9,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 9,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 9,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 9,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 9,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 9,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 9,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 9,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 9,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 9,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 9,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 9,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 9,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 9,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 10,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 10,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 10,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 10,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 10,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 10,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 10,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 10,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 10,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 10,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 10,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 10,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 10,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 10,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 10,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 10,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 10,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 10,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 9,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 9,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 9,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 9,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 9,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 9,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 9,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 9,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 9,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 9,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 9,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 9,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 9,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 9,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 9,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 9,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 9,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 9,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 9,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 9,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 9,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 9,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 9,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 9,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 9,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 9,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 9,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 9,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 9,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 9,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 9,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 9,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 9,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 9,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 9,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 9,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 10,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 10,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 10,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 10,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 10,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 10,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 10,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 10,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 10,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 10,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 10,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 10,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 10,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 10,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 10,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 10,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 10,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 10,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 9,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 9,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 9,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 9,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 9,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 9,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 9,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 9,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 9,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 9,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 9,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 9,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 9,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 9,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 9,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "mirror@u",
+   "board": "binary",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 9,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "consensus": {
+     "cards": 9,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 9,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 0,
+   "above_market": 0
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 19,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 9,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 10,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 11,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 19,
+   "carrying": 3,
+   "share": 0.1579,
+   "by_basis": {
+    "divergence": {
+     "cards": 9,
+     "carrying": 3
+    },
+    "consensus": {
+     "cards": 10,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 11,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 19,
+   "carrying": 3,
+   "share": 0.1579,
+   "by_basis": {
+    "divergence": {
+     "cards": 9,
+     "carrying": 3
+    },
+    "consensus": {
+     "cards": 10,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 11,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 19,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 9,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 10,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 11,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 19,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 9,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 10,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 11,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 19,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 9,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 10,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 11,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 54,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 29,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 19,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 25,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 7
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 54,
+   "carrying": 25,
+   "share": 0.463,
+   "by_basis": {
+    "divergence": {
+     "cards": 29,
+     "carrying": 17
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 8
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 19,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 25,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 7
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 54,
+   "carrying": 25,
+   "share": 0.463,
+   "by_basis": {
+    "divergence": {
+     "cards": 29,
+     "carrying": 17
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 8
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 19,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 25,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 7
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 54,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 29,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 19,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 25,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 7
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 54,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 29,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 19,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 25,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 7
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 54,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 29,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 19,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 25,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 7
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 16,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 12,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 4,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 10,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 1,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 16,
+   "carrying": 3,
+   "share": 0.1875,
+   "by_basis": {
+    "divergence": {
+     "cards": 12,
+     "carrying": 3
+    },
+    "consensus": {
+     "cards": 4,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 10,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 1,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 16,
+   "carrying": 3,
+   "share": 0.1875,
+   "by_basis": {
+    "divergence": {
+     "cards": 12,
+     "carrying": 3
+    },
+    "consensus": {
+     "cards": 4,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 10,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 1,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 16,
+   "carrying": 3,
+   "share": 0.1875,
+   "by_basis": {
+    "divergence": {
+     "cards": 12,
+     "carrying": 3
+    },
+    "consensus": {
+     "cards": 4,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 10,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 1,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 16,
+   "carrying": 3,
+   "share": 0.1875,
+   "by_basis": {
+    "divergence": {
+     "cards": 12,
+     "carrying": 3
+    },
+    "consensus": {
+     "cards": 4,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 10,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 1,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 16,
+   "carrying": 3,
+   "share": 0.1875,
+   "by_basis": {
+    "divergence": {
+     "cards": 12,
+     "carrying": 3
+    },
+    "consensus": {
+     "cards": 4,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 10,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 0,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 1,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 20,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 13,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 7,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 11,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 3
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 20,
+   "carrying": 3,
+   "share": 0.15,
+   "by_basis": {
+    "divergence": {
+     "cards": 13,
+     "carrying": 3
+    },
+    "consensus": {
+     "cards": 7,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 11,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 3
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 20,
+   "carrying": 3,
+   "share": 0.15,
+   "by_basis": {
+    "divergence": {
+     "cards": 13,
+     "carrying": 3
+    },
+    "consensus": {
+     "cards": 7,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 11,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 3
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 20,
+   "carrying": 3,
+   "share": 0.15,
+   "by_basis": {
+    "divergence": {
+     "cards": 13,
+     "carrying": 3
+    },
+    "consensus": {
+     "cards": 7,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 11,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 3
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 20,
+   "carrying": 3,
+   "share": 0.15,
+   "by_basis": {
+    "divergence": {
+     "cards": 13,
+     "carrying": 3
+    },
+    "consensus": {
+     "cards": 7,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 11,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 3
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 20,
+   "carrying": 3,
+   "share": 0.15,
+   "by_basis": {
+    "divergence": {
+     "cards": 13,
+     "carrying": 3
+    },
+    "consensus": {
+     "cards": 7,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 11,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 3
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 24,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 22,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 22,
+   "share": 0.4,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 14
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 8
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 24,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 22,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 22,
+   "share": 0.4,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 14
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 8
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 24,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 22,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 22,
+   "share": 0.4,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 14
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 8
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 24,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 22,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 22,
+   "share": 0.4,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 14
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 8
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 24,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 22,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 22,
+   "share": 0.4,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 14
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 8
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 24,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 22,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 17,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 14,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 3,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 11,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 1,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 17,
+   "carrying": 3,
+   "share": 0.1765,
+   "by_basis": {
+    "divergence": {
+     "cards": 14,
+     "carrying": 3
+    },
+    "consensus": {
+     "cards": 3,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 11,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 1,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 17,
+   "carrying": 3,
+   "share": 0.1765,
+   "by_basis": {
+    "divergence": {
+     "cards": 14,
+     "carrying": 3
+    },
+    "consensus": {
+     "cards": 3,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 11,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 1,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 17,
+   "carrying": 3,
+   "share": 0.1765,
+   "by_basis": {
+    "divergence": {
+     "cards": 14,
+     "carrying": 3
+    },
+    "consensus": {
+     "cards": 3,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 11,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 1,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 17,
+   "carrying": 3,
+   "share": 0.1765,
+   "by_basis": {
+    "divergence": {
+     "cards": 14,
+     "carrying": 3
+    },
+    "consensus": {
+     "cards": 3,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 11,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 1,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "binary",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 17,
+   "carrying": 3,
+   "share": 0.1765,
+   "by_basis": {
+    "divergence": {
+     "cards": 14,
+     "carrying": 3
+    },
+    "consensus": {
+     "cards": 3,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 11,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 1,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 21,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 14,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 7,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 3,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 3
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 21,
+   "carrying": 9,
+   "share": 0.4286,
+   "by_basis": {
+    "divergence": {
+     "cards": 14,
+     "carrying": 6
+    },
+    "consensus": {
+     "cards": 7,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 3,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 3
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 21,
+   "carrying": 9,
+   "share": 0.4286,
+   "by_basis": {
+    "divergence": {
+     "cards": 14,
+     "carrying": 6
+    },
+    "consensus": {
+     "cards": 7,
+     "carrying": 3
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 3,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 3
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 21,
+   "carrying": 6,
+   "share": 0.2857,
+   "by_basis": {
+    "divergence": {
+     "cards": 14,
+     "carrying": 6
+    },
+    "consensus": {
+     "cards": 7,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 2,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 3,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 3
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 21,
+   "carrying": 6,
+   "share": 0.2857,
+   "by_basis": {
+    "divergence": {
+     "cards": 14,
+     "carrying": 6
+    },
+    "consensus": {
+     "cards": 7,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 2,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 3,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 3
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "B_current",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 21,
+   "carrying": 3,
+   "share": 0.1429,
+   "by_basis": {
+    "divergence": {
+     "cards": 14,
+     "carrying": 3
+    },
+    "consensus": {
+     "cards": 7,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 3,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 6,
+   "above_market": 3
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 11,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 9,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 8,
+    "[0.35,0.50)": 17,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 8,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 34,
+   "share": 0.6182,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 19
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 15
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 11,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 9,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 8,
+    "[0.35,0.50)": 17,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 8,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 34,
+   "share": 0.6182,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 19
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 15
+    }
+   },
+   "distinct_named": 3,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 11,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 9,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 8,
+    "[0.35,0.50)": 17,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 8,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 25,
+   "share": 0.4545,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 18
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 7
+    }
+   },
+   "distinct_named": 2,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 11,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 9,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 8,
+    "[0.35,0.50)": 17,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 8,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 25,
+   "share": 0.4545,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 18
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 7
+    }
+   },
+   "distinct_named": 2,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 11,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 9,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 8,
+    "[0.35,0.50)": 17,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 8,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "A_baseline",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 17,
+   "share": 0.3091,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 15
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 2
+    }
+   },
+   "distinct_named": 1,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 11,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 9,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 8,
+    "[0.35,0.50)": 17,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 8,
+   "above_market": 2
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 20,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 3,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 5,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 3
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 20,
+   "carrying": 11,
+   "share": 0.55,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 9
+    },
+    "consensus": {
+     "cards": 3,
+     "carrying": 2
+    }
+   },
+   "distinct_named": 4,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 5,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 3
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 20,
+   "carrying": 11,
+   "share": 0.55,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 9
+    },
+    "consensus": {
+     "cards": 3,
+     "carrying": 2
+    }
+   },
+   "distinct_named": 4,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 5,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 3
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 20,
+   "carrying": 11,
+   "share": 0.55,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 9
+    },
+    "consensus": {
+     "cards": 3,
+     "carrying": 2
+    }
+   },
+   "distinct_named": 4,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 5,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 3
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 20,
+   "carrying": 11,
+   "share": 0.55,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 9
+    },
+    "consensus": {
+     "cards": 3,
+     "carrying": 2
+    }
+   },
+   "distinct_named": 4,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 5,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 3
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "hashed",
+   "arm": "D_challenger",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 20,
+   "carrying": 11,
+   "share": 0.55,
+   "by_basis": {
+    "divergence": {
+     "cards": 17,
+     "carrying": 9
+    },
+    "consensus": {
+     "cards": 3,
+     "carrying": 2
+    }
+   },
+   "distinct_named": 4,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 5,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 3,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 3,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 0
+   },
+   "picks_only_give": 3,
+   "above_market": 3
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 24,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 6,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 9
+   },
+   "picks_only_give": 6,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 24,
+   "carrying": 12,
+   "share": 0.5,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 12
+    },
+    "consensus": {
+     "cards": 6,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 4,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 9
+   },
+   "picks_only_give": 6,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 24,
+   "carrying": 12,
+   "share": 0.5,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 12
+    },
+    "consensus": {
+     "cards": 6,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 4,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 9
+   },
+   "picks_only_give": 6,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 24,
+   "carrying": 12,
+   "share": 0.5,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 12
+    },
+    "consensus": {
+     "cards": 6,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 4,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 9
+   },
+   "picks_only_give": 6,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 24,
+   "carrying": 12,
+   "share": 0.5,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 12
+    },
+    "consensus": {
+     "cards": 6,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 4,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 9
+   },
+   "picks_only_give": 6,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "none",
+   "arm": "B_current",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 24,
+   "carrying": 12,
+   "share": 0.5,
+   "by_basis": {
+    "divergence": {
+     "cards": 18,
+     "carrying": 12
+    },
+    "consensus": {
+     "cards": 6,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 4,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 9
+   },
+   "picks_only_give": 6,
+   "above_market": 6
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 15,
+    "[0.50,1.01)": 26
+   },
+   "picks_only_give": 9,
+   "above_market": 5
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 41,
+   "share": 0.7455,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 26
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 15
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 15,
+    "[0.50,1.01)": 26
+   },
+   "picks_only_give": 9,
+   "above_market": 5
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 41,
+   "share": 0.7455,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 26
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 15
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 15,
+    "[0.50,1.01)": 26
+   },
+   "picks_only_give": 9,
+   "above_market": 5
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 41,
+   "share": 0.7455,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 26
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 15
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 15,
+    "[0.50,1.01)": 26
+   },
+   "picks_only_give": 9,
+   "above_market": 5
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 41,
+   "share": 0.7455,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 26
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 15
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 15,
+    "[0.50,1.01)": 26
+   },
+   "picks_only_give": 9,
+   "above_market": 5
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "none",
+   "arm": "A_baseline",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 55,
+   "carrying": 41,
+   "share": 0.7455,
+   "by_basis": {
+    "divergence": {
+     "cards": 30,
+     "carrying": 26
+    },
+    "consensus": {
+     "cards": 25,
+     "carrying": 15
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 15,
+    "[0.50,1.01)": 26
+   },
+   "picks_only_give": 9,
+   "above_market": 5
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.0,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 21,
+   "carrying": 0,
+   "share": 0.0,
+   "by_basis": {
+    "divergence": {
+     "cards": 19,
+     "carrying": 0
+    },
+    "consensus": {
+     "cards": 2,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 0,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 9
+   },
+   "picks_only_give": 2,
+   "above_market": 7
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.05,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 21,
+   "carrying": 12,
+   "share": 0.5714,
+   "by_basis": {
+    "divergence": {
+     "cards": 19,
+     "carrying": 12
+    },
+    "consensus": {
+     "cards": 2,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 9
+   },
+   "picks_only_give": 2,
+   "above_market": 7
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.1,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 21,
+   "carrying": 12,
+   "share": 0.5714,
+   "by_basis": {
+    "divergence": {
+     "cards": 19,
+     "carrying": 12
+    },
+    "consensus": {
+     "cards": 2,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 9
+   },
+   "picks_only_give": 2,
+   "above_market": 7
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.15,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 21,
+   "carrying": 12,
+   "share": 0.5714,
+   "by_basis": {
+    "divergence": {
+     "cards": 19,
+     "carrying": 12
+    },
+    "consensus": {
+     "cards": 2,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 9
+   },
+   "picks_only_give": 2,
+   "above_market": 7
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.25,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 21,
+   "carrying": 12,
+   "share": 0.5714,
+   "by_basis": {
+    "divergence": {
+     "cards": 19,
+     "carrying": 12
+    },
+    "consensus": {
+     "cards": 2,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 9
+   },
+   "picks_only_give": 2,
+   "above_market": 7
+  },
+  {
+   "league": "12t_1qb@u8",
+   "board": "graded",
+   "conf": "none",
+   "arm": "D_challenger",
+   "w": 0.35,
+   "baseline_identical": true,
+   "deck_invariant": true,
+   "cards_total": 21,
+   "carrying": 12,
+   "share": 0.5714,
+   "by_basis": {
+    "divergence": {
+     "cards": 19,
+     "carrying": 12
+    },
+    "consensus": {
+     "cards": 2,
+     "carrying": 0
+    }
+   },
+   "distinct_named": 5,
+   "headliner_gap_hist": {
+    "[0.00,0.05)": 0,
+    "[0.05,0.10)": 0,
+    "[0.10,0.15)": 0,
+    "[0.15,0.25)": 0,
+    "[0.25,0.35)": 0,
+    "[0.35,0.50)": 3,
+    "[0.50,1.01)": 9
+   },
+   "picks_only_give": 2,
+   "above_market": 7
+  }
+ ]
+}
