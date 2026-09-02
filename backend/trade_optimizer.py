@@ -736,7 +736,8 @@ def generate_pair_trades_v3(
                 extra_ok_fn=_gap_extra_ok)
             if closed is None:
                 continue
-            s_pid, side, new_give, new_recv, n_gv, n_rv, ratio = closed
+            s_pid, side, new_give, new_recv, n_gv, n_rv, ratio, partial \
+                = closed
             new_key = (frozenset(new_give), frozenset(new_recv))
             if new_key in card_keys:      # would collide with a sibling card
                 continue
@@ -767,6 +768,8 @@ def generate_pair_trades_v3(
                 "gap_before": round(gap_before, 1),
                 "gap_after": round(abs(n_gv - n_rv), 1),
             }
+            if partial:      # best-effort close (sweetener_best_effort)
+                card.gap_sweetener["partial"] = True
             card_keys.add(new_key)
 
     return cards
@@ -882,16 +885,46 @@ def close_value_gap(give_ids, recv_ids, *, seed_value, gap_threshold,
     `pick_swap_ok` re-runs inside every caller's `extra_ok_fn` (#227/C3),
     which is the guard that keeps a pick-for-pick churn shape out.
 
-    Returns (sweetener_pid, side, new_give, new_recv, gv, rv, point_ratio)
-    or None. ``side`` is the side the asset was ADDED to: "give" when the
-    USER was the richer party (they pay the equalizer), "receive" when the
-    opponent was.
+    Two knobs (2026-09-02, #414 — docs/plans/sweetener-relative-band/),
+    both read HERE at call time through `_c` so an arm overlay reaches
+    them, both 0.0 = the behaviour above byte-for-byte:
+
+      * ``sweetener_gap_frac`` — the trigger becomes
+        ``max(gap_threshold, frac × max(gv, rv))``, so it scales with the
+        trade instead of sitting at one flat absolute. The operator's
+        London-for-CeeDee 1x1 (gap 1,396 = 19% of the richer side) sat
+        under the flat 1,539 while R1 correctly passed it: the window
+        (1539, 0.25·H) is empty unless the richer side prices above
+        ~6,156. Requirement (a) is tested against the same effective
+        trigger.
+      * ``sweetener_best_effort`` — when NO candidate satisfies (a) but at
+        least one passes every other gate, attach the gate-passing
+        candidate that minimises the post-add |gap|, provided it strictly
+        narrows the gap and does not flip which side is richer (a flipped
+        candidate still above the trigger has turned the user's overpay
+        into the partner's). Without this, lowering the threshold
+        REGRESSES: a card partially closable to 1,535 at 1,539 shipped
+        unsweetened at 1,825 once the line was 750 (QA, 2026-09-01).
+
+    Returns (sweetener_pid, side, new_give, new_recv, gv, rv, point_ratio,
+    partial) or None. ``side`` is the side the asset was ADDED to: "give"
+    when the USER was the richer party (they pay the equalizer), "receive"
+    when the opponent was. ``partial`` is True only for a best-effort close
+    that left the gap above the trigger; callers stamp it onto
+    `gap_sweetener` so the corpus can split partial from full closes.
     """
     gv, rv = _consensus_packages(give_ids, recv_ids, seed_value)
-    if abs(gv - rv) <= gap_threshold:
+    thr_eff = gap_threshold
+    frac = _c("sweetener_gap_frac")
+    if frac > 0:
+        thr_eff = max(gap_threshold, frac * max(gv, rv))
+    gap_before = abs(gv - rv)
+    if gap_before <= thr_eff:
         return None
+    best_effort = _c("sweetener_best_effort") >= 1.0
+    user_richer = rv > gv
     in_trade = set(give_ids) | set(recv_ids)
-    if rv > gv:            # user receives more — user adds to the give side
+    if user_richer:        # user receives more — user adds to the give side
         side = "give"
         roster = user_roster if give_candidates is None else give_candidates
     else:                  # opponent receives more — they add (user receives)
@@ -907,6 +940,7 @@ def close_value_gap(give_ids, recv_ids, *, seed_value, gap_threshold,
                          and not (side == "receive" and not_interested_ids
                                   and p in not_interested_ids)),
                         key=seed_value)
+    best = None      # tightest gate-passing PARTIAL so far (best-effort only)
     for s_pid in candidates:
         if side == "give":
             new_give, new_recv = list(give_ids) + [s_pid], list(recv_ids)
@@ -915,8 +949,17 @@ def close_value_gap(give_ids, recv_ids, *, seed_value, gap_threshold,
         n_gv, n_rv = _consensus_packages(new_give, new_recv, seed_value)
         if n_gv <= 0 or n_rv <= 0:
             continue
-        if abs(n_gv - n_rv) > gap_threshold:      # too small to close it
-            continue
+        n_gap = abs(n_gv - n_rv)
+        closes = n_gap <= thr_eff
+        if not closes:
+            if not best_effort:
+                continue                          # too small to close it
+            # Best-effort partial: strictly narrower, same richer side, and
+            # only worth gating if it beats the tightest partial so far.
+            if n_gap >= gap_before or (n_rv > n_gv) != user_richer:
+                continue
+            if best is not None and n_gap >= best[0]:
+                continue
         ratio = min(n_gv, n_rv) / max(n_gv, n_rv)
         if ratio < fairness_threshold:            # fell out of the band
             continue
@@ -928,8 +971,15 @@ def close_value_gap(give_ids, recv_ids, *, seed_value, gap_threshold,
             continue
         if extra_ok_fn is not None and not extra_ok_fn(new_give, new_recv):
             continue
-        return s_pid, side, new_give, new_recv, n_gv, n_rv, round(ratio, 3)
-    return None
+        if closes:
+            return (s_pid, side, new_give, new_recv, n_gv, n_rv,
+                    round(ratio, 3), False)
+        best = (n_gap, s_pid, side, new_give, new_recv, n_gv, n_rv,
+                round(ratio, 3))
+    if best is None:
+        return None
+    _n_gap, s_pid, side, new_give, new_recv, n_gv, n_rv, ratio = best
+    return s_pid, side, new_give, new_recv, n_gv, n_rv, ratio, True
 
 
 # ---------------------------------------------------------------------------

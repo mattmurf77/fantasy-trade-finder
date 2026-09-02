@@ -115,7 +115,8 @@ def test_helper_adds_smallest_sufficient_equalizer_from_richer_side():
                           fairness_threshold=0.75, user_roster=user_roster,
                           opp_roster=opp_roster, players=players)
     assert out is not None
-    s_pid, side, new_give, new_recv, gv, rv, ratio = out
+    s_pid, side, new_give, new_recv, gv, rv, ratio, partial = out
+    assert partial is False               # a full close, not best-effort
     # User receives more (7000 > 5400) → the USER pays the equalizer.
     assert side == "give"
     # X2 (600) is tried first (cheapest) but cannot close a 1600 gap under
@@ -137,7 +138,7 @@ def test_helper_direction_flips_with_the_gap():
                           fairness_threshold=0.75, user_roster=opp_roster,
                           opp_roster=user_roster + ["Y1"], players=players)
     assert out is not None
-    s_pid, side, new_give, new_recv, gv, rv, _ratio = out
+    s_pid, side, new_give, new_recv, gv, rv, _ratio, _partial = out
     assert side == "receive"
     assert s_pid in ("X1", "Y1")          # cheapest sufficient wins
     assert abs(gv - rv) <= 1539.0

@@ -134,6 +134,18 @@ MODEL_A_PROFILE: dict[str, float] = {
     # sort-key factory returns `seed_value` itself, so arm A's pools are
     # byte-identical and the golden stands un-recaptured.
     "consensus_fit_weight":      0.0,   # fit sort off (pre-wave value sort)
+    # Gap-sweetener relative band + best-effort fallback — 2026-09-02 (#414,
+    # docs/plans/sweetener-relative-band/scope.md). Both post-date the
+    # reference SHA and are read INSIDE `trade_optimizer.close_value_gap`
+    # via `_c`, so a pin is honoured. Pinned at the IDENTITY value 0.0 for
+    # the D-172 reason: the live rows move (750 / 0.12 / 1) and an unpinned
+    # arm A would inherit them. Today the reads are unreachable on an arm-A
+    # thread — `sweetener_gap_threshold` is pinned 0.0 above and every
+    # caller guards `GAP_THR > 0` — so these are defence in depth for the
+    # day that pin is lifted; `test_sweetener_band_pins_are_load_bearing`
+    # proves them with the threshold pin removed from the overlay.
+    "sweetener_gap_frac":        0.0,   # absolute trigger only
+    "sweetener_best_effort":     0.0,   # all-or-nothing closer
 }
 
 
