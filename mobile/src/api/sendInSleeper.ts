@@ -3,7 +3,8 @@
 // docs/plans/sleeper-write-capture-runbook.md). All calls are session-authed
 // by the shared client. Errors surface as ApiError; callers branch on
 // `(err.body as any)?.error` (sleeper_not_linked | sleeper_expired |
-// sleeper_write_failed | sleeper_unconfigured | feature_disabled).
+// sleeper_write_failed | sleeper_unconfigured | feature_disabled |
+// sleeper_pick_unmapped | sleeper_pick_not_owned).
 
 import * as SecureStore from 'expo-secure-store';
 
@@ -24,8 +25,8 @@ export interface SleeperLinkStatus {
 export interface ProposeTradePayload {
   league_id: string;
   their_user_id: string;          // opponent's Sleeper user_id (== FTF user_id)
-  give_player_ids: string[];      // players I send
-  receive_player_ids: string[];   // players I receive
+  give_player_ids: string[];      // players AND FTF pick ids I send (#413: server encodes picks)
+  receive_player_ids: string[];   // players AND FTF pick ids I receive
   // F1 signal spine (flag deck.signal_v2): joins a deck-sourced send to its
   // deck_impressions row as a `propose` outcome. Optional/additive — old
   // servers ignore it; only set when the flag is on.
@@ -211,7 +212,7 @@ export async function proposeTradeToSleeper(
 // data unreachable (nothing validated).
 
 export interface TradeSendWarning {
-  code: string;                    // league_archived | player_moved | roster_limit | roster_not_found
+  code: string;                    // league_archived | player_moved | roster_limit | roster_not_found | asset_unmapped | pick_moved
   severity: 'blocking' | 'warning';
   message: string;
 }

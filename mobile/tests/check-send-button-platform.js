@@ -43,6 +43,18 @@
 //   6. SendInEspnButton self-gates on `espn.send`, proposes ONLY via
 //      proposeTradeToEspn (never the Sleeper propose), carries testID
 //      `trades.send-espn-btn`, and REQUIRES `surface`.
+//   7–8. (#413, 2026-09-02) The Sleeper propose refuses a pick-bearing send
+//      with 422 `sleeper_pick_unmapped` / `sleeper_pick_not_owned` instead of
+//      sending pick ids to Sleeper as player keys. SendInSleeperButton's
+//      doPropose error ladder gives each its own branch that calls
+//      Alert.alert and never `goConnect` (a reconnect cannot fix a pick that
+//      changed hands — the tempting "refresh" instinct). 7b pins both
+//      branches INSIDE the if/else-if chain that starts at
+//      `sleeper_not_linked` and ends at the catch-all `else`: a branch
+//      appended after that `else` is a second `if` that double-alerts
+//      (catch-all first, then the pick copy), so chain membership is the
+//      claim. 7c pins the catch-all's own copy so the branches were added,
+//      not substituted. Presence of exact wirings, not behavior.
 //
 // Run: node tests/check-send-button-platform.js
 //   (or: npm run test:send-button-platform)
@@ -423,6 +435,79 @@ function walk(node, cb) {
   } else {
     fail('espn button: not-connected/expired reconnect is in-flow (no LeaguePicker punt)',
          'the espn_not_connected/espn_auth_expired branch must route to the connect screen (goConnect) and must NOT navigate to LeaguePicker');
+  }
+}
+
+// ── 7–8: #413 pick-refusal branches in SendInSleeperButton's error ladder ──
+{
+  const { sf } = parse('SendInSleeperButton.tsx');
+  const condText = (node) => node.expression.getText(sf).replace(/\s+/g, ' ');
+  const UNMAPPED = /code\s*===\s*'sleeper_pick_unmapped'/;
+  const NOT_OWNED = /code\s*===\s*'sleeper_pick_not_owned'/;
+
+  // 7 / 8 — presence: an `if` whose condition names the code, whose branch
+  // calls Alert.alert and never references goConnect. Every matching `if`
+  // must satisfy this, so folding a code into the reconnect branch (whose
+  // condition would then also match) is caught even if a dedicated branch
+  // survives beside it.
+  function branchCheck(label, re) {
+    const hits = [];
+    walk(sf, (node) => {
+      if (ts.isIfStatement(node) && re.test(condText(node))) hits.push(node);
+    });
+    if (hits.length === 0) {
+      fail(label, `no \`if (code === '…')\` branch for this code in SendInSleeperButton.tsx — the 422 would fall to the catch-all and render the server's \`detail\` instead of the count-aware copy`);
+      return;
+    }
+    const bad = hits.filter((node) => {
+      const body = node.thenStatement.getText(sf);
+      return !/Alert\.alert\(/.test(body) || /goConnect/.test(body);
+    });
+    if (bad.length === 0) {
+      ok(label);
+    } else {
+      fail(label, 'the branch must call Alert.alert and must NOT reference goConnect — a pick refusal is not an auth error; reconnecting cannot fix it');
+    }
+  }
+  branchCheck('sleeper button: sleeper_pick_unmapped has its own Alert branch, no goConnect', UNMAPPED);
+  branchCheck('sleeper button: sleeper_pick_not_owned has its own Alert branch, no goConnect', NOT_OWNED);
+
+  // 7b — reachability: follow elseStatement links from the chain's root
+  // (`sleeper_not_linked`) to the terminal non-if `else`, collecting each
+  // condition. Both codes must appear IN that chain. A branch appended after
+  // the catch-all is a separate `if` that never joins the chain: it would
+  // pass 7/8 and double-alert at runtime.
+  let root = null;
+  walk(sf, (node) => {
+    if (!root && ts.isIfStatement(node) && /sleeper_not_linked/.test(condText(node))) root = node;
+  });
+  const chain = [];
+  let finalElse = null;
+  for (let cur = root; cur; ) {
+    chain.push(condText(cur));
+    const next = cur.elseStatement;
+    if (next && ts.isIfStatement(next)) { cur = next; continue; }
+    finalElse = next || null;
+    break;
+  }
+  const unmappedInChain = chain.some((c) => UNMAPPED.test(c));
+  const notOwnedInChain = chain.some((c) => NOT_OWNED.test(c));
+  if (root && finalElse && unmappedInChain && notOwnedInChain) {
+    ok('sleeper button: both pick branches sit inside the ladder before the catch-all else');
+  } else {
+    fail('sleeper button: both pick branches sit inside the ladder before the catch-all else',
+         !root ? 'could not find the ladder root `if (code === \'sleeper_not_linked\' …)`'
+         : !finalElse ? 'the ladder has no terminal `else` — the catch-all was removed'
+         : `chain conditions: [${chain.join(' | ')}] — missing ${[!unmappedInChain && 'sleeper_pick_unmapped', !notOwnedInChain && 'sleeper_pick_not_owned'].filter(Boolean).join(', ')}; a branch appended after the catch-all is unreachable through the chain and double-alerts`);
+  }
+
+  // 7c — the catch-all still carries its own copy: the branches were added,
+  // not swapped in for the fallback every unknown code depends on.
+  if (finalElse && /Something went wrong sending to Sleeper/.test(finalElse.getText(sf))) {
+    ok('sleeper button: the catch-all else still renders the generic failure copy');
+  } else {
+    fail('sleeper button: the catch-all else still renders the generic failure copy',
+         "expected the terminal `else` to contain 'Something went wrong sending to Sleeper' — unknown codes must keep their fallback");
   }
 }
 
