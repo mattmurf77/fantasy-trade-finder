@@ -193,7 +193,7 @@ two live examples, unconfirmed on a multi-owner pick; closed by TF-3's logged ou
   surfaces it on a card, it refuses: its `original_roster_id` is *"an OPAQUE, LEAGUE-LOCAL slot
   label … never resolved against a platform"* (`database.py:10217-10221`), not a Sleeper
   roster id, and Sleeper's `traded_picks`/rosters can validate a platform row and nothing else.
-  The default platform source is the containment, not an oversight (guardrail 8).
+  The literal platform source (`source=PICK_SOURCE_PLATFORM`, sanctioned by name in the ADR-010 AST guard) is the containment, not an oversight (guardrail 8).
 
 ---
 

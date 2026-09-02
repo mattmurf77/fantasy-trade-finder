@@ -215,7 +215,7 @@ if give_picks or recv_picks:
 
 Binding details:
 - `load_draft_picks` is already imported into `server`'s namespace (`server.py:149`); call it by
-  that name (tests patch `server.load_draft_picks`). Use the **default** `source`
+  that name (tests patch `server.load_draft_picks`). Pass `source=PICK_SOURCE_PLATFORM` **literally** (build note: the ADR-010 AST guard `test_pick_assignment.py::test_w3_02` forbids bare-default `load_draft_picks` calls and requires each caller to be sanctioned by name — `propose_trade_to_sleeper` and `trades_validate` were added to `_SANCTIONED_SOURCE_CALLERS` with a decision comment; same value as the default)
   (`PICK_SOURCE_PLATFORM`) — not `_pick_read_source()`. Only platform-written rows are existence
   proof for a Sleeper pick; a user-asserted row (ADR-010) is not.
 - The two fetches happen **only** inside the `if`. A pick-free send makes no `traded_picks` call
