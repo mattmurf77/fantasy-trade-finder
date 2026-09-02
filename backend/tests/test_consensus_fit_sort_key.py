@@ -635,6 +635,44 @@ def test_default_registered_in_both_stores():
     assert ts._DEFAULT_CFG[KNOB] == seeded[KNOB] == 0.0
 
 
+# ── 4. D-159 junk guard on the harness fixtures ───────────────────────────
+
+def _harness():
+    """The measurement harness (docs/plans/consensus-fit-sort-key/) is a
+    plain script, not a package; import it by path."""
+    import importlib.util
+    import os
+    here = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(here, "..", "..", "docs", "plans",
+                        "consensus-fit-sort-key", "measure_consensus_fit.py")
+    spec = importlib.util.spec_from_file_location("measure_consensus_fit",
+                                                  path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.mark.parametrize("league", ["12t_1qb@u0", "12t_1qb@u8", "mirror@b"])
+def test_junk_guard_on_harness_fixtures(league, monkeypatch):
+    """D-159 guardrail: the sub-450 body share of emitted consensus cards at
+    w = 0.5 may not exceed the w = 0 share by more than 2pp, and the deck
+    must not shrink. Clock frozen for the test only (G-065) — the v2 pair
+    generator's 1 s deadline is otherwise a hidden input."""
+    h = _harness()
+    monkeypatch.setattr(ts.time, "monotonic", lambda: h.FROZEN_CLOCK)
+    h.live_flags(**{"trade_engine.v2": True, "trade_engine.v3": True,
+                    "trade.bakeoff": False})
+    L = dict(h.LEAGUES)[league]()
+    h.reset_cfg(**{KNOB: 0.0})
+    base = h.gen(L)
+    h.reset_cfg(**{KNOB: 0.5})
+    half = h.gen(L)
+    s0, s5 = h.stats(base, L), h.stats(half, L, baseline=base)
+    assert s0["consensus_cards"] > 0
+    assert s5["consensus_cards"] >= s0["consensus_cards"], (s0, s5)
+    assert s5["sub450_share"] <= s0["sub450_share"] + 0.02, (s0, s5)
+
+
 if __name__ == "__main__":       # capture mode — see the module docstring
     print("_GOLDEN_MAIN_JSON = \"\"\"\\")
     for row in _rows(_eq_consensus()):

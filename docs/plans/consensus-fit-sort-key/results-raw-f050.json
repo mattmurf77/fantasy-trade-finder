@@ -1,0 +1,8184 @@
+{
+ "meta": {
+  "pythonhashseed": "0",
+  "prod_pins": {
+   "filler_min_frac": 0.15,
+   "overpay_adjusted": 0.0,
+   "trade_elo_gap_max": 0.0,
+   "v3_shape_max_delta": 2.0
+  },
+  "sweep": [
+   0.0,
+   0.25,
+   0.5,
+   1.0
+  ],
+  "fairness_threshold": 0.5,
+  "frozen_clock": 1000000.0
+ },
+ "cells": [
+  {
+   "league": "12t_1qb@u0",
+   "path": "v3",
+   "arm": "B_current",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 28,
+   "consensus_cards": 13,
+   "shapes": {
+    "1x1": 13
+   },
+   "sub450_cards": 5,
+   "sub450_share": 0.3846,
+   "distinct_centerpieces": 11,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 1,
+   "surplus_to_need_recv": 6,
+   "give_from_user_surplus": 9,
+   "recv_from_partner_surplus": 6,
+   "top5": [
+    [
+     [
+      "6801"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "12t_pick_0_0"
+     ],
+     [
+      "4034"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12t_pick_0_2"
+     ],
+     [
+      "12512"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "10236"
+     ],
+     [
+      "7588"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "6803"
+     ],
+     [
+      "6790"
+     ],
+     "u8"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u0",
+   "path": "v3",
+   "arm": "B_current",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 28,
+   "consensus_cards": 13,
+   "shapes": {
+    "1x1": 13
+   },
+   "sub450_cards": 5,
+   "sub450_share": 0.3846,
+   "distinct_centerpieces": 11,
+   "mean_consensus_fit": 0.423,
+   "surplus_to_need_give": 1,
+   "surplus_to_need_recv": 6,
+   "give_from_user_surplus": 9,
+   "recv_from_partner_surplus": 6,
+   "top5": [
+    [
+     [
+      "6801"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "12t_pick_0_0"
+     ],
+     [
+      "4034"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12t_pick_0_2"
+     ],
+     [
+      "12512"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "10236"
+     ],
+     [
+      "7588"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "6803"
+     ],
+     [
+      "6790"
+     ],
+     "u8"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u0",
+   "path": "v3",
+   "arm": "B_current",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 28,
+   "consensus_cards": 13,
+   "shapes": {
+    "1x1": 13
+   },
+   "sub450_cards": 5,
+   "sub450_share": 0.3846,
+   "distinct_centerpieces": 11,
+   "mean_consensus_fit": 0.423,
+   "surplus_to_need_give": 1,
+   "surplus_to_need_recv": 6,
+   "give_from_user_surplus": 9,
+   "recv_from_partner_surplus": 6,
+   "top5": [
+    [
+     [
+      "6801"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "12t_pick_0_0"
+     ],
+     [
+      "4034"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12t_pick_0_2"
+     ],
+     [
+      "12512"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "10236"
+     ],
+     [
+      "7588"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "6803"
+     ],
+     [
+      "6790"
+     ],
+     "u8"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u0",
+   "path": "v3",
+   "arm": "B_current",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 28,
+   "consensus_cards": 13,
+   "shapes": {
+    "1x1": 13
+   },
+   "sub450_cards": 5,
+   "sub450_share": 0.3846,
+   "distinct_centerpieces": 11,
+   "mean_consensus_fit": 0.423,
+   "surplus_to_need_give": 1,
+   "surplus_to_need_recv": 6,
+   "give_from_user_surplus": 9,
+   "recv_from_partner_surplus": 6,
+   "top5": [
+    [
+     [
+      "6801"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "12t_pick_0_0"
+     ],
+     [
+      "4034"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12t_pick_0_2"
+     ],
+     [
+      "12512"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "10236"
+     ],
+     [
+      "7588"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "6803"
+     ],
+     [
+      "6790"
+     ],
+     "u8"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u0",
+   "path": "v3",
+   "arm": "A_baseline",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 55,
+   "consensus_cards": 25,
+   "shapes": {
+    "1x1": 25
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 10,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 7,
+   "surplus_to_need_recv": 10,
+   "give_from_user_surplus": 20,
+   "recv_from_partner_surplus": 10,
+   "top5": [
+    [
+     [
+      "5859"
+     ],
+     [
+      "9226"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "11604"
+     ],
+     [
+      "9226"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "11604"
+     ],
+     [
+      "8138"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "5859"
+     ],
+     [
+      "8138"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "10229"
+     ],
+     [
+      "4034"
+     ],
+     "u10"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u0",
+   "path": "v3",
+   "arm": "A_baseline",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 55,
+   "consensus_cards": 25,
+   "shapes": {
+    "1x1": 25
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 10,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 7,
+   "surplus_to_need_recv": 10,
+   "give_from_user_surplus": 20,
+   "recv_from_partner_surplus": 10,
+   "top5": [
+    [
+     [
+      "5859"
+     ],
+     [
+      "9226"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "11604"
+     ],
+     [
+      "9226"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "11604"
+     ],
+     [
+      "8138"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "5859"
+     ],
+     [
+      "8138"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "10229"
+     ],
+     [
+      "4034"
+     ],
+     "u10"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u0",
+   "path": "v3",
+   "arm": "A_baseline",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 55,
+   "consensus_cards": 25,
+   "shapes": {
+    "1x1": 25
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 10,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 7,
+   "surplus_to_need_recv": 10,
+   "give_from_user_surplus": 20,
+   "recv_from_partner_surplus": 10,
+   "top5": [
+    [
+     [
+      "5859"
+     ],
+     [
+      "9226"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "11604"
+     ],
+     [
+      "9226"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "11604"
+     ],
+     [
+      "8138"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "5859"
+     ],
+     [
+      "8138"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "10229"
+     ],
+     [
+      "4034"
+     ],
+     "u10"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u0",
+   "path": "v3",
+   "arm": "A_baseline",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 55,
+   "consensus_cards": 25,
+   "shapes": {
+    "1x1": 25
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 10,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 7,
+   "surplus_to_need_recv": 10,
+   "give_from_user_surplus": 20,
+   "recv_from_partner_surplus": 10,
+   "top5": [
+    [
+     [
+      "5859"
+     ],
+     [
+      "9226"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "11604"
+     ],
+     [
+      "9226"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "11604"
+     ],
+     [
+      "8138"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "5859"
+     ],
+     [
+      "8138"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "10229"
+     ],
+     [
+      "4034"
+     ],
+     "u10"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u0",
+   "path": "v3",
+   "arm": "D_challenger",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 28,
+   "consensus_cards": 10,
+   "shapes": {
+    "1x1": 10
+   },
+   "sub450_cards": 4,
+   "sub450_share": 0.4,
+   "distinct_centerpieces": 9,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 1,
+   "surplus_to_need_recv": 4,
+   "give_from_user_surplus": 6,
+   "recv_from_partner_surplus": 4,
+   "top5": [
+    [
+     [
+      "6801"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "12t_pick_0_2"
+     ],
+     [
+      "12512"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "7564"
+     ],
+     [
+      "9221"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "12t_pick_0_0"
+     ],
+     [
+      "4034"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "6803"
+     ],
+     [
+      "6790"
+     ],
+     "u8"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u0",
+   "path": "v3",
+   "arm": "D_challenger",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 28,
+   "consensus_cards": 10,
+   "shapes": {
+    "1x1": 10
+   },
+   "sub450_cards": 4,
+   "sub450_share": 0.4,
+   "distinct_centerpieces": 9,
+   "mean_consensus_fit": 0.493,
+   "surplus_to_need_give": 1,
+   "surplus_to_need_recv": 4,
+   "give_from_user_surplus": 6,
+   "recv_from_partner_surplus": 4,
+   "top5": [
+    [
+     [
+      "6801"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "12t_pick_0_2"
+     ],
+     [
+      "12512"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "7564"
+     ],
+     [
+      "9221"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "12t_pick_0_0"
+     ],
+     [
+      "4034"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "6803"
+     ],
+     [
+      "6790"
+     ],
+     "u8"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u0",
+   "path": "v3",
+   "arm": "D_challenger",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 28,
+   "consensus_cards": 10,
+   "shapes": {
+    "1x1": 10
+   },
+   "sub450_cards": 4,
+   "sub450_share": 0.4,
+   "distinct_centerpieces": 9,
+   "mean_consensus_fit": 0.493,
+   "surplus_to_need_give": 1,
+   "surplus_to_need_recv": 4,
+   "give_from_user_surplus": 6,
+   "recv_from_partner_surplus": 4,
+   "top5": [
+    [
+     [
+      "6801"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "12t_pick_0_2"
+     ],
+     [
+      "12512"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "7564"
+     ],
+     [
+      "9221"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "12t_pick_0_0"
+     ],
+     [
+      "4034"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "6803"
+     ],
+     [
+      "6790"
+     ],
+     "u8"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u0",
+   "path": "v3",
+   "arm": "D_challenger",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 28,
+   "consensus_cards": 10,
+   "shapes": {
+    "1x1": 10
+   },
+   "sub450_cards": 4,
+   "sub450_share": 0.4,
+   "distinct_centerpieces": 9,
+   "mean_consensus_fit": 0.493,
+   "surplus_to_need_give": 1,
+   "surplus_to_need_recv": 4,
+   "give_from_user_surplus": 6,
+   "recv_from_partner_surplus": 4,
+   "top5": [
+    [
+     [
+      "6801"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "12t_pick_0_2"
+     ],
+     [
+      "12512"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "7564"
+     ],
+     [
+      "9221"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "12t_pick_0_0"
+     ],
+     [
+      "4034"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "6803"
+     ],
+     [
+      "6790"
+     ],
+     "u8"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u0",
+   "path": "v2_only",
+   "arm": "B_current",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 25,
+   "consensus_cards": 14,
+   "shapes": {
+    "1x1": 14
+   },
+   "sub450_cards": 5,
+   "sub450_share": 0.3571,
+   "distinct_centerpieces": 11,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 1,
+   "surplus_to_need_recv": 7,
+   "give_from_user_surplus": 9,
+   "recv_from_partner_surplus": 7,
+   "top5": [
+    [
+     [
+      "6801"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "12t_pick_0_0"
+     ],
+     [
+      "4034"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12t_pick_0_2"
+     ],
+     [
+      "12512"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "8183"
+     ],
+     [
+      "7588"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "10236"
+     ],
+     [
+      "7588"
+     ],
+     "u2"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u0",
+   "path": "v2_only",
+   "arm": "B_current",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 25,
+   "consensus_cards": 14,
+   "shapes": {
+    "1x1": 14
+   },
+   "sub450_cards": 5,
+   "sub450_share": 0.3571,
+   "distinct_centerpieces": 11,
+   "mean_consensus_fit": 0.426,
+   "surplus_to_need_give": 1,
+   "surplus_to_need_recv": 7,
+   "give_from_user_surplus": 9,
+   "recv_from_partner_surplus": 7,
+   "top5": [
+    [
+     [
+      "6801"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "12t_pick_0_0"
+     ],
+     [
+      "4034"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12t_pick_0_2"
+     ],
+     [
+      "12512"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "8183"
+     ],
+     [
+      "7588"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "10236"
+     ],
+     [
+      "7588"
+     ],
+     "u2"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u0",
+   "path": "v2_only",
+   "arm": "B_current",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 25,
+   "consensus_cards": 14,
+   "shapes": {
+    "1x1": 14
+   },
+   "sub450_cards": 5,
+   "sub450_share": 0.3571,
+   "distinct_centerpieces": 11,
+   "mean_consensus_fit": 0.426,
+   "surplus_to_need_give": 1,
+   "surplus_to_need_recv": 7,
+   "give_from_user_surplus": 9,
+   "recv_from_partner_surplus": 7,
+   "top5": [
+    [
+     [
+      "6801"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "12t_pick_0_0"
+     ],
+     [
+      "4034"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12t_pick_0_2"
+     ],
+     [
+      "12512"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "8183"
+     ],
+     [
+      "7588"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "10236"
+     ],
+     [
+      "7588"
+     ],
+     "u2"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u0",
+   "path": "v2_only",
+   "arm": "B_current",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 25,
+   "consensus_cards": 14,
+   "shapes": {
+    "1x1": 14
+   },
+   "sub450_cards": 5,
+   "sub450_share": 0.3571,
+   "distinct_centerpieces": 11,
+   "mean_consensus_fit": 0.426,
+   "surplus_to_need_give": 1,
+   "surplus_to_need_recv": 7,
+   "give_from_user_surplus": 9,
+   "recv_from_partner_surplus": 7,
+   "top5": [
+    [
+     [
+      "6801"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "12t_pick_0_0"
+     ],
+     [
+      "4034"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12t_pick_0_2"
+     ],
+     [
+      "12512"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "8183"
+     ],
+     [
+      "7588"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "10236"
+     ],
+     [
+      "7588"
+     ],
+     "u2"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u0",
+   "path": "v2_only",
+   "arm": "A_baseline",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 55,
+   "consensus_cards": 25,
+   "shapes": {
+    "1x1": 25
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 10,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 7,
+   "surplus_to_need_recv": 10,
+   "give_from_user_surplus": 20,
+   "recv_from_partner_surplus": 10,
+   "top5": [
+    [
+     [
+      "5859"
+     ],
+     [
+      "9226"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "11604"
+     ],
+     [
+      "9226"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "11604"
+     ],
+     [
+      "8138"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "5859"
+     ],
+     [
+      "8138"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "10229"
+     ],
+     [
+      "4034"
+     ],
+     "u10"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u0",
+   "path": "v2_only",
+   "arm": "A_baseline",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 55,
+   "consensus_cards": 25,
+   "shapes": {
+    "1x1": 25
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 10,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 7,
+   "surplus_to_need_recv": 10,
+   "give_from_user_surplus": 20,
+   "recv_from_partner_surplus": 10,
+   "top5": [
+    [
+     [
+      "5859"
+     ],
+     [
+      "9226"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "11604"
+     ],
+     [
+      "9226"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "11604"
+     ],
+     [
+      "8138"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "5859"
+     ],
+     [
+      "8138"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "10229"
+     ],
+     [
+      "4034"
+     ],
+     "u10"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u0",
+   "path": "v2_only",
+   "arm": "A_baseline",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 55,
+   "consensus_cards": 25,
+   "shapes": {
+    "1x1": 25
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 10,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 7,
+   "surplus_to_need_recv": 10,
+   "give_from_user_surplus": 20,
+   "recv_from_partner_surplus": 10,
+   "top5": [
+    [
+     [
+      "5859"
+     ],
+     [
+      "9226"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "11604"
+     ],
+     [
+      "9226"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "11604"
+     ],
+     [
+      "8138"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "5859"
+     ],
+     [
+      "8138"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "10229"
+     ],
+     [
+      "4034"
+     ],
+     "u10"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u0",
+   "path": "v2_only",
+   "arm": "A_baseline",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 55,
+   "consensus_cards": 25,
+   "shapes": {
+    "1x1": 25
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 10,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 7,
+   "surplus_to_need_recv": 10,
+   "give_from_user_surplus": 20,
+   "recv_from_partner_surplus": 10,
+   "top5": [
+    [
+     [
+      "5859"
+     ],
+     [
+      "9226"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "11604"
+     ],
+     [
+      "9226"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "11604"
+     ],
+     [
+      "8138"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "5859"
+     ],
+     [
+      "8138"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "10229"
+     ],
+     [
+      "4034"
+     ],
+     "u10"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u0",
+   "path": "v2_only",
+   "arm": "D_challenger",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 24,
+   "consensus_cards": 13,
+   "shapes": {
+    "1x1": 13
+   },
+   "sub450_cards": 4,
+   "sub450_share": 0.3077,
+   "distinct_centerpieces": 11,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 1,
+   "surplus_to_need_recv": 7,
+   "give_from_user_surplus": 7,
+   "recv_from_partner_surplus": 7,
+   "top5": [
+    [
+     [
+      "6801"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "12t_pick_0_2"
+     ],
+     [
+      "12512"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "8183"
+     ],
+     [
+      "7588"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "7564"
+     ],
+     [
+      "9221"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "10236"
+     ],
+     [
+      "7588"
+     ],
+     "u2"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u0",
+   "path": "v2_only",
+   "arm": "D_challenger",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 24,
+   "consensus_cards": 13,
+   "shapes": {
+    "1x1": 13
+   },
+   "sub450_cards": 4,
+   "sub450_share": 0.3077,
+   "distinct_centerpieces": 11,
+   "mean_consensus_fit": 0.498,
+   "surplus_to_need_give": 1,
+   "surplus_to_need_recv": 7,
+   "give_from_user_surplus": 7,
+   "recv_from_partner_surplus": 7,
+   "top5": [
+    [
+     [
+      "6801"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "12t_pick_0_2"
+     ],
+     [
+      "12512"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "8183"
+     ],
+     [
+      "7588"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "7564"
+     ],
+     [
+      "9221"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "10236"
+     ],
+     [
+      "7588"
+     ],
+     "u2"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u0",
+   "path": "v2_only",
+   "arm": "D_challenger",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 24,
+   "consensus_cards": 13,
+   "shapes": {
+    "1x1": 13
+   },
+   "sub450_cards": 4,
+   "sub450_share": 0.3077,
+   "distinct_centerpieces": 11,
+   "mean_consensus_fit": 0.498,
+   "surplus_to_need_give": 1,
+   "surplus_to_need_recv": 7,
+   "give_from_user_surplus": 7,
+   "recv_from_partner_surplus": 7,
+   "top5": [
+    [
+     [
+      "6801"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "12t_pick_0_2"
+     ],
+     [
+      "12512"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "8183"
+     ],
+     [
+      "7588"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "7564"
+     ],
+     [
+      "9221"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "10236"
+     ],
+     [
+      "7588"
+     ],
+     "u2"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u0",
+   "path": "v2_only",
+   "arm": "D_challenger",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 24,
+   "consensus_cards": 13,
+   "shapes": {
+    "1x1": 13
+   },
+   "sub450_cards": 4,
+   "sub450_share": 0.3077,
+   "distinct_centerpieces": 11,
+   "mean_consensus_fit": 0.498,
+   "surplus_to_need_give": 1,
+   "surplus_to_need_recv": 7,
+   "give_from_user_surplus": 7,
+   "recv_from_partner_surplus": 7,
+   "top5": [
+    [
+     [
+      "6801"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "12t_pick_0_2"
+     ],
+     [
+      "12512"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "8183"
+     ],
+     [
+      "7588"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "7564"
+     ],
+     [
+      "9221"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "10236"
+     ],
+     [
+      "7588"
+     ],
+     "u2"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "16t_sf@u0",
+   "path": "v3",
+   "arm": "B_current",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 32,
+   "consensus_cards": 14,
+   "shapes": {
+    "1x1": 14
+   },
+   "sub450_cards": 9,
+   "sub450_share": 0.6429,
+   "distinct_centerpieces": 11,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 1,
+   "give_from_user_surplus": 2,
+   "recv_from_partner_surplus": 1,
+   "top5": [
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "7525"
+     ],
+     "u14"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "11628"
+     ],
+     "u12"
+    ],
+    [
+     [
+      "5870"
+     ],
+     [
+      "9756"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "12490"
+     ],
+     [
+      "9756"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "5870"
+     ],
+     [
+      "5927"
+     ],
+     "u12"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "16t_sf@u0",
+   "path": "v3",
+   "arm": "B_current",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 32,
+   "consensus_cards": 14,
+   "shapes": {
+    "1x1": 14
+   },
+   "sub450_cards": 9,
+   "sub450_share": 0.6429,
+   "distinct_centerpieces": 11,
+   "mean_consensus_fit": 0.147,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 1,
+   "give_from_user_surplus": 2,
+   "recv_from_partner_surplus": 1,
+   "top5": [
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "7525"
+     ],
+     "u14"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "11628"
+     ],
+     "u12"
+    ],
+    [
+     [
+      "5870"
+     ],
+     [
+      "9756"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "12490"
+     ],
+     [
+      "9756"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "5870"
+     ],
+     [
+      "5927"
+     ],
+     "u12"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "16t_sf@u0",
+   "path": "v3",
+   "arm": "B_current",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 32,
+   "consensus_cards": 14,
+   "shapes": {
+    "1x1": 14
+   },
+   "sub450_cards": 9,
+   "sub450_share": 0.6429,
+   "distinct_centerpieces": 11,
+   "mean_consensus_fit": 0.147,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 1,
+   "give_from_user_surplus": 2,
+   "recv_from_partner_surplus": 1,
+   "top5": [
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "7525"
+     ],
+     "u14"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "11628"
+     ],
+     "u12"
+    ],
+    [
+     [
+      "5870"
+     ],
+     [
+      "9756"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "12490"
+     ],
+     [
+      "9756"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "5870"
+     ],
+     [
+      "5927"
+     ],
+     "u12"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "16t_sf@u0",
+   "path": "v3",
+   "arm": "B_current",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 32,
+   "consensus_cards": 14,
+   "shapes": {
+    "1x1": 14
+   },
+   "sub450_cards": 9,
+   "sub450_share": 0.6429,
+   "distinct_centerpieces": 11,
+   "mean_consensus_fit": 0.147,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 1,
+   "give_from_user_surplus": 2,
+   "recv_from_partner_surplus": 1,
+   "top5": [
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "7525"
+     ],
+     "u14"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "11628"
+     ],
+     "u12"
+    ],
+    [
+     [
+      "5870"
+     ],
+     [
+      "9756"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "12490"
+     ],
+     [
+      "9756"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "5870"
+     ],
+     [
+      "5927"
+     ],
+     "u12"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "16t_sf@u0",
+   "path": "v3",
+   "arm": "A_baseline",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 73,
+   "consensus_cards": 40,
+   "shapes": {
+    "1x1": 40
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 17,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 5,
+   "surplus_to_need_recv": 20,
+   "give_from_user_surplus": 15,
+   "recv_from_partner_surplus": 20,
+   "top5": [
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "7525"
+     ],
+     "u14"
+    ],
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "11628"
+     ],
+     "u12"
+    ],
+    [
+     [
+      "6813"
+     ],
+     [
+      "8112"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "9226"
+     ],
+     [
+      "8112"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "12519"
+     ],
+     "u8"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "16t_sf@u0",
+   "path": "v3",
+   "arm": "A_baseline",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 73,
+   "consensus_cards": 40,
+   "shapes": {
+    "1x1": 40
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 17,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 5,
+   "surplus_to_need_recv": 20,
+   "give_from_user_surplus": 15,
+   "recv_from_partner_surplus": 20,
+   "top5": [
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "7525"
+     ],
+     "u14"
+    ],
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "11628"
+     ],
+     "u12"
+    ],
+    [
+     [
+      "6813"
+     ],
+     [
+      "8112"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "9226"
+     ],
+     [
+      "8112"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "12519"
+     ],
+     "u8"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "16t_sf@u0",
+   "path": "v3",
+   "arm": "A_baseline",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 73,
+   "consensus_cards": 40,
+   "shapes": {
+    "1x1": 40
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 17,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 5,
+   "surplus_to_need_recv": 20,
+   "give_from_user_surplus": 15,
+   "recv_from_partner_surplus": 20,
+   "top5": [
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "7525"
+     ],
+     "u14"
+    ],
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "11628"
+     ],
+     "u12"
+    ],
+    [
+     [
+      "6813"
+     ],
+     [
+      "8112"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "9226"
+     ],
+     [
+      "8112"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "12519"
+     ],
+     "u8"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "16t_sf@u0",
+   "path": "v3",
+   "arm": "A_baseline",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 73,
+   "consensus_cards": 40,
+   "shapes": {
+    "1x1": 40
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 17,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 5,
+   "surplus_to_need_recv": 20,
+   "give_from_user_surplus": 15,
+   "recv_from_partner_surplus": 20,
+   "top5": [
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "7525"
+     ],
+     "u14"
+    ],
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "11628"
+     ],
+     "u12"
+    ],
+    [
+     [
+      "6813"
+     ],
+     [
+      "8112"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "9226"
+     ],
+     [
+      "8112"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "12519"
+     ],
+     "u8"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "16t_sf@u0",
+   "path": "v3",
+   "arm": "D_challenger",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 27,
+   "consensus_cards": 9,
+   "shapes": {
+    "1x1": 9
+   },
+   "sub450_cards": 4,
+   "sub450_share": 0.4444,
+   "distinct_centerpieces": 7,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 2,
+   "give_from_user_surplus": 2,
+   "recv_from_partner_surplus": 2,
+   "top5": [
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "10229"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "6801"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "5870"
+     ],
+     [
+      "9756"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "12490"
+     ],
+     [
+      "9756"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "5870"
+     ],
+     [
+      "5927"
+     ],
+     "u12"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "16t_sf@u0",
+   "path": "v3",
+   "arm": "D_challenger",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 27,
+   "consensus_cards": 9,
+   "shapes": {
+    "1x1": 9
+   },
+   "sub450_cards": 4,
+   "sub450_share": 0.4444,
+   "distinct_centerpieces": 7,
+   "mean_consensus_fit": 0.233,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 1,
+   "give_from_user_surplus": 2,
+   "recv_from_partner_surplus": 1,
+   "top5": [
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "6801"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "7526"
+     ],
+     "u15"
+    ],
+    [
+     [
+      "5870"
+     ],
+     [
+      "9756"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "12490"
+     ],
+     [
+      "9756"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "5870"
+     ],
+     [
+      "5927"
+     ],
+     "u12"
+    ]
+   ],
+   "top5_jaccard": 0.667,
+   "set_jaccard": 0.8
+  },
+  {
+   "league": "16t_sf@u0",
+   "path": "v3",
+   "arm": "D_challenger",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 27,
+   "consensus_cards": 9,
+   "shapes": {
+    "1x1": 9
+   },
+   "sub450_cards": 4,
+   "sub450_share": 0.4444,
+   "distinct_centerpieces": 7,
+   "mean_consensus_fit": 0.233,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 1,
+   "give_from_user_surplus": 2,
+   "recv_from_partner_surplus": 1,
+   "top5": [
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "6801"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "7526"
+     ],
+     "u15"
+    ],
+    [
+     [
+      "5870"
+     ],
+     [
+      "9756"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "12490"
+     ],
+     [
+      "9756"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "5870"
+     ],
+     [
+      "5927"
+     ],
+     "u12"
+    ]
+   ],
+   "top5_jaccard": 0.667,
+   "set_jaccard": 0.8
+  },
+  {
+   "league": "16t_sf@u0",
+   "path": "v3",
+   "arm": "D_challenger",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 27,
+   "consensus_cards": 9,
+   "shapes": {
+    "1x1": 9
+   },
+   "sub450_cards": 4,
+   "sub450_share": 0.4444,
+   "distinct_centerpieces": 7,
+   "mean_consensus_fit": 0.233,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 1,
+   "give_from_user_surplus": 2,
+   "recv_from_partner_surplus": 1,
+   "top5": [
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "6801"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "7526"
+     ],
+     "u15"
+    ],
+    [
+     [
+      "5870"
+     ],
+     [
+      "9756"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "12490"
+     ],
+     [
+      "9756"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "5870"
+     ],
+     [
+      "5927"
+     ],
+     "u12"
+    ]
+   ],
+   "top5_jaccard": 0.667,
+   "set_jaccard": 0.8
+  },
+  {
+   "league": "16t_sf@u0",
+   "path": "v2_only",
+   "arm": "B_current",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 32,
+   "consensus_cards": 16,
+   "shapes": {
+    "1x1": 16
+   },
+   "sub450_cards": 8,
+   "sub450_share": 0.5,
+   "distinct_centerpieces": 12,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 4,
+   "give_from_user_surplus": 3,
+   "recv_from_partner_surplus": 4,
+   "top5": [
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "7525"
+     ],
+     "u14"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "7525"
+     ],
+     "u14"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "11628"
+     ],
+     "u12"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "13279"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "5870"
+     ],
+     [
+      "9756"
+     ],
+     "u2"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "16t_sf@u0",
+   "path": "v2_only",
+   "arm": "B_current",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 32,
+   "consensus_cards": 16,
+   "shapes": {
+    "1x1": 16
+   },
+   "sub450_cards": 8,
+   "sub450_share": 0.5,
+   "distinct_centerpieces": 12,
+   "mean_consensus_fit": 0.184,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 4,
+   "give_from_user_surplus": 3,
+   "recv_from_partner_surplus": 4,
+   "top5": [
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "7525"
+     ],
+     "u14"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "7525"
+     ],
+     "u14"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "11628"
+     ],
+     "u12"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "13279"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "5870"
+     ],
+     [
+      "9756"
+     ],
+     "u2"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "16t_sf@u0",
+   "path": "v2_only",
+   "arm": "B_current",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 32,
+   "consensus_cards": 16,
+   "shapes": {
+    "1x1": 16
+   },
+   "sub450_cards": 8,
+   "sub450_share": 0.5,
+   "distinct_centerpieces": 12,
+   "mean_consensus_fit": 0.184,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 4,
+   "give_from_user_surplus": 3,
+   "recv_from_partner_surplus": 4,
+   "top5": [
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "7525"
+     ],
+     "u14"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "7525"
+     ],
+     "u14"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "11628"
+     ],
+     "u12"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "13279"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "5870"
+     ],
+     [
+      "9756"
+     ],
+     "u2"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "16t_sf@u0",
+   "path": "v2_only",
+   "arm": "B_current",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 32,
+   "consensus_cards": 16,
+   "shapes": {
+    "1x1": 16
+   },
+   "sub450_cards": 8,
+   "sub450_share": 0.5,
+   "distinct_centerpieces": 12,
+   "mean_consensus_fit": 0.184,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 4,
+   "give_from_user_surplus": 3,
+   "recv_from_partner_surplus": 4,
+   "top5": [
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "7525"
+     ],
+     "u14"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "7525"
+     ],
+     "u14"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "11628"
+     ],
+     "u12"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "13279"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "5870"
+     ],
+     [
+      "9756"
+     ],
+     "u2"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "16t_sf@u0",
+   "path": "v2_only",
+   "arm": "A_baseline",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 75,
+   "consensus_cards": 35,
+   "shapes": {
+    "1x1": 35
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 15,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 2,
+   "surplus_to_need_recv": 20,
+   "give_from_user_surplus": 12,
+   "recv_from_partner_surplus": 20,
+   "top5": [
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "7525"
+     ],
+     "u14"
+    ],
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "11628"
+     ],
+     "u12"
+    ],
+    [
+     [
+      "6813"
+     ],
+     [
+      "8112"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "9226"
+     ],
+     [
+      "8112"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "12519"
+     ],
+     "u8"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "16t_sf@u0",
+   "path": "v2_only",
+   "arm": "A_baseline",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 75,
+   "consensus_cards": 35,
+   "shapes": {
+    "1x1": 35
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 15,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 2,
+   "surplus_to_need_recv": 20,
+   "give_from_user_surplus": 12,
+   "recv_from_partner_surplus": 20,
+   "top5": [
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "7525"
+     ],
+     "u14"
+    ],
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "11628"
+     ],
+     "u12"
+    ],
+    [
+     [
+      "6813"
+     ],
+     [
+      "8112"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "9226"
+     ],
+     [
+      "8112"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "12519"
+     ],
+     "u8"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "16t_sf@u0",
+   "path": "v2_only",
+   "arm": "A_baseline",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 75,
+   "consensus_cards": 35,
+   "shapes": {
+    "1x1": 35
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 15,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 2,
+   "surplus_to_need_recv": 20,
+   "give_from_user_surplus": 12,
+   "recv_from_partner_surplus": 20,
+   "top5": [
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "7525"
+     ],
+     "u14"
+    ],
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "11628"
+     ],
+     "u12"
+    ],
+    [
+     [
+      "6813"
+     ],
+     [
+      "8112"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "9226"
+     ],
+     [
+      "8112"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "12519"
+     ],
+     "u8"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "16t_sf@u0",
+   "path": "v2_only",
+   "arm": "A_baseline",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 75,
+   "consensus_cards": 35,
+   "shapes": {
+    "1x1": 35
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 15,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 2,
+   "surplus_to_need_recv": 20,
+   "give_from_user_surplus": 12,
+   "recv_from_partner_surplus": 20,
+   "top5": [
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "7525"
+     ],
+     "u14"
+    ],
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "11628"
+     ],
+     "u12"
+    ],
+    [
+     [
+      "6813"
+     ],
+     [
+      "8112"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "9226"
+     ],
+     [
+      "8112"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "12519"
+     ],
+     "u8"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "16t_sf@u0",
+   "path": "v2_only",
+   "arm": "D_challenger",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 26,
+   "consensus_cards": 10,
+   "shapes": {
+    "1x1": 10
+   },
+   "sub450_cards": 2,
+   "sub450_share": 0.2,
+   "distinct_centerpieces": 8,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 2,
+   "give_from_user_surplus": 3,
+   "recv_from_partner_surplus": 2,
+   "top5": [
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "7525"
+     ],
+     "u14"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "10229"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "6801"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "7525"
+     ],
+     "u14"
+    ],
+    [
+     [
+      "5870"
+     ],
+     [
+      "9756"
+     ],
+     "u2"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "16t_sf@u0",
+   "path": "v2_only",
+   "arm": "D_challenger",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 26,
+   "consensus_cards": 10,
+   "shapes": {
+    "1x1": 10
+   },
+   "sub450_cards": 2,
+   "sub450_share": 0.2,
+   "distinct_centerpieces": 8,
+   "mean_consensus_fit": 0.209,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 1,
+   "give_from_user_surplus": 3,
+   "recv_from_partner_surplus": 1,
+   "top5": [
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "7525"
+     ],
+     "u14"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "6801"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "7525"
+     ],
+     "u14"
+    ],
+    [
+     [
+      "5870"
+     ],
+     [
+      "9756"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "12519"
+     ],
+     "u8"
+    ]
+   ],
+   "top5_jaccard": 0.667,
+   "set_jaccard": 0.818
+  },
+  {
+   "league": "16t_sf@u0",
+   "path": "v2_only",
+   "arm": "D_challenger",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 26,
+   "consensus_cards": 10,
+   "shapes": {
+    "1x1": 10
+   },
+   "sub450_cards": 2,
+   "sub450_share": 0.2,
+   "distinct_centerpieces": 8,
+   "mean_consensus_fit": 0.209,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 1,
+   "give_from_user_surplus": 3,
+   "recv_from_partner_surplus": 1,
+   "top5": [
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "7525"
+     ],
+     "u14"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "6801"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "7525"
+     ],
+     "u14"
+    ],
+    [
+     [
+      "5870"
+     ],
+     [
+      "9756"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "12519"
+     ],
+     "u8"
+    ]
+   ],
+   "top5_jaccard": 0.667,
+   "set_jaccard": 0.818
+  },
+  {
+   "league": "16t_sf@u0",
+   "path": "v2_only",
+   "arm": "D_challenger",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 26,
+   "consensus_cards": 10,
+   "shapes": {
+    "1x1": 10
+   },
+   "sub450_cards": 2,
+   "sub450_share": 0.2,
+   "distinct_centerpieces": 8,
+   "mean_consensus_fit": 0.261,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 1,
+   "give_from_user_surplus": 3,
+   "recv_from_partner_surplus": 1,
+   "top5": [
+    [
+     [
+      "16t_pick_0_0"
+     ],
+     [
+      "7525"
+     ],
+     "u14"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "6801"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "7525"
+     ],
+     "u14"
+    ],
+    [
+     [
+      "5870"
+     ],
+     [
+      "9756"
+     ],
+     "u2"
+    ],
+    [
+     [
+      "16t_pick_0_2"
+     ],
+     [
+      "11628"
+     ],
+     "u12"
+    ]
+   ],
+   "top5_jaccard": 0.667,
+   "set_jaccard": 0.818
+  },
+  {
+   "league": "mirror@u",
+   "path": "v3",
+   "arm": "B_current",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 9,
+   "consensus_cards": 9,
+   "shapes": {
+    "1x1": 9
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 4,
+   "surplus_to_need_recv": 5,
+   "give_from_user_surplus": 6,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB2"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "bRB2"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uRB1"
+     ],
+     [
+      "bRB2"
+     ],
+     "b"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@u",
+   "path": "v3",
+   "arm": "B_current",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 9,
+   "consensus_cards": 9,
+   "shapes": {
+    "1x1": 9
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": 0.611,
+   "surplus_to_need_give": 4,
+   "surplus_to_need_recv": 5,
+   "give_from_user_surplus": 7,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB2"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "bRB2"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR3"
+     ],
+     [
+      "aRB2"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 0.667,
+   "set_jaccard": 0.8
+  },
+  {
+   "league": "mirror@u",
+   "path": "v3",
+   "arm": "B_current",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 9,
+   "consensus_cards": 9,
+   "shapes": {
+    "1x1": 9
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": 0.611,
+   "surplus_to_need_give": 4,
+   "surplus_to_need_recv": 5,
+   "give_from_user_surplus": 7,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB2"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "bRB2"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR3"
+     ],
+     [
+      "aRB2"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 0.667,
+   "set_jaccard": 0.8
+  },
+  {
+   "league": "mirror@u",
+   "path": "v3",
+   "arm": "B_current",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 9,
+   "consensus_cards": 9,
+   "shapes": {
+    "1x1": 9
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": 0.611,
+   "surplus_to_need_give": 4,
+   "surplus_to_need_recv": 5,
+   "give_from_user_surplus": 7,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB2"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "bRB2"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR3"
+     ],
+     [
+      "aRB2"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 0.667,
+   "set_jaccard": 0.8
+  },
+  {
+   "league": "mirror@u",
+   "path": "v3",
+   "arm": "A_baseline",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 10,
+   "consensus_cards": 10,
+   "shapes": {
+    "1x1": 10
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 2,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 5,
+   "surplus_to_need_recv": 5,
+   "give_from_user_surplus": 9,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR3"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@u",
+   "path": "v3",
+   "arm": "A_baseline",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 10,
+   "consensus_cards": 10,
+   "shapes": {
+    "1x1": 10
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 2,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 5,
+   "surplus_to_need_recv": 5,
+   "give_from_user_surplus": 9,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR3"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@u",
+   "path": "v3",
+   "arm": "A_baseline",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 10,
+   "consensus_cards": 10,
+   "shapes": {
+    "1x1": 10
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 2,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 5,
+   "surplus_to_need_recv": 5,
+   "give_from_user_surplus": 9,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR3"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@u",
+   "path": "v3",
+   "arm": "A_baseline",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 10,
+   "consensus_cards": 10,
+   "shapes": {
+    "1x1": 10
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 2,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 5,
+   "surplus_to_need_recv": 5,
+   "give_from_user_surplus": 9,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR3"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@u",
+   "path": "v3",
+   "arm": "D_challenger",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 9,
+   "consensus_cards": 9,
+   "shapes": {
+    "1x1": 9
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 4,
+   "surplus_to_need_recv": 5,
+   "give_from_user_surplus": 6,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB2"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "bRB2"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@u",
+   "path": "v3",
+   "arm": "D_challenger",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 9,
+   "consensus_cards": 9,
+   "shapes": {
+    "1x1": 9
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": 0.611,
+   "surplus_to_need_give": 4,
+   "surplus_to_need_recv": 5,
+   "give_from_user_surplus": 7,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB2"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "bRB2"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 0.8
+  },
+  {
+   "league": "mirror@u",
+   "path": "v3",
+   "arm": "D_challenger",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 9,
+   "consensus_cards": 9,
+   "shapes": {
+    "1x1": 9
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": 0.611,
+   "surplus_to_need_give": 4,
+   "surplus_to_need_recv": 5,
+   "give_from_user_surplus": 7,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB2"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "bRB2"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 0.8
+  },
+  {
+   "league": "mirror@u",
+   "path": "v3",
+   "arm": "D_challenger",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 9,
+   "consensus_cards": 9,
+   "shapes": {
+    "1x1": 9
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": 0.611,
+   "surplus_to_need_give": 4,
+   "surplus_to_need_recv": 5,
+   "give_from_user_surplus": 7,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB2"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "bRB2"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 0.8
+  },
+  {
+   "league": "mirror@u",
+   "path": "v2_only",
+   "arm": "B_current",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 9,
+   "consensus_cards": 9,
+   "shapes": {
+    "1x1": 9
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 4,
+   "surplus_to_need_recv": 5,
+   "give_from_user_surplus": 6,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB2"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "bRB2"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uRB1"
+     ],
+     [
+      "bRB2"
+     ],
+     "b"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@u",
+   "path": "v2_only",
+   "arm": "B_current",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 9,
+   "consensus_cards": 9,
+   "shapes": {
+    "1x1": 9
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": 0.611,
+   "surplus_to_need_give": 4,
+   "surplus_to_need_recv": 5,
+   "give_from_user_surplus": 7,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB2"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "bRB2"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR3"
+     ],
+     [
+      "aRB2"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 0.667,
+   "set_jaccard": 0.8
+  },
+  {
+   "league": "mirror@u",
+   "path": "v2_only",
+   "arm": "B_current",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 9,
+   "consensus_cards": 9,
+   "shapes": {
+    "1x1": 9
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": 0.611,
+   "surplus_to_need_give": 4,
+   "surplus_to_need_recv": 5,
+   "give_from_user_surplus": 7,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB2"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "bRB2"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR3"
+     ],
+     [
+      "aRB2"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 0.667,
+   "set_jaccard": 0.8
+  },
+  {
+   "league": "mirror@u",
+   "path": "v2_only",
+   "arm": "B_current",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 9,
+   "consensus_cards": 9,
+   "shapes": {
+    "1x1": 9
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": 0.611,
+   "surplus_to_need_give": 4,
+   "surplus_to_need_recv": 5,
+   "give_from_user_surplus": 7,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB2"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "bRB2"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR3"
+     ],
+     [
+      "aRB2"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 0.667,
+   "set_jaccard": 0.8
+  },
+  {
+   "league": "mirror@u",
+   "path": "v2_only",
+   "arm": "A_baseline",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 10,
+   "consensus_cards": 10,
+   "shapes": {
+    "1x1": 10
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 2,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 5,
+   "surplus_to_need_recv": 5,
+   "give_from_user_surplus": 9,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR3"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@u",
+   "path": "v2_only",
+   "arm": "A_baseline",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 10,
+   "consensus_cards": 10,
+   "shapes": {
+    "1x1": 10
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 2,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 5,
+   "surplus_to_need_recv": 5,
+   "give_from_user_surplus": 9,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR3"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@u",
+   "path": "v2_only",
+   "arm": "A_baseline",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 10,
+   "consensus_cards": 10,
+   "shapes": {
+    "1x1": 10
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 2,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 5,
+   "surplus_to_need_recv": 5,
+   "give_from_user_surplus": 9,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR3"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@u",
+   "path": "v2_only",
+   "arm": "A_baseline",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 10,
+   "consensus_cards": 10,
+   "shapes": {
+    "1x1": 10
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 2,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 5,
+   "surplus_to_need_recv": 5,
+   "give_from_user_surplus": 9,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR3"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@u",
+   "path": "v2_only",
+   "arm": "D_challenger",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 9,
+   "consensus_cards": 9,
+   "shapes": {
+    "1x1": 9
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 4,
+   "surplus_to_need_recv": 5,
+   "give_from_user_surplus": 6,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB2"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "bRB2"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@u",
+   "path": "v2_only",
+   "arm": "D_challenger",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 9,
+   "consensus_cards": 9,
+   "shapes": {
+    "1x1": 9
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": 0.611,
+   "surplus_to_need_give": 4,
+   "surplus_to_need_recv": 5,
+   "give_from_user_surplus": 7,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB2"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "bRB2"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 0.8
+  },
+  {
+   "league": "mirror@u",
+   "path": "v2_only",
+   "arm": "D_challenger",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 9,
+   "consensus_cards": 9,
+   "shapes": {
+    "1x1": 9
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": 0.611,
+   "surplus_to_need_give": 4,
+   "surplus_to_need_recv": 5,
+   "give_from_user_surplus": 7,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB2"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "bRB2"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 0.8
+  },
+  {
+   "league": "mirror@u",
+   "path": "v2_only",
+   "arm": "D_challenger",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 9,
+   "consensus_cards": 9,
+   "shapes": {
+    "1x1": 9
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": 0.611,
+   "surplus_to_need_give": 4,
+   "surplus_to_need_recv": 5,
+   "give_from_user_surplus": 7,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB2"
+     ],
+     "a"
+    ],
+    [
+     [
+      "uWR1"
+     ],
+     [
+      "bRB1"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "bRB2"
+     ],
+     "b"
+    ],
+    [
+     [
+      "uWR2"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 0.8
+  },
+  {
+   "league": "12t_1qb@u8",
+   "path": "v3",
+   "arm": "B_current",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 20,
+   "consensus_cards": 7,
+   "shapes": {
+    "1x1": 7
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 6,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 3,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 3,
+   "recv_from_partner_surplus": 2,
+   "top5": [
+    [
+     [
+      "12t_pick_8_0"
+     ],
+     [
+      "6801"
+     ],
+     "u0"
+    ],
+    [
+     [
+      "8148"
+     ],
+     [
+      "12t_pick_10_0"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "8146"
+     ],
+     [
+      "13287"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12t_pick_8_0"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "12t_pick_8_2"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u8",
+   "path": "v3",
+   "arm": "B_current",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 19,
+   "consensus_cards": 6,
+   "shapes": {
+    "1x1": 6
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 6,
+   "mean_consensus_fit": 0.341,
+   "surplus_to_need_give": 3,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 3,
+   "recv_from_partner_surplus": 2,
+   "top5": [
+    [
+     [
+      "12t_pick_8_0"
+     ],
+     [
+      "6801"
+     ],
+     "u0"
+    ],
+    [
+     [
+      "8148"
+     ],
+     [
+      "12t_pick_10_0"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "8146"
+     ],
+     [
+      "13287"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12t_pick_8_0"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "7523"
+     ],
+     [
+      "12529"
+     ],
+     "u10"
+    ]
+   ],
+   "top5_jaccard": 0.667,
+   "set_jaccard": 0.857
+  },
+  {
+   "league": "12t_1qb@u8",
+   "path": "v3",
+   "arm": "B_current",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 20,
+   "consensus_cards": 7,
+   "shapes": {
+    "1x1": 7
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 6,
+   "mean_consensus_fit": 0.349,
+   "surplus_to_need_give": 3,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 3,
+   "recv_from_partner_surplus": 2,
+   "top5": [
+    [
+     [
+      "12t_pick_8_0"
+     ],
+     [
+      "6801"
+     ],
+     "u0"
+    ],
+    [
+     [
+      "8148"
+     ],
+     [
+      "12t_pick_10_0"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "8146"
+     ],
+     [
+      "13287"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12t_pick_8_0"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "12t_pick_8_2"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u8",
+   "path": "v3",
+   "arm": "B_current",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 22,
+   "consensus_cards": 9,
+   "shapes": {
+    "1x1": 9
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 7,
+   "mean_consensus_fit": 0.382,
+   "surplus_to_need_give": 4,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 5,
+   "recv_from_partner_surplus": 4,
+   "top5": [
+    [
+     [
+      "8148"
+     ],
+     [
+      "12t_pick_10_0"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "8146"
+     ],
+     [
+      "13287"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12t_pick_8_0"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "12t_pick_8_2"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "7523"
+     ],
+     [
+      "12529"
+     ],
+     "u10"
+    ]
+   ],
+   "top5_jaccard": 0.667,
+   "set_jaccard": 0.6
+  },
+  {
+   "league": "12t_1qb@u8",
+   "path": "v3",
+   "arm": "A_baseline",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 55,
+   "consensus_cards": 25,
+   "shapes": {
+    "1x1": 25
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 13,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 9,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 22,
+   "recv_from_partner_surplus": 16,
+   "top5": [
+    [
+     [
+      "8137"
+     ],
+     [
+      "7525"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "12527"
+     ],
+     [
+      "9493"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "12527"
+     ],
+     [
+      "9221"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "8146"
+     ],
+     [
+      "13287"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12527"
+     ],
+     [
+      "9509"
+     ],
+     "u2"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u8",
+   "path": "v3",
+   "arm": "A_baseline",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 55,
+   "consensus_cards": 25,
+   "shapes": {
+    "1x1": 25
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 13,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 9,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 22,
+   "recv_from_partner_surplus": 16,
+   "top5": [
+    [
+     [
+      "8137"
+     ],
+     [
+      "7525"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "12527"
+     ],
+     [
+      "9493"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "12527"
+     ],
+     [
+      "9221"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "8146"
+     ],
+     [
+      "13287"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12527"
+     ],
+     [
+      "9509"
+     ],
+     "u2"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u8",
+   "path": "v3",
+   "arm": "A_baseline",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 55,
+   "consensus_cards": 25,
+   "shapes": {
+    "1x1": 25
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 13,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 9,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 22,
+   "recv_from_partner_surplus": 16,
+   "top5": [
+    [
+     [
+      "8137"
+     ],
+     [
+      "7525"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "12527"
+     ],
+     [
+      "9493"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "12527"
+     ],
+     [
+      "9221"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "8146"
+     ],
+     [
+      "13287"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12527"
+     ],
+     [
+      "9509"
+     ],
+     "u2"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u8",
+   "path": "v3",
+   "arm": "A_baseline",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 55,
+   "consensus_cards": 25,
+   "shapes": {
+    "1x1": 25
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 13,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 9,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 22,
+   "recv_from_partner_surplus": 16,
+   "top5": [
+    [
+     [
+      "8137"
+     ],
+     [
+      "7525"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "12527"
+     ],
+     [
+      "9493"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "12527"
+     ],
+     [
+      "9221"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "8146"
+     ],
+     [
+      "13287"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12527"
+     ],
+     [
+      "9509"
+     ],
+     "u2"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u8",
+   "path": "v3",
+   "arm": "D_challenger",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 17,
+   "consensus_cards": 3,
+   "shapes": {
+    "1x1": 3
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 3,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 2,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 2,
+   "recv_from_partner_surplus": 0,
+   "top5": [
+    [
+     [
+      "8148"
+     ],
+     [
+      "12t_pick_10_0"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "8146"
+     ],
+     [
+      "13287"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12t_pick_8_0"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u8",
+   "path": "v3",
+   "arm": "D_challenger",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 17,
+   "consensus_cards": 3,
+   "shapes": {
+    "1x1": 3
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 3,
+   "mean_consensus_fit": 0.517,
+   "surplus_to_need_give": 2,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 2,
+   "recv_from_partner_surplus": 0,
+   "top5": [
+    [
+     [
+      "8148"
+     ],
+     [
+      "12t_pick_10_0"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "8146"
+     ],
+     [
+      "13287"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12t_pick_8_0"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u8",
+   "path": "v3",
+   "arm": "D_challenger",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 17,
+   "consensus_cards": 3,
+   "shapes": {
+    "1x1": 3
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 3,
+   "mean_consensus_fit": 0.683,
+   "surplus_to_need_give": 2,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 2,
+   "recv_from_partner_surplus": 1,
+   "top5": [
+    [
+     [
+      "8146"
+     ],
+     [
+      "13287"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12t_pick_8_0"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "8148"
+     ],
+     [
+      "10859"
+     ],
+     "u2"
+    ]
+   ],
+   "top5_jaccard": 0.5,
+   "set_jaccard": 0.5
+  },
+  {
+   "league": "12t_1qb@u8",
+   "path": "v3",
+   "arm": "D_challenger",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 18,
+   "consensus_cards": 4,
+   "shapes": {
+    "1x1": 4
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": 0.637,
+   "surplus_to_need_give": 2,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 3,
+   "recv_from_partner_surplus": 2,
+   "top5": [
+    [
+     [
+      "8146"
+     ],
+     [
+      "13287"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "6790"
+     ],
+     [
+      "11638"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "12t_pick_8_0"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "8148"
+     ],
+     [
+      "12518"
+     ],
+     "u2"
+    ]
+   ],
+   "top5_jaccard": 0.4,
+   "set_jaccard": 0.4
+  },
+  {
+   "league": "12t_1qb@u8",
+   "path": "v2_only",
+   "arm": "B_current",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 16,
+   "consensus_cards": 7,
+   "shapes": {
+    "1x1": 7
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 6,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 3,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 3,
+   "recv_from_partner_surplus": 2,
+   "top5": [
+    [
+     [
+      "12t_pick_8_0"
+     ],
+     [
+      "6801"
+     ],
+     "u0"
+    ],
+    [
+     [
+      "8148"
+     ],
+     [
+      "12t_pick_10_0"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "8146"
+     ],
+     [
+      "13287"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12t_pick_8_0"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "12t_pick_8_2"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u8",
+   "path": "v2_only",
+   "arm": "B_current",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 15,
+   "consensus_cards": 6,
+   "shapes": {
+    "1x1": 6
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 6,
+   "mean_consensus_fit": 0.341,
+   "surplus_to_need_give": 3,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 3,
+   "recv_from_partner_surplus": 2,
+   "top5": [
+    [
+     [
+      "12t_pick_8_0"
+     ],
+     [
+      "6801"
+     ],
+     "u0"
+    ],
+    [
+     [
+      "8148"
+     ],
+     [
+      "12t_pick_10_0"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "8146"
+     ],
+     [
+      "13287"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12t_pick_8_0"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "7523"
+     ],
+     [
+      "12529"
+     ],
+     "u10"
+    ]
+   ],
+   "top5_jaccard": 0.667,
+   "set_jaccard": 0.857
+  },
+  {
+   "league": "12t_1qb@u8",
+   "path": "v2_only",
+   "arm": "B_current",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 16,
+   "consensus_cards": 7,
+   "shapes": {
+    "1x1": 7
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 6,
+   "mean_consensus_fit": 0.349,
+   "surplus_to_need_give": 3,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 3,
+   "recv_from_partner_surplus": 2,
+   "top5": [
+    [
+     [
+      "12t_pick_8_0"
+     ],
+     [
+      "6801"
+     ],
+     "u0"
+    ],
+    [
+     [
+      "8148"
+     ],
+     [
+      "12t_pick_10_0"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "8146"
+     ],
+     [
+      "13287"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12t_pick_8_0"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "12t_pick_8_2"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u8",
+   "path": "v2_only",
+   "arm": "B_current",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 18,
+   "consensus_cards": 9,
+   "shapes": {
+    "1x1": 9
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 7,
+   "mean_consensus_fit": 0.382,
+   "surplus_to_need_give": 4,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 5,
+   "recv_from_partner_surplus": 4,
+   "top5": [
+    [
+     [
+      "8148"
+     ],
+     [
+      "12t_pick_10_0"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "8146"
+     ],
+     [
+      "13287"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12t_pick_8_0"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "12t_pick_8_2"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "7523"
+     ],
+     [
+      "12529"
+     ],
+     "u10"
+    ]
+   ],
+   "top5_jaccard": 0.667,
+   "set_jaccard": 0.6
+  },
+  {
+   "league": "12t_1qb@u8",
+   "path": "v2_only",
+   "arm": "A_baseline",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 55,
+   "consensus_cards": 25,
+   "shapes": {
+    "1x1": 25
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 13,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 9,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 22,
+   "recv_from_partner_surplus": 16,
+   "top5": [
+    [
+     [
+      "8137"
+     ],
+     [
+      "7525"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "12527"
+     ],
+     [
+      "9493"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "12527"
+     ],
+     [
+      "9221"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "8146"
+     ],
+     [
+      "13287"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12527"
+     ],
+     [
+      "9509"
+     ],
+     "u2"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u8",
+   "path": "v2_only",
+   "arm": "A_baseline",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 55,
+   "consensus_cards": 25,
+   "shapes": {
+    "1x1": 25
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 13,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 9,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 22,
+   "recv_from_partner_surplus": 16,
+   "top5": [
+    [
+     [
+      "8137"
+     ],
+     [
+      "7525"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "12527"
+     ],
+     [
+      "9493"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "12527"
+     ],
+     [
+      "9221"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "8146"
+     ],
+     [
+      "13287"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12527"
+     ],
+     [
+      "9509"
+     ],
+     "u2"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u8",
+   "path": "v2_only",
+   "arm": "A_baseline",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 55,
+   "consensus_cards": 25,
+   "shapes": {
+    "1x1": 25
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 13,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 9,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 22,
+   "recv_from_partner_surplus": 16,
+   "top5": [
+    [
+     [
+      "8137"
+     ],
+     [
+      "7525"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "12527"
+     ],
+     [
+      "9493"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "12527"
+     ],
+     [
+      "9221"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "8146"
+     ],
+     [
+      "13287"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12527"
+     ],
+     [
+      "9509"
+     ],
+     "u2"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u8",
+   "path": "v2_only",
+   "arm": "A_baseline",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 55,
+   "consensus_cards": 25,
+   "shapes": {
+    "1x1": 25
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 13,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 9,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 22,
+   "recv_from_partner_surplus": 16,
+   "top5": [
+    [
+     [
+      "8137"
+     ],
+     [
+      "7525"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "12527"
+     ],
+     [
+      "9493"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "12527"
+     ],
+     [
+      "9221"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "8146"
+     ],
+     [
+      "13287"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12527"
+     ],
+     [
+      "9509"
+     ],
+     "u2"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u8",
+   "path": "v2_only",
+   "arm": "D_challenger",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 12,
+   "consensus_cards": 3,
+   "shapes": {
+    "1x1": 3
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 3,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 2,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 2,
+   "recv_from_partner_surplus": 0,
+   "top5": [
+    [
+     [
+      "8148"
+     ],
+     [
+      "12t_pick_10_0"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "8146"
+     ],
+     [
+      "13287"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12t_pick_8_0"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u8",
+   "path": "v2_only",
+   "arm": "D_challenger",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 12,
+   "consensus_cards": 3,
+   "shapes": {
+    "1x1": 3
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 3,
+   "mean_consensus_fit": 0.517,
+   "surplus_to_need_give": 2,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 2,
+   "recv_from_partner_surplus": 0,
+   "top5": [
+    [
+     [
+      "8148"
+     ],
+     [
+      "12t_pick_10_0"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "8146"
+     ],
+     [
+      "13287"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12t_pick_8_0"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "12t_1qb@u8",
+   "path": "v2_only",
+   "arm": "D_challenger",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 12,
+   "consensus_cards": 3,
+   "shapes": {
+    "1x1": 3
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 3,
+   "mean_consensus_fit": 0.623,
+   "surplus_to_need_give": 2,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 2,
+   "recv_from_partner_surplus": 0,
+   "top5": [
+    [
+     [
+      "8148"
+     ],
+     [
+      "12529"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "8146"
+     ],
+     [
+      "13287"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "12t_pick_8_0"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ]
+   ],
+   "top5_jaccard": 0.5,
+   "set_jaccard": 0.5
+  },
+  {
+   "league": "12t_1qb@u8",
+   "path": "v2_only",
+   "arm": "D_challenger",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 14,
+   "consensus_cards": 5,
+   "shapes": {
+    "1x1": 5
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 5,
+   "mean_consensus_fit": 0.674,
+   "surplus_to_need_give": 3,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 4,
+   "recv_from_partner_surplus": 2,
+   "top5": [
+    [
+     [
+      "8148"
+     ],
+     [
+      "12529"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "8146"
+     ],
+     [
+      "13287"
+     ],
+     "u10"
+    ],
+    [
+     [
+      "6790"
+     ],
+     [
+      "11638"
+     ],
+     "u6"
+    ],
+    [
+     [
+      "12t_pick_8_0"
+     ],
+     [
+      "9224"
+     ],
+     "u4"
+    ],
+    [
+     [
+      "5850"
+     ],
+     [
+      "10236"
+     ],
+     "u0"
+    ]
+   ],
+   "top5_jaccard": 0.333,
+   "set_jaccard": 0.333
+  },
+  {
+   "league": "mirror@b",
+   "path": "v3",
+   "arm": "B_current",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 8,
+   "consensus_cards": 8,
+   "shapes": {
+    "1x1": 8
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 0,
+   "recv_from_partner_surplus": 6,
+   "top5": [
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB2"
+     ],
+     [
+      "uWR2"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@b",
+   "path": "v3",
+   "arm": "B_current",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 8,
+   "consensus_cards": 8,
+   "shapes": {
+    "1x1": 8
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": 0.312,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 0,
+   "recv_from_partner_surplus": 6,
+   "top5": [
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB2"
+     ],
+     [
+      "uWR2"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@b",
+   "path": "v3",
+   "arm": "B_current",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 8,
+   "consensus_cards": 8,
+   "shapes": {
+    "1x1": 8
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": 0.312,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 0,
+   "recv_from_partner_surplus": 6,
+   "top5": [
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB2"
+     ],
+     [
+      "uWR2"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@b",
+   "path": "v3",
+   "arm": "B_current",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 8,
+   "consensus_cards": 8,
+   "shapes": {
+    "1x1": 8
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": 0.312,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 0,
+   "recv_from_partner_surplus": 6,
+   "top5": [
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB2"
+     ],
+     [
+      "uWR2"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@b",
+   "path": "v3",
+   "arm": "A_baseline",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 10,
+   "consensus_cards": 10,
+   "shapes": {
+    "1x1": 10
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 2,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 0,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "aQB"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "aQB"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bRB2"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@b",
+   "path": "v3",
+   "arm": "A_baseline",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 10,
+   "consensus_cards": 10,
+   "shapes": {
+    "1x1": 10
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 2,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 0,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "aQB"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "aQB"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bRB2"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@b",
+   "path": "v3",
+   "arm": "A_baseline",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 10,
+   "consensus_cards": 10,
+   "shapes": {
+    "1x1": 10
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 2,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 0,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "aQB"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "aQB"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bRB2"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@b",
+   "path": "v3",
+   "arm": "A_baseline",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 10,
+   "consensus_cards": 10,
+   "shapes": {
+    "1x1": 10
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 2,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 0,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "aQB"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "aQB"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bRB2"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@b",
+   "path": "v3",
+   "arm": "D_challenger",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 8,
+   "consensus_cards": 8,
+   "shapes": {
+    "1x1": 8
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 0,
+   "recv_from_partner_surplus": 6,
+   "top5": [
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB2"
+     ],
+     [
+      "uWR2"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@b",
+   "path": "v3",
+   "arm": "D_challenger",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 8,
+   "consensus_cards": 8,
+   "shapes": {
+    "1x1": 8
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": 0.312,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 0,
+   "recv_from_partner_surplus": 6,
+   "top5": [
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB2"
+     ],
+     [
+      "uWR2"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@b",
+   "path": "v3",
+   "arm": "D_challenger",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 8,
+   "consensus_cards": 8,
+   "shapes": {
+    "1x1": 8
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": 0.312,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 0,
+   "recv_from_partner_surplus": 6,
+   "top5": [
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB2"
+     ],
+     [
+      "uWR2"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@b",
+   "path": "v3",
+   "arm": "D_challenger",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 8,
+   "consensus_cards": 8,
+   "shapes": {
+    "1x1": 8
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": 0.312,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 0,
+   "recv_from_partner_surplus": 6,
+   "top5": [
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB2"
+     ],
+     [
+      "uWR2"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@b",
+   "path": "v2_only",
+   "arm": "B_current",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 8,
+   "consensus_cards": 8,
+   "shapes": {
+    "1x1": 8
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 0,
+   "recv_from_partner_surplus": 6,
+   "top5": [
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB2"
+     ],
+     [
+      "uWR2"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@b",
+   "path": "v2_only",
+   "arm": "B_current",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 8,
+   "consensus_cards": 8,
+   "shapes": {
+    "1x1": 8
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": 0.312,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 0,
+   "recv_from_partner_surplus": 6,
+   "top5": [
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB2"
+     ],
+     [
+      "uWR2"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@b",
+   "path": "v2_only",
+   "arm": "B_current",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 8,
+   "consensus_cards": 8,
+   "shapes": {
+    "1x1": 8
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": 0.312,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 0,
+   "recv_from_partner_surplus": 6,
+   "top5": [
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB2"
+     ],
+     [
+      "uWR2"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@b",
+   "path": "v2_only",
+   "arm": "B_current",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 8,
+   "consensus_cards": 8,
+   "shapes": {
+    "1x1": 8
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": 0.312,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 0,
+   "recv_from_partner_surplus": 6,
+   "top5": [
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB2"
+     ],
+     [
+      "uWR2"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@b",
+   "path": "v2_only",
+   "arm": "A_baseline",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 10,
+   "consensus_cards": 10,
+   "shapes": {
+    "1x1": 10
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 2,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 0,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "aQB"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "aQB"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bRB2"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@b",
+   "path": "v2_only",
+   "arm": "A_baseline",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 10,
+   "consensus_cards": 10,
+   "shapes": {
+    "1x1": 10
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 2,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 0,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "aQB"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "aQB"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bRB2"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@b",
+   "path": "v2_only",
+   "arm": "A_baseline",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 10,
+   "consensus_cards": 10,
+   "shapes": {
+    "1x1": 10
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 2,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 0,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "aQB"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "aQB"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bRB2"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@b",
+   "path": "v2_only",
+   "arm": "A_baseline",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 10,
+   "consensus_cards": 10,
+   "shapes": {
+    "1x1": 10
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 2,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 0,
+   "recv_from_partner_surplus": 5,
+   "top5": [
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "aQB"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "aQB"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bRB2"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@b",
+   "path": "v2_only",
+   "arm": "D_challenger",
+   "w": 0.0,
+   "baseline_identical": true,
+   "cards_total": 8,
+   "consensus_cards": 8,
+   "shapes": {
+    "1x1": 8
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": null,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 0,
+   "recv_from_partner_surplus": 6,
+   "top5": [
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB2"
+     ],
+     [
+      "uWR2"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@b",
+   "path": "v2_only",
+   "arm": "D_challenger",
+   "w": 0.25,
+   "baseline_identical": true,
+   "cards_total": 8,
+   "consensus_cards": 8,
+   "shapes": {
+    "1x1": 8
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": 0.312,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 0,
+   "recv_from_partner_surplus": 6,
+   "top5": [
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB2"
+     ],
+     [
+      "uWR2"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@b",
+   "path": "v2_only",
+   "arm": "D_challenger",
+   "w": 0.5,
+   "baseline_identical": true,
+   "cards_total": 8,
+   "consensus_cards": 8,
+   "shapes": {
+    "1x1": 8
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": 0.312,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 0,
+   "recv_from_partner_surplus": 6,
+   "top5": [
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB2"
+     ],
+     [
+      "uWR2"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  },
+  {
+   "league": "mirror@b",
+   "path": "v2_only",
+   "arm": "D_challenger",
+   "w": 1.0,
+   "baseline_identical": true,
+   "cards_total": 8,
+   "consensus_cards": 8,
+   "shapes": {
+    "1x1": 8
+   },
+   "sub450_cards": 0,
+   "sub450_share": 0.0,
+   "distinct_centerpieces": 4,
+   "mean_consensus_fit": 0.312,
+   "surplus_to_need_give": 0,
+   "surplus_to_need_recv": 0,
+   "give_from_user_surplus": 0,
+   "recv_from_partner_surplus": 6,
+   "top5": [
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB2"
+     ],
+     [
+      "uWR2"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ],
+    [
+     [
+      "bWR1"
+     ],
+     [
+      "uWR1"
+     ],
+     "u"
+    ],
+    [
+     [
+      "bRB1"
+     ],
+     [
+      "aRB1"
+     ],
+     "a"
+    ]
+   ],
+   "top5_jaccard": 1.0,
+   "set_jaccard": 1.0
+  }
+ ]
+}
