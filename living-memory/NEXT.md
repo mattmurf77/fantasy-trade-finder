@@ -9,7 +9,7 @@
 ---
 
 ## Table of Contents
-- [2026-09-02 — Web parity: the merge decision is the only blocker; P2-3 needs two operator inputs](#2026-09-02--web-parity-the-merge-decision-is-the-only-blocker-p2-3-needs-two-operator-inputs)
+- [2026-09-02 — Web parity SHIPPED and live; the only remaining work needs an App Store/TestFlight URL](#2026-09-02--web-parity-shipped-and-live-the-only-remaining-work-needs-an-app-storetestflight-url)
 - [2026-08-31 — Finder gap analysis: P0 likes-you tag on the merged landing, then the P1 batch](#2026-08-31--finder-gap-analysis-p0-likes-you-tag-on-the-merged-landing-then-the-p1-batch)
 - [2026-08-30b — Second feedback batch (#409/#410/#411/#412): checklist + the G-063 sweep](#2026-08-30b--second-feedback-batch-409410411412-checklist--the-g-063-sweep)
 - [2026-08-30 — Feedback batch #407/#406 SHIPPED; run the two checklists, then two small follow-ups](#2026-08-30--feedback-batch-407406-shipped-run-the-two-checklists-then-two-small-follow-ups)
@@ -41,32 +41,30 @@
 
 ---
 
-## 2026-09-02 — Web parity: the merge decision is the only blocker; P2-3 needs two operator inputs
+## 2026-09-02 — Web parity SHIPPED and live; the only remaining work needs an App Store/TestFlight URL
 
-**Why now:** the web work (phases 0-2, 36 files) has been built, gated and unmerged since
-2026-08-26, and it drifts further behind `main` every week — this session spent the whole
-resync cost for the second time. It is now caught up to `main` @ `c65a7998`, re-gated green
-(pytest 4519, web 175/175, testid-lint OK) and, for the first time, **runtime-verified**
-against a live server. That pass immediately paid for itself: it caught web analytics about
-to ship stamped `source:"mobile"` ([G-068](GOTCHAS.md), fixed). Nothing is pushed.
+**Why now:** shipped 2026-09-02 (PR #263 → `main` `1eb520bd`, live on Render, verified on the
+live site). Phases 0-2 + P2-3 are done and the posture question is closed
+([D-173](DECISIONS.md), B/Companion). What is left is **not engineering**:
 
-1. **Operator: merge or don't.** This is the only blocker. 36 files of web change plus one
-   prod-behavior change (the admin dashboard shell 404s in prod); merging auto-deploys to
-   Render. Branch `claude/website-updates-continue-c7942b` @ `e672d7f4`.
-2. **P2-3, the landing page — blocked on the operator, not on engineering.** Confirmed live:
-   the landing is still one viewport (`scrollHeight` 749 vs a 720 viewport) with no feature
-   section and **no app mention at all**. It needs (a) positioning copy the operator reserved,
-   and (b) a CTA destination — **no TestFlight or App Store link exists anywhere in the
-   repo**, so the "convert visitors into testers" CTA has nowhere to point. Not a thing to
-   invent. A screenshot strip is also blocked: `web/` has no image assets and `screens/` is
-   frozen at 2026-08-11, three weeks behind the shipping build.
-3. **D2 / D3 remain open** and gate Phase 3 (posture B, [D-173](DECISIONS.md) — stop at 3a),
-   not this merge. D3 (bundle + minify) is the largest lever left: 266 KB unminified
-   `app.js` + 133 KB CSS at `no-cache`.
-4. **Housekeeping surfaced, unclaimed:** `main` carries three pre-existing duplicate-ID
-   defects — `## D-039`, `## D-069`, `## D-070`, and a duplicate `G-062` (two different
-   gotchas, same ID, in both index and body). Any grep-the-max ID allocation mis-counts while
-   they stand, and this branch's IDs have now been stolen out from under it four times.
+1. **Supply a TestFlight or App Store URL.** The landing now has a feature section but **no
+   app CTA**, because no such link exists anywhere in this repo. Waiver **W6** in
+   [scope.md](../docs/plans/web-parity/scope.md) §6; the CTA's home in `web/index.html` is
+   marked with a comment. Given TestFlight-only distribution, this is the single highest-value
+   thing the site is missing — it is the whole point of P2-3, and it is one URL away.
+2. **Current screenshots (W7).** `web/` has no image assets; `screens/` is frozen at
+   2026-08-11, weeks behind the shipping build. D-056 left screen capture without a producer
+   and that gap is now visible on the marketing surface.
+3. **Rewrite the positioning copy** if the shipped draft is not the voice you want — it is
+   honest and specific, but it is not final, and it is editable in place.
+4. **D2 / D3** remain open, gating Phase 3 (which stops at 3a). D3 (bundle + minify) is the
+   biggest perf lever left: 266 KB unminified `app.js` + 133 KB CSS at `no-cache`.
+5. **Phase 4** is specced, unstarted. P4-1 needs a verified Search Console property for the
+   prod domain — if none exists, creating it is a same-day task and data only accrues from then.
+
+**Analytics seam:** web `app_opened` goes zero → non-zero at this deploy, and the `source`
+column for web was wrong until it ([G-068](GOTCHAS.md)). Do not trend per-client splits across
+2026-09-02.
 
 ## 2026-08-31 — Finder gap analysis: P0 likes-you tag on the merged landing, then the P1 batch
 
