@@ -1,6 +1,6 @@
 # Code-walk proof — below-market card reason (`reason_below_market_frac`)
 
-**Date:** 2026-09-02 · **Branch:** `claude/below-market-reason` (forked from `origin/main` @ `02d2eac2`) · **Scope:** [scope.md](scope.md) · **Measurement:** [results.md](results.md)
+**Date:** 2026-09-02 · **Branch:** `claude/below-market-reason` (forked from `origin/main` @ `02d2eac2`, rebased onto `e16bb487` — the intervening commits touch neither the engine nor the serializer; see results.md § Suite) · **Scope:** [scope.md](scope.md) · **Measurement:** [results.md](results.md)
 
 Line numbers are the branch tip's `backend/trade_service.py` unless another file is named. Every claim below is either a cited line or a test in `backend/tests/test_below_market_reason.py` (named in brackets).
 
