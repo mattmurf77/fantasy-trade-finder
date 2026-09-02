@@ -148,7 +148,14 @@
     if (inFlight || Date.now() < nextFlushAt || !flagOn() || !queue.length) return;
     inFlight = true;
     var batch = queue.slice(0, BATCH_MAX);
-    var headers = { "Content-Type": "application/json", "X-Device-Id": deviceId() };
+    // X-Source is the `source` column. The backend defaults it to "mobile"
+    // (analytics_ingest.py) because mobile is the one client that sends no
+    // such header — so omitting it here does not land NULL, it lands a LIE:
+    // every web row would read source:"mobile" and contaminate per-client
+    // splits. The extension already declares 'extension'; test_events_api's
+    // test_platform_from_body_when_no_device_header pins web to "web".
+    var headers = { "Content-Type": "application/json", "X-Device-Id": deviceId(),
+                    "X-Source": "web" };
     try { var tok = localStorage.getItem(TOKEN_KEY); if (tok) headers["X-Session-Token"] = tok; } catch (e) {}
     var ctrl = ("AbortController" in window) ? new AbortController() : null;
     var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, SEND_TIMEOUT_MS) : null;

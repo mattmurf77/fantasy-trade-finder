@@ -283,6 +283,20 @@ def run() -> int:
             "public bundle references the CRON-gated /api/debug/log")
     r.check("HYG-no-dead-log-drawer", "logDrawer" not in app_js,
             f"{app_js.count('logDrawer')}× logDrawer — its DOM targets do not exist in index.html")
+    # The `source` column defaults to "mobile" server-side (analytics_ingest.py),
+    # because mobile is the one client that declares nothing. A web SDK that
+    # omits X-Source therefore does not land NULL — it lands "mobile", and web
+    # traffic silently contaminates per-client splits. Body `platform` does NOT
+    # cover this: they are separate columns, and test_events_api pins both.
+    events_js = (WEB / "js" / "events.js").read_text(encoding="utf-8")
+    r.check("HYG-events-declare-source",
+            re.search(r'["\']X-Source["\']\s*:\s*["\']web["\']', events_js) is not None,
+            'web/js/events.js does not send X-Source:"web" — every web row '
+            'would be stamped source:"mobile" by the ingest default')
+    r.check("HYG-events-declare-platform",
+            re.search(r'platform\s*:\s*["\']web["\']', events_js) is not None,
+            'web/js/events.js does not declare platform:"web" in the body')
+
     tiers = read("positional-tiers.html")
     r.check("HYG-no-stale-sample-roster", "SAMPLE_PLAYERS" not in tiers,
             "hardcoded 2024-era roster rendered before the API responds")

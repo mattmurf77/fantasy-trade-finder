@@ -26,6 +26,18 @@ dropped on **every** web session.
 | `screen_viewed` | arrived only if fired >1 network RTT after load | arrives |
 | `find_trades_tapped` | arrived (user-timed, always post-flag) | unchanged |
 
+**Correction (2026-09-02), found by runtime verification on the resynced tree:** the SDK
+declared `platform: "web"` in the body but sent no `X-Source` header. `source` and `platform`
+are **separate columns**, and `analytics_ingest.py:376` defaults `source` to `"mobile"` —
+mobile being the one client that declares nothing. So web rows did not land `source` NULL,
+they landed the lie `source: "mobile"`, contaminating every per-client split the moment this
+deploys. The extension has always declared `'extension'`; `test_events_api.py`'s
+`test_platform_from_body_when_no_device_header` pins web to `"web"` on **both** columns — the
+shipped client simply did not match the contract the backend already tested. Fixed by sending
+`X-Source: "web"`; pinned by two new `HYG-events-declare-*` checks in the CI web gate.
+Verified end-to-end against a live server: the row now reads `source='web', platform='web'`
+where it previously read `source='mobile'`.
+
 **Watch item:** web `app_opened` volume goes from zero to non-zero on deploy. Any
 web-inclusive funnel baseline computed before this date is not comparable to one after.
 Web still emits only 3 event types; `signin_attempted` / `signin_succeeded` /

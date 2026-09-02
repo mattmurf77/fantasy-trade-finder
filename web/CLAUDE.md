@@ -35,7 +35,7 @@ and only one of the twelve copies got it.
 
 ## The web CI gate
 
-`python3 qa/web/check_web_structure.py` — 161 structural checks over the shipped
+`python3 qa/web/check_web_structure.py` — 175 structural checks over the shipped
 HTML/CSS/JS: design tokens, emoji-as-icons, radii, fonts, SEO metadata, a11y
 landmarks/headings, and hygiene. No browser, no server, no dependencies; runs in
 well under a second. Wired as the `web-structure` job in `.github/workflows/ci.yml`.
@@ -56,5 +56,8 @@ of the emoji check — `git grep qa:allow-emoji` lists every one.
 
 - **UI tokens:** root `CLAUDE.md` §Conventions "UI rules" + [`docs/design/design-system.md`](../docs/design/design-system.md) + [`docs/design/components.md`](../docs/design/components.md). Never emoji-as-icons, gradients, blur, system font stacks, radius >8px.
 - **Doc triggers:** new page → [`docs/CLAUDE.md`](../docs/CLAUDE.md); any UI change → `docs/design/`; new/changed route consumed here → [`docs/api-reference.md`](../docs/api-reference.md).
-- **No automated web tests.** Verify by running `python run.py` and loading `http://127.0.0.1:5000/`.
+- **Structural checks only — there is no web RUNTIME harness.** The CI gate parses source; it never
+  loads a page. Anything that only breaks when the page runs (an event that never posts, a dead
+  CTA, a flag race) is invisible to it. Verify those by hand: `python run.py`, load
+  `http://127.0.0.1:5000/`, and read the console + `POST /api/events`.
 - Web screen captures are not part of the screen library yet — see [`screens/web/README.md`](../screens/web/README.md).
