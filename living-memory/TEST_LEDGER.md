@@ -11,6 +11,28 @@
 
 ---
 
+## 2026-09-01 — Trade-engine quality research: prod config read, knob-only harness sweep, pool-fit prototype (read-only; nothing shipped)
+
+Context: dual-agent review of open TradesHome quality items #350/#363/#393/#401/#414 (+#370). Brief: session artifact *Where Trades Die*; findings logged as [G-064](GOTCHAS.md)–[G-066](GOTCHAS.md), [Q-035](OPEN_QUESTIONS.md)–[Q-036](OPEN_QUESTIONS.md). No engine line changed on any shipped branch; no flag flipped; no feedback status changed.
+
+**Prod `model_config` read** (`GET /api/admin/config`, 237 rows): D-159 bundle **applied** (`filler_min_frac` 0.15 · `overpay_adjusted` 0 · `trade_elo_gap_max` 0 · `v3_shape_max_delta` 2) — the ledger's 2026-08-24 future-tense entry and NEXT.md:86 were stale. `bakeoff_serve_interleaved` 1.0, `bakeoff_include_gen_v2` 1.0, `bakeoff_include_challenger` 1.0 → **arms C and D both serving**. Unchanged: `sweetener_gap_threshold` 1539, `need_fit_weight` 0.15, `need_gate_upgrade_margin` 0.
+
+**Knob-only sweep** — `measure_gap_distribution.py` copied to scratch, extended (lateral share, centerpiece repeats, partner-favourable share, top-5 Jaccard), baseline pinned to the four prod values, `PYTHONHASHSEED=0`, **clock frozen** (G-065; unfrozen the baseline disagreed with itself by 3 cards). Determinism: two baselines byte-identical.
+
+| Variant | Result |
+|---|---|
+| V1 `sweetener_gap_threshold` 1539→750 | Only variant that moved anything. Sweetened share up (12t/v3 challenger 9%→23%); gap p90 down where it works (1169.9→484.7). Top-5 Jaccard 0.959 (13/14 groups identical) — content changes, order does not. **Regression mode traced:** `close_value_gap` is all-or-nothing (`trade_optimizer.py:918/:932`); a card partially closed to 1535 at 1539 ships **unsweetened at 1825** at 750, so `>1539` share *rose* 0%→4% in one cell. Junk<450 never exceeded 15.0% (D-159 line ~20%). |
+| V2 relative band `max(750, 0.12·max)` | **Needs code** — `gap_threshold` is a scalar param; one-line knob inside `close_value_gap`. |
+| V3/V4 `need_fit_weight` 0.35 | **Unmeasurable here**: `need_fit_score` returned exactly 0.5 on every card — the snake-drafted fixture has no positional asymmetry. Not a null result about the knob. |
+| V5 `shrink_pseudocount` | **Unmeasurable here**: never read — harness passes `confidence=None`. |
+| V6 `need_gate_upgrade_margin` 0.10 | Never read at baseline (R5 fails open with no outlook). With R5 armed (`outlook=contender`, fixture extension): **+1 card in 2 of 4 cells, top-5 unchanged everywhere.** Not a lever worth a release. |
+| V7 = V1 + V3 | Byte-identical to V1. |
+| Partner-favourable, consensus path | **0/N on every non-challenger arm, every cell** (viewer-wins sign test, measured). Challenger: 20–43%. Consensus share of fixture cards 17–55% vs prod 84.5% — consensus effects under-weighted in this harness. |
+
+**Pool-fit prototype** — isolated worktree `agent-a9c4c705ebb53fc71`, commit `60aa4572` off `origin/main` `ce3f443c`, knob `v3_pool_fit_extra` default 0. `pytest backend/tests` at knob 0: **4483 passed, 1 skipped** (320 s). Knob-0 golden byte-identical to main. Pre-registered failure ("pool grows, deck unchanged") **falsified**: 16t SF knob 4 → 15 of 17 divergence cards replaced, 14 of 16 carry a fit-selected asset. But: cost **2.5× / 5.5× / 11×** at N = 2/4/6 (review's 2.4× was N=2; N=4 breaches the 30 s rail on a fully-boarded 16-team league); the clean mirror 1-for-1 ranks **53,242nd of 137,558** behind 54,695 junk-stuffed siblings (trade-wide depth benchmark inflates surplus once a second asset is on a side — existing objective property); distinct give-headliners 8→4; partner-favourable share flat. Strict-xfail fixture `test_v3_pool_fit_prototype.py` encodes the mechanism. **Verdict: build differently** — fit-asymmetry *sort key* in `_generate_consensus_for_pair` (two sorts, not a prune; knob-sized; the 84.5% path) first; divergence pool N≤2 only alongside a junk-stuffing fix.
+
+Reproduce: scratchpad `measure_knob_variants.py` / `report.py` / `probe_reads.py`; prototype `measure_fit_pool.py` / `deck_diff.py`. Levels are directional (synthetic boards); deltas are the result; all decks are no-time-pressure.
+
 ## 2026-08-31b — D-171 finder results push: built, gates green, v1.16.14
 
 Branch `claude/finder-results-push`, cut from `main` @ `2ceff988`. Full gates, no waivers ([scope](../docs/plans/finder-results-push/scope.md) — the five 2026-08-31 operator rulings; ruling 5b shipped it LIT over the dark-flag recommendation).

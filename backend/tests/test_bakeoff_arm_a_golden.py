@@ -718,7 +718,67 @@ v3_pool_size vet_age waiver_baseline_value waiver_slot_cost youth_age
     # `priced_pool_value` is never entered — so no season, no round, and
     # nothing for a market floor to clamp.
     "market_r1_yoy_floor",
+
+    # ── consensus roster-fit sort key, 2026-09-02 ──────────────────────────
+    # docs/plans/consensus-fit-sort-key/scope.md. One knob, one disposition.
+    #
+    # WHERE IT IS READ: `_generate_consensus_for_pair` → `_c` at CALL time,
+    # on the arm's own thread, INSIDE the `_cfg_override` context `model_a()`
+    # opens — so an arm pin is honoured, unlike `exploration_base_per_opp`.
+    # It re-sorts the two candidate pools, and on this path the pool sort IS
+    # the ranking (the emit loops take pool order), so it changes WHICH
+    # consensus cards exist, not just their order — generation logic.
+    #
+    # DECISION: **PINNED at 0.0 in MODEL_A_PROFILE — the identity value.**
+    # Its default is the pre-change engine, which is the D-095 shape ("a pin
+    # would change arm A rather than preserve it") — but that rule is safe
+    # only while the LIVE row keeps sitting at the pre-wave value, and this
+    # knob ships expressly to be flipped live (the recommended value is in
+    # docs/plans/consensus-fit-sort-key/results.md). Unpinned, arm A would
+    # silently start emitting fit-sorted consensus decks the pre-wave engine
+    # never built, with no golden drift. That is exactly the C4
+    # `v3_shape_max_delta` situation one screen up, and it takes the same
+    # remedy. At 0.0 the sort-key factory returns `seed_value` itself, so the
+    # pin equals the default, the pools are byte-identical, and the golden
+    # stands un-recaptured. The golden is NOT what proves the pin, though:
+    # this fixture is fit-symmetric (QA showed it passes identically with the
+    # pin removed and the live row at 0.5), so
+    # `test_consensus_fit_pin_is_load_bearing` below asserts the pin on the
+    # mirror fixture, which the knob does move — the same shape as
+    # `test_pick_pair_strip_kill_value_is_load_bearing`.
+    "consensus_fit_weight",
 }
+
+
+def test_consensus_fit_pin_is_load_bearing():
+    """`consensus_fit_weight` is the one MODEL_A_PROFILE entry this file's
+    deck fixture cannot exercise (fit-symmetric: every lineup mirrors the
+    other side's, so the marginal-value asymmetry is 0 everywhere). Assert
+    the pin on a fixture that DOES move — the consensus-fit mirror — with the
+    live row at 0.5: arm A's output must equal its knob-0 output, and with
+    the pin temporarily removed from the overlay it must NOT, so the pin is
+    proven load-bearing rather than assumed."""
+    from backend.tests.test_consensus_fit_sort_key import (
+        _consensus, _mirror, _setup, KNOB)
+    from backend.trade_service import _cfg_override, r4_bypass
+
+    def run(live, overlay):
+        _setup(live)                       # process-global row := live
+        svc, seed, roster, opp = _mirror()
+        with _cfg_override(overlay), r4_bypass():   # == model_a()'s shape
+            cards = _consensus(svc, user_roster=roster, seed=seed, opp=opp,
+                               fairness=0.75, w=live, profiles=False)
+        return [(c.give_player_ids, c.receive_player_ids) for c in cards]
+
+    pinned = dict(MODEL_A_PROFILE)
+    unpinned = {k: v for k, v in MODEL_A_PROFILE.items() if k != KNOB}
+    assert KNOB in pinned and pinned[KNOB] == 0.0
+    # Arm A is unmoved by the live row...
+    assert run(0.5, pinned) == run(0.0, pinned)
+    # ...and only because of the pin: the same overlay minus this one key
+    # follows the live row (non-vacuity — the fixture really moves).
+    assert run(0.5, unpinned) != run(0.0, unpinned)
+    assert run(0.0, unpinned) == run(0.0, pinned)
 
 
 def test_no_generation_knob_was_added_without_an_arm_a_decision():

@@ -124,6 +124,16 @@ MODEL_A_PROFILE: dict[str, float] = {
     # (same rule as `package_floor_cross`).
     "age_pref_mult_u23":         1.0,   # age boost off (pre-wave pricing)
     "age_pref_mult_30plus":      1.0,   # age discount off
+    # Consensus roster-fit sort key — 2026-09-02 (docs/plans/consensus-fit-
+    # sort-key/scope.md). Post-dates the reference SHA and re-sorts the
+    # consensus generator's pools, which IS that path's ranking. Pinned at
+    # the IDENTITY value 0.0 (the C4 `v3_shape_max_delta` rule, not the
+    # D-095 exclusion): the D-095 knobs are overlay-only and their live row
+    # never moves, whereas this one ships to be flipped live — and an
+    # unpinned arm A would then silently inherit the prod sort. At 0.0 the
+    # sort-key factory returns `seed_value` itself, so arm A's pools are
+    # byte-identical and the golden stands un-recaptured.
+    "consensus_fit_weight":      0.0,   # fit sort off (pre-wave value sort)
 }
 
 
