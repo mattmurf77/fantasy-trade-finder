@@ -219,8 +219,11 @@ console.log('check-results-push:');
     && /setCanvasRunSeq\(\(n\) => n \+ 1\);/.test(consume),
     '4e. it arms exactly the calculator-arrival refs and triggers the ONE choke point',
     'the D-153 fork (fair sweep vs model job) is taken at the same single dispatch site as ever');
+  // Re-keyed 2026-09-03 (#417): 9 → 8. The legacy CTA arm now routes through
+  // handleFindTrades instead of dispatching itself, so the deck lost a site;
+  // the push still adds none.
   assert(count(tradesCode, /generateMutation\.mutate\(/g) === 1
-    && count(tradesCode, /dispatchGenerate\(/g) === 9,
+    && count(tradesCode, /dispatchGenerate\(/g) === 8,
     '4f. no new generate dispatch site — the push added zero mutate paths');
   assert(/setInlineAnchor\(/.test(consume) && /anchorLabel/.test(consume),
     '4g. the anchor receipt is seeded from the param — "Built around X" tops the pushed deck (ruling 2)');
@@ -306,6 +309,130 @@ console.log('check-results-push:');
 {
   assert(!/results_push/.test(readRoot('backend/analytics_taxonomy.py')),
     '7. no new analytics event was registered — calc_find_a_trade_tapped / find_trades_tapped and the deck\'s own events cover it');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 8 — FB-417 (2026-09-03): a SECOND search cannot start from, or merge
+//     into, the pushed anchored deck
+//
+// The operator built a give-side canvas, tapped Find a Trade, and the
+// pushed deck's own always-mounted "Find a Trade" primary took a tap ~1s
+// later (prod event stream: `find_trades_tapped {mode: deck}` with no
+// `source`, 1s after the push, before the first card was viewed). That tap
+// dispatched the UNANCHORED model job; its cards APPENDED to the fair deck
+// and — fairness toggle off — sorted ABOVE it (fair cards carry
+// `match_score: 0`), so the top card stopped being about his player while
+// the "Built around X" receipt still said it was. Three structural facts
+// close it, and none of them is visible to tsc:
+//
+//   • the anchored pushed deck renders NO page-level primary (its search
+//     controls are the receipt's Change/Clear and the end-of-deck exits);
+//   • every model dispatch that can start from a fair deck resets the deck
+//     FIRST — anchored and model cards can never share one deck;
+//   • the jobless fair sweep has an in-flight flag, because neither
+//     `generateMutation.isPending` nor `job.status` is true while it runs.
+// ═══════════════════════════════════════════════════════════════════════
+{
+  const flat = tradesCode.replace(/[ \t]+/g, ' ');
+
+  // (a) the CTA is withheld on an ANCHORED pushed deck — both arms, one
+  //     derivation, so the legacy and consolidated copies cannot drift.
+  assert(/const findCtaHiddenForAnchoredDeck = isResultsPushed && fairDeck;/.test(trades)
+    && count(tradesCode, /const findCtaHiddenForAnchoredDeck =/g) === 1,
+    '8. ONE derivation of the anchored-deck CTA suppression (isResultsPushed && fairDeck)',
+    'a per-arm predicate is how the two copies of this button drift apart');
+  const gated = count(flat,
+    /\{canvasHost !== 'flag' && !findCtaHiddenForAnchoredDeck \? \(\n?\s*<Button/g);
+  assert(gated === 2,
+    '8a. BOTH trades.find-btn arms are gated off on the anchored pushed deck',
+    `saw ${gated} of 2 — an ungated arm re-opens the unanchored second search`);
+  assert(count(tradesCode, /testID="trades\.find-btn"/g) === 2,
+    '8b. …and both mounts still EXIST (this is a render gate, not a deletion)',
+    'deleting an arm changes the flag-off page, which #417 may not do');
+  // The controls that REPLACE it on that page must still be there: the
+  // receipt's Change/Clear (Clear IS handleSearchAllTrades) and the
+  // end-of-deck exits. A gate with nothing behind it strands the user.
+  for (const id of ['trades.anchor-receipt.change', 'trades.anchor-receipt.clear',
+                    'trades.deck-exhausted.back-to-calc',
+                    'trades.deck-summary.search-all',
+                    'trades.deck-exhausted.search-all',
+                    'trades.deck-summary.back-to-calc']) {
+    assert(trades.includes(`testID="${id}"`),
+      `8c. the anchored deck's own search control survives: ${id}`,
+      'hiding the CTA is only legal because these are the page\'s search controls');
+  }
+
+  // (b) a model dispatch that STARTS from a fair deck resets first.
+  const hft = functionNamed(host, 'handleFindTrades');
+  const hftText = hft ? stripComments(hft.getText()) : '';
+  assert(/if \(fairDeck\) resetDeckForNewTargets\(\);/.test(hftText),
+    '8d. handleFindTrades resets the deck when the current deck is a FAIR deck',
+    'setFairDeck(false) alone drops the receipt and LEAVES the anchored cards — '
+    + 'the model cards then append to them and outrank them (match_score 0)');
+  const resetAt = hftText.indexOf('if (fairDeck) resetDeckForNewTargets();');
+  const dispAt = hftText.indexOf('dispatchGenerate(');
+  assert(resetAt > -1 && dispAt > resetAt,
+    '8e. …BEFORE the dispatch (the reset opens the epoch the dispatch is stamped with)',
+    'resetting after dispatchGenerate would kill the search it just started');
+  // Stated explicitly because #417's reset is now on the manual search path:
+  // the reset is DECK state only. Pins are the user's targets, and the very
+  // next dispatch reads them out of the store (mutationFn) — clearing them
+  // here would silently widen the search the user just asked for.
+  const rstEarly = functionNamed(host, 'resetDeckForNewTargets');
+  assert(!!rstEarly && !referencesIdentifier(host, rstEarly, 'useFinderTargets'),
+    '8f. …and the reset does NOT touch the pin store (pins are targets, not deck state)',
+    'a store clear inside the reset drops the targets the next search must honor');
+  // The fair deck's own exit rides the same entry point, so "Search all
+  // trades" / the receipt's Clear inherit the reset.
+  const sat = functionNamed(host, 'handleSearchAllTrades');
+  assert(!!sat && /handleFindTrades\(/.test(stripComments(sat.getText()))
+    && !/dispatchGenerate\(/.test(stripComments(sat.getText())),
+    '8g. handleSearchAllTrades still dispatches THROUGH handleFindTrades — so it resets too',
+    'a private dispatch would merge the model deck into the anchored one again');
+
+  // (c) the legacy arm cannot drift: it calls the shared entry point.
+  const armAt = tradesCode.indexOf('testID="trades.find-btn"');
+  const arm = tradesCode.slice(armAt, armAt + 700);
+  assert(/onPress=\{\(\) => handleFindTrades\(\)\}/.test(arm) && !/dispatchGenerate\(/.test(arm),
+    '8h. the legacy !consolidateOn arm dispatches through handleFindTrades, not a bare dispatchGenerate',
+    'its own dispatch skipped setFairDeck(false), the #257 nudge clear AND the #417 reset');
+  assert(count(tradesCode, /onPress=\{\(\) => handleFindTrades\(\)\}/g) === 2,
+    '8i. …exactly as the consolidated arm does (one onPress shape for both)');
+
+  // (d) the jobless sweep's in-flight flag, owned by the sweep.
+  const rfp = functionNamed(host, 'runFairPackages');
+  const rfpText = rfp ? stripComments(rfp.getText()) : '';
+  assert(/const epoch = deckEpochRef\.current;\s*setFairSweepPending\(true\);/.test(rfpText),
+    '8j. runFairPackages marks itself in flight at ENTRY, beside the epoch capture',
+    'without it neither generateMutation.isPending nor job.status is true during the sweep '
+    + '— every Find-a-Trade control stays live for the second it takes');
+  assert(/setFairDeck\(true\);\s*setFairSweepPending\(false\);/.test(rfpText),
+    '8k. …clears it on the success exit (after the #330 epoch guard)');
+  assert(/setFairDeck\(false\);\s*setFairSweepPending\(false\);/.test(rfpText),
+    '8l. …and on the failure exit (after the same guard)');
+  assert(count(rfpText, /setFairSweepPending\(false\)/g) === 2
+    && count(rfpText, /setFairSweepPending\(true\)/g) === 1,
+    '8m. …exactly one arm and two disarms — a superseded sweep returns before both',
+    'a disarm ahead of the epoch guard lets a dead sweep re-enable the controls of a live one');
+  const rst = functionNamed(host, 'resetDeckForNewTargets');
+  assert(!!rst && /setFairSweepPending\(false\);/.test(stripComments(rst.getText())),
+    '8n. a deck reset also disarms the flag — a superseded sweep can never strand a disabled control',
+    'the reset bumps the epoch, so that sweep will return without clearing the flag itself');
+
+  // (e)/(f) the flag is actually read by the controls it exists for.
+  const disabled = count(flat,
+    /disabled=\{\n?\s*!leagueId \|\|\n?\s*generateMutation\.isPending \|\|\n?\s*job\?\.status === 'running' \|\|\n?\s*fairSweepPending\n?\s*\}/g);
+  assert(disabled === 2,
+    '8o. both CTA arms include fairSweepPending in `disabled` (the double-tap guard)',
+    `saw ${disabled} of 2 — the window this closes is the ~1s between the push and the first card`);
+  assert(/onFindATrade=\{\s*canvasHost === 'flag' && !fairSweepPending\s*\?\s*handleInlineFindATrade\s*:\s*undefined\s*\}/.test(trades),
+    '8p. the landing canvas cell withholds its handler while a sweep is in flight',
+    'InLeagueCalculator gates that cell on `!onFindATrade` — this IS its disabled state');
+
+  // R-5 — #417 ships no flag of its own; `calc.results_push` (§1) stays the
+  // only kill switch for this whole surface.
+  assert(!/fairSweepPending|findCtaHiddenForAnchoredDeck/.test(readRoot('config/features.json')),
+    '8q. #417 introduced no feature flag — calc.results_push remains the kill switch');
 }
 
 console.log(failures === 0

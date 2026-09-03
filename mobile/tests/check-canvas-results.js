@@ -692,10 +692,14 @@ console.log('check-canvas-results:');
 //      defaults. Each pin names the sabotage it would catch.
 // ═══════════════════════════════════════════════════════════════════════
 {
-  // (a) DISPATCH CENSUS — 8 call sites + the definition, nothing raw.
+  // (a) DISPATCH CENSUS — 7 call sites + the definition, nothing raw.
+  // Re-keyed 2026-09-03 (#417): the legacy `!consolidateOn` CTA arm no longer
+  // dispatches for itself — it calls handleFindTrades, which is already one of
+  // the routed sites — so the census is 7+1. The invariant is unchanged and
+  // strictly tighter: a NEW dispatch site still breaks this count.
   const calls = count(tradesCode, /dispatchGenerate\(/g);
-  assert(calls === 9,
-    '12a. dispatchGenerate: 8 routed dispatch sites + 1 definition (census pinned)',
+  assert(calls === 8,
+    '12a. dispatchGenerate: 7 routed dispatch sites + 1 definition (census pinned)',
     `saw ${calls} — a new site must be added to the helper's census table AND this count`);
   // (b) the first-run auto-start is the P0: it must create a session.
   assert(/autoGenRef\.current = 'kicked';[\s\S]{0,500}?dispatchGenerate\(\{ auto: true \}\)/.test(tradesCode),

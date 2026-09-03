@@ -115,7 +115,10 @@ console.log('check-inline-home:');
 // ═══════════════════════════════════════════════════════════════════════
 {
   const at = trades.indexOf('<TradeBuildCanvas');
-  const seg = trades.slice(at, at + 900);
+  // Widened 900 → 1800 on 2026-09-03 (#417): the mount's prop list grew a
+  // comment block and the onLikeTrade / hideFormatChips props fell outside
+  // the old window. The assertions below are unchanged.
+  const seg = trades.slice(at, at + 1800);
   assert(/showSuggestionRail=\{canvasHost === 'experiment'\}/.test(seg),
     "3. the rail dies on the flag path and survives on the experiment's",
     'the deck below IS the rail (plan §3b); the experiment keeps its strip');
@@ -125,7 +128,11 @@ console.log('check-inline-home:');
     'a default of false would silently delete the experiment variant\'s rail');
   assert(/\{showSuggestionRail && suggestions\.length > 0 \?/.test(canvas),
     '3b. the rail render is gated on it');
-  assert(/onFindATrade=\{\s*canvasHost === 'flag' \? handleInlineFindATrade : undefined\s*\}/.test(seg),
+  // Re-keyed 2026-09-03 (#417): the handler is ALSO withheld while a fair
+  // sweep is in flight — `disabled={!onFindATrade}` is the cell's own gate
+  // (InLeagueCalculator), so this is the landing cell's double-tap guard. The
+  // host gate itself is unchanged and still the first conjunct.
+  assert(/onFindATrade=\{\s*canvasHost === 'flag' && !fairSweepPending\s*\?\s*handleInlineFindATrade\s*:\s*undefined\s*\}/.test(seg),
     '3c. the flag path wires Find a Trade; the experiment path does not');
   assert(/onLikeTrade=\{\s*canvasHost === 'flag' \? handleInlineLikeTrade : undefined\s*\}/.test(seg),
     '3d. …and the ✓ cell, same gate');
@@ -237,9 +244,11 @@ console.log('check-inline-home:');
   // route through the ONE dispatchGenerate helper so the browse-session
   // lifecycle rides every dispatch (check-canvas-results §12 census). The
   // no-new-site invariant is unchanged — it just counts the helper's calls.
+  // Re-keyed 2026-09-03 (#417): 8 routed → 7 (the legacy CTA arm calls
+  // handleFindTrades now). No new site, which is what this pins.
   assert(count(tradesCode, /generateMutation\.mutate\(/g) === 1
-    && count(tradesCode, /dispatchGenerate\(/g) === 9,
-    '7f. no new generate dispatch site was added (1 raw mutate in the helper; 8 routed sites + definition)',
+    && count(tradesCode, /dispatchGenerate\(/g) === 8,
+    '7f. no new generate dispatch site was added (1 raw mutate in the helper; 7 routed sites + definition)',
     'a second site is a second search per tap waiting to happen');
   assert(/\}, \[finderMode, scopedOpponent, autoRunSeq, canvasRunSeq\]\);/.test(trades),
     '7g. the choke point lists the inline trigger as a dep');
@@ -377,7 +386,12 @@ console.log('check-inline-home:');
       `found ${mounts.length} — the bar must still render whenever the canvas does not`);
     const gated = mounts.filter((m) => {
       const before = tradesCode.slice(Math.max(0, m.index - 400), m.index);
-      return /\{canvasHost !== 'flag' \? \(\s*<Button/.test(before);
+      // Re-keyed 2026-09-03 (#417): the gate gained a second conjunct
+      // (`!findCtaHiddenForAnchoredDeck` — the anchored pushed deck renders no
+      // page-level primary). The host gate is still the FIRST conjunct and
+      // still required, which is what T-2 is about; §14 below owns the new one.
+      return /\{canvasHost !== 'flag'( && !findCtaHiddenForAnchoredDeck)? \? \(\s*<Button/
+        .test(before);
     });
     assert(gated.length === 2,
       "11b. T-2: …and each is gated on `canvasHost !== 'flag'`",
@@ -399,7 +413,9 @@ console.log('check-inline-home:');
   // for the component-side gate).
   {
     const at = trades.indexOf('<TradeBuildCanvas');
-    const seg = trades.slice(at, at + 1100);
+    // Widened 1100 → 2000 on 2026-09-03 (#417) for the same reason as §3's
+    // window: the mount's prop list grew a comment block. Assertion unchanged.
+    const seg = trades.slice(at, at + 2000);
     assert(/hideFormatChips=\{canvasHost === 'flag'\}/.test(seg),
       "11d. T-3: the mount passes hideFormatChips on the flag path only",
       'the #270 experiment path must keep today\'s chips');
