@@ -8,7 +8,7 @@ Flask backend (`run.py`), so a page is live the moment the file exists.
 
 | File | Shipped? | What it is |
 |---|---|---|
-| `index.html` | yes | Single-page app entry — Dynasty Rankings. Only page that links out to `faq`, `league-rankings`, `positional-tiers` |
+| `index.html` | yes | Single-page app entry — Dynasty Rankings. Only page that links out to `faq`, `league-rankings`, `positional-tiers`. Landing offers **Sleeper · ESPN · MFL** entry (flag `landing.platform_options`, 2026-09-03 — [scope §V3](../docs/plans/landing-platform-options/scope.md)); entry users (`entry:` ids) read leagues from `/api/{espn,mfl}/leagues`, never the Sleeper proxies |
 | `league-rankings.html` | yes | Per-league ranking view. Dark — `league.power_rankings` is false, so the route 401s and the nav link is hidden |
 | `positional-tiers.html` | yes | Positional tier boards |
 | `player.html` | yes | Player profile. Dark — `players.profile_pages` is false, so it renders a sign-in prompt and fires no requests |

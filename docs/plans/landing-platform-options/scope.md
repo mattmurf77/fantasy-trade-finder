@@ -270,3 +270,138 @@ reviewed line-by-line and shipped by the lead session.
      (no team-claim step) → in. Then Trades → a send-in-MFL surface should
      find the credential already stored.
   3. Both league-ID paths from the V2 checklist still work unchanged.
+
+---
+
+# V3 — Web landing mirror: Sleeper · ESPN · MFL on `web/index.html` (2026-09-03)
+
+**Date:** 2026-09-03
+**Entry point:** direct ask — "update the landing page on web to mimic the mobile app with ESPN and MFL options"
+**Builder:** Claude session (worktree `compassionate-jones-ea8a0e`, branch `claude/landing-page-espn-mfl-a5a85a`)
+**Operator sign-off on waivers:** not needed — no waivers
+
+## What changes
+
+The web landing (`web/index.html` hero) gains the same three-chip platform
+row — **Sleeper · ESPN · MFL** — above the sign-in form, driven by the same
+flags and the same backend route as mobile (D-164):
+
+- **Sleeper (default):** today's username door, untouched. The smart-start
+  CTA + username row now sit inside a `#entry-sleeper` wrapper solely so
+  the panel swap can hide them.
+- **ESPN:** explainer + league ID / URL field → `POST /api/entry/platform`
+  preview → team list → claim (mint) → canonical `POST /api/espn/link`
+  import. The web has no WebView, so private leagues use the **cookie
+  paste** (`espn_s2` + `SWID`) that is mobile's fallback; a 403
+  `espn_auth_required` auto-opens that section (mobile's self-serve
+  pattern). With a pasted pair, "Find my leagues" runs the v2.1 sessionless
+  `my_leagues` action (gated `espn.league_picker`) and lists the account's
+  leagues.
+- **MFL:** "Sign in & find my leagues" (v2.1 sessionless `auth_leagues`,
+  gated `mfl.auth_link`) lists the account's leagues with the user's own
+  franchise → one click mints + imports, then a best-effort
+  `POST /api/mfl/auth-link` re-store so Send-in-MFL works later (the
+  password leaves the field the moment the lookup returns and is held in a
+  module variable only until that one call, cleared on every exit). Or
+  league ID / URL + season year → preview → franchise claim.
+- **After the claim** the ordinary web league flow takes over with ONE new
+  routing rule: a saved user whose id starts with `entry:` reads leagues
+  and rosters from `GET /api/{espn,mfl}/leagues` (the imported snapshot)
+  instead of Sleeper's roster proxies — in `showLeagueScreen` (with
+  mobile's single-league auto-skip), `selectLeague`, `initSession` (page
+  reload), `switchToLeague`, the boot-time switcher fill and the FB-47
+  leaguemate pool. The session body comes from `buildPlatformRosterData`,
+  the snapshot twin of `buildRosterData` (same output shape).
+- **Copy:** `<meta description>` / `og:description` now read "Works with
+  Sleeper, ESPN, and MyFantasyLeague." ("How it works" step 1 already did).
+- **Drive-by fix inside the restructured function:** `selectLeague`'s
+  "Roster loaded" toast referenced an undefined `userPlayerIds` — a
+  `ReferenceError` thrown after every league pick since the first commit
+  (the league was saved, so a reload recovered, but the method screen /
+  main app never mounted in that pass). It reads `rosterData.userPlayerIds`
+  now.
+
+No backend route changes. No schema changes. No new flags — the web reads
+the existing `landing.platform_options`, `espn.link`, `mfl.link`,
+`mfl.auth_link`, `espn.league_picker` from `/api/feature-flags`, so the one
+revert lever stays the one revert lever (flag off ⇒ the row never renders
+and the landing is today's Sleeper page).
+
+Out of scope: the in-app "Connect another league" modal (its ESPN/MFL paste
+still says "on the roadmap" — a NEXT follow-up now that the link routes are
+reachable from web), Fleaflicker (dark), the Sleeper smart-start / demo
+affordances (unchanged).
+
+## Analytics (v3)
+
+- [x] **(b) Existing events cover it.** The web now emits the pre-auth
+  funnel mobile already emits: `signin_attempted` / `signin_succeeded` /
+  `signin_failed {method, error_code}` with `method ∈ {sleeper, espn, mfl}`
+  (`screen: 'SignIn'`). The Sleeper door gains them too (it emitted nothing
+  before), so the web funnel is symmetric across platforms. All three events
+  and props are registered in `backend/analytics_taxonomy.py`; `espn`/`mfl`
+  are the documented value-only additions (addendum
+  `docs/business/analytics/2026-08-26-entry-method-values.md`, web rows
+  added). `league_selected` is not emitted by web today and stays that way.
+
+## Schema & flag scope (v3 delta)
+
+- Tables/columns: **none**
+- Flags: **none new**; the `docs/config-reference.md` row for
+  `landing.platform_options` now names the web surface too.
+- Env vars / `model_config`: **none**
+
+## Evidence scope (v3)
+
+- [x] **Structural guard:** `qa/web/check_web_structure.py` — **175/175**
+  (tokens, no emoji, radius ≤ 8px, fonts, SEO meta, a11y landmarks/h1,
+  hygiene). Web has no `check-*.js`; this script is its CI gate.
+- [x] **Unit tests:** `backend/tests/test_entry_platform_route.py` +2
+  (23 → 25): `test_mfl_entry_leagues_snapshot_carries_the_claimed_franchise`,
+  `test_espn_entry_leagues_snapshot_carries_the_claimed_team` — pin the
+  contract the web's `buildPlatformRosterData` relies on (the snapshot lists
+  the claimed league under the entry token; the claimed team's member row
+  carries the ENTRY user id with a non-empty roster; every other member is a
+  synthetic `espn:`/`mfl:` id).
+- [x] **Browser E2E (runtime — the web's equivalent of the TestFlight
+  checklist):** see [`code-walk.md` §V3](code-walk.md). Run against the
+  real Flask app with only the ESPN/MFL fetchers patched to the fixture
+  leagues (the same seams the route tests patch) on a scratch SQLite DB.
+  Both platforms: chip → preview → claim → mint → import → league
+  auto-select → `/api/session/init` → ranking-method screen → main app with
+  the claimed 8-player roster and the franchise name in the account chip;
+  page reload restores the entry session through `boot()`; the leaguemate
+  pool populates from the snapshot (16 players, 2 owners); live-API error
+  paths (unknown MFL id, private ESPN league) render the right copy and
+  auto-open the cookie section. Console clean throughout.
+- [x] **Code-walk proof:** [`code-walk.md` §V3](code-walk.md).
+- `testID`s: n/a (web).
+
+## Docs scope (v3)
+
+| Doc | Updated? | Section / reason n/a |
+|---|---|---|
+| `docs/api-reference.md` | n/a | no route added, renamed or contract-changed — the web calls existing routes with their documented bodies |
+| `living-memory/LLD.md` | n/a | no schema/route/invariant convention shifted; the `entry:` routing rule lives here + in the code comments |
+| `docs/architecture.md` | n/a | no module wiring change — web stays vanilla JS over existing routes |
+| `living-memory/HLD.md` | n/a | no new module, client or major flow — web reuses the D-164 flow |
+| `docs/cross-client-invariants.md` | n/a | nothing shared added; chips use existing tokens |
+| `docs/glossary.md` | n/a | no new term |
+| `DECISIONS.md` | updated | D-177 |
+| `docs/config-reference.md` | updated | `landing.platform_options` row names the web chip row |
+| `docs/design/components.md` | updated | PlatformChips row (mobile + web construction) |
+| `docs/business/analytics/2026-08-26-entry-method-values.md` | updated | web emitter rows |
+| `web/CLAUDE.md` | updated | `index.html` row mentions the platform entry |
+
+## Manual check for the operator (prod, after deploy)
+
+1. Load `/` signed out → the chip row shows **Sleeper · ESPN · MFL**; Sleeper
+   is selected and the username door is unchanged.
+2. **MFL** chip → a real league ID + year → Continue → your franchises list →
+   pick yours → the ranking-method screen with your roster; the account chip
+   shows your franchise name. Reload → straight back into the app.
+3. **ESPN** chip → a public league ID → Continue → teams → pick yours → same
+   landing. A private league ID → the cookie section opens with the "This
+   league is private" line; paste `espn_s2` / `SWID` → Continue → teams.
+4. Flip `landing.platform_options` off (+ `POST /api/feature-flags/reload`)
+   → the row is gone and the landing is today's Sleeper page.

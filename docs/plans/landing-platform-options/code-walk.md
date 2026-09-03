@@ -214,3 +214,125 @@ numbers as of the shipping commit on `claude/entry-platform-login-option`.
 - Lead-session addition: SignInScreen panel explainers updated to name the
   sign-in option first ("Sign in to ESPN and we'll find your leagues, or
   enter a league ID").
+
+---
+
+# V3 — Web landing mirror (2026-09-03)
+
+Line numbers as of branch `claude/landing-page-espn-mfl-a5a85a`. Files:
+`web/index.html`, `web/js/app.js`, `web/css/styles.css`.
+
+## 1. The chip row renders, correctly gated
+
+- `web/index.html:83` — `#platform-row` ships with class `hidden`; the
+  ESPN/MFL chips (`:85-86`) ship `hidden` too. Only `_applyPlatformOptionsFlag`
+  (`app.js:1229`) removes them: `optionsOn = FTF_FLAG('landing.platform_options')`,
+  `espnOn = optionsOn && FTF_FLAG('espn.link')`, `mflOn = optionsOn &&
+  FTF_FLAG('mfl.link')`; the row shows only when `espnOn || mflOn` (≥2
+  platforms incl. Sleeper — the mobile `platformChips.length >= 2` rule).
+  It runs from `_applyLandingFlags` (`app.js:1116`) at 0 / 250 / 1000 ms
+  after script load, the same schedule the smart-start and demo CTAs use.
+- Same function hides the MFL sign-in block without `mfl.auth_link` and the
+  ESPN "Find my leagues" link without `espn.league_picker` — the two v2.1
+  actions 404 without them. A flag withdrawal mid-page falls back to the
+  Sleeper chip (`:1245-1247`), mirroring SignInScreen's revalidation effect.
+
+## 2. Sleeper default is byte-identical behavior
+
+- `_entryPlatformSel` initializes `'sleeper'` (`app.js:1153`); `#entry-sleeper`
+  (`index.html:90`) has no `hidden` class at load, and the ESPN / MFL /
+  teams panels (`:141`, `:179`, `:213`) do. `handleLogin`, the smart-start
+  CTA and the demo link are untouched apart from the funnel events in §6.
+- `showAuthScreen` (`app.js:324`) calls `entryReset()` (`:1277`), which
+  clears every entry field, the transient MFL password and re-selects
+  Sleeper — logout lands on the same landing as a fresh visit.
+
+## 3. Preview → claim → import is the D-164 sequence, verbatim
+
+- `_entryPost` (`app.js:1299`) is a plain `fetch` (no session header, no
+  session-expiry hook) against `POST /api/entry/platform`; non-2xx rejects
+  with `{code, status, message}` from the route's own error vocabulary.
+- ESPN: `entryEspnPreview` (`:1344`) parses the id with the mobile regex
+  (`parseEspnLeagueInput`, `:1328`), enforces the cookie XOR the route
+  enforces, posts `{platform:'espn', espn_league_id, espn_s2?, swid?}` and
+  renders `data.teams` via `_renderEntryTeams` (`:1532`). A 403
+  `espn_auth_required` opens `#espn-cookies` (`index.html:164`) with the
+  two mobile copy branches (`:1373-1380`).
+- MFL: `entryMflPreview` (`:1443`) validates with `parseMflLeagueInput`
+  (`:1430`) but sends the RAW input as `mfl_league_id` — `_mfl_resolve`
+  (`backend/server.py:27178`) parses a URL itself and keeps its `wwwNN`
+  host, which a client-side id extraction would lose.
+- Claim: `entryPickTeam` (`:1544`) → `_entryClaim` (`:1562`): mint body
+  `{platform, espn_league_id|mfl_league_id, season|year, team_id|franchise_id,
+  cookies?}` → token stored in `LS_TOKEN` + `sessionToken`, user saved as
+  `{user_id: minted.user_id, display_name, avatar_id: null, platform}` →
+  canonical import `POST /api/{espn,mfl}/link` under `apiFetch` (which adds
+  `X-Session-Token`) → on import failure the half-made user/token are
+  removed so the landing cannot strand (`:1614-1620`) → optional MFL
+  credential re-store → `showLeagueScreen(user)`.
+- v2.1: `entryEspnFindLeagues` (`:1390`) posts `{action:'my_leagues',
+  espn_s2, swid}`; `entryMflSignIn` (`:1476`) posts `{action:'auth_leagues',
+  username, password, year}` and clears the password field on return
+  (`:1494`); `entryMflPickAuthLeague` (`:1516`) mints straight from the
+  listed `franchise_id` — no team-claim step, as on mobile.
+
+## 4. Entry users never touch Sleeper's roster proxies
+
+`_isEntryUser` (`app.js:1165`) = saved `user_id` starts with `entry:`;
+`_entryPlatform` (`:1168`) reads the saved `platform` or the id's second
+segment. Every Sleeper-only read in the file forks on it:
+
+| Path | Fork | Snapshot read |
+|---|---|---|
+| `boot()` switcher fill | `app.js:243` | `_platformLeagues` (`:1177`) → `_cachedLeagues` |
+| `showLeagueScreen` | `:455` | lists the snapshot; **1 league → `selectLeague(0, null)` after 200 ms** (mobile's single-league auto-skip) |
+| `selectLeague` | `:673` | `_platformRosterData` (`:1214`) → `buildPlatformRosterData` (`:1196`) |
+| `initSession` reload path | `:835` | same |
+| `switchToLeague` | `:2988` | same |
+| `_ensureLeaguematePool` | `:3536` | members reshaped to `{owner_id, roster_id, players}` so the shared pool build + `ownsRoster` work unchanged |
+
+`buildPlatformRosterData` returns exactly `buildRosterData`'s shape
+(`userRoster, userPlayerIds, leagueUserId, leagueDisplayName,
+opponentRosters`), so `initSession`'s body construction (`:846-866`) is
+untouched. Its `members.find(m => m.user_id === userId)` is the contract
+`test_{mfl,espn}_entry_leagues_snapshot_*` pin server-side.
+
+## 5. Design-system compliance
+
+- `styles.css:4343+` — chips: 36px min height, 1px `--line-strong`, radius
+  `--r-sm`, transparent, `--font-ui` 13/600 chalk-dim; `.on` = `--accent`
+  (ice) border + `--text`; hover `--ink-3`. Rows reuse the league-item
+  construction (`--ink-2`, 1px `--border`, `--r-sm`, 44px min). No emoji,
+  gradients, blur, system fonts or radius > 8px — `check_web_structure.py`
+  175/175.
+
+## 6. Funnel events
+
+- Sleeper: `signin_attempted {method:'sleeper'}` at the Connect click
+  (`app.js:356`), `signin_succeeded` after the user resolves, `signin_failed
+  {error_code: http_<status> | http_404 | network}` on the three failure
+  classes.
+- ESPN/MFL: `_entryClaim` fires `signin_attempted` before the mint,
+  `signin_succeeded` once the token is stored, `signin_failed {error_code:
+  <route error code>}` on a refused mint — the claim is the attempt,
+  exactly as `mobile/src/api/platformEntry.ts` does.
+
+## 7. Runtime E2E (2026-09-03, browser against the stubbed app)
+
+Server: `backend.server.app` on `:5089` with `es.fetch_league`,
+`es.get_crosswalk`, `mfl.resolve_host`, `mfl.fetch_league_bundle` and
+`server._shared_crosswalk` patched to the route tests' fixtures, on a
+scratch SQLite DB (`DATABASE_URL`), real `_extension_build_session`.
+
+| Step | Observed |
+|---|---|
+| Load `/` | flags resolve; `#platform-row` visible, all three chips; Sleeper selected |
+| MFL chip → `10005` → Continue | teams panel: "Masters Copper Dynasty … — which team is yours?", 3 franchises × "8 players" |
+| Click "Clobberin Time 2" | `sleeper_user = {user_id:"entry:mfl:10005.f0001", display_name:"Clobberin Time 2", platform:"mfl"}`, `sleeper_league = {league_id:"10005", …}`, token set, auth hidden, league screen hidden (auto-skip), overlay hidden, ranking-method screen shown |
+| Pick "trio" | main app: Rank Players / Trios with QB trio; account chip "CL Clobberin Time 2" |
+| Reload | `boot()` → `_myRoster.length = 8`, `_cachedLeagues.length = 1`, `currentUserId = entry:mfl:10005.f0001`; auth + overlay hidden |
+| `_ensureLeaguematePool()` | 16 players from owners "Benji's Boys C3", "DoCoMo IV" (never the user's own team) |
+| Start over → ESPN chip → paste `…leagueId=987654321` URL → Continue | teams: "Chalk Dusters owner1", "Icy Veins owner2", "Flare Guns owner3" |
+| Click "Chalk Dusters" | `user_id:"entry:espn:{A1111111-…}"`, league `987654321`, token set, `_myRoster.length = 8`, method screen shown |
+| Live API (real server on `:5088`) | MFL `99999` → "MFL has no league with that ID."; ESPN `1` → "This league is private — paste your espn_s2 and SWID cookies below." + cookie section auto-opened |
+| Console | no errors at any step; `POST /api/events` 200 ×3 (funnel events flowing) |
