@@ -8,6 +8,20 @@
 
 ---
 
+## 2026-09-03b — Web landing platform entry (Sleeper · ESPN · MFL) BUILT, PR #272 open, NOT merged
+
+**Where:** branch `claude/landing-page-espn-mfl-a5a85a` @ `8473fab2` + this write-back commit, worktree `.claude/worktrees/compassionate-jones-ea8a0e`, PR [#272](https://github.com/mattmurf77/fantasy-trade-finder/pull/272) against `main` @ `6ccd6698`. [D-177](DECISIONS.md); scope + code-walk §V3 in `docs/plans/landing-platform-options/`.
+
+**What it is:** `web/index.html` mirrors SignInScreen's Sleeper · ESPN · MFL chip row and adds ESPN/MFL entry panels on the D-164 sessionless route (preview → claim/mint → canonical link import; private ESPN = cookie paste; v2.1 "find my leagues" / "sign in with MFL"). Entry users (`entry:` ids) read the platform snapshot everywhere the web used Sleeper proxies; web emits `signin_*` by method. No route/schema/flag change — `landing.platform_options` is the single revert lever for web too. Also fixed `selectLeague`'s undefined `userPlayerIds` toast (ReferenceError after every league pick).
+
+**Owed:**
+1. **Merge PR #272 once CI is green** (4 jobs) — squash as usual; Render auto-deploys the web half (no mobile change, no EAS build).
+2. **Operator prod check** — scope §V3 "Manual check" (4 steps): chip row shows signed-out; MFL id → franchise → in; ESPN public id → team → in, private id → cookie section opens; flag off → today's landing.
+3. **Follow-up (NEXT):** the in-app "Connect another league" modal still tells ESPN/MFL pasters "sync is on the roadmap" — wire it to the same preview → team-claim rows (no mint needed under a live session) or drop the copy.
+4. After merge: recovery-ledger the branch tip and `git worktree remove` `compassionate-jones-ea8a0e` from the main checkout (a session cannot remove its own worktree).
+
+**Blocking:** nothing. **Rollback:** flip `landing.platform_options` false (row hidden + route 404) or revert the squash.
+
 ## 2026-09-03 — #413 Sleeper pick-send SHIPPED (D-176, v1.16.15); the parallel #414 build was superseded by D-175 and NOT shipped
 
 **Where:** `main` @ `5c83e8cd` (PR [#270](https://github.com/mattmurf77/fantasy-trade-finder/pull/270), squash, CI ×4 green). Render deploy `dep-dacf8l6q1p3s73ek9ef0` **live** 2026-09-03T04:16Z. EAS build **144** / v1.16.15 queued with auto-submit (submission `b4763913`). Feedback #413 and #414 → `fixed`. All session refs ledgered and deleted (`docs/recovery/2026-09-03-fb413-ship-sweep.md`); the hosting worktree `.claude/worktrees/unruffled-meitner-3596cb` cannot remove itself — `git worktree remove` it from the main checkout.
@@ -397,6 +411,7 @@ move, and the avatar lab's anchor test models the brief's described layout, not 
 **none**, so the bubble reads "The Analyst" above a ram, which is D-155's recorded default). Higgsfield credits ~4.35.
 
 ## Table of Contents
+- [2026-09-03b — Web landing platform entry (Sleeper · ESPN · MFL) BUILT, PR #272 open, NOT merged](#2026-09-03b--web-landing-platform-entry-sleeper--espn--mfl-built-pr-272-open-not-merged)
 - [2026-09-02 — web parity SHIPPED (PR #263, live on Render); what is left is two operator inputs, not code](#2026-09-02--web-parity-shipped-pr-263-live-on-render-what-is-left-is-two-operator-inputs-not-code)
 - [2026-09-02 — D-172 `consensus_fit_weight` LIVE at 0.5; research write-back landed; two prototype worktrees ledgered](#2026-09-02--d-172-consensusfitweight-live-at-05-research-write-back-landed-two-prototype-worktrees-ledgered)
 - [2026-08-27 — #384 partner shape-summary regression SHIPPED to main; owed = one TestFlight checklist on the next build](#2026-08-27--384-partner-shape-summary-regression-shipped-to-main-owed--one-testflight-checklist-on-the-next-build)

@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-09-03b — Web platform entry: merge PR #272, then the "Connect another league" modal follow-up](#2026-09-03b--web-platform-entry-merge-pr-272-then-the-connect-another-league-modal-follow-up)
 - [2026-09-03 — After the #413 ship: the checklist that closes Q-037, then the G-8 avoid gap D-175 still has, then the impression gap](#2026-09-03--after-the-413-ship-the-checklist-that-closes-q-037-then-the-g-8-avoid-gap-d-175-still-has-then-the-impression-gap)
 - [2026-09-02 — Web parity SHIPPED and live; the only remaining work needs an App Store/TestFlight URL](#2026-09-02--web-parity-shipped-and-live-the-only-remaining-work-needs-an-app-storetestflight-url)
 - [2026-08-31 — Finder gap analysis: P0 likes-you tag on the merged landing, then the P1 batch](#2026-08-31--finder-gap-analysis-p0-likes-you-tag-on-the-merged-landing-then-the-p1-batch)
@@ -41,6 +42,10 @@
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## 2026-09-03b — Web platform entry: merge PR #272, then the "Connect another league" modal follow-up
+
+**Why now:** the web landing now offers ESPN/MFL entry ([D-177](DECISIONS.md), PR [#272](https://github.com/mattmurf77/fantasy-trade-finder/pull/272) open) but the in-app "Connect another league" modal (`web/index.html` `#connect-league-modal`, `app.js` `connectPastedLeague`, and the smart-start URL path) still answers an ESPN/MFL URL with "sync is on the roadmap" — now a false statement on a page that links those platforms at the door. In order: (1) merge #272 when CI is green and run the scope §V3 prod check; (2) wire the modal's ESPN/MFL branch to the same preview → team-claim rows the landing uses (under a live session it is the plain `/api/{espn,mfl}/link` preview/import — no mint), or delete the "roadmap" copy; (3) web still emits no `league_selected` (mobile sends it with `platform`) — a one-line add if the funnel needs the far side.
 
 ## 2026-09-03 — After the #413 ship: the checklist that closes Q-037, then the G-8 avoid gap D-175 still has, then the impression gap
 
