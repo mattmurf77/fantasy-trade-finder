@@ -40,7 +40,7 @@ app/site) — neither is an API call and neither carries any FTF data.
 | 3 | `GET /league/{league_id}` | League metadata: `roster_positions`, `scoring_settings`, `settings` (playoff weeks/teams, status) | `backend/server.py:666-682` (`_fetch_sleeper_league_meta`, used for scoring-format detection + `/api/trades/validate`'s `league_archived` check); `backend/outlook/league_state.py:130,133` (outlook pipeline) | not directly routed — internal helper, consumed by several routes |
 | 4 | `GET /league/{league_id}/rosters` | Roster → owner_id → player_ids, starters, W/L | `backend/server.py:13781` (`/api/sleeper/rosters/<league_id>`); `backend/server.py:10178-10184` (`_fetch_league_rosters`, send-in-sleeper roster resolution); `backend/server.py:19351-19353` (free-agents live rostered-player exclusion); `backend/draft_board_service.py:302-303`; `backend/outlook/league_state.py:146`; `backend/trade_block_service.py:90-99` (`_fetch_rosters`, ownership validation) | `/api/sleeper/rosters/<league_id>` |
 | 5 | `GET /league/{league_id}/users` | League member list: user_id, display_name, avatar, team-name metadata | `backend/server.py:13812` (`/api/sleeper/league_users/<league_id>`); `backend/draft_board_service.py:305-306`; `backend/outlook/league_state.py:147` | `/api/sleeper/league_users/<league_id>` |
-| 6 | `GET /league/{league_id}/traded_picks` | Which roster currently owns each future pick | `backend/server.py:10187-10200` (`_fetch_sleeper_traded_picks`); `backend/draft_board_service.py:299-300` | not directly routed — feeds Draft Room / owned-pick sync |
+| 6 | `GET /league/{league_id}/traded_picks` | Which roster currently owns each future pick | `backend/server.py:10187-10200` (`_fetch_sleeper_traded_picks`); `backend/draft_board_service.py:299-300`; since #413 also `/api/trades/propose` + `/api/trades/validate` (pick sends only — the live holder check in `_sleeper_encode_ftf_picks`) | not directly routed — feeds Draft Room / owned-pick sync / pick-send holder check |
 | 7 | `GET /league/{league_id}/drafts` | Draft list for a league: `draft_id`, `status`, `season`, `type` | `backend/server.py:10203-10219` (`_fetch_sleeper_drafts`); `backend/draft_board_service.py:289-290` | feeds `/api/draft/board` and `#228`'s current-season-drafted exclusion |
 | 8 | `GET /draft/{draft_id}` | Single draft detail | `backend/draft_board_service.py:292-294` | feeds `/api/draft/board` |
 | 9 | `GET /draft/{draft_id}/picks` | Picks already made in a live/complete draft | `backend/draft_board_service.py:296-297` | feeds `/api/draft/board` |
@@ -59,7 +59,7 @@ every shape here was captured from live browser traffic (see
 | # | Operation | Purpose | Auth | Call site |
 |---|---|---|---|---|
 | 14 | `league_players` | Public read: `{player_id, settings}` for every rostered player in a league — `settings.otb` flags "on the block" | none (public) | `backend/trade_block_service.py:65-87` (`fetch_league_players`) |
-| 15 | `propose_trade` | **Write**: submit a real trade proposal into the user's Sleeper league | JWT (raw, no `Bearer` prefix) | `backend/sleeper_write.py:203-273,331-337` (`build_propose_trade_body` / `propose_trade`) |
+| 15 | `propose_trade` | **Write**: submit a real trade proposal into the user's Sleeper league. Since #413 emits a non-empty `draft_picks` list on pick trades, produced server-side by `server._sleeper_encode_ftf_picks` → `sleeper_write.encode_draft_pick` (never client-supplied) | JWT (raw, no `Bearer` prefix) | `backend/sleeper_write.py:203-273,331-337` (`build_propose_trade_body` / `propose_trade`) |
 | 16 | `reject_trade` | **Write**: reject a pending proposal | JWT | `backend/sleeper_write.py:340-351` |
 | 17 | `ftf_token_probe` | No-op (`{ __typename }`) — proves a captured JWT is real by exercising Sleeper's own auth middleware | JWT | `backend/sleeper_write.py:168-193` (`verify_token_live`) |
 
@@ -186,6 +186,9 @@ degrades ESPN/MFL cookie storage too, not just Sleeper.
   metadata:{team_name}}]`.
 - `GET /league/{id}/traded_picks` → `[{round, season(str), roster_id(orig),
   owner_id(current), previous_owner_id}]` (`backend/server.py:10187-10200`).
+  Consumers: the owned-pick sync daemon, the Draft Room, and since #413 the
+  propose + validate routes on pick sends (`_sleeper_pick_holder_index` — an
+  absent `(season, round, orig)` key means the original roster still holds it).
 - `GET /league/{id}/drafts` → `[{draft_id, status: pre_draft|drafting|complete,
   season(str), type, ...}]` (`backend/server.py:10203-10219`).
 
@@ -202,6 +205,16 @@ degrades ESPN/MFL cookie storage too, not just Sleeper.
   object args must be GraphQL **literals** (bare keys — `{sender:1}`), not JSON;
   `_graphql_object_literal()` does that encoding. `draft_picks` is unaffected —
   a list of strings is spelled identically in both syntaxes.
+- `draft_picks` elements (#413, `sleeper_write.encode_draft_pick`):
+  `"<orig>,<season>,<round>,<from>,<to>"` — `orig` = the pick's ORIGINAL-owner
+  roster id (the `draft_picks` grid row's `original_roster_id`), `from` = the
+  roster giving the pick up, `to` = the roster receiving it. Give side encodes
+  `from = my roster, to = theirs`; receive side flips them. Both live captures
+  (`"11,2026,1,1,2"`, `"1,2027,4,2,1"`, runbook §C2) are original-owner picks,
+  so field 1 is **captured, not confirmed, on a pick that has changed hands**
+  (living-memory Q-035; closed by the #413 TestFlight step 3). If Sleeper wants
+  the current holder there, only acquired picks fail — visibly, as a GraphQL
+  error → 502 `sleeper_write_failed` with `detail`.
 - ⚠️ **`waiver_budget`'s element type is unresolved — FAAB is unimplemented,
   not merely untested.** The 2026-07-02 capture only ever showed
   `waiver_budget: []`, so the `[{sender, receiver, amount}]` shape in

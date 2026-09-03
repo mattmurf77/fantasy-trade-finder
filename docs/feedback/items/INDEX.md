@@ -272,6 +272,18 @@
 | 396 | flex-slot-label | planned | 2026-08-24 | G-C satellite, canonical `395-lineup-impact-superflex/` |
 | 397 | swipe-tour-placement | planned | 2026-08-24 | **canonical** G-B of the 2026-08-24 wave (#397/#398) — swipe tour beat moves above the trade chip strip (#398 supersedes #397) |
 | 398 | swipe-tour-top | planned | 2026-08-24 | G-B satellite (the operative placement ask), canonical `397-swipe-tour-placement/` |
+| 402 | more-offers-shop | shipped | 2026-08-28 | #402/#403 "shop a player" — CHANGELOG 2026-08-28, v1.16.9 build 135, `trade.shop_asset` lit; folder holds the whole canvas-results arc (rulings ×6, rev-3 spec) |
+| 403 | shop-a-player-README.md | shipped | 2026-08-28 | satellite of `402-more-offers-shop/` (README pointer only) |
+| 406 | target-any-leaguemate | shipped | 2026-08-30 | **canonical** of the 2026-08-30 batch (#406/#407) — "Any league mate" targeting, D-168; PR #250, v1.16.12 build 140 |
+| 407 | finder-forced-team | shipped | 2026-08-30 | fast-track bug, fix `8f722676` (auto-defaulted partner no longer scopes Find a Trade); PR #250 |
+| 409 | like-not-league-member | shipped | 2026-08-30 | ✓ queue 100% refusal since 2026-08-22 (G-063 caller exclusion); backend PR #254, superseded by D-170 (2026-08-31) which removed the validation gate entirely |
+| 410 | found-trade-decline-position | shipped | 2026-08-30 | **canonical** of the 2026-08-30b batch (#409–#412) — D-169 bare-✕ decline cell; PR #254, v1.16.13 build 142; 14-step TestFlight checklist owed |
+| 411 | player-name-truncation | shipped | 2026-08-30 | satellite — chip to meta line, name 13/18 (QA-B F-1 disclosure, checklist step 11b ruling) |
+| 412 | more-offers-placement | shipped | 2026-08-30 | satellite — More offers under the give Add |
+| 413 | sleeper-send-draft-picks | planned | 2026-09-02 | **canonical** of the 2026-09-02 weekly run — Send in Sleeper has no draft-pick split/encode; batch `plan.md` + `investigation.md` here |
+| 414 | lopsided-one-for-one | planned | 2026-09-02 | G-414 — lopsided 1-for-1 served (London for Lamb straight up); batch plan in `413-sleeper-send-draft-picks/` |
+| 415 | queue-loss-refusal-no-advance | shipped | 2026-09-02 | verify-closed — refusal half = D-170 (server, live 2026-08-31T21:29Z), advance half = D-171 v1.16.14 build 143; proof = finder-results-push scope §7 step 5 |
+| 416 | liked-card-stays-no-swipe | shipped | 2026-09-02 | verify-closed — D-171 v1.16.14 restores the classic swipe deck; proof = scope §7 steps 1/5/6 |
 | — | 2026-07-26-adjustments-breakdown | shipped | 2026-07-26 | n/a |
 | — | 2026-07-26-asset-trade-ideas | shipped | 2026-07-26 | teardown-remediation / `trade.asset_ideas` ON |
 | — | 2026-07-26-calc-eveners | shipped | 2026-07-26 | `eveners`/`adjustments`/`naive_totals` on `/api/trade/evaluate` — CHANGELOG 2026-07-26 |

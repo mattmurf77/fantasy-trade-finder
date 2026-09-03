@@ -244,6 +244,14 @@ _SANCTIONED_SOURCE_CALLERS = frozenset({
     # generic round label, which is the honest rendering of "we don't agree
     # who this is".
     "_assigned_slot_order",      # server.py  — D-090 slot-label numbering read
+    # FB-413 (D-172) — the Sleeper pick-SEND path. A LITERAL platform read on
+    # purpose, the same reasoning as `_mock_owned_pick_overlay`: only a row
+    # Sleeper itself wrote proves a pick exists for `propose_trade`'s
+    # `draft_picks` encoding, and a user-asserted row's `original_roster_id`
+    # is an opaque slot label that cannot be encoded into a Sleeper roster id.
+    # These reads must never follow `picks.assign_tradeable`.
+    "propose_trade_to_sleeper",  # server.py  — POST /api/trades/propose pick encode
+    "trades_validate",           # server.py  — POST /api/trades/validate pick advisories
 })
 
 #: Everything allowed to name `source=` at all: the seven engine read sites
