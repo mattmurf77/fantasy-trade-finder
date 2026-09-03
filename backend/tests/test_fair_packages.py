@@ -632,3 +632,96 @@ def test_flag_off_is_byte_identical(harness):
     assert _queue(client, before[0]).status_code == 200
     ff._flags_cache = {**ff._flags_cache, "trade.presentment_rules": False}
     assert _post(client, opponent_user_id=OPP).get_json()["ideas"] == before
+
+
+# ---------------------------------------------------------------------------
+# D-178 follow-up — QA-B B-1 (full parity with the deck's like memory) and
+# QA-B C-4 (say what the exclusion dropped).
+# ---------------------------------------------------------------------------
+
+def _rebuild_like_memory(trade_svc):
+    """What `session_init` does at the top of every session: the `like_days`
+    LIKE subset, cut from the same `load_trade_decisions` read as the dismiss
+    subset, keyed by the one constructor. The fixture's service was built
+    before these rows existed; D-178 imports the deck's like memory as the
+    deck holds it — a session snapshot, staleness included."""
+    from backend.database import load_trade_decisions
+    trade_svc._liked_decision_keys.clear()
+    for td in load_trade_decisions(user_id=ME, league_id=LEAGUE, since_days=7):
+        if td.get("decision") != "pass":
+            trade_svc._liked_decision_keys.add(
+                ts.presentment_key(td["give_player_ids"],
+                                   td["receive_player_ids"]))
+
+
+def test_a_declined_offer_stays_suppressed_like_the_deck(harness):
+    """QA-B B-1 — R4 is windowless but drops a like the moment ANY match row
+    exists, and `load_matches_for_exclusion` re-adds only `pending`/
+    `accepted`; a DECLINED offer therefore sat in neither set and returned to
+    this sweep at once, while the deck went on suppressing it for
+    `like_days`. The route now consults the deck's like subset too.
+
+    SABOTAGE (the route drops `trade_service=` from its
+    `_load_presentment_exclusions` call — the shipped-at-77a4e33b
+    behaviour): the declined package is re-served → RED."""
+    from backend.database import create_trade_match, record_match_disposition
+    client, engine, _sess, trade_svc, _league = harness
+    _seed_members(engine)
+    before = _post(client, opponent_user_id=OPP).get_json()["ideas"]
+    sent = before[0]
+    assert _queue(client, sent).status_code == 200
+    assert sent["receive_player_ids"] not in [
+        i["receive_player_ids"]
+        for i in _post(client, opponent_user_id=OPP).get_json()["ideas"]]
+
+    match = create_trade_match(
+        league_id=LEAGUE, user_a_id=ME, user_b_id=OPP,
+        user_a_give=sent["give_player_ids"],
+        user_a_receive=sent["receive_player_ids"])
+    record_match_disposition(match["id"], ME, "accept")
+    assert record_match_disposition(
+        match["id"], OPP, "decline")["outcome"] == "declined"
+    # R4 alone now holds nothing for this key — proven, not assumed.
+    assert server._load_presentment_exclusions(ME, LEAGUE) == set()
+
+    _rebuild_like_memory(trade_svc)
+    try:
+        after = _post(client, opponent_user_id=OPP).get_json()
+        assert sent["receive_player_ids"] not in [
+            i["receive_player_ids"] for i in after["ideas"]]
+        assert after["excluded_count"] == 1
+    finally:
+        trade_svc._liked_decision_keys.clear()
+
+
+def test_the_sweep_reports_what_the_exclusion_dropped(harness):
+    """QA-B C-4 — additive `excluded_count`, always present, and it counts the
+    packages actually DROPPED rather than the size of the exclusion set. With
+    the flag off it is 0, so the rollback state tells the client nothing the
+    server did not do.
+
+    SABOTAGE (`excluded_count = len(exclusion_keys)`): the second, unrelated
+    like — a package this anchor's sweep can never produce — inflates the
+    count to 2 → RED."""
+    client, engine, *_ = harness
+    _seed_members(engine)
+    before = _post(client, opponent_user_id=OPP).get_json()
+    assert before["excluded_count"] == 0
+    sent = before["ideas"][0]
+    assert _queue(client, sent).status_code == 200
+    # A like on a package this sweep cannot emit (its give side is not the
+    # anchor), so it is in the exclusion set and matches nothing.
+    assert _queue(client, {"counterparty_user_id": OPP,
+                           "give_player_ids": ["a2"],
+                           "receive_player_ids": ["b5"]}).status_code == 200
+
+    after = _post(client, opponent_user_id=OPP).get_json()
+    assert sent["receive_player_ids"] not in [
+        i["receive_player_ids"] for i in after["ideas"]]
+    assert after["excluded_count"] == 1, (
+        "the count is what was dropped, not how big the exclusion set is")
+
+    ff._flags_cache = {**ff._flags_cache, "trade.presentment_rules": False}
+    off = _post(client, opponent_user_id=OPP).get_json()
+    assert off["excluded_count"] == 0
+    assert off["ideas"] == before["ideas"]

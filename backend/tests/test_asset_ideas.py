@@ -1762,3 +1762,197 @@ def test_route_flag_off_is_byte_identical(route_client):
     _lit_route_flags(**{"trade.presentment_rules": False})
     assert _post(route_client,
                  {"asset_id": "P", "direction": "give"}).get_json() == before
+
+
+# ---------------------------------------------------------------------------
+# D-178 follow-up — QA-A A-1 (the slot-yielding pre-filters), QA-B B-1 (full
+# parity with the deck's like memory) and QA-B C-4 (say what was dropped).
+# ---------------------------------------------------------------------------
+
+# Two near-equal sweeteners, so the UPGRADE group has two viable variants for
+# the same counterpart (U): ([P,S1],[U]) and ([P,S2],[U]). The shipped fixture
+# above has only one, which is exactly why the `_emit_best` pre-filter could be
+# deleted with the whole suite green (QA-A sabotage Q-B).
+TWO_SWEETENER_ELO = {**GIVE_ELO, "S2": 1605.0}
+
+
+def _two_sweetener_ideas(exclusion_keys=None):
+    players = {pid: _Player(pid) for pid in TWO_SWEETENER_ELO}
+    opp = LeagueMember(user_id="opp", username="OppTeam",
+                       roster=["U", "L", "L2", "D1", "D2"], elo_ratings={})
+    svc = TradeService(players=players)
+    svc.add_league(League(league_id="L1", name="T", platform="demo",
+                          members=[opp]))
+    groups = svc.generate_asset_ideas(
+        user_id="user",
+        user_roster=["P", "S1", "S2"],
+        league_id="L1",
+        seed_elo=dict(TWO_SWEETENER_ELO),
+        asset_id="P",
+        direction="give",
+        fairness_threshold=0.50,
+        raw_user_elo=dict(TWO_SWEETENER_ELO),
+        exclusion_keys=exclusion_keys,
+    )
+    return groups, svc
+
+
+def _pairs(ideas):
+    return [(i["give_player_ids"], i["receive_player_ids"]) for i in ideas]
+
+
+def test_an_excluded_variant_yields_its_slot_to_the_runner_up():
+    """QA-A A-1 — the claim "an excluded idea yields its slot to the
+    next-best" is made true for every `_emit_best`-served group by the
+    VARIANT pre-filter, and nothing pinned it: the whole suite stayed green
+    with that filter narrowed to dismisses (sabotage Q-B), because no fixture
+    ever gave a group two viable variants. This one does.
+
+    Excluding the best variant must promote the SECOND, not lose the group:
+    the exclusion costs its own slot and no more.
+
+    SABOTAGE (Q-B — `_emit_best`'s pre-filter and the downgrade-combo skip
+    narrowed to `self._dismissed_decision_keys`, the `_emit` backstop left
+    intact so presence is still correct): the best variant wins the ranking,
+    is handed to `_emit`, and is suppressed there — the upgrade group comes
+    back EMPTY → RED."""
+    base, _ = _two_sweetener_ideas()
+    assert _pairs(base["upgrade"]) == [(["P", "S1"], ["U"])]
+
+    after, svc = _two_sweetener_ideas(
+        exclusion_keys={ts.presentment_key(["P", "S1"], ["U"])})
+    assert _pairs(after["upgrade"]) == [(["P", "S2"], ["U"])], (
+        "the runner-up variant must take the slot, not vanish with the best")
+    # …and the other groups are untouched by a variant-level exclusion.
+    assert _pairs(after["lateral"]) == _pairs(base["lateral"])
+    assert _pairs(after["downgrade"]) == _pairs(base["downgrade"])
+    # QA-B C-4 — the drop is counted, once, against the group it happened in.
+    assert svc.excluded_idea_counts() == {
+        "upgrade": 1, "lateral": 0, "downgrade": 0}
+
+
+def _rebuild_like_memory(svc):
+    """Exactly what `session_init` does at the top of every session: cut the
+    `like_days` LIKE subset out of the SAME `load_trade_decisions` read the
+    dismiss subset comes from, keyed by the one constructor. Called here
+    because the fixture's service was built before these rows existed — the
+    deck's like memory is a session snapshot, and D-178's parity ruling
+    imports it as the deck holds it, staleness included (an in-session like
+    is covered by R4's windowless awaiting set until a match row appears)."""
+    from backend.database import load_trade_decisions
+    svc._liked_decision_keys.clear()
+    for td in load_trade_decisions(user_id="user", league_id="L1",
+                                   since_days=7):
+        if td.get("decision") != "pass":
+            svc._liked_decision_keys.add(
+                ts.presentment_key(td["give_player_ids"],
+                                   td["receive_player_ids"]))
+
+
+def test_a_declined_offer_stays_suppressed_like_the_deck(route_client):
+    """QA-B B-1 — the parity ruling, completed. R4's set is windowless but
+    drops a like the moment ANY match row exists (`load_awaiting_trades`
+    subtracts matched keys status-unfiltered) and `load_matches_for_exclusion`
+    re-adds only `pending`/`accepted` — so a DECLINED offer sat in neither
+    set and came straight back to the shop, while the deck went on
+    suppressing it for `like_days`. The route now consults the deck's like
+    subset too, so both surfaces answer the same.
+
+    SABOTAGE (the route drops `trade_service=` from its
+    `_load_presentment_exclusions` call — the shipped-at-77a4e33b behaviour):
+    the declined package is re-offered → RED."""
+    from backend.database import create_trade_match, record_match_disposition
+    import backend.server as server
+    _lit_route_flags()
+    _seed_route_members()
+    with server._sessions_lock:
+        svc = server._sessions[TOKEN]["trade_svc"]
+
+    before = _post(route_client,
+                   {"asset_id": "P", "direction": "give"}).get_json()
+    idea = before["groups"]["lateral"][0]
+    assert _send(route_client, idea).status_code == 200
+    # While it is merely awaiting, R4 alone already covers it.
+    assert _post(route_client, {"asset_id": "P", "direction": "give"}
+                 ).get_json()["groups"]["lateral"] == []
+
+    # The counterparty declines — both production writers, both dispositions,
+    # so the row really reaches status='declined'.
+    match = create_trade_match(
+        league_id="L1", user_a_id="user", user_b_id="opp",
+        user_a_give=idea["give_player_ids"],
+        user_a_receive=idea["receive_player_ids"])
+    record_match_disposition(match["id"], "user", "accept")
+    outcome = record_match_disposition(match["id"], "opp", "decline")
+    assert outcome["outcome"] == "declined"
+
+    # R4 is now empty for this key: proven, not assumed.
+    assert server._load_presentment_exclusions("user", "L1") == set()
+
+    _rebuild_like_memory(svc)
+    try:
+        assert svc.recent_like_keys(), "the like subset must hold the row"
+        after = _post(route_client,
+                      {"asset_id": "P", "direction": "give"}).get_json()
+        assert after["groups"]["lateral"] == [], (
+            "a declined offer must stay suppressed for like_days, as it is "
+            "on the deck")
+        assert after["excluded_by_group"]["lateral"] == 1
+    finally:
+        svc._liked_decision_keys.clear()
+
+
+def test_route_reports_what_the_exclusion_dropped(route_client):
+    """QA-B C-4 — the routes used to drop an idea and say nothing, so the
+    client could not tell "the market is empty" from "you emptied it" and
+    explained the second with copy written for the first. The counts are the
+    ideas actually DROPPED, per group — never the size of the exclusion set,
+    most of whose keys have nothing to do with this pin.
+
+    SABOTAGE (`excluded_count = len(exclusion_keys)`): the second, unrelated
+    like inflates the count to 2 → RED."""
+    _lit_route_flags()
+    _seed_route_members()
+    before = _post(route_client,
+                   {"asset_id": "P", "direction": "give"}).get_json()
+    assert before["excluded_count"] == 0
+    assert before["excluded_by_group"] == {
+        "upgrade": 0, "lateral": 0, "downgrade": 0}
+
+    assert _send(route_client, before["groups"]["lateral"][0]).status_code == 200
+    # A second, unrelated like: in the exclusion set, never a candidate for
+    # this pin (every idea here gives P away).
+    assert _send(route_client, {"counterparty_user_id": "opp",
+                                "give_player_ids": ["S1"],
+                                "receive_player_ids": ["D2"]}
+                 ).status_code == 200
+
+    after = _post(route_client,
+                  {"asset_id": "P", "direction": "give"}).get_json()
+    assert after["groups"]["lateral"] == []
+    assert after["excluded_by_group"] == {
+        "upgrade": 0, "lateral": 1, "downgrade": 0}
+    assert after["excluded_count"] == 1, (
+        "the count is what was dropped, not how big the exclusion set is")
+
+
+def test_excluded_counts_are_zero_with_the_flag_off(route_client):
+    """QA-B C-4 posture bar: the two fields are ADDITIVE and always present,
+    and they read 0 whenever `trade.presentment_rules` is off — so every
+    field a pre-D-178 client reads is unchanged in the rollback state, and
+    the counts can never invite the client into copy the server did not
+    cause.
+
+    SABOTAGE (the counters read before the flag gate / the flag gate removed
+    from the route): the sent offer is counted with the flag off → RED."""
+    _lit_route_flags()
+    _seed_route_members()
+    before = _post(route_client,
+                   {"asset_id": "P", "direction": "give"}).get_json()
+    assert _send(route_client, before["groups"]["lateral"][0]).status_code == 200
+    _lit_route_flags(**{"trade.presentment_rules": False})
+    off = _post(route_client, {"asset_id": "P", "direction": "give"}).get_json()
+    assert off["excluded_count"] == 0
+    assert off["excluded_by_group"] == {
+        "upgrade": 0, "lateral": 0, "downgrade": 0}
+    assert off["groups"] == before["groups"]

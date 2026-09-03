@@ -245,8 +245,23 @@ rule live (deploy-free) via `PUT /api/admin/config/<knob>`:
 R1 → `max_overpay_frac = 0` · R2 → `pos_net_cap = 0` · R3 →
 `pick_gap_frac = 0` · R5 → `need_gate_min_value = 0`. R4 has no knob; the
 whole group reverts by flipping `trade.presentment_rules` to `false` in
-`config/features.json` (one-line commit + deploy). Expect zero hits on
-healthy leagues; contender-heavy leagues thin the most by design (#304 is a
+`config/features.json` (one-line commit + deploy).
+
+> **Before you flip that flag (D-178, 2026-09-03): killing it also un-fixes
+> feedback #418.** Since D-178 the same flag gates the like exclusion on
+> `POST /api/trades/asset-ideas` and `POST /api/trades/fair-packages`, so the
+> shop window and the anchored sweep immediately resume re-offering packages
+> the user has already sent — a user-visible regression with no analytics
+> signal of its own (the `presentment-tripwire` WARNING counts R1/R2/R3/R5
+> only, so it goes quiet in a way that looks like the revert worked). Prefer
+> the per-rule knobs above for a single-rule incident and reserve the flag
+> for a genuine group revert. **How to see it:** both idea routes log one
+> line per request — `asset-ideas: presentment exclusion set=<n> dropped=<n>`
+> and `fair-packages: presentment exclusion set=<n> dropped=<n>`. After a
+> flag revert `set=` drops abruptly and permanently to 0 on both; that line
+> is the only tripwire this coupling has, so check it before and after.
+
+Expect zero hits on healthy leagues; contender-heavy leagues thin the most by design (#304 is a
 contender complaint) — log any hit with its rule attribution in
 `docs/feedback/items/304-positional-need-filter/status.md`.
 

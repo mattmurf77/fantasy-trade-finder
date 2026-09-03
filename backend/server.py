@@ -248,6 +248,10 @@ from .trade_service import TradeService, TradeCard, League, LeagueMember
 # Aliased: the likes-you injector's own parameter is named `trade_service`
 # (the service INSTANCE), so the module name is not usable inside it.
 from .trade_service import r4_bypassed as _r4_bypassed
+# D-178 (#418) — the ONE presentment-key constructor. Every site that
+# builds or consults an exclusion key goes through it so the deck, the
+# shop and the anchored sweep cannot drift on orientation.
+from .trade_service import presentment_key as _presentment_key
 
 # ---------------------------------------------------------------------------
 # Demo Player Pool (used until Sleeper roster is loaded)
@@ -5808,7 +5812,8 @@ def _presentment_need_gate_bypass(pinned_give, pinned_receive,
                 or acquire_positions)
 
 
-def _load_presentment_exclusions(user_id: str, league_id: str) -> set:
+def _load_presentment_exclusions(user_id: str, league_id: str,
+                                 trade_service=None) -> set:
     """G6 R4 #336 — windowless per-job exclusion set, built once per trade
     job: (frozenset(my_give), frozenset(my_receive)) keys for (a) the
     user's un-retracted awaiting likes in THIS league — NO time window
@@ -5820,17 +5825,31 @@ def _load_presentment_exclusions(user_id: str, league_id: str) -> set:
     and already subtracts matured matches — both properties are relied on,
     not re-implemented. Failure is non-fatal: log + empty set, matching
     the surrounding pref-load posture.
+
+    D-178 QA-B B-1 — `trade_service` (the IDEA ROUTES pass it; the deck job
+    does not) adds the deck's OTHER like memory: the `like_days` = 7 LIKE
+    subset of `past_decision_keys`, read via `TradeService.recent_like_keys`.
+    Without it a like whose match was DECLINED sits in neither set —
+    `load_awaiting_trades` subtracts every match row it finds, status
+    unfiltered (database.py), and `load_matches_for_exclusion` keeps only
+    `pending`/`accepted` — so a rejected offer returned to the shop at once
+    while the deck still suppressed it for a week. The operator's ruling is
+    parity, so the two idea routes now consult exactly what the deck
+    consults. The deck applies the same subset itself, through
+    `_past_decision_keys`, so it deliberately passes nothing here (a union
+    would be a second application of the same rule). No new window and no
+    new loader: this set is the one the session build already loaded.
     """
     exclusion_keys: set = set()
     try:
         for t in load_awaiting_trades(user_id):
             if t.get("league_id") != league_id:
                 continue
-            exclusion_keys.add((frozenset(t["my_give"]),
-                                frozenset(t["my_receive"])))
+            exclusion_keys.add(_presentment_key(t["my_give"], t["my_receive"]))
         for m in load_matches_for_exclusion(user_id, league_id):
-            exclusion_keys.add((frozenset(m["my_give"]),
-                                frozenset(m["my_receive"])))
+            exclusion_keys.add(_presentment_key(m["my_give"], m["my_receive"]))
+        if trade_service is not None:
+            exclusion_keys |= set(trade_service.recent_like_keys())
     except Exception as excl_err:
         log.warning("trade-job: presentment exclusion-set build failed "
                     "(non-fatal, serving without R4): %s", excl_err)
@@ -12229,6 +12248,19 @@ def asset_trade_ideas():
     `trade.presentment_rules` exactly as the deck's copy is, so that flag
     stays R4's one switch; a failed load is non-fatal and serves the
     unfiltered groups.
+
+    QA-B B-1 — the set is the deck's WHOLE like memory: R4's windowless
+    awaiting/live keys PLUS the deck's `like_days` LIKE subset, read off
+    the live service. R4 alone drops a like the instant ANY match row
+    exists while only `pending`/`accepted` are re-added, so a DECLINED
+    offer used to return here at once while the deck held it a week.
+
+    QA-B C-4 — the response carries two additive fields, `excluded_count`
+    and `excluded_by_group`: the ideas the exclusion actually DROPPED (per
+    group, distinct keys), never the size of the set, and 0 with the flag
+    off. Without them the client cannot tell an empty market from one the
+    caller emptied — and three of its empty states were explaining the
+    second with copy written for the first.
     """
     if not is_enabled("trade.asset_ideas"):
         return jsonify({"error": "not found"}), 404
@@ -12357,9 +12389,15 @@ def asset_trade_ideas():
     # stale set would re-offer a package the user sent seconds ago — the exact
     # bug this closes. The loader is non-fatal by construction: a failure logs
     # and returns an empty set, and the groups serve unfiltered.
+    #
+    # QA-B B-1 — `trade_service` is passed so the set is the deck's WHOLE
+    # like memory, not just R4's: the live service carries the `like_days`
+    # subset of `past_decision_keys`, which is what keeps a DECLINED offer
+    # suppressed for a week here exactly as it is on the deck.
     exclusion_keys: set = set()
     if FLAGS.trade_presentment_rules:
-        exclusion_keys = _load_presentment_exclusions(g_user_id, league_id)
+        exclusion_keys = _load_presentment_exclusions(
+            g_user_id, league_id, trade_service=trade_service)
 
     # #170/#171/#185 — owned-pick injection, THE SAME guard as the generate
     # job (one helper since W3 M-C, so the two can no longer drift), so a pick
@@ -12423,6 +12461,25 @@ def asset_trade_ideas():
         out["gap"]    = verdict["gap"]
         return out
 
+    # D-178 QA-B C-4 — say WHY an idea vanished. Before this the routes
+    # dropped the idea and said nothing, so the client physically could not
+    # tell "the market is empty" from "you emptied it" and explained the
+    # second with copy written for the first. ADDITIVE and always present:
+    # every existing field is untouched, and both counts are 0 whenever the
+    # flag is off or nothing matched, so flag-off behaviour is unchanged for
+    # everything a pre-D-178 client reads. The counts are the ideas the
+    # exclusion actually DROPPED (distinct keys, per group) — never the size
+    # of the exclusion set, most of which has nothing to do with this pin.
+    excluded_by_group = trade_service.excluded_idea_counts()
+    excluded_by_group = {g: int(excluded_by_group.get(g, 0))
+                         for g in groups.keys()}
+    excluded_count = sum(excluded_by_group.values())
+    # The flag-coupling tripwire QA-B §4 asks for: a `trade.presentment_rules`
+    # revert shows here as an abrupt, permanent set=0 — the only signal that
+    # a group revert also un-fixed #418.
+    log.info("asset-ideas: presentment exclusion set=%d dropped=%d (%s) "
+             "league=%s asset=%s", len(exclusion_keys), excluded_count,
+             excluded_by_group, league_id, asset_id)
     return jsonify({
         "asset":       player_to_dict(players_dict[asset_id]),
         "asset_value": round(_trade_service_mod.elo_to_value(
@@ -12430,6 +12487,8 @@ def asset_trade_ideas():
         "direction":   direction,
         "basis":       "consensus",
         "groups":      {k: [_idea_row(i) for i in v] for k, v in groups.items()},
+        "excluded_count":    excluded_count,
+        "excluded_by_group": excluded_by_group,
     })
 
 
@@ -12518,13 +12577,20 @@ def fair_packages():
     never price the same trade differently.
 
     D-178 (#418) — a package the caller has ALREADY OFFERED is not an idea.
-    This route consults the deck's own windowless awaiting-like / matched
-    exclusion set (`_load_presentment_exclusions`, G6 R4 #336, gated on
+    This route consults the deck's own like memory
+    (`_load_presentment_exclusions`, G6 R4 #336, gated on
     `trade.presentment_rules`, the same call `asset-ideas` and the deck job
     make) and drops every idea whose (give-set, receive-set) key is in it —
     before the `fair_packages_cap` cut and before the #189 strict/relaxed
-    choice, so the list still fills. A like retracted in Awaiting returns.
-    A failed load is non-fatal: the sweep serves unfiltered.
+    choice, so the list still fills (from the candidates that remain — QA-A
+    A-2). A like retracted in Awaiting returns. A failed load is non-fatal:
+    the sweep serves unfiltered. QA-B B-1: the set is R4's windowless
+    awaiting/live keys PLUS the deck's `like_days` LIKE subset (the live
+    service's `recent_like_keys`), because R4 alone lets a DECLINED offer
+    back in immediately while the deck holds it a week. QA-B C-4: the
+    response carries an additive `excluded_count` — the packages actually
+    dropped, never the size of the set, 0 with the flag off — and the route
+    logs the set size and the drop count.
     """
     if not getattr(FLAGS, "calc_merged_layout", False):
         return jsonify({"error": "feature_disabled"}), 404
@@ -12603,10 +12669,13 @@ def fair_packages():
 
     # D-178 (#418) — the same loader, the same flag, the same set as the deck
     # job and asset-ideas: an offer the caller already sent is not a new idea.
-    # Non-fatal by construction (log + empty set ⇒ unfiltered sweep).
+    # Non-fatal by construction (log + empty set ⇒ unfiltered sweep). QA-B
+    # B-1: `trade_service` carries the deck's `like_days` subset, so a
+    # DECLINED offer stays suppressed here for the week the deck holds it.
     exclusion_keys: set = set()
     if FLAGS.trade_presentment_rules:
-        exclusion_keys = _load_presentment_exclusions(g_user_id, league_id)
+        exclusion_keys = _load_presentment_exclusions(
+            g_user_id, league_id, trade_service=trade_service)
 
     result = trade_service.generate_fair_packages(
         user_id            = g_user_id,
@@ -12644,6 +12713,12 @@ def fair_packages():
             idea["give_player_ids"], idea["receive_player_ids"])
         return out
 
+    # D-178 QA-B C-4 — same additive disclosure as asset-ideas, flat
+    # (this route has no groups). 0 when the flag is off or nothing matched.
+    excluded_count = int(trade_service.excluded_package_count())
+    log.info("fair-packages: presentment exclusion set=%d dropped=%d "
+             "league=%s anchor=%s", len(exclusion_keys), excluded_count,
+             league_id, give_ids)
     payload = {
         "basis":   "consensus",
         "anchor":  {
@@ -12653,6 +12728,7 @@ def fair_packages():
         },
         "ideas":   [_idea_row(i) for i in result.get("ideas") or []],
         "relaxed": bool(result.get("relaxed")),
+        "excluded_count": excluded_count,
     }
     if result.get("reason"):
         payload["reason"] = result["reason"]
@@ -19200,10 +19276,25 @@ def session_init():
     past_decision_keys: set = set()
     # #402 rev-3 QA-B F2 — the pass-only subset (same keys, dismisses only,
     # already pass_cooldown_days-windowed by the loop below). The deck path
-    # keeps consulting the mixed set; generate_asset_ideas consults ONLY
-    # this one, because there a like is a queued proposal, never a
-    # suppression. One shared set object across formats, like its parent.
+    # keeps consulting the mixed set; the idea routes reach the two subsets
+    # separately.
+    #
+    # D-178 (#418), amended by QA-B B-1 — the sentence that used to live
+    # here ("generate_asset_ideas consults ONLY this one, because there a
+    # like is a queued proposal, never a suppression") is exactly what the
+    # operator's ruling reversed: a sent offer IS a like, and is "treated
+    # the same as any other 'liked' trade" on every surface. So the LIKE
+    # subset is cut here too and reaches the idea routes through
+    # `TradeService.recent_like_keys` → `_load_presentment_exclusions`,
+    # under the `trade.presentment_rules` gate those routes already apply.
+    # It is the memory R4 cannot supply: R4 is windowless but drops a like
+    # the moment ANY match row exists, so a DECLINED offer would otherwise
+    # be back in the shop instantly while the deck still held it for
+    # `like_days`. Both subsets are one shared set object across formats,
+    # like their parent, so the swipe route's in-memory bind reaches every
+    # service.
     past_pass_keys: set = set()
+    past_like_keys: set = set()
     try:
         pass_days = float(_deck_cfg("pass_cooldown_days", 14.0))
         like_days = 7.0
@@ -19234,12 +19325,16 @@ def session_init():
                     continue
             except (KeyError, TypeError, ValueError):
                 pass  # unparseable stamp ⇒ keep excluding (fail closed)
-            key = (frozenset(td["give_player_ids"]), frozenset(td["receive_player_ids"]))
+            # D-178 — the ONE key constructor, shared with every consulting
+            # site so an orientation flip cannot happen in one place only.
+            key = _presentment_key(td["give_player_ids"],
+                                   td["receive_player_ids"])
             past_decision_keys.add(key)
             if is_pass:
                 past_pass_keys.add(key)     # QA-B F2 — asset-ideas subset
                 n_pass += 1
             else:
+                past_like_keys.add(key)     # D-178 QA-B B-1 — same, for likes
                 n_like += 1
         if past_decision_keys:
             log.info("  loaded %d past trade decisions (%d dismissed / %.0fd, "
@@ -19256,7 +19351,8 @@ def session_init():
         fmt_players_dict = {p.id: p for p in fmt_pool}
         tsvc = TradeService(players=fmt_players_dict,
                             past_decision_keys=past_decision_keys,
-                            dismissed_keys=past_pass_keys)   # QA-B F2
+                            dismissed_keys=past_pass_keys,   # QA-B F2
+                            like_keys=past_like_keys)        # D-178 QA-B B-1
         tsvc.add_league(new_league)
         new_trade_svcs[fmt] = tsvc
 
@@ -20473,14 +20569,20 @@ def _build_replenish_session(user_id: str, league_id: str) -> str | None:
         # always used — a narrower window than session_init's 14-day
         # pass_cooldown_days cut, a pre-existing gap of this builder.
         past_pass_keys: set = set()
+        # D-178 QA-B B-1 — the like subset the idea routes consult, cut from
+        # the same 7-day query (which IS `like_days` here, so this builder
+        # needs no window of its own).
+        past_like_keys: set = set()
         try:
             for td in load_trade_decisions(user_id=user_id,
                                            league_id=league_id, since_days=7):
-                _k = (frozenset(td["give_player_ids"]),
-                      frozenset(td["receive_player_ids"]))
+                _k = _presentment_key(td["give_player_ids"],
+                                      td["receive_player_ids"])
                 past_decision_keys.add(_k)
                 if td.get("decision") == "pass":
                     past_pass_keys.add(_k)
+                else:
+                    past_like_keys.add(_k)
         except Exception:
             pass
 
@@ -20491,7 +20593,8 @@ def _build_replenish_session(user_id: str, league_id: str) -> str | None:
         fmt_pool, _ = _get_universal_pool(fmt)
         tsvc = TradeService(players={p.id: p for p in fmt_pool},
                             past_decision_keys=past_decision_keys,
-                            dismissed_keys=past_pass_keys)   # QA-B F2
+                            dismissed_keys=past_pass_keys,   # QA-B F2
+                            like_keys=past_like_keys)        # D-178 QA-B B-1
         tsvc.add_league(league)
 
         payload.update({

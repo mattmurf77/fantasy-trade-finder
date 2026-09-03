@@ -176,7 +176,16 @@ export default function AssetIdeasPanel({
           </View>
         ) : !groups || total === 0 ? (
           <Text style={[type.bodySm, styles.empty]}>
-            No defensible packages found around this asset right now.
+            {/* D-178 QA-B B-6 — the line below is a claim about PACKAGE
+                QUALITY, and since D-178 the server can empty this panel
+                purely because the user already sent every package it would
+                have listed. Those packages were defensible enough to offer,
+                so say what actually happened. Only reachable when the route
+                says so (`excluded_count`); a panel emptied by anything else
+                keeps the sentence that is still true for it. */}
+            {(data?.excluded_count ?? 0) > 0
+              ? 'You have already offered every package we would build around this asset. Retract one under Awaiting them and it comes back here.'
+              : 'No defensible packages found around this asset right now.'}
           </Text>
         ) : (
           GROUP_KEYS.map((key) => {

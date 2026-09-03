@@ -1,6 +1,6 @@
 # FB-418
 
-**Status:** in_progress · 2026-09-03 · branch `claude/new-user-feedback-06dabd`, fix commit `f593020a` (worktree `happy-golick-345cf1`); QA A **PASS** / QA B **PASS**; awaiting ship
+**Status:** in_progress · 2026-09-03 · branch `claude/new-user-feedback-06dabd`, fix commit `f593020a`, backend follow-up `77a4e33b` + QA-resolution pass (worktree `happy-golick-345cf1`); QA A **PASS** / QA B **PASS**, all findings closed or named; awaiting ship
 
 - **Path:** fast-track bug — mini-PRD + scope block + one-page plan; no HLD/LLD delta.
 - **Covered IDs:** 418.
@@ -44,4 +44,37 @@
   queued like" comment is corrected in the same commit (all three k8 `#418` sites intact).
   Remaining: operator TestFlight check (3 steps, `backend-scope.md` §3) and the prod
   `shop_opened` volume read.
-
+- **Backend QA, 2026-09-03** — [`backend-qa-A.md`](backend-qa-A.md) (mechanical
+  correctness + honest evidence, **PASS**; A-1 non-blocking coverage gap, A-2…A-6
+  notes) · [`backend-qa-B.md`](backend-qa-B.md) (adversarial product / blast
+  radius, **PASS**; B-1 needed an operator read, B-2/B-3/B-4/B-6 honest-copy
+  defects, B-5 a 60 s cache hole, B-7 unmeasurable, C-4 the root cause of half
+  the report).
+- **QA resolution, 2026-09-03** — no blocking defect existed; this pass closes
+  the findings. **Four changes.** (1) **B-1 — parity is now full:** both idea
+  routes also take the deck's `like_days` = 7 LIKE subset of
+  `past_decision_keys` (via `TradeService.recent_like_keys`, unioned inside the
+  same loader), because R4 alone drops a like the moment ANY match row exists
+  while only `pending`/`accepted` are re-added — so a **declined** offer came
+  straight back to the shop while the deck held it a week. (2) **A-1:** the
+  `_emit_best` variant pre-filter and the downgrade-combo skip are pinned by a
+  two-variant test that is RED under exactly the mutation that left the whole
+  suite green. (3) **C-4 — the exclusion is visible:** `asset-ideas` returns
+  additive `excluded_count` + `excluded_by_group`, `fair-packages` returns
+  additive `excluded_count`, both routes log the set size and drop count per
+  request (also the flag-coupling tripwire). Counts are what was DROPPED, not
+  the set size, and 0 with the flag off. (4) **B-5/B-3/B-2/B-6 (mobile):** the
+  queued ✓ invalidates the `shop-ideas` rows (`refetchType: 'none'`), the
+  Same-value auto-widen stands down on an exclusion-caused zero instead of
+  asserting *"Nothing at {POS}"*, and the shop's and panel's empties say *"you
+  have offered every …"* — only when the group is empty as the server sent it
+  AND its exclusion count is > 0. Plus the comment corrections (B-8, A-5) and
+  the doc softenings (A-2), the undisclosed limits (A-3, A-4), and the flag
+  coupling KEPT with its cost named in `docs/runbook.md` + D-178.
+  **Evidence:** `pytest backend/tests` **4605 passed / 1 skipped**;
+  `check-shop-deck` **154 PASS** (153 + k10); `tsc --noEmit` clean;
+  `testid-lint` OK; 6 new tests each RED under a named mutation
+  ([`backend-prd.md`](backend-prd.md) §7, second table). **Named follow-ups NOT
+  built** ([`backend-prd.md`](backend-prd.md) §8): QA-B B-4 (a #417-surface
+  item), B-7's client `already_queued` prop, B-9, C-1, and C-3 — a re-send
+  affordance for a windowless exclusion, which **needs an operator ruling**.

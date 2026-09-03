@@ -331,6 +331,18 @@ export interface AssetIdeasResponse {
     lateral: AssetIdea[];
     downgrade: AssetIdea[];
   };
+  /** D-178 QA-B C-4 — how many ideas the server dropped because the caller
+   *  has already OFFERED them (a sent offer is a like). Additive and always
+   *  present; 0 when `trade.presentment_rules` is off or nothing matched.
+   *  Lets an empty group say "you've offered these" instead of blaming the
+   *  market for something the user did. NEVER the size of the exclusion
+   *  set — only what it actually removed from THIS answer. */
+  excluded_count: number;
+  excluded_by_group: {
+    upgrade: number;
+    lateral: number;
+    downgrade: number;
+  };
 }
 
 function normalizeAssetIdea(raw: any): AssetIdea {
@@ -416,6 +428,11 @@ export async function fetchAssetIdeas(body: {
   const g = res?.groups ?? {};
   const norm = (arr: any) =>
     Array.isArray(arr) ? arr.map(normalizeAssetIdea) : [];
+  // D-178 C-4 — an older server (or a failed field) reads as 0, which is the
+  // "say nothing extra" default: the copy branches below only ever ADD an
+  // explanation, never remove one.
+  const ex = res?.excluded_by_group ?? {};
+  const n = (v: any) => (Number.isFinite(Number(v)) ? Math.max(0, Number(v)) : 0);
   return {
     asset: res?.asset ?? null,
     direction: res?.direction === 'receive' ? 'receive' : 'give',
@@ -424,6 +441,12 @@ export async function fetchAssetIdeas(body: {
       upgrade: norm(g.upgrade),
       lateral: norm(g.lateral),
       downgrade: norm(g.downgrade),
+    },
+    excluded_count: n(res?.excluded_count),
+    excluded_by_group: {
+      upgrade: n(ex.upgrade),
+      lateral: n(ex.lateral),
+      downgrade: n(ex.downgrade),
     },
   };
 }
@@ -455,6 +478,9 @@ export interface FairPackagesResult {
   ideas: AssetIdea[];
   /** #189 — the whole list came from the widened fairness band. */
   relaxed: boolean;
+  /** D-178 QA-B C-4 — packages dropped because the caller already offered
+   *  them. Additive; 0 when the flag is off or nothing matched. */
+  excluded_count: number;
   /** Present only alongside an EMPTY list: `give_untouchable` |
    *  `unknown_asset` | `no_partner` | `unknown_league`. */
   reason?: string;
@@ -484,6 +510,9 @@ export async function getFairPackages(body: {
     },
     ideas: Array.isArray(res?.ideas) ? res.ideas.map(normalizeAssetIdea) : [],
     relaxed: res?.relaxed === true,
+    excluded_count: Number.isFinite(Number(res?.excluded_count))
+      ? Math.max(0, Number(res.excluded_count))
+      : 0,
     ...(typeof res?.reason === 'string' ? { reason: res.reason } : {}),
   };
 }

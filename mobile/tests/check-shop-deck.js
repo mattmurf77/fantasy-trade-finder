@@ -1016,6 +1016,34 @@ for (const rel of [BODY_REL, MODE_REL]) {
       ? `setSuppressed(${supCall.arguments.map((a) => txt(sf, a)).join(', ')})`
       : 'no setSuppressed call in handleLike',
   );
+  // k10 (D-178 QA-B B-5) — the send also marks the `shop-ideas` cache rows
+  // stale. Without it the fix was time-boxed, not made: `suppressed` dies
+  // with this screen instance while the cache row lives 60 s, so reopening
+  // the window inside that minute re-rendered the idea just sent. Three
+  // clauses, each load-bearing: the call sits in the SAME queued branch (a
+  // refused queue must invalidate nothing), the key is the `shop-ideas`
+  // prefix (every position selection owns its own row), and
+  // `refetchType: 'none'` — a refetch here would rebuild the open pager
+  // under the user's thumb, which is the P-1 rule this fix must not break.
+  const invCall = findAll(
+    sf,
+    (n) =>
+      ts.isCallExpression(n) &&
+      ts.isPropertyAccessExpression(n.expression) &&
+      n.expression.name.text === 'invalidateQueries' &&
+      !!gate &&
+      inside(n, gate.thenStatement),
+  )[0];
+  const invArg = invCall && invCall.arguments.length === 1 ? invCall.arguments[0] : null;
+  const invTxt = invArg ? txt(sf, invArg) : '';
+  assert(
+    !!invArg &&
+      ts.isObjectLiteralExpression(invArg) &&
+      /queryKey\s*:\s*\[\s*'shop-ideas'/.test(invTxt) &&
+      /refetchType\s*:\s*'none'/.test(invTxt),
+    "k10: the queued branch invalidates the ['shop-ideas', …] rows with refetchType 'none' (the next mount refetches; the open pager does not)",
+    invCall ? `invalidateQueries(${invTxt})` : 'no invalidateQueries call in the queued branch',
+  );
 }
 
 // ── (j) rev-3 §2 — the position filter row, on ALL modes ─────────────────

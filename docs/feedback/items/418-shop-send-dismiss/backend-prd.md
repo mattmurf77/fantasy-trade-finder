@@ -1,7 +1,9 @@
 # FB-418 backend follow-up — PRD: a sent offer is a LIKE on the idea routes
 
 > **Status:** built 2026-09-03 on `feat/fb418-backend-like-exclusion` (from
-> `f13dd96c`). Not merged, not deployed.
+> `f13dd96c`); **QA-resolution pass 2026-09-03** on
+> `claude/new-user-feedback-06dabd` (from `77a4e33b`) closing QA-A A-1…A-5 and
+> QA-B B-1/B-2/B-3/B-5/B-6/B-8/C-4 — see §10. Not merged, not deployed.
 > **Ruling:** [D-178](../../../../living-memory/DECISIONS.md) — operator, verbatim:
 > *"needs a backend follow up. This should be treated the same as any other
 > 'liked' trade."*
@@ -40,8 +42,12 @@ package against its own re-offer — silently, and only for users who had
 actually sent something.
 
 **R-3 — The filter runs before any cap, so a capped list still fills.**
-An excluded idea yields its slot to the next-best candidate. It must not be
-possible to send three offers and get 17 ideas where 20 were promised.
+An excluded idea yields its slot to the next-best candidate **where one
+exists**: the cap truncates a post-filter list, so the group refills from the
+candidates that remain and still empties when the excluded idea was the only
+one (QA-A A-2 — the earlier absolute phrasing overstated this; the mechanism
+is right, the claim was not). It must not be possible to send three offers and
+get 17 ideas where 20 were promised **while candidates 18–20 exist**.
 
 **R-4 — Group counts stay honest.** The excluded idea is absent from the
 payload itself, so anything the client derives from the payload — the shop's
@@ -71,11 +77,113 @@ byte-identical to pre-D-178.
 memory for a queued like. It says the opposite now. The three `#418` tag sites
 `check-shop-deck.js` k8 requires are untouched.
 
+### Requirements added by the QA-resolution pass (2026-09-03)
+
+**R-10 — Parity is FULL: the routes take the deck's whole like memory.**
+(QA-B B-1.) R4 is windowless but `load_awaiting_trades` subtracts a like the
+moment ANY `trade_matches` row exists — status-unfiltered
+(`database.py:8623-8636`) — while `load_matches_for_exclusion` re-adds only
+`pending`/`accepted` (`:8562`). A **`declined`** offer therefore sat in
+neither set and returned to the shop immediately, while the deck went on
+suppressing it for `like_days = 7.0` (`server.py:19198-19199`) through
+`past_decision_keys`. Both idea routes now also consult that `like_days` LIKE
+subset.
+
+*Which of the deck's like memories are imported, exactly:*
+
+| The deck consults | Imported here? | Why |
+|---|---|---|
+| R4 #336 — un-retracted awaiting likes in this league, windowless | **Yes**, since the first build | `_load_presentment_exclusions` |
+| R4 #336 — `pending`/`accepted` matches, windowless | **Yes**, since the first build | same loader |
+| `past_decision_keys` — the `like_days` = 7 LIKE subset | **Yes, new** | `TradeService.recent_like_keys()`, unioned inside the same loader. This is the arm that covers a **declined** offer, and also a like whose counterparty `load_awaiting_trades` cannot resolve from the roster snapshot (A-3) or that fell off its 500-row read (A-4) |
+| `past_decision_keys` — the `pass_cooldown_days` DISMISS subset | Already there, by its own route (D-067), not through this loader | `_dismissed_decision_keys`; unchanged, and deliberately still NOT on `fair-packages` |
+
+*Deliberately NOT imported:* nothing else exists to import — the deck's like
+memory is exactly those three arms. Two properties are inherited rather than
+improved, on purpose, because parity is the ruling: (a) the `like_days` subset
+is a **session snapshot** loaded at `session_init`, so a like made in the
+current session is not in it — it is covered by R4's windowless awaiting set
+until a match row appears, and the `declined` case (which requires a
+counterparty action) is picked up from the next session, exactly as on the
+deck; (b) no in-memory bind is added on `POST /api/trades/queue` (the D-067
+dismiss bind at `server.py:12905` has no like counterpart), because adding one
+would make the shop suppress MORE than the deck — a divergence, not parity.
+Beyond `like_days` a declined offer regenerates on both surfaces (Q-G6-2).
+
+**Pass criteria:** `test_a_declined_offer_stays_suppressed_like_the_deck` in
+both `test_asset_ideas.py` and `test_fair_packages.py` — each drives a real
+`create_trade_match` + two `record_match_disposition` calls to status
+`declined`, asserts `_load_presentment_exclusions(user, league) == set()` (R4
+genuinely holds nothing), and then asserts the idea is still absent.
+
+**R-11 — The exclusion is visible to the client and the operator.**
+(QA-B C-4 — the root cause of B-2/B-3/B-6 and of B-7's "ships
+unmeasurable".) `POST /api/trades/asset-ideas` returns two ADDITIVE top-level
+fields, `excluded_count: int` and `excluded_by_group: {upgrade, lateral,
+downgrade}` (one entry per key present in `groups`; `excluded_count` is their
+sum). `POST /api/trades/fair-packages` returns `excluded_count: int`. Both
+routes log one line per request naming the exclusion-set size and the drop
+count.
+
+Two properties are load-bearing and pinned:
+- The counts are what the exclusion **actually dropped** — distinct
+  `(give-set, receive-set)` keys, per group — never the size of the exclusion
+  set, most of whose keys have nothing to do with this pin. Counting keys
+  rather than calls makes a candidate re-evaluated at several sites count
+  once, and only the D-178 arm is counted: a D-067 dismiss is a different
+  story, and the copy the client branches on says *"you already offered
+  this"*.
+- They read **0** with the flag off. Stated plainly: **adding the fields is
+  the one thing that is not byte-identical in the rollback state.** It was
+  scoped so that every field a pre-D-178 client reads is unchanged, and the
+  new ones are inert there — a client can only ever ADD an explanation the
+  server actually caused, never invent one during a revert.
+
+**Pass criteria:** `test_route_reports_what_the_exclusion_dropped`,
+`test_excluded_counts_are_zero_with_the_flag_off` (asset-ideas) and
+`test_the_sweep_reports_what_the_exclusion_dropped` (fair-packages). Each
+seeds a second, unrelated like that can never be a candidate for the pin/
+anchor, so a `len(exclusion_keys)` implementation is RED.
+
+**R-12 — The slot-yielding pre-filters are pinned.**
+(QA-A A-1.) `_emit_best`'s variant filter (`trade_service.py:5591`) and the
+downgrade-combo skip (`:5713`) are what make R-3 true for every
+`_emit_best`-served group, and no test bound them: narrowing both to
+dismiss-only while keeping the `_emit` backstop left the entire suite green.
+**Pass criteria:**
+`test_an_excluded_variant_yields_its_slot_to_the_runner_up` — a group with two
+viable variants (`([P,S1],[U])` and `([P,S2],[U])`) where excluding the best
+must serve the SECOND; RED under exactly that mutation, where the group comes
+back empty.
+
+**R-13 — The client's honest-copy defects are closed with the new counts.**
+(QA-B B-5, B-3, B-2, B-6.)
+- **B-5:** `handleLike` invalidates the `['shop-ideas', leagueId, assetId]`
+  rows after a queued ✓, with `refetchType: 'none'` — the open pager must not
+  rebuild under the user's thumb (P-1), while the next mount refetches. Closes
+  the 60-second window in which `staleTime` outlived the screen-scoped
+  `suppressed` set and re-showed the sent idea.
+- **B-3:** the Same-value auto-widen no longer fires when the server's raw
+  zero is exclusion-caused (`excluded_by_group.lateral > 0`), so the shop's one
+  honest-notice line can no longer assert *"Nothing at {pos}"* about a pool
+  the user emptied himself.
+- **B-2 / B-6:** the shop's unfiltered empty and the single-pin panel's empty
+  say *"You have offered every … here"* instead of blaming the market — and
+  **only** when the group/panel is EMPTY as the server sent it AND its
+  exclusion count is > 0. A group that refilled to its cap reads exactly as it
+  does today.
+
+**Pass criteria:** `check-shop-deck` k10 (the invalidation, its query key and
+`refetchType: 'none'`, inside the queued branch); `tsc --noEmit` clean; all
+three copy branches unreachable without a non-zero server count, by
+construction.
+
 ## 4. Contract
 
-**No request-shape change on either route. No new field, no new enum, no new
-error.** The only observable delta is that the answer can contain fewer ideas:
-one already-offered package is absent rather than re-offered. Concretely:
+**No request-shape change on either route. No new enum, no new error.** The
+observable deltas are two: the answer can contain fewer ideas (one
+already-offered package is absent rather than re-offered), and — added by the
+QA-resolution pass, R-11 — the answer SAYS how many it dropped. Concretely:
 
 - `asset-ideas` — an idea missing from `groups.upgrade` / `groups.lateral` /
   `groups.downgrade`. The **"Already queued"** re-✓ path stops being reachable
@@ -87,8 +195,20 @@ one already-offered package is absent rather than re-offered. Concretely:
   band was already offered now correctly falls through to the widened band
   instead of returning a list of trades the user has already sent.
 - Both — gated on `trade.presentment_rules`; a failed load serves unfiltered.
+- **New, additive (R-11):** `asset-ideas` gains `excluded_count: int` and
+  `excluded_by_group: {upgrade: int, lateral: int, downgrade: int}`;
+  `fair-packages` gains `excluded_count: int`. Always present, 0 when the flag
+  is off or nothing matched, and never the size of the exclusion set. **Does
+  this break the flag-off byte-identity claim?** For every EXISTING field, no
+  — that is exactly how it was scoped, and the two flag-off tests compare the
+  whole payload and stay green. For the payload as a whole, yes, and stated
+  rather than papered over: two fields a pre-D-178 client never reads are now
+  present in both states, reading 0 in the rollback state. The alternative —
+  omitting them when the flag is off — was rejected: a field that appears and
+  disappears is a second, undocumented signal about the flag, and the client
+  would have to treat "absent" and "0" identically anyway.
 
-`docs/api-reference.md` carries this on both rows.
+`docs/api-reference.md` carries all of this on both rows.
 
 ## 5. The four design points, answered
 
@@ -103,7 +223,12 @@ one already-offered package is absent rather than re-offered. Concretely:
 
 The existing D-067 dismiss filter already sits at emission, *before* the
 `asset-ideas` cap, precisely so "a dismissed variant yields its slot to the
-next-best instead of silently consuming it".
+next-best instead of silently consuming it" — **where a next-best exists**.
+QA-A A-2: the cap truncates a post-filter list, so it refills from the
+candidates that remain; a group whose only idea was excluded still empties
+(`test_route_excludes_a_sent_offer` asserts exactly that for `lateral`). The
+mechanism is right; the absolute phrasing was not, here and in
+`docs/api-reference.md`, and both are now stated as what the code does.
 
 **Chosen.** The exclusion set is threaded into both generator impls as an
 `exclusion_keys` kwarg and applied at the same emission points, never to the
@@ -167,13 +292,42 @@ counterparty names, which this caller discards), not a TTL.
 | Matured matches subtracted; `pending`/`accepted` block, `declined` does not | `load_awaiting_trades` + `load_matches_for_exclusion` (Q-G6-2) | `test_a_live_match_excludes_the_same_way` |
 | Non-fatal failure ⇒ serve unfiltered | the loader's own `try/except` | `test_a_broken_exclusion_load_serves_unfiltered`, `test_route_serves_unfiltered_when_the_load_breaks` |
 
-One inherited limitation worth stating: `load_awaiting_trades` **drops** a like
-whose counterparty it cannot recover from the `league_members` roster snapshot.
-A stale member snapshot therefore weakens the exclusion (the idea is re-offered)
-rather than breaking anything — fail-open, consistent with the rest of this
-path. The tests persist that snapshot through the production writer
-(`upsert_league_members`) precisely so they do not accidentally pass on a shape
-production never produces.
+Three inherited limitations worth stating. All three are **fail-open** (they
+weaken the exclusion, re-offering an idea — the pre-D-178 behaviour) and all
+three are shared with the deck, which has lived with them since the G6 wave.
+Since the QA-resolution pass the `like_days` subset (R-10) covers a recent
+like through all three, because it is cut from `load_trade_decisions` and needs
+neither the roster snapshot nor the awaiting read — but only for `like_days`,
+so they still bite beyond a week.
+
+1. **The roster snapshot (QA-A A-3, disclosed here from the first build,
+   restated with its prod shape).** `load_awaiting_trades` **drops** a like
+   whose counterparty it cannot recover from the `league_members` roster
+   snapshot (`database.py:8704`, `if not partner_id: continue`). The tests
+   write that snapshot **synchronously**; production writes it from a
+   **best-effort background daemon** at `session_init` (`server.py:19577`,
+   inside a `try/except … continuing`). A session whose daemon upsert failed
+   therefore silently loses that half of the exclusion in a way the tests can
+   never see. The tests persist the snapshot through the production writer
+   (`upsert_league_members`) precisely so they do not accidentally pass on a
+   shape production never produces — but same-writer is not same-timing, and
+   the timing is the part that can fail in prod.
+2. **The 500-row cross-league cap (QA-A A-4 — not disclosed anywhere before
+   this pass).** `load_awaiting_trades` selects the **500 most recent likes
+   across ALL leagues** (`database.py:8613`, `.order_by(created_at.desc())
+   .limit(500)`, no `league_id` predicate), and `_load_presentment_exclusions`
+   filters to one league only *afterwards* (`server.py:5827-5828`). A user with
+   heavy like volume in other leagues can therefore have this league's older
+   likes truncated out of the set, silently. Pre-existing, shared with the
+   deck, not introduced by D-178, and fail-open.
+3. **The `league_id` asymmetry (QA-A A-6).** `asset-ideas` takes
+   `league_id = body.get("league_id") or g_league.league_id` with no
+   `league_mismatch` guard, unlike `fair-packages` and `/api/trades/queue`. A
+   foreign `league_id` cannot produce *unfiltered* ideas — the generator's
+   `self._leagues.get(league_id)` misses and returns empty groups — so it is
+   not a D-178 defect; noted because D-178 adds a consumer of that unvalidated
+   value, and because the `like_days` subset it now also consults is
+   session-league-scoped by construction.
 
 ### 5.5 Orientation, and the flag
 
@@ -271,6 +425,25 @@ fix in place with one targeted clause broken, restored immediately after.
 | 11 | `test_route_flag_off_is_byte_identical` | test_asset_ideas.py | R-8: `trade.presentment_rules` off ⇒ pre-D-178 behavior | **sabotage S1** — flag guard removed ⇒ excludes anyway |
 | 12 | `test_flag_off_is_byte_identical` | test_fair_packages.py | R-8 on the second route | **sabotage S1** |
 
+**QA-resolution pass, 2026-09-03 — six more tests, four named mutations.**
+Baseline for these is the *fixed* code at `77a4e33b`, since each pins behaviour
+that commit did not have; every one carries its mutation in its own docstring
+and every mutation was run.
+
+| # | Test | File | Proves | RED against (verified) |
+|---|---|---|---|---|
+| 13 | `test_an_excluded_variant_yields_its_slot_to_the_runner_up` | test_asset_ideas.py | R-12 / QA-A A-1 — the `_emit_best` variant pre-filter and the downgrade-combo skip are load-bearing | **Q-B**: both narrowed to `self._dismissed_decision_keys`, the `_emit` backstop left intact → the upgrade group comes back EMPTY. **1 failed, 106 passed** — and *only* this test, which is the point: the mutation was invisible to the whole suite before |
+| 14 | `test_a_declined_offer_stays_suppressed_like_the_deck` | test_asset_ideas.py | R-10 / QA-B B-1 on the shop route | **B-1-off**: the route drops `trade_service=` from its `_load_presentment_exclusions` call (the shipped `77a4e33b` behaviour) → the declined package is re-offered. **2 failed, 105 passed** (both routes' copies) |
+| 15 | `test_a_declined_offer_stays_suppressed_like_the_deck` | test_fair_packages.py | R-10 on the anchored sweep | **B-1-off** (same run as #14) |
+| 16 | `test_route_reports_what_the_exclusion_dropped` | test_asset_ideas.py | R-11 — counts are DROPS, per group, not set size | **set-size**: `excluded_count = len(exclusion_keys)` → the second, unrelated like inflates the count to 2. **2 failed, 105 passed** |
+| 17 | `test_the_sweep_reports_what_the_exclusion_dropped` | test_fair_packages.py | R-11 on the second route, incl. flag-off 0 | **set-size** (same run as #16) |
+| 18 | `test_excluded_counts_are_zero_with_the_flag_off` | test_asset_ideas.py | R-11 — the fields are inert in the rollback state | **flag-gate removed** (`if True:` at both new call sites) → the sent offer is counted with the flag off. **4 failed, 103 passed** (these two plus both pre-existing byte-identity bars) |
+
+Mobile, same pass: `check-shop-deck` **k10** (R-13's invalidation, its query
+key and `refetchType: 'none'`, inside the queued branch) is RED with the
+`invalidateQueries` call deleted — `no invalidateQueries call in the queued
+branch` — and green with it restored.
+
 Tests 8–12 are posture/regression bars and **cannot** be red on the baseline —
 the baseline is the behavior they pin. They are proven by sabotaging the fix
 instead, which is the only honest red for a bar of that kind; each carries its
@@ -304,15 +477,61 @@ Mobile: `npm run test:shop-deck` → **153 PASS**; `npx tsc --noEmit` → clean.
   read ever shows up in traces; not done speculatively.
 - **The prod volume read** the spec asks for — one `shop_opened` →
   `visibleIdeas.length` distribution before and after. That is an operator/
-  analytics task after the deploy, not part of this build.
+  analytics task after the deploy, not part of this build. QA-B B-7 corrects
+  the event: `shop_opened`'s allowed props are `{asset_position, source,
+  give_count}` and carry no idea count; the event that carries one is
+  `shop_mode_selected {mode, n_ideas}`, which fires on a chip tap only and so
+  never samples the default mode on open. Read it with that bias noted, or
+  take the server-side answer the new `excluded_count` log line now gives.
+
+### Named follow-ups from the QA pass — deliberately NOT built here
+
+These are carried out of the QA reports so they are not lost, and each needs
+either a separate surface or an operator ruling.
+
+| id | What | Why not here |
+|---|---|---|
+| **QA-B B-4** | A fair sweep emptied by likes lands the pushed anchored deck on the never-searched card (*"Hit 'Find a Trade' to start"* on a page whose Find-a-Trade button #417 hides). The fix is the `trades.canvas-results.fair-zero` card the in-canvas host already has (`TradesScreen.tsx:7927`), lifted into the classic ladder above the never-searched fallback. | A **#417-surface** item on the classic deck ladder, pre-existing (audit-Q5) and owned by that item's files. D-178 makes it more reachable; it does not create it. |
+| **QA-B B-7** | The client analytics prop: add `already_queued` to `calc_trade_queued`'s allow-set (`analytics_taxonomy.py:1550`) and emit the value `queueCalcTrade.ts` already holds, so `{queued: true, already_queued: true}` on `ShopAsset` falling to ~0 measures the fix from the client end. | A taxonomy change — the bright line says it is not a quick fix, and it is a separate one-commit client change. The server-side half of B-7 IS built: the `excluded_count` log line answers the same question from the other end. |
+| **QA-B B-9** | The bake-off arm inconsistency: an R4-bypassed arm gets decks that may contain a package their shop window refuses to show. Worth a line in the experiment's own notes. | Not a code change; belongs to the experiment's notes, not this build. |
+| **QA-B C-1** | A narrower awaiting loader for this caller (the current one resolves counterparty names and fans out `league_members` across every league the user has likes in, all of which the exclusion set discards), scoped against per-chip-change frequency rather than per-shop-open. | Performance work with no measured trigger. §5.3 already names it as the honest fix *if* the read shows up in traces; building it speculatively is the wrong order. |
+| **QA-B C-3** | A re-send affordance. The exclusion is windowless for an awaiting like, so a user who genuinely wants to re-send (they nudged the partner in chat) has no path from the shop — the only route back is retracting in Awaiting, which throws the original offer away. C-3's own suggestion is a *"you already offered this — view in Awaiting"* tile in place of the dropped idea. | **Needs an operator ruling.** It changes what the shop shows for an excluded idea, and the alternative reading — that a sent offer should simply be gone — is what D-178 just ruled. Not a decision to make inside a QA-resolution pass. |
 
 ## 9. Test plan (what a reviewer should re-run)
 
 1. `python3 -m pytest backend/tests/test_asset_ideas.py backend/tests/test_fair_packages.py -q`
-   → 101 passed.
-2. `python3 -m pytest backend/tests -q` → 4599 passed, 1 skipped.
-3. `git checkout -- backend/server.py backend/trade_service.py` (tests kept),
-   re-run step 1 → the 7 baseline-red tests in §7 fail. Restore.
-4. `cd mobile && npm run test:shop-deck` → 153 PASS; `npx tsc --noEmit` → clean.
-5. Operator, post-deploy: the 3-step TestFlight checklist in
+   → **107 passed** (101 at the first build, +6 from the QA-resolution pass).
+2. `python3 -m pytest backend/tests -q` → **4605 passed, 1 skipped**.
+3. `git checkout f13dd96c -- backend/server.py backend/trade_service.py`
+   (tests kept), re-run step 1 → the 7 baseline-red tests in §7 fail. Restore.
+   The six added in the QA pass are proven by their own named mutations
+   instead (§7's second table), because the code they pin did not exist at
+   `f13dd96c`.
+4. `cd mobile && npm run test:shop-deck` → **154 PASS** (153 + k10);
+   `npx tsc --noEmit` → clean; `bash scripts/testid-lint.sh` → OK.
+5. Operator, post-deploy: the TestFlight checklist in
    [`backend-scope.md`](backend-scope.md) §3.
+
+## 10. What the QA-resolution pass changed (2026-09-03)
+
+Both QA agents returned **PASS** with no blocking defect; this pass closes
+their findings rather than fixing a break.
+
+| Finding | Verdict | Where it landed |
+|---|---|---|
+| QA-A **A-1** (live mutant: the slot-yielding pre-filters are unpinned) | Closed | R-12; `test_an_excluded_variant_yields_its_slot_to_the_runner_up` |
+| QA-A **A-2** (the cap claim is stated absolutely) | Closed | R-3, §5.1 and `docs/api-reference.md` softened to what the code does |
+| QA-A **A-3** (roster snapshot written by a best-effort daemon in prod) | Closed | §5.4 item 1 — restated with its prod shape |
+| QA-A **A-4** (500-row cross-league like cap, undisclosed) | Closed | §5.4 item 2 — first disclosure |
+| QA-A **A-5** (mobile comment asserts the server half unconditionally) | Closed | `ShopOffersBody.tsx` — the claim is now flag-conditional and names the rollback state |
+| QA-A **A-6** (`league_id` asymmetry) | Noted | §5.4 item 3 |
+| QA-B **B-1** (a declined offer comes straight back) | **Closed — this was the ruling** | R-10 |
+| QA-B **B-2 / B-3 / B-6** (empty-state copy blames the market; the widen fabricates a cause) | Closed | R-13, on the back of R-11's counts |
+| QA-B **B-4** | Out of scope, named | §8 — a #417-surface item |
+| QA-B **B-5** (60-second cache hole) | Closed | R-13; `check-shop-deck` k10 |
+| QA-B **B-7** (ships unmeasurable) | Half closed | The server-side half is R-11's log line; the client `already_queued` prop is named in §8 |
+| QA-B **B-8** (stale comment at the source of the two sets) | Closed | `server.py` session build — the sentence D-178 reversed is gone |
+| QA-B **B-9**, **C-1**, **C-3** | Out of scope, named | §8 (C-3 needs an operator ruling) |
+| QA-B **C-2** (counts shrink unexplained) | Partly addressed | The copy in R-13 explains the EMPTY case; the "3 already offered" line under the chip row is not built — it would need a design pass, and C-3's tile would subsume it |
+| QA-B **C-4** (nothing says an exclusion happened) | **Closed** | R-11 — the root cause of B-2/B-3/B-6/B-7's server half |
+| QA-B **§4** (flag coupling) | Decision kept, cost named | The single gate stays; bought down with the log line (R-11) and the runbook warning. Recorded in [`backend-scope.md`](backend-scope.md) §6 and D-178's consequences |

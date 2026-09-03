@@ -4623,7 +4623,8 @@ class TradeService:
     """
 
     def __init__(self, players: dict, past_decision_keys: set | None = None,
-                 dismissed_keys: set | None = None):
+                 dismissed_keys: set | None = None,
+                 like_keys: set | None = None):
         """
         players: { player_id: Player } — full player pool
         past_decision_keys: set of (frozenset(give_ids), frozenset(receive_ids))
@@ -4634,6 +4635,19 @@ class TradeService:
             QA-B F2: a like is a queued proposal, never a suppression there).
             The caller shares ONE set object across formats so the swipe
             route's in-memory bind reaches every service.
+        like_keys: the LIKE subset of past_decision_keys (D-178 QA-B B-1),
+            same key derivation, the deck's own `like_days` = 7 window. The
+            deck has always suppressed a liked package for a week regardless
+            of match state; the idea routes imported only R4's windowless
+            awaiting/live set, which leaves a like whose match was DECLINED
+            in neither set — back in the shop at once while the deck still
+            holds it. The operator's ruling is parity, so the idea routes
+            take this subset too, through the SAME `_suppressed` predicate.
+            Read by `recent_like_keys()`, unioned into the request-scoped
+            exclusion set by `server._load_presentment_exclusions` — never
+            consulted directly here, so it stays under the one
+            `trade.presentment_rules` gate on those routes and the deck
+            keeps applying it via `_past_decision_keys` exactly as before.
         """
         self._players     = players
         self._trade_cards: dict[str, TradeCard] = {}    # trade_id → TradeCard
@@ -4641,6 +4655,19 @@ class TradeService:
         self._past_decision_keys = past_decision_keys or set()
         self._dismissed_decision_keys = (dismissed_keys
                                          if dismissed_keys is not None else set())
+        self._liked_decision_keys = (like_keys
+                                     if like_keys is not None else set())
+        # D-178 QA-B C-4 — DISTINCT ideas the like/exclusion set dropped on
+        # the most recent generate call, so the routes can report
+        # `excluded_count` / `excluded_by_group` and the client can tell
+        # "the market is empty" apart from "you emptied it". Per-call state
+        # reset at the top of each impl, exactly like `_presentment_kills`;
+        # counts KEYS, never the size of the exclusion set, and never the
+        # D-067 dismiss arm (a dismissed idea is a different story and a
+        # pre-existing one).
+        self._idea_excluded_keys: dict[str, set] = {
+            "upgrade": set(), "lateral": set(), "downgrade": set()}
+        self._fair_excluded_keys: set = set()
         # G6 presentment rules (flag trade.presentment_rules) — per-job
         # state, reset by every _generate_trades_impl call:
         #   _exclusion_keys — R4 #336 windowless awaiting/matched exclusion
@@ -5122,6 +5149,28 @@ class TradeService:
         counts["R4"] = len(self._r4_excluded_keys)
         return counts
 
+    def recent_like_keys(self) -> set:
+        """D-178 QA-B B-1 — the deck's `like_days`-windowed LIKE subset of
+        `_past_decision_keys`, read by `server._load_presentment_exclusions`
+        so the idea routes suppress everything the deck suppresses, not just
+        R4's windowless awaiting/live set. Returns the live set object (the
+        caller only reads it); empty for any service built without one, which
+        is byte-identical to pre-B-1."""
+        return self._liked_decision_keys
+
+    def excluded_idea_counts(self) -> dict[str, int]:
+        """D-178 QA-B C-4 — DISTINCT ideas the exclusion set dropped, per
+        group, on the most recent `generate_asset_ideas` call. Not the size
+        of the exclusion set (most of whose keys never match a candidate on
+        this pin) and not the dismiss arm: the number the client needs to
+        say "you already offered these" honestly."""
+        return {g: len(k) for g, k in self._idea_excluded_keys.items()}
+
+    def excluded_package_count(self) -> int:
+        """D-178 QA-B C-4 — the same count for the most recent
+        `generate_fair_packages` call, flat (that route has no groups)."""
+        return len(self._fair_excluded_keys)
+
     # ------------------------------------------------------------------
     # #189 — relaxed fallback for empty targeted sweeps
     # ------------------------------------------------------------------
@@ -5297,7 +5346,25 @@ class TradeService:
         caller that does not pass one, `_past_decision_keys` still
         excludes nothing on this sweep, and the filter runs at emission,
         BEFORE `asset_ideas_group_cap`, so an excluded idea yields its
-        slot to the next-best rather than shrinking the group.
+        slot to the next-best WHERE ONE EXISTS — the cap truncates a
+        post-filter list, so the group refills from what remains and
+        still empties when the excluded idea was the only one (QA-A A-2:
+        the earlier absolute phrasing overstated this).
+
+        QA-B B-1 — the set the routes pass is the deck's WHOLE like
+        memory: R4's windowless awaiting/live keys PLUS the deck's
+        `like_days` LIKE subset (`recent_like_keys`), unioned by
+        `server._load_presentment_exclusions`. Without that second arm a
+        DECLINED offer was in neither set and came straight back here
+        while the deck still suppressed it for a week. Nothing about the
+        subset is re-implemented either — it is the one the session build
+        already loaded.
+
+        QA-B C-4 — every drop is COUNTED, per group, distinct keys, read
+        back by the route through `excluded_idea_counts()`: the client
+        cannot otherwise tell an empty market from one the caller
+        emptied, and was explaining the second with copy written for the
+        first. The D-067 dismiss arm is deliberately not counted.
 
         #402 rev-3 §3 — `lateral_scope` (optional, validated by the
         route): absent/None or `"band"` keeps today's ±band lateral pool
@@ -5354,6 +5421,11 @@ class TradeService:
         |difference|). Deterministic for a fixed league snapshot.
         """
         empty: dict[str, list[dict]] = {"upgrade": [], "lateral": [], "downgrade": []}
+        # D-178 QA-B C-4 — per-call drop counters, reset BEFORE the early
+        # returns below so a route that answers `empty` can never report a
+        # previous call's count.
+        self._idea_excluded_keys = {
+            "upgrade": set(), "lateral": set(), "downgrade": set()}
         league = self._leagues.get(league_id)
         players = self._players
         _avoid = set(avoid_positions or ())      # #360
@@ -5522,10 +5594,20 @@ class TradeService:
         # and the like memory would drift apart. Absent/empty ⇒ every
         # pre-D-178 caller is byte-identical.
         _excl_keys = exclusion_keys or frozenset()
+        # QA-B C-4 — the exclusion arm is COUNTED (per group, distinct keys);
+        # the dismiss arm is not. The client branches its empty-state copy on
+        # "you already offered these", which only the exclusion arm can
+        # claim, and a package that is both liked and dismissed was still
+        # offered. Counting keys (not calls) makes a candidate re-evaluated
+        # at several sites count once.
+        _excl_drops = self._idea_excluded_keys
 
-        def _suppressed(give_ids, recv_ids) -> bool:
+        def _suppressed(give_ids, recv_ids, group) -> bool:
             key = presentment_key(give_ids, recv_ids)
-            return (key in self._dismissed_decision_keys) or (key in _excl_keys)
+            if key in _excl_keys:
+                _excl_drops[group].add(key)
+                return True
+            return key in self._dismissed_decision_keys
 
         strict: dict[str, list[dict]] = {"upgrade": [], "lateral": [], "downgrade": []}
         relaxed: dict[str, list[dict]] = {"upgrade": [], "lateral": [], "downgrade": []}
@@ -5537,7 +5619,7 @@ class TradeService:
             # exist so a suppressed variant yields its slot to the next-best
             # instead of silently consuming it. This runs BEFORE the group
             # cap below, so the group still fills to `asset_ideas_group_cap`.
-            if _suppressed(give_ids, recv_ids):
+            if _suppressed(give_ids, recv_ids, group):
                 return
             # Dedupe is GROUP-scoped (#402 rev-3 §3): under band scope the
             # groups partition the value axis, so adding `group` to the key
@@ -5588,7 +5670,7 @@ class TradeService:
             # QA-B F2 / D-178 — a dismissed OR liked variant is out of the
             # running entirely, so the next-best variant wins the slot rather
             # than the whole opponent's idea vanishing with it.
-            variants = [v for v in variants if not _suppressed(v[0], v[1])]
+            variants = [v for v in variants if not _suppressed(v[0], v[1], group)]
             if not variants:
                 return
             if _min_pkg_band <= 0:
@@ -5710,7 +5792,7 @@ class TradeService:
                             continue
                         # QA-B F2 / D-178 — a dismissed or liked combo never
                         # consumes one of the two headliner slots below.
-                        if _suppressed([asset_id], combo):
+                        if _suppressed([asset_id], combo, "downgrade"):
                             continue
                         res = _eval([asset_id], list(combo))
                         if res:
@@ -5918,14 +6000,22 @@ class TradeService:
         `accepted` matches, built by
         `server._load_presentment_exclusions`). An idea whose
         `presentment_key` is in it is never emitted: a package the caller has
-        already offered is not a new idea. The filter sits in `_emit`, so it
-        runs before the #189 strict/relaxed choice AND before
-        `fair_packages_cap` — a suppressed idea yields its slot rather than
-        shrinking the list. `None`/empty is byte-identical to pre-D-178. The
+        already offered is not a new idea. Since QA-B B-1 that set is the
+        deck's WHOLE like memory — R4's windowless keys PLUS the deck's
+        `like_days` LIKE subset — so a DECLINED offer stays suppressed here
+        for the week the deck holds it instead of returning at once. The
+        filter sits in `_emit`, so it runs before the #189 strict/relaxed
+        choice AND before `fair_packages_cap` — a suppressed idea yields its
+        slot rather than shrinking the list, WHERE A NEXT-BEST EXISTS (QA-A
+        A-2). Every drop is counted for the route's additive
+        `excluded_count` (QA-B C-4). `None`/empty is byte-identical to pre-D-178. The
         D-067 dismiss cooldown is deliberately NOT consulted here: it has
         never bound this route, and widening it is a separate ruling.
         """
         empty = {"ideas": [], "relaxed": False, "reason": None}
+        # D-178 QA-B C-4 — per-call drop counter, reset before the early
+        # returns so a refused sweep never reports a previous call's count.
+        self._fair_excluded_keys = set()
         league = self._leagues.get(league_id)
         players = self._players
         if not league:
@@ -5988,8 +6078,13 @@ class TradeService:
 
         def _emit(member, recv_ids: list[str], res) -> None:
             # D-178 — before the dedupe key is even claimed, so a suppressed
-            # package cannot swallow a slot on the way out.
-            if presentment_key(give_anchor, recv_ids) in _excl_keys:
+            # package cannot swallow a slot on the way out. QA-B C-4: the
+            # drop is COUNTED (distinct keys) so the route can report
+            # `excluded_count` and the client can tell an empty market apart
+            # from one the caller emptied.
+            _p_key = presentment_key(give_anchor, recv_ids)
+            if _p_key in _excl_keys:
+                self._fair_excluded_keys.add(_p_key)
                 return
             key = (member.user_id, frozenset(recv_ids))
             if key in seen:

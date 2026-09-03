@@ -183,6 +183,27 @@ const EMPTY_HEAD: Record<ShopMode, string> = {
   tier_down: 'No tier-down offers cleared the bar',
   same_value: 'No same-value offers cleared the bar',
 };
+// D-178 QA-B B-2 — the SAME empty, with the cause the user can act on. The
+// three lines above are claims about the MARKET; since D-178 the server can
+// empty a group because the user offered every idea in it, and blaming the
+// league for that is the fabricated-cause defect §4a exists to prevent. Only
+// reachable when the route says so (`excluded_by_group`), so a group that
+// refilled to its cap is untouched.
+const OFFERED_HEAD: Record<ShopMode, string> = {
+  tier_up: 'You have offered every tier-up here',
+  tier_down: 'You have offered every tier-down here',
+  same_value: 'You have offered every same-value deal here',
+};
+function offeredBody(mode: ShopMode, name: string): string {
+  const kind =
+    mode === 'tier_up'
+      ? 'tier-up'
+      : mode === 'tier_down'
+        ? 'tier-down'
+        : 'same-value';
+  return `Every ${kind} offer we can build around ${name} is already sitting with a league-mate. Retract one under Awaiting them and it comes back here.`;
+}
+
 function emptyBody(mode: ShopMode, name: string): string {
   if (mode === 'tier_up') {
     return `Nobody in this league holds a bigger piece that a package around ${name} can reach under the fairness rules.`;
@@ -323,11 +344,15 @@ export default function ShopOffersBody({
   // simply doesn't offer a recently dismissed idea. This set only bridges
   // the in-instance gap between a commit and that next fetch. A QUEUED
   // like (#418) is the same story since D-178 (2026-09-03): the ✓ writes a
-  // real `decision:'like'` row and asset-ideas now consults the deck's
-  // windowless awaiting-like exclusion set, so the next fetch doesn't
-  // re-offer a sent idea either — this set bridges the same gap for a ✓
-  // that it bridges for a ✕, and is no longer the only filter. An UNDONE
-  // dismiss never enters:
+  // real `decision:'like'` row and asset-ideas consults the deck's like
+  // memory — the windowless awaiting/live set plus the `like_days` subset
+  // — so the next fetch doesn't re-offer a sent idea either. QA-A A-5:
+  // that server half is CONDITIONAL, gated on `trade.presentment_rules`,
+  // and turning that flag off is the documented deploy-free rollback — in
+  // which state this set is again the only thing standing between a ✓ and
+  // a re-offer, exactly as it was before D-178. So it bridges the same gap
+  // for a ✓ that it bridges for a ✕, and stops being the only filter only
+  // while the flag is lit. An UNDONE dismiss never enters:
   // Undo nulls `pendingDismissRef` and cancels the timer before any flush
   // path can reach `commitDismiss`, so the key never leaves
   // `locallyRemoved` for here. The one subtraction is the commit-failure
@@ -447,7 +472,16 @@ export default function ShopOffersBody({
     pickerApplies &&
     widenKey !== '' &&
     ideasQuery.isSuccess &&
-    (ideasQuery.data?.groups.lateral.length ?? 0) === 0;
+    (ideasQuery.data?.groups.lateral.length ?? 0) === 0 &&
+    // D-178 QA-B B-3 — the widen answers ONE question ("is the position
+    // filter why Same value is empty?") and its notice asserts that answer.
+    // Since D-178 the server's raw zero has a second cause: the user offered
+    // them all. The widen cannot tell the two apart, so it would re-request
+    // every position and then say "Nothing at {pos}" — the one fabricated
+    // cause in the shop, on the line §4a wrote to be never-fabricated. When
+    // the server says the zero is its own doing, stand down and let the
+    // honest "you've offered these" empty below speak.
+    (ideasQuery.data?.excluded_by_group.lateral ?? 0) === 0;
   const widenedQuery = useQuery({
     queryKey: ['shop-ideas', leagueId, asset.id, widenKey],
     queryFn: () =>
@@ -472,17 +506,33 @@ export default function ShopOffersBody({
   // render, not that the rows themselves share an age.
   const rendered = useMemo(() => {
     const base = ideasQuery.data?.groups;
+    // D-178 C-4 — the exclusion counts ride the SAME snapshot as the groups
+    // they describe, for the same reason `widenShowing` does: copy that says
+    // "you've offered these" must never be computed from a differently-
+    // composed payload than the tiles (or the absence of tiles) it explains.
+    const baseExcluded = ideasQuery.data?.excluded_by_group;
     if (!base || !widenEligible || !widenedQuery.data) {
-      return { groups: base, widenShowing: false };
+      return { groups: base, widenShowing: false, excluded: baseExcluded };
     }
     // Lateral ONLY — upgrade/downgrade keep the own-position default.
     return {
       groups: { ...base, lateral: widenedQuery.data.groups.lateral },
       widenShowing: true,
+      excluded: baseExcluded && {
+        ...baseExcluded,
+        lateral: widenedQuery.data.excluded_by_group.lateral,
+      },
     };
   }, [ideasQuery.data, widenEligible, widenedQuery.data]);
   const groups = rendered.groups;
   const widenShowing = rendered.widenShowing;
+  // D-178 QA-B B-2 — the active mode's group is empty AS THE SERVER SENT IT
+  // and the exclusion is why. BOTH halves are required: a group that refilled
+  // to its cap reads exactly as it did before this change, and an empty with
+  // no exclusion behind it keeps the market copy that is still true for it.
+  const offeredOutOfMode =
+    (groups?.[SHOP_MODE_GROUP[mode]]?.length ?? 0) === 0 &&
+    (rendered.excluded?.[SHOP_MODE_GROUP[mode]] ?? 0) > 0;
 
   // Settled selection as a list, for copy that must describe the DATA on
   // screen (the fetched payload), not a chip tapped 100ms ago.
@@ -726,6 +776,19 @@ export default function ShopOffersBody({
         // pending state, no undo route; a refusal writes nothing.
         requestPagerScroll(index);
         setSuppressed((s) => new Set(s).add(key));
+        // D-178 QA-B B-5 — `suppressed` dies with this screen instance (by
+        // design), but the `shop-ideas` cache row does not: `staleTime` is
+        // 60 s, so backing out and re-entering the window inside that minute
+        // mounted a fresh instance against the PRE-send payload and showed
+        // the idea again — the #418 complaint, time-boxed rather than fixed.
+        // Mark the rows stale WITHOUT refetching: `refetchType: 'none'` keeps
+        // the open pager from rebuilding under the user's thumb (P-1), while
+        // the next mount fetches and gets the server's post-D-178 answer.
+        // Every selection owns its own row, so the key is the prefix.
+        queryClient.invalidateQueries({
+          queryKey: ['shop-ideas', leagueId, asset.id],
+          refetchType: 'none',
+        });
       }
       onToast(res.toast);
     } finally {
@@ -940,9 +1003,13 @@ export default function ShopOffersBody({
           // Clear-positions button here: nothing is selected to clear, and
           // a dead control is worse than none (mockup D11).
           <View style={styles.empty} testID="shop.empty">
-            <Text style={[type.body, styles.emptyHead]}>{EMPTY_HEAD[mode]}</Text>
+            <Text style={[type.body, styles.emptyHead]}>
+              {offeredOutOfMode ? OFFERED_HEAD[mode] : EMPTY_HEAD[mode]}
+            </Text>
             <Text style={[type.bodySm, styles.emptyBody]}>
-              {emptyBody(mode, asset.name)}
+              {offeredOutOfMode
+                ? offeredBody(mode, asset.name)
+                : emptyBody(mode, asset.name)}
             </Text>
             {SHOP_MODES.some((m) => m !== mode && visibleByMode[m].length > 0) ? (
               <Text style={[type.bodySm, styles.emptyHint]}>
