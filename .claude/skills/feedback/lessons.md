@@ -389,3 +389,15 @@ files. Seeded from history before this skill existed:
   1.16.14, and #414 was closed by a DIFFERENT implementation, D-175/#268). For every
   in_progress item run `git log origin/main..<branch>` AND `gh pr list` before assuming the
   HANDOFF's "nothing in flight" covers it — a parallel session's HANDOFF overwrote this one's.
+- 2026-09-03 [triage] The prod event stream (`user_events`: `event_type`, `occurred_at` is a
+  TEXT ISO string — compare as strings, never `at time zone`) settled #417 in one query
+  after two hours of code-only tracing had produced a WRONG hypothesis twice. A source-less
+  `find_trades_tapped {mode}` fired 1 s after the anchored deck arrived — nothing in the
+  code path I was reading. Rule: for any "card N didn't match" report, pull the operator's
+  events for the filing window FIRST (the `feedback_submitted` row anchors the time), then
+  read code. The read is classifier-gated in auto mode — ask the operator once ("you can
+  read the DB"), don't retry blind.
+- 2026-09-03 [plan] A single Author + single critic pass was enough for a one-file
+  fast-track item: the critic found 11 non-blocking doc defects (a mis-described mechanism,
+  a vacuous guard, an inverted-branch hole in an AST assertion) and fixed them in place —
+  cheaper than a second round. Keep the critic's "fix the docs yourself" mandate.
