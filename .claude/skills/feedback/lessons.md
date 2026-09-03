@@ -380,3 +380,12 @@ files. Seeded from history before this skill existed:
   backend half fixes fielded builds: one merge put #409 live on Render for every phone
   already installed (verified deploy CREATED for the sha, then polled to `live`), while the
   mobile half waits on TestFlight. Don't split the PR just because the platforms differ.
+- 2026-09-02c [triage] A fresh agent worktree has NO `secrets.local.env` (gitignored, lives
+  only in the main checkout), so `fetch_feedback.py` dies before the network. Fix that works
+  and stays ignored: `ln -sf "<main checkout>/secrets.local.env" secrets.local.env` in the
+  worktree (`git check-ignore` confirms). Don't copy the file — one source of truth.
+- 2026-09-02c [triage] `in_progress` can mean "merged to a SESSION branch with a version bump
+  and no PR" (#413 + v1.16.15 sat on `claude/weekly-feedback-review-5943dd` while main shipped
+  1.16.14, and #414 was closed by a DIFFERENT implementation, D-175/#268). For every
+  in_progress item run `git log origin/main..<branch>` AND `gh pr list` before assuming the
+  HANDOFF's "nothing in flight" covers it — a parallel session's HANDOFF overwrote this one's.

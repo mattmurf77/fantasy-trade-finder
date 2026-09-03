@@ -48,7 +48,8 @@
 //     say 'ShopAsset'; shop_opened names the TAP on Trades — the taxonomy
 //     comment and the emit sites agree on that split);
 //   • a committed dismiss could be resurrected by a cache tick (Fix A: the
-//     suppression set is commit-only, never cleared by data), or an early
+//     suppression set has exactly two gates — a committed dismiss and a
+//     queued ✓ like, #418 — and is never cleared by data), or an early
 //     commit could leave a dead "Undo" button on screen (B-4 —
 //     retract-by-reference, now wired on the SCREEN's toast mount).
 //
@@ -841,6 +842,126 @@ for (const rel of [BODY_REL, MODE_REL]) {
       !referencesIdentifier(sf, fnUndo, 'commitDismiss') &&
       !referencesIdentifier(sf, fnUndo, 'flushPendingDismiss'),
     'i6: undo cancels the timer — the request is never sent (the copy is true)',
+  );
+}
+
+// ── (k) #418 — a queued like leaves the pager (the second suppression gate)
+// "Send this offer" queued the trade but left the tile in place; the fix
+// gives handleLike the committed-removal half commitDismiss already has.
+// Pinned here: the write goes to the COMMITTED set (never the pending one —
+// there is no un-queue route, so "Undo" would be the dishonest copy R-9 was
+// written to prevent); the pager index is REQUESTED before the write (P-1);
+// the write is conditional on `res.queued`, inside the then-branch, after
+// the await (never optimistic — a refused queue leaves the tile); an
+// already-queued idea is still queued and still leaves (R-b); the like
+// never flushes the pending dismiss (D-1); busyKey still releases in
+// `finally` (R-8); and the three "one gate" comments carry the item number.
+
+{
+  const sf = parse(BODY_REL);
+  const fnLike = functionNamed(sf, 'handleLike');
+  const inside = (n, root) =>
+    !!root && n.getStart(sf) >= root.getStart(sf) && n.getEnd() <= root.getEnd();
+
+  // k1 — the like writes the COMMITTED set.
+  assert(
+    !!fnLike && referencesIdentifier(sf, fnLike, 'setSuppressed'),
+    'k1: handleLike writes the suppression set (a queued like is committed by the call itself)',
+  );
+  // k2 — …and never the pending one (no undo route exists for a sent offer).
+  assert(
+    !!fnLike &&
+      !referencesIdentifier(sf, fnLike, 'setLocallyRemoved') &&
+      !referencesIdentifier(sf, fnLike, 'locallyRemoved'),
+    'k2: handleLike never touches locallyRemoved (a like has no pending state)',
+  );
+  // k3 — P-1: the index is REQUESTED before the data write. A missing
+  // identifier on either side is a fail, not a vacuous pass.
+  const reqIds = findAll(
+    sf,
+    (n) => ts.isIdentifier(n) && n.text === 'requestPagerScroll' && inside(n, fnLike),
+  );
+  const supIds = findAll(
+    sf,
+    (n) => ts.isIdentifier(n) && n.text === 'setSuppressed' && inside(n, fnLike),
+  );
+  assert(
+    reqIds.length > 0 && supIds.length > 0 && reqIds[0].getStart(sf) < supIds[0].getStart(sf),
+    'k3: handleLike requests the pager index BEFORE writing the suppression set (P-1)',
+    `requestPagerScroll ×${reqIds.length}, setSuppressed ×${supIds.length}`,
+  );
+  // k4 — the write is gated on `res.queued`, in the THEN branch, with no
+  // negation in the condition (the inverted-branch hole: `if (res.queued)
+  // {toast} else {suppress}` would remove the tile on a refusal).
+  const supCall = findAll(
+    sf,
+    (n) =>
+      ts.isCallExpression(n) &&
+      ts.isIdentifier(n.expression) &&
+      n.expression.text === 'setSuppressed' &&
+      inside(n, fnLike),
+  )[0];
+  const gate = supCall && nearestAncestor(supCall, ts.isIfStatement);
+  assert(
+    !!supCall &&
+      !!gate &&
+      inside(gate, fnLike) &&
+      referencesIdentifier(sf, gate.expression, 'queued') &&
+      !/!/.test(txt(sf, gate.expression)) &&
+      inside(supCall, gate.thenStatement),
+    'k4: the suppression write sits in the then-branch of an un-negated `queued` check (a refused queue writes nothing)',
+    !supCall
+      ? 'no setSuppressed call in handleLike'
+      : !gate
+        ? 'setSuppressed is not inside an if statement'
+        : `if (${txt(sf, gate.expression)}) — in then-branch: ${inside(supCall, gate.thenStatement)}`,
+  );
+  // k5 — an already-queued idea is still queued and still leaves.
+  assert(
+    !!fnLike && !referencesIdentifier(sf, fnLike, 'alreadyQueued'),
+    'k5: handleLike never branches on alreadyQueued (already queued IS queued — the tile leaves either way)',
+  );
+  // k6 (D-1) — the like is not a flush trigger for the pending dismiss.
+  assert(
+    !!fnLike &&
+      !referencesIdentifier(sf, fnLike, 'flushPendingDismiss') &&
+      !referencesIdentifier(sf, fnLike, 'flushPendingDismissRef'),
+    'k6: handleLike never flushes the pending dismiss (D-1 — a like creates no second pending state)',
+  );
+  // k7 (R-8) — busyKey releases in `finally`; the write lives inside the
+  // `try`, AFTER the await (post-resolution, never optimistic).
+  const tryStmt = findAll(sf, (n) => ts.isTryStatement(n) && inside(n, fnLike))[0];
+  const awaitExpr = findAll(sf, (n) => ts.isAwaitExpression(n) && inside(n, fnLike))[0];
+  assert(
+    !!tryStmt &&
+      !!tryStmt.finallyBlock &&
+      referencesIdentifier(sf, tryStmt.finallyBlock, 'setBusyKey') &&
+      !!supCall &&
+      !!awaitExpr &&
+      inside(supCall, tryStmt.tryBlock) &&
+      supCall.getStart(sf) > awaitExpr.getStart(sf),
+    'k7: busyKey is released in finally, and the suppression write sits inside the try AFTER the await',
+    !tryStmt
+      ? 'no try statement in handleLike'
+      : !tryStmt.finallyBlock
+        ? 'try has no finally block'
+        : !referencesIdentifier(sf, tryStmt.finallyBlock, 'setBusyKey')
+          ? 'finally does not release busyKey'
+          : 'the write is outside the try block or precedes the await',
+  );
+  // k8 (R-9) — textual tripwire, not a proof: the header bullet, the
+  // `suppressed` block, and the commitDismiss note all name the second
+  // gate by item number, one of them inside commitDismiss's range.
+  const src = sf.text;
+  const tagAt = [];
+  for (let i = src.indexOf('#418'); i >= 0; i = src.indexOf('#418', i + 1)) tagAt.push(i);
+  const fnCommit = functionNamed(sf, 'commitDismiss');
+  assert(
+    tagAt.length >= 3 &&
+      !!fnCommit &&
+      tagAt.some((i) => i >= fnCommit.getStart(sf) && i <= fnCommit.getEnd()),
+    'k8: the body names the second gate (#418) in at least three comments, one inside commitDismiss',
+    `#418 ×${tagAt.length}${fnCommit ? '' : '; commitDismiss not found'}`,
   );
 }
 

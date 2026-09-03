@@ -79,7 +79,10 @@ import type { Player, TradeCard } from '../shared/types';
 //               `record_elo` was ruled out). Refusals render the shipped
 //               `queueRefusalLine` copy; `calc_trade_queued` fires with
 //               screen 'ShopAsset'. The SCREEN owns the Toast mount
-//               (`onToast` — host = ShopAssetScreen, rev3-spec §1).
+//               (`onToast` — host = ShopAssetScreen, rev3-spec §1). A
+//               QUEUED like (incl. "already queued") is the SECOND gate
+//               into the suppression set (#418): the tile leaves the
+//               pager for the rest of the session, like a committed ✕.
 //   ✕ dismiss — full deck-pass semantics via POST /api/trades/swipe
 //               `decision:'pass'`, but the POST is HELD for UNDO_HOLD_MS and
 //               Undo cancels the timer so the request is never sent — the
@@ -305,8 +308,10 @@ export default function ShopOffersBody({
   const [locallyRemoved, setLocallyRemoved] = useState<Set<string>>(new Set());
   // Fix A (rulings 2026-08-28 R-A — B-3 + P-2, ONE mechanism).
   // UNIVERSAL RULE: a COMMITTED dismissal is client-authoritative for the
-  // shop session. Keys enter this set only when a held dismiss COMMITS
-  // (never while merely pending — that's `locallyRemoved` above), and
+  // shop session. Keys enter this set through TWO gates — a held dismiss
+  // that COMMITS, or a ✓ like the server QUEUED (#418, `handleLike`) —
+  // never while a dismiss is merely pending (that's `locallyRemoved`
+  // above), and
   // NOTHING clears it: not dataUpdatedAt, not a warm cache row on a
   // selection switch, not a racing refetch, not a fresh payload. It dies
   // only with this instance — i.e. with the pushed ShopAssetScreen: back
@@ -316,7 +321,10 @@ export default function ShopOffersBody({
   // consults the D-067 dismiss-cooldown when building its pools (QA-B
   // backend fix 2, 2026-08-28 — landed this round), so the next fetch
   // simply doesn't offer a recently dismissed idea. This set only bridges
-  // the in-instance gap between a commit and that next fetch. An UNDONE
+  // the in-instance gap between a commit and that next fetch. For a
+  // QUEUED like (#418) there is NO server-side memory — asset-ideas does
+  // not consult the queue — so the next fetch WILL re-offer the idea and
+  // this set is its only filter for the rest of the session. An UNDONE
   // dismiss never enters:
   // Undo nulls `pendingDismissRef` and cancels the timer before any flush
   // path can reach `commitDismiss`, so the key never leaves
@@ -533,7 +541,8 @@ export default function ShopOffersBody({
 
   function commitDismiss(idea: AssetIdea) {
     const key = assetIdeaKey(idea);
-    // Fix A — the commit is the ONE gate into the suppression set: from
+    // Fix A — the commit is one of TWO gates into the suppression set
+    // (the other is a queued ✓ like in `handleLike`, #418): from
     // here the dismissal is client-authoritative for the shop session
     // (B-3/P-2), and the pending entry is dropped in the same breath so
     // the two sets stay disjoint (pending vs committed).
@@ -708,6 +717,14 @@ export default function ShopOffersBody({
         receiveIds: idea.receive_player_ids,
         screen: 'ShopAsset',
       });
+      if (res.queued) {
+        // #418 — a queued offer (incl. "already queued") is committed by
+        // the call itself: request the pager index first (P-1), then the
+        // key enters the session suppression set like a committed ✕. No
+        // pending state, no undo route; a refusal writes nothing.
+        requestPagerScroll(index);
+        setSuppressed((s) => new Set(s).add(key));
+      }
       onToast(res.toast);
     } finally {
       setBusyKey(null);
