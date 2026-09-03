@@ -8,6 +8,17 @@
 
 ---
 
+## 2026-09-03b — API audit fixes on PR #273 (D-177); finding 3 held, web push deferred
+
+**Where:** branch `claude/api-audit-redundancies-9a6075` pushed; [PR #273](https://github.com/mattmurf77/fantasy-trade-finder/pull/273) open against `main` @ `6ccd6698`. All gates green on the merged tree (pytest 4617/1, tsc 0, testid-lint OK, web 175/175 — TEST_LEDGER 2026-09-03b). Nothing in flight; the two agent worktrees are swept (`docs/recovery/2026-09-03-api-audit-agent-sweep.md`). Session worktree `new-user-feedback-5fa613` hosts this branch.
+
+**Owed, in order:**
+1. **Operator: merge PR #273** (squash, as usual). Render auto-deploys the backend + web; mobile changes ride the next EAS build.
+2. **Post-deploy:** one real session init in the Render log should show ≤7 `api.sleeper.app` calls (one `rosters`, one `/league/{id}`, ≤2 `transactions`). Then the 5-step TestFlight check in the PR body — it only proves anything on a build cut after this merge.
+3. **Finding 3 decision** (NEXT 2026-09-03b item 2): ping-then-init trades roster freshness for calls; the safer variant is a server-side 15-min skip inside the daemon. Not built.
+4. **Web push** is a scoped feature, not a fix (NEXT item 3). **Route hygiene** batch (NEXT item 4) is mechanical and each row is an `api-reference.md` edit.
+5. `SEASON_START` in `backend/sleeper_trades_service.py` is a constant (2026-09-08) — bump it each September, or replace with a `/v1/state/nfl` read if one ever lands.
+
 ## 2026-09-03 — #413 Sleeper pick-send SHIPPED (D-176, v1.16.15); the parallel #414 build was superseded by D-175 and NOT shipped
 
 **Where:** `main` @ `5c83e8cd` (PR [#270](https://github.com/mattmurf77/fantasy-trade-finder/pull/270), squash, CI ×4 green). Render deploy `dep-dacf8l6q1p3s73ek9ef0` **live** 2026-09-03T04:16Z. EAS build **144** / v1.16.15 queued with auto-submit (submission `b4763913`). Feedback #413 and #414 → `fixed`. All session refs ledgered and deleted (`docs/recovery/2026-09-03-fb413-ship-sweep.md`); the hosting worktree `.claude/worktrees/unruffled-meitner-3596cb` cannot remove itself — `git worktree remove` it from the main checkout.
@@ -397,6 +408,7 @@ move, and the avatar lab's anchor test models the brief's described layout, not 
 **none**, so the bubble reads "The Analyst" above a ram, which is D-155's recorded default). Higgsfield credits ~4.35.
 
 ## Table of Contents
+- [2026-09-03b — API audit fixes on PR #273 (D-177); finding 3 held, web push deferred](#2026-09-03b--api-audit-fixes-on-pr-273-d-177-finding-3-held-web-push-deferred)
 - [2026-09-02 — web parity SHIPPED (PR #263, live on Render); what is left is two operator inputs, not code](#2026-09-02--web-parity-shipped-pr-263-live-on-render-what-is-left-is-two-operator-inputs-not-code)
 - [2026-09-02 — D-172 `consensus_fit_weight` LIVE at 0.5; research write-back landed; two prototype worktrees ledgered](#2026-09-02--d-172-consensusfitweight-live-at-05-research-write-back-landed-two-prototype-worktrees-ledgered)
 - [2026-08-27 — #384 partner shape-summary regression SHIPPED to main; owed = one TestFlight checklist on the next build](#2026-08-27--384-partner-shape-summary-regression-shipped-to-main-owed--one-testflight-checklist-on-the-next-build)
