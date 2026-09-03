@@ -463,3 +463,55 @@ def test_mfl_unknown_action_400(client):
     r = _entry(c, platform="mfl", action="my_leagues")
     assert r.status_code == 400
     assert r.get_json()["error"] == "bad_action"
+
+
+# ── web landing mirror (landing platform options §V3, 2026-09-03) ───────────
+# The web client has no platform-league cache: after the mint → import
+# handoff it builds its /api/session/init body straight from
+# GET /api/{espn,mfl}/leagues (web/js/app.js buildPlatformRosterData).
+# These pin the two facts that build relies on — the snapshot lists the
+# claimed league under the entry token, and the claimed team's member row
+# carries the ENTRY user id (so `members.find(m => m.user_id === user_id)`
+# resolves) with a non-empty roster in Sleeper id space.
+
+def _import_then_leagues(c, token, platform, body):
+    r = c.post(f"/api/{platform}/link",
+               headers={"X-Session-Token": token,
+                        "Content-Type": "application/json"},
+               data=json.dumps(body))
+    assert r.status_code == 200, r.get_data(as_text=True)
+    r = c.get(f"/api/{platform}/leagues", headers={"X-Session-Token": token})
+    assert r.status_code == 200, r.get_data(as_text=True)
+    return r.get_json()["leagues"]
+
+
+def test_mfl_entry_leagues_snapshot_carries_the_claimed_franchise(client):
+    c, _ = client
+    minted = _entry(c, platform="mfl", mfl_league_id=MFL_LEAGUE, year=2026,
+                    franchise_id="0001").get_json()
+    leagues = _import_then_leagues(
+        c, minted["session_token"], "mfl",
+        {"mfl_league_id": MFL_LEAGUE, "year": 2026, "franchise_id": "0001"})
+    assert [lg["league_id"] for lg in leagues] == [MFL_LEAGUE]
+    lg = leagues[0]
+    assert lg["platform"] == "mfl" and lg["total_rosters"]
+    mine = [m for m in lg["members"] if m["user_id"] == minted["user_id"]]
+    assert len(mine) == 1 and mine[0]["player_ids"]
+    others = [m for m in lg["members"] if m["user_id"] != minted["user_id"]]
+    assert others and all(m["user_id"].startswith("mfl:") for m in others)
+
+
+def test_espn_entry_leagues_snapshot_carries_the_claimed_team(client):
+    c, _ = client
+    minted = _entry(c, platform="espn", espn_league_id=ESPN_LEAGUE,
+                    team_id=1).get_json()
+    leagues = _import_then_leagues(
+        c, minted["session_token"], "espn",
+        {"espn_league_id": ESPN_LEAGUE, "team_id": 1})
+    assert [lg["league_id"] for lg in leagues] == [ESPN_LEAGUE]
+    lg = leagues[0]
+    assert lg["platform"] == "espn" and lg["total_rosters"]
+    mine = [m for m in lg["members"] if m["user_id"] == minted["user_id"]]
+    assert len(mine) == 1 and mine[0]["player_ids"]
+    others = [m for m in lg["members"] if m["user_id"] != minted["user_id"]]
+    assert others and all(m["user_id"].startswith("espn:") for m in others)

@@ -525,6 +525,7 @@
 | D-090 | A Current-Year Pick Reads as Its Real Slot; the 2026-07-18 "Can't Resolve a Slot" Premise Is Narrowed, Not the Decision | 2026-08-19 |
 | D-175 | The Gap Sweetener's Trigger Is a Floor Plus a Relative Band, and Its Closer Is Best-Effort; Shipped Live at 750 / 0.12 / 1 | 2026-09-02 |
 | D-176 | Sleeper Pick Sends Are Encoded Server-Side From the Grid Plus Live `traded_picks`; the Client Never Encodes and Any Unresolvable Pick Refuses the Whole Send | 2026-09-02 |
+| D-177 | The Web Landing Mirrors Platform Entry Through the Same Sessionless Route; Private ESPN on Web Is the Cookie Paste, and Entry Users Read the Platform Snapshot | 2026-09-03 |
 | D-178 | Sleeper Reads Are Fetched Once Per Session Init and Handed Down; the Trades Sweep Is Incremental (Offseason = Leg 1); Cron Sweeps Cover Only Leagues Active in 30 Days, With the Draft Probe Season-Gated | 2026-09-03 |
 | D-174 | A Card Says Why a Give-Side Piece Is There When the User Rates Him Below Market; the Vehicle Is `reasons`, the Bar Is the Shrunk Board | 2026-09-02 |
 | D-173 | Web Posture Is B, Companion: Marketing Front Door Plus Session-Gated Tools, Not Full Parity | 2026-08-26 |
@@ -1684,6 +1685,19 @@ No historical 1100-pin repair — indistinguishable from anchor no-value.
 **Alternatives considered:** skipping the auto-detect meta read once a format is stored — rejected, the block also writes the team count. Offseason sweep = nothing — rejected after the build agent flagged the module's own "offseason trades land on leg 1" note. `league_members.updated_at` as the activity signal — equivalent but needs a join. A general TTL cache in `_sleeper_get` — deferred; the per-request threading removes the duplication without a cache-invalidation story.
 
 **Consequences:** 26 → 7 Sleeper calls per init in season (6 offseason); 17 → 4 DB reads per trade job; leagues nobody has opened in 30 days drop out of both cron sweeps (a returning user's first session init re-warms `updated_at`, so they re-enter the next tick). **Known leak:** `set_platform_future_picks` also stamps `updated_at` from inside the draft-status refresh, so MFL leagues keep themselves warm. Pinned by `test_session_init_sleeper_calls.py`, `test_market_data_readiness.py` (sweep cases), `test_cron_sweep_scope.py`, `test_trade_job_read_amplification.py`. Companion client-side fixes (web /warm, swipe 5→3, poll pause, league switch; mobile roster-cache seed) are in the same PR and need no decision record.
+## D-177 — The Web Landing Mirrors Platform Entry Through the Same Sessionless Route; Private ESPN on Web Is the Cookie Paste, and Entry Users Read the Platform Snapshot
+
+**Date:** 2026-09-03 · **Status:** shipped — PR [#272](https://github.com/mattmurf77/fantasy-trade-finder/pull/272) squash → `main` @ `ca5fac46` · **Scope:** [`docs/plans/landing-platform-options/scope.md` §V3](../docs/plans/landing-platform-options/scope.md)
+
+**Context:** Operator ask — the web landing should mimic the mobile app's Sleeper · ESPN · MFL options. Mobile's entry (D-164) mints a session at the team claim via the sessionless `POST /api/entry/platform` and imports through the canonical link routes. The web's league/roster plumbing was Sleeper-only (`/api/sleeper/rosters|league_users|leagues` everywhere) and had no notion of a non-Sleeper user.
+
+**Decision:** Web reuses the D-164 flow verbatim — same route, same wire shapes, same flags read from `/api/feature-flags` — rather than a web-specific link path. Where mobile signs into ESPN through a WebView capture, web offers the cookie paste (`espn_s2` + `SWID`) that is already mobile's fallback, auto-opened on a 403; the v2.1 `my_leagues` action runs off that pasted pair, and MFL sign-in runs `auth_leagues`. Non-Sleeper identity on web is recognised by the `entry:` id prefix (plus a saved `platform`), and every Sleeper-only read forks on it to `GET /api/{espn,mfl}/leagues` — the imported snapshot — through one builder (`buildPlatformRosterData`) returning `buildRosterData`'s exact shape, so `/api/session/init` body construction stays shared. The web Sleeper door gains the `signin_*` funnel at the same time so the web funnel is symmetric by `method`.
+
+**Alternatives considered:** (a) a web-only "paste a league URL" path through `/api/league/parse-url` + the link routes under a Sleeper session — needs a Sleeper identity first, which is exactly what ESPN/MFL managers lack; (b) a cross-origin ESPN sign-in on web — the page cannot read ESPN's cookies, so the paste is the only honest web path; (c) caching platform leagues client-side like mobile's AsyncStorage league cache — the snapshot read is one cheap GET per boot, and a cache would be a second source of truth to keep in sync.
+
+**Consequences:** Flag off ⇒ the web landing is byte-for-byte the Sleeper page (the row ships hidden). Entry users on web inherit every D-164 consequence: unverified session (client token + deterministic re-claim recovers), no server persistence, write grace. The in-app "Connect another league" modal still tells ESPN/MFL pasters "on the roadmap" — a follow-up now that the link routes are reachable from web. `selectLeague`'s undefined `userPlayerIds` toast (a `ReferenceError` after every league pick since the first commit) was fixed inside the restructure.
+
+**Status:** Active.
 
 ## D-176 — Sleeper Pick Sends Are Encoded Server-Side From the Grid Plus Live `traded_picks`; the Client Never Encodes and Any Unresolvable Pick Refuses the Whole Send
 

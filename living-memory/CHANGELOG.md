@@ -11,13 +11,29 @@
 
 ---
 
-## 2026-09-03b — API audit (D-178): session init 26 → 7 Sleeper calls, trade job 17 → 4 reads, cron sweeps scoped, web/mobile re-fetches removed (PR pending)
+## 2026-09-03c — API audit (D-178): session init 26 → 7 Sleeper calls, trade job 17 → 4 reads, cron sweeps scoped, web/mobile re-fetches removed (PR pending)
 
 Branch `claude/api-audit-redundancies-9a6075`. Source: [`docs/reviews/2026-09-03-api-audit.md`](../docs/reviews/2026-09-03-api-audit.md) (four-layer audit + 195-route caller table). Operator chose findings 1, 2, 4, 5, 6, 7, 8, 9, 10; **3 held** (ping-then-init would stop the per-foreground league resync — see NEXT), **7 shipped as poll-pause** (real web push = schema + dependency, needs a scope block).
 - **Backend:** session-init daemon fetches rosters + league meta once and threads them to owned-picks / telemetry; trades sync is incremental (`sweep_weeks`: backfill once, then `[week-1, week]`, offseason `[1]`); trade job takes request-time prefs (`prefs_preload`), bulk opponent prefs, one memoized `load_draft_picks`; both cron loaders filter `leagues.updated_at` ≤ 30 d; `not_drafted` probe 24 h outside Apr 1 – Sep 15.
 - **Web:** `/api/sleeper/players` → `/warm` (4.8 MB never read); `apiFetch` parses bodies on 401 only; swipe 5 → 3 requests; notification poll pauses on hidden tabs; `switchToLeague` saves + reloads (boot did it all again).
 - **Mobile:** `initLeagueSession` / `buildSessionInitBody` hand back rosters + users; `state/queryClient.seedLeagueSessionCaches` seeds `['league-rosters'|'league-users', id]` on every init path (5-min staleTime already held by all five consumers).
 - **Tests:** +4 pytest files / +23 cases; `check-session-seed.js`. pytest **4617 / 1 skipped**, tsc 0, testid-lint OK, web structure 175/175.
+## 2026-09-03b — Web landing mirrors mobile platform entry SHIPPED: Sleeper · ESPN · MFL chips (D-177, PR #272 → `main` @ `ca5fac46`)
+Operator ask: "update the landing page on web to mimic the mobile app with ESPN and MFL options."
+`web/index.html` gains SignInScreen's chip row (flag `landing.platform_options` + `espn.link` /
+`mfl.link`) and ESPN/MFL entry panels on the same sessionless `POST /api/entry/platform` (D-164):
+preview → claim (mint) → canonical `/api/{espn,mfl}/link` import; private ESPN = cookie paste
+(auto-opened on 403); "Find my leagues" / "Sign in with MFL" = the v2.1 actions. Entry users
+(`entry:` ids) read leagues/rosters from `GET /api/{espn,mfl}/leagues` in every path that used
+Sleeper proxies (league screen w/ single-league auto-skip, `selectLeague`, reload, switcher,
+leaguemate pool) via `buildPlatformRosterData`. Web now emits `signin_*` (method sleeper/espn/mfl).
+Drive-by: `selectLeague`'s undefined `userPlayerIds` toast (ReferenceError after every league pick)
+fixed. No route/schema/flag changes. Evidence: web gate 175/175, `test_entry_platform_route` +2 (25),
+browser E2E on the fixture-stubbed app for both platforms
+([code-walk §V3](../docs/plans/landing-platform-options/code-walk.md)). **Shipped** 2026-09-03: PR
+[#272](https://github.com/mattmurf77/fantasy-trade-finder/pull/272) squash → `main` @ `ca5fac46`, CI ×4 green, branch content-verified and ledgered
+(`docs/recovery/2026-09-03b-web-platform-entry-ship.md`). Web-only — Render redeploys, no EAS build.
+Owed: the operator's 4-step prod check (scope §V3).
 
 ## 2026-09-03 — Weekly feedback run SHIPPED: #413 Sleeper pick-send fix (D-176, v1.16.15); #415/#416 verify-closed; a parallel #414 build superseded by D-175
 Operator ask (2026-09-02): "all my open feedback from this week". **#415/#416 → `fixed`** (already

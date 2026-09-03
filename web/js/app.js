@@ -230,7 +230,18 @@
         // so we fetch leagues in the background without blocking the UI.
         // Demo users are skipped: their synthetic id 503s, which surfaced as a
         // console error on every demo boot.
-        if (!_isDemoUser(user)) {
+        if (_isEntryUser(user)) {
+          // ESPN/MFL entry user (D-164 web mirror): the switcher lists the
+          // backend's platform snapshot — Sleeper's list would 503 on the id.
+          _platformLeagues(_entryPlatform(user))
+            .then(leagues => {
+              if (leagues && leagues.length) {
+                _cachedLeagues = leagues;
+                renderLeagueSwitcher();
+              }
+            })
+            .catch(() => { /* best-effort, same as below */ });
+        } else if (!_isDemoUser(user)) {
         apiFetch(`/api/sleeper/leagues/${user.user_id}`)
           .then(r => r.json())
           .then(leagues => {
@@ -301,6 +312,7 @@
       document.getElementById('username-input').value = '';
       document.getElementById('auth-btn').disabled = false;
       document.getElementById('auth-btn').textContent = 'Connect with Sleeper →';
+      entryReset();
       setTimeout(() => document.getElementById('username-input').focus(), 100);
     }
 
@@ -331,6 +343,8 @@
       errEl.textContent = '';
       btn.disabled = true;
       btn.textContent = 'Looking up…';
+      // Pre-auth funnel, same semantics as mobile: the claim is the attempt.
+      try { if (window.FTFTrack) window.FTFTrack('signin_attempted', { method: 'sleeper' }, 'SignIn'); } catch (_) {}
 
       const url = `/api/sleeper/user/${encodeURIComponent(username)}`;
 
@@ -352,6 +366,7 @@
           // Prefer the human-readable message (e.g. Sleeper-outage 503);
           // fall back to the machine code, then a generic message.
           errEl.textContent = data.message || data.error || `Server error ${res.status}. Check the debug log.`;
+          try { if (window.FTFTrack) window.FTFTrack('signin_failed', { method: 'sleeper', error_code: `http_${res.status}` }, 'SignIn'); } catch (_) {}
           input.classList.add('error');
           btn.disabled = false;
           btn.textContent = 'Connect with Sleeper →';
@@ -360,6 +375,7 @@
 
         if (data === null) {
           errEl.textContent = 'Username not found on Sleeper. Check spelling (usernames are lowercase).';
+          try { if (window.FTFTrack) window.FTFTrack('signin_failed', { method: 'sleeper', error_code: 'http_404' }, 'SignIn'); } catch (_) {}
           input.classList.add('error');
           btn.disabled = false;
           btn.textContent = 'Connect with Sleeper →';
@@ -389,12 +405,14 @@
           avatar_id:    data.avatar || null,
         };
         saveUser(user);
+        try { if (window.FTFTrack) window.FTFTrack('signin_succeeded', { method: 'sleeper' }, 'SignIn'); } catch (_) {}
         renderAccountChip(user);
         hideAuthScreen();
         showLeagueScreen(user);
 
       } catch (e) {
         errEl.textContent = 'Could not reach server — is server.py running?';
+        try { if (window.FTFTrack) window.FTFTrack('signin_failed', { method: 'sleeper', error_code: 'network' }, 'SignIn'); } catch (_) {}
         btn.disabled = false;
         btn.textContent = 'Connect with Sleeper →';
       }
@@ -422,6 +440,39 @@
         list.innerHTML =
           '<div class="league-empty">The sample league session has ended.<br>' +
           'Start over to connect your own Sleeper account.</div>';
+        return;
+      }
+
+      if (_isEntryUser(user)) {
+        // ESPN/MFL entry user (D-164 web mirror): the leagues are the
+        // backend's imported snapshot, not Sleeper's list. Exactly one
+        // league → auto-select (mobile's single-league auto-skip).
+        let leagues = null;
+        try { leagues = await _platformLeagues(_entryPlatform(user)); } catch (_) { /* rendered below */ }
+        if (!leagues) {
+          list.innerHTML = '<div class="league-empty">Couldn\'t load your leagues — try again shortly.</div>';
+          return;
+        }
+        if (!leagues.length) {
+          list.innerHTML = '<div class="league-empty">No league is linked to this team yet.<br>Start over to connect one.</div>';
+          return;
+        }
+        _cachedLeagues = leagues;
+        if (leagues.length === 1) {
+          setTimeout(() => selectLeague(0, null), 200);
+          return;
+        }
+        list.innerHTML = leagues.map((lg, i) => `
+          <div class="league-item" id="li-${lg.league_id}" onclick="selectLeague(${i}, this)">
+            <div class="league-item-icon">${ICON.crown}</div>
+            <div class="league-item-info">
+              <div class="league-item-name">${escapeHtml(lg.name)}<span class="league-rank-chip hidden" id="lrc-${lg.league_id}"></span></div>
+              <div class="league-item-meta">${lg.total_rosters || '?'} teams · ${_PLATFORM_LABEL[lg.platform] || lg.platform}</div>
+            </div>
+            <div class="league-item-arrow">›</div>
+          </div>
+        `).join('');
+        _loadLeagueRankChips(leagues);
         return;
       }
 
@@ -609,6 +660,21 @@
       if (!user) { logout(); return; }
 
       hideLeagueScreen();
+      let rosterData = null;
+      if (_isEntryUser(user)) {
+        // ESPN/MFL entry user (D-164 web mirror): rosters come from the
+        // backend's imported snapshot — never Sleeper's roster proxies,
+        // which would 404 on a non-Sleeper league id.
+        showInitOverlay('Fetching rosters…');
+        rosterData = await _platformRosterData(user, leagueId);
+        if (!rosterData) {
+          hideInitOverlay();
+          showToast('Could not load your roster for this league');
+          resetLeagueItem(el);
+          showLeagueScreen(user);
+          return;
+        }
+      } else {
       showInitOverlay('Fetching player database…');
 
       // 1. Warm the Sleeper player cache (first call downloads ~5MB)
@@ -651,7 +717,7 @@
       // 3. Find user's roster (owner OR co-owner)
       const allOwnerIds = (rosters || []).map(r => r.owner_id).join(', ');
 
-      const rosterData = buildRosterData(rosters, usernameMap, user.user_id);
+      rosterData = buildRosterData(rosters, usernameMap, user.user_id);
       if (!rosterData) {
         hideInitOverlay();
         showToast('Could not find your roster in this league');
@@ -660,6 +726,7 @@
         return;
       }
       if (rosterData.leagueUserId !== user.user_id) {
+      }
       }
 
       setInitLabel('Building your rankings…');
@@ -681,7 +748,7 @@
       currentLeagueId = leagueId;
       currentUserId   = user.user_id || null;
       renderAccountChip(user);
-      showToast(`Roster loaded — ${userPlayerIds.length} players imported`);
+      showToast(`Roster loaded — ${rosterData.userPlayerIds.length} players imported`);
 
       // Check if user has unlocked the trade finder — if not, show ranking method selection
       let showMethodScreen = false;
@@ -756,6 +823,13 @@
     // ── Init Session ────────────────────────────────────────────────
     async function initSession(user, league, rosterData) {
 
+      if (!rosterData && _isEntryUser(user)) {
+        // Page-reload path for an ESPN/MFL entry user (D-164 web mirror):
+        // the backend's imported snapshot is the roster source.
+        setInitLabel('Fetching rosters…');
+        rosterData = await _platformRosterData(user, league.league_id);
+        if (!rosterData) return false;
+      }
       if (!rosterData) {
         // Page-reload path: need to re-fetch roster data
         try {
@@ -1029,6 +1103,8 @@
           const el = document.getElementById('try-demo-wrap');
           if (el) el.classList.remove('hidden');
         }
+        // Landing platform options — Sleeper · ESPN · MFL chips (D-164 web mirror)
+        _applyPlatformOptionsFlag();
       } catch (_) { /* flags may not have loaded yet */ }
     }
     // Run now (in case flags already populated) and again after a beat
@@ -1036,6 +1112,532 @@
     _applyLandingFlags();
     setTimeout(_applyLandingFlags, 250);
     setTimeout(_applyLandingFlags, 1000);
+
+
+    // ═══════════════════════════════════════════════════════════════
+    //  LANDING PLATFORM OPTIONS — Sleeper · ESPN · MFL entry
+    //  (flag landing.platform_options; web mirror of mobile SignInScreen's
+    //  chip row + the D-164 sessionless entry —
+    //  docs/plans/landing-platform-options/scope.md §V3)
+    //
+    //  Sleeper (default) is today's username door, untouched. ESPN/MFL swap
+    //  the form for that platform's panel:
+    //    preview → POST /api/entry/platform (no team_id): the link route's
+    //              choose_team shape; nothing persisted, no session yet
+    //    claim   → POST /api/entry/platform (team_id): mints a session for a
+    //              DETERMINISTIC entry:<platform>:… user id (re-claiming the
+    //              same team recovers the same boards)
+    //    import  → the canonical POST /api/{espn,mfl}/link under the fresh
+    //              token — no import logic is duplicated here
+    //  Then the ordinary league flow takes over: showLeagueScreen lists the
+    //  platform snapshot (GET /api/{espn,mfl}/leagues) and selectLeague /
+    //  initSession / switchToLeague build the session body from it instead
+    //  of Sleeper's roster proxies (_platformRosterData). The web can't run
+    //  mobile's ESPN WebView capture, so private ESPN leagues use the cookie
+    //  paste that is mobile's fallback; "Find my leagues" runs the v2.1
+    //  my_leagues action off that pair. MFL sign-in runs v2.1 auth_leagues.
+    // ═══════════════════════════════════════════════════════════════
+    let _entryPlatformSel = 'sleeper';
+    let _entryPreview     = null;   // { platform, league_id, name, season, teams, espn_s2?, swid? }
+    let _entryEspnLeagues = [];     // v2.1 my_leagues result
+    let _entryMflLeagues  = [];     // v2.1 auth_leagues result
+    let _entryMflYear     = undefined;
+    let _entryMflUser     = '';
+    // Entry-only: the MFL password, held OUTSIDE the DOM and never logged,
+    // for exactly one more use — the best-effort credential re-store under
+    // the minted session so "Send in MFL" works later. Dropped the moment
+    // that call is made and on every reset.
+    let _entryMflPass     = '';
+    const _PLATFORM_LABEL = { sleeper: 'Sleeper', espn: 'ESPN', mfl: 'MyFantasyLeague' };
+
+    // Entry ids are minted as entry:<platform>:… (D-164). The prefix is how
+    // every Sleeper-only path in this file routes entry users to the
+    // platform snapshot instead.
+    function _isEntryUser(u) {
+      return !!(u && String(u.user_id || '').startsWith('entry:'));
+    }
+    function _entryPlatform(u) {
+      if (!u) return null;
+      if (u.platform === 'espn' || u.platform === 'mfl') return u.platform;
+      const m = /^entry:(espn|mfl):/.exec(String(u.user_id || ''));
+      return m ? m[1] : null;
+    }
+
+    // GET /api/{platform}/leagues → the league-screen / switcher shape, plus
+    // the members snapshot the session body is built from.
+    async function _platformLeagues(platform) {
+      if (platform !== 'espn' && platform !== 'mfl') return null;
+      const res = await apiFetch(`/api/${platform}/leagues`);
+      if (!res || !res.ok) return null;
+      const body = await res.json().catch(() => null);
+      if (!body || !Array.isArray(body.leagues)) return null;
+      return body.leagues.map(lg => ({
+        league_id:     String(lg.league_id),
+        name:          lg.name || 'Unnamed League',
+        total_rosters: lg.total_rosters || lg.total_teams || (lg.members || []).length,
+        platform,
+        members:       lg.members || [],
+      }));
+    }
+
+    // Platform-snapshot twin of buildRosterData — same output shape, so the
+    // session body build in initSession is shared. The import bound the
+    // claimed team to the entry user id; counterparties carry synthetic
+    // espn:/mfl: ids (display only, never routable).
+    function buildPlatformRosterData(members, userId) {
+      const mine = (members || []).find(m => m.user_id === userId);
+      if (!mine) return null;
+      return {
+        userRoster:        mine,
+        userPlayerIds:     (mine.player_ids || []).filter(Boolean),
+        leagueUserId:      userId,
+        leagueDisplayName: mine.display_name || undefined,
+        opponentRosters:   (members || [])
+          .filter(m => m.user_id !== userId)
+          .map(m => ({
+            user_id:    m.user_id,
+            username:   m.display_name || m.username || m.user_id,
+            player_ids: (m.player_ids || []).filter(Boolean),
+          }))
+          .filter(r => r.player_ids.length > 0),
+      };
+    }
+    async function _platformRosterData(user, leagueId) {
+      const platform = _entryPlatform(user);
+      if (!platform) return null;
+      try {
+        const leagues = await _platformLeagues(platform);
+        const target = (leagues || []).find(lg => lg.league_id === String(leagueId));
+        return target ? buildPlatformRosterData(target.members, user.user_id) : null;
+      } catch (_) { return null; }
+    }
+
+    // Chip-row reveal — mirrors SignInScreen's platformPickerShown: the flag
+    // AND ≥2 live platforms (a one-chip "choice" is noise). Per-platform
+    // chips additionally need espn.link / mfl.link; the MFL sign-in block
+    // needs mfl.auth_link and the ESPN "find my leagues" link needs
+    // espn.league_picker (the v2.1 actions 404 without them).
+    function _applyPlatformOptionsFlag() {
+      const row = document.getElementById('platform-row');
+      if (!row || !window.FTF_FLAG) return;
+      const optionsOn = window.FTF_FLAG('landing.platform_options');
+      const espnOn = optionsOn && window.FTF_FLAG('espn.link');
+      const mflOn  = optionsOn && window.FTF_FLAG('mfl.link');
+      const espnChip = document.getElementById('platform-chip-espn');
+      const mflChip  = document.getElementById('platform-chip-mfl');
+      if (espnChip) espnChip.classList.toggle('hidden', !espnOn);
+      if (mflChip)  mflChip.classList.toggle('hidden', !mflOn);
+      row.classList.toggle('hidden', !(espnOn || mflOn));
+      const signin = document.getElementById('mfl-signin');
+      if (signin) signin.classList.toggle('hidden', !window.FTF_FLAG('mfl.auth_link'));
+      const find = document.getElementById('espn-find-btn');
+      if (find) find.classList.toggle('hidden', !window.FTF_FLAG('espn.league_picker'));
+      // Flag revalidation can withdraw the selected platform — fall back to
+      // Sleeper instead of stranding the user on a chip that no longer shows.
+      if ((_entryPlatformSel === 'espn' && !espnOn) || (_entryPlatformSel === 'mfl' && !mflOn)) {
+        selectEntryPlatform('sleeper');
+      }
+    }
+
+    function selectEntryPlatform(p) {
+      _entryPlatformSel = p;
+      _entryPreview = null;
+      for (const id of ['sleeper', 'espn', 'mfl']) {
+        const chip = document.getElementById(`platform-chip-${id}`);
+        if (!chip) continue;
+        chip.classList.toggle('on', id === p);
+        chip.setAttribute('aria-pressed', id === p ? 'true' : 'false');
+      }
+      _entryShowStep(p);
+      const focusId = { espn: 'espn-league-input', mfl: 'mfl-league-input' }[p];
+      const focusEl = focusId && document.getElementById(focusId);
+      if (focusEl) setTimeout(() => focusEl.focus(), 50);
+    }
+    function _entryShowStep(step) {
+      for (const id of ['sleeper', 'espn', 'mfl', 'teams']) {
+        const el = document.getElementById(`entry-${id}`);
+        if (el) el.classList.toggle('hidden', id !== step);
+      }
+    }
+    function entryBackToInput() {
+      _entryPreview = null;
+      _entryShowStep(_entryPlatformSel);
+    }
+    // showAuthScreen → back to the Sleeper default with every field and the
+    // transient MFL password cleared.
+    function entryReset() {
+      _entryPreview = null; _entryEspnLeagues = []; _entryMflLeagues = [];
+      _entryMflPass = ''; _entryMflUser = ''; _entryMflYear = undefined;
+      for (const id of ['espn-league-input', 'espn-s2-input', 'espn-swid-input',
+                        'mfl-league-input', 'mfl-user-input', 'mfl-pass-input']) {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+      }
+      for (const id of ['espn-error', 'mfl-error', 'entry-teams-error']) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = '';
+      }
+      for (const id of ['espn-league-list', 'mfl-league-list', 'espn-cookies']) {
+        const el = document.getElementById(id);
+        if (el) el.classList.add('hidden');
+      }
+      selectEntryPlatform('sleeper');
+    }
+
+    // Sessionless POST — deliberately plain fetch (no stale X-Session-Token,
+    // and apiFetch's session-expiry handler must not fire here). Rejects
+    // with {code, status, message} in the link routes' vocabulary.
+    async function _entryPost(body) {
+      const res = await fetch('/api/entry/platform', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err = new Error(data.message || data.error || `Request failed (${res.status}).`);
+        err.code = data.error || `http_${res.status}`;
+        err.status = res.status;
+        throw err;
+      }
+      return data;
+    }
+    function _entryBusy(btn, busy, label) {
+      if (!btn) return;
+      if (busy) {
+        btn.dataset.label = btn.textContent;
+        btn.textContent = label;
+        btn.disabled = true;
+      } else {
+        btn.textContent = btn.dataset.label || btn.textContent;
+        btn.disabled = false;
+      }
+    }
+
+    // ── ESPN ────────────────────────────────────────────────────────
+    // Mirrors mobile api/espn.parseEspnLeagueInput.
+    function parseEspnLeagueInput(input) {
+      const raw = (input || '').trim();
+      if (!raw) return null;
+      if (/^\d+$/.test(raw)) return raw;
+      const m = raw.match(/fantasy\.espn\.com\/.*[?&]leagueId=(\d+)/i);
+      return m ? m[1] : null;
+    }
+    function _espnCookies() {
+      const s2 = (document.getElementById('espn-s2-input').value || '').trim();
+      const sw = (document.getElementById('espn-swid-input').value || '').trim();
+      return { s2, sw };
+    }
+    function toggleEspnCookies() {
+      const box = document.getElementById('espn-cookies');
+      if (box) box.classList.toggle('hidden');
+    }
+    async function entryEspnPreview(leagueIdOverride) {
+      const errEl = document.getElementById('espn-error');
+      const btn   = document.getElementById('espn-go-btn');
+      const leagueId = leagueIdOverride
+        || parseEspnLeagueInput(document.getElementById('espn-league-input').value);
+      errEl.textContent = '';
+      if (!leagueId) {
+        errEl.textContent = 'Enter a numeric ESPN league ID or a fantasy.espn.com league URL.';
+        return;
+      }
+      const { s2, sw } = _espnCookies();
+      if (!!s2 !== !!sw) { errEl.textContent = 'Private leagues need both espn_s2 and SWID.'; return; }
+      _entryBusy(btn, true, 'Fetching…');
+      try {
+        const data = await _entryPost({
+          platform: 'espn', espn_league_id: leagueId,
+          espn_s2: s2 || undefined, swid: sw || undefined,
+        });
+        if (data.status !== 'choose_team' || !data.league) throw new Error('Unexpected response from the server.');
+        _entryPreview = {
+          platform:  'espn',
+          league_id: String(data.league.espn_league_id || leagueId),
+          name:      data.league.name || `League ${leagueId}`,
+          season:    data.league.season,
+          teams:     data.teams || [],
+          espn_s2:   s2 || undefined,
+          swid:      sw || undefined,
+        };
+        _renderEntryTeams();
+      } catch (e) {
+        if (e.code === 'espn_auth_required') {
+          // Private league (or rejected cookies): put the fix on screen
+          // instead of a dead end — same copy branches as mobile's sheet.
+          document.getElementById('espn-cookies').classList.remove('hidden');
+          errEl.textContent = (s2 && sw)
+            ? "ESPN didn't accept those cookies — they may have expired. Paste fresh espn_s2 and SWID values from a logged-in espn.com session."
+            : 'This league is private — paste your espn_s2 and SWID cookies below.';
+        } else {
+          errEl.textContent = e.message || "Couldn't reach ESPN — try again shortly.";
+        }
+      } finally {
+        _entryBusy(btn, false);
+      }
+    }
+    // v2.1 my_leagues off the pasted pair — the web stand-in for mobile's
+    // "Sign in to ESPN, never type a league id". Stores nothing server-side.
+    async function entryEspnFindLeagues() {
+      const errEl = document.getElementById('espn-error');
+      const btn   = document.getElementById('espn-find-btn');
+      const list  = document.getElementById('espn-league-list');
+      errEl.textContent = '';
+      const { s2, sw } = _espnCookies();
+      if (!s2 || !sw) { errEl.textContent = 'Paste both espn_s2 and SWID to look up your leagues.'; return; }
+      _entryBusy(btn, true, 'Looking up…');
+      try {
+        const data = await _entryPost({ platform: 'espn', action: 'my_leagues', espn_s2: s2, swid: sw });
+        _entryEspnLeagues = data.leagues || [];
+        if (!_entryEspnLeagues.length) {
+          list.classList.add('hidden');
+          errEl.textContent = "We couldn't find any fantasy football leagues on that ESPN account — enter a league ID above instead.";
+          return;
+        }
+        list.innerHTML = _entryEspnLeagues.map((lg, i) => `
+          <button type="button" class="cb-entry-row" onclick="entryEspnPickLeague(${i})">
+            <span class="cb-entry-row-name">${escapeHtml(lg.league_name || 'League ' + lg.league_id)}</span>
+            <span class="cb-entry-row-meta">${escapeHtml(lg.team_name || '')}${lg.season ? ' · ' + escapeHtml(lg.season) : ''}</span>
+          </button>`).join('');
+        list.classList.remove('hidden');
+      } catch (e) {
+        errEl.textContent = e.code === 'espn_auth_required'
+          ? "ESPN didn't accept those cookies. Paste fresh values, or enter a league ID above instead."
+          : (e.message || "We couldn't list your ESPN leagues — enter a league ID above instead.");
+      } finally {
+        _entryBusy(btn, false);
+      }
+    }
+    function entryEspnPickLeague(i) {
+      const lg = _entryEspnLeagues[i];
+      if (!lg) return;
+      document.getElementById('espn-league-input').value = String(lg.league_id);
+      entryEspnPreview(String(lg.league_id));
+    }
+
+    // ── MFL ─────────────────────────────────────────────────────────
+    // Mirrors mobile api/platformLink.parseMflLeagueInput — validation only:
+    // the raw input is what gets sent, so a pasted URL keeps its wwwNN host.
+    function parseMflLeagueInput(input) {
+      const raw = (input || '').trim();
+      if (!raw) return null;
+      if (/^\d{4,6}$/.test(raw)) return raw;
+      let m = raw.match(/myfantasyleague\.com\/\d{4}\/(?:home|options|standings)\/(\d{4,6})/i);
+      if (m) return m[1];
+      m = raw.match(/[?&]L=(\d{4,6})/i);
+      return m ? m[1] : null;
+    }
+    function _mflYear() {
+      const y = parseInt(document.getElementById('mfl-year-input').value, 10);
+      return (y >= 2000 && y <= 2100) ? y : undefined;
+    }
+    async function entryMflPreview() {
+      const errEl = document.getElementById('mfl-error');
+      const btn   = document.getElementById('mfl-go-btn');
+      const raw   = (document.getElementById('mfl-league-input').value || '').trim();
+      errEl.textContent = '';
+      const parsedId = parseMflLeagueInput(raw);
+      if (!parsedId) {
+        errEl.textContent = 'Enter a numeric MFL league ID or a myfantasyleague.com URL.';
+        return;
+      }
+      _entryBusy(btn, true, 'Fetching…');
+      try {
+        const data = await _entryPost({ platform: 'mfl', mfl_league_id: raw, year: _mflYear() });
+        if (data.status !== 'choose_team' || !data.league) throw new Error('Unexpected response from the server.');
+        _entryPreview = {
+          platform:  'mfl',
+          league_id: String(data.league.mfl_league_id || parsedId),
+          name:      data.league.name || `League ${parsedId}`,
+          season:    data.league.season || _mflYear(),
+          teams:     data.teams || [],
+        };
+        _renderEntryTeams();
+      } catch (e) {
+        errEl.textContent = e.message || "Couldn't reach MFL — try again shortly.";
+      } finally {
+        _entryBusy(btn, false);
+      }
+    }
+    // v2.1 auth_leagues: sign in and list the account's leagues WITH the
+    // user's own franchise_id, so one click mints directly (no team-claim
+    // step). The backend uses the password for the one MFL login and stores
+    // nothing; here it leaves the field at once and lives in _entryMflPass
+    // only until the post-import re-store.
+    async function entryMflSignIn() {
+      const errEl  = document.getElementById('mfl-error');
+      const btn    = document.getElementById('mfl-signin-btn');
+      const list   = document.getElementById('mfl-league-list');
+      const userEl = document.getElementById('mfl-user-input');
+      const passEl = document.getElementById('mfl-pass-input');
+      errEl.textContent = '';
+      const username = (userEl.value || '').trim();
+      const password = passEl.value || '';
+      if (!username || !password) { errEl.textContent = 'Enter your MFL username and password.'; return; }
+      _entryBusy(btn, true, 'Signing in…');
+      try {
+        const year = _mflYear();
+        const data = await _entryPost({ platform: 'mfl', action: 'auth_leagues', username, password, year });
+        passEl.value = '';
+        _entryMflLeagues = data.leagues || [];
+        _entryMflYear = data.year || year;
+        _entryMflUser = username;
+        _entryMflPass = password;
+        if (!_entryMflLeagues.length) {
+          _entryMflPass = '';
+          list.classList.add('hidden');
+          errEl.textContent = 'MFL lists no leagues for that account this season — enter a league ID below instead.';
+          return;
+        }
+        list.innerHTML = _entryMflLeagues.map((lg, i) => `
+          <button type="button" class="cb-entry-row" onclick="entryMflPickAuthLeague(${i})"${lg.franchise_id ? '' : ' disabled'}>
+            <span class="cb-entry-row-name">${escapeHtml(lg.name || 'League ' + lg.league_id)}</span>
+            <span class="cb-entry-row-meta">${escapeHtml(lg.franchise_name || (lg.franchise_id ? 'Franchise ' + lg.franchise_id : 'no franchise'))}</span>
+          </button>`).join('');
+        list.classList.remove('hidden');
+      } catch (e) {
+        _entryMflPass = '';
+        errEl.textContent = e.code === 'mfl_bad_credentials'
+          ? "MFL didn't accept that username and password."
+          : (e.message || "Couldn't reach MFL — try again shortly.");
+      } finally {
+        _entryBusy(btn, false);
+      }
+    }
+    async function entryMflPickAuthLeague(i) {
+      const lg = _entryMflLeagues[i];
+      if (!lg || !lg.franchise_id) return;
+      const rows = document.querySelectorAll('#mfl-league-list .cb-entry-row');
+      rows.forEach(r => { r.disabled = true; });
+      try {
+        await _entryClaim({
+          platform: 'mfl', league_id: String(lg.league_id), name: lg.name || `League ${lg.league_id}`,
+          season: _entryMflYear, team_id: String(lg.franchise_id),
+        }, document.getElementById('mfl-error'));
+      } finally {
+        rows.forEach(r => { r.disabled = false; });
+      }
+    }
+
+    // ── Shared: claim a team ────────────────────────────────────────
+    function _renderEntryTeams() {
+      const p = _entryPreview;
+      if (!p) return;
+      document.getElementById('entry-teams-title').textContent = `${p.name} — which team is yours?`;
+      document.getElementById('entry-teams-error').textContent = '';
+      document.getElementById('entry-team-list').innerHTML = (p.teams || []).map((t, i) => `
+        <button type="button" class="cb-entry-row" onclick="entryPickTeam(${i})">
+          <span class="cb-entry-row-name">${escapeHtml(t.name || 'Team ' + t.team_id)}${t.owner_display ? ` <span class="cb-entry-row-owner">${escapeHtml(t.owner_display)}</span>` : ''}</span>
+          <span class="cb-entry-row-meta">${Number(t.mapped_players) || 0} players</span>
+        </button>`).join('');
+      _entryShowStep('teams');
+    }
+    async function entryPickTeam(i) {
+      const p = _entryPreview;
+      const t = p && p.teams[i];
+      if (!t) return;
+      const rows = document.querySelectorAll('#entry-team-list .cb-entry-row');
+      rows.forEach(r => { r.disabled = true; });
+      try {
+        await _entryClaim({
+          platform: p.platform, league_id: p.league_id, name: p.name, season: p.season,
+          team_id: t.team_id, espn_s2: p.espn_s2, swid: p.swid,
+        }, document.getElementById('entry-teams-error'));
+      } finally {
+        rows.forEach(r => { r.disabled = false; });
+      }
+    }
+    // The claim IS the sign-in (mint), then the canonical import under the
+    // fresh token, then the ordinary league flow. signin_* carries method
+    // espn/mfl exactly as mobile does (value-only addendum 2026-08-26).
+    async function _entryClaim(c, errEl) {
+      if (errEl) errEl.textContent = '';
+      const isEspn = c.platform === 'espn';
+      try { if (window.FTFTrack) window.FTFTrack('signin_attempted', { method: c.platform }, 'SignIn'); } catch (_) {}
+      let minted;
+      try {
+        minted = await _entryPost(isEspn
+          ? { platform: 'espn', espn_league_id: c.league_id, season: c.season, team_id: c.team_id,
+              espn_s2: c.espn_s2, swid: c.swid }
+          : { platform: 'mfl', mfl_league_id: c.league_id, year: c.season, franchise_id: c.team_id });
+      } catch (e) {
+        try { if (window.FTFTrack) window.FTFTrack('signin_failed', { method: c.platform, error_code: e.code || 'unknown' }, 'SignIn'); } catch (_) {}
+        if (errEl) errEl.textContent = e.message || 'Could not claim that team — try again.';
+        return;
+      }
+      sessionToken = minted.session_token;
+      localStorage.setItem(LS_TOKEN, sessionToken);
+      const user = {
+        user_id:      minted.user_id,
+        display_name: minted.display_name || c.name,
+        avatar_id:    null,
+        platform:     c.platform,
+      };
+      saveUser(user);
+      try { if (window.FTFTrack) window.FTFTrack('signin_succeeded', { method: c.platform }, 'SignIn'); } catch (_) {}
+
+      // Canonical import — binds the claimed team to the entry user and
+      // persists league + members (unverified-write grace admits it).
+      showInitOverlay('Importing your league…');
+      try {
+        const res = await apiFetch(isEspn ? '/api/espn/link' : '/api/mfl/link', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify(isEspn
+            ? { espn_league_id: c.league_id, season: c.season, team_id: c.team_id,
+                espn_s2: c.espn_s2, swid: c.swid }
+            : { mfl_league_id: c.league_id, year: c.season, franchise_id: c.team_id }),
+        });
+        const body = res ? await res.json().catch(() => ({})) : {};
+        if (!res || !res.ok || !body.ok) {
+          throw new Error((body && (body.message || body.error)) || 'Import failed — try again.');
+        }
+      } catch (e) {
+        hideInitOverlay();
+        // No league landed: drop the half-made session so the landing page
+        // isn't stuck on a user with nothing to show.
+        localStorage.removeItem(LS_USER);
+        localStorage.removeItem(LS_TOKEN);
+        sessionToken = null;
+        if (errEl) errEl.textContent = e.message || 'Import failed — try again.';
+        return;
+      }
+
+      // Best-effort, non-blocking: with a session now, re-store the MFL
+      // credential so "Send in MFL" works later. The league is already in,
+      // so a failure here costs a nicety, never the entry.
+      if (!isEspn && _entryMflPass) {
+        const pass = _entryMflPass;
+        _entryMflPass = '';
+        try {
+          await apiFetch('/api/mfl/auth-link', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ username: _entryMflUser, password: pass, year: c.season }),
+          });
+        } catch (_) { /* optional */ }
+      }
+      hideInitOverlay();
+
+      renderAccountChip(user);
+      hideAuthScreen();
+      // showLeagueScreen's entry branch lists the platform snapshot and
+      // auto-selects when it holds exactly one league (mobile's
+      // single-league auto-skip) — selectLeague then builds the session.
+      showLeagueScreen(user);
+    }
+
+    // Enter submits the panel the field belongs to.
+    for (const [id, fn] of [
+      ['espn-league-input', entryEspnPreview],
+      ['mfl-league-input',  entryMflPreview],
+      ['mfl-year-input',    entryMflPreview],
+      ['mfl-user-input',    entryMflSignIn],
+      ['mfl-pass-input',    entryMflSignIn],
+    ]) {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') fn(); });
+    }
 
     // ── Smart-start CTA ─────────────────────────────────────────────
     function toggleSmartStart() {
@@ -2383,8 +2985,10 @@
       //
       // boot() → initSession(user, league) with no rosterData re-warms the
       // player cache, re-fetches rosters + league users and POSTs
-      // /api/session/init itself, so doing any of that here just ran the
-      // whole boot twice. If the new league turns out to be unusable,
+      // /api/session/init itself — and for an ESPN/MFL entry user it takes
+      // the _isEntryUser branch and reads the platform snapshot instead —
+      // so doing any of that here just ran the whole boot twice. If the new
+      // league turns out to be unusable,
       // initSession() fails after the reload and boot() drops the user on
       // the league picker.
       saveLeague({ league_id: lg.league_id, league_name: lg.name });
@@ -2836,14 +3440,32 @@
           const stored = localStorage.getItem('ftf_active_format');
           if (stored === '1qb_ppr' || stored === 'sf_tep') fmt = stored;
         } catch (_) { /* default */ }
+        let rosters, users, values;
+        const poolUser = getSavedUser();
+        if (_isEntryUser(poolUser)) {
+          // ESPN/MFL entry user (D-164 web mirror): the imported snapshot
+          // IS the league — shaped like Sleeper rosters so the pool build
+          // below is shared. Members carry the entry id for your own team
+          // and synthetic espn:/mfl: ids for everyone else.
+          const [leagues, vRes] = await Promise.all([
+            _platformLeagues(_entryPlatform(poolUser)),
+            apiFetch(`/api/trade/values?scoring_format=${fmt}`),
+          ]);
+          const target = (leagues || []).find(l => l.league_id === String(leagueId));
+          if (!target) throw new Error('league not linked');
+          rosters = target.members.map(m => ({ owner_id: m.user_id, roster_id: m.user_id, players: m.player_ids || [] }));
+          users   = target.members.map(m => ({ user_id: m.user_id, display_name: m.display_name || m.username || '' }));
+          values  = await vRes.json();
+        } else {
         const [rRes, uRes, vRes] = await Promise.all([
           apiFetch(`/api/sleeper/rosters/${leagueId}`),
           apiFetch(`/api/sleeper/league_users/${leagueId}`),
           apiFetch(`/api/trade/values?scoring_format=${fmt}`),
         ]);
-        const rosters = await rRes.json();
-        const users   = await uRes.json();
-        const values  = await vRes.json();
+        rosters = await rRes.json();
+        users   = await uRes.json();
+        values  = await vRes.json();
+        }
         const nameByOwner = {};
         for (const u of (users || [])) {
           nameByOwner[u.user_id] = u.display_name || u.username || u.user_id;

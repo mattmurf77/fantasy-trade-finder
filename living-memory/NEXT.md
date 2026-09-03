@@ -9,7 +9,8 @@
 ---
 
 ## Table of Contents
-- [2026-09-03b — API audit fixes: merge the PR, then the held items (ping-then-init, web push, route hygiene)](#2026-09-03b--api-audit-fixes-merge-the-pr-then-the-held-items-ping-then-init-web-push-route-hygiene)
+- [2026-09-03c — API audit fixes: merge the PR, then the held items (ping-then-init, web push, route hygiene)](#2026-09-03c--api-audit-fixes-merge-the-pr-then-the-held-items-ping-then-init-web-push-route-hygiene)
+- [2026-09-03b — Web platform entry: merge PR #272, then the "Connect another league" modal follow-up](#2026-09-03b--web-platform-entry-merge-pr-272-then-the-connect-another-league-modal-follow-up)
 - [2026-09-03 — After the #413 ship: the checklist that closes Q-037, then the G-8 avoid gap D-175 still has, then the impression gap](#2026-09-03--after-the-413-ship-the-checklist-that-closes-q-037-then-the-g-8-avoid-gap-d-175-still-has-then-the-impression-gap)
 - [2026-09-02 — Web parity SHIPPED and live; the only remaining work needs an App Store/TestFlight URL](#2026-09-02--web-parity-shipped-and-live-the-only-remaining-work-needs-an-app-storetestflight-url)
 - [2026-08-31 — Finder gap analysis: P0 likes-you tag on the merged landing, then the P1 batch](#2026-08-31--finder-gap-analysis-p0-likes-you-tag-on-the-merged-landing-then-the-p1-batch)
@@ -43,7 +44,7 @@
 
 ---
 
-## 2026-09-03b — API audit fixes: merge the PR, then the held items (ping-then-init, web push, route hygiene)
+## 2026-09-03c — API audit fixes: merge the PR, then the held items (ping-then-init, web push, route hygiene)
 
 **Why now:** [`docs/reviews/2026-09-03-api-audit.md`](../docs/reviews/2026-09-03-api-audit.md) found ~26 Sleeper calls per app open and a stack of client-side re-fetches; findings 1, 2, 4, 5, 6, 7 (as poll-pause), 8, 9, 10 are built on `claude/api-audit-redundancies-9a6075` (D-178). In order:
 1. **Merge the PR**, then watch the Render log for one real session init: expect ≤7 `api.sleeper.app` calls (one `rosters`, one `/league/{id}`, ≤2 `transactions`), and run the 5-step TestFlight check in the PR body (no second `/api/sleeper/rosters/<id>` after opening Trades).
@@ -51,6 +52,9 @@
 3. **Finding 7 as real web push:** service worker + VAPID keys in Render + a subscriptions table + `pywebpush` — schema + dependency, so a scope block first. The 30 s poll now pauses on hidden tabs; that is the shipped fix.
 4. **Route hygiene (audit §Removal candidates):** delete `POST /api/reset`, `GET /api/leagues`, `GET /api/skips`, `GET /api/players/<id>` (no caller anywhere) and the 10 dead mobile wrappers; alias `/api/tiers/dismiss` → `/api/trio/skip`; fold `/api/progress` and `/api/trades/matches`; fix `TestStagesScreen`'s call to the nonexistent `/api/test-users/templates`. Each is an `api-reference.md` row.
 5. **Two things the build agents found in passing:** the web demo path writes its token to `sessionStorage` but `boot()` reads `localStorage` (demo session never adopted; flag is off in prod); `signOut` does not `queryClient.clear()` (stale league caches survive an account swap within `gcTime`). And the MFL `set_platform_future_picks` self-warming leak in the cron activity filter (D-178).
+## 2026-09-03b — Web platform entry: merge PR #272, then the "Connect another league" modal follow-up
+
+**Why now:** the web landing now offers ESPN/MFL entry ([D-177](DECISIONS.md), shipped 2026-09-03, `main` @ `ca5fac46`) but the in-app "Connect another league" modal (`web/index.html` `#connect-league-modal`, `app.js` `connectPastedLeague`, and the smart-start URL path) still answers an ESPN/MFL URL with "sync is on the roadmap" — now a false statement on a page that links those platforms at the door. In order: (1) confirm the Render deploy and run the scope §V3 prod check (4 steps); (2) wire the modal's ESPN/MFL branch to the same preview → team-claim rows the landing uses (under a live session it is the plain `/api/{espn,mfl}/link` preview/import — no mint), or delete the "roadmap" copy; (3) web still emits no `league_selected` (mobile sends it with `platform`) — a one-line add if the funnel needs the far side.
 
 ## 2026-09-03 — After the #413 ship: the checklist that closes Q-037, then the G-8 avoid gap D-175 still has, then the impression gap
 

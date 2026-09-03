@@ -11,7 +11,7 @@
 
 ---
 
-## 2026-09-03b — API audit fixes (D-178): merged branch green — pytest 4617 / 1 skipped, tsc 0, testid-lint OK, web 175/175
+## 2026-09-03c — API audit fixes (D-178): merged branch green — pytest 4617 / 1 skipped, tsc 0, testid-lint OK, web 175/175
 
 Branch `claude/api-audit-redundancies-9a6075` (cut from `main` @ `6ccd6698`). Treated as internal perf fixes: no scope block; evidence = new tests + code-walk proofs in the agent reports + this ledger. Four Opus build agents, two in isolated worktrees (swept — `docs/recovery/2026-09-03-api-audit-agent-sweep.md`).
 
@@ -19,6 +19,18 @@ Branch `claude/api-audit-redundancies-9a6075` (cut from `main` @ `6ccd6698`). Tr
 - **Mobile:** `npx tsc --noEmit` exit 0 · `testid-lint OK` · all 88 `check-*.js` pass + new `check-session-seed.js` (U-1..U-3 execute the real seeding module against a stub QueryClient; S-1..S-3 pin the wiring, the five consumers' 5-min `staleTime`, and the api-layer import rule). Sabotage: dropping the `Array.isArray` guard, the `revalidateSession` seed call, or one `staleTime` each → RED.
 - **Web:** `node --check` clean; `qa/web/check_web_structure.py` 175/175. Runtime (local Flask, demo flag forced on): boot shows `/api/sleeper/players/warm` and no `/api/sleeper/players`; one swipe = `rank3` → `rankings/progress` → `trio` only, progress label and unlock bar updated; hidden tab clears the poll timer, visible restarts it with an immediate fetch; after `logout()` a hide/show does not restart. **Not runtime-verified:** `switchToLeague` (demo has one league) and the 401 `session_expired` branch — code-walk only.
 - **Owed after merge:** watch one real session init in the Render log (expect ≤7 `api.sleeper.app` calls); the 5-step TestFlight check in the PR body (no second `/api/sleeper/rosters/<id>` after opening Trades; ESPN/MFL league still renders a roster).
+## 2026-09-03b — Web landing platform entry (PR #272): web gate 175/175, entry-route suite 25/25, browser E2E both platforms; sim gate skipped (D-056 posture)
+
+Branch `claude/landing-page-espn-mfl-a5a85a` @ `8473fab2` (off `main` @ `6ccd6698`), PR [#272](https://github.com/mattmurf77/fantasy-trade-finder/pull/272). Full gates ([scope §V3](../docs/plans/landing-platform-options/scope.md)), no waivers. `FTF_SKIP_SIM_GATE=1` on push — web-only change; the evidence below replaces the retired simulator.
+
+- **`python3 qa/web/check_web_structure.py`:** **175/175** (DS tokens / emoji / radius / fonts, SEO, A11Y, HYG) on the shipped `index.html` / `app.js` / `styles.css`.
+- **`pytest backend/tests/test_entry_platform_route.py`:** **25 passed** (23 + 2 new: `test_mfl_entry_leagues_snapshot_carries_the_claimed_franchise`, `test_espn_entry_leagues_snapshot_carries_the_claimed_team` — pin the `GET /api/{espn,mfl}/leagues` contract the web's `buildPlatformRosterData` reads). Full suite `pytest backend/tests`: **4587 passed / 1 skipped** in 6:33 (baseline 4585/1 from the #413 ship + the 2 new).
+- **`node --check web/js/app.js`:** clean.
+- **Browser E2E** (Claude Browser pane; real `backend.server.app` on `:5089` with only `es.fetch_league` / `es.get_crosswalk` / `mfl.resolve_host` / `mfl.fetch_league_bundle` / `server._shared_crosswalk` patched to the route tests' fixtures, scratch SQLite via `DATABASE_URL`): MFL `10005` → 3 franchises → claim "Clobberin Time 2" → `entry:mfl:10005.f0001` session, league auto-selected, `/api/session/init` OK, ranking-method screen → main app (8-player roster, account chip = franchise name); reload restores via `boot()` (`_myRoster` 8, `_cachedLeagues` 1); `_ensureLeaguematePool` → 16 players / 2 owners, never the user's own team. ESPN pasted `…leagueId=987654321` URL → 3 teams with owners → claim "Chalk Dusters" → `entry:espn:{A111…}` session, roster 8, method screen. Live server on `:5088`: MFL `99999` → "MFL has no league with that ID."; ESPN `1` → private-league copy + cookie section auto-opened. Console clean; `POST /api/events` 200 ×3. Full table: [code-walk §V3.7](../docs/plans/landing-platform-options/code-walk.md).
+- **Bug caught by the walk (fixed before commit):** the Sleeper wrapper had no `.hidden` rule, so the username row stayed visible under the ESPN/MFL panels — visible on the first screenshot.
+- **CI on PR #272 (merged head `9fea43e0`): all four green** — backend-tests 7m37s · mobile-typecheck 51s · maestro-testid-lint 7s · web-structure 6s. Squashed → `main` @ `ca5fac46` 2026-09-03; `git diff origin/main 9fea43e0` **empty** (content verification of record).
+- **Prod verified 2026-09-03 after the merge** (live `https://fantasy-trade-finder.onrender.com/`): markup present (`platform-row`, `entry-espn`, `entry-mfl`, `entry-teams`, `mfl-signin`; the "Sleeper, ESPN, and MyFantasyLeague" meta ×2); `js/app.js` carries the entry module; `/api/feature-flags` has all five gates true; `POST /api/entry/platform {"platform":"nope"}` → **400** `bad_platform` (not 404 — the route is live and past the flag gate). Browser on the live site: chip row visible with Sleeper · ESPN · MFL, Sleeper selected, panels swap both ways, Sleeper form restored on switch-back; live MFL probe id `99999` → "MFL has no league with that ID." with the button restored (no stuck-busy).
+- **Owed:** the operator's own 4-step prod check with a REAL league (scope §V3) — the checks above prove the surface and the error paths, not a successful claim against a live ESPN/MFL account.
 
 ## 2026-09-03 — #413 SHIPPED: PR #270 squash → `main` @ `5c83e8cd`, CI ×4 green, Render live, EAS build 144 / v1.16.15 submitted
 
@@ -3567,7 +3579,8 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
-- [2026-09-03b — API audit fixes (D-178): merged branch green — pytest 4617 / 1 skipped, tsc 0, testid-lint OK, web 175/175](#2026-09-03b--api-audit-fixes-d-177-merged-branch-green--pytest-4617--1-skipped-tsc-0-testid-lint-ok-web-175175)
+- [2026-09-03c — API audit fixes (D-178): merged branch green — pytest 4617 / 1 skipped, tsc 0, testid-lint OK, web 175/175](#2026-09-03c--api-audit-fixes-d-177-merged-branch-green--pytest-4617--1-skipped-tsc-0-testid-lint-ok-web-175175)
+- [2026-09-03b — Web landing platform entry (PR #272): web gate 175/175, entry-route suite 25/25, browser E2E both platforms; sim gate skipped (D-056 posture)](#2026-09-03b--web-landing-platform-entry-pr-272-web-gate-175175-entry-route-suite-2525-browser-e2e-both-platforms-sim-gate-skipped-d-056-posture)
 - [2026-09-03 — #413 SHIPPED: PR #270 squash → `main` @ `5c83e8cd`, CI ×4 green, Render live, EAS build 144 / v1.16.15 submitted](#2026-09-03--413-shipped-pr-270-squash--main--5c83e8cd-ci-4-green-render-live-eas-build-144--v11615-submitted)
 - [2026-09-02 — feedback #413 Sleeper pick-send fix: built, dual-QA green, shipped 2026-09-02 (see the merged-tree entry above)](#2026-09-02--feedback-413-sleeper-pick-send-fix-built-dual-qa-green-shipped-2026-09-02-see-the-merged-tree-entry-above)
 - [2026-08-28d — IAP enablement code half (runbook 6–7): webhook delta + RevenueCat paywall — full gates, ALL DARK](#2026-08-28d--iap-enablement-code-half-runbook-67-webhook-delta--revenuecat-paywall--full-gates-all-dark)
