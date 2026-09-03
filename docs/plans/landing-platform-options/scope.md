@@ -405,3 +405,104 @@ affordances (unchanged).
    league is private" line; paste `espn_s2` / `SWID` → Continue → teams.
 4. Flip `landing.platform_options` off (+ `POST /api/feature-flags/reload`)
    → the row is gone and the landing is today's Sleeper page.
+
+---
+
+# V3.1 — ESPN entry leads with sign-in, not the league ID (2026-09-03)
+
+**Date:** 2026-09-03
+**Entry point:** operator, on the shipped V3 landing — "ESPN option is missing the log in prompt as primary"
+**Builder:** Claude session (worktree `compassionate-jones-ea8a0e`, branch `claude/espn-signin-primary`)
+**Operator sign-off on waivers:** not needed — no waivers
+
+## What changes
+
+V3 shipped the ESPN panel league-ID-first, with the credential path demoted to
+a "Private league? Paste your ESPN cookies" link. That inverted mobile, where
+`EspnLinkSheet` in entry mode makes signing in **first-class** and the league
+ID the other path (`mobile/src/components/EspnLinkSheet.tsx:459-476`: the
+sign-in button, then "We'll find your leagues — no league ID needed", then
+"or enter a league ID"). MFL already matched; only ESPN was inverted.
+
+The web ESPN panel is now, in order: read-only explainer → **primary "Sign in
+to ESPN" button** → "We'll find your leagues — no league ID needed. We never
+see your password." → the cookie block it expands (with a "Find my leagues"
+primary running the v2.1 `my_leagues` action) → **"or enter a league ID"**
+divider → the league-ID row.
+
+**Why the web's "sign in" is a cookie paste.** Mobile's primary is one button
+because its WebView captures `espn_s2`/`SWID` from the native cookie store. A
+browser cannot read espn.com's cookies cross-origin, and ESPN publishes no
+OAuth, so the honest web equivalent is the paste that is *already* mobile's
+own fallback. The expanded block says so plainly and links to espn.com. No
+ESPN password is ever requested — the app has no ESPN password path.
+
+**Flag-driven layout.** The primary block's whole promise ("we'll find your
+leagues") is the `my_leagues` action, which 404s without `espn.league_picker`.
+That flag therefore chooses the layout, mirroring how mobile gates its entry
+sign-in on `espn.webview_capture`:
+
+| `espn.league_picker` | Layout |
+|---|---|
+| **on** (ships true) | sign-in primary + hint + "or enter a league ID" divider; the cookie block carries "Find my leagues" |
+| **off** | no promise we can keep — league ID is primary and the cookie fields sit behind the secondary "Private league?" link, exactly where V3 had them |
+
+One set of cookie inputs serves both layouts; only the controls around them
+move, so there is no duplicate-id hazard.
+
+**Copy fix found by testing.** Both `#espn-error` and `#mfl-error` render
+*after* the cookie block **and** after the league-ID row, so every
+directional word in four error strings pointed the wrong way. "paste your
+espn_s2 and SWID cookies **below**" was wrong even in V3 — it came from
+mobile, whose sheet genuinely does put that section under the error. All four
+are now direction-free ("Paste your espn_s2 and SWID cookies to continue.",
+"Try a league ID instead."), which cannot rot when the layout moves again.
+
+## Analytics (v3.1)
+
+- [x] **(b) Existing events cover it.** No new events. `signin_*` still fires
+  once per claim with `method: 'espn'`; expanding the sign-in block is not a
+  claim and deliberately emits nothing, matching mobile's rule that opening
+  the sheet or previewing a league is not an attempt.
+
+## Schema & flag scope (v3.1 delta)
+
+- Tables/columns: **none**. New flags: **none** — `espn.league_picker` is
+  existing and now additionally selects the web ESPN layout (documented in
+  `docs/config-reference.md`).
+
+## Evidence scope (v3.1)
+
+- [x] **Structural guard:** `qa/web/check_web_structure.py` — **175/175**.
+- [x] **Unit tests:** none added; the change is client-side only and
+  `backend/tests/test_entry_platform_route.py` still passes **25/25**
+  (the route contract is unchanged).
+- [x] **Browser E2E** (fixture-stubbed app, ESPN fan-profile lookup stubbed
+  too so the `my_leagues` path is exercised end to end) — table in
+  [`code-walk.md` §V3.1](code-walk.md).
+- [x] **Code-walk proof:** [`code-walk.md` §V3.1](code-walk.md).
+
+### Bug found by the re-verification (fixed here, not caused here)
+
+Re-running the E2E after rebasing onto D-178 exposed a **latent §V3 defect**:
+for an entry user whose session had died, `apiFetch`'s global
+`session_expired` recovery and the platform-snapshot read formed a closed
+cycle — hundreds of `GET /api/{espn,mfl}/leagues` 401s per second, forever.
+Entry sessions are unverified and never server-persisted (D-164), so a dead
+one is the normal end of an entry session, not an edge case. The read is now
+a plain `fetch` that bypasses the shared recovery, a 401 returns an
+`ENTRY_SESSION_LOST` sentinel propagated by all five call sites, and the user
+is returned to the landing to re-claim (deterministic ids, so no data is
+lost). Measured after: exactly 2 requests, then the landing. Recorded as
+[G-069](../../living-memory/GOTCHAS.md) with the general rule; details in
+code-walk §V3.1.6.
+
+## Docs scope (v3.1)
+
+| Doc | Updated? | Section / reason n/a |
+|---|---|---|
+| `docs/api-reference.md` | n/a | no route touched |
+| `living-memory/LLD.md` / `docs/architecture.md` / `living-memory/HLD.md` | n/a | presentation-order change inside one existing panel |
+| `docs/design/components.md` | updated | PlatformChips row notes the ESPN sign-in-primary hierarchy + its flag |
+| `docs/config-reference.md` | updated | `espn.league_picker` row notes it selects the web ESPN layout |
+| `DECISIONS.md` | updated | D-179 |

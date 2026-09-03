@@ -235,6 +235,7 @@
           // backend's platform snapshot — Sleeper's list would 503 on the id.
           _platformLeagues(_entryPlatform(user))
             .then(leagues => {
+              if (leagues === ENTRY_SESSION_LOST) return;  // handled on the path that needs it
               if (leagues && leagues.length) {
                 _cachedLeagues = leagues;
                 renderLeagueSwitcher();
@@ -449,6 +450,7 @@
         // league → auto-select (mobile's single-league auto-skip).
         let leagues = null;
         try { leagues = await _platformLeagues(_entryPlatform(user)); } catch (_) { /* rendered below */ }
+        if (leagues === ENTRY_SESSION_LOST) { _handleEntrySessionLost(); return; }
         if (!leagues) {
           list.innerHTML = '<div class="league-empty">Couldn\'t load your leagues — try again shortly.</div>';
           return;
@@ -667,6 +669,7 @@
         // which would 404 on a non-Sleeper league id.
         showInitOverlay('Fetching rosters…');
         rosterData = await _platformRosterData(user, leagueId);
+        if (rosterData === ENTRY_SESSION_LOST) { _handleEntrySessionLost(); return; }
         if (!rosterData) {
           hideInitOverlay();
           showToast('Could not load your roster for this league');
@@ -828,6 +831,7 @@
         // the backend's imported snapshot is the roster source.
         setInitLabel('Fetching rosters…');
         rosterData = await _platformRosterData(user, league.league_id);
+        if (rosterData === ENTRY_SESSION_LOST) { _handleEntrySessionLost(); return false; }
         if (!rosterData) return false;
       }
       if (!rosterData) {
@@ -1163,12 +1167,59 @@
       return m ? m[1] : null;
     }
 
+    // An entry session that the server no longer knows. Distinct from a
+    // plain failure because the recovery is different: an entry user's
+    // session CANNOT be rebuilt from localStorage — /api/{espn,mfl}/leagues
+    // requires a session, and the only way to get one is to re-claim the
+    // team on the landing (deterministic `entry:` ids recover the same
+    // boards, D-164). Entry sessions are unverified, so they are never
+    // server-persisted and die on every restart/deploy — this is the normal
+    // end of one, not an edge case.
+    const ENTRY_SESSION_LOST = { entrySessionLost: true };
+
+    // Drop a dead entry session and hand the user back to the landing.
+    // Clears the saved USER too, which is what makes this terminate: boot()
+    // and showLeagueScreen() both re-enter the entry path while a user is
+    // saved, and re-claiming is required anyway (same team → same id → same
+    // boards). Idempotent — safe to call from every caller that sees the
+    // sentinel.
+    function _handleEntrySessionLost() {
+      try {
+        localStorage.removeItem(LS_TOKEN);
+        localStorage.removeItem(LS_LEAGUE);
+        localStorage.removeItem(LS_USER);
+      } catch (_) { /* private mode — the reset below still applies */ }
+      sessionToken    = null;
+      currentLeagueId = null;
+      currentUserId   = null;
+      _myRoster       = [];
+      hideInitOverlay();
+      hideLeagueScreen();
+      const chip = document.getElementById('account-chip-container');
+      if (chip) chip.innerHTML = '';
+      showToast('Your session expired — claim your team again to pick up where you left off');
+      showAuthScreen();
+    }
+
     // GET /api/{platform}/leagues → the league-screen / switcher shape, plus
     // the members snapshot the session body is built from.
+    //
+    // Deliberately a PLAIN fetch, not apiFetch (same reason as _entryPost):
+    // apiFetch's session_expired branch "recovers" by calling initSession or
+    // boot(), and for an entry user both come straight back here — a session
+    // -required read with no way to mint a session — so the recursion never
+    // terminates. Before this guard a dead entry token produced HUNDREDS of
+    // 401s per second (reproduced 2026-09-03, code-walk §V3.1.6). Returning
+    // the sentinel lets each caller stop and route to a re-claim instead.
     async function _platformLeagues(platform) {
       if (platform !== 'espn' && platform !== 'mfl') return null;
-      const res = await apiFetch(`/api/${platform}/leagues`);
-      if (!res || !res.ok) return null;
+      let res;
+      try {
+        res = await fetch(`/api/${platform}/leagues`,
+          sessionToken ? { headers: { 'X-Session-Token': sessionToken } } : undefined);
+      } catch (_) { return null; }
+      if (res.status === 401) return ENTRY_SESSION_LOST;
+      if (!res.ok) return null;
       const body = await res.json().catch(() => null);
       if (!body || !Array.isArray(body.leagues)) return null;
       return body.leagues.map(lg => ({
@@ -1202,11 +1253,15 @@
           .filter(r => r.player_ids.length > 0),
       };
     }
+    // Returns the roster payload, null on a soft failure, or the
+    // ENTRY_SESSION_LOST sentinel, which callers must propagate rather than
+    // treat as "no roster" (see _handleEntrySessionLost).
     async function _platformRosterData(user, leagueId) {
       const platform = _entryPlatform(user);
       if (!platform) return null;
       try {
         const leagues = await _platformLeagues(platform);
+        if (leagues === ENTRY_SESSION_LOST) return ENTRY_SESSION_LOST;
         const target = (leagues || []).find(lg => lg.league_id === String(leagueId));
         return target ? buildPlatformRosterData(target.members, user.user_id) : null;
       } catch (_) { return null; }
@@ -1230,8 +1285,28 @@
       row.classList.toggle('hidden', !(espnOn || mflOn));
       const signin = document.getElementById('mfl-signin');
       if (signin) signin.classList.toggle('hidden', !window.FTF_FLAG('mfl.auth_link'));
-      const find = document.getElementById('espn-find-btn');
-      if (find) find.classList.toggle('hidden', !window.FTF_FLAG('espn.league_picker'));
+      // ESPN entry hierarchy, mirroring mobile EspnLinkSheet: signing in is
+      // the FIRST-CLASS option and the league id is the other path. The whole
+      // promise of the primary block ("we'll find your leagues") is the v2.1
+      // my_leagues action, which 404s without `espn.league_picker` — so that
+      // flag chooses the layout:
+      //   ON  → primary "Sign in to ESPN" button + hint + "or enter a league
+      //         ID" divider above the id row; the cookie fields it expands
+      //         carry the "Find my leagues" primary.
+      //   OFF → no sign-in promise we can keep; the id row is primary and the
+      //         cookie fields sit behind the secondary "Private league?" link,
+      //         exactly where they lived before this change.
+      const pickerOn = window.FTF_FLAG('espn.league_picker');
+      for (const [id, shown] of [
+        ['espn-signin-btn',   pickerOn],
+        ['espn-signin-hint',  pickerOn],
+        ['espn-find-btn',     pickerOn],
+        ['espn-or',           pickerOn],
+        ['espn-cookies-toggle', !pickerOn],
+      ]) {
+        const el = document.getElementById(id);
+        if (el) el.classList.toggle('hidden', !shown);
+      }
       // Flag revalidation can withdraw the selected platform — fall back to
       // Sleeper instead of stranding the user on a chip that no longer shows.
       if ((_entryPlatformSel === 'espn' && !espnOn) || (_entryPlatformSel === 'mfl' && !mflOn)) {
@@ -1249,7 +1324,10 @@
         chip.setAttribute('aria-pressed', id === p ? 'true' : 'false');
       }
       _entryShowStep(p);
-      const focusId = { espn: 'espn-league-input', mfl: 'mfl-league-input' }[p];
+      // Focus the panel's primary field. For ESPN under the sign-in-primary
+      // layout that is the cookie pair once expanded, so focus nothing here
+      // (the button is the primary and takes the tab stop naturally).
+      const focusId = { mfl: 'mfl-league-input' }[p];
       const focusEl = focusId && document.getElementById(focusId);
       if (focusEl) setTimeout(() => focusEl.focus(), 50);
     }
@@ -1281,6 +1359,8 @@
         const el = document.getElementById(id);
         if (el) el.classList.add('hidden');
       }
+      const sBtn = document.getElementById('espn-signin-btn');
+      if (sBtn) sBtn.setAttribute('aria-expanded', 'false');
       selectEntryPlatform('sleeper');
     }
 
@@ -1328,9 +1408,23 @@
       const sw = (document.getElementById('espn-swid-input').value || '').trim();
       return { s2, sw };
     }
-    function toggleEspnCookies() {
+    // Expand/collapse the cookie block. Called by BOTH controls (the primary
+    // "Sign in to ESPN" button when the picker flag is on, the secondary
+    // "Private league?" link when it is off) and by the 403 handler, which
+    // needs the fix on screen rather than behind a closed section.
+    function toggleEspnCookies(forceOpen) {
       const box = document.getElementById('espn-cookies');
-      if (box) box.classList.toggle('hidden');
+      if (!box) return;
+      const open = forceOpen === true ? true : box.classList.contains('hidden');
+      box.classList.toggle('hidden', !open);
+      const btn = document.getElementById('espn-signin-btn');
+      if (btn && !btn.classList.contains('hidden')) {
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      }
+      if (open) {
+        const s2 = document.getElementById('espn-s2-input');
+        if (s2) setTimeout(() => s2.focus(), 50);
+      }
     }
     async function entryEspnPreview(leagueIdOverride) {
       const errEl = document.getElementById('espn-error');
@@ -1365,10 +1459,10 @@
         if (e.code === 'espn_auth_required') {
           // Private league (or rejected cookies): put the fix on screen
           // instead of a dead end — same copy branches as mobile's sheet.
-          document.getElementById('espn-cookies').classList.remove('hidden');
+          toggleEspnCookies(true);
           errEl.textContent = (s2 && sw)
             ? "ESPN didn't accept those cookies — they may have expired. Paste fresh espn_s2 and SWID values from a logged-in espn.com session."
-            : 'This league is private — paste your espn_s2 and SWID cookies below.';
+            : 'This league is private. Paste your espn_s2 and SWID cookies to continue.';
         } else {
           errEl.textContent = e.message || "Couldn't reach ESPN — try again shortly.";
         }
@@ -1391,7 +1485,7 @@
         _entryEspnLeagues = data.leagues || [];
         if (!_entryEspnLeagues.length) {
           list.classList.add('hidden');
-          errEl.textContent = "We couldn't find any fantasy football leagues on that ESPN account — enter a league ID above instead.";
+          errEl.textContent = "We couldn't find any fantasy football leagues on that ESPN account. Try a league ID instead.";
           return;
         }
         list.innerHTML = _entryEspnLeagues.map((lg, i) => `
@@ -1402,8 +1496,8 @@
         list.classList.remove('hidden');
       } catch (e) {
         errEl.textContent = e.code === 'espn_auth_required'
-          ? "ESPN didn't accept those cookies. Paste fresh values, or enter a league ID above instead."
-          : (e.message || "We couldn't list your ESPN leagues — enter a league ID above instead.");
+          ? "ESPN didn't accept those cookies. Paste fresh values, or try a league ID instead."
+          : (e.message || "We couldn't list your ESPN leagues. Try a league ID instead.");
       } finally {
         _entryBusy(btn, false);
       }
@@ -1486,7 +1580,7 @@
         if (!_entryMflLeagues.length) {
           _entryMflPass = '';
           list.classList.add('hidden');
-          errEl.textContent = 'MFL lists no leagues for that account this season — enter a league ID below instead.';
+          errEl.textContent = 'MFL lists no leagues for that account this season. Try a league ID instead.';
           return;
         }
         list.innerHTML = _entryMflLeagues.map((lg, i) => `
@@ -3451,6 +3545,7 @@
             _platformLeagues(_entryPlatform(poolUser)),
             apiFetch(`/api/trade/values?scoring_format=${fmt}`),
           ]);
+          if (leagues === ENTRY_SESSION_LOST) { _handleEntrySessionLost(); return; }
           const target = (leagues || []).find(l => l.league_id === String(leagueId));
           if (!target) throw new Error('league not linked');
           rosters = target.members.map(m => ({ owner_id: m.user_id, roster_id: m.user_id, players: m.player_ids || [] }));

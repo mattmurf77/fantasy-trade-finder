@@ -135,15 +135,40 @@
 
           </div>
 
-          <!-- ESPN entry panel (D-164 entry mode). No WebView on the web, so
-               private leagues use the cookie paste that is mobile's fallback;
-               "Find my leagues" runs the v2.1 my_leagues action off that pair. -->
+          <!-- ESPN entry panel (D-164 entry mode). Mirrors mobile
+               EspnLinkSheet's ENTRY hierarchy: signing in is the FIRST-CLASS
+               option, not something buried under "Private league?", and the
+               league-id field is the other path below an "or" divider.
+               Mobile's primary is one button because its WebView captures the
+               cookies natively; a browser cannot read espn.com's cookies
+               cross-origin, so the web's sign-in expands into the cookie paste
+               that is mobile's own fallback and runs the v2.1 my_leagues
+               action off that pair. Flag `espn.league_picker` owns the
+               find-my-leagues promise: with it off the primary button and its
+               "no league ID needed" hint are withdrawn (the action 404s) and
+               the panel falls back to league-id-first with the cookie fields
+               behind the secondary link, which is where they lived before. -->
           <div class="cb-entry-panel hidden" id="entry-espn">
             <p class="cb-entry-explainer">
-              ESPN dynasty leagues are supported. Enter your league ID and claim your team &mdash;
-              no extra account needed. Private league? Paste your ESPN cookies and we&#8217;ll
-              find your leagues.
+              ESPN dynasty leagues are supported. Read-only: we read team names and rosters,
+              and never post or change anything in ESPN.
             </p>
+            <button class="cb-go-btn cb-go-btn-block hidden" id="espn-signin-btn" type="button" onclick="toggleEspnCookies()">Sign in to ESPN &#8594;</button>
+            <p class="cb-entry-sub hidden" id="espn-signin-hint">We&#8217;ll find your leagues &mdash; no league ID needed. We never see your password.</p>
+            <button type="button" class="cb-entry-link hidden" id="espn-cookies-toggle" onclick="toggleEspnCookies()">Private league? Paste your ESPN cookies</button>
+            <div class="cb-entry-cookies hidden" id="espn-cookies">
+              <p class="cb-entry-sub">
+                A browser can&#8217;t read ESPN&#8217;s cookies for us, so paste them once. Sign in at
+                <a href="https://www.espn.com/fantasy/" target="_blank" rel="noopener noreferrer">espn.com</a>,
+                then copy the <code>espn_s2</code> and <code>SWID</code> cookies for that site
+                (browser settings &rsaquo; cookies, or the Application tab in developer tools).
+                Both are needed. We never see your password.
+              </p>
+              <input class="cb-input" id="espn-s2-input" type="text" placeholder="espn_s2" aria-label="espn_s2 cookie" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
+              <input class="cb-input" id="espn-swid-input" type="text" placeholder="SWID (with braces)" aria-label="SWID cookie" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
+              <button type="button" class="cb-go-btn cb-go-btn-block hidden" id="espn-find-btn" onclick="entryEspnFindLeagues()">Find my leagues &#8594;</button>
+            </div>
+            <div class="cb-entry-or hidden" id="espn-or">or enter a league ID</div>
             <div class="cb-input-row">
               <input
                 class="cb-input"
@@ -159,17 +184,6 @@
                 spellcheck="false"
               />
               <button class="cb-go-btn" id="espn-go-btn" type="button" onclick="entryEspnPreview()">Continue &#8594;</button>
-            </div>
-            <button type="button" class="cb-entry-link" id="espn-cookies-toggle" onclick="toggleEspnCookies()">Private league? Paste your ESPN cookies</button>
-            <div class="cb-entry-cookies hidden" id="espn-cookies">
-              <p class="cb-entry-sub">
-                From a logged-in espn.com session: the <code>espn_s2</code> and <code>SWID</code> cookies.
-                Both are needed for a private league. We use them to read your league and never
-                see your password.
-              </p>
-              <input class="cb-input" id="espn-s2-input" type="text" placeholder="espn_s2" aria-label="espn_s2 cookie" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
-              <input class="cb-input" id="espn-swid-input" type="text" placeholder="SWID (with braces)" aria-label="SWID cookie" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
-              <button type="button" class="cb-entry-link hidden" id="espn-find-btn" onclick="entryEspnFindLeagues()">Find my leagues with these cookies &#8594;</button>
             </div>
             <div class="auth-error" id="espn-error"></div>
             <div class="cb-entry-list hidden" id="espn-league-list"></div>
