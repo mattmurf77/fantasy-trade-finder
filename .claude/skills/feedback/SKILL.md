@@ -112,6 +112,15 @@ phase**, not all upfront:
   proof, operator TestFlight checklist); Planner critiques; Author
   incorporates; loop max 3 rounds, orchestrator arbitrates leftovers. PRD must
   pin the exact API contracts both build agents will code against.
+- **Re-diff against `origin/main` at two points (2026-09-03 lesson):** right before
+  Phase 2 launches build agents, and right before the Phase 5 ship summary, run
+  `git fetch origin main && git log --oneline <spec-sha>..origin/main` and
+  `git diff --name-only <spec-sha> origin/main` against every file the group owns.
+  Sessions run concurrently in this repo; on 2026-09-02 a parallel session shipped
+  the same item (#414) with the same knob name and opposite semantics while this
+  pipeline was in QA. Any overlap → STOP, read the other session's DECISIONS entry,
+  and compare designs before building or shipping further. Allocate D-/Q-/G- ids from
+  `origin/main`, never from the session tree.
 - **Phase 2 — Build** → `references/build-phase.md`
   Set items `in_progress`. One agent per platform in isolated worktrees with
   disjoint file ownership; backend agent (if any) finishes before client
