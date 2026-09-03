@@ -173,6 +173,20 @@ success `fairDeck` goes true → the receipt and the hidden CTA are back to the 
 Flag-off and every non-pushed host evaluate `isResultsPushed` false and take the model arm,
 byte-identical.
 
+### 4.1 The page's escapes, after R-1 (operator review, 2026-09-03)
+
+Hiding the CTA does not strand anyone, and the QA-B B-4 cost was written before this was
+checked. A pushed results deck is registered with `subScreenOptions('Trade ideas',
+'TradesHome')` (`mobile/src/navigation/TabNav.tsx:459-465`), which always renders a custom
+`HeaderBack` (`:148-152`) — a JS control, because native back is dead over a
+`headerShown: false` parent on iOS 26 (RNS#3294). So an anchored deck always offers:
+
+| Escape | Where | Lands on |
+|---|---|---|
+| Header back (always rendered) | `TabNav.tsx:459-465` → `:148-152` | the builder landing, canvas intact (D-171 ruling 4) |
+| Receipt **Change** / **Clear** | `TradesScreen.tsx:7760` / `:7786-7802` | re-pick the anchor / `handleSearchAllTrades` (the model deck) |
+| End of deck: **Back to calculator**, **Search all trades** (no receipt) | `:8564`/`:8672`, `:8597`/`:8691` | landing / model deck |
+
 ## 5. Out of scope
 
 - Changing `sortedDeck`'s `match_score` ordering or giving fair cards a non-zero score — the

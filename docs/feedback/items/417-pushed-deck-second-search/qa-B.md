@@ -80,3 +80,33 @@ Log the outcome in `living-memory/TEST_LEDGER.md`; if step 2 or 4 fails the fix 
 - The `resetDeckForNewTargets` inside `handleFindTrades` does not touch the pin store (assertion 8f), `sheetOpponent`, or `inlineAnchor` — so Clear keeps the partner and the anchor label is merely hidden, ready for the next fair deck on this instance (none can happen on the pushed page — it would be a new push — so no stale-label risk).
 - Batching: the choke's `resetDeckForNewTargets()` (disarm) and `runFairPackages` (arm) run in the same effect tick; React 18 batches to a net `true`. The two disarms both sit after the epoch guard, so a superseded sweep never flips the flag — the intended #330 R-10 posture, and the reason B-2's bypassing bump matters.
 - No new testID, event, flag, route, or schema; `testid-lint` unaffected; the change is byte-identical for flag-off, team/player modes and the landing (all three `findCtaHiddenForAnchoredDeck`/`fairSweepPending` reads are `false` there by construction).
+
+
+---
+
+## Operator review — 2026-09-03 (post-report; corrects B-4, closes B-5)
+
+**Operator, verbatim:** *"Isn't there a back button as well?"* — **yes, and the report
+understated the page's escapes.**
+
+The pushed results deck is registered with `subScreenOptions('Trade ideas', 'TradesHome')`
+(`mobile/src/navigation/TabNav.tsx:459-465`), which composes the Chalkline header with a
+**custom always-on `HeaderBack`** falling back to `TradesHome` (`:148-152`). It is not the
+native control (dead on iOS 26 over a `headerShown: false` parent, RNS#3294) — it is a JS
+control that is always rendered, so an anchored deck ALWAYS carries a visible back button
+in its header, and it pops to the builder landing with the canvas intact (D-171 ruling 4).
+
+**Effect on B-4 (severity downgraded COST → NOTE).** The anchored page has three escapes,
+not one: the header back control (always visible), the receipt's Change / Clear, and the
+end-of-deck exits. "Search everything" from the landing is back → Find a Trade on the
+still-built canvas; the receipt's Clear remains the one-tap version. The finding's real
+content survives — Clear is a text link and its discoverability is untested — but "the
+one-tap escape is gone" was wrong: the user is never stranded, and the watch on
+`deck_search_all_tapped` volume still stands as the way to tell whether Clear is found.
+
+**Effect on B-5 (RESOLVED in the round-1 resolution, commit `bf6a824a`).** The CTA is now
+hidden for the whole anchored lifecycle (`isResultsPushed && (fairDeck || fairSweepPending)`)
+and the in-progress "Looking for trades…" card fires on `fairSweepPending`, so the greyed
+button under 'Hit "Find a Trade" to start' no longer occurs. Checklist step 1's expectation
+was updated with it. B-1's copy finding was resolved in the same commit (third branch on the
+deck-done card naming the control that actually renders).

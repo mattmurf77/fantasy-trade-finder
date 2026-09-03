@@ -18,3 +18,14 @@
 - **Critic pass:** 2026-09-03 — [`reconciliation-log.md`](reconciliation-log.md); verdict READY FOR BUILD.
 - **Build:** 2026-09-03 — `f593020a` on `claude/new-user-feedback-06dabd`; [`build-notes.md`](build-notes.md) (diff, sabotage proof k1–k8; §2.1 adds k3b, k9, tightened k8).
 - **QA:** 2026-09-03 — [`qa-A.md`](qa-A.md) (mechanical re-proof, **PASS**, non-blocking F-1/F-2 resolved by k9/k3b/k8) · [`qa-B.md`](qa-B.md) (adversarial product review, **PASS**; B-2 added to prd D-2, B-6 corrected in §8.3 step 8, its 11-step checklist adopted as prd §8.3; B-1 cross-visit re-offer is a ruling for the operator at checklist step 10).
+- **Operator ruling, 2026-09-03 (closes QA-B B-1):** *"needs a backend follow up. This
+  should be treated the same as any other 'liked' trade."* The cross-window re-offer is
+  **not** accepted behavior — the server must stop offering a sent idea, exactly as the deck
+  already refuses to re-offer a liked package. Recorded as
+  [D-178](../../../living-memory/DECISIONS.md); spec (backend-only, not built) at
+  [`followup-backend-like-exclusion.md`](followup-backend-like-exclusion.md); queued in
+  [`NEXT.md`](../../../living-memory/NEXT.md) 2026-09-03c. The mobile half in this branch is
+  unchanged and still correct — it becomes the bridge between a send and the next fetch,
+  which is the role it already plays for a dismiss. Checklist step 10's ruling question is
+  answered; the step stands as a verification that the tile leaves.
+
