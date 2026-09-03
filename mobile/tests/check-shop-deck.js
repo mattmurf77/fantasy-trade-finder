@@ -48,7 +48,8 @@
 //     say 'ShopAsset'; shop_opened names the TAP on Trades — the taxonomy
 //     comment and the emit sites agree on that split);
 //   • a committed dismiss could be resurrected by a cache tick (Fix A: the
-//     suppression set is commit-only, never cleared by data), or an early
+//     suppression set has exactly two gates — a committed dismiss and a
+//     queued ✓ like, #418 — and is never cleared by data), or an early
 //     commit could leave a dead "Undo" button on screen (B-4 —
 //     retract-by-reference, now wired on the SCREEN's toast mount).
 //
@@ -841,6 +842,179 @@ for (const rel of [BODY_REL, MODE_REL]) {
       !referencesIdentifier(sf, fnUndo, 'commitDismiss') &&
       !referencesIdentifier(sf, fnUndo, 'flushPendingDismiss'),
     'i6: undo cancels the timer — the request is never sent (the copy is true)',
+  );
+}
+
+// ── (k) #418 — a queued like leaves the pager (the second suppression gate)
+// "Send this offer" queued the trade but left the tile in place; the fix
+// gives handleLike the committed-removal half commitDismiss already has.
+// Pinned here: the write goes to the COMMITTED set (never the pending one —
+// there is no un-queue route, so "Undo" would be the dishonest copy R-9 was
+// written to prevent); the pager index is REQUESTED before the write (P-1);
+// the write is conditional on `res.queued`, inside the then-branch, after
+// the await (never optimistic — a refused queue leaves the tile); an
+// already-queued idea is still queued and still leaves (R-b); the like
+// never flushes the pending dismiss (D-1); busyKey still releases in
+// `finally` (R-8); the write is a copy-and-ADD of the prior set, never a
+// replacement or a no-op (k9); the request carries the tap-time `index`
+// (k3b); and the three "one gate" comments carry the item number, each at
+// its own named site (k8).
+
+{
+  const sf = parse(BODY_REL);
+  const fnLike = functionNamed(sf, 'handleLike');
+  const inside = (n, root) =>
+    !!root && n.getStart(sf) >= root.getStart(sf) && n.getEnd() <= root.getEnd();
+
+  // k1 — the like writes the COMMITTED set.
+  assert(
+    !!fnLike && referencesIdentifier(sf, fnLike, 'setSuppressed'),
+    'k1: handleLike writes the suppression set (a queued like is committed by the call itself)',
+  );
+  // k2 — …and never the pending one (no undo route exists for a sent offer).
+  assert(
+    !!fnLike &&
+      !referencesIdentifier(sf, fnLike, 'setLocallyRemoved') &&
+      !referencesIdentifier(sf, fnLike, 'locallyRemoved'),
+    'k2: handleLike never touches locallyRemoved (a like has no pending state)',
+  );
+  // k3 — P-1: the index is REQUESTED before the data write. A missing
+  // identifier on either side is a fail, not a vacuous pass.
+  const reqIds = findAll(
+    sf,
+    (n) => ts.isIdentifier(n) && n.text === 'requestPagerScroll' && inside(n, fnLike),
+  );
+  const supIds = findAll(
+    sf,
+    (n) => ts.isIdentifier(n) && n.text === 'setSuppressed' && inside(n, fnLike),
+  );
+  assert(
+    reqIds.length > 0 && supIds.length > 0 && reqIds[0].getStart(sf) < supIds[0].getStart(sf),
+    'k3: handleLike requests the pager index BEFORE writing the suppression set (P-1)',
+    `requestPagerScroll ×${reqIds.length}, setSuppressed ×${supIds.length}`,
+  );
+  // k4 — the write is gated on `res.queued`, in the THEN branch, with no
+  // negation in the condition (the inverted-branch hole: `if (res.queued)
+  // {toast} else {suppress}` would remove the tile on a refusal).
+  const supCall = findAll(
+    sf,
+    (n) =>
+      ts.isCallExpression(n) &&
+      ts.isIdentifier(n.expression) &&
+      n.expression.text === 'setSuppressed' &&
+      inside(n, fnLike),
+  )[0];
+  const gate = supCall && nearestAncestor(supCall, ts.isIfStatement);
+  assert(
+    !!supCall &&
+      !!gate &&
+      inside(gate, fnLike) &&
+      referencesIdentifier(sf, gate.expression, 'queued') &&
+      !/!/.test(txt(sf, gate.expression)) &&
+      inside(supCall, gate.thenStatement),
+    'k4: the suppression write sits in the then-branch of an un-negated `queued` check (a refused queue writes nothing)',
+    !supCall
+      ? 'no setSuppressed call in handleLike'
+      : !gate
+        ? 'setSuppressed is not inside an if statement'
+        : `if (${txt(sf, gate.expression)}) — in then-branch: ${inside(supCall, gate.thenStatement)}`,
+  );
+  // k3b (D-2) — the request carries the tap-time `index`: `0` would rewind
+  // the pager on every send, `index + 1` would skip a tile. Read from the
+  // queued branch so it is the same call k3 ordered and k4 gated (hence
+  // placed after k4, which finds that branch).
+  const reqCall = findAll(
+    sf,
+    (n) =>
+      ts.isCallExpression(n) &&
+      ts.isIdentifier(n.expression) &&
+      n.expression.text === 'requestPagerScroll' &&
+      !!gate &&
+      inside(n, gate.thenStatement),
+  )[0];
+  assert(
+    !!reqCall && reqCall.arguments.length === 1 && txt(sf, reqCall.arguments[0]) === 'index',
+    'k3b: the queued branch requests the tap-time `index` (not 0, not index ± n — D-2)',
+    reqCall
+      ? `requestPagerScroll(${reqCall.arguments.map((a) => txt(sf, a)).join(', ')})`
+      : 'no requestPagerScroll call in the queued branch',
+  );
+  // k5 — an already-queued idea is still queued and still leaves.
+  assert(
+    !!fnLike && !referencesIdentifier(sf, fnLike, 'alreadyQueued'),
+    'k5: handleLike never branches on alreadyQueued (already queued IS queued — the tile leaves either way)',
+  );
+  // k6 (D-1) — the like is not a flush trigger for the pending dismiss.
+  assert(
+    !!fnLike &&
+      !referencesIdentifier(sf, fnLike, 'flushPendingDismiss') &&
+      !referencesIdentifier(sf, fnLike, 'flushPendingDismissRef'),
+    'k6: handleLike never flushes the pending dismiss (D-1 — a like creates no second pending state)',
+  );
+  // k7 (R-8) — busyKey releases in `finally`; the write lives inside the
+  // `try`, AFTER the await (post-resolution, never optimistic).
+  const tryStmt = findAll(sf, (n) => ts.isTryStatement(n) && inside(n, fnLike))[0];
+  const awaitExpr = findAll(sf, (n) => ts.isAwaitExpression(n) && inside(n, fnLike))[0];
+  assert(
+    !!tryStmt &&
+      !!tryStmt.finallyBlock &&
+      referencesIdentifier(sf, tryStmt.finallyBlock, 'setBusyKey') &&
+      !!supCall &&
+      !!awaitExpr &&
+      inside(supCall, tryStmt.tryBlock) &&
+      supCall.getStart(sf) > awaitExpr.getStart(sf),
+    'k7: busyKey is released in finally, and the suppression write sits inside the try AFTER the await',
+    !tryStmt
+      ? 'no try statement in handleLike'
+      : !tryStmt.finallyBlock
+        ? 'try has no finally block'
+        : !referencesIdentifier(sf, tryStmt.finallyBlock, 'setBusyKey')
+          ? 'finally does not release busyKey'
+          : 'the write is outside the try block or precedes the await',
+  );
+  // k8 (R-9) — textual tripwire, not a proof: three NAMED comment sites
+  // each carry the item number — the header's "✓ like" bullet, the
+  // `suppressed` declaration's comment block, and commitDismiss's body.
+  // Named sites, not a count: the fix's own comment in handleLike must not
+  // be able to stand in for a clause deleted elsewhere. A comment block is
+  // the leading trivia of the statement it precedes (fullStart → start).
+  const src = sf.text;
+  const leading = (stmt) => (stmt ? src.slice(stmt.getFullStart(), stmt.getStart(sf)) : '');
+  const hdrLead = leading(sf.statements.find((st) => leading(st).includes('✓ like')));
+  const bStart = hdrLead.indexOf('✓ like');
+  const bEnd = hdrLead.indexOf('✕ dismiss', Math.max(bStart, 0));
+  const hdrBullet = bStart >= 0 && bEnd > bStart ? hdrLead.slice(bStart, bEnd) : '';
+  const supDecl = findAll(
+    sf,
+    (n) => ts.isVariableDeclaration(n) && txt(sf, n.name) === '[suppressed, setSuppressed]',
+  )[0];
+  const supBlock = supDecl ? leading(nearestAncestor(supDecl, ts.isVariableStatement)) : '';
+  const fnCommit = functionNamed(sf, 'commitDismiss');
+  const sites = {
+    'header ✓-like bullet': hdrBullet.includes('#418'),
+    'suppressed comment block': supBlock.includes('#418'),
+    'commitDismiss': !!fnCommit && txt(sf, fnCommit).includes('#418'),
+  };
+  assert(
+    Object.values(sites).every(Boolean),
+    'k8: the header ✓-like bullet, the `suppressed` comment block, and commitDismiss each name the second gate (#418)',
+    `missing: ${Object.keys(sites).filter((k) => !sites[k]).join(', ') || 'none'}`,
+  );
+  // k9 — the write is a copy-and-ADD of the prior set: an updater arrow
+  // whose body names `key` and calls `.add(`. `setSuppressed(new Set([key]))`
+  // would resurrect every earlier committed ✕ and sent offer of the session
+  // (Fix A broken by replacement); `(s) => new Set(s)` would be the #418
+  // bug back with k1–k8 green.
+  const supArg = supCall && supCall.arguments.length === 1 ? supCall.arguments[0] : null;
+  assert(
+    !!supArg &&
+      ts.isArrowFunction(supArg) &&
+      referencesIdentifier(sf, supArg.body, 'key') &&
+      txt(sf, supArg.body).includes('.add('),
+    'k9: the suppression write is an updater that copies the prior set and ADDS the key (never a replacement, never a no-op)',
+    supCall
+      ? `setSuppressed(${supCall.arguments.map((a) => txt(sf, a)).join(', ')})`
+      : 'no setSuppressed call in handleLike',
   );
 }
 

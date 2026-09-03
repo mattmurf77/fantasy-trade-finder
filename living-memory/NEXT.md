@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-09-03c — FB-418 backend half (D-178): a sent offer stops being offered](#2026-09-03c--fb-418-backend-half-d-178-a-sent-offer-stops-being-offered)
 - [2026-09-03b — Web platform entry: merge PR #272, then the "Connect another league" modal follow-up](#2026-09-03b--web-platform-entry-merge-pr-272-then-the-connect-another-league-modal-follow-up)
 - [2026-09-03 — After the #413 ship: the checklist that closes Q-037, then the G-8 avoid gap D-175 still has, then the impression gap](#2026-09-03--after-the-413-ship-the-checklist-that-closes-q-037-then-the-g-8-avoid-gap-d-175-still-has-then-the-impression-gap)
 - [2026-09-02 — Web parity SHIPPED and live; the only remaining work needs an App Store/TestFlight URL](#2026-09-02--web-parity-shipped-and-live-the-only-remaining-work-needs-an-app-storetestflight-url)
@@ -42,6 +43,10 @@
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## 2026-09-03c — FB-418 backend half (D-178): a sent offer stops being offered
+
+**Why now:** [#418](../docs/feedback/items/418-shop-send-dismiss/prd.md)'s mobile half ships in PR #274 (the tile leaves the pager for the session), and the operator ruled the other half the same day: a sent offer is a like, so the server must stop offering it. The deck already does this with no time window (`_load_presentment_exclusions`, `backend/server.py:5811`); `asset-ideas` applies only the D-067 **dismiss** cooldown and `fair-packages` applies nothing, so today a dismissed idea stays gone and a **sent** one returns on the next fetch. Spec is written and scoped to one shared helper plus two call sites: [`followup-backend-like-exclusion.md`](../docs/feedback/items/418-shop-send-dismiss/followup-backend-like-exclusion.md). Backend-only, no flag, no schema — but it changes two route contracts, so full gates and a `docs/api-reference.md` update. Do it before the #418 mobile suppression comment goes stale in testers' heads.
 
 ## 2026-09-03b — Web platform entry: merge PR #272, then the "Connect another league" modal follow-up
 

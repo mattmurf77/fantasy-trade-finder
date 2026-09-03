@@ -10,6 +10,18 @@
 
 ---
 
+## D-178 — A Sent Offer Is a LIKE Everywhere: the Idea Routes Adopt the Deck's Awaiting-Like Exclusion
+
+**Date:** 2026-09-03 (operator ruling, verbatim: *"needs a backend follow up. This should be treated the same as any other 'liked' trade."*) · **Trigger:** feedback [#418](../docs/feedback/items/418-shop-send-dismiss/prd.md) QA-B finding B-1 · **Spec:** [`followup-backend-like-exclusion.md`](../docs/feedback/items/418-shop-send-dismiss/followup-backend-like-exclusion.md) · **Extends:** the G6 R4 (#336) exclusion set to two more surfaces · **Status:** ruled, **not built**
+
+**Context:** #418's mobile half makes "Send this offer" remove the shop tile for the session. QA-B then measured what the server does next and found an asymmetry nobody had stated: `POST /api/trades/queue` writes a genuine `decision="like"` row (`backend/server.py:13327-13333`), and the model deck refuses to re-offer any liked package with **no time window** (`_load_presentment_exclusions`, `:5811-5838`, wired at `:5983`/`:6292`) — but `asset-ideas` consults only the D-067 **dismiss** cooldown (`:12214-12216`) and `fair-packages` consults nothing. So a dismissed idea stays gone and a **sent** idea comes back on the next fetch, looking new.
+
+**Decision:** a like is a like on every surface. Both idea routes build the SAME `(frozenset(give), frozenset(receive))` exclusion set the deck builds, through the same loader, and drop matching ideas. The session-scoped client suppression #418 added becomes a bridge between a send and the next fetch — the role it already plays for a dismiss — not the only memory. Nothing about the time window, retraction (Q-G6-2 / #318), or the non-fatal failure posture is re-implemented; all three are inherited by calling the existing loader.
+
+**Alternatives considered:** *A shop-only "sent" list on the client* — rejected: it dies with the screen and lies on every other device. *A cooldown window mirroring D-067's dismiss window* — rejected: R4 (#336) removed exactly that window from likes because an 8-day-old like still sitting in Awaiting legitimately regenerated the same card. *Leaving it as documented behavior* — rejected by the ruling.
+
+**Consequences:** the `already_queued` re-✓ path stops being reachable from a fresh shop window (the idea is absent, not re-offered); shop counts shrink for users with many outstanding likes, which is worth one prod read; `ShopOffersBody.tsx:321-327`'s "there is NO server-side memory for a queued like" comment becomes false the day this ships and is corrected in the same commit. `docs/api-reference.md` must record the response-semantics change for both routes.
+
 ## D-001 — Sleeper as the Sole Identity Provider
 **Date:** Pre-changelog (foundational)
 **Context:** Need a user-identification mechanism. Dynasty fantasy football is Sleeper-dominated; building separate accounts adds friction.
@@ -526,6 +538,7 @@
 | D-175 | The Gap Sweetener's Trigger Is a Floor Plus a Relative Band, and Its Closer Is Best-Effort; Shipped Live at 750 / 0.12 / 1 | 2026-09-02 |
 | D-176 | Sleeper Pick Sends Are Encoded Server-Side From the Grid Plus Live `traded_picks`; the Client Never Encodes and Any Unresolvable Pick Refuses the Whole Send | 2026-09-02 |
 | D-177 | The Web Landing Mirrors Platform Entry Through the Same Sessionless Route; Private ESPN on Web Is the Cookie Paste, and Entry Users Read the Platform Snapshot | 2026-09-03 |
+| D-178 | A Sent Offer Is a LIKE Everywhere: the Idea Routes Adopt the Deck's Awaiting-Like Exclusion (ruled, not built) | 2026-09-03 |
 | D-174 | A Card Says Why a Give-Side Piece Is There When the User Rates Him Below Market; the Vehicle Is `reasons`, the Bar Is the Shrunk Board | 2026-09-02 |
 | D-173 | Web Posture Is B, Companion: Marketing Front Door Plus Session-Gated Tools, Not Full Parity | 2026-08-26 |
 

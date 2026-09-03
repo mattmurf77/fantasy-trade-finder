@@ -380,6 +380,27 @@ files. Seeded from history before this skill existed:
   backend half fixes fielded builds: one merge put #409 live on Render for every phone
   already installed (verified deploy CREATED for the sha, then polled to `live`), while the
   mobile half waits on TestFlight. Don't split the PR just because the platforms differ.
+- 2026-09-02c [triage] A fresh agent worktree has NO `secrets.local.env` (gitignored, lives
+  only in the main checkout), so `fetch_feedback.py` dies before the network. Fix that works
+  and stays ignored: `ln -sf "<main checkout>/secrets.local.env" secrets.local.env` in the
+  worktree (`git check-ignore` confirms). Don't copy the file — one source of truth.
+- 2026-09-02c [triage] `in_progress` can mean "merged to a SESSION branch with a version bump
+  and no PR" (#413 + v1.16.15 sat on `claude/weekly-feedback-review-5943dd` while main shipped
+  1.16.14, and #414 was closed by a DIFFERENT implementation, D-175/#268). For every
+  in_progress item run `git log origin/main..<branch>` AND `gh pr list` before assuming the
+  HANDOFF's "nothing in flight" covers it — a parallel session's HANDOFF overwrote this one's.
+- 2026-09-03 [triage] The prod event stream (`user_events`: `event_type`, `occurred_at` is a
+  TEXT ISO string — compare as strings, never `at time zone`) settled #417 in one query
+  after two hours of code-only tracing had produced a WRONG hypothesis twice. A source-less
+  `find_trades_tapped {mode}` fired 1 s after the anchored deck arrived — nothing in the
+  code path I was reading. Rule: for any "card N didn't match" report, pull the operator's
+  events for the filing window FIRST (the `feedback_submitted` row anchors the time), then
+  read code. The read is classifier-gated in auto mode — ask the operator once ("you can
+  read the DB"), don't retry blind.
+- 2026-09-03 [plan] A single Author + single critic pass was enough for a one-file
+  fast-track item: the critic found 11 non-blocking doc defects (a mis-described mechanism,
+  a vacuous guard, an inverted-branch hole in an AST assertion) and fixed them in place —
+  cheaper than a second round. Keep the critic's "fix the docs yourself" mandate.
 - 2026-09-02 [triage] "This week" needs a stated boundary before filtering: ISO week (Mon) vs US week (Sun) moved one P0 item (#413, Sunday 08-30 local) in or out. Also convert `created_at` (UTC) to the operator's local day before deciding — #408 is Sat local / Sun UTC. State the boundary in the batch plan so the next run can see what was excluded and why.
 - 2026-09-02 [triage] A report filed BETWEEN two same-day ships needs a minute-level timeline, not a day-level one: #415 (20:26Z) predates D-170 (21:29Z) and reads as a live bug; #416 (22:22Z) was filed AFTER D-170 landed and its first clause ("validation errors don't fire anymore") is the operator watching that ship arrive. `gh pr view <n> --json mergedAt` is the cheap timestamp; pair it with the feedback `created_at`.
 - 2026-09-02 [triage] Agent-tool worktrees ship WITHOUT `mobile/node_modules` and WITHOUT `secrets.local.env`; the MAIN checkout's `mobile/node_modules` was EMPTY (0 entries), so linking to it silently fails at `npx tsc`/`eas`. Link to a populated sibling worktree (`ls .claude/worktrees/*/mobile/node_modules | wc -l` to find one) and symlink `secrets.local.env` from the main checkout. `eas build:list --json` prints nothing on a plugin-resolution error — read the text form.
