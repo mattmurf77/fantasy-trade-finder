@@ -45,7 +45,7 @@ app/site) — neither is an API call and neither carries any FTF data.
 | 8 | `GET /draft/{draft_id}` | Single draft detail | `backend/draft_board_service.py:292-294` | feeds `/api/draft/board` |
 | 9 | `GET /draft/{draft_id}/picks` | Picks already made in a live/complete draft | `backend/draft_board_service.py:296-297` | feeds `/api/draft/board` |
 | 10 | `GET /league/{league_id}/matchups/{week}` | Weekly scores/pairings, one call per regular-season week — **cached per league+season+week** since 2026-08-09 (`_outlook_sleeper_fetch()`, `backend/server.py`; completed weeks never refetch — see §5.4) | `backend/outlook/league_state.py:218` via the injected fetch | feeds `/api/league/outlook` |
-| 11 | `GET /league/{league_id}/transactions/{week}` | Completed transactions for one leg/week; filtered to `type=trade, status=complete` | `backend/sleeper_trades_service.py:53-68` (`fetch_week_transactions`, swept for weeks 1–18 every call — see §5) | not directly routed — session-init background capture only |
+| 11 | `GET /league/{league_id}/transactions/{week}` | Completed transactions for one leg/week; filtered to `type=trade, status=complete` | `backend/sleeper_trades_service.py:53-68` (`fetch_week_transactions`; the 1–18 sweep is the one-time backfill for a league with no captured rows, otherwise only the live leg and the one before it — see §5.2) | not directly routed — session-init background capture only |
 | 12 | `GET /players/nfl` | **Bulk player dump, ~5 MB raw / ~4.8 MB filtered.** All NFL players; FTF keeps only QB/RB/WR/TE with a `full_name` | `backend/server.py:1593,1672-1684` (`_PLAYERS_BULK_URL` / `_fetch_players_bulk`); called from `_ensure_sleeper_cache_populated` (`backend/server.py:13920-13969`) and the M0 refresh daemon (`backend/server.py:1795-1823`) | `/api/sleeper/players`, `/api/sleeper/players/warm` |
 | 13 | `GET /players/nfl/adp` | Average draft position — **undocumented**, best-effort | `backend/server.py:586-615` (`_fetch_sleeper_adp`) | not routed — feeds player-DB sync only |
 
@@ -294,17 +294,31 @@ degrades ESPN/MFL cookie storage too, not just Sleeper.
 
 ### 5.2 Per-session-init background sync (best-effort, non-blocking)
 Fired from `/api/session/init`'s background daemon on every league switch/login,
-each independently flag-gated and each a **fresh live fetch, no shared cache**:
+each independently flag-gated. Payloads that are **immutable for the length of
+one init** — the v1 `rosters` list and the `/league/{id}` meta blob — are
+fetched ONCE by the daemon and handed to every consumer; everything else is a
+fresh live fetch with no shared cache.
 
 | Sync | Flag | Endpoints hit | Site |
 |---|---|---|---|
-| Trade-block import | `sleeper.trade_block` | 1× `league_players` GraphQL + 1× `rosters` | `backend/server.py:14628-14640` |
-| Owned draft-pick re-normalization | `picks.owned_sync` | MFL-league-only re-derivation, no new Sleeper reads for Sleeper leagues | `backend/server.py:14642-14669` |
-| Trade-transaction capture | `market.trade_capture` | **18 calls** — `transactions/{week}` for `week` in `1..18`, every sync, idempotent insert | `backend/sleeper_trades_service.py:36-40,53-68` |
+| Shared rosters fetch | `sleeper.trade_block` \| `market.roster_history` \| `picks.owned_sync` | 1× `rosters`, reused by all four consumers below | `_session_init_background_writes`, `backend/server.py` |
+| Shared league meta | (unconditional for numeric, non-platform-linked ids) | 1× `/league/{id}`, reused by scoring auto-detect, the FB #41 team-count persist and the owned-pick sync | `_league_meta()` in the same daemon |
+| Trade-block import | `sleeper.trade_block` | 1× `league_players` GraphQL (rosters shared) | `sync_league_trade_block`, `backend/trade_block_service.py` |
+| Owned draft-pick sync | `picks.owned_sync` | 1× `traded_picks` + 1× `drafts` (rosters + meta shared); MFL leagues re-derive with no Sleeper reads | `_sync_sleeper_owned_picks`, `backend/server.py` |
+| Trade-transaction capture | `market.trade_capture` | **≤2 calls** — `transactions/{week}` for the live leg and the one before it. The full `1..18` sweep runs ONCE, as the first-time backfill for a league with no captured rows; in the offseason an already-swept league fetches **1** (leg 1, where Sleeper books every offseason trade) | `sweep_weeks` / `sync_league_trades`, `backend/sleeper_trades_service.py` |
+| Executed-trade matcher | `suggestion.telemetry` | 0 — takes the shared rosters map | `match_league_trades(roster_map=…)`, `backend/suggestion_telemetry.py` |
+| Rookie-draft status refresh | (unflagged) | 0 in steady state; up to 3 (`/league/{id}`, `drafts`, `rosters`) when the per-status TTL has expired — 12 h once a league reads `drafted` | `_refresh_league_draft_status`, `backend/server.py` |
 
-All three are wrapped in bare `try/except` so a Sleeper flake just leaves the
+**Per-init upstream budget for a Sleeper league** (steady state, all flags ON,
+draft-status TTL warm): **7 calls in season, 6 in the offseason** — meta,
+rosters, GraphQL `league_players`, `traded_picks`, `drafts`, and ≤2
+`transactions/{week}`. Before 2026-09-03 the same init cost **26** (29 on a
+draft-status refresh): 18 transaction legs, 3 rosters reads and 2 meta reads.
+
+All of these are wrapped in bare `try/except` so a Sleeper flake just leaves the
 previous snapshot in place — "best-effort" is load-bearing language throughout
-these modules, not a suggestion.
+these modules, not a suggestion. A shared fetch that fails is handed on as
+`None`, and every consumer falls back to fetching for itself.
 
 ### 5.3 Draft Room polling (`GET /api/draft/board`, flag `draft.room`)
 Server-side cache with a state-dependent TTL and a circuit breaker
@@ -387,7 +401,7 @@ standing is a wrong answer, not a slow one.
   outcomes, not credentials
 - Sleeper `sleeper_user_id` claim (it's the same value as FTF's `user_id` for
   Sleeper-origin accounts — already the join key everywhere)
-- Transaction/draft/roster **counts** (e.g. "18 week-sweeps returned N trade rows")
+- Transaction/draft/roster **counts** (e.g. "2 week-sweeps returned N trade rows")
 
 ### 6.2 Must redact / never log
 - **The JWT itself**, in any form — full, truncated, or hashed-without-a-salt-pepper

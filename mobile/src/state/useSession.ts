@@ -13,7 +13,7 @@ import { connectLeague as apiConnectLeague } from '../api/league';
 import { getLeagues } from '../api/sleeper';
 import { initPurchases } from '../api/purchases';
 import { setUser as sentrySetUser } from '../observability/sentry';
-import { queryClient } from './queryClient';
+import { queryClient, seedLeagueSessionCaches } from './queryClient';
 import { getActiveScoringFormat } from '../api/rankings';
 import type { LeagueSummary, ScoringFormat } from '../shared/types';
 
@@ -364,10 +364,14 @@ export const useSession = create<SessionState>((set, get) => ({
       // initLeagueSession mints a fresh server session + token and stores
       // it in secure-store, replacing whatever (possibly orphaned) token
       // the app restored at boot.
-      await initLeagueSession(user, {
+      const seed = await initLeagueSession(user, {
         league_id: league.league_id,
         name:      league.league_name,
       });
+      // The handshake just fetched this league's rosters + users. Hand them
+      // to the cache so Trades / the calculator / the DNA sheet / the hub
+      // don't re-request the same two endpoints on their next mount.
+      seedLeagueSessionCaches(league.league_id, seed);
       _lastRevalidateMs = Date.now();
       set({ hasToken: true });
       // Onboarding item 4 (hazard H3): the silent re-init is the returning-
@@ -459,10 +463,13 @@ export const useSession = create<SessionState>((set, get) => ({
     try {
       // initLeagueSession owns the backend handshake (rosters → users →
       // /api/session/init). On success, persist the new active league.
-      await initLeagueSession(userSnapshot, {
+      const seed = await initLeagueSession(userSnapshot, {
         league_id: lg.league_id,
         name:      lg.league_name,
       });
+      // Seed the NEW league's roster/user caches from the handshake's own
+      // fetches — see seedLeagueSessionCaches.
+      seedLeagueSessionCaches(lg.league_id, seed);
       await get().setLeague(lg);
       // Invalidate league-agnostic caches whose CONTENTS change on a
       // league swap. `[leagueId]`-keyed queries auto-refetch on key
@@ -634,10 +641,11 @@ export const useSession = create<SessionState>((set, get) => ({
 
     // 3. Initialize a session against the new league and persist as
     //    active. Same handshake LeaguePickerScreen runs.
-    await initLeagueSession(state.user, {
+    const seed = await initLeagueSession(state.user, {
       league_id: result.league_id,
       name:      result.league_name,
     });
+    seedLeagueSessionCaches(result.league_id, seed);
     await get().setLeague({
       league_id:   result.league_id,
       league_name: result.league_name,

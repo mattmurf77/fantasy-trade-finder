@@ -143,6 +143,21 @@ def _ago(hours):
     return (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
 
 
+#: A `leagues.updated_at` inside the active-league window. Both sweep
+#: work-lists now skip leagues nobody has opened in
+#: `ACTIVE_LEAGUE_WINDOW_DAYS` days, so a fixture league that is meant to be
+#: swept has to look like one somebody still uses.
+def _active():
+    return _ago(1)
+
+
+#: A UTC instant INSIDE the rookie-draft window. The `not_drafted` TTL is
+#: season-gated (3 h in-window, 24 h outside — see test_cron_sweep_scope.py),
+#: so these expectations only hold against a pinned clock; on the wall clock
+#: the same rows would flip on September 16.
+_IN_WINDOW = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+
+
 @pytest.mark.parametrize("status,hours,fresh", [
     # A drafted league never un-drafts inside a season → long TTL.
     ("drafted", 6, True),
@@ -155,8 +170,9 @@ def _ago(hours):
     ("unknown", 2, False),
 ])
 def test_cheap_skip_ttls_are_asymmetric(status, hours, fresh):
-    ctx = {"status": status, "checked_at": _ago(hours)}
-    assert server._draft_status_is_fresh(ctx) is fresh
+    checked = (_IN_WINDOW - timedelta(hours=hours)).isoformat()
+    ctx = {"status": status, "checked_at": checked}
+    assert server._draft_status_is_fresh(ctx, now=_IN_WINDOW) is fresh
 
 
 def test_never_checked_league_is_never_fresh():
@@ -286,11 +302,11 @@ def test_refresh_queue_puts_never_checked_leagues_first(mem_db):
     with db_module.engine.begin() as conn:
         conn.execute(leagues_table.insert(), [
             {"sleeper_league_id": "old", "user_id": "u",
-             "draft_status_checked_at": _ago(48)},
+             "updated_at": _active(), "draft_status_checked_at": _ago(48)},
             {"sleeper_league_id": "fresh", "user_id": "u",
-             "draft_status_checked_at": _ago(1)},
+             "updated_at": _active(), "draft_status_checked_at": _ago(1)},
             {"sleeper_league_id": "never", "user_id": "u",
-             "draft_status_checked_at": None},
+             "updated_at": _active(), "draft_status_checked_at": None},
         ])
     assert db_module.load_league_ids_for_draft_status_refresh() == [
         "never", "old", "fresh"]
@@ -323,10 +339,10 @@ def test_hourly_tick_refreshes_stale_leagues_and_skips_fresh_ones(
         conn.execute(leagues_table.insert(), [
             {"sleeper_league_id": "111", "user_id": "u", "season": "2026",
              "total_rosters": 12, "draft_status": None,
-             "draft_status_checked_at": None},
+             "updated_at": _active(), "draft_status_checked_at": None},
             {"sleeper_league_id": "222", "user_id": "u", "season": "2026",
              "total_rosters": 12, "draft_status": "drafted",
-             "draft_status_checked_at": _ago(1)},
+             "updated_at": _active(), "draft_status_checked_at": _ago(1)},
         ])
     server._invalidate_draft_context_cache()
     _patch_sleeper(monkeypatch,
@@ -346,7 +362,8 @@ def test_hourly_tick_sweep_is_bounded_per_tick(cron_client, monkeypatch):
     with db_module.engine.begin() as conn:
         conn.execute(leagues_table.insert(), [
             {"sleeper_league_id": str(i), "user_id": "u", "season": "2026",
-             "total_rosters": 12, "draft_status_checked_at": None}
+             "total_rosters": 12, "updated_at": _active(),
+             "draft_status_checked_at": None}
             for i in range(n)
         ])
     server._invalidate_draft_context_cache()

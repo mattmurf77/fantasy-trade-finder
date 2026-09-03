@@ -6,9 +6,10 @@ pre-bake-off `origin/main`, where that module does not exist. Keeping the
 harness portable is what makes the golden a real capture rather than a
 self-consistent assertion.
 
-`trade_intent` is passed through only when set, so the golden capture (which
-never sets it) calls `_run_trade_job` with exactly the argument list it had at
-the pre-bake-off SHA.
+`trade_intent` (and, on the same rule, `prefs_preload`) is passed through only
+when set, so the golden capture (which never sets either) calls
+`_run_trade_job` with exactly the argument list it had at the pre-bake-off
+SHA.
 
 `run_capture()` drives one complete trade job through the real engine with a
 fixed flag configuration and returns a canonical dict — served cards, every
@@ -131,7 +132,8 @@ def _canonical_rows(engine):
     return out
 
 
-def run_capture(extra_patches=(), seed_like=True, trade_intent=None):
+def run_capture(extra_patches=(), seed_like=True, trade_intent=None,
+                prefs_preload=None):
     """Run one full trade job and return the canonical capture dict."""
     engine = create_engine("sqlite:///:memory:",
                            connect_args={"check_same_thread": False})
@@ -196,6 +198,8 @@ def run_capture(extra_patches=(), seed_like=True, trade_intent=None):
             with server._trade_jobs_lock:
                 server._trade_jobs[JOB_ID] = job
             _job_kw = {"trade_intent": trade_intent} if trade_intent else {}
+            if prefs_preload is not None:
+                _job_kw["prefs_preload"] = prefs_preload
             server._run_trade_job(JOB_ID, TOKEN, LEAGUE, 0.75, [], **_job_kw)
         finally:
             for p in reversed(stack):

@@ -8,7 +8,7 @@ import {
   warmPlayerCache,
   resetWarmedFlag,
 } from './sleeper';
-import type { RosterRow } from './sleeper';
+import type { LeagueUser, RosterRow } from './sleeper';
 import { isEspnLeague, buildEspnSessionInitBody } from './espn';
 import {
   isMflLeague,
@@ -339,6 +339,22 @@ export async function sessionPing(): Promise<{ ok: true }> {
 // atomic — no backgrounding needed there).
 export interface LeagueLite { league_id: string; name: string }
 
+/** The Sleeper reads the session-init builders already performed, handed
+ *  back so the caller can seed the query cache instead of letting the
+ *  screens re-fetch the identical two endpoints seconds later
+ *  (`['league-rosters', leagueId]` / `['league-users', leagueId]`).
+ *
+ *  Both fields are ABSENT for ESPN / MFL / Fleaflicker leagues — those
+ *  branches source rosters from the backend snapshot and never call the
+ *  Sleeper proxies, so there is nothing to seed. Never seed `undefined`.
+ *
+ *  This layer cannot touch the QueryClient (api/* imports no state); the
+ *  seeding itself lives in `state/queryClient.seedLeagueSessionCaches`. */
+export interface SessionInitSeed {
+  rosters?: RosterRow[];
+  leagueUsers?: LeagueUser[];
+}
+
 // ── Sleeper roster → session payload (co-owner aware) ──────────────────
 // ONE resolver, shared by both builders below, so the initial league pick
 // and the in-app league switch cannot resolve a roster differently.
@@ -374,10 +390,13 @@ function buildSleeperRosterPayload(
   };
 }
 
+// Resolves to a `SessionInitSeed` — the Sleeper reads it already made, so
+// the caller can seed the query cache. Additive: every existing caller
+// awaits this for its side effects and ignores the value.
 export async function initLeagueSession(
   user: SavedUser,
   lg: LeagueLite,
-): Promise<void> {
+): Promise<SessionInitSeed> {
   // ESPN-imported leagues (flag `espn.link`) have no Sleeper rosters — the
   // proxy routes would 404 on their numeric ids. Build the init body from
   // the backend's imported snapshot instead (api/espn.ts); the resulting
@@ -386,17 +405,17 @@ export async function initLeagueSession(
   if (isEspnLeague(lg.league_id)) {
     const espnBody = await buildEspnSessionInitBody(user, lg);
     await submitSessionInit(espnBody);
-    return;
+    return {};
   }
   // MFL / Fleaflicker imports work the same way — rosters come from the
   // backend snapshot (api/platformLink.ts), not Sleeper proxies.
   if (isMflLeague(lg.league_id)) {
     await submitSessionInit(await buildPlatformSessionInitBody('mfl', user, lg));
-    return;
+    return {};
   }
   if (isFleaflickerLeague(lg.league_id)) {
     await submitSessionInit(await buildPlatformSessionInitBody('fleaflicker', user, lg));
-    return;
+    return {};
   }
   // Warm the backend's Sleeper player-DB cache in parallel with the
   // roster/users fetches. session_init below errors with
@@ -471,6 +490,8 @@ export async function initLeagueSession(
       throw e;
     }
   }
+
+  return { rosters: rosters ?? undefined, leagueUsers: leagueUsers ?? undefined };
 }
 
 // ── INIT-08-client: two-phase session init for optimistic navigation ───
@@ -481,9 +502,17 @@ export async function initLeagueSession(
 // navigating away from LeaguePicker.
 //
 // Returns a `SessionInitBody` ready to pass to `submitSessionInit`.
+//
+// `seedOut` is an optional out-parameter: when supplied, the Sleeper reads
+// this function made are written onto it so the caller can seed the query
+// cache (see `state/queryClient.seedLeagueSessionCaches`). It is NOT part
+// of the returned body — that object is POSTed verbatim, so nothing may be
+// added to it. Left untouched on the ESPN / MFL / Fleaflicker branches,
+// which fetch no Sleeper data.
 export async function buildSessionInitBody(
   user: SavedUser,
   lg: LeagueLite,
+  seedOut?: SessionInitSeed,
 ): Promise<SessionInitBody> {
   // ESPN/MFL/Fleaflicker imports: roster source is the backend snapshot, not
   // Sleeper (see initLeagueSession's espn branch for the why).
@@ -504,6 +533,10 @@ export async function buildSessionInitBody(
     getLeagueUsers(lg.league_id),
     warmPlayerCache().catch(() => { /* best-effort */ }),
   ]);
+  if (seedOut) {
+    seedOut.rosters = rosters ?? undefined;
+    seedOut.leagueUsers = leagueUsers ?? undefined;
+  }
   const usernameMap: Record<string, string> = {};
   for (const u of leagueUsers || []) {
     usernameMap[u.user_id] = u.display_name || u.username || u.user_id;

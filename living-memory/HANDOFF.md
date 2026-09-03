@@ -8,6 +8,16 @@
 
 ---
 
+## 2026-09-03c — API audit fixes on PR #273 (D-178); finding 3 held, web push deferred
+
+**Where:** branch `claude/api-audit-redundancies-9a6075` pushed; [PR #273](https://github.com/mattmurf77/fantasy-trade-finder/pull/273) open against `main` @ `6ccd6698`. All gates green on the merged tree (pytest 4617/1, tsc 0, testid-lint OK, web 175/175 — TEST_LEDGER 2026-09-03c). Nothing in flight; the two agent worktrees are swept (`docs/recovery/2026-09-03-api-audit-agent-sweep.md`). Session worktree `new-user-feedback-5fa613` hosts this branch.
+
+**Owed, in order:**
+1. **Operator: merge PR #273** (squash, as usual). Render auto-deploys the backend + web; mobile changes ride the next EAS build.
+2. **Post-deploy:** one real session init in the Render log should show ≤7 `api.sleeper.app` calls (one `rosters`, one `/league/{id}`, ≤2 `transactions`). Then the 5-step TestFlight check in the PR body — it only proves anything on a build cut after this merge.
+3. **Finding 3 decision** (NEXT 2026-09-03c item 2): ping-then-init trades roster freshness for calls; the safer variant is a server-side 15-min skip inside the daemon. Not built.
+4. **Web push** is a scoped feature, not a fix (NEXT item 3). **Route hygiene** batch (NEXT item 4) is mechanical and each row is an `api-reference.md` edit.
+5. `SEASON_START` in `backend/sleeper_trades_service.py` is a constant (2026-09-08) — bump it each September, or replace with a `/v1/state/nfl` read if one ever lands.
 ## 2026-09-03b — Web landing platform entry (Sleeper · ESPN · MFL) SHIPPED (D-177); awaiting the Render deploy + the operator prod check
 
 **Where:** `main` @ `ca5fac46` (PR [#272](https://github.com/mattmurf77/fantasy-trade-finder/pull/272), squash, CI ×4 green). [D-177](DECISIONS.md); scope + code-walk §V3 in `docs/plans/landing-platform-options/`. Branch `claude/landing-page-espn-mfl-a5a85a` @ `9fea43e0` content-verified (`git diff origin/main 9fea43e0` empty) and ledgered in `docs/recovery/2026-09-03b-web-platform-entry-ship.md`.
@@ -411,6 +421,7 @@ move, and the avatar lab's anchor test models the brief's described layout, not 
 **none**, so the bubble reads "The Analyst" above a ram, which is D-155's recorded default). Higgsfield credits ~4.35.
 
 ## Table of Contents
+- [2026-09-03c — API audit fixes on PR #273 (D-178); finding 3 held, web push deferred](#2026-09-03c--api-audit-fixes-on-pr-273-d-177-finding-3-held-web-push-deferred)
 - [2026-09-03b — Web landing platform entry (Sleeper · ESPN · MFL) SHIPPED (D-177); awaiting the Render deploy + the operator prod check](#2026-09-03b--web-landing-platform-entry-sleeper--espn--mfl-shipped-d-177-awaiting-the-render-deploy--the-operator-prod-check)
 - [2026-09-02 — web parity SHIPPED (PR #263, live on Render); what is left is two operator inputs, not code](#2026-09-02--web-parity-shipped-pr-263-live-on-render-what-is-left-is-two-operator-inputs-not-code)
 - [2026-09-02 — D-172 `consensus_fit_weight` LIVE at 0.5; research write-back landed; two prototype worktrees ledgered](#2026-09-02--d-172-consensusfitweight-live-at-05-research-write-back-landed-two-prototype-worktrees-ledgered)

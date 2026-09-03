@@ -1,0 +1,334 @@
+<title>Fleeced API Audit</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    color-scheme: dark;
+    --ink-0: #0C0E11; --ink-1: #13161B; --ink-2: #1A1E25; --ink-3: #232833;
+    --line: #262C35; --line-strong: #59647A;
+    --chalk: #ECEFF4; --chalk-dim: #97A1AE; --chalk-faint: #626C79;
+    --ice: #56D9EC; --flare: #F0508C;
+    --pos: #22C55E; --neg: #EF4444; --warn: #F59E0B;
+    --font-ui: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+    --font-display: 'Barlow Condensed', 'Arial Narrow', Impact, sans-serif;
+    --font-data: 'IBM Plex Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      color-scheme: light;
+      --ink-0: #F3F5F8; --ink-1: #FFFFFF; --ink-2: #EAEEF4; --ink-3: #DDE3EB;
+      --line: #D5DAE2; --line-strong: #8A94A6;
+      --chalk: #0C0E11; --chalk-dim: #4B5566; --chalk-faint: #7A8494;
+      --ice: #0E8CA0; --flare: #C0356D;
+      --pos: #15803D; --neg: #B91C1C; --warn: #B45309;
+    }
+  }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --ink-0: #F3F5F8; --ink-1: #FFFFFF; --ink-2: #EAEEF4; --ink-3: #DDE3EB;
+    --line: #D5DAE2; --line-strong: #8A94A6;
+    --chalk: #0C0E11; --chalk-dim: #4B5566; --chalk-faint: #7A8494;
+    --ice: #0E8CA0; --flare: #C0356D;
+    --pos: #15803D; --neg: #B91C1C; --warn: #B45309;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ink-0); color: var(--chalk);
+    font-family: var(--font-ui); font-size: 15px; line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--ice); text-decoration: none; }
+  a:hover, a:focus-visible { text-decoration: underline; outline: none; }
+  :focus-visible { outline: 2px solid var(--ice); outline-offset: 2px; }
+  code {
+    font-family: var(--font-data); font-size: 0.86em; color: var(--chalk);
+    background: var(--ink-2); padding: 1px 5px; border-radius: 2px;
+    white-space: nowrap;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 40px 24px 96px; }
+
+  /* Masthead */
+  .mast { border-bottom: 1px solid var(--line-strong); padding-bottom: 20px; margin-bottom: 28px; }
+  .eyebrow {
+    font-family: var(--font-data); font-size: 11px; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--chalk-dim); margin: 0 0 8px;
+  }
+  h1 {
+    font-family: var(--font-display); font-weight: 700; font-size: 44px;
+    line-height: 1; letter-spacing: 0.005em; margin: 0 0 12px; text-wrap: balance;
+  }
+  .lede { max-width: 66ch; color: var(--chalk-dim); margin: 0; }
+  .lede strong { color: var(--chalk); font-weight: 600; }
+
+  h2 {
+    font-family: var(--font-display); font-weight: 700; font-size: 26px;
+    line-height: 1.05; margin: 48px 0 14px; text-wrap: balance;
+    padding-top: 18px; border-top: 1px solid var(--line);
+  }
+  h3 {
+    font-family: var(--font-ui); font-weight: 600; font-size: 15px;
+    margin: 24px 0 8px;
+  }
+  p { max-width: 68ch; margin: 0 0 12px; }
+  ul { padding-left: 20px; margin: 0 0 12px; max-width: 70ch; }
+  li { margin-bottom: 6px; }
+
+  /* Layer tiles */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin: 0 0 8px; }
+  .tile { background: var(--ink-1); border: 1px solid var(--line); border-radius: 4px; padding: 14px 14px 12px; }
+  .tile .k { font-family: var(--font-data); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--chalk-dim); }
+  .tile .n { font-family: var(--font-display); font-weight: 700; font-size: 40px; line-height: 1; margin: 6px 0 4px; font-variant-numeric: tabular-nums; }
+  .tile .d { font-size: 13px; color: var(--chalk-dim); line-height: 1.35; }
+  .tile.crit .n { color: var(--neg); }
+  .tile.warn .n { color: var(--warn); }
+  .tile.ok .n { color: var(--pos); }
+  .note { font-size: 13px; color: var(--chalk-faint); max-width: 70ch; margin: 10px 0 0; }
+
+  /* Findings */
+  .finding {
+    display: grid; grid-template-columns: 6px 1fr; gap: 0 16px;
+    background: var(--ink-1); border: 1px solid var(--line); border-radius: 4px;
+    margin-bottom: 10px; overflow: hidden;
+  }
+  .finding .stripe { background: var(--line-strong); }
+  .finding.high .stripe { background: var(--neg); }
+  .finding.med .stripe { background: var(--warn); }
+  .finding.low .stripe { background: var(--line-strong); }
+  .finding .body { padding: 14px 16px 14px 0; min-width: 0; }
+  .finding .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px; margin-bottom: 6px; }
+  .finding .num { font-family: var(--font-data); font-size: 12px; color: var(--chalk-faint); font-variant-numeric: tabular-nums; }
+  .finding h3 { margin: 0; font-size: 16px; }
+  .chip {
+    font-family: var(--font-data); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+    border: 1px solid var(--line-strong); color: var(--chalk-dim); border-radius: 999px; padding: 1px 8px;
+  }
+  .sev { font-family: var(--font-data); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 500; }
+  .high .sev { color: var(--neg); } .med .sev { color: var(--warn); } .low .sev { color: var(--chalk-dim); }
+  .finding p { font-size: 14px; color: var(--chalk-dim); max-width: 74ch; }
+  .finding p:last-child { margin-bottom: 0; }
+  .finding p.fix { color: var(--chalk); }
+  .finding p.fix::before { content: "Fix "; font-family: var(--font-data); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ice); margin-right: 4px; }
+  .finding .loc { font-family: var(--font-data); font-size: 12.5px; color: var(--chalk-faint); margin-bottom: 8px; word-break: break-word; }
+  .finding .loc code { background: none; padding: 0; color: var(--chalk-dim); white-space: normal; }
+
+  /* Tables */
+  .tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 4px; margin: 0 0 14px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-family: var(--font-data); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--chalk-dim); font-weight: 500; background: var(--ink-2); }
+  tr:last-child td { border-bottom: 0; }
+  td code { white-space: nowrap; }
+
+  /* Order list */
+  ol.order { padding-left: 0; list-style: none; counter-reset: step; max-width: 74ch; }
+  ol.order li { counter-increment: step; display: grid; grid-template-columns: 34px 1fr; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+  ol.order li::before { content: counter(step); font-family: var(--font-display); font-weight: 700; font-size: 26px; line-height: 1; color: var(--chalk-faint); }
+  ol.order li strong { display: block; margin-bottom: 2px; }
+  ol.order li span { color: var(--chalk-dim); font-size: 14px; }
+
+  @media (max-width: 600px) {
+    h1 { font-size: 34px; }
+    .wrap { padding: 28px 16px 72px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header class="mast">
+    <p class="eyebrow">Fleeced · backend + mobile + web + extension · 2026-09-03 · main @ c7e75666</p>
+    <h1>Fleeced API Audit</h1>
+    <p class="lede">Every HTTP call in the app, read statically across all four layers and re-verified by hand. <strong>Nothing was changed.</strong> Counts are per code path, not measured traffic. The scarce resource is Sleeper calls: they are rate-limited and most of them run inside the session-init daemon the user is waiting on.</p>
+  </header>
+
+  <section>
+    <div class="tiles">
+      <div class="tile crit"><div class="k">Sleeper calls / session init</div><div class="n">26–29</div><div class="d">rosters ×3–4, league meta ×3, drafts ×2, 18 weeks of transactions</div></div>
+      <div class="tile crit"><div class="k">Mobile requests / cold start</div><div class="n">18–22</div><div class="d">before any user input; full re-init again on every resume older than 60 s</div></div>
+      <div class="tile warn"><div class="k">Web bytes discarded / load</div><div class="n">4.8 MB</div><div class="d">players blob fetched, parsed, never read; a warm endpoint already exists</div></div>
+      <div class="tile warn"><div class="k">Routes with no caller</div><div class="n">4 + 5 + 7</div><div class="d">none anywhere · tests only · admin sub-routes nobody calls</div></div>
+      <div class="tile ok"><div class="k">Extension</div><div class="n">OK</div><div class="d">one stale-badge bug; caching and gating are sound</div></div>
+    </div>
+    <p class="note">Deploy context: <code>render.yaml:16</code> runs one gunicorn worker, so in-process caches do share across requests. The gap is that the base Sleeper fetcher (<code>server.py:564</code>) has no cache at all, and the single league-meta cache that exists (<code>26472</code>) is consulted by 2 of its 9 callers.</p>
+  </section>
+
+  <h2>Ranked findings</h2>
+  <p>Severity weighs wasted calls × how often the path runs × upstream cost. High means it burns Sleeper budget or user-visible latency on every launch.</p>
+
+  <article class="finding high"><div class="stripe"></div><div class="body">
+    <div class="head"><span class="num">01</span><h3>Trades sync walks all 18 weeks on every app open</h3><span class="chip">backend → sleeper</span><span class="sev">high</span></div>
+    <div class="loc"><code>sleeper_trades_service.py:128-143</code> · <code>:40</code> WEEKS = range(1, 19) · called from <code>server.py:19591</code></div>
+    <p>One transactions fetch per week, every session init, year-round. Only the live week can change and the insert is idempotent, so ~17 calls are wasted per init. A Sleeper outage costs up to 18 × 15 s of daemon time.</p>
+    <p class="fix">Fetch only the current week, with a one-time per-league backfill flag; or move the sweep to the daily tick.</p>
+  </div></article>
+
+  <article class="finding high"><div class="stripe"></div><div class="body">
+    <div class="head"><span class="num">02</span><h3>Session-init daemon re-fetches rosters and league meta per consumer</h3><span class="chip">backend → sleeper</span><span class="sev">high</span></div>
+    <div class="loc"><code>server.py:19497-19520</code> trade block · <code>11693-11694</code> owned picks · <code>15872-15884</code> draft status · <code>19424-19427</code> auto-detect · <code>suggestion_telemetry.py:377</code></div>
+    <p>The comment at 19497 says "fetch ONCE here, hand it to both consumers." The trade block gets the shared rosters; the owned-picks sync fetches rosters and meta again on its own, and draft-status fetches meta, drafts and rosters a third time when its TTL lapses. Scoring auto-detect reads the stored format into <code>existing_fmt</code> and then calls Sleeper regardless, despite the comment above it saying the call is skipped once stored. Three identical <code>is_linked_platform_league</code> reads (19504, 19549, 19623) and a duplicate <code>get_league_scoring</code> (19185, 19424) ride along.</p>
+    <p class="fix">Thread the shared rosters and one meta read into the owned-picks and draft-status calls; gate auto-detect on <code>existing_fmt</code>; hoist the repeated SELECTs.</p>
+  </div></article>
+
+  <article class="finding high"><div class="stripe"></div><div class="body">
+    <div class="head"><span class="num">03</span><h3>Mobile rebuilds the whole session on every launch and resume, never pinging first</h3><span class="chip">mobile</span><span class="sev">high</span></div>
+    <div class="loc"><code>useSession.ts:363-383</code> · <code>auth.ts:377, 416-418, 239</code> · <code>App.tsx:117, 210</code> · dead: <code>auth.ts:320</code> sessionPing</div>
+    <p>Revalidate means GET rosters + GET users + POST session init, plus GET and POST on the Sleeper link when unverified. It runs at boot and on every foreground older than 60 s. Each run pays findings 1 and 2 server-side and kicks a trade pregen. The cheap liveness probe exists and has zero callers.</p>
+    <p class="fix">Ping first; re-init only on a 401. That fully covers the FB-45 concern that a deploy kills in-memory sessions.</p>
+  </div></article>
+
+  <article class="finding high"><div class="stripe"></div><div class="body">
+    <div class="head"><span class="num">04</span><h3>Web downloads the 4.8 MB players blob three ways and never reads it</h3><span class="chip">web</span><span class="sev">high</span></div>
+    <div class="loc"><code>app.js:625, 771, 2387</code> · parser <code>app.js:121-139</code> · warm route <code>server.py:18754</code></div>
+    <p>Each call site checks only <code>pr.ok</code>. The shared fetch wrapper then clones, reads and JSON-parses every response to build a <code>summary</code> string that nothing reads, so the full blob is parsed on the main thread for no output. The warm endpoint already returns a few hundred bytes; its comment claiming the web client consumes the body is wrong.</p>
+    <p class="fix">Point web at the warm route, delete the summary block, then retire the raw players route (positional-tiers uses the DB-backed players endpoint, not this one).</p>
+  </div></article>
+
+  <article class="finding high"><div class="stripe"></div><div class="body">
+    <div class="head"><span class="num">05</span><h3>Mobile fetches rosters and users for the init body, discards them, then re-fetches per screen</h3><span class="chip">mobile</span><span class="sev">high</span></div>
+    <div class="loc"><code>auth.ts:416-430</code> · re-fetched at <code>TradesScreen:2762, 2772</code> · <code>InLeagueCalculator:423</code> · <code>TradeDnaSheet:353</code> · <code>TradeFinderHub:284</code></div>
+    <p>No query-cache seed follows the init fetch, so four screens request the same two proxy endpoints again. Combined with finding 3, that is four proxy calls per launch for data the server just rebuilt into league members.</p>
+    <p class="fix">Seed the roster and users query keys from the init path; or let session init accept a league id and pull rosters server-side, collapsing three requests into one and removing the client-side Sleeper proxy hop.</p>
+  </div></article>
+
+  <article class="finding high"><div class="stripe"></div><div class="body">
+    <div class="head"><span class="num">06</span><h3>Web fires five requests per ranking swipe; three are redundant</h3><span class="chip">web</span><span class="sev">high</span></div>
+    <div class="loc"><code>app.js:1445, 1485, 1493, 1779, 1797, 2635</code> · rank3 already returns the counts: <code>server.py:7631-7634</code></div>
+    <p>The swipe response carries the progress fields, then the client fetches rankings progress, waits 350 ms, loads the next trio, fetches progress again, and fetches rankings progress a second time. Roughly 120 wasted requests per user reaching the unlock threshold.</p>
+  </div></article>
+
+  <article class="finding high"><div class="stripe"></div><div class="body">
+    <div class="head"><span class="num">07</span><h3>Web polls notifications every 30 s and never pauses</h3><span class="chip">web</span><span class="sev">high</span></div>
+    <div class="loc"><code>app.js:4802</code> · cleared only at <code>:275</code> logout · no visibilitychange handler in app.js</div>
+    <p>A backgrounded tab issues 120 requests an hour indefinitely. Mobile, by contrast, does not poll at all and relies on push, which is the right shape.</p>
+  </div></article>
+
+  <article class="finding med"><div class="stripe"></div><div class="body">
+    <div class="head"><span class="num">08</span><h3>Web league switch runs the full boot twice</h3><span class="chip">web</span><span class="sev">medium</span></div>
+    <div class="loc"><code>app.js:2372-2461</code> · <code>location.reload()</code> at 2461 · dead code after the return at 2462</div>
+    <p>The switch fetches players, rosters and users and posts session init, then reloads the page, and boot repeats every one of those calls including the 4.8 MB one.</p>
+  </div></article>
+
+  <article class="finding med"><div class="stripe"></div><div class="body">
+    <div class="head"><span class="num">09</span><h3>Hourly draft-status sweep has no season gate and no active-user filter</h3><span class="chip">backend cron</span><span class="sev">medium</span></div>
+    <div class="loc"><code>server.py:21135-21141</code> · TTLs <code>15797-15801</code> · <code>database.py:9653, 11529</code> · daily rosters <code>server.py:20763</code></div>
+    <p>Up to 50 leagues × 3 Sleeper calls per tick, over every league row ever synced. An undrafted league is re-probed every 3 hours, which is 24 calls a day per league for the nine months no draft can happen. The daily roster sweep fetches the same rosters on its own and also sweeps every league ever synced.</p>
+    <p class="fix">Gate the draft sweep on the rookie-draft window; filter both sweeps to leagues with a session in the last N days.</p>
+  </div></article>
+
+  <article class="finding med"><div class="stripe"></div><div class="body">
+    <div class="head"><span class="num">10</span><h3>Trade job loads preferences and picks two to three times</h3><span class="chip">backend cpu</span><span class="sev">medium</span></div>
+    <div class="loc"><code>server.py:12067-12070</code> request · <code>5936, 5972, 5758, 6009</code> worker · N+1 at <code>6003</code> · bulk loader <code>database.py:9132</code></div>
+    <p>The request thread reads preference and outlook for the cache key; the worker re-reads both, and the outlook path loads draft picks which the worker loads again. Inside the members loop each opponent's preference is a separate query although a bulk loader exists and is already used by the trade breaker. This runs on every session init through pregen.</p>
+  </div></article>
+
+  <article class="finding med"><div class="stripe"></div><div class="body">
+    <div class="head"><span class="num">11</span><h3>Mobile trade pregen fires on every launch, not just the first session</h3><span class="chip">mobile</span><span class="sev">medium</span></div>
+    <div class="loc"><code>tradePregen.ts:64-78</code> · <code>useSession.ts:376</code> · races <code>TradesScreen:2213-2220</code></div>
+    <p>Gated only on the two onboarding flags (both true) and a per-launch dedupe. It races the Trades screen's own auto-generate; the server dedupes a fresh job, so usually one wasted POST. Unproven whether a POST landing mid-init produces a second job.</p>
+  </div></article>
+
+  <article class="finding med"><div class="stripe"></div><div class="body">
+    <div class="head"><span class="num">12</span><h3>Trades landing mounts five ungated calculator queries</h3><span class="chip">mobile</span><span class="sev">medium</span></div>
+    <div class="loc"><code>TradesScreen:7596</code> · <code>InLeagueCalculator.tsx:412-450</code></div>
+    <p>With the inline-calculator flag on, trade values, rosters, picks, power rankings and coverage all fire on the Trades tab whether or not the canvas is opened. Power rankings is not a cheap route.</p>
+  </div></article>
+
+  <article class="finding med"><div class="stripe"></div><div class="body">
+    <div class="head"><span class="num">13</span><h3>Format-default applier writes on every boot, then invalidates what just resolved</h3><span class="chip">mobile + web</span><span class="sev">medium</span></div>
+    <div class="loc"><code>useScoringFormat.ts:60-73, 89-116</code> · web <code>positional-tiers.html:2659, 2866, 2884, 2678</code></div>
+    <p>Mobile posts a scoring switch even when it equals the active format, then invalidates progress, rankings, streak, trio, tiers status and trends. The web tiers page posts the same switch on every page view, twice on toggle, then awaits four rankings fetches in series.</p>
+  </div></article>
+
+  <article class="finding med"><div class="stripe"></div><div class="body">
+    <div class="head"><span class="num">14</span><h3>ESPN link reads the same league three to six times</h3><span class="chip">backend → espn</span><span class="sev">medium</span></div>
+    <div class="loc"><code>server.py:24372, 24436-24452, 24249, 24800, 24810</code></div>
+    <p>Oracle read, then every linked league, then the target again, then an anonymous probe, then a second verify when the league is public. Low volume, high cost per link.</p>
+  </div></article>
+
+  <article class="finding med"><div class="stripe"></div><div class="body">
+    <div class="head"><span class="num">15</span><h3>Invite-meta is a public, unauthenticated, uncached Sleeper proxy</h3><span class="chip">backend → sleeper</span><span class="sev">medium</span></div>
+    <div class="loc"><code>server.py:22984-23012</code></div>
+    <p>One upstream call per hit, no rate limit by design. Trivially abusable to burn the Sleeper budget.</p>
+  </div></article>
+
+  <article class="finding low"><div class="stripe"></div><div class="body">
+    <div class="head"><span class="num">16</span><h3>Extension background refresh fetches rankings the page then ignores</h3><span class="chip">extension</span><span class="sev">low</span></div>
+    <div class="loc"><code>background.js:82-99</code> · <code>content.js:127</code> early return · <code>popup.js:82</code> vs <code>background.js:41</code></div>
+    <p>The 15-minute alarm fetches and broadcasts, but the content script returns early when the league id has not changed, so badges stay stale until the user navigates away and back. The popup and background hold two implementations of the same fetch with different staleness rules.</p>
+  </div></article>
+
+  <h3>Smaller items</h3>
+  <ul>
+    <li>Mobile record-picks screen polls the draft board every 15 s unconditionally (<code>RecordPicksScreen.tsx:111</code>); the draft room (<code>DraftRoomScreen:221</code>) has the correct focus and state guard.</li>
+    <li>Rank menu prefetches under query keys the target screens never read (<code>TabNav.tsx:879-923</code>), a full rankings payload per menu tap.</li>
+    <li>The sign-in response already carries a leagues list (<code>server.py:22409</code>) but the client immediately calls get-leagues, a second Sleeper round-trip. Check the compact shape suffices.</li>
+    <li>Progress and tiers status fetched outside the query cache alongside cached copies (<code>usePresentationDeck.ts:98</code>, <code>quicksetProgress.ts:62</code>); entitlements refetch on every foreground with no throttle; the bell always posts read-all even at zero unread.</li>
+    <li>Web fetches full liked-trade cards after every swipe and load just to count a badge (<code>app.js:3185, 3262, 4011</code>); the trades tab fires five to six uncached requests per visit; session ping at <code>:211</code> is dead weight since init always follows.</li>
+    <li>Web market pulse (<code>app.js:4929</code>) is unreachable from normal navigation, so that section never loads. A bug, not a redundancy.</li>
+    <li>Backend fetches the DynastyProcess CSV twice per boot (<code>server.py:341, 1662</code>); Expo push goes out one POST per user (<code>20129-20139</code>) where the API accepts 100 per batch; the Sleeper fetcher permanently downgrades SSL verification for the process after one cert failure (<code>598-611</code>).</li>
+    <li>Anthropic is called once per trio when the rotation lands on the tightest lane; the result is not cached; <code>generate_next_matchup</code> in the smart-matchup module is dead code.</li>
+  </ul>
+
+  <h2>Removal candidates</h2>
+
+  <h3>Routes with no caller anywhere</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>Route</th><th>Line</th><th>Note</th></tr></thead>
+    <tbody>
+      <tr><td><code>POST /api/reset</code></td><td><code>9668</code></td><td>Wipes in-memory rankings for a position. A destructive write nobody calls.</td></tr>
+      <tr><td><code>GET /api/leagues</code></td><td><code>17429</code></td><td>Returns the session league as a one-element list.</td></tr>
+      <tr><td><code>GET /api/skips</code></td><td><code>21901</code></td><td>Docstring says the frontend uses it. None does.</td></tr>
+      <tr><td><code>GET /api/players/&lt;id&gt;</code></td><td><code>10173</code></td><td>The only client string targets the profile sibling (<code>web/player.html:134</code>).</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Tests-only routes</h3>
+  <p><code>/api/rankings/submit</code> (its work is done inline by the three save routes), <code>/api/auth/google</code> (no mobile Google sign-in), <code>/api/trades/respond-mfl</code>, <code>/api/mfl/pending-trades</code>, <code>/api/account/reset-rankings</code>. Decide roadmap or delete; if kept, say so in the API reference.</p>
+
+  <h3>Admin sub-routes nothing calls</h3>
+  <p>Six experiment sub-routes at <code>server.py:8978-9035</code> plus reseed-layers at <code>29010</code>. The admin page hits only the list route.</p>
+
+  <h3>Duplicate bodies</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>Pair</th><th>Lines</th><th>Relationship</th></tr></thead>
+    <tbody>
+      <tr><td><code>/api/trio/skip</code> · <code>/api/tiers/dismiss</code></td><td><code>21815</code> · <code>21856</code></td><td>Line-for-line identical except response keys and one decorator (dismiss gates unverified writes). Alias one path. <code>/api/skips</code> is their unused read side.</td></tr>
+      <tr><td><code>/api/progress</code> · <code>/api/rankings/progress</code></td><td><code>7735</code> · <code>7750</code></td><td>Strict subset. Web calls both back-to-back (<code>app.js:1779, 1783</code>).</td></tr>
+      <tr><td><code>/api/trades/matches</code> · <code>/matches/all</code></td><td><code>16388</code> · <code>16462</code></td><td>One-league restriction with weaker enrichment; web only. Both emit <code>match_viewed</code>, so calling both double-counts. Mobile's wrapper has no callers.</td></tr>
+      <tr><td><code>/api/{espn,mfl,fleaflicker}/{leagues,link,import}</code></td><td><code>24910, 27279, 28902</code> and siblings</td><td>Same 15-line bodies; the MFL member-persistence block is pasted three times (<code>27230, 27370, 27480</code>). Mobile already builds the path from the platform name.</td></tr>
+      <tr><td><code>tiers/save</code> · <code>anchor/save</code> · <code>rankings/reorder</code></td><td><code>9178, 9352, 9744</code></td><td>Same 50-line tail. Extract; the ranking-method rules in that tail are subtle, so keep ordering.</td></tr>
+      <tr><td><code>propose</code> · <code>propose-mfl</code> · <code>propose-espn</code></td><td><code>16196, 28121, 28573</code></td><td>Same 40-line preamble. A single dispatcher was deliberately rejected (<code>28145</code>, numeric id collisions). Extract the preamble, keep the routes.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Dead mobile wrappers</h3>
+  <p>Exported with zero callers: <code>sessionPing</code>, <code>getMatches</code>, <code>getRecentTrades</code>, <code>markNotificationRead</code>, <code>markNotificationsRead</code>, <code>dismissPlayer</code>, <code>skipPlayer</code>, <code>importPlatformLeague</code>, <code>getAnchorScale</code>, <code>setAnchorScale</code>.</p>
+
+  <h3>Flag-dead routes</h3>
+  <p>Twenty routes are gated on a flag currently false: fleaflicker ×4, profiles ×3, player profile, tiers community-diff and stability, league activity, member-unlock-states, invite impact, tier-board share ×2, session demo, paywall config, receipts, test-users ×2. Not waste in themselves, except member-unlock-states: it returns a flag-off stub and both clients still call it on every League screen visit (<code>league.ts:332</code>, <code>app.js:5103</code>).</p>
+
+  <h3>Found in passing</h3>
+  <ul>
+    <li><code>TestStagesScreen.tsx:118, 141</code> call <code>/api/test-users/templates</code>, which does not exist. Flask matches the delete-only user route and returns 405. Latent behind the stage-users flag.</li>
+    <li>Four cron levers (value-snapshot, players-refresh, roster-snapshot, receipts-grade) are not scheduled in <code>render.yaml</code>; each is duplicated by a fallback guard inside a tick. Operator tools, not waste, but the docs should say the guard is what fires.</li>
+  </ul>
+
+  <h2>Suggested order</h2>
+  <ol class="order">
+    <li><strong>Server only, no client change.</strong><span>Thread rosters and meta into the init daemon and gate auto-detect (2); current-week-only trades sync (1); bulk prefs and pass the request-time outlook into the job (10). Cuts roughly 25 Sleeper calls and several reads per login with zero contract change.</span></li>
+    <li><strong>Web, small diffs.</strong><span>Warm route plus delete the summary block (4); pause polling on visibility change (7); drop the redundant progress calls (6); delete the dead post-reload block and skip the pre-reload fetches (8).</span></li>
+    <li><strong>Mobile, one PR.</strong><span>Ping then init (3), seed the roster and users cache (5), gate pregen on first session or on Trades being the landing tab (11). This changes session-init frequency, which is the FB-45 contract, so walk it through the gates.</span></li>
+    <li><strong>Route hygiene.</strong><span>Delete the four no-caller routes and ten dead wrappers, alias skip and dismiss, fold progress and matches, fix the templates call. Update the API reference row by row.</span></li>
+    <li><strong>Cron.</strong><span>Season-gate the draft sweep and filter both sweeps to recently active leagues (9).</span></li>
+  </ol>
+  <p class="note">Not recommended: merging the three propose routes (decided against at <code>28145</code>), or a bootstrap bundle replacing flags, entitlements and session init. Session init embeds none of those payloads today (<code>19700-19715</code>), so that would be a design change, not a de-dup.</p>
+
+  <h2>Uncertainties</h2>
+  <ul>
+    <li>Volumes are per code path. The 200 inits a day and 240 leagues used for estimates are illustrative; the api-events table would give real counts.</li>
+    <li>Whether the server-side job dedupe fully absorbs the double trade-generate when the second POST lands mid-init.</li>
+    <li>Whether the Anthropic key is set in Render; it is not in <code>render.yaml</code>.</li>
+    <li>Whether the compact leagues list in the sign-in response has every field the league picker needs.</li>
+    <li>Admin routes may be hit by operator curl not visible in the repo.</li>
+  </ul>
+  <p class="note">Full report with the complete 195-route caller table: <code>docs/reviews/2026-09-03-api-audit.md</code> in the worktree.</p>
+</div>

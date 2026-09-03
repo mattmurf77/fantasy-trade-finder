@@ -118,43 +118,33 @@
       } catch (e) {
         throw e;
       }
-      // Clone so we can read body for logging without consuming it
-      const clone = res.clone();
-      let _parsedBody = null;
-      let summary = '';
-      try {
-        const raw = await clone.text();
-        _parsedBody = raw ? JSON.parse(raw) : null;
-        const parsed = _parsedBody;
-        if (parsed === null) {
-          summary = 'null';
-        } else if (Array.isArray(parsed)) {
-          summary = `array[${parsed.length}]`;
-        } else if (parsed && typeof parsed === 'object') {
-          // Show the most useful key fields
-          const keys = ['user_id','display_name','username','error','ok',
-                        'league_id','name','player_count','opponents'];
-          const parts = keys.filter(k => parsed[k] !== undefined)
-                            .map(k => `${k}=${JSON.stringify(parsed[k])}`);
-          summary = parts.length ? parts.join(' ') : `{${Object.keys(parsed).slice(0,4).join(',')}}`;
-        }
-      } catch { /* non-JSON – ignore */ }
-
       // ── Session expiry handling ─────────────────────────────────────
-      if (res.status === 401 && _parsedBody && _parsedBody.error === 'session_expired') {
-        localStorage.removeItem(LS_TOKEN);
-        sessionToken = null;
-        showToast('Session expired — reconnecting…');
-        const savedUser   = getSavedUser();
-        const savedLeague = getSavedLeague();
-        if (savedUser && savedLeague) {
-          showInitOverlay('Reconnecting…');
-          await initSession(savedUser, savedLeague);
-          hideInitOverlay();
-        } else {
-          boot();
+      // Only a 401 can carry the session_expired marker, so we clone + read
+      // the body for that status alone. Every other response is handed back
+      // untouched — cloning and JSON.parsing every payload (including the
+      // ~4.8MB player blob) was pure overhead.
+      if (res.status === 401) {
+        let _parsedBody = null;
+        try {
+          const raw = await res.clone().text();
+          _parsedBody = raw ? JSON.parse(raw) : null;
+        } catch { /* non-JSON – ignore */ }
+
+        if (_parsedBody && _parsedBody.error === 'session_expired') {
+          localStorage.removeItem(LS_TOKEN);
+          sessionToken = null;
+          showToast('Session expired — reconnecting…');
+          const savedUser   = getSavedUser();
+          const savedLeague = getSavedLeague();
+          if (savedUser && savedLeague) {
+            showInitOverlay('Reconnecting…');
+            await initSession(savedUser, savedLeague);
+            hideInitOverlay();
+          } else {
+            boot();
+          }
+          return;  // caller receives undefined; their try/catch handles it
         }
-        return;  // caller receives undefined; their try/catch handles it
       }
 
       return res;
@@ -283,6 +273,7 @@
       currentAcquirePositions   = [];
       currentTradeAwayPositions = [];
       invalidateRankingProgressCache();
+      _notifPollActive = false;
       if (_notifPollTimer) { clearInterval(_notifPollTimer); _notifPollTimer = null; }
       _notifState = [];
       _updateNotifBadge(0);
@@ -688,7 +679,7 @@
 
       // 1. Warm the Sleeper player cache (first call downloads ~5MB)
       try {
-        const pr = await apiFetch('/api/sleeper/players');
+        const pr = await apiFetch('/api/sleeper/players/warm');
         if (!pr.ok) throw new Error(`HTTP ${pr.status}`);
       } catch (e) {
         hideInitOverlay();
@@ -842,7 +833,7 @@
       if (!rosterData) {
         // Page-reload path: need to re-fetch roster data
         try {
-          const pr = await apiFetch('/api/sleeper/players');
+          const pr = await apiFetch('/api/sleeper/players/warm');
           if (!pr.ok) return false;
         } catch (e) { return false; }
 
@@ -1889,7 +1880,13 @@
     }
 
     // ── Load next trio ──────────────────────────────────────────────
-    async function loadTrio() {
+    // opts.skipProgress: the caller has already applied fresh progress (the
+    // /api/rank3 response carries interaction_count / threshold /
+    // threshold_met for the position just ranked, and the swipe path also
+    // refreshes the unlock bar via _onRankingSwipeComplete). Re-fetching
+    // /api/progress + /api/rankings/progress here would just re-render the
+    // same numbers. Cold loads pass nothing and keep the fetch.
+    async function loadTrio(opts = {}) {
       if (locked) return;
       resetCards();
       setCardsLoading();
@@ -1902,7 +1899,7 @@
         renderCard('a', data.player_a);
         renderCard('b', data.player_b);
         renderCard('c', data.player_c);
-        await loadProgress();
+        if (!opts.skipProgress) await loadProgress();
       } catch {
         showToast('Could not reach server — is server.py running?');
       }
@@ -2092,7 +2089,10 @@
       setTimeout(() => {
         selectionOrder = [];
         locked = false;
-        if (!_celebrationActive) loadTrio();
+        // Progress for this swipe was already applied from the /api/rank3
+        // body (updateProgress) and the unlock bar / trades gate from
+        // _onRankingSwipeComplete — so skip the duplicate refetch.
+        if (!_celebrationActive) loadTrio({ skipProgress: true });
       }, 350);
     }
 
@@ -2966,12 +2966,6 @@
     function _setSwitcherStatus(text) {
       for (const s of _allSwitcherStatuses()) s.textContent = text;
     }
-    function _setSwitcherSelectedIndex(idx) {
-      for (const s of _allSwitcherSelects()) {
-        if (idx >= 0 && idx < s.options.length) s.selectedIndex = idx;
-      }
-    }
-
     async function switchToLeague(idx) {
       const lg = _cachedLeagues[idx];
       if (!lg || lg.league_id === currentLeagueId) return;
@@ -2982,111 +2976,26 @@
 
       _setSwitcherDisabled(true);
       if (genBtn) genBtn.disabled = true;
-      _setSwitcherStatus('Switching…');
-
-      let rosterData = null;
-      if (_isEntryUser(user)) {
-        // ESPN/MFL entry user (D-164 web mirror): platform snapshot, not
-        // Sleeper proxies.
-        rosterData = await _platformRosterData(user, lg.league_id);
-      } else {
-      // Warm player cache (no-op if already loaded), then fetch new rosters
-      try {
-        const pr = await apiFetch('/api/sleeper/players');
-        if (!pr.ok) throw new Error(`Player cache HTTP ${pr.status}`);
-      } catch (e) {
-        _setSwitcherStatus('Failed');
-        _setSwitcherDisabled(false);
-        if (genBtn) genBtn.disabled = false;
-        // Revert visual selection to current league
-        const revertIdx = _cachedLeagues.findIndex(l => l.league_id === currentLeagueId);
-        if (revertIdx >= 0) _setSwitcherSelectedIndex(revertIdx);
-        showToast('Could not load player database');
-        return;
-      }
-
-      let rosters, leagueUsers;
-      try {
-        const [rRes, uRes] = await Promise.all([
-          apiFetch(`/api/sleeper/rosters/${lg.league_id}`),
-          apiFetch(`/api/sleeper/league_users/${lg.league_id}`),
-        ]);
-        rosters     = await rRes.json();
-        leagueUsers = await uRes.json();
-      } catch (e) {
-        _setSwitcherStatus('Failed');
-        _setSwitcherDisabled(false);
-        if (genBtn) genBtn.disabled = false;
-        const revertIdx = _cachedLeagues.findIndex(l => l.league_id === currentLeagueId);
-        if (revertIdx >= 0) _setSwitcherSelectedIndex(revertIdx);
-        showToast('Failed to fetch roster data');
-        return;
-      }
-
-      const usernameMap = {};
-      for (const u of (leagueUsers || [])) {
-        usernameMap[u.user_id] = u.display_name || u.username || u.user_id;
-      }
-
-      rosterData = buildRosterData(rosters, usernameMap, user.user_id);
-      }
-      if (!rosterData) {
-        _setSwitcherStatus('No roster');
-        _setSwitcherDisabled(false);
-        if (genBtn) genBtn.disabled = false;
-        const revertIdx = _cachedLeagues.findIndex(l => l.league_id === currentLeagueId);
-        if (revertIdx >= 0) _setSwitcherSelectedIndex(revertIdx);
-        showToast('Could not find your roster in this league');
-        return;
-      }
-
-      _setSwitcherStatus('Loading…');
-      const ok = await initSession(
-        user,
-        { league_id: lg.league_id, league_name: lg.name },
-        rosterData
-      );
-
-      _setSwitcherDisabled(false);
-      if (genBtn) genBtn.disabled = false;
-
-      if (!ok) {
-        _setSwitcherStatus('Failed');
-        const revertIdx = _cachedLeagues.findIndex(l => l.league_id === currentLeagueId);
-        if (revertIdx >= 0) _setSwitcherSelectedIndex(revertIdx);
-        showToast('Failed to switch league');
-        return;
-      }
 
       // Commit the switch — persist to localStorage, then HARD RELOAD
       // the page. Incrementally patching every visible view after a switch
       // was bug-prone (stale rankings, stale trade cards, stale contrarian
       // leaderboards, etc.). A full reload re-runs boot() which reads the
       // saved league from localStorage and rebuilds every view cleanly.
+      //
+      // boot() → initSession(user, league) with no rosterData re-warms the
+      // player cache, re-fetches rosters + league users and POSTs
+      // /api/session/init itself — and for an ESPN/MFL entry user it takes
+      // the _isEntryUser branch and reads the platform snapshot instead —
+      // so doing any of that here just ran the whole boot twice. If the new
+      // league turns out to be unusable,
+      // initSession() fails after the reload and boot() drops the user on
+      // the league picker.
       saveLeague({ league_id: lg.league_id, league_name: lg.name });
       _setSwitcherStatus('✓ Switched — reloading…');
       // Small delay so the status text is visible before the reload yanks
       // the page out from under the user.
       setTimeout(() => { location.reload(); }, 400);
-      return;
-
-      // Clear stale trade cards and reset ranking gate for new league
-      document.getElementById('trades-list').innerHTML =
-        `<div class="trades-empty"><strong>League switched</strong>Hit "Find a Trade" to see trade ideas for ${escapeHtml(lg.name)}.</div>`;
-      const _gateEl = document.getElementById('trades-gate');
-      const _wrapEl = document.getElementById('trades-wrap');
-      if (_gateEl) { _gateEl.classList.remove('active', 'unlocking'); _gateEl.innerHTML = ''; }
-      if (_wrapEl) { _wrapEl.classList.remove('gate-active'); }
-      refreshCoverage();
-
-      // Load per-league fairness preference and reset outlook
-      initFairnessSlider();
-      currentOutlook            = null;
-      currentAcquirePositions   = [];
-      currentTradeAwayPositions = [];
-      invalidateRankingProgressCache();
-      updateOutlookBadge();
-      checkOutlookPrompt();
     }
 
     // ── Leaguemate ranking coverage ─────────────────────────────────────
@@ -5131,6 +5040,7 @@
     // ── Notifications ──────────────────────────────────────────────
     let _notifState    = [];   // current cached notifications (server-side, unfiltered)
     let _notifPollTimer = null;
+    let _notifPollActive = false;  // true between _startNotifPolling() and logout()
 
     // LEGACY per-browser dismissal set. READ-ONLY since 2026-08-13: "Clear
     // all" now dismisses server-side (GD-4, see clearVisibleNotifs below)
@@ -5425,9 +5335,22 @@
 
     function _startNotifPolling() {
       if (_notifPollTimer) clearInterval(_notifPollTimer);
+      _notifPollActive = true;
       fetchNotifications();  // immediate fetch on login
       _notifPollTimer = setInterval(fetchNotifications, 30000);
     }
+
+    // A backgrounded tab has no badge to update, so the 30s poll ran forever
+    // for nothing. Pause it on hide; on show, catch up immediately and
+    // restart. _notifPollActive gates the resume so a logged-out tab never
+    // starts polling and logout() still stops it for good.
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        if (_notifPollTimer) { clearInterval(_notifPollTimer); _notifPollTimer = null; }
+      } else if (_notifPollActive) {
+        _startNotifPolling();
+      }
+    });
 
     // ══════════════════════════════════════════════════════════════════
     //  Dual-scoring-format toggle + League Summary + Invite share sheet

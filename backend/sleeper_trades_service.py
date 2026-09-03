@@ -25,19 +25,28 @@ from __future__ import annotations
 import json
 import logging
 import urllib.request
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from .database import record_sleeper_trades
+from .database import has_sleeper_trades, record_sleeper_trades
 
 log = logging.getLogger(__name__)
 
 SLEEPER_API_BASE = "https://api.sleeper.app/v1"
 
 # Sleeper legs run 1..18 (regular season + playoffs); offseason trades land
-# on leg 1. A full sweep every sync keeps capture complete regardless of
-# when in the season a league is first synced; idempotent inserts make the
-# re-sweep free on the DB side.
+# on leg 1. The full sweep is the FIRST-TIME backfill for a league — it keeps
+# capture complete regardless of when in the season a league is first synced.
+# After that only the live legs can gain rows (see `sweep_weeks`).
 WEEKS = range(1, 19)
+
+# Tuesday that opens leg 1 of the current NFL regular season (Sleeper rolls
+# `leg` on Tuesday, after Monday night; kickoff is the Thursday after).
+# Sleeper publishes the authoritative value at /v1/state/nfl, but nothing in
+# FTF fetches that endpoint — adding it would spend one upstream call per
+# session init, which is exactly what the incremental sweep below exists to
+# save. Bump this constant each September.
+SEASON_START = date(2026, 9, 8)
+LAST_WEEK = 18
 
 # Same rationale as trade_block_service — Cloudflare 1010-bans naked
 # urllib UAs.
@@ -125,15 +134,49 @@ def parse_trade_transactions(txns: list, league_id: str) -> list[dict]:
     return rows
 
 
+def current_nfl_week(today: date | None = None) -> int | None:
+    """The live NFL leg (1..18), or None when there is no live leg.
+
+    Derived from `SEASON_START` rather than a network read — see that
+    constant. None means OFFSEASON (before leg 1 or after leg 18); callers
+    must treat it as "no live leg", never as leg 1.
+    """
+    today = today or datetime.now(timezone.utc).date()
+    week = ((today - SEASON_START).days // 7) + 1
+    return week if 1 <= week <= LAST_WEEK else None
+
+
+def sweep_weeks(league_id: str, today: date | None = None) -> list[int]:
+    """Which legs `sync_league_trades` should fetch for this league.
+
+    A league with NO captured rows gets the full 1..18 backfill once. After
+    that only the live leg and the one before it can produce new rows — a
+    completed trade never mutates, and the leg it lands on can slip by one
+    when Sleeper processes an accepted trade late in the week.
+
+    OFFSEASON (`current_nfl_week()` is None) returns [1]: Sleeper books every
+    offseason trade on leg 1 of the league's season (see the module note),
+    and dynasty's heaviest trading window IS the offseason, so an
+    already-swept league keeps one live leg all year.
+    """
+    if not has_sleeper_trades(league_id):
+        return list(WEEKS)
+    week = current_nfl_week(today)
+    if week is None:
+        return [1]
+    return [w for w in (week - 1, week) if w >= 1]
+
+
 def sync_league_trades(league_id: str, *, _opener=None) -> int:
-    """Sweep all legs for a league, store completed trades. Returns the
-    number of NEW trades captured (0 in steady state).
+    """Sweep this league's live legs (or backfill all 18 on the first pass),
+    store completed trades. Returns the number of NEW trades captured (0 in
+    steady state).
 
     Per-week fetch failures are logged and skipped — one bad leg must not
     drop the rest of the sweep.
     """
     rows: list[dict] = []
-    for week in WEEKS:
+    for week in sweep_weeks(league_id):
         try:
             txns = fetch_week_transactions(league_id, week, _opener=_opener)
         except Exception as e:

@@ -11,6 +11,13 @@
 
 ---
 
+## 2026-09-03c — API audit (D-178): session init 26 → 7 Sleeper calls, trade job 17 → 4 reads, cron sweeps scoped, web/mobile re-fetches removed (PR pending)
+
+Branch `claude/api-audit-redundancies-9a6075`. Source: [`docs/reviews/2026-09-03-api-audit.md`](../docs/reviews/2026-09-03-api-audit.md) (four-layer audit + 195-route caller table). Operator chose findings 1, 2, 4, 5, 6, 7, 8, 9, 10; **3 held** (ping-then-init would stop the per-foreground league resync — see NEXT), **7 shipped as poll-pause** (real web push = schema + dependency, needs a scope block).
+- **Backend:** session-init daemon fetches rosters + league meta once and threads them to owned-picks / telemetry; trades sync is incremental (`sweep_weeks`: backfill once, then `[week-1, week]`, offseason `[1]`); trade job takes request-time prefs (`prefs_preload`), bulk opponent prefs, one memoized `load_draft_picks`; both cron loaders filter `leagues.updated_at` ≤ 30 d; `not_drafted` probe 24 h outside Apr 1 – Sep 15.
+- **Web:** `/api/sleeper/players` → `/warm` (4.8 MB never read); `apiFetch` parses bodies on 401 only; swipe 5 → 3 requests; notification poll pauses on hidden tabs; `switchToLeague` saves + reloads (boot did it all again).
+- **Mobile:** `initLeagueSession` / `buildSessionInitBody` hand back rosters + users; `state/queryClient.seedLeagueSessionCaches` seeds `['league-rosters'|'league-users', id]` on every init path (5-min staleTime already held by all five consumers).
+- **Tests:** +4 pytest files / +23 cases; `check-session-seed.js`. pytest **4617 / 1 skipped**, tsc 0, testid-lint OK, web structure 175/175.
 ## 2026-09-03b — Web landing mirrors mobile platform entry SHIPPED: Sleeper · ESPN · MFL chips (D-177, PR #272 → `main` @ `ca5fac46`)
 Operator ask: "update the landing page on web to mimic the mobile app with ESPN and MFL options."
 `web/index.html` gains SignInScreen's chip row (flag `landing.platform_options` + `espn.link` /

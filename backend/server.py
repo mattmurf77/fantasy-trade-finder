@@ -133,6 +133,7 @@ from .database import (
     record_match_disposition,
     dismiss_match,
     upsert_league_preference, load_league_preference,
+    load_league_preferences_bulk,
     load_asset_preferences, set_asset_preference, ASSET_PREF_LISTS,
     sync_players, needs_player_sync,
     load_players, load_player, load_players_by_ids,
@@ -142,7 +143,7 @@ from .database import (
     # rookie-draft M0 — class-load monitor
     count_rookie_class_rows,
     set_league_draft_status, get_league_draft_context,
-    load_league_ids_for_draft_status_refresh,
+    load_league_ids_for_draft_status_refresh, ACTIVE_LEAGUE_WINDOW_DAYS,
     # draft-extensions W2 — mock drafts
     create_mock_draft, load_mock_draft, load_current_mock_draft,
     update_mock_draft, abandon_completed_mock_drafts,
@@ -5746,18 +5747,24 @@ def _first_session_board_refresh(
     }
 
 
-def _user_pick_share(user_id: str, league_id: str) -> float:
+def _user_pick_share(user_id: str, league_id: str, picks: list | None = None) -> float:
     """The user's share of total draft-pick value in a league (0.0 when no
     picks synced). Feeds the #8 outlook seed and #1's classifier.
 
     W3 M-C (S2): reads asserted rows too when `picks.assign_tradeable` is on,
     so an ESPN manager's own draft capital shapes their inferred contend /
     rebuild window instead of reading as zero.
+
+    `picks` — already-loaded rows from the SAME read this would issue
+    (`load_draft_picks(league_id, source=_pick_read_source())`). The trade
+    job reads them once and shares them with the #1 opponent pick shares;
+    every other caller leaves it None and gets the historical read.
     """
-    try:
-        picks = load_draft_picks(league_id=league_id, source=_pick_read_source())
-    except Exception:
-        return 0.0
+    if picks is None:
+        try:
+            picks = load_draft_picks(league_id=league_id, source=_pick_read_source())
+        except Exception:
+            return 0.0
     grand = sum((pk.get("pick_value") or 0.0) for pk in picks)
     if grand <= 0:
         return 0.0
@@ -5766,13 +5773,16 @@ def _user_pick_share(user_id: str, league_id: str) -> float:
     return mine / grand
 
 
-def _infer_user_outlook(user_id: str, league_id: str, sess: dict, league):
+def _infer_user_outlook(user_id: str, league_id: str, sess: dict, league,
+                        picks: list | None = None):
     """Backlog #8 — infer the USER's own contend/rebuild window from their
     roster, for leagues with no declared outlook. Returns (outlook, signals)
     or (None, None) when the seed flag is off or roster/player data is absent.
 
     Called from BOTH the generate-route cache pre-read and the worker so the
     cache-freshness key resolves identically on both sides.
+
+    `picks` is threaded straight to `_user_pick_share` — see its docstring.
     """
     if not FLAGS.trade_outlook_seed:
         return None, None
@@ -5784,7 +5794,7 @@ def _infer_user_outlook(user_id: str, league_id: str, sess: dict, league):
     pdict = {p.id: p for p in players}
     num_teams = len(league.members) if league and getattr(league, "members", None) else 12
     outlook, _score, signals = infer_team_outlook(
-        roster, pdict, _user_pick_share(user_id, league_id), num_teams)
+        roster, pdict, _user_pick_share(user_id, league_id, picks), num_teams)
     return outlook, signals
 
 
@@ -5872,12 +5882,22 @@ def _run_trade_job(
     opponent_user_id: str | None = None,
     pinned_give_mode: str = "any",
     trade_intent: str | None = None,
+    prefs_preload: dict | None = None,
 ):
     """Daemon-thread entry point. Resolves the session itself (rather than
     capturing closures over per-request state) so the request that kicked
     us off can return immediately. All exceptions caught — a thread death
     here would leave the job 'running' forever, which is a worse failure
-    than surfacing the error to the polling frontend."""
+    than surfacing the error to the polling frontend.
+
+    `prefs_preload` — {"prefs": <league preference dict|None>,
+    "seeded_outlook": <str|None>} as resolved ON THE REQUEST THREAD by
+    /api/trades/generate, which had to read both to build the cache-freshness
+    key. Passing them in is what makes the two threads agree BY CONSTRUCTION
+    rather than by re-resolving (see `_infer_user_outlook`'s docstring: both
+    sides must land on the same value or every seeded league's cache check
+    would miss). None = not supplied (pregen from session_init, the
+    replenishment cron) ⇒ the worker loads them itself, exactly as before."""
     try:
         with _sessions_lock:
             sess = _sessions.get(sess_token)
@@ -5927,13 +5947,36 @@ def _run_trade_job(
         except Exception as db_err:
             log.warning("trade-job: could not load real rankings: %s", db_err)
 
+        # ONE draft_picks read per job, memoized and shared by the #8 outlook
+        # seed (via `_user_pick_share`) and the #1 opponent pick shares —
+        # both used to issue their own identical read. Lazy, so a job that
+        # needs neither still reads nothing. A failed read degrades to []
+        # (logged), which is what both call sites already did with a raised
+        # one: 0.0 share, empty opponent shares.
+        _picks_memo: list = []
+        _picks_loaded = False
+
+        def _job_draft_picks() -> list:
+            nonlocal _picks_memo, _picks_loaded
+            if not _picks_loaded:
+                _picks_loaded = True
+                try:
+                    _picks_memo = load_draft_picks(league_id=league_id,
+                                                   source=_pick_read_source())
+                except Exception as picks_err:
+                    log.warning("trade-job: draft picks read failed: %s", picks_err)
+                    _picks_memo = []
+            return _picks_memo
+
         # Outlook + positional preferences
         outlook_value        = None
         acquire_positions    = []
         trade_away_positions = []
         avoid_positions      = []          # #360
         try:
-            prefs = load_league_preference(user_id=g_user_id, league_id=league_id)
+            prefs = (prefs_preload.get("prefs") if prefs_preload is not None
+                     else load_league_preference(user_id=g_user_id,
+                                                 league_id=league_id))
             if prefs:
                 outlook_value        = prefs.get("team_outlook")
                 acquire_positions    = prefs.get("acquire_positions",    []) or []
@@ -5969,7 +6012,11 @@ def _run_trade_job(
         # (flag-gated). Must mirror the generate-route pre-read exactly so the
         # job-cache freshness key agrees.
         if not outlook_value:
-            seeded, _sig = _infer_user_outlook(g_user_id, league_id, sess, g_league)
+            if prefs_preload is not None:
+                seeded = prefs_preload.get("seeded_outlook")
+            else:
+                seeded, _sig = _infer_user_outlook(g_user_id, league_id, sess,
+                                                   g_league, _job_draft_picks())
             if seeded:
                 outlook_value = seeded
 
@@ -5997,17 +6044,25 @@ def _run_trade_job(
         opponent_pick_shares: dict[str, float] = {}
         if FLAGS.trade_outlook_infer:
             try:
+                # ONE `IN (...)` select for every opponent instead of a
+                # per-member query on this thread. Same per-row shape as the
+                # singular loader, absent users simply missing (pinned by
+                # test_breaker_seam), so the `mp and mp.get(...)` test below
+                # reads identically to the per-member load it replaces.
+                _opp_prefs = load_league_preferences_bulk(
+                    [m.user_id for m in g_league.members
+                     if m.user_id != g_user_id],
+                    league_id)
                 for m in g_league.members:
                     if m.user_id == g_user_id:
                         continue
-                    mp = load_league_preference(user_id=m.user_id, league_id=league_id)
+                    mp = _opp_prefs.get(m.user_id)
                     if mp and mp.get("team_outlook"):
                         opponent_outlooks[m.user_id] = mp["team_outlook"]
                 # W3 M-C (S3) — opponent pick shares include asserted rows
                 # behind `picks.assign_tradeable`, so an ESPN league's inferred
                 # opponent outlooks stop treating everyone as pickless.
-                picks = load_draft_picks(league_id=league_id,
-                                         source=_pick_read_source())
+                picks = _job_draft_picks()
                 totals: dict[str, float] = {}
                 grand = 0.0
                 for pk in picks:
@@ -6077,6 +6132,7 @@ def _run_trade_job(
                     user_id        = g_user_id,
                     user_roster    = g_user_roster,
                     league         = g_league,
+                    picks          = _job_draft_picks(),
                 )
                 log.info("trade-job: injected %d owned-pick assets (cap=%d)",
                          n_inj, _picks_pool_cap())
@@ -6874,6 +6930,7 @@ def _kickoff_trade_job(
     source: str | None = None,
     synchronous: bool = False,
     trade_intent: str | None = None,
+    prefs_preload: dict | None = None,
 ) -> str:
     """Register a new job in _trade_jobs and start its worker thread.
     Returns the job_id. Caller is responsible for any pre-existing-job
@@ -6892,6 +6949,10 @@ def _kickoff_trade_job(
     trade_intent — #172 (flag trades.intent_modes): "consolidate" |
                     "tier_up" | "tier_down" | None. Stored on the job so
                     _trade_job_is_fresh can key the shared cache on it.
+
+    prefs_preload — the league preference + seeded outlook the CALLER already
+                    read on its own thread, handed to the worker so it does
+                    not read them a second time. See `_run_trade_job`.
     """
     job_id = uuid.uuid4().hex
     # Pinned flows (give OR receive) and single-opponent scope (#156 Specific
@@ -6925,7 +6986,8 @@ def _kickoff_trade_job(
         _run_trade_job(job_id, sess_token, league_id, fairness_threshold,
                        pinned_give or [], pinned_receive or [],
                        opponent_user_id, pinned_give_mode,
-                       trade_intent=trade_intent)
+                       trade_intent=trade_intent,
+                       prefs_preload=prefs_preload)
         return job_id
 
     threading.Thread(
@@ -6933,7 +6995,8 @@ def _kickoff_trade_job(
         args=(job_id, sess_token, league_id, fairness_threshold,
               pinned_give or [], pinned_receive or [], opponent_user_id,
               pinned_give_mode),
-        kwargs={"trade_intent": trade_intent},
+        kwargs={"trade_intent": trade_intent,
+                "prefs_preload": prefs_preload},
         daemon=True,
     ).start()
     return job_id
@@ -11400,7 +11463,8 @@ def _picks_pool_cap() -> int:
         return 6
 
 
-def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr") -> dict:
+def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr",
+                       picks: list | None = None) -> dict:
     """Build capped PICK pseudo-Players per owner for suggestion injection.
 
     Returns {owner_user_id: [Player(position="PICK"), ...]} — the top-N picks
@@ -11445,7 +11509,11 @@ def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr") -> dict:
     # asserted. The guard `_owned_picks_available` decides per league; this
     # decides per row.
     slot_order = _league_slot_order(league_id)           # D-090, once per league
-    for p in load_draft_picks(league_id=league_id, source=_pick_read_source()):
+    # `picks`, when supplied, is the SAME read this line would issue, already
+    # done once for this job (see `_run_trade_job`'s `_job_draft_picks`).
+    if picks is None:
+        picks = load_draft_picks(league_id=league_id, source=_pick_read_source())
+    for p in picks:
         owner = p.get("owner_user_id")
         if owner:
             by_owner.setdefault(owner, []).append(p)
@@ -11503,7 +11571,8 @@ def _pick_asset_elos(pick_assets: dict) -> dict[str, float]:
 
 def _inject_owned_picks(*, league_id: str, scoring_format: str, trade_service,
                         players_dict: dict, seed_map: dict, user_elo: dict,
-                        user_id: str, user_roster: list, league):
+                        user_id: str, user_roster: list, league,
+                        picks: list | None = None):
     """#170/#171 + #185 — owned-pick injection for one trade job.
 
     1. Injects each team's capped owned picks as PICK pseudo-Players into the
@@ -11538,7 +11607,7 @@ def _inject_owned_picks(*, league_id: str, scoring_format: str, trade_service,
     _pp_mode = (_trade_service_mod.pinned_pick_pricing_mode()
                 or _trade_service_mod.pick_pricing_mode_for_user(user_id))
     with _trade_service_mod.pick_pricing_override(_pp_mode):
-        pick_assets = _owned_pick_assets(league_id, scoring_format)
+        pick_assets = _owned_pick_assets(league_id, scoring_format, picks)
     # league.members are shared session objects reused across jobs, so
     # injection must be IDEMPOTENT: strip any owned-pick ids this league
     # injected on a prior run (they alone start with "{league_id}_" — real
@@ -11670,7 +11739,9 @@ def _sync_mfl_owned_picks(league_id: str) -> int:
 
 
 def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
-                              scoring_format: str) -> list[dict] | None:
+                              scoring_format: str, *,
+                              rosters: list | None = None,
+                              meta: dict | None = None) -> list[dict] | None:
     """#158 Sleeper owned-pick grid sync for one league (session-init daemon
     step, extracted so the skip conditions are unit-testable).
 
@@ -11688,10 +11759,18 @@ def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
     The drafts read is best-effort: a flake excludes nothing (today's
     behavior); future seasons are always included. The replace-sync cleans
     previously synced stale rows for the excluded season automatically.
+
+    `rosters` / `meta` let the session-init daemon hand over the v1 rosters
+    and league-meta payloads it has ALREADY fetched (for the trade-block
+    sync and the scoring auto-detect respectively) instead of this function
+    re-reading both from Sleeper — two upstream calls per app open. Same
+    shapes: `rosters` is the raw `/league/<id>/rosters` list, `meta` the raw
+    `/league/<id>` dict. None (every other caller, and a daemon whose own
+    fetch flaked) keeps the self-fetching behavior verbatim.
     """
     _tp = _fetch_sleeper_traded_picks(league_id)
-    _prosters = _fetch_league_rosters(league_id)
-    _pmeta = _fetch_sleeper_league_meta(league_id)
+    _prosters = rosters if rosters is not None else _fetch_league_rosters(league_id)
+    _pmeta = meta if meta is not None else _fetch_sleeper_league_meta(league_id)
     if not _prosters or not _pmeta:
         log.warning("  owned-pick sync skipped for %s — Sleeper %s "
                     "unavailable (keeping prior snapshot)", league_id,
@@ -12059,17 +12138,24 @@ def generate_trades():
             log.warning("deck fatigue reset failed (non-fatal): %s", reset_err)
         force_fresh = True   # the cached deck predates the reset by definition
 
-    # Read current outlook for cache-freshness comparison. The actual job
-    # worker reads it again; this is just for the cache hit decision. Must
-    # resolve declared-else-seeded identically to the worker (#8) or every
-    # seeded-league cache check would miss.
+    # Read current outlook for the cache hit decision. Must resolve
+    # declared-else-seeded identically to the worker (#8) or every
+    # seeded-league cache check would miss — so rather than have the worker
+    # re-resolve it (two preference reads and two draft-pick reads per
+    # generate), hand it THESE values in `prefs_preload`. Identical by
+    # construction is stronger than identical by re-derivation. A failed read
+    # leaves the preload None and the worker loads for itself, as before.
+    prefs_preload = None
     try:
         prefs = load_league_preference(user_id=g_user_id, league_id=league_id)
         outlook_value = (prefs or {}).get("team_outlook")
+        seeded_outlook = None
         if not outlook_value:
             seeded, _sig = _infer_user_outlook(g_user_id, league_id, sess, g_league)
             if seeded:
                 outlook_value = seeded
+                seeded_outlook = seeded
+        prefs_preload = {"prefs": prefs, "seeded_outlook": seeded_outlook}
     except Exception:
         outlook_value = None
 
@@ -12132,6 +12218,7 @@ def generate_trades():
         opponent_user_id   = opponent_user_id,
         opponents_total    = opponents_total,
         trade_intent       = trade_intent,
+        prefs_preload      = prefs_preload,
     )
     with _trade_jobs_lock:
         snapshot = _trade_job_public_view(_trade_jobs[job_id])
@@ -15800,6 +15887,20 @@ _DRAFT_STATUS_TTL_SECONDS = {
     "unknown":      1 * 3600,
 }
 _DRAFT_STATUS_DEFAULT_TTL = 1 * 3600
+# Season gate for the `not_drafted` TTL only. A league can only flip
+# not_drafted → drafted while rookie drafts are actually being held, and
+# dynasty rookie drafts cluster May–August (a few leagues go early in April,
+# stragglers finish in the first half of September). Outside that window the
+# 3 h re-probe above spends three platform reads per undrafted league per
+# tick to re-learn a verdict that cannot have changed, so it backs off to
+# daily. There is no season-phase notion anywhere else in the backend to
+# reuse; this window is deliberately local to the draft-status cache.
+# The `drafting` / live path is untouched, and an explicit
+# `_refresh_league_draft_status(league_id, force=True)` still bypasses the
+# whole cheap-skip.
+_ROOKIE_DRAFT_WINDOW_START = (4, 1)     # Apr 1, UTC, inclusive
+_ROOKIE_DRAFT_WINDOW_END   = (9, 15)    # Sep 15, UTC, inclusive
+_DRAFT_STATUS_OFFSEASON_NOT_DRAFTED_TTL = 24 * 3600
 # Per-tick refresh budget for the hourly sweep. Each refresh costs up to
 # three serial platform reads, so an unbounded sweep would turn a cron
 # request into a multi-minute job as the league count grows. The queue is
@@ -15808,19 +15909,32 @@ _DRAFT_STATUS_DEFAULT_TTL = 1 * 3600
 _DRAFT_STATUS_SWEEP_BUDGET = 50
 
 
+def _in_rookie_draft_window(now: datetime | None = None) -> bool:
+    """True when rookie drafts can plausibly be happening (see the window
+    constants above). Month/day only — the window repeats every year."""
+    now = now or datetime.now(timezone.utc)
+    return (_ROOKIE_DRAFT_WINDOW_START
+            <= (now.month, now.day)
+            <= _ROOKIE_DRAFT_WINDOW_END)
+
+
 def _draft_status_is_fresh(ctx: dict | None, now: datetime | None = None) -> bool:
     """True when the cached verdict is young enough to skip a re-check."""
     if not ctx or not ctx.get("checked_at") or not ctx.get("status"):
         return False
-    ttl = _DRAFT_STATUS_TTL_SECONDS.get(ctx.get("status"),
-                                        _DRAFT_STATUS_DEFAULT_TTL)
+    now = now or datetime.now(timezone.utc)
+    status = ctx.get("status")
+    ttl = _DRAFT_STATUS_TTL_SECONDS.get(status, _DRAFT_STATUS_DEFAULT_TTL)
+    # Season gate — outside the rookie-draft window an undrafted league
+    # cannot flip, so it is re-probed daily instead of every 3 h.
+    if status == "not_drafted" and not _in_rookie_draft_window(now):
+        ttl = _DRAFT_STATUS_OFFSEASON_NOT_DRAFTED_TTL
     try:
         checked = datetime.fromisoformat(ctx["checked_at"])
     except (TypeError, ValueError):
         return False
     if checked.tzinfo is None:
         checked = checked.replace(tzinfo=timezone.utc)
-    now = now or datetime.now(timezone.utc)
     return (now - checked).total_seconds() < ttl
 
 
@@ -18794,10 +18908,11 @@ def sleeper_players():
         return jsonify({"error": "internal_error"}), 500
 
 
-# Mobile callers only want the side-effect (server-side cache hydration);
-# the full /api/sleeper/players payload is ~4.8MB and discarded on the floor.
-# This variant returns only {ok, count} so the warm hop is a few hundred bytes.
-# Web client keeps /api/sleeper/players because it consumes the body.
+# Mobile AND web callers only want the side-effect (server-side cache
+# hydration); the full /api/sleeper/players payload is ~4.8MB and discarded on
+# the floor. This variant returns only {ok, count} so the warm hop is a few
+# hundred bytes. The web client checked only `res.ok` too, so it now calls
+# /warm as well; the raw route stays for external/legacy callers.
 @app.route("/api/sleeper/players/warm")
 def sleeper_players_warm():
     try:
@@ -19223,15 +19338,21 @@ def session_init():
         from .database import get_league_scoring, DEFAULT_SCORING as DB_DEFAULT
     except ImportError:
         DB_DEFAULT = "1qb_ppr"
+    # Read the stored format ONCE, here: the background daemon's scoring
+    # auto-detect needs the same value and nothing between here and there
+    # can change it (the daemon's own set_league_scoring is the only writer
+    # and it runs after this read).
+    _stored_scoring = None
+    try:
+        _stored_scoring = get_league_scoring(league_id)
+    except Exception:
+        pass
     if requested_format in DB_SCORING_FORMATS:
         active_format = requested_format
     elif existing_sess and existing_sess.get("active_format") in DB_SCORING_FORMATS:
         active_format = existing_sess["active_format"]
     else:
-        try:
-            active_format = get_league_scoring(league_id)
-        except Exception:
-            active_format = DB_DEFAULT
+        active_format = _stored_scoring or DB_DEFAULT
 
     # ── Create or update session ─────────────────────────────────────────
     session_payload = {
@@ -19313,7 +19434,31 @@ def session_init():
         docs/reviews/2026-05-22-silent-bugs.md, so we log.exception on
         any escape rather than letting the thread die quietly.
         """
+        # ── One Sleeper league-meta read per init ────────────────────
+        # Three daemon steps used to fetch `/league/<id>` for themselves
+        # (scoring auto-detect, the FB #41 team-count persist that rides
+        # it, and the owned-pick sync). The payload is identical and
+        # immutable for the length of one init, so it is fetched at most
+        # ONCE here and handed to each consumer. Lazy on purpose: a
+        # non-Sleeper league id costs nothing extra (the fetcher itself
+        # returns None without a network call for non-numeric /
+        # platform-linked ids), and a daemon that dies before the
+        # auto-detect block never spends the call at all.
+        _meta_fetched = False
+        _meta_payload: dict | None = None
+
+        def _league_meta() -> dict | None:
+            nonlocal _meta_fetched, _meta_payload
+            if not _meta_fetched:
+                _meta_fetched = True
+                _meta_payload = _fetch_sleeper_league_meta(league_id)
+            return _meta_payload
+
         try:
+            # Platform-link state is a DB fact that nothing in this daemon
+            # writes, so the three guards below read it once.
+            _platform_linked = is_linked_platform_league(league_id)
+
             # Agent 4 addition: capture INSERT-vs-UPDATE state BEFORE
             # upsert_user runs so we can emit a one-time referral-receipt
             # notification on the referred user's first session.
@@ -19454,8 +19599,13 @@ def session_init():
                 # format on file. Retrying on each init (when
                 # existing_fmt is falsy) self-heals leagues whose first
                 # sync hit a Sleeper API flake — subsequent logins keep
-                # attempting until detection succeeds. Once stored, the
-                # Sleeper call is skipped.
+                # attempting until detection succeeds. The league-meta
+                # read is NOT skipped once a format is stored, because
+                # this block also persists the league's true team count
+                # (FB #41) from that same payload on every init — it is
+                # instead the SHARED `_league_meta()` read, so detection,
+                # the team-count persist and the owned-pick sync below
+                # cost one upstream call between them, not three.
                 #
                 # NOTE: now runs on the background daemon. The session
                 # response uses whatever format `get_league_scoring`
@@ -19466,12 +19616,8 @@ def session_init():
                 # unaffected: the detected format already matches the
                 # stored format in steady state.
                 try:
-                    existing_fmt = None
-                    try:
-                        existing_fmt = get_league_scoring(league_id)
-                    except Exception:
-                        pass
-                    meta = _fetch_sleeper_league_meta(league_id)
+                    existing_fmt = _stored_scoring
+                    meta = _league_meta()
                     if meta:
                         # FB #41 — persist the league's TRUE team count.
                         # league_members can't be trusted for this: clients
@@ -19539,18 +19685,25 @@ def session_init():
             except Exception as db_err:
                 log.warning("  league_members upsert failed (continuing): %s", db_err)
 
-            # ── Shared v1 rosters fetch (trade-block + roster-history) ──
+            # ── Shared v1 rosters fetch (four consumers) ────────────────
             # ADR-011: trade_block_service used to fetch roster_id →
             # owner_id and throw it away; the roster-history snapshot's
             # team_key needs exactly that mapping. Fetch ONCE here, hand
-            # it to both consumers. Failure leaves it None — trade-block
-            # refetches for itself, the snapshot falls back to weak keys.
+            # it to every consumer — trade block, roster history, the
+            # owned-pick sync and the executed-trade matcher's roster map
+            # all read the SAME `/league/<id>/rosters` list of dicts
+            # (`trade_block_service._fetch_rosters` and
+            # `_fetch_league_rosters` return that payload verbatim).
+            # Failure leaves it None — every consumer refetches for
+            # itself, exactly as before, and the snapshot falls back to
+            # weak keys.
             _rh_roster_rows: list | None = None
             try:
                 if (str(league_id).isdigit()
-                        and not is_linked_platform_league(league_id)
+                        and not _platform_linked
                         and (is_enabled("sleeper.trade_block")
-                             or is_enabled("market.roster_history"))):
+                             or is_enabled("market.roster_history")
+                             or is_enabled("picks.owned_sync"))):
                     from .trade_block_service import _fetch_rosters as _tb_fetch
                     _rh_roster_rows = _tb_fetch(league_id)
             except Exception as _rr_err:
@@ -19593,7 +19746,7 @@ def session_init():
             try:
                 if (is_enabled("picks.owned_sync")
                         and str(league_id).isdigit()
-                        and is_linked_platform_league(league_id)):
+                        and _platform_linked):
                     _npk = _sync_mfl_owned_picks(league_id)
                     if _npk:
                         log.info("  ✅ MFL owned picks re-normalized (%d picks)", _npk)
@@ -19610,8 +19763,11 @@ def session_init():
                     }
                     # Include the logged-in user (not part of `members`).
                     _uid_to_name[str(user_id)] = display_name or username or str(user_id)
+                    # Reuse the rosters + league meta this daemon already
+                    # fetched (None on either falls back to self-fetching).
                     _n_picks = _sync_sleeper_owned_picks(
-                        league_id, _uid_to_name, active_format)
+                        league_id, _uid_to_name, active_format,
+                        rosters=_rh_roster_rows, meta=_league_meta())
                     if _n_picks is not None:
                         log.info("  ✅ owned draft picks synced (%d picks)",
                                  len(_n_picks))
@@ -19646,7 +19802,22 @@ def session_init():
                     # a matcher hiccup can't be mistaken for capture failure.
                     try:
                         if is_enabled("suggestion.telemetry"):
-                            _n_links = _sugg_tel.match_league_trades(league_id)
+                            # Fourth rosters consumer — hand it the shared
+                            # fetch rather than letting it read
+                            # /league/<id>/rosters again. None keeps its
+                            # own lazy fetch (only paid when there is
+                            # something unlinked to match).
+                            _rmap = None
+                            if _rh_roster_rows:
+                                _rmap = {
+                                    str(r["roster_id"]): str(r["owner_id"])
+                                    for r in _rh_roster_rows
+                                    if isinstance(r, dict)
+                                    and r.get("roster_id") is not None
+                                    and r.get("owner_id")
+                                }
+                            _n_links = _sugg_tel.match_league_trades(
+                                league_id, roster_map=_rmap)
                             if _n_links:
                                 log.info("  ✅ suggestion links written (%d)",
                                          _n_links)
@@ -19667,7 +19838,7 @@ def session_init():
             try:
                 if (is_enabled("market.roster_history")
                         and str(league_id).isdigit()
-                        and not is_linked_platform_league(league_id)):
+                        and not _platform_linked):
                     _sleeper_roster_history_on_sync(
                         league_id, all_members_for_db, _rh_roster_rows)
             except Exception as rh_err:
@@ -20926,19 +21097,25 @@ def _sweep_fetch_teams(lg: dict) -> tuple[list[dict] | None, str | None]:
     return None, f"unsupported_platform_{platform}"
 
 
-def _run_roster_snapshot_sweep(now: datetime, budget: int) -> dict:
+def _run_roster_snapshot_sweep(now: datetime, budget: int,
+                               active_within_days: int | None =
+                               ACTIVE_LEAGUE_WINDOW_DAYS) -> dict:
     """Writer B's body — runs INSIDE the daemon thread. Stalest-first over
-    every stored league, skipping any that already holds a 'weekly' row
-    for the current period (that row is the per-week marker; re-runs after
-    the >= gate cost nothing). One fetch + one transaction per league;
+    every ACTIVE stored league, skipping any that already holds a 'weekly'
+    row for the current period (that row is the per-week marker; re-runs
+    after the >= gate cost nothing). One fetch + one transaction per league;
     per-league fetch ms logged from day one — that log is what sets the
-    budget later, not the thread."""
+    budget later, not the thread.
+
+    `active_within_days=None` sweeps every league regardless of activity —
+    the manual /api/cron/roster-snapshot lever passes it."""
     from . import roster_history as _rh
     period = _rh.iso_period_key(now)
     stats: dict = {"period_key": period, "eligible": 0, "swept": 0,
                    "skipped_done": 0, "deferred": 0, "errors": 0,
                    "skips": {}}
-    leagues = load_history_sweep_leagues(period)
+    leagues = load_history_sweep_leagues(period,
+                                         active_within_days=active_within_days)
     processed = 0
     for lg in leagues:
         if lg.get("has_current_weekly"):
@@ -20974,10 +21151,12 @@ def _run_roster_snapshot_sweep(now: datetime, budget: int) -> dict:
     return stats
 
 
-def _start_roster_snapshot_daemon(now: datetime, budget: int) -> None:
+def _start_roster_snapshot_daemon(now: datetime, budget: int,
+                                  active_within_days: int | None =
+                                  ACTIVE_LEAGUE_WINDOW_DAYS) -> None:
     def _body():
         try:
-            stats = _run_roster_snapshot_sweep(now, budget)
+            stats = _run_roster_snapshot_sweep(now, budget, active_within_days)
             log.info("roster-sweep done: %s", stats)
         except Exception:
             log.exception("roster-snapshot sweep crashed")
@@ -21089,13 +21268,17 @@ def cron_roster_snapshot():
     than a code change. Deliberately NO weekday gate — a manual invocation
     IS the operator overriding the calendar. Same daemon + budget as the
     daily-tick path; the existing 'weekly' row per period keeps a forced
-    re-run idempotent."""
+    re-run idempotent. Deliberately NO active-league filter either, for the
+    same reason there is no weekday gate: a manual invocation IS the operator
+    overriding the defaults, so this reaches dormant leagues the scheduled
+    daily-tick path now skips."""
     _require_cron_auth()
     from . import roster_history as _rh
     if not is_enabled("market.roster_history"):
         return jsonify({"ok": False, "disabled": True})
     now = datetime.now(timezone.utc)
-    _start_roster_snapshot_daemon(now, _ROSTER_SNAPSHOT_SWEEP_BUDGET)
+    _start_roster_snapshot_daemon(now, _ROSTER_SNAPSHOT_SWEEP_BUDGET,
+                                  active_within_days=None)
     return jsonify({"ok": True, "started": True,
                     "period_key": _rh.iso_period_key(now)})
 
@@ -21177,10 +21360,14 @@ def cron_hourly_tick():
     # draft that completes between sessions would otherwise go unnoticed.
     # The per-status TTLs (_DRAFT_STATUS_TTL_SECONDS) do the real filtering:
     # `not_drafted` leagues — the ones that can still flip — are re-probed
-    # every 3 h, `drafted` ones (which never un-draft inside a season) every
-    # 12 h. Bounded by _DRAFT_STATUS_SWEEP_BUDGET per tick (the queue is
-    # stalest-first, so this rotates rather than starves). Failure-isolated
-    # like the snapshot guard above.
+    # every 3 h INSIDE the rookie-draft window and daily outside it
+    # (_in_rookie_draft_window), `drafted` ones (which never un-draft inside a
+    # season) every 12 h. The queue itself is now limited to leagues with
+    # activity in the last ACTIVE_LEAGUE_WINDOW_DAYS days, so a league nobody
+    # opens any more stops costing platform reads. Bounded by
+    # _DRAFT_STATUS_SWEEP_BUDGET per tick (the queue is stalest-first, so this
+    # rotates rather than starves). Failure-isolated like the snapshot guard
+    # above.
     draft_status_checked = 0
     try:
         for _lid in load_league_ids_for_draft_status_refresh():
