@@ -11,6 +11,21 @@
 
 ---
 
+## 2026-09-03 — feedback #418 (shop send dismisses the tile) + #417 (pushed anchored deck never re-searches unanchored): PR #274, v1.16.16, awaiting ship go
+
+Both fast-track mobile-only items off `main` @ `c7e75666`, re-synced onto `ca5fac46` (post-#413/#272). No backend, schema, flag, or analytics change. `FTF_SKIP_SIM_GATE=1` per D-056 — evidence below replaces the sim gate.
+
+| Gate | #418 (`ShopOffersBody.tsx`) | #417 (`TradesScreen.tsx`) |
+|---|---|---|
+| Root cause | `handleLike` queued the offer but never removed the tile (`:696-715`) | pushed anchored deck rendered its own primary `trades.find-btn`; prod events show a source-less `find_trades_tapped {mode}` 1 s after the push, model cards appended to the fair deck and re-sorted above it (`investigation.md`) |
+| Structural guard | `check-shop-deck.js` k1–k9 + k3b: **153 ✓**, every assertion sabotage-proven (11 builder + 7 resolution sabotages, all red→green) | `check-results-push.js` §8 `8`,`8a`–`8v`: **75 ✓**, 24 sabotages red→green; 4 suites re-specced with dated `#417` notes (dispatch census 9→8, emitter census 4→3, mount-slice widths) |
+| tsc / all suites / testid-lint | clean · **89/89** `check-*.js` green on the merged tree · OK | same run |
+| pytest (backend untouched) | **4565 passed / 1 skipped** on the branch | same run |
+| QA | A PASS (F-1 guard gap → k9/k3b added), B PASS (B-1 cross-window re-offer = COST, ruling asked in checklist step 10) | A PASS (F-1/F-2 guard gaps → 8v/8j), B PASS (B-1 copy, B-2 second epoch bump, B-3 anchored retry, B-5 greyed-button flash — all resolved; B-4/B-5 disclosed COSTS) |
+| Code-walk proof | prd §8.2 (k=0, mid, last, N=1, refusal), qa-A.md | prd §7 code-walks 1–5 + R-6, qa-A.md |
+| TestFlight checklist (operator) | prd §8.3, 11 steps (must-run 2, 2b, 6, 8, 10) | prd §7.3, 15 steps (Network Link Conditioner makes the 1 s window deterministic; step 15 = analytics negation of the prod signature) |
+| CI | PR #274 — pending at write time; recorded in CHANGELOG at ship | same |
+
 ## 2026-09-03b — Web landing platform entry (PR #272): web gate 175/175, entry-route suite 25/25, browser E2E both platforms; sim gate skipped (D-056 posture)
 
 Branch `claude/landing-page-espn-mfl-a5a85a` @ `8473fab2` (off `main` @ `6ccd6698`), PR [#272](https://github.com/mattmurf77/fantasy-trade-finder/pull/272). Full gates ([scope §V3](../docs/plans/landing-platform-options/scope.md)), no waivers. `FTF_SKIP_SIM_GATE=1` on push — web-only change; the evidence below replaces the retired simulator.
