@@ -11,6 +11,15 @@
 
 ---
 
+## 2026-09-03b — API audit fixes (D-177): merged branch green — pytest 4617 / 1 skipped, tsc 0, testid-lint OK, web 175/175
+
+Branch `claude/api-audit-redundancies-9a6075` (cut from `main` @ `6ccd6698`). Treated as internal perf fixes: no scope block; evidence = new tests + code-walk proofs in the agent reports + this ledger. Four Opus build agents, two in isolated worktrees (swept — `docs/recovery/2026-09-03-api-audit-agent-sweep.md`).
+
+- **pytest `backend/tests`:** **4617 passed / 1 skipped** in 371 s on the merged tree (baseline 4594/1 after the #413 ship; +23 = the new cases). New files: `test_session_init_sleeper_calls.py` (daemon budget: ≤1 rosters, ≤1 meta for a Sleeper league; zero for a non-Sleeper id; both directions of the `rosters=`/`meta=` seam), `test_cron_sweep_scope.py` (30-day activity filter both loaders; `not_drafted` TTL 3 h in-window / 24 h out), `test_trade_job_read_amplification.py` (`load_league_preference` ≤1, `load_league_preferences_bulk` ×1, `load_draft_picks` ×1 for N opponents); `test_market_data_readiness.py` +5 sweep cases (18 legs on first pass; `[6,7]`; `[1]` at week 1 and in the offseason; date-driven). Sabotage: reverting `server.py` fails the session-init test 2/4; the trade-job counters fail on the old loop.
+- **Mobile:** `npx tsc --noEmit` exit 0 · `testid-lint OK` · all 88 `check-*.js` pass + new `check-session-seed.js` (U-1..U-3 execute the real seeding module against a stub QueryClient; S-1..S-3 pin the wiring, the five consumers' 5-min `staleTime`, and the api-layer import rule). Sabotage: dropping the `Array.isArray` guard, the `revalidateSession` seed call, or one `staleTime` each → RED.
+- **Web:** `node --check` clean; `qa/web/check_web_structure.py` 175/175. Runtime (local Flask, demo flag forced on): boot shows `/api/sleeper/players/warm` and no `/api/sleeper/players`; one swipe = `rank3` → `rankings/progress` → `trio` only, progress label and unlock bar updated; hidden tab clears the poll timer, visible restarts it with an immediate fetch; after `logout()` a hide/show does not restart. **Not runtime-verified:** `switchToLeague` (demo has one league) and the 401 `session_expired` branch — code-walk only.
+- **Owed after merge:** watch one real session init in the Render log (expect ≤7 `api.sleeper.app` calls); the 5-step TestFlight check in the PR body (no second `/api/sleeper/rosters/<id>` after opening Trades; ESPN/MFL league still renders a roster).
+
 ## 2026-09-03 — #413 SHIPPED: PR #270 squash → `main` @ `5c83e8cd`, CI ×4 green, Render live, EAS build 144 / v1.16.15 submitted
 
 Ship branch `ship/2026-09-02-fb413` @ `c6c95e07` = `main` @ `c7e75666` + `feat/fb413-sleeper-send-draft-picks` @ `d49611be` (clean merge) + the write-back with renumbered ids + version bump. Tree byte-identical to the squash (`git diff origin/main ship/…` empty).
@@ -3558,6 +3567,7 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-09-03b — API audit fixes (D-177): merged branch green — pytest 4617 / 1 skipped, tsc 0, testid-lint OK, web 175/175](#2026-09-03b--api-audit-fixes-d-177-merged-branch-green--pytest-4617--1-skipped-tsc-0-testid-lint-ok-web-175175)
 - [2026-09-03 — #413 SHIPPED: PR #270 squash → `main` @ `5c83e8cd`, CI ×4 green, Render live, EAS build 144 / v1.16.15 submitted](#2026-09-03--413-shipped-pr-270-squash--main--5c83e8cd-ci-4-green-render-live-eas-build-144--v11615-submitted)
 - [2026-09-02 — feedback #413 Sleeper pick-send fix: built, dual-QA green, shipped 2026-09-02 (see the merged-tree entry above)](#2026-09-02--feedback-413-sleeper-pick-send-fix-built-dual-qa-green-shipped-2026-09-02-see-the-merged-tree-entry-above)
 - [2026-08-28d — IAP enablement code half (runbook 6–7): webhook delta + RevenueCat paywall — full gates, ALL DARK](#2026-08-28d--iap-enablement-code-half-runbook-67-webhook-delta--revenuecat-paywall--full-gates-all-dark)
