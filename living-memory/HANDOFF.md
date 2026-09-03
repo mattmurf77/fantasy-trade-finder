@@ -8,17 +8,17 @@
 
 ---
 
-## 2026-09-03b — Web landing platform entry (Sleeper · ESPN · MFL) BUILT, PR #272 open, NOT merged
+## 2026-09-03b — Web landing platform entry (Sleeper · ESPN · MFL) SHIPPED (D-177); awaiting the Render deploy + the operator prod check
 
-**Where:** branch `claude/landing-page-espn-mfl-a5a85a` @ `8473fab2` + this write-back commit, worktree `.claude/worktrees/compassionate-jones-ea8a0e`, PR [#272](https://github.com/mattmurf77/fantasy-trade-finder/pull/272) against `main` @ `6ccd6698`. [D-177](DECISIONS.md); scope + code-walk §V3 in `docs/plans/landing-platform-options/`.
+**Where:** `main` @ `ca5fac46` (PR [#272](https://github.com/mattmurf77/fantasy-trade-finder/pull/272), squash, CI ×4 green). [D-177](DECISIONS.md); scope + code-walk §V3 in `docs/plans/landing-platform-options/`. Branch `claude/landing-page-espn-mfl-a5a85a` @ `9fea43e0` content-verified (`git diff origin/main 9fea43e0` empty) and ledgered in `docs/recovery/2026-09-03b-web-platform-entry-ship.md`.
 
-**What it is:** `web/index.html` mirrors SignInScreen's Sleeper · ESPN · MFL chip row and adds ESPN/MFL entry panels on the D-164 sessionless route (preview → claim/mint → canonical link import; private ESPN = cookie paste; v2.1 "find my leagues" / "sign in with MFL"). Entry users (`entry:` ids) read the platform snapshot everywhere the web used Sleeper proxies; web emits `signin_*` by method. No route/schema/flag change — `landing.platform_options` is the single revert lever for web too. Also fixed `selectLeague`'s undefined `userPlayerIds` toast (ReferenceError after every league pick).
+**What shipped:** `web/index.html` mirrors SignInScreen's Sleeper · ESPN · MFL chip row and adds ESPN/MFL entry panels on the D-164 sessionless route (preview → claim/mint → canonical link import; private ESPN = cookie paste since web has no WebView; v2.1 "find my leagues" / "sign in with MFL"). Entry users (`entry:` ids) read the platform snapshot everywhere the web used Sleeper roster proxies. Web emits `signin_*` by method. Also fixed `selectLeague`'s undefined `userPlayerIds` toast (a `ReferenceError` after every league pick). No route/schema/flag change — `landing.platform_options` is the single revert lever for web too.
 
 **Owed:**
-1. **Merge PR #272 once CI is green** (4 jobs) — squash as usual; Render auto-deploys the web half (no mobile change, no EAS build).
-2. **Operator prod check** — scope §V3 "Manual check" (4 steps): chip row shows signed-out; MFL id → franchise → in; ESPN public id → team → in, private id → cookie section opens; flag off → today's landing.
-3. **Follow-up (NEXT):** the in-app "Connect another league" modal still tells ESPN/MFL pasters "sync is on the roadmap" — wire it to the same preview → team-claim rows (no mint needed under a live session) or drop the copy.
-4. After merge: recovery-ledger the branch tip and `git worktree remove` `compassionate-jones-ea8a0e` from the main checkout (a session cannot remove its own worktree).
+1. ~~Confirm the Render deploy~~ **done 2026-09-03**: prod serves the new landing (markup + entry module + all five flags true + `POST /api/entry/platform` returns 400 not 404); browser on the live site shows the chip row, both panels, and the live MFL error path. Details in TEST_LEDGER 2026-09-03b.
+2. **Operator prod check with a REAL league, 4 steps** (scope §V3 "Manual check") — the automated pass above proves the surface and the error paths, never a successful claim against a live account: chip row visible signed-out; MFL id → franchise → in; ESPN public id → team → in, private id → cookie section opens; flag off (+ `POST /api/feature-flags/reload`) → today's Sleeper landing.
+3. **Follow-up (NEXT):** the in-app "Connect another league" modal still answers an ESPN/MFL URL with "sync is on the roadmap" — false now that the door offers those platforms. Wire it to the same preview → team-claim rows (no mint under a live session) or drop the copy.
+4. **Worktree:** `.claude/worktrees/compassionate-jones-ea8a0e` hosts this session and cannot remove itself — `git worktree remove` it from the main checkout (clean; everything committed and pushed).
 
 **Blocking:** nothing. **Rollback:** flip `landing.platform_options` false (row hidden + route 404) or revert the squash.
 
@@ -411,7 +411,7 @@ move, and the avatar lab's anchor test models the brief's described layout, not 
 **none**, so the bubble reads "The Analyst" above a ram, which is D-155's recorded default). Higgsfield credits ~4.35.
 
 ## Table of Contents
-- [2026-09-03b — Web landing platform entry (Sleeper · ESPN · MFL) BUILT, PR #272 open, NOT merged](#2026-09-03b--web-landing-platform-entry-sleeper--espn--mfl-built-pr-272-open-not-merged)
+- [2026-09-03b — Web landing platform entry (Sleeper · ESPN · MFL) SHIPPED (D-177); awaiting the Render deploy + the operator prod check](#2026-09-03b--web-landing-platform-entry-sleeper--espn--mfl-shipped-d-177-awaiting-the-render-deploy--the-operator-prod-check)
 - [2026-09-02 — web parity SHIPPED (PR #263, live on Render); what is left is two operator inputs, not code](#2026-09-02--web-parity-shipped-pr-263-live-on-render-what-is-left-is-two-operator-inputs-not-code)
 - [2026-09-02 — D-172 `consensus_fit_weight` LIVE at 0.5; research write-back landed; two prototype worktrees ledgered](#2026-09-02--d-172-consensusfitweight-live-at-05-research-write-back-landed-two-prototype-worktrees-ledgered)
 - [2026-08-27 — #384 partner shape-summary regression SHIPPED to main; owed = one TestFlight checklist on the next build](#2026-08-27--384-partner-shape-summary-regression-shipped-to-main-owed--one-testflight-checklist-on-the-next-build)
