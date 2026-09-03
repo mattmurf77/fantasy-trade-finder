@@ -10,6 +10,12 @@ the network: `_sleeper_get` (roster lookup), `sleeper_write.propose_trade`
 verification oracle probe) — so nothing here touches Sleeper or the ToS-adverse
 endpoint. The flag is forced on via a patched `is_enabled`.
 
+Pick sends (#413): every `_sleeper_get` stub here is a single `return_value`
+(the rosters list), and `_fetch_sleeper_traded_picks` also rides `_sleeper_get`
+— so pick tests patch `server.load_draft_picks` (the grid) and
+`server._fetch_sleeper_traded_picks` (the holder overlay) DIRECTLY, and the
+route must reach neither on a pick-free send (T-10 pins that).
+
 Account-auth P1 contract (docs/plans/account-auth-plan-2026-07-11.md):
 POST /api/sleeper/link requires the token claim to match the session user
 (so USER == SLEEPER_UID here) and marks the session verified on oracle
@@ -270,24 +276,239 @@ def _trade_sent_rows():
     return [dict(r._mapping) for r in rows]
 
 
-def test_propose_success_fires_no_trade_sent_on_sleeper(client):
-    """Analytics dedup (MFL merge, 2026-08-11): a confirmed Sleeper send is
-    measured by `sleeper_send_succeeded` (P0-7, funnel stage 8 — covered in
-    test_analytics_p0.py) and must NOT also land a `trade_sent` row —
-    one event per real occurrence. `trade_sent` is the non-Sleeper
-    confirmed-send event (POST /api/trades/propose-mfl only)."""
+def _send_succeeded_rows():
+    """user_events rows of type sleeper_send_succeeded (P0-7 server-fired)."""
+    from sqlalchemy import select
+    with db_module.engine.connect() as conn:
+        rows = conn.execute(
+            select(db_module.user_events_table)
+            .where(db_module.user_events_table.c.event_type == "sleeper_send_succeeded")
+        ).fetchall()
+    return [dict(r._mapping) for r in rows]
+
+
+# ── #413 — draft picks in the mixed arrays ────────────────────────────────
+# Fixture shapes per docs/feedback/items/413-sleeper-send-draft-picks/lld-delta.md
+# §7.2: rosters 1 = me, 2 = them; the grid holds my 2027 2nd (orig 1), roster
+# 7's 2027 1st, and their 2026 1st (orig 2); traded_picks says roster 7's
+# 2027 1st is now held by roster 1 (me).
+
+ROSTERS_1V2 = [{"owner_id": SLEEPER_UID, "roster_id": 1}, {"owner_id": "opp", "roster_id": 2}]
+GRID = [  # load_draft_picks rows — only the keys the encoder reads
+    {"pick_id": f"{LEAGUE}_2027_2_1", "season": 2027, "round": 2, "original_roster_id": "1"},
+    {"pick_id": f"{LEAGUE}_2027_1_7", "season": 2027, "round": 1, "original_roster_id": "7"},
+    {"pick_id": f"{LEAGUE}_2026_1_2", "season": 2026, "round": 1, "original_roster_id": "2"},
+]
+TRADED = [{"season": "2027", "round": 1, "roster_id": 7, "owner_id": 1, "previous_owner_id": 7}]
+MY_2027_2ND = f"{LEAGUE}_2027_2_1"
+MY_ACQUIRED_2027_1ST = f"{LEAGUE}_2027_1_7"
+THEIR_2026_1ST = f"{LEAGUE}_2026_1_2"
+T3_BODY = {"give_player_ids": ["100", "101", MY_2027_2ND], "receive_player_ids": ["200"]}
+
+
+def _propose(client, body, *, grid=GRID, traded=TRADED, fake=None, deck_outcome=None):
+    """Link, then POST /api/trades/propose with the pick ground truth patched
+    directly (never through `_sleeper_get`). Returns (response, propose_trade
+    mock, load_draft_picks mock, _fetch_sleeper_traded_picks mock)."""
     c, token = client
     c.post("/api/sleeper/link", headers=_h(token), data=json.dumps({"token": _token()}))
-    rosters = [{"owner_id": SLEEPER_UID, "roster_id": 1}, {"owner_id": "opp", "roster_id": 2}]
-    fake = MagicMock(return_value={"transaction_id": "TX9", "status": "proposed", "raw": {}})
-    with patch.object(server, "_sleeper_get", return_value=rosters), \
-         patch.object(server._sleeper_write, "propose_trade", fake):
+    fake = fake or MagicMock(return_value={"transaction_id": "TX9", "status": "proposed", "raw": {}})
+    grid_mock = MagicMock(return_value=grid)
+    traded_mock = MagicMock(return_value=traded)
+    patches = [
+        patch.object(server, "_sleeper_get", return_value=ROSTERS_1V2),
+        patch.object(server._sleeper_write, "propose_trade", fake),
+        patch.object(server, "load_draft_picks", grid_mock),
+        patch.object(server, "_fetch_sleeper_traded_picks", traded_mock),
+    ]
+    if deck_outcome is not None:
+        patches.append(patch.object(server, "_save_deck_outcome_safe", deck_outcome))
+    for pt in patches:
+        pt.start()
+    try:
         r = c.post("/api/trades/propose", headers=_h(token), data=json.dumps({
-            "league_id": LEAGUE, "their_roster_id": 2,
-            "give_player_ids": ["100", "101"], "receive_player_ids": ["200"],
-            "draft_picks": ["2027_1"]}))
+            "league_id": LEAGUE, "their_roster_id": 2, **body}))
+    finally:
+        for pt in reversed(patches):
+            pt.stop()
+    return r, fake, grid_mock, traded_mock
+
+
+def test_propose_success_fires_no_trade_sent_on_sleeper(client):
+    """T-3 — Analytics dedup (MFL merge, 2026-08-11): a confirmed Sleeper send
+    is measured by `sleeper_send_succeeded` (P0-7, funnel stage 8 — covered in
+    test_analytics_p0.py) and must NOT also land a `trade_sent` row —
+    one event per real occurrence. `trade_sent` is the non-Sleeper
+    confirmed-send event (POST /api/trades/propose-mfl only).
+
+    #413 fixture fix: the pick rides `give_player_ids` (as every mount sends
+    it) — the old `"draft_picks": ["2027_1"]` was a string the adapter would
+    reject and passed only because `propose_trade` is mocked. The adapter
+    must now receive players-only arrays plus the server-encoded pick."""
+    r, fake, _, _ = _propose(client, T3_BODY)
     assert r.status_code == 200, r.get_data(as_text=True)
+    sent_req = fake.call_args[0][1]
+    assert sent_req.give_player_ids == ["100", "101"]
+    assert sent_req.receive_player_ids == ["200"]
+    assert sent_req.draft_picks == ["1,2027,2,1,2"]
     assert _trade_sent_rows() == []
+
+
+def test_propose_success_labels_impression_propose(client):
+    """T-3b — the positive spine assertion: a successful pick send still labels
+    its impression `propose` exactly once. Without this, deleting the
+    `_save_deck_outcome_safe` call would pass every negative test (T-11)."""
+    outcome = MagicMock()
+    r, _, _, _ = _propose(client, {**T3_BODY, "impression_id": "imp-1"},
+                          deck_outcome=outcome)
+    assert r.status_code == 200, r.get_data(as_text=True)
+    outcome.assert_called_once_with("imp-1", "propose", acting_user_id=USER)
+
+
+def test_propose_encodes_give_pick_from_to(client):
+    """T-4 — give side: orig = the grid row's original roster, from = my
+    roster, to = theirs."""
+    r, fake, _, _ = _propose(client, {"give_player_ids": [MY_2027_2ND],
+                                      "receive_player_ids": ["200"]})
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert fake.call_args[0][1].draft_picks == ["1,2027,2,1,2"]
+
+
+def test_propose_encodes_receive_pick_flips_from_to(client):
+    """T-5 — receive side: from = THEIR roster, to = mine (orig 2 = them)."""
+    r, fake, _, _ = _propose(client, {"give_player_ids": ["100"],
+                                      "receive_player_ids": [THEIR_2026_1ST]})
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert fake.call_args[0][1].draft_picks == ["2,2026,1,2,1"]
+
+
+def test_propose_acquired_pick_uses_traded_picks_holder(client):
+    """T-6 — roster 7's 2027 1st is held by me per traded_picks, so giving it
+    encodes (orig stays 7; from = me); the default-holder rule alone would
+    have refused it as not_owned."""
+    r, fake, _, _ = _propose(client, {"give_player_ids": [MY_ACQUIRED_2027_1ST],
+                                      "receive_player_ids": ["200"]})
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert fake.call_args[0][1].draft_picks == ["7,2027,1,1,2"]
+
+
+def test_propose_hard_blocks_generic_pick(client):
+    """T-7 — a generic rung names no real pick: 422 sleeper_pick_unmapped
+    listing every failing id from BOTH sides (give-then-receive), `detail`
+    byte-equal to `message` (fielded builds render `detail`), and the
+    players are NOT sent without the picks."""
+    r, fake, _, _ = _propose(client, {
+        "give_player_ids": ["100", "generic_pick_1_early"],
+        "receive_player_ids": ["200", "generic_pick_2_mid"]})
+    assert r.status_code == 422, r.get_data(as_text=True)
+    body = r.get_json()
+    assert body["error"] == "sleeper_pick_unmapped"
+    assert body["picks"] == ["generic_pick_1_early", "generic_pick_2_mid"]
+    assert body["detail"] == body["message"]
+    assert "Early 1st" in body["message"]
+    fake.assert_not_called()
+
+
+def test_propose_hard_blocks_pick_missing_from_grid(client):
+    """T-8 — a well-formed owned-pick id with no grid row (beyond the horizon,
+    completed draft, phantom season…) is unmapped; existence is the grid,
+    never inferred from the rosters list."""
+    phantom = f"{LEAGUE}_2031_1_1"
+    r, fake, _, _ = _propose(client, {"give_player_ids": [phantom],
+                                      "receive_player_ids": ["200"]})
+    assert r.status_code == 422, r.get_data(as_text=True)
+    body = r.get_json()
+    assert body["error"] == "sleeper_pick_unmapped" and body["picks"] == [phantom]
+    fake.assert_not_called()
+
+
+def test_propose_hard_blocks_pick_not_owned(client):
+    """T-9 — live traded_picks says my 2027 2nd is now held by roster 9: 422
+    sleeper_pick_not_owned, `detail == message`, nothing sent."""
+    traded = [{"season": "2027", "round": 2, "roster_id": 1, "owner_id": 9,
+               "previous_owner_id": 1}]
+    r, fake, _, _ = _propose(client, {"give_player_ids": [MY_2027_2ND],
+                                      "receive_player_ids": ["200"]},
+                             traded=traded)
+    assert r.status_code == 422, r.get_data(as_text=True)
+    body = r.get_json()
+    assert body["error"] == "sleeper_pick_not_owned"
+    assert body["picks"] == [MY_2027_2ND]
+    assert body["detail"] == body["message"]
+    fake.assert_not_called()
+
+
+def test_propose_pick_free_send_makes_no_traded_picks_fetch(client):
+    """T-10 — the byte-identical player-only path: neither the grid read nor
+    the traded_picks fetch happens when the trade carries no pick."""
+    r, fake, grid_mock, traded_mock = _propose(client, {
+        "give_player_ids": ["100"], "receive_player_ids": ["200"]})
+    assert r.status_code == 200, r.get_data(as_text=True)
+    grid_mock.assert_not_called()
+    traded_mock.assert_not_called()
+    assert fake.call_args[0][1].draft_picks is None
+
+
+def test_propose_422_fires_no_success_event_and_no_deck_outcome(client):
+    """T-11 — a refusal is invisible to the success spine: no
+    sleeper_send_succeeded row, no `propose` deck-outcome label, even with an
+    impression_id present."""
+    outcome = MagicMock()
+    r, fake, _, _ = _propose(client, {
+        "give_player_ids": ["100", "generic_pick_1_early"],
+        "receive_player_ids": ["200", "generic_pick_2_mid"],
+        "impression_id": "imp-1"}, deck_outcome=outcome)
+    assert r.status_code == 422
+    assert _send_succeeded_rows() == []
+    outcome.assert_not_called()
+    fake.assert_not_called()
+
+
+def test_propose_rejects_client_supplied_draft_picks(client):
+    """T-12 — the client never encodes: a non-empty `draft_picks` body key is
+    400 bad_request (with message/detail); an empty list is accepted."""
+    r, fake, _, _ = _propose(client, {"give_player_ids": ["100"],
+                                      "receive_player_ids": ["200"],
+                                      "draft_picks": ["1,2027,2,1,2"]})
+    assert r.status_code == 400, r.get_data(as_text=True)
+    body = r.get_json()
+    assert body["error"] == "bad_request"
+    assert body["detail"] == body["message"] and "draft_picks" in body["message"]
+    fake.assert_not_called()
+
+    r, fake, _, _ = _propose(client, {"give_player_ids": ["100"],
+                                      "receive_player_ids": ["200"],
+                                      "draft_picks": []})
+    assert r.status_code == 200, r.get_data(as_text=True)
+    fake.assert_called_once()
+
+
+def test_propose_success_pick_n_honest(client):
+    """T-13 — sleeper_send_succeeded props count players in give_n/receive_n
+    and encoded picks in pick_n (before #413 the pick was a "player" and
+    pick_n was structurally 0)."""
+    r, _, _, _ = _propose(client, T3_BODY)
+    assert r.status_code == 200, r.get_data(as_text=True)
+    rows = _send_succeeded_rows()
+    assert len(rows) == 1
+    props = json.loads(rows[0]["props"])
+    assert props == {"give_n": 2, "receive_n": 1, "pick_n": 1,
+                     "from_deck": False, "transaction_id": "TX9"}
+
+
+def test_propose_reports_unmapped_before_not_owned(client):
+    """T-14 — an unmappable pick has no holder to check: with one generic rung
+    and one traded-away pick, the 422 is unmapped and lists ONLY the rung."""
+    traded = [{"season": "2027", "round": 2, "roster_id": 1, "owner_id": 9,
+               "previous_owner_id": 1}]
+    r, fake, _, _ = _propose(client, {
+        "give_player_ids": ["generic_pick_1_early", MY_2027_2ND],
+        "receive_player_ids": ["200"]}, traded=traded)
+    assert r.status_code == 422, r.get_data(as_text=True)
+    body = r.get_json()
+    assert body["error"] == "sleeper_pick_unmapped"
+    assert body["picks"] == ["generic_pick_1_early"]
+    fake.assert_not_called()
 
 
 def test_propose_failure_fires_no_trade_sent(client):

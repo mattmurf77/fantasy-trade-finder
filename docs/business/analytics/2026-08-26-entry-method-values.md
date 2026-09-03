@@ -12,6 +12,8 @@ already-whitelisted `method` prop:
 |---|---|---|
 | `espn` | The user claims an ESPN team at entry (`POST /api/entry/platform` mint) | `mobile/src/api/platformEntry.ts` |
 | `mfl` | The user claims an MFL franchise at entry (same route) | same |
+| `espn` / `mfl` | **Web (2026-09-03):** the same claim on the web landing (`_entryClaim`) | `web/js/app.js` |
+| `sleeper` | **Web (2026-09-03):** the web Sleeper username door — it emitted no funnel events before this date, so web funnel history starts here | `web/js/app.js` `handleLogin` |
 
 All three funnel events carry it: `signin_attempted` at the claim,
 `signin_succeeded` on a stored token, `signin_failed {error_code}` on

@@ -11,6 +11,41 @@
 
 ---
 
+## 2026-09-03b — Web landing platform entry (PR #272): web gate 175/175, entry-route suite 25/25, browser E2E both platforms; sim gate skipped (D-056 posture)
+
+Branch `claude/landing-page-espn-mfl-a5a85a` @ `8473fab2` (off `main` @ `6ccd6698`), PR [#272](https://github.com/mattmurf77/fantasy-trade-finder/pull/272). Full gates ([scope §V3](../docs/plans/landing-platform-options/scope.md)), no waivers. `FTF_SKIP_SIM_GATE=1` on push — web-only change; the evidence below replaces the retired simulator.
+
+- **`python3 qa/web/check_web_structure.py`:** **175/175** (DS tokens / emoji / radius / fonts, SEO, A11Y, HYG) on the shipped `index.html` / `app.js` / `styles.css`.
+- **`pytest backend/tests/test_entry_platform_route.py`:** **25 passed** (23 + 2 new: `test_mfl_entry_leagues_snapshot_carries_the_claimed_franchise`, `test_espn_entry_leagues_snapshot_carries_the_claimed_team` — pin the `GET /api/{espn,mfl}/leagues` contract the web's `buildPlatformRosterData` reads). Full suite `pytest backend/tests`: **4587 passed / 1 skipped** in 6:33 (baseline 4585/1 from the #413 ship + the 2 new).
+- **`node --check web/js/app.js`:** clean.
+- **Browser E2E** (Claude Browser pane; real `backend.server.app` on `:5089` with only `es.fetch_league` / `es.get_crosswalk` / `mfl.resolve_host` / `mfl.fetch_league_bundle` / `server._shared_crosswalk` patched to the route tests' fixtures, scratch SQLite via `DATABASE_URL`): MFL `10005` → 3 franchises → claim "Clobberin Time 2" → `entry:mfl:10005.f0001` session, league auto-selected, `/api/session/init` OK, ranking-method screen → main app (8-player roster, account chip = franchise name); reload restores via `boot()` (`_myRoster` 8, `_cachedLeagues` 1); `_ensureLeaguematePool` → 16 players / 2 owners, never the user's own team. ESPN pasted `…leagueId=987654321` URL → 3 teams with owners → claim "Chalk Dusters" → `entry:espn:{A111…}` session, roster 8, method screen. Live server on `:5088`: MFL `99999` → "MFL has no league with that ID."; ESPN `1` → private-league copy + cookie section auto-opened. Console clean; `POST /api/events` 200 ×3. Full table: [code-walk §V3.7](../docs/plans/landing-platform-options/code-walk.md).
+- **Bug caught by the walk (fixed before commit):** the Sleeper wrapper had no `.hidden` rule, so the username row stayed visible under the ESPN/MFL panels — visible on the first screenshot.
+- **Owed:** CI on PR #272 (backend-tests · mobile-typecheck · maestro-testid-lint · web-structure); operator prod check per scope §V3 after merge.
+
+## 2026-09-03 — #413 SHIPPED: PR #270 squash → `main` @ `5c83e8cd`, CI ×4 green, Render live, EAS build 144 / v1.16.15 submitted
+
+Ship branch `ship/2026-09-02-fb413` @ `c6c95e07` = `main` @ `c7e75666` + `feat/fb413-sleeper-send-draft-picks` @ `d49611be` (clean merge) + the write-back with renumbered ids + version bump. Tree byte-identical to the squash (`git diff origin/main ship/…` empty).
+
+- **Local, ship tree:** `pytest backend/tests` **4585 passed / 1 skipped** (fresh DB; main's own baseline had grown with D-172/D-174/D-175's suites — the #413 delta is still +20) · `npx tsc --noEmit` exit 0 · **89/89** `check-*.js` · `testid-lint OK` · `test_app_version_consistency` at 1.16.15.
+- **CI on `c6c95e07` (PR [#270](https://github.com/mattmurf77/fantasy-trade-finder/pull/270)):** backend-tests · mobile-typecheck · maestro-testid-lint · web-structure — **all pass**; `mergeStateStatus CLEAN`.
+- **Deploy:** Render `dep-dacf8l6q1p3s73ek9ef0` for `5c83e8cd` **live** at 2026-09-03T04:16:38Z; `GET /api/feature-flags` 200. Every fielded build (1.16.12–1.16.14) now gets the server half: a pick-bearing send no longer 502s, and a refusal reads its reason.
+- **Mobile:** EAS build **144** / v1.16.15 (`ceffdbe7`), `--auto-submit` scheduled (submission `b4763913`). Verify the submission by STATUS (2026-08-30 lesson), not the CLI's last line.
+- **Not shipped:** the parallel #414 build (`feat/fb414-lopsided-one-for-one` @ `8c165533`, 4512/1, dual-QA green) — superseded by D-175, which was live before this ship; its evidence stays in the 2026-09-02b entry below and the item folder.
+- **Owed:** the operator's **7-step #413 TestFlight checklist** on build 144 (PRD §10) — TF-3 closes [Q-037](OPEN_QUESTIONS.md); log outcomes here.
+
+## 2026-09-02 — feedback #413 Sleeper pick-send fix: built, dual-QA green, shipped 2026-09-02 (see the merged-tree entry above)
+
+Branch `feat/fb413-sleeper-send-draft-picks` @ `d49611be`, cut from the session spec commit `ad5adafa` (main @ `ce3f443c`). Full gates, no waivers ([scope](../docs/feedback/items/413-sleeper-send-draft-picks/scope.md)). Backend agent `b4aabcc3`/`31e8d590`/`b938642b`, orchestrator `51794a35` (ADR-010 guard sanction), mobile `8e4e1648`, post-QA copy fix `d49611be`.
+
+- **pytest `backend/tests`:** **4503 passed / 1 skipped** (baseline 4483/1, +20 = PRD's expected delta) — re-run by the orchestrator on `d49611be` after the copy-only delta; both QA agents independently reproduced 4503/1 on `8e4e1648`.
+- **Mobile:** `npx tsc --noEmit` exit 0 · **89/89** `check-*.js` (incl. `check-mascot-ram.js` under plain `node`) · `testid-lint OK` · `check-send-button-platform.js` +4 checks (7, 7b, 7c, 8).
+- **Sabotage evidence:** builders 25 (backend) + 6 (mobile) cycles; **QA-A 32 PRD-named + 11 own, QA-B 32 PRD-named + 12 own** — every PRD-named sabotage RED except T-8's `if False:` variant (self-satisfying: the `None` row raises inside the encoder's `try` and lands in `unmapped` anyway); **T-8's proof of record is the "existence inferred from rosters × horizon" sabotage** (RED for both agents). Own-devised sabotages that stayed GREEN (coverage gaps, accepted as code-walk-only): mobile "never renders `picks[]` ids / never reads `detail`"; `encoded` give-then-receive order; guardrail 8's literal `PICK_SOURCE_PLATFORM` value (the AST guard checks the kwarg is named, not its value).
+- **Fixture-shape audit (both agents):** rosters int `roster_id` / string `owner_id`; grid `original_roster_id` string (load-bearing); `traded_picks` `{season:"2027", round:int, roster_id:int, owner_id:int}` — all production shapes; `_sleeper_get` single-return stubs untouched (the fetches are inside `if give_picks or recv_picks`).
+- **Code-walk proofs:** R-8 ordering (422s return before the write; `_save_deck_outcome_safe` + `_record_send_success` after it), R-13 ladder + fielded-build catch-all reading `detail`, R-15 warnings render unchanged, R-16 four enum sites at 17, W-1 four mounts still pass mixed arrays — `qa-round-1-agent-{A,B}.md` + `code-walk-mobile.md`.
+- **Post-QA delta (orchestrator, copy-only):** validate advisory strings count-aware (`is/are`, `it/them`) + curly apostrophe; `test_trade_send_validate.py` 16/16 + full suite re-run above. Round 2 was an orchestrator gate re-run on this two-string delta, not a second two-agent round — disclosed.
+- **Declared re-spec:** `test_sleeper_write_route.py:288` fixture (PRD R-17) — the bogus `draft_picks: ["2027_1"]` body replaced by an owned pick inside `give_player_ids`, now asserting the adapter's request.
+- **Owed:** the operator's **7-step TestFlight checklist** (PRD §10 / both QA reports) on any build ≥ 1.16.12 after the Render deploy — TF-1/2/4/7 mandatory, **TF-3 conditional and the Q-037 proof** (give an acquired pick; "not run" is a legal logged outcome), TF-5/6 opportunistic. Log each outcome here.
+
 ## 2026-09-02b — D-174 below-market reason (PR #267) and D-175 sweetener band + best-effort (PR #268): shipped and flipped live
 
 Both off `main` @ `e16bb487`, full gates, waivers surfaced and accepted (no new analytics; no `check-*.js`; TestFlight replaced by server-side prod verification). Both QA'd adversarially by independent Opus reviewers; every code claim survived, all fixes were docs/tests.
@@ -3534,6 +3569,9 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-09-03b — Web landing platform entry (PR #272): web gate 175/175, entry-route suite 25/25, browser E2E both platforms; sim gate skipped (D-056 posture)](#2026-09-03b--web-landing-platform-entry-pr-272-web-gate-175175-entry-route-suite-2525-browser-e2e-both-platforms-sim-gate-skipped-d-056-posture)
+- [2026-09-03 — #413 SHIPPED: PR #270 squash → `main` @ `5c83e8cd`, CI ×4 green, Render live, EAS build 144 / v1.16.15 submitted](#2026-09-03--413-shipped-pr-270-squash--main--5c83e8cd-ci-4-green-render-live-eas-build-144--v11615-submitted)
+- [2026-09-02 — feedback #413 Sleeper pick-send fix: built, dual-QA green, shipped 2026-09-02 (see the merged-tree entry above)](#2026-09-02--feedback-413-sleeper-pick-send-fix-built-dual-qa-green-shipped-2026-09-02-see-the-merged-tree-entry-above)
 - [2026-08-28d — IAP enablement code half (runbook 6–7): webhook delta + RevenueCat paywall — full gates, ALL DARK](#2026-08-28d--iap-enablement-code-half-runbook-67-webhook-delta--revenuecat-paywall--full-gates-all-dark)
 - [2026-08-28c — v1.16.9 (EAS build 135) BUILT + SUBMITTED to TestFlight; trade.shop_asset LIT in prod](#2026-08-28c--v1169-eas-build-135-built--submitted-to-testflight-tradeshop_asset-lit-in-prod)
 - [2026-08-28b — #402/#403 QA round 2: B-3, own-position chip ruling, P-1..P-4 — universal-rule fixes, gates green](#2026-08-28b--402403-qa-round-2-b-3-own-position-chip-ruling-p-1p-4--universal-rule-fixes-gates-green)

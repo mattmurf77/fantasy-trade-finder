@@ -8,6 +8,34 @@
 
 ---
 
+## 2026-09-03b — Web landing platform entry (Sleeper · ESPN · MFL) BUILT, PR #272 open, NOT merged
+
+**Where:** branch `claude/landing-page-espn-mfl-a5a85a` @ `8473fab2` + this write-back commit, worktree `.claude/worktrees/compassionate-jones-ea8a0e`, PR [#272](https://github.com/mattmurf77/fantasy-trade-finder/pull/272) against `main` @ `6ccd6698`. [D-177](DECISIONS.md); scope + code-walk §V3 in `docs/plans/landing-platform-options/`.
+
+**What it is:** `web/index.html` mirrors SignInScreen's Sleeper · ESPN · MFL chip row and adds ESPN/MFL entry panels on the D-164 sessionless route (preview → claim/mint → canonical link import; private ESPN = cookie paste; v2.1 "find my leagues" / "sign in with MFL"). Entry users (`entry:` ids) read the platform snapshot everywhere the web used Sleeper proxies; web emits `signin_*` by method. No route/schema/flag change — `landing.platform_options` is the single revert lever for web too. Also fixed `selectLeague`'s undefined `userPlayerIds` toast (ReferenceError after every league pick).
+
+**Owed:**
+1. **Merge PR #272 once CI is green** (4 jobs) — squash as usual; Render auto-deploys the web half (no mobile change, no EAS build).
+2. **Operator prod check** — scope §V3 "Manual check" (4 steps): chip row shows signed-out; MFL id → franchise → in; ESPN public id → team → in, private id → cookie section opens; flag off → today's landing.
+3. **Follow-up (NEXT):** the in-app "Connect another league" modal still tells ESPN/MFL pasters "sync is on the roadmap" — wire it to the same preview → team-claim rows (no mint needed under a live session) or drop the copy.
+4. After merge: recovery-ledger the branch tip and `git worktree remove` `compassionate-jones-ea8a0e` from the main checkout (a session cannot remove its own worktree).
+
+**Blocking:** nothing. **Rollback:** flip `landing.platform_options` false (row hidden + route 404) or revert the squash.
+
+## 2026-09-03 — #413 Sleeper pick-send SHIPPED (D-176, v1.16.15); the parallel #414 build was superseded by D-175 and NOT shipped
+
+**Where:** `main` @ `5c83e8cd` (PR [#270](https://github.com/mattmurf77/fantasy-trade-finder/pull/270), squash, CI ×4 green). Render deploy `dep-dacf8l6q1p3s73ek9ef0` **live** 2026-09-03T04:16Z. EAS build **144** / v1.16.15 queued with auto-submit (submission `b4763913`). Feedback #413 and #414 → `fixed`. All session refs ledgered and deleted (`docs/recovery/2026-09-03-fb413-ship-sweep.md`); the hosting worktree `.claude/worktrees/unruffled-meitner-3596cb` cannot remove itself — `git worktree remove` it from the main checkout.
+
+**Why #414 was dropped at the door:** main moved 9 commits during the run; the other session read the same prod card (`model_arm current`, gap 1,396 packaged) and shipped D-175 — `sweetener_gap_frac` as a relative BAND (`max(threshold, frac×max)`) plus `sweetener_best_effort`, with the threshold row lowered to 750 live, measured on the harness corpus. This session's build used the SAME knob name with the OPPOSITE semantics (`min(threshold, frac×max)`, a tightening) and a two-tier accept — a textual conflict in five engine files and a product conflict on the live knob. Main's version is live and corpus-measured; ours is history. Comparison in the 2026-09-03 session summary and `docs/feedback/items/414-lopsided-one-for-one/status.md`.
+
+**Owed:**
+1. **Confirm EAS build 144 finished and submission `b4763913` reached FINISHED** (`eas build:view ceffdbe7-96c1-473d-9b5c-809ddd05d5fe`; submission status via the Expo GraphQL as in the 2026-08-30 lesson). Render is already live.
+2. **Operator TestFlight checklist, 7 steps** (`docs/feedback/items/413-sleeper-send-draft-picks/prd.md` §10) — **TF-3 (give an ACQUIRED pick) closes Q-037**; "not run" is a legal logged outcome. Log in TEST_LEDGER.
+3. Feedback DB: #413 and #414 are `fixed` (set 2026-09-03 after the merge).
+4. **G-8 follow-up** (NEXT): add `avoid_ok` to `_gap_extra_ok` on v3/v2 in `close_value_gap`'s callers — main's D-175 pass can still hand back an avoided-position equalizer (flag `trade.avoid_positions` is dark, so no user impact today); the test design is in the superseded folder's `test_gap_sweetener_frac.py` (`test_v3_gap_pass_never_uses_an_avoided_position_as_equalizer`).
+
+**Blocking:** nothing. **Rollback:** #413 = code revert (no flag).
+
 ## 2026-09-02b — D-174 (reason line, 0.15) and D-175 (sweetener band + best-effort, 750/0.12/1) LIVE; Q-035/Q-036 closed
 
 **Where:** `main` @ `f9add99c`. Both knobs live via admin PUT. Nothing in flight on the engine. Three engine-affecting knob changes this week (D-172 Tue, D-174/D-175 Wed) — the 09-01 → 09-07 bake-off window is censored (D-099); do not read it.
@@ -383,6 +411,7 @@ move, and the avatar lab's anchor test models the brief's described layout, not 
 **none**, so the bubble reads "The Analyst" above a ram, which is D-155's recorded default). Higgsfield credits ~4.35.
 
 ## Table of Contents
+- [2026-09-03b — Web landing platform entry (Sleeper · ESPN · MFL) BUILT, PR #272 open, NOT merged](#2026-09-03b--web-landing-platform-entry-sleeper--espn--mfl-built-pr-272-open-not-merged)
 - [2026-09-02 — web parity SHIPPED (PR #263, live on Render); what is left is two operator inputs, not code](#2026-09-02--web-parity-shipped-pr-263-live-on-render-what-is-left-is-two-operator-inputs-not-code)
 - [2026-09-02 — D-172 `consensus_fit_weight` LIVE at 0.5; research write-back landed; two prototype worktrees ledgered](#2026-09-02--d-172-consensusfitweight-live-at-05-research-write-back-landed-two-prototype-worktrees-ledgered)
 - [2026-08-27 — #384 partner shape-summary regression SHIPPED to main; owed = one TestFlight checklist on the next build](#2026-08-27--384-partner-shape-summary-regression-shipped-to-main-owed--one-testflight-checklist-on-the-next-build)

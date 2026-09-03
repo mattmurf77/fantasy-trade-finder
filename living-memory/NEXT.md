@@ -9,6 +9,8 @@
 ---
 
 ## Table of Contents
+- [2026-09-03b — Web platform entry: merge PR #272, then the "Connect another league" modal follow-up](#2026-09-03b--web-platform-entry-merge-pr-272-then-the-connect-another-league-modal-follow-up)
+- [2026-09-03 — After the #413 ship: the checklist that closes Q-037, then the G-8 avoid gap D-175 still has, then the impression gap](#2026-09-03--after-the-413-ship-the-checklist-that-closes-q-037-then-the-g-8-avoid-gap-d-175-still-has-then-the-impression-gap)
 - [2026-09-02 — Web parity SHIPPED and live; the only remaining work needs an App Store/TestFlight URL](#2026-09-02--web-parity-shipped-and-live-the-only-remaining-work-needs-an-app-storetestflight-url)
 - [2026-08-31 — Finder gap analysis: P0 likes-you tag on the merged landing, then the P1 batch](#2026-08-31--finder-gap-analysis-p0-likes-you-tag-on-the-merged-landing-then-the-p1-batch)
 - [2026-08-30b — Second feedback batch (#409/#410/#411/#412): checklist + the G-063 sweep](#2026-08-30b--second-feedback-batch-409410411412-checklist--the-g-063-sweep)
@@ -40,6 +42,14 @@
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## 2026-09-03b — Web platform entry: merge PR #272, then the "Connect another league" modal follow-up
+
+**Why now:** the web landing now offers ESPN/MFL entry ([D-177](DECISIONS.md), PR [#272](https://github.com/mattmurf77/fantasy-trade-finder/pull/272) open) but the in-app "Connect another league" modal (`web/index.html` `#connect-league-modal`, `app.js` `connectPastedLeague`, and the smart-start URL path) still answers an ESPN/MFL URL with "sync is on the roadmap" — now a false statement on a page that links those platforms at the door. In order: (1) merge #272 when CI is green and run the scope §V3 prod check; (2) wire the modal's ESPN/MFL branch to the same preview → team-claim rows the landing uses (under a live session it is the plain `/api/{espn,mfl}/link` preview/import — no mint), or delete the "roadmap" copy; (3) web still emits no `league_selected` (mobile sends it with `platform`) — a one-line add if the funnel needs the far side.
+
+## 2026-09-03 — After the #413 ship: the checklist that closes Q-037, then the G-8 avoid gap D-175 still has, then the impression gap
+
+**Why now:** #413 (D-176) is merged; every fielded build gets the server half on deploy, the alert copy rides v1.16.15. In order: (1) the **7-step #413 TestFlight checklist** — **TF-3 closes [Q-037](OPEN_QUESTIONS.md)** (Sleeper's field-1 semantics on an acquired pick; a failure is a one-line encoder flip). (2) **G-8 — the gap pass re-earns #360 avoid on receive-side equalizers on v3/v2** (`_gap_extra_ok` in `close_value_gap`'s v3/v2 callers never calls `avoid_ok`; consensus is filtered at pool construction; arm C has no #360 concept at all, organic path included). Found by this session's superseded #414 build (`docs/feedback/items/414-lopsided-one-for-one/`, test design `test_v3_gap_pass_never_uses_an_avoided_position_as_equalizer`); with D-175 live at 750/0.12/1 the pass fires far more often, so the gap is more reachable than before — dark only because `trade.avoid_positions` is false. One line per arm + the port of that test. (3) **Streamed-then-trimmed cards carry no impression** — the exact #414 swipe row had `impression_id: 'none'` (rendered from a streaming snapshot ~9 s before the final publish, then trimmed by the mutation stack); size with `SELECT count(*) FROM user_events WHERE event_type='match_swiped' AND props->>'impression_id'='none'` vs total; client-side fix on `status === 'complete'` (PRD Appendix A in the 414 folder). Also queued: `bakeoff_runner.py:247` interleave fallback inverted vs the seed; pin the mobile "never renders `picks[]` / never reads `detail`" rule with a body regex in `check-send-button-platform.js`.
 
 ## 2026-09-02 — Web parity SHIPPED and live; the only remaining work needs an App Store/TestFlight URL
 

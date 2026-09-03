@@ -16198,12 +16198,16 @@ def propose_trade_to_sleeper():
     """Send a built trade to Sleeper as a real proposal.
 
     Body: {league_id, their_user_id (or their_roster_id), give_player_ids[],
-           receive_player_ids[], draft_picks?[]}  (players-only v1; picks pre-encoded).
+           receive_player_ids[]}. The two arrays are MIXED — Sleeper player
+    ids AND FTF pick ids (owned `{league}_{season}_{round}_{orig}`, generic
+    `generic_pick_{round}_{tier}`) — exactly as the trade surfaces carry them;
+    the server splits picks out and encodes them itself (#413,
+    _sleeper_encode_ftf_picks). A non-empty `draft_picks` body key is rejected.
     Success → {status:"proposed", transaction_id}. Structured errors the client
     maps to the deep-link fallback / reconnect prompt:
       404 feature_disabled | 403 verification_required | 409 sleeper_not_linked
       409 sleeper_expired | 503 sleeper_unconfigured | 502 sleeper_write_failed
-      400 bad_request
+      422 sleeper_pick_unmapped | 422 sleeper_pick_not_owned | 400 bad_request
     """
     if _TEST_MODE:
         # Fail closed: there is no legitimate automated send. Route-hit
@@ -16237,6 +16241,13 @@ def propose_trade_to_sleeper():
     picks = [str(p) for p in (body.get("draft_picks") or [])]
     if not league_id.isdigit() or (their_user_id is None and their_roster_id_in is None):
         return jsonify({"error": "bad_request"}), 400
+    # #413 — the client never encodes picks. Pick ids ride the mixed arrays
+    # and the server encodes them against its own ground truth (below); a
+    # pre-encoded `draft_picks` list would be a second, unverified entry point.
+    if picks:
+        _msg = ("draft_picks is not accepted — put pick ids in give_player_ids / "
+                "receive_player_ids; the server encodes them.")
+        return jsonify({"error": "bad_request", "message": _msg, "detail": _msg}), 400
 
     cred = get_sleeper_credential(user_id)
     if not cred:
@@ -16266,10 +16277,46 @@ def propose_trade_to_sleeper():
         if their_rid is None:
             return jsonify({"error": "opponent_roster_not_found"}), 400
 
+    # #413 — FTF's trade surfaces carry picks in the SAME arrays as players.
+    # Split them out and encode owned picks server-side: existence is the
+    # league's `draft_picks` grid (platform rows — the default source; a
+    # user-asserted ADR-010 row is not proof a Sleeper pick exists), the
+    # current holder is live `traded_picks` over "original roster holds by
+    # default". Any pick that can't be resolved refuses the WHOLE send — an
+    # offer must never silently lose an asset. Both fetches happen only when
+    # the trade carries a pick, so a player-only send is byte-identical.
+    give_players = [p for p in give if not _is_ftf_pick_asset(league_id, p)]
+    give_picks = [p for p in give if _is_ftf_pick_asset(league_id, p)]
+    recv_players = [p for p in receive if not _is_ftf_pick_asset(league_id, p)]
+    recv_picks = [p for p in receive if _is_ftf_pick_asset(league_id, p)]
+    encoded: list = []
+    if give_picks or recv_picks:
+        # A LITERAL platform read on purpose (the #328 `_mock_owned_pick_overlay`
+        # precedent, sanctioned in test_pick_assignment's AST guard): only a
+        # platform-synced row proves a Sleeper pick exists, and this read must
+        # never follow the `picks.assign_tradeable` pricing flag.
+        grid_rows = load_draft_picks(league_id, source=PICK_SOURCE_PLATFORM)
+        traded = _fetch_sleeper_traded_picks(league_id)
+        encoded, unmapped, not_owned = _sleeper_encode_ftf_picks(
+            league_id, give_picks, recv_picks, my_roster_id, their_rid, grid_rows, traded)
+        # `detail` == `message` on both: fielded builds render `detail` in
+        # their catch-all, so a refusal without it reads "Please try again".
+        if unmapped:
+            _msg = ("Some draft picks in this trade couldn’t be matched to a pick in this "
+                    "Sleeper league, so nothing was sent. Generic picks like “Early 1st” "
+                    "can’t be sent — use a specific pick.")
+            return jsonify({"error": "sleeper_pick_unmapped", "picks": unmapped,
+                            "message": _msg, "detail": _msg}), 422
+        if not_owned:
+            _msg = ("Some draft picks in this trade have already changed hands, so nothing "
+                    "was sent. Rebuild the trade and try again.")
+            return jsonify({"error": "sleeper_pick_not_owned", "picks": not_owned,
+                            "message": _msg, "detail": _msg}), 422
+
     req = _sleeper_write.ProposeTradeRequest(
         league_id=league_id, my_roster_id=my_roster_id, their_roster_id=their_rid,
-        give_player_ids=give, receive_player_ids=receive,
-        draft_picks=picks or None,
+        give_player_ids=give_players, receive_player_ids=recv_players,
+        draft_picks=encoded or None,
     )
     try:
         result = _sleeper_write.propose_trade(token, req)
@@ -16313,7 +16360,7 @@ def propose_trade_to_sleeper():
     # non-Sleeper platforms (today: /api/trades/propose-mfl only);
     # Sleeper's confirmed send is `sleeper_send_succeeded`, below.
     _record_send_success(
-        user_id, league_id, give, receive, picks,
+        user_id, league_id, give_players, recv_players, encoded,
         result.get("transaction_id"),
         bool(body.get("impression_id")),
     )
@@ -27835,10 +27882,36 @@ def trades_validate():
         })
         return jsonify({"ok": True, "checked": True, "warnings": warnings})
 
+    # #413 — picks ride the same arrays as players. Split them out so a pick is
+    # never judged against `roster.players` (which holds no pick ids), and
+    # mirror the propose route's two hard blocks as blocking advisories. Pick
+    # ground truth is fetched only when the trade carries a pick.
+    give_players = [p for p in give if not _is_ftf_pick_asset(league_id, p)]
+    give_picks = [p for p in give if _is_ftf_pick_asset(league_id, p)]
+    recv_players = [p for p in receive if not _is_ftf_pick_asset(league_id, p)]
+    recv_picks = [p for p in receive if _is_ftf_pick_asset(league_id, p)]
+    if give_picks or recv_picks:
+        # Literal platform read, same reason as the propose route (#328 precedent).
+        _, unmapped, not_owned = _sleeper_encode_ftf_picks(
+            league_id, give_picks, recv_picks, my_rid, their_rid,
+            load_draft_picks(league_id, source=PICK_SOURCE_PLATFORM),
+            _fetch_sleeper_traded_picks(league_id))
+        if unmapped:
+            n = len(unmapped)
+            warnings.append({"code": "asset_unmapped", "severity": "blocking", "message": (
+                f"{n} draft pick{'s' if n != 1 else ''} in this trade can’t be sent to Sleeper "
+                "(generic picks like “Early 1st” name no real pick) — the send will be blocked "
+                f"rather than dropping {'them' if n != 1 else 'it'}.")})
+        if not_owned:
+            n = len(not_owned)
+            warnings.append({"code": "pick_moved", "severity": "blocking", "message": (
+                f"{n} pick{'s' if n != 1 else ''} in this trade {'are' if n != 1 else 'is'} no longer owned by the "
+                "expected team (already traded) — Sleeper will reject the offer.")})
+
     my_players = {str(p) for p in (mine.get("players") or [])}
     their_players = {str(p) for p in (theirs.get("players") or [])}
-    moved_give = [p for p in give if p not in my_players]
-    moved_receive = [p for p in receive if p not in their_players]
+    moved_give = [p for p in give_players if p not in my_players]
+    moved_receive = [p for p in recv_players if p not in their_players]
     if moved_give or moved_receive:
         n = len(moved_give) + len(moved_receive)
         warnings.append({
@@ -27858,9 +27931,10 @@ def trades_validate():
     except (TypeError, ValueError):
         max_roster = 0
     if max_roster > 0:
+        # Sleeper's roster limit counts players only; picks are not roster slots.
         for label, players, out_ids, in_ids in (
-            ("Your", my_players, give, receive),
-            ("Their", their_players, receive, give),
+            ("Your", my_players, give_players, recv_players),
+            ("Their", their_players, recv_players, give_players),
         ):
             post = len(players) - len([p for p in out_ids if p in players]) + len(in_ids)
             if post > max_roster:
@@ -27999,6 +28073,87 @@ def _mfl_encode_ftf_picks(row, league_id: str, pick_ids: list) -> tuple[dict, li
             continue
         encoded[pid] = _mfl_write.encode_future_pick(key[2], key[0], key[1])
     return encoded, unmapped
+
+
+# ── Sleeper pick-asset encoding (FTF pick ids → "orig,season,round,from,to") ──
+#
+# The Sleeper instance of the MFL pattern above (#413). The propose route
+# splits picks out of the mixed give/receive arrays and encodes owned picks
+# server-side against TWO ground truths: existence is the league's
+# `draft_picks` grid (platform rows, by `pick_id` — `load_draft_picks`'s
+# default source; a user-asserted ADR-010 row carries an opaque slot label,
+# not a Sleeper roster id, and is not proof a Sleeper pick exists), and the
+# current holder is the live public `traded_picks` list overlaid on
+# "original roster holds by default". The give side must be held by the
+# proposer's roster, the receive side by the counterparty's. Anything that
+# can't be positively resolved — generic rungs included — hard-blocks the
+# send (422 sleeper_pick_unmapped / sleeper_pick_not_owned); the validate
+# route reports the same misses as blocking advisories. The encoding itself
+# lives in sleeper_write.encode_draft_pick; NEVER a client-supplied string.
+
+def _sleeper_pick_holder_index(traded_picks: list) -> dict:
+    """{(season:int, round:int, orig_roster_id:str): holder_roster_id:int} from the
+    public traded_picks list ({round, season(str), roster_id(orig), owner_id(current)},
+    _fetch_sleeper_traded_picks). Same parsing sync_draft_picks does at
+    database.py:10037-10042. Malformed entries are skipped; an absent key means
+    "the original roster still holds it"."""
+    index: dict = {}
+    for tp in traded_picks if isinstance(traded_picks, list) else []:
+        if not isinstance(tp, dict):
+            continue
+        try:
+            key = (int(tp["season"]), int(tp["round"]), str(tp["roster_id"]))
+            index[key] = int(tp["owner_id"])
+        except (TypeError, ValueError, KeyError):
+            continue
+    return index
+
+
+def _sleeper_encode_ftf_picks(league_id: str, give_picks: list, recv_picks: list,
+                              my_rid: int, their_rid: int,
+                              grid_rows: list, traded_picks: list
+                              ) -> tuple[list, list, list]:
+    """FTF pick ids → Sleeper draft_picks strings, ground-truthed twice.
+    Returns (encoded, unmapped, not_owned). A pick lands in exactly one of the
+    three; `encoded` preserves give-then-receive order. The propose route
+    hard-blocks on either failure list (an offer must never silently lose an
+    asset); the validate route reports them as blocking advisories."""
+    # One membership test covers every existence failure: generic rungs,
+    # another league's id, a malformed id, a phantom / out-of-horizon /
+    # completed-draft season, a round beyond draft_rounds — none has a row.
+    grid = {str(r["pick_id"]): r for r in (grid_rows or [])}
+    index = _sleeper_pick_holder_index(traded_picks)
+    encoded: list = []
+    unmapped: list = []
+    not_owned: list = []
+    # Every roster-id COMPARISON is int vs int; `str` appears only inside the
+    # holder-index key because the grid column is a String.
+    for pid, from_rid, to_rid in (
+        [(p, my_rid, their_rid) for p in give_picks]
+        + [(p, their_rid, my_rid) for p in recv_picks]
+    ):
+        row = grid.get(str(pid))
+        if row is None:
+            unmapped.append(pid)
+            continue
+        try:
+            season, rnd = int(row["season"]), int(row["round"])
+            orig = str(row["original_roster_id"])
+            holder = index.get((season, rnd, orig))
+            if holder is None:
+                holder = int(orig)          # original roster holds by default
+        except (TypeError, ValueError, KeyError):
+            unmapped.append(pid)
+            continue
+        if holder != from_rid:
+            not_owned.append(pid)
+            continue
+        try:
+            encoded.append(_sleeper_write.encode_draft_pick(
+                orig, season, rnd, from_rid, to_rid))
+        except ValueError:
+            unmapped.append(pid)
+    return encoded, unmapped, not_owned
 
 
 def _validate_mfl_trade(sess, user_id, row, league_id, their_user_id,
