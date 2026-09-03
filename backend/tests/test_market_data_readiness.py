@@ -203,7 +203,7 @@ def test_sync_survives_per_week_fetch_failures(client):
 # ~26 Sleeper calls one app open cost. Only the live leg (and the one before
 # it, for a late-processed trade) can produce new rows once a league has been
 # swept, so after the first backfill the sweep shrinks to <=2 legs — and to
-# ZERO in the offseason, where there is no live leg to sweep.
+# leg 1 alone in the offseason, where Sleeper books every trade.
 # ---------------------------------------------------------------------------
 
 def _counting_opener():
@@ -255,7 +255,7 @@ def test_second_sync_only_sweeps_live_legs(client, monkeypatch):
     assert seen == [1]
 
 
-def test_offseason_sync_fetches_nothing_after_backfill(client, monkeypatch):
+def test_offseason_sync_sweeps_only_leg_1_after_backfill(client, monkeypatch):
     _, engine = client
     sync_league_trades(LEAGUE, _opener=_fake_opener)
 
@@ -263,7 +263,7 @@ def test_offseason_sync_fetches_nothing_after_backfill(client, monkeypatch):
                         lambda today=None: None)
     opener, seen = _counting_opener()
     assert sync_league_trades(LEAGUE, _opener=opener) == 0
-    assert seen == []                          # (c) offseason → zero calls
+    assert seen == [1]                         # (c) offseason → leg 1 only
     assert len(_trade_rows(engine)) == 1
 
     # But a league that has NEVER been swept still gets its backfill, even
@@ -280,7 +280,7 @@ def test_sweep_weeks_is_date_driven(client):
     assert sweep_weeks(LEAGUE, start + timedelta(weeks=4)) == list(range(1, 19))
     record_sleeper_trades(parse_trade_transactions(WEEK1_PAYLOAD, LEAGUE))
     assert sweep_weeks(LEAGUE, start + timedelta(weeks=4)) == [4, 5]
-    assert sweep_weeks(LEAGUE, start - timedelta(days=30)) == []
+    assert sweep_weeks(LEAGUE, start - timedelta(days=30)) == [1]
 
 
 # ---------------------------------------------------------------------------

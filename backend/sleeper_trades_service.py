@@ -154,15 +154,16 @@ def sweep_weeks(league_id: str, today: date | None = None) -> list[int]:
     completed trade never mutates, and the leg it lands on can slip by one
     when Sleeper processes an accepted trade late in the week.
 
-    OFFSEASON (`current_nfl_week()` is None) returns [] — an already-swept
-    league fetches NOTHING until leg 1 opens. Sweeping "week 1 of the
-    upcoming season" would be a guess at a leg that has not started.
+    OFFSEASON (`current_nfl_week()` is None) returns [1]: Sleeper books every
+    offseason trade on leg 1 of the league's season (see the module note),
+    and dynasty's heaviest trading window IS the offseason, so an
+    already-swept league keeps one live leg all year.
     """
     if not has_sleeper_trades(league_id):
         return list(WEEKS)
     week = current_nfl_week(today)
     if week is None:
-        return []
+        return [1]
     return [w for w in (week - 1, week) if w >= 1]
 
 

@@ -305,12 +305,12 @@ fresh live fetch with no shared cache.
 | Shared league meta | (unconditional for numeric, non-platform-linked ids) | 1× `/league/{id}`, reused by scoring auto-detect, the FB #41 team-count persist and the owned-pick sync | `_league_meta()` in the same daemon |
 | Trade-block import | `sleeper.trade_block` | 1× `league_players` GraphQL (rosters shared) | `sync_league_trade_block`, `backend/trade_block_service.py` |
 | Owned draft-pick sync | `picks.owned_sync` | 1× `traded_picks` + 1× `drafts` (rosters + meta shared); MFL leagues re-derive with no Sleeper reads | `_sync_sleeper_owned_picks`, `backend/server.py` |
-| Trade-transaction capture | `market.trade_capture` | **≤2 calls** — `transactions/{week}` for the live leg and the one before it. The full `1..18` sweep runs ONCE, as the first-time backfill for a league with no captured rows; in the offseason an already-swept league fetches **0** | `sweep_weeks` / `sync_league_trades`, `backend/sleeper_trades_service.py` |
+| Trade-transaction capture | `market.trade_capture` | **≤2 calls** — `transactions/{week}` for the live leg and the one before it. The full `1..18` sweep runs ONCE, as the first-time backfill for a league with no captured rows; in the offseason an already-swept league fetches **1** (leg 1, where Sleeper books every offseason trade) | `sweep_weeks` / `sync_league_trades`, `backend/sleeper_trades_service.py` |
 | Executed-trade matcher | `suggestion.telemetry` | 0 — takes the shared rosters map | `match_league_trades(roster_map=…)`, `backend/suggestion_telemetry.py` |
 | Rookie-draft status refresh | (unflagged) | 0 in steady state; up to 3 (`/league/{id}`, `drafts`, `rosters`) when the per-status TTL has expired — 12 h once a league reads `drafted` | `_refresh_league_draft_status`, `backend/server.py` |
 
 **Per-init upstream budget for a Sleeper league** (steady state, all flags ON,
-draft-status TTL warm): **7 calls in season, 5 in the offseason** — meta,
+draft-status TTL warm): **7 calls in season, 6 in the offseason** — meta,
 rosters, GraphQL `league_players`, `traded_picks`, `drafts`, and ≤2
 `transactions/{week}`. Before 2026-09-03 the same init cost **26** (29 on a
 draft-status refresh): 18 transaction legs, 3 rosters reads and 2 meta reads.
