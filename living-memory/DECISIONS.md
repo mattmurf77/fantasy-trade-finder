@@ -1675,7 +1675,7 @@ No historical 1100-pin repair — indistinguishable from anchor no-value.
 **Consequences:** Entry sessions are unverified → not server-persisted (client Keychain token + cheap deterministic re-claim is the recovery path); if `auth.enforce_verified_writes` ever flips on, entry users lose write grace — revisit then. Two humans claiming the same team share an identity, same as a shared Sleeper username claim. `signin_*` gains method values `espn`/`mfl` (value-only; addendum `docs/business/analytics/2026-08-26-entry-method-values.md`). `landing.platform_options` is now server-read (gates the route), remaining the one revert lever. The D-163 `platformIntent`/`mflLink` machinery survives on the quiet Apple re-entry link and the Settings CTA.
 ## D-177 — The Web Landing Mirrors Platform Entry Through the Same Sessionless Route; Private ESPN on Web Is the Cookie Paste, and Entry Users Read the Platform Snapshot
 
-**Date:** 2026-09-03 · **Status:** built, PR [#272](https://github.com/mattmurf77/fantasy-trade-finder/pull/272) open (not merged) · **Scope:** [`docs/plans/landing-platform-options/scope.md` §V3](../docs/plans/landing-platform-options/scope.md)
+**Date:** 2026-09-03 · **Status:** shipped — PR [#272](https://github.com/mattmurf77/fantasy-trade-finder/pull/272) squash → `main` @ `ca5fac46` · **Scope:** [`docs/plans/landing-platform-options/scope.md` §V3](../docs/plans/landing-platform-options/scope.md)
 
 **Context:** Operator ask — the web landing should mimic the mobile app's Sleeper · ESPN · MFL options. Mobile's entry (D-164) mints a session at the team claim via the sessionless `POST /api/entry/platform` and imports through the canonical link routes. The web's league/roster plumbing was Sleeper-only (`/api/sleeper/rosters|league_users|leagues` everywhere) and had no notion of a non-Sleeper user.
 
@@ -1685,7 +1685,7 @@ No historical 1100-pin repair — indistinguishable from anchor no-value.
 
 **Consequences:** Flag off ⇒ the web landing is byte-for-byte the Sleeper page (the row ships hidden). Entry users on web inherit every D-164 consequence: unverified session (client token + deterministic re-claim recovers), no server persistence, write grace. The in-app "Connect another league" modal still tells ESPN/MFL pasters "on the roadmap" — a follow-up now that the link routes are reachable from web. `selectLeague`'s undefined `userPlayerIds` toast (a `ReferenceError` after every league pick since the first commit) was fixed inside the restructure.
 
-**Status:** Active (pending merge).
+**Status:** Active.
 
 ## D-176 — Sleeper Pick Sends Are Encoded Server-Side From the Grid Plus Live `traded_picks`; the Client Never Encodes and Any Unresolvable Pick Refuses the Whole Send
 
