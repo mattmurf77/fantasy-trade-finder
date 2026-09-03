@@ -249,8 +249,8 @@ export default function SendInSleeperButton({
       // place that sees network errors, timeouts, and the pre-identity
       // refusals (feature_disabled / no_user / test_mode_propose_disabled)
       // the server cannot attribute to a user — and the only place that
-      // knows `surface`. Closed enum: 12 server codes ∪ network | timeout
-      // | unknown = 15 values, forever.
+      // knows `surface`. Closed enum: 14 server codes ∪ network | timeout
+      // | unknown = 17 values, forever.
       track('sleeper_send_failed', {
         surface,
         error_code: err instanceof ApiError
@@ -301,6 +301,24 @@ export default function SendInSleeperButton({
         Alert.alert(
           'Couldn’t send',
           'Couldn’t match one of the teams to a roster in this Sleeper league.',
+        );
+      } else if (code === 'sleeper_pick_unmapped') {
+        // #413 — ≥1 pick could not be matched to a pick in this league's grid
+        // (generic rungs like “Early 1st”, or a pick outside the synced grid).
+        // The server refused the WHOLE send rather than dropping the pick.
+        // Count-aware like the MFL twin (SendInMflButton.tsx:141-146); the ids
+        // themselves are never rendered.
+        const n = Array.isArray(body?.picks) ? body.picks.length : 0;
+        Alert.alert(
+          'Couldn’t send',
+          `${n || 'Some'} draft pick${n === 1 ? '' : 's'} in this trade couldn’t be matched to a pick in this Sleeper league, so nothing was sent. Generic picks like “Early 1st” can’t be sent — use a specific pick.`,
+        );
+      } else if (code === 'sleeper_pick_not_owned') {
+        // #413 — live traded_picks says the offering team no longer holds it.
+        const n = Array.isArray(body?.picks) ? body.picks.length : 0;
+        Alert.alert(
+          'Couldn’t send',
+          `${n || 'Some'} draft pick${n === 1 ? '' : 's'} in this trade ${n === 1 ? 'has' : 'have'} already changed hands, so nothing was sent. Rebuild the trade and try again.`,
         );
       } else {
         Alert.alert(

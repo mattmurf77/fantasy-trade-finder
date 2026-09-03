@@ -11,6 +11,19 @@
 
 ---
 
+## 2026-09-02 — feedback #413 Sleeper pick-send fix: built, dual-QA green, shipped 2026-09-02 (see the merged-tree entry above)
+
+Branch `feat/fb413-sleeper-send-draft-picks` @ `d49611be`, cut from the session spec commit `ad5adafa` (main @ `ce3f443c`). Full gates, no waivers ([scope](../docs/feedback/items/413-sleeper-send-draft-picks/scope.md)). Backend agent `b4aabcc3`/`31e8d590`/`b938642b`, orchestrator `51794a35` (ADR-010 guard sanction), mobile `8e4e1648`, post-QA copy fix `d49611be`.
+
+- **pytest `backend/tests`:** **4503 passed / 1 skipped** (baseline 4483/1, +20 = PRD's expected delta) — re-run by the orchestrator on `d49611be` after the copy-only delta; both QA agents independently reproduced 4503/1 on `8e4e1648`.
+- **Mobile:** `npx tsc --noEmit` exit 0 · **89/89** `check-*.js` (incl. `check-mascot-ram.js` under plain `node`) · `testid-lint OK` · `check-send-button-platform.js` +4 checks (7, 7b, 7c, 8).
+- **Sabotage evidence:** builders 25 (backend) + 6 (mobile) cycles; **QA-A 32 PRD-named + 11 own, QA-B 32 PRD-named + 12 own** — every PRD-named sabotage RED except T-8's `if False:` variant (self-satisfying: the `None` row raises inside the encoder's `try` and lands in `unmapped` anyway); **T-8's proof of record is the "existence inferred from rosters × horizon" sabotage** (RED for both agents). Own-devised sabotages that stayed GREEN (coverage gaps, accepted as code-walk-only): mobile "never renders `picks[]` ids / never reads `detail`"; `encoded` give-then-receive order; guardrail 8's literal `PICK_SOURCE_PLATFORM` value (the AST guard checks the kwarg is named, not its value).
+- **Fixture-shape audit (both agents):** rosters int `roster_id` / string `owner_id`; grid `original_roster_id` string (load-bearing); `traded_picks` `{season:"2027", round:int, roster_id:int, owner_id:int}` — all production shapes; `_sleeper_get` single-return stubs untouched (the fetches are inside `if give_picks or recv_picks`).
+- **Code-walk proofs:** R-8 ordering (422s return before the write; `_save_deck_outcome_safe` + `_record_send_success` after it), R-13 ladder + fielded-build catch-all reading `detail`, R-15 warnings render unchanged, R-16 four enum sites at 17, W-1 four mounts still pass mixed arrays — `qa-round-1-agent-{A,B}.md` + `code-walk-mobile.md`.
+- **Post-QA delta (orchestrator, copy-only):** validate advisory strings count-aware (`is/are`, `it/them`) + curly apostrophe; `test_trade_send_validate.py` 16/16 + full suite re-run above. Round 2 was an orchestrator gate re-run on this two-string delta, not a second two-agent round — disclosed.
+- **Declared re-spec:** `test_sleeper_write_route.py:288` fixture (PRD R-17) — the bogus `draft_picks: ["2027_1"]` body replaced by an owned pick inside `give_player_ids`, now asserting the adapter's request.
+- **Owed:** the operator's **7-step TestFlight checklist** (PRD §10 / both QA reports) on any build ≥ 1.16.12 after the Render deploy — TF-1/2/4/7 mandatory, **TF-3 conditional and the Q-037 proof** (give an acquired pick; "not run" is a legal logged outcome), TF-5/6 opportunistic. Log each outcome here.
+
 ## 2026-09-02b — D-174 below-market reason (PR #267) and D-175 sweetener band + best-effort (PR #268): shipped and flipped live
 
 Both off `main` @ `e16bb487`, full gates, waivers surfaced and accepted (no new analytics; no `check-*.js`; TestFlight replaced by server-side prod verification). Both QA'd adversarially by independent Opus reviewers; every code claim survived, all fixes were docs/tests.
@@ -3534,6 +3547,7 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-09-02 — feedback #413 Sleeper pick-send fix: built, dual-QA green, shipped 2026-09-02 (see the merged-tree entry above)](#2026-09-02--feedback-413-sleeper-pick-send-fix-built-dual-qa-green-shipped-2026-09-02-see-the-merged-tree-entry-above)
 - [2026-08-28d — IAP enablement code half (runbook 6–7): webhook delta + RevenueCat paywall — full gates, ALL DARK](#2026-08-28d--iap-enablement-code-half-runbook-67-webhook-delta--revenuecat-paywall--full-gates-all-dark)
 - [2026-08-28c — v1.16.9 (EAS build 135) BUILT + SUBMITTED to TestFlight; trade.shop_asset LIT in prod](#2026-08-28c--v1169-eas-build-135-built--submitted-to-testflight-tradeshop_asset-lit-in-prod)
 - [2026-08-28b — #402/#403 QA round 2: B-3, own-position chip ruling, P-1..P-4 — universal-rule fixes, gates green](#2026-08-28b--402403-qa-round-2-b-3-own-position-chip-ruling-p-1p-4--universal-rule-fixes-gates-green)

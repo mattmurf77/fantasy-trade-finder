@@ -81,6 +81,7 @@ A dynasty fantasy football trade-finding app. Users log in via their Sleeper use
 | Component | Path | Role |
 |---|---|---|
 | **Flask app + routes** | `backend/server.py` | All API endpoints, Sleeper integration, session management, in-memory ring-buffer debug logger (200 entries) |
+| **League-write adapters** | `backend/{sleeper_write,mfl_write,espn_write}.py` | Real trade proposals into the user's league. All three propose routes split pick assets out of the mixed give/receive arrays and encode/verify them server-side against their own ground truth (Sleeper: `draft_picks` grid + live `traded_picks`, 2026-09-02 D-176); an unresolvable pick refuses the whole send. |
 | **Database** | `backend/database.py` + `trade_finder.db` (SQLite) | SQLAlchemy Core table defs. Schema in [`../docs/data-dictionary.md`](../docs/data-dictionary.md) |
 | **Ranking engine** | `backend/ranking_service.py` | Elo with 2-player (pairwise) and 3-player (full-rank) interactions; 3-player decomposes to 3 pairwise updates for 2.6× info per interaction |
 | **Trade generation** | `backend/trade_service.py` | Mutual-gain trade discovery; team-outlook modifiers; positional preference scoring; package diminishing-returns |

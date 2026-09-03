@@ -24,6 +24,7 @@ from backend.sleeper_write import (
     SleeperAuthError,
     SleeperWriteError,
     build_propose_trade_body,
+    encode_draft_pick,
 )
 
 
@@ -156,6 +157,30 @@ def test_picks_encoded_and_validated():
             give_player_ids=[], receive_player_ids=["2"],
             draft_picks=["not,a,valid,pick"],
         ))
+
+
+def test_encode_draft_pick_shape():
+    """T-1 (#413) — "orig,season,round,from,to": orig is the ORIGINAL owner
+    (field 1), from is the roster giving the pick up, to the roster receiving
+    it; string inputs are int-coerced; output satisfies _is_valid_pick_str."""
+    assert encode_draft_pick(7, 2027, 1, 3, 5) == "7,2027,1,3,5"
+    assert sw._is_valid_pick_str(encode_draft_pick(7, 2027, 1, 3, 5))
+    assert encode_draft_pick("7", "2027", "1", "3", "5") == "7,2027,1,3,5"
+    with pytest.raises(ValueError):
+        encode_draft_pick("slot_a", 2027, 1, 3, 5)
+
+
+def test_pick_only_trade_builds_body():
+    """T-2 (#413) — a pick-for-nothing / pick-for-pick trade with empty player
+    arrays is legal: the empty-trade guard counts draft_picks."""
+    body = build_propose_trade_body(ProposeTradeRequest(
+        league_id="999", my_roster_id=1, their_roster_id=2,
+        give_player_ids=[], receive_player_ids=[],
+        draft_picks=["1,2027,2,1,2"],
+    ))
+    assert body["variables"]["k_adds"] == []
+    assert body["variables"]["k_drops"] == []
+    assert '["1,2027,2,1,2"]' in body["query"]
 
 
 # ---------------------------------------------------------------------------

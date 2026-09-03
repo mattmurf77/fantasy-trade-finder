@@ -8,6 +8,20 @@
 
 ---
 
+## 2026-09-03 — #413 Sleeper pick-send SHIPPED (D-176, v1.16.15); the parallel #414 build was superseded by D-175 and NOT shipped
+
+**Where:** `ship/2026-09-02-fb413` cut from `main` @ `c7e75666`, merged with `feat/fb413-sleeper-send-draft-picks` @ `d49611be` (clean), version 1.16.15 — see the PR/merge sha in CHANGELOG once landed. The session branch `claude/weekly-feedback-review-5943dd` (worktree `unruffled-meitner-3596cb`) and `feat/fb414-lopsided-one-for-one` @ `8c165533` are the unshipped parallel #414 build — ledger + delete both after this lands (`docs/recovery/2026-09-02-fb413-build-qa-sweep.md` carries the rest).
+
+**Why #414 was dropped at the door:** main moved 9 commits during the run; the other session read the same prod card (`model_arm current`, gap 1,396 packaged) and shipped D-175 — `sweetener_gap_frac` as a relative BAND (`max(threshold, frac×max)`) plus `sweetener_best_effort`, with the threshold row lowered to 750 live, measured on the harness corpus. This session's build used the SAME knob name with the OPPOSITE semantics (`min(threshold, frac×max)`, a tightening) and a two-tier accept — a textual conflict in five engine files and a product conflict on the live knob. Main's version is live and corpus-measured; ours is history. Comparison in the 2026-09-03 session summary and `docs/feedback/items/414-lopsided-one-for-one/status.md`.
+
+**Owed:**
+1. **Render deploy of #413** fixes every fielded build (1.16.12–1.16.14) at once — verify a pick-bearing send no longer 502s; then the **EAS build** for the alert copy (`eas build --platform ios --profile production --auto-submit`; verify the submission by STATUS).
+2. **Operator TestFlight checklist, 7 steps** (`docs/feedback/items/413-sleeper-send-draft-picks/prd.md` §10) — **TF-3 (give an ACQUIRED pick) closes Q-037**; "not run" is a legal logged outcome. Log in TEST_LEDGER.
+3. Feedback DB: #413 and #414 → `fixed` (done at merge if the push succeeded; else `python3 .claude/skills/feedback/scripts/fetch_feedback.py set <id> fixed`).
+4. **G-8 follow-up** (NEXT): add `avoid_ok` to `_gap_extra_ok` on v3/v2 in `close_value_gap`'s callers — main's D-175 pass can still hand back an avoided-position equalizer (flag `trade.avoid_positions` is dark, so no user impact today); the test design is in the superseded folder's `test_gap_sweetener_frac.py` (`test_v3_gap_pass_never_uses_an_avoided_position_as_equalizer`).
+
+**Blocking:** nothing. **Rollback:** #413 = code revert (no flag).
+
 ## 2026-09-02b — D-174 (reason line, 0.15) and D-175 (sweetener band + best-effort, 750/0.12/1) LIVE; Q-035/Q-036 closed
 
 **Where:** `main` @ `f9add99c`. Both knobs live via admin PUT. Nothing in flight on the engine. Three engine-affecting knob changes this week (D-172 Tue, D-174/D-175 Wed) — the 09-01 → 09-07 bake-off window is censored (D-099); do not read it.

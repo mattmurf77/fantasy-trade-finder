@@ -11,6 +11,24 @@
 
 ---
 
+## 2026-09-03 — Weekly feedback run SHIPPED: #413 Sleeper pick-send fix (D-176, v1.16.15); #415/#416 verify-closed; a parallel #414 build superseded by D-175
+Operator ask (2026-09-02): "all my open feedback from this week". **#415/#416 → `fixed`** (already
+shipped by D-170 at 21:29Z and D-171/v1.16.14 on 08-31; a minute-level timeline showed #415 filed
+63 min before D-170 landed and #416 after it). **#413 ([D-176](DECISIONS.md))** — Send in Sleeper had
+NO pick handling: picks went to Sleeper as player ids (502) and the validator flagged every pick as a
+moved player. Server now splits the mixed arrays, resolves existence on the platform `draft_picks`
+grid + holder on live `traded_picks`, encodes `orig,season,round,from,to` itself, and refuses the
+whole send (422 `sleeper_pick_unmapped` / `sleeper_pick_not_owned`, both with `detail == message`
+so fielded builds read the reason); validate gains `asset_unmapped` / `pick_moved`; mobile adds
+count-aware alerts. Field 1 on an acquired pick is [Q-037](OPEN_QUESTIONS.md) (TestFlight step 3).
+Dual-QA PASS, +20 tests, 40+ sabotage cycles. **#414:** this session built a *tightening* frac knob
+(`min(1539, 0.10×max)`, two-tier accept, sibling rule, +29 tests, dual-QA green) on a base cut
+before the OTHER session shipped [D-175](DECISIONS.md) (`max(threshold, frac×max)` band +
+`sweetener_best_effort`, corpus-measured, live at 750/0.12/1) for the same report — main's answer
+stands; the parallel build is **not shipped**, kept as history in
+`docs/feedback/items/414-lopsided-one-for-one/`. Its one finding main still lacks — the gap pass's
+receive-side equalizer never re-checks #360 avoid on v3/v2 (G-8) — is a NEXT follow-up. Lessons ×14
+in the skill. Evidence: TEST_LEDGER 2026-09-02/-03.
 ## 2026-09-02b — D-174 `reason_below_market_frac` (live 0.15) and D-175 sweetener relative band + best-effort (live 750 / 0.12 / 1)
 
 Two backend-only knob-gated engine changes, both deployed byte-identical and flipped live via the admin API the same day; no client change, no EAS build. **D-174** (PR [#267](https://github.com/mattmurf77/fantasy-trade-finder/pull/267) → `808ff8c4`): a card whose give-side headliner sits ≥ 15% below consensus on the user's shrunk board now carries *"You rank {name} below the market — that gap is what this trade cashes in."* in `reasons` (already rendered by mobile and web under `trade_math.human_explanations`). Closes #350 / [Q-035] as a presentation fix — the model was right. 4542 / 1 vs 4519 / 1 clean main; wire golden byte-identical; 5 QA sabotages red→green. **D-175** (PR [#268](https://github.com/mattmurf77/fantasy-trade-finder/pull/268) → `f9add99c`): `close_value_gap`'s trigger is `max(threshold, 0.12 × max side)` and its closer is best-effort (partial closes stamped `gap_sweetener.partial`), with the flat threshold lowered 1539 → 750 in the load-bearing PUT order best-effort → frac → threshold. Closes #414 / [Q-036] (the card was read from prod: main engine, 19% gap, below the flat floor — no arm bypass). 4541 / 1 vs 4519 / 1; goldens byte-identical at defaults; 6 builder + 5 QA sabotages; on the real #414 card the partial close moves the bar from "≈ Late 1st" to "≈ Early 2nd". Both Wednesday flips censor the bake-off window (D-099) — accepted. Same PR carries [Q-036]'s closure.

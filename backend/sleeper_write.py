@@ -20,7 +20,10 @@ Captured facts (runbook §C1–C3):
         v_adds[i]  = roster_id that RECEIVES  k_adds[i]
         v_drops[i] = roster_id that GIVES UP  k_drops[i]
     league_id + draft_picks are inlined into the query string; adds/drops ride
-    as variables.
+    as variables. draft_picks elements are produced server-side by
+    `server._sleeper_encode_ftf_picks` via `encode_draft_pick`; field 1 =
+    original-owner roster id (captured, unconfirmed on a multi-owner pick —
+    Q-037).
   - ⚠️ FAAB (`waiver_budget`) is UNRESOLVED — treat it as unimplemented, not
     merely untested. The [{sender,receiver,amount}] shape below is an
     INFERENCE: the 2026-07-02 capture only ever showed `waiver_budget: []`, so
@@ -227,13 +230,28 @@ class ProposeTradeRequest:
     their_roster_id: int       # the counterparty's roster
     give_player_ids: list      # players I send    (my_roster  -> their_roster)
     receive_player_ids: list   # players I receive (their_roster -> my_roster)
-    draft_picks: list | None = None      # pre-encoded "orig,season,round,from,to" strings
+    draft_picks: list | None = None      # "orig,season,round,from,to" strings, server-encoded by encode_draft_pick — never client-supplied
     waiver_budget: list | None = None    # [{sender, receiver, amount}]
 
 
 def _is_valid_pick_str(p) -> bool:
     parts = str(p).split(",")
     return len(parts) == 5 and all(x.strip().lstrip("-").isdigit() for x in parts)
+
+
+def encode_draft_pick(orig_roster_id: int, season: int, round_: int,
+                      from_roster_id: int, to_roster_id: int) -> str:
+    """One Sleeper `draft_picks` element: "<orig>,<season>,<round>,<from>,<to>".
+
+    Captured shape (runbook §C2, 2026-07-02): fields 2-5 and both live examples
+    ("11,2026,1,1,2", "1,2027,4,2,1") are OBSERVED. Field 1 is captured as the
+    ORIGINAL-owner roster id but has not been confirmed on a pick that has
+    changed hands (living-memory Q-037) — if Sleeper wanted the current holder
+    there, only acquired picks would fail, visibly (GraphQL error → 502).
+    `from` is the roster giving the pick up, `to` the roster receiving it.
+    Output always satisfies _is_valid_pick_str.
+    """
+    return f"{int(orig_roster_id)},{int(season)},{int(round_)},{int(from_roster_id)},{int(to_roster_id)}"
 
 
 _GRAPHQL_NAME_RE = re.compile(r"^[_A-Za-z][_0-9A-Za-z]*$")

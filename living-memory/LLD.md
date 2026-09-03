@@ -41,6 +41,7 @@
 - [The opponent sweep is complete; a generation budget is never a deck cap (2026-08-22, D-154, `trade.full_sweep`)](#the-opponent-sweep-is-complete-a-generation-budget-is-never-a-deck-cap-2026-08-22-d-154-tradefull_sweep)
 - [Tiers-save route contract shrank: `demoted_pids` is an ignored legacy key (2026-08-24, D-160)](#tiers-save-route-contract-shrank-demoted_pids-is-an-ignored-legacy-key-2026-08-24-d-160)
 - [Provider identity is reconciled server-side; presentation is server config (2026-08-28, ADR-016)](#provider-identity-is-reconciled-server-side-presentation-is-server-config-2026-08-28-adr-016)
+- [Pick assets ride the mixed arrays on every propose route; the server splits and encodes (2026-09-02, D-176)](#pick-assets-ride-the-mixed-arrays-on-every-propose-route-the-server-splits-and-encodes-2026-09-02-d-172)
 
 ---
 
@@ -725,3 +726,20 @@ dark — all `monetize.*` flags false, no route wears `@_require_pro`.
   else* — a dark paywall must not ship SKUs or prices.
 - **Session auth is checked before the flag gate.** A dark route must never be an open
   one; `test_paywall_config.py` pins both orders.
+
+## Pick assets ride the mixed arrays on every propose route; the server splits and encodes (2026-09-02, D-176)
+
+- `POST /api/trades/propose` (Sleeper), `/propose-mfl` and `/propose-espn` all receive picks INSIDE
+  `give_player_ids` / `receive_player_ids` — owned `{league}_{season}_{round}_{orig}` or generic
+  `generic_pick_{round}_{tier}` — exactly as the deck, Matches, Awaiting and calculator mounts send
+  them. No route accepts a client-encoded pick string (Sleeper's `draft_picks` body key now 400s
+  when non-empty).
+- Each route splits with `_is_ftf_pick_asset` and resolves picks against its OWN ground truth:
+  Sleeper = the platform `draft_picks` grid (existence, literal `source=PICK_SOURCE_PLATFORM`) +
+  live `traded_picks` (holder; from/to = giver/receiver rosters); MFL = the stored snapshot;
+  ESPN = hard block. Any unresolvable pick refuses the WHOLE send (422 with `picks[]`), never a
+  silent drop; the validate routes mirror the misses as blocking advisories (`asset_unmapped`,
+  `pick_moved`) and count roster limits over players only.
+- Every new `load_draft_picks` caller must be sanctioned by name in
+  `test_pick_assignment.py::_SANCTIONED_SOURCE_CALLERS` (ADR-010 AST guard) — bare-default calls
+  are forbidden.
