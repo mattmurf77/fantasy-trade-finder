@@ -98,7 +98,7 @@ empty) — nothing there.
 | D-e | **No feature flag.** The change lives inside `trade.send_in_sleeper`; a pick-free send is byte-identical; both new responses are refusals on a path that today ends in a 502. Rollback is a code revert of an additive contract — the D-063 precedent (*"rollback is a code revert on an additive contract, operator-accepted"*, `living-memory/DECISIONS.md:675-676`). | *A `trade.sleeper_pick_send` flag* — would add a second way to keep pick sends broken, gating a fix rather than a behavior. Stated in scope §2, not waived. |
 | D-f | **`traded_picks` fetch failure degrades, it does not block.** `_fetch_sleeper_traded_picks` returns `[]` on error (`:13906-13908`), indistinguishable from "nothing traded"; holder falls back to the original roster. Outcomes are bounded (LLD §6.9): an acquired pick → 422 `not_owned` (safe refusal); one's own original pick already traded away → encoded with `from = me` → Sleeper rejects → 502 (today's behavior). **Never a silently wrong send.** | *A strict variant returning `None` + 502 on flake* — a second failure path for a transient the route already tolerates on the rosters fetch. Accepted residual, recorded. |
 
-The `DECISIONS.md` entry is **D-172** (next id; `D-171` at `living-memory/DECISIONS.md` is the
+The `DECISIONS.md` entry is **D-176** (next id; `D-171` at `living-memory/DECISIONS.md` is the
 current max, verified 2026-09-02) — text in PRD §12.
 
 ---
@@ -125,6 +125,6 @@ transaction shape corroborates `roster_id (original)` / `previous_owner_id` / `o
 (`server.py:13900`). If field 1 is instead the current holder, a never-traded pick (orig == from)
 still works and only acquired picks fail — visibly, as 502 `sleeper_write_failed` with `detail`.
 The operator may hold no acquired pick in any league, so the device proof is **conditional**:
-"not run — Q-035 stays open" is a legal, logged outcome (PRD §10). There is no dry run (no Sleeper sandbox; `FTF_TEST_MODE` fail-closes the route at `:16167-16171`),
-so the proof is TestFlight step 3 (PRD §10). Logged as **Q-035** in `OPEN_QUESTIONS.md` the way
+"not run — Q-037 stays open" is a legal, logged outcome (PRD §10). There is no dry run (no Sleeper sandbox; `FTF_TEST_MODE` fail-closes the route at `:16167-16171`),
+so the proof is TestFlight step 3 (PRD §10). Logged as **Q-037** in `OPEN_QUESTIONS.md` the way
 Q-016 records `waiver_budget`.

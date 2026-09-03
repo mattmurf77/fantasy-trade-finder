@@ -441,7 +441,7 @@ The mobile Trade Calculator's server side ([docs/plans/manual-trade-calculator-p
 | 422 | `sleeper_pick_not_owned` | **#413.** ≥1 pick's current holder (live `traded_picks`, default original roster) is not the side offering it. Same `picks[]` / `message` / `detail` shape. Nothing sent. |
 | 400 | `bad_request` / `roster_not_found` / `opponent_roster_not_found` | Malformed body / caller or counterparty not in that league. Since #413 `bad_request` also covers a non-empty `draft_picks` body key (carries `message` + `detail`) — pick ids belong in the mixed arrays |
 
-**Scope:** players + draft picks (encoded server-side, #413); FAAB remains unimplemented (Q-016). Field 1 of the pick string (original-owner roster id) is captured, not yet confirmed on a pick that changed hands — Q-035.
+**Scope:** players + draft picks (encoded server-side, #413); FAAB remains unimplemented (Q-016). Field 1 of the pick string (original-owner roster id) is captured, not yet confirmed on a pick that changed hands — Q-037.
 
 ## Send in MFL (flagged)
 

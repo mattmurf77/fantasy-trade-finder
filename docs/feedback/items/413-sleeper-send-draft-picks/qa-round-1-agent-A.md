@@ -6,7 +6,7 @@ The code under test does what the PRD says it does. Every requirement R-1…R-17
 mechanically proven green here or code-walked below; R-18 is orchestrator-owned (N/A). Every
 PRD-named sabotage I could apply went RED on the named test, with one honest exception (T-8a's
 `if False:` is not a behavior change — see Sabotage table). The one **major** finding is not a
-code defect: the living-memory docs scope §4 marks "updated — required" (D-172, Q-035, the
+code defect: the living-memory docs scope §4 marks "updated — required" (D-176, Q-037, the
 `LLD.md` H2, the `HLD.md` line) are absent from the group tip `8e4e1648`. If those are the
 orchestrator's ship-time writes, gate 3 is met at ship; if not, it is unmet at this tip.
 
@@ -87,7 +87,7 @@ Two run notes, recorded because they affect what the numbers mean:
 | R-15 warnings render with zero client change | PASS | code-walk below; `confirmSend` unchanged in the diff |
 | R-16 enum 15 → 17 at four sites | PASS | `analytics_taxonomy.py:1057`, `SendInSleeperButton.tsx:253`, addendum `:72`, `cross-client-invariants.md:827` all say 17; `git grep "15 values\|15-value"` over those paths → 0 hits; route emits exactly 14 distinct server codes (grep of `"error": "…"` in `server.py:16156-16340`) |
 | R-17 `:288` false-confidence fixture fixed | PASS | T-3 now sends the pick in `give_player_ids` and asserts the adapter request |
-| R-18 Q-035 logged | **N/A** (orchestrator) | not in the tree — `OPEN_QUESTIONS.md` max is Q-034 (see F-1) |
+| R-18 Q-037 logged | **N/A** (orchestrator) | not in the tree — `OPEN_QUESTIONS.md` max is Q-034 (see F-1) |
 | §6 contract consistency | PASS | see "Contract consistency" below |
 
 ## Sabotage table (PRD-named + my own)
@@ -247,7 +247,7 @@ carries `kind`). Emitter untouched.
 - **`docs/api-reference.md`:** propose row (`:405`) describes mixed arrays, the two ground
   truths, the whole-send refusal and the `draft_picks` 400; error table gains the two 422 rows
   (`:419-420`) and the 400 row gains the `draft_picks` reason (`:421`); the "v1 scope" line is
-  replaced (`:423`, cites Q-016/Q-035). No `draft_picks?` remnant (`grep "draft_picks?"` → 0).
+  replaced (`:423`, cites Q-016/Q-037). No `draft_picks?` remnant (`grep "draft_picks?"` → 0).
 - **`docs/integrations/sleeper.md`:** op 6 `traded_picks` consumers (`:43`), op 15 `propose_trade`
   (`:62`), §3.3 element shape + field-1 caveat (`:208-217`) — present.
 - **`docs/architecture.md`:** new `sleeper_write.py` row (`:154`), mermaid `SL → SRV` label
@@ -257,7 +257,7 @@ carries `kind`). Emitter untouched.
 
 ## Findings
 
-### F-1: Living-memory docs owed by scope §4 are not in the group tip — Severity **major** (orchestrator-scoped) — Repro: `grep -o "^## D-[0-9]*" living-memory/DECISIONS.md | tail -1` → `D-171`; `grep -o "Q-0[0-9]*" living-memory/OPEN_QUESTIONS.md | sort -u | tail -1` → `Q-034`; `git grep -n 413 -- living-memory/LLD.md living-memory/HLD.md` → 0 — Expected (scope §4 "updated — required": `DECISIONS.md` D-172 + index row; `OPEN_QUESTIONS.md` Q-035; `LLD.md` new H2 per LLD §10; `HLD.md` one line; PRD §11/§12) vs actual: none of the four is present at `8e4e1648`; the diff touches no file under `living-memory/`. `docs/api-reference.md:423` already cites Q-035 as if it existed — Evidence: `git diff --stat ad5adafa..8e4e1648` (20 files, none in `living-memory/`). If the orchestrator writes these at ship (CHANGELOG/TEST_LEDGER/NEXT are explicitly "at ship"; D-172/Q-035/LLD/HLD are not labeled so), gate 3 closes then; otherwise it is open. R-18 is N/A for me either way.
+### F-1: Living-memory docs owed by scope §4 are not in the group tip — Severity **major** (orchestrator-scoped) — Repro: `grep -o "^## D-[0-9]*" living-memory/DECISIONS.md | tail -1` → `D-171`; `grep -o "Q-0[0-9]*" living-memory/OPEN_QUESTIONS.md | sort -u | tail -1` → `Q-034`; `git grep -n 413 -- living-memory/LLD.md living-memory/HLD.md` → 0 — Expected (scope §4 "updated — required": `DECISIONS.md` D-176 + index row; `OPEN_QUESTIONS.md` Q-037; `LLD.md` new H2 per LLD §10; `HLD.md` one line; PRD §11/§12) vs actual: none of the four is present at `8e4e1648`; the diff touches no file under `living-memory/`. `docs/api-reference.md:423` already cites Q-037 as if it existed — Evidence: `git diff --stat ad5adafa..8e4e1648` (20 files, none in `living-memory/`). If the orchestrator writes these at ship (CHANGELOG/TEST_LEDGER/NEXT are explicitly "at ship"; D-176/Q-037/LLD/HLD are not labeled so), gate 3 closes then; otherwise it is open. R-18 is N/A for me either way.
 
 ### F-2: `encoded` give-then-receive order is unpinned — Severity **minor** (coverage) — Repro: sabotage O-4 (`return encoded[::-1], …`) → 44 passed — Expected (LLD §3.2 "`encoded` preserves give-then-receive order") vs actual: no test sends two encodable picks, so the claim has no mechanical guard — Evidence: sabotage table O-4. Sleeper's `draft_picks` list is very likely order-insensitive, so this is a documentation-vs-test gap, not a defect.
 
@@ -285,7 +285,7 @@ Conditional: TF-3. Opportunistic: TF-5, TF-6.
 |---|---|---|---|
 | **TF-1** (mandatory, Half A) | Trades deck (`TradesHome`) or Matches → Awaiting row | Open a card whose **give** side has one of **your own original** future picks (e.g. your 2027 2nd). Tap **Send in Sleeper**. | The plain **"Send this trade?"** confirm. **Not** "This trade will likely fail" / "…no longer on the expected roster". |
 | **TF-2** (mandatory, Half B, R-5 give) | same | Tap **Send**. Then open the Sleeper app → League → Trades. | "**Trade sent** — Check your Sleeper app for the pending offer." Sleeper's pending offer lists that exact pick (season + round, "via <your team>") on **your** side. Cancel it in Sleeper. |
-| **TF-3** (conditional, field-1 proof / Q-035) | Calculator (in-league) | **Only if** you hold a pick you **acquired from another team** in some league: build a trade giving that pick, Send. If you hold none anywhere, log **"not run — Q-035 stays open"**. | "Trade sent"; Sleeper shows the pick with the **original** team's name, moving from you to the partner. Cancel. **If it fails** with "Sleeper wouldn't accept the send" or "Couldn't send" plus a detail, **copy the detail text verbatim** into TEST_LEDGER — that falsifies Q-035 and the encoder's field 1 flips to the current holder (one argument in `encode_draft_pick`). |
+| **TF-3** (conditional, field-1 proof / Q-037) | Calculator (in-league) | **Only if** you hold a pick you **acquired from another team** in some league: build a trade giving that pick, Send. If you hold none anywhere, log **"not run — Q-037 stays open"**. | "Trade sent"; Sleeper shows the pick with the **original** team's name, moving from you to the partner. Cancel. **If it fails** with "Sleeper wouldn't accept the send" or "Couldn't send" plus a detail, **copy the detail text verbatim** into TEST_LEDGER — that falsifies Q-037 and the encoder's field 1 flips to the current holder (one argument in `encode_draft_pick`). |
 | **TF-4** (mandatory, R-5 receive) | Calculator (in-league) | Build a trade **receiving** one of the partner's **own original** picks (the picker offers their current grid picks). Send. | "Trade sent"; Sleeper shows the pick moving **from them to you**. Cancel. |
 | **TF-5** (opportunistic, R-7 / V-3) | Calculator (in-league) | **Only if** a partner's pick changed hands in Sleeper **after** the app last synced (a real pick trade between opening the app and this send). Build a trade with that pick on their side. Tap Send. | Pre-send alert titled **"This trade will likely fail"** with "• N pick(s) in this trade are no longer owned by the expected team (already traded) — Sleeper will reject the offer." Tap **Send anyway** → "**Couldn't send**": new build "1 draft pick in this trade has already changed hands, so nothing was sent. Rebuild the trade and try again."; fielded build "Some draft picks … have already changed hands …". **Nothing** appears in Sleeper. Proof of record otherwise: T-9 / V-3. |
 | **TF-6** (opportunistic, R-6 / V-2) | Trades deck | **Only if** a deck card on a Sleeper league shows a **generic rung** ("Early 1st", "Mid 2nd") — no producer was found, so this may never occur. Tap Send in Sleeper. | Pre-send alert "This trade will likely fail" with "• N draft pick(s) in this trade can't be sent to Sleeper (generic picks like “Early 1st” name no real pick) — the send will be blocked rather than dropping them." Send anyway → "**Couldn't send**": new build "1 draft pick in this trade couldn’t be matched to a pick in this Sleeper league, so nothing was sent. Generic picks like “Early 1st” can’t be sent — use a specific pick."; fielded build the "Some draft picks …" form. Nothing in Sleeper. Proof of record otherwise: T-7 / V-2. |

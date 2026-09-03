@@ -280,8 +280,8 @@
 | 410 | found-trade-decline-position | shipped | 2026-08-30 | **canonical** of the 2026-08-30b batch (#409–#412) — D-169 bare-✕ decline cell; PR #254, v1.16.13 build 142; 14-step TestFlight checklist owed |
 | 411 | player-name-truncation | shipped | 2026-08-30 | satellite — chip to meta line, name 13/18 (QA-B F-1 disclosure, checklist step 11b ruling) |
 | 412 | more-offers-placement | shipped | 2026-08-30 | satellite — More offers under the give Add |
-| 413 | sleeper-send-draft-picks | planned | 2026-09-02 | **canonical** of the 2026-09-02 weekly run — Send in Sleeper has no draft-pick split/encode; batch `plan.md` + `investigation.md` here |
-| 414 | lopsided-one-for-one | planned | 2026-09-02 | G-414 — lopsided 1-for-1 served (London for Lamb straight up); batch plan in `413-sleeper-send-draft-picks/` |
+| 413 | sleeper-send-draft-picks | shipped | 2026-09-02 | **canonical** of the 2026-09-02 weekly run — Send in Sleeper has no draft-pick split/encode; batch `plan.md` + `investigation.md` here |
+| 414 | lopsided-one-for-one | shipped | 2026-09-02 | shipped by the OTHER session as D-175 (`sweetener_gap_frac` band + `sweetener_best_effort`, PR #268, live 750/0.12/1); this folder's parallel D-173 build is superseded, kept as history; G-8 avoid follow-up in NEXT |
 | 415 | queue-loss-refusal-no-advance | shipped | 2026-09-02 | verify-closed — refusal half = D-170 (server, live 2026-08-31T21:29Z), advance half = D-171 v1.16.14 build 143; proof = finder-results-push scope §7 step 5 |
 | 416 | liked-card-stays-no-swipe | shipped | 2026-09-02 | verify-closed — D-171 v1.16.14 restores the classic swipe deck; proof = scope §7 steps 1/5/6 |
 | — | 2026-07-26-adjustments-breakdown | shipped | 2026-07-26 | n/a |

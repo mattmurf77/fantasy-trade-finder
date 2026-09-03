@@ -50,7 +50,7 @@ def encode_draft_pick(orig_roster_id: int, season: int, round_: int,
     Captured shape (runbook §C2, 2026-07-02): fields 2-5 and both live examples
     ("11,2026,1,1,2", "1,2027,4,2,1") are OBSERVED. Field 1 is captured as the
     ORIGINAL-owner roster id but has not been confirmed on a pick that has
-    changed hands (living-memory Q-035) — if Sleeper wanted the current holder
+    changed hands (living-memory Q-037) — if Sleeper wanted the current holder
     there, only acquired picks would fail, visibly (GraphQL error → 502).
     `from` is the roster giving the pick up, `to` the roster receiving it.
     Output always satisfies _is_valid_pick_str.
@@ -67,7 +67,7 @@ no-Flask/no-DB rule (`:33`).
 - Module header `:22` — after "league_id + draft_picks are inlined into the query string":
   add *"draft_picks elements are produced server-side by `server._sleeper_encode_ftf_picks`
   via `encode_draft_pick`; field 1 = original-owner roster id (captured, unconfirmed on a
-  multi-owner pick — Q-035)."*
+  multi-owner pick — Q-037)."*
 - `ProposeTradeRequest.draft_picks` comment `:230` — replace `pre-encoded` with
   *"server-encoded by encode_draft_pick — never client-supplied"*.
 

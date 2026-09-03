@@ -7,6 +7,7 @@
 ---
 
 ## Table of Contents
+- [2026-09-02 — Open Items (#413 Sleeper pick send)](#2026-09-02--open-items-413-sleeper-pick-send)
 - [2026-09-01 — Open Items (trade-suggestion quality, dual-agent review)](#2026-09-01--open-items-trade-suggestion-quality-dual-agent-review)
 - [2026-08-22 — Open Items (trade-model restrictiveness)](#2026-08-22--open-items-trade-model-restrictiveness)
 - [2026-08-22 — Open Items (#384 merged calculator)](#2026-08-22--open-items-384-merged-calculator)
@@ -26,6 +27,14 @@
 - [Conventions](#conventions)
 
 ---
+
+## 2026-09-02 — Open Items (#413 Sleeper pick send)
+
+### Q-037 — Is field 1 of Sleeper's `propose_trade(draft_picks:)` element the ORIGINAL-owner roster id on a pick that has changed hands?
+- **Why it matters:** [D-176](DECISIONS.md) encodes `"orig,season,round,from,to"` with field 1 = the grid row's `original_roster_id`. The 2026-07-02 capture (`docs/plans/sleeper-write-capture-runbook.md` §C2) observed fields 2–5 and two whole live strings, but both examples had `orig == from` (never-traded picks), so field 1 is captured, not confirmed. If Sleeper wants the current holder there, only ACQUIRED picks fail — visibly, as a GraphQL error → 502 `sleeper_write_failed` with `detail`; never-traded picks work either way.
+- **Action to unblock:** the operator runs TestFlight step 3 of `docs/feedback/items/413-sleeper-send-draft-picks/prd.md` §10 (give an acquired pick in a real league, cancel in Sleeper) and logs the outcome in TEST_LEDGER. Pass ⇒ close. Fail ⇒ `encode_draft_pick` field 1 flips to the current holder (one line) and the runbook is corrected.
+- **Workaround:** none needed — the failure mode is a visible refusal, not a wrong send.
+- **Owner:** operator · **Asked:** 2026-09-02
 
 ## 2026-09-01 — Open Items (trade-suggestion quality, dual-agent review)
 

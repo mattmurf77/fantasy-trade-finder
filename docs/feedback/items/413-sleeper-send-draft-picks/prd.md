@@ -24,7 +24,7 @@
 - [9. Code-walk proof targets](#9-code-walk-proof-targets)
 - [10. Operator TestFlight checklist](#10-operator-testflight-checklist)
 - [11. Docs owed](#11-docs-owed)
-- [12. The D-172 entry](#12-the-d-172-entry)
+- [12. The D-176 entry](#12-the-d-172-entry)
 
 ---
 
@@ -165,7 +165,7 @@ sends `"draft_picks": ["2027_1"]`, a string the adapter would reject; it passes 
 traded stubs, and assert the adapter request. → T-3 (this **is** the fixed test).
 
 **R-18 — The field-1 question is logged, not buried.** `living-memory/OPEN_QUESTIONS.md` gains
-**Q-035** (next id; `Q-034` is the current max): field 1 = original-owner roster id, captured on
+**Q-037** (next id; `Q-034` is the current max): field 1 = original-owner roster id, captured on
 two live examples, unconfirmed on a multi-owner pick; closed by TF-3's logged outcome.
 `sleeper_write.py:22` and `docs/integrations/sleeper.md` §3.3 carry the same caveat. → TF-3.
 
@@ -210,7 +210,7 @@ two live examples, unconfirmed on a multi-owner pick; closed by TF-3's logged ou
    analytics props, all seven pre-existing propose tests green unedited (after the `:288` fix).
    (T-10; the existing suite.)
 5. **Honest telemetry.** `pick_n` > 0 on a pick send; `give_n` excludes picks. (T-13.)
-6. **Field 1 proven or falsified on device.** TF-3 outcome logged in TEST_LEDGER; Q-035 closed
+6. **Field 1 proven or falsified on device.** TF-3 outcome logged in TEST_LEDGER; Q-037 closed
    or converted into the one-line encoder change.
 
 ---
@@ -370,7 +370,7 @@ the count-aware sentence ("1 draft pick …"). **Cancel every proposal in Sleepe
 each outcome in TEST_LEDGER.
 
 **Which steps are which:** TF-1, TF-2, TF-4, TF-7 are **mandatory**. TF-3 is **conditional** —
-run it if the operator holds an acquired pick in any league; otherwise log **"not run — Q-035
+run it if the operator holds an acquired pick in any league; otherwise log **"not run — Q-037
 stays open"** as the outcome (a legal result; the operator has sold more firsts than he has
 acquired, so the precondition may be false everywhere). TF-5 and TF-6 are **opportunistic** —
 they need a state the app does not let you build on demand (TF-5: the grid must be stale relative
@@ -385,7 +385,7 @@ situation arises; **the proof of record for those two refusals is T-9/V-3 and T-
 |---|---|---|---|
 | **TF-1** | Trades deck or Matches → Awaiting | Open a card whose **give** side contains one of **your own original** future picks (e.g. your 2027 2nd). Tap **Send in Sleeper**. | The plain **"Send this trade?"** confirm. **No** "This trade will likely fail" / "no longer on the expected roster" warning. (Half A.) |
 | **TF-2** | same | Tap Send. | **"Trade sent"**. In the Sleeper app, the pending offer lists that exact pick (season + round, "via <your team>") on your side. Cancel it in Sleeper. (Half B; R-5 give orientation.) |
-| **TF-3** *(conditional)* | Calculator | **Field-1 proof.** Only if you hold a pick you **acquired from another team** in some league: build a trade giving that pick. Send. If you hold none, **log "not run — Q-035 stays open"** and move on. | "Trade sent"; Sleeper shows the pick with the **original** team's name, moving from you to the partner. Cancel. **If it fails** with "Sleeper wouldn't accept the send" / "Couldn't send" plus a detail, **capture the detail text verbatim** — that is the Q-035 falsification and the encoder's field 1 flips to the current holder. |
+| **TF-3** *(conditional)* | Calculator | **Field-1 proof.** Only if you hold a pick you **acquired from another team** in some league: build a trade giving that pick. Send. If you hold none, **log "not run — Q-037 stays open"** and move on. | "Trade sent"; Sleeper shows the pick with the **original** team's name, moving from you to the partner. Cancel. **If it fails** with "Sleeper wouldn't accept the send" / "Couldn't send" plus a detail, **capture the detail text verbatim** — that is the Q-037 falsification and the encoder's field 1 flips to the current holder. |
 | **TF-4** | Calculator | Build a trade **receiving** one of the partner's own picks. Send. | "Trade sent"; Sleeper shows the pick moving from them to you. Cancel. (R-5 receive orientation.) |
 | **TF-5** *(opportunistic)* | Calculator | Only if a partner's pick has **changed hands in Sleeper since the app last synced** (you or a leaguemate traded it after opening the app): build a trade with that pick on their side. Tap Send. | Pre-send warning **"…no longer owned by the expected team (already traded) — Sleeper will reject the offer."** Tap **Send anyway** → **"Couldn't send"** with, on a fielded build, *"Some draft picks in this trade have already changed hands, so nothing was sent…"* and on the new build *"1 draft pick in this trade has already changed hands…"*. Nothing appears in Sleeper. Proof of record otherwise: T-9 / V-3. |
 | **TF-6** *(opportunistic)* | Trades deck | Only if a deck card shows a **generic rung** ("Early 1st", "Mid 2nd") on a Sleeper league: tap Send. | Pre-send warning **"…can't be sent to Sleeper (generic picks like “Early 1st” name no real pick)…"**. Send anyway → **"Couldn't send"** with *"Some draft picks in this trade couldn’t be matched to a pick in this Sleeper league… Generic picks like “Early 1st” can’t be sent — use a specific pick."* (fielded) / *"1 draft pick in this trade couldn’t be matched…"* (new build). Nothing in Sleeper. Proof of record otherwise: T-7 / V-2. |
@@ -398,18 +398,18 @@ situation arises; **the proof of record for those two refusals is T-9/V-3 and T-
 Row-by-row in [scope.md §4](scope.md#4-docs-scope-mandatory--hld--lld--api). Summary: `docs/api-reference.md:405-406,408-421`;
 `docs/integrations/sleeper.md:62,187-188,197-204`; `docs/cross-client-invariants.md:825` (enum
 listing); `docs/business/analytics/2026-08-11-p0-7-addendum.md:56-57,64-67`; `living-memory/LLD.md`
-(one H2, LLD §10); `living-memory/DECISIONS.md` (D-172, §12) + index row; `living-memory/OPEN_QUESTIONS.md`
-(Q-035); `mobile/src/components/CLAUDE.md:33`; `mobile/src/api/CLAUDE.md:32`; CHANGELOG /
+(one H2, LLD §10); `living-memory/DECISIONS.md` (D-176, §12) + index row; `living-memory/OPEN_QUESTIONS.md`
+(Q-037); `mobile/src/components/CLAUDE.md:33`; `mobile/src/api/CLAUDE.md:32`; CHANGELOG /
 TEST_LEDGER / NEXT at ship.
 
 ---
 
-## 12. The D-172 entry
+## 12. The D-176 entry
 
 Insert above D-171 in `living-memory/DECISIONS.md` and add the index row at the table under
 `:438`.
 
-> ## D-172 — Sleeper Pick Sends Are Encoded Server-Side From the Grid Plus Live `traded_picks`; the Client Never Encodes and Any Unresolvable Pick Refuses the Whole Send
+> ## D-176 — Sleeper Pick Sends Are Encoded Server-Side From the Grid Plus Live `traded_picks`; the Client Never Encodes and Any Unresolvable Pick Refuses the Whole Send
 >
 > **Date:** 2026-09-02 (#413) · **Scope:** [`docs/feedback/items/413-sleeper-send-draft-picks/scope.md`](../docs/feedback/items/413-sleeper-send-draft-picks/scope.md) · **Mirrors:** the MFL propose route's split-and-encode (`_mfl_encode_ftf_picks`) and the ESPN route's hard block.
 >
@@ -417,7 +417,7 @@ Insert above D-171 in `living-memory/DECISIONS.md` and add the index row at the 
 >
 > **Alternatives considered:** a new `give_pick_ids` key (fielded builds already send mixed arrays; must work on server deploy alone); client-side encoding (the client cannot see `traded_picks`, and a client-asserted `from` is the value the server exists to verify); grid `owner_user_id` as holder (stale between syncs, and a user id, not a roster id); MFL-style pass-through of pre-encoded strings (a second unverified entry point for a producer that does not exist); a strict `traded_picks` variant that 502s on flake (a second failure path for a transient the route already tolerates on rosters — accepted residual instead).
 >
-> **Consequences:** `sleeper_send_failed.error_code` is 17 values; `sleeper_send_succeeded.pick_n`/`give_n` become honest (dated in the addendum). Validate's Sleeper branch gains `asset_unmapped` / `pick_moved` and counts roster limits over players only. Field 1 of the pick string is captured-not-confirmed on a multi-owner pick — Q-035, closed by the TestFlight step-3 outcome.
+> **Consequences:** `sleeper_send_failed.error_code` is 17 values; `sleeper_send_succeeded.pick_n`/`give_n` become honest (dated in the addendum). Validate's Sleeper branch gains `asset_unmapped` / `pick_moved` and counts roster limits over players only. Field 1 of the pick string is captured-not-confirmed on a multi-owner pick — Q-037, closed by the TestFlight step-3 outcome.
 >
 > **Status:** Active.
 
@@ -428,7 +428,7 @@ Two independent QA agents (reports `qa-round-1-agent-A.md`, `qa-round-1-agent-B.
 
 | Finding (both agents) | Disposition |
 |---|---|
-| Living-memory docs (D-172, Q-035, LLD.md line, HLD.md line) absent at the tip | Orchestrator writes at ship (scope §4 "at ship" rows) — not a code defect |
+| Living-memory docs (D-176, Q-037, LLD.md line, HLD.md line) absent at the tip | Orchestrator writes at ship (scope §4 "at ship" rows) — not a code defect |
 | Validate advisory copy: n=1 "pick … are", "dropping them"; straight `can't` beside curly quotes | **Fixed on the group branch** after round 1 (server strings count-aware for the verb/pronoun, curly apostrophe); LLD §5 updated to match. Copy-only delta; V-1…V-6 re-run green |
 | `code-walk.md` vs delivered `code-walk-mobile.md`; PRD cited the calculator under `screens/` | PRD corrected (this commit) |
 | scope §3 said +18; actual +20 | scope corrected |

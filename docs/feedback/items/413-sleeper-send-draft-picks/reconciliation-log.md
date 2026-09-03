@@ -18,7 +18,7 @@
 | 8 | T-8 sabotage was a rewrite, not a slip | **incorporated** | PRD T-8: `if False:` / rosters-derived existence |
 | 9 | Int/str coercion rule scattered | **incorporated** | LLD §3.1 "Rule (binding)" paragraph |
 | 10 | Restore D-063 cite in D-e; spine cite = CHANGELOG 2026-08-29d, not D-152 | **incorporated** | HLD D-e (`DECISIONS.md:675-676`), HLD §6 (`CHANGELOG.md` § 2026-08-29d, PR #241) |
-| 11 | Ruling-1 paragraph (user-asserted rows) into PRD §4 + LLD §4.2 | **incorporated** | PRD §4 bullet + guardrail 8 pointer; LLD §4.2 binding bullet; PRD §12 D-172 sentence |
+| 11 | Ruling-1 paragraph (user-asserted rows) into PRD §4 + LLD §4.2 | **incorporated** | PRD §4 bullet + guardrail 8 pointer; LLD §4.2 binding bullet; PRD §12 D-176 sentence |
 | 12 | `detail` on the new 400 for symmetry | **incorporated** | LLD §4.1, §4.4, §9; PRD R-2 |
 | 13 | HLD §2 diagram sentence ("node covering an edge") | **incorporated** | HLD §2: label on the existing `SRV → SL` edge + new `DB → SRV` edge |
 | 14 | Recount the test delta | **incorporated** | PRD §7.5, scope §3/§5 — **+20** |
@@ -30,7 +30,7 @@ needs orchestrator arbitration.
 
 | Ruling | Decision | What changed |
 |---|---|---|
-| 1 — grid source | Platform-only; user-asserted rows 422 `unmapped` by design | PRD §4 bullet with the `database.py:10217-10221` / `server.py:14502-14545`, `:14591-14640`, `:10840`, `:11347` / `features.json:219` cites; LLD §4.2 bullet; D-172 text |
+| 1 — grid source | Platform-only; user-asserted rows 422 `unmapped` by design | PRD §4 bullet with the `database.py:10217-10221` / `server.py:14502-14545`, `:14591-14640`, `:10840`, `:11347` / `features.json:219` cites; LLD §4.2 bullet; D-176 text |
 | 2 — mobile copy | Rewrite count-aware, keep structure (title, no `goConnect`, no `detail`, no ids, chain position) | LLD §8.1 strings + comment; server `message`/`detail` use the "Some" form verbatim; PRD R-13 |
 | 3 — T-11 mock vs flag-driving | Mock; pair with T-3b | PRD §7.2 note after T-14 |
 | 4 — TestFlight honesty | With `detail`, all seven steps run on any fielded build; TF-5/6 opportunistic; TF-3 "not run" legal | PRD §1/§10, scope §3/§5 |

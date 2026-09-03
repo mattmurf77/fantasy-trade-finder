@@ -212,7 +212,7 @@ degrades ESPN/MFL cookie storage too, not just Sleeper.
   `from = my roster, to = theirs`; receive side flips them. Both live captures
   (`"11,2026,1,1,2"`, `"1,2027,4,2,1"`, runbook §C2) are original-owner picks,
   so field 1 is **captured, not confirmed, on a pick that has changed hands**
-  (living-memory Q-035; closed by the #413 TestFlight step 3). If Sleeper wants
+  (living-memory Q-037; closed by the #413 TestFlight step 3). If Sleeper wants
   the current holder there, only acquired picks fail — visibly, as a GraphQL
   error → 502 `sleeper_write_failed` with `detail`.
 - ⚠️ **`waiver_budget`'s element type is unresolved — FAAB is unimplemented,

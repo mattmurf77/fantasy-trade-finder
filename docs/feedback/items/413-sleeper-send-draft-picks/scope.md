@@ -85,7 +85,7 @@ invariants doc are updated per §4.
       the wire contract; the 422 reaches `sleeper_send_failed.error_code` through the existing
       `body?.error` read.
 - [x] **Manual TestFlight checklist:** PRD §10, **7 steps** — TF-1/2/4/7 mandatory, TF-3
-      conditional (legal outcome: "not run — Q-035 stays open"), TF-5/6 opportunistic (their proof
+      conditional (legal outcome: "not run — Q-037 stays open"), TF-5/6 opportunistic (their proof
       of record is T-9/V-3 and T-7/V-2; the states are not buildable on demand) — run by the
       operator on a real Sleeper league (every proposal cancelled in Sleeper afterwards). Runtime
       proof genuinely matters here for one reason that no test can substitute: **step 3 is the
@@ -94,7 +94,7 @@ invariants doc are updated per §4.
       a pick that has changed hands, and there is no Sleeper dry run (`FTF_TEST_MODE` fail-closes the
       route, `server.py:16167-16171`). Steps 1–2 close the two halves of the report; 4 checks the
       receive orientation; 5–6 the two refusals; 7 the byte-identical player-only path. Outcome of
-      step 3 closes **Q-035** either way (pass → close; fail → capture `detail`, flip field 1 to the
+      step 3 closes **Q-037** either way (pass → close; fail → capture `detail`, flip field 1 to the
       current holder — one argument in `encode_draft_pick`).
 - [ ] **WAIVED because:** nothing.
 - **`testID`s added/renamed: none.** The alerts are `Alert.alert`, not JSX. `mobile/scripts/testid-lint.sh`
@@ -110,25 +110,25 @@ invariants doc are updated per §4.
 | `living-memory/HLD.md` (architecture genuinely shifted) | **updated — one line** | The Sleeper write path gains the same pick step MFL/ESPN have (mirror of the `docs/architecture.md` row); no new module/client/flow. |
 | `docs/cross-client-invariants.md` (shared constants/enums/colors) | **updated — required** | § Client analytics event contract, beside the `surface` enum at `:825`: `sleeper_send_failed.error_code` is a closed 17-value enum — list all 17 (the 14 server codes of `/api/trades/propose` incl. the two new ones + `network` \| `timeout` \| `unknown`). Also the validate `code` vocabulary (`league_archived`, `player_moved`, `roster_limit`, `roster_not_found`, `asset_unmapped`, `pick_moved`) if not already pinned there. |
 | `docs/glossary.md` (new domain term) | **n/a** | No new term. "owned pick", "generic rung", "pick grid", "traded picks" are existing vocabulary. |
-| ADR or `DECISIONS.md` entry (non-obvious choice made) | **updated — required** | `living-memory/DECISIONS.md` gains **D-172** (verbatim in PRD §12; next id — `D-171` is the current max, verified 2026-09-02) + the matching row in the Decision index at `:438`. Records: server-owned encoding; two ground truths; whole-send refusal; `draft_picks` key rejected; no flag; the `traded_picks`-flake residual. No ADR — it is an instance of an established pattern, not a new architectural rule. |
+| ADR or `DECISIONS.md` entry (non-obvious choice made) | **updated — required** | `living-memory/DECISIONS.md` gains **D-176** (verbatim in PRD §12; next id — `D-171` is the current max, verified 2026-09-02) + the matching row in the Decision index at `:438`. Records: server-owned encoding; two ground truths; whole-send refusal; `draft_picks` key rejected; no flag; the `traded_picks`-flake residual. No ADR — it is an instance of an established pattern, not a new architectural rule. |
 
 **Additional doc rows this change owes, beyond the template's list:**
 
 | Doc | Updated? | Section / reason |
 |---|---|---|
-| `docs/integrations/sleeper.md` | **updated** | `:62` op 15 `propose_trade`: "now emits non-empty `draft_picks`, produced by `server._sleeper_encode_ftf_picks` → `sleeper_write.encode_draft_pick`". `:43`/`:187-188` `traded_picks`: gains two consumers (propose + validate, pick sends only). §3.3 `:197-204`: the element shape `"orig,season,round,from,to"` with the field-1 caveat (Q-035), from/to orientation per side. |
+| `docs/integrations/sleeper.md` | **updated** | `:62` op 15 `propose_trade`: "now emits non-empty `draft_picks`, produced by `server._sleeper_encode_ftf_picks` → `sleeper_write.encode_draft_pick`". `:43`/`:187-188` `traded_picks`: gains two consumers (propose + validate, pick sends only). §3.3 `:197-204`: the element shape `"orig,season,round,from,to"` with the field-1 caveat (Q-037), from/to orientation per side. |
 | `docs/business/analytics/2026-08-11-p0-7-addendum.md` | **updated** | `:64-67`: 14 server codes, 17 values, the two new spellings. New dated bullet under the `sleeper_send_succeeded` row `:57`: `pick_n`/`give_n` semantic correction as of the deploy date — rows before it counted picks as players and `pick_n` was structurally 0. |
 | `docs/config-reference.md` | **n/a** | No flag, env var, or `model_config` key. |
 | `docs/data-dictionary.md` | **n/a** | No schema change; `draft_picks` is read with its existing contract. |
-| `living-memory/OPEN_QUESTIONS.md` | **updated** | **Q-035** — field 1 of the Sleeper pick string on a previously-traded pick (Q-016 format: why it matters / action to unblock = TestFlight step 3 / workaround = none needed, failure is visible / owner = operator / asked 2026-09-02). |
-| `backend/sleeper_write.py` header `:22` + `:230` | **updated** | Server-side production of `draft_picks`; field-1 caveat pointing at Q-035. (Code comment, same commit — listed because the module header is the doc of record for the captured shape.) |
+| `living-memory/OPEN_QUESTIONS.md` | **updated** | **Q-037** — field 1 of the Sleeper pick string on a previously-traded pick (Q-016 format: why it matters / action to unblock = TestFlight step 3 / workaround = none needed, failure is visible / owner = operator / asked 2026-09-02). |
+| `backend/sleeper_write.py` header `:22` + `:230` | **updated** | Server-side production of `draft_picks`; field-1 caveat pointing at Q-037. (Code comment, same commit — listed because the module header is the doc of record for the captured shape.) |
 | `mobile/src/components/CLAUDE.md:33` | **updated** | `SendInSleeperButton` row: one clause — the two `sleeper_pick_*` refusal branches; pick ids ride the mixed arrays verbatim, the server encodes. |
 | `mobile/src/api/CLAUDE.md:32` | **updated** | `sendInSleeper.ts` row: one clause — propose arrays are mixed; validate's Sleeper codes now include `asset_unmapped` / `pick_moved`. |
 | `living-memory/CHANGELOG.md` | **updated at ship** | Dated H2 for the merge. |
 | `living-memory/TEST_LEDGER.md` | **updated at ship + after TestFlight** | Suite counts (+20), the 21 named sabotages proven RED, the structural checks 7–8, the code-walk, and the 7-step checklist with **step 3's outcome logged explicitly**. |
 | `living-memory/NEXT.md` | **updated at ship** | #413 closed; if TF-3 fails, a one-line follow-up (flip field 1) is queued. |
 | `docs/feedback/items/413-sleeper-send-draft-picks/status.md` | **updated at ship** | → shipped, with the sha and build. |
-| `docs/plans/sleeper-write-capture-runbook.md:159` | **n/a — deliberately not edited** | It is the capture record. Its "confirm on a multi-owner pick" sentence stays true until TF-3 is logged; the resolution is recorded in Q-035 and `integrations/sleeper.md`, not by rewriting history. |
+| `docs/plans/sleeper-write-capture-runbook.md:159` | **n/a — deliberately not edited** | It is the capture record. Its "confirm on a multi-owner pick" sentence stays true until TF-3 is logged; the resolution is recorded in Q-037 and `integrations/sleeper.md`, not by rewriting history. |
 
 ## 5. Ship gate declaration
 
