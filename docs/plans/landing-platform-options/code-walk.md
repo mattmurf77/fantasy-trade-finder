@@ -415,3 +415,37 @@ any other, so both `my_leagues` branches are reachable. The **real** app
 entry branch and once in `selectLeague` → `_platformRosterData`. Both are
 cheap reads of the same snapshot and caching it would add a staleness source,
 so it stands. Noted so it is not rediscovered as a bug.
+
+## 6. The 401 loop this change uncovered, and the guard (§V3.1)
+
+**Not caused by the reordering** — a latent defect in §V3 that the re-verification
+after the rebase happened to trip. Full write-up: [G-069](../../living-memory/GOTCHAS.md).
+
+`apiFetch` has a global 401 branch: on `{"error":"session_expired"}` it clears
+the token and recovers by calling `initSession(savedUser, savedLeague)`, or
+`boot()` with no saved league. Sound for a Sleeper user, whose recovery re-mints
+a session through `POST /api/session/init`. A **closed cycle** for an entry user,
+because §V3 routes `entry:` ids to `GET /api/{espn,mfl}/leagues`, which requires
+a session and cannot create one: read → 401 → recovery → read, with no counter
+and no backoff. Measured before the fix, from a planted dead token: an unbroken
+second of 401s in the server log. Entry sessions are unverified and therefore
+never server-persisted (D-164), so a dead one is the **normal** end of an entry
+session, not an edge case.
+
+Guard:
+
+- `_platformLeagues` is now a plain `fetch` with the token attached by hand, so
+  the global recovery cannot fire on it — the rule `_entryPost` already followed.
+- A 401 returns the `ENTRY_SESSION_LOST` sentinel, propagated by all five call
+  sites (`boot` switcher fill, `showLeagueScreen`, `selectLeague`,
+  `initSession` reload, `_ensureLeaguematePool`) and by `_platformRosterData`.
+- `_handleEntrySessionLost()` clears user + league + token and returns the
+  visitor to the landing to re-claim. Clearing the **user** is what makes it
+  terminate: `boot()` and `showLeagueScreen()` re-enter the entry path while a
+  user is saved. Re-claiming is cheap and lossless — `entry:` ids are
+  deterministic, so the same team recovers the same boards.
+
+| Check | Before | After |
+|---|---|---|
+| Dead entry token, reload | hundreds of `GET /api/espn/leagues` 401s per second, page never renders | **exactly 2** requests (the two parallel callers), then the landing with everything cleared and a toast |
+| Happy path unchanged | — | find-my-leagues → 2 leagues → 3 teams → claim → roster 8 → method screen → main app; leaguemate pool 16 across 2 owners; reload restores the session |

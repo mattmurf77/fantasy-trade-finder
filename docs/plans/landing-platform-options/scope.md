@@ -482,6 +482,21 @@ are now direction-free ("Paste your espn_s2 and SWID cookies to continue.",
   [`code-walk.md` §V3.1](code-walk.md).
 - [x] **Code-walk proof:** [`code-walk.md` §V3.1](code-walk.md).
 
+### Bug found by the re-verification (fixed here, not caused here)
+
+Re-running the E2E after rebasing onto D-178 exposed a **latent §V3 defect**:
+for an entry user whose session had died, `apiFetch`'s global
+`session_expired` recovery and the platform-snapshot read formed a closed
+cycle — hundreds of `GET /api/{espn,mfl}/leagues` 401s per second, forever.
+Entry sessions are unverified and never server-persisted (D-164), so a dead
+one is the normal end of an entry session, not an edge case. The read is now
+a plain `fetch` that bypasses the shared recovery, a 401 returns an
+`ENTRY_SESSION_LOST` sentinel propagated by all five call sites, and the user
+is returned to the landing to re-claim (deterministic ids, so no data is
+lost). Measured after: exactly 2 requests, then the landing. Recorded as
+[G-069](../../living-memory/GOTCHAS.md) with the general rule; details in
+code-walk §V3.1.6.
+
 ## Docs scope (v3.1)
 
 | Doc | Updated? | Section / reason n/a |

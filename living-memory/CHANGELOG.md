@@ -22,10 +22,16 @@ v2.1 `my_leagues` action) → "or enter a league ID" → the id row. The web's s
 ESPN password is ever asked for. `espn.league_picker` now picks the LAYOUT too — off, the promise is
 withdrawn and V3's id-first order returns, one set of inputs serving both. Testing also caught four
 error strings whose "above"/"below" pointed the wrong way (both error lines render after both
-blocks); one was wrong in V3 already, inherited from mobile. Now direction-free. Web gate 175/175,
-entry-route suite 25/25, browser E2E both flag states + the live-ESPN 403 force-open
+blocks); one was wrong in V3 already, inherited from mobile. Now direction-free.
+**Also fixes a latent V3 defect the re-verification exposed ([G-069](GOTCHAS.md)):** for an entry
+user whose session had died, `apiFetch`'s global `session_expired` recovery and the platform-snapshot
+read formed a closed cycle — **hundreds of `/api/{espn,mfl}/leagues` 401s per second, forever**
+(entry sessions are unverified, so never server-persisted, and a dead one is the NORMAL end of one).
+The read now bypasses `apiFetch`, a 401 returns a sentinel all five call sites propagate, and the
+user is returned to the landing to re-claim (deterministic ids, nothing lost). After: exactly 2
+requests. Web gate 175/175, entry-route suite 25/25, browser E2E both flag states + the live-ESPN
+403 force-open + the dead-token repro
 ([code-walk §V3.1](../docs/plans/landing-platform-options/code-walk.md)).
-## 2026-09-03c — API audit (D-178): session init 26 → 7 Sleeper calls, trade job 17 → 4 reads, cron sweeps scoped, web/mobile re-fetches removed (PR pending)
 ## 2026-09-03c — API audit SHIPPED (D-178): PR #273 squash → `main` @ `c2775fe0`, Render live 16:33 UTC — session init 26 → 7 Sleeper calls, trade job 17 → 4 reads, cron sweeps scoped, web/mobile re-fetches removed
 
 Branch `claude/api-audit-redundancies-9a6075` → squash `c2775fe0`. **Note:** the squash commit title says D-177; the correct id is **D-178** — PR #272 claimed D-177 for the web platform entry while this branch was open, and the ledger was renumbered in the merge. `DECISIONS.md` is authoritative. Source: [`docs/reviews/2026-09-03-api-audit.md`](../docs/reviews/2026-09-03-api-audit.md) (four-layer audit + 195-route caller table). Operator chose findings 1, 2, 4, 5, 6, 7, 8, 9, 10; **3 held** (ping-then-init would stop the per-foreground league resync — see NEXT), **7 shipped as poll-pause** (real web push = schema + dependency, needs a scope block).

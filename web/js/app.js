@@ -235,6 +235,7 @@
           // backend's platform snapshot — Sleeper's list would 503 on the id.
           _platformLeagues(_entryPlatform(user))
             .then(leagues => {
+              if (leagues === ENTRY_SESSION_LOST) return;  // handled on the path that needs it
               if (leagues && leagues.length) {
                 _cachedLeagues = leagues;
                 renderLeagueSwitcher();
@@ -449,6 +450,7 @@
         // league → auto-select (mobile's single-league auto-skip).
         let leagues = null;
         try { leagues = await _platformLeagues(_entryPlatform(user)); } catch (_) { /* rendered below */ }
+        if (leagues === ENTRY_SESSION_LOST) { _handleEntrySessionLost(); return; }
         if (!leagues) {
           list.innerHTML = '<div class="league-empty">Couldn\'t load your leagues — try again shortly.</div>';
           return;
@@ -667,6 +669,7 @@
         // which would 404 on a non-Sleeper league id.
         showInitOverlay('Fetching rosters…');
         rosterData = await _platformRosterData(user, leagueId);
+        if (rosterData === ENTRY_SESSION_LOST) { _handleEntrySessionLost(); return; }
         if (!rosterData) {
           hideInitOverlay();
           showToast('Could not load your roster for this league');
@@ -828,6 +831,7 @@
         // the backend's imported snapshot is the roster source.
         setInitLabel('Fetching rosters…');
         rosterData = await _platformRosterData(user, league.league_id);
+        if (rosterData === ENTRY_SESSION_LOST) { _handleEntrySessionLost(); return false; }
         if (!rosterData) return false;
       }
       if (!rosterData) {
@@ -1163,12 +1167,59 @@
       return m ? m[1] : null;
     }
 
+    // An entry session that the server no longer knows. Distinct from a
+    // plain failure because the recovery is different: an entry user's
+    // session CANNOT be rebuilt from localStorage — /api/{espn,mfl}/leagues
+    // requires a session, and the only way to get one is to re-claim the
+    // team on the landing (deterministic `entry:` ids recover the same
+    // boards, D-164). Entry sessions are unverified, so they are never
+    // server-persisted and die on every restart/deploy — this is the normal
+    // end of one, not an edge case.
+    const ENTRY_SESSION_LOST = { entrySessionLost: true };
+
+    // Drop a dead entry session and hand the user back to the landing.
+    // Clears the saved USER too, which is what makes this terminate: boot()
+    // and showLeagueScreen() both re-enter the entry path while a user is
+    // saved, and re-claiming is required anyway (same team → same id → same
+    // boards). Idempotent — safe to call from every caller that sees the
+    // sentinel.
+    function _handleEntrySessionLost() {
+      try {
+        localStorage.removeItem(LS_TOKEN);
+        localStorage.removeItem(LS_LEAGUE);
+        localStorage.removeItem(LS_USER);
+      } catch (_) { /* private mode — the reset below still applies */ }
+      sessionToken    = null;
+      currentLeagueId = null;
+      currentUserId   = null;
+      _myRoster       = [];
+      hideInitOverlay();
+      hideLeagueScreen();
+      const chip = document.getElementById('account-chip-container');
+      if (chip) chip.innerHTML = '';
+      showToast('Your session expired — claim your team again to pick up where you left off');
+      showAuthScreen();
+    }
+
     // GET /api/{platform}/leagues → the league-screen / switcher shape, plus
     // the members snapshot the session body is built from.
+    //
+    // Deliberately a PLAIN fetch, not apiFetch (same reason as _entryPost):
+    // apiFetch's session_expired branch "recovers" by calling initSession or
+    // boot(), and for an entry user both come straight back here — a session
+    // -required read with no way to mint a session — so the recursion never
+    // terminates. Before this guard a dead entry token produced HUNDREDS of
+    // 401s per second (reproduced 2026-09-03, code-walk §V3.1.6). Returning
+    // the sentinel lets each caller stop and route to a re-claim instead.
     async function _platformLeagues(platform) {
       if (platform !== 'espn' && platform !== 'mfl') return null;
-      const res = await apiFetch(`/api/${platform}/leagues`);
-      if (!res || !res.ok) return null;
+      let res;
+      try {
+        res = await fetch(`/api/${platform}/leagues`,
+          sessionToken ? { headers: { 'X-Session-Token': sessionToken } } : undefined);
+      } catch (_) { return null; }
+      if (res.status === 401) return ENTRY_SESSION_LOST;
+      if (!res.ok) return null;
       const body = await res.json().catch(() => null);
       if (!body || !Array.isArray(body.leagues)) return null;
       return body.leagues.map(lg => ({
@@ -1202,11 +1253,15 @@
           .filter(r => r.player_ids.length > 0),
       };
     }
+    // Returns the roster payload, null on a soft failure, or the
+    // ENTRY_SESSION_LOST sentinel, which callers must propagate rather than
+    // treat as "no roster" (see _handleEntrySessionLost).
     async function _platformRosterData(user, leagueId) {
       const platform = _entryPlatform(user);
       if (!platform) return null;
       try {
         const leagues = await _platformLeagues(platform);
+        if (leagues === ENTRY_SESSION_LOST) return ENTRY_SESSION_LOST;
         const target = (leagues || []).find(lg => lg.league_id === String(leagueId));
         return target ? buildPlatformRosterData(target.members, user.user_id) : null;
       } catch (_) { return null; }
@@ -3490,6 +3545,7 @@
             _platformLeagues(_entryPlatform(poolUser)),
             apiFetch(`/api/trade/values?scoring_format=${fmt}`),
           ]);
+          if (leagues === ENTRY_SESSION_LOST) { _handleEntrySessionLost(); return; }
           const target = (leagues || []).find(l => l.league_id === String(leagueId));
           if (!target) throw new Error('league not linked');
           rosters = target.members.map(m => ({ owner_id: m.user_id, roster_id: m.user_id, players: m.player_ids || [] }));

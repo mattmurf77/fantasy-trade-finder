@@ -12,6 +12,8 @@
 
 **Where:** branch `claude/espn-signin-primary` off `main` @ `a65bb771`, worktree `compassionate-jones-ea8a0e`. [D-178](DECISIONS.md); [scope §V3.1](../docs/plans/landing-platform-options/scope.md) + code-walk §V3.1.
 
+**Carries a production-relevant bug fix beyond the ask:** re-verifying after the rebase exposed a latent V3 defect ([G-069](GOTCHAS.md)) — an entry user with a dead session put the page into an **unbounded 401 loop** (hundreds of `/api/{espn,mfl}/leagues` per second). Entry sessions are never server-persisted, so this would have hit real users after any Render restart. Guarded at all five call sites; verified down to 2 requests then a clean return to the landing.
+
 **What it is:** the operator flagged that the shipped V3 ESPN panel led with the league ID while mobile leads with sign-in. ESPN now reads: explainer → primary "Sign in to ESPN" → "we'll find your leagues, no league ID needed" → the `espn_s2`/`SWID` block it expands (with a "Find my leagues" primary) → "or enter a league ID" → the id row. The web's sign-in is the cookie paste because a browser cannot read espn.com's cookies and ESPN has no OAuth; no ESPN password is requested. `espn.league_picker` selects the layout, so flag-off restores V3's id-first order. Also fixed four error strings whose "above"/"below" pointed the wrong way (one predating this change).
 
 **Owed:**
@@ -20,7 +22,6 @@
 3. **Worktree:** `.claude/worktrees/compassionate-jones-ea8a0e` hosts this session and cannot remove itself — `git worktree remove` it from the main checkout.
 
 **Blocking:** nothing. **Rollback:** `espn.league_picker` false reverts the layout to V3's order without a deploy; or revert the squash.
-## 2026-09-03c — API audit fixes on PR #273 (D-178); finding 3 held, web push deferred
 ## 2026-09-03c — API audit fixes SHIPPED (D-178) and live on Render; backend prod count still owed
 
 **Where:** PR #273 squash-merged → `main` @ `c2775fe0`; Render deploy `dep-dacq1urbc2fs73cebekg` **live 2026-09-03 16:33 UTC**. CI ×4 green on the final head; pytest 4619/1 locally after merging main. Nothing in flight. The branch `claude/api-audit-redundancies-9a6075` still exists (not swept — see below); the two build-agent worktrees were already swept (`docs/recovery/2026-09-03-api-audit-agent-sweep.md`).
