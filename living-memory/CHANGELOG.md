@@ -11,6 +11,21 @@
 
 ---
 
+## 2026-09-03 — Web landing mirrors mobile platform entry: Sleeper · ESPN · MFL chips (D-177; PR #272 open, NOT merged)
+Operator ask: "update the landing page on web to mimic the mobile app with ESPN and MFL options."
+`web/index.html` gains SignInScreen's chip row (flag `landing.platform_options` + `espn.link` /
+`mfl.link`) and ESPN/MFL entry panels on the same sessionless `POST /api/entry/platform` (D-164):
+preview → claim (mint) → canonical `/api/{espn,mfl}/link` import; private ESPN = cookie paste
+(auto-opened on 403); "Find my leagues" / "Sign in with MFL" = the v2.1 actions. Entry users
+(`entry:` ids) read leagues/rosters from `GET /api/{espn,mfl}/leagues` in every path that used
+Sleeper proxies (league screen w/ single-league auto-skip, `selectLeague`, reload, switcher,
+leaguemate pool) via `buildPlatformRosterData`. Web now emits `signin_*` (method sleeper/espn/mfl).
+Drive-by: `selectLeague`'s undefined `userPlayerIds` toast (ReferenceError after every league pick)
+fixed. No route/schema/flag changes. Evidence: web gate 175/175, `test_entry_platform_route` +2 (25),
+browser E2E on the fixture-stubbed app for both platforms
+([code-walk §V3](../docs/plans/landing-platform-options/code-walk.md)). **Awaiting CI + operator
+merge** — PR [#272](https://github.com/mattmurf77/fantasy-trade-finder/pull/272); Render deploys the web half on merge, no EAS build needed.
+
 ## 2026-09-03 — Weekly feedback run SHIPPED: #413 Sleeper pick-send fix (D-176, v1.16.15); #415/#416 verify-closed; a parallel #414 build superseded by D-175
 Operator ask (2026-09-02): "all my open feedback from this week". **#415/#416 → `fixed`** (already
 shipped by D-170 at 21:29Z and D-171/v1.16.14 on 08-31; a minute-level timeline showed #415 filed

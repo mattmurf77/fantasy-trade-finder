@@ -11,6 +11,17 @@
 
 ---
 
+## 2026-09-03b — Web landing platform entry (PR #272): web gate 175/175, entry-route suite 25/25, browser E2E both platforms; sim gate skipped (D-056 posture)
+
+Branch `claude/landing-page-espn-mfl-a5a85a` @ `8473fab2` (off `main` @ `6ccd6698`), PR [#272](https://github.com/mattmurf77/fantasy-trade-finder/pull/272). Full gates ([scope §V3](../docs/plans/landing-platform-options/scope.md)), no waivers. `FTF_SKIP_SIM_GATE=1` on push — web-only change; the evidence below replaces the retired simulator.
+
+- **`python3 qa/web/check_web_structure.py`:** **175/175** (DS tokens / emoji / radius / fonts, SEO, A11Y, HYG) on the shipped `index.html` / `app.js` / `styles.css`.
+- **`pytest backend/tests/test_entry_platform_route.py`:** **25 passed** (23 + 2 new: `test_mfl_entry_leagues_snapshot_carries_the_claimed_franchise`, `test_espn_entry_leagues_snapshot_carries_the_claimed_team` — pin the `GET /api/{espn,mfl}/leagues` contract the web's `buildPlatformRosterData` reads). Full suite `pytest backend/tests`: **4587 passed / 1 skipped** in 6:33 (baseline 4585/1 from the #413 ship + the 2 new).
+- **`node --check web/js/app.js`:** clean.
+- **Browser E2E** (Claude Browser pane; real `backend.server.app` on `:5089` with only `es.fetch_league` / `es.get_crosswalk` / `mfl.resolve_host` / `mfl.fetch_league_bundle` / `server._shared_crosswalk` patched to the route tests' fixtures, scratch SQLite via `DATABASE_URL`): MFL `10005` → 3 franchises → claim "Clobberin Time 2" → `entry:mfl:10005.f0001` session, league auto-selected, `/api/session/init` OK, ranking-method screen → main app (8-player roster, account chip = franchise name); reload restores via `boot()` (`_myRoster` 8, `_cachedLeagues` 1); `_ensureLeaguematePool` → 16 players / 2 owners, never the user's own team. ESPN pasted `…leagueId=987654321` URL → 3 teams with owners → claim "Chalk Dusters" → `entry:espn:{A111…}` session, roster 8, method screen. Live server on `:5088`: MFL `99999` → "MFL has no league with that ID."; ESPN `1` → private-league copy + cookie section auto-opened. Console clean; `POST /api/events` 200 ×3. Full table: [code-walk §V3.7](../docs/plans/landing-platform-options/code-walk.md).
+- **Bug caught by the walk (fixed before commit):** the Sleeper wrapper had no `.hidden` rule, so the username row stayed visible under the ESPN/MFL panels — visible on the first screenshot.
+- **Owed:** CI on PR #272 (backend-tests · mobile-typecheck · maestro-testid-lint · web-structure); operator prod check per scope §V3 after merge.
+
 ## 2026-09-03 — #413 SHIPPED: PR #270 squash → `main` @ `5c83e8cd`, CI ×4 green, Render live, EAS build 144 / v1.16.15 submitted
 
 Ship branch `ship/2026-09-02-fb413` @ `c6c95e07` = `main` @ `c7e75666` + `feat/fb413-sleeper-send-draft-picks` @ `d49611be` (clean merge) + the write-back with renumbered ids + version bump. Tree byte-identical to the squash (`git diff origin/main ship/…` empty).
@@ -3558,6 +3569,7 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-09-03b — Web landing platform entry (PR #272): web gate 175/175, entry-route suite 25/25, browser E2E both platforms; sim gate skipped (D-056 posture)](#2026-09-03b--web-landing-platform-entry-pr-272-web-gate-175175-entry-route-suite-2525-browser-e2e-both-platforms-sim-gate-skipped-d-056-posture)
 - [2026-09-03 — #413 SHIPPED: PR #270 squash → `main` @ `5c83e8cd`, CI ×4 green, Render live, EAS build 144 / v1.16.15 submitted](#2026-09-03--413-shipped-pr-270-squash--main--5c83e8cd-ci-4-green-render-live-eas-build-144--v11615-submitted)
 - [2026-09-02 — feedback #413 Sleeper pick-send fix: built, dual-QA green, shipped 2026-09-02 (see the merged-tree entry above)](#2026-09-02--feedback-413-sleeper-pick-send-fix-built-dual-qa-green-shipped-2026-09-02-see-the-merged-tree-entry-above)
 - [2026-08-28d — IAP enablement code half (runbook 6–7): webhook delta + RevenueCat paywall — full gates, ALL DARK](#2026-08-28d--iap-enablement-code-half-runbook-67-webhook-delta--revenuecat-paywall--full-gates-all-dark)

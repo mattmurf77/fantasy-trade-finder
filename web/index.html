@@ -4,12 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Fleeced — Dynasty Trade Finder</title>
-  <meta name="description" content="Rank your dynasty players, compare boards with your leaguemates, and find trades where both sides come out ahead. Free, works with Sleeper.">
+  <meta name="description" content="Rank your dynasty players, compare boards with your leaguemates, and find trades where both sides come out ahead. Free. Works with Sleeper, ESPN, and MyFantasyLeague.">
   <link rel="canonical" href="https://fantasy-trade-finder.onrender.com/">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Fleeced: Dynasty Trade Finder">
   <meta property="og:title" content="Fleeced — Dynasty Trade Finder">
-  <meta property="og:description" content="Rank your dynasty players, compare boards with your leaguemates, and find trades where both sides come out ahead. Free, works with Sleeper.">
+  <meta property="og:description" content="Rank your dynasty players, compare boards with your leaguemates, and find trades where both sides come out ahead. Free. Works with Sleeper, ESPN, and MyFantasyLeague.">
   <meta property="og:url" content="https://fantasy-trade-finder.onrender.com/">
   <meta name="twitter:card" content="summary">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -70,8 +70,24 @@
           then finds trades where both sides come out ahead. No more "Hey! What do you want for X player?"
         </p>
 
-        <!-- Sleeper connect -->
+        <!-- Connect — platform chips + per-platform entry.
+             Landing platform options (flag landing.platform_options): the web
+             mirror of mobile SignInScreen's Sleeper · ESPN · MFL chip row and
+             the D-164 sessionless entry (docs/plans/landing-platform-options/
+             scope.md §V3). Sleeper (default) is the username door, untouched;
+             ESPN/MFL swap it for that platform's panel. The row stays hidden
+             until _applyPlatformOptionsFlag() confirms the flag AND ≥2 live
+             platforms — one chip is no choice. -->
         <div class="cb-connect-wrap" style="margin-top: 18px;">
+
+          <div class="cb-platform-row hidden" id="platform-row" role="group" aria-label="League platform">
+            <button type="button" class="cb-platform-chip on" id="platform-chip-sleeper" aria-pressed="true" onclick="selectEntryPlatform('sleeper')">Sleeper</button>
+            <button type="button" class="cb-platform-chip hidden" id="platform-chip-espn" aria-pressed="false" onclick="selectEntryPlatform('espn')">ESPN</button>
+            <button type="button" class="cb-platform-chip hidden" id="platform-chip-mfl" aria-pressed="false" onclick="selectEntryPlatform('mfl')">MFL</button>
+          </div>
+
+          <!-- Sleeper (default) — cb-entry-panel only for its .hidden rule -->
+          <div class="cb-entry-panel" id="entry-sleeper">
 
           <!-- Agent A7 · Smart-start CTA (flag: landing.smart_start_cta) -->
           <div class="smart-start hidden" id="smart-start-wrap">
@@ -116,6 +132,92 @@
             <button class="cb-go-btn" id="auth-btn" onclick="handleLogin()">Connect &#8594;</button>
           </div>
           <div class="auth-error" id="auth-error"></div>
+
+          </div>
+
+          <!-- ESPN entry panel (D-164 entry mode). No WebView on the web, so
+               private leagues use the cookie paste that is mobile's fallback;
+               "Find my leagues" runs the v2.1 my_leagues action off that pair. -->
+          <div class="cb-entry-panel hidden" id="entry-espn">
+            <p class="cb-entry-explainer">
+              ESPN dynasty leagues are supported. Enter your league ID and claim your team &mdash;
+              no extra account needed. Private league? Paste your ESPN cookies and we&#8217;ll
+              find your leagues.
+            </p>
+            <div class="cb-input-row">
+              <input
+                class="cb-input"
+                id="espn-league-input"
+                type="text"
+                inputmode="numeric"
+                enterkeyhint="go"
+                placeholder="ESPN league ID or league URL"
+                aria-label="ESPN league ID or league URL"
+                autocomplete="off"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
+              />
+              <button class="cb-go-btn" id="espn-go-btn" type="button" onclick="entryEspnPreview()">Continue &#8594;</button>
+            </div>
+            <button type="button" class="cb-entry-link" id="espn-cookies-toggle" onclick="toggleEspnCookies()">Private league? Paste your ESPN cookies</button>
+            <div class="cb-entry-cookies hidden" id="espn-cookies">
+              <p class="cb-entry-sub">
+                From a logged-in espn.com session: the <code>espn_s2</code> and <code>SWID</code> cookies.
+                Both are needed for a private league. We use them to read your league and never
+                see your password.
+              </p>
+              <input class="cb-input" id="espn-s2-input" type="text" placeholder="espn_s2" aria-label="espn_s2 cookie" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
+              <input class="cb-input" id="espn-swid-input" type="text" placeholder="SWID (with braces)" aria-label="SWID cookie" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
+              <button type="button" class="cb-entry-link hidden" id="espn-find-btn" onclick="entryEspnFindLeagues()">Find my leagues with these cookies &#8594;</button>
+            </div>
+            <div class="auth-error" id="espn-error"></div>
+            <div class="cb-entry-list hidden" id="espn-league-list"></div>
+          </div>
+
+          <!-- MFL entry panel (D-164 entry mode + v2.1 sign-in) -->
+          <div class="cb-entry-panel hidden" id="entry-mfl">
+            <p class="cb-entry-explainer">
+              MyFantasyLeague dynasty leagues are supported. Sign in with MFL and we&#8217;ll find
+              your leagues, or enter a league ID &mdash; no extra account needed.
+            </p>
+            <div class="cb-entry-signin hidden" id="mfl-signin">
+              <input class="cb-input" id="mfl-user-input" type="text" placeholder="MFL username" aria-label="MFL username" autocomplete="username" autocorrect="off" autocapitalize="off" spellcheck="false" />
+              <input class="cb-input" id="mfl-pass-input" type="password" placeholder="MFL password" aria-label="MFL password" autocomplete="current-password" />
+              <button class="cb-go-btn cb-go-btn-block" id="mfl-signin-btn" type="button" onclick="entryMflSignIn()">Sign in &amp; find my leagues &#8594;</button>
+              <p class="cb-entry-sub">Your password goes to MFL once, to list your leagues. It is never stored.</p>
+              <div class="cb-entry-or">or enter a league ID</div>
+            </div>
+            <div class="cb-input-row">
+              <input
+                class="cb-input"
+                id="mfl-league-input"
+                type="text"
+                enterkeyhint="go"
+                placeholder="MFL league ID or URL"
+                aria-label="MFL league ID or league URL"
+                autocomplete="off"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
+              />
+              <input class="cb-input cb-input-year" id="mfl-year-input" type="text" inputmode="numeric" value="2026" placeholder="2026" aria-label="Season year" autocomplete="off" />
+              <button class="cb-go-btn" id="mfl-go-btn" type="button" onclick="entryMflPreview()">Continue &#8594;</button>
+            </div>
+            <div class="auth-error" id="mfl-error"></div>
+            <div class="cb-entry-list hidden" id="mfl-league-list"></div>
+          </div>
+
+          <!-- Shared team-claim step (both platforms): the preview's teams;
+               picking one mints the session and runs the canonical import. -->
+          <div class="cb-entry-panel hidden" id="entry-teams">
+            <div class="cb-entry-teams-head">
+              <span class="cb-entry-teams-title" id="entry-teams-title">Which team is yours?</span>
+              <button type="button" class="cb-entry-link" onclick="entryBackToInput()">&#8592; Back</button>
+            </div>
+            <div class="cb-entry-list" id="entry-team-list"></div>
+            <div class="auth-error" id="entry-teams-error"></div>
+          </div>
 
           <!-- Agent A7 · Try-before-sync link (flag: landing.try_before_sync) -->
           <div class="try-demo-wrap hidden" id="try-demo-wrap">

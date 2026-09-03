@@ -27,6 +27,7 @@ Radius `--r-xs`, `label` type (11px Archivo 600 caps), 2px 6px padding. Construc
 | Component | Spec | Replaces |
 |---|---|---|
 | **PositionChip** | border+text in position color, e.g. `QB` | `.pos-badge` · `PositionChip` |
+| **PlatformChips** (landing platform options, flag `landing.platform_options`; D-164 / §V3 web mirror 2026-09-03) | Sleeper · ESPN · MFL entry chips on the sign-in landing: equal-width row, 36px min height, 1px `--line-strong` border, radius `--r-sm`, transparent fill, `body-sm` semibold chalk-dim label; selected = ice border + chalk text (ice = action, ADR-005); pressed/hover `--ink-3`. Row hidden unless the flag is on AND ≥2 platforms are live (`espn.link` / `mfl.link`). Selecting ESPN/MFL swaps the username form for that platform's entry panel: `body-sm` chalk-dim explainer → inputs → team-claim rows in the league-item construction (`--ink-2`, hairline, `--r-sm`, 44px, mono player count right) | `mobile/src/screens/SignInScreen.tsx` `platformChip` · web `.cb-platform-chip` / `.cb-entry-*` (`web/css/styles.css`) |
 | **TierBadge** | border+text in tier color, tier name label | `.tier-badge` · `TierBadge` |
 | **DepthBadge** | `--line-strong` border, chalk-dim text (`WR1`) | `.dc-badge` |
 | **RookieBadge** | flare border, flare text, `RK` | `.rookie-badge` |
