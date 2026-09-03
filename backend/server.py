@@ -11670,7 +11670,9 @@ def _sync_mfl_owned_picks(league_id: str) -> int:
 
 
 def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
-                              scoring_format: str) -> list[dict] | None:
+                              scoring_format: str, *,
+                              rosters: list | None = None,
+                              meta: dict | None = None) -> list[dict] | None:
     """#158 Sleeper owned-pick grid sync for one league (session-init daemon
     step, extracted so the skip conditions are unit-testable).
 
@@ -11688,10 +11690,18 @@ def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
     The drafts read is best-effort: a flake excludes nothing (today's
     behavior); future seasons are always included. The replace-sync cleans
     previously synced stale rows for the excluded season automatically.
+
+    `rosters` / `meta` let the session-init daemon hand over the v1 rosters
+    and league-meta payloads it has ALREADY fetched (for the trade-block
+    sync and the scoring auto-detect respectively) instead of this function
+    re-reading both from Sleeper — two upstream calls per app open. Same
+    shapes: `rosters` is the raw `/league/<id>/rosters` list, `meta` the raw
+    `/league/<id>` dict. None (every other caller, and a daemon whose own
+    fetch flaked) keeps the self-fetching behavior verbatim.
     """
     _tp = _fetch_sleeper_traded_picks(league_id)
-    _prosters = _fetch_league_rosters(league_id)
-    _pmeta = _fetch_sleeper_league_meta(league_id)
+    _prosters = rosters if rosters is not None else _fetch_league_rosters(league_id)
+    _pmeta = meta if meta is not None else _fetch_sleeper_league_meta(league_id)
     if not _prosters or not _pmeta:
         log.warning("  owned-pick sync skipped for %s — Sleeper %s "
                     "unavailable (keeping prior snapshot)", league_id,
@@ -19223,15 +19233,21 @@ def session_init():
         from .database import get_league_scoring, DEFAULT_SCORING as DB_DEFAULT
     except ImportError:
         DB_DEFAULT = "1qb_ppr"
+    # Read the stored format ONCE, here: the background daemon's scoring
+    # auto-detect needs the same value and nothing between here and there
+    # can change it (the daemon's own set_league_scoring is the only writer
+    # and it runs after this read).
+    _stored_scoring = None
+    try:
+        _stored_scoring = get_league_scoring(league_id)
+    except Exception:
+        pass
     if requested_format in DB_SCORING_FORMATS:
         active_format = requested_format
     elif existing_sess and existing_sess.get("active_format") in DB_SCORING_FORMATS:
         active_format = existing_sess["active_format"]
     else:
-        try:
-            active_format = get_league_scoring(league_id)
-        except Exception:
-            active_format = DB_DEFAULT
+        active_format = _stored_scoring or DB_DEFAULT
 
     # ── Create or update session ─────────────────────────────────────────
     session_payload = {
@@ -19313,7 +19329,31 @@ def session_init():
         docs/reviews/2026-05-22-silent-bugs.md, so we log.exception on
         any escape rather than letting the thread die quietly.
         """
+        # ── One Sleeper league-meta read per init ────────────────────
+        # Three daemon steps used to fetch `/league/<id>` for themselves
+        # (scoring auto-detect, the FB #41 team-count persist that rides
+        # it, and the owned-pick sync). The payload is identical and
+        # immutable for the length of one init, so it is fetched at most
+        # ONCE here and handed to each consumer. Lazy on purpose: a
+        # non-Sleeper league id costs nothing extra (the fetcher itself
+        # returns None without a network call for non-numeric /
+        # platform-linked ids), and a daemon that dies before the
+        # auto-detect block never spends the call at all.
+        _meta_fetched = False
+        _meta_payload: dict | None = None
+
+        def _league_meta() -> dict | None:
+            nonlocal _meta_fetched, _meta_payload
+            if not _meta_fetched:
+                _meta_fetched = True
+                _meta_payload = _fetch_sleeper_league_meta(league_id)
+            return _meta_payload
+
         try:
+            # Platform-link state is a DB fact that nothing in this daemon
+            # writes, so the three guards below read it once.
+            _platform_linked = is_linked_platform_league(league_id)
+
             # Agent 4 addition: capture INSERT-vs-UPDATE state BEFORE
             # upsert_user runs so we can emit a one-time referral-receipt
             # notification on the referred user's first session.
@@ -19454,8 +19494,13 @@ def session_init():
                 # format on file. Retrying on each init (when
                 # existing_fmt is falsy) self-heals leagues whose first
                 # sync hit a Sleeper API flake — subsequent logins keep
-                # attempting until detection succeeds. Once stored, the
-                # Sleeper call is skipped.
+                # attempting until detection succeeds. The league-meta
+                # read is NOT skipped once a format is stored, because
+                # this block also persists the league's true team count
+                # (FB #41) from that same payload on every init — it is
+                # instead the SHARED `_league_meta()` read, so detection,
+                # the team-count persist and the owned-pick sync below
+                # cost one upstream call between them, not three.
                 #
                 # NOTE: now runs on the background daemon. The session
                 # response uses whatever format `get_league_scoring`
@@ -19466,12 +19511,8 @@ def session_init():
                 # unaffected: the detected format already matches the
                 # stored format in steady state.
                 try:
-                    existing_fmt = None
-                    try:
-                        existing_fmt = get_league_scoring(league_id)
-                    except Exception:
-                        pass
-                    meta = _fetch_sleeper_league_meta(league_id)
+                    existing_fmt = _stored_scoring
+                    meta = _league_meta()
                     if meta:
                         # FB #41 — persist the league's TRUE team count.
                         # league_members can't be trusted for this: clients
@@ -19539,18 +19580,25 @@ def session_init():
             except Exception as db_err:
                 log.warning("  league_members upsert failed (continuing): %s", db_err)
 
-            # ── Shared v1 rosters fetch (trade-block + roster-history) ──
+            # ── Shared v1 rosters fetch (four consumers) ────────────────
             # ADR-011: trade_block_service used to fetch roster_id →
             # owner_id and throw it away; the roster-history snapshot's
             # team_key needs exactly that mapping. Fetch ONCE here, hand
-            # it to both consumers. Failure leaves it None — trade-block
-            # refetches for itself, the snapshot falls back to weak keys.
+            # it to every consumer — trade block, roster history, the
+            # owned-pick sync and the executed-trade matcher's roster map
+            # all read the SAME `/league/<id>/rosters` list of dicts
+            # (`trade_block_service._fetch_rosters` and
+            # `_fetch_league_rosters` return that payload verbatim).
+            # Failure leaves it None — every consumer refetches for
+            # itself, exactly as before, and the snapshot falls back to
+            # weak keys.
             _rh_roster_rows: list | None = None
             try:
                 if (str(league_id).isdigit()
-                        and not is_linked_platform_league(league_id)
+                        and not _platform_linked
                         and (is_enabled("sleeper.trade_block")
-                             or is_enabled("market.roster_history"))):
+                             or is_enabled("market.roster_history")
+                             or is_enabled("picks.owned_sync"))):
                     from .trade_block_service import _fetch_rosters as _tb_fetch
                     _rh_roster_rows = _tb_fetch(league_id)
             except Exception as _rr_err:
@@ -19593,7 +19641,7 @@ def session_init():
             try:
                 if (is_enabled("picks.owned_sync")
                         and str(league_id).isdigit()
-                        and is_linked_platform_league(league_id)):
+                        and _platform_linked):
                     _npk = _sync_mfl_owned_picks(league_id)
                     if _npk:
                         log.info("  ✅ MFL owned picks re-normalized (%d picks)", _npk)
@@ -19610,8 +19658,11 @@ def session_init():
                     }
                     # Include the logged-in user (not part of `members`).
                     _uid_to_name[str(user_id)] = display_name or username or str(user_id)
+                    # Reuse the rosters + league meta this daemon already
+                    # fetched (None on either falls back to self-fetching).
                     _n_picks = _sync_sleeper_owned_picks(
-                        league_id, _uid_to_name, active_format)
+                        league_id, _uid_to_name, active_format,
+                        rosters=_rh_roster_rows, meta=_league_meta())
                     if _n_picks is not None:
                         log.info("  ✅ owned draft picks synced (%d picks)",
                                  len(_n_picks))
@@ -19646,7 +19697,22 @@ def session_init():
                     # a matcher hiccup can't be mistaken for capture failure.
                     try:
                         if is_enabled("suggestion.telemetry"):
-                            _n_links = _sugg_tel.match_league_trades(league_id)
+                            # Fourth rosters consumer — hand it the shared
+                            # fetch rather than letting it read
+                            # /league/<id>/rosters again. None keeps its
+                            # own lazy fetch (only paid when there is
+                            # something unlinked to match).
+                            _rmap = None
+                            if _rh_roster_rows:
+                                _rmap = {
+                                    str(r["roster_id"]): str(r["owner_id"])
+                                    for r in _rh_roster_rows
+                                    if isinstance(r, dict)
+                                    and r.get("roster_id") is not None
+                                    and r.get("owner_id")
+                                }
+                            _n_links = _sugg_tel.match_league_trades(
+                                league_id, roster_map=_rmap)
                             if _n_links:
                                 log.info("  ✅ suggestion links written (%d)",
                                          _n_links)
@@ -19667,7 +19733,7 @@ def session_init():
             try:
                 if (is_enabled("market.roster_history")
                         and str(league_id).isdigit()
-                        and not is_linked_platform_league(league_id)):
+                        and not _platform_linked):
                     _sleeper_roster_history_on_sync(
                         league_id, all_members_for_db, _rh_roster_rows)
             except Exception as rh_err:

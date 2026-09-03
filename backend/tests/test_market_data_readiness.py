@@ -17,6 +17,7 @@ patched server helpers.
 
 import io
 import json
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -32,8 +33,10 @@ from backend.database import (
     sleeper_trades_table,
     value_snapshot_formats_for,
 )
+import backend.sleeper_trades_service as sleeper_trades_service
 from backend.sleeper_trades_service import (
     parse_trade_transactions,
+    sweep_weeks,
     sync_league_trades,
 )
 
@@ -191,6 +194,93 @@ def test_sync_survives_per_week_fetch_failures(client):
     # Week 2 blows up; week 1's trade is still captured.
     assert sync_league_trades(LEAGUE, _opener=_flaky_opener) == 1
     assert len(_trade_rows(engine)) == 1
+
+
+# ---------------------------------------------------------------------------
+# Trade capture — incremental sweep (18 legs only on the first pass)
+#
+# The 18-leg sweep used to run on EVERY session init, year-round: ~18 of the
+# ~26 Sleeper calls one app open cost. Only the live leg (and the one before
+# it, for a late-processed trade) can produce new rows once a league has been
+# swept, so after the first backfill the sweep shrinks to <=2 legs — and to
+# ZERO in the offseason, where there is no live leg to sweep.
+# ---------------------------------------------------------------------------
+
+def _counting_opener():
+    """A `_fake_opener` that records every leg it was asked for."""
+    seen: list[int] = []
+
+    def opener(request, timeout=15):
+        seen.append(int(request.full_url.rsplit("/", 1)[1]))
+        return _fake_opener(request, timeout)
+
+    return opener, seen
+
+
+def test_current_nfl_week_window_and_offseason():
+    start = sleeper_trades_service.SEASON_START
+    assert sleeper_trades_service.current_nfl_week(start) == 1
+    assert sleeper_trades_service.current_nfl_week(start + timedelta(days=6)) == 1
+    assert sleeper_trades_service.current_nfl_week(start + timedelta(days=7)) == 2
+    assert sleeper_trades_service.current_nfl_week(start + timedelta(weeks=17)) == 18
+    # Offseason on both sides of the season → None, never leg 1.
+    assert sleeper_trades_service.current_nfl_week(start - timedelta(days=1)) is None
+    assert sleeper_trades_service.current_nfl_week(start + timedelta(weeks=18)) is None
+
+
+def test_first_sync_backfills_all_18_legs(client):
+    _, engine = client
+    opener, seen = _counting_opener()
+    assert sync_league_trades(LEAGUE, _opener=opener) == 1
+    assert seen == list(range(1, 19))          # (a) empty league → full sweep
+    assert len(_trade_rows(engine)) == 1
+
+
+def test_second_sync_only_sweeps_live_legs(client, monkeypatch):
+    _, _engine = client
+    # Backfill first so the league has rows.
+    sync_league_trades(LEAGUE, _opener=_fake_opener)
+
+    monkeypatch.setattr(sleeper_trades_service, "current_nfl_week",
+                        lambda today=None: 7)
+    opener, seen = _counting_opener()
+    assert sync_league_trades(LEAGUE, _opener=opener) == 0
+    assert seen == [6, 7]                      # (b) live leg + the one before
+
+    # Week 1 has no predecessor — never fetches leg 0.
+    monkeypatch.setattr(sleeper_trades_service, "current_nfl_week",
+                        lambda today=None: 1)
+    opener, seen = _counting_opener()
+    sync_league_trades(LEAGUE, _opener=opener)
+    assert seen == [1]
+
+
+def test_offseason_sync_fetches_nothing_after_backfill(client, monkeypatch):
+    _, engine = client
+    sync_league_trades(LEAGUE, _opener=_fake_opener)
+
+    monkeypatch.setattr(sleeper_trades_service, "current_nfl_week",
+                        lambda today=None: None)
+    opener, seen = _counting_opener()
+    assert sync_league_trades(LEAGUE, _opener=opener) == 0
+    assert seen == []                          # (c) offseason → zero calls
+    assert len(_trade_rows(engine)) == 1
+
+    # But a league that has NEVER been swept still gets its backfill, even
+    # in the offseason — that is the one pass that must not be skipped.
+    opener, seen = _counting_opener()
+    sync_league_trades("111122223333444455", _opener=opener)
+    assert seen == list(range(1, 19))
+
+
+def test_sweep_weeks_is_date_driven(client):
+    _, _engine = client
+    start = sleeper_trades_service.SEASON_START
+    # No rows yet → backfill regardless of the date.
+    assert sweep_weeks(LEAGUE, start + timedelta(weeks=4)) == list(range(1, 19))
+    record_sleeper_trades(parse_trade_transactions(WEEK1_PAYLOAD, LEAGUE))
+    assert sweep_weeks(LEAGUE, start + timedelta(weeks=4)) == [4, 5]
+    assert sweep_weeks(LEAGUE, start - timedelta(days=30)) == []
 
 
 # ---------------------------------------------------------------------------

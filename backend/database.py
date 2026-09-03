@@ -7361,6 +7361,21 @@ def load_sleeper_trades(league_id: str, limit: int = 200) -> list[dict]:
     return [dict(r._mapping) for r in rows]
 
 
+def has_sleeper_trades(league_id: str) -> bool:
+    """True when this league already has at least one captured trade row.
+
+    Read seam for `sleeper_trades_service.sweep_weeks`: a league that has
+    never been swept needs the one-time 1..18 backfill; one that has only
+    needs the live legs.
+    """
+    with engine.connect() as conn:
+        return conn.execute(
+            select(sleeper_trades_table.c.transaction_id)
+            .where(sleeper_trades_table.c.league_id == league_id)
+            .limit(1)
+        ).fetchone() is not None
+
+
 def set_league_scoring(league_id: str, scoring_format: str) -> None:
     """Save the league's default scoring format (shown on the league summary)."""
     if scoring_format not in SCORING_FORMATS:
