@@ -11,7 +11,7 @@
 
 ---
 
-## 2026-09-03d — Web ESPN entry leads with sign-in, matching mobile (D-179; PR open, NOT merged)
+## 2026-09-03d — Web ESPN entry leads with sign-in SHIPPED (D-179) + the entry-session 401 loop guarded (G-069) — PR #276 → `main` @ `0059a8a0`, live
 Operator on the live V3 landing: "ESPN option is missing the log in prompt as primary." Correct —
 V3 shipped ESPN league-ID-first with credentials behind a "Private league?" link, inverting mobile's
 `EspnLinkSheet` entry order (sign-in first-class, "or enter a league ID" after). MFL already matched.
@@ -31,7 +31,11 @@ The read now bypasses `apiFetch`, a 401 returns a sentinel all five call sites p
 user is returned to the landing to re-claim (deterministic ids, nothing lost). After: exactly 2
 requests. Web gate 175/175, entry-route suite 25/25, browser E2E both flag states + the live-ESPN
 403 force-open + the dead-token repro
-([code-walk §V3.1](../docs/plans/landing-platform-options/code-walk.md)).
+([code-walk §V3.1](../docs/plans/landing-platform-options/code-walk.md)). **Shipped + verified live**
+2026-09-03: PR [#276](https://github.com/mattmurf77/fantasy-trade-finder/pull/276) squash → `main` @ `0059a8a0`, CI ×4 green, Render serving it — prod shows
+the sign-in-primary order, the expand focuses `espn_s2`, no stale directional copy, and the
+dead-token repro against PROD makes **exactly 2** requests then returns to the landing with
+everything cleared. Ledgered in `docs/recovery/2026-09-03c-espn-signin-primary-ship.md`.
 ## 2026-09-03c — API audit SHIPPED (D-178): PR #273 squash → `main` @ `c2775fe0`, Render live 16:33 UTC — session init 26 → 7 Sleeper calls, trade job 17 → 4 reads, cron sweeps scoped, web/mobile re-fetches removed
 
 Branch `claude/api-audit-redundancies-9a6075` → squash `c2775fe0`. **Note:** the squash commit title says D-177; the correct id is **D-178** — PR #272 claimed D-177 for the web platform entry while this branch was open, and the ledger was renumbered in the merge. `DECISIONS.md` is authoritative. Source: [`docs/reviews/2026-09-03-api-audit.md`](../docs/reviews/2026-09-03-api-audit.md) (four-layer audit + 195-route caller table). Operator chose findings 1, 2, 4, 5, 6, 7, 8, 9, 10; **3 held** (ping-then-init would stop the per-foreground league resync — see NEXT), **7 shipped as poll-pause** (real web push = schema + dependency, needs a scope block).
