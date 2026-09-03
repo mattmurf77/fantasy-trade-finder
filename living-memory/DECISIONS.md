@@ -525,7 +525,7 @@
 | D-090 | A Current-Year Pick Reads as Its Real Slot; the 2026-07-18 "Can't Resolve a Slot" Premise Is Narrowed, Not the Decision | 2026-08-19 |
 | D-175 | The Gap Sweetener's Trigger Is a Floor Plus a Relative Band, and Its Closer Is Best-Effort; Shipped Live at 750 / 0.12 / 1 | 2026-09-02 |
 | D-176 | Sleeper Pick Sends Are Encoded Server-Side From the Grid Plus Live `traded_picks`; the Client Never Encodes and Any Unresolvable Pick Refuses the Whole Send | 2026-09-02 |
-| D-177 | Sleeper Reads Are Fetched Once Per Session Init and Handed Down; the Trades Sweep Is Incremental (Offseason = Leg 1); Cron Sweeps Cover Only Leagues Active in 30 Days, With the Draft Probe Season-Gated | 2026-09-03 |
+| D-178 | Sleeper Reads Are Fetched Once Per Session Init and Handed Down; the Trades Sweep Is Incremental (Offseason = Leg 1); Cron Sweeps Cover Only Leagues Active in 30 Days, With the Draft Probe Season-Gated | 2026-09-03 |
 | D-174 | A Card Says Why a Give-Side Piece Is There When the User Rates Him Below Market; the Vehicle Is `reasons`, the Bar Is the Shrunk Board | 2026-09-02 |
 | D-173 | Web Posture Is B, Companion: Marketing Front Door Plus Session-Gated Tools, Not Full Parity | 2026-08-26 |
 
@@ -1673,7 +1673,7 @@ No historical 1100-pin repair — indistinguishable from anchor no-value.
 **Alternatives considered:** (a) keep Apple (D-163 v1) — rejected by the operator; (b) anonymous mint-first then sheets verbatim — smaller, but identity would be device-random: sign-out/reinstall loses boards, worse than the Sleeper bar; (c) extract/refactor the link routes' import bodies into shared helpers for a one-call mint+import — more surface churn in two hot routes for one round-trip saved; (d) platform-native credential auth at entry for public leagues too — needless friction; credentials stay exactly where the link flows already require them.
 
 **Consequences:** Entry sessions are unverified → not server-persisted (client Keychain token + cheap deterministic re-claim is the recovery path); if `auth.enforce_verified_writes` ever flips on, entry users lose write grace — revisit then. Two humans claiming the same team share an identity, same as a shared Sleeper username claim. `signin_*` gains method values `espn`/`mfl` (value-only; addendum `docs/business/analytics/2026-08-26-entry-method-values.md`). `landing.platform_options` is now server-read (gates the route), remaining the one revert lever. The D-163 `platformIntent`/`mflLink` machinery survives on the quiet Apple re-entry link and the Settings CTA.
-## D-177 — Sleeper Reads Are Fetched Once Per Session Init and Handed Down; the Trades Sweep Is Incremental (Offseason = Leg 1); Cron Sweeps Cover Only Leagues Active in 30 Days, With the Draft Probe Season-Gated
+## D-178 — Sleeper Reads Are Fetched Once Per Session Init and Handed Down; the Trades Sweep Is Incremental (Offseason = Leg 1); Cron Sweeps Cover Only Leagues Active in 30 Days, With the Draft Probe Season-Gated
 
 **Date:** 2026-09-03 · **Source:** [`docs/reviews/2026-09-03-api-audit.md`](../docs/reviews/2026-09-03-api-audit.md) (findings 1, 2, 9, 10) · **Gates:** treated as internal perf fixes — no scope block; CI + new pytest + ledger only. Operator said "do it" per finding.
 

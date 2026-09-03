@@ -11,7 +11,7 @@
 
 ---
 
-## 2026-09-03b — API audit (D-177): session init 26 → 7 Sleeper calls, trade job 17 → 4 reads, cron sweeps scoped, web/mobile re-fetches removed (PR pending)
+## 2026-09-03b — API audit (D-178): session init 26 → 7 Sleeper calls, trade job 17 → 4 reads, cron sweeps scoped, web/mobile re-fetches removed (PR pending)
 
 Branch `claude/api-audit-redundancies-9a6075`. Source: [`docs/reviews/2026-09-03-api-audit.md`](../docs/reviews/2026-09-03-api-audit.md) (four-layer audit + 195-route caller table). Operator chose findings 1, 2, 4, 5, 6, 7, 8, 9, 10; **3 held** (ping-then-init would stop the per-foreground league resync — see NEXT), **7 shipped as poll-pause** (real web push = schema + dependency, needs a scope block).
 - **Backend:** session-init daemon fetches rosters + league meta once and threads them to owned-picks / telemetry; trades sync is incremental (`sweep_weeks`: backfill once, then `[week-1, week]`, offseason `[1]`); trade job takes request-time prefs (`prefs_preload`), bulk opponent prefs, one memoized `load_draft_picks`; both cron loaders filter `leagues.updated_at` ≤ 30 d; `not_drafted` probe 24 h outside Apr 1 – Sep 15.

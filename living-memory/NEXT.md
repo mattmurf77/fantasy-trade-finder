@@ -45,12 +45,12 @@
 
 ## 2026-09-03b — API audit fixes: merge the PR, then the held items (ping-then-init, web push, route hygiene)
 
-**Why now:** [`docs/reviews/2026-09-03-api-audit.md`](../docs/reviews/2026-09-03-api-audit.md) found ~26 Sleeper calls per app open and a stack of client-side re-fetches; findings 1, 2, 4, 5, 6, 7 (as poll-pause), 8, 9, 10 are built on `claude/api-audit-redundancies-9a6075` (D-177). In order:
+**Why now:** [`docs/reviews/2026-09-03-api-audit.md`](../docs/reviews/2026-09-03-api-audit.md) found ~26 Sleeper calls per app open and a stack of client-side re-fetches; findings 1, 2, 4, 5, 6, 7 (as poll-pause), 8, 9, 10 are built on `claude/api-audit-redundancies-9a6075` (D-178). In order:
 1. **Merge the PR**, then watch the Render log for one real session init: expect ≤7 `api.sleeper.app` calls (one `rosters`, one `/league/{id}`, ≤2 `transactions`), and run the 5-step TestFlight check in the PR body (no second `/api/sleeper/rosters/<id>` after opening Trades).
 2. **Finding 3 (held — operator question answered 2026-09-03):** ping-then-init on mobile would stop the daemon's league resync on every foreground, so rosters/trade block/picks would only refresh on cold start. If wanted anyway, the safer variant is server-side: daemon skips sub-syncs completed <15 min ago. Decide; not built.
 3. **Finding 7 as real web push:** service worker + VAPID keys in Render + a subscriptions table + `pywebpush` — schema + dependency, so a scope block first. The 30 s poll now pauses on hidden tabs; that is the shipped fix.
 4. **Route hygiene (audit §Removal candidates):** delete `POST /api/reset`, `GET /api/leagues`, `GET /api/skips`, `GET /api/players/<id>` (no caller anywhere) and the 10 dead mobile wrappers; alias `/api/tiers/dismiss` → `/api/trio/skip`; fold `/api/progress` and `/api/trades/matches`; fix `TestStagesScreen`'s call to the nonexistent `/api/test-users/templates`. Each is an `api-reference.md` row.
-5. **Two things the build agents found in passing:** the web demo path writes its token to `sessionStorage` but `boot()` reads `localStorage` (demo session never adopted; flag is off in prod); `signOut` does not `queryClient.clear()` (stale league caches survive an account swap within `gcTime`). And the MFL `set_platform_future_picks` self-warming leak in the cron activity filter (D-177).
+5. **Two things the build agents found in passing:** the web demo path writes its token to `sessionStorage` but `boot()` reads `localStorage` (demo session never adopted; flag is off in prod); `signOut` does not `queryClient.clear()` (stale league caches survive an account swap within `gcTime`). And the MFL `set_platform_future_picks` self-warming leak in the cron activity filter (D-178).
 
 ## 2026-09-03 — After the #413 ship: the checklist that closes Q-037, then the G-8 avoid gap D-175 still has, then the impression gap
 
