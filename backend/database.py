@@ -9650,18 +9650,63 @@ def get_league_draft_context(league_id: str) -> dict | None:
     }
 
 
-def load_league_ids_for_draft_status_refresh(limit: int = 500) -> list[str]:
+# ---------------------------------------------------------------------------
+# Active-league window — shared by the two cron sweeps
+# ---------------------------------------------------------------------------
+# Both `load_league_ids_for_draft_status_refresh` (hourly draft-status) and
+# `load_history_sweep_leagues` (weekly roster snapshot) used to select EVERY
+# league ever synced, so a league nobody has opened since last season still
+# cost platform reads on every tick, forever.
+#
+# `leagues.updated_at` is the signal: `upsert_league` stamps it on every
+# session_init for that league (any member opening the app in it), and the
+# ESPN/MFL link paths stamp it at import. It lives on the league row itself —
+# no join, no new column, no schema change.
+#
+# Escape hatch: pass `active_within_days=None` to disable the filter
+# entirely. The manual admin lever (POST /api/cron/roster-snapshot) does
+# exactly that, so an operator forcing a sweep still reaches every league;
+# the per-league admin path (`_refresh_league_draft_status(..., force=True)`)
+# never goes through these loaders at all.
+#
+# Known leak: `set_platform_future_picks` also stamps `updated_at` and is
+# called from the draft-status refresh itself, so an MFL league keeps its own
+# row warm. Leagues on every other platform age out as intended.
+ACTIVE_LEAGUE_WINDOW_DAYS = 30
+
+
+def _active_league_cutoff(days: int | None) -> str | None:
+    """ISO-UTC cutoff for the active-league filter; None = no filter.
+
+    ISO-8601 UTC strings compare lexicographically, so a computed cutoff
+    string suffices (same rule `purge_stale_persisted_sessions` relies on).
+    """
+    if days is None:
+        return None
+    return (datetime.now(timezone.utc) - timedelta(days=int(days))).isoformat()
+
+
+def load_league_ids_for_draft_status_refresh(
+    limit: int = 500,
+    active_within_days: int | None = ACTIVE_LEAGUE_WINDOW_DAYS,
+) -> list[str]:
     """Leagues the hourly tick should re-check, freshest-last.
 
     Ordered so never-checked leagues come first, then the stalest — the tick
     applies its own per-status TTL (see server._draft_status_is_fresh), this
     just bounds the scan.
+
+    Only leagues with activity inside the active window are returned (see
+    ACTIVE_LEAGUE_WINDOW_DAYS); pass `active_within_days=None` for all of them.
     """
+    cutoff = _active_league_cutoff(active_within_days)
+    q = select(leagues_table.c.sleeper_league_id)
+    if cutoff is not None:
+        q = q.where(leagues_table.c.updated_at >= cutoff)
     with engine.connect() as conn:
         rows = conn.execute(
-            select(leagues_table.c.sleeper_league_id)
-            .order_by(leagues_table.c.draft_status_checked_at.is_(None).desc(),
-                      leagues_table.c.draft_status_checked_at)
+            q.order_by(leagues_table.c.draft_status_checked_at.is_(None).desc(),
+                       leagues_table.c.draft_status_checked_at)
             .limit(int(limit))
         ).fetchall()
     return [str(r.sleeper_league_id) for r in rows]
@@ -11526,21 +11571,30 @@ def load_member_boards_for_league(league_id: str) -> list[dict]:
     return list(grouped.values())
 
 
-def load_history_sweep_leagues(period_key: str) -> list[dict]:
+def load_history_sweep_leagues(
+    period_key: str,
+    active_within_days: int | None = ACTIVE_LEAGUE_WINDOW_DAYS,
+) -> list[dict]:
     """Sweep work-list for the weekly roster snapshot, STALEST-FIRST:
     leagues with no 'weekly' row for the current period first (never swept
     or missed), then by how recently they got one. Each entry carries what
-    the per-platform fetch adapters need."""
+    the per-platform fetch adapters need.
+
+    Only leagues with activity inside the active window are returned (see
+    ACTIVE_LEAGUE_WINDOW_DAYS); pass `active_within_days=None` for all of
+    them, which is what the manual /api/cron/roster-snapshot lever does."""
     lt, ht = leagues_table, league_roster_history_table
+    cutoff = _active_league_cutoff(active_within_days)
     try:
+        lq = select(lt.c.sleeper_league_id, lt.c.platform,
+                    lt.c.default_scoring, lt.c.user_id,
+                    lt.c.espn_auth, lt.c.espn_season, lt.c.espn_my_team_id,
+                    lt.c.platform_auth, lt.c.platform_season,
+                    lt.c.platform_host, lt.c.platform_my_team)
+        if cutoff is not None:
+            lq = lq.where(lt.c.updated_at >= cutoff)
         with engine.connect() as conn:
-            leagues = conn.execute(
-                select(lt.c.sleeper_league_id, lt.c.platform,
-                       lt.c.default_scoring, lt.c.user_id,
-                       lt.c.espn_auth, lt.c.espn_season, lt.c.espn_my_team_id,
-                       lt.c.platform_auth, lt.c.platform_season,
-                       lt.c.platform_host, lt.c.platform_my_team)
-            ).fetchall()
+            leagues = conn.execute(lq).fetchall()
             done = {
                 r.league_id for r in conn.execute(
                     select(ht.c.league_id).distinct()

@@ -198,7 +198,14 @@ def _calls_named(tree: ast.AST, name: str):
 #: with `picks.assign_tradeable` off and `'any'` with it on. Editing this set
 #: is how an eighth site gets DECIDED rather than silently added.
 _SEVEN_READ_SITES = frozenset({
-    "_roster_eveners", "_user_pick_share", "_run_trade_job",
+    "_roster_eveners", "_user_pick_share",
+    # The trade job's own read. It used to sit directly in `_run_trade_job`
+    # and ran up to three times per job (outlook seed, opponent pick shares,
+    # owned-pick injection); it is now the `_job_draft_picks` memo nested
+    # inside that same function, which reads once and hands the rows to all
+    # three consumers. SAME site, same `_pick_read_source()`, same flag
+    # reach — only the enclosing symbol this AST scan sees moved.
+    "_job_draft_picks",
     "_trade_evaluate_impl", "get_league_picks", "_owned_pick_assets",
     "_power_picks_by_owner",
     # #365 / D-110, 2026-08-20 — the EIGHTH engine read site, DECIDED here

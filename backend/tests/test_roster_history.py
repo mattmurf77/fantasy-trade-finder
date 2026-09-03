@@ -31,7 +31,7 @@ Harness pattern follows test_notif_inbox_growth.py: isolated file-backed
 SQLite engine patched into backend.database.
 """
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -424,10 +424,13 @@ def test_pick_fold_records_exclusions_per_owner():
 def test_sweep_worklist_is_stalest_first(tmp_path):
     eng = _engine(tmp_path)
     with eng.begin() as conn:
+        # `updated_at` inside the active-league window: the work-list now
+        # skips leagues nobody has opened in ACTIVE_LEAGUE_WINDOW_DAYS days.
+        recent = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
         for lid, platform in (("100", "sleeper"), ("200", "espn"), ("300", None)):
             conn.execute(insert(db_module.leagues_table).values(
                 sleeper_league_id=lid, user_id="u1", name=f"L{lid}",
-                platform=platform))
+                platform=platform, updated_at=recent))
         conn.execute(insert(league_roster_history_table).values(
             **_base_row(league_id="100", source="weekly")))
     with patch.object(db_module, "engine", eng):

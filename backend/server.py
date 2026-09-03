@@ -133,6 +133,7 @@ from .database import (
     record_match_disposition,
     dismiss_match,
     upsert_league_preference, load_league_preference,
+    load_league_preferences_bulk,
     load_asset_preferences, set_asset_preference, ASSET_PREF_LISTS,
     sync_players, needs_player_sync,
     load_players, load_player, load_players_by_ids,
@@ -142,7 +143,7 @@ from .database import (
     # rookie-draft M0 — class-load monitor
     count_rookie_class_rows,
     set_league_draft_status, get_league_draft_context,
-    load_league_ids_for_draft_status_refresh,
+    load_league_ids_for_draft_status_refresh, ACTIVE_LEAGUE_WINDOW_DAYS,
     # draft-extensions W2 — mock drafts
     create_mock_draft, load_mock_draft, load_current_mock_draft,
     update_mock_draft, abandon_completed_mock_drafts,
@@ -5746,18 +5747,24 @@ def _first_session_board_refresh(
     }
 
 
-def _user_pick_share(user_id: str, league_id: str) -> float:
+def _user_pick_share(user_id: str, league_id: str, picks: list | None = None) -> float:
     """The user's share of total draft-pick value in a league (0.0 when no
     picks synced). Feeds the #8 outlook seed and #1's classifier.
 
     W3 M-C (S2): reads asserted rows too when `picks.assign_tradeable` is on,
     so an ESPN manager's own draft capital shapes their inferred contend /
     rebuild window instead of reading as zero.
+
+    `picks` — already-loaded rows from the SAME read this would issue
+    (`load_draft_picks(league_id, source=_pick_read_source())`). The trade
+    job reads them once and shares them with the #1 opponent pick shares;
+    every other caller leaves it None and gets the historical read.
     """
-    try:
-        picks = load_draft_picks(league_id=league_id, source=_pick_read_source())
-    except Exception:
-        return 0.0
+    if picks is None:
+        try:
+            picks = load_draft_picks(league_id=league_id, source=_pick_read_source())
+        except Exception:
+            return 0.0
     grand = sum((pk.get("pick_value") or 0.0) for pk in picks)
     if grand <= 0:
         return 0.0
@@ -5766,13 +5773,16 @@ def _user_pick_share(user_id: str, league_id: str) -> float:
     return mine / grand
 
 
-def _infer_user_outlook(user_id: str, league_id: str, sess: dict, league):
+def _infer_user_outlook(user_id: str, league_id: str, sess: dict, league,
+                        picks: list | None = None):
     """Backlog #8 — infer the USER's own contend/rebuild window from their
     roster, for leagues with no declared outlook. Returns (outlook, signals)
     or (None, None) when the seed flag is off or roster/player data is absent.
 
     Called from BOTH the generate-route cache pre-read and the worker so the
     cache-freshness key resolves identically on both sides.
+
+    `picks` is threaded straight to `_user_pick_share` — see its docstring.
     """
     if not FLAGS.trade_outlook_seed:
         return None, None
@@ -5784,7 +5794,7 @@ def _infer_user_outlook(user_id: str, league_id: str, sess: dict, league):
     pdict = {p.id: p for p in players}
     num_teams = len(league.members) if league and getattr(league, "members", None) else 12
     outlook, _score, signals = infer_team_outlook(
-        roster, pdict, _user_pick_share(user_id, league_id), num_teams)
+        roster, pdict, _user_pick_share(user_id, league_id, picks), num_teams)
     return outlook, signals
 
 
@@ -5872,12 +5882,22 @@ def _run_trade_job(
     opponent_user_id: str | None = None,
     pinned_give_mode: str = "any",
     trade_intent: str | None = None,
+    prefs_preload: dict | None = None,
 ):
     """Daemon-thread entry point. Resolves the session itself (rather than
     capturing closures over per-request state) so the request that kicked
     us off can return immediately. All exceptions caught — a thread death
     here would leave the job 'running' forever, which is a worse failure
-    than surfacing the error to the polling frontend."""
+    than surfacing the error to the polling frontend.
+
+    `prefs_preload` — {"prefs": <league preference dict|None>,
+    "seeded_outlook": <str|None>} as resolved ON THE REQUEST THREAD by
+    /api/trades/generate, which had to read both to build the cache-freshness
+    key. Passing them in is what makes the two threads agree BY CONSTRUCTION
+    rather than by re-resolving (see `_infer_user_outlook`'s docstring: both
+    sides must land on the same value or every seeded league's cache check
+    would miss). None = not supplied (pregen from session_init, the
+    replenishment cron) ⇒ the worker loads them itself, exactly as before."""
     try:
         with _sessions_lock:
             sess = _sessions.get(sess_token)
@@ -5927,13 +5947,36 @@ def _run_trade_job(
         except Exception as db_err:
             log.warning("trade-job: could not load real rankings: %s", db_err)
 
+        # ONE draft_picks read per job, memoized and shared by the #8 outlook
+        # seed (via `_user_pick_share`) and the #1 opponent pick shares —
+        # both used to issue their own identical read. Lazy, so a job that
+        # needs neither still reads nothing. A failed read degrades to []
+        # (logged), which is what both call sites already did with a raised
+        # one: 0.0 share, empty opponent shares.
+        _picks_memo: list = []
+        _picks_loaded = False
+
+        def _job_draft_picks() -> list:
+            nonlocal _picks_memo, _picks_loaded
+            if not _picks_loaded:
+                _picks_loaded = True
+                try:
+                    _picks_memo = load_draft_picks(league_id=league_id,
+                                                   source=_pick_read_source())
+                except Exception as picks_err:
+                    log.warning("trade-job: draft picks read failed: %s", picks_err)
+                    _picks_memo = []
+            return _picks_memo
+
         # Outlook + positional preferences
         outlook_value        = None
         acquire_positions    = []
         trade_away_positions = []
         avoid_positions      = []          # #360
         try:
-            prefs = load_league_preference(user_id=g_user_id, league_id=league_id)
+            prefs = (prefs_preload.get("prefs") if prefs_preload is not None
+                     else load_league_preference(user_id=g_user_id,
+                                                 league_id=league_id))
             if prefs:
                 outlook_value        = prefs.get("team_outlook")
                 acquire_positions    = prefs.get("acquire_positions",    []) or []
@@ -5969,7 +6012,11 @@ def _run_trade_job(
         # (flag-gated). Must mirror the generate-route pre-read exactly so the
         # job-cache freshness key agrees.
         if not outlook_value:
-            seeded, _sig = _infer_user_outlook(g_user_id, league_id, sess, g_league)
+            if prefs_preload is not None:
+                seeded = prefs_preload.get("seeded_outlook")
+            else:
+                seeded, _sig = _infer_user_outlook(g_user_id, league_id, sess,
+                                                   g_league, _job_draft_picks())
             if seeded:
                 outlook_value = seeded
 
@@ -5997,17 +6044,25 @@ def _run_trade_job(
         opponent_pick_shares: dict[str, float] = {}
         if FLAGS.trade_outlook_infer:
             try:
+                # ONE `IN (...)` select for every opponent instead of a
+                # per-member query on this thread. Same per-row shape as the
+                # singular loader, absent users simply missing (pinned by
+                # test_breaker_seam), so the `mp and mp.get(...)` test below
+                # reads identically to the per-member load it replaces.
+                _opp_prefs = load_league_preferences_bulk(
+                    [m.user_id for m in g_league.members
+                     if m.user_id != g_user_id],
+                    league_id)
                 for m in g_league.members:
                     if m.user_id == g_user_id:
                         continue
-                    mp = load_league_preference(user_id=m.user_id, league_id=league_id)
+                    mp = _opp_prefs.get(m.user_id)
                     if mp and mp.get("team_outlook"):
                         opponent_outlooks[m.user_id] = mp["team_outlook"]
                 # W3 M-C (S3) — opponent pick shares include asserted rows
                 # behind `picks.assign_tradeable`, so an ESPN league's inferred
                 # opponent outlooks stop treating everyone as pickless.
-                picks = load_draft_picks(league_id=league_id,
-                                         source=_pick_read_source())
+                picks = _job_draft_picks()
                 totals: dict[str, float] = {}
                 grand = 0.0
                 for pk in picks:
@@ -6077,6 +6132,7 @@ def _run_trade_job(
                     user_id        = g_user_id,
                     user_roster    = g_user_roster,
                     league         = g_league,
+                    picks          = _job_draft_picks(),
                 )
                 log.info("trade-job: injected %d owned-pick assets (cap=%d)",
                          n_inj, _picks_pool_cap())
@@ -6874,6 +6930,7 @@ def _kickoff_trade_job(
     source: str | None = None,
     synchronous: bool = False,
     trade_intent: str | None = None,
+    prefs_preload: dict | None = None,
 ) -> str:
     """Register a new job in _trade_jobs and start its worker thread.
     Returns the job_id. Caller is responsible for any pre-existing-job
@@ -6892,6 +6949,10 @@ def _kickoff_trade_job(
     trade_intent — #172 (flag trades.intent_modes): "consolidate" |
                     "tier_up" | "tier_down" | None. Stored on the job so
                     _trade_job_is_fresh can key the shared cache on it.
+
+    prefs_preload — the league preference + seeded outlook the CALLER already
+                    read on its own thread, handed to the worker so it does
+                    not read them a second time. See `_run_trade_job`.
     """
     job_id = uuid.uuid4().hex
     # Pinned flows (give OR receive) and single-opponent scope (#156 Specific
@@ -6925,7 +6986,8 @@ def _kickoff_trade_job(
         _run_trade_job(job_id, sess_token, league_id, fairness_threshold,
                        pinned_give or [], pinned_receive or [],
                        opponent_user_id, pinned_give_mode,
-                       trade_intent=trade_intent)
+                       trade_intent=trade_intent,
+                       prefs_preload=prefs_preload)
         return job_id
 
     threading.Thread(
@@ -6933,7 +6995,8 @@ def _kickoff_trade_job(
         args=(job_id, sess_token, league_id, fairness_threshold,
               pinned_give or [], pinned_receive or [], opponent_user_id,
               pinned_give_mode),
-        kwargs={"trade_intent": trade_intent},
+        kwargs={"trade_intent": trade_intent,
+                "prefs_preload": prefs_preload},
         daemon=True,
     ).start()
     return job_id
@@ -11400,7 +11463,8 @@ def _picks_pool_cap() -> int:
         return 6
 
 
-def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr") -> dict:
+def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr",
+                       picks: list | None = None) -> dict:
     """Build capped PICK pseudo-Players per owner for suggestion injection.
 
     Returns {owner_user_id: [Player(position="PICK"), ...]} — the top-N picks
@@ -11445,7 +11509,11 @@ def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr") -> dict:
     # asserted. The guard `_owned_picks_available` decides per league; this
     # decides per row.
     slot_order = _league_slot_order(league_id)           # D-090, once per league
-    for p in load_draft_picks(league_id=league_id, source=_pick_read_source()):
+    # `picks`, when supplied, is the SAME read this line would issue, already
+    # done once for this job (see `_run_trade_job`'s `_job_draft_picks`).
+    if picks is None:
+        picks = load_draft_picks(league_id=league_id, source=_pick_read_source())
+    for p in picks:
         owner = p.get("owner_user_id")
         if owner:
             by_owner.setdefault(owner, []).append(p)
@@ -11503,7 +11571,8 @@ def _pick_asset_elos(pick_assets: dict) -> dict[str, float]:
 
 def _inject_owned_picks(*, league_id: str, scoring_format: str, trade_service,
                         players_dict: dict, seed_map: dict, user_elo: dict,
-                        user_id: str, user_roster: list, league):
+                        user_id: str, user_roster: list, league,
+                        picks: list | None = None):
     """#170/#171 + #185 — owned-pick injection for one trade job.
 
     1. Injects each team's capped owned picks as PICK pseudo-Players into the
@@ -11538,7 +11607,7 @@ def _inject_owned_picks(*, league_id: str, scoring_format: str, trade_service,
     _pp_mode = (_trade_service_mod.pinned_pick_pricing_mode()
                 or _trade_service_mod.pick_pricing_mode_for_user(user_id))
     with _trade_service_mod.pick_pricing_override(_pp_mode):
-        pick_assets = _owned_pick_assets(league_id, scoring_format)
+        pick_assets = _owned_pick_assets(league_id, scoring_format, picks)
     # league.members are shared session objects reused across jobs, so
     # injection must be IDEMPOTENT: strip any owned-pick ids this league
     # injected on a prior run (they alone start with "{league_id}_" — real
@@ -12059,17 +12128,24 @@ def generate_trades():
             log.warning("deck fatigue reset failed (non-fatal): %s", reset_err)
         force_fresh = True   # the cached deck predates the reset by definition
 
-    # Read current outlook for cache-freshness comparison. The actual job
-    # worker reads it again; this is just for the cache hit decision. Must
-    # resolve declared-else-seeded identically to the worker (#8) or every
-    # seeded-league cache check would miss.
+    # Read current outlook for the cache hit decision. Must resolve
+    # declared-else-seeded identically to the worker (#8) or every
+    # seeded-league cache check would miss — so rather than have the worker
+    # re-resolve it (two preference reads and two draft-pick reads per
+    # generate), hand it THESE values in `prefs_preload`. Identical by
+    # construction is stronger than identical by re-derivation. A failed read
+    # leaves the preload None and the worker loads for itself, as before.
+    prefs_preload = None
     try:
         prefs = load_league_preference(user_id=g_user_id, league_id=league_id)
         outlook_value = (prefs or {}).get("team_outlook")
+        seeded_outlook = None
         if not outlook_value:
             seeded, _sig = _infer_user_outlook(g_user_id, league_id, sess, g_league)
             if seeded:
                 outlook_value = seeded
+                seeded_outlook = seeded
+        prefs_preload = {"prefs": prefs, "seeded_outlook": seeded_outlook}
     except Exception:
         outlook_value = None
 
@@ -12132,6 +12208,7 @@ def generate_trades():
         opponent_user_id   = opponent_user_id,
         opponents_total    = opponents_total,
         trade_intent       = trade_intent,
+        prefs_preload      = prefs_preload,
     )
     with _trade_jobs_lock:
         snapshot = _trade_job_public_view(_trade_jobs[job_id])
@@ -15800,6 +15877,20 @@ _DRAFT_STATUS_TTL_SECONDS = {
     "unknown":      1 * 3600,
 }
 _DRAFT_STATUS_DEFAULT_TTL = 1 * 3600
+# Season gate for the `not_drafted` TTL only. A league can only flip
+# not_drafted → drafted while rookie drafts are actually being held, and
+# dynasty rookie drafts cluster May–August (a few leagues go early in April,
+# stragglers finish in the first half of September). Outside that window the
+# 3 h re-probe above spends three platform reads per undrafted league per
+# tick to re-learn a verdict that cannot have changed, so it backs off to
+# daily. There is no season-phase notion anywhere else in the backend to
+# reuse; this window is deliberately local to the draft-status cache.
+# The `drafting` / live path is untouched, and an explicit
+# `_refresh_league_draft_status(league_id, force=True)` still bypasses the
+# whole cheap-skip.
+_ROOKIE_DRAFT_WINDOW_START = (4, 1)     # Apr 1, UTC, inclusive
+_ROOKIE_DRAFT_WINDOW_END   = (9, 15)    # Sep 15, UTC, inclusive
+_DRAFT_STATUS_OFFSEASON_NOT_DRAFTED_TTL = 24 * 3600
 # Per-tick refresh budget for the hourly sweep. Each refresh costs up to
 # three serial platform reads, so an unbounded sweep would turn a cron
 # request into a multi-minute job as the league count grows. The queue is
@@ -15808,19 +15899,32 @@ _DRAFT_STATUS_DEFAULT_TTL = 1 * 3600
 _DRAFT_STATUS_SWEEP_BUDGET = 50
 
 
+def _in_rookie_draft_window(now: datetime | None = None) -> bool:
+    """True when rookie drafts can plausibly be happening (see the window
+    constants above). Month/day only — the window repeats every year."""
+    now = now or datetime.now(timezone.utc)
+    return (_ROOKIE_DRAFT_WINDOW_START
+            <= (now.month, now.day)
+            <= _ROOKIE_DRAFT_WINDOW_END)
+
+
 def _draft_status_is_fresh(ctx: dict | None, now: datetime | None = None) -> bool:
     """True when the cached verdict is young enough to skip a re-check."""
     if not ctx or not ctx.get("checked_at") or not ctx.get("status"):
         return False
-    ttl = _DRAFT_STATUS_TTL_SECONDS.get(ctx.get("status"),
-                                        _DRAFT_STATUS_DEFAULT_TTL)
+    now = now or datetime.now(timezone.utc)
+    status = ctx.get("status")
+    ttl = _DRAFT_STATUS_TTL_SECONDS.get(status, _DRAFT_STATUS_DEFAULT_TTL)
+    # Season gate — outside the rookie-draft window an undrafted league
+    # cannot flip, so it is re-probed daily instead of every 3 h.
+    if status == "not_drafted" and not _in_rookie_draft_window(now):
+        ttl = _DRAFT_STATUS_OFFSEASON_NOT_DRAFTED_TTL
     try:
         checked = datetime.fromisoformat(ctx["checked_at"])
     except (TypeError, ValueError):
         return False
     if checked.tzinfo is None:
         checked = checked.replace(tzinfo=timezone.utc)
-    now = now or datetime.now(timezone.utc)
     return (now - checked).total_seconds() < ttl
 
 
@@ -20926,19 +21030,25 @@ def _sweep_fetch_teams(lg: dict) -> tuple[list[dict] | None, str | None]:
     return None, f"unsupported_platform_{platform}"
 
 
-def _run_roster_snapshot_sweep(now: datetime, budget: int) -> dict:
+def _run_roster_snapshot_sweep(now: datetime, budget: int,
+                               active_within_days: int | None =
+                               ACTIVE_LEAGUE_WINDOW_DAYS) -> dict:
     """Writer B's body — runs INSIDE the daemon thread. Stalest-first over
-    every stored league, skipping any that already holds a 'weekly' row
-    for the current period (that row is the per-week marker; re-runs after
-    the >= gate cost nothing). One fetch + one transaction per league;
+    every ACTIVE stored league, skipping any that already holds a 'weekly'
+    row for the current period (that row is the per-week marker; re-runs
+    after the >= gate cost nothing). One fetch + one transaction per league;
     per-league fetch ms logged from day one — that log is what sets the
-    budget later, not the thread."""
+    budget later, not the thread.
+
+    `active_within_days=None` sweeps every league regardless of activity —
+    the manual /api/cron/roster-snapshot lever passes it."""
     from . import roster_history as _rh
     period = _rh.iso_period_key(now)
     stats: dict = {"period_key": period, "eligible": 0, "swept": 0,
                    "skipped_done": 0, "deferred": 0, "errors": 0,
                    "skips": {}}
-    leagues = load_history_sweep_leagues(period)
+    leagues = load_history_sweep_leagues(period,
+                                         active_within_days=active_within_days)
     processed = 0
     for lg in leagues:
         if lg.get("has_current_weekly"):
@@ -20974,10 +21084,12 @@ def _run_roster_snapshot_sweep(now: datetime, budget: int) -> dict:
     return stats
 
 
-def _start_roster_snapshot_daemon(now: datetime, budget: int) -> None:
+def _start_roster_snapshot_daemon(now: datetime, budget: int,
+                                  active_within_days: int | None =
+                                  ACTIVE_LEAGUE_WINDOW_DAYS) -> None:
     def _body():
         try:
-            stats = _run_roster_snapshot_sweep(now, budget)
+            stats = _run_roster_snapshot_sweep(now, budget, active_within_days)
             log.info("roster-sweep done: %s", stats)
         except Exception:
             log.exception("roster-snapshot sweep crashed")
@@ -21089,13 +21201,17 @@ def cron_roster_snapshot():
     than a code change. Deliberately NO weekday gate — a manual invocation
     IS the operator overriding the calendar. Same daemon + budget as the
     daily-tick path; the existing 'weekly' row per period keeps a forced
-    re-run idempotent."""
+    re-run idempotent. Deliberately NO active-league filter either, for the
+    same reason there is no weekday gate: a manual invocation IS the operator
+    overriding the defaults, so this reaches dormant leagues the scheduled
+    daily-tick path now skips."""
     _require_cron_auth()
     from . import roster_history as _rh
     if not is_enabled("market.roster_history"):
         return jsonify({"ok": False, "disabled": True})
     now = datetime.now(timezone.utc)
-    _start_roster_snapshot_daemon(now, _ROSTER_SNAPSHOT_SWEEP_BUDGET)
+    _start_roster_snapshot_daemon(now, _ROSTER_SNAPSHOT_SWEEP_BUDGET,
+                                  active_within_days=None)
     return jsonify({"ok": True, "started": True,
                     "period_key": _rh.iso_period_key(now)})
 
@@ -21177,10 +21293,14 @@ def cron_hourly_tick():
     # draft that completes between sessions would otherwise go unnoticed.
     # The per-status TTLs (_DRAFT_STATUS_TTL_SECONDS) do the real filtering:
     # `not_drafted` leagues — the ones that can still flip — are re-probed
-    # every 3 h, `drafted` ones (which never un-draft inside a season) every
-    # 12 h. Bounded by _DRAFT_STATUS_SWEEP_BUDGET per tick (the queue is
-    # stalest-first, so this rotates rather than starves). Failure-isolated
-    # like the snapshot guard above.
+    # every 3 h INSIDE the rookie-draft window and daily outside it
+    # (_in_rookie_draft_window), `drafted` ones (which never un-draft inside a
+    # season) every 12 h. The queue itself is now limited to leagues with
+    # activity in the last ACTIVE_LEAGUE_WINDOW_DAYS days, so a league nobody
+    # opens any more stops costing platform reads. Bounded by
+    # _DRAFT_STATUS_SWEEP_BUDGET per tick (the queue is stalest-first, so this
+    # rotates rather than starves). Failure-isolated like the snapshot guard
+    # above.
     draft_status_checked = 0
     try:
         for _lid in load_league_ids_for_draft_status_refresh():
