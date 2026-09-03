@@ -10,14 +10,14 @@
 
 ## 2026-09-03 — #413 Sleeper pick-send SHIPPED (D-176, v1.16.15); the parallel #414 build was superseded by D-175 and NOT shipped
 
-**Where:** `ship/2026-09-02-fb413` cut from `main` @ `c7e75666`, merged with `feat/fb413-sleeper-send-draft-picks` @ `d49611be` (clean), version 1.16.15 — see the PR/merge sha in CHANGELOG once landed. The session branch `claude/weekly-feedback-review-5943dd` (worktree `unruffled-meitner-3596cb`) and `feat/fb414-lopsided-one-for-one` @ `8c165533` are the unshipped parallel #414 build — ledger + delete both after this lands (`docs/recovery/2026-09-02-fb413-build-qa-sweep.md` carries the rest).
+**Where:** `main` @ `5c83e8cd` (PR [#270](https://github.com/mattmurf77/fantasy-trade-finder/pull/270), squash, CI ×4 green). Render deploy `dep-dacf8l6q1p3s73ek9ef0` **live** 2026-09-03T04:16Z. EAS build **144** / v1.16.15 queued with auto-submit (submission `b4763913`). Feedback #413 and #414 → `fixed`. All session refs ledgered and deleted (`docs/recovery/2026-09-03-fb413-ship-sweep.md`); the hosting worktree `.claude/worktrees/unruffled-meitner-3596cb` cannot remove itself — `git worktree remove` it from the main checkout.
 
 **Why #414 was dropped at the door:** main moved 9 commits during the run; the other session read the same prod card (`model_arm current`, gap 1,396 packaged) and shipped D-175 — `sweetener_gap_frac` as a relative BAND (`max(threshold, frac×max)`) plus `sweetener_best_effort`, with the threshold row lowered to 750 live, measured on the harness corpus. This session's build used the SAME knob name with the OPPOSITE semantics (`min(threshold, frac×max)`, a tightening) and a two-tier accept — a textual conflict in five engine files and a product conflict on the live knob. Main's version is live and corpus-measured; ours is history. Comparison in the 2026-09-03 session summary and `docs/feedback/items/414-lopsided-one-for-one/status.md`.
 
 **Owed:**
-1. **Render deploy of #413** fixes every fielded build (1.16.12–1.16.14) at once — verify a pick-bearing send no longer 502s; then the **EAS build** for the alert copy (`eas build --platform ios --profile production --auto-submit`; verify the submission by STATUS).
+1. **Confirm EAS build 144 finished and submission `b4763913` reached FINISHED** (`eas build:view ceffdbe7-96c1-473d-9b5c-809ddd05d5fe`; submission status via the Expo GraphQL as in the 2026-08-30 lesson). Render is already live.
 2. **Operator TestFlight checklist, 7 steps** (`docs/feedback/items/413-sleeper-send-draft-picks/prd.md` §10) — **TF-3 (give an ACQUIRED pick) closes Q-037**; "not run" is a legal logged outcome. Log in TEST_LEDGER.
-3. Feedback DB: #413 and #414 → `fixed` (done at merge if the push succeeded; else `python3 .claude/skills/feedback/scripts/fetch_feedback.py set <id> fixed`).
+3. Feedback DB: #413 and #414 are `fixed` (set 2026-09-03 after the merge).
 4. **G-8 follow-up** (NEXT): add `avoid_ok` to `_gap_extra_ok` on v3/v2 in `close_value_gap`'s callers — main's D-175 pass can still hand back an avoided-position equalizer (flag `trade.avoid_positions` is dark, so no user impact today); the test design is in the superseded folder's `test_gap_sweetener_frac.py` (`test_v3_gap_pass_never_uses_an_avoided_position_as_equalizer`).
 
 **Blocking:** nothing. **Rollback:** #413 = code revert (no flag).

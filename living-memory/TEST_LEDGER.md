@@ -11,6 +11,17 @@
 
 ---
 
+## 2026-09-03 — #413 SHIPPED: PR #270 squash → `main` @ `5c83e8cd`, CI ×4 green, Render live, EAS build 144 / v1.16.15 submitted
+
+Ship branch `ship/2026-09-02-fb413` @ `c6c95e07` = `main` @ `c7e75666` + `feat/fb413-sleeper-send-draft-picks` @ `d49611be` (clean merge) + the write-back with renumbered ids + version bump. Tree byte-identical to the squash (`git diff origin/main ship/…` empty).
+
+- **Local, ship tree:** `pytest backend/tests` **4585 passed / 1 skipped** (fresh DB; main's own baseline had grown with D-172/D-174/D-175's suites — the #413 delta is still +20) · `npx tsc --noEmit` exit 0 · **89/89** `check-*.js` · `testid-lint OK` · `test_app_version_consistency` at 1.16.15.
+- **CI on `c6c95e07` (PR [#270](https://github.com/mattmurf77/fantasy-trade-finder/pull/270)):** backend-tests · mobile-typecheck · maestro-testid-lint · web-structure — **all pass**; `mergeStateStatus CLEAN`.
+- **Deploy:** Render `dep-dacf8l6q1p3s73ek9ef0` for `5c83e8cd` **live** at 2026-09-03T04:16:38Z; `GET /api/feature-flags` 200. Every fielded build (1.16.12–1.16.14) now gets the server half: a pick-bearing send no longer 502s, and a refusal reads its reason.
+- **Mobile:** EAS build **144** / v1.16.15 (`ceffdbe7`), `--auto-submit` scheduled (submission `b4763913`). Verify the submission by STATUS (2026-08-30 lesson), not the CLI's last line.
+- **Not shipped:** the parallel #414 build (`feat/fb414-lopsided-one-for-one` @ `8c165533`, 4512/1, dual-QA green) — superseded by D-175, which was live before this ship; its evidence stays in the 2026-09-02b entry below and the item folder.
+- **Owed:** the operator's **7-step #413 TestFlight checklist** on build 144 (PRD §10) — TF-3 closes [Q-037](OPEN_QUESTIONS.md); log outcomes here.
+
 ## 2026-09-02 — feedback #413 Sleeper pick-send fix: built, dual-QA green, shipped 2026-09-02 (see the merged-tree entry above)
 
 Branch `feat/fb413-sleeper-send-draft-picks` @ `d49611be`, cut from the session spec commit `ad5adafa` (main @ `ce3f443c`). Full gates, no waivers ([scope](../docs/feedback/items/413-sleeper-send-draft-picks/scope.md)). Backend agent `b4aabcc3`/`31e8d590`/`b938642b`, orchestrator `51794a35` (ADR-010 guard sanction), mobile `8e4e1648`, post-QA copy fix `d49611be`.
@@ -3547,6 +3558,7 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-09-03 — #413 SHIPPED: PR #270 squash → `main` @ `5c83e8cd`, CI ×4 green, Render live, EAS build 144 / v1.16.15 submitted](#2026-09-03--413-shipped-pr-270-squash--main--5c83e8cd-ci-4-green-render-live-eas-build-144--v11615-submitted)
 - [2026-09-02 — feedback #413 Sleeper pick-send fix: built, dual-QA green, shipped 2026-09-02 (see the merged-tree entry above)](#2026-09-02--feedback-413-sleeper-pick-send-fix-built-dual-qa-green-shipped-2026-09-02-see-the-merged-tree-entry-above)
 - [2026-08-28d — IAP enablement code half (runbook 6–7): webhook delta + RevenueCat paywall — full gates, ALL DARK](#2026-08-28d--iap-enablement-code-half-runbook-67-webhook-delta--revenuecat-paywall--full-gates-all-dark)
 - [2026-08-28c — v1.16.9 (EAS build 135) BUILT + SUBMITTED to TestFlight; trade.shop_asset LIT in prod](#2026-08-28c--v1169-eas-build-135-built--submitted-to-testflight-tradeshop_asset-lit-in-prod)
