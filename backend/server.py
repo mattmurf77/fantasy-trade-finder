@@ -18794,10 +18794,11 @@ def sleeper_players():
         return jsonify({"error": "internal_error"}), 500
 
 
-# Mobile callers only want the side-effect (server-side cache hydration);
-# the full /api/sleeper/players payload is ~4.8MB and discarded on the floor.
-# This variant returns only {ok, count} so the warm hop is a few hundred bytes.
-# Web client keeps /api/sleeper/players because it consumes the body.
+# Mobile AND web callers only want the side-effect (server-side cache
+# hydration); the full /api/sleeper/players payload is ~4.8MB and discarded on
+# the floor. This variant returns only {ok, count} so the warm hop is a few
+# hundred bytes. The web client checked only `res.ok` too, so it now calls
+# /warm as well; the raw route stays for external/legacy callers.
 @app.route("/api/sleeper/players/warm")
 def sleeper_players_warm():
     try:

@@ -20,7 +20,13 @@ import { S as GUIDE } from '../components/analystScript';
 import { getLeagues } from '../api/sleeper';
 import { getEspnLeagues } from '../api/espn';
 import { getPlatformLeagues, LinkPlatform } from '../api/platformLink';
-import { buildSessionInitBody, submitSessionInit, type LinkSleeperResponse } from '../api/auth';
+import {
+  buildSessionInitBody,
+  submitSessionInit,
+  type LinkSleeperResponse,
+  type SessionInitSeed,
+} from '../api/auth';
+import { seedLeagueSessionCaches } from '../state/queryClient';
 import { maybePregenTrades } from '../api/tradePregen';
 import { track } from '../api/events';
 import EspnLinkSheet from '../components/EspnLinkSheet';
@@ -432,7 +438,12 @@ export default function LeaguePickerScreen({
       // Phase 1 (~2-3s): fetch rosters + users from Sleeper and build the
       // session_init payload. This is the "data-gather" leg — fast enough
       // that we block on it so we can surface Sleeper errors inline.
-      const body = await buildSessionInitBody(user, { league_id: lg.league_id, name: lg.name });
+      // `seed` collects the rosters + users phase 1 fetches, so the tabs we
+      // are about to navigate into read them from cache instead of asking
+      // Sleeper for the same two payloads again (state/queryClient).
+      const seed: SessionInitSeed = {};
+      const body = await buildSessionInitBody(user, { league_id: lg.league_id, name: lg.name }, seed);
+      seedLeagueSessionCaches(lg.league_id, seed);
 
       // Persist the league so RootNav gates to 'Main' immediately and the
       // user sees their tabs while the backend is still processing.
