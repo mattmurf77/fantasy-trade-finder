@@ -331,16 +331,33 @@ console.log('check-results-push:');
 //     FIRST — anchored and model cards can never share one deck;
 //   • the jobless fair sweep has an in-flight flag, because neither
 //     `generateMutation.isPending` nor `job.status` is true while it runs.
+//
+// QA round 1 (2026-09-03) widened three of these and added two:
+//   • the CTA is hidden for the WHOLE anchored lifecycle (B-5) — the sweep
+//     window included — and the in-progress card fills that second (8, 8r);
+//   • the deck-done card quotes a control that renders on THIS page (B-1,
+//     the #316 rule) (8s);
+//   • EVERY epoch bump disarms the in-flight flag, not just the reset (B-2,
+//     the QuickSet-regen bump bypasses the reset on purpose) (8t);
+//   • the anchored page's failure retry re-runs the ANCHORED search (B-3)
+//     (8u);
+//   • the fair-deck reset in handleFindTrades stays CONDITIONAL — a second,
+//     unconditional one would make model "Find more trades" replace instead
+//     of append (QA-A F-1) (8v).
 // ═══════════════════════════════════════════════════════════════════════
 {
   const flat = tradesCode.replace(/[ \t]+/g, ' ');
 
   // (a) the CTA is withheld on an ANCHORED pushed deck — both arms, one
   //     derivation, so the legacy and consolidated copies cannot drift.
-  assert(/const findCtaHiddenForAnchoredDeck = isResultsPushed && fairDeck;/.test(trades)
+  assert(/const findCtaHiddenForAnchoredDeck =\s*isResultsPushed && \(fairDeck \|\| fairSweepPending\);/
+      .test(tradesCode)
     && count(tradesCode, /const findCtaHiddenForAnchoredDeck =/g) === 1,
-    '8. ONE derivation of the anchored-deck CTA suppression (isResultsPushed && fairDeck)',
-    'a per-arm predicate is how the two copies of this button drift apart');
+    '8. ONE derivation of the anchored-deck CTA suppression, over the WHOLE anchored '
+      + 'lifecycle (isResultsPushed && (fairDeck || fairSweepPending))',
+    'a per-arm predicate is how the two copies of this button drift apart; and dropping '
+    + 'the fairSweepPending disjunct (QA B-5) puts a greyed "Find a Trade" back under '
+    + 'the card for the second the sweep takes — an invitation the page cannot honor');
   const gated = count(flat,
     /\{canvasHost !== 'flag' && !findCtaHiddenForAnchoredDeck \? \(\n?\s*<Button/g);
   assert(gated === 2,
@@ -402,10 +419,14 @@ console.log('check-results-push:');
   // (d) the jobless sweep's in-flight flag, owned by the sweep.
   const rfp = functionNamed(host, 'runFairPackages');
   const rfpText = rfp ? stripComments(rfp.getText()) : '';
-  assert(/const epoch = deckEpochRef\.current;\s*setFairSweepPending\(true\);/.test(rfpText),
-    '8j. runFairPackages marks itself in flight at ENTRY, beside the epoch capture',
+  assert(/if \(!leagueId\) return;\s*const epoch = deckEpochRef\.current;\s*setFairSweepPending\(true\);/
+      .test(rfpText),
+    '8j. runFairPackages marks itself in flight at ENTRY — after the leagueId early '
+      + 'return, beside the epoch capture',
     'without it neither generateMutation.isPending nor job.status is true during the sweep '
-    + '— every Find-a-Trade control stays live for the second it takes');
+    + '— every Find-a-Trade control stays live for the second it takes. Arming ABOVE the '
+    + 'early return (QA-A F-2) strands the flag true with no sweep to clear it: no request '
+    + 'was made, so neither exit runs, and every control stays disabled until a reset');
   assert(/setFairDeck\(true\);\s*setFairSweepPending\(false\);/.test(rfpText),
     '8k. …clears it on the success exit (after the #330 epoch guard)');
   assert(/setFairDeck\(false\);\s*setFairSweepPending\(false\);/.test(rfpText),
@@ -433,6 +454,68 @@ console.log('check-results-push:');
   // only kill switch for this whole surface.
   assert(!/fairSweepPending|findCtaHiddenForAnchoredDeck/.test(readRoot('config/features.json')),
     '8q. #417 introduced no feature flag — calc.results_push remains the kill switch');
+
+  // ── QA round 1 (2026-09-03) ────────────────────────────────────────────
+  const squash = tradesCode.replace(/\s+/g, ' ');
+
+  // (g) B-5 — the second the CTA is now hidden for is NARRATED, not blank.
+  //     Without this the pushed page falls through the whole deck-tree
+  //     ternary to the never-searched card and tells a user who just
+  //     searched to search.
+  assert(/generateMutation\.isPending \|\| job\?\.status === 'running' \|\| \(isResultsPushed && fairSweepPending\) \? \(/
+      .test(squash)
+    && /testID="trades\.empty-text"/.test(tradesCode),
+    '8r. the pushed page renders the in-progress card while the jobless sweep runs',
+    'the fair sweep has no job, so both signals above it are false — the deck tree '
+    + 'falls through to \'Hit "Find a Trade" to start\', which is now not even a '
+    + 'reachable instruction (the CTA is hidden). The never-searched card must SURVIVE '
+    + 'for every other host, hence the second half');
+
+  // (h) B-1 — #316: the deck-done card quotes a control, so on this page it
+  //     must quote one that renders here. Both legacy sentences byte-identical.
+  const anchoredDone = [
+    'Fresh ideas land every week — or tap Clear on the receipt to search all trades.',
+    'Fresh ideas land every week — or tap Search all trades to widen the search.',
+  ];
+  assert(/\{findCtaHiddenForAnchoredDeck \? inlineAnchorShown \?/.test(squash)
+    && anchoredDone.every((c) => trades.includes(c))
+    && anchoredDone.every((c) => !/Find a Trade|Find more trades/.test(c))
+    && trades.includes('Fresh ideas land every week — or tap Find a Trade to search again now.')
+    && trades.includes('Fresh ideas land every week — or tap Find more trades to search again now.'),
+    '8s. the deck-done card names a control that RENDERS on the anchored pushed deck',
+    'the receipt\'s Clear while the receipt is up, this card\'s own "Search all trades" '
+    + 'when there is none — never the CTA #417 hides (#316: the copy follows whichever '
+    + 'control actually renders). The landing and legacy sentences stay byte-identical');
+
+  // (i) B-2 — the in-flight flag's invariant is "every epoch bump disarms".
+  //     One of the two bump sites bypasses resetDeckForNewTargets on purpose.
+  const bumps = [];
+  for (let i = tradesCode.indexOf('deckEpochRef.current += 1;'); i > -1;
+       i = tradesCode.indexOf('deckEpochRef.current += 1;', i + 1)) bumps.push(i);
+  assert(bumps.length === 2
+    && bumps.every((i) => /setFairSweepPending\(false\)/.test(tradesCode.slice(i, i + 400))),
+    '8t. EVERY epoch bump disarms the in-flight flag — both sites, not just the reset',
+    `saw ${bumps.length} bump site(s); a bump that skips the disarm supersedes the sweep, `
+    + 'which then returns at its epoch guard WITHOUT clearing the flag — both CTA arms '
+    + 'stay disabled for the life of the page (QA B-2: the QuickSet-regen focus effect)');
+
+  // (j) B-3 — the anchored page's failure retry re-runs the ANCHORED search.
+  const retryAt = squash.indexOf('testID="trades.deck-error.retry"');
+  const retryBtn = retryAt > -1 ? squash.slice(retryAt, retryAt + 400) : '';
+  assert(/onPress=\{\(\) => isResultsPushed && inlineAnchor \? void runFairPackages\(\{ giveIds: inlineAnchor\.giveIds, receiveIds: inlineAnchor\.receiveIds, \}\) : handleFindTrades\('deck_error_retry'\) \}/
+      .test(retryBtn),
+    '8u. a failed sweep\'s "Try again" retries the ANCHORED search on the pushed page',
+    'handleFindTrades runs the UNANCHORED model job: the user asked for trades around '
+    + 'his player, the network failed, and the retry would quietly answer a different '
+    + 'question. Every other host keeps the model retry (the fallback arm)');
+
+  // (k) QA-A F-1 — the fair-deck reset stays CONDITIONAL. An unconditional
+  //     second one passes 8d/8e and silently breaks model "Find more trades".
+  assert(count(hftText, /resetDeckForNewTargets\(/g) === 1,
+    '8v. …and handleFindTrades resets EXACTLY ONCE, behind the `if (fairDeck)` guard',
+    'a second, unconditional reset makes every "Find more trades" tap on a MODEL deck '
+    + 'REPLACE the deck instead of appending to it — the one behavior R-2 promises not '
+    + 'to touch, and invisible to 8d/8e');
 }
 
 console.log(failures === 0

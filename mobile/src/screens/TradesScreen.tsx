@@ -770,9 +770,14 @@ export default function TradesScreen({ navigation, route }: any) {
   // the second the sweep takes. The operator's report is that window: a tap
   // ~1s after the push dispatched the UNANCHORED model job, whose cards then
   // merged into the fair deck. Owned by the sweep — set at its entry, cleared
-  // at both of its epoch-guarded exits — and cleared by
-  // resetDeckForNewTargets so a SUPERSEDED sweep (which must not flip it,
-  // #330 R-10) can never strand a control disabled.
+  // at both of its epoch-guarded exits — and cleared by EVERY epoch bump, so
+  // a SUPERSEDED sweep (which returns at its guard BEFORE both exits and must
+  // not flip the flag, #330 R-10) can never strand a control disabled. There
+  // are exactly two bump sites and both disarm: `resetDeckForNewTargets` and
+  // the QuickSet-regen focus effect's inline bump. The second was added
+  // 2026-09-03 (QA round 1, B-2): that site bypasses the reset on purpose and
+  // had bypassed the disarm with it, which left both CTA arms disabled for the
+  // life of the page. Pinned by check-results-push 8t.
   const [fairSweepPending, setFairSweepPending] = useState(false);
   // D-158 — the anchored deck's FILTER RECEIPT. The operator's framing: an
   // anchored Find a Trade "becomes the same treatment as the existing filters
@@ -1681,9 +1686,13 @@ export default function TradesScreen({ navigation, route }: any) {
   // regression in WHERE existing controls render, so the question is "do
   // the existing events still fire from the pinned surface", and a new name
   // could not answer that (it would have no pre-fix baseline).
-  // Two find_trades_tapped emitters exist below (:768 handleFindTrades and
-  // the legacy `!consolidateOn` arm's inline track) — both read THIS const,
-  // so the two arms can never disagree about the mode.
+  // THREE find_trades_tapped emitters exist below — handleFindTrades (the
+  // shared manual entry point), the #330 choke point's model arm, and the
+  // fair sweep — and all three read THIS const, so no two surfaces can
+  // disagree about the mode. FB-417 (2026-09-03) deleted a fourth: the legacy
+  // `!consolidateOn` CTA arm's own inline track, whose row is now
+  // handleFindTrades's no-`source` branch (same name, same `{mode}` shape).
+  // Count pinned by check-analytics-297-302 (#298 emitter census).
   const deckMode: 'single_pin' | 'deck' = singlePinFeatured ? 'single_pin' : 'deck';
   const assetIdeasQuery = useQuery({
     queryKey: [
@@ -1986,7 +1995,11 @@ export default function TradesScreen({ navigation, route }: any) {
   // DISPATCH CENSUS — every mutate site in this file, all routed through
   // this helper (check-canvas-results §12 pins `generateMutation.mutate(`
   // to exactly ONE occurrence — the call below — so a future site cannot
-  // bypass silently):
+  // bypass silently). SEVEN routed sites; with this definition that is the
+  // 8 `dispatchGenerate(` occurrences the census suites count. Re-keyed
+  // 2026-09-03 by FB-417: the legacy `!consolidateOn` CTA arm was the
+  // eighth routed site and now calls handleFindTrades (site 1) instead, so
+  // it dispatches nothing of its own:
   //   1. handleFindTrades              — manual CTA, prefs-changed strip,
   //                                      browse retry / search-all / unpin
   //   2. generateMutation.onError      — the auto-start's silent retry
@@ -2001,9 +2014,6 @@ export default function TradesScreen({ navigation, route }: any) {
   //   7. QuickSet regen focus effect   — board-change forced regen (its
   //                                      inline clear kills the old session
   //                                      first — see the effect)
-  //   8. legacy !consolidateOn CTA     — renders only when
-  //                                      canvasHost !== 'flag', so its live
-  //                                      branch is dead; routed anyway
   function dispatchGenerate(
     vars: { auto?: boolean; force?: boolean },
     mutateOpts?: Parameters<typeof generateMutation.mutate>[1],
@@ -4584,6 +4594,13 @@ export default function TradesScreen({ navigation, route }: any) {
       // Clear the guard and drop the job for the same reason every other
       // deck-invalidating path does — see resetDeckForNewTargets below.
       deckEpochRef.current += 1;
+      // FB-417 (2026-09-03, QA round 1 B-2) — the bump above supersedes any
+      // fair sweep in flight, and that sweep returns at its epoch guard
+      // WITHOUT disarming (by design, #330 R-10). resetDeckForNewTargets
+      // clears the flag for exactly that reason; this inline bump bypasses
+      // the reset, so it has to clear it too — otherwise both CTA arms stay
+      // disabled for the life of the page. Every bump site disarms (8t).
+      setFairSweepPending(false);
       lastDispositionedRef.current = null; // regenerated decks can reuse ids
       // #402 QA B-C2 — this inline clear bypasses resetDeckForNewTargets on
       // purpose (it must not clear pins/lane state), so it kills the browse
@@ -5817,7 +5834,14 @@ export default function TradesScreen({ navigation, route }: any) {
   // aside only while the receipt is up. Read by BOTH arms of the CTA ternary
   // so the two can never drift. Landing, team/player modes, model decks on the
   // pushed page and flag-off are all `false` here ⇒ byte-identical.
-  const findCtaHiddenForAnchoredDeck = isResultsPushed && fairDeck;
+  // QA round 1 (B-5/B-1, 2026-09-03) — `fairSweepPending` joins `fairDeck` so
+  // the gate covers the WHOLE anchored lifecycle, not just the part after the
+  // cards land. Between the push and the sweep's answer `fairDeck` is still
+  // false, so the button used to render greyed under a card telling the user
+  // to tap it, then vanish a second later — an invitation the page could not
+  // honor and a visible reflow. Hidden for that second instead; the in-flight
+  // card below (`Looking for trades…`) is what narrates the wait.
+  const findCtaHiddenForAnchoredDeck = isResultsPushed && (fairDeck || fairSweepPending);
 
   // ── #402 canvas-results — derived gates ─────────────────────────────────
   // `canvasResultsLive`: the feature is on AND this render is the flag-hosted
@@ -8506,10 +8530,21 @@ export default function TradesScreen({ navigation, route }: any) {
             // to re-kick (autoGenRef.current !== 'idle'). Before this guard a
             // first-run user whose polling died sat on this skeleton FOREVER.
             <SkeletonTradeCard />
-          ) : generateMutation.isPending || job?.status === 'running' ? (
+          ) : generateMutation.isPending ||
+            job?.status === 'running' ||
+            (isResultsPushed && fairSweepPending) ? (
             // Job is running but no cards have arrived yet (first ~3s of
             // the first opponent). Show a placeholder so the deck doesn't
             // look broken — the progress strip above narrates state.
+            //
+            // FB-417 (2026-09-03, QA round 1 B-5) — the third disjunct: the
+            // fair sweep is a single request with NO job, so neither signal
+            // above is true while it runs and the pushed page fell all the
+            // way through to the never-searched 'Hit "Find a Trade" to start'
+            // card — telling a user who had just searched to search, for the
+            // second the sweep takes, next to a button #417 had disabled and
+            // now hides. Scoped to the pushed instance: the in-canvas host
+            // has its own fair in-flight card and the landing is unchanged.
             <Card>
               <View style={styles.emptyInner}>
                 <ActivityIndicator color={ice.base} />
@@ -8541,9 +8576,23 @@ export default function TradesScreen({ navigation, route }: any) {
                     T-2 (ruling 2026-08-28): with the page bar gone on the
                     merged view, the quoted control is the canvas action
                     row's cell, whose label is a fixed "Find a Trade" —
-                    the copy follows whichever control actually renders. */}
+                    the copy follows whichever control actually renders.
+                    FB-417 (2026-09-03, QA round 1 B-1): the same rule, third
+                    branch. On the anchored pushed deck #417 hides the CTA
+                    both sentences below quote, so the honest exit is
+                    whichever replacement renders — the receipt's Clear (it IS
+                    handleSearchAllTrades) while the receipt is up, and this
+                    card's own "Search all trades" when there is none (a push
+                    whose anchorLabel is null). Both live under
+                    `calc.merged_layout`, a documented prerequisite of
+                    `calc.results_push` (see its features.json comment), so
+                    the quoted control is always on the page. */}
                 <Text style={styles.emptyBody}>
-                  {canvasHost === 'flag'
+                  {findCtaHiddenForAnchoredDeck
+                    ? inlineAnchorShown
+                      ? 'Fresh ideas land every week — or tap Clear on the receipt to search all trades.'
+                      : 'Fresh ideas land every week — or tap Search all trades to widen the search.'
+                    : canvasHost === 'flag'
                     ? 'Fresh ideas land every week — or tap Find a Trade to search again now.'
                     : 'Fresh ideas land every week — or tap Find more trades to search again now.'}
                 </Text>
@@ -8708,12 +8757,29 @@ export default function TradesScreen({ navigation, route }: any) {
               <View style={styles.emptyInner} testID="trades.deck-error">
                 <Text style={styles.deckErrorTitle}>Search failed</Text>
                 <Text style={styles.emptyBody}>{deckFailure.message}</Text>
+                {/* FB-417 (2026-09-03, QA round 1 B-3) — on the pushed
+                    ANCHORED page "Try again" retries the search that failed,
+                    which is the fair sweep around the anchor that rode the
+                    push param — not the unanchored model job. The failure
+                    exit cleared `fairDeck`, so the receipt is down and the
+                    page no longer CLAIMS the anchor; running the model here
+                    anyway would quietly answer a question the user did not
+                    ask. The in-canvas host already forked this way
+                    (`handleBrowseRetry`); the pushed page never did. Every
+                    other host keeps the model retry verbatim. */}
                 <Button
                   testID="trades.deck-error.retry"
                   label="Try again"
                   variant="secondary"
                   compact
-                  onPress={() => handleFindTrades('deck_error_retry')}
+                  onPress={() =>
+                    isResultsPushed && inlineAnchor
+                      ? void runFairPackages({
+                          giveIds: inlineAnchor.giveIds,
+                          receiveIds: inlineAnchor.receiveIds,
+                        })
+                      : handleFindTrades('deck_error_retry')
+                  }
                 />
               </View>
             </Card>

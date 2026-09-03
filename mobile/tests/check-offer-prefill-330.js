@@ -187,8 +187,8 @@ assert(
 );
 // Re-keyed 2026-08-29 (canvas-results QA round): every dispatch now routes
 // through the single dispatchGenerate helper (session lifecycle at every
-// dispatch — check-canvas-results §12 owns the 8-site census). The invariant
-// here is the same: no new dispatch site.
+// dispatch — check-canvas-results §12 owns the dispatch-site census). The
+// invariant here is the same: no new dispatch site.
 // Re-keyed 2026-09-03 (#417): the legacy `!consolidateOn` CTA arm routes
 // through handleFindTrades instead of dispatching itself, so the census drops
 // 8 routed → 7. The invariant is the same one and no weaker: no NEW site.

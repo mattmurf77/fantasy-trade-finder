@@ -49,7 +49,7 @@ window widths. Each is annotated in place with a dated `#417` note.
 | `check-inline-home.js` | `3c` `onFindATrade` wiring | Regex updated for the `&& !fairSweepPending` conjunct | The host gate is unchanged and still first |
 | `check-inline-home.js` | `3` / `11d` mount slice widths | `900` → `1800`, `1100` → `2000` chars | Mechanical: the mount's prop list grew a comment block and `onLikeTrade` / `hideFormatChips` fell outside the old windows. The assertions themselves are byte-identical |
 
-## 3. Sabotage table — every new assertion proven red, then restored
+## 3. Sabotage table — every new assertion proven red, then restored (build round)
 
 Harness: apply the sabotage to the working tree, run `node tests/check-results-push.js`, record
 which `8*` ids fail, restore the file, re-run and confirm zero failures. Every sabotage restored
@@ -91,3 +91,75 @@ absence of an #417 key in `config/features.json`) and are proven red by S7 and S
 | `bash mobile/scripts/testid-lint.sh` | `testid-lint OK` |
 
 `backend/tests` not run — no backend file was touched; CI covers it on push.
+
+## 5. QA round 1 resolution — 2026-09-03
+
+Both QA verdicts were **PASS**; this section is the resolution of the non-blocking findings
+they raised (qa-B B-1/B-2/B-3/B-5, qa-A F-1/F-2/F-3). No requirement was reopened; R-6 is new.
+Line numbers below are post-resolution.
+
+### 5.1 Source changes (`mobile/src/screens/TradesScreen.tsx`)
+
+| Line(s) | Change | Finding | Requirement |
+|---|---|---|---|
+| :768-780 | `fairSweepPending`'s declaration comment now claims what is true: cleared by **every** epoch bump, and it names the two bump sites | qa-B B-2 | R-3 |
+| :4596-4603 | The QuickSet-regen focus effect's inline `deckEpochRef.current += 1` gains `setFairSweepPending(false)` beside it. That site bypasses `resetDeckForNewTargets` on purpose (it must not clear pins/lane state) and had bypassed the disarm with it: a sweep superseded by it returns at its epoch guard without disarming, so both CTA arms stayed disabled for the life of the page | qa-B B-2 | R-3 |
+| :5836-5844 | `findCtaHiddenForAnchoredDeck = isResultsPushed && (fairDeck \|\| fairSweepPending)` — the gate now covers the whole anchored lifecycle, not just the part after the cards land | qa-B B-5 | R-1 |
+| :8533-8535 | The deck tree's in-progress branch gains `\|\| (isResultsPushed && fairSweepPending)`, so the pushed page shows "Looking for trades…" for the second the jobless sweep takes instead of falling through to `Hit "Find a Trade" to start` | qa-B B-5/B-1(b) | R-1 |
+| :8580-8598 | The deck-done card's body gains a third copy branch keyed on `findCtaHiddenForAnchoredDeck`: with the receipt up it names the receipt's **Clear** (which IS `handleSearchAllTrades`), without one (a push whose `anchorLabel` is null) it names this card's own **Search all trades**. The two pre-existing sentences are byte-identical | qa-B B-1(a), qa-A F-6 | R-1 |
+| :8763-8784 | The deck-failure card's "Try again" forks on `isResultsPushed && inlineAnchor` to `runFairPackages(inlineAnchor)`; every other host keeps `handleFindTrades('deck_error_retry')` verbatim | qa-B B-3 | **R-6** |
+| :1689-1695 | `deckMode`'s comment: the emitter census is 3, not "two below (… the legacy arm's inline track)" — that emitter was deleted by this change | qa-A F-3 | R-4 |
+| :1995-2006 | The `dispatchGenerate` DISPATCH CENSUS: the dead "8. legacy !consolidateOn CTA" row is gone and the header states SEVEN routed sites (8 `dispatchGenerate(` occurrences with the definition), re-keyed and dated | qa-A F-3 | R-2 |
+
+`mobile/tests/check-offer-prefill-330.js:190` — the prose "check-canvas-results §12 owns the
+8-site census" now reads "the dispatch-site census" (the number lives in the assertion below it,
+which was already re-keyed). Comment-only.
+
+**qa-A F-2** needed no source change: `setFairSweepPending(true)` was already **below**
+`if (!leagueId) return;`. The gap was in the guard — 8j's regex could not tell the two orders
+apart — and is closed by the re-anchor in 5.2.
+
+### 5.2 Guard changes (`mobile/tests/check-results-push.js` § 8)
+
+Two assertions changed, five added; every one proven red by a named sabotage and restored.
+Harness identical to §3 (apply, `node tests/check-results-push.js`, record the red ids, restore
+from a byte-compared backup). After the last restore the file is byte-identical to its pre-
+sabotage state and § 8 prints **28 lines / 23 distinct ids** (`8`, `8a`–`8v`; `8c` × 6).
+
+| # | Sabotage | Assertion | Red | Restored |
+|---|---|---|---|---|
+| S18 | derivation back to `isResultsPushed && fairDeck` (drops the B-5 disjunct) | `8` (CHANGED) | 8 | yes |
+| S19 | `runFairPackages` arms **above** `if (!leagueId) return;` | `8j` (CHANGED) | 8j | yes |
+| S20 | the in-progress branch loses `(isResultsPushed && fairSweepPending)` | `8r` (NEW) | 8r | yes |
+| S21 | the deck-done copy reverts to the two-branch version quoting the hidden CTA | `8s` (NEW) | 8s | yes |
+| S22 | the QuickSet-regen epoch bump stops disarming the flag | `8t` (NEW) | 8t | yes |
+| S23 | the deck-error retry goes back to the unanchored model job | `8u` (NEW) | 8u | yes |
+| S24 | a second, **unconditional** `resetDeckForNewTargets()` in `handleFindTrades` | `8v` (NEW) | 8v | yes |
+
+What each new id pins:
+
+- **8r** — the pushed page narrates the sweep (`Looking for trades…`) **and** the never-searched
+  `trades.empty-text` card still exists for every other host.
+- **8s** — the deck-done body names a control that renders here, neither anchored sentence
+  contains "Find a Trade"/"Find more trades", and both legacy sentences stay byte-identical
+  (#316: the copy follows whichever control actually renders).
+- **8t** — there are exactly **two** `deckEpochRef.current += 1` sites and **both** disarm
+  within 400 chars. A third bump site that skips the disarm fails it.
+- **8u** — the `trades.deck-error.retry` button's exact `onPress` fork (sliced from its testID,
+  so it cannot be satisfied by a different button).
+- **8v** — `count(handleFindTrades text, /resetDeckForNewTargets\(/g) === 1`. qa-A F-1's
+  sabotage (an extra unconditional reset, guarded line kept) passed all 32 suites before this.
+
+S24 reproduces qa-A's QA-A2; S19 reproduces qa-A's QA-A1b. Both are now red.
+
+### 5.3 Commands after the resolution (session tree, `mobile/`)
+
+| Command | Result |
+|---|---|
+| `npx tsc --noEmit` | clean, exit 0 |
+| `npm run test:results-push` | **75 assertions, all passed** (§8: 28 printed lines, 23 ids) |
+| every suite in `grep -l TradesScreen tests/check-*.js` | **32/32 exit 0** |
+| `bash scripts/testid-lint.sh` | `testid-lint OK` |
+
+`mobile/src/components/ShopOffersBody.tsx` and `mobile/tests/check-shop-deck.js` untouched
+(owned by #418).
