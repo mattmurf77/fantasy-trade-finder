@@ -763,6 +763,17 @@ export default function TradesScreen({ navigation, route }: any) {
   // the W5 unpin-retry is meaningless here and "Search all trades" takes its
   // place. Cleared by every path that starts or invalidates a model search.
   const [fairDeck, setFairDeck] = useState(false);
+  // FB-417 (2026-09-03) — the fair sweep is IN FLIGHT. `runFairPackages` is a
+  // single synchronous request with NO job, so the deck's two in-flight
+  // signals (`generateMutation.isPending`, `job?.status === 'running'`) are
+  // both false while it runs and every Find-a-Trade control stayed live for
+  // the second the sweep takes. The operator's report is that window: a tap
+  // ~1s after the push dispatched the UNANCHORED model job, whose cards then
+  // merged into the fair deck. Owned by the sweep — set at its entry, cleared
+  // at both of its epoch-guarded exits — and cleared by
+  // resetDeckForNewTargets so a SUPERSEDED sweep (which must not flip it,
+  // #330 R-10) can never strand a control disabled.
+  const [fairSweepPending, setFairSweepPending] = useState(false);
   // D-158 — the anchored deck's FILTER RECEIPT. The operator's framing: an
   // anchored Find a Trade "becomes the same treatment as the existing filters
   // from the outlook tab", so the anchor is shown as a receipt above the
@@ -1106,6 +1117,17 @@ export default function TradesScreen({ navigation, route }: any) {
     prefsChangedSinceGenerateRef.current = false;
     setShowPrefsChangedStrip(false);
     setPinIdeaResumed(false); // #317 — a new search's deck re-takes the slot
+    // FB-417 (2026-09-03) — a model dispatch that STARTS from a fair deck must
+    // never merge into it. `setFairDeck(false)` below drops the receipt but
+    // left the anchored cards in `deck`, and the streaming effect appends the
+    // model's cards to them; with fairness off `sortedDeck` then sorts every
+    // model card ABOVE the fair ones (fair cards carry `match_score: 0`), so
+    // the top card changes identity under the user. Only the full reset — new
+    // epoch, deck emptied, job dropped — keeps the two bases out of one deck.
+    // Pins are the user's targets and are deliberately NOT cleared here (a
+    // fair deck has none: the anchor rode the request body). NOT a fair deck ⇒
+    // untouched, so a "Find more trades" tap still APPENDS to a model deck.
+    if (fairDeck) resetDeckForNewTargets();
     setFairDeck(false); // #384 W6-B — this dispatch is the MODEL's, so the
                         // deck that lands is not a fair deck
     pendingScrollToDeckRef.current = true; // #276
@@ -2877,6 +2899,11 @@ export default function TradesScreen({ navigation, route }: any) {
     setJob(null);
     setFairDeck(false); // #384 W6-B — the next deck is the model's until a
                         // fair sweep says otherwise
+    // FB-417 — a reset supersedes any sweep in flight (this bumped the epoch,
+    // so that sweep will drop its own result and, being superseded, must not
+    // touch the flag). Clearing it here is what keeps the CTA and the canvas
+    // cell from staying disabled behind a sweep whose answer is now dead.
+    setFairSweepPending(false);
     setScopedEmpty(null); // #330 — a reset invalidates the scoped zero-result card
     setEdits({});
     setSwapTarget(null);
@@ -3519,6 +3546,10 @@ export default function TradesScreen({ navigation, route }: any) {
   async function runFairPackages(anchor: { giveIds: string[]; receiveIds: string[] }) {
     if (!leagueId) return;
     const epoch = deckEpochRef.current;
+    // FB-417 — the sweep's in-flight marker: this request is the only thing
+    // running, so nothing else can re-dispatch behind it (see the state's
+    // declaration). Cleared at BOTH exits below, after the epoch guard.
+    setFairSweepPending(true);
     setDeckFailure(null);
     setScopedEmpty(null);
     setSummaryDismissed(false);
@@ -3550,6 +3581,7 @@ export default function TradesScreen({ navigation, route }: any) {
       setDeckIdx(0);
       setJob(null);
       setFairDeck(true);
+      setFairSweepPending(false); // FB-417 — exit 1: the deck landed
     } catch (e: any) {
       if (deckEpochRef.current !== epoch) return;
       // The existing deck-failure copy, verbatim — a fair sweep that fails is
@@ -3559,6 +3591,7 @@ export default function TradesScreen({ navigation, route }: any) {
         message: readErrorCopy(e, DECK_FAIL_GENERIC),
       });
       setFairDeck(false);
+      setFairSweepPending(false); // FB-417 — exit 2: the sweep failed
     }
   }
 
@@ -5773,6 +5806,18 @@ export default function TradesScreen({ navigation, route }: any) {
   // the gate. `fairDeck` still guarantees the label cannot outlive its deck.
   const inlineAnchorShown =
     (canvasHost === 'flag' || isResultsPushed) && fairDeck && !!inlineAnchor;
+  // FB-417 (2026-09-03) — on the PUSHED results deck an ANCHORED deck does not
+  // render the page-level "Find a Trade" primary. That button dispatches the
+  // unanchored model job, and on a page the user reached by searching it reads
+  // as an invitation to search again — the operator took it ~1s after the push
+  // and got a deck that had stopped being about his player. The anchored
+  // deck's search controls are the receipt's Change / Clear
+  // (`trades.anchor-receipt.*` — Clear IS `handleSearchAllTrades`) and, at the
+  // end of the deck, "Back to calculator" plus the search-all exit that stands
+  // aside only while the receipt is up. Read by BOTH arms of the CTA ternary
+  // so the two can never drift. Landing, team/player modes, model decks on the
+  // pushed page and flag-off are all `false` here ⇒ byte-identical.
+  const findCtaHiddenForAnchoredDeck = isResultsPushed && fairDeck;
 
   // ── #402 canvas-results — derived gates ─────────────────────────────────
   // `canvasResultsLive`: the feature is on AND this render is the flag-hosted
@@ -7181,7 +7226,7 @@ export default function TradesScreen({ navigation, route }: any) {
               `trades.edit_full_sheet`; were that ever off with
               `calc.inline_home` on, this copy would render beside the hosted
               canvas. Flag off, `canvasHost` is never 'flag' — unchanged. */}
-          {canvasHost !== 'flag' ? (
+          {canvasHost !== 'flag' && !findCtaHiddenForAnchoredDeck ? (
           <Button
             variant="primary"
             testID="trades.find-btn"
@@ -7190,12 +7235,20 @@ export default function TradesScreen({ navigation, route }: any) {
                 ? 'Find more trades'
                 : 'Find a Trade'
             }
-            disabled={!leagueId || generateMutation.isPending || job?.status === 'running'}
-            onPress={() => {
-              track('find_trades_tapped', { mode: deckMode }, 'Trades');
-              setPinIdeaResumed(false); // #317 — parity with handleFindTrades
-              dispatchGenerate({});
-            }}
+            disabled={
+              !leagueId ||
+              generateMutation.isPending ||
+              job?.status === 'running' ||
+              fairSweepPending // FB-417 — the jobless sweep's own in-flight gate
+            }
+            // FB-417 (2026-09-03) — routed through the shared entry point
+            // instead of its own track + dispatch. The two arms are one
+            // ternary and had already drifted: this copy never cleared
+            // `fairDeck` (#384 W6-B) or the #257 nudge, so a tap here from an
+            // anchored deck merged model cards into it. `handleFindTrades()`
+            // with no `source` emits the IDENTICAL `{mode: deckMode}` row the
+            // inline track did — same event, same shape, one emitter fewer.
+            onPress={() => handleFindTrades()}
             style={styles.findBtn}
           />
           ) : null}
@@ -7387,7 +7440,7 @@ export default function TradesScreen({ navigation, route }: any) {
             quotes whichever control renders (see #316 note there). The
             progress strip below stays — it narrates the inline search too.
             Flag off, `canvasHost` is never 'flag' — byte-identical. */}
-        {canvasHost !== 'flag' ? (
+        {canvasHost !== 'flag' && !findCtaHiddenForAnchoredDeck ? (
         <Button
           variant="primary"
           testID="trades.find-btn"
@@ -7396,7 +7449,12 @@ export default function TradesScreen({ navigation, route }: any) {
               ? 'Find more trades'
               : 'Find a Trade'
           }
-          disabled={!leagueId || generateMutation.isPending || job?.status === 'running'}
+          disabled={
+            !leagueId ||
+            generateMutation.isPending ||
+            job?.status === 'running' ||
+            fairSweepPending // FB-417 — the jobless sweep's own in-flight gate
+          }
           onPress={() => handleFindTrades()}
           style={styles.findBtn}
         />
@@ -7599,8 +7657,16 @@ export default function TradesScreen({ navigation, route }: any) {
               opponentUserId={scopedOpponent ?? null}
               suggestions={deck}
               showSuggestionRail={canvasHost === 'experiment'}
+              // FB-417 — `disabled={!onFindATrade}` is the cell's own gate
+              // (InLeagueCalculator:1297), so withholding the handler while a
+              // fair sweep is in flight is what disables the double-tap. Under
+              // the push posture the landing never runs a sweep itself (D-171
+              // ruling 1), so this is only ever true on the in-place
+              // (`calc.canvas_results`) posture the kill switch restores.
               onFindATrade={
-                canvasHost === 'flag' ? handleInlineFindATrade : undefined
+                canvasHost === 'flag' && !fairSweepPending
+                  ? handleInlineFindATrade
+                  : undefined
               }
               onLikeTrade={
                 canvasHost === 'flag' ? handleInlineLikeTrade : undefined

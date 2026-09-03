@@ -272,6 +272,7 @@
 | 396 | flex-slot-label | planned | 2026-08-24 | G-C satellite, canonical `395-lineup-impact-superflex/` |
 | 397 | swipe-tour-placement | planned | 2026-08-24 | **canonical** G-B of the 2026-08-24 wave (#397/#398) — swipe tour beat moves above the trade chip strip (#398 supersedes #397) |
 | 398 | swipe-tour-top | planned | 2026-08-24 | G-B satellite (the operative placement ask), canonical `397-swipe-tour-placement/` |
+| 417 | pushed-deck-second-search | in-progress | 2026-09-03 | fast-track bug — the pushed anchored deck still rendered the unanchored `trades.find-btn`; a second tap merged model cards into the fair deck (`TradesScreen.tsx` legacy CTA arm → `dispatchGenerate`, no reset). Fixed on `feat/fb417-pushed-deck-research` (not pushed/merged): CTA hidden while `isResultsPushed && fairDeck`, `handleFindTrades` resets a fair deck before dispatching, new `fairSweepPending` double-tap guard. Guard: `check-results-push.js` §8, 17 sabotages |
 | 418 | shop-send-dismiss | planned | 2026-09-03 | fast-track bug — the shop tile leaves the pager after "Send this offer" (`ShopOffersBody.tsx` `handleLike` → `suppressed`); docs only, no branch yet |
 | — | 2026-07-26-adjustments-breakdown | shipped | 2026-07-26 | n/a |
 | — | 2026-07-26-asset-trade-ideas | shipped | 2026-07-26 | teardown-remediation / `trade.asset_ideas` ON |

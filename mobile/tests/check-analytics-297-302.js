@@ -257,10 +257,14 @@ assert(
 // ══ 3. #298 — a property on events that already fire, not a new name ══════
 
 const findTapped = trackPropKeys(tradesText, 'find_trades_tapped');
+// Re-keyed 2026-09-03 (#417): 4 → 3. The legacy `!consolidateOn` CTA arm no
+// longer emits for itself — it calls handleFindTrades(), whose no-`source`
+// branch sends the IDENTICAL `{mode: deckMode}` row (pinned below). One
+// emitter fewer, the same shapes; a NEW emitter still breaks this count.
 assert(
-  findTapped.length === 4,
+  findTapped.length === 3,
   '#298 all find_trades_tapped call sites are accounted for',
-  'expected 4 (handleFindTrades + the legacy !consolidateOn arm + the #330 '
+  'expected 3 (handleFindTrades — which both CTA arms now call — + the #330 '
     + 'auto-run emit in the choke-point effect + the #384 W6-B fair-package '
     + `sweep, which is a find-trades dispatch with no job), saw ${findTapped.length}`,
 );
@@ -289,11 +293,24 @@ assert(
   /source \? \{ source, mode: deckMode \} : \{ mode: deckMode \}/.test(tradesText),
   '#298 handleFindTrades sends `mode` with or without a `source`',
 );
-assert(
-  countOf(tradesCode, "track('find_trades_tapped', { mode: deckMode }, 'Trades')") === 1,
-  '#298 the legacy-layout CTA sends `mode` too',
-  'an emitter without mode makes the single-pin count silently incomplete',
-);
+// Re-keyed 2026-09-03 (#417). The legacy CTA's inline emitter is gone; the
+// row it sent is now handleFindTrades's no-`source` branch — same name, same
+// `{mode: deckMode}` shape (asserted directly above). What has to stay true is
+// that the legacy arm still goes through that entry point rather than
+// dispatching silently, which is ALSO what keeps the deck reset (#417 R-2) on
+// both arms. Pinned on the arm's own onPress, next to its testID.
+{
+  const arm = tradesCode.slice(
+    tradesCode.indexOf('testID="trades.find-btn"'),
+    tradesCode.indexOf('testID="trades.find-btn"') + 700,
+  );
+  assert(
+    /onPress=\{\(\) => handleFindTrades\(\)\}/.test(arm)
+      && !/dispatchGenerate\(/.test(arm),
+    '#298 the legacy-layout CTA sends `mode` too — via handleFindTrades()',
+    'a private dispatch here emits no row at all (and skips the #417 reset)',
+  );
+}
 assert(
   countOf(
     tradesCode,

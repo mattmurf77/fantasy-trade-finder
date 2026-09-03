@@ -189,10 +189,13 @@ assert(
 // through the single dispatchGenerate helper (session lifecycle at every
 // dispatch — check-canvas-results §12 owns the 8-site census). The invariant
 // here is the same: no new dispatch site.
+// Re-keyed 2026-09-03 (#417): the legacy `!consolidateOn` CTA arm routes
+// through handleFindTrades instead of dispatching itself, so the census drops
+// 8 routed → 7. The invariant is the same one and no weaker: no NEW site.
 assert(
   countOf(tradesCode, 'generateMutation.mutate(') === 1
-    && countOf(tradesCode, 'dispatchGenerate(') === 9,
-  'S-2 the count of generate dispatch sites does not increase over base (1 raw mutate; 8 routed + definition)',
+    && countOf(tradesCode, 'dispatchGenerate(') === 8,
+  'S-2 the count of generate dispatch sites does not increase over base (1 raw mutate; 7 routed + definition)',
   `saw mutate=${countOf(tradesCode, 'generateMutation.mutate(')} helper=${countOf(tradesCode, 'dispatchGenerate(')} — a new dispatch site is a second generation per handoff waiting to happen`,
 );
 assert(
