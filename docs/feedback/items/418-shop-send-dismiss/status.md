@@ -28,4 +28,20 @@
   unchanged and still correct — it becomes the bridge between a send and the next fetch,
   which is the role it already plays for a dismiss. Checklist step 10's ruling question is
   answered; the step stands as a verification that the tile leaves.
+- **Backend follow-up BUILT, 2026-09-03** — branch `feat/fb418-backend-like-exclusion`
+  (from `f13dd96c`), **not merged, not deployed**. `POST /api/trades/asset-ideas` and
+  `POST /api/trades/fair-packages` now build the deck's own windowless awaiting-like /
+  matched exclusion set (`_load_presentment_exclusions`, G6 R4 #336, gated on
+  `trade.presentment_rules`) and drop every idea whose (give-set, receive-set) key is in
+  it — so a sent offer is absent from the next fetch, and from the counts the client
+  derives from the payload. Filter runs at emission, INSIDE both caps, so the answer still
+  fills. Docs: [`backend-prd.md`](backend-prd.md) (R-1…R-9, the four design answers,
+  code-walk proof, 12-test red-proof table) · [`backend-scope.md`](backend-scope.md)
+  (filled scope block; §6 = two deviations from the spec) ·
+  [`followup-backend-like-exclusion.md`](followup-backend-like-exclusion.md) (spec, now
+  marked built). Evidence: full suite **4599 passed / 1 skipped**, `check-shop-deck`
+  **153 PASS**, `tsc --noEmit` clean. `ShopOffersBody.tsx`'s "no server-side memory for a
+  queued like" comment is corrected in the same commit (all three k8 `#418` sites intact).
+  Remaining: operator TestFlight check (3 steps, `backend-scope.md` §3) and the prod
+  `shop_opened` volume read.
 

@@ -126,6 +126,13 @@ def harness():
         **ff.DEFAULT_FLAGS,
         "calc.merged_layout":     True,
         "trade.preference_lists": True,
+        # D-178 (#418) — R4's one switch, TRUE in config/features.json since
+        # the G6 wave. The route builds its awaiting-like exclusion set under
+        # this flag exactly as the deck job does, so the harness runs in the
+        # shipped posture; `test_flag_off_is_byte_identical` covers the other
+        # side. With no likes in the fixture DB the set is empty, so every
+        # test above this line is unaffected.
+        "trade.presentment_rules": True,
     }
     ts._cfg.clear()
     ts._cfg.update(ts._DEFAULT_CFG)
@@ -444,3 +451,184 @@ def test_both_surfaces_use_the_one_gate_function():
     assert "price_consensus_package(" not in fair_src, "fair-packages"
     assert "price_consensus_package(" in ideas_src, \
         "asset-ideas' tier-scope lateral pricing rides the shared pricing half"
+
+
+# ---------------------------------------------------------------------------
+# D-178 (#418) — a sent offer is a LIKE, so it stops being offered
+#
+# Operator ruling, verbatim: *"needs a backend follow up. This should be
+# treated the same as any other 'liked' trade."* The deck has always refused
+# to re-offer a package the caller has an un-retracted awaiting like on
+# (G6 R4 #336, `server._load_presentment_exclusions`, NO time window). This
+# route consulted nothing, so an idea the user had already sent came back on
+# the very next sweep looking new.
+#
+# Fixture honesty: the like is written by the SHIPPED routes — `/api/trades/
+# queue` (the shop's ✓ / "Send this offer") — and the retraction by
+# `/api/trades/awaiting/dismiss` (#318, the only retraction surface). The
+# exclusion loader reads `trade_decisions` + `league_members`, so the member
+# snapshot `session_init` writes in production is written here too; without
+# it `load_awaiting_trades` cannot resolve the counterparty and drops the
+# like on the floor — in tests AND in prod.
+# ---------------------------------------------------------------------------
+
+def _seed_members(engine):
+    """The membership snapshot session_init persists (upsert_league_members).
+    load_awaiting_trades recovers the counterparty by roster ownership, so a
+    like whose receive side names nobody is invisible to the exclusion set."""
+    from backend.database import upsert_league_members
+    upsert_league_members(LEAGUE, [
+        {"user_id": ME, "username": "me", "player_ids": list(MY_ROSTER)},
+        {"user_id": OPP, "username": "opp", "player_ids": list(THEIR_ROSTER)},
+        {"user_id": OPP2, "username": "opp2", "player_ids": list(THEIR2_ROSTER)},
+    ])
+
+
+def _queue(client, idea):
+    """POST the idea through the real ✓ route — the same call the shop and
+    the pushed fair deck make, and the one that writes decision='like'."""
+    return client.post(
+        "/api/trades/queue",
+        data=json.dumps({
+            "league_id":          LEAGUE,
+            "opponent_user_id":   idea["counterparty_user_id"],
+            "give_player_ids":    idea["give_player_ids"],
+            "receive_player_ids": idea["receive_player_ids"],
+        }),
+        content_type="application/json",
+        headers={"X-Session-Token": TOKEN})
+
+
+def test_a_sent_offer_is_gone_from_the_next_sweep(harness):
+    """(a) The ruling itself. Send one idea; the next fetch does not contain
+    it, and contains everything else it contained before.
+
+    SABOTAGE (the `exclusion_keys` filter removed from `_emit`): the sent
+    package is re-served → RED."""
+    client, engine, *_ = harness
+    _seed_members(engine)
+    before = _post(client, opponent_user_id=OPP).get_json()["ideas"]
+    assert len(before) > 1, "fixture must offer more than the one we send"
+    sent = before[0]
+
+    res = _queue(client, sent)
+    assert res.status_code == 200, res.get_data(as_text=True)
+    assert res.get_json()["queued"] is True
+
+    after = _post(client, opponent_user_id=OPP).get_json()["ideas"]
+    got = [i["receive_player_ids"] for i in after]
+    assert sent["receive_player_ids"] not in got
+    # Every OTHER idea survives, in the same order — this is one exclusion,
+    # not a thinning of the sweep.
+    assert got == [i["receive_player_ids"] for i in before[1:]]
+
+
+def test_a_retracted_like_comes_back(harness):
+    """(b) Q-G6-2 / #318, inherited not re-implemented: the exclusion reads
+    `load_awaiting_trades`, which already drops retracted likes. Dismissing
+    the Awaiting tile restores the idea.
+
+    SABOTAGE (a windowed or client-side 'sent' list instead of the shared
+    loader): the idea stays gone after retraction → RED."""
+    client, engine, *_ = harness
+    _seed_members(engine)
+    before = _post(client, opponent_user_id=OPP).get_json()["ideas"]
+    sent = before[0]
+    assert _queue(client, sent).status_code == 200
+    assert (sent["receive_player_ids"]
+            not in [i["receive_player_ids"]
+                    for i in _post(client, opponent_user_id=OPP).get_json()["ideas"]])
+
+    res = client.post(
+        "/api/trades/awaiting/dismiss",
+        data=json.dumps({
+            "league_id":  LEAGUE,
+            "my_give":    sent["give_player_ids"],
+            "my_receive": sent["receive_player_ids"],
+            "partner_id": sent["counterparty_user_id"],
+        }),
+        content_type="application/json",
+        headers={"X-Session-Token": TOKEN})
+    assert res.status_code == 200, res.get_data(as_text=True)
+    assert res.get_json()["dismissed_likes"] >= 1
+
+    assert _post(client, opponent_user_id=OPP).get_json()["ideas"] == before
+
+
+def test_the_cap_still_fills_after_an_exclusion(harness):
+    """(d) The filter runs at emission, so it is INSIDE the
+    `fair_packages_cap` cut: sending three offers must not hand the user a
+    17-idea window where a 20-idea one was promised.
+
+    SABOTAGE (filter applied to the returned list instead of at emission):
+    the capped list comes back one short → RED."""
+    client, engine, *_ = harness
+    _seed_members(engine)
+    uncapped = _post(client, opponent_user_id=OPP).get_json()["ideas"]
+    assert len(uncapped) > 3
+    ts._cfg["fair_packages_cap"] = 3.0
+    capped = _post(client, opponent_user_id=OPP).get_json()["ideas"]
+    assert len(capped) == 3
+
+    assert _queue(client, capped[0]).status_code == 200
+    after = _post(client, opponent_user_id=OPP).get_json()["ideas"]
+    assert len(after) == 3, "the cap must REFILL, not shrink"
+    assert capped[0]["receive_player_ids"] not in [
+        i["receive_player_ids"] for i in after]
+    # The refill is the next idea in the same order, not a re-rank.
+    assert ([i["receive_player_ids"] for i in after]
+            == [i["receive_player_ids"] for i in uncapped[1:4]])
+
+
+def test_a_live_match_excludes_the_same_way(harness):
+    """The set is the DECK's set, not a likes-only invention: a `pending`
+    trade_matches row for the same asset sets suppresses the idea with no
+    like row at all (`load_matches_for_exclusion`)."""
+    from backend.database import trade_matches_table
+    client, engine, *_ = harness
+    _seed_members(engine)
+    before = _post(client, opponent_user_id=OPP).get_json()["ideas"]
+    target = before[0]
+    with engine.begin() as conn:
+        conn.execute(trade_matches_table.insert().values(
+            league_id=LEAGUE, user_a_id=ME, user_b_id=OPP,
+            user_a_give=json.dumps(target["give_player_ids"]),
+            user_a_receive=json.dumps(target["receive_player_ids"]),
+            status="pending", matched_at="2026-09-03T00:00:00Z"))
+    after = _post(client, opponent_user_id=OPP).get_json()["ideas"]
+    assert target["receive_player_ids"] not in [
+        i["receive_player_ids"] for i in after]
+
+
+def test_a_broken_exclusion_load_serves_unfiltered(harness):
+    """(e) Non-fatal posture, inherited from `_load_presentment_exclusions`:
+    a loader that raises logs and yields an EMPTY set, so the sweep answers
+    unfiltered rather than 500-ing or returning nothing.
+
+    SABOTAGE (the load moved outside the loader's try/except): the request
+    raises → RED."""
+    client, engine, *_ = harness
+    _seed_members(engine)
+    before = _post(client, opponent_user_id=OPP).get_json()["ideas"]
+    sent = before[0]
+    assert _queue(client, sent).status_code == 200
+
+    def _boom(_user_id):
+        raise RuntimeError("awaiting load exploded")
+
+    with patch.object(server, "load_awaiting_trades", _boom):
+        res = _post(client, opponent_user_id=OPP)
+    assert res.status_code == 200
+    assert res.get_json()["ideas"] == before
+
+
+def test_flag_off_is_byte_identical(harness):
+    """`trade.presentment_rules` is R4's one switch (docs/config-reference.md)
+    and stays that way: off ⇒ this route builds no set and re-serves the sent
+    package, exactly as it did before D-178."""
+    client, engine, *_ = harness
+    _seed_members(engine)
+    before = _post(client, opponent_user_id=OPP).get_json()["ideas"]
+    assert _queue(client, before[0]).status_code == 200
+    ff._flags_cache = {**ff._flags_cache, "trade.presentment_rules": False}
+    assert _post(client, opponent_user_id=OPP).get_json()["ideas"] == before

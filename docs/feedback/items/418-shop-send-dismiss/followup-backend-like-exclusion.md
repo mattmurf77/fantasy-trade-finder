@@ -1,6 +1,13 @@
 # FB-418 follow-up (backend) — a sent offer is a LIKE, so it stops being offered
 
-> **Status:** specced 2026-09-03, **not built**. Operator ruling on the #418 QA-B B-1 cost.
+> **Status:** specced 2026-09-03, **BUILT 2026-09-03** on branch
+> `feat/fb418-backend-like-exclusion` (from `f13dd96c`) — not merged, not deployed.
+> Build docs: [`backend-prd.md`](backend-prd.md) (requirements, the four design
+> answers, code-walk proof, red-proof table) · [`backend-scope.md`](backend-scope.md)
+> (filled scope block; §6 records two deviations from this spec — the filter moved
+> INTO the generators so the caps still fill, and the existing
+> `trade.presentment_rules` gate is reused).
+> Operator ruling on the #418 QA-B B-1 cost.
 > **Ruling (verbatim):** *"needs a backend follow up. This should be treated the same as any
 > other 'liked' trade."* → [D-178](../../../living-memory/DECISIONS.md)
 > **Parent item:** [#418](prd.md) (mobile half, shipped in the same run — the tile leaves the
@@ -55,12 +62,16 @@ an error).
 - Shop counts shrink for users with many outstanding likes. Worth one prod read of the
   `shop_opened` → `visibleIdeas.length` distribution before and after.
 
-## Gates when built (full gates — this is an API contract change)
+## Gates when built (full gates — this is an API contract change) — DONE
 
-- Scope block (`scope.md`) — §1 (b) existing events; §2 no schema, no flag, no `model_config`
-  key; §4 `docs/api-reference.md` **must** be updated for both routes' response semantics.
-- pytest: a route test per surface proving a liked package is absent from the next fetch, a
-  retracted like returns, and a dismissed package still behaves as it does today. Every new
-  test proven red against the unfixed route.
-- No mobile change, so no `check-*.js` delta and no TestFlight step beyond one operator
-  confirmation: send an offer, reopen the window, the idea is gone.
+- Scope block → [`backend-scope.md`](backend-scope.md). §1 (b) existing events named; §2 no
+  schema, no NEW flag (the existing `trade.presentment_rules` is reused — deviation, §6), no
+  `model_config` key; §4 `docs/api-reference.md` updated for both routes' response semantics,
+  plus `docs/config-reference.md` for the flag's widened reach.
+- pytest: 12 route tests across both surfaces. 7 proven RED against the unfixed routes; the
+  5 posture/regression bars (dismiss unchanged, non-fatal load, flag-off byte-identity)
+  proven red by targeted sabotage of the fix, since they cannot be red on the baseline.
+  Table in [`backend-prd.md`](backend-prd.md) §7. Full suite 4599 passed / 1 skipped.
+- The one mobile edit is the comment correction below — no behavior change, so no `check-*.js`
+  delta (`check-shop-deck` stays 153 PASS, `tsc --noEmit` clean). Operator TestFlight check:
+  send an offer, reopen the window, the idea is gone (3 steps in `backend-scope.md` §3).

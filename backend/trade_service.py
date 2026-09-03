@@ -2182,6 +2182,22 @@ def price_consensus_package(
     return min(gv, rv) / max(gv, rv), gv, rv
 
 
+def presentment_key(give_ids, recv_ids) -> tuple:
+    """D-178 (#418) — the ONE presentment key, built in ONE place.
+
+    `(frozenset(give), frozenset(receive))` in the CALLER's orientation:
+    `give` is what the user sends, `receive` is what the user gets. That is
+    the orientation `server._load_presentment_exclusions` builds its set in
+    (`t["my_give"]` / `t["my_receive"]`), the orientation the deck's R4 #336
+    filter compares in, and the orientation the D-067 dismiss keys use. A
+    surface that built the key the other way round would fail to match a
+    liked package against its own re-offer — silently, and only for users
+    who had actually sent an offer — so the construction lives here rather
+    than being restated per surface.
+    """
+    return (frozenset(give_ids), frozenset(recv_ids))
+
+
 def eval_consensus_package(
     give_ids: list[str],
     recv_ids: list[str],
@@ -5212,6 +5228,12 @@ class TradeService:
                                              # format for lateral_scope="tier"
         opponent_user_id: str | None = None,  # #250 Specific Team: scope the
                                               # sweep to this one league-mate
+        exclusion_keys: set | None = None,   # D-178 (#418) — the deck's own
+                                             # windowless awaiting-like /
+                                             # matched set, per REQUEST
+                                             # (league-scoped; never cached
+                                             # on the service, which serves
+                                             # several leagues)
     ) -> dict[str, list[dict]]:
         """Grouped trade ideas for ONE pinned asset (player or pick), the
         Dynasty-Trade-Factory "Smart Trade Finder" presentation: sweep every
@@ -5255,13 +5277,27 @@ class TradeService:
         cooldown for this user (`self._dismissed_decision_keys` — the
         "pass" subset of the deck path's `_past_decision_keys`, same key
         derivation, `pass_cooldown_days` window) are excluded from every
-        group, both directions, both lateral scopes. A LIKE never
-        excludes here: it is a queued proposal, and its deck-side
-        exclusion (#336 R4 / the 7-day like window) stays deck-only.
+        group, both directions, both lateral scopes.
         Deliberate consequence: the single-pin panel stops re-serving
         shop-dismissed packages too — that is D-067 compliance ("the
         cooldown binds every live service immediately"), not a
         regression.
+
+        D-178 (#418) — and a LIKE excludes the same way, through the
+        SAME predicate, once the caller passes `exclusion_keys`: the
+        operator's ruling is that a sent offer "should be treated the
+        same as any other 'liked' trade", and the deck has always
+        refused to re-offer a package the user has an un-retracted
+        awaiting like on. The set is the deck's own — built by
+        `server._load_presentment_exclusions` (G6 R4 #336: un-retracted
+        awaiting likes in THIS league plus `pending`/`accepted` matches,
+        NO time window) — so nothing about windowing, retraction
+        (Q-G6-2 / #318) or the non-fatal load posture is re-implemented
+        here. `None`/empty is byte-identical to pre-D-178 for every
+        caller that does not pass one, `_past_decision_keys` still
+        excludes nothing on this sweep, and the filter runs at emission,
+        BEFORE `asset_ideas_group_cap`, so an excluded idea yields its
+        slot to the next-best rather than shrinking the group.
 
         #402 rev-3 §3 — `lateral_scope` (optional, validated by the
         route): absent/None or `"band"` keeps today's ±band lateral pool
@@ -5471,29 +5507,37 @@ class TradeService:
 
         # #402 rev-3 QA-B F2 — D-067: the dismiss cooldown binds this sweep
         # too. Same key derivation as the deck path's _past_decision_keys /
-        # the swipe route's in-memory bind (frozenset(give), frozenset(recv)
-        # in USER orientation — the service instance already scopes user +
+        # the swipe route's in-memory bind (`presentment_key`: give/recv in
+        # USER orientation — the service instance already scopes user +
         # league); consulted for every group, both directions, both lateral
         # scopes — a correctness rule, not a tier feature. Only DISMISSES
         # ("pass", pass_cooldown_days-windowed at load) live in
-        # _dismissed_decision_keys: a like is a queued proposal and never
-        # suppresses an idea here. Deliberate consequence: the single-pin
-        # panel stops re-serving shop-dismissed packages too — D-067
-        # compliance, not a regression.
-        def _dismissed(give_ids, recv_ids) -> bool:
-            return ((frozenset(give_ids), frozenset(recv_ids))
-                    in self._dismissed_decision_keys)
+        # _dismissed_decision_keys.
+        #
+        # D-178 (#418) — a LIKE now suppresses through the SAME predicate,
+        # from `exclusion_keys`: the deck's windowless R4 #336 set of
+        # un-retracted awaiting likes + live matches, built for this league
+        # by server._load_presentment_exclusions and passed per request.
+        # ONE predicate on purpose — a second copy is how the dismiss memory
+        # and the like memory would drift apart. Absent/empty ⇒ every
+        # pre-D-178 caller is byte-identical.
+        _excl_keys = exclusion_keys or frozenset()
+
+        def _suppressed(give_ids, recv_ids) -> bool:
+            key = presentment_key(give_ids, recv_ids)
+            return (key in self._dismissed_decision_keys) or (key in _excl_keys)
 
         strict: dict[str, list[dict]] = {"upgrade": [], "lateral": [], "downgrade": []}
         relaxed: dict[str, list[dict]] = {"upgrade": [], "lateral": [], "downgrade": []}
         seen: set[tuple] = set()
 
         def _emit(member, give_ids, recv_ids, res, group, gated=True) -> None:
-            # QA-B F2 backstop — every idea funnels through here; the
+            # QA-B F2 / D-178 backstop — every idea funnels through here; the
             # _emit_best variant filter and the downgrade combo skip above
-            # exist so a dismissed variant yields its slot to the next-best
-            # instead of silently consuming it.
-            if _dismissed(give_ids, recv_ids):
+            # exist so a suppressed variant yields its slot to the next-best
+            # instead of silently consuming it. This runs BEFORE the group
+            # cap below, so the group still fills to `asset_ideas_group_cap`.
+            if _suppressed(give_ids, recv_ids):
                 return
             # Dedupe is GROUP-scoped (#402 rev-3 §3): under band scope the
             # groups partition the value axis, so adding `group` to the key
@@ -5541,10 +5585,10 @@ class TradeService:
             """variants: [(give_ids, recv_ids, res)]. Emit the best deal —
             strict-band passes over relaxed, then (C2) the fewest pieces among
             near-equivalent fairness, then closest to even."""
-            # QA-B F2 — a dismissed variant is out of the running entirely,
-            # so the next-best variant wins the slot rather than the whole
-            # opponent's idea vanishing with it.
-            variants = [v for v in variants if not _dismissed(v[0], v[1])]
+            # QA-B F2 / D-178 — a dismissed OR liked variant is out of the
+            # running entirely, so the next-best variant wins the slot rather
+            # than the whole opponent's idea vanishing with it.
+            variants = [v for v in variants if not _suppressed(v[0], v[1])]
             if not variants:
                 return
             if _min_pkg_band <= 0:
@@ -5664,9 +5708,9 @@ class TradeService:
                         if _swap_all_groups and pos_constrained \
                                 and not _pos_ok(combo[0]):
                             continue
-                        # QA-B F2 — a dismissed combo never consumes one of
-                        # the two headliner slots below.
-                        if _dismissed([asset_id], combo):
+                        # QA-B F2 / D-178 — a dismissed or liked combo never
+                        # consumes one of the two headliner slots below.
+                        if _suppressed([asset_id], combo):
                             continue
                         res = _eval([asset_id], list(combo))
                         if res:
@@ -5829,6 +5873,7 @@ class TradeService:
         untouchable_ids: set | None = None,
         not_interested_ids: set | None = None,
         opponent_user_id: str | None = None,
+        exclusion_keys: set | None = None,   # D-178 (#418) — see below
     ) -> dict:
         """What can this EXACT package fetch? — the operator's #384 W6-B ask,
         verbatim: *"a much simpler set of cards solving for fairness only.
@@ -5867,6 +5912,18 @@ class TradeService:
         labels), as ONE flat list capped at `fair_packages_cap` — the deck is
         a swipe stack, not three groups. Deterministic for a fixed league
         snapshot.
+
+        D-178 (#418) — `exclusion_keys` is the deck's own windowless R4 #336
+        set (un-retracted awaiting likes in this league + `pending`/
+        `accepted` matches, built by
+        `server._load_presentment_exclusions`). An idea whose
+        `presentment_key` is in it is never emitted: a package the caller has
+        already offered is not a new idea. The filter sits in `_emit`, so it
+        runs before the #189 strict/relaxed choice AND before
+        `fair_packages_cap` — a suppressed idea yields its slot rather than
+        shrinking the list. `None`/empty is byte-identical to pre-D-178. The
+        D-067 dismiss cooldown is deliberately NOT consulted here: it has
+        never bound this route, and widening it is a separate ruling.
         """
         empty = {"ideas": [], "relaxed": False, "reason": None}
         league = self._leagues.get(league_id)
@@ -5925,8 +5982,15 @@ class TradeService:
         strict: list[dict] = []
         relaxed: list[dict] = []
         seen: set[tuple] = set()
+        # D-178 (#418) — same set, same key, same orientation as the deck's
+        # R4 filter and asset-ideas' `_suppressed`; see the docstring.
+        _excl_keys = exclusion_keys or frozenset()
 
         def _emit(member, recv_ids: list[str], res) -> None:
+            # D-178 — before the dedupe key is even claimed, so a suppressed
+            # package cannot swallow a slot on the way out.
+            if presentment_key(give_anchor, recv_ids) in _excl_keys:
+                return
             key = (member.user_id, frozenset(recv_ids))
             if key in seen:
                 return

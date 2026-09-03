@@ -321,10 +321,12 @@ export default function ShopOffersBody({
   // consults the D-067 dismiss-cooldown when building its pools (QA-B
   // backend fix 2, 2026-08-28 — landed this round), so the next fetch
   // simply doesn't offer a recently dismissed idea. This set only bridges
-  // the in-instance gap between a commit and that next fetch. For a
-  // QUEUED like (#418) there is NO server-side memory — asset-ideas does
-  // not consult the queue — so the next fetch WILL re-offer the idea and
-  // this set is its only filter for the rest of the session. An UNDONE
+  // the in-instance gap between a commit and that next fetch. A QUEUED
+  // like (#418) is the same story since D-178 (2026-09-03): the ✓ writes a
+  // real `decision:'like'` row and asset-ideas now consults the deck's
+  // windowless awaiting-like exclusion set, so the next fetch doesn't
+  // re-offer a sent idea either — this set bridges the same gap for a ✓
+  // that it bridges for a ✕, and is no longer the only filter. An UNDONE
   // dismiss never enters:
   // Undo nulls `pendingDismissRef` and cancels the timer before any flush
   // path can reach `commitDismiss`, so the key never leaves

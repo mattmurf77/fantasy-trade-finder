@@ -833,11 +833,16 @@ def test_expired_dismiss_cooldown_returns():
             == _give_ideas(lateral_scope="tier"))
 
 
-def test_like_does_not_exclude_asset_ideas():
-    """A LIKE (queued proposal) lives in the mixed _past_decision_keys the
-    deck consults, but never in dismissed_keys — asset-ideas must keep
-    serving it, band and tier (the pre-F2 pin that generate_asset_ideas
-    ignores the mixed set survives as this test).
+def test_past_decision_keys_do_not_exclude_asset_ideas():
+    """The mixed `_past_decision_keys` set the DECK consults never excludes
+    on this sweep — the pre-F2 pin, still true after D-178.
+
+    NOT a claim that a like cannot exclude here: D-178 (#418) says it does,
+    but through the explicit `exclusion_keys` kwarg (the deck's windowless
+    R4 #336 set, built per request by
+    `server._load_presentment_exclusions`), never through this mixed set of
+    every past disposition. The route tests at the bottom of this file pin
+    that half.
 
     SABOTAGE (consult widened to _past_decision_keys): the liked idea
     vanishes → RED."""
@@ -1069,9 +1074,33 @@ class _FakeService:
     def get_rankings(self, position=None):
         return _FakeRankSet(rankings=self._rank_rows)
 
+    def record_trade_signal(self, **kw):
+        """The Elo half of a ✓ (`/api/trades/queue`). Irrelevant to what this
+        file pins — the D-178 tests below need the DECISION ROW that route
+        writes, not the board move — so it is a no-op here."""
+        return None
+
 
 @pytest.fixture()
-def route_client():
+def route_db():
+    """D-178 (#418) — the route now READS the database: it builds the deck's
+    awaiting-like exclusion set per request. An isolated in-memory DB keeps
+    that hermetic (and stops every route test below from touching the real
+    `data/trade_finder.db`)."""
+    from sqlalchemy import create_engine
+
+    import backend.database as db_module
+    from backend.database import metadata
+
+    engine = create_engine("sqlite:///:memory:",
+                           connect_args={"check_same_thread": False})
+    metadata.create_all(engine)
+    with patch.object(db_module, "engine", engine):
+        yield engine
+
+
+@pytest.fixture()
+def route_client(route_db):
     import backend.server as server
     svc = _give_service()
     players = list(svc._players.values())
@@ -1534,3 +1563,202 @@ def test_receive_direction_balanced_mix_under_market_mode():
     assert up["receive_player_ids"] == ["PIN"]
     assert len(up["give_player_ids"]) == 3
     assert "G" in up["give_player_ids"]
+
+
+# ── D-178 (#418) — a sent offer is a LIKE, so it stops being offered ──────
+#
+# Operator ruling, verbatim: *"needs a backend follow up. This should be
+# treated the same as any other 'liked' trade."* The shop's ✓ ("Send this
+# offer") writes a real `decision="like"` row through POST /api/trades/queue,
+# and the model deck has always refused to re-offer a package the caller has
+# an un-retracted awaiting like on (G6 R4 #336 — NO time window). This route
+# consulted only the D-067 dismiss cooldown, so a SENT idea came back on the
+# next window open looking new while a DISMISSED one stayed gone.
+#
+# Fixture honesty: every like here is written by the shipped ✓ route and
+# every retraction by the shipped POST /api/trades/awaiting/dismiss (#318).
+# `load_awaiting_trades` recovers the counterparty from the `league_members`
+# roster snapshot `session_init` persists, so these tests persist it too —
+# without it a like is invisible to the exclusion set, in tests and in prod
+# alike.
+
+_ROUTE_FLAGS = {
+    "trade.asset_ideas":       True,
+    "calc.merged_layout":      True,   # the ✓ route's own gate
+    "trade.presentment_rules": True,   # R4's one switch (true in prod)
+}
+
+
+def _lit_route_flags(**over):
+    ff._flags_cache = {**ff.DEFAULT_FLAGS, **_ROUTE_FLAGS, **over}
+
+
+def _seed_route_members():
+    """The membership snapshot session_init writes (upsert_league_members).
+    `league.members` is caller-excluded by app convention (FB-409), but the
+    persisted snapshot is not — it carries every owner, which is how the
+    counterparty of a like is recovered."""
+    from backend.database import upsert_league_members
+    upsert_league_members("L1", [
+        {"user_id": "user", "username": "Me",
+         "player_ids": ["P", "S1"]},
+        {"user_id": "opp", "username": "OppTeam",
+         "player_ids": ["U", "L", "L2", "D1", "D2"]},
+    ])
+
+
+def _send(client, idea):
+    """The shop's ✓ — POST /api/trades/queue, the route that turns 'Send this
+    offer' into a decision='like' row."""
+    return client.post(
+        "/api/trades/queue",
+        json={"league_id":          "L1",
+              "opponent_user_id":   idea["counterparty_user_id"],
+              "give_player_ids":    idea["give_player_ids"],
+              "receive_player_ids": idea["receive_player_ids"]},
+        headers={"X-Session-Token": TOKEN})
+
+
+def test_route_excludes_a_sent_offer(route_client):
+    """(a) The ruling. Send the lateral idea (P → L); the next fetch has no
+    lateral at all and the other two groups are untouched — band scope and
+    tier scope alike, because the exclusion is a correctness rule, not a
+    tier feature.
+
+    SABOTAGE (the route stops loading/passing `exclusion_keys`): L is
+    re-served → RED."""
+    _lit_route_flags()
+    _seed_route_members()
+    before = _post(route_client,
+                   {"asset_id": "P", "direction": "give"}).get_json()
+    assert [i["receive_player_ids"]
+            for i in before["groups"]["lateral"]] == [["L"]]
+
+    res = _send(route_client, before["groups"]["lateral"][0])
+    assert res.status_code == 200, res.get_json()
+    assert res.get_json()["queued"] is True
+
+    after = _post(route_client,
+                  {"asset_id": "P", "direction": "give"}).get_json()
+    assert after["groups"]["lateral"] == []
+    assert after["groups"]["upgrade"] == before["groups"]["upgrade"]
+    assert after["groups"]["downgrade"] == before["groups"]["downgrade"]
+
+    tier = _post(route_client, {"asset_id": "P", "direction": "give",
+                                "lateral_scope": "tier"}).get_json()
+    assert ({i["receive_player_ids"][0] for i in tier["groups"]["lateral"]}
+            == {"L2", "D1", "D2"})
+
+
+def test_route_returns_a_retracted_like(route_client):
+    """(b) Q-G6-2 / #318, inherited: `load_awaiting_trades` already drops
+    retracted likes, so retracting the Awaiting tile brings the idea back.
+    Nothing about retraction is re-implemented on this route.
+
+    SABOTAGE (a bespoke 'sent' memory instead of the shared loader): the
+    idea stays gone → RED."""
+    _lit_route_flags()
+    _seed_route_members()
+    before = _post(route_client,
+                   {"asset_id": "P", "direction": "give"}).get_json()
+    idea = before["groups"]["lateral"][0]
+    assert _send(route_client, idea).status_code == 200
+    assert _post(route_client, {"asset_id": "P", "direction": "give"}
+                 ).get_json()["groups"]["lateral"] == []
+
+    res = route_client.post(
+        "/api/trades/awaiting/dismiss",
+        json={"league_id":  "L1",
+              "my_give":    idea["give_player_ids"],
+              "my_receive": idea["receive_player_ids"],
+              "partner_id": idea["counterparty_user_id"]},
+        headers={"X-Session-Token": TOKEN})
+    assert res.status_code == 200, res.get_json()
+    assert res.get_json()["dismissed_likes"] >= 1
+
+    assert _post(route_client,
+                 {"asset_id": "P", "direction": "give"}).get_json() == before
+
+
+def test_route_dismiss_behaviour_is_unchanged(route_client):
+    """(c) D-067 regression bar: the dismiss cooldown still excludes on its
+    own — with NO like row and NO exclusion set — and still binds through
+    the live service the swipe route mutates in memory. D-178 widened the
+    predicate; it must not have replaced it."""
+    _lit_route_flags()
+    _seed_route_members()
+    import backend.server as server
+    plain = _post(route_client,
+                  {"asset_id": "P", "direction": "give"}).get_json()
+    with server._sessions_lock:
+        svc = server._sessions[TOKEN]["trade_svc"]
+    svc._dismissed_decision_keys.add((frozenset({"P"}), frozenset({"L"})))
+    try:
+        after = _post(route_client,
+                      {"asset_id": "P", "direction": "give"}).get_json()
+        assert after["groups"]["lateral"] == []
+        assert after["groups"]["upgrade"] == plain["groups"]["upgrade"]
+        assert after["groups"]["downgrade"] == plain["groups"]["downgrade"]
+    finally:
+        svc._dismissed_decision_keys.clear()
+
+
+def test_route_group_cap_refills_after_an_exclusion(route_client):
+    """(d) The filter runs at EMISSION, inside `asset_ideas_group_cap`, so a
+    sent offer costs its own slot and no more: a 2-deep group stays 2 deep by
+    promoting the next-best idea.
+
+    SABOTAGE (filter applied to the response groups instead of at emission):
+    the capped group comes back one short → RED."""
+    _lit_route_flags()
+    _seed_route_members()
+    ts._cfg["asset_ideas_group_cap"] = 2.0
+    full = _post(route_client, {"asset_id": "P", "direction": "give",
+                                "lateral_scope": "tier"}).get_json()
+    lateral = full["groups"]["lateral"]
+    assert len(lateral) == 2, lateral
+    uncapped = ["L", "L2", "D1", "D2"]
+
+    assert _send(route_client, lateral[0]).status_code == 200
+    after = _post(route_client, {"asset_id": "P", "direction": "give",
+                                 "lateral_scope": "tier"}).get_json()
+    got = [i["receive_player_ids"][0] for i in after["groups"]["lateral"]]
+    assert len(got) == 2, "the cap must REFILL, not shrink"
+    assert lateral[0]["receive_player_ids"][0] not in got
+    assert set(got) <= set(uncapped)
+
+
+def test_route_serves_unfiltered_when_the_load_breaks(route_client):
+    """(e) Non-fatal posture, inherited from `_load_presentment_exclusions`:
+    a raising loader logs and yields an empty set, so the groups answer
+    unfiltered instead of 500-ing.
+
+    SABOTAGE (the load hoisted out of the loader's try/except): 500 → RED."""
+    _lit_route_flags()
+    _seed_route_members()
+    import backend.server as server
+    before = _post(route_client,
+                   {"asset_id": "P", "direction": "give"}).get_json()
+    assert _send(route_client, before["groups"]["lateral"][0]).status_code == 200
+
+    def _boom(_user_id):
+        raise RuntimeError("awaiting load exploded")
+
+    with patch.object(server, "load_awaiting_trades", _boom):
+        res = _post(route_client, {"asset_id": "P", "direction": "give"})
+    assert res.status_code == 200
+    assert res.get_json() == before
+
+
+def test_route_flag_off_is_byte_identical(route_client):
+    """`trade.presentment_rules` stays R4's ONE switch: with it off this
+    route builds no set and re-serves the sent package, exactly as it did
+    before D-178."""
+    _lit_route_flags()
+    _seed_route_members()
+    before = _post(route_client,
+                   {"asset_id": "P", "direction": "give"}).get_json()
+    assert _send(route_client, before["groups"]["lateral"][0]).status_code == 200
+    _lit_route_flags(**{"trade.presentment_rules": False})
+    assert _post(route_client,
+                 {"asset_id": "P", "direction": "give"}).get_json() == before

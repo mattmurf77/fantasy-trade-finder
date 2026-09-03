@@ -12214,7 +12214,21 @@ def asset_trade_ideas():
     #402 rev-3 QA-B F2 — the D-067 dismiss cooldown binds this route too:
     ideas whose (give-set, receive-set) key matches a live dismiss
     ("pass", pass_cooldown_days window) for the caller are excluded from
-    every group, under either lateral_scope. Likes never exclude here.
+    every group, under either lateral_scope.
+
+    D-178 (#418) — and so does a LIKE. Sending an offer from the shop
+    writes a real `decision="like"` row (`POST /api/trades/queue`), and the
+    model deck has always refused to re-offer a liked package; this route
+    now consults the SAME set through the same loader
+    (`_load_presentment_exclusions`: un-retracted awaiting likes in this
+    league + `pending`/`accepted` matches, G6 R4 #336, NO time window).
+    So an idea the caller has already sent is absent from the next fetch —
+    including from the group counts the client renders — instead of being
+    re-offered and idempotently re-queued. A like retracted in Awaiting
+    (`POST /api/trades/awaiting/dismiss`) returns. Gated on
+    `trade.presentment_rules` exactly as the deck's copy is, so that flag
+    stays R4's one switch; a failed load is non-fatal and serves the
+    unfiltered groups.
     """
     if not is_enabled("trade.asset_ideas"):
         return jsonify({"error": "not found"}), 404
@@ -12335,6 +12349,18 @@ def asset_trade_ideas():
         except Exception as lp_err:
             log.warning("asset-ideas: league prefs load failed: %s", lp_err)
 
+    # D-178 (#418) — a sent offer is a LIKE, so it stops being offered here
+    # too. The SAME loader the deck job calls (`_load_presentment_exclusions`,
+    # G6 R4 #336) under the SAME flag, so `trade.presentment_rules` remains
+    # R4's one switch and the two surfaces cannot build different sets. Two
+    # indexed reads on a route that already does several; no cache, because a
+    # stale set would re-offer a package the user sent seconds ago — the exact
+    # bug this closes. The loader is non-fatal by construction: a failure logs
+    # and returns an empty set, and the groups serve unfiltered.
+    exclusion_keys: set = set()
+    if FLAGS.trade_presentment_rules:
+        exclusion_keys = _load_presentment_exclusions(g_user_id, league_id)
+
     # #170/#171/#185 — owned-pick injection, THE SAME guard as the generate
     # job (one helper since W3 M-C, so the two can no longer drift), so a pick
     # can be the pinned asset, a sweetener or a downgrade piece.
@@ -12374,6 +12400,7 @@ def asset_trade_ideas():
         lateral_scope      = lateral_scope,                # #402 rev-3 §3
         scoring_format     = fmt,                          # tier bucketing
         opponent_user_id   = opponent_user_id,
+        exclusion_keys     = exclusion_keys or None,       # D-178 (#418)
     )
 
     def _idea_row(idea: dict) -> dict:
@@ -12489,6 +12516,15 @@ def fair_packages():
     Gates are `trade_service.eval_consensus_package` — literally the function
     `_generate_asset_ideas_impl` calls, so a fair package and an asset idea can
     never price the same trade differently.
+
+    D-178 (#418) — a package the caller has ALREADY OFFERED is not an idea.
+    This route consults the deck's own windowless awaiting-like / matched
+    exclusion set (`_load_presentment_exclusions`, G6 R4 #336, gated on
+    `trade.presentment_rules`, the same call `asset-ideas` and the deck job
+    make) and drops every idea whose (give-set, receive-set) key is in it —
+    before the `fair_packages_cap` cut and before the #189 strict/relaxed
+    choice, so the list still fills. A like retracted in Awaiting returns.
+    A failed load is non-fatal: the sweep serves unfiltered.
     """
     if not getattr(FLAGS, "calc_merged_layout", False):
         return jsonify({"error": "feature_disabled"}), 404
@@ -12565,6 +12601,13 @@ def fair_packages():
             log.warning("fair-packages: owned-pick injection failed (continuing): %s",
                         pick_err)
 
+    # D-178 (#418) — the same loader, the same flag, the same set as the deck
+    # job and asset-ideas: an offer the caller already sent is not a new idea.
+    # Non-fatal by construction (log + empty set ⇒ unfiltered sweep).
+    exclusion_keys: set = set()
+    if FLAGS.trade_presentment_rules:
+        exclusion_keys = _load_presentment_exclusions(g_user_id, league_id)
+
     result = trade_service.generate_fair_packages(
         user_id            = g_user_id,
         user_roster        = user_roster,
@@ -12577,6 +12620,7 @@ def fair_packages():
         untouchable_ids    = untouchable_ids or None,
         not_interested_ids = not_interested_ids or None,
         opponent_user_id   = opponent_user_id,
+        exclusion_keys     = exclusion_keys or None,       # D-178 (#418)
     )
 
     def _idea_row(idea: dict) -> dict:
