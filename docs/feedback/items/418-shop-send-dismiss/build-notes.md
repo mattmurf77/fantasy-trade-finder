@@ -93,6 +93,45 @@ are by construction, not noise:
 - **S-5 also red k4** — the prd's k4 forbids any `!` in the gate condition
   (the inverted-branch closure), and `!res.alreadyQueued` is exactly that.
 
+### 2.1 Phase 4 additions — k3b, k9, k8 tightened (2026-09-03)
+
+QA-A F-1 showed k1–k8 accept four wrong implementations (X-1…X-4) and F-2
+showed k8 was a count (≥ 3 anywhere) rather than three named sites. Resolved
+in `check-shop-deck.js` section `(k)`, no body change:
+
+- **k9** — the `setSuppressed` call's single argument is an arrow function
+  whose body references `key` and contains `.add(` (a copy-and-add updater;
+  `new Set([key])` and `(s) => new Set(s)` both fail).
+- **k3b** — the `requestPagerScroll` call inside the queued branch
+  (`gate.thenStatement`, so the same call k3 orders and k4 gates) has exactly
+  one argument whose text is `index`. Placed after k4 because it reads k4's
+  `gate`.
+- **k8** — now requires `#418` inside three **named** ranges: the header's
+  "✓ like" bullet (the `✓ like` → `✕ dismiss` slice of the `UNDO_HOLD_MS`
+  statement's leading trivia), the `suppressed` declaration's comment block
+  (leading trivia of its `useState` statement), and `commitDismiss`'s text.
+  The fix's own `#418` comment in `handleLike` no longer counts toward
+  anything. Detail names the missing site(s).
+
+Same method as §2: snapshot sha1 `be8f41cd…` (equal to the build snapshot),
+exact-string sabotage on `ShopOffersBody.tsx`, run, restore, re-run; final
+hash equals the snapshot. Baseline: **153 PASS / 0 FAIL** (151 + k3b + k9).
+
+| Sabotage | Named target | RED assertions observed | Exit | PASS count | Restored → green |
+|---|---|---|---|---|---|
+| X-1 `setSuppressed(new Set([key]))` — replaces the set | k9 | **k9** | 1 | 152 | yes (153) |
+| X-3 `setSuppressed((s) => new Set(s))` — no-op write | k9 | **k9** | 1 | 152 | yes (153) |
+| X-2 `requestPagerScroll(0)` — rewinds the pager | k3b | **k3b** | 1 | 152 | yes (153) |
+| X-4 `requestPagerScroll(index + 1)` — skips a tile | k3b | **k3b** | 1 | 152 | yes (153) |
+| S-8h delete the header ✓-like bullet's `#418` clause **only** (old k8 stayed green here: 5 − 1 ≥ 3) | k8 | **k8** | 1 | 152 | yes (153) |
+| S-8s delete both `suppressed`-block `#418` tags only (extra) | k8 | **k8** | 1 | 152 | yes (153) |
+| S-8 delete the `commitDismiss` clause only (re-proof) | k8 | **k8** | 1 | 152 | yes (153) |
+
+No collateral reds in any run; k1–k7 and the existing fence stayed green
+throughout. Post-change gates (from `mobile/`): `npx tsc --noEmit` exit 0 ·
+`npm run test:shop-deck` 153 PASS / 0 FAIL · `bash scripts/testid-lint.sh`
+"testid-lint OK".
+
 ## 3. Command results
 
 Run from `mobile/` after `npm ci` in this worktree (guardrail 9 — no symlink to

@@ -272,7 +272,7 @@
 | 396 | flex-slot-label | planned | 2026-08-24 | G-C satellite, canonical `395-lineup-impact-superflex/` |
 | 397 | swipe-tour-placement | planned | 2026-08-24 | **canonical** G-B of the 2026-08-24 wave (#397/#398) — swipe tour beat moves above the trade chip strip (#398 supersedes #397) |
 | 398 | swipe-tour-top | planned | 2026-08-24 | G-B satellite (the operative placement ask), canonical `397-swipe-tour-placement/` |
-| 418 | shop-send-dismiss | planned | 2026-09-03 | fast-track bug — the shop tile leaves the pager after "Send this offer" (`ShopOffersBody.tsx` `handleLike` → `suppressed`); docs only, no branch yet |
+| 418 | shop-send-dismiss | in-progress | 2026-09-03 | fast-track bug — the shop tile leaves the pager after "Send this offer" (`ShopOffersBody.tsx` `handleLike` → `suppressed`); fix `f593020a` on `claude/new-user-feedback-06dabd`, QA A/B PASS, awaiting ship |
 | — | 2026-07-26-adjustments-breakdown | shipped | 2026-07-26 | n/a |
 | — | 2026-07-26-asset-trade-ideas | shipped | 2026-07-26 | teardown-remediation / `trade.asset_ideas` ON |
 | — | 2026-07-26-calc-eveners | shipped | 2026-07-26 | `eveners`/`adjustments`/`naive_totals` on `/api/trade/evaluate` — CHANGELOG 2026-07-26 |

@@ -214,8 +214,9 @@ is refreshed with it on every parent render, and `onMomentumScrollEnd`
 `index` is the tapped tile's index. Because it is a closure **constant**, its
 value is identical before and after the `await`; `const at = index` (the
 `restoreIndex` shape at `:619`) is therefore a readability capture, not a
-correctness one — permitted, not required, and the guard `k3` accepts either
-`requestPagerScroll(at)` or `requestPagerScroll(index)`. What the fix must
+correctness one — permitted, not required. The guard `k3` orders the call;
+`k3b` (added 2026-09-03 for QA-A F-1) pins its argument text to `index`, so
+adopting the `at` capture later means moving `k3b` with it. What the fix must
 **not** do is read a live index (a ref updated by the pager) after the await.
 Consequence, stated precisely: if the user swipes during the sub-second
 round-trip, the pager fronts **the tile that took the liked tile's slot**
@@ -224,9 +225,15 @@ left them, one tile behind two forward swipes, and one tile ahead of a
 backward swipe; always clamped, never off-list. A second residual, accepted:
 a refetch landing *during* the round-trip (a position toggle, or a
 focus/stale refetch) rewinds the pager to 0 (`:678`) and the like's
-resolution then jumps it to `at`. Both windows are sub-second and the
-outcome is a position, never a wrong tile removed; a live-index ref for
-this is not worth its lines (coding-guidelines §2).
+resolution then jumps it to `at`. A third residual, accepted (QA-B B-2,
+2026-09-03): a **mode-chip tap** during the round-trip — `handleSelectMode`
+(`:766-775`) requests 0 and sets the new mode; when the like resolves,
+`setSuppressed` recomputes every mode's array (`:517-526`), so the effect
+runs on the new mode's list and consumes the like's `requestPagerScroll(at)`
+→ the new mode's pager fronts `clamp(at)` instead of tile 1. On device it
+reads as "the pager jumped after I changed mode". All three windows are
+sub-second and the outcome is a position, never a wrong tile removed; a
+live-index ref for this is not worth its lines (coding-guidelines §2).
 
 **D-3 — Extend `check-shop-deck.js`; no new guard file, no `package.json`
 change.** The existing suite already parses this body with the helpers the new
@@ -295,7 +302,9 @@ red under its named sabotage, then green after revert** (402 prd §6.4).
 | **k5** | does **not** reference `alreadyQueued` (an already-queued idea is still queued and still leaves) | S-5: `if (res.queued && !res.alreadyQueued)` |
 | **k6** | does **not** reference `flushPendingDismiss` or `flushPendingDismissRef` (D-1) | S-6: insert `flushPendingDismiss();` before the queue call |
 | **k7** | the function's `TryStatement` has a `finallyBlock` that references `setBusyKey`, and the `setSuppressed` call's start offset is inside the `tryBlock` range **and greater than** the `AwaitExpression`'s start offset (R-8: release in `finally`; the write is post-resolution, never optimistic) | S-7a: move `setBusyKey(null)` out of `finally` into the `try` · S-7b: move the suppression write above the `await` |
-| **k8** | the body's source text contains `#418` in at least **three** places, and one of them lies inside `commitDismiss`'s range (R-9: the header bullet, the `suppressed` block, and the commit note all name the second gate). Textual by nature — a tripwire for a stale comment, not a semantic proof | S-8: delete the `commitDismiss` clause |
+| **k8** | `#418` lies inside each of three **named** ranges — the header's "✓ like" bullet, the `suppressed` declaration's comment block (its statement's leading trivia), and `commitDismiss`'s text (R-9). Named sites, not a count (tightened 2026-09-03, QA-A F-2 — the fix's own `#418` comment in `handleLike` cannot stand in for a deleted clause). Textual by nature — a tripwire for a stale comment, not a semantic proof | S-8: delete the `commitDismiss` clause · S-8h: delete the header clause only |
+| **k3b** | the `requestPagerScroll` call inside the queued branch (`gate.thenStatement`) has one argument whose text is `index` (D-2; added 2026-09-03, QA-A F-1) | X-2: `requestPagerScroll(0)` · X-4: `requestPagerScroll(index + 1)` |
+| **k9** | the `setSuppressed` call's single argument is an arrow function whose body references `key` and contains `.add(` — a copy-and-add updater, never a replacement or a no-op (Fix A; added 2026-09-03, QA-A F-1) | X-1: `setSuppressed(new Set([key]))` · X-3: `setSuppressed((s) => new Set(s))` |
 
 Existing assertions that must **stay green** on the fixed file, as the
 regression fence: `e` (counter reads the pager's list), `h5d` (screen
@@ -335,72 +344,97 @@ A file:line trace, each hop cited against the **fixed** file:
 
 ### 8.3 Manual TestFlight checklist (operator, first build carrying the fix)
 
-Every step names the regression it catches. Steps 2, 2b, 6 and 8 are the
-must-runs; 3–5, 7, 9 are the interaction fences.
+Adopted from QA-B §6 (2026-09-03). Every step names the regression it
+catches, states the pre-existing behaviors the operator would otherwise
+report as bugs (QA-B B-4 empty copy, B-5 Undo replacement, the refetch
+rewind), and step 10 takes the B-1 ruling with the behavior in hand.
+Must-runs: **2, 2b, 6, 8, 10**. Fences: 3, 4, 5, 7, 9.
 
-1. **Open the window.** Trades → a deck card → give-side **More offers** (or a
-   chooser row) → shop window; pick a mode whose chip shows **≥ 3** offers.
-   Note the counter `1 / N` and the chip's `· N`. ☐
-2. **Send on tile 1.** Tap **Send this offer** → toast *"Queued for @X — it'll
-   show in their suggestions."*; the tile is **gone**, the **next** tile is on
-   screen without you swiping, the counter reads **`1 / N-1`**, the mode chip
-   reads **`· N-1`**. *(R-1, R-2, R-3)* ☐
-2b. **Send on a middle tile.** Swipe to tile 2 (counter `2 / N-1`, N-1 ≥ 3)
-   → tap **Send** → the tile that was 3rd is now on screen, counter reads
-   **`2 / N-2`** — the pager held its position, it did not rewind to 1.
-   *(R-3 — the `k < N-1` clamp case; step 2 only covers `k = 0`)* ☐
-3. **It stays gone.** Swipe through every tile in this mode: the sent idea
-   (same partner, same pieces) does not appear. *(R-1)* ☐
-4. **Survives a mode round-trip.** Switch to another mode and back → still
-   absent, counts unchanged from step 2. *(Fix A — session-authoritative)* ☐
-5. **Survives a refetch.** Toggle a position chip, wait for the sweep, clear it
-   → still absent. *(Fix A — never cleared by a data tick)* ☐
-6. **Last tile → empty state.** In a mode with exactly **1** offer left
-   (dismiss down to one if needed and let the Undo toast expire), tap **Send**
-   → toast, then the **empty state** with no counter row and no spinner:
-   *"No <mode> offers cleared the bar"* if no position chip is selected, or
-   *"Nothing at <POS>"* with a **Clear positions** button if one is. The chip
-   reads `· 0`. In Same value this must **not** silently swap in an
-   all-positions notice. *(R-3)* ☐
-7. **Already queued.** Go back, reopen the window for the same player
-   **within a minute** of step 2 — the shop-ideas cache row is warm for
-   `staleTime: 60_000` (`:410`) and the same key `['shop-ideas', league,
-   asset, '']` (`:388`) is read, so the same ideas return and the new
-   instance's empty `suppressed` shows the sent one again. Find the idea from
-   step 2, tap **Send** → toast *"Already queued for @X."* **and** the tile
-   leaves exactly as in step 2. *(R-1 — alreadyQueued is queued.)* If more
-   than a minute has passed the sweep re-runs, and because the like moved
-   the Elo board (ruling 2026-08-27 A, `trade_k_like`) the idea may
-   legitimately be absent or in another mode — that is not a failure; redo
-   the step inside the window. ☐
-8. **Refused queue → tile stays.** Turn on **Airplane Mode**, tap **Send** on
-   any tile → toast *"Couldn't queue that. Try again."*; the tile is **still on
-   screen**, counter unchanged, both buttons enabled again. Airplane Mode off.
-   iOS usually fails the request at once; if the client waits out its 15 s
-   deadline instead (`api/client.ts:230`), the button shows its spinner
-   until then — the toast and the re-enabled pair are the pass, not the
-   latency. *(R-4. This forces the network-catch refusal; server-side
-   reasons — untouchable, not-interested, fairness floor — need a second
-   account's preferences and are covered by code-walk step 4 / guard k4
-   only.)* ☐
-9. **Pending dismiss + like on the next tile.** Dismiss tile A (the *Dismissed ·
-   Undo* toast shows and tile B is fronted); within 5 s tap **Send** on B →
-   the queue toast replaces the Undo toast; B leaves; A does **not** come back;
-   wait 6 s → nothing reappears, no second toast. *(R-7 / D-1)* ☐
+1. **Open.** Trades → deck card → give-side **More offers** (or a chooser
+   row). Pick a mode whose chip shows **≥ 3**. Write down `1 / N` and `· N`.
+   ☐
+2. **Send on tile 1.** Tap **Send this offer**. In one motion: toast
+   *"Queued for @X — it'll show in their suggestions."*, the tile is gone,
+   the tile that was 2nd is on screen **without swiping**, counter `1 / N-1`,
+   chip `· N-1`. **Regression signs:** the same tile still on screen after
+   the toast (the #418 bug itself); counter or chip unchanged while the
+   tile left (R-2/R-5 counter honesty); the pager visibly animating (P-1 —
+   the move must be instant, `animated:false`). *(R-1, R-2, R-3)* ☐
+2b. **Send on a middle tile.** Swipe to tile 2 (`2 / N-1`, need N-1 ≥ 3),
+   Send. The tile that was 3rd is now on screen, counter `2 / N-2`.
+   **Regression sign:** the pager snapping back to tile 1 (a rewind means
+   the like went through the refetch path or requested index 0). *(R-3)* ☐
+3. **It stays gone.** Swipe to the end and back: the sent package (same
+   partner, same pieces) never appears. *(R-1)* ☐
+4. **Survives a mode round-trip.** Tap another mode chip, then back. Still
+   absent; counts equal step 2's. Note: switching modes always lands on
+   tile 1 of the mode — that is shipped, not a regression. *(Fix A)* ☐
+5. **Survives a refetch.** Toggle a position chip, wait for the sweep, tap
+   it again to clear. Still absent. The pager rewinds to tile 1 on every
+   refetch — shipped, not a regression. **Regression sign:** the sent tile
+   reappearing after the sweep (the suppression set was cleared by a data
+   tick — n2d). *(Fix A)* ☐
+6. **Last tile → empty state.** Get a mode down to exactly 1 (dismiss the
+   rest, let each Undo toast expire), Send it. Expect: toast, then the
+   empty state with **no counter row and no spinner**, chip `· 0`. The copy
+   will say *"No <mode> offers cleared the bar"* (or *"Nothing at POS"* with
+   **Clear positions** if a chip is selected). **That copy is known to be
+   misleading here (QA-B B-4) — it is not a regression of this fix.** In
+   Same value the empty must **not** swap in a "showing all positions"
+   notice. **Regression signs:** a spinner, a `1 / 0` counter, or a blank
+   pager. *(R-3)* ☐
+7. **Already queued, same visit.** Within **60 s** of step 2, go back and
+   reopen the window for the same player. The sent idea **is offered
+   again** (expected — see step 10). Tap Send on it: toast *"Already queued
+   for @X."* **and** the tile leaves exactly as in step 2. **Regression
+   sign:** the tile staying after "Already queued" (k5 — an already-queued
+   like must still remove). Outside 60 s the sweep re-runs and the idea
+   may be absent or in another mode; that is not a failure, redo inside
+   the window. *(R-1)* ☐
+8. **Refused → tile stays.** Airplane Mode on, Send on any tile. Expect
+   toast *"Couldn't queue that. Try again."* (red rail, stays ~5 s), the
+   **same tile still on screen**, counter unchanged, both ✕ and Send
+   enabled again. If the spinner runs up to 15 s before the toast, that is
+   the client deadline (`api/client.ts:230`) — the toast and the re-enabled
+   pair are the pass. Airplane Mode off; the pager may rewind to tile 1 on
+   reconnect (shipped). **Regression sign:** the tile leaving on a refusal
+   (k4 — an optimistic or inverted write). This is the only refusal you can
+   force: D-170 (2026-08-31) removed the untouchable / not-interested /
+   fairness-floor refusals, and the server's sole surviving reason is
+   `not_league_member` — it takes the same `queued: false` path (code-walk
+   step 4 / guard k4). *(R-4)* ☐
+9. **Pending dismiss + Send on the next tile.** Dismiss A (*Dismissed ·
+   Undo* shows; B is fronted). Within 5 s, Send on B. Expect: the queue
+   toast **replaces** the Undo toast (the Undo button is gone for good —
+   this is the shipped B-4 rule, not a regression), B leaves, A does
+   **not** come back. Wait 6 s: nothing reappears, no second toast.
+   **Regression signs:** A returning (the like restored or cleared the
+   pending set); a second "Dismissed" toast (the like re-issued it); the
+   Undo toast staying up with a dead button. *(R-7 / D-1)* ☐
+10. **Cross-visit re-offer — take the ruling with the behavior in hand.**
+   Send an offer, back out, wait > 60 s, reopen the window for the same
+   player, look for the package in every mode. If it is there it looks like
+   a new idea, and tapping Send says "Already queued". **This is expected
+   today** (the server excludes dismissed ideas from the shop but never
+   sent ones — QA-B B-1; §6 "cross-session memory"). **Ruling question for
+   the operator:** sending an offer hides it for this visit only, and the
+   app has no sender-side list of what was sent — is that acceptable for
+   now, or should sent offers be excluded server-side like dismissed ones
+   (a D-067-shaped backend change, filed as a new item)? ☐
 
 ### 8.4 Pass criteria — one line per requirement
 
 | Req | Guard | Code-walk hop | Checklist |
 |---|---|---|---|
-| R-1 | k1, k2, k4, k5 | 5–6 | 2, 3, 4, 5, 7 |
+| R-1 | k1, k2, k4, k5, k9 | 5–6 | 2, 3, 4, 5, 7 |
 | R-2 | e, n2e, n2f (existing) | 6 | 2, 2b, 6 |
-| R-3 | k3, n3a, n3b (existing) | 5, 7 | 2, 2b, 6 |
+| R-3 | k3, k3b, n3a, n3b (existing) | 5, 7 | 2, 2b, 6 |
 | R-4 | k4, k7 (write is post-resolution) | 4, 8 | 8 |
 | R-5 | diff contains no `queueCalcTrade.ts` | 3 | 2, 7, 8 (copy read verbatim) |
 | R-6 | h, h5d (existing); no new `track(` in `handleLike` | 3 | — |
 | R-7 | k6 | 5 (only `suppressed` written) | 9 |
 | R-8 | k7; i3 (existing) | 2, 8 | 8 |
-| R-9 | k8 (tripwire); wording review | — | — |
+| R-9 | k8 (tripwire, three named sites); wording review | — | — |
 
 ## 9. File ownership
 
@@ -409,7 +443,7 @@ Exactly two files:
 | File | Change |
 |---|---|
 | `mobile/src/components/ShopOffersBody.tsx` | `handleLike` (today `:696-715`): inside the `try`, after the `await`, on `res.queued` call `requestPagerScroll(index)` (or a captured `at` — D-2) then `setSuppressed(...)`; three comment clauses (R-9), each carrying `#418`. Nothing else. |
-| `mobile/tests/check-shop-deck.js` | New section `(k)`, eight assertions k1–k8 (§8.1), inserted after `(i)`; one clause on the header bullet at `:50-51` (R-9). |
+| `mobile/tests/check-shop-deck.js` | New section `(k)`, assertions k1–k8 (§8.1) plus k3b and k9 (2026-09-03), inserted after `(i)`; one clause on the header bullet at `:50-51` (R-9). |
 
 No `mobile/package.json` change — `test:shop-deck` exists (`:85`). Forbidden:
 `mobile/src/utils/queueCalcTrade.ts`, `mobile/src/screens/ShopAssetScreen.tsx`,

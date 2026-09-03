@@ -855,7 +855,10 @@ for (const rel of [BODY_REL, MODE_REL]) {
 // the await (never optimistic — a refused queue leaves the tile); an
 // already-queued idea is still queued and still leaves (R-b); the like
 // never flushes the pending dismiss (D-1); busyKey still releases in
-// `finally` (R-8); and the three "one gate" comments carry the item number.
+// `finally` (R-8); the write is a copy-and-ADD of the prior set, never a
+// replacement or a no-op (k9); the request carries the tap-time `index`
+// (k3b); and the three "one gate" comments carry the item number, each at
+// its own named site (k8).
 
 {
   const sf = parse(BODY_REL);
@@ -916,6 +919,26 @@ for (const rel of [BODY_REL, MODE_REL]) {
         ? 'setSuppressed is not inside an if statement'
         : `if (${txt(sf, gate.expression)}) — in then-branch: ${inside(supCall, gate.thenStatement)}`,
   );
+  // k3b (D-2) — the request carries the tap-time `index`: `0` would rewind
+  // the pager on every send, `index + 1` would skip a tile. Read from the
+  // queued branch so it is the same call k3 ordered and k4 gated (hence
+  // placed after k4, which finds that branch).
+  const reqCall = findAll(
+    sf,
+    (n) =>
+      ts.isCallExpression(n) &&
+      ts.isIdentifier(n.expression) &&
+      n.expression.text === 'requestPagerScroll' &&
+      !!gate &&
+      inside(n, gate.thenStatement),
+  )[0];
+  assert(
+    !!reqCall && reqCall.arguments.length === 1 && txt(sf, reqCall.arguments[0]) === 'index',
+    'k3b: the queued branch requests the tap-time `index` (not 0, not index ± n — D-2)',
+    reqCall
+      ? `requestPagerScroll(${reqCall.arguments.map((a) => txt(sf, a)).join(', ')})`
+      : 'no requestPagerScroll call in the queued branch',
+  );
   // k5 — an already-queued idea is still queued and still leaves.
   assert(
     !!fnLike && !referencesIdentifier(sf, fnLike, 'alreadyQueued'),
@@ -949,19 +972,49 @@ for (const rel of [BODY_REL, MODE_REL]) {
           ? 'finally does not release busyKey'
           : 'the write is outside the try block or precedes the await',
   );
-  // k8 (R-9) — textual tripwire, not a proof: the header bullet, the
-  // `suppressed` block, and the commitDismiss note all name the second
-  // gate by item number, one of them inside commitDismiss's range.
+  // k8 (R-9) — textual tripwire, not a proof: three NAMED comment sites
+  // each carry the item number — the header's "✓ like" bullet, the
+  // `suppressed` declaration's comment block, and commitDismiss's body.
+  // Named sites, not a count: the fix's own comment in handleLike must not
+  // be able to stand in for a clause deleted elsewhere. A comment block is
+  // the leading trivia of the statement it precedes (fullStart → start).
   const src = sf.text;
-  const tagAt = [];
-  for (let i = src.indexOf('#418'); i >= 0; i = src.indexOf('#418', i + 1)) tagAt.push(i);
+  const leading = (stmt) => (stmt ? src.slice(stmt.getFullStart(), stmt.getStart(sf)) : '');
+  const hdrLead = leading(sf.statements.find((st) => leading(st).includes('✓ like')));
+  const bStart = hdrLead.indexOf('✓ like');
+  const bEnd = hdrLead.indexOf('✕ dismiss', Math.max(bStart, 0));
+  const hdrBullet = bStart >= 0 && bEnd > bStart ? hdrLead.slice(bStart, bEnd) : '';
+  const supDecl = findAll(
+    sf,
+    (n) => ts.isVariableDeclaration(n) && txt(sf, n.name) === '[suppressed, setSuppressed]',
+  )[0];
+  const supBlock = supDecl ? leading(nearestAncestor(supDecl, ts.isVariableStatement)) : '';
   const fnCommit = functionNamed(sf, 'commitDismiss');
+  const sites = {
+    'header ✓-like bullet': hdrBullet.includes('#418'),
+    'suppressed comment block': supBlock.includes('#418'),
+    'commitDismiss': !!fnCommit && txt(sf, fnCommit).includes('#418'),
+  };
   assert(
-    tagAt.length >= 3 &&
-      !!fnCommit &&
-      tagAt.some((i) => i >= fnCommit.getStart(sf) && i <= fnCommit.getEnd()),
-    'k8: the body names the second gate (#418) in at least three comments, one inside commitDismiss',
-    `#418 ×${tagAt.length}${fnCommit ? '' : '; commitDismiss not found'}`,
+    Object.values(sites).every(Boolean),
+    'k8: the header ✓-like bullet, the `suppressed` comment block, and commitDismiss each name the second gate (#418)',
+    `missing: ${Object.keys(sites).filter((k) => !sites[k]).join(', ') || 'none'}`,
+  );
+  // k9 — the write is a copy-and-ADD of the prior set: an updater arrow
+  // whose body names `key` and calls `.add(`. `setSuppressed(new Set([key]))`
+  // would resurrect every earlier committed ✕ and sent offer of the session
+  // (Fix A broken by replacement); `(s) => new Set(s)` would be the #418
+  // bug back with k1–k8 green.
+  const supArg = supCall && supCall.arguments.length === 1 ? supCall.arguments[0] : null;
+  assert(
+    !!supArg &&
+      ts.isArrowFunction(supArg) &&
+      referencesIdentifier(sf, supArg.body, 'key') &&
+      txt(sf, supArg.body).includes('.add('),
+    'k9: the suppression write is an updater that copies the prior set and ADDS the key (never a replacement, never a no-op)',
+    supCall
+      ? `setSuppressed(${supCall.arguments.map((a) => txt(sf, a)).join(', ')})`
+      : 'no setSuppressed call in handleLike',
   );
 }
 
