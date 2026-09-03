@@ -226,11 +226,11 @@ Line numbers as of branch `claude/landing-page-espn-mfl-a5a85a`. Files:
 
 - `web/index.html:83` — `#platform-row` ships with class `hidden`; the
   ESPN/MFL chips (`:85-86`) ship `hidden` too. Only `_applyPlatformOptionsFlag`
-  (`app.js:1229`) removes them: `optionsOn = FTF_FLAG('landing.platform_options')`,
+  (`app.js:1220`) removes them: `optionsOn = FTF_FLAG('landing.platform_options')`,
   `espnOn = optionsOn && FTF_FLAG('espn.link')`, `mflOn = optionsOn &&
   FTF_FLAG('mfl.link')`; the row shows only when `espnOn || mflOn` (≥2
   platforms incl. Sleeper — the mobile `platformChips.length >= 2` rule).
-  It runs from `_applyLandingFlags` (`app.js:1116`) at 0 / 250 / 1000 ms
+  It runs from `_applyLandingFlags` (`app.js:1107`) at 0 / 250 / 1000 ms
   after script load, the same schedule the smart-start and demo CTAs use.
 - Same function hides the MFL sign-in block without `mfl.auth_link` and the
   ESPN "Find my leagues" link without `espn.league_picker` — the two v2.1
@@ -239,7 +239,7 @@ Line numbers as of branch `claude/landing-page-espn-mfl-a5a85a`. Files:
 
 ## 2. Sleeper default is byte-identical behavior
 
-- `_entryPlatformSel` initializes `'sleeper'` (`app.js:1153`); `#entry-sleeper`
+- `_entryPlatformSel` initializes `'sleeper'` (`app.js:1140`); `#entry-sleeper`
   (`index.html:90`) has no `hidden` class at load, and the ESPN / MFL /
   teams panels (`:141`, `:179`, `:213`) do. `handleLogin`, the smart-start
   CTA and the demo link are untouched apart from the funnel events in §6.
@@ -249,7 +249,7 @@ Line numbers as of branch `claude/landing-page-espn-mfl-a5a85a`. Files:
 
 ## 3. Preview → claim → import is the D-164 sequence, verbatim
 
-- `_entryPost` (`app.js:1299`) is a plain `fetch` (no session header, no
+- `_entryPost` (`app.js:1315`) is a plain `fetch` (no session header, no
   session-expiry hook) against `POST /api/entry/platform`; non-2xx rejects
   with `{code, status, message}` from the route's own error vocabulary.
 - ESPN: `entryEspnPreview` (`:1344`) parses the id with the mobile regex
@@ -278,18 +278,19 @@ Line numbers as of branch `claude/landing-page-espn-mfl-a5a85a`. Files:
 
 ## 4. Entry users never touch Sleeper's roster proxies
 
-`_isEntryUser` (`app.js:1165`) = saved `user_id` starts with `entry:`;
+`_isEntryUser` (`app.js:1156`) = saved `user_id` starts with `entry:`;
 `_entryPlatform` (`:1168`) reads the saved `platform` or the id's second
 segment. Every Sleeper-only read in the file forks on it:
 
 | Path | Fork | Snapshot read |
 |---|---|---|
-| `boot()` switcher fill | `app.js:243` | `_platformLeagues` (`:1177`) → `_cachedLeagues` |
-| `showLeagueScreen` | `:455` | lists the snapshot; **1 league → `selectLeague(0, null)` after 200 ms** (mobile's single-league auto-skip) |
-| `selectLeague` | `:673` | `_platformRosterData` (`:1214`) → `buildPlatformRosterData` (`:1196`) |
-| `initSession` reload path | `:835` | same |
-| `switchToLeague` | `:2988` | same |
-| `_ensureLeaguematePool` | `:3536` | members reshaped to `{owner_id, roster_id, players}` so the shared pool build + `ownsRoster` work unchanged |
+| `boot()` switcher fill | `app.js:233` | `_platformLeagues` (`:1168`) → `_cachedLeagues` |
+| `showLeagueScreen` | `:446` | lists the snapshot; **1 league → `selectLeague(0, null)` after 200 ms** (mobile's single-league auto-skip) |
+| `selectLeague` | `:664` | `_platformRosterData` (`:1205`) → `buildPlatformRosterData` (`:1187`) |
+| `initSession` reload path | `:826` | same |
+| `_ensureLeaguematePool` | `:3484` | members reshaped to `{owner_id, roster_id, players}` so the shared pool build + `ownsRoster` work unchanged |
+
+> **Amended 2026-09-03 (rebase onto [D-178](../../living-memory/DECISIONS.md), PR #273).** V3 shipped a **sixth** fork, in `switchToLeague`. That commit deleted the function's entire pre-reload body — it saves the league and reloads, so `boot()` → `initSession` redoes the work, and everything before the reload (the Sleeper warm-up, the roster fetches, and V3's entry branch) was dead. Entry users are still correct there because the reload lands in the `initSession` fork above, which is exactly what that commit's own comment says. Line numbers in this table are post-rebase.
 
 `buildPlatformRosterData` returns exactly `buildRosterData`'s shape
 (`userRoster, userPlayerIds, leagueUserId, leagueDisplayName,
@@ -336,3 +337,81 @@ scratch SQLite DB (`DATABASE_URL`), real `_extension_build_session`.
 | Click "Chalk Dusters" | `user_id:"entry:espn:{A1111111-…}"`, league `987654321`, token set, `_myRoster.length = 8`, method screen shown |
 | Live API (real server on `:5088`) | MFL `99999` → "MFL has no league with that ID."; ESPN `1` → "This league is private — paste your espn_s2 and SWID cookies below." + cookie section auto-opened |
 | Console | no errors at any step; `POST /api/events` 200 ×3 (funnel events flowing) |
+
+---
+
+# V3.1 — ESPN sign-in primary (2026-09-03)
+
+Line numbers as of branch `claude/espn-signin-primary`.
+
+## 1. The panel's DOM order now matches mobile
+
+`web/index.html` inside `#entry-espn`: explainer → `#espn-signin-btn` (156) →
+`#espn-signin-hint` (157) → `#espn-or` (158) → `#espn-cookies-toggle` (159) →
+`#espn-cookies` (the fields + `#espn-find-btn`) → the league-ID row (171) →
+`#espn-error` (175) → `#espn-league-list` (188). Rendered order is confirmed
+by the runtime read in §4, which lists the children in paint order.
+
+Mirrors `mobile/src/components/EspnLinkSheet.tsx:459-476` — sign-in button,
+"We'll find your leagues — no league ID needed. We never see your password.",
+"or enter a league ID" — with the league-ID field after it.
+
+## 2. The flag picks the layout, and both are complete
+
+`web/js/app.js:1244` — `const pickerOn = window.FTF_FLAG('espn.league_picker')`,
+then one table (1246-1250) toggles five elements: `espn-signin-btn`,
+`espn-signin-hint`, `espn-find-btn`, `espn-or` shown when `pickerOn`, and
+`espn-cookies-toggle` shown when **not** `pickerOn`. So:
+
+- picker **on** → sign-in primary; the secondary link is hidden.
+- picker **off** → the sign-in button, its hint, the find button and the "or"
+  divider all withdraw (the action 404s, so the promise would be a lie), and
+  the secondary "Private league?" link returns. The cookie inputs are the
+  same two elements in both cases — nothing is duplicated.
+
+Runtime proof of both states in §4.
+
+## 3. Opening the block, and the 403 that forces it open
+
+`app.js:1360` — `toggleEspnCookies(forceOpen)`: with no argument it toggles;
+with `true` it opens. It mirrors the open state onto `#espn-signin-btn`'s
+`aria-expanded` (only while that button is the visible control) and focuses
+`#espn-s2-input` on open.
+
+`app.js:1407` — the `espn_auth_required` branch calls
+`toggleEspnCookies(true)`. That matters after the restructure: V3 called
+`classList.remove('hidden')`, which happened to work, but a plain `toggle()`
+here would *close* the block for a user who had already opened it, hiding the
+fix. Forcing open is the invariant; §4 shows it holding on a real 403.
+
+## 4. Runtime E2E (2026-09-03)
+
+Two servers. The **stub** (`:5089`) is the real Flask app with
+`es.fetch_league`, `es.get_crosswalk`, `es.fetch_fan_leagues`,
+`mfl.resolve_host`, `mfl.fetch_league_bundle` and `server._shared_crosswalk`
+patched to the route tests' fixtures on a scratch SQLite DB — `fetch_fan_leagues`
+returns two leagues for one "good" cookie pair and raises `kind="auth"` for
+any other, so both `my_leagues` branches are reachable. The **real** app
+(`:5088`) hits live ESPN for the private-league 403.
+
+| Step | Observed |
+|---|---|
+| ESPN chip, picker on | children in paint order: explainer, `espn-signin-btn`, `espn-signin-hint`, `espn-cookies-toggle`, `espn-cookies`, `espn-or`, id row, error, list. Sign-in + hint + "or" visible; secondary link hidden; cookie block closed |
+| Click "Sign in to ESPN" | block opens, `#espn-find-btn` visible, `aria-expanded="true"`, focus moves to `#espn-s2-input` |
+| Wrong cookie pair → Find my leagues | "ESPN didn't accept those cookies. Paste fresh values, or try a league ID instead."; list stays hidden; button restored, not stuck |
+| Good pair → Find my leagues | 2 rows: "Recorded Shape Dynasty · Chalk Dusters · 2026", "Second League · Backups · 2025" |
+| Pick league → team list | "Recorded Shape Dynasty — which team is yours?", 3 teams with owners × "8 players" |
+| Claim "Chalk Dusters" | `entry:espn:{A1111111-…}` session minted, `sleeper_league` = 987654321, token stored, `_myRoster.length` 8, ranking-method screen shown, no error |
+| Find my leagues with empty fields | "Paste both espn_s2 and SWID to look up your leagues." (guard, no request) |
+| `espn.league_picker` forced **off** + re-apply | sign-in button, hint, "or" divider, find button all hidden; secondary "Private league?" link shown; cookie inputs still reachable |
+| flag back **on** | primary restored, secondary hidden |
+| **Real ESPN**, league id `1` (private) | "This league is private. Paste your espn_s2 and SWID cookies to continue."; block **force-opened**; `aria-expanded="true"`; focus on `#espn-s2-input`; Continue restored |
+| Network | the one 403 is the deliberate rejected-pair probe; the full claim path is `entry/platform` ×3 (my_leagues, preview, mint) → `espn/link` → `espn/leagues` ×2 → `session/init` → `rankings/progress`, all 200 |
+| Console | no errors beyond the two intentional 403 fetches |
+
+## 5. Known minor inefficiency (not introduced here, not fixed here)
+
+`GET /api/espn/leagues` fires twice on a claim: once in `showLeagueScreen`'s
+entry branch and once in `selectLeague` → `_platformRosterData`. Both are
+cheap reads of the same snapshot and caching it would add a staleness source,
+so it stands. Noted so it is not rediscovered as a bug.

@@ -1230,8 +1230,28 @@
       row.classList.toggle('hidden', !(espnOn || mflOn));
       const signin = document.getElementById('mfl-signin');
       if (signin) signin.classList.toggle('hidden', !window.FTF_FLAG('mfl.auth_link'));
-      const find = document.getElementById('espn-find-btn');
-      if (find) find.classList.toggle('hidden', !window.FTF_FLAG('espn.league_picker'));
+      // ESPN entry hierarchy, mirroring mobile EspnLinkSheet: signing in is
+      // the FIRST-CLASS option and the league id is the other path. The whole
+      // promise of the primary block ("we'll find your leagues") is the v2.1
+      // my_leagues action, which 404s without `espn.league_picker` — so that
+      // flag chooses the layout:
+      //   ON  → primary "Sign in to ESPN" button + hint + "or enter a league
+      //         ID" divider above the id row; the cookie fields it expands
+      //         carry the "Find my leagues" primary.
+      //   OFF → no sign-in promise we can keep; the id row is primary and the
+      //         cookie fields sit behind the secondary "Private league?" link,
+      //         exactly where they lived before this change.
+      const pickerOn = window.FTF_FLAG('espn.league_picker');
+      for (const [id, shown] of [
+        ['espn-signin-btn',   pickerOn],
+        ['espn-signin-hint',  pickerOn],
+        ['espn-find-btn',     pickerOn],
+        ['espn-or',           pickerOn],
+        ['espn-cookies-toggle', !pickerOn],
+      ]) {
+        const el = document.getElementById(id);
+        if (el) el.classList.toggle('hidden', !shown);
+      }
       // Flag revalidation can withdraw the selected platform — fall back to
       // Sleeper instead of stranding the user on a chip that no longer shows.
       if ((_entryPlatformSel === 'espn' && !espnOn) || (_entryPlatformSel === 'mfl' && !mflOn)) {
@@ -1249,7 +1269,10 @@
         chip.setAttribute('aria-pressed', id === p ? 'true' : 'false');
       }
       _entryShowStep(p);
-      const focusId = { espn: 'espn-league-input', mfl: 'mfl-league-input' }[p];
+      // Focus the panel's primary field. For ESPN under the sign-in-primary
+      // layout that is the cookie pair once expanded, so focus nothing here
+      // (the button is the primary and takes the tab stop naturally).
+      const focusId = { mfl: 'mfl-league-input' }[p];
       const focusEl = focusId && document.getElementById(focusId);
       if (focusEl) setTimeout(() => focusEl.focus(), 50);
     }
@@ -1281,6 +1304,8 @@
         const el = document.getElementById(id);
         if (el) el.classList.add('hidden');
       }
+      const sBtn = document.getElementById('espn-signin-btn');
+      if (sBtn) sBtn.setAttribute('aria-expanded', 'false');
       selectEntryPlatform('sleeper');
     }
 
@@ -1328,9 +1353,23 @@
       const sw = (document.getElementById('espn-swid-input').value || '').trim();
       return { s2, sw };
     }
-    function toggleEspnCookies() {
+    // Expand/collapse the cookie block. Called by BOTH controls (the primary
+    // "Sign in to ESPN" button when the picker flag is on, the secondary
+    // "Private league?" link when it is off) and by the 403 handler, which
+    // needs the fix on screen rather than behind a closed section.
+    function toggleEspnCookies(forceOpen) {
       const box = document.getElementById('espn-cookies');
-      if (box) box.classList.toggle('hidden');
+      if (!box) return;
+      const open = forceOpen === true ? true : box.classList.contains('hidden');
+      box.classList.toggle('hidden', !open);
+      const btn = document.getElementById('espn-signin-btn');
+      if (btn && !btn.classList.contains('hidden')) {
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      }
+      if (open) {
+        const s2 = document.getElementById('espn-s2-input');
+        if (s2) setTimeout(() => s2.focus(), 50);
+      }
     }
     async function entryEspnPreview(leagueIdOverride) {
       const errEl = document.getElementById('espn-error');
@@ -1365,10 +1404,10 @@
         if (e.code === 'espn_auth_required') {
           // Private league (or rejected cookies): put the fix on screen
           // instead of a dead end — same copy branches as mobile's sheet.
-          document.getElementById('espn-cookies').classList.remove('hidden');
+          toggleEspnCookies(true);
           errEl.textContent = (s2 && sw)
             ? "ESPN didn't accept those cookies — they may have expired. Paste fresh espn_s2 and SWID values from a logged-in espn.com session."
-            : 'This league is private — paste your espn_s2 and SWID cookies below.';
+            : 'This league is private. Paste your espn_s2 and SWID cookies to continue.';
         } else {
           errEl.textContent = e.message || "Couldn't reach ESPN — try again shortly.";
         }
@@ -1391,7 +1430,7 @@
         _entryEspnLeagues = data.leagues || [];
         if (!_entryEspnLeagues.length) {
           list.classList.add('hidden');
-          errEl.textContent = "We couldn't find any fantasy football leagues on that ESPN account — enter a league ID above instead.";
+          errEl.textContent = "We couldn't find any fantasy football leagues on that ESPN account. Try a league ID instead.";
           return;
         }
         list.innerHTML = _entryEspnLeagues.map((lg, i) => `
@@ -1402,8 +1441,8 @@
         list.classList.remove('hidden');
       } catch (e) {
         errEl.textContent = e.code === 'espn_auth_required'
-          ? "ESPN didn't accept those cookies. Paste fresh values, or enter a league ID above instead."
-          : (e.message || "We couldn't list your ESPN leagues — enter a league ID above instead.");
+          ? "ESPN didn't accept those cookies. Paste fresh values, or try a league ID instead."
+          : (e.message || "We couldn't list your ESPN leagues. Try a league ID instead.");
       } finally {
         _entryBusy(btn, false);
       }
@@ -1486,7 +1525,7 @@
         if (!_entryMflLeagues.length) {
           _entryMflPass = '';
           list.classList.add('hidden');
-          errEl.textContent = 'MFL lists no leagues for that account this season — enter a league ID below instead.';
+          errEl.textContent = 'MFL lists no leagues for that account this season. Try a league ID instead.';
           return;
         }
         list.innerHTML = _entryMflLeagues.map((lg, i) => `

@@ -11,6 +11,24 @@
 
 ---
 
+## 2026-09-03d — Web ESPN sign-in-primary (D-179): web gate 175/175, entry route 25/25, browser E2E both flag states + live-ESPN 403
+
+Branch `claude/espn-signin-primary` off `main` @ `a65bb771`. Client-only (`web/index.html`, `web/js/app.js`); full gates, no waivers ([scope §V3.1](../docs/plans/landing-platform-options/scope.md)).
+
+- **`qa/web/check_web_structure.py`:** **175/175**. **`node --check web/js/app.js`:** clean.
+- **`pytest backend/tests/test_entry_platform_route.py`:** **25 passed** — unchanged route contract, re-run as a guard since the layout drives the same two actions.
+- **Browser E2E, two servers.** Stub (`:5089`): the real app with the ESPN/MFL network seams patched to the route fixtures on a scratch DB, **including `es.fetch_fan_leagues`** (two leagues for one good cookie pair, `kind="auth"` for any other) so BOTH `my_leagues` branches are reachable. Real app (`:5088`) for the live-ESPN 403.
+  - Paint order confirmed: explainer → sign-in btn → hint → (secondary link, hidden) → cookie block → "or" divider → id row → error → list.
+  - Sign-in click → block opens, find button visible, `aria-expanded="true"`, focus on `espn_s2`.
+  - Wrong pair → "ESPN didn't accept those cookies…"; list hidden; button restored. Good pair → 2 leagues → pick → 3 teams → claim → `entry:espn:{A1111111-…}`, roster 8, method screen, no error.
+  - Empty fields → "Paste both espn_s2 and SWID to look up your leagues." (guard, no request).
+  - `espn.league_picker` forced **off** → sign-in btn/hint/find/divider withdraw, secondary link returns, inputs still reachable; back **on** → primary restored.
+  - **Live ESPN, league `1`:** "This league is private. Paste your espn_s2 and SWID cookies to continue.", block **force-opened**, focus on `espn_s2`. This is the case the restructure could have broken — V3 used `classList.remove`, a plain toggle here would have CLOSED the block for a user who had already opened it; `toggleEspnCookies(true)` is the invariant.
+  - Network: the single 403 is the deliberate rejected-pair probe; the claim path is `entry/platform` ×3 → `espn/link` → `espn/leagues` ×2 → `session/init` → `rankings/progress`, all 200. Console clean otherwise.
+- **Bugs caught by testing, fixed before commit:** four error strings with wrong directional words (three ESPN, one MFL); one of them predates this change.
+- **Noted, not fixed:** `GET /api/espn/leagues` fires twice per claim (league screen + `_platformRosterData`) — cheap reads of one snapshot, caching would add staleness. Recorded in code-walk §V3.1.5 so it is not rediscovered as a bug.
+- **Owed:** CI on the PR; the operator's real-account ESPN check (a stub cannot prove a live sign-in).
+## 2026-09-03c — API audit fixes (D-178): merged branch green — pytest 4617 / 1 skipped, tsc 0, testid-lint OK, web 175/175
 ## 2026-09-03c — API audit fixes (D-178) SHIPPED: `main` @ `c2775fe0`, CI ×4 green, Render live; pytest 4619 / 1 skipped after the main merge
 
 Branch `claude/api-audit-redundancies-9a6075` (cut from `main` @ `6ccd6698`). Treated as internal perf fixes: no scope block; evidence = new tests + code-walk proofs in the agent reports + this ledger. Four Opus build agents, two in isolated worktrees (swept — `docs/recovery/2026-09-03-api-audit-agent-sweep.md`).
@@ -3585,6 +3603,7 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-09-03d — Web ESPN sign-in-primary (D-179): web gate 175/175, entry route 25/25, browser E2E both flag states + live-ESPN 403](#2026-09-03d--web-espn-sign-in-primary-d-179-web-gate-175175-entry-route-2525-browser-e2e-both-flag-states--live-espn-403)
 - [2026-09-03c — API audit fixes (D-178): merged branch green — pytest 4617 / 1 skipped, tsc 0, testid-lint OK, web 175/175](#2026-09-03c--api-audit-fixes-d-177-merged-branch-green--pytest-4617--1-skipped-tsc-0-testid-lint-ok-web-175175)
 - [2026-09-03b — Web landing platform entry (PR #272): web gate 175/175, entry-route suite 25/25, browser E2E both platforms; sim gate skipped (D-056 posture)](#2026-09-03b--web-landing-platform-entry-pr-272-web-gate-175175-entry-route-suite-2525-browser-e2e-both-platforms-sim-gate-skipped-d-056-posture)
 - [2026-09-03 — #413 SHIPPED: PR #270 squash → `main` @ `5c83e8cd`, CI ×4 green, Render live, EAS build 144 / v1.16.15 submitted](#2026-09-03--413-shipped-pr-270-squash--main--5c83e8cd-ci-4-green-render-live-eas-build-144--v11615-submitted)

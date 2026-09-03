@@ -11,6 +11,21 @@
 
 ---
 
+## 2026-09-03d — Web ESPN entry leads with sign-in, matching mobile (D-179; PR open, NOT merged)
+Operator on the live V3 landing: "ESPN option is missing the log in prompt as primary." Correct —
+V3 shipped ESPN league-ID-first with credentials behind a "Private league?" link, inverting mobile's
+`EspnLinkSheet` entry order (sign-in first-class, "or enter a league ID" after). MFL already matched.
+The panel now reads: read-only explainer → primary **"Sign in to ESPN"** → "we'll find your leagues,
+no league ID needed" → the cookie block it expands (with a "Find my leagues" primary running the
+v2.1 `my_leagues` action) → "or enter a league ID" → the id row. The web's sign-in is the
+`espn_s2`/`SWID` paste because a browser cannot read espn.com's cookies and ESPN has no OAuth; no
+ESPN password is ever asked for. `espn.league_picker` now picks the LAYOUT too — off, the promise is
+withdrawn and V3's id-first order returns, one set of inputs serving both. Testing also caught four
+error strings whose "above"/"below" pointed the wrong way (both error lines render after both
+blocks); one was wrong in V3 already, inherited from mobile. Now direction-free. Web gate 175/175,
+entry-route suite 25/25, browser E2E both flag states + the live-ESPN 403 force-open
+([code-walk §V3.1](../docs/plans/landing-platform-options/code-walk.md)).
+## 2026-09-03c — API audit (D-178): session init 26 → 7 Sleeper calls, trade job 17 → 4 reads, cron sweeps scoped, web/mobile re-fetches removed (PR pending)
 ## 2026-09-03c — API audit SHIPPED (D-178): PR #273 squash → `main` @ `c2775fe0`, Render live 16:33 UTC — session init 26 → 7 Sleeper calls, trade job 17 → 4 reads, cron sweeps scoped, web/mobile re-fetches removed
 
 Branch `claude/api-audit-redundancies-9a6075` → squash `c2775fe0`. **Note:** the squash commit title says D-177; the correct id is **D-178** — PR #272 claimed D-177 for the web platform entry while this branch was open, and the ledger was renumbered in the merge. `DECISIONS.md` is authoritative. Source: [`docs/reviews/2026-09-03-api-audit.md`](../docs/reviews/2026-09-03-api-audit.md) (four-layer audit + 195-route caller table). Operator chose findings 1, 2, 4, 5, 6, 7, 8, 9, 10; **3 held** (ping-then-init would stop the per-foreground league resync — see NEXT), **7 shipped as poll-pause** (real web push = schema + dependency, needs a scope block).
