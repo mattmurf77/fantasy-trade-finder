@@ -11,9 +11,9 @@
 
 ---
 
-## 2026-09-03c — API audit (D-178): session init 26 → 7 Sleeper calls, trade job 17 → 4 reads, cron sweeps scoped, web/mobile re-fetches removed (PR pending)
+## 2026-09-03c — API audit SHIPPED (D-178): PR #273 squash → `main` @ `c2775fe0`, Render live 16:33 UTC — session init 26 → 7 Sleeper calls, trade job 17 → 4 reads, cron sweeps scoped, web/mobile re-fetches removed
 
-Branch `claude/api-audit-redundancies-9a6075`. Source: [`docs/reviews/2026-09-03-api-audit.md`](../docs/reviews/2026-09-03-api-audit.md) (four-layer audit + 195-route caller table). Operator chose findings 1, 2, 4, 5, 6, 7, 8, 9, 10; **3 held** (ping-then-init would stop the per-foreground league resync — see NEXT), **7 shipped as poll-pause** (real web push = schema + dependency, needs a scope block).
+Branch `claude/api-audit-redundancies-9a6075` → squash `c2775fe0`. **Note:** the squash commit title says D-177; the correct id is **D-178** — PR #272 claimed D-177 for the web platform entry while this branch was open, and the ledger was renumbered in the merge. `DECISIONS.md` is authoritative. Source: [`docs/reviews/2026-09-03-api-audit.md`](../docs/reviews/2026-09-03-api-audit.md) (four-layer audit + 195-route caller table). Operator chose findings 1, 2, 4, 5, 6, 7, 8, 9, 10; **3 held** (ping-then-init would stop the per-foreground league resync — see NEXT), **7 shipped as poll-pause** (real web push = schema + dependency, needs a scope block).
 - **Backend:** session-init daemon fetches rosters + league meta once and threads them to owned-picks / telemetry; trades sync is incremental (`sweep_weeks`: backfill once, then `[week-1, week]`, offseason `[1]`); trade job takes request-time prefs (`prefs_preload`), bulk opponent prefs, one memoized `load_draft_picks`; both cron loaders filter `leagues.updated_at` ≤ 30 d; `not_drafted` probe 24 h outside Apr 1 – Sep 15.
 - **Web:** `/api/sleeper/players` → `/warm` (4.8 MB never read); `apiFetch` parses bodies on 401 only; swipe 5 → 3 requests; notification poll pauses on hidden tabs; `switchToLeague` saves + reloads (boot did it all again).
 - **Mobile:** `initLeagueSession` / `buildSessionInitBody` hand back rosters + users; `state/queryClient.seedLeagueSessionCaches` seeds `['league-rosters'|'league-users', id]` on every init path (5-min staleTime already held by all five consumers).

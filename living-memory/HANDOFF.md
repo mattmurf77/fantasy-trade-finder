@@ -8,16 +8,21 @@
 
 ---
 
-## 2026-09-03c — API audit fixes on PR #273 (D-178); finding 3 held, web push deferred
+## 2026-09-03c — API audit fixes SHIPPED (D-178) and live on Render; backend prod count still owed
 
-**Where:** branch `claude/api-audit-redundancies-9a6075` pushed; [PR #273](https://github.com/mattmurf77/fantasy-trade-finder/pull/273) open against `main` @ `6ccd6698`. All gates green on the merged tree (pytest 4617/1, tsc 0, testid-lint OK, web 175/175 — TEST_LEDGER 2026-09-03c). Nothing in flight; the two agent worktrees are swept (`docs/recovery/2026-09-03-api-audit-agent-sweep.md`). Session worktree `new-user-feedback-5fa613` hosts this branch.
+**Where:** PR #273 squash-merged → `main` @ `c2775fe0`; Render deploy `dep-dacq1urbc2fs73cebekg` **live 2026-09-03 16:33 UTC**. CI ×4 green on the final head; pytest 4619/1 locally after merging main. Nothing in flight. The branch `claude/api-audit-redundancies-9a6075` still exists (not swept — see below); the two build-agent worktrees were already swept (`docs/recovery/2026-09-03-api-audit-agent-sweep.md`).
+
+**Verified in prod already:** the web half. `/api/sleeper/players/warm` returns 25 bytes where the old call shipped ~4.8 MB, and the deployed `/js/app.js` carries the `/warm` sites, the `visibilitychange` pause and `skipProgress`. Service booted clean.
 
 **Owed, in order:**
-1. **Operator: merge PR #273** (squash, as usual). Render auto-deploys the backend + web; mobile changes ride the next EAS build.
-2. **Post-deploy:** one real session init in the Render log should show ≤7 `api.sleeper.app` calls (one `rosters`, one `/league/{id}`, ≤2 `transactions`). Then the 5-step TestFlight check in the PR body — it only proves anything on a build cut after this merge.
-3. **Finding 3 decision** (NEXT 2026-09-03c item 2): ping-then-init trades roster freshness for calls; the safer variant is a server-side 15-min skip inside the daemon. Not built.
-4. **Web push** is a scoped feature, not a fix (NEXT item 3). **Route hygiene** batch (NEXT item 4) is mechanical and each row is an `api-reference.md` edit.
-5. `SEASON_START` in `backend/sleeper_trades_service.py` is a constant (2026-09-08) — bump it each September, or replace with a `/v1/state/nfl` read if one ever lands.
+1. **Backend prod count (the one real gap).** Open the app once against prod, then read the Render log for `=== /api/session/init` and count the `→ Sleeper GET` lines that follow: expect **≤7** for a Sleeper league. The DB `api_call` rows cannot settle this — successes are 1-in-10 sampled. If the count is high, the likely culprit is the draft-status TTL having lapsed (that path legitimately adds 3).
+2. **Mobile seed needs a build.** The `seedLeagueSessionCaches` change only ships with a new EAS build; the 5-step TestFlight checklist is in the PR #273 body and TEST_LEDGER 2026-09-03c. Nothing to check on the fielded 1.16.15.
+3. **Cron filters** land on the next hourly (draft-status, now season-gated + 30-day active filter) and daily (roster sweep) ticks. Spot-check that a league nobody has opened in 30 days stops being swept, and that MFL leagues are the known exception (`set_platform_future_picks` stamps `updated_at` itself — D-178 §Consequences).
+4. **Finding 3 is a decision, not a task** (NEXT 2026-09-03c item 2): ping-then-init would stop the per-foreground league resync, so data goes staler; the safer variant is a server-side 15-min skip inside the daemon. Not built.
+5. **Sweep the session branch** once you are satisfied with item 1 — ledger its sha first per `docs/recovery/CLAUDE.md`.
+
+**Two ids to not trip on:** the squash commit title says D-177, but this work is **D-178** — PR #272 took D-177 for the web platform entry mid-flight. `DECISIONS.md` is authoritative. Same story for the dated ledger sections: mine are **2026-09-03c**, the web platform entry is 03b.
+
 ## 2026-09-03b — Web landing platform entry (Sleeper · ESPN · MFL) SHIPPED (D-177); awaiting the Render deploy + the operator prod check
 
 **Where:** `main` @ `ca5fac46` (PR [#272](https://github.com/mattmurf77/fantasy-trade-finder/pull/272), squash, CI ×4 green). [D-177](DECISIONS.md); scope + code-walk §V3 in `docs/plans/landing-platform-options/`. Branch `claude/landing-page-espn-mfl-a5a85a` @ `9fea43e0` content-verified (`git diff origin/main 9fea43e0` empty) and ledgered in `docs/recovery/2026-09-03b-web-platform-entry-ship.md`.
