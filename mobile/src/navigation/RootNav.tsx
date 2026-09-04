@@ -36,6 +36,7 @@ import PremiumRankingsBrowserScreen from '../screens/PremiumRankingsBrowserScree
 import TestStagesScreen from '../screens/TestStagesScreen';
 import LeagueSummaryScreen from '../screens/LeagueSummaryScreen';
 import FreeAgentsScreen from '../screens/FreeAgentsScreen';
+import WinNowScreen from '../screens/WinNowScreen';
 import ReceiptsScreen from '../screens/ReceiptsScreen';
 // #402/#403 rev-3 — the shop window (rev3-spec.md §1): give-side "More
 // offers" on the Trades deck pushes this screen.
@@ -138,6 +139,7 @@ type AuthStack = {
   // #142/#144 — League rankings (power rankings) + FA finder, entered from
   // the League tab's Explore rows.
   LeagueSummary: undefined;
+  WinNow: undefined;
   FreeAgents: undefined;
   // Receipts — the viewer's graded suggestion track record
   // (docs/plans/receipts/). No params: the screen scopes itself to the
@@ -779,6 +781,19 @@ export default function RootNav({ booted }: { booted: boolean }) {
                 }
               />
             ),
+          })}
+        />
+        <Stack.Screen
+          name="WinNow"
+          component={WinNowScreen}
+          options={({ navigation }) => ({
+            headerShown: true,
+            title: 'Win Now',
+            headerTitle: () => <HeaderTitle>Win Now</HeaderTitle>,
+            headerStyle: { backgroundColor: ink.ink0 },
+            headerTintColor: chalk.base,
+            headerBackVisible: false,
+            headerLeft: () => <HeaderBack testID="win-now.back-btn" onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.navigate('Main')} />,
           })}
         />
         {/* FA finder — pushed from the League tab's "Free agents" row. */}

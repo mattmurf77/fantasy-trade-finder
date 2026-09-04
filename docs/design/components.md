@@ -154,3 +154,14 @@ Three constructions on the merged calculator (`InLeagueCalculator`, flag `calc.m
 - **Scope-truth note** (`calc.search-scope-note`) — one chalk-dim `body-sm` line directly under the action row: "Find a Trade searches all teams — pick a team to target one." Renders **iff** the search payload's partner would be null (explicit Anyone, or the untouched default with an empty receive side); its disappearance IS the scoped signal — no scoped-state caption (the action row's frame budget is contested, D-157).
 - **Receive-column hint** (`calc.receive-any-hint`) — chalk-dim `body-sm` line under the receive `TradeSide` while Anyone is active: "Pick a team to add specific players — Find a Trade already shows offers from everyone." Pairs with the receive Add redirect (Add opens the team sheet, never an empty picker). The column header reads "any team" in the same state.
 
+---
+
+## Season projections and Win Now
+
+Restricted beta behind separate season-read, trade-search and title gates; default off. Uses existing Chalkline cards, secondary/primary buttons, label/body text, hairline tables and 44-point mobile controls, with no new palette or icon system.
+
+Mobile entry rows on Trades and League Summary push the unconditional root `WinNow` screen with a custom Back control and one local FeedbackFAB. Web adds a view inside the existing authenticated SPA, reached from Trade Finder/League. Projected standings sort a copy by expected finish, labeled Avg finish with two decimals, and show source/as-of/coverage and expected outcomes. Receipts explicitly identify the uncalibrated beta; selected-objective card ranges describe sampling error only, not forecast/model uncertainty. Title control/data require both flag and capability.
+
+Priority choices lead to percent budget/fairness inputs, protected asset choices and one primary search action. Budget copy explicitly names the fixed baseline roster denominator. Server-ordered cards show give/receive, both-team before/after with pp deltas, dynasty/market/partner evidence and a dated snapshot receipt. Edit & evaluate reveals buyer/partner-owned asset choices, bounded by package policy, and invalidates any previous evaluation when edited. Likes/passes remain season-only decisions.
+
+Unsupported/disabled, stale, empty and failed states use explanatory text plus manual refresh/retry where applicable; progress is bounded and cancellable. Expiry removes current recommendations without requiring another tap. [Evidence and runtime checklist](../plans/win-now/EVIDENCE.md).

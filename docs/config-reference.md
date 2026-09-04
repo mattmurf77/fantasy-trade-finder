@@ -7,6 +7,8 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
 
 ## Table of Contents
 
+- [Win Now beta controls](#win-now-beta-controls)
+
 - [Environment variables](#environment-variables)
 - [Feature flags](#feature-flags)
 - [Flags — 2026-04-19 sprint cohort (swipe, tiers, trades, league social, invite, mobile polish, landing, trade math)](#flags-2026-04-19-sprint-cohort-swipe-tiers-trades-league-social-invite-mobile-polish-landing-trade-math)
@@ -1397,3 +1399,23 @@ No feature flag and no `model_config` keys: the harness is a read-only CLI/libra
 | `EVAL_RUNS_DIR` | `backend/eval/persistence.py` | Directory for the append-only `runs.jsonl` run records. Default `data/eval_runs/` (inside the already-gitignored `/data/`). Tests point it at a tmp dir. |
 
 Fixed estimator constants (in `backend/eval/replay.py`, changed only by code review because they change what the numbers mean): propensity-tilt clip bounds `TILT_MIN=0.5` / `TILT_MAX=2.0` (clip **count** is reported on every run), exposure-curve floor `EXPOSURE_FLOOR=0.02`, Laplace `+1/+2` smoothing on the served→viewed curve.
+
+---
+
+## Win Now beta controls
+
+All three flags default **false**. This is a verified local implementation, not an enabled forecast product. Never enable championship simply because its mechanical probability tests pass.
+
+| Flag / setting | Default | Meaning |
+|---|---|---|
+| `outlook.season_projections` | false | New projection reads and client entries; prerequisite for the new trade flow |
+| `trades.win_now` | false | Dedicated trade search, edited evaluation and isolated decisions |
+| `outlook.championship_probabilities` | false | New-model title fields and championship objective, only after independent graduation |
+| `FTF_SEASON_FORECAST_FILE` | unset | Optional local normalized forecast JSON import; preserves source capture/publication, never backdates replay |
+| `FTF_SEASON_SIM_COUNT` | 1000 | Per-evaluation simulation draws; clamped to 256–4000 by the application layer |
+
+`win_now_service.py` uses a 900-second serving/capture-age limit and an earlier required source game boundary. Expiry is also capped at capture time plus 900 seconds, so refreshing an older import cannot extend its lifespan. Date-only source rows use a conservative midnight-UTC cutoff, not an invented kickoff. Job/scenario serving rejects expired or changed inputs; toggling off a serving flag does not erase historical evidence.
+
+Versioned optimizer policy is code in `win_now_optimizer.POLICY` (`win-now-v1`), not a second collection of live `model_config` overrides. It bounds side/total package size, screening and simulation work; market floor is at least 0.75 and the market-evidence fallback floor is at least 0.90. User settings may tighten these constraints. The request freezes the existing shared trade-pricing configuration; a retry must not relax buyer budget, fairness or partner gates. API/client ranges are in [the route reference](api-reference.md#season-projections-and-win-now).
+
+[Source restrictions](integrations/sleeper.md#weekly-season-projection-feed) · [build status and calibration limits](plans/win-now/BUILD.md)

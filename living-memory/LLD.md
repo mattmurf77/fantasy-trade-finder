@@ -42,6 +42,7 @@
 - [Tiers-save route contract shrank: `demoted_pids` is an ignored legacy key (2026-08-24, D-160)](#tiers-save-route-contract-shrank-demoted_pids-is-an-ignored-legacy-key-2026-08-24-d-160)
 - [Provider identity is reconciled server-side; presentation is server config (2026-08-28, ADR-016)](#provider-identity-is-reconciled-server-side-presentation-is-server-config-2026-08-28-adr-016)
 - [Pick assets ride the mixed arrays on every propose route; the server splits and encodes (2026-09-02, D-176)](#pick-assets-ride-the-mixed-arrays-on-every-propose-route-the-server-splits-and-encodes-2026-09-02-d-172)
+- [Win Now snapshot and request isolation](#win-now-snapshot-and-request-isolation)
 
 ---
 
@@ -743,3 +744,9 @@ dark — all `monetize.*` flags false, no route wears `@_require_pro`.
 - Every new `load_draft_picks` caller must be sanctioned by name in
   `test_pick_assignment.py::_SANCTIONED_SOURCE_CALLERS` (ADR-010 AST guard) — bare-default calls
   are forbidden.
+
+---
+
+## Win Now snapshot and request isolation
+
+Implementation checkpoint 2026-09-04: immutable whole forecast batches and league/model revisions identify baselines; viewer-scoped job/scenario IDs retain objective, constraints and expiry. A stable exchange asset key groups history without replacing evaluated evidence. Clients cancel by viewer/league/objective/parameter epoch and preserve server order; expired results are not recommendations. Probabilities are fractions and deltas display absolute pp. Budget uses fixed baseline roster value. Like/pass writes only the season decision store. Routes, schema and shared bounds are in the [API](../docs/api-reference.md#season-projections-and-win-now), [data dictionary](../docs/data-dictionary.md#win-now-evidence-tables) and [invariants](../docs/cross-client-invariants.md#win-now-objective-and-evidence-semantics); parent integration review and local mechanical verification are complete. The explicit platform-only pick read in `win_now_service.build_context` is sanctioned in the existing ADR-010 containment test.

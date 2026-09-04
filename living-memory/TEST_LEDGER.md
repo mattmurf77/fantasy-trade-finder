@@ -11,6 +11,17 @@
 
 ---
 
+## 2026-09-04 — Win Now implementation reviewed; backend and client verification
+
+Branch `codex/win-now-20260904`, isolated at `/private/tmp/ftf-win-now-20260904`; implementation reviewed, not a release. [Scope](../docs/plans/win-now/scope.md), [evidence/code-walk/checklist](../docs/plans/win-now/EVIDENCE.md).
+
+- **Completed locally:** full mobile `tsc --noEmit` pass; `node mobile/tests/check-win-now.js` **24 checks pass** (actual formatter and web DOM/deferred-response execution, plus mobile structure); both web scripts pass `node --check`; web structural gate **185/185**; test-ID lint passes. `git diff --check` passed at frontend handoff.
+- **Backend:** first full run 4,812 pass / 1 skip / 1 flag-fixture failure; final broad run 4,790 pass / 1 skip / 2 derivative-flag failures, plus 54 API/store passes. Corrected flag fixtures and explicit platform pick-source declaration, then reran all affected suites: **200 passed**. Distinct covered set: **4,846 pass, 1 skip**; see evidence for command boundaries. Local Python 3.14, hosted Python 3.12 CI remains a merge gate.
+- **Parent review/runtime:** reviewed agent modules, contracts, tests and docs; actual web module/CSS with synthetic responses passed wide/390px screenshot and search/edit/evaluation checks. 12-team/9-slot/1,000-draw/8-finalist synthetic search total47.26s. No model-calibration claim.
+- **Not performed:** native simulator/Maestro (D-056), native build, production deploy/flag changes, physical TestFlight or live integrated source/auth runtime checklist, held-out forecast/title calibration. No championship graduation or source-licensing conclusion follows from unit tests.
+
+---
+
 ## 2026-09-03d — Web ESPN sign-in-primary (D-179): web gate 175/175, entry route 25/25, browser E2E both flag states + live-ESPN 403
 
 Branch `claude/espn-signin-primary` off `main` @ `a65bb771`. Client-only (`web/index.html`, `web/js/app.js`); full gates, no waivers ([scope §V3.1](../docs/plans/landing-platform-options/scope.md)).
@@ -3607,6 +3618,7 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-09-04 — Win Now implementation reviewed; backend and client verification](#2026-09-04--win-now-implementation-reviewed-backend-and-client-verification)
 - [2026-09-03d — Web ESPN sign-in-primary (D-179): web gate 175/175, entry route 25/25, browser E2E both flag states + live-ESPN 403](#2026-09-03d--web-espn-sign-in-primary-d-179-web-gate-175175-entry-route-2525-browser-e2e-both-flag-states--live-espn-403)
 - [2026-09-03c — API audit fixes (D-178): merged branch green — pytest 4617 / 1 skipped, tsc 0, testid-lint OK, web 175/175](#2026-09-03c--api-audit-fixes-d-177-merged-branch-green--pytest-4617--1-skipped-tsc-0-testid-lint-ok-web-175175)
 - [2026-09-03b — Web landing platform entry (PR #272): web gate 175/175, entry-route suite 25/25, browser E2E both platforms; sim gate skipped (D-056 posture)](#2026-09-03b--web-landing-platform-entry-pr-272-web-gate-175175-entry-route-suite-2525-browser-e2e-both-platforms-sim-gate-skipped-d-056-posture)

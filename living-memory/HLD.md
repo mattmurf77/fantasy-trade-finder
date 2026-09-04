@@ -20,6 +20,7 @@
 - [Living-Memory Layer (this project)](#living-memory-layer-this-project)
 - [Design Trade-offs at the System Level](#design-trade-offs-at-the-system-level)
 - [Out-of-Scope / Won't Do](#out-of-scope--wont-do)
+- [Win Now season pipeline](#win-now-season-pipeline)
 
 ---
 
@@ -174,3 +175,9 @@ All 17 patterns adopted on 2026-05-21. Cross-references existing [`../docs/`](..
 - In-tournament live tracking or DFS lineup optimization.
 - Direct sportsbook / FanDuel / DK API integration.
 - Public productization (multi-tenant SaaS, billing, etc.) — re-evaluate post-launch of personal-use version.
+
+---
+
+## Win Now season pipeline
+
+Implementation checkpoint 2026-09-04, D-180 / ADR-017: external weekly forecasts feed supported league scoring and legal lineups, then full-league paired season simulations and constrained search. Durable evidence/jobs and the mobile/web Win Now flow remain separate from dynasty generators and Elo feedback. All three flags default off; parent integration review complete; hosted CI/calibration pending. Authoritative [architecture](../docs/architecture.md#win-now-season-pipeline) and [build limits](../docs/plans/win-now/BUILD.md).

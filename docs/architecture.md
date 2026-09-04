@@ -266,3 +266,17 @@ Hot-read endpoints (inactivity scans, "last login" lookups) read the denormalize
 3. `apply_tiers` spreads Elos linearly inside each `[min, max]` band per `(scoring_format, position, tier)`.
 4. Web SPA `GET /api/tier-config` → buckets players client-side using the same `[min, max]` ranges (top-down walk). This guarantees server and web tier assignments match.
 5. Mobile + extension use their own `tierBands` constants — keep in sync with this file (see [cross-client-invariants.md](cross-client-invariants.md)).
+
+---
+
+## Win Now season pipeline
+
+The restricted beta adds a separate season objective without changing the dynasty generators or treating dynasty value as projected points. All three feature flags default off; integration and calibration status is tracked in [BUILD](plans/win-now/BUILD.md) and [EVIDENCE](plans/win-now/EVIDENCE.md).
+
+`season_forecasts.py` normalizes external weekly stat/availability forecasts → `season_simulator.py` applies supported league scoring, legal projected lineups and the actual remaining schedule/bracket → `win_now_optimizer.py` screens season-oriented exchanges and applies the same legality/budget/fairness/partner gates for search and calculator → `win_now_service.py` binds current league facts, in-memory pricing/ranking evidence, revision hashes, paired/independent confirmation simulations and expiry → `win_now_store.py` retains immutable evidence and durable jobs → `win_now_api.py` serves authenticated mobile/web views.
+
+A bounded in-process worker consumes durable database jobs; this is not an external worker service or a promised latency SLA. League/source inputs and player/week random worlds are reusable, but personalized scenario results remain viewer-scoped. Clients preserve server order, cancel stale local requests and remove expired recommendations. Search/decision state never enters the legacy deck cache or Elo swipe path. Likelihood of actual partner acceptance is not the season model.
+
+The simulator's normal residuals and availability assumptions are explicitly experimental. Shared NFL game/team effects and multiweek injury correlation are absent. Unsupported live play, forecast gaps, scoring/roster/bracket rules and stale source data fail unavailable. Title outputs require independent graduation; the old outlook title display prohibition remains unchanged. [ADR-017](adr/adr-017-win-now-external-forecasts.md) records the separation.
+
+Account deletion and final Win Now persistence share a short account row lock (SQLite uses a write reservation); queued computations cannot recreate user evidence after deletion. No lock spans a simulation. Worker housekeeping bounds retention to 7-day jobs, 180-day trade evidence and 400-day forecast/projection evidence.

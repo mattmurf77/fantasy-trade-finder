@@ -1180,3 +1180,18 @@ Plan of record: [00-platform-foundation.md](plans/monetization/00-platform-found
 - **`display_price` / `per_month_equiv` are FALLBACK COPY.** On iOS the client renders the StoreKit-localized price from the matching RevenueCat offering; the server strings are US-English list prices that know nothing about storefront, currency, or promotional offers. `trial_eligible` is a claim about the SKU, not a per-Apple-ID promise — real eligibility is store-managed.
 
 **Paywall analytics event names** (client-fired; registered in `backend/analytics_taxonomy.py` and all five classified NON_INTENT in `analytics_queries.NON_INTENT_EVENTS`): `paywall_viewed` {`source`, `platform`}, `paywall_purchase_initiated` {`product_id`, `source`}, `paywall_purchase_completed` {`product_id`, `source`}, `paywall_purchase_failed` {`product_id`, `user_cancelled`}, `paywall_restore` {`restored`}. `source` is the 402's `gate` string or a non-gate origin (`settings`, `onboarding`); `platform` is the config **variant** rendered, not the device platform (that is a `user_events` column derived server-side). Conversion truth is the server-fired `entitlement_granted` row, never these echoes.
+
+---
+
+## Win Now objective and evidence semantics
+
+Restricted implementation beta; `outlook.season_projections`, `trades.win_now` and `outlook.championship_probabilities` default false. New-model outputs use a dedicated API and UI. The existing `GET /api/league/outlook` display policy above, including the ban on legacy `odds.title_pct`, is **unchanged**.
+
+- Objective enum: `wins` = expected wins in the next three remaining regular-season weeks; `playoffs` = make-playoffs probability; `championship` = validated new-model title probability. Clients require both the championship flag and snapshot capability; no legacy estimate fallback.
+- Probability wire values are fractions. `100 * (after-before)` is an absolute percentage-point change: 0.20 → 0.25 is **+5.0 pp**, not +25%. Missing/unsupported data is not zero. Win-count changes stay wins; lower expected seed is better.
+- `max_dynasty_spend_pct` is a percent of the **fixed baseline roster-asset value**, not the outgoing package. API/UI bounds are 0–10%; market balance controls are 75–100% displayed / 0.75–1 on the wire. Server policy may be stricter. Neither fairness nor partner/budget gates relax to fill an empty result.
+- Show buyer and partner impacts separately with evidence basis/confidence/coverage and declared/unknown intent. Market fallback is an estimate, never claimed as the partner's actual ranking board. Low standings alone is not rebuild consent.
+- Preserve eligible trade server order. Standings sort a copy by expected seed and label the decimal Avg finish. Display uncalibrated-beta status and distinguish paired sampling ranges from forecast confidence intervals. Scope local jobs/results by viewer, league, objective and parameters; changing them, leaving the view or expiring evidence invalidates current work. Retained history is never a fresh recommendation.
+- Win Now likes/passes use the separate scenario decision endpoint/table. They do not reach legacy swipe/queue/Elo learning and do not constitute the partner's action or a real league proposal.
+
+Locations: `backend/win_now_api.py`, `win_now_service.py`, `win_now_optimizer.py`, `season_simulator.py`; `mobile/src/shared/types.ts`, `utils/winNow.ts`, `screens/WinNowScreen.tsx`; `web/js/win-now.js`. [Build and outstanding calibration](plans/win-now/BUILD.md).

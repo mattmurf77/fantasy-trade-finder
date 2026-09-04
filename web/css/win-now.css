@@ -1,0 +1,20 @@
+.win-now-wrap { max-width: 960px; margin: 0 auto; padding: 24px 16px 80px; color: var(--chalk); }
+.win-now-wrap h1, .win-now-wrap h2 { font-family: var(--font-display); }
+.win-now-wrap p { color: var(--chalk-dim); line-height: 1.6; }
+.win-now-wrap button, .win-now-wrap input { min-height: 44px; font-family: var(--font-ui); font-size: 14px; border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: var(--ink-2); color: var(--chalk); padding: 8px 12px; }
+.win-now-wrap button { cursor: pointer; }
+.win-now-wrap button:focus-visible, .win-now-wrap input:focus-visible { outline: 2px solid var(--ice); outline-offset: 2px; }
+.win-now-wrap button[aria-pressed="true"] { color: var(--ice); border-color: var(--ice); }
+.win-now-wrap button:disabled { opacity: .5; cursor: default; }
+.win-now-wrap label { display: grid; gap: 8px; margin: 16px 0; }
+.win-now-wrap input { max-width: 160px; }
+.win-now-card { background: var(--ink-1); border: 1px solid var(--line); border-radius: var(--r-md); padding: 16px; margin: 16px 0; }
+.win-now-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.win-now-receipt { white-space: pre-line; font-size: 13px; overflow-wrap: anywhere; }
+.win-now-table-wrap { overflow-x: auto; }
+.win-now-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.win-now-table th, .win-now-table td { padding: 12px 8px; border-bottom: 1px solid var(--line); text-align: left; }
+.win-now-table td { font-family: var(--font-data); }
+#win-now-status { margin: 16px 0; color: var(--chalk-dim); }
+
+.win-now-wrap #win-now-search, .win-now-wrap #win-now-evaluate { background: var(--ice); border-color: var(--ice); color: var(--on-ice); }

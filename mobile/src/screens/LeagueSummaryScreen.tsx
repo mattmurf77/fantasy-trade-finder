@@ -10,6 +10,7 @@ import {
   AccessibilityInfo,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import ChalkText from '../components/chalkline/Text';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 
@@ -400,6 +401,7 @@ function activeTotal(
 }
 
 export default function LeagueSummaryScreen() {
+  const seasonProjectionsOn = useFlag('outlook.season_projections');
   const league = useSession((s) => s.league);
   const leagueId = league?.league_id || null;
   // #181 — which of the two registrations is rendering (see header comment).
@@ -1512,6 +1514,11 @@ export default function LeagueSummaryScreen() {
           />
         }
       >
+        {seasonProjectionsOn && leagueId ? (
+          <Pressable testID="league-summary.win-now" accessibilityRole="button" onPress={() => navigation.navigate('WinNow')} style={{ minHeight: 44, justifyContent: 'center', paddingVertical: space.sm }}>
+            <ChalkText variant="bodySm" style={{ color: ice.base }}>Season projections & Win Now</ChalkText>
+          </Pressable>
+        ) : null}
         {/* #181 — the classic league page's entry point, tab-root variant
             only (the root-stack push still exits via its back control).
             LeagueRow construction: hairline list row, title + body-sm

@@ -226,6 +226,9 @@ _SEVEN_READ_SITES = frozenset({
 #: (`PICK_SOURCE_USER`) rather than the flag-gated helper, because they are
 #: the screens on which assertions are seen and fixed.
 _SANCTIONED_SOURCE_CALLERS = frozenset({
+    # Win Now beta verifies Sleeper ownership; user-asserted picks cannot
+    # establish a league-legal season exchange (ADR-017).
+    "build_context",            # win_now_service.py — literal platform only
     "seed_pick_grid",            # database.py — reads its own provenance only
     "_assignment_slots",         # server.py  — the assignment screen's payload
     "_assignment_grid",          # server.py  — the ESPN board's grid
@@ -277,7 +280,7 @@ def test_w3_02_ast_only_sanctioned_call_sites_name_source():
          is invisible to the flag.
     """
     seen_default, seen_source = set(), set()
-    for path in (SERVER_PATH, DATABASE_PATH):
+    for path in (SERVER_PATH, DATABASE_PATH, SERVER_PATH.with_name("win_now_service.py")):
         for enclosing, kwargs in _calls_named(ast.parse(path.read_text()),
                                               "load_draft_picks"):
             (seen_source if "source" in kwargs else seen_default).add(enclosing)
@@ -338,7 +341,7 @@ def test_w3_02b_ast_no_unsanctioned_writer_reaches_the_store():
     }
     for name, allowed in sanctioned.items():
         callers = set()
-        for path in (SERVER_PATH, DATABASE_PATH):
+        for path in (SERVER_PATH, DATABASE_PATH, SERVER_PATH.with_name("win_now_service.py")):
             for enclosing, _kw in _calls_named(ast.parse(path.read_text()), name):
                 if enclosing != name:          # skip the definition's recursion
                     callers.add(enclosing)
@@ -859,7 +862,7 @@ def test_w3_10_pick_id_has_exactly_one_construction():
     assert db.make_pick_id("L", 2026, 1, "3") == "L_2026_1_3"
     assert db.make_pick_id("L", 2026, "1", "3") == "L_2026_1_3"   # unpadded
     # No raw construction survives in either module.
-    for path in (SERVER_PATH, DATABASE_PATH):
+    for path in (SERVER_PATH, DATABASE_PATH, SERVER_PATH.with_name("win_now_service.py")):
         src = path.read_text()
         for shape in ('_{season}_{rnd}_', '_{yr}_{rnd}_', '_{season}_{round_}_'):
             assert shape not in src, f"{path.name} still builds a pick_id by hand"

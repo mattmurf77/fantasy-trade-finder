@@ -221,5 +221,8 @@
   "trade.negmem": false,
   "trade.full_sweep": true,
   "trade.avoid_positions": false,
-  "trade.standing_offers": true
+  "trade.standing_offers": true,
+  "outlook.season_projections": false,
+  "trades.win_now": false,
+  "outlook.championship_probabilities": false
 }

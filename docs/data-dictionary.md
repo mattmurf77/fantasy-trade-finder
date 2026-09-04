@@ -7,6 +7,8 @@ Source of truth: `backend/database.py`. Keep this file in sync when adding/chang
 
 ## Table of Contents
 
+- [Win Now evidence tables](#win-now-evidence-tables)
+
 **Core / Users / Auth**
 
 - [`users`](#users)
@@ -1504,3 +1506,21 @@ Daily rollup per `(experiment_key, version, variant, metric_key, window)`: `n` (
 
 ### `analytics_segments`
 Saved analytics cohorts (Fullstory-style Segments). `id` PK, `name` (unique), `definition_json`, `created_at`. The definition is a **closed grammar** (`did` / `did_not` / `platform` / `min_events`) evaluated live per query window by `analytics_queries.evaluate_segment` — every operand maps to a code-controlled SQL fragment, so a segment can never inject SQL. Unknown ops/events/platforms raise `BadParam` → 400.
+
+---
+
+## Win Now evidence tables
+
+Additive schema for the restricted implementation beta; all feature flags remain off. Defined in `backend/database.py`; persistence lives in `backend/win_now_store.py`. JSON is serialized deterministically with nonfinite numbers rejected. Snapshot timestamps are ISO UTC strings. There are no new dynasty-ranking writes.
+
+| Table | Grain / key | Columns besides primary key |
+|---|---|---|
+| `season_forecast_snapshots` | Immutable normalized player/week batch; `snapshot_id` string PK | `season`, `source`, `captured_at`, `payload_json` (all required) |
+| `season_projection_snapshots` | Immutable league/model/forecast snapshot; `snapshot_id` string PK | `league_id` (indexed), `forecast_snapshot_id`, `created_at`, `expires_at`, `payload_json` (all required) |
+| `win_now_jobs` | Viewer-owned generation job; `job_id` string PK | `user_id` (indexed), `league_id`, `status` (indexed), `created_at`, `updated_at`, `expires_at`, `input_json` required; `result_json`, `reason` nullable |
+| `win_now_scenarios` | Directed buyer/partner exchange and evaluated snapshot; `scenario_id` string PK | `user_id` (indexed), `league_id`, `snapshot_id`, `objective`, `asset_key`, `created_at`, `expires_at`, `payload_json` (all required) |
+| `win_now_decisions` | Viewer decision on a scenario; autoincrement integer `id` PK | `user_id` (indexed), `scenario_id`, `decision`, `created_at` required; unique `(user_id,scenario_id)` |
+
+Forecast payloads retain original source capture/publication times, provenance and quality; whole batches prevent joins across publication revisions. Projection payloads retain league facts plus the simulation baseline. Job input JSON freezes the requesting actor’s valuation inputs and parameters and must be treated as private. Pricing/ranking revision hashes and package-level evidence are retained; other managers’ complete boards are not persisted. Job result and scenario payloads retain immutable before/after evidence and metadata; `asset_key` groups repeated exchanges without rewriting prior scenario evidence. Enforced lifecycle is queued → running → complete/failed; interrupted work can be recovered from durable input.
+
+Serving expiry does not delete history. Worker housekeeping removes jobs after 7 days, scenarios/decisions after 180 days and forecast/projection snapshots after 400 days. Account export/deletion includes all three user-owned tables. Short account-row-guarded writes prevent queued or calculator work from recreating evidence after account deletion; no simulation holds that lock. References are application-enforced strings, not new SQL foreign-key constraints. Access checks live in the new authenticated routes. See [API contract](api-reference.md#season-projections-and-win-now).

@@ -29360,6 +29360,18 @@ def reseed_experiment_layers_route():
     return jsonify(reseed_experiment_layers())
 
 
+from .win_now_api import install as _install_win_now
+_install_win_now(app, require_session=_require_initialized_session,
+                 read_denial=_verified_read_denial, write_denial=_verified_write_denial,
+                 active_format=_active_format, league_user_id=_league_user_id,
+                 pool_provider=_get_universal_pool, fetch_json=_sleeper_get)
+if not os.environ.get("FTF_TEST_MODE"):
+    from . import win_now_store as _win_now_store, win_now_service as _win_now_service
+    _win_now_store.recover_interrupted_jobs()
+    if _win_now_store.pending_jobs(1):
+        _win_now_service.wake_worker(_sleeper_get)
+
+
 if __name__ == "__main__":
     # Pre-load Sleeper player cache from disk if available
     _load_sleeper_cache()

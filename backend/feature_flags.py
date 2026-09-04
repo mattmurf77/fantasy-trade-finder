@@ -45,6 +45,10 @@ from typing import Any
 # Every key here MUST be listed in `DEFAULT_FLAGS` below with a default.
 # The agent prompts reference these literal strings; do not rename lightly.
 FLAG_KEYS: tuple[str, ...] = (
+    # Separate seasonal model / search / calibrated championship graduation.
+    "outlook.season_projections",
+    "trades.win_now",
+    "outlook.championship_probabilities",
     # Swipe UX (Agent A1)
     "swipe.community_compare",
     "swipe.qc_compliments",

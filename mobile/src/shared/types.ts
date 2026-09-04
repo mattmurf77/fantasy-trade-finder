@@ -576,3 +576,114 @@ export interface DemoSessionResponse {
   user_roster: Player[];
   opponents: number;
 }
+
+// Win Now wire values: probabilities are fractions; dynasty spend is percent
+// of the immutable baseline roster value (never percent of the give package).
+export type WinNowObjective = 'wins' | 'playoffs' | 'championship';
+export interface SeasonMeta {
+  beta?: boolean;
+  calibrated?: boolean;
+  uncertainty?: string;
+  snapshot_id?: string;
+  as_of?: string;
+  source?: string;
+  model_version?: string;
+  championship_available?: boolean;
+  coverage?: number | Record<string, unknown>;
+  stale?: boolean;
+  expires_at?: string;
+}
+export interface SeasonTeam {
+  roster_id: number;
+  user_id?: string;
+  username?: string;
+  expected_wins?: number;
+  expected_losses?: number;
+  expected_ties?: number;
+  projected_seed?: number;
+  next_three_week_expected_wins?: number;
+  expected_remaining_wins?: number;
+  next_matchup_win_probability?: number;
+  playoff_probability?: number;
+  bye_probability?: number;
+  championship_probability?: number | null;
+  weekly_win_probabilities?: Record<string, number> | {week: number; win_probability: number}[];
+  finish_distribution?: Record<string, number>;
+}
+export interface WinNowAsset {
+  id: string;
+  name: string;
+  position?: string;
+  owner_roster_id?: number;
+  is_pick?: boolean;
+  tradable?: boolean;
+}
+export interface SeasonProjection {
+  status: 'available' | 'unavailable';
+  reason?: string;
+  message?: string;
+  meta?: SeasonMeta;
+  teams?: SeasonTeam[];
+  buyer_roster_id?: number;
+  assets?: WinNowAsset[];
+}
+export interface WinNowImpact {
+  before: SeasonTeam;
+  after: SeasonTeam;
+  delta?: Partial<SeasonTeam>;
+  uncertainty?: Record<string, {
+    standard_error?: number;
+    lower_bound?: number;
+    upper_bound?: number;
+    confirmation_delta?: number;
+    paired?: boolean;
+    kind?: string;
+  }>;
+}
+export interface WinNowScenario {
+  objective?: WinNowObjective;
+  conservative_season_gain?: number;
+  scenario_id: string;
+  partner_roster_id: number;
+  partner_username?: string;
+  partner_intent?: string;
+  give: WinNowAsset[];
+  receive: WinNowAsset[];
+  buyer: WinNowImpact;
+  partner: WinNowImpact;
+  valuation: {
+    buyer_dynasty_cost?: number;
+    buyer_package_loss_fraction?: number;
+    buyer_budget?: number;
+    partner_gain_fraction?: number;
+    market_ratio?: number;
+    partner_basis?: string;
+    partner_confidence?: number;
+    partner_coverage?: number;
+    partner_intent?: string;
+  };
+  reasons?: string[];
+}
+export interface WinNowSearchParams {
+  league_id: string;
+  objective: WinNowObjective;
+  max_dynasty_spend_pct: number;
+  min_fairness: number;
+  protected_ids?: string[];
+}
+export interface WinNowJob {
+  job_id?: string;
+  status: 'queued' | 'running' | 'complete' | 'failed' | 'unavailable';
+  reason?: string;
+  message?: string;
+  result?: {meta?: SeasonMeta; baseline?: SeasonProjection; trades: WinNowScenario[]};
+}
+export interface WinNowEvaluation {
+  status: 'available' | 'unavailable';
+  scenario?: WinNowScenario;
+  eligible?: boolean;
+  rejection_reasons?: string[];
+  reason?: string;
+  message?: string;
+  meta?: SeasonMeta;
+}

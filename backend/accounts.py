@@ -632,8 +632,16 @@ def delete_user_data(sleeper_user_id: str,
             res = conn.execute(delete(tbl).where(getattr(tbl.c, col) == uid))
             counts[f"{name}_deleted"] = res.rowcount or 0
 
+        # Short Win Now writes take this same row lock after simulations, so
+        # deletion cannot be followed by a worker resurrecting user evidence.
+        conn.execute(select(db.users_table.c.sleeper_user_id)
+                     .where(db.users_table.c.sleeper_user_id == uid).with_for_update()).first()
+
         _del("swipe_decisions", db.swipe_decisions_table)
         _del("trade_decisions", db.trade_decisions_table)
+        _del("win_now_decisions", db.win_now_decisions_table)
+        _del("win_now_scenarios", db.win_now_scenarios_table)
+        _del("win_now_jobs", db.win_now_jobs_table)
         _del("member_rankings", db.member_rankings_table)
         _del("elo_history", db.elo_history_table)
         _del("league_preferences", db.league_preferences_table)
@@ -743,6 +751,9 @@ _EXPORT_TABLES: tuple = (
     ("users",                   "users_table",                   "sleeper_user_id", ()),
     ("swipe_decisions",         "swipe_decisions_table",         "user_id",         ()),
     ("trade_decisions",         "trade_decisions_table",         "user_id",         ()),
+    ("win_now_decisions",       "win_now_decisions_table",       "user_id",         ()),
+    ("win_now_scenarios",       "win_now_scenarios_table",       "user_id",         ()),
+    ("win_now_jobs",            "win_now_jobs_table",            "user_id",         ()),
     ("member_rankings",         "member_rankings_table",         "user_id",         ()),
     ("elo_history",             "elo_history_table",             "user_id",         ()),
     ("league_preferences",      "league_preferences_table",      "user_id",         ()),
