@@ -7,6 +7,7 @@
 ---
 
 ## Table of Contents
+- [2026-09-04 — Open Items (personal-market policy)](#2026-09-04--open-items-personal-market-policy)
 - [2026-09-02 — Open Items (#413 Sleeper pick send)](#2026-09-02--open-items-413-sleeper-pick-send)
 - [2026-09-01 — Open Items (trade-suggestion quality, dual-agent review)](#2026-09-01--open-items-trade-suggestion-quality-dual-agent-review)
 - [2026-08-22 — Open Items (trade-model restrictiveness)](#2026-08-22--open-items-trade-model-restrictiveness)
@@ -27,6 +28,21 @@
 - [Conventions](#conventions)
 
 ---
+
+## 2026-09-04 — Open Items (personal-market policy)
+
+### Q-038 — The policy and the generators judge "both managers gain" on two different value bases. Which one is the product's definition?
+- **Why it matters:** `backend/trade_policy.py` prices personal values as `elo_to_value(confidence-shrunk elo)`. The engine's own `min_side_surplus` gate prices them as **marginal (over-replacement)** values whenever `trade.marginal_value` is on — which it is in production. The two disagree systematically: marginal values collapse roster hoarding, so a card the generator proves mutually beneficial can show a *negative* two-sided gain on raw boards, and vice versa. This was found by the wiring fixture, not by review: the first draft applied the policy's basis as a universal eligibility veto and emptied the deck.
+- **What was built, and why:** two-sided gain is a **Conviction** requirement, not a blanket veto. A Core card (market ratio ≥ `market_core_ratio`) is market-plausible on its own and is not re-litigated under a definition the generator does not use; a below-Core card has only the two managers' agreement to justify it, so there the test bites. That is a defensible reading of the brief ("Conviction: … positive personal surplus for both managers") and it is deliberately conservative — but it is a **choice**, not a derivation.
+- **The consequence to watch:** Conviction supply depends on cards showing positive two-sided gain on *raw* shrunk boards, a stricter test than the marginal one. If Conviction cards turn out to be near-nonexistent in the live phase, the cause is this, not the floors.
+- **Action to unblock:** an operator/product call on whether the policy's personal-value basis should become marginal-aware (arm-dependent, needs rosters threaded into the evaluator, and it would make cross-arm floor comparisons less clean), or whether the raw basis is the intended definition of "both managers gain". Measurable first from Stage-A shadow data: compare `personal_opportunity` in `deck_impressions.valuation_json` against the generator's own `mismatch_score` on the same cards.
+- **Owner:** operator · **Asked:** 2026-09-04 · **Related:** [D-180](DECISIONS.md), [scope](../docs/plans/personal-market-policy/scope.md), [code-walk §8](../docs/plans/personal-market-policy/code-walk.md)
+
+### Q-039 — Whose identity keys a `trade_concept_id` in a co-owned league?
+- **Why it matters:** the concept id is built from the session `user_id` (ACCOUNT identity) and `card.target_user_id` (LEAGUE identity), because that is exactly the pair `check_for_match` already joins on — so a concept id and a mirror hit always agree about who the two managers are. For a sole owner these are the same string. For a co-owned roster they are not, and the same package could in principle produce two concept ids depending on which co-owner opened the deck.
+- **Why it was left alone:** this is the open co-owner identity question already logged in `NEXT.md` (`member_rankings` is keyed the same way and feeds cross-league Trends aggregation, so re-keying is not a local change). Resolving it inside a telemetry change would silently re-key the join for everyone, and today's behaviour is honest degradation rather than corruption ([ADR-012](../docs/adr/adr-012-co-owned-roster-identity.md)).
+- **Action to unblock:** decide whether a *team* board and an *account* board are the same object — the same decision `NEXT.md` already blocks on — then re-key `trade_concept_id` alongside `member_rankings`, bumping `CONCEPT_SCHEMA_VERSION` so old and new ids are deliberately incomparable.
+- **Owner:** operator · **Asked:** 2026-09-04
 
 ## 2026-09-02 — Open Items (#413 Sleeper pick send)
 

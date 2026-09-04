@@ -58,7 +58,14 @@ GOLDEN = Path(__file__).parent / "fixtures" / "bakeoff" / "flag_off_golden.json"
 #: Mirrors test_bakeoff_serving.NEW_COLUMNS — the columns the bake-off change
 #: ADDS to deck_impressions, stripped before comparing against the golden.
 NEW_COLUMNS = ("model_arm", "arm_rank", "fairness_threshold",
-               "group_key", "group_rank", "lane_slot", "trade_intent")
+               "group_key", "group_rank", "lane_slot", "trade_intent",
+               # Personal-market policy (2026-09-04) — same rule as the
+               # bake-off columns: the golden predates them, so the
+               # comparison strips them. test_bakeoff_serving additionally
+               # asserts all four are NULL with the flags off, which is where
+               # the flag-off byte-identity claim is actually pinned.
+               "valuation_json", "trade_concept_id", "policy_variant",
+               "source_like_impression_id")
 
 SENTENCE = "They may not want to move off a young back."
 

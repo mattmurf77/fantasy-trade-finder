@@ -340,14 +340,22 @@ def test_reasoned_pass_route_gates_the_elo_write_on_the_decision_write():
 
 def test_check_for_match_is_not_gated_on_the_replay_verdict():
     """A replayed LIKE must still be able to surface a mutual match — the
-    dedupe suppresses a redundant write, never match detection."""
+    dedupe suppresses a redundant write, never match detection.
+
+    The route now calls `find_mirror_like` rather than `check_for_match`
+    (personal-market policy, 2026-09-04): same matching logic, but it returns
+    the counterparty's row so the match can record both like times and both
+    impressions instead of pretending the two likes were simultaneous.
+    `check_for_match` is a thin bool wrapper over it, so there is still one
+    implementation. Only the name this test watches moved; the guarantee is
+    unchanged."""
     import backend.server as server
     src = _swipe_gate_src(server.swipe_trade)
-    assert "check_for_match" in src, "sanity: the route still checks for a match"
+    assert "find_mirror_like" in src, "sanity: the route still checks for a match"
     for line in src.splitlines():
-        if "check_for_match" in line and "def " not in line:
+        if "find_mirror_like" in line and "def " not in line:
             assert "wrote_decision" not in line, \
-                "check_for_match must not be gated on the replay verdict"
+                "mirror detection must not be gated on the replay verdict"
 
 
 # ---------------------------------------------------------------------------
@@ -419,12 +427,15 @@ def route():
     }
     server.app.config["TESTING"] = True
     client  = server.app.test_client()
-    matcher = MagicMock(return_value=False)
+    # `find_mirror_like` returns the counterparty's row or None (see
+    # test_check_for_match_is_not_gated_on_the_replay_verdict) — None is the
+    # "no mirror" answer the old bool False used to be.
+    matcher = MagicMock(return_value=None)
 
     with patch.object(db_module, "engine", engine), \
          patch.object(server, "record_event", MagicMock()), \
          patch.object(server, "create_notification", MagicMock()), \
-         patch.object(server, "check_for_match", matcher):
+         patch.object(server, "find_mirror_like", matcher):
         with server._sessions_lock:
             server._sessions[token] = sess
         try:
@@ -499,7 +510,7 @@ def test_route_replay_leaves_the_in_session_signal_doubled(route):
 
 def test_route_replayed_like_still_runs_match_detection(route):
     """Suppressing match detection on a re-sent like would be a worse bug
-    than the doubled Elo. Both POSTs must reach `check_for_match`."""
+    than the doubled Elo. Both POSTs must reach mirror detection."""
     client, token, _service, matcher = route
 
     assert _post_swipe(client, token, "like").status_code == 200
@@ -507,5 +518,5 @@ def test_route_replayed_like_still_runs_match_detection(route):
 
     assert len(load_swipe_decisions(user_id=ME, scoring_format="1qb_ppr")) == 1
     assert matcher.call_count == 2, (
-        "check_for_match must run on the replay too — the guard suppresses a "
+        "mirror detection must run on the replay too — the guard suppresses a "
         "redundant write, never match detection")

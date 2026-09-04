@@ -117,6 +117,7 @@ from .trade_service import (
     _harmonic_mean,
     _shrink_user_elo,
     age_pref_value,
+    make_consensus_value_fn,
     analyze_roster_strengths,
     elo_to_value,
     filler_ok,
@@ -1081,17 +1082,11 @@ def generate_league_suggestions(
     def uval(pid: str) -> float:
         return user_value.get(pid, _def_val)
 
-    _cv_cache: dict[str, float] = {}
 
-    def cval(pid: str) -> float:
-        v = _cv_cache.get(pid)
-        if v is None:
-            # Age-preference adjusted (2026-08-29) — mirrors trade_service's
-            # _vs so the arms cannot price an age band differently.
-            v = age_pref_value(elo_to_value(seed_elo.get(pid, 1500.0)),
-                               players.get(pid))
-            _cv_cache[pid] = v
-        return v
+    # Age-preference adjusted (2026-08-29). Delegates to the ONE shared
+    # accessor (trade_service.make_consensus_value_fn) so the arms cannot
+    # price an age band differently.
+    cval = make_consensus_value_fn(seed_elo, players)
 
     # Divergence needs two REAL boards — unranked opponents are out of
     # scope for this engine (the existing consensus fallback still serves

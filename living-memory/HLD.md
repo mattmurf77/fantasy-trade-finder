@@ -95,6 +95,12 @@ A dynasty fantasy football trade-finding app. Users log in via their Sleeper use
 
 Full per-route + per-table detail in [`../docs/api-reference.md`](../docs/api-reference.md) and [`../docs/data-dictionary.md`](../docs/data-dictionary.md).
 
+**`backend/trade_policy.py` — the trade-policy evaluator (2026-09-04, dark).** A leaf module owning the answer to *"may this trade be served, and how good is it for these two managers?"*. It encodes [D-180](DECISIONS.md): consensus value is a **non-bypassable market-plausibility guardrail** rather than 30% of a blended objective, personal rankings are the primary ordering signal among the plausible trades, and ranking confidence — applied symmetrically to **both** managers for the first time — controls how far the floor may descend. Called from three places: v2's candidate loop, v3's candidate loop, and one server-side choke point on the final deck (so every post-generation mutation is covered). Ships behind two flags, both default off: `trade.valuation_telemetry` (snapshots, canonical concept ids, shadow evaluation, proposal and match attribution — additive writes only) and `trade.personal_market_policy_v1` (the evaluator actually gates and orders). `policy_variant` is recorded **orthogonally** to `model_arm`, so the three existing generators keep generating inside both variants and no fourth arm is created ([D-181](DECISIONS.md)).
+
+### Full-roster evaluation (2026-09-04; dark)
+
+Two new leaves, `trade_roster.py` and `trade_roster_adapter.py`, evaluate both final rosters using exact shared-slot allocation, usable depth, capacity and observed-input provenance. The server captures one snapshot after mutations and before market composition; enforcing gates hold progressive card publication. Existing impression/shadow stores carry evidence. Estimated templates cannot pass enforcement; no weekly forecast is claimed. See `docs/plans/post-trade-roster-evaluation/`.
+
 ## External Dependencies (technical)
 See [`DEPENDENCIES.md`](DEPENDENCIES.md). High-level: Sleeper API (free, public), DynastyProcess GitHub CSV (free), Anthropic Claude API (optional, paid).
 

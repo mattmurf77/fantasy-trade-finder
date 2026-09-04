@@ -44,6 +44,7 @@ backend. Never read either end-to-end — grep for the route path or the table n
 | `trade_service.py` | 5.0k | Trade-card generation: pair enumeration, package building, fairness gates, mutual-gain scoring. `_DEFAULT_CFG` + `reload_config()` read the `model_config` table. Routes to `trade_gen_v2` when `trade_gen.v2` is on. |
 | `trade_gen_v2.py` | 1.0k | **Divergence-driven, dual-board, staged generation** (flag `trade_gen.v2`, default OFF). Ships *alongside* the existing generator — when the flag is off this module is never imported and every legacy/v2/v3 path is byte-identical. |
 | `bakeoff_profiles.py` | 80 | **Three-model bake-off arm definitions.** `MODEL_A_PROFILE` — the pinned kill-value set that *is* arm A (the pre-2026-08-16 engine), golden-tested against SHA `92c31d5` — and `model_a()`, which applies it together with `trade_service.r4_bypass()`. Inert until a caller enters the context. |
+| `trade_policy.py` | 0.9k | **The ONE trade-policy evaluator** (2026-09-04, dark behind `trade.valuation_telemetry` / `trade.personal_market_policy_v1`). Consensus as a non-bypassable market floor, two-sided personal opportunity as the ordering signal, symmetric ranking confidence (D-180); `policy_variant` recorded orthogonally to `model_arm` (D-181). A **leaf** like `suggestion_telemetry.py` — never imports `server`, and imports `trade_service`/`trade_optimizer` lazily inside functions (both directions cycle). Called by v2, v3 and one choke point in `_run_trade_job` on the final deck. |
 | `trade_optimizer.py` | 864 | Trade engine **v3** — exact per-pair package optimizer, lineup feasibility, 3-team cycles, sweeteners (flag `trade_engine.v3`). |
 | `ranking_service.py` | 1.7k | Elo math for 2-player and 3-player (trio) matchups; tier bands from `tier_config.json`; same `reload_config()` pattern. |
 | `value_model.py` | 812 | F6 learned acceptance heads × V-vector (flag `deck.value_model`). Model store at `VALUE_MODEL_DIR`. |
@@ -235,3 +236,7 @@ too. The only dev dependency is `pytest` (`requirements-dev.txt`). CI
 Before building anything user-visible, read the **Feature gates** section of the root
 [CLAUDE.md](../CLAUDE.md) (scope block → Maestro delta → docs → sim run) and the
 [coding guidelines](../docs/coding-guidelines.md).
+
+### Full-roster gate (2026-09-04)
+
+`trade_roster.py` and `trade_roster_adapter.py` are leaf modules. The worker captures one final snapshot and gates after all mutations, before market composition. Do not publish provisional cards while `final_checks_pending`; do not bypass on errors. `trade.roster_evaluation` and `trade.roster_protection` both default false. Keep schema-v1 evidence frozen in impression features; estimated provider templates cannot pass enforcement. See `docs/plans/post-trade-roster-evaluation/`.

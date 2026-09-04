@@ -1253,6 +1253,42 @@ _DEFAULT_CFG: dict[str, float] = {
     # (partner, *) cell, folded chronologically with a clamp at zero
     # after every step (DE-2).
     "negmem_like_net":            1.0,
+    # ------------------------------------------------------------------
+    # Personal-market policy (backend/trade_policy.py; scope block
+    # docs/plans/personal-market-policy/scope.md).
+    # ------------------------------------------------------------------
+    # These live here, in trade_service's default map, for one structural
+    # reason: `_c()` falls back to `_DEFAULT_CFG[key]`, and `trade_policy._c`
+    # deliberately reads through `trade_service._c` so a bake-off arm's
+    # thread-local `_cfg_override` overlay applies to the policy evaluator
+    # too. A knob the policy reads but this map does not declare would raise
+    # KeyError the first time an arm evaluated a candidate.
+    #
+    # NOT added to MODEL_A_PROFILE. Arm A is a pinned reconstruction of the
+    # pre-2026-08-16 engine; the policy did not exist then, so there is
+    # nothing for it to pin. While both policy flags are off no code path
+    # reads any of these, so arm A's behaviour is unchanged either way — and
+    # `test_bakeoff_arm_a_golden` still passes byte-for-byte.
+    #
+    # Values mirror `database._MODEL_CONFIG_DEFAULTS` exactly; the seeded row
+    # is the live source of truth and this map is only the fallback.
+    "market_floor_absolute":            0.65,
+    "market_floor_one_board":           0.85,
+    "market_floor_two_board_base":      0.80,
+    "market_floor_confidence_discount": 0.10,
+    "market_floor_surplus_discount":    0.05,
+    "market_core_ratio":                0.80,
+    "personal_gain_min_frac":           0.0,
+    "conviction_deck_share":            0.20,
+    "deck_core_lead_cards":             3.0,
+    "deck_core_min_share":              0.70,
+    "policy_surplus_norm":              0.25,
+    "conf_source_seed":                 0.0,
+    "conf_source_cross_format":         0.75,
+    "conf_source_explicit":             1.0,
+    "policy_confidence_band_high":      0.66,
+    "policy_confidence_band_med":       0.33,
+    "policy_shadow_log_cap":           40.0,
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.
@@ -3354,6 +3390,36 @@ _OUTLOOK_ALPHA_CFG_KEY = {
 }
 
 
+def make_consensus_value_fn(seed_elo: dict, players: dict):
+    """The ONE consensus-value accessor.
+
+    Returns a memoized ``pid -> consensus value`` closure:
+    ``age_pref_value(elo_to_value(seed_elo[pid]), players[pid])``.
+
+    Three copies of this existed — v2's `_vs`, v3's `_sv` and
+    `trade_gen_v2.cval` — each with a comment telling the next reader that it
+    mirrors the others, which is the shape of a bug waiting to happen. The
+    manual calculator prices the same way, and `docs/plans/personal-market-
+    policy/` makes "finder and calculator consensus package values are
+    identical" an acceptance criterion, so `trade_policy` needs to build this
+    exact function too. Four mirrors would have been worse than three.
+
+    Behaviour is unchanged: the three call sites now delegate here and the
+    body is byte-identical to what each of them had, memoization included.
+    """
+    cache: dict[str, float] = {}
+
+    def _value(pid: str) -> float:
+        v = cache.get(pid)
+        if v is None:
+            v = age_pref_value(elo_to_value(seed_elo.get(pid, 1500.0)),
+                               players.get(pid))
+            cache[pid] = v
+        return v
+
+    return _value
+
+
 def outlook_alpha(outlook: str | None) -> float:
     """Blend weight α (1.0 = pure now-value, 0.0 = pure future-value).
     None / unknown outlooks fall back to the not_sure 50/50 blend."""
@@ -4354,6 +4420,31 @@ class LeagueMember:
     # The v2 engine refuses to run divergence math against fabricated/seeded
     # elo_ratings — unranked members get consensus-basis cards instead.
     has_rankings: bool = False
+    # ── Opponent ranking confidence (personal-market policy, 2026-09-04;
+    # scope block docs/plans/personal-market-policy/scope.md).
+    #
+    # Until now this dataclass had NO field for opponent confidence and
+    # `member_rankings` had no column to fill one from, which is why the
+    # asymmetry documented in docs/reviews/2026-08-19-armb-audit-claims-3-4.md
+    # §3 was called "structural, not tunable": the user's board was shrunk
+    # toward consensus by how well-sampled it was, and a league-mate's board
+    # was trusted raw. These three fields are the missing half.
+    #
+    # All default to None/empty, so every existing construction site — the
+    # demo league, the seeded-noise members, the tests — builds the same
+    # object it built before, and `trade_policy.shrink_board` reads an absent
+    # weight as 0.0 (price at consensus), which is the fail-safe direction.
+    #
+    # Populated ONLY from real `member_rankings` rows. A member with
+    # `has_rankings=False` carries fabricated Elo and must never be handed a
+    # confidence map that would make that noise look evidenced.
+    comparison_counts:  dict[str, int] | None = None
+    confidence_weights: dict[str, float] | None = None
+    confidence_source:  str | None = None
+    # ISO UTC of this member's most recent ranking publish, when known. The
+    # valuation snapshot records it so a later reader can tell whether a
+    # board moved between two impressions of the same concept.
+    board_updated_at:   str | None = None
 
 
 @dataclass
@@ -4504,6 +4595,15 @@ class TradeCard:
     # card produced by a league-mate's standing offer. Server-composed;
     # serialized only when set. Carries NO team ids and NO counts (R-19).
     standing_offer_reason: Optional[str] = None
+    # Personal-market policy (2026-09-04) — the counterparty's OWN impression
+    # id when this card was injected because they had already liked the
+    # mirror. Stamped only by the likes-you / standing-offer injector; every
+    # other path leaves it None, which is what distinguishes an ORGANIC,
+    # independently generated mirror from a card shown because of the first
+    # manager's action. Copied onto deck_impressions.source_like_impression_id
+    # while trade.valuation_telemetry is on; never serialized to clients (it
+    # is another user's row id).
+    source_like_impression_id: Optional[str] = None
     # #362 — {"round": int, "seasons": [int]} when one of the DECK OWNER's own
     # live standing offers covers this card. Display only; never reorders,
     # never boosts, never filters.
@@ -6114,17 +6214,12 @@ class TradeService:
                     alpha,
                 )
 
-        _vs_cache: dict[str, float] = {}
-        def _vs(pid: str) -> float:
-            """Consensus (seed) value of a player in the v2 value space.
-            Age-preference adjusted (2026-08-29) — both mults at 1.0 make
-            age_pref_value the identity, restoring the pre-feature value."""
-            v = _vs_cache.get(pid)
-            if v is None:
-                v = age_pref_value(elo_to_value(seed_elo.get(pid, 1500.0)),
-                                   self._players.get(pid))
-                _vs_cache[pid] = v
-            return v
+        # Consensus (seed) value of a player in the v2 value space.
+        # Age-preference adjusted (2026-08-29) — both mults at 1.0 make
+        # age_pref_value the identity, restoring the pre-feature value.
+        # Delegates to the shared factory so v2, v3, trade_gen_v2 and
+        # trade_policy cannot price an age band differently.
+        _vs = make_consensus_value_fn(seed_elo, self._players)
 
         # v2 eligibility: every other member with a roster. Members without
         # real rankings are NOT compared in divergence space (their
@@ -6332,6 +6427,7 @@ class TradeService:
                         target_ids           = target_ids,
                         not_interested_ids   = not_interested_ids,
                         raw_user_elo         = user_elo,
+                        policy_placements    = placements,
                         user_needs           = _user_needs,
                         presentment_ok_fn    = _member_presentment,
                     )
@@ -6344,6 +6440,7 @@ class TradeService:
                         opponent             = member,
                         league_id            = league_id,
                         seed_value           = _vs,
+                        seed_elo             = seed_elo,   # policy only
                         max_cards            = max_per_opponent,
                         fairness_threshold   = fairness_threshold,
                         acquire_positions    = acquire_positions or [],
@@ -6359,6 +6456,7 @@ class TradeService:
                         target_ids           = target_ids,
                         not_interested_ids   = not_interested_ids,
                         raw_user_elo         = user_elo,
+                        policy_placements    = placements,
                         user_needs           = _user_needs,
                         presentment_ok_fn    = _member_presentment,
                     )
@@ -6602,6 +6700,11 @@ class TradeService:
         max_cards: int,
         fairness_threshold: float,
         acquire_positions: list[str],
+        # Raw consensus ELO map. Only the personal-market policy reads it —
+        # it needs ELO space to confidence-shrink the OPPONENT's board, and
+        # `seed_value` is already in value space. None ⇒ the policy prices
+        # every unknown asset at consensus, which is the fail-safe.
+        seed_elo: dict | None = None,
         trade_away_positions: list[str],
         avoid_positions: list[str] | None = None,      # #360
         pinned_give_players: list[str] | None,
@@ -6614,6 +6717,7 @@ class TradeService:
         target_ids: set | None = None,
         not_interested_ids: set | None = None,
         raw_user_elo: dict[str, float] | None = None,
+        policy_placements: dict | None = None,
         user_needs: set | None = None,
         presentment_ok_fn=None,              # G6 rules R1/R2/R3/R5; None = off
     ) -> list[TradeCard]:
@@ -6656,12 +6760,30 @@ class TradeService:
         TARGET_BONUS = _c("target_acquire_bonus")   # #2 per-target composite reward
         MULT_CAP     = _c("pos_multiplier_cap")
 
-        # Interview 2026-07-17 ("loosen it") — both members have real
-        # boards here and the both-sides surplus gate already proves
-        # mutual gain, so the consensus fairness check is only an
-        # extreme-case veto. Consensus-basis cards keep the full bar.
-        fairness_threshold = min(fairness_threshold,
-                                 _c("fairness_floor_divergence"))
+        # ── consensus fairness composition ────────────────────────────────
+        # LEGACY (policy flag off): interview 2026-07-17 ("loosen it") —
+        # both members have real boards here and the both-sides surplus gate
+        # already proves mutual gain, so the consensus fairness check is only
+        # an extreme-case veto. Consensus-basis cards keep the full bar.
+        #
+        # personal_market_v1: this `min()` IS the composition the policy
+        # replaces. It turns a user's stricter 0.75 request into a looser
+        # 0.55 gate — a stated preference making the guardrail WEAKER. Under
+        # the policy the requested value is left alone and
+        # `trade_policy.compose_effective_floor` takes `max(policy_floor,
+        # requested)`, with the dynamic floor doing the "loosen it" work
+        # honestly: it descends toward the 0.65 absolute floor only when BOTH
+        # boards are well-supported and both managers actually gain.
+        #
+        # `_policy_requested_floor` keeps the UNCOMPOSED request for the
+        # evaluator built further down (after `_uv` exists), so the policy
+        # never sees a value the legacy min() already loosened.
+        from . import trade_policy as _tp
+        _policy_on = _tp.policy_enabled()
+        _policy_requested_floor = fairness_threshold
+        if not _policy_on:
+            fairness_threshold = min(fairness_threshold,
+                                     _c("fairness_floor_divergence"))
 
         _vo_cache: dict[str, float] = {}
         def _vo(pid: str) -> float:
@@ -6688,6 +6810,36 @@ class TradeService:
         _def_uval = elo_to_value(1500.0)
         def _uv(pid: str) -> float:
             return user_value.get(pid, _def_uval)
+
+        # The shared policy evaluator for THIS pair, or None while the flag
+        # is off (one `is None` check in `_consider`, no allocation, no
+        # evaluation — that is the flag-off byte-identity).
+        #
+        # `_uv` is the viewer's CONFIDENCE-SHRUNK value map (`user_value` is
+        # built from `_shrink_user_elo` upstream), and the opponent's board
+        # is shrunk inside `make_pair_evaluator` by the same rule. That
+        # symmetry is the point: `_vo` below still reads `opp_elo` RAW for
+        # the legacy surplus math, which is exactly the asymmetry the policy
+        # exists to remove.
+        _policy_eval = None
+        if _policy_on:
+            _raw_uv = ({pid: elo_to_value(e) for pid, e in raw_user_elo.items()}
+                       if raw_user_elo else None)
+            _policy_eval = _tp.make_pair_evaluator(
+                consensus_value        = seed_value,
+                viewer_effective_value = _uv,
+                viewer_raw_value       = ((lambda pid: _raw_uv.get(pid, _uv(pid)))
+                                          if _raw_uv else None),
+                viewer_confidence_of   = (lambda pid: _tp.confidence_weight_for(
+                    (confidence or {}).get(pid), _tp.SOURCE_VOTES)),
+                opponent               = opponent,
+                seed_elo               = seed_elo or {},
+                requested_floor        = _policy_requested_floor,
+                scoring_format         = scoring_format,
+                viewer_elo             = raw_user_elo,
+                viewer_counts          = confidence,
+                viewer_placements      = policy_placements,
+            )
 
         if MARGINAL:
             # Replacement levels computed ONCE per pair from the PRE-trade
@@ -6922,6 +7074,16 @@ class TradeService:
             fairness = _fairness(give_ids, recv_ids)
             if fairness is None:
                 return
+            # The shared evaluator, on the FINAL package for this candidate.
+            # `_fairness` above may have admitted the card on RANGE OVERLAP
+            # with a point ratio below the bar; the policy re-judges the
+            # POINT ratio against the effective floor, so wide uncertainty
+            # can no longer rescue a market-imbalanced trade. Low confidence
+            # has to make the engine more conservative, and overlap did the
+            # opposite.
+            if _policy_eval is not None and not _policy_eval(
+                    give_ids, recv_ids).eligible:
+                return
 
             hm = _harmonic_mean(user_surplus, opp_surplus)   # A1 ranking
             composite = _composite_v2(hm, fairness, give_ids, recv_ids)
@@ -7053,7 +7215,15 @@ class TradeService:
             if not _gap_ok(g, r):
                 return False
             u_s, o_s = _pair_surpluses(g, r)
-            return u_s >= MIN_SIDE and o_s >= MIN_SIDE
+            if u_s < MIN_SIDE or o_s < MIN_SIDE:
+                return False
+            # A sweetener CHANGES the package, so the pre-mutation verdict is
+            # void and the card must re-ask. Without this the gap sweetener
+            # is a bypass: it is allowed to move the consensus ratio, which
+            # is the exact quantity the policy gates on.
+            if _policy_eval is not None and not _policy_eval(g, r).eligible:
+                return False
+            return True
 
         cards: list[TradeCard] = []
         _picked_keys = {(frozenset(e[5]), frozenset(e[6]))
