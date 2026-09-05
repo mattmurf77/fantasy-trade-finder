@@ -1444,13 +1444,13 @@ If safe supply is insufficient the deck comes back **shorter**. Returning a smal
 
 | Key | Default | Description |
 |---|---|---|
-| `conf_source_seed` | 0.0 | Confidence weight for an unchanged consensus seed — no personal evidence at all. |
-| `conf_source_cross_format` | 0.75 | Weight for a ranking copied across scoring formats (the copy-from-format publish). |
-| `conf_source_explicit` | 1.0 | Weight for an explicit tier, manual order, import or anchor placement — the strongest statement of value the product accepts. |
+| `conf_source_seed` | 0.0 | Legacy compatibility key; D-185's dark-policy authority resolver now fixes seed/no evidence at 0, independent of this value. |
+| `conf_source_cross_format` | 0.75 | Legacy compatibility key; no longer discounts deliberate copied entries in the dark policy. D-185 fixes known deliberate input at 1. Stored historic weights/snapshots are not rewritten. |
+| `conf_source_explicit` | 1.0 | Legacy compatibility key; D-185 fixes known deliberate input at 1 regardless of ranking method. Do not use this key as a rollout control. |
 | `policy_confidence_band_high` | 0.66 | Trade confidence at/above which a card's privacy-safe `confidence_band` reads `high`. |
 | `policy_confidence_band_med` | 0.33 | …and `medium` (below it, `low`). The band names which side of the line the **weaker** board falls on and reveals nothing about the counterparty's values, positions or counts. |
 
-Vote-based evidence keeps the existing shape `n / (n + shrink_pseudocount)`; the three source constants are flat overrides for provenances a count cannot describe. A missing count with no recognised source returns **0.0** — "no evidence" prices the player at consensus and buys no floor relief. That is the fail-safe direction, and it is the opposite of `trade_service._shrink_user_elo`, which returns the board **raw** when confidence is None.
+D-185 amendment (2026-09-05): the **dark policy** treats positive-count votes, explicit placements and identified deliberate copies with equal authority (1); seed/no evidence gets 0. Per-player provenance supersedes majority-source summaries and historic method weights for new calculations. Legacy live `_shrink_user_elo` still uses `n / (n + shrink_pseudocount)` and retains its `confidence=None` raw-board path to preserve the historical control arm; it is not fully owner-aligned yet. No default flag, threshold or allocation changes accompany this patch. Numerical fairness rules and ordering below remain historical dark implementation, not approved rollout policy.
 
 ### Observability
 

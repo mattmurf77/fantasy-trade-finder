@@ -11,6 +11,8 @@
 
 ## Current State — 2026-09-05
 
+**In flight, not deployed:** owner-contract first wave on `codex/owner-contracts-20260905`, isolated integration worktree `/private/tmp/ftf-owner-contracts-e8bWFV/integration`, based on `5cf34182`. Astra Ultra mobile/policy builders and independent review completed; parent fixed review findings and passed final local gates: **5,455 backend passed / 1 skipped**, **93 mobile guards**, TypeScript, test-ID lint and **190 web checks**. Feature-branch publication and hosted CI are pending. No main merge, deployment, experiment activation or device verification is authorized by this patch. All three generator arms remain intact. [Review / remaining work](../docs/plans/owner-contracts/review.md), [unrun TestFlight checklist](../docs/plans/owner-contracts/mobile-testflight.md). Raw owner interview/source documents remain local, excluded from public history; preserve the dirty original checkout and task worktrees.
+
 **Shipped:** Win Now experimental beta, PR #280, `main` release `c28ec6d8`, Render live 05:07:28 UTC. Season projections, Win Now search/evaluation and championship flags all verified true. Dynasty fairness/partner evidence and season-only decisions remain separate from dynasty Elo. User explicitly accepts exploratory evidence; this is not a calibration claim. [Release record](../docs/business/ops/2026-09-05-win-now.md).
 
 **Verified:** exact-head CI 5,353 pass / 1 skip, all four jobs green; parent merged integration 220 pass; 92 client guards/typecheck/testID, 190 web checks, 23 auth checks and Chromium/MV3 runtime. Public live JS/CSS match the release; new endpoints reject unauthenticated access. Actual live landing renders without captured warn/error messages. No authenticated production forecast result is claimed.
@@ -21,4 +23,4 @@
 
 **Security release preserved:** #279 verified ownership/data lifecycle remains intact, with Win Now workers admitted through its deletion leases and alias-aware data removal/export. Keep one Gunicorn worker until distributed fencing exists. Historical production token cleanup/revocation and membership resync remain separate work; [security evidence](../docs/plans/security-data-hardening/deployment.md).
 
-**Recovery:** original dirty checkout preserved. Release branch/worktree tip and publication/content checks are recorded in [recovery ledger](../docs/recovery/2026-09-05-win-now-release.md). No implementation or deployment work remains. Rollback: three Win Now flags false; prior Render code `a927e3a7`.
+**Win Now recovery:** original dirty checkout preserved. Release branch/worktree tip and publication/content checks are recorded in [recovery ledger](../docs/recovery/2026-09-05-win-now-release.md). No Win Now release implementation or deployment work remains; the owner-contract follow-up above is separate and incomplete. Win Now rollback: three flags false; prior Render code `a927e3a7`.

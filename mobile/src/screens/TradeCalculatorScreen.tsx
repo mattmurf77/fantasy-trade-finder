@@ -861,6 +861,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
                 opponent: opponent ?? null,
                 autoRun: true,
                 origin: 'calculator',
+                canvasSelection: { giveIds: fork.giveIds, receiveIds: fork.receiveIds },
                 ...(anchor ? { fairAnchor: anchor } : {}),
               });
               // popTo, not navigate: without `pop` (and with no `getId` on

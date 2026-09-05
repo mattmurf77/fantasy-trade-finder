@@ -624,8 +624,8 @@ def test_confidence_round_trips_through_member_rankings(db):
     board = out["u1"]
     assert board["elo_ratings"] == {"p1": 1800.0, "p2": 1400.0}
     assert board["comparison_counts"] == {"p1": 12, "p2": 0}
-    # p1: votes, n=12, n0=4 -> 0.75. p2: per-row 'explicit' override -> 1.0.
-    assert board["confidence_weights"]["p1"] == pytest.approx(0.75)
+    # September 5: deliberate votes and placements have equal authority.
+    assert board["confidence_weights"]["p1"] == 1.0
     assert board["confidence_weights"]["p2"] == pytest.approx(1.0)
     assert board["board_updated_at"]
 

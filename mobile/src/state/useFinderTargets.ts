@@ -61,6 +61,9 @@ export interface FinderHandoff {
    *  `giveIds` is the ANCHOR (every served card gives exactly these);
    *  `receiveIds` is a preference the sweep sorts by. */
   fairAnchor?: { giveIds: string[]; receiveIds: string[] };
+  /** Explicit canvas selections also travel on the receive-only model path.
+   *  Empty arrays mean a deliberately empty canvas, not old finder pins. */
+  canvasSelection?: { giveIds: string[]; receiveIds: string[] };
 }
 
 interface FinderTargetsState {

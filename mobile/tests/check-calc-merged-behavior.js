@@ -177,20 +177,21 @@ assert(/pinCount === 1\s*\?\s*`Search without \$\{[^`]*\}`\s*:\s*'Search without
 {
   const at = trades.indexOf('function handleBackToCalculator()');
   assert(at >= 0, '10b. handleBackToCalculator is the single back-to-calc handler');
-  // Window widened 1400 → 2100 on 2026-08-31 (D-171 ruling 4): the handler
-  // grew a pushed-deck arm FIRST — a plain popToLanding(), because the
-  // landing's canvas still holds the build and a fair deck has no pins to
-  // rebuild a prefill from. The two shipped arms below it are unchanged and
-  // stay pinned by 10c-10e; the pop arm itself is check-results-push §5's.
-  const seg = trades.slice(at, at + 2100);
+  // Bound to the next handler, not a character window: request-based Back
+  // restoration covers canvas searches that deliberately never write pins.
+  const seg = trades.slice(at, trades.indexOf('function handleUnpinRetry()', at));
   assert(/if \(isResultsPushed\) \{\s*popToLanding\(\);\s*return;\s*\}/.test(seg),
     '10b2. the pushed-deck arm pops WITHOUT a prefill (D-171 ruling 4)',
     'a pin-derived prefill from a pushed fair deck is empty — it would CLEAR the landing canvas');
   assert(/navigate\?\.\('TradeCalculator',\s*\{\s*prefill:/.test(seg),
     '10c. it navigates with a `prefill` object',
     'a bare navigate resets the calculator to Real values with an empty canvas');
-  assert(/giveIds: pinnedGive\.map/.test(seg) && /receiveIds: pinnedReceive\.map/.test(seg),
-    '10d. the canvas is rebuilt from the pins');
+  assert(/lastFairRequestRef.current\?\.anchor/.test(seg)
+      && /giveIds: modelRequest.pinned_give_players \?\? \[\]/.test(seg)
+      && /receiveIds: modelRequest.pinned_receive_players \?\? \[\]/.test(seg)
+      && /giveIds: pinnedGive\.map/.test(seg) && /receiveIds: pinnedReceive\.map/.test(seg)
+      && /giveIds: selection.giveIds/.test(seg) && /receiveIds: selection.receiveIds/.test(seg),
+    '10d. Back restores the searched canvas, with pins only as the no-request fallback');
   assert(/scopedOpponent \? \{ opponentUserId: scopedOpponent \}/.test(seg),
     '10e. the partner rides along when one is scoped, and the prefill survives without one');
 }

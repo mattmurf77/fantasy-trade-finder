@@ -220,7 +220,7 @@ console.log('check-results-push:');
     '4e. it arms exactly the calculator-arrival refs and triggers the ONE choke point',
     'the D-153 fork (fair sweep vs model job) is taken at the same single dispatch site as ever');
   assert(count(tradesCode, /generateMutation\.mutate\(/g) === 1
-    && count(tradesCode, /dispatchGenerate\(/g) === 9,
+    && count(tradesCode, /dispatchGenerate\(/g) === 8,
     '4f. no new generate dispatch site — the push added zero mutate paths');
   assert(/setInlineAnchor\(/.test(consume) && /anchorLabel/.test(consume),
     '4g. the anchor receipt is seeded from the param — "Built around X" tops the pushed deck (ruling 2)');

@@ -104,6 +104,7 @@ import { ideaToCard } from '../utils/ideaToCard';
 // so the two hosts of the same canvas can never diverge (see each file's
 // header).
 import { anchorSummary, forkCanvasSearch } from '../utils/canvasSearch';
+import { modelSelectionParams, type SearchSelection } from '../utils/tradeSearchRequest';
 import { queueCalcTrade } from '../utils/queueCalcTrade';
 import {
   postDeclineReason,
@@ -518,6 +519,7 @@ export default function TradesScreen({ navigation, route }: any) {
   // toggle would paint ON while 0.5 was being sent. An explicit 'on' is
   // restored by the hydrate below; nobody's stored value is rewritten.
   const [fairnessOn, setFairnessOn] = useState(fairnessOnFromPref(null));
+  const [fairnessReady, setFairnessReady] = useState(false);
   const [deck, setDeck] = useState<TradeCard[]>([]);
   const [deckIdx, setDeckIdx] = useState(0);
   // #288 — the deck snapshot from the moment a "Keep · more offers" tap
@@ -766,6 +768,15 @@ export default function TradesScreen({ navigation, route }: any) {
   // the W5 unpin-retry is meaningless here and "Search all trades" takes its
   // place. Cleared by every path that starts or invalidates a model search.
   const [fairDeck, setFairDeck] = useState(false);
+  const [fairPending, setFairPending] = useState(false);
+  const fairPendingRef = useRef(false);
+  const canvasSelectionRef = useRef<SearchSelection | null>(null);
+  const lastFairRequestRef = useRef<{
+    anchor: SearchSelection;
+    opponentId: string | undefined;
+  } | null>(null);
+  const lastModelRequestRef = useRef<Parameters<typeof generateTrades>[0] | null>(null);
+  const resultsPushPendingRef = useRef(false);
   // D-158 — the anchored deck's FILTER RECEIPT. The operator's framing: an
   // anchored Find a Trade "becomes the same treatment as the existing filters
   // from the outlook tab", so the anchor is shown as a receipt above the
@@ -843,6 +854,9 @@ export default function TradesScreen({ navigation, route }: any) {
         opponent: { userId: string; name: string } | null;
         origin: 'calculator' | null;
         fairAnchor: { giveIds: string[]; receiveIds: string[] } | null;
+        canvasSelection?: SearchSelection;
+        fairnessOn?: boolean;
+        tradeIntent?: TradeIntent;
         anchorLabel: string | null;
       }
     | undefined;
@@ -1084,11 +1098,17 @@ export default function TradesScreen({ navigation, route }: any) {
     let cancelled = false;
     (async () => {
       try {
+        if (resultsPushParam?.fairnessOn !== undefined) {
+          setFairnessOn(resultsPushParam.fairnessOn);
+          return;
+        }
         const raw = await AsyncStorage.getItem(FAIRNESS_PREF_KEY);
         if (cancelled) return;
         setFairnessOn(fairnessOnFromPref(raw));
       } catch {
         /* AsyncStorage unavailable — keep the default (OFF) */
+      } finally {
+        if (!cancelled) setFairnessReady(true);
       }
     })();
     return () => { cancelled = true; };
@@ -1098,24 +1118,35 @@ export default function TradesScreen({ navigation, route }: any) {
   // button in both flag states, and the "Preferences changed" strip)
   // clears the refresh nudge the same way.
   function handleFindTrades(source?: string) {
+    if (fairPendingRef.current) return;
     setDeckFailure(null); // P0-2 — a search in flight has no failure
     setScopedEmpty(null); // #330 — re-set by the completion effect if the re-run is empty too
     // #298 — `mode` always present; `source` only when a caller named one.
     // `source` has been sent here since #257 and STRIPPED on every row by
     // an empty prop registry until 2026-08-11; it is registered now.
-    track('find_trades_tapped',
-          source ? { source, mode: deckMode } : { mode: deckMode },
-          'Trades');
+    if (!lastFairRequestRef.current) {
+      track('find_trades_tapped',
+            source ? { source, mode: deckMode } : { mode: deckMode },
+            'Trades');
+    }
     prefsChangedSinceGenerateRef.current = false;
     setShowPrefsChangedStrip(false);
     setPinIdeaResumed(false); // #317 — a new search's deck re-takes the slot
+    const fairRequest = lastFairRequestRef.current;
+    if (fairRequest) {
+      void runFairPackages(fairRequest.anchor, fairRequest.opponentId, source);
+      return;
+    }
     setFairDeck(false); // #384 W6-B — this dispatch is the MODEL's, so the
                         // deck that lands is not a fair deck
     pendingScrollToDeckRef.current = true; // #276
-    dispatchGenerate({});
+    dispatchGenerate({ repeat: true });
   }
 
   function handleToggleFairness(next: boolean) {
+    deckEpochRef.current += 1;
+    fairPendingRef.current = false;
+    setFairPending(false);
     setFairnessOn(next);
     // Fire-and-forget persistence; a write failure shouldn't block the UI.
     AsyncStorage.setItem(FAIRNESS_PREF_KEY, next ? 'on' : 'off').catch(() => {});
@@ -1844,11 +1875,12 @@ export default function TradesScreen({ navigation, route }: any) {
 
   const generateMutation = useMutation({
     // `auto` marks the onboarding first-run auto-start (item 4): its
-    // failures stay silent (retry below) instead of toasting. Manual taps
-    // pass {} and behave exactly as before. `force` (item 7) skips the
+    // failures stay silent (retry below) instead of toasting. `repeat`
+    // retains the last selected assets/partner across manual refreshes.
+    // `force` (item 7) skips the
     // server's complete-fresh job cache — used by the post-Quick-Set
     // regeneration, whose board change doesn't alter the cache key.
-    mutationFn: (vars: { auto?: boolean; force?: boolean }) => {
+    mutationFn: (vars: { auto?: boolean; force?: boolean; repeat?: boolean }) => {
       // Pins are read from the store (not the render closure) so a
       // pin-then-generate in the same tick (#186 keep-side) always sends
       // the fresh lists.
@@ -1857,32 +1889,33 @@ export default function TradesScreen({ navigation, route }: any) {
         pinnedReceive: wants,
         packageMode: pkg,
       } = useFinderTargets.getState();
-      return generateTrades({
-        league_id: leagueId!,
-        fairness_threshold: effectiveFairness,
-        force: vars.force || undefined,
-        // FB-47 — omit (not []) when unset so untargeted payloads stay
-        // byte-identical to the pre-targeting shape.
-        pinned_give_players:
-          targetingEnabled && pins.length > 0
-            ? pins.map((p) => p.id)
-            : undefined,
-        pinned_receive_players:
-          targetingEnabled && wants.length > 0
-            ? wants.map((p) => p.id)
-            : undefined,
-        // #174 — "Trade as one package": with 2+ give pins and the toggle
-        // ON, every card must send ALL of them. Omitted otherwise.
-        pinned_give_mode:
-          targetingEnabled && pkg && pins.length >= 2 ? 'all' : undefined,
-        // FB #156 Specific Team — scope the sweep to one league-mate. Omitted
-        // (not null) when unset so untargeted payloads stay byte-identical.
-        opponent_user_id: scopedOpponent || undefined,
-        // #172 — trade intent modes. Omitted (not null) when unset so
-        // byte-identical payloads hold for every user who never touches
-        // the chips (flag off, or flag on but no selection made).
-        trade_intent: tradeIntent ?? undefined,
-      });
+      const request = vars.repeat && lastModelRequestRef.current
+        ? {
+            ...lastModelRequestRef.current,
+            fairness_threshold: effectiveFairness,
+            trade_intent: tradeIntent ?? undefined,
+            force: vars.force || undefined,
+          }
+        : {
+            league_id: leagueId!,
+            fairness_threshold: effectiveFairness,
+            force: vars.force || undefined,
+            // Omit empty sides; the helper also owns the existing package
+            // mode for multi-GIVE pins and the explicit canvas selection.
+            ...modelSelectionParams(canvasSelectionRef.current, {
+              giveIds: pins.map((p) => p.id),
+              receiveIds: wants.map((p) => p.id),
+            }, targetingEnabled, pkg),
+            // Omit absent scope/shape so untargeted payloads retain their
+            // historical API shape.
+            opponent_user_id: scopedOpponent || undefined,
+            trade_intent: tradeIntent ?? undefined,
+          };
+      lastModelRequestRef.current = request;
+      // A handoff supplies one explicit canvas request. Subsequent new
+      // targeting uses the pin store; Retry/Find more use the saved request.
+      canvasSelectionRef.current = null;
+      return generateTrades(request);
     },
     // #330 R-10 — stamp the dispatch-time epoch; onSuccess/onError compare
     // it against the current one and drop stale results entirely.
@@ -1968,7 +2001,7 @@ export default function TradesScreen({ navigation, route }: any) {
   // this helper (check-canvas-results §12 pins `generateMutation.mutate(`
   // to exactly ONE occurrence — the call below — so a future site cannot
   // bypass silently):
-  //   1. handleFindTrades              — manual CTA, prefs-changed strip,
+  //   1. handleFindTrades              — both manual CTAs, prefs-changed strip,
   //                                      browse retry / search-all / unpin
   //   2. generateMutation.onError      — the auto-start's silent retry
   //   3. first-run auto-start effect   — the P0 site: a new user's first deck
@@ -1982,13 +2015,11 @@ export default function TradesScreen({ navigation, route }: any) {
   //   7. QuickSet regen focus effect   — board-change forced regen (its
   //                                      inline clear kills the old session
   //                                      first — see the effect)
-  //   8. legacy !consolidateOn CTA     — renders only when
-  //                                      canvasHost !== 'flag', so its live
-  //                                      branch is dead; routed anyway
   function dispatchGenerate(
-    vars: { auto?: boolean; force?: boolean },
+    vars: { auto?: boolean; force?: boolean; repeat?: boolean },
     mutateOpts?: Parameters<typeof generateMutation.mutate>[1],
   ) {
+    lastFairRequestRef.current = null;
     if (canvasResultsLive) {
       // Adopt-or-create (see header). ONE session-creation literal for the
       // model path — a second one is a census bypass.
@@ -2171,6 +2202,14 @@ export default function TradesScreen({ navigation, route }: any) {
     flushPendingPassRef.current();
     lastDispositionedRef.current = null;
     matchIdByTradeRef.current.clear();
+    deckEpochRef.current += 1;
+    canvasSelectionRef.current = null;
+    lastFairRequestRef.current = null;
+    lastModelRequestRef.current = null;
+    fairPendingRef.current = false;
+    setFairPending(false);
+    setCanvasPrefill(null);
+    setSheetOpponent(null);
     setDeck([]);
     setDeckIdx(0);
     setLaneFilter(null);
@@ -2222,7 +2261,7 @@ export default function TradesScreen({ navigation, route }: any) {
   // it) and show the skeleton deck instead of the manual empty state.
   // One kick per league; the silent retry lives in generateMutation.onError.
   useEffect(() => {
-    if (!firstRun || !leagueId || gateState) return;
+    if (!firstRun || !leagueId || gateState || !fairnessReady) return;
     // D-171 ruling 1 (2026-08-31) — no auto-start on the push-posture
     // LANDING (builder only: a kicked generate would stream into the
     // retired deck tree — the QA B-C1 invisible-deck shape) and none on the
@@ -2240,7 +2279,7 @@ export default function TradesScreen({ navigation, route }: any) {
     // generateMutation identity churns per render; keying on the inputs
     // that matter keeps this a mount/league-scoped one-shot.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [firstRun, leagueId, gateState, job, deck.length]);
+  }, [firstRun, leagueId, gateState, job, deck.length, fairnessReady]);
 
   // Clear any pending auto-retry on unmount.
   useEffect(
@@ -2866,12 +2905,18 @@ export default function TradesScreen({ navigation, route }: any) {
   //                                the session inline
   //   4. QuickSet regen effect   — inline clear, kills the session inline
   //                                before dispatchGenerate creates the new one
-  //   (this function is the 5th `setDeck([])` and owns the session kill for
+  //   5. runFairPackages         — clears old cards into the fair session
+  //                                while its explicit pending state renders
+  //   (this function is the 6th `setDeck([])` and owns the session kill for
   //   every path that routes through it)
   function resetDeckForNewTargets() {
     // #330 R-10 — every reset opens a new generation epoch; results from
     // dispatches stamped under an older epoch are dropped on arrival.
     deckEpochRef.current += 1;
+    fairPendingRef.current = false;
+    setFairPending(false);
+    lastFairRequestRef.current = null;
+    lastModelRequestRef.current = null;
     flushPendingPassRef.current(); // commit any undoable pass before reset
     lastDispositionedRef.current = null; // regenerated decks can reuse ids
     setDeck([]);
@@ -2952,6 +2997,9 @@ export default function TradesScreen({ navigation, route }: any) {
   // travels in the handoff (and then in the request body) rather than through
   // the pin store, which is why nothing here writes pins any more.
   const navFocused = useIsFocused();
+  useEffect(() => {
+    if (navFocused) resultsPushPendingRef.current = false;
+  }, [navFocused]);
   const finderHandoff = useFinderTargets((s) => s.handoff);
   const [autoRunSeq, setAutoRunSeq] = useState(0);
   const autoRunPendingRef = useRef(false);
@@ -2983,6 +3031,9 @@ export default function TradesScreen({ navigation, route }: any) {
           opponent: finderHandoff.opponent,
           origin: fwdOrigin,
           fairAnchor: fwdFair,
+          canvasSelection: finderHandoff.canvasSelection,
+          ...(fairnessReady ? { fairnessOn } : {}),
+          tradeIntent,
           // A store handoff carries ids, not display names — no receipt
           // label to build here (the calculator's own path labels via
           // anchorSummary at the push site).
@@ -2992,6 +3043,7 @@ export default function TradesScreen({ navigation, route }: any) {
       return;
     }
     setSheetOpponent(finderHandoff.opponent);
+    canvasSelectionRef.current = finderHandoff.canvasSelection ?? null;
     const origin = finderHandoff.origin === 'calculator' ? 'calculator' : null;
     setDeckOrigin(origin);
     const fair = origin && finderHandoff.fairAnchor?.giveIds?.length
@@ -3028,7 +3080,7 @@ export default function TradesScreen({ navigation, route }: any) {
 
   const finderScopeSeen = useRef(false);
   useEffect(() => {
-    if (!finderHubOn || !finderMode) return;
+    if (!finderHubOn || !finderMode || !fairnessReady) return;
     resetDeckForNewTargets();
     // D-171 ruling 1 (2026-08-31) — the LANDING dispatches nothing under the
     // push posture: Find a Trade and forwarded handoffs push `TradeDeck`
@@ -3112,7 +3164,7 @@ export default function TradesScreen({ navigation, route }: any) {
     // `calc.inline_home` on, so flag-off this dep is a constant 0 and the
     // effect fires exactly when it always did.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [finderMode, scopedOpponent, autoRunSeq, canvasRunSeq]);
+  }, [finderMode, scopedOpponent, autoRunSeq, canvasRunSeq, fairnessReady]);
 
   // ── D-171 (2026-08-31 rulings 2+4) — the pushed results deck's arrival ──
   //
@@ -3136,6 +3188,9 @@ export default function TradesScreen({ navigation, route }: any) {
     }
     consumedResultsPushSeqRef.current = rp.seq;
     setSheetOpponent(rp.opponent ?? null);
+    canvasSelectionRef.current = rp.canvasSelection ?? null;
+    if (rp.fairnessOn !== undefined) setFairnessOn(rp.fairnessOn);
+    if (rp.tradeIntent !== undefined) setTradeIntent(rp.tradeIntent);
     // Ruling 4 — a calculator-origin push keeps the calculator's deck
     // semantics (✕ → overlay, calculator-first exits); a forwarded league
     // offer keeps its own (inline tiles), exactly as its direct
@@ -3174,6 +3229,7 @@ export default function TradesScreen({ navigation, route }: any) {
     receive: CalcPlayer[];
     opponent: { userId: string; name: string } | null;
   }) {
+    if (resultsPushLive && resultsPushPendingRef.current) return;
     const fork = forkCanvasSearch(opts, 'Trades');
     // D-171 rulings 1+2 (2026-08-31) — under the push posture the landing
     // does not consume its own search: the D-153 verdict (and the anchor,
@@ -3184,8 +3240,8 @@ export default function TradesScreen({ navigation, route }: any) {
     // documents navigate's reuse rules as a trap). The landing's canvas
     // keeps the build — Change/Edit-in-calculator pop back to it.
     if (resultsPushLive) {
+      resultsPushPendingRef.current = true;
       const summary = anchorSummary(opts.give);
-      setSheetOpponent(fork.opponent);
       navigation?.push?.('TradeDeck', {
         mode: 'guided',
         resultsPush: {
@@ -3193,6 +3249,9 @@ export default function TradesScreen({ navigation, route }: any) {
           opponent: fork.opponent,
           origin: 'calculator',
           fairAnchor: fork.anchor,
+          canvasSelection: { giveIds: fork.giveIds, receiveIds: fork.receiveIds },
+          ...(fairnessReady ? { fairnessOn } : {}),
+          tradeIntent,
           anchorLabel: fork.anchor && summary ? summary : null,
         },
       });
@@ -3202,6 +3261,7 @@ export default function TradesScreen({ navigation, route }: any) {
     // carried it — adopting it here is what `setSheetOpponent(handoff.opponent)`
     // did on arrival.
     setSheetOpponent(fork.opponent);
+    canvasSelectionRef.current = { giveIds: fork.giveIds, receiveIds: fork.receiveIds };
     // #384 review #7 — this deck came from the calculator, which is what keeps
     // the ✕→decline-reason OVERLAY and the calculator-first end-of-deck exits
     // legal on it. The canvas being inline does not change whose deck it is.
@@ -3478,6 +3538,9 @@ export default function TradesScreen({ navigation, route }: any) {
   // empty-deck state, where "Find a Trade" is always the recovery path, so
   // the user is never stranded either way.
   function handleClearPin() {
+    canvasSelectionRef.current = null;
+    lastFairRequestRef.current = null;
+    lastModelRequestRef.current = null;
     haptics.selection();
     const snap = preSinglePinSnapshotRef.current;
     flushPendingPassRef.current();
@@ -3519,24 +3582,39 @@ export default function TradesScreen({ navigation, route }: any) {
   // `/api/trades/flag` all echo the card's give/receive ids plus the
   // counterparty and let `_reconstruct_swipe_card` (FB-46) rebuild the card
   // under that id, exactly as they already do for a deck lost to a restart.
-  async function runFairPackages(anchor: { giveIds: string[]; receiveIds: string[] }) {
-    if (!leagueId) return;
-    const epoch = deckEpochRef.current;
+  async function runFairPackages(
+    anchor: SearchSelection,
+    opponentId: string | undefined = scopedOpponent,
+    source: string = 'calculator',
+  ) {
+    if (!leagueId || fairPendingRef.current) return;
+    const epoch = ++deckEpochRef.current;
+    lastFairRequestRef.current = {
+      anchor: { giveIds: [...anchor.giveIds], receiveIds: [...anchor.receiveIds] },
+      opponentId,
+    };
+    canvasSelectionRef.current = null;
+    fairPendingRef.current = true;
+    setFairPending(true);
+    setFairDeck(true);
+    setDeck([]);
+    setJob(null);
     setDeckFailure(null);
     setScopedEmpty(null);
     setSummaryDismissed(false);
     // R-4 — the sweep is a find-trades dispatch the user asked for with the
     // calculator's Find a Trade, same event and same attributable source as
     // the model path below.
-    track('find_trades_tapped', { source: 'calculator', mode: deckMode }, 'Trades');
+    track('find_trades_tapped', { source, mode: deckMode }, 'Trades');
     try {
       const res = await getFairPackages({
         league_id: leagueId,
+        fairness_threshold: effectiveFairness,
         give_player_ids: anchor.giveIds,
         ...(anchor.receiveIds.length
           ? { receive_player_ids: anchor.receiveIds }
           : {}),
-        ...(scopedOpponent ? { opponent_user_id: scopedOpponent } : {}),
+        ...(opponentId ? { opponent_user_id: opponentId } : {}),
       });
       // #330 R-10 — the same generation-epoch guard the model path uses: a
       // league switch or a newer search while this was in flight must not be
@@ -3562,6 +3640,11 @@ export default function TradesScreen({ navigation, route }: any) {
         message: readErrorCopy(e, DECK_FAIL_GENERIC),
       });
       setFairDeck(false);
+    } finally {
+      if (deckEpochRef.current === epoch) {
+        fairPendingRef.current = false;
+        setFairPending(false);
+      }
     }
   }
 
@@ -3587,15 +3670,27 @@ export default function TradesScreen({ navigation, route }: any) {
       popToLanding();
       return;
     }
+    // Canvas searches travel in the request, not the pin store. Reopening
+    // the legacy calculator must restore those selections too.
+    const modelRequest = lastModelRequestRef.current;
+    const selection = lastFairRequestRef.current?.anchor ?? (modelRequest
+      ? {
+          giveIds: modelRequest.pinned_give_players ?? [],
+          receiveIds: modelRequest.pinned_receive_players ?? [],
+        }
+      : {
+          giveIds: pinnedGive.map((p) => p.id),
+          receiveIds: pinnedReceive.map((p) => p.id),
+        });
     // D-158 — "back to calculator" on the merged landing is a scroll: the
-    // canvas is already on this page and still holds what the user built, so
-    // the prefill only has to re-assert the pins the deck was generated
-    // around. Same event, same pin payload; no push.
+    // canvas is already on this page. Restore the searched selections (or
+    // legacy pins when no request exists), rather than clearing a fair or
+    // receive-only canvas merely because it never wrote the pin store.
     if (inlineHomeOn) {
       loadCanvasPrefill({
         ...(scopedOpponent ? { opponentId: scopedOpponent } : {}),
-        give: pinnedGive.map((p) => p.id),
-        receive: pinnedReceive.map((p) => p.id),
+        give: selection.giveIds,
+        receive: selection.receiveIds,
       });
       return;
     }
@@ -3603,14 +3698,14 @@ export default function TradesScreen({ navigation, route }: any) {
     // (:111-114): a truthy prefill object forces `mode:'league'` (:114 + the
     // :168-170 re-assert) and suppresses the auto-tour (:132), and
     // InLeagueCalculator seeds its canvas from the same ids. Rebuilt from the
-    // pins so the canvas survives the round trip; with no partner scoped the
+    // request so the canvas survives the round trip; with no partner scoped the
     // object still carries the assets, which is what keeps the arrival in
     // league mode instead of resetting to Real values.
     navigation?.navigate?.('TradeCalculator', {
       prefill: {
         ...(scopedOpponent ? { opponentUserId: scopedOpponent } : {}),
-        giveIds: pinnedGive.map((p) => p.id),
-        receiveIds: pinnedReceive.map((p) => p.id),
+        giveIds: selection.giveIds,
+        receiveIds: selection.receiveIds,
       },
     });
   }
@@ -3638,6 +3733,9 @@ export default function TradesScreen({ navigation, route }: any) {
   // `fairDeck` itself, so the deck that lands is a normal model deck with its
   // normal exits.
   function handleSearchAllTrades() {
+    lastFairRequestRef.current = null;
+    lastModelRequestRef.current = null;
+    canvasSelectionRef.current = null;
     haptics.selection();
     track('deck_search_all_tapped', undefined, 'Trades');
     setSummaryDismissed(true);
@@ -3653,10 +3751,14 @@ export default function TradesScreen({ navigation, route }: any) {
     haptics.selection();
     setSuppressionUndoPending(true);
     track('suppression_undo_tapped', undefined, 'Trades');
+    const epoch = deckEpochRef.current;
+    const request = lastModelRequestRef.current;
     try {
       await undoDeckSuppression(leagueId);
+      if (deckEpochRef.current !== epoch) return;
       resetDeckForNewTargets();
-      dispatchGenerate({ force: true });
+      lastModelRequestRef.current = request;
+      dispatchGenerate({ force: true, repeat: true });
     } catch {
       setToast({ msg: 'Could not undo — try again', tone: 'warn' });
     } finally {
@@ -4567,7 +4669,7 @@ export default function TradesScreen({ navigation, route }: any) {
       setDeckIdx(0);
       setJob(null); // stop the old job's poller refilling the deck we just cleared
       dispatchGenerate(
-        { force: true },
+        { force: true, repeat: true },
         {
           // Late-bind the reveal to the job this handoff forced. Without
           // it the deck clear above re-runs the diff effect on the commit
@@ -7194,16 +7296,12 @@ export default function TradesScreen({ navigation, route }: any) {
             variant="primary"
             testID="trades.find-btn"
             label={
-              singlePinFeatured || (deck.length > 0 && job?.status === 'complete')
+              singlePinFeatured || (deck.length > 0 && (fairDeck || job?.status === 'complete'))
                 ? 'Find more trades'
                 : 'Find a Trade'
             }
-            disabled={!leagueId || generateMutation.isPending || job?.status === 'running'}
-            onPress={() => {
-              track('find_trades_tapped', { mode: deckMode }, 'Trades');
-              setPinIdeaResumed(false); // #317 — parity with handleFindTrades
-              dispatchGenerate({});
-            }}
+            disabled={!leagueId || !fairnessReady || fairPending || generateMutation.isPending || job?.status === 'running'}
+            onPress={() => handleFindTrades()}
             style={styles.findBtn}
           />
           ) : null}
@@ -7400,11 +7498,11 @@ export default function TradesScreen({ navigation, route }: any) {
           variant="primary"
           testID="trades.find-btn"
           label={
-            singlePinFeatured || (deck.length > 0 && job?.status === 'complete')
+            singlePinFeatured || (deck.length > 0 && (fairDeck || job?.status === 'complete'))
               ? 'Find more trades'
               : 'Find a Trade'
           }
-          disabled={!leagueId || generateMutation.isPending || job?.status === 'running'}
+          disabled={!leagueId || !fairnessReady || fairPending || generateMutation.isPending || job?.status === 'running'}
           onPress={() => handleFindTrades()}
           style={styles.findBtn}
         />
@@ -7838,7 +7936,7 @@ export default function TradesScreen({ navigation, route }: any) {
                 </View>
               </Card>
             ) : browseSession!.origin === 'fair' ? (
-              fairDeck ? (
+              fairDeck && !fairPending ? (
                 // §5 — the fair sweep completed with ZERO ideas. This card IS
                 // the audit-Q5 fix: an honest zero, never the idle card.
                 <Card>
@@ -8429,6 +8527,7 @@ export default function TradesScreen({ navigation, route }: any) {
               ) : null}
             </>
           ) : firstRun &&
+            !fairDeck &&
             deck.length === 0 &&
             job?.status !== 'complete' &&
             job?.status !== 'error' &&
@@ -8448,7 +8547,7 @@ export default function TradesScreen({ navigation, route }: any) {
             // to re-kick (autoGenRef.current !== 'idle'). Before this guard a
             // first-run user whose polling died sat on this skeleton FOREVER.
             <SkeletonTradeCard />
-          ) : generateMutation.isPending || job?.status === 'running' ? (
+          ) : fairPending || generateMutation.isPending || job?.status === 'running' ? (
             // Job is running but no cards have arrived yet (first ~3s of
             // the first opponent). Show a placeholder so the deck doesn't
             // look broken — the progress strip above narrates state.
@@ -8656,6 +8755,22 @@ export default function TradesScreen({ navigation, route }: any) {
                   variant="secondary"
                   compact
                   onPress={() => handleFindTrades('deck_error_retry')}
+                />
+              </View>
+            </Card>
+          ) : fairDeck && deck.length === 0 ? (
+            <Card>
+              <View style={styles.emptyInner} testID="trades.fair-empty">
+                <Text style={styles.emptyTitle}>No trade found</Text>
+                <Text style={styles.emptyBody}>
+                  No offers found for these players. Try changing the players or team.
+                </Text>
+                <Button
+                  testID="trades.fair-empty.back"
+                  label="Back to calculator"
+                  variant="secondary"
+                  compact
+                  onPress={handleBackToCalculator}
                 />
               </View>
             </Card>

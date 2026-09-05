@@ -258,9 +258,9 @@ assert(
 
 const findTapped = trackPropKeys(tradesText, 'find_trades_tapped');
 assert(
-  findTapped.length === 4,
+  findTapped.length === 3,
   '#298 all find_trades_tapped call sites are accounted for',
-  'expected 4 (handleFindTrades + the legacy !consolidateOn arm + the #330 '
+  'expected 3 (handleFindTrades, shared by both layout CTAs + the #330 '
     + 'auto-run emit in the choke-point effect + the #384 W6-B fair-package '
     + `sweep, which is a find-trades dispatch with no job), saw ${findTapped.length}`,
 );
@@ -270,9 +270,11 @@ assert(
   // ONE deckMode derivation. A sweep that fired nothing would make the
   // calculator's conversion look like it stopped converting.
   (tradesCode.match(
-    /track\('find_trades_tapped', \{ source: 'calculator', mode: deckMode \}, 'Trades'\)/g,
-  ) || []).length === 1,
-  "#384 the fair-package sweep emits find_trades_tapped{source:'calculator'}",
+    /track\('find_trades_tapped', \{ source, mode: deckMode \}, 'Trades'\)/g,
+  ) || []).length === 1
+    && /async function runFairPackages\([\s\S]*?source: string = 'calculator',/.test(tradesCode)
+    && /if \(!lastFairRequestRef\.current\) \{\s*track\('find_trades_tapped'/.test(tradesCode),
+  "#384 the fair sweep defaults to source:'calculator'; named retries emit once with their actual source",
   'a synchronous sweep that skips the event is a search that vanishes from the funnel',
 );
 assert(
@@ -290,9 +292,9 @@ assert(
   '#298 handleFindTrades sends `mode` with or without a `source`',
 );
 assert(
-  countOf(tradesCode, "track('find_trades_tapped', { mode: deckMode }, 'Trades')") === 1,
-  '#298 the legacy-layout CTA sends `mode` too',
-  'an emitter without mode makes the single-pin count silently incomplete',
+  countOf(tradesCode, 'onPress={() => handleFindTrades()}') === 2,
+  '#298 both layout CTAs share the handler that sends `mode`',
+  'a separate legacy dispatch could lose request context or omit mode',
 );
 assert(
   countOf(
