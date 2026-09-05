@@ -5,5 +5,5 @@
     "test_a_failed_proposal_snapshot_still_records_the_send",
     "test_a_confirmed_send_labels_its_impression_exactly_once"
   ],
-  "provider_network_calls": 0
+  "provider_offers_sent": 0
 }

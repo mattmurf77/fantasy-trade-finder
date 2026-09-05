@@ -45,4 +45,4 @@ Run `python3 -m pytest backend/tests -q` after all agents stop editing. CI uses 
 
 ## Full-suite execution record
 
-The frozen local run was interrupted for diagnosis after 3,933 passed / one existing opt-in skip, 562.63 seconds, with no failures. It was still progressing through CPU-intensive existing generator tests; no infinite loop was established. This is not recorded as a complete suite pass. Remaining local modules and the complete pushed-revision Python 3.12 CI run are the outstanding checks at this commit.
+The frozen local run was interrupted for diagnosis after 3,933 passed / one existing opt-in skip, 562.63 seconds, with no failures. It was still progressing through CPU-intensive existing generator tests; no infinite loop was established. This is not recorded as a complete suite pass. The remaining modules then passed: 983 tests in 57.39 seconds, including 17 overlapping cases. Against 4,900 collected tests this covers **4,899 unique passes and one existing skip**. Backend source hashes remained unchanged across both runs. A complete uninterrupted pushed-revision Python 3.12 CI run remains the release gate.
