@@ -273,3 +273,31 @@ Hot-read endpoints (inactivity scans, "last login" lookups) read the denormalize
 `trade_roster.py` is a pure exact-assignment and both-team coverage evaluator; `trade_roster_adapter.py` converts provider snapshots without I/O. The server captures one snapshot after package mutations, applies roster protection before market-policy composition, and copies its evidence into impressions. Provisional cards are held until enforcing gates finish. Personal opportunity remains primary under market policy; weaker-team roster/outlook utility precedes market-distance ties. No-board fallback gains roster ordering. Estimated settings and incomplete availability cannot pass enforcement. Details: `docs/plans/post-trade-roster-evaluation/code-walk.md`.
 
 Whole-team benefit extension (2026-09-04): `trade_roster.Context.card` calls pure `trade_outlook_utility` for both complete rosters, then `trade_mutual_benefit` for eligibility and ordering. Explicit outlook provenance is captured before inference. Current production requires supplied fresh point data; dynasty-only evidence cannot enable the strict gate. The worker evaluates after all package mutations, withholds provisional cards in enforcement mode and preserves market lane quotas. Collection lives under existing roster telemetry; `trade.mutual_benefit_v1` remains independently dark. See `docs/plans/trade-model-activation/validation.md`.
+
+## Local request and trade execution context
+
+`server._require_session` returns a mapping view whose top-level session reads
+and effective scoring aliases are captured for the request. Normal route writes
+still reach the underlying session; a view captured before a different user or
+account takes over the token cannot write auth/credential state into that new
+identity. `_sessions` itself continues to contain plain dictionaries. Consumers
+that accept either representation test `Mapping`, not `dict`.
+
+`_kickoff_trade_job` captures a frozen `_TradeExecutionContext` before scheduling
+its existing daemon thread (or running synchronous replenishment). Interactive
+requests supply their view; session/init pre-generation supplies its new payload;
+headless replenishment resolves its session at kickoff. The passed user, league
+and scoring format determine job ownership and the selected services. Pins and
+preloaded preferences are copied before scheduling. The worker no longer resolves
+an accepted job through a token that might now name a different session context.
+
+Each job gets a copied league/member graph and a shallow copy of the selected
+trade service with private player/league maps. Ranking/pick injection and mutable
+generation counters therefore belong to that job. The original selected
+service's card dictionary and decision sets remain shared so streamed cards stay
+available to pending/swipe routes and suppression sees live decisions. Ranking
+services retain execution-time reads; player objects, other request service
+mutations, DB preferences and feature/config reads are not immutable snapshots.
+This is a limited in-process prerequisite, **not** stateless request handling,
+durable jobs, full thread safety, or a separate worker. One Gunicorn worker and
+all generation/timing policies remain unchanged. See the [implementation record](plans/budget-scalability/implementation.md).

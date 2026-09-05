@@ -46,3 +46,9 @@ Run `python3 -m pytest backend/tests -q` after all agents stop editing. CI uses 
 ## Full-suite execution record
 
 The frozen local run was interrupted for diagnosis after 3,933 passed / one existing opt-in skip, 562.63 seconds, with no failures. It was still progressing through CPU-intensive existing generator tests; no infinite loop was established. This is not recorded as a complete suite pass. The remaining modules then passed: 983 tests in 57.39 seconds, including 17 overlapping cases. Against 4,900 collected tests this covers **4,899 unique passes and one existing skip**. Backend source hashes remained unchanged across both runs. A complete uninterrupted pushed-revision Python 3.12 CI run remains the release gate.
+
+## Main integration
+
+While this PR was being opened, `db6b3a17` (#277, request scoring/captured execution context) landed on main. It was merged into the requested branch. The auto-merge revealed a semantic seam: the worker's reduced session no longer carried league identity. `_TradeExecutionContext` now freezes `league_user_id`, and the reduced session keeps both the account and provider owner IDs. A delayed-job regression changes the live session after kickoff and proves roster evaluation retains the original owner and roster.
+
+After integration: 104 focused tests passed in 9.81 seconds (scoring context, policy/roster wiring, mutual integration and pick assignment). Complete CI must run on this merged revision; earlier local counts describe the pre-merge revision. No production setting has been changed at this point.

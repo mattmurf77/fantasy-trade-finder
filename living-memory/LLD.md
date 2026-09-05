@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [Request scoring views and captured job ownership (2026-09-04, budget scalability)](#request-scoring-views-and-captured-job-ownership-2026-09-04-budget-scalability)
 - [Authoritative References](#authoritative-references)
 - [Directory Layout](#directory-layout)
 - [Naming Conventions](#naming-conventions)
@@ -768,3 +769,22 @@ dark — all `monetize.*` flags false, no route wears `@_require_pro`.
   are forbidden.
 
 Whole-team benefit extension (2026-09-04): `trade_roster.Context.card` calls pure `trade_outlook_utility` for both complete rosters, then `trade_mutual_benefit` for eligibility and ordering. Explicit outlook provenance is captured before inference. Current production requires supplied fresh point data; dynasty-only evidence cannot enable the strict gate. The worker evaluates after all package mutations, withholds provisional cards in enforcement mode and preserves market lane quotas. Collection lives under existing roster telemetry; `trade.mutual_benefit_v1` remains independently dark. See `docs/plans/trade-model-activation/validation.md`.
+
+## Request scoring views and captured job ownership (2026-09-04, budget scalability)
+
+`_require_session` returns `_RequestSession`, a mapping snapshot with ordinary
+writes forwarded to the original identity's session. Reads must not update
+shared `service`, `trade_svc` or `_effective_format`; `_active_format` honors the
+request view and ignores stale scratch keys on raw sessions. Repeated helper
+calls within one Flask request reuse the view. Mapping consumers must accept
+`collections.abc.Mapping`. The session lock is reentrant because existing callers
+can hold it while mutating a request view.
+
+Job kickoff passes its explicit format and captured ownership to a frozen
+`_TradeExecutionContext` before scheduling. Interactive and pregen callers pass
+already-resolved context instead of rereading a potentially reinitialized token.
+Generation gets a private league/member graph, but deliberately retains the
+selected service's live card/decision stores for existing pending/swipe behavior.
+This does not snapshot ranking versions or make DB-backed reads transactional;
+see [architecture](../docs/architecture.md#local-request-and-trade-execution-context)
+and [scope/evidence](../docs/plans/budget-scalability/implementation.md).

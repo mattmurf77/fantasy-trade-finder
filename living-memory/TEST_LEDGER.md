@@ -11,6 +11,10 @@
 
 ---
 
+## 2026-09-04 — Trade model/scoring-context integration
+
+Merged main `db6b3a17` (#277) into the requested balance branch before CI. Preserved captured request/format ownership and added captured provider `league_user_id`, which the reduced worker session otherwise omitted. New delayed-job test proves a co-owner roster check cannot follow a later session reinitialization. **104 focused tests passed** in 9.81 seconds. The complete merged-revision CI remains the release gate; pre-merge full local coverage below is not claimed for this merge.
+
 ## 2026-09-04 — Trade activation validation and original items 2/3
 
 Same branch `claude/fleeced-trade-engine-balance-c0c75d`. Two subagents implemented whole-team outlook utility and weaker-manager benefit ranking (49 and 101 tests). Main integrated four final-package tests and the independent dark `trade.mutual_benefit_v1` switch. Existing focused cluster 126 passed; TypeScript, all 90 mobile structural suites, testID lint, and 175 web checks passed. Upgrading an isolated PostgreSQL copy of production's schema twice preserved rows/config; four proposal/attribution contracts passed on PostgreSQL. No provider offers were sent.
@@ -71,6 +75,43 @@ On the same requested branch, after the preceding agent's implementation:
 - Failed attempts were investigated, not hidden: the golden caught flag-off extra job keys; the roster-cut test caught unrelated position groups; the full-run pricing guard required the new roster consumer to be registered. Seven source-inspection failures occurred when the worker file changed after import. All pass in the final stable run. See `docs/plans/post-trade-roster-evaluation/validation.md`.
 
 All four new switches are false; nothing deployed or migrated in production. TestFlight checklist written but not run. Acceptance uplift, cross-format viewer provenance and non-Sleeper observed-slot coverage remain rollout-validation work, not claims from these tests.
+
+## 2026-09-04 — Scoring execution context: local prerequisite built, unmerged
+
+Branch `codex/scoring-execution-context`, isolated worktree
+`/private/tmp/ftf-scoring-execution-context`, freshly fetched base `606e512c`.
+[Scope and applicability](../docs/plans/budget-scalability/scope.md) ·
+[implementation, code-walk, test setup and remaining limits](../docs/plans/budget-scalability/implementation.md).
+No push, merge, deploy, paid infrastructure, worker-count change, new search
+limits or feature reductions. Original dirty checkout and HANDOFF untouched.
+
+- **Python 3.12.14**, isolated temporary venv; scratch SQLite/player cache,
+  committed provider fixtures, network blocked and startup daemons suppressed.
+- **Final source targeted suites: 150 passed** (5.60 s), including ten new
+  barrier/delayed-start/identity/format/pick/card regression cases and existing
+  owned-pick, replenishment, trade-match, force-supersede, read-amplification and
+  bakeoff/fairness/ranking goldens. Earlier broader trade/analytics selection:
+  **195 passed** (22.09 s). Independent base/implementation API comparison:
+  **87 passed on each** (format copy, rookie scope, persistent sessions, trades).
+- **Broad final-source run:** **4620 passed / 8 failed / 1 skipped / 1
+  deselected** (189.65 s). Only slow mock-draft calibration was deselected;
+  an earlier run was interrupted there at 2263 passed / 7 failed (259.24 s).
+  All eight failures reproduce on unchanged base and are test-bootstrap fixture
+  override conflicts in API observability, DP crosswalk/format and QB-cap tests.
+  With overrides removed after safe import and network still blocked, those
+  four files plus the ten new context cases pass together: **61 passed**
+  (0.62 s). Counts overlap; **no monolithic full-suite green claim**.
+- **Sabotages RED:** `mutable_request_aliases` (1 failure),
+  `late_token_resolution` (2), `shared_member_graph` (2). Final source GREEN.
+- **Static checks:** `py_compile` of changed Python files and `git diff --check`
+  clean. Mobile/UI evidence n/a: backend-only, unchanged API/visual contracts;
+  no testID delta. Maestro/simulator retired (D-056), never invoked.
+- **Local capture benchmark:** 340 committed fixture players, twelve synthetic
+  members with 340 Elo entries each; 100 samples median 1.61 ms / p95 1.99 ms,
+  single-capture allocation peak 95,736 bytes. This is not a production/load or
+  budget certification. Durable workers, cross-process sessions and general
+  concurrent write transactions remain deferred; all process/timing policies
+  unchanged. Full pre-ship CI remains required before a future merge.
 
 ## 2026-09-03d — Web ESPN sign-in-primary (D-179): web gate 175/175, entry route 25/25, browser E2E both flag states + live-ESPN 403
 
