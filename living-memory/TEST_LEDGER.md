@@ -11,6 +11,16 @@
 
 ---
 
+## 2026-09-05 — Owner-contract backend activation verified
+
+Owner said “Turn it on” after being told backend was undeployed. Final head `f88afabb669aa946de65a3a4a20d8b85b9256724` passed [all four CI jobs](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/33951522857): **5,455 passed / 1 skipped in 624.31 s**, TypeScript/all 93 guards, test-ID lint and 190 web checks. PR #281 merged 09:50:55 UTC as `4026ebc81eaae50b345b42421641125c5b8d413e`; fetched squash tree exactly equals tested head. Build 148's runtime source remains identical.
+
+Render `dep-daduc0bm8hqs73ckbifg` reports that exact commit **live since 09:51:59.126135 UTC**. Before/after read-only comparison preserves hashes for **207 flags, 258 model values, tier definitions and experiment summaries**. Root HTML matches reviewed bytes; root/tier-config/flags and aggregate operator health/config/experiments return 200, unauthenticated trade/admin-config reads return 401. PostgreSQL event index present, zero ingest transaction failures. No real-user session or personalized production trade used. [Smoke artifact](../docs/plans/owner-contracts/production-smoke.json), [release and rollback](../docs/plans/owner-contracts/release.md).
+
+Live valuation telemetry and roster evaluation were already on and remain on; personal-market policy and roster protection remain off. No flag/config edits, destructive migration, branch/worktree cleanup or new EAS build. Manual TestFlight remains unrun. Documentation-only evidence follow-up uses `[skip render]`; no runtime change or second restart.
+
+---
+
 ## 2026-09-05 — Owner-contract GitHub and TestFlight release verified
 
 Owner explicitly authorized public GitHub publication and TestFlight distribution, resolving the earlier publication block. [Draft PR #281](https://github.com/mattmurf77/fantasy-trade-finder/pull/281); exact built source `0fc1b5390894f3a4e5c9ed8c1c480efd562a09e2`. [Hosted CI](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/33950667865): **5,455 passed / 1 skipped in 621.36 s**, all four jobs successful; mobile TypeScript/all 93 guards, test-ID lint and 190 web checks passed. Release evidence updates after this source are documentation only, not changes to the tested/built runtime tree.

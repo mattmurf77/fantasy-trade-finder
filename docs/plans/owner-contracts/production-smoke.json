@@ -1,0 +1,39 @@
+{
+  "at": "2026-09-05T09:53:27.044Z",
+  "commit": "4026ebc81eaae50b345b42421641125c5b8d413e",
+  "deploy": "dep-daduc0bm8hqs73ckbifg",
+  "liveSince": "2026-09-05T09:51:59.126135Z",
+  "statuses": {
+    "root": 200,
+    "tierConfig": 200,
+    "featureFlags": 200,
+    "operatorConfig": 200,
+    "operatorHealth": 200,
+    "operatorExperiments": 200,
+    "unauthenticatedTrades": 401,
+    "unauthenticatedAdminConfig": 401
+  },
+  "configCount": 258,
+  "flagCount": 207,
+  "hashes": {
+    "configValueHash": "a417117defbbdbb66231e6883108a318bc73e92c4bde3a66f04bf04d4130c91f",
+    "tierHash": "a4e0dd14bf755cefb955de7fb5ab2fe2cfaea619983804a462af4ba239b1e632",
+    "flagHash": "5d3ca88a1ef1706686607254317d165e8e14189bb675a1f8f798ac07734b2eeb",
+    "experimentSummaryHash": "ff73c3f8aa942c34dd11a003e354b5a0b29fccd239526825af73404e24dea4e5"
+  },
+  "configurationUnchanged": true,
+  "rootMatchesReviewedBytes": true,
+  "rootSha256": "35b379411f39b205e79e0d2178b7ad222872023965f3802780f6ab84dec516ed",
+  "health": {"event_id_index_present": true, "wal": null, "txn_failed": 0},
+  "keyFlags": {
+    "outlook.championship_probabilities": true,
+    "outlook.season_projections": true,
+    "trade.bakeoff": true,
+    "trade.personal_market_policy_v1": false,
+    "trade.roster_evaluation": true,
+    "trade.roster_protection": false,
+    "trade.valuation_telemetry": true,
+    "trades.win_now": true
+  },
+  "limits": "Read-only liveness/configuration and Render deployment-identity verification; no real user session, personalized trade generation or physical-device QA."
+}
