@@ -1,7 +1,7 @@
 # Feature scope — In-season projections and Win Now
 
 **Date:** 2026-09-04. **Entry point:** Operator-authorized implementation of [PROPOSAL.md](PROPOSAL.md), with Astra subagents and parent review.
-**Status:** Implementation and parent mechanical verification complete. On 2026-09-05 the operator explicitly authorized live experimental season/Win Now/championship beta, accepting the exploratory evidence without a calibration claim. CI, Render verification and mobile 1.17.0 EAS/TestFlight delivery are pending in this record.
+**Status:** PR #280 merged; backend/web live at `c28ec6d8`, all three beta flags true and final CI green. iOS 1.17.0 (147) built/uploaded; Apple processing and tester availability remain separate. Physical QA and calibrated forecast evidence remain outstanding.
 **Contract:** [BUILD.md](BUILD.md) defines this restricted beta. Standard mechanical evidence/doc gates apply. The operator explicitly superseded the earlier calibration-before-championship-enablement restriction for this beta; physical runtime evidence remains outstanding. D-056 replaces obsolete simulator/Maestro requirements.
 
 ## 1. Analytics scope
@@ -25,7 +25,7 @@ Source configuration: `FTF_SEASON_FORECAST_FILE` optionally imports a normalized
 ## 3. Test scope
 
 - Backend: provider/horizon/scoring validation, legal lineup assignment, week-three starter counterfactual, paired probability accounting, trade legality, fixed-baseline budget, protected assets, fairness and partner gates, persistence/auth/freshness/decision isolation. Parent reviewed the integrated route/service code and all agent work; final backend gate results are recorded in EVIDENCE.
-- Clients: TypeScript, executable formatter and web DOM race tests, structural entry/gating tests, JavaScript syntax, web structure and test-ID lint. Latest feature suite: **24 checks passed**. Detailed completed checks and pending runtime evidence are in [EVIDENCE.md](EVIDENCE.md).
+- Clients: TypeScript, executable formatter and web DOM race tests, structural entry/gating tests, JavaScript syntax, web structure and test-ID lint. Final client verification includes **92 structural guards**, TypeScript and testID lint; earlier feature-check counts remain historical checkpoints in EVIDENCE. Detailed completed checks and pending runtime evidence are in [EVIDENCE.md](EVIDENCE.md).
 - Calibration: frozen historical or prospective source capture and held-out league/season evaluation remain outstanding. Passing unit tests does not establish forecast skill or title graduation.
 - Runtime: parent browser inspection with synthetic data passed at wide/narrow widths; the physical TestFlight and live integrated source/auth checklist remains pending. No Maestro, native simulator or screen-library captures.
 
@@ -43,8 +43,10 @@ Source configuration: `FTF_SEASON_FORECAST_FILE` optionally imports a normalized
 | `docs/glossary.md` | Forecast, sacrifice, partner evidence and percentage points |
 | `docs/design/components.md` | Gated season/Win Now surface and editing/empty/error states |
 | ADR / `DECISIONS.md` | ADR-018 / D-184: external forecasts with independent season simulation and no dynasty feedback |
-| `docs/plans/README.md` + living memory | Implementation under review, pending full verification and rollout |
+| `docs/plans/README.md` + living memory | Live backend/web, final CI and uploaded iOS binary; pending Apple/tester confirmation and physical QA |
 
 ## 5. Ship gate declaration
 
-Parent reviewed the implementation and recorded backend, TypeScript, web and test-ID evidence. Hosted Python 3.12 CI remains a merge gate. The operator explicitly authorized all three beta flags on 2026-09-05 despite exploratory, uncalibrated evidence; this authorization does not claim completed CI, Render rollout, EAS delivery or physical QA. The legacy `odds.title_pct` prohibition remains unchanged. [2026-09-05 release record](../../business/ops/2026-09-05-win-now.md) distinguishes execution from authorization, links the manual checklist, and records all-three-flags-false / prior main commit `a927e3a7` rollback. The [scoring boundaries](BUILD.md#release-scoring-boundaries--2026-09-05) disclose unused K/DEF normalization and exact rare-event exclusions while preserving raw scoring/evaluation artifacts.
+Final Python 3.12 backend suite: **5,353 passed, 1 skipped in 732.08 seconds**. Parent merged focused run: **220 passed in 15.25 seconds**. Client verification: all **92** structural guards, TypeScript and testID lint passed; **190** web structure checks, **23** auth checks and actual isolated Chromium/MV3 runtime passed. All four hosted CI checks succeeded on tested head `abb1af118d3fe39f32292e99cecc64cebff1d2f3`, run `33945722395`; PR #280 squash-merged as `c28ec6d802463e048d59a97967e9bb5bb9fdc6f9`.
+
+All three beta flags are verified true on live Render under explicit operator authorization despite uncalibrated exploratory evidence. iOS 1.17.0 (147) uploaded successfully; Apple processing/tester availability and physical QA remain unverified. The legacy `odds.title_pct` prohibition stays unchanged. [Release record](../../business/ops/2026-09-05-win-now.md) records rollout, source refusal, limitations and rollback to all three flags false / prior main `a927e3a7`.

@@ -1,6 +1,6 @@
 # HANDOFF — Fantasy Trade Finder
 
-> **Purpose:** current release work and delivery checks; prior history lives in CHANGELOG and feature records.
+> **Purpose:** current release state and remaining follow-up.
 >
 > **Read at:** session start. **Write at:** session end.
 >
@@ -11,18 +11,14 @@
 
 ## Current State — 2026-09-05
 
-**Active request:** operator accepts exploratory historical evidence and authorizes shipping Win Now, season projections and championship estimates as an uncalibrated beta. Worktree `/private/tmp/ftf-win-now-20260904`, branch `codex/win-now-20260904`; original dirty checkout preserved. [Release record](../docs/business/ops/2026-09-05-win-now.md).
+**Shipped:** Win Now experimental beta, PR #280, `main` release `c28ec6d8`, Render live 05:07:28 UTC. Season projections, Win Now search/evaluation and championship flags all verified true. Dynasty fairness/partner evidence and season-only decisions remain separate from dynasty Elo. User explicitly accepts exploratory evidence; this is not a calibration claim. [Release record](../docs/business/ops/2026-09-05-win-now.md).
 
-**Integration:** PR #280 opened at `ee4f37a8`; main advanced to account-security release `a927e3a7` (#279) during CI. Its ownership/data-lifecycle changes were merged and reviewed by three Astra agents plus parent in `77824c02`. The later `904702cc` update contains delivery records only; those are merged without changing runtime code. Final exact-head CI is pending. Preserve all protections from #277–#279. The release changes only the three Win Now flags; dynasty policy switches retain main's values.
+**Verified:** exact-head CI 5,353 pass / 1 skip, all four jobs green; parent merged integration 220 pass; 92 client guards/typecheck/testID, 190 web checks, 23 auth checks and Chromium/MV3 runtime. Public live JS/CSS match the release; new endpoints reject unauthenticated access. Actual live landing renders without captured warn/error messages. No authenticated production forecast result is claimed.
 
-**Evidence so far:** before #279 integration, Python 3.12 full suite 5,248 passed / 1 skipped (7m44s), final focused scoring/job lifecycle suite 144 passed; 93 client commands and 185 web checks passed. Original CI head is superseded. Public Lakeview source smoke explicitly refused `unknown_starter_availability:1:1`; no availability assumption was relaxed. Historical accepted replay: Lakeview 2024, four checkpoints, one independent champion; not calibration.
+**iOS:** 1.17.0 (147) build and App Store Connect upload complete. EAS build `69b53400-1d8d-42ec-ad7a-5d0e3c756059`; submission `6184a831-a685-497b-8e97-734ed30fa4b9`. Apple's processing/tester availability and physical iPhone QA are not verified. Build146 was canceled and never submitted; security build 145 belongs to #279.
 
-**Mobile:** 1.17.0 intended. EAS build 146 (`c8104c6e-ed72-42e6-86e4-7ccc78002c85`) was canceled before submission because it lacked concurrently landed security changes. Replacement build147 (`69b53400-1d8d-42ec-ad7a-5d0e3c756059`) uses reviewed merged code `77824c02` and is in progress; subsequent delivery-record merge changes no backend/mobile/web/config/build code. Existing security build 145 / 1.16.16 belongs to #279; do not submit it as this release.
+**Known limit:** current Lakeview source check refuses `unknown_starter_availability:1:1`. Data-quality guards remain active. Follow [manual checklist](../docs/plans/win-now/EVIDENCE.md) and seek independent/prospective forecast evidence; no recurring capture was configured.
 
-**Next:** finish merge/review; required CI on final head; merge PR #280; verify Render actual commit, flags, web and auth behavior; build and submit correct iOS binary to TestFlight; record actual outcomes and recovery ledger before worktree cleanup. Physical iPhone proof remains an operator checklist.
+**Security release preserved:** #279 verified ownership/data lifecycle remains intact, with Win Now workers admitted through its deletion leases and alias-aware data removal/export. Keep one Gunicorn worker until distributed fencing exists. Historical production token cleanup/revocation and membership resync remain separate work; [security evidence](../docs/plans/security-data-hardening/deployment.md).
 
-**Security delivery preserved:** #279 is live on Render at `a927e3a7`, iOS1.16.16(145) build/submission finished, and extension0.1.1 published; see its linked evidence. That is not a claim of physical-device QA or Apple tester availability.
-
-**Security follow-ups retained:** [security deployment record](../docs/plans/security-data-hardening/deployment.md), [review](../docs/plans/security-data-hardening/review.md) and [physical checklist](../docs/plans/security-data-hardening/mobile-evidence.md). Historical production token cleanup/revocation and membership resync are separate maintenance work. Deletion work leases assume the existing single-worker service; no scaling change is part of Win Now.
-
-**Do not repeat:** no invented forecasts or backdating, calibration claim, dynasty Elo updates from Win Now decisions, native simulator/Maestro (D-056), production synthetic maintenance, or deletion of the original dirty checkout. No recurring forecast capture configured. Running jobs are never stolen by another startup; queued jobs resume, expired jobs cannot be revived.
+**Recovery:** original dirty checkout preserved. Release branch/worktree tip and publication/content checks are recorded in [recovery ledger](../docs/recovery/2026-09-05-win-now-release.md). No implementation or deployment work remains. Rollback: three Win Now flags false; prior Render code `a927e3a7`.

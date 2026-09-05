@@ -1,7 +1,7 @@
 # ADR-018: External weekly forecasts and an independent Win Now season model
 
 Date: 2026-09-04
-Status: Implemented and parent-reviewed; experimental release authorized 2026-09-05
+Status: Experimental backend/web release live 2026-09-05; iOS 1.17.0 (147) uploaded, tester availability unverified
 
 ## Context
 
@@ -19,6 +19,6 @@ Reusing roster-value or trailing-score outlook strength would not make a trade-s
 
 ## Consequences
 
-The beta can measure roster-sensitive season tradeoffs with reproducible inputs while preserving existing dynasty discovery. It cannot claim calibrated championship improvement or acceptance propensity. Current-status injuries, independent normal residuals, absent NFL game/team and multiweek injury correlations, conservative game-date cutoff, incomplete source coverage and unsupported formats restrict serving. Hosted Python 3.12 CI and deployment verification gate this release. Forecast-source quality, prospective calibration and the physical TestFlight checklist remain documented follow-ups under the operator's explicit beta authorization; existing Sleeper authorization governs use. See [BUILD](../plans/win-now/BUILD.md) and [EVIDENCE](../plans/win-now/EVIDENCE.md).
+The beta can measure roster-sensitive season tradeoffs with reproducible inputs while preserving existing dynasty discovery. It cannot claim calibrated championship improvement or acceptance propensity. Current-status injuries, independent normal residuals, absent NFL game/team and multiweek injury correlations, conservative game-date cutoff, incomplete source coverage and unsupported formats restrict serving. Final hosted Python 3.12 CI passed and Render deployment was verified live at `c28ec6d8`. Forecast-source quality, prospective calibration and the physical TestFlight checklist remain documented follow-ups under the operator's explicit beta authorization; existing Sleeper authorization governs use. See [BUILD](../plans/win-now/BUILD.md) and [EVIDENCE](../plans/win-now/EVIDENCE.md).
 
 Historical validation uses separate outcome collection and archived-input scoring. Running a replay today is valid when its complete remaining-season inputs were actually archived before the forecast origin; stitching later weekly forecasts is not. Supplied references and hashes remain unverified assertions until reviewed. The initial historical endpoint audit supplies outcomes but no authenticated pregame projections. See [validation evidence and protocol](../plans/win-now/HISTORICAL-VALIDATION.md).

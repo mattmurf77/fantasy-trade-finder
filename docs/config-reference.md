@@ -1497,7 +1497,7 @@ Collection uses only `trade.valuation_telemetry` and `trade.roster_evaluation`; 
 
 ## Win Now beta controls
 
-The 2026-09-05 release candidate sets all three flags to **true** under explicit operator authorization for an experimental, uncalibrated beta, including championship output. Authorization supersedes the earlier calibration-before-enablement restriction; it does not establish calibrated probabilities. Deployment and effective production values remain pending CI/Render verification. See the [release record](business/ops/2026-09-05-win-now.md).
+The live 2026-09-05 release sets all three flags to **true** under explicit operator authorization for an experimental, uncalibrated beta, including championship output. Authorization supersedes the earlier calibration-before-enablement restriction; it does not establish calibrated probabilities. Final CI passed; Render `c28ec6d8` is live and all three effective production values were verified true. See the [release record](business/ops/2026-09-05-win-now.md).
 
 | Flag / setting | Default | Meaning |
 |---|---|---|

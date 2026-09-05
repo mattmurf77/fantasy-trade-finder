@@ -1,12 +1,14 @@
 # Win Now evidence and remaining verification
 
-2026-09-04 evidence checkpoint; updated 2026-09-05 for explicit experimental beta-release authorization. Historical test counts and raw exploratory artifacts below are preserved. Authorization permits season/Win Now/championship before calibration; it does not certify probability accuracy or successful deployment. [2026-09-05 release record](../../business/ops/2026-09-05-win-now.md) tracks pending CI/Render verification and mobile 1.17.0 EAS/TestFlight delivery.
+2026-09-04 evidence checkpoint; updated 2026-09-05 for explicit experimental beta-release authorization. Historical test counts and raw exploratory artifacts below are preserved. Authorization permits season/Win Now/championship before calibration; it does not certify probability accuracy or successful deployment. [2026-09-05 release record](../../business/ops/2026-09-05-win-now.md) records final CI, live Render verification and successful iOS 1.17.0 (147) upload; tester availability and physical QA remain unverified.
 
 ## Security integration update — 2026-09-05
 
-Security release #279 landed concurrently on main `a927e3a7` and is now being integrated. Initial CI for `ee4f37a8` is superseded and is not validation of the merged revision. Mobile 1.17.0 build **146** is superseded; cancellation was confirmed for EAS build `c8104c6e-ed72-42e6-86e4-7ccc78002c85`. A replacement build is pending after integration. Final merged-revision CI, Render and EAS/TestFlight verification remain pending; no new passing result is claimed.
+Backend/web is live at `c28ec6d8` after PR #280 merged on 2026-09-05 at 05:06:23 UTC. All four final CI checks passed for `abb1af118d3fe39f32292e99cecc64cebff1d2f3` (run `33945722395`). Render deployment `dep-dadq6k97lnhs73e8o970` is LIVE since 05:07:28.48285 UTC with all three beta flags verified true. iOS **1.17.0 (147)** finished building and uploaded successfully; Apple processing and tester availability are separate, with tester availability still unverified. Forecast/title calibration and physical-device QA remain unproven.
 
-## Completed client checks
+See the [release record](../../business/ops/2026-09-05-win-now.md) and [production smoke artifact](production-smoke.json).
+
+## Initial implementation checkpoint — completed client checks
 
 | Check | Observed result |
 |---|---|
@@ -37,7 +39,7 @@ Parent reviewed the forecast provider, complete simulator and optimizer, mobile/
 - Final API/storage run: **54 passed** in 0.99 seconds, including real route→worker→optimizer→simulator→storage→poll flow, decision isolation, cutoff expiry, deletion and retention.
 - Final broad run excluding those two independently executed files: **4,790 passed, 1 skipped, 2 failed** in 354.35 seconds. Both failures were derivative flag-fixture key parity (onboarding/profiles); both fixtures now include the same three false flags.
 - After those corrections and the explicit platform-only pick-source declaration, the affected seed/flag, pick-containment, service, API and storage suites were rerun together: **200 passed**. The broad run plus the separately executed API/storage cases covers **4,846 passing backend cases and one skip**; the recorded commands above distinguish the corrected/rerun failures from a single all-green invocation.
-- Local runtime is Python 3.14; deployment uses Python 3.12. No new dependency was added; hosted Python 3.12 CI remains a merge gate.
+- Local runtime is Python 3.14; deployment uses Python 3.12. No new dependency was added; hosted Python 3.12 CI was still a merge gate at this historical checkpoint; the final release result appears below.
 - Synthetic performance: 12 teams × 25 players, 9 slots, 14 forecast weeks, 1,000 draws; baseline 1.14s, exact-lineup search plus 8 paired/independent-confirmation finalists 46.11s; 11,990 screened, one frontier result. Source/persistence alone mocked. This is a latency sample, not a production SLA or calibration.
 
 ## Parent browser inspection
@@ -54,7 +56,7 @@ The parent ran a loopback-only synthetic fixture using the actual shipped `web/j
 6. Force empty results, a network/HTTP error, HTTP-200 unavailable and an expired snapshot. Verify honest copy, no endless spinner, enabled manual recovery, removal of expired cards and no request against expired evidence. Check likes/passes are isolated season decisions with visible save failures.
 7. On a physical supported iPhone and in narrow/wide browsers, inspect long player/pick/league names, keyboard access, focus, VoiceOver/Dynamic Type, asset chooser scrolling and primary actions. Review console/network failures in the real web app; the DOM test harness is not this check.
 
-No simulator, Maestro flow, native build, deployment or production flag changes were performed as the historical client validation above. The separately authorized 2026-09-05 release is pending execution verification in the release record.
+No simulator, Maestro flow, native build, deployment or production flag changes were performed as the historical client validation above. The separately authorized 2026-09-05 release is now verified live, with final CI and iOS upload recorded below.
 
 ## Historical outcome follow-up — 2026-09-04
 
@@ -64,10 +66,12 @@ Parent-reviewed Astra collection/evaluator/audit work: 119 affected backend test
 
 Actual revised-source simulation/evaluation completed: Lakeview 2024, after weeks 3/6/9/12, 10,000 draws each. Lakeview 2025 lacked full lineup forecast coverage; FFv3 active K/IDP formats excluded. Parent reviewed the opt-in evaluator changes/replay adapter; **144 affected tests passed in 0.62s**, cached rerun and direct evaluator metrics identical, strict-mode control rejects all four cohorts. [Numeric results and exact assumptions](EXPLORATORY-RESULTS.md). No production flag, model or UI changes.
 
-## Release verification pending — 2026-09-05
+## Final release verification — 2026-09-05
 
-The operator accepted exploratory evidence for the experimental beta, including championship. Final merged-revision CI and focused release-scoring regressions must be recorded by the release executor; this documentation pass ran no product tests. Render commit/effective flags, authenticated live behavior, mobile 1.17.0 build/submission/processing and physical TestFlight remain unverified here. Run the [existing checklist](#manual-testflight-and-browser-checklist), including absent-slot K/DEF normalization, active K/DEF refusal, preserved raw scoring, provider-aware rare-event omissions and the exact warning **“Rare special-teams/fumble bonuses are not projected.”** See [implementation boundaries](BUILD.md#release-scoring-boundaries--2026-09-05). No historical result is relabeled as prospective or calibrated.
+Final Python 3.12 backend suite: **5,353 passed, 1 skipped in 732.08 seconds**. Parent merged focused run: **220 passed in 15.25 seconds**. Client verification: all **92** structural guards, TypeScript and testID lint passed; **190** web structure checks, **23** auth checks and actual isolated Chromium/MV3 runtime passed. All four hosted CI checks succeeded on tested head `abb1af118d3fe39f32292e99cecc64cebff1d2f3`, run `33945722395`; PR #280 squash-merged as `c28ec6d802463e048d59a97967e9bb5bb9fdc6f9`.
 
-### Release verification — 2026-09-05
+Production smoke verified HTTP 200 for root and flags, all three serving flags true, exact deployed bytes for `app.js`, `win-now.js` and Win Now CSS, and HTTP 401 from four new unauthenticated endpoints. The live in-app-browser landing rendered with no error/warning logs. This does not establish an authenticated production forecast or a physical TestFlight pass. The real-source Lakeview check still refused `unknown_starter_availability:1:1`; no forecast was fabricated.
 
-Parent reviewed all Astra scoring, client receipt and deployment lifecycle changes. 93 client commands passed (TypeScript, 91 structural suites, testID lint); Win Now has 28 checks; web structure 185/185. Focused Python 3.12 and full/hosted results are tracked in the [release record](../../business/ops/2026-09-05-win-now.md). Real public Lakeview source smoke returned `unknown_starter_availability:1:1` after 34 reads/27.66 seconds; no availability assumption was relaxed. No physical TestFlight or authenticated production forecast success is claimed.
+EAS build `69b53400-1d8d-42ec-ad7a-5d0e3c756059` for iOS **1.17.0 (147)** finished. It compiled `77824c02`; runtime code was byte-identical to tested head `abb1af11` and released main. Submission `6184a831-a685-497b-8e97-734ed30fa4b9` uploaded successfully and entered Apple processing; tester availability and physical installation remain unverified. The first optional `--what-to-test` attempt was rejected as Enterprise-only before submission; retrying without that field uploaded the same binary successfully. Superseded build 146 was canceled and was not submitted.
+
+[Production smoke artifact](production-smoke.json) and [real-source refusal](release-source-smoke.json). The [manual checklist](#manual-testflight-and-browser-checklist) remains unperformed on a physical iPhone. Exploratory evidence does not establish calibration.

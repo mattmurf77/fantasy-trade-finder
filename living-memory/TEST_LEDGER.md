@@ -11,9 +11,19 @@
 
 ---
 
+## 2026-09-05 — Win Now release verified on final CI and production
+
+PR [#280](https://github.com/mattmurf77/fantasy-trade-finder/pull/280): final head `abb1af118d3fe39f32292e99cecc64cebff1d2f3`, squash `c28ec6d802463e048d59a97967e9bb5bb9fdc6f9`; committed trees compare equal after fetch. [Final CI](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/33945722395): **5,353 passed / 1 skipped in 732.08s**, Python 3.12, all four checks success. Parent merged integration: **220 passed in 15.25s**; TypeScript/all 92 client guards/testID, 190 web structure, 23 auth checks and isolated Chromium/MV3 runtime passed.
+
+Render `dep-dadq6k97lnhs73e8o970` **live** on `c28ec6d8` since 05:07:28.48285 UTC. Root/flags 200; all three Win Now flags true; deployed `app.js`, `win-now.js`, `win-now.css` match release bytes; projections/job/search/evaluate deny unauthenticated access with 401. Live IAB landing rendered with no captured warn/error messages. [Public smoke](../docs/plans/win-now/production-smoke.json).
+
+iOS **1.17.0 (147)** EAS `69b53400-1d8d-42ec-ad7a-5d0e3c756059` finished; build commit `77824c02` has identical runtime code to final head. Submission `6184a831-a685-497b-8e97-734ed30fa4b9` uploaded successfully; Apple's processing/tester availability is unverified. Superseded build 146 canceled. No native simulator/Maestro, physical iPhone or authenticated production forecast success claimed. Real Lakeview source smoke returned `unknown_starter_availability:1:1`; estimates remain experimental. [Release record](../docs/business/ops/2026-09-05-win-now.md).
+
+---
+
 ## 2026-09-05 — Authorized Win Now beta release checks
 
-**Concurrent release integration:** main `a927e3a7` (#279) merged before shipping. Parent reviewed Astra resolutions, alias-aware Win Now export/delete and worker lifecycle leases. Python 3.12 focused Win Now/deletion group **137 passed** plus main account/lifecycle group **45 passed** (182 total). TypeScript, all **92** mobile guards, testID lint, **23** browser/extension auth checks, **190/190** web structure, native plist parsing and isolated Chromium/MV3 runtime passed. Previous iOS 1.17.0 build146 canceled before submission; replacement and CI on merged head pending. D-056 standing `FTF_SKIP_SIM_GATE=1` used for push; no native simulator or physical TestFlight claimed.
+**Concurrent release integration:** main `a927e3a7` (#279) merged before shipping. Parent reviewed Astra resolutions, alias-aware Win Now export/delete and worker lifecycle leases. Python 3.12 focused Win Now/deletion group **137 passed** plus main account/lifecycle group **45 passed** (182 total). TypeScript, all **92** mobile guards, testID lint, **23** browser/extension auth checks, **190/190** web structure, native plist parsing and isolated Chromium/MV3 runtime passed. Previous iOS 1.17.0 build 146 canceled before submission; replacement and CI on merged head pending. D-056 standing `FTF_SKIP_SIM_GATE=1` used for push; no native simulator or physical TestFlight claimed.
 
 
 Security release #279 landed concurrently on main `a927e3a7` and is now being integrated. Initial CI for `ee4f37a8` is superseded and is not validation of the merged revision. Mobile 1.17.0 build **146** is superseded; cancellation was confirmed for EAS build `c8104c6e-ed72-42e6-86e4-7ccc78002c85`. A replacement build is pending after integration. Final merged-revision CI, Render and EAS/TestFlight verification remain pending; no new passing result is claimed.

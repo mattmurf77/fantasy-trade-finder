@@ -11,6 +11,12 @@
 
 ---
 
+## 2026-09-05 — Win Now experimental beta SHIPPED (D-184), PR #280
+
+Season standings, win/playoff/championship projections and constrained Win Now trade discovery are live on web/backend. All three beta flags are enabled under explicit operator acceptance of exploratory evidence; probabilities remain uncalibrated. Parent reviewed Astra work and preserved account-security changes from #279. Final CI: **5,353 passed / 1 skipped**, all four gates green. Render `c28ec6d8` live at 05:07:28 UTC; public flags, exact served JS/CSS and protected endpoint 401s verified. iOS **1.17.0 (147)** built and uploaded to App Store Connect for TestFlight; Apple processing/tester availability and physical-device QA are not verified. Lakeview currently refuses unknown starter availability. [Release evidence and rollback](../docs/business/ops/2026-09-05-win-now.md).
+
+---
+
 ## 2026-09-05 — Security findings 1–5 SHIPPED (D-183), PR #279
 
 Verified ownership now gates private data; session initialization resolves identity/membership on the server; analytics excludes bearer tokens and admits only owned outcomes; deletion drains work and covers aliases, credentials and new private tables. Mobile rejects stale proof/session callbacks. Export v2 and privacy disclosures updated. Integrated main #277/#278 before release; CI **5,001 passed / 1 skipped**, all four jobs green; PostgreSQL **57 passed**. Render `a927e3a7` live 04:40 UTC, static content matched and invalid-session probes returned 401. iOS **1.16.16 (145)** build and TestFlight submission finished. Extension **0.1.1** published with unpacked-install instructions. Physical-device QA and historical production cleanup remain owed. [Deployment evidence](../docs/plans/security-data-hardening/deployment.md).

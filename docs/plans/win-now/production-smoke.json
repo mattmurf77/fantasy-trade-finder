@@ -1,0 +1,64 @@
+{
+  "/": {
+    "status": 200,
+    "bytes": 73601,
+    "win_now_module_present": true
+  },
+  "/api/feature-flags": {
+    "status": 200,
+    "bytes": 5787,
+    "flags": {
+      "outlook.season_projections": true,
+      "trades.win_now": true,
+      "outlook.championship_probabilities": true
+    }
+  },
+  "/js/win-now.js": {
+    "status": 200,
+    "bytes": 21441,
+    "matches_release_file": true,
+    "sha256": "2a97b0a3167dac71c229324328613a808c753362b599c8eb11aa5e2d7f23337d"
+  },
+  "/css/win-now.css": {
+    "status": 200,
+    "bytes": 1689,
+    "matches_release_file": true,
+    "sha256": "b08ac6b5806e7ce443a3ea951f32c1424c9dea022cc65f904679e8e8555f522d"
+  },
+  "/js/app.js": {
+    "status": 200,
+    "bytes": 299642,
+    "matches_release_file": true,
+    "sha256": "2b878deeeabb5aea54f12b9d95f42308e39340ed54fb521acc34721cc9e4e140"
+  },
+  "/api/league/season-projections": {
+    "status": 401,
+    "bytes": 87,
+    "body": {
+      "error": "session_expired",
+      "message": "Session expired \u2014 please reload the page."
+    }
+  },
+  "/api/win-now/jobs/release-smoke": {
+    "status": 401,
+    "bytes": 87,
+    "body": {
+      "error": "session_expired",
+      "message": "Session expired \u2014 please reload the page."
+    }
+  },
+  "POST /api/win-now/search": {
+    "status": 401,
+    "body": {
+      "error": "session_expired",
+      "message": "Session expired \u2014 please reload the page."
+    }
+  },
+  "POST /api/win-now/evaluate": {
+    "status": 401,
+    "body": {
+      "error": "session_expired",
+      "message": "Session expired \u2014 please reload the page."
+    }
+  }
+}

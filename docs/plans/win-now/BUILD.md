@@ -4,7 +4,9 @@
 
 ## Security integration update — 2026-09-05
 
-Security release #279 landed concurrently on main `a927e3a7` and is now being integrated. Initial CI for `ee4f37a8` is superseded and is not validation of the merged revision. Mobile 1.17.0 build **146** is superseded; cancellation was confirmed for EAS build `c8104c6e-ed72-42e6-86e4-7ccc78002c85`. A replacement build is pending after integration. Final merged-revision CI, Render and EAS/TestFlight verification remain pending; no new passing result is claimed.
+Backend/web is live at `c28ec6d8` after PR #280 merged on 2026-09-05 at 05:06:23 UTC. All four final CI checks passed for `abb1af118d3fe39f32292e99cecc64cebff1d2f3` (run `33945722395`). Render deployment `dep-dadq6k97lnhs73e8o970` is LIVE since 05:07:28.48285 UTC with all three beta flags verified true. iOS **1.17.0 (147)** finished building and uploaded successfully; Apple processing and tester availability are separate, with tester availability still unverified. Forecast/title calibration and physical-device QA remain unproven.
+
+See the [release record](../../business/ops/2026-09-05-win-now.md) and [production smoke artifact](production-smoke.json).
 
 ## Source decision
 
@@ -29,7 +31,7 @@ Fractions are 0–1; display deltas in percentage points. Wins objective means t
 
 ## Launch restrictions and flags
 
-The implementation began with `outlook.season_projections`, `trades.win_now` and `outlook.championship_probabilities` false. On 2026-09-05 the operator explicitly authorized enabling all three as an experimental beta despite exploratory, uncalibrated evidence. The release candidate now targets true for all three; this authorization supersedes calibration as a prerequisite for this beta, without claiming forecast/title calibration. The championship flag and snapshot capability remain separate mechanical gates. No old title odds are exposed. Forecast/lineup/simulation support is explicit: unsupported live weeks, scoring/rules, incomplete contributors, playoffs already underway, stale data or missing schedule return unavailable. No retries silently relax market fairness or partner/budget policy. Preserved historical scenarios are not current recommendations.
+The implementation began with `outlook.season_projections`, `trades.win_now` and `outlook.championship_probabilities` false. On 2026-09-05 the operator explicitly authorized enabling all three as an experimental beta despite exploratory, uncalibrated evidence. The live release has all three verified true; this authorization supersedes calibration as a prerequisite for this beta, without claiming forecast/title calibration. The championship flag and snapshot capability remain separate mechanical gates. No old title odds are exposed. Forecast/lineup/simulation support is explicit: unsupported live weeks, scoring/rules, incomplete contributors, playoffs already underway, stale data or missing schedule return unavailable. No retries silently relax market fairness or partner/budget policy. Preserved historical scenarios are not current recommendations.
 
 ## Evidence and delivery
 
@@ -37,7 +39,7 @@ Unit tests cover provider normalization, real lineup counterfactuals after week 
 
 ## Current implementation status
 
-Implementation and parent review were completed on 2026-09-04. The operator authorized live experimental season/Win Now/championship release on 2026-09-05. Hosted Python 3.12 CI, Render deployment/effective-flag verification and a new mobile **1.17.0** EAS binary/processing remain pending in this record. Physical TestFlight checks and forecast calibration are also unperformed. Parent browser review with synthetic data passed at wide and 390px widths. Authorization is not deployment evidence; [2026-09-05 release record](../../business/ops/2026-09-05-win-now.md) tracks execution. [EVIDENCE.md](EVIDENCE.md) records completed client checks separately from these open gates.
+Backend/web is live at `c28ec6d8` after PR #280 merged on 2026-09-05 at 05:06:23 UTC. All four final CI checks passed for `abb1af118d3fe39f32292e99cecc64cebff1d2f3` (run `33945722395`). Render deployment `dep-dadq6k97lnhs73e8o970` is LIVE since 05:07:28.48285 UTC with all three beta flags verified true. iOS **1.17.0 (147)** finished building and uploaded successfully; Apple processing and tester availability are separate, with tester availability still unverified. Forecast/title calibration and physical-device QA remain unproven. [EVIDENCE.md](EVIDENCE.md) records final verification and preserves earlier checkpoints.
 
 The beta is narrower than the full proposal: Sleeper in-season leagues before fantasy playoffs; QB/RB/WR/TE and supported flex/scoring/bracket rules; complete published weekly forecasts; no live-game continuation. Best-ball and trade review delays are unsupported; disabled pick trading is enforced. Reserve/taxi assets are excluded from lineup/trade eligibility while retaining baseline roster value. Missing contributors or unsupported rules refuse serving. Dynasty picks have no direct points; post-trade original-team pick-price revaluation, explicit drop workflows, other platforms, real proposal preparation and learned acceptance models are deferred.
 
@@ -79,4 +81,4 @@ Separately, nonzero finite coefficients for exactly `st_ff`, `st_fum_rec`, `st_t
 
 ## Release rollback
 
-Set all three serving flags false and verify the running process. Prior main commit `a927e3a7` is the code rollback target; preserve evidence tables and raw historical artifacts. Mobile 1.17.0 is planned, not yet proven installed or available in TestFlight. [2026-09-05 release record](../../business/ops/2026-09-05-win-now.md) owns release status.
+Set all three serving flags false and verify the running process. Prior main commit `a927e3a7` is the code rollback target; preserve evidence tables and raw historical artifacts. Mobile 1.17.0 (147) built and uploaded; Apple processing and tester availability remain unverified. [2026-09-05 release record](../../business/ops/2026-09-05-win-now.md) owns release status.

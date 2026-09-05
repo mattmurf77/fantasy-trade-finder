@@ -4,7 +4,7 @@ Release authorization and verified delivery are recorded separately. Engineering
 
 | Date | Release | Status | Record |
 |---|---|---|---|
-| 2026-09-05 | Season projections + Win Now + championship experimental beta; mobile 1.17.0 planned | Authorized; security main `a927e3a7` integration and fresh CI/Render/EAS verification pending. CI `ee4f37a8` and build 146 superseded; cancellation confirmed, replacement build pending. Calibration/physical QA unperformed. | [Release scope, evidence, checklist and rollback](2026-09-05-win-now.md) |
+| 2026-09-05 | Season projections + Win Now + championship experimental beta; iOS 1.17.0 (147) | Backend/web LIVE `c28ec6d8`; all three flags true; final CI green. iOS built/uploaded, Apple processing; tester availability and physical QA unverified. Calibration unproven. | [Release evidence and rollback](2026-09-05-win-now.md) |
 
 ## Decisions needed
 
@@ -12,4 +12,4 @@ None for the already authorized release. Authorization accepts exploratory, unca
 
 ## Handoffs
 
-The parent release executor updates the dated record and this row with observed CI/deploy/build/processing outcomes. The operator completes the linked physical TestFlight checklist. Rollback is all three Win Now flags false; prior main commit `a927e3a7` is recorded in the dated release document.
+Confirm Apple processing/tester availability and complete the linked physical TestFlight checklist. Rollback remains all three flags false; prior main `a927e3a7` is the code rollback target.
