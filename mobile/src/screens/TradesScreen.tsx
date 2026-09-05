@@ -20,6 +20,7 @@ import {
   type NativeSyntheticEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import ChalkText from '../components/chalkline/Text';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   useSharedValue,
@@ -390,6 +391,8 @@ export default function TradesScreen({ navigation, route }: any) {
   const leagues = useSession((s) => s.leagues);
   const showPortfolioPill = (leagues?.length || 0) >= 2;
   const leagueId = league?.league_id || null;
+  const winNowOn = useFlag('trades.win_now');
+  const seasonProjectionsOn = useFlag('outlook.season_projections');
   const userId   = user?.user_id || '';
   const isDemo   = useSession((s) => s.isDemo);
 
@@ -6364,6 +6367,11 @@ export default function TradesScreen({ navigation, route }: any) {
         }}
         scrollEventThrottle={16}
       >
+        {winNowOn && seasonProjectionsOn && leagueId && !switching ? (
+          <Pressable testID="trades.win-now" accessibilityRole="button" onPress={() => navigation.navigate('WinNow')} style={{ minHeight: 44, justifyContent: 'center', paddingVertical: space.sm }}>
+            <ChalkText variant="bodySm" style={{ color: ice.base }}>Win Now · season gains within your dynasty budget</ChalkText>
+          </Pressable>
+        ) : null}
         {/* FB #156/#246 — the persistent mode chip strip. Since the
             guided-first landing (#246) this renders on the tab's landing
             itself (TradesHome mounts with mode:'guided') and is the

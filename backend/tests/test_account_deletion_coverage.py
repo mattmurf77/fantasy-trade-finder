@@ -251,3 +251,16 @@ def test_export_includes_alias_private_rows_and_omits_credentials(engine):
     feedback = rows(engine, db.app_feedback_table)
     assert [r['text'] for r in feedback if r['user_id'] == OTHER] == ['private note ' + OTHER]
     assert all(r['text'] == '[Removed following account deletion]' for r in feedback if r['user_id'] is None)
+
+
+@pytest.mark.parametrize("name", ["win_now_jobs", "win_now_scenarios", "win_now_decisions"])
+def test_win_now_private_data_exports_and_deletes_all_account_aliases(engine, name):
+    table = getattr(db, name + "_table")
+    with engine.begin() as conn:
+        for uid in (UID, ALIAS, OTHER):
+            seed(conn, table, uid, user_id=uid)
+    archive = accounts.export_user_data(UID)
+    assert {row["user_id"] for row in archive["tables"][name]} == {UID, ALIAS}
+    counts = accounts.delete_user_data(UID)
+    assert counts[name + "_deleted"] == 2
+    assert [row["user_id"] for row in rows(engine, table)] == [OTHER]

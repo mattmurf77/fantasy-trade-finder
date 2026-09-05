@@ -7,6 +7,8 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
 
 ## Table of Contents
 
+- [Win Now beta controls](#win-now-beta-controls)
+
 - [Environment variables](#environment-variables)
 - [Feature flags](#feature-flags)
 - [Flags — 2026-04-19 sprint cohort (swipe, tiers, trades, league social, invite, mobile polish, landing, trade math)](#flags-2026-04-19-sprint-cohort-swipe-tiers-trades-league-social-invite-mobile-polish-landing-trade-math)
@@ -1490,3 +1492,29 @@ Collection uses only `trade.valuation_telemetry` and `trade.roster_evaluation`; 
 ### Legacy authorization rollout flag
 
 `auth.enforce_verified_writes` remains accepted for configuration compatibility but cannot disable private read/write verification. Changing it is not an authorization rollback. Session initialization reports enforcement as true.
+
+---
+
+## Win Now beta controls
+
+The 2026-09-05 release candidate sets all three flags to **true** under explicit operator authorization for an experimental, uncalibrated beta, including championship output. Authorization supersedes the earlier calibration-before-enablement restriction; it does not establish calibrated probabilities. Deployment and effective production values remain pending CI/Render verification. See the [release record](business/ops/2026-09-05-win-now.md).
+
+| Flag / setting | Default | Meaning |
+|---|---|---|
+| `outlook.season_projections` | true | New projection reads and client entries; prerequisite for the new trade flow |
+| `trades.win_now` | true | Dedicated trade search, edited evaluation and isolated decisions |
+| `outlook.championship_probabilities` | true | Experimental new-model title fields and championship objective, expressly authorized before calibration; snapshot capability still required |
+| `FTF_SEASON_FORECAST_FILE` | unset | Optional local normalized forecast JSON import; preserves source capture/publication, never backdates replay |
+| `FTF_SEASON_SIM_COUNT` | 1000 | Per-evaluation simulation draws; clamped to 256–4000 by the application layer |
+
+`win_now_service.py` uses a 900-second serving/capture-age limit and an earlier required source game boundary. Expiry is also capped at capture time plus 900 seconds, so refreshing an older import cannot extend its lifespan. Date-only source rows use a conservative midnight-UTC cutoff, not an invented kickoff. Job/scenario serving rejects expired or changed inputs; toggling off a serving flag does not erase historical evidence.
+
+Versioned optimizer policy is code in `win_now_optimizer.POLICY` (`win-now-v1`), not a second collection of live `model_config` overrides. It bounds side/total package size, screening and simulation work; market floor is at least 0.75 and the market-evidence fallback floor is at least 0.90. User settings may tighten these constraints. The request freezes the existing shared trade-pricing configuration; a retry must not relax buyer budget, fairness or partner gates. API/client ranges are in [the route reference](api-reference.md#season-projections-and-win-now).
+
+Rollback: set `outlook.season_projections`, `trades.win_now` and `outlook.championship_probabilities` all false, deploy/reload as appropriate, and verify effective server flags. Prior main commit: `a927e3a7` for code rollback. Retained evidence is not deleted by disabling serving.
+
+Known unused K/DEF coefficients are normalized only for absent slots; active K/DEF/IDP remains unsupported. The four explicitly disclosed rare player-event omissions and preserved source/effective scoring are detailed in [BUILD](plans/win-now/BUILD.md#release-scoring-boundaries--2026-09-05).
+
+[Source restrictions](integrations/sleeper.md#weekly-season-projection-feed) · [build status and calibration limits](plans/win-now/BUILD.md)
+
+`FTF_BUILD_MODE=1` is set only for the build-time player-cache import in `build.sh`; it suppresses Win Now worker startup. Do not set it on the serving process.

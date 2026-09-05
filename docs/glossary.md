@@ -475,6 +475,16 @@ The lane-2a import path (D-058): the user opens DLF/Dynasty Nerds in an in-app b
 
 **Hesitation line** — The single user-facing sentence the breaker renders from the top objection, always led by "Their likely hesitation:" and composed **server-side** by `trade_narrative.hesitation_line` from version-stamped templates (`HESITATION_TMPL_VERSION`). It is a distinct card element, not part of `TradeCard.narrative`. Three properties are the design: it names only players, positions and numbers that exist in the objection's own evidence (a missing or null evidence value yields silence, never a half-filled sentence); it is *narration-gated* on the wire, so a card that did not narrate carries no `breaker` key at all and the client's gate is the payload's presence rather than a flag; and a class may be scored but permanently un-narratable — `other_player_keep` is, because saying it out loud would advertise that FTF read the counterparty's private keep-list.
 
+**Season forecast snapshot** — Immutable external player/week stat and availability inputs, with original source/capture times and coverage; scored under the league's supported rules before legal-lineup season simulation. Current beta is not statistically calibrated.
+
+**Win Now** — Separate trade objective for next-three-week wins, playoff probability, or independently graduated championship probability, constrained by dynasty sacrifice, legality, market balance and partner fit. It does not alter the user's dynasty rankings from likes/passes.
+
+**Dynasty sacrifice budget** — Maximum dynasty-value loss as a percent of the buyer's fixed baseline roster-asset value; the denominator stays fixed across offers and is not the outgoing package value.
+
+**Partner evidence** — Confidence/coverage/intent summary describing whether a partner evaluation uses confidence-adjusted personal values or a labeled market estimate. It is not a prediction that the partner consented to rebuild or will accept.
+
+**Percentage points (pp)** — Absolute difference between probabilities after conversion to percent. A move from 20% to 25% is +5 pp; it is not a +5% relative increase.
+
 **Market ratio** — `min(consensus(give), consensus(receive)) / max(...)`, priced with `trade_optimizer._consensus_packages` — the *same* function the manual calculator and all three generators use, so a deck card and the calculator can never disagree. Under `personal_market_v1` it is a **hard eligibility guardrail**, not a scoring term: the point ratio must clear the effective floor, and a confidence interval may inform display or secondary ranking but may never rescue a point ratio below it. That last clause is a reversal — the legacy range-overlap gate admitted a card whose point ratio was under the bar whenever the two value intervals overlapped, which made *low* confidence more permissive.
 
 **Personal opportunity** — `min(viewer_gain_pct, partner_gain_pct)`, where each manager's gain is their own confidence-shrunk surplus over what they give up. Deliberately the **weaker** side's gain, not a mean: a trade excellent for one manager and barely positive for the other should rank below one that is meaningfully positive for both. Primary ordering signal under `personal_market_v1`; the harmonic mutual surplus survives as a secondary, monotone signal.

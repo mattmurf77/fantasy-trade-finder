@@ -1211,3 +1211,18 @@ Clients must prove ownership before calling `/api/session/init`; legacy roster/p
 Mobile source-link and init responses must still belong to the session that started them. Screen/form callbacks also check the current user and whether the component is mounted before adopting proof or navigating. An init response must not restore an echoed old session token.
 
 Web and extension Sleeper sign-in use an explicit gesture to request proof from an open, trusted Sleeper tab. Only the resulting verified Fleeced session reaches the first-party page; the raw Sleeper token is never sent to that page or saved in extension storage. The bridge accepts the production web origin, not localhost. Both clients revalidate before displaying private cached boards. Browser ESPN/MFL entry currently directs users to mobile verification; selecting a public team is not proof of account ownership.
+
+---
+
+## Win Now objective and evidence semantics
+
+Experimental beta; the release configuration enables `outlook.season_projections`, `trades.win_now` and `outlook.championship_probabilities` after operator acceptance of exploratory evidence on 2026-09-05. None of these switches asserts statistical calibration. New-model outputs use a dedicated API and UI. The existing `GET /api/league/outlook` display policy above, including the ban on legacy `odds.title_pct`, is **unchanged**.
+
+- Objective enum: `wins` = expected wins in the next three remaining regular-season weeks; `playoffs` = make-playoffs probability; `championship` = experimental new-model title probability. Clients require both the championship flag and snapshot capability; no legacy estimate fallback.
+- Probability wire values are fractions. `100 * (after-before)` is an absolute percentage-point change: 0.20 → 0.25 is **+5.0 pp**, not +25%. Missing/unsupported data is not zero. Win-count changes stay wins; lower expected seed is better.
+- `max_dynasty_spend_pct` is a percent of the **fixed baseline roster-asset value**, not the outgoing package. API/UI bounds are 0–10%; market balance controls are 75–100% displayed / 0.75–1 on the wire. Server policy may be stricter. Neither fairness nor partner/budget gates relax to fill an empty result.
+- Show buyer and partner impacts separately with evidence basis/confidence/coverage and declared/unknown intent. Market fallback is an estimate, never claimed as the partner's actual ranking board. Low standings alone is not rebuild consent.
+- Preserve eligible trade server order. Standings sort a copy by expected seed and label the decimal Avg finish. Display uncalibrated-beta status and distinguish paired sampling ranges from forecast confidence intervals. Append the server's `meta.scoring_warning` when present; never invent or suppress that disclosure. Scope local jobs/results by viewer, league, objective and parameters; changing them, leaving the view or expiring evidence invalidates current work. Retained history is never a fresh recommendation.
+- Win Now likes/passes use the separate scenario decision endpoint/table. They do not reach legacy swipe/queue/Elo learning and do not constitute the partner's action or a real league proposal.
+
+Locations: `backend/win_now_api.py`, `win_now_service.py`, `win_now_optimizer.py`, `season_simulator.py`; `mobile/src/shared/types.ts`, `utils/winNow.ts`, `screens/WinNowScreen.tsx`; `web/js/win-now.js`. [Build and outstanding calibration](plans/win-now/BUILD.md).

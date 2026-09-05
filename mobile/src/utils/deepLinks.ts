@@ -119,6 +119,7 @@ const V2_SCREENS = {
   LeagueJoin: 'app/league/join/:leagueId',
   // Root-stack league-wide surfaces (#142/#143) — pushed over the tabs.
   LeagueSummary: 'app/league/summary',
+  WinNow: 'app/trades/win-now',
   FreeAgents: 'app/league/free-agents',
   // rookie-draft M4. Addressable even while `draft.room` is off: the flag
   // gates the League tab's ENTRY TILE, not the route, and a link that

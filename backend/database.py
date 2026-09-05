@@ -63,6 +63,56 @@ engine   = create_engine(DATABASE_URL, echo=False, future=True,
                          connect_args=_connect_args)
 metadata = MetaData()
 
+# Win Now — immutable evidence and a durable, viewer-scoped work queue.
+# Whole normalized forecast batches are stored together so a simulation cannot
+# accidentally join player rows from different publication snapshots.
+season_forecast_snapshots_table = Table("season_forecast_snapshots", metadata,
+    Column("snapshot_id", String, primary_key=True),
+    Column("season", String, nullable=False),
+    Column("source", String, nullable=False),
+    Column("captured_at", String, nullable=False),
+    Column("payload_json", Text, nullable=False),
+)
+season_projection_snapshots_table = Table("season_projection_snapshots", metadata,
+    Column("snapshot_id", String, primary_key=True),
+    Column("league_id", String, nullable=False, index=True),
+    Column("forecast_snapshot_id", String, nullable=False),
+    Column("created_at", String, nullable=False),
+    Column("expires_at", String, nullable=False),
+    Column("payload_json", Text, nullable=False),
+)
+win_now_jobs_table = Table("win_now_jobs", metadata,
+    Column("job_id", String, primary_key=True),
+    Column("user_id", String, nullable=False, index=True),
+    Column("league_id", String, nullable=False),
+    Column("status", String, nullable=False, index=True),
+    Column("created_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+    Column("expires_at", String, nullable=False),
+    Column("input_json", Text, nullable=False),
+    Column("result_json", Text),
+    Column("reason", String),
+)
+win_now_scenarios_table = Table("win_now_scenarios", metadata,
+    Column("scenario_id", String, primary_key=True),
+    Column("user_id", String, nullable=False, index=True),
+    Column("league_id", String, nullable=False),
+    Column("snapshot_id", String, nullable=False),
+    Column("objective", String, nullable=False),
+    Column("asset_key", String, nullable=False),
+    Column("created_at", String, nullable=False),
+    Column("expires_at", String, nullable=False),
+    Column("payload_json", Text, nullable=False),
+)
+win_now_decisions_table = Table("win_now_decisions", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("user_id", String, nullable=False, index=True),
+    Column("scenario_id", String, nullable=False),
+    Column("decision", String, nullable=False),
+    Column("created_at", String, nullable=False),
+    UniqueConstraint("user_id", "scenario_id", name="uq_win_now_decision"),
+)
+
 # ---------------------------------------------------------------------------
 # Analytics platform engines & PRAGMAs (docs/plans/analytics-platform/lld.md §3.3)
 # ---------------------------------------------------------------------------

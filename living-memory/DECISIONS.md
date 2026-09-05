@@ -10,6 +10,16 @@
 
 ---
 
+## D-184 — Win Now separates external forecasts, season utility and dynasty preference learning
+
+**Date:** 2026-09-04. **Status:** implemented and parent-reviewed; rollout pending.
+**Context:** Dynasty values cannot stand in for weekly points, and season-motivated likes must not teach dynasty Elo. Legacy title estimates remain barred from display.
+**Decision:** External normalized weekly forecasts feed Fleeced league scoring, legal lineups and paired season simulations. Shared hard trade gates bound sacrifice against fixed baseline roster value and preserve partner evidence/intent. Durable scenarios and decisions remain separate from dynasty ranking/swipe paths; three independent serving/title flags retain false code fallbacks. On 2026-09-05 the operator accepted exploratory historical evidence and authorized all three in release configuration, including championship estimates with uncalibrated-beta labeling; statistical calibration remains unproven.
+**Alternatives:** reuse roster-value outlook; train a proprietary player model before collecting frozen evidence. Neither supplies the proposed trade-sensitive, verifiable forecast foundation today.
+**Consequences:** Initial Sleeper/RotoWire source and independent normal residuals are restricted beta inputs, not calibrated skill claims. Parent integration review/local tests passed; hosted CI, physical TestFlight and forecast-quality graduation remain pending. The operator authorized experimental championship output before calibration; independent forecast-quality validation remains outstanding. [ADR-018](../docs/adr/adr-018-win-now-external-forecasts.md), [build limitations](../docs/plans/win-now/BUILD.md).
+
+---
+
 ## D-001 — Sleeper as the Sole Identity Provider
 **Date:** Pre-changelog (foundational)
 **Context:** Need a user-identification mechanism. Dynasty fantasy football is Sleeper-dominated; building separate accounts adds friction.
@@ -439,6 +449,7 @@
 
 | ID | Title | Date |
 |---|---|---|
+| D-184 | Win Now separates forecasts, season utility and dynasty learning | 2026-09-04 |
 | D-001 | Sleeper as the Sole Identity Provider | Pre-changelog |
 | D-002 | 3-Player Matchups Over 2-Player | Pre-changelog |
 | D-003 | Elo Decomposition for 3-Player Rankings | Pre-changelog |

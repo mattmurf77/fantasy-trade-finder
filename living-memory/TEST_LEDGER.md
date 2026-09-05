@@ -11,6 +11,22 @@
 
 ---
 
+## 2026-09-05 — Authorized Win Now beta release checks
+
+**Concurrent release integration:** main `a927e3a7` (#279) merged before shipping. Parent reviewed Astra resolutions, alias-aware Win Now export/delete and worker lifecycle leases. Python 3.12 focused Win Now/deletion group **137 passed** plus main account/lifecycle group **45 passed** (182 total). TypeScript, all **92** mobile guards, testID lint, **23** browser/extension auth checks, **190/190** web structure, native plist parsing and isolated Chromium/MV3 runtime passed. Previous iOS 1.17.0 build146 canceled before submission; replacement and CI on merged head pending. D-056 standing `FTF_SKIP_SIM_GATE=1` used for push; no native simulator or physical TestFlight claimed.
+
+
+Security release #279 landed concurrently on main `a927e3a7` and is now being integrated. Initial CI for `ee4f37a8` is superseded and is not validation of the merged revision. Mobile 1.17.0 build **146** is superseded; cancellation was confirmed for EAS build `c8104c6e-ed72-42e6-86e4-7ccc78002c85`. A replacement build is pending after integration. Final merged-revision CI, Render and EAS/TestFlight verification remain pending; no new passing result is claimed.
+
+User accepted exploratory evidence and authorized shipping season, Win Now and championship beta; calibration is not claimed. Parent reviewed Astra scoring normalization/explicit rare-event omissions, canonical freshness fix, both client receipts and rolling-deploy job fences. Latest production main `0a8093fe` merged cleanly in code; docs resolved preserving both features.
+
+- Client release run: **93 commands passed** — TypeScript, all 91 `check-*.js` suites and testID lint. Win Now suite: **28 checks**. Web structural: **185/185**. No Maestro/native simulator (D-056).
+- Astra Python 3.12 reports: scoring/freshness **122 passed**, then deployment lifecycle **106 passed**. Parent final focused run: **144 passed in 1.95s** on Python 3.12.14. Full suite and hosted exact-head CI are in progress; [release record](../docs/business/ops/2026-09-05-win-now.md) records final outcomes.
+- Public real-source smoke: Lakeview 2026 loaded through production service code into a temporary local DB, 34 reads / 27.66 seconds, refused `unknown_starter_availability:1:1`. This verifies explicit source refusal, not forecast availability or authenticated production flow.
+- Render target and prior live commit `0a8093fe` verified; CRON_SECRET and DATABASE_URL are set. Mobile version 1.17.0 staged for new EAS build. Production activation, hosted CI, binary submission/processing and physical TestFlight are not claimed by these local checks.
+
+---
+
 ## 2026-09-05 — Security release verified in CI, Render and EAS
 
 PR #279: tested `ab8f54d0`, squash `a927e3a7`, content diff empty. [CI run](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/33944570236): **5,001 passed / 1 skipped in 589.55 s**, all four jobs complete/success (Python 3.12; full mobile typecheck + 91 guards; testID lint; 180 web checks). Integrated PostgreSQL: **57 passed in 10.99 s** including incoming proposal/shadow deletion/export and counterparty valuation scrubbing. Disposable cluster stopped.
@@ -27,6 +43,38 @@ Same isolated branch, `codex/security-data-hardening-20260904`, based on `606e51
 - **Web/extension:** 23 isolated auth checks, **180/180** web structural checks, and actual MV3-loaded Chromium runtime pass with synthetic upstreams, disposable profile and no live credentials. Wrong-account denial, verified success, secret isolation, revocation recovery, unsupported platform fallback and popup cache clearing are exercised. Narrow viewport screenshot inspected. [Browser evidence](../docs/plans/security-data-hardening/browser-evidence.md).
 - **Negative control:** disabling lifecycle invalidation only in memory makes all three targeted stale-work/deletion tests fail at the expected assertions (queued work ran; late auth/provider proof did not reject). No sabotage remains. Log: `/private/tmp/ftf-lifecycle-sabotage.log`.
 - No physical iPhone found. No native build distribution, production cleanup, commit, push or deploy. Web Sleeper requires the updated extension; browser ESPN/MFL verification uses mobile. Single-worker deletion and retained public/counterparty data limits remain explicit. [Reproduction harnesses](../docs/plans/security-data-hardening/validation-tools/README.md).
+
+## 2026-09-04 — Operator-approved revised-input evaluation completed
+
+- User accepted available historical data for now and asked to run evaluator. Added explicit exploratory mode; strict default and production behavior unchanged.
+- **144 passed in 0.62s:** historical diagnostic, calibration, history, forecasts and simulator suites. Parent reviewed Astra evaluator changes and replay adapter; regression guards cover opt-in isolation, modern timestamp honesty, prefix-only standings, custom zero and median scoring, and current player metadata isolation.
+- Actual run: 28 Sleeper weekly responses cached; Lakeview 2024 scored at completed weeks 3/6/9/12 with 10,000 draws each. Final-win MAE 2.60/1.81/1.21/0.76 (median wins included); title Brier 0.0535/0.0428/0.0327/0.0288 versus equal odds 0.0764. One league-season/one champion, not four independent championship events. No confidence interval or calibration claim.
+- Lakeview 2025 excluded for missing source-covered lineup at roster 12 / week 13; four FFv3 seasons excluded for K/IDP slots. No projections fabricated. Offline scoring coefficients and past-starter requirement adjustments explicitly logged.
+- Cached rerun and direct evaluator CLI metric groups match exactly; strict CLI control rejects all four revised-input cohorts. [Results, artifacts and commands](../docs/plans/win-now/EXPLORATORY-RESULTS.md). No production/flag/UI changes.
+
+---
+
+## 2026-09-04 — Historical Sleeper outcome collection and calibration readiness
+
+Continuation on `codex/win-now-20260904`, after `ad3c5346`, no release. [Scope](../docs/plans/win-now/historical-validation-scope.md) and [evidence/code walk](../docs/plans/win-now/HISTORICAL-VALIDATION.md).
+
+- Parent final affected run: `python3 -m pytest backend/tests/test_season_history.py backend/tests/test_season_calibration.py backend/tests/test_season_forecasts.py backend/tests/test_season_simulator.py -q` — **119 passed in 0.95s**, Python 3.14. Earlier affected run 109 passed before final guard additions. CLI source capture and offline evaluator exercised.
+- Live public Sleeper collection: 6 completed seasons, 72 team-seasons, 1,008 regular-season team scores, 6 champions, two lineages; two explicit missing-year exclusions. No profiles, owners, final rosters, database or production mutations. Full local raw capture `/private/tmp/ftf-win-now-history-20260904.json`; compact summary/hash and readiness JSON committed beside guide.
+- Source audit: six historical projection URLs, all dated stat rows carry revision timestamps later than game dates. **No authenticated pregame forecast archive; no championship calibration claimed.** The six outcome-valid seasons also fail current strict model rule coverage (FFv3 K/IDP; Lakeview retained K/DEF coefficients).
+- Astra implementation/audit reviewed by parent. Named sabotage checks (reported by subagents): custom_zero_truthiness, allow_post_cutoff_snapshot, invert_actual_playoff_label each RED then restored GREEN. Final parent run after restoration. No UI changes; no additional mobile runtime gate applies.
+
+---
+
+## 2026-09-04 — Win Now implementation reviewed; backend and client verification
+
+Branch `codex/win-now-20260904`, isolated at `/private/tmp/ftf-win-now-20260904`; implementation reviewed, not a release. [Scope](../docs/plans/win-now/scope.md), [evidence/code-walk/checklist](../docs/plans/win-now/EVIDENCE.md).
+
+- **Completed locally:** full mobile `tsc --noEmit` pass; `node mobile/tests/check-win-now.js` **24 checks pass** (actual formatter and web DOM/deferred-response execution, plus mobile structure); both web scripts pass `node --check`; web structural gate **185/185**; test-ID lint passes. `git diff --check` passed at frontend handoff.
+- **Backend:** first full run 4,812 pass / 1 skip / 1 flag-fixture failure; final broad run 4,790 pass / 1 skip / 2 derivative-flag failures, plus 54 API/store passes. Corrected flag fixtures and explicit platform pick-source declaration, then reran all affected suites: **200 passed**. Distinct covered set: **4,846 pass, 1 skip**; see evidence for command boundaries. Local Python 3.14, hosted Python 3.12 CI remains a merge gate.
+- **Parent review/runtime:** reviewed agent modules, contracts, tests and docs; actual web module/CSS with synthetic responses passed wide/390px screenshot and search/edit/evaluation checks. 12-team/9-slot/1,000-draw/8-finalist synthetic search total47.26s. No model-calibration claim.
+- **Not performed:** native simulator/Maestro (D-056), native build, production deploy/flag changes, physical TestFlight or live integrated source/auth runtime checklist, held-out forecast/title calibration. No championship graduation or source-licensing conclusion follows from unit tests.
+
+---
 
 ## 2026-09-04 — Security findings 1–5: initial local implementation, not deployed
 
@@ -3737,6 +3785,14 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-09-05 — Security follow-up independently reviewed: Python 3.12 and PostgreSQL pass; native runtime pending](#2026-09-05--security-follow-up-independently-reviewed-python-312-and-postgresql-pass-native-runtime-pending)
+- [2026-09-04 — Security findings 1–5: initial local implementation, not deployed](#2026-09-04--security-findings-15-initial-local-implementation-not-deployed)
+- [2026-09-04 — Operator-approved revised-input evaluation completed](#2026-09-04--operator-approved-revised-input-evaluation-completed)
+- [2026-09-04 — Historical Sleeper outcome collection and calibration readiness](#2026-09-04--historical-sleeper-outcome-collection-and-calibration-readiness)
+- [2026-09-04 — Trade model/scoring-context integration](#2026-09-04--trade-modelscoring-context-integration)
+- [2026-09-04 — Trade activation validation and original items 2/3](#2026-09-04--trade-activation-validation-and-original-items-23)
+- [2026-09-04 — Scoring execution context: local prerequisite built, unmerged](#2026-09-04--scoring-execution-context-local-prerequisite-built-unmerged)
+- [2026-09-04 — Win Now implementation reviewed; backend and client verification](#2026-09-04--win-now-implementation-reviewed-backend-and-client-verification)
 - [2026-09-04 — Personal-market policy built DARK (D-180/D-181): 87 new tests, full suite green, flag-off byte identity proved three ways](#2026-09-04--personal-market-policy-built-dark-d-180d-181-87-new-tests-full-suite-green-flag-off-byte-identity-proved-three-ways)
 - [2026-09-03d — Web ESPN sign-in-primary (D-179): web gate 175/175, entry route 25/25, browser E2E both flag states + live-ESPN 403](#2026-09-03d--web-espn-sign-in-primary-d-179-web-gate-175175-entry-route-2525-browser-e2e-both-flag-states--live-espn-403)
 - [2026-09-03c — API audit fixes (D-178): merged branch green — pytest 4617 / 1 skipped, tsc 0, testid-lint OK, web 175/175](#2026-09-03c--api-audit-fixes-d-177-merged-branch-green--pytest-4617--1-skipped-tsc-0-testid-lint-ok-web-175175)

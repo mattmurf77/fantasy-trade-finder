@@ -97,6 +97,7 @@
     "test:trades-banner-region": "node tests/check-trades-banner-region.js",
     "test:vault-subsumes-legacy": "node tests/check-vault-subsumes-legacy.js",
     "test:window-composite": "node tests/check-window-composite.js",
+    "test:win-now": "node tests/check-win-now.js",
     "test:window-signals": "node tests/check-window-signals.js",
     "web": "expo start --web"
   },

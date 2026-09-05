@@ -739,6 +739,9 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     "trade_proposed", "match_swiped", "match_viewed", "match_dismissed",
     "trade_accepted", "trade_declined", "trade_ratified", "counter_sent",
     "trade_match", "trades_generated", "calc_trade_evaluated",
+    # Committed Win Now search objective/budget, server-authoritative. Never
+    # submitted by a client event emitter and never used to update dynasty Elo.
+    "win_now_objective_selected",
     # P0-7 — the north-star SEND leg. analytics_queries reserved this and
     # its two client siblings in WAT_DARK on 2026-07-17 and nothing ever
     # fired them; the same commit as this one moves all three to WAT_LIVE.

@@ -226,5 +226,8 @@
   "trade.roster_protection": false,
   "trade.mutual_benefit_v1": false,
   "trade.avoid_positions": false,
-  "trade.standing_offers": true
+  "trade.standing_offers": true,
+  "outlook.season_projections": true,
+  "trades.win_now": true,
+  "outlook.championship_probabilities": true
 }

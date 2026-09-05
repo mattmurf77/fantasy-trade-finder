@@ -306,3 +306,21 @@ all generation/timing policies remain unchanged. See the [implementation record]
 ## Ownership and telemetry boundaries
 
 Private route gates require a verified session; username discovery cannot authorize private state. `backend/session_input.py` resolves identity and roster inputs from authenticated session state plus authoritative league sources before session construction or persistence. Apple/Google proof authenticates its provider account; a new Sleeper binding separately requires Sleeper proof. Analytics commits validated events before recommendation outcome side effects, which require verified ownership of an existing impression. Authentication tokens are replaced by domain-separated analytics identifiers at both persistence entry points. Account deletion revokes durable sessions in the same transaction as private data deletion.
+
+---
+
+## Win Now season pipeline
+
+The restricted beta adds a separate season objective without changing the dynasty generators or treating dynasty value as projected points. The release configuration enables all three feature flags following explicit operator acceptance of the exploratory evidence on 2026-09-05; estimates remain experimental and uncalibrated. Deployment and calibration status is tracked in [BUILD](plans/win-now/BUILD.md) and [EVIDENCE](plans/win-now/EVIDENCE.md).
+
+`season_forecasts.py` normalizes external weekly stat/availability forecasts → `season_simulator.py` applies supported league scoring, legal projected lineups and the actual remaining schedule/bracket → `win_now_optimizer.py` screens season-oriented exchanges and applies the same legality/budget/fairness/partner gates for search and calculator → `win_now_service.py` binds current league facts, in-memory pricing/ranking evidence, revision hashes, paired/independent confirmation simulations and expiry → `win_now_store.py` retains immutable evidence and durable jobs → `win_now_api.py` serves authenticated mobile/web views.
+
+A bounded in-process worker consumes durable database jobs; this is not an external worker service or a promised latency SLA. League/source inputs and player/week random worlds are reusable, but personalized scenario results remain viewer-scoped. Clients preserve server order, cancel stale local requests and remove expired recommendations. Search/decision state never enters the legacy deck cache or Elo swipe path. Likelihood of actual partner acceptance is not the season model.
+
+The simulator's normal residuals and availability assumptions are explicitly experimental. Shared NFL game/team effects and multiweek injury correlation are absent. Unsupported live play, forecast gaps, scoring/roster/bracket rules and stale source data fail unavailable. Experimental title output is operator-authorized before calibration and still requires its flag plus snapshot capability; the old outlook title display prohibition remains unchanged. [ADR-018](adr/adr-018-win-now-external-forecasts.md) records the separation.
+
+Account deletion and final Win Now persistence share a short account row lock (SQLite uses a write reservation); queued computations cannot recreate user evidence after deletion. No lock spans a simulation. Worker housekeeping bounds retention to 7-day jobs, 180-day trade evidence and 400-day forecast/projection evidence.
+
+Offline validation is separate from serving: `season_history.py` extracts prior-season outcomes through bounded public Sleeper reads; `season_calibration.py` joins externally supplied archived predictions and independently referenced forecast cutoffs. It reports conditional reliability and error by model and forecast origin, never tunes the production model or activates flags. [Historical validation](plans/win-now/HISTORICAL-VALIDATION.md) records actual collection coverage and input-provenance limits.
+
+The offline evaluator also has an explicitly selected revised-input diagnostic mode. `run_season_historical_diagnostic.py` supplies honestly dated current captures of historical weekly projections, reconstructs completed-week standings/rosters, and records scoring/coverage approximations. This mode uses the player simulator for exploratory measurements without weakening the default archived-input checks or any serving behavior. [Measured scope](plans/win-now/EXPLORATORY-RESULTS.md).

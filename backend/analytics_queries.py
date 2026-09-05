@@ -61,6 +61,8 @@ WAT_EVENTS = WAT_LIVE | WAT_DARK
 # backend/api_observability.py; rows carry user_id='system:api') — they must
 # never read as user intent.
 NON_INTENT_EVENTS = frozenset({
+    # win_now_objective_selected is intentionally absent: submitting a season
+    # objective and dynasty budget is user intent, independently of Elo swipes.
     "app_opened", "app_backgrounded", "app_open", "screen_viewed",
     "push_sent", "client_error", "api_call", "api_request",
     # P0 remediation 2026-08-11 — impression / navigation / outcome class.

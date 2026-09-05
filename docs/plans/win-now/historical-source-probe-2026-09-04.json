@@ -1,0 +1,157 @@
+{
+  "schema_version": 1,
+  "purpose": "Historical URL provenance audit; not pregame archived forecasts",
+  "probes": [
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2022/1?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "season": 2022,
+      "week": 1,
+      "captured_at": "2026-09-05T03:17:08.367582+00:00",
+      "response_sha256": "4627726c9ec8431a51b2dbede0ce3d188c23627b15513b1a92ccb6c1d4304e17",
+      "raw_rows": 3115,
+      "stat_rows": 387,
+      "dated_stat_rows": 387,
+      "revised_after_game_date": 387,
+      "examples": [
+        {
+          "player_id": "4984",
+          "game_date": "2022-09-08",
+          "source_updated_at": "2022-11-04T21:38:18.845000+00:00",
+          "revised_after_game_date": true
+        },
+        {
+          "player_id": "6797",
+          "game_date": "2022-09-11",
+          "source_updated_at": "2022-11-04T21:38:18.963000+00:00",
+          "revised_after_game_date": true
+        }
+      ]
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2024/1?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "season": 2024,
+      "week": 1,
+      "captured_at": "2026-09-05T03:17:09.347611+00:00",
+      "response_sha256": "0cc60746ee576a6743adee02ff9d5d4892061e7ed881188482cd63085430e7e6",
+      "raw_rows": 3116,
+      "stat_rows": 351,
+      "dated_stat_rows": 351,
+      "revised_after_game_date": 351,
+      "examples": [
+        {
+          "player_id": "4984",
+          "game_date": "2024-09-08",
+          "source_updated_at": "2024-09-10T03:45:16.287000+00:00",
+          "revised_after_game_date": true
+        },
+        {
+          "player_id": "6904",
+          "game_date": "2024-09-06",
+          "source_updated_at": "2024-09-10T03:45:16.258000+00:00",
+          "revised_after_game_date": true
+        }
+      ]
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2025/1?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "season": 2025,
+      "week": 1,
+      "captured_at": "2026-09-05T03:17:09.776081+00:00",
+      "response_sha256": "7a6c8a2aeeb51f5c4560b0497aeedbd4180326703306ae20ac4122aca29fc8d5",
+      "raw_rows": 3115,
+      "stat_rows": 356,
+      "dated_stat_rows": 356,
+      "revised_after_game_date": 356,
+      "examples": [
+        {
+          "player_id": "4881",
+          "game_date": "2025-09-07",
+          "source_updated_at": "2025-10-06T15:45:02.563000+00:00",
+          "revised_after_game_date": true
+        },
+        {
+          "player_id": "6904",
+          "game_date": "2025-09-04",
+          "source_updated_at": "2025-10-06T15:45:02.298000+00:00",
+          "revised_after_game_date": true
+        }
+      ]
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2025/6?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "season": 2025,
+      "week": 6,
+      "captured_at": "2026-09-05T03:17:10.317627+00:00",
+      "response_sha256": "98d335aaaec9b6d306d0fdd6088bab11b47d3dc402259f14f615bf7b5c818cd9",
+      "raw_rows": 3115,
+      "stat_rows": 321,
+      "dated_stat_rows": 321,
+      "revised_after_game_date": 321,
+      "examples": [
+        {
+          "player_id": "4984",
+          "game_date": "2025-10-13",
+          "source_updated_at": "2025-10-14T04:00:29.763000+00:00",
+          "revised_after_game_date": true
+        },
+        {
+          "player_id": "4046",
+          "game_date": "2025-10-12",
+          "source_updated_at": "2025-10-14T04:00:29.755000+00:00",
+          "revised_after_game_date": true
+        }
+      ]
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2025/12?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "season": 2025,
+      "week": 12,
+      "captured_at": "2026-09-05T03:17:10.965692+00:00",
+      "response_sha256": "bc985bf1168b8a9bd06aca89e2a8894a5ffe70e4581988f4ccaa28f1cb996f11",
+      "raw_rows": 3115,
+      "stat_rows": 324,
+      "dated_stat_rows": 324,
+      "revised_after_game_date": 324,
+      "examples": [
+        {
+          "player_id": "4984",
+          "game_date": "2025-11-20",
+          "source_updated_at": "2025-11-25T05:00:36.730000+00:00",
+          "revised_after_game_date": true
+        },
+        {
+          "player_id": "6904",
+          "game_date": "2025-11-23",
+          "source_updated_at": "2025-11-25T05:00:37.089000+00:00",
+          "revised_after_game_date": true
+        }
+      ]
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2025/17?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "season": 2025,
+      "week": 17,
+      "captured_at": "2026-09-05T03:17:11.536770+00:00",
+      "response_sha256": "77cc2d9b88bb5d9e09eb2ce1c50196f24a0a13ade4f27bb3fbeaf5d66a7ead2c",
+      "raw_rows": 3115,
+      "stat_rows": 363,
+      "dated_stat_rows": 363,
+      "revised_after_game_date": 363,
+      "examples": [
+        {
+          "player_id": "4034",
+          "game_date": "2025-12-28",
+          "source_updated_at": "2025-12-30T05:00:33.902000+00:00",
+          "revised_after_game_date": true
+        },
+        {
+          "player_id": "3294",
+          "game_date": "2025-12-25",
+          "source_updated_at": "2025-12-30T05:00:33.318000+00:00",
+          "revised_after_game_date": true
+        }
+      ]
+    }
+  ],
+  "conclusion": "Historical endpoint responses retrieved now contain post-game revisions. Source revision timestamps do not establish pregame availability; no historical calibration eligibility asserted."
+}

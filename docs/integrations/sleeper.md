@@ -19,6 +19,7 @@
 4. [Error modes](#4-error-modes)
 5. [Call frequency / caching](#5-call-frequency--caching)
 6. [Instrumentation guidance](#6-instrumentation-guidance)
+7. [Weekly season projection feed](#weekly-season-projection-feed)
 
 ---
 
@@ -466,3 +467,21 @@ prerequisite decision for the build, not an oversight to patch around silently.
 `sleeper.app` across `backend/` and `mobile/src/`, then reading every call site.
 Re-run the grep before trusting line numbers after any Sleeper-adjacent change —
 `backend/server.py` alone is ~20k lines and routes move.*
+
+---
+
+## Weekly season projection feed
+
+Implementation beta, all serving flags off. `backend/season_forecasts.py` uses the experimental public endpoint:
+
+`GET https://api.sleeper.app/projections/nfl/{season}/{week}?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr`
+
+The adapter's provider ID is `sleeper_weekly_experimental`; rows currently carry RotoWire revisions and retain `source_company`/source-update provenance. This is an external player-stat forecast, not a Fleeced-trained projection. Feed access is not a contractual grant of commercial/redistribution rights. No paid provider was purchased. The optional normalized-file adapter leaves a path for contracted sources.
+
+For every required remaining week, validate player/season/week/regular-season identity, usable stat vectors, positions and independently verified bye state. ADP-only future placeholders do not establish projection coverage. NFL schedule bye certification comes through `backend/outlook/bye_weeks.py`; source absence does not authorize a stale bundled bye fallback. Current injury strings supply limited status evidence; no week-specific return date is inferred. Unknown availability that could affect a lineup contributor makes the scenario unsupported.
+
+Successful source responses are cached briefly in the application layer (weekly feed up to 300 seconds); failures do not reuse an expired response. Keep captured time distinct from source publication/update and model as-of time. A historical endpoint fetched now is not a valid historical as-of backtest. Serving expires at the short TTL or earlier known game boundary; date-only feed records use midnight UTC conservatively and are never labeled an actual kickoff. Live/partial fantasy weeks are unsupported in this beta.
+
+Safe diagnostic context: endpoint class, season/week, response status, counts, provider/model revisions, snapshot IDs and aggregate missing/unknown coverage. Do not log session/JWT/credential headers, raw personal ranking inputs or full roster/forecast/job payloads as telemetry. Persisted normalized snapshots are evidence storage, not a logging allowlist. Source probe: `scripts/probe_season_forecasts.py`; actual integrated/rollout evidence remains in [the Win Now plan](../plans/win-now/EVIDENCE.md).
+
+Historical research uses the documented `GET /v1/league/{id}` predecessor chain, `/matchups/{week}` and `/winners_bracket`, bounded by `scripts/capture_season_history.py`. It omits user profiles, owner IDs and final `/rosters`; local weekly player lists are historical week-level evidence, not proven pregame eligibility. Research captures retain commissioner score overrides and bracket truth. The [2026-09-04 source audit](../plans/win-now/historical-source-probe-2026-09-04.json) found post-game revision timestamps throughout six historical projection responses; do not treat those responses as pregame archives.

@@ -193,6 +193,7 @@
       }
 
       currentLeagueId = league.league_id;
+      window.FTFWinNow?.reset();
       currentUserId   = user.user_id || null;
       showInitOverlay('Importing your roster…');
       const ok = await initSession(user, league);
@@ -252,6 +253,7 @@
       localStorage.removeItem(LS_TOKEN);
       sessionToken              = null;
       currentLeagueId           = null;
+      window.FTFWinNow?.reset();
       currentUserId             = null;
       currentOutlook            = null;
       currentAcquirePositions   = [];
@@ -678,6 +680,7 @@
       // 5. Persist and show app
       saveLeague({ league_id: leagueId, league_name: leagueName });
       currentLeagueId = leagueId;
+      window.FTFWinNow?.reset();
       currentUserId   = user.user_id || null;
       renderAccountChip(user);
       showToast(`Roster loaded — ${rosterData.userPlayerIds.length} players imported`);
@@ -890,6 +893,7 @@
     async function switchLeague() {
       clearSavedLeague();
       currentLeagueId = null;
+      window.FTFWinNow?.reset();
       const user = getSavedUser();
       if (user) showLeagueScreen(user);
     }
@@ -1120,6 +1124,7 @@
       } catch (_) { /* private mode — the reset below still applies */ }
       sessionToken    = null;
       currentLeagueId = null;
+      window.FTFWinNow?.reset();
       currentUserId   = null;
       _myRoster       = [];
       hideInitOverlay();
@@ -3209,6 +3214,7 @@
       rankings:  { group: 'rank',   subView: 'rankings' },
       trends:    { group: 'rank',   subView: 'trends' },
       trades:    { group: 'trades', subView: 'trades' },
+      'win-now': { group: 'trades', subView: null },
       matches:   { group: 'trades', subView: 'matches' },
       portfolio: { group: 'trades', subView: 'portfolio' },
       // 'league' is reachable only via the header League chip; no tier-2 needed.
@@ -3271,6 +3277,7 @@
     }
 
     function switchView(view, btn) {
+      window.FTFWinNow?.onView(view);
       // Analytics P4 (web SDK) — screen view. Fire-and-forget, no-op when the
       // analytics.client_events flag is off or the SDK didn't load.
       try { if (window.FTFTrack) window.FTFTrack('screen_viewed', { screen: view }, view); } catch (e) {}
@@ -6720,3 +6727,10 @@
 
     // Kick everything off
     boot();
+
+    // Authenticated, viewer-scoped bridge for the additive Win Now view.
+    window.FTFWinNowContext = {
+      apiFetch,
+      leagueId: () => currentLeagueId,
+      userId: () => currentUserId,
+    };

@@ -2,7 +2,7 @@
 
 *Jump via the TOC — read sections, not the file.*
 
-All routes live in `backend/server.py`. Same-origin from web; mobile + extension hit the deployed host. Keep this file in sync when adding/renaming/removing routes.
+The Flask app lives in `backend/server.py`; domain route modules such as `backend/win_now_api.py` register on that app. Same-origin from web; mobile + extension hit the deployed host. Keep this file in sync when adding/renaming/removing routes.
 
 Auth: an opaque bearer token sent as the **`X-Session-Token` header**. Username discovery tokens require ownership verification before private data access; `/api/session/init` initializes an existing verified session.
 There is no cookie and no Flask session — earlier versions of this line said "session cookie",
@@ -20,6 +20,8 @@ the operator reaches it by running the server locally.
 
 
 ## Table of Contents
+
+- [Season projections and Win Now](#season-projections-and-win-now)
 
 - [Session / Auth](#session-auth)
   - [Persistent sessions (teardown 06-03 P3, flag `auth.persistent_sessions` — W3B)](#persistent-sessions-teardown-06-03-p3-flag-authpersistent_sessions-w3b)
@@ -912,3 +914,27 @@ With `trade.roster_protection`, final generated cards may include `roster_evalua
 ### Recommendation outcome admission
 
 `POST /api/events` continues to accept anonymous analytics, but only verified users can label owned impressions. No recommendation write occurs until body/batch limits, envelope validation, rate limiting, property scrubbing and successful analytics commit. The callback receives only rows actually inserted (`INSERT ... RETURNING`), including under concurrent duplicate event IDs. `deck_card_viewed` accepts optional `dwell_ms`; storage requires an integer from 0 through 3,600,000. A valid impression has at most one view and 32 of each other allowed action. Missing/foreign impressions, unverified sessions, invalid values and rejected batches create no outcome. Verified users share their rate bucket across device IDs.
+
+---
+
+## Season projections and Win Now
+
+The release configuration enables season projections, Win Now and experimental championship estimates; independent kill switches remain available. Routes are registered by `backend/win_now_api.py.install` on the existing Flask app. Auth uses the initialized `X-Session-Token` session, existing board-read/verified-write gates, and exact current league identity. User-owned job/scenario IDs are not transferable between accounts or leagues.
+
+| Method / route | Request | Response |
+|---|---|---|
+| GET `/api/league/season-projections` | `league_id` query | `{status, meta, teams, buyer_roster_id, assets?}` |
+| POST `/api/win-now/search` | Settings below | HTTP 202 `{job_id, status:"queued"}` |
+| GET `/api/win-now/jobs/<job_id>` | Current viewer and league | `{job_id,status,result?,reason?,message?}`; status queued/running/complete/failed |
+| POST `/api/win-now/evaluate` | Search settings plus integer `partner_roster_id`, string arrays `give_ids`, `receive_ids` (at most 3 per side) | `{status,eligible,rejection_reasons,scenario?,meta}` |
+| POST `/api/win-now/scenarios/<scenario_id>/decision` | `{decision:"like"\|"pass"}` | `{ok:true}`; durable season-only decision, no dynasty Elo update |
+
+Search settings: string `league_id`; `objective` = `wins` (default, next three remaining regular-season weeks), `playoffs` or `championship`; `max_dynasty_spend_pct` = number 0–10 (default 3, **percent of fixed baseline roster value**); `min_fairness` = fraction 0.75–1 (default 0.90); optional `protected_ids` = up to 100 nonempty buyer-owned canonical IDs. Numeric booleans/nonfinite values and invalid shapes are rejected. Shared policy may require stricter fairness; no empty-result retry relaxes it. The optimizer also enforces the total package size, ownership, deadline, roster/lineup and partner gates.
+
+New team metrics use fractions for `playoff_probability`, `bye_probability`, `championship_probability` and `next_matchup_win_probability`; wins/losses/ties, expected remaining wins and next-three-week wins are expected counts. `finish_distribution` maps seed strings to probability fractions; `weekly_win_probabilities` maps week strings. `projected_seed` is an expected finish, not a known final placement. New title fields are unavailable/null until the independent title gate permits them; the legacy outlook response is never a fallback.
+
+A completed result contains `meta`, `baseline:{meta,teams}`, and server-ordered `trades`. Each scenario supplies `scenario_id`, partner identity, `give`/`receive` assets, `buyer`/`partner` before/after/delta metric blocks, valuation summaries, reasons and immutable metadata. Public valuation includes dynasty cost/budget, outgoing-package loss fraction, market ratio and partner surplus/evidence basis/confidence/coverage/intent; raw private boards are not public. Meta identifies source, as-of/expiry, forecast/model/snapshot revisions, support and championship capability. Optional `scoring_exclusions` records omitted rare-event coefficients, and `scoring_warning` is a nullable display string rendered in both clients' source receipts. Immutable league evidence preserves both source and effective scoring; `league_revision` identifies canonical source facts for freshness. Asset summaries identify owner and whether selectable; unavailable assets must not become freely tradable because the editor knows their IDs.
+
+Expected source/rule/stale/capability failures use HTTP 200 `{status:"unavailable",reason,message}` and must be handled before polling or rendering numbers. Invalid requests use 400, identity/read/write denials use existing 401/403 behavior, absent/foreign IDs use 404, and too many outstanding jobs use 429. Search clients stop locally after a bounded wait and offer manual retry; cancelling local polling does not cancel a durable server job. Queued jobs resume after startup; unexpired running jobs are never requeued during overlapping deploys. A crashed running job waits for its original expiry before retry; late completion cannot revive expired work. Completed jobs and decisions revalidate current league, pick ownership, preferences and valuation revisions and expiry before serving. Best-ball and unsupported trade-review delays fail explicitly; standings do not depend on successful pick retrieval. Calculator results recheck expiry after simulation. Likes/passes do not create real league proposals.
+
+[Build contract](plans/win-now/BUILD.md) · [Evidence and remaining checks](plans/win-now/EVIDENCE.md)

@@ -7,6 +7,8 @@ Source of truth: `backend/database.py`. Keep this file in sync when adding/chang
 
 ## Table of Contents
 
+- [Win Now evidence tables](#win-now-evidence-tables)
+
 **Core / Users / Auth**
 
 - [`users`](#users)
@@ -1639,3 +1641,21 @@ Saved analytics cohorts (Fullstory-style Segments). `id` PK, `name` (unique), `d
 The private manifest includes `trade_proposals` and `trade_policy_shadow`. On deletion, another manager's proposal record can retain provider/package history, but a deleted target user's attribution and frozen `valuation_json` are cleared.
 
 Server and client analytics session identifiers are domain-separated SHA-256 values, never authentication bearer tokens. `accounts.delete_user_data` deletes credential rows for Sleeper/ESPN/MFL, account aliases, durable sessions, identity links, linked anonymous history, and private recommendation/billing/ranking/mock data transactionally. Shared counterpart records are anonymized or preserved according to the explicit matrix; public draft/transaction data, global aggregates and published ranking snapshots are retained. Export version 2 includes this private scope, aliases, owned outcomes/ranking entries, and account-attributed shared rows; it omits credentials, session identifiers, push tokens and raw billing payloads. Submitted feedback text is replaced on deletion. Counterparties’ embedded JSON and public records may retain incidental personal mentions. Process-local work leases drain active account operations and invalidate queued work after deletion; see ADR-017.
+
+---
+
+## Win Now evidence tables
+
+Additive schema for the experimental beta; the release configuration enables all three serving flags under operator authorization, with deployment verification recorded separately. Defined in `backend/database.py`; persistence lives in `backend/win_now_store.py`. JSON is serialized deterministically with nonfinite numbers rejected. Snapshot timestamps are ISO UTC strings. There are no new dynasty-ranking writes.
+
+| Table | Grain / key | Columns besides primary key |
+|---|---|---|
+| `season_forecast_snapshots` | Immutable normalized player/week batch; `snapshot_id` string PK | `season`, `source`, `captured_at`, `payload_json` (all required) |
+| `season_projection_snapshots` | Immutable league/model/forecast snapshot; `snapshot_id` string PK | `league_id` (indexed), `forecast_snapshot_id`, `created_at`, `expires_at`, `payload_json` (all required) |
+| `win_now_jobs` | Viewer-owned generation job; `job_id` string PK | `user_id` (indexed), `league_id`, `status` (indexed), `created_at`, `updated_at`, `expires_at`, `input_json` required; `result_json`, `reason` nullable |
+| `win_now_scenarios` | Directed buyer/partner exchange and evaluated snapshot; `scenario_id` string PK | `user_id` (indexed), `league_id`, `snapshot_id`, `objective`, `asset_key`, `created_at`, `expires_at`, `payload_json` (all required) |
+| `win_now_decisions` | Viewer decision on a scenario; autoincrement integer `id` PK | `user_id` (indexed), `scenario_id`, `decision`, `created_at` required; unique `(user_id,scenario_id)` |
+
+Forecast payloads retain original source capture/publication times, provenance and quality; whole batches prevent joins across publication revisions. Projection payloads retain league facts plus the simulation baseline. Job input JSON freezes the requesting actor’s valuation inputs and parameters and must be treated as private. Pricing/ranking revision hashes and package-level evidence are retained; other managers’ complete boards are not persisted. Job result and scenario payloads retain immutable before/after evidence and metadata; `asset_key` groups repeated exchanges without rewriting prior scenario evidence. Enforced lifecycle is queued → running → complete/failed; queued work resumes from durable input. Unexpired running jobs are never requeued during overlapping deploys; a crashed running search expires before retry. Account lifecycle admissions drain active searches before deleting all user-owned rows.
+
+Serving expiry does not delete history. Worker housekeeping removes jobs after 7 days, scenarios/decisions after 180 days and forecast/projection snapshots after 400 days. Account export/deletion includes all three user-owned tables. Short account-row-guarded writes prevent queued or calculator work from recreating evidence after account deletion; no simulation holds that lock. References are application-enforced strings, not new SQL foreign-key constraints. Access checks live in the new authenticated routes. See [API contract](api-reference.md#season-projections-and-win-now).

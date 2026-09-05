@@ -9,7 +9,6 @@
 ---
 
 ## Table of Contents
-- [Request scoring views and captured job ownership (2026-09-04, budget scalability)](#request-scoring-views-and-captured-job-ownership-2026-09-04-budget-scalability)
 - [Authoritative References](#authoritative-references)
 - [Directory Layout](#directory-layout)
 - [Naming Conventions](#naming-conventions)
@@ -45,6 +44,8 @@
 - [Tiers-save route contract shrank: `demoted_pids` is an ignored legacy key (2026-08-24, D-160)](#tiers-save-route-contract-shrank-demoted_pids-is-an-ignored-legacy-key-2026-08-24-d-160)
 - [Provider identity is reconciled server-side; presentation is server config (2026-08-28, ADR-016)](#provider-identity-is-reconciled-server-side-presentation-is-server-config-2026-08-28-adr-016)
 - [Pick assets ride the mixed arrays on every propose route; the server splits and encodes (2026-09-02, D-176)](#pick-assets-ride-the-mixed-arrays-on-every-propose-route-the-server-splits-and-encodes-2026-09-02-d-172)
+- [Request scoring views and captured job ownership (2026-09-04, budget scalability)](#request-scoring-views-and-captured-job-ownership-2026-09-04-budget-scalability)
+- [Win Now snapshot and request isolation](#win-now-snapshot-and-request-isolation)
 
 ---
 
@@ -793,3 +794,9 @@ and [scope/evidence](../docs/plans/budget-scalability/implementation.md).
 ## Ownership and telemetry invariants
 
 Private reads/writes depend on proof on the current session, never the grace flag or absence of a verified controller. Session initialization cannot change account identity and accepts only server-resolved roster snapshots. New Sleeper source binding proves source ownership before inspecting either board. Recommendation labels require a verified actor, valid owned impression and accepted validated ingestion. Analytics stores domain-separated identifiers instead of bearer tokens. Deletion resolves aliases, drains concurrent account work, revokes durable sessions transactionally and invalidates queued work. Version 2 export covers the expanded private scope while omitting credential material. The work gate assumes the deployed single-worker topology; see [ADR-017](../docs/adr/adr-017-account-deletion-work-leases.md). Browser verification uses the explicit extension bridge restricted to the production web origin.
+
+---
+
+## Win Now snapshot and request isolation
+
+Implementation checkpoint 2026-09-04: immutable whole forecast batches and league/model revisions identify baselines; viewer-scoped job/scenario IDs retain objective, constraints and expiry. A stable exchange asset key groups history without replacing evaluated evidence. Clients cancel by viewer/league/objective/parameter epoch and preserve server order; expired results are not recommendations. Probabilities are fractions and deltas display absolute pp. Budget uses fixed baseline roster value. Like/pass writes only the season decision store. Routes, schema and shared bounds are in the [API](../docs/api-reference.md#season-projections-and-win-now), [data dictionary](../docs/data-dictionary.md#win-now-evidence-tables) and [invariants](../docs/cross-client-invariants.md#win-now-objective-and-evidence-semantics); parent integration review and local mechanical verification are complete. The explicit platform-only pick read in `win_now_service.build_context` is sanctioned in the existing ADR-010 containment test.

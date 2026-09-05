@@ -14,11 +14,11 @@ consumer-facing distillation — one file per external service, organized around
 
 | File | Service |
 |---|---|
-| [sleeper.md](sleeper.md) | Sleeper — REST v1, undocumented GraphQL, WebView JWT capture |
+| [sleeper.md](sleeper.md) | Sleeper — REST v1, undocumented GraphQL, WebView JWT capture, restricted-beta weekly projections |
 | [espn.md](espn.md) | ESPN Fantasy Football unofficial v3 API (`lm-api-reads.fantasy.espn.com`) — league linking, roster import, standings-derived draft order |
 | [mfl.md](mfl.md) | MyFantasyLeague — official export API + authenticated login flow |
 | [dynastyprocess.md](dynastyprocess.md) | DynastyProcess consensus-values CSVs (GitHub) — Elo seeds, pick slot prices, player-id crosswalk; also documents the adjacent KTC scrape |
-| [nflverse.md](nflverse.md) | nflverse/nfldata NFL schedule CSV (GitHub) — bye-week derivation for the EVALUATED #169 bye-multiplier (`backend/outlook/bye_weeks.py`); not yet reachable from any live server route |
+| [nflverse.md](nflverse.md) | nflverse/nfldata NFL schedule CSV (GitHub) — bye-week derivation for the EVALUATED #169 bye-multiplier (`backend/outlook/bye_weeks.py`); also used for independently certified byes in the default-off Win Now forecast adapter |
 | [anthropic.md](anthropic.md) | Anthropic Claude API — smart matchup selection |
 | [expo-push.md](expo-push.md) | Expo push-notification relay (`exp.host`) |
 

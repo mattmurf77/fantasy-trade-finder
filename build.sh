@@ -25,7 +25,8 @@ mkdir -p data
 # runtime lazy-load path takes over on first request, exactly as before.
 echo "→ Baking Sleeper player cache (best-effort)…"
 set +o errexit
-python -c "from backend.server import _ensure_sleeper_cache_populated; _ensure_sleeper_cache_populated()" \
+# Importing the server here must not claim jobs from the serving container.
+FTF_BUILD_MODE=1 python -c "from backend.server import _ensure_sleeper_cache_populated; _ensure_sleeper_cache_populated()" \
   && echo "✓ Sleeper player cache baked into data/.sleeper_players_cache.json" \
   || echo "⚠ Sleeper cache bake skipped (fetch/import failed) — runtime lazy-load will populate on first request"
 set -o errexit

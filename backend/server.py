@@ -30605,6 +30605,15 @@ def reseed_experiment_layers_route():
     return jsonify(reseed_experiment_layers())
 
 
+from .win_now_api import install as _install_win_now
+_install_win_now(app, require_session=_require_initialized_session,
+                 read_denial=_verified_read_denial, write_denial=_verified_write_denial,
+                 active_format=_active_format, league_user_id=_league_user_id,
+                 pool_provider=_get_universal_pool, fetch_json=_sleeper_get)
+from . import win_now_service as _win_now_service
+_win_now_service.start_worker_on_startup(_sleeper_get)
+
+
 if __name__ == "__main__":
     # Pre-load Sleeper player cache from disk if available
     _load_sleeper_cache()

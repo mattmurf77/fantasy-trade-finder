@@ -43,6 +43,7 @@
     .league-rank-chip.lrc-mid    { border-color: var(--warn); color: var(--warn); }
     .league-rank-chip.lrc-bottom { border-color: var(--neg);  color: var(--neg); }
   </style>
+  <link rel="stylesheet" href="/css/win-now.css">
 </head>
 <body>
 
@@ -792,6 +793,16 @@
   <!-- ═══════════════════════════════════════════════════
        VIEW: TRADES
   ════════════════════════════════════════════════════ -->
+  <section class="view" id="view-win-now" aria-labelledby="win-now-title">
+    <div class="win-now-wrap">
+      <button type="button" class="tab" onclick="switchView('trades')">Back to Trade Finder</button>
+      <h2 id="win-now-title">Season projections &amp; Win Now</h2>
+      <p>Improve this season while keeping dynasty sacrifice within your limit. Forecasts are estimates, not guarantees.</p>
+      <div id="win-now-controls"></div>
+      <div id="win-now-status" role="status" aria-live="polite"></div>
+      <div id="win-now-results"></div>
+    </div>
+  </section>
   <div class="view" id="view-trades">
     <div class="trades-wrap" id="trades-wrap">
       <!-- Ranking gate — filled by JS; hidden until progress check runs -->
@@ -799,6 +810,7 @@
 
       <div class="trades-header">
         <div class="trades-title">Find a Trade</div>
+        <button type="button" class="tab hidden" id="trades-win-now" onclick="switchView('win-now')">Win Now</button>
         <button class="generate-btn" id="gen-btn" onclick="generateTrades()">
           Find a Trade
         </button>
@@ -989,6 +1001,7 @@
                league.power_rankings is on (toggled by
                _applyPowerRankingsFlag() in web/js/app.js). Mirrors the
                positional-tiers tab-link pattern. -->
+          <button type="button" class="tab hidden" id="league-win-now" onclick="switchView('win-now')">Season projections &amp; Win Now</button>
           <a class="tab hidden" id="league-rankings-link" href="/league-rankings.html"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 17V9M10 17V3M17 17v-6"/></svg> League rankings</a>
           <a class="tab" id="calculator-link" href="/calculator.html"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3h12v14H4zM7 7h6M7 11h2M7 14h2M12 11v3"/></svg> Calculator</a>
           <button class="invite-btn" id="invite-btn" onclick="openInviteModal()"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg> Invite</button>
@@ -1324,5 +1337,6 @@
   <script src="/js/events.js"></script>
   <script src="/js/browser-auth.js"></script>
   <script src="/js/app.js"></script>
+  <script src="/js/win-now.js"></script>
 </body>
 </html>

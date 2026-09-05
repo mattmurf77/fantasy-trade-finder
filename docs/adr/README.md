@@ -49,3 +49,5 @@ Don't bother for routine code changes, bug fixes, or anything self-evident from 
 - [ADR-014 Bake-Off Serving Rounds](adr-014-bakeoff-serving-rounds.md)
 - [ADR-015 Negative-Results Memory is a Clamped Soft Prior, Not a Fourth Filter](adr-015-negmem-soft-prior-not-fourth-filter.md)
 - [ADR-016 RevenueCat is the Purchase Layer; the Entitlements Ledger is the Truth](adr-016-revenuecat-with-server-truth-entitlements.md)
+- [ADR-017 Drain Account Work Before Deleting Its Data](adr-017-account-deletion-work-leases.md)
+- [ADR-018 External Weekly Forecasts and an Independent Win Now Season Model](adr-018-win-now-external-forecasts.md)
