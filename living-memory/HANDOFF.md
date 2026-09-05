@@ -23,7 +23,7 @@
 ### Blocked on
 - Physical iPhone/TestFlight: no device available. [Checklist](../docs/plans/security-data-hardening/mobile-evidence.md).
 - Historical production token cleanup/revocation and membership resync need a reviewed rollout.
-- Deletion fencing requires one worker; distributed writers need additional coordination (D-180 / ADR-017).
+- Deletion fencing requires one worker; distributed writers need additional coordination (D-183 / ADR-017).
 
 ### Don't repeat
 - No simulator/Maestro (D-056); Hermes export is not native proof.

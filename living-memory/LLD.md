@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [Request scoring views and captured job ownership (2026-09-04, budget scalability)](#request-scoring-views-and-captured-job-ownership-2026-09-04-budget-scalability)
 - [Authoritative References](#authoritative-references)
 - [Directory Layout](#directory-layout)
 - [Naming Conventions](#naming-conventions)
@@ -18,6 +19,7 @@
 - [Code Conventions](#code-conventions)
 - [Living-Memory File Schemas](#living-memory-file-schemas)
 - [Tooling & Constraints](#tooling--constraints)
+- [One policy evaluator, one choke point (2026-09-04, personal-market policy)](#one-policy-evaluator-one-choke-point-2026-09-04-personal-market-policy)
 - [Ownership and telemetry invariants](#ownership-and-telemetry-invariants)
 - [Guide beats: the GuideStep eligibility convention (2026-08-15, guide-v2)](#guide-beats-the-guidestep-eligibility-convention-2026-08-15-guide-v2)
 - [Trade generation pipeline v2: gen2_* namespace + GenerationReport hand-off (2026-08-16, trade_gen.v2)](#trade-generation-pipeline-v2-gen2_-namespace--generationreport-hand-off-2026-08-16-trade_genv2)
@@ -224,6 +226,28 @@ Required: H1 with project suffix, purpose blockquote, Table of Contents, ISO dat
 - **Browser extension is MV3** — load unpacked in Chrome/Edge.
 - **Tests:** ad-hoc scripts (`dump_mismatches.py`, `tmp_check_db.py`, etc.). No pytest suite yet — see [`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md).
 - **Port 5000 conflict on macOS:** AirPlay Receiver uses it. Kill via `lsof -ti:5000 | xargs kill -9`. See [`GOTCHAS.md`](GOTCHAS.md).
+
+## One policy evaluator, one choke point (2026-09-04, personal-market policy)
+
+**The convention:** eligibility thresholds live in exactly one module (`backend/trade_policy.py`), and every card passes it **after its final package is assembled** — not merely at generation. Generation may prefilter cheaply; the evaluator is the *last* check, and no card reaches a user without it.
+
+**Why it is a convention and not just a feature.** Before this, threshold logic was duplicated across `trade_service`'s v2 pair generator, `trade_optimizer`'s v3 package search and several post-generation mutation paths in `server.py`. That made `fairness_floor_divergence` = 0.55, the relaxed fallback, both sweeteners, swap/edit, likes-you injection, wildcards and weekly replenishment **six independent routes to the deck under different bars** — none of them wrong on its own, all of them a bypass in aggregate. The rule that prevents a seventh is structural: the choke point sits on `final_cards` in `_run_trade_job`, immediately before the ghost split, so a new mutation layer is either above it (and therefore gated) or it has to be inserted between two adjacent statements.
+
+**Three rules for anyone adding a threshold:**
+
+1. **A mutation voids the verdict.** Anything that changes a package — a sweetener, a swap, a filler — must re-ask. Both sweetener paths do; that is why `_gap_extra_ok` calls the evaluator rather than only re-running the surplus math.
+2. **A user preference composes with `max`, never `min`.** A stated preference may tighten a system policy and can never loosen it. The pre-existing `min(requested, fairness_floor_divergence)` is the counterexample this rule exists to name: it turned a stricter 0.75 request into a looser 0.55 gate.
+3. **Fail safe means toward consensus.** Missing evidence prices an asset at consensus and buys no floor relief. `trade_policy.shrink_board` is deliberately NOT `trade_service._shrink_user_elo`, which returns a board **raw** when confidence is None — for a partner board that is precisely backwards.
+
+**Leaf discipline, same as `suggestion_telemetry.py`:** nothing in `trade_policy` imports `server`, and `trade_service` / `trade_optimizer` are imported **lazily inside functions** (both directions cycle otherwise). The lazy `trade_service._c` read is also what makes a bake-off arm's thread-local `_cfg_override` reach the evaluator, so an arm's candidates are judged under the arm's own configuration.
+
+**Flag-off must be an early return, not a no-op branch.** `make_pair_evaluator` returns `None` when the flag is off, so each in-loop gate is one `is None` check with no allocation; the choke point returns the input list after two boolean reads; the impression stamp is gated per JOB (`if policy_results:`), never per card, because `save_deck_impressions` uses `executemany` and compiles from the first row's keys.
+
+**Orthogonal attribution.** `model_arm` (which generator) and `policy_variant` (which policy) are separate columns. Adding a policy as a generator arm would confound two questions in one label and split an already-underpowered sample — see [D-181](DECISIONS.md).
+
+### Roster checks and publication (2026-09-04)
+
+The final roster gate precedes market quotas. A mutation invalidates roster evidence; the context cache key includes both final asset lists and partner. Exact matching shares every slot. Constrained position-group coverage may not worsen, including an established single-absence buffer. Unknown inputs cannot pass; shadow failures preserve the legacy deck, enforcement failures publish an empty deck. `final_checks_pending` guards every provisional card write; flag-off jobs retain their original key shape. Card evidence is public only with protection; frozen impression evidence and capped `roster_check` rejection rows support shadow review. Safety-switch changes invalidate completed caches. See `docs/plans/post-trade-roster-evaluation/code-walk.md`.
 
 ## Guide beats: the GuideStep eligibility convention (2026-08-15, guide-v2)
 
@@ -745,6 +769,26 @@ dark — all `monetize.*` flags false, no route wears `@_require_pro`.
   `test_pick_assignment.py::_SANCTIONED_SOURCE_CALLERS` (ADR-010 AST guard) — bare-default calls
   are forbidden.
 
+Whole-team benefit extension (2026-09-04): `trade_roster.Context.card` calls pure `trade_outlook_utility` for both complete rosters, then `trade_mutual_benefit` for eligibility and ordering. Explicit outlook provenance is captured before inference. Current production requires supplied fresh point data; dynasty-only evidence cannot enable the strict gate. The worker evaluates after all package mutations, withholds provisional cards in enforcement mode and preserves market lane quotas. Collection lives under existing roster telemetry; `trade.mutual_benefit_v1` remains independently dark. See `docs/plans/trade-model-activation/validation.md`.
+
+## Request scoring views and captured job ownership (2026-09-04, budget scalability)
+
+`_require_session` returns `_RequestSession`, a mapping snapshot with ordinary
+writes forwarded to the original identity's session. Reads must not update
+shared `service`, `trade_svc` or `_effective_format`; `_active_format` honors the
+request view and ignores stale scratch keys on raw sessions. Repeated helper
+calls within one Flask request reuse the view. Mapping consumers must accept
+`collections.abc.Mapping`. The session lock is reentrant because existing callers
+can hold it while mutating a request view.
+
+Job kickoff passes its explicit format and captured ownership to a frozen
+`_TradeExecutionContext` before scheduling. Interactive and pregen callers pass
+already-resolved context instead of rereading a potentially reinitialized token.
+Generation gets a private league/member graph, but deliberately retains the
+selected service's live card/decision stores for existing pending/swipe behavior.
+This does not snapshot ranking versions or make DB-backed reads transactional;
+see [architecture](../docs/architecture.md#local-request-and-trade-execution-context)
+and [scope/evidence](../docs/plans/budget-scalability/implementation.md).
 
 ## Ownership and telemetry invariants
 

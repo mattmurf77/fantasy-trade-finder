@@ -30,7 +30,7 @@ Per current D-056 policy, evidence consists of backend regression tests and a wr
 | living-memory/HLD.md | Updated | Document single-worker deletion coordination limit |
 | docs/cross-client-invariants.md | Update if required | Shared session verification contract |
 | docs/glossary.md | n/a | No new domain terms |
-| living-memory/DECISIONS.md | Updated (D-180 / ADR-017) | Ownership compatibility and deletion-work coordination |
+| living-memory/DECISIONS.md | Updated (D-183 / ADR-017) | Ownership compatibility and deletion-work coordination |
 
 ## 5. Delivery gate
 
@@ -48,3 +48,7 @@ The operator authorized addressing the remaining blockers after the combined rev
 Mobile review additionally covers late proof/source-link/initialization responses after account changes or unmount. Behavioral regressions must demonstrate the old failure before the fix. Build verification may export an iOS JavaScript bundle; this is not a native or TestFlight runtime pass. A physical-device availability check and an operator TestFlight handoff remain necessary when no device is accessible.
 
 The delivery boundary above remains: reviewed local work and reproducible evidence, without merging, deployment, TestFlight distribution, or production cleanup.
+
+## Deployment authorization — 2026-09-05
+
+The operator subsequently requested “Deploy.” Release work now includes merging current main, green PR CI, publishing the unpacked extension package, Render deployment and the matching EAS/TestFlight submission. Physical-device verification remains outstanding as disclosed. Historical token cleanup and contaminated membership resync remain separate maintenance operations. See [deployment evidence](deployment.md).

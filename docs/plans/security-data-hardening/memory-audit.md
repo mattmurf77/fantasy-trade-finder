@@ -7,7 +7,7 @@ Applied the repository's living-memory-format-check skill to the five changed me
 | HANDOFF.md | ✅ clean | Current-state overwrite, required template, labels, links and 2,000-byte cap checked. |
 | HLD.md | ❌ blocking | Pre-existing human-readable H1 differs from the literal filename required by the format rule; required sections and docs links pass. |
 | LLD.md | ❌ blocking | Pre-existing human-readable H1 differs from the literal filename; required sections and docs links pass. |
-| DECISIONS.md | ❌ blocking | Pre-existing nonliteral H1 and four missing historical docs targets. Bottom index is allowed by FORMAT retention rules; new D-180 is unique and indexed. |
+| DECISIONS.md | ❌ blocking | Pre-existing nonliteral H1 and four missing historical docs targets. Bottom index is allowed by FORMAT retention rules; new D-183 is unique and indexed. |
 | TEST_LEDGER.md | ❌ blocking | Pre-existing nonliteral H1 and three missing historical docs targets. Required sections and new security links pass. |
 
 Count: 1 clean, 0 minor, 4 blocking under the strict format labels. This is a scoped check, not certification of every historical TOC anchor or ID sequence.

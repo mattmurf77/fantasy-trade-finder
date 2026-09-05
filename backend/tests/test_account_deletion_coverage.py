@@ -81,6 +81,31 @@ def test_encrypted_credentials_billing_and_all_sessions_removed(engine):
     assert [r["sleeper_user_id"] for r in rows(engine, db.users_table)] == [OTHER]
 
 
+def test_proposals_preserve_other_owners_history_without_deleted_board(engine):
+    """Counterparty sends survive; identity and private valuation do not."""
+    with engine.begin() as conn:
+        for target in (UID, ALIAS, "unrelated-counterparty"):
+            seed(conn, db.trade_proposals_table, target, user_id=OTHER,
+                 target_user_id=target, give_asset_ids='["player-a"]',
+                 receive_asset_ids='["player-b"]', provider="sleeper",
+                 valuation_json=json.dumps({"private_board": target}))
+    accounts.delete_user_data(UID)
+    proposals = rows(engine, db.trade_proposals_table)
+    assert len(proposals) == 3
+    for proposal in proposals:
+        assert proposal["user_id"] == OTHER
+        assert proposal["give_asset_ids"] == '["player-a"]'
+        assert proposal["receive_asset_ids"] == '["player-b"]'
+        assert proposal["provider"] == "sleeper"
+        if proposal["proposal_event_id"] in {UID, ALIAS}:
+            assert proposal["target_user_id"] is None
+            assert proposal["valuation_json"] is None
+        else:
+            assert proposal["target_user_id"] == "unrelated-counterparty"
+            assert json.loads(proposal["valuation_json"]) == {
+                "private_board": "unrelated-counterparty"}
+
+
 def test_shared_device_deletes_anonymous_history_preserves_other_identity(engine):
     with engine.begin() as conn:
         for uid, aid in ((UID, AID), (OTHER, "other-account"), (None, None)):
@@ -199,6 +224,9 @@ def test_export_includes_alias_private_rows_and_omits_credentials(engine):
     with engine.begin() as conn:
         for uid in (UID, ALIAS, OTHER):
             seed(conn, db.user_taste_table, uid, user_id=uid)
+            seed(conn, db.trade_proposals_table, uid, user_id=uid,
+                 valuation_json=json.dumps({"private_board": uid}))
+            seed(conn, db.trade_policy_shadow_table, uid, user_id=uid)
             seed(conn, db.espn_credentials_table, uid, user_id=uid,
                  espn_s2_encrypted='PRIVATE_ESPN_CIPHERTEXT')
             seed(conn, db.mfl_credentials_table, uid, user_id=uid,
@@ -209,6 +237,10 @@ def test_export_includes_alias_private_rows_and_omits_credentials(engine):
     archive = accounts.export_user_data(UID)
     assert archive['export_version'] == 2
     assert {r['user_id'] for r in archive['tables']['user_taste']} == {UID, ALIAS}
+    for table_name in ("trade_proposals", "trade_policy_shadow"):
+        assert {r['user_id'] for r in archive['tables'][table_name]} == {UID, ALIAS}
+    assert {json.loads(r['valuation_json'])['private_board']
+            for r in archive['tables']['trade_proposals']} == {UID, ALIAS}
     assert {r['user_id'] for r in archive['tables']['espn_credentials']} == {UID, ALIAS}
     exported = json.dumps(archive)
     assert 'PRIVATE_ESPN_CIPHERTEXT' not in exported

@@ -654,6 +654,7 @@ _ADDITIONAL_PRIVATE_TABLES = (
     "deck_suppressions", "deck_fatigue_resets", "deck_replenish_log", "user_taste",
     "trade_pass_reasons", "standing_offers", "league_board_history",
     "rank_set_adoptions", "accuracy_scores", "mock_drafts", "receipts_grades",
+    "trade_proposals", "trade_policy_shadow",
 )
 
 
@@ -764,6 +765,15 @@ def _delete_user_data(sleeper_user_id: str,
         _del("deck_impressions", db.deck_impressions_table)
         for name in _ADDITIONAL_PRIVATE_TABLES:
             _del(name, getattr(db, name + "_table"))
+
+        # Another manager owns their confirmed-send record. Preserve its
+        # package/provider history, but remove deleted-counterparty attribution
+        # and the frozen valuation, which can contain their private board data.
+        proposals = db.trade_proposals_table
+        res = conn.execute(update(proposals).where(
+            proposals.c.target_user_id.in_(user_ids)).values(
+                target_user_id=None, valuation_json=None))
+        counts["trade_proposals_counterparty_anonymized"] = res.rowcount or 0
 
         # Preserve published ranking snapshots and other users' adoptions;
         # remove attribution and freeform author metadata. Private sets have

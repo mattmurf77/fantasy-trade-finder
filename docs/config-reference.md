@@ -71,6 +71,7 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
   - [Mock-draft CPU drafters (draft-extensions W2) — `mock_draft_service._DEFAULT_CFG`](#mock-draft-cpu-drafters-draft-extensions-w2-mock_draft_service_default_cfg)
   - [Counterparty breaker (flag `trade.breaker`) — `trade_service._DEFAULT_CFG`, DB-seeded](#counterparty-breaker-flag-tradebreaker--trade_service_default_cfg-db-seeded)
   - [Negative-results memory (flag `trade.negmem`) — `trade_service._DEFAULT_CFG`, DB-seeded](#negative-results-memory-flag-tradenegmem--trade_service_default_cfg-db-seeded)
+  - [Personal-market policy (flags `trade.valuation_telemetry` / `trade.personal_market_policy_v1`) — `trade_service._DEFAULT_CFG`, DB-seeded](#personal-market-policy-flags-tradevaluation_telemetry--tradepersonal_market_policy_v1--trade_service_default_cfg-db-seeded)
 - [Offline eval harness (F8, `backend/eval/` — operator tooling, unflagged)](#offline-eval-harness-f8-backendeval-operator-tooling-unflagged)
 
 ---
@@ -1384,6 +1385,79 @@ Six keys, consumed **only** by `backend/negmem.py` and its four generation seams
 
 Every operator change goes through `scripts/set_knob.py` so it lands in `model_config_changes`, **and lands at a bake-off round boundary** (GR3). Observability: `backend/scripts/negmem_readout.py` prints the resolved knobs alongside every cell; `scripts/negmem-stamp-rate.sql` and `scripts/negmem-gr4-joint.sql` are the two tripwire queries.
 
+
+---
+
+## Flags — Personal-market policy (2026-09-04, both ship **DARK**)
+
+Scope block: [personal-market-policy](plans/personal-market-policy/scope.md). Module: `backend/trade_policy.py`. Decisions: `living-memory/DECISIONS.md` **D-180** (consensus is a constraint, not an objective) and **D-181** (policy is an orthogonal experiment dimension, not a fourth generator arm).
+
+**Two flags, not one.** The brief's own rollout separates *measure it* (Phase 1/2) from *change it* (Phase 3), and a single flag cannot express "measure but do not change".
+
+| Key | Default | Description |
+|---|---|---|
+| `trade.valuation_telemetry` | **false** | ON ⇒ every `deck_impressions` row carries a frozen `valuation_json` snapshot, a canonical `trade_concept_id` and a `policy_variant` stamp; the shared evaluator runs in **shadow** and writes the candidates it *would* have rejected to `trade_policy_shadow`; a confirmed provider send writes a `trade_proposals` row; a mutual match records both impressions, both like times and a third match-time snapshot; a liked mirror that is no longer actionable records a closed reason instead of silently disappearing. **Eligibility, ordering and every card payload are untouched — these are additive WRITES only.** OFF (default) ⇒ no new column is populated, no new table is written, and `deck_impressions` rows are byte-identical (pinned by `test_bakeoff_serving.py::test_flag_off_is_byte_identical_to_the_captured_golden`, whose `NEW_COLUMNS` list asserts all four are NULL, and by `test_trade_policy_wiring.py::test_flag_off_produces_no_policy_state_at_all`). **Graduation criterion:** ≥99% of new divergence impressions carry a parseable snapshot whose assets match `assets_json`; recomputed market ratio within 0.001 of stored fairness; p95 generation latency up no more than 5%. |
+| `trade.personal_market_policy_v1` | **false** | ON ⇒ the shared evaluator actually **gates and orders**: consensus becomes a non-bypassable market floor instead of 30% of a blended score, two-sided personal opportunity becomes the primary sort, and the deck is composed under the Core/Conviction quotas. OFF (default) ⇒ every generator, mutation path and ordering layer behaves exactly as today — `trade_policy.make_pair_evaluator` returns `None`, so v2's `_consider` and v3's candidate loop each do one `is None` check and evaluate nothing. **Graduation criterion:** only after the telemetry flag's criteria pass **and** an operator-approved within-user crossover schedule exists. Randomize at the **deck-job** level, never per card — deck composition is part of the treatment. |
+
+**Rollback ladder**, bluntest last: `trade.personal_market_policy_v1` → false + `POST /api/feature-flags/reload` (deploy-free; serving returns to legacy immediately) → raise `market_floor_absolute` / `market_floor_two_board_base` toward 1.0 to make the treatment conservative without turning it off → `trade.valuation_telemetry` → false (stops all additive writes) → revert commit. Nothing persisted needs cleanup: every new column is nullable and every new table is append-only telemetry.
+
+---
+
+## Personal-market policy (flags `trade.valuation_telemetry` / `trade.personal_market_policy_v1`) — `trade_service._DEFAULT_CFG`, DB-seeded
+
+Seventeen keys, all `Float` (the `model_config` table has no other type), all in `trade_service._DEFAULT_CFG` **and** `database._MODEL_CONFIG_DEFAULTS` with identical values. Read only through `trade_policy._c`, which delegates to `trade_service._c` — so a bake-off arm's thread-local `_cfg_override` overlay reaches the evaluator, and a key the policy reads but `_DEFAULT_CFG` does not declare would `KeyError` the first time an arm evaluated a candidate.
+
+**None of them is in `MODEL_A_PROFILE`, deliberately.** Arm A is a pinned reconstruction of the pre-2026-08-16 engine; the policy did not exist then, so there is nothing for it to pin, and pinning would *change* arm A rather than preserve it. The reasoning is recorded in [scope-phase2](plans/three-model-bakeoff/scope-phase2.md) and asserted by `test_trade_policy.py::test_the_pinned_historical_model_a_profile_is_not_modified`.
+
+**Every value here is an experiment setting, not a permanent product truth** — which is exactly why each is a remotely-settable row rather than a constant.
+
+### The market floor
+
+| Key | Default | Description |
+|---|---|---|
+| `market_floor_absolute` | 0.65 | **The one non-negotiable bar.** No finder card is ever served below this consensus market ratio, and every other floor knob is clamped to be ≥ it — so even an operator who zeroes the rest cannot get below it (`test_trade_policy.py::test_no_card_can_pass_below_the_absolute_floor_at_any_knob_setting`). 0.65 comes from a retrospective sweep over the 231 decided divergence cards in prod (2026-09-04): at 0.65 the removed cards were 83.3% passes — five passes shed per like. That justifies it as an **experimental** floor. It is not evidence that every card at 0.65 is user-ready, and it is not a permanent default. |
+| `market_floor_one_board` | 0.85 | Floor when the counterparty has **no real personal board**. Higher than the two-board floors on purpose: with only one board there is no two-sided personal evidence to justify departing from the market. |
+| `market_floor_two_board_base` | 0.80 | Starting floor when both managers have real boards. Confidence and two-sided gain discount **down** from here, never up. |
+| `market_floor_confidence_discount` | 0.10 | Maximum floor relief bought by ranking confidence (× the weaker board's package confidence). |
+| `market_floor_surplus_discount` | 0.05 | Maximum floor relief bought by the weaker manager's normalized personal gain. **Itself scaled by confidence** — a large two-sided "gain" measured on boards nobody has ranked is not evidence of anything, and letting it buy relief would reopen the exact hole this design closes (low confidence making the engine *more* willing to leave the market). |
+| `policy_surplus_norm` | 0.25 | The weaker-side gain fraction that counts as "full" personal strength when normalizing for the surplus discount. |
+| `personal_gain_min_frac` | 0.0 | Minimum weaker-side gain fraction a **below-Core** two-board card must clear. Deliberately **not** applied to Core cards: a Core card is market-plausible on its own and does not need personal evidence to justify itself — and the engine's own `min_side_surplus` gate runs on *marginal* values when `trade.marginal_value` is on, so a universal second veto on the policy's raw-value basis would silently re-litigate every card the generator already cleared under a definition the generator does not use. |
+
+`derive_policy_floor` is monotone non-increasing in both inputs (`test_trade_policy.py::test_more_confidence_or_more_gain_never_tightens_the_floor`): a user who ranks more, or a trade that helps both managers more, never faces a stricter bar for it.
+
+**The user's fairness preference composes with `max`, never `min`.** The live divergence path uses `min(requested, fairness_floor_divergence)`, so a user asking for a stricter 0.75 band was handed the looser 0.55 gate — their stated preference made the guardrail *weaker*. `trade_policy.compose_effective_floor` is `max(policy_floor, requested, market_floor_absolute)`.
+
+### Deck composition
+
+| Key | Default | Description |
+|---|---|---|
+| `market_core_ratio` | 0.80 | Core / Conviction lane boundary — at or above this ratio a two-board card is **Core**. |
+| `conviction_deck_share` | 0.20 | Max share of a deck that may be Conviction, **hard-capped at 2 regardless**. |
+| `deck_core_lead_cards` | 3.0 | The deck's first N cards must be Core — trust is built before anything unusual is shown. |
+| `deck_core_min_share` | 0.70 | Minimum Core share, measured against the **realized** deck length: a deck that came back short because supply ran out is not thereby allowed a weaker Core share than a full one. |
+
+If safe supply is insufficient the deck comes back **shorter**. Returning a smaller deck is the specified behaviour; weakening the guardrail to fill ten slots is not.
+
+### Confidence
+
+| Key | Default | Description |
+|---|---|---|
+| `conf_source_seed` | 0.0 | Confidence weight for an unchanged consensus seed — no personal evidence at all. |
+| `conf_source_cross_format` | 0.75 | Weight for a ranking copied across scoring formats (the copy-from-format publish). |
+| `conf_source_explicit` | 1.0 | Weight for an explicit tier, manual order, import or anchor placement — the strongest statement of value the product accepts. |
+| `policy_confidence_band_high` | 0.66 | Trade confidence at/above which a card's privacy-safe `confidence_band` reads `high`. |
+| `policy_confidence_band_med` | 0.33 | …and `medium` (below it, `low`). The band names which side of the line the **weaker** board falls on and reveals nothing about the counterparty's values, positions or counts. |
+
+Vote-based evidence keeps the existing shape `n / (n + shrink_pseudocount)`; the three source constants are flat overrides for provenances a count cannot describe. A missing count with no recognised source returns **0.0** — "no evidence" prices the player at consensus and buys no floor relief. That is the fail-safe direction, and it is the opposite of `trade_service._shrink_user_elo`, which returns the board **raw** when confidence is None.
+
+### Observability
+
+| Key | Default | Description |
+|---|---|---|
+| `policy_shadow_log_cap` | 40.0 | Max `trade_policy_shadow` rows per deck job. Bounds a pathological league without hiding the treatment's rejections. |
+
+`trade_policy.HEALTH` is a process-local counter dict (`serialize_failures`, `snapshot_failures`, `asset_mismatches`, `shadow_write_failures`, `proposal_write_failures`), reset on deploy. It is the tripwire for "telemetry is silently degrading" — check it before trusting any readout built on `valuation_json`.
+
 ---
 
 ## Offline eval harness (F8, `backend/eval/` — operator tooling, unflagged)
@@ -1398,6 +1472,20 @@ No feature flag and no `model_config` keys: the harness is a read-only CLI/libra
 
 Fixed estimator constants (in `backend/eval/replay.py`, changed only by code review because they change what the numbers mean): propensity-tilt clip bounds `TILT_MIN=0.5` / `TILT_MAX=2.0` (clip **count** is reported on every run), exposure-curve floor `EXPOSURE_FLOOR=0.02`, Laplace `+1/+2` smoothing on the served→viewed curve.
 
+### Full-roster switches (2026-09-04; both default false)
+
+| Flag | Behavior | Rollback / graduation |
+|---|---|---|
+| `trade.roster_evaluation` | Shadow both-team full-roster evidence; preserves cards/order. Adds impression features and bounded shadow rejection reasons. | Disable independently. Graduate after coverage/rejection and outcome review. |
+| `trade.roster_protection` | Enforce supported structural/availability checks on final packages; unknown coverage withholds the card. Rank safe candidates by weaker-manager outlook utility, subject to market policy's personal-opportunity priority. | Disable immediately to restore legacy serving. Require observed platform settings, offline/shadow validation and operator cohort rollout. |
+
+Neither flag is enabled in this branch's configuration. Current observed adapter is Sleeper; non-Sleeper templates cannot pass enforcement. Settings/cache changes trigger regeneration on the next deck request. The 48-hour availability freshness limit is conservative source coverage, not an injury forecast. No additional model_config keys or schema are introduced by roster evaluation.
+
+### Whole-team benefit switch
+
+`trade.mutual_benefit_v1` defaults false in code, config and all release fixtures. It implies final market and roster enforcement even if their switches are off. Eligible trades require both managers' complete utility evidence, explicit intent, confidence >=0.5 and normalized gain >=0.01. These are uncalibrated defaults of the pure evaluator, not acceptance probabilities; they do not enter MODEL_A_PROFILE. Unknown point data or preferences cannot pass. Order is weaker gain, total gain, then fewer assets, within Core/Conviction quotas. This flag invalidates cached decks when changed.
+
+Collection uses only `trade.valuation_telemetry` and `trade.roster_evaluation`; all enforcement switches remain false. On Render, FTF_FLAGS changes require a new deployment to reach the running process. POST /api/feature-flags/reload reloads the current process environment and on-disk file; it does not fetch newly changed Render environment settings. See [rollout procedure](plans/trade-model-activation/rollout.md).
 
 ### Legacy authorization rollout flag
 

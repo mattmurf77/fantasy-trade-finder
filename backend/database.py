@@ -337,6 +337,14 @@ trade_decisions_table = Table("trade_decisions", metadata,
     # dismissed offer must not resurface in the DISMISSER's own deck). A
     # later re-like writes a fresh row with NULL — that is the revive path.
     Column("retracted_at",       String),
+    # ── personal-market policy. NULL on every pre-change row and on any
+    # decision the client sends without an impression; additive, no backfill.
+    # `trade_decisions` is the older audit log and lacks a reliable
+    # impression key, which is exactly why match attribution could not be
+    # reconstructed from it. New writes carry both keys so a match can name
+    # the two impressions that produced it instead of inferring them.
+    Column("impression_id",      String),
+    Column("trade_concept_id",   String),
 )
 
 # All members (including the logged-in user) for every league session_init has seen.
@@ -407,6 +415,32 @@ member_rankings_table = Table("member_rankings", metadata,
     Column("elo",            Float,   nullable=False),
     Column("updated_at",     String),
     Column("scoring_format", String), # '1qb_ppr' | 'sf_tep' (null = legacy '1qb_ppr')
+    # ── Ranking confidence (personal-market policy; scope block
+    # docs/plans/personal-market-policy/scope.md). All three NULL on every
+    # pre-change row and additive via _migrate_db — deliberately NOT
+    # backfilled, because the evidence behind a historical row no longer
+    # exists and a fabricated count would read as trust the user never gave.
+    #
+    # Why this exists: the REQUESTING user's live RankingService has
+    # comparison counts, so `trade_service._shrink_user_elo` could shrink
+    # their board toward consensus. A league-mate's published snapshot
+    # carried only `elo`, so it was used RAW — the engine trusted a
+    # stranger's board more than the user's own. That asymmetry is measured
+    # at 86.9% of boarded-pair cards existing in only one direction
+    # (docs/reviews/2026-08-19-armb-audit-claims-3-4.md §3). These columns
+    # are what make symmetric shrinkage possible at all.
+    #
+    #   comparison_count  — pairwise/trio votes behind this player's Elo.
+    #   confidence_weight — the weight the WRITING session computed,
+    #                       n/(n+shrink_pseudocount) for vote evidence or the
+    #                       flat source constant otherwise. Stored rather than
+    #                       re-derived so a later knob change cannot silently
+    #                       rewrite what a past board was worth.
+    #   confidence_source — 'votes' | 'seed' | 'cross_format' | 'explicit'.
+    #                       NULL reads as 'legacy' ⇒ LOWEST confidence.
+    Column("comparison_count",  Integer),
+    Column("confidence_weight", Float),
+    Column("confidence_source", String),
 )
 
 # Created when two users have BOTH swiped "like" on mirrored versions of the
@@ -437,7 +471,124 @@ trade_matches_table = Table("trade_matches", metadata,
     # list permanently (see dismiss_match + load_matches filter).
     Column("user_a_dismissed", Integer),
     Column("user_b_dismissed", Integer),
+    # ── Two-user temporal attribution (personal-market policy scope block).
+    # A mutual trade is a SEQUENCE, not one simultaneous observation: A is
+    # served the concept, views it, likes it; the mirror becomes eligible for
+    # B; B may see it minutes or days later. Consensus values, rosters,
+    # personal boards and even the active policy can all change in between.
+    # These columns preserve each observation at its own timestamp instead of
+    # evaluating both users against whatever state an analyst finds later.
+    #
+    # The impression links are the SOURCE OF TRUTH; the timestamps and
+    # latency are denormalized audit fields, so a match stays readable even
+    # if event-query semantics change. Legacy matches leave all seven NULL,
+    # which is the honest answer — those matches genuinely have no
+    # impression-level provenance.
+    #
+    #   match_valuation_json: a THIRD snapshot, re-evaluated on the unchanged
+    #     package under the roster/consensus/board state at match time. It
+    #     answers "was the concept still valid when mutual interest formed?"
+    #     and must never overwrite either user's earlier impression snapshot —
+    #     the three records answer three different questions.
+    Column("trade_concept_id",      String),
+    Column("user_a_impression_id",  String),
+    Column("user_b_impression_id",  String),
+    Column("first_like_at",         String),
+    Column("second_like_at",        String),
+    Column("match_latency_seconds", Float),
+    Column("match_valuation_json",  Text),
 )
+
+# ---------------------------------------------------------------------------
+# trade_proposals — the durable record of a CONFIRMED provider send
+# ---------------------------------------------------------------------------
+# Scope block: docs/plans/personal-market-policy/scope.md
+#
+# There are two distinct moments worth measuring and they are routinely
+# different:
+#
+#   1. SUGGESTION time — what values and policy caused the engine to serve the
+#      original card. That is `deck_impressions.valuation_json`.
+#   2. PROPOSAL time — the exact package and values when the user actually
+#      succeeded in sending an offer. The user may have swapped an asset,
+#      dropped a piece, added a sweetener, or rebuilt the trade in the
+#      calculator entirely.
+#
+# Treating (1) as the truth for (2) silently mis-attributes every edited send.
+# This table is (2). `valuation_json` here is RECALCULATED from the final
+# package immediately after provider success — never copied from the
+# impression.
+#
+# Idempotency. `proposal_event_id` is minted BEFORE the provider call and is
+# unique, so a retried write after a provider success that lost its response
+# cannot create a second row. `provider_transaction_id` is the second key and
+# is deduped in `save_trade_proposal` by a select-then-insert rather than by a
+# partial unique index: the index would have to be `UNIQUE … WHERE
+# provider_transaction_id IS NOT NULL` (most sends legitimately have none), and
+# `_migrate_db` cannot add indexes to existing tables, so a constraint declared
+# here would exist on fresh databases and silently not on production. Only a
+# confirmed success writes here: an attempted or failed send is not a proposal.
+#
+# `policy_eligible` inside the snapshot is TELEMETRY, not a gate. A user may
+# deliberately construct a trade the finder would never generate; that is
+# recorded, not blocked. Blocking manual sends would be a separate product
+# decision and this change does not make it.
+trade_proposals_table = Table("trade_proposals", metadata,
+    Column("id",                      Integer, primary_key=True, autoincrement=True),
+    Column("proposal_event_id",       String,  nullable=False),   # minted pre-call
+    Column("impression_id",           String),   # originating card, when any
+    Column("match_id",                Integer),  # originating match, when any
+    Column("user_id",                 String,  nullable=False),
+    Column("league_id",               String,  nullable=False),
+    Column("target_user_id",          String),
+    Column("provider",                String,  nullable=False),   # sleeper|espn|mfl
+    Column("provider_transaction_id", String),
+    Column("source",                  String),   # deck | match | calculator
+    Column("give_asset_ids",          Text,    nullable=False),   # JSON, FINAL
+    Column("receive_asset_ids",       Text,    nullable=False),   # JSON, FINAL
+    Column("origin_trade_hash",       String),
+    Column("final_trade_hash",        String),
+    Column("edited_from_source",      Integer),  # 0 | 1
+    Column("valuation_json",          Text),     # frozen at confirmed send
+    Column("proposed_at",             String,  nullable=False),   # server UTC
+    UniqueConstraint("proposal_event_id", name="uq_trade_proposal_event"),
+)
+Index("ix_trade_proposals_user_league",
+      trade_proposals_table.c.user_id, trade_proposals_table.c.league_id)
+Index("ix_trade_proposals_impression", trade_proposals_table.c.impression_id)
+
+# ---------------------------------------------------------------------------
+# trade_policy_shadow — candidates the TREATMENT policy rejected
+# ---------------------------------------------------------------------------
+# Without this table the treatment's discarded candidates vanish from the
+# denominator: every card it served passed its own gate, because the ones it
+# killed were never written down. The policy would then look artificially
+# precise no matter how much supply it destroyed.
+#
+# One row per rejected candidate, capped per job by `policy_shadow_log_cap` so
+# a pathological league cannot flood the table. The generator ARM is carried so
+# a rejection can be attributed to the generator that produced it — that is the
+# whole point of keeping model_arm and policy_variant orthogonal.
+trade_policy_shadow_table = Table("trade_policy_shadow", metadata,
+    Column("id",                   Integer, primary_key=True, autoincrement=True),
+    Column("deck_job_id",          String,  nullable=False),
+    Column("user_id",              String,  nullable=False),
+    Column("league_id",            String,  nullable=False),
+    Column("trade_hash",           String),
+    Column("trade_concept_id",     String),
+    Column("model_arm",            String),
+    Column("policy_variant",       String),
+    Column("eligible",             Integer),
+    Column("reason",               String),
+    Column("market_ratio",         Float),
+    Column("effective_floor",      Float),
+    Column("policy_floor",         Float),
+    Column("personal_opportunity", Float),
+    Column("trade_confidence",     Float),
+    Column("lane",                 String),
+    Column("created_at",           String),
+)
+Index("ix_trade_policy_shadow_job", trade_policy_shadow_table.c.deck_job_id)
 
 # Composite indexes on (user, league) — both single-league and the new
 # cross-league /api/trades/matches/all queries hit one of these. Without
@@ -609,6 +760,41 @@ deck_impressions_table = Table("deck_impressions", metadata,
     #     mid-test; the resulting shift in each group's basis/lane mix would
     #     otherwise be invisible in the data.
     Column("trade_intent",       String),
+    # ── personal-market policy (scope block:
+    # docs/plans/personal-market-policy/scope.md). All four NULL while
+    # `trade.valuation_telemetry` is off and on every pre-change row;
+    # additive via _migrate_db, and deliberately NOT backfilled — the board
+    # state a historical card was priced against no longer exists, so any
+    # reconstruction would be a fabrication wearing an audit trail's clothes.
+    #
+    #   valuation_json: the frozen serve-time valuation snapshot
+    #     (backend/trade_policy.build_valuation_snapshot, schema_version 1).
+    #     An audit/replay record, NOT a replacement for the scalar columns
+    #     beside it: `fairness_score`, `base_score` and friends stay where
+    #     they are. What this adds is the half those cannot answer — the raw
+    #     and effective values each manager's OWN board put on each side, the
+    #     confidence behind them, the floors that applied, and the per-asset
+    #     breakdown. `member_rankings` is replace-in-place, so without this
+    #     the values behind a served card are unrecoverable the moment either
+    #     manager re-ranks. Written for served, shadow AND ghost rows.
+    #   trade_concept_id: canonical, PERSPECTIVE-INDEPENDENT id for the
+    #     package (trade_policy.trade_concept_id). `trade_hash` is
+    #     viewer-relative — A's card and B's mirror hash differently — so it
+    #     cannot join the two halves of a mutual match. This can. Both are
+    #     kept: trade_hash still drives viewer-relative fatigue and dedup.
+    #   policy_variant: 'legacy' | 'personal_market_v1' — which eligibility/
+    #     ranking/deck POLICY governed the job. Orthogonal to `model_arm`
+    #     (which generator produced the card); the two are recorded
+    #     separately so a result can be read overall and per generator.
+    #   source_like_impression_id: set ONLY when this card was injected
+    #     because the counterparty had already liked the mirror. It
+    #     distinguishes an organic, independently generated mirror from a
+    #     card shown because of the first manager's action — a distinction
+    #     the likes-you corpus could not make before.
+    Column("valuation_json",            Text),
+    Column("trade_concept_id",          String),
+    Column("policy_variant",            String),
+    Column("source_like_impression_id", String),
 )
 
 Index(
@@ -2674,6 +2860,35 @@ _MODEL_CONFIG_DEFAULTS = [
     # trade_service._DEFAULT_CFG exactly; seeding is behavior-neutral.
     ("exploration_base_per_opp", 5.0, "full sweep: served cards kept per opponent — the base exploration_overgen adds to, and the width _split_exploration_pool trims back to. 5.0 reproduces the pre-knob hardcoded constant exactly"),
     ("full_sweep_budget_s",     30.0, "full sweep: wall-clock seconds of opponent sweep before generation stops starting new pairs, checked BETWEEN opponents. Read only while trade.full_sweep is ON — it replaces the global_target card count as the job's ceiling, because trade_optimizer.generate_pair_trades_v3 carries no deadline of its own. <=0 disables the rail (job then bounded only by _JOB_HARD_TIMEOUT, 60s)"),
+    # ── Personal-market policy (backend/trade_policy.py; scope block
+    # docs/plans/personal-market-policy/scope.md). Every value here is an
+    # EXPERIMENT SETTING, not a permanent product truth — which is exactly why
+    # each one is a remotely-settable row rather than a constant. Nothing below
+    # is read while `trade.personal_market_policy_v1` and
+    # `trade.valuation_telemetry` are both off.
+    #
+    # The 0.65 absolute floor comes from a retrospective sweep over the 231
+    # decided divergence cards in prod (2026-09-04): at 0.65 the removed cards
+    # were 83.3% passes — five passes shed per like. That justifies it as an
+    # EXPERIMENTAL floor. It is not evidence that every card at 0.65 is
+    # user-ready, and it is not a permanent default.
+    ("market_floor_absolute",            0.65, "policy: no finder card may ever be served below this consensus market ratio — the one non-negotiable floor; every other floor knob is clamped to be >= this"),
+    ("market_floor_one_board",           0.85, "policy: floor when the counterparty has no real personal board. Higher than the two-board floors on purpose — with only one board there is no two-sided personal evidence to justify departing from the market"),
+    ("market_floor_two_board_base",      0.80, "policy: starting floor when both managers have real boards; confidence and two-sided gain discount DOWN from here, never up"),
+    ("market_floor_confidence_discount", 0.10, "policy: maximum floor relief bought by ranking confidence (multiplied by the weaker board's package confidence)"),
+    ("market_floor_surplus_discount",    0.05, "policy: maximum floor relief bought by the WEAKER manager's normalized personal gain"),
+    ("market_core_ratio",                0.80, "policy: Core / Conviction lane boundary — at or above this ratio a card is Core"),
+    ("personal_gain_min_frac",           0.0,  "policy: minimum weaker-side gain fraction a two-board card must clear; 0 = any strictly non-negative two-sided gain qualifies"),
+    ("conviction_deck_share",            0.20, "policy: max share of a deck that may be Conviction cards (hard-capped at 2 regardless)"),
+    ("deck_core_lead_cards",             3.0,  "policy: the deck's first N cards must be Core — trust is built before anything unusual is shown"),
+    ("deck_core_min_share",              0.70, "policy: minimum Core share of the served deck, measured against the REALIZED length"),
+    ("policy_surplus_norm",              0.25, "policy: the weaker-side gain fraction that counts as 'full' personal strength when normalizing for the floor's surplus discount"),
+    ("conf_source_seed",                 0.0,  "policy: confidence weight for an UNCHANGED consensus seed — no personal evidence at all"),
+    ("conf_source_cross_format",         0.75, "policy: confidence weight for a ranking copied across scoring formats"),
+    ("conf_source_explicit",             1.0,  "policy: confidence weight for an explicit tier, manual order, import or anchor placement — the strongest statement of value the product accepts"),
+    ("policy_confidence_band_high",      0.66, "policy: trade confidence at/above which a card's privacy-safe confidence_band reads 'high'"),
+    ("policy_confidence_band_med",       0.33, "policy: trade confidence at/above which a card's confidence_band reads 'medium' (below it reads 'low')"),
+    ("policy_shadow_log_cap",           40.0,  "policy: max trade_policy_shadow rows written per deck job — bounds a pathological league without hiding the treatment's rejections"),
 ]
 
 
@@ -2894,6 +3109,25 @@ def _migrate_db() -> None:
         # M1 (fit-challenger measurement rail) — stamp of the last funneled
         # write; NULL until a key's first set_config() after this landed.
         ("model_config",       "updated_at",            "VARCHAR"),
+        # ── personal-market policy (docs/plans/personal-market-policy/scope.md)
+        # Every column below is nullable and unbackfilled by design; see the
+        # table definitions for why a backfill would be a fabrication.
+        ("member_rankings",    "comparison_count",          "INTEGER"),
+        ("member_rankings",    "confidence_weight",         "FLOAT"),
+        ("member_rankings",    "confidence_source",         "VARCHAR"),
+        ("deck_impressions",   "valuation_json",            "TEXT"),
+        ("deck_impressions",   "trade_concept_id",          "VARCHAR"),
+        ("deck_impressions",   "policy_variant",            "VARCHAR"),
+        ("deck_impressions",   "source_like_impression_id", "VARCHAR"),
+        ("trade_decisions",    "impression_id",             "VARCHAR"),
+        ("trade_decisions",    "trade_concept_id",          "VARCHAR"),
+        ("trade_matches",      "trade_concept_id",          "VARCHAR"),
+        ("trade_matches",      "user_a_impression_id",      "VARCHAR"),
+        ("trade_matches",      "user_b_impression_id",      "VARCHAR"),
+        ("trade_matches",      "first_like_at",             "VARCHAR"),
+        ("trade_matches",      "second_like_at",            "VARCHAR"),
+        ("trade_matches",      "match_latency_seconds",     "FLOAT"),
+        ("trade_matches",      "match_valuation_json",      "TEXT"),
     ]
     # Each ALTER TABLE gets its own transaction so a "column already exists"
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
@@ -5434,8 +5668,19 @@ def save_trade_decision(
     give_player_ids: list[str],
     receive_player_ids: list[str],
     decision: str,
+    *,
+    impression_id: str | None = None,
+    trade_concept_id: str | None = None,
 ) -> bool:
     """Persist a high-level trade card decision (like/pass).
+
+    `impression_id` / `trade_concept_id` (personal-market policy, 2026-09-04)
+    are optional and NULL by default, so every existing caller is unchanged.
+    They exist because this table is the older audit log: it has no reliable
+    impression key, which is precisely why a mutual match could not name the
+    two impressions that produced it. New writes carry both, so
+    `check_for_match` can hand `create_trade_match` the counterparty's
+    impression and like time instead of leaving them unknowable.
 
     Returns **True** when a row was written and **False** when the call was
     recognised as a REPLAY of the row immediately preceding it and skipped
@@ -5525,6 +5770,8 @@ def save_trade_decision(
             receive_player_ids = receive_json,
             decision           = decision,
             created_at         = now,
+            impression_id      = impression_id,
+            trade_concept_id   = trade_concept_id,
         ))
     return True
 
@@ -5587,6 +5834,9 @@ def load_recent_league_likes(
                 trade_decisions_table.c.give_player_ids,
                 trade_decisions_table.c.receive_player_ids,
                 trade_decisions_table.c.created_at,
+                # Personal-market policy — the counterparty's own impression,
+                # so an injected mirror can name the like that caused it.
+                trade_decisions_table.c.impression_id,
             ).where(
                 and_(
                     trade_decisions_table.c.league_id  == league_id,
@@ -5613,6 +5863,9 @@ def load_recent_league_likes(
             "give_player_ids":    give,
             "receive_player_ids": receive,
             "created_at":         r.created_at,
+            # Additive key; None on every pre-change row and on any decision
+            # the client sent without an impression.
+            "impression_id":      getattr(r, "impression_id", None),
         })
     return result
 
@@ -5970,6 +6223,95 @@ def save_deck_impressions(rows: list[dict]) -> None:
         return
     with engine.begin() as conn:
         conn.execute(insert(deck_impressions_table), rows)
+
+
+# ---------------------------------------------------------------------------
+# Personal-market policy writers (scope: docs/plans/personal-market-policy/)
+# ---------------------------------------------------------------------------
+
+def save_trade_policy_shadow(rows: list[dict]) -> int:
+    """Batch-insert `trade_policy_shadow` rows — candidates the treatment
+    policy REJECTED.
+
+    Row assembly lives in `trade_policy.shadow_row`; this is the thin write.
+    Caller wraps in try/except: like every other telemetry writer in this
+    file, a shadow-log failure must never break trade generation.
+
+    Returns the number of rows written so the caller can surface a health
+    counter — a silent zero here would be indistinguishable from "the policy
+    rejected nothing", which is the exact misreading these rows exist to
+    prevent.
+    """
+    if not rows:
+        return 0
+    with engine.begin() as conn:
+        conn.execute(insert(trade_policy_shadow_table), rows)
+    return len(rows)
+
+
+def save_trade_proposal(row: dict) -> tuple[int | None, bool]:
+    """Idempotently record ONE confirmed provider send.
+
+    Returns ``(proposal_id, created)``. ``created`` is False when an existing
+    row already covered this send, which is the normal outcome of a retry.
+
+    Two idempotency keys, checked in this order:
+
+      1. ``proposal_event_id`` — minted by the caller BEFORE the provider
+         call. Stable within that server request, including a ledger retry.
+         It is NOT stable across a new client HTTP request. A provider send
+         retried by the client can therefore create a second confirmed-send
+         record; this helper does not provide provider-send idempotency.
+      2. ``provider_transaction_id`` — the provider's own id, when it gave
+         one. Catches a retry that (incorrectly) minted a fresh event id.
+
+    Deliberately NOT a unique index on (2): most sends legitimately carry no
+    transaction id, so the constraint would have to be partial, and
+    `_migrate_db` cannot add indexes to existing tables — the constraint
+    would exist on fresh databases and silently not in production. A
+    select-then-insert is honest about being a narrow window rather than
+    pretending to be a lock; the `proposal_event_id` UNIQUE constraint is the
+    real guarantee and it is declared on the table.
+    """
+    ev = row.get("proposal_event_id")
+    txid = row.get("provider_transaction_id")
+    with engine.begin() as conn:
+        if ev:
+            hit = conn.execute(
+                select(trade_proposals_table.c.id).where(
+                    trade_proposals_table.c.proposal_event_id == ev
+                ).limit(1)
+            ).fetchone()
+            if hit:
+                return (hit.id, False)
+        if txid:
+            hit = conn.execute(
+                select(trade_proposals_table.c.id).where(
+                    and_(
+                        trade_proposals_table.c.provider == row.get("provider"),
+                        trade_proposals_table.c.provider_transaction_id == txid,
+                    )
+                ).limit(1)
+            ).fetchone()
+            if hit:
+                return (hit.id, False)
+        res = conn.execute(insert(trade_proposals_table).values(**row))
+        return (res.inserted_primary_key[0], True)
+
+
+def load_trade_proposals(user_id: str, league_id: str | None = None,
+                         limit: int = 100) -> list[dict]:
+    """Read back proposal records for one user. Operator/analysis surface —
+    no route exposes it."""
+    with engine.connect() as conn:
+        q = select(trade_proposals_table).where(
+            trade_proposals_table.c.user_id == user_id)
+        if league_id:
+            q = q.where(trade_proposals_table.c.league_id == league_id)
+        rows = conn.execute(
+            q.order_by(trade_proposals_table.c.id.desc()).limit(limit)
+        ).fetchall()
+    return [dict(r._mapping) for r in rows]
 
 
 def save_deck_outcome(
@@ -6849,7 +7191,14 @@ def load_deck_fatigue_reset(user_id: str, league_id: str) -> str | None:
 def load_deck_impression(impression_id: str) -> dict | None:
     """F5 — one impression row's owner + frozen features, for the
     synchronous taste update riding an outcome write. Read-only; None for
-    an unknown id (late/junk labels update nothing)."""
+    an unknown id (late/junk labels update nothing).
+
+    `trade_hash` / `trade_concept_id` (personal-market policy, 2026-09-04)
+    are ADDITIVE keys: `_record_trade_proposal` compares the suggestion's
+    hash against the FINAL package's to tell an edited send from an
+    unedited one, and `_owned_impression_id` uses the same single read for
+    its ownership check. Existing callers read `user_id` / `league_id` /
+    `features_json` / `served_at` and are unaffected."""
     with engine.connect() as conn:
         row = conn.execute(
             select(
@@ -6857,12 +7206,16 @@ def load_deck_impression(impression_id: str) -> dict | None:
                 deck_impressions_table.c.league_id,
                 deck_impressions_table.c.features_json,
                 deck_impressions_table.c.served_at,
+                deck_impressions_table.c.trade_hash,
+                deck_impressions_table.c.trade_concept_id,
             ).where(deck_impressions_table.c.impression_id == impression_id)
         ).first()
     if row is None:
         return None
     return {"user_id": row.user_id, "league_id": row.league_id,
-            "features_json": row.features_json, "served_at": row.served_at}
+            "features_json": row.features_json, "served_at": row.served_at,
+            "trade_hash": row.trade_hash,
+            "trade_concept_id": row.trade_concept_id}
 
 
 def load_user_taste(user_id: str) -> list[dict]:
@@ -8048,11 +8401,33 @@ def is_linked_platform_league(league_id: str) -> bool:
 # Member rankings operations
 # ---------------------------------------------------------------------------
 
+def _confidence_weight(comparison_count, source) -> float | None:
+    """Confidence weight for one stored ranking row.
+
+    Delegates to `trade_policy.confidence_weight_for` so the write path and
+    the engine's read path cannot drift — there is exactly one formula.  The
+    import is lazy because `trade_policy` reaches `trade_service` for its
+    knobs and `trade_service` reaches back here for `get_config()`; a
+    top-level import would cycle.  A failure returns None (unknown
+    confidence, which reads as the lowest) rather than raising: a ranking
+    save must never fail because a telemetry weight could not be computed.
+    """
+    try:
+        from .trade_policy import confidence_weight_for
+        return float(confidence_weight_for(comparison_count, source))
+    except Exception as err:                       # pragma: no cover — belt
+        log.warning("confidence weight computation failed: %s", err)
+        return None
+
+
 def upsert_member_rankings(
     user_id: str,
     league_id: str,
     rankings: list[dict],
     scoring_format: str = DEFAULT_SCORING,
+    *,
+    comparison_counts: dict | None = None,
+    confidence_source: str | None = None,
 ) -> None:
     """
     Replace a user's ranking snapshot for a league + scoring format.
@@ -8063,20 +8438,53 @@ def upsert_member_rankings(
     scoring_format) and bulk-inserts the fresh snapshot.  The OTHER
     format's snapshot is left untouched, so toggling scoring doesn't
     wipe the rank set you're not currently using.
+
+    Confidence (personal-market policy, 2026-09-04)
+    -----------------------------------------------
+    `comparison_counts` is ``{player_id: n}`` — the same map
+    `RankingService.comparison_counts()` already gives the trade engine for
+    the REQUESTING user.  Persisting it here is what lets a league-mate's
+    board be confidence-shrunk symmetrically instead of being trusted raw.
+
+    `confidence_source` names the provenance for the whole snapshot
+    (`votes` / `cross_format` / `explicit` / `seed`); per-player counts still
+    decide the weight for vote-based evidence.  The weight is computed and
+    STORED at write time rather than derived on read, so a later change to
+    `shrink_pseudocount` cannot retroactively rewrite what a past board was
+    worth.
+
+    Both are optional and both default to None.  A caller that passes
+    neither writes NULL confidence, which every reader treats as the LOWEST
+    confidence — the fail-safe direction.  That is also exactly what every
+    pre-existing row holds, so no caller is silently upgraded.
     """
     now  = _now()
-    rows = [
-        {
+    counts = comparison_counts or {}
+    rows = []
+    for r in rankings:
+        if not r.get("player_id") or r.get("elo") is None:
+            continue
+        pid = r["player_id"]
+        # Per-row overrides win over the snapshot-wide map — an import path
+        # that knows a single player's provenance can say so.
+        n = r.get("comparison_count", counts.get(pid))
+        src = r.get("confidence_source", confidence_source)
+        row = {
             "user_id":        user_id,
             "league_id":      league_id,
-            "player_id":      r["player_id"],
+            "player_id":      pid,
             "elo":            float(r["elo"]),
             "updated_at":     now,
             "scoring_format": scoring_format,
+            "comparison_count":  None,
+            "confidence_weight": None,
+            "confidence_source": None,
         }
-        for r in rankings
-        if r.get("player_id") and r.get("elo") is not None
-    ]
+        if n is not None or src is not None:
+            row["comparison_count"] = int(n) if n is not None else None
+            row["confidence_source"] = src
+            row["confidence_weight"] = _confidence_weight(n, src)
+        rows.append(row)
 
     with engine.begin() as conn:
         # Delete only this format's rows. Legacy NULL-tagged rows (before
@@ -8120,14 +8528,31 @@ def load_member_rankings(
     Returns:
     {
         user_id: {
-            "username":    str,
-            "elo_ratings": { player_id: elo, ... }
+            "username":            str,
+            "elo_ratings":         { player_id: elo, ... },
+            "comparison_counts":   { player_id: int, ... },    # may be empty
+            "confidence_weights":  { player_id: float, ... },  # may be empty
+            "confidence_source":   str | None,
+            "board_updated_at":    str | None,   # newest row's updated_at
         },
         ...
     }
 
     Only users who have submitted at least one ranking in this format
     are included.
+
+    The three confidence keys (personal-market policy, 2026-09-04) are
+    ADDITIVE — every pre-existing consumer reads `username` / `elo_ratings`
+    and is unaffected.  They are empty/None for rows written before
+    confidence persistence existed, and `trade_policy.shrink_board` treats an
+    absent weight as 0.0, i.e. price that player at consensus.  Failing safe
+    that way is the point: the engine must be MORE conservative when it does
+    not know how well-sampled an opinion is, and the previous behaviour
+    (trust the whole board raw) was the opposite.
+
+    `confidence_source` is snapshot-wide.  A snapshot written by more than
+    one provenance reports the source of the majority of its rows; the
+    per-player weights, which are what the math actually uses, stay exact.
     """
     with engine.connect() as conn:
         # Username lookup from league_members
@@ -8160,14 +8585,40 @@ def load_member_rankings(
         ranking_rows = conn.execute(q).fetchall()
 
     result: dict = {}
+    src_tally: dict = {}
     for r in ranking_rows:
         uid = r.user_id
         if uid not in result:
             result[uid] = {
-                "username":    username_map.get(uid, uid),
-                "elo_ratings": {},
+                "username":           username_map.get(uid, uid),
+                "elo_ratings":        {},
+                "comparison_counts":  {},
+                "confidence_weights": {},
+                "confidence_source":  None,
+                "board_updated_at":   None,
             }
+            src_tally[uid] = {}
+        _upd = getattr(r, "updated_at", None)
+        if _upd and (result[uid]["board_updated_at"] is None
+                     or _upd > result[uid]["board_updated_at"]):
+            result[uid]["board_updated_at"] = _upd
         result[uid]["elo_ratings"][r.player_id] = r.elo
+        # getattr with a default: a Postgres/SQLite instance that has not yet
+        # run _migrate_db has no such column, and a ranking read must not
+        # start 500ing because a telemetry column is one deploy behind.
+        n = getattr(r, "comparison_count", None)
+        w = getattr(r, "confidence_weight", None)
+        s = getattr(r, "confidence_source", None)
+        if n is not None:
+            result[uid]["comparison_counts"][r.player_id] = n
+        if w is not None:
+            result[uid]["confidence_weights"][r.player_id] = w
+        if s:
+            src_tally[uid][s] = src_tally[uid].get(s, 0) + 1
+
+    for uid, tally in src_tally.items():
+        if tally:
+            result[uid]["confidence_source"] = max(tally, key=tally.get)
 
     return result
 
@@ -8304,6 +8755,41 @@ def check_for_match(
 
     Returns True if a matching "like" decision exists.
     """
+    return find_mirror_like(
+        current_user_id, league_id, target_user_id,
+        give_player_ids, receive_player_ids,
+        fuzzy=fuzzy, fuzzy_tau=fuzzy_tau,
+        fuzzy_guard_rank=fuzzy_guard_rank,
+    ) is not None
+
+
+def find_mirror_like(
+    current_user_id: str,
+    league_id: str,
+    target_user_id: str,
+    give_player_ids: list[str],
+    receive_player_ids: list[str],
+    fuzzy: bool = False,
+    fuzzy_tau: float = 0.8,
+    fuzzy_guard_rank: int = 120,
+) -> dict | None:
+    """The DETAIL behind `check_for_match` (personal-market policy, 2026-09-04).
+
+    Identical matching logic — `check_for_match` is now a thin bool wrapper
+    over this, so there is one implementation and the two can never disagree.
+    What this adds is the counterparty's row itself:
+
+        {"impression_id": str|None, "trade_concept_id": str|None,
+         "liked_at": str|None, "exact": bool}
+
+    A match is a SEQUENCE, not one observation: the counterparty liked the
+    mirror at some earlier moment, under whatever consensus values, rosters
+    and policy existed then.  `create_trade_match` needs that moment and that
+    impression to record first-like/second-like times and to link both
+    users' exact impressions.  Returning only `True` threw all of it away.
+
+    Returns None when no mirror like exists.
+    """
     give_set    = set(give_player_ids)
     receive_set = set(receive_player_ids)
 
@@ -8313,6 +8799,9 @@ def check_for_match(
             select(
                 trade_decisions_table.c.give_player_ids,
                 trade_decisions_table.c.receive_player_ids,
+                trade_decisions_table.c.impression_id,
+                trade_decisions_table.c.trade_concept_id,
+                trade_decisions_table.c.created_at,
             ).where(
                 and_(
                     trade_decisions_table.c.user_id    == target_user_id,
@@ -8325,35 +8814,46 @@ def check_for_match(
             )
         ).fetchall()
 
-    parsed: list[tuple[set, set]] = []
+    parsed: list[tuple[set, set, object]] = []
     for r in rows:
         try:
             their_give    = set(json.loads(r.give_player_ids))
             their_receive = set(json.loads(r.receive_player_ids))
         except (json.JSONDecodeError, TypeError):
             continue
-        parsed.append((their_give, their_receive))
+        parsed.append((their_give, their_receive, r))
+
+    def _detail(row, exact: bool) -> dict:
+        return {
+            # getattr defaults: an instance one deploy behind _migrate_db has
+            # no such column, and match detection must not start failing over
+            # a telemetry field.
+            "impression_id":    getattr(row, "impression_id", None),
+            "trade_concept_id": getattr(row, "trade_concept_id", None),
+            "liked_at":         getattr(row, "created_at", None),
+            "exact":            exact,
+        }
 
     # Exact set-equality mirror — always checked first, behavior unchanged.
-    for their_give, their_receive in parsed:
+    for their_give, their_receive, row in parsed:
         # Their give == what current user receives, their receive == what current user gives
         if their_give == receive_set and their_receive == give_set:
-            return True
+            return _detail(row, True)
 
     if not fuzzy:
-        return False
+        return None
 
     # Fuzzy pass — near-mirrors that differ only by low-value pieces.
-    for their_give, their_receive in parsed:
+    for their_give, their_receive, row in parsed:
         if _jaccard(their_give, receive_set) < fuzzy_tau:
             continue
         if _jaccard(their_receive, give_set) < fuzzy_tau:
             continue
         differing = (their_give ^ receive_set) | (their_receive ^ give_set)
         if _all_low_value_players(differing, fuzzy_guard_rank):
-            return True
+            return _detail(row, False)
 
-    return False
+    return None
 
 
 def match_already_exists(
@@ -8410,6 +8910,12 @@ def create_trade_match(
     user_b_id: str,
     user_a_give: list[str],
     user_a_receive: list[str],
+    *,
+    trade_concept_id: str | None = None,
+    user_a_impression_id: str | None = None,
+    user_b_impression_id: str | None = None,
+    first_like_at: str | None = None,
+    match_valuation_json: str | None = None,
 ) -> dict:
     """
     Persist a new trade match and return it as a dict.
@@ -8417,8 +8923,41 @@ def create_trade_match(
     user_a is the user whose swipe *triggered* the match detection
     (i.e. the current user who just swiped "like").
     user_b is the counterparty who had already swiped "like" earlier.
+
+    Temporal attribution (personal-market policy, 2026-09-04)
+    ---------------------------------------------------------
+    All five keyword arguments default to None, so every existing caller
+    writes exactly the rows it wrote before.
+
+    `first_like_at` is user_b's like — they liked the mirror EARLIER, which
+    is what made this match possible. `second_like_at` is always `now`,
+    because user_a is by definition the one who just decided. The latency
+    between them is stored rather than derived so a later change in
+    event-query semantics cannot silently rewrite historical lags.
+
+    `match_valuation_json` is a THIRD snapshot: the unchanged package
+    re-evaluated under the roster / consensus / board state that exists NOW.
+    It answers "was the concept still valid when mutual interest formed?"
+    and must never be confused with either user's serve-time snapshot —
+    those stay on their own impression rows, untouched.
+
+    A malformed `first_like_at` yields a NULL latency rather than raising:
+    the match itself is the product event and must not fail on an audit
+    field.
     """
     now = _now()
+    latency = None
+    if first_like_at:
+        try:
+            _a = datetime.fromisoformat(str(first_like_at).replace("Z", "+00:00"))
+            _b = datetime.fromisoformat(str(now).replace("Z", "+00:00"))
+            if _a.tzinfo is None and _b.tzinfo is not None:
+                _a = _a.replace(tzinfo=_b.tzinfo)
+            elif _b.tzinfo is None and _a.tzinfo is not None:
+                _b = _b.replace(tzinfo=_a.tzinfo)
+            latency = max((_b - _a).total_seconds(), 0.0)
+        except (ValueError, TypeError):
+            latency = None
     with engine.begin() as conn:
         result = conn.execute(
             insert(trade_matches_table).values(
@@ -8429,6 +8968,13 @@ def create_trade_match(
                 user_a_receive = json.dumps(user_a_receive),
                 matched_at   = now,
                 status       = "pending",
+                trade_concept_id      = trade_concept_id,
+                user_a_impression_id  = user_a_impression_id,
+                user_b_impression_id  = user_b_impression_id,
+                first_like_at         = first_like_at,
+                second_like_at        = now if first_like_at else None,
+                match_latency_seconds = latency,
+                match_valuation_json  = match_valuation_json,
             )
         )
         match_id = result.inserted_primary_key[0]

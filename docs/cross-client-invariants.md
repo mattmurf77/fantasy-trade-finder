@@ -339,6 +339,25 @@ Three rules that are not negotiable:
 
 **Locations:** `backend/server.py` (`trade_card_to_dict`), `web/js/app.js` fairness meter.
 
+> **Known scale bug — [G-070](../living-memory/GOTCHAS.md) (found 2026-09-04, not fixed).** A likes-you **synthesized** card (`likes_you` true, `basis` `consensus`, `mismatch_score` 0.0) computes `fairness_score` from **summed raw Elo**, not from `package_value_v2` in value space like every other path. Elo is a log scale, so the ratio compresses toward 1.0 — an observed card read `0.851` against its own `give_value`/`receive_value` of 704.7 / 2459.6 (true ratio **0.29**). The card's value bar is correct; only this scalar is on the wrong scale. Exclude that class from any `fairness_score` aggregate, or read `deck_impressions.valuation_json.market.ratio`, which is one scale on all paths.
+
+## Personal-market policy enum strings — **reserved, not yet on the wire** (2026-09-04)
+
+Scope block: [personal-market-policy](plans/personal-market-policy/scope.md). Both flags (`trade.valuation_telemetry`, `trade.personal_market_policy_v1`) default OFF, and **no card payload carries any of these fields yet** — the Phase 3 client contract is specified here so the strings are fixed before a client ships against them, exactly as the breaker's objection codes were held back in v1.
+
+| Field | Values | Meaning |
+|---|---|---|
+| `market_fairness` | float `[0, 1]` | The consensus market ratio the card actually cleared. **Not** `fairness_score` under a new name: it is the point ratio the hard floor was applied to, with no range-overlap rescue. |
+| `value_basis` | `two_board` \| `one_board` \| `consensus` | What the card's personal math rests on. `two_board` is the only value that may be described as a mutual win. |
+| `confidence_band` | `high` \| `medium` \| `low` | Which band the **weaker** of the two boards falls in (`policy_confidence_band_high` 0.66 / `policy_confidence_band_med` 0.33). Privacy-safe by construction: it reveals no counterparty value, ranking position or comparison count. |
+| `opportunity_label` | `core` \| `conviction` | The deck lane. A `conviction` card must visibly state that it involves a market premium; it must never expose the opponent's precise values. |
+
+**Server-side only, never serialized:** `policy_variant` (`legacy` / `personal_market_v1`), `trade_concept_id`, `source_like_impression_id`. The last is another user's impression id and must not reach a client.
+
+**The banned copy** is "fairness is off". The explore control does **not** disable the guardrail — it permits qualified conviction cards down to their dynamic floor, never to 0.50 and never below `market_floor_absolute`. A label such as "Explore ranking edges" describes the behaviour; "fairness off" describes something the engine will not do.
+
+**Locations (when Phase 3 ships):** `backend/trade_policy.PolicyResult.client_payload`, `backend/server.py` (`trade_card_to_dict`), `mobile/src/components/` trade card.
+
 ## Trade value-verdict shape (`favors` + `gap`) — the value bar
 
 The pick-denominated **TradeValueBar** (feedback #157) is the universal trade verdict — it replaces the mobile deck's 0–1 fairness meter. It reads four fields that BOTH `POST /api/trade/evaluate` and every deck card (`/api/trades`, `/api/trades/status`, `/api/trades/liked`) now carry, built by the single shared helper `_value_verdict_payload` in `backend/server.py`:
@@ -1181,6 +1200,9 @@ Plan of record: [00-platform-foundation.md](plans/monetization/00-platform-found
 
 **Paywall analytics event names** (client-fired; registered in `backend/analytics_taxonomy.py` and all five classified NON_INTENT in `analytics_queries.NON_INTENT_EVENTS`): `paywall_viewed` {`source`, `platform`}, `paywall_purchase_initiated` {`product_id`, `source`}, `paywall_purchase_completed` {`product_id`, `source`}, `paywall_purchase_failed` {`product_id`, `user_cancelled`}, `paywall_restore` {`restored`}. `source` is the 402's `gate` string or a non-gate origin (`settings`, `onboarding`); `platform` is the config **variant** rendered, not the device platform (that is a `user_events` column derived server-side). Conversion truth is the server-fired `entitlement_granted` row, never these echoes.
 
+### Roster coverage semantics (2026-09-04; dark)
+
+`roster_evaluation.status` is `safe`, `blocked` or `unknown`; clients must never map unknown/missing/estimated evidence to a green safety claim. Safe refers only to checks with reported coverage. Dynasty values are not fantasy-point projections. A FLEX starter is already used and cannot simultaneously be called a backup. Picks cannot fill lineup slots. No mobile/web mount is shipped; the HTML mockup is an additive design review.
 
 ## Verified session activation
 

@@ -616,6 +616,14 @@ tier_mult_bench tier_mult_depth tier_mult_elite tier_mult_solid
 tier_mult_starter trade_elo_gap_max user_elo_shrink user_gain_epsilon
 v3_diversity_max_overlap
 v3_pool_size vet_age waiver_baseline_value waiver_slot_cost youth_age
+
+market_floor_absolute market_floor_one_board market_floor_two_board_base
+market_floor_confidence_discount market_floor_surplus_discount
+market_core_ratio personal_gain_min_frac conviction_deck_share
+deck_core_lead_cards deck_core_min_share policy_surplus_norm
+conf_source_seed conf_source_cross_format conf_source_explicit
+policy_confidence_band_high policy_confidence_band_med
+policy_shadow_log_cap
 """.split()) | {
     # ── knockout refine, 2026-08-23 ────────────────────────────────────────
     # docs/plans/knockout-refine/plan.md §3. Four knobs, four dispositions.

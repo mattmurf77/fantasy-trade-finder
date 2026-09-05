@@ -62,7 +62,15 @@ GOLDEN = (Path(__file__).parent / "fixtures" / "bakeoff"
 #: The columns this change ADDS to deck_impressions. Everything else in a
 #: flag-off row must equal the captured golden exactly.
 NEW_COLUMNS = ("model_arm", "arm_rank", "fairness_threshold",
-               "group_key", "group_rank", "lane_slot", "trade_intent")
+               "group_key", "group_rank", "lane_slot", "trade_intent",
+               # Personal-market policy (2026-09-04). Listed here for the
+               # same reason as the bake-off columns above: the golden was
+               # captured before they existed, so the comparison strips them
+               # — and the loop below then asserts every one of them is NULL
+               # with the flags off, which IS the flag-off byte-identity
+               # guarantee for this change.
+               "valuation_json", "trade_concept_id", "policy_variant",
+               "source_like_impression_id")
 
 
 # ---------------------------------------------------------------------------
