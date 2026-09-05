@@ -325,10 +325,8 @@ def test_propose_unmapped_hard_block_fires_no_trade_sent(client):
     assert _trade_sent_rows() == []
 
 
-def test_mfl_only_user_verifies_via_auth_link_then_proposes(client):
-    """Operator decision 2026-08-11: a successful MFL login (#177 auth-link)
-    IS session verification, so an MFL-only user — never verified via
-    Sleeper/Apple/Google — passes the propose-mfl hard gate."""
+def test_verified_account_links_mfl_then_proposes(client):
+    """The account must prove ownership before linking MFL credentials."""
     import backend.mfl_service as mfl
     c, token = client
     with server._sessions_lock:
@@ -337,6 +335,9 @@ def test_mfl_only_user_verifies_via_auth_link_then_proposes(client):
     r = c.post("/api/trades/propose-mfl", headers=_h(token), data=_propose_body())
     assert r.status_code == 403
     assert r.get_json()["error"] == "verification_required"
+    # Account proof precedes linking credentials from another platform.
+    with server._sessions_lock:
+        server._sessions[token]["verified"] = True
     # MFL sign-in (patched login — no network), then the same propose passes.
     with patch.object(server, "is_enabled",
                       lambda k: k in ("trade.send_in_mfl", "mfl.auth_link")), \

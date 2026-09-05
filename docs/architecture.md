@@ -143,6 +143,7 @@ Contested and orphaned slots are withheld from priced reads by a **row filter** 
 | `fleaflicker_service.py` | ~230 | Fleaflicker league-linking adapter (flag `fleaflicker.link`): zero-auth public JSON API reads (`FetchLeagueStandings`/`FetchLeagueRosters` + email-based `FetchUserLeagues`), `sportradar_id` crosswalk from roster `externalIds`. Consumed by `/api/fleaflicker/*`; live smoke: `python3 -m backend.fleaflicker_service <league_id \| email>` |
 | `trends_service.py` | ~420 | Risers/fallers, contrarian, consensus-gap; reads `elo_history` |
 | `wrapped_collector.py` | ~70 | **Frozen** (analytics P0 cutover, LLD §6.4): its `record_event()` wrote `wrapped_events`, which now receives zero writes — all five former callers route through `database.record_event()` into `user_events`. Kept only until the module is retired |
+| `user_data_lifecycle.py` | ~130 | Concurrent account-work admissions, exclusive deletion draining and generation invalidation. Requests, queued session/generation jobs and notification writes participate. Process-local, matching the single-worker deployment; [ADR-017](adr/adr-017-account-deletion-work-leases.md). |
 | `analytics_taxonomy.py` | ~120 | Analytics P0: single source of truth for event names — `ALLOWED_CLIENT_EVENTS` (POST /api/events allowlist), `SERVER_FIRED_EVENTS`, `FUNNEL_CRITICAL` (SDK overflow retention). Asserts client/server namespace disjointness at import |
 | `analytics_ingest.py` | ~300 | Analytics P1: the `POST /api/events` pipeline — validation, dedupe, PII scrub, rate limit, single-transaction batch insert on the dedicated `ingest_engine`. Always-200 accounting contract; never touches `users` |
 | `analytics_queries.py` | ~500 | Analytics P2: report catalog R1–R8/R10 as dual-dialect SQL on the read-only `ro_engine` + Python post-processing. Honest degradation (dark→"—", never a fabricated 0). Rendered by `web/admin/analytics.html` |
@@ -302,6 +303,10 @@ This is a limited in-process prerequisite, **not** stateless request handling,
 durable jobs, full thread safety, or a separate worker. One Gunicorn worker and
 all generation/timing policies remain unchanged. See the [implementation record](plans/budget-scalability/implementation.md).
 
+## Ownership and telemetry boundaries
+
+Private route gates require a verified session; username discovery cannot authorize private state. `backend/session_input.py` resolves identity and roster inputs from authenticated session state plus authoritative league sources before session construction or persistence. Apple/Google proof authenticates its provider account; a new Sleeper binding separately requires Sleeper proof. Analytics commits validated events before recommendation outcome side effects, which require verified ownership of an existing impression. Authentication tokens are replaced by domain-separated analytics identifiers at both persistence entry points. Account deletion revokes durable sessions in the same transaction as private data deletion.
+
 ---
 
 ## Win Now season pipeline
@@ -312,7 +317,7 @@ The restricted beta adds a separate season objective without changing the dynast
 
 A bounded in-process worker consumes durable database jobs; this is not an external worker service or a promised latency SLA. League/source inputs and player/week random worlds are reusable, but personalized scenario results remain viewer-scoped. Clients preserve server order, cancel stale local requests and remove expired recommendations. Search/decision state never enters the legacy deck cache or Elo swipe path. Likelihood of actual partner acceptance is not the season model.
 
-The simulator's normal residuals and availability assumptions are explicitly experimental. Shared NFL game/team effects and multiweek injury correlation are absent. Unsupported live play, forecast gaps, scoring/roster/bracket rules and stale source data fail unavailable. Title outputs require independent graduation; the old outlook title display prohibition remains unchanged. [ADR-017](adr/adr-017-win-now-external-forecasts.md) records the separation.
+The simulator's normal residuals and availability assumptions are explicitly experimental. Shared NFL game/team effects and multiweek injury correlation are absent. Unsupported live play, forecast gaps, scoring/roster/bracket rules and stale source data fail unavailable. Experimental title output is operator-authorized before calibration and still requires its flag plus snapshot capability; the old outlook title display prohibition remains unchanged. [ADR-018](adr/adr-018-win-now-external-forecasts.md) records the separation.
 
 Account deletion and final Win Now persistence share a short account row lock (SQLite uses a write reservation); queued computations cannot recreate user evidence after deletion. No lock spans a simulation. Worker housekeeping bounds retention to 7-day jobs, 180-day trade evidence and 400-day forecast/projection evidence.
 

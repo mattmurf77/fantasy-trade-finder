@@ -9,8 +9,8 @@ the length of one init, so the daemon now fetches each at most once and hands
 the payload to every consumer.
 
 What this pins:
-  • exactly ONE `/league/<id>/rosters` read per init for a Sleeper league
-  • exactly ONE `/league/<id>` (league meta) read per init
+  • ONE daemon `/league/<id>/rosters` and league-meta read per init
+  • ONE additional authoritative membership snapshot before initialization
   • `_sync_sleeper_owned_picks(rosters=…, meta=…)` makes neither call itself
   • non-Sleeper league ids still make ZERO Sleeper calls
 
@@ -38,7 +38,7 @@ import backend.trade_block_service as tb_service
 from backend.database import metadata, record_sleeper_trades
 
 LEAGUE_ID = "1338231586314780672"
-NON_SLEEPER_LEAGUE = "demo_league"
+NON_SLEEPER_LEAGUE = "mfl:synthetic:1"
 USER_ID = "460238423161040896"
 OPP_ID = "733459678624915456"
 
@@ -98,6 +98,10 @@ def harness(monkeypatch):
         if tail == LEAGUE_ID:
             calls.bump("meta")
             return dict(LEAGUE_META)
+        if tail == f"{LEAGUE_ID}/users":
+            calls.bump("users")
+            return [{"user_id": USER_ID, "username": "Me"},
+                    {"user_id": OPP_ID, "username": "Opp"}]
         if tail == f"{LEAGUE_ID}/rosters":
             calls.bump("rosters")
             return [dict(r) for r in ROSTERS]
@@ -156,14 +160,30 @@ def harness(monkeypatch):
 
     monkeypatch.setattr(server.threading, "Thread", _InlineBgThread)
 
+    with engine.begin() as conn:
+        conn.execute(db_module.leagues_table.insert().values(
+            sleeper_league_id=NON_SLEEPER_LEAGUE, user_id=USER_ID,
+            name="Imported", platform="mfl"))
+    db_module.upsert_league_members(NON_SLEEPER_LEAGUE, [
+        {"user_id": USER_ID, "username": "Me", "player_ids": ["p1"]},
+        {"user_id": OPP_ID, "username": "Opp", "player_ids": ["p2"]},
+    ])
+    with server._sessions_lock:
+        server._sessions["budget-verified-token"] = {"user_id": USER_ID, "verified": True}
     server.app.config["TESTING"] = True
-    return server.app.test_client(), calls
+    try:
+        yield server.app.test_client(), calls
+    finally:
+        with server._sessions_lock:
+            server._sessions.pop("budget-verified-token", None)
+        engine.dispose()
 
 
 def _init(client, league_id):
     return client.post(
         "/api/session/init",
         content_type="application/json",
+        headers={"X-Session-Token": "budget-verified-token"},
         data=json.dumps({
             "user_id": USER_ID,
             "league_id": league_id,
@@ -185,10 +205,11 @@ def test_daemon_makes_one_rosters_and_one_meta_call(harness):
 
     assert _init(client, LEAGUE_ID).status_code == 200
 
-    # Was 3 rosters reads (trade block, owned picks, matcher roster map) and
-    # 2 league-meta reads (scoring auto-detect, owned picks).
-    assert calls.get("rosters") == 1, calls
-    assert calls.get("meta") == 1, calls
+    # One authoritative membership snapshot plus one daemon snapshot.
+    # The daemon still shares its payload across all background consumers.
+    assert calls.get("rosters") == 2, calls
+    assert calls.get("meta") == 2, calls
+    assert calls.get("users") == 1, calls
     # The rest of the daemon's Sleeper budget, pinned so a regression here is
     # visible: one traded-picks + one drafts read for the owned-pick sync.
     assert calls.get("traded_picks") == 1, calls

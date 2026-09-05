@@ -36,10 +36,12 @@ Hover the pill for format + league context.
 
 1. Open `chrome://extensions` (or `edge://extensions`).
 2. Toggle **Developer mode** (top right).
-3. Click **Load unpacked** and pick this `extension/` directory.
-4. Click the FTF icon in your browser toolbar.
-5. Enter your Sleeper username → pick a league → done.
-6. Open `sleeper.com`, click any player, and watch for the badge.
+3. Extract the release zip, then click **Load unpacked** and pick its `extension/` directory. For a source checkout, pick this directory directly.
+4. Open `https://sleeper.com/login` in the same browser and sign in to the Sleeper account you want to use. Refresh any Sleeper tab opened before extension installation.
+5. Click the FTF toolbar icon, enter that account's Sleeper username, and verify. A different open Sleeper account is rejected.
+6. Choose a league, then open a Sleeper player to see the badge. On the Fleeced web page, enter the same username and choose Verify to use the extension's proof flow.
+
+To update an existing unpacked install, replace its files with the new package, press **Reload** on its extension card and refresh the Sleeper/Fleeced tabs. This is an unpacked Chrome/Edge release, not a Chrome Web Store listing. Do not paste your Sleeper password or session token into Fleeced.
 
 ---
 
@@ -51,28 +53,21 @@ The extension points at the production API by default:
 https://fantasy-trade-finder.onrender.com
 ```
 
-To develop against a local backend, edit both `popup.js` and
-`background.js` and swap the `API_BASE` constant at the top:
-
-```js
-// const API_BASE = 'https://fantasy-trade-finder.onrender.com';
-const API_BASE = 'http://127.0.0.1:5000';
-```
-
-Then reload the extension on `chrome://extensions` (click the refresh icon
-on its card).
+Verification fixes its API destination in `verify.mjs`; the web bridge accepts only the production first-party origin. Localhost is deliberately excluded. Use the synthetic auth harnesses in `qa/web/` for local validation instead of forwarding real credentials to a development page.
 
 ---
 
 ## How it works
 
-- **popup.js** runs the username → league-picker → connect flow and stores
-  the session token + cached rankings map in `chrome.storage.local`.
+- **popup.js** runs username → ownership verification → league selection and stores
+  the verified Fleeced session token + cached rankings in `chrome.storage.local`.
+- **verify.mjs / sleeper-proof.js** obtain the known Sleeper token only on an explicit request from a trusted extension caller, send it to the fixed verification endpoint, and discard it. Raw Sleeper proof is not stored by the extension or returned to the Fleeced web page.
+- **web-auth.js** bridges a single trusted click/Enter request from the production Fleeced page. Origin, top-frame sender, focus, timeout and request correlation are checked.
 - **background.js** is a MV3 service worker. Every 15 minutes it refetches
   rankings from `/api/extension/rankings` so the cache stays fresh. It also
   acts as the message hub between popup and content scripts.
 - **content.js** runs on every `sleeper.com` page. It:
-  1. Reads the cached rankings from `chrome.storage.local`.
+  1. Revalidates the verified session before displaying cached rankings.
   2. Attaches a `MutationObserver` to `<body>` so SPA navigations re-trigger
      scans without a full reload.
   3. Scans for anchors whose href contains `/players/nfl/<id>` — that's the
@@ -89,15 +84,22 @@ on its card).
 
 ## Backend contract
 
-Two endpoints on the FTF server:
+The verification and private-data flow uses these FTF endpoints:
 
 ### `POST /api/extension/auth`
-- Body `{username}` → returns `{stage: "pick_league", leagues: [...]}`
-- Body `{username, league_id}` → returns `{session_token, expires_at,
-  scoring_format, username, league_id, ...}`
+- Body `{username}` discovers the account and returns an initially unverified session. Discovery alone does not grant private access.
+
+### `POST /api/sleeper/link`
+- Header `X-Session-Token`, body `{token}` supplies the transient Sleeper proof.
+- The extension adopts the Fleeced session only when `verified === true` and the returned Sleeper ID matches the requested account.
+- The backend retains the connection credential encrypted; the extension does not persist the raw proof.
+
+### `GET /api/me/streak`
+- The web client uses this private read to revalidate a restored session before displaying account data.
 
 ### `GET /api/extension/rankings`
 - Header: `X-Session-Token: <token>`
+- Requires a verified current session; rejection clears the matching cached session and prompts recovery.
 - Returns:
   ```json
   {
@@ -155,6 +157,9 @@ extension/
 ├── popup.js            Sign-in flow + session storage
 ├── popup.css           Popup styling
 ├── background.js       Service worker (alarm + message hub)
+├── verify.mjs          Trusted ownership-proof orchestration
+├── sleeper-proof.js    Explicit token capture on Sleeper only
+├── web-auth.js         First-party verification bridge
 ├── content.js          Sleeper DOM scanner + badge injector
 ├── content.css         Badge styles (8 tier variants)
 ├── icons/

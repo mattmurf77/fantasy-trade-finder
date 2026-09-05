@@ -229,3 +229,65 @@ def test_finish_requires_running_job_and_preserves_terminal_results(engine, stat
     store.finish_job(job["job_id"], result={"trades": ["late"]})
     assert store.get_job(job["job_id"], "alice") == before
     assert before["status"] == state
+
+
+def test_account_deletion_drains_active_win_now_search_then_removes_its_writes(engine, monkeypatch):
+    import threading
+    from backend import accounts, win_now_service as service
+    db.metadata.create_all(engine)
+    job = store.create_job("alice", "league", {"actor": {"user_id": "alice"}, "params": {}}, require_user=True)
+    entered, release, deleted = threading.Event(), threading.Event(), threading.Event()
+    errors = []
+    monkeypatch.setattr(service, "is_enabled", lambda _: True)
+    def search(actor, params, fetch, *, job_id):
+        entered.set()
+        assert release.wait(3)
+        store.save_scenario("alice", "league", "wins", {"buyer_roster_id": 1, "partner_roster_id": 2,
+            "give": [{"id": "a"}], "receive": [{"id": "b"}]},
+            {"snapshot_id": "s", "expires_at": job["expires_at"]}, require_user=True, job_id=job_id)
+        return {"meta": {"expires_at": job["expires_at"]}, "trades": []}
+    monkeypatch.setattr(service, "run_search", search)
+    def work():
+        try:
+            service.process_pending(lambda _: pytest.fail("unexpected network"))
+        except Exception as exc:
+            errors.append(exc)
+    def delete_account():
+        try:
+            accounts.delete_user_data("alice")
+            deleted.set()
+        except Exception as exc:
+            errors.append(exc)
+    worker = threading.Thread(target=work)
+    worker.start()
+    deletion = None
+    try:
+        assert entered.wait(2)
+        deletion = threading.Thread(target=delete_account)
+        deletion.start()
+        assert not deleted.wait(.05)
+    finally:
+        release.set()
+        for thread in [worker] + ([deletion] if deletion else []):
+            thread.join(4)
+            assert not thread.is_alive()
+    assert not errors
+    assert deleted.is_set()
+    with engine.connect() as conn:
+        for table in (db.users_table, db.win_now_jobs_table, db.win_now_scenarios_table):
+            assert conn.execute(select(table)).first() is None
+
+
+def test_queue_read_started_before_deletion_cannot_admit_stale_user_work(engine, monkeypatch):
+    from backend import accounts, win_now_service as service
+    db.metadata.create_all(engine)
+    store.create_job("alice", "league", {"actor": {"user_id": "alice"}, "params": {}}, require_user=True)
+    original_pending = store.pending_jobs
+    def read_then_delete():
+        rows = original_pending()
+        accounts.delete_user_data("alice")
+        return rows
+    monkeypatch.setattr(store, "pending_jobs", read_then_delete)
+    monkeypatch.setattr(store, "claim_job", lambda _: pytest.fail("stale lifecycle lease must reject before claiming"))
+    monkeypatch.setattr(service, "run_search", lambda *_a, **_k: pytest.fail("deleted user cannot simulate"))
+    service.process_pending(lambda _: pytest.fail("unexpected network"))

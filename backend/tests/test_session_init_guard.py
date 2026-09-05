@@ -1,20 +1,7 @@
-"""POST /api/session/init fail-fast guard (mobile-testing S2 drill).
+"""Init requires a verified existing token; demo bootstrap is separate.
 
-An authenticated request (X-Session-Token present) whose body omits
-`user_id` used to silently default to DEMO_USER_ID and build a session
-with an empty user_roster — which only surfaced much later as "session
-missing required state for trade gen". The route now returns 400
-{"error": "missing_user_id"} immediately.
-
-The demo flow must keep working unchanged:
-  - tokenless /api/session/init (first init / web demo) still defaults
-    to DEMO_USER_ID and proceeds past the guard
-  - /api/session/demo still bootstraps a seeded demo session
-
-Requests that legitimately pass the guard are stopped one line later by
-patching _load_sleeper_cache to return None ("Player database not
-cached" 400), so the tests distinguish "guard fired" from "guard passed"
-without building the full universal player pool.
+A verified request must provide user_id. Accepted account-only requests
+reach the player-cache guard without any upstream or real database access.
 """
 import json
 from unittest.mock import patch
@@ -22,15 +9,28 @@ from unittest.mock import patch
 import pytest
 
 import backend.server as server
+import backend.database as db
+from sqlalchemy import create_engine
 
 
 CACHE_MISS_ERROR = "Player database not cached"
 
 
 @pytest.fixture()
-def client():
+def client(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    db.metadata.create_all(engine)
+    monkeypatch.setattr(db, "engine", engine)
     server.app.config["TESTING"] = True
-    return server.app.test_client()
+    with server._sessions_lock:
+        server._sessions["some-token"] = {
+            "user_id": "sleeper_123", "verified": True, "account_only": True}
+    try:
+        yield server.app.test_client()
+    finally:
+        with server._sessions_lock:
+            server._sessions.pop("some-token", None)
+        engine.dispose()
 
 
 def _post_init(client, body, token=None):
@@ -61,28 +61,25 @@ def test_token_with_empty_user_id_fails_fast(client):
 
 
 # ---------------------------------------------------------------------------
-# Guard passes: token + user_id, or no token at all (demo / first init).
-# _load_sleeper_cache is patched to None so the request stops at the very
-# next check instead of building real session state.
+# Verified identity plus account-only league reaches the pool guard.
+# Tokenless init is rejected; the dedicated demo route remains available.
 # ---------------------------------------------------------------------------
 
 def test_token_with_user_id_passes_guard(client):
     with patch.object(server, "_load_sleeper_cache", return_value=None):
-        resp = _post_init(client, {"user_id": "sleeper_123"},
+        resp = _post_init(client, {"user_id": "sleeper_123", "league_id": "no_league"},
                           token="some-token")
 
     assert resp.status_code == 400
     assert CACHE_MISS_ERROR in resp.get_json()["error"]
 
 
-def test_tokenless_demo_init_passes_guard(client):
-    # No token, no user_id — the web demo / first-init path. Must NOT be
-    # rejected as missing_user_id; it defaults to DEMO_USER_ID as before.
-    with patch.object(server, "_load_sleeper_cache", return_value=None):
+def test_tokenless_init_is_rejected(client):
+    with patch.object(server, "_load_sleeper_cache",
+                      side_effect=AssertionError("pool must not be reached")):
         resp = _post_init(client, {})
-
-    assert resp.status_code == 400
-    assert CACHE_MISS_ERROR in resp.get_json()["error"]
+    assert resp.status_code == 401
+    assert resp.get_json()["error"] == "session_expired"
 
 
 # ---------------------------------------------------------------------------

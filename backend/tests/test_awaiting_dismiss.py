@@ -75,7 +75,7 @@ def harness():
     metadata.create_all(eng)
 
     token = "awaiting-dismiss-sess"
-    sess = {"user_id": ME, "active_format": "1qb_ppr", "last_active": 0.0}
+    sess = {"verified": True, "user_id": ME, "active_format": "1qb_ppr", "last_active": 0.0}
 
     server.app.config["TESTING"] = True
     client = server.app.test_client()
@@ -297,7 +297,7 @@ def test_empty_lists_and_malformed_body_are_400(harness):
     assert resp.get_json() == _REQUIRED_ERR
 
 
-def test_session_without_user_is_400(harness):
+def test_session_without_user_is_unverified(harness):
     client, _, _, _, _ = harness
     token = "awaiting-dismiss-nouser"
     with server._sessions_lock:
@@ -308,8 +308,8 @@ def test_session_without_user_is_400(harness):
     finally:
         with server._sessions_lock:
             server._sessions.pop(token, None)
-    assert resp.status_code == 400
-    assert resp.get_json() == {"error": "session not initialised"}
+    assert resp.status_code == 403
+    assert resp.get_json() == {"error": "verification_required"}
 
 
 # ---------------------------------------------------------------------------

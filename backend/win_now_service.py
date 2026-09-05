@@ -520,23 +520,31 @@ def run_search(actor, params, fetch, *, job_id=None):
 
 
 def process_pending(fetch):
+    from . import user_data_lifecycle
+    # Capture before reading queued inputs. Deletion drains admitted searches
+    # and invalidates stale queued work, matching the dynasty worker protocol.
+    started = user_data_lifecycle.snapshot()
     store.expire_jobs()
     for job in store.pending_jobs():
-        if not store.claim_job(job["job_id"]):
-            continue
-        try:
-            if timestamp(job["expires_at"]) <= now_utc():
-                raise Unavailable("job_expired")
-            if not is_enabled("trades.win_now") or not is_enabled("outlook.season_projections"):
-                raise Unavailable("feature_disabled")
-            inputs = json.loads(job["input_json"])
-            result = run_search(inputs["actor"], inputs["params"], fetch, job_id=job["job_id"])
-            store.finish_job(job["job_id"], result=result)
-        except Unavailable as exc:
-            store.finish_job(job["job_id"], reason=exc.reason)
-        except Exception:
-            log.exception("Win Now job failed job_id=%s", job["job_id"])
-            store.finish_job(job["job_id"], reason="generation_failed")
+        lease = user_data_lifecycle.capture(job["user_id"], started=started)
+        with lease.active() as active:
+            if not active:
+                continue
+            if not store.claim_job(job["job_id"]):
+                continue
+            try:
+                if timestamp(job["expires_at"]) <= now_utc():
+                    raise Unavailable("job_expired")
+                if not is_enabled("trades.win_now") or not is_enabled("outlook.season_projections"):
+                    raise Unavailable("feature_disabled")
+                inputs = json.loads(job["input_json"])
+                result = run_search(inputs["actor"], inputs["params"], fetch, job_id=job["job_id"])
+                store.finish_job(job["job_id"], result=result)
+            except Unavailable as exc:
+                store.finish_job(job["job_id"], reason=exc.reason)
+            except Exception:
+                log.exception("Win Now job failed job_id=%s", job["job_id"])
+                store.finish_job(job["job_id"], reason="generation_failed")
 
 
 def start_worker_on_startup(fetch):

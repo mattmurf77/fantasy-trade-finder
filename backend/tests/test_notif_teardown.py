@@ -48,7 +48,7 @@ def client():
     metadata.create_all(engine)
 
     token = "sess-notif-tok"
-    sess = {"user_id": UID, "active_format": "1qb_ppr", "last_active": 0.0}
+    sess = {"verified": True, "user_id": UID, "active_format": "1qb_ppr", "last_active": 0.0}
 
     server.app.config["TESTING"] = True
     c = server.app.test_client()

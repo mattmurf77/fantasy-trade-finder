@@ -40,7 +40,7 @@ def client():
     metadata.create_all(engine)
 
     token = "sess-export-tok"
-    sess = {"user_id": UID, "active_format": "1qb_ppr", "last_active": 0.0}
+    sess = {"verified": True, "user_id": UID, "active_format": "1qb_ppr", "last_active": 0.0}
 
     server.app.config["TESTING"] = True
     c = server.app.test_client()
@@ -95,6 +95,7 @@ def test_export_verified_user_requires_verified_session(client):
     flags_on.add("account.data_export")
     db_module.upsert_user(sleeper_user_id=UID)
     accounts.mark_user_verified(UID, "sleeper")
+    server._sessions[token]["verified"] = False
     r = c.get("/api/account/export", headers=_h(token))
     assert r.status_code == 403
     assert r.get_json()["error"] == "verification_required"
@@ -127,7 +128,7 @@ def test_export_happy_path_matches_deletion_matrix(client):
     assert r.status_code == 200, r.get_data(as_text=True)
     assert "attachment" in r.headers.get("Content-Disposition", "")
     archive = r.get_json()
-    assert archive["user_id"] == UID and archive["export_version"] == 1
+    assert archive["user_id"] == UID and archive["export_version"] == 2
 
     tables = archive["tables"]
     # Every deletion-matrix table key is present in the archive.

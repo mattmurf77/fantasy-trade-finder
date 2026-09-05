@@ -32,12 +32,14 @@ import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
+from contextlib import contextmanager
 
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from sqlalchemy import delete, insert, select, update
 
 from . import database as db
+from . import user_data_lifecycle
 
 # ---------------------------------------------------------------------------
 # Provider constants
@@ -608,15 +610,100 @@ def migrate_board_data(from_uid: str, to_uid: str) -> dict[str, int]:
 #            bad_trade_flags.target_user_id/target_username → NULL where the
 #            deleted user was the counterparty on someone else's flag.
 #            app_feedback.user_id/username → NULL (feedback is retained as a
-#            product record per privacy policy §5; becomes anonymous, which
-#            the submission contract already allows).
+#            product record per privacy policy §5; submitted freeform text
+#            is removed because it can itself contain personal identifiers).
 #
+#   ALSO DELETE newer private tables in _ADDITIONAL_PRIVATE_TABLES,
+#            durable sessions, account-linked billing (including raw payloads),
+#            own deck impressions/outcomes, identity links, linked anonymous
+#            device events/assignments, and private ranking sets/entries.
+#            Resolve acct_<account_id> aliases before removing identity rows.
+#   ALSO ANONYMIZE shared packages, public ranking authors, referral sides,
+#            affiliate attribution, recorded-pick authors, trade-block owners,
+#            strong roster-history owners and suggestion impression links.
+#            Weak user-keyed roster history is deleted. Other identified
+#            users' events/identity links on a shared device are preserved.
 #   KEEP     player_value_history + model_config (not user-keyed),
 #            draft_picks (public league pick grid other members rely on;
 #            re-synced from Sleeper), players.
 # ---------------------------------------------------------------------------
 
+def _user_data_scope(conn, user_id: str, account_id: str | None = None):
+    """Resolve account aliases, never other users linked through a shared device."""
+    acct_ids = set(conn.execute(select(db.accounts_table.c.account_id).where(
+        db.accounts_table.c.sleeper_user_id == user_id)).scalars())
+    if account_id:
+        acct_ids.add(account_id)
+    if is_account_user_id(user_id):
+        acct_ids.add(user_id[len(ACCOUNT_USER_PREFIX):])
+    user_ids = {user_id} | {account_user_id(aid) for aid in acct_ids}
+    user_ids.update(uid for uid in conn.execute(
+        select(db.accounts_table.c.sleeper_user_id).where(
+            db.accounts_table.c.account_id.in_(acct_ids))).scalars() if uid)
+    # Durable sessions also record historical working keys. Resolve these
+    # before revocation so their private rows cannot outlive the account.
+    user_ids.update(conn.execute(select(db.sessions_table.c.user_id).where(
+        db.sessions_table.c.account_id.in_(acct_ids))).scalars())
+    return user_ids, acct_ids
+
+
+# Additional private rows introduced after the original deletion matrix.
+# Billing payloads are deleted too: nulling their keys leaves identity in JSON.
+_ADDITIONAL_PRIVATE_TABLES = (
+    "espn_credentials", "mfl_credentials", "deck_candidate_sets", "bakeoff_runs",
+    "deck_suppressions", "deck_fatigue_resets", "deck_replenish_log", "user_taste",
+    "trade_pass_reasons", "standing_offers", "league_board_history",
+    "rank_set_adoptions", "accuracy_scores", "mock_drafts", "receipts_grades",
+    "trade_proposals", "trade_policy_shadow",
+)
+
+
+@contextmanager
+def deletion_scope(sleeper_user_id: str, account_id: str | None = None):
+    """Drain the full alias set, retrying if a just-finished bind expanded it."""
+    deadline = time.monotonic() + 10.0
+    while True:
+        with db.engine.connect() as conn:
+            user_ids, acct_ids = _user_data_scope(conn, sleeper_user_id, account_id)
+            work_keys = _deletion_work_keys(conn, user_ids, acct_ids)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise user_data_lifecycle.UserDataBusy("account aliases changed during deletion")
+        with user_data_lifecycle.hold(work_keys, timeout=remaining):
+            with db.engine.connect() as conn:
+                latest_users, latest_accounts = _user_data_scope(conn, sleeper_user_id, account_id)
+                latest_keys = _deletion_work_keys(conn, latest_users, latest_accounts)
+            if not latest_keys <= work_keys or not latest_accounts <= acct_ids:
+                continue
+            yield user_ids, acct_ids
+            return
+
+
+def identity_work_key(provider: str, subject: str) -> str:
+    """Stable admission key even when deletion removes the account mapping."""
+    digest = hashlib.sha256((provider + "\0" + subject).encode()).hexdigest()
+    return "identity_work:" + digest
+
+
+def _deletion_work_keys(conn, user_ids, account_ids):
+    identities = conn.execute(select(db.linked_identities_table.c.provider,
+                                     db.linked_identities_table.c.provider_subject).where(
+        db.linked_identities_table.c.account_id.in_(account_ids)))
+    return set(user_ids) | {identity_work_key(provider, subject) for provider, subject in identities}
+
+
 def delete_user_data(sleeper_user_id: str,
+                     account_id: str | None = None) -> dict[str, int]:
+    """Drain authorized work, atomically delete, then reject queued old work."""
+    with deletion_scope(sleeper_user_id, account_id) as (user_ids, account_ids):
+        with db.engine.connect() as conn:
+            work_keys = _deletion_work_keys(conn, user_ids, account_ids)
+        counts = _delete_user_data(sleeper_user_id, account_id)
+        user_data_lifecycle.invalidate(work_keys)
+        return counts
+
+
+def _delete_user_data(sleeper_user_id: str,
                      account_id: str | None = None) -> dict[str, int]:
     """Delete/anonymize everything keyed to `sleeper_user_id`.
 
@@ -628,14 +715,120 @@ def delete_user_data(sleeper_user_id: str,
     counts: dict[str, int] = {}
 
     with db.engine.begin() as conn:
+        user_ids, acct_ids = _user_data_scope(conn, uid, account_id)
+
         def _del(name: str, tbl, col="user_id"):
-            res = conn.execute(delete(tbl).where(getattr(tbl.c, col) == uid))
+            res = conn.execute(delete(tbl).where(getattr(tbl.c, col).in_(user_ids)))
             counts[f"{name}_deleted"] = res.rowcount or 0
 
-        # Short Win Now writes take this same row lock after simulations, so
-        # deletion cannot be followed by a worker resurrecting user evidence.
+        # Keep the DB fence as well as the in-process lifecycle lease: a
+        # rolling deploy may still have a Win Now writer in another container.
+        # Lock every resolved alias in a stable order before deleting evidence.
         conn.execute(select(db.users_table.c.sleeper_user_id)
-                     .where(db.users_table.c.sleeper_user_id == uid).with_for_update()).first()
+                     .where(db.users_table.c.sleeper_user_id.in_(user_ids))
+                     .order_by(db.users_table.c.sleeper_user_id).with_for_update()).all()
+        # Revoke durable tokens in this transaction. A failure must roll back
+        # the deletion, never return success with restorable credentials.
+        for name in ("sessions", "entitlements", "subscription_events"):
+            tbl = getattr(db, name + "_table")
+            res = conn.execute(delete(tbl).where(
+                tbl.c.user_id.in_(user_ids) | tbl.c.account_id.in_(acct_ids)))
+            counts[name + "_deleted"] = res.rowcount or 0
+
+        links = db.identity_links_table
+        own_link = (links.c.sleeper_user_id.in_(user_ids)
+                    | links.c.account_id.in_(acct_ids))
+        device_ids = set(conn.execute(select(links.c.device_id).where(own_link)).scalars())
+        # Delete pre-auth history associated with these devices. Preserve
+        # identified events for another person who used the same installation.
+        anonymous_ids = {"device:" + did for did in device_ids}
+        events = db.user_events_table
+        res = conn.execute(delete(events).where(
+            events.c.user_id.in_(user_ids | anonymous_ids)))
+        counts["user_events_deleted"] = res.rowcount or 0
+        res = conn.execute(delete(links).where(
+            own_link | (links.c.device_id.in_(device_ids)
+                        & links.c.sleeper_user_id.is_(None)
+                        & links.c.account_id.is_(None))))
+        counts["identity_links_deleted"] = res.rowcount or 0
+        assignments = db.experiment_assignments_table
+        res = conn.execute(delete(assignments).where(
+            assignments.c.unit_id.in_(user_ids | anonymous_ids | device_ids | acct_ids)))
+        counts["experiment_assignments_deleted"] = res.rowcount or 0
+
+        impressions = select(db.deck_impressions_table.c.impression_id).where(
+            db.deck_impressions_table.c.user_id.in_(user_ids))
+        res = conn.execute(delete(db.deck_outcomes_table).where(
+            db.deck_outcomes_table.c.impression_id.in_(impressions)))
+        counts["deck_outcomes_deleted"] = res.rowcount or 0
+        # Shared executed-trade records keep their aggregate classification,
+        # but cannot retain links to deleted private suggestions.
+        links = db.suggestion_trade_links_table
+        for col in ("matched_impression_id", "ghost_impression_id"):
+            res = conn.execute(update(links).where(links.c[col].in_(impressions))
+                               .values({col: None}))
+            counts["suggestion_trade_links_" + col + "_anonymized"] = res.rowcount or 0
+        _del("deck_impressions", db.deck_impressions_table)
+        for name in _ADDITIONAL_PRIVATE_TABLES:
+            _del(name, getattr(db, name + "_table"))
+
+        # Another manager owns their confirmed-send record. Preserve its
+        # package/provider history, but remove deleted-counterparty attribution
+        # and the frozen valuation, which can contain their private board data.
+        proposals = db.trade_proposals_table
+        res = conn.execute(update(proposals).where(
+            proposals.c.target_user_id.in_(user_ids)).values(
+                target_user_id=None, valuation_json=None))
+        counts["trade_proposals_counterparty_anonymized"] = res.rowcount or 0
+
+        # Preserve published ranking snapshots and other users' adoptions;
+        # remove attribution and freeform author metadata. Private sets have
+        # no shared contract, so remove their entries and the sets themselves.
+        sets = db.rank_sets_table
+        private_sets = select(sets.c.id).where(
+            sets.c.owner_user_id.in_(user_ids), sets.c.visibility == "private")
+        for name in ("rank_set_entries", "rank_set_adoptions"):
+            tbl = getattr(db, name + "_table")
+            res = conn.execute(delete(tbl).where(tbl.c.rank_set_id.in_(private_sets)))
+            counts[name + "_private_deleted"] = res.rowcount or 0
+        res = conn.execute(delete(sets).where(sets.c.id.in_(private_sets)))
+        counts["rank_sets_deleted"] = res.rowcount or 0
+        res = conn.execute(update(sets).where(sets.c.owner_user_id.in_(user_ids))
+                           .values(owner_user_id=DELETED_USER_PLACEHOLDER,
+                                   title="Deleted contributor", description=None))
+        counts["rank_sets_anonymized"] = res.rowcount or 0
+
+        for name, col, values in (
+            ("shared_packages", "user_id", {"user_id": DELETED_USER_PLACEHOLDER}),
+            ("affiliate_clicks", "user_id", {"user_id": None}),
+            ("trade_block", "user_id", {"user_id": None}),
+            ("users", "invited_by", {"invited_by": None}),
+            ("recorded_picks", "recorded_by", {"recorded_by": DELETED_USER_PLACEHOLDER}),
+            ("draft_picks", "assigned_by", {"assigned_by": None}),
+        ):
+            tbl = getattr(db, name + "_table")
+            res = conn.execute(update(tbl).where(tbl.c[col].in_(user_ids)).values(**values))
+            counts[name + "_" + col + "_anonymized"] = res.rowcount or 0
+        # Weak roster keys embed the user ID; strong keys are public team slots.
+        history = db.league_roster_history_table
+        res = conn.execute(delete(history).where(history.c.owner_user_id.in_(user_ids),
+                                                history.c.team_key_quality == "weak"))
+        counts["league_roster_history_weak_deleted"] = res.rowcount or 0
+        res = conn.execute(update(history).where(history.c.owner_user_id.in_(user_ids))
+                           .values(owner_user_id=None))
+        counts["league_roster_history_anonymized"] = res.rowcount or 0
+        referrals = db.referrals_table
+        # NULL the invitee first; per-row sender tombstones avoid collisions
+        # in the unique sender/invitee index after several account deletions.
+        res = conn.execute(update(referrals).where(referrals.c.referred_user_id.in_(user_ids))
+                           .values(referred_user_id=None))
+        counts["referrals_referred_anonymized"] = res.rowcount or 0
+        rows = conn.execute(select(referrals.c.id).where(
+            referrals.c.referrer_user_id.in_(user_ids))).scalars().all()
+        for rid in rows:
+            conn.execute(update(referrals).where(referrals.c.id == rid).values(
+                referrer_user_id=f"{DELETED_USER_PLACEHOLDER}:{rid}"))
+        counts["referrals_referrer_anonymized"] = len(rows)
 
         _del("swipe_decisions", db.swipe_decisions_table)
         _del("trade_decisions", db.trade_decisions_table)
@@ -652,7 +845,6 @@ def delete_user_data(sleeper_user_id: str,
         _del("notification_prefs", db.notification_prefs_table)
         _del("notification_events_log", db.notification_events_log_table)
         _del("notification_queue", db.notification_queue_table)
-        _del("user_events", db.user_events_table)
         _del("wrapped_events", db.wrapped_events_table)
         _del("sleeper_credentials", db.sleeper_credentials_table)
         _del("league_members", db.league_members_table)
@@ -664,48 +856,40 @@ def delete_user_data(sleeper_user_id: str,
         # record (incl. status + both decisions) intact.
         res = conn.execute(
             update(db.trade_matches_table)
-            .where(db.trade_matches_table.c.user_a_id == uid)
+            .where(db.trade_matches_table.c.user_a_id.in_(user_ids))
             .values(user_a_id=DELETED_USER_PLACEHOLDER)
         )
         n = res.rowcount or 0
         res = conn.execute(
             update(db.trade_matches_table)
-            .where(db.trade_matches_table.c.user_b_id == uid)
+            .where(db.trade_matches_table.c.user_b_id.in_(user_ids))
             .values(user_b_id=DELETED_USER_PLACEHOLDER)
         )
         counts["trade_matches_anonymized"] = n + (res.rowcount or 0)
 
         res = conn.execute(
             update(db.trade_impressions_table)
-            .where(db.trade_impressions_table.c.target_user_id == uid)
+            .where(db.trade_impressions_table.c.target_user_id.in_(user_ids))
             .values(target_user_id=None)
         )
         counts["trade_impressions_target_anonymized"] = res.rowcount or 0
 
         res = conn.execute(
             update(db.bad_trade_flags_table)
-            .where(db.bad_trade_flags_table.c.target_user_id == uid)
+            .where(db.bad_trade_flags_table.c.target_user_id.in_(user_ids))
             .values(target_user_id=None, target_username=None)
         )
         counts["bad_trade_flags_target_anonymized"] = res.rowcount or 0
 
         res = conn.execute(
             update(db.app_feedback_table)
-            .where(db.app_feedback_table.c.user_id == uid)
-            .values(user_id=None, username=None)
+            .where(db.app_feedback_table.c.user_id.in_(user_ids))
+            .values(user_id=None, username=None,
+                    text="[Removed following account deletion]")
         )
         counts["app_feedback_anonymized"] = res.rowcount or 0
 
         # Identity layer — the bound account plus any session-attached one.
-        acct_ids = set()
-        for row in conn.execute(
-            select(db.accounts_table.c.account_id).where(
-                db.accounts_table.c.sleeper_user_id == uid
-            )
-        ).fetchall():
-            acct_ids.add(row.account_id)
-        if account_id:
-            acct_ids.add(account_id)
         n_acct = n_ident = 0
         for aid in acct_ids:
             res = conn.execute(
@@ -726,7 +910,7 @@ def delete_user_data(sleeper_user_id: str,
         # The user record itself — last, per privacy policy §6.
         res = conn.execute(
             delete(db.users_table).where(
-                db.users_table.c.sleeper_user_id == uid
+                db.users_table.c.sleeper_user_id.in_(user_ids)
             )
         )
         counts["users_deleted"] = res.rowcount or 0
@@ -736,10 +920,10 @@ def delete_user_data(sleeper_user_id: str,
 
 # ---------------------------------------------------------------------------
 # Data export (GDPR Art. 20 portability — teardown 06-02, flag
-# `account.data_export` on the route) — the deletion matrix above is the
-# manifest: every table the matrix DELETEs or ANONYMIZEs for this user is
-# exported here, so "Download my data" and "Delete account" describe the
-# same data set. Route in server.py (GET /api/account/export) applies the
+# `account.data_export` on the route). The export includes the deletion
+# scope's private rows and user-attributed shared rows. Credential ciphertext,
+# legacy session identifiers and raw billing payloads are never exported.
+# Route in server.py (GET /api/account/export) applies the
 # same auth gates as deletion (demo-blocked, verified-user step-up).
 # ---------------------------------------------------------------------------
 
@@ -760,18 +944,34 @@ _EXPORT_TABLES: tuple = (
     ("asset_preferences",       "asset_preferences_table",       "user_id",         ()),
     ("user_player_skips",       "user_player_skips_table",       "user_id",         ()),
     ("notifications",           "notifications_table",           "user_id",         ()),
-    ("device_tokens",           "device_tokens_table",           "user_id",         ()),
+    ("device_tokens",           "device_tokens_table",           "user_id",         ("device_token",)),
     ("notification_prefs",      "notification_prefs_table",      "user_id",         ()),
     ("notification_events_log", "notification_events_log_table", "user_id",         ()),
     ("notification_queue",      "notification_queue_table",      "user_id",         ()),
-    ("user_events",             "user_events_table",             "user_id",         ()),
+    ("user_events",             "user_events_table",             "user_id",         ("session_id",)),
     ("wrapped_events",          "wrapped_events_table",          "user_id",         ()),
     ("sleeper_credentials",     "sleeper_credentials_table",     "user_id",         ("token_encrypted",)),
     ("league_members",          "league_members_table",          "user_id",         ()),
-    ("leagues",                 "leagues_table",                 "user_id",         ()),
+    ("leagues",                 "leagues_table",                 "user_id",         ("espn_auth", "platform_auth")),
     ("bad_trade_flags",         "bad_trade_flags_table",         "user_id",         ()),
     ("trade_impressions",       "trade_impressions_table",       "user_id",         ()),
     ("app_feedback",            "app_feedback_table",            "user_id",         ()),
+    ("espn_credentials", "espn_credentials_table", "user_id", ("espn_s2_encrypted",)),
+    ("mfl_credentials", "mfl_credentials_table", "user_id", ("cookie_encrypted",)),
+    ("deck_impressions", "deck_impressions_table", "user_id", ()),
+    ("shared_packages", "shared_packages_table", "user_id", ()),
+    ("affiliate_clicks", "affiliate_clicks_table", "user_id", ()),
+    ("trade_block", "trade_block_table", "user_id", ()),
+    ("rank_sets", "rank_sets_table", "owner_user_id", ()),
+    ("recorded_picks", "recorded_picks_table", "recorded_by", ()),
+    ("draft_picks", "draft_picks_table", "assigned_by", ()),
+    ("league_roster_history", "league_roster_history_table", "owner_user_id", ()),
+)
+
+_EXPORT_TABLES += tuple(
+    (name, name + "_table", "user_id", ())
+    for name in _ADDITIONAL_PRIVATE_TABLES
+    if name not in {"espn_credentials", "mfl_credentials"}
 )
 
 
@@ -790,55 +990,55 @@ def export_user_data(sleeper_user_id: str,
     """
     uid = sleeper_user_id
     out: dict = {
-        "export_version": 1,
+        "export_version": 2,
         "exported_at":    _now_iso(),
         "user_id":        uid,
         "tables":         {},
     }
     tables = out["tables"]
     with db.engine.connect() as conn:
+        user_ids, acct_ids = _user_data_scope(conn, uid, account_id)
         for key, tbl_attr, col, omit in _EXPORT_TABLES:
             tbl = getattr(db, tbl_attr)
-            rows = conn.execute(
-                select(tbl).where(getattr(tbl.c, col) == uid)
-            ).fetchall()
-            tables[key] = _rows_as_dicts(rows, omit)
+            tables[key] = _rows_as_dicts(conn.execute(
+                select(tbl).where(tbl.c[col].in_(user_ids))).fetchall(), omit)
 
-        # Shared rows — the user's side of trade matches (the deletion
-        # matrix anonymizes these in place rather than deleting them).
-        rows = conn.execute(
-            select(db.trade_matches_table).where(
-                (db.trade_matches_table.c.user_a_id == uid)
-                | (db.trade_matches_table.c.user_b_id == uid)
-            )
-        ).fetchall()
-        tables["trade_matches"] = _rows_as_dicts(rows)
+        for name, predicate, omit in (
+            ("trade_matches", db.trade_matches_table.c.user_a_id.in_(user_ids)
+             | db.trade_matches_table.c.user_b_id.in_(user_ids), ()),
+            ("referrals", db.referrals_table.c.referrer_user_id.in_(user_ids)
+             | db.referrals_table.c.referred_user_id.in_(user_ids), ("invite_token",)),
+            ("accounts", db.accounts_table.c.account_id.in_(acct_ids), ()),
+            ("linked_identities", db.linked_identities_table.c.account_id.in_(acct_ids), ()),
+            ("identity_links", db.identity_links_table.c.sleeper_user_id.in_(user_ids)
+             | db.identity_links_table.c.account_id.in_(acct_ids), ()),
+        ):
+            tbl = getattr(db, name + "_table")
+            tables[name] = _rows_as_dicts(conn.execute(select(tbl).where(predicate)).fetchall(), omit)
 
-        # Identity layer — bound account(s) + the session-attached one.
-        acct_ids = {
-            r.account_id for r in conn.execute(
-                select(db.accounts_table.c.account_id).where(
-                    db.accounts_table.c.sleeper_user_id == uid
-                )
-            ).fetchall()
-        }
-        if account_id:
-            acct_ids.add(account_id)
-        accounts_rows: list[dict] = []
-        identities_rows: list[dict] = []
-        for aid in sorted(acct_ids):
-            accounts_rows += _rows_as_dicts(conn.execute(
-                select(db.accounts_table).where(
-                    db.accounts_table.c.account_id == aid
-                )
-            ).fetchall())
-            identities_rows += _rows_as_dicts(conn.execute(
-                select(db.linked_identities_table).where(
-                    db.linked_identities_table.c.account_id == aid
-                )
-            ).fetchall())
-        tables["accounts"] = accounts_rows
-        tables["linked_identities"] = identities_rows
+        for name, omit in (("sessions", ("token_hash",)), ("entitlements", ()),
+                           ("subscription_events", ("payload", "process_error"))):
+            tbl = getattr(db, name + "_table")
+            tables[name] = _rows_as_dicts(conn.execute(select(tbl).where(
+                tbl.c.user_id.in_(user_ids) | tbl.c.account_id.in_(acct_ids))).fetchall(), omit)
+
+        devices = {r["device_id"] for r in tables["identity_links"]}
+        anonymous_ids = {"device:" + did for did in devices}
+        tables["user_events"] += _rows_as_dicts(conn.execute(
+            select(db.user_events_table).where(
+                db.user_events_table.c.user_id.in_(anonymous_ids))).fetchall(), ("session_id",))
+        tables["experiment_assignments"] = _rows_as_dicts(conn.execute(
+            select(db.experiment_assignments_table).where(
+                db.experiment_assignments_table.c.unit_id.in_(
+                    user_ids | acct_ids | anonymous_ids | devices))).fetchall())
+        impression_ids = [r["impression_id"] for r in tables["deck_impressions"]]
+        tables["deck_outcomes"] = _rows_as_dicts(conn.execute(
+            select(db.deck_outcomes_table).where(
+                db.deck_outcomes_table.c.impression_id.in_(impression_ids))).fetchall())
+        rank_set_ids = [r["id"] for r in tables["rank_sets"]]
+        tables["rank_set_entries"] = _rows_as_dicts(conn.execute(
+            select(db.rank_set_entries_table).where(
+                db.rank_set_entries_table.c.rank_set_id.in_(rank_set_ids))).fetchall())
 
     return out
 

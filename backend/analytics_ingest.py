@@ -284,14 +284,14 @@ def _experiment_stamp(user_id: str, event_type: str,
 # Conflict-ignore insert — sanctioned dialect spot 1 (LLD §4.1 / FR-5)
 # ---------------------------------------------------------------------------
 
-def _insert_events_ignore(conn, rows: list[dict]) -> None:
+def _insert_events_ignore(conn, rows: list[dict]) -> set[str]:
     # NO index_where: the shipped ix_user_events_event_id is a FULL unique
     # index (§3.1) — a partial predicate here fails to match it on Postgres
     # ("no unique constraint matching the given keys").
     ins = sqlite_insert if conn.dialect.name == "sqlite" else pg_insert
     stmt = ins(user_events_table).on_conflict_do_nothing(
-        index_elements=["event_id"])
-    conn.execute(stmt, rows)
+        index_elements=["event_id"]).returning(user_events_table.c.event_id)
+    return set(conn.execute(stmt, rows).scalars())
 
 
 # ---------------------------------------------------------------------------
@@ -310,7 +310,7 @@ def _respond(accepted: int, deduped: int, rejected: list[dict],
     })
 
 
-def ingest_request(session_user_id: str | None):
+def ingest_request(session_user_id: str | None, *, on_accepted=None):
     """Handle POST /api/events. `session_user_id` is resolved by the
     server.py shim (it owns `_sessions`); None covers both no-token and
     dead-token (E-15 — silent fallback to device identity)."""
@@ -327,6 +327,8 @@ def ingest_request(session_user_id: str | None):
 
     # 3 — parse. Empty/absent events → legal no-op (sum 0 == 0).
     body = request.get_json(force=True, silent=True) or {}
+    if not isinstance(body, dict):
+        return _respond(0, 0, [], 0, "batch_rejected:bad_envelope")
     events = body.get("events")
     if not isinstance(events, list) or not events:
         return _respond(0, 0, [], 0, "ok")
@@ -365,7 +367,7 @@ def ingest_request(session_user_id: str | None):
     # 6 — rate limit, WHOLE-BATCH granularity: the hour counter takes the
     # batch's valid count; busting the cap sheds every remaining envelope
     # as accepted-and-dropped (never 429 — KD-2).
-    if valid and _rate_exceeded(device_id or user_id, len(valid)):
+    if valid and _rate_exceeded(session_user_id or device_id or user_id, len(valid)):
         _health_bump("dropped_rate_limited", len(valid))
         accepted = dropped = len(valid)
         _health_bump("accepted", accepted)
@@ -451,7 +453,7 @@ def ingest_request(session_user_id: str | None):
             "event_type":  etype,
             "occurred_at": now_iso,
             "league_id":   None,
-            "session_id":  env["session_id"][:64],
+            "session_id":  db.analytics_session_id(env["session_id"]),
             "device_type": info.get("device_type"),
             "os_version":  info.get("os_version"),
             "app_version": info.get("app_version"),
@@ -472,6 +474,7 @@ def ingest_request(session_user_id: str | None):
     # The OperationalError handler wraps the context-manager ENTRY too:
     # with BEGIN IMMEDIATE in the begin event (RC-8), the 150 ms lock
     # failure raises at .begin() entry, not at execute/commit.
+    fresh = []
     if to_insert:
         try:
             with db.ingest_engine.begin() as conn:
@@ -488,11 +491,11 @@ def ingest_request(session_user_id: str | None):
                          if r["event_id"] not in existing]
                 deduped += len(to_insert) - len(fresh)
                 if fresh:
-                    _insert_events_ignore(conn, fresh)
+                    inserted_ids = _insert_events_ignore(conn, fresh)
+                    inserted = [r for r in fresh if r["event_id"] in inserted_ids]
+                    deduped += len(fresh) - len(inserted)
+                    fresh = inserted
                 accepted += len(fresh)
-                dropped_rows = 0  # placeholder for symmetry; races that
-                # slip past the SELECT are swallowed by conflict-ignore and
-                # still counted `accepted` (documented imprecision, I-4).
         except OperationalError:
             # Lock budget blown (Sunday burst) or transient DB failure —
             # shed the batch, keep product writes healthy (KD-12). The ONE
@@ -502,6 +505,12 @@ def ingest_request(session_user_id: str | None):
 
     _health_bump("accepted", accepted)
     _health_bump("deduped", deduped)
+
+    # Product side effects receive only sanitized rows after a successful
+    # transaction. Database outcome bounds also guard concurrent replay.
+    if on_accepted:
+        for row in fresh:
+            on_accepted(row)
 
     # 13 — respond. Invariant I-3: accepted + deduped + len(rejected) == N.
     return _respond(accepted, deduped, rejected, dropped, "ok")

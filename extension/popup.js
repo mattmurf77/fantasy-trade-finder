@@ -1,5 +1,5 @@
 // Fantasy Trade Finder — popup.js
-// Single-step auth: username → token. League picker is gone — the
+// Explicit Sleeper login proof verifies ownership before private rankings. The
 // content script auto-detects which league the user is viewing on
 // sleeper.com and fetches rankings for that league on demand.
 
@@ -58,6 +58,16 @@ async function clearSession() {
   });
 }
 
+async function clearSessionIfCurrent(token) {
+  if ((await getSession())?.token !== token) return;
+  await clearSession();
+  try { chrome.runtime.sendMessage({ type: 'ftf:signed_out' }); } catch (_) {}
+}
+
+async function cacheSessionIfCurrent(sess) {
+  if ((await getSession())?.token === sess.token) await setSession(sess);
+}
+
 function fmtLabel(fmt) {
   return fmt === 'sf_tep' ? 'SF TEP' : fmt === '1qb_ppr' ? '1QB PPR' : fmt || '—';
 }
@@ -66,15 +76,23 @@ function fmtLabel(fmt) {
 //  API calls
 // ─────────────────────────────────────────────────────────────────
 
+const VERIFICATION_MESSAGES = {
+  sleeper_tab_required: 'Open sleeper.com in a tab and sign in, then try again.',
+  sleeper_login_required: 'Sign in to Sleeper and refresh that tab, then try again.',
+  token_user_mismatch: 'The open Sleeper account does not match this username. Switch accounts in Sleeper and try again.',
+  token_rejected: 'Sign in to Sleeper again, then retry verification.',
+  token_expired: 'Sign in to Sleeper again, then retry verification.',
+  verification_unavailable: 'Sleeper verification is temporarily unavailable. Please try again.',
+  feature_disabled: 'Verification is unavailable on the server. Please try later.',
+  verification_busy: 'Another verification is in progress. Please try again.',
+};
+
 async function apiSignIn(username) {
-  const res = await fetch(`${API_BASE}/api/extension/auth`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username }),
-  });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.message || body.error || `HTTP ${res.status}`);
-  return body;  // { session_token, expires_at, user_id, username, display_name, avatar, leagues }
+  const result = await chrome.runtime.sendMessage({ type: 'ftf:verify_sleeper', username });
+  if (!result?.ok || result.session?.verified !== true) {
+    throw new Error(VERIFICATION_MESSAGES[result?.error] || 'Could not verify your account. Sign in to Sleeper and try again.');
+  }
+  return result.session;
 }
 
 async function apiRankings(token, leagueId) {
@@ -84,7 +102,7 @@ async function apiRankings(token, leagueId) {
   });
   if (res.status === 401) throw new Error('session_expired');
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.message || body.error || `HTTP ${res.status}`);
+  if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
   return body;
 }
 
@@ -113,20 +131,8 @@ document.getElementById('btn-signin').addEventListener('click', async () => {
   if (!username) { setError('Enter your Sleeper username.'); return; }
   show('busy', 'Signing in…');
   try {
-    const auth = await apiSignIn(username);
-    const sess = {
-      token:         auth.session_token,
-      username:      auth.username,
-      display_name:  auth.display_name,
-      user_id:       auth.user_id,
-      avatar:        auth.avatar,
-      expires_at:    auth.expires_at,
-      leagues:       auth.leagues || [],
-      // Cache rankings per league so we don't refetch on every popup open
-      rankings_cache: {},
-    };
-    await setSession(sess);
-    try { chrome.runtime.sendMessage({ type: 'ftf:signed_in', sess }); } catch (_) {}
+    const sess = await apiSignIn(username);
+    try { chrome.runtime.sendMessage({ type: 'ftf:signed_in' }); } catch (_) {}
     await renderConnectedFromActiveTab(sess);
     show('connected');
   } catch (e) {
@@ -157,13 +163,14 @@ document.getElementById('btn-refresh').addEventListener('click', async () => {
     if (leagueId) {
       sess.rankings_cache[leagueId] = { ...data, fetched_at: Date.now() };
     }
-    await setSession(sess);
+    await cacheSessionIfCurrent(sess);
     try { chrome.runtime.sendMessage({ type: 'ftf:rankings_updated', leagueId }); } catch (_) {}
     await renderConnectedFromActiveTab(sess);
     show('connected');
   } catch (e) {
-    if (String(e.message) === 'session_expired') {
-      await clearSession();
+    if (['session_expired', 'verification_required'].includes(String(e.message))) {
+      await clearSessionIfCurrent(sess.token);
+      setError('Verify your Sleeper account again to continue.');
       show('signin');
     } else {
       await renderConnectedFromActiveTab(sess);
@@ -199,13 +206,14 @@ async function renderConnectedFromActiveTab(sess) {
     const data = await apiRankings(sess.token, leagueId);
     sess.rankings_cache = sess.rankings_cache || {};
     sess.rankings_cache[leagueId] = { ...data, fetched_at: Date.now() };
-    await setSession(sess);
+    await cacheSessionIfCurrent(sess);
     try { chrome.runtime.sendMessage({ type: 'ftf:rankings_updated', leagueId }); } catch (_) {}
     const leagueName = data.league_name || findLeagueName(sess, leagueId) || leagueId;
     els.connCurLeague.textContent = leagueName;
     els.connFmt.textContent = fmtLabel(data.format);
     els.connCount.textContent = data.players ? `${Object.keys(data.players).length}` : '0';
-  } catch (_) {
+  } catch (error) {
+    if (['session_expired', 'verification_required'].includes(error.message)) throw error;
     els.connCurLeague.textContent = findLeagueName(sess, leagueId) || leagueId;
     els.connFmt.textContent = '—';
     els.connCount.textContent = '—';
@@ -224,12 +232,24 @@ function findLeagueName(sess, leagueId) {
 
 (async function init() {
   const sess = await getSession();
-  if (sess && sess.token) {
+  if (sess?.token && sess.verified === true) {
     show('busy', 'Loading your rankings…');
-    await renderConnectedFromActiveTab(sess);
-    show('connected');
-  } else {
-    show('signin');
-    els.username.focus();
+    try {
+      // Validate even without an active league; never show an old cached board
+      // while the server requires a fresh proof.
+      await apiRankings(sess.token, null);
+      await renderConnectedFromActiveTab(sess);
+      show('connected');
+      return;
+    } catch (error) {
+      if (!['session_expired', 'verification_required'].includes(error.message)) {
+        setError('Could not check your session. Please try again.');
+        show('signin');
+        return;
+      }
+    }
   }
+  if (sess?.token) await clearSessionIfCurrent(sess.token);
+  show('signin');
+  els.username.focus();
 })();

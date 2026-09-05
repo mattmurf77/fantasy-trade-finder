@@ -54,6 +54,7 @@ def harness():
     service = RankingService(players=pool)
     token = "test-token-w1"
     sess = {
+        "verified": True,
         "user_id":       ME,
         "league":        None,       # no league → member_rankings publish skipped
         "players":       pool,

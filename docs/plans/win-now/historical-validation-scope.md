@@ -26,7 +26,7 @@ Backend unit tests cover outcome extraction, historical-chain traversal, missing
 | Architecture / HLD | updated both reference and memory with separate offline collection/evaluation flow; no production wiring changes |
 | Cross-client invariants | n/a: clients unchanged |
 | Glossary | existing calibration terminology; explained in validation guide |
-| ADR / decision | add provenance distinction to existing ADR-017 / validation guide |
+| ADR / decision | add provenance distinction to existing ADR-018 / validation guide |
 | Scripts README | document capture/evaluation commands |
 | TEST_LEDGER / HANDOFF | updated with parent 119-test run, live capture, source audit and remaining evidence constraints |
 

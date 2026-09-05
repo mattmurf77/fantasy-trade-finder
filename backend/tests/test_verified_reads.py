@@ -6,7 +6,7 @@ username must not be able to VIEW the victim's board once the real owner
 has verified. Rule under test (@_gate_unverified_read):
 
   unverified session + verified controller exists → 403 verification_required
-  unverified session, no controller               → allow (onboarding/grace)
+  unverified session, no controller               → 403 verification_required
   verified session                                → allow
   enforcement flag                                → irrelevant to reads
 
@@ -33,6 +33,15 @@ from .test_verified_sessions import UID, _h, _token
 # session (league/players/services) still 403 cleanly from a bare session.
 GATED_READS = [
     "/api/rankings",
+    "/api/skips",
+    "/api/trio",
+    "/api/settings/stud-tax",
+    "/api/players/1/profile",
+    "/api/portfolio",
+    "/api/notifications/prefs",
+    "/api/account",
+    "/api/profile/visibility",
+    "/api/invite/impact",
     "/api/progress",
     "/api/rankings/progress",
     "/api/me/streak",
@@ -124,23 +133,21 @@ def test_unverified_with_controller_denied_on_every_gated_read(client):
         assert r.get_json()["error"] == "verification_required", path
 
 
-def test_unverified_without_controller_reads_allowed(client):
-    """Onboarding case: nobody has verified this user_id → reads work
-    exactly as before the gate existed."""
+def test_unverified_without_controller_reads_denied(client):
+    """Lack of a controller does not prove the caller owns the data."""
     c, token, _ = client
-    for path in BARE_SESSION_200_READS:
+    for path in GATED_READS:
         r = c.get(path, headers=_h(token))
-        assert r.status_code == 200, f"{path} → {r.status_code}"
+        assert r.status_code == 403, f"{path} → {r.status_code}"
 
 
-def test_enforcement_flag_does_not_deny_reads(client):
-    """auth.enforce_verified_writes hard-denies WRITES only; a user mid-
-    onboarding (no controller anywhere) must still see their own board."""
+def test_enforcement_flag_does_not_weaken_reads(client):
+    """The obsolete rollout flag cannot weaken private-read authorization."""
     c, token, flags_on = client
     flags_on.add("auth.enforce_verified_writes")
-    for path in BARE_SESSION_200_READS:
+    for path in GATED_READS:
         r = c.get(path, headers=_h(token))
-        assert r.status_code == 200, f"{path} → {r.status_code}"
+        assert r.status_code == 403, f"{path} → {r.status_code}"
 
 
 def test_verified_session_reads_allowed_with_controller(client):
@@ -191,9 +198,9 @@ def test_owner_verifies_and_squatters_reads_die(client):
                                             "active_format": "1qb_ppr",
                                             "last_active": 0.0}
     try:
-        # Pre-verification: the squatter can read (grace-era behavior).
+        # A username claim never permits private reads.
         assert c.get("/api/tiers/status",
-                     headers=_h(token_squatter)).status_code == 200
+                     headers=_h(token_squatter)).status_code == 403
 
         # Owner proves control via the Sleeper-JWT link (oracle mocked OK).
         with patch.object(server._sleeper_write, "verify_token_live",

@@ -435,7 +435,7 @@ def client(monkeypatch):
                 team="BBB", years_exp=5, rookie_year="2021"))
 
     svc = _FakeService(_mixed_pool())
-    sess = {
+    sess = {"verified": True,
         "user_id": UID,
         "active_format": "1qb_ppr",
         "last_active": 0.0,

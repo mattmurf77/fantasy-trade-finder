@@ -110,7 +110,7 @@ See [`DEPENDENCIES.md`](DEPENDENCIES.md). High-level: Sleeper API (free, public)
 ## Deployment Topology
 - **Local dev:** `python3 run.py` → Flask on `http://0.0.0.0:5000`; SQLite at `data/trade_finder.db` (with legacy duplicate at root).
 - **Mobile dev:** `cd mobile && npx expo start --tunnel --clear`; scan QR via Expo Go.
-- **Production (planned):** Postgres via `DATABASE_URL` env var, hosted backend (Render config exists in `render.yaml`).
+- **Production:** Postgres via `DATABASE_URL`, hosted on Render. The checked-in gunicorn configuration uses one worker; cron services call that worker over HTTP. Account deletion drains active writes and invalidates queued work in that process. Multiple workers or independent writers require distributed fencing before scaling ([ADR-017](../docs/adr/adr-017-account-deletion-work-leases.md)).
 
 ---
 
@@ -188,6 +188,6 @@ All 17 patterns adopted on 2026-05-21. Cross-references existing [`../docs/`](..
 
 ## Win Now season pipeline
 
-Implementation checkpoint 2026-09-04, D-183 / ADR-017: external weekly forecasts feed supported league scoring and legal lineups, then full-league paired season simulations and constrained search. Durable evidence/jobs and the mobile/web Win Now flow remain separate from dynasty generators and Elo feedback. The 2026-09-05 release configuration enables all three flags under explicit operator acceptance of exploratory evidence; parent integration review is complete, hosted CI/deployment verification is in progress, and calibration remains unproven. Authoritative [architecture](../docs/architecture.md#win-now-season-pipeline) and [build limits](../docs/plans/win-now/BUILD.md).
+Implementation checkpoint 2026-09-04, D-184 / ADR-018: external weekly forecasts feed supported league scoring and legal lineups, then full-league paired season simulations and constrained search. Durable evidence/jobs and the mobile/web Win Now flow remain separate from dynasty generators and Elo feedback. The 2026-09-05 release configuration enables all three flags under explicit operator acceptance of exploratory evidence; parent integration review is complete, hosted CI/deployment verification is in progress, and calibration remains unproven. Authoritative [architecture](../docs/architecture.md#win-now-season-pipeline) and [build limits](../docs/plans/win-now/BUILD.md).
 
 Offline historical validation now has an outcome collector and a conditional archived-prediction evaluator. No serving model or data-store wiring changes. [Protocol and source limitations](../docs/plans/win-now/HISTORICAL-VALIDATION.md).

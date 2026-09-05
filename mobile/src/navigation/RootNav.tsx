@@ -1039,14 +1039,21 @@ export default function RootNav({ booted }: { booted: boolean }) {
         <Stack.Screen
           name="SleeperConnect"
           component={SleeperConnectScreen}
-          options={{
+          options={({ navigation }) => ({
             presentation: 'modal',
             headerShown: true,
             title: 'Connect Sleeper',
             headerTitle: () => <HeaderTitle>Connect Sleeper</HeaderTitle>,
             headerStyle: { backgroundColor: ink.ink0 },
             headerTintColor: chalk.base,
-          }}
+            headerRight: () => (
+              <Pressable testID="sleeperconnect.close" accessibilityRole="button"
+                accessibilityLabel="Close Sleeper sign-in" onPress={() => navigation.goBack()}
+                hitSlop={8} style={styles.headerClose}>
+                <Icon name="x" size={20} color={chalk.dim} />
+              </Pressable>
+            ),
+          })}
         />
         {/* ESPN Connect WebView — cookie capture for private ESPN leagues
             (flag `espn.webview_capture`). Pushed (NOT modal) from

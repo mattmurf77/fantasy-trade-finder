@@ -2,6 +2,10 @@
 
 2026-09-04 — implementation authorized by the operator, using Astra subagents with parent review. Branch `codex/win-now-20260904` starts from fetched main `606e512c`; shared original checkout is preserved.
 
+## Security integration update — 2026-09-05
+
+Security release #279 landed concurrently on main `a927e3a7` and is now being integrated. Initial CI for `ee4f37a8` is superseded and is not validation of the merged revision. Mobile 1.17.0 build **146** is superseded; cancellation was confirmed for EAS build `c8104c6e-ed72-42e6-86e4-7ccc78002c85`. A replacement build is pending after integration. Final merged-revision CI, Render and EAS/TestFlight verification remain pending; no new passing result is claimed.
+
 ## Source decision
 
 Use external **Sleeper weekly stat projections**, behind a provider-neutral adapter. Public live probes confirmed separate forecast weeks through 17. ADP-only placeholder rows are not projections and must not count as coverage. NFL schedule data certifies byes. The application computes league-scored player distributions, legal lineups, standings and playoff outcomes; it does not derive player points from dynasty value or claim a trained proprietary projection model. Source/method remains beta and timestamped snapshots are retained for prospective evaluation. Normalized imports support later contracted providers without a simulator rewrite. No paid source is purchased. Existing Sleeper authorization is retained; commercial provider terms are not inferred from endpoint accessibility.
@@ -75,4 +79,4 @@ Separately, nonzero finite coefficients for exactly `st_ff`, `st_fum_rec`, `st_t
 
 ## Release rollback
 
-Set all three serving flags false and verify the running process. Prior Render commit `0a8093fe` is the code rollback target; preserve evidence tables and raw historical artifacts. Mobile 1.17.0 is planned, not yet proven installed or available in TestFlight. [2026-09-05 release record](../../business/ops/2026-09-05-win-now.md) owns release status.
+Set all three serving flags false and verify the running process. Prior main commit `a927e3a7` is the code rollback target; preserve evidence tables and raw historical artifacts. Mobile 1.17.0 is planned, not yet proven installed or available in TestFlight. [2026-09-05 release record](../../business/ops/2026-09-05-win-now.md) owns release status.

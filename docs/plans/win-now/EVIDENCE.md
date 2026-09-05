@@ -2,6 +2,10 @@
 
 2026-09-04 evidence checkpoint; updated 2026-09-05 for explicit experimental beta-release authorization. Historical test counts and raw exploratory artifacts below are preserved. Authorization permits season/Win Now/championship before calibration; it does not certify probability accuracy or successful deployment. [2026-09-05 release record](../../business/ops/2026-09-05-win-now.md) tracks pending CI/Render verification and mobile 1.17.0 EAS/TestFlight delivery.
 
+## Security integration update — 2026-09-05
+
+Security release #279 landed concurrently on main `a927e3a7` and is now being integrated. Initial CI for `ee4f37a8` is superseded and is not validation of the merged revision. Mobile 1.17.0 build **146** is superseded; cancellation was confirmed for EAS build `c8104c6e-ed72-42e6-86e4-7ccc78002c85`. A replacement build is pending after integration. Final merged-revision CI, Render and EAS/TestFlight verification remain pending; no new passing result is claimed.
+
 ## Completed client checks
 
 | Check | Observed result |

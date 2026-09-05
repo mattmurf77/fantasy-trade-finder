@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -9,11 +9,16 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  Keyboard,
+  useWindowDimensions,
 } from 'react-native';
 import { ink, chalk, semantic, space, radii, type, shadowSheet, scrim } from '../theme/chalkline';
 import { Button } from './chalkline';
+import SleeperLoginCapture from './SleeperLoginCapture';
+import { linkSleeperToken, persistSleeperToken } from '../api/sendInSleeper';
 import { ApiError } from '../api/client';
 import { linkSleeperUsername, type LinkSleeperResponse } from '../api/auth';
+import { useSession } from '../state/useSession';
 
 // ── The Sleeper-identity link form (account-first P2.6), extracted ────────
 //
@@ -57,6 +62,11 @@ export interface LinkSleeperFormProps {
  *  <Card>; the sheet below wraps it in a Modal. */
 export function LinkSleeperForm({ onLinked, onNotice, onBusyChange }: LinkSleeperFormProps) {
   const [linkUsername, setLinkUsername] = useState('');
+  const [capturing, setCapturing] = useState(false);
+  const proofRef = useRef<string | null>(null);
+  const mountedRef = useRef(true);
+  const { height } = useWindowDimensions();
+  useEffect(() => () => { mountedRef.current = false; proofRef.current = null; }, []);
   const [linkBusy, setLinkBusyState] = useState(false);
   const [inlineError, setInlineError] = useState<string | null>(null);
 
@@ -75,22 +85,33 @@ export function LinkSleeperForm({ onLinked, onNotice, onBusyChange }: LinkSleepe
     else setInlineError(t.msg);
   }
 
-  // ── moved VERBATIM from SettingsScreen (only the four caller lines — the
-  //    setUser / setLeague / invalidate / navigation.replace block — were
-  //    removed, and replaced by the single onLinked hand-off). Do not
-  //    reformat: this hunk is reviewed as a byte diff.
+  // Ownership proof stays in memory through the explicit board choice.
   async function handleLinkSleeper(strategy?: 'keep_sleeper' | 'keep_account') {
     const uname = linkUsername.trim();
-    if (!uname || linkBusy) return;
+    const sourceUserId = useSession.getState().user?.user_id;
+    if (!uname || linkBusy || !proofRef.current || !mountedRef.current || !sourceUserId) return;
+    const stillCurrent = () => mountedRef.current && useSession.getState().user?.user_id === sourceUserId;
     setLinkBusy(true);
     setInlineError(null);
     try {
-      const res = await linkSleeperUsername(uname, strategy);
+      const proof = proofRef.current;
+      const res = await linkSleeperUsername(uname, strategy, proof);
+      if (!stillCurrent()) return;
+      // Binding succeeded. Retain only a token separately proven against
+      // the now-bound identity, including the already-bound response path.
+      try {
+        const linked = await linkSleeperToken(proof);
+        if (!stillCurrent()) return;
+        if (linked.verified === true) await persistSleeperToken(res.sleeper_user_id, proof);
+      } catch { /* Source is linked; a send credential can be connected later. */ }
+      if (!stillCurrent()) return;
+      proofRef.current = null;
       // Session is now keyed to the real Sleeper user — the CALLER updates
       // the saved user, drops the sentinel league, and decides where (or
       // whether) to navigate.
       await onLinked(res);
     } catch (e: any) {
+      if (!stillCurrent()) return;
       const body = e instanceof ApiError ? (e.body as any) : null;
       if (body?.error === 'merge_choice_required') {
         const acctSwipes = body.account_board?.swipes ?? 0;
@@ -101,7 +122,7 @@ export function LinkSleeperForm({ onLinked, onNotice, onBusyChange }: LinkSleepe
             `@${uname} already has rankings too (${slpSwipes} comparisons). ` +
             'Which board do you want to keep? The other is deleted.',
           [
-            { text: 'Cancel', style: 'cancel' },
+            { text: 'Cancel', style: 'cancel', onPress: () => { proofRef.current = null; } },
             {
               text: 'Keep this board',
               onPress: () => void handleLinkSleeper('keep_account'),
@@ -112,18 +133,44 @@ export function LinkSleeperForm({ onLinked, onNotice, onBusyChange }: LinkSleepe
             },
           ],
         );
+      } else if (body?.error === 'token_user_mismatch' || body?.error === 'token_rejected') {
+        proofRef.current = null;
+        setToast({ msg: 'Sign in to the Sleeper account matching that username, then try again.', tone: 'warn' });
       } else if (body?.error === 'sleeper_already_claimed') {
+        proofRef.current = null;
         setToast({
           msg: 'That Sleeper account is already verified by another sign-in.',
           tone: 'warn',
         });
       } else {
+        proofRef.current = null;
         setToast({ msg: e?.message || "Couldn't link that username.", tone: 'warn' });
       }
     } finally {
-      setLinkBusy(false);
+      if (mountedRef.current) setLinkBusy(false);
     }
   }
+
+  if (capturing) return (
+    <View style={styles.connectBody}>
+      <Text style={styles.connectHelp}>
+        Sign in to Sleeper as @{linkUsername.trim()} to verify ownership.
+        Your password stays with Sleeper. The sign-in token is stored securely
+        to verify your account and send trades you approve.
+      </Text>
+      <View style={{ height: Math.min(420, height * 0.48) }}>
+        <SleeperLoginCapture onToken={(token) => {
+          proofRef.current = token;
+          setCapturing(false);
+          void handleLinkSleeper();
+        }} />
+      </View>
+      <Button label="Back to username" variant="ghost" onPress={() => {
+        proofRef.current = null;
+        setCapturing(false);
+      }} />
+    </View>
+  );
 
   return (
     <View style={styles.connectBody}>
@@ -134,7 +181,7 @@ export function LinkSleeperForm({ onLinked, onNotice, onBusyChange }: LinkSleepe
       <TextInput
         testID="settings.link-sleeper-input"
         value={linkUsername}
-        onChangeText={setLinkUsername}
+        onChangeText={(value) => { proofRef.current = null; setLinkUsername(value); }}
         placeholder="Sleeper username"
         placeholderTextColor={chalk.faint}
         autoCapitalize="none"
@@ -148,8 +195,12 @@ export function LinkSleeperForm({ onLinked, onNotice, onBusyChange }: LinkSleepe
         </Text>
       ) : null}
       <Button
-        label={linkBusy ? 'Linking…' : 'Link Sleeper username'}
-        onPress={() => void handleLinkSleeper()}
+        label={linkBusy ? 'Linking…' : 'Sign in to link Sleeper'}
+        onPress={() => {
+          Keyboard.dismiss();
+          setInlineError(null);
+          setCapturing(true);
+        }}
         disabled={!linkUsername.trim() || linkBusy}
       />
     </View>
@@ -200,13 +251,13 @@ export default function LinkSleeperSheet({
           <Text style={type.heading} accessibilityRole="header">
             Link your Sleeper username
           </Text>
-          <LinkSleeperForm
+          {visible && <LinkSleeperForm
             {...rest}
             onBusyChange={(b) => {
               busyRef.current = b;
               onBusyChange?.(b);
             }}
-          />
+          />}
           <Button
             label="Cancel"
             variant="ghost"

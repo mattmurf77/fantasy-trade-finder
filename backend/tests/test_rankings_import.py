@@ -430,7 +430,7 @@ class _FakeService:
 
 
 def _mk_sess(svc):
-    return {
+    return {"verified": True,
         "user_id":       USER,
         "active_format": "1qb_ppr",
         "last_active":   0.0,

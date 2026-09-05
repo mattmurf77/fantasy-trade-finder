@@ -87,19 +87,19 @@
         username, display name, avatar), your fantasy leagues for the current
         season, league rosters, draft-pick assets, and the usernames and display
         names of your leaguemates. All of this is read from Sleeper's public,
-        read-only API — signing in never involves a password. Because username
-        entry alone isn't authentication, one honest caveat: until you verify
-        with your Sleeper login, anyone who knows your username could open a
-        session that sees this board — verifying locks it to you.
+        read-only API. A username can discover public league information;
+        private boards and account data require a verified session. Sleeper
+        ownership is verified using the token issued by Sleeper's own sign-in page.
       </li>
       <li>
         <strong>Sign-in identity (Apple or Google).</strong> If you sign in with
         Apple (or, in the future, Google), we store the stable anonymous
         identifier the provider issues for our app (Apple/Google
         <code>sub</code>), the provider name, and — if the provider shares an
-        email address — a one-way SHA-256 hash of it. We never store your email
-        address itself, your name from the provider beyond an optional display
-        name you can change, or any provider password. This identifier exists
+        email address — a one-way SHA-256 hash of it. When account email
+        collection is enabled, we also retain the address shared by your
+        provider or supplied to your account. We may retain an optional display
+        name, but never a provider password. The provider identifier exists
         only to recognize your account across devices and sign-ins.
       </li>
       <li>
@@ -147,18 +147,29 @@
         preferences including your time zone (used for quiet hours).
       </li>
       <li>
-        <strong>Optional Sleeper connection token ("Send in Sleeper" beta).</strong>
-        If you opt into sending trade proposals directly to Sleeper, you sign in
-        to sleeper.com inside an in-app browser window. Your Sleeper password is
+        <strong>Sleeper connection token.</strong>
+        To verify ownership or connect trade sending, you sign in
+        to Sleeper's own site through the app or browser extension. Your Sleeper password is
         entered on Sleeper's own site — we never see, receive, or store it. The
         app captures the session token Sleeper issues and stores it encrypted at
         rest (Fernet symmetric encryption; the key lives only in our server
-        environment, never in the database, and the token is never logged or
-        returned to any client). This token is a full-account Sleeper credential:
-        we use it only to submit or withdraw the trade proposals you explicitly
-        ask us to send. You can disconnect at any time in the app's Settings
+        environment, never in the database, and the server does not return the
+        token to clients). The mobile app can also retain it in device secure
+        storage for verification replay. The extension uses it transiently and
+        does not save it or pass it to the Fleeced web page. This token is a
+        full-account Sleeper credential: we use it to verify ownership and,
+        when you request it, submit or withdraw trade proposals.
+        You can disconnect at any time in the app's Settings
         ("Disconnect Sleeper sending"), which deletes the stored token
-        immediately; it also expires on Sleeper's schedule (about one year).
+        immediately; it also expires on Sleeper's schedule.
+      </li>
+      <li>
+        <strong>Other league connections and purchases.</strong> ESPN and MFL
+        connections retain encrypted authentication cookies or tokens and imported
+        league data. If purchases are enabled, we retain account-linked
+        subscription status, product identifiers and billing-provider event records
+        to grant and reconcile access. Payment processing is handled by the
+        relevant app store and billing provider.
       </li>
       <li>
         <strong>Crash and performance data (Sentry).</strong> The mobile app uses
@@ -173,8 +184,8 @@
 
     <h2>2. Information we do NOT collect</h2>
     <ul>
-      <li>No passwords. Sign-in is by Sleeper username via Sleeper's public API. The optional Sleeper connection captures a session token, never your password.</li>
-      <li>No email addresses, phone numbers, or payment information — the Service has no email field, no billing, and no in-app purchases.</li>
+      <li>We do not store passwords. Sleeper passwords stay on Sleeper's sign-in page; account verification uses the session token it issues. When you use MFL sign-in, we forward the password to MFL to authenticate and retain only the returned connection token.</li>
+      <li>We do not request card numbers or payment-account passwords. Account email and subscription records, when enabled, are described above.</li>
       <li>No location, contacts, camera, microphone, or health data.</li>
       <li>No advertising or third-party marketing analytics SDKs — there are no ad networks and no trackers such as Google Analytics, Meta, Firebase Analytics, Mixpanel, or similar in the app or website. The usage analytics described above are collected and stored by us alone; the only third party receiving diagnostic data is Sentry, for crashes.</li>
       <li>We do not sell your data, and we do not share it with advertisers or data brokers.</li>
@@ -207,31 +218,35 @@
       <li><strong>Ranking comparisons, trade decisions, activity and usage events</strong> are append-only logs kept for product function and quality analysis. On account deletion, the records keyed to your account are deleted outright; a small set of shared records is anonymized instead so the other manager's history stays intact — see section 6.</li>
       <li><strong>Feedback</strong> is kept through its triage lifecycle (new → planned/in&nbsp;progress → fixed/shipped or declined) and retained as a product record afterward.</li>
       <li><strong>Push tokens</strong> are kept until you sign out on that device, disable notifications, or your data is deleted.</li>
-      <li><strong>Sleeper connection tokens</strong> are kept encrypted until you disconnect in the app (immediate deletion), the token expires (about one year), or your data is deleted.</li>
-      <li><strong>Sign-in sessions</strong> are short-lived server records that expire automatically.</li>
+      <li><strong>Sleeper, ESPN and MFL connection tokens</strong> are kept encrypted until you disconnect in the app (immediate deletion), the token expires or your data is deleted.</li>
+      <li><strong>Sign-in sessions</strong> expire automatically; verified sessions may persist across app restarts until sign-out, deletion or the inactivity limit.</li>
       <li><strong>Server logs</strong> used for debugging are transient; our hosting provider retains standard request logs per its own policy.</li>
     </ul>
 
     <h2>6. Deletion and your choices</h2>
     <ul>
       <li><strong>Delete your account:</strong> go to Settings &rarr; Delete
-        account in the app. Deletion is immediate and self-serve — no waiting
-        period and no support request needed. It removes your user record,
+        account in the app. Deletion is self-serve. It waits for active account
+        operations to finish; if they cannot finish in time, retry the request.
+        A successful deletion removes your user record,
         rankings and rating history, ranking comparisons, trade decisions,
         preferences, notifications and push tokens, activity and usage events,
-        and any stored Sleeper connection token. A small set of
+        and stored Sleeper, ESPN and MFL connection tokens. Linked anonymous usage history and stored sign-in sessions are removed too. A small set of
         <em>shared</em> records is anonymized instead of erased so the other
         manager's history stays intact: trade matches keep the other side's
         record with your identifier replaced by a deleted-user placeholder,
         references to you on other users' trade decks and "bad trade" flags
-        are cleared, and any feedback you submitted is kept as an anonymous
-        product record. The app also clears its local analytics queue when
+        are cleared. Feedback you submitted retains its triage status, with your
+        account attribution and note text removed. Public league records and
+        other managers' records may still mention you. The app also clears its local analytics queue when
         your account is deleted. If you can't use the in-app path, you can
         request deletion from any browser through our
         <a href="/contact.html">contact form</a>.</li>
       <li><strong>Export your data:</strong> you can download a copy of the
         data we hold about you (profile, rankings, decisions, events) from
-        the app's Settings; it's returned as a machine-readable file.</li>
+        the app's Settings; it's returned as a machine-readable file. The export
+        includes linked account aliases and newer recommendation records. Login
+        tokens, encrypted credentials, push tokens and raw billing payloads are excluded.</li>
       <li><strong>Device identifier after deletion:</strong> the random install identifier lives in your device's secure storage, which apps cannot fully erase; it persists on the device even after account deletion (and survives reinstalls). It links to nothing on our servers after anonymization — if you sign up again from the same device, our systems see a new user on a previously seen device, nothing more. Erasing your device removes it entirely.</li>
       <li><strong>Disconnect Sleeper sending:</strong> in the app's Settings at any time — the stored token is deleted immediately.</li>
       <li><strong>Push notifications:</strong> can be turned off per-category in Settings or entirely in your device settings.</li>

@@ -1,6 +1,6 @@
-import { api, apiRequest, setSessionToken } from './client';
+import { api, apiRequest, ApiError, getSessionToken, setSessionToken } from './client';
 import { getDeviceId } from './events';
-import { maybeReplaySleeperVerification } from './sendInSleeper';
+import { getPersistedSleeperToken, maybeReplaySleeperVerification } from './sendInSleeper';
 import {
   findMyRoster,
   getLeagueRosters,
@@ -139,11 +139,17 @@ export interface LinkSleeperResponse {
 export async function linkSleeperUsername(
   username: string,
   strategy?: 'keep_sleeper' | 'keep_account',
+  sleeperToken?: string,
 ): Promise<LinkSleeperResponse> {
+  const sessionToken = await getSessionToken();
+  const savedProof = sleeperToken ? null : await getPersistedSleeperToken();
+  await requireSameSession(sessionToken);
   const res = await api.post<LinkSleeperResponse>('/api/account/link-sleeper', {
     username: username.trim().toLowerCase(),
     strategy,
-  });
+    sleeper_token: sleeperToken || savedProof?.token,
+  }, {skipAuth: true, headers: {'X-Session-Token': sessionToken!}});
+  await requireSameSession(sessionToken);
   if (res?.session_token) {
     await setSessionToken(res.session_token);
   }
@@ -218,10 +224,8 @@ export interface SessionInitBody {
 }
 
 // Backend response shape from /api/session/init.
-// `token` is what we care about: when the request goes out without an
-// X-Session-Token header (e.g. after a 401-driven clearSessionToken), the
-// backend creates a brand-new session and returns its token here. Without
-// saving it, every subsequent API call would 401 in a loop.
+// The backend requires an existing verified session and echoes its token.
+// Initialization cannot mint or restore a signed-out session.
 export interface SessionInitResponse {
   ok: boolean;
   token: string;
@@ -235,16 +239,22 @@ export interface SessionInitResponse {
   verification?: SessionVerification;
 }
 
-export async function sessionInit(body: SessionInitBody): Promise<SessionInitResponse> {
-  const res = await api.post<SessionInitResponse>('/api/session/init', body);
-  // Persist the returned token so the next request carries it. Critical
-  // when recovering from a session-expired state — the user goes through
-  // the league picker without a stored token, sessionInit mints a new
-  // one, and we MUST save it or the very next API call 401s again.
-  // Idempotent when the backend echoes back the existing token.
-  if (res?.token) {
-    await setSessionToken(res.token);
+async function requireSameSession(token: string | null): Promise<void> {
+  if (!token || await getSessionToken() !== token) {
+    throw new ApiError(409, {error: 'session_changed'}, 'Your session changed. Please try again.');
   }
+}
+
+export async function sessionInit(body: SessionInitBody): Promise<SessionInitResponse> {
+  const sessionToken = await getSessionToken();
+  // The protected init must follow proof, including cold-start replay and
+  // the sign-in replay already in flight. Account-only sessions skip this
+  // helper because their provider proof was established at mint.
+  await maybeReplaySleeperVerification(body.user_id);
+  await requireSameSession(sessionToken);
+  const res = await api.post<SessionInitResponse>('/api/session/init', body,
+    {skipAuth: true, headers: {'X-Session-Token': sessionToken!}});
+  await requireSameSession(sessionToken);
   // Mirror the server's verified-session state into the store so the
   // verify banner reacts to every init/revalidate. Loaded inline to avoid
   // a circular import (same pattern as consumeInvitedBy below).
@@ -568,9 +578,8 @@ export async function buildSessionInitBody(
 }
 
 // Phase 2 — POST the built body to /api/session/init with cold-restart
-// recovery. Call this AFTER navigating to Main so the ~5-10s backend
-// processing doesn't block UI. Returns a promise the caller can attach
-// error handling to. Does not throw on "player database not cached" —
+// recovery. Await before entering Main so ownership or membership failures
+// remain recoverable in the league picker. Does not throw on "player database not cached" —
 // retries once automatically (same recovery path as initLeagueSession).
 export async function submitSessionInit(body: SessionInitBody): Promise<void> {
   try {

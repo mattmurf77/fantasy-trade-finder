@@ -4,7 +4,7 @@
 
 The Flask app lives in `backend/server.py`; domain route modules such as `backend/win_now_api.py` register on that app. Same-origin from web; mobile + extension hit the deployed host. Keep this file in sync when adding/renaming/removing routes.
 
-Auth: an opaque bearer token from `/api/session/init`, sent as the **`X-Session-Token` header**.
+Auth: an opaque bearer token sent as the **`X-Session-Token` header**. Username discovery tokens require ownership verification before private data access; `/api/session/init` initializes an existing verified session.
 There is no cookie and no Flask session — earlier versions of this line said "session cookie",
 which was never true. Web stores the token in `localStorage`, mobile in `expo-secure-store`.
 The extension uses its own token from `/api/extension/auth`.
@@ -77,7 +77,7 @@ pre-generation eligibility, cache TTLs and polling contracts are unchanged.
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/session/init` | Establish session for a Sleeper username. Response includes the additive `verification` field (below). 400 `missing_user_id` if a session token is sent without `user_id` in the body (tokenless demo/first-init still defaults to the demo user). Optional additive body fields `league_user_id` / `league_display_name` carry the caller's **league identity** for co-owned Sleeper rosters — see [League identity](#apisessioninit--league-identity-co-owned-rosters) below |
+| POST | `/api/session/init` | Initialize an existing verified session. Requires matching `user_id` and `league_id`; profile, roster, opponents and co-owner identity are resolved server-side. 401 `session_expired`, 403 `verification_required` / `identity_mismatch` / `league_membership_required`, 503 `league_data_unavailable`. No tokenless bootstrap or identity reassignment. |
 | GET | `/api/session/ping` | Liveness / session check |
 | POST/GET | `/api/session/demo` | Demo session bootstrap |
 | POST | `/api/session/signout` | **Teardown 06-03 (W2C), unflagged.** Evict the calling `X-Session-Token` server-side → `{ok: true, evicted: bool}`. Idempotent, never errors (missing/stale token → `evicted: false`) — clients call it best-effort during sign-out so the token doesn't stay live until idle eviction. Also deletes the token's durable `sessions` row (W3B; unconditional, so rows from a flag-on period can't outlive a sign-out) |
@@ -105,33 +105,30 @@ Every mutating user route (`rank3`, `reset`, `rankings/reorder`, `rankings/impor
 | Caller | Result |
 |---|---|
 | Verified session | allow |
-| Unverified, user_id has a verified controller (`users.verified_via` set) | **403 `{error: verification_required}`** — first-verified-controller-wins, even during grace |
-| Unverified, no controller, grace (`auth.enforce_verified_writes` false) | allow + one `AUTH-GRACE` log line (runbook monitors the funnel) |
-| Unverified, no controller, enforcement on | **403 `verification_required`** |
+| Unverified session, regardless of controller/flag | **403 `{error: verification_required}`** |
+| Server-created synthetic demo (`is_demo` and `demo_user_` ID) | Ordinary demo operations allowed; export/deletion remain blocked |
 
 Hard-verified regardless of grace: `POST /api/sleeper/link` (carries its own proof — see Send in Sleeper below), `POST /api/trades/propose`, `POST /api/trades/propose-mfl`, `POST /api/trades/respond-mfl`, `POST /api/account/reset-rankings`.
 
 ### The read gate (account-auth P2.5 — read privacy)
 
-"Ranks hidden behind an account" (#102) covers reads too: the write gate alone still let a username-only session *view* the victim's board. Board-content READ routes run `@_gate_unverified_read`, which mirrors **only** the write gate's verified-controller branch:
+"Ranks hidden behind an account" (#102) covers reads too: the write gate alone still let a username-only session *view* the victim's board. Board-content READ routes run `@_gate_unverified_read`, which requires proof on this session, matching the write gate:
 
 | Caller | Result |
 |---|---|
 | Verified session | allow |
-| Unverified, user_id has a verified controller (`users.verified_via` set) | **403 `{error: verification_required}`** — no grace: the owner has proven control, squatters get nothing (`AUTH-DENY unverified_read` log line) |
-| Unverified, no controller | allow — onboarding users must see their own board, so `auth.enforce_verified_writes` is deliberately **not** consulted for reads |
+| Unverified session, regardless of controller/flag | **403 `{error: verification_required}`** |
+| Server-created synthetic demo | Demo operations allowed; account data export/deletion blocked |
 
 **Gated reads** (the user's own board / board-derived content): `GET /api/rankings`, `/api/progress`, `/api/rankings/progress`, `/api/me/streak`, `/api/tiers/status`, `/api/tiers/community-diff`, `/api/tiers/stability`, `/api/anchor/scale` (GET side; POST side keeps the write gate), `/api/trades`, `/api/trades/status`, `/api/trades/liked`, `/api/trades/matches`, `/api/trades/matches/all`, `/api/trades/awaiting`, `/api/league/preferences` (GET), `/api/league/asset-prefs` (GET), `/api/league/free-agents` (priced by the caller's board — #143), `/api/draft/board` (flag `draft.room` — blanket decorator, **deliberately tighter than the `power-rankings` inline precedent**: see the note under [Draft room](#draft-room-flag-draftroom)), `/api/feedback/mine`, `/api/notifications`, `/api/trends/risers-fallers`, `/api/trends/contrarian`, `/api/trends/consensus-gap`, `/api/extension/rankings`, plus **Mode B of `POST /api/trade/evaluate`** (gated inline — it prices by the caller's board; Mode A stays public).
 
-**Deliberately left open** (documented decisions, not omissions): `/api/trade/values` + `/api/trade/evaluate` Mode A (public calculator by design), `/api/tier-config` (global band table, no user data), `/api/leaderboard` (community content; `is_self` tagging only), `/api/trio` + `/api/skips` (onboarding surface — the trio/skip list doesn't expose the board's ordering), `/api/portfolio` (Sleeper-public roster exposure, no Elo), `/api/leagues`, `/api/league/summary` (counts of the caller's matches, no content), `/api/league/coverage|members|member-unlock-states|activity|contrarian|format-stats` (league-shared aggregates by design), `/api/league/rank-chip` (consensus-basis power rank only — league-shared consensus values, no personal/board data, same class as `/api/league/summary`), `/api/market/movers` (universal-pool consensus value trend — no user/board/league content, same class as `/api/tier-config`; flag `market.movers`), `/api/notifications/prefs` GET (settings toggles, not board content), `/api/session/init` + `/api/session/ping` + `/api/sleeper/link` GET (must work for unverified sessions — they drive the verify prompt itself), `/og/*`, `/s/*`, `/u/*`, `/api/profile/*` (public share surfaces by explicit product design).
+**Public/recovery boundaries:** public calculator Mode A, global values/bands, explicitly published shares and league aggregates remain public as documented by their routes. Username discovery and session ping remain bootstrap/recovery operations. Sleeper link GET/POST remain available for token replay/proof; an inconclusive proof returns 503 `verification_unavailable` without storing an unproven credential. Private trio/skips, account/profile settings, notification preferences, portfolios, league lists and platform imports require verification. `/api/session/init` also requires verification; it cannot serve as a bootstrap bypass.
 
-**Client contract:** the mobile API client (`mobile/src/api/client.ts`) treats any 403 `verification_required` as a central signal — it flips `useSession.verification` so the existing `VerifyAccountBanner` appears; gated screens' load-error states show "Verify your account to view your data." **Known limitation:** web + extension clients have no verification flow yet, so once an owner verifies on mobile, their own username-only web/extension sessions read-403 until those clients grow a capture path (same asymmetry the write gate already has).
+**Client contract:** the mobile API client (`mobile/src/api/client.ts`) treats any 403 `verification_required` as a central signal — it flips `useSession.verification` so the existing `VerifyAccountBanner` appears; gated screens' load-error states show "Verify your account to view your data." The browser and extension require an explicit Sleeper verification action through the installed extension. Only the first-party production web origin can request the bridge; localhost pages cannot receive production sessions. Failed/expired proof clears private caches and returns to verification. ESPN/MFL browser entry directs users to mobile verification; it cannot establish ownership by selecting a team.
 
 ### `/api/session/init` — league identity (co-owned rosters)
 
-Two optional, additive body fields, both defaulting to the caller's own values.
-A client that omits them is byte-identical to pre-2026-08-15 behavior, so old
-binaries are unaffected.
+Legacy identity and roster fields remain accepted on the wire but are not trusted. `backend/session_input.py` resolves Sleeper membership/co-ownership from live upstream rosters and uses authorized stored platform imports for ESPN/MFL/Fleaflicker. Supplied profiles, rosters and opponent rows cannot overwrite that authoritative input.
 
 | Field | Meaning |
 |---|---|
@@ -163,7 +160,7 @@ Background: `docs/plans/sleeper-co-owner-rosters/scope.md`.
   "session_verified": false,   // THIS session proved control
   "user_verified":    false,   // some controller has verified this user_id
   "verified_via":     null,    // 'sleeper' | 'apple' | 'google' | null
-  "enforced":         false    // auth.enforce_verified_writes (grace over)
+  "enforced":         true     // private authorization is always enforced
 }
 ```
 
@@ -173,12 +170,12 @@ Account-auth plan P2 + P2.6 account-first (docs/plans/account-auth-plan-2026-07-
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/auth/apple` | Verify a Sign in with Apple identity token (JWKS RS256 + iss + aud=`com.fantasytradefinder.app` + exp). Find-or-create the account, then: with a session → bind the session's Sleeper user + mark session `verified_via='apple'`; no session + bound account → device-loss restore (returns `session_token`); no session + new account → **account-first (P2.6)**: mints an account-keyed session — `{account_only:true, session_token, user_id:"acct_<account_id>", league_id:"no_league"}` — with per-format ranking services and a real EMPTY league (never the demo fallback). Optional body `display_name` (Apple sends the name only to the client, first auth only). Binding is sticky — a session for a different user gets `conflict:true`, never a rebind; `acct_*` keys are never bound as Sleeper sources. 404 while flag off. |
+| POST | `/api/auth/apple` | Verify a Sign in with Apple identity token (JWKS RS256 + iss + aud=`com.fantasytradefinder.app` + exp). Find-or-create the account, then: with a verified session → bind the proven session's Sleeper user + mark session `verified_via='apple'`; no session + bound account → device-loss restore (returns `session_token`); no session or unverified discovery session + new account → **account-first (P2.6)**: mints an account-keyed session — `{account_only:true, session_token, user_id:"acct_<account_id>", league_id:"no_league"}` — with per-format ranking services and a real EMPTY league (never the demo fallback). Optional body `display_name` (Apple sends the name only to the client, first auth only). Binding is sticky — a session for a different user gets `conflict:true`, never a rebind; `acct_*` keys are never bound as Sleeper sources. 404 while flag off. |
 | POST | `/api/auth/google` | Same flow, Google JWKS + `GOOGLE_OAUTH_CLIENT_ID` as `aud`. 503 `not_configured` until that env var is set. 404 while flag off. |
 | GET | `/api/account` | Current account: `{sleeper_user_id, verified_via, account: {account_id, sleeper_user_id, identities:[{provider, linked_at}]} \| null, account_only, sleeper_username}`. 404 while flag off. |
-| POST | `/api/account/link-sleeper` | **P2.6.** Link a Sleeper username as a source on the session's account. Body `{username, strategy?}`; requires `sess.account_id` (400 `no_account`). Rules: sticky binding (409 `sleeper_conflict` if bound elsewhere); **first-verified-wins** — target id already has a verified controller → 403 `sleeper_already_claimed`, no takeover; both boards have data and no `strategy` → 409 `merge_choice_required` + `{account_board, sleeper_board}` summaries; `strategy='keep_sleeper'` wipes the account board, `'keep_account'` wipes the Sleeper board and migrates the account board in; account-board-only → migrated automatically. On success: binds, marks the Sleeper user `verified_via=<provider>`, evicts the `acct_*` sessions, returns a fresh session for the Sleeper user `{session_token, user_id, username, merge}`. 404 while flag off. |
-| GET | `/api/account/export` | **Data export (teardown 06-02, flag `account.data_export`; 404 while dark).** JSON archive of every user-keyed row — the deletion matrix in `accounts.delete_user_data` is the manifest (same table set, plus the user's side of `trade_matches` and the account/identity rows; `sleeper_credentials.token_encrypted` excluded). Same gates as deletion: 400 `demo_session`; verified user + unverified session → 403 `verification_required`. → `{export_version, exported_at, user_id, tables:{...}}` with a `Content-Disposition: attachment` hint. |
-| DELETE | `/api/account` | **In-app account deletion (App Store 5.1.1(v)) — NOT flag-gated.** Deletes/anonymizes per the matrix in `accounts.delete_user_data` (honors `web/privacy.html` §6): own rows deleted; shared rows (trade matches, others' impressions/flags naming this user) anonymized so counterparties keep their records; feedback anonymized; non-user-keyed aggregates kept. If `users.verified_via` is set, the calling session must itself be verified (403 `verification_required` otherwise). Evicts all of the user's live sessions. **SIWA revocation (teardown 06-02, unflagged):** when a linked Apple identity exists, best-effort revoke via Apple `/auth/token` + `/auth/revoke` — requires env `APPLE_TEAM_ID`/`APPLE_KEY_ID`/`APPLE_PRIVATE_KEY` plus a fresh `apple_authorization_code` in the optional request body; failures are logged and never block local deletion. Response gains additive `apple_revoked: bool`. |
+| POST | `/api/account/link-sleeper` | **P2.6.** Link a Sleeper username as a source on the session's account. Body `{username, sleeper_token?, strategy?}`; requires a verified account session (400 `no_account` without an account). New bindings require a live Sleeper token whose claim matches the resolved username before any board read/merge; missing proof is 403 `verification_required`, rejected proof is 403, unavailable proof is 503 `verification_unavailable`. Existing bindings need no repeated source proof. Rules: sticky binding (409 `sleeper_conflict` if bound elsewhere); a different provider account already bound to the target → 403 `sleeper_already_claimed`, no takeover; both boards have data and no `strategy` → 409 `merge_choice_required` + `{account_board, sleeper_board}` summaries; `strategy='keep_sleeper'` wipes the account board, `'keep_account'` wipes the Sleeper board and migrates the account board in; account-board-only → migrated automatically. On success: binds, marks the Sleeper user `verified_via=<provider>`, evicts the `acct_*` sessions, returns a fresh session for the Sleeper user `{session_token, user_id, username, merge}`. 404 while flag off. |
+| GET | `/api/account/export` | Data export (`account.data_export`; 404 while dark). Version 2 covers account aliases, newer private records, linked anonymous events, outcomes, ranking entries and account-attributed shared rows. Credential ciphertext, bearer/session identifiers, push tokens and raw billing payloads are excluded. Requires verified session; demos get 400 `demo_session`. Returns `{export_version, exported_at, user_id, tables:{...}}` with a download hint. |
+| DELETE | `/api/account` | **In-app account deletion (App Store 5.1.1(v)) — NOT flag-gated.** Deletes/anonymizes per the matrix in `accounts.delete_user_data` (honors `web/privacy.html` §6): own rows deleted; shared rows (trade matches, others' impressions/flags naming this user) anonymized so counterparties keep their records; feedback anonymized; non-user-keyed aggregates kept. The calling session must itself be verified (403 `verification_required` otherwise). Deletes all platform credentials, linked identity/device history, account aliases and newer private data. Durable session revocation is transactional; live alias sessions are evicted and marked revoked, and concurrent restore rechecks the durable token under the deletion lock. **SIWA revocation (teardown 06-02, unflagged):** when a linked Apple identity exists, best-effort revoke via Apple `/auth/token` + `/auth/revoke` — requires env `APPLE_TEAM_ID`/`APPLE_KEY_ID`/`APPLE_PRIVATE_KEY` plus a fresh `apple_authorization_code` in the optional request body; failures are logged and never block local deletion. Response gains additive `apple_revoked: bool`. |
 
 ## Sleeper passthrough
 
@@ -913,6 +910,10 @@ Synthetic stage-user spawner for onboarding QA (`backend/test_users.py`; plan: `
 ### Full-roster evidence (2026-09-04; dark)
 
 With `trade.roster_protection`, final generated cards may include `roster_evaluation`: schema_version 1, status (`safe`, `blocked`, `unknown`), eligible, settings_source, observed_at, schedule_coverage, unknowns, both teams' before/after lineup/coverage, replacements, cuts_required and outlook utility. Only safe evaluated cards are served under enforcement. `safe` covers the declared structural/availability checks; no weekly forecast is implied. Shadow-only evidence is stored in impression features, not rendered on cards. Job registry diagnostics record counts/reasons or evaluation_unavailable; they are internal diagnostics, not a promised new mobile status field. No route is added. Both switches default false. See `docs/plans/post-trade-roster-evaluation/code-walk.md`.
+
+### Recommendation outcome admission
+
+`POST /api/events` continues to accept anonymous analytics, but only verified users can label owned impressions. No recommendation write occurs until body/batch limits, envelope validation, rate limiting, property scrubbing and successful analytics commit. The callback receives only rows actually inserted (`INSERT ... RETURNING`), including under concurrent duplicate event IDs. `deck_card_viewed` accepts optional `dwell_ms`; storage requires an integer from 0 through 3,600,000. A valid impression has at most one view and 32 of each other allowed action. Missing/foreign impressions, unverified sessions, invalid values and rejected batches create no outcome. Verified users share their rate bucket across device IDs.
 
 ---
 

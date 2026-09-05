@@ -1,4 +1,4 @@
-# ADR-017: External weekly forecasts and an independent Win Now season model
+# ADR-018: External weekly forecasts and an independent Win Now season model
 
 Date: 2026-09-04
 Status: Implemented and parent-reviewed; experimental release authorized 2026-09-05

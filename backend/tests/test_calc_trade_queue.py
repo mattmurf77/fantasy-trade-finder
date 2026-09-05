@@ -110,6 +110,7 @@ def _harness_ctx(*, caller_in_members: bool):
         members=members)
 
     sess = {
+        "verified": True,
         "user_id":       ME,
         "username":      "me",
         "league":        league,

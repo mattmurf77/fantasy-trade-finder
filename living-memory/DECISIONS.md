@@ -10,13 +10,13 @@
 
 ---
 
-## D-183 — Win Now separates external forecasts, season utility and dynasty preference learning
+## D-184 — Win Now separates external forecasts, season utility and dynasty preference learning
 
 **Date:** 2026-09-04. **Status:** implemented and parent-reviewed; rollout pending.
 **Context:** Dynasty values cannot stand in for weekly points, and season-motivated likes must not teach dynasty Elo. Legacy title estimates remain barred from display.
 **Decision:** External normalized weekly forecasts feed Fleeced league scoring, legal lineups and paired season simulations. Shared hard trade gates bound sacrifice against fixed baseline roster value and preserve partner evidence/intent. Durable scenarios and decisions remain separate from dynasty ranking/swipe paths; three independent serving/title flags retain false code fallbacks. On 2026-09-05 the operator accepted exploratory historical evidence and authorized all three in release configuration, including championship estimates with uncalibrated-beta labeling; statistical calibration remains unproven.
 **Alternatives:** reuse roster-value outlook; train a proprietary player model before collecting frozen evidence. Neither supplies the proposed trade-sensitive, verifiable forecast foundation today.
-**Consequences:** Initial Sleeper/RotoWire source and independent normal residuals are restricted beta inputs, not calibrated skill claims. Parent integration review/local tests passed; hosted CI, physical TestFlight and forecast-quality graduation remain pending. Championship requires independent graduation. [ADR-017](../docs/adr/adr-017-win-now-external-forecasts.md), [build limitations](../docs/plans/win-now/BUILD.md).
+**Consequences:** Initial Sleeper/RotoWire source and independent normal residuals are restricted beta inputs, not calibrated skill claims. Parent integration review/local tests passed; hosted CI, physical TestFlight and forecast-quality graduation remain pending. The operator authorized experimental championship output before calibration; independent forecast-quality validation remains outstanding. [ADR-018](../docs/adr/adr-018-win-now-external-forecasts.md), [build limitations](../docs/plans/win-now/BUILD.md).
 
 ---
 
@@ -449,7 +449,7 @@
 
 | ID | Title | Date |
 |---|---|---|
-| D-183 | Win Now separates forecasts, season utility and dynasty learning | 2026-09-04 |
+| D-184 | Win Now separates forecasts, season utility and dynasty learning | 2026-09-04 |
 | D-001 | Sleeper as the Sole Identity Provider | Pre-changelog |
 | D-002 | 3-Player Matchups Over 2-Player | Pre-changelog |
 | D-003 | Elo Decomposition for 3-Player Rankings | Pre-changelog |
@@ -542,6 +542,7 @@
 | D-180 | Consensus Value Is a Non-Bypassable Market Guardrail; Personal Rankings Are the Ordering Signal | 2026-09-04 |
 | D-182 | Observed roster coverage is required before an enforcing trade can publish | 2026-09-04 |
 | D-181 | Policy Is an Orthogonal Experiment Dimension, Not a Fourth Generator Arm | 2026-09-04 |
+| D-183 | Verified ownership for private data; deletion drains and invalidates account work | 2026-09-04 |
 | D-174 | A Card Says Why a Give-Side Piece Is There When the User Rates Him Below Market; the Vehicle Is `reasons`, the Bar Is the Shrunk Board | 2026-09-02 |
 | D-173 | Web Posture Is B, Companion: Marketing Front Door Plus Session-Gated Tools, Not Full Parity | 2026-08-26 |
 
@@ -1728,6 +1729,17 @@ No historical 1100-pin repair — indistinguishable from anchor no-value.
 **Status:** Active (dark). Live enablement requires the operator: telemetry coverage ≥99%, then a within-user crossover schedule.
 
 **Related:** [D-181](#d-181--policy-is-an-orthogonal-experiment-dimension-not-a-fourth-generator-arm), [D-085](#d-085) (the placement clamp, honoured by the policy's shrinkage), [D-095](#d-095) (`user_elo_shrink`, the shrink-neither challenger), [D-096](#d-096) (likes-you quality gates), `docs/reviews/2026-08-19-armb-remedy-bucket-a.md`.
+## D-183 — Verified ownership for private data; deletion drains and invalidates account work
+
+**Date:** 2026-09-04 · **Status:** implemented locally, not deployed.
+
+**Context:** Username/team discovery was being treated as private-account authorization. Row deletion alone also allowed already-authorized requests and delayed sign-in/background work to recreate private data.
+
+**Decision:** All private paths require proven ownership of the current session, independently of the legacy grace flag. Web Sleeper uses explicit extension-mediated proof; ESPN/MFL browser entry directs users to the verified mobile flow. This supersedes the private-access aspect of D-001 and the unverified team-claim activation in D-164/D-177. Account deletion uses shared work admissions, exclusive draining, stable alias/provider-identity keys and generation invalidation in the existing single-worker service. Detailed design: [ADR-017](../docs/adr/adr-017-account-deletion-work-leases.md).
+
+**Alternatives:** Keep grace access (preserves the vulnerability); trust public team selection (does not prove ownership); delete rows without fencing (allows recreation); serialize all account work (unnecessarily blocks ordinary concurrent requests); add distributed coordination now (the checked-in deployment has one worker).
+
+**Consequences:** Legacy clients need verification recovery. Web Sleeper needs the updated extension, and browser ESPN/MFL verification remains mobile-only. Deletion can time out while work drains and require retry. Multiple workers or independent writers require distributed fencing before scaling. Historical token cleanup and membership repair remain explicit production operations. [Review and evidence](../docs/plans/security-data-hardening/review.md).
 
 ## D-179 — On Web, "Sign In to ESPN" Is the Primary Entry and the League ID the Alternate; the Web's Sign-In Is the Cookie Paste, and `espn.league_picker` Picks the Layout
 

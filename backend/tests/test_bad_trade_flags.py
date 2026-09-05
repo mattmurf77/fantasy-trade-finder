@@ -57,6 +57,7 @@ def harness():
                     members=[LeagueMember(user_id=ME, username="me",
                                           roster=[], elo_ratings={})])
     sess = {
+        "verified": True,
         "user_id":       ME,
         "username":      "me",
         "display_name":  "me",

@@ -87,7 +87,7 @@ def client(monkeypatch):
     metadata.create_all(engine)
 
     players = [_pick(1, "Early"), _pick(2, "Mid"), _human()]
-    sess = {
+    sess = {"verified": True,
         "user_id": UID,
         "active_format": "1qb_ppr",
         "last_active": 0.0,

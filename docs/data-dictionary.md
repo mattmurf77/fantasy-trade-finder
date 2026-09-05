@@ -476,7 +476,7 @@ Indexes: `ix_deck_impressions_user_league` on `(user_id, league_id)`; `ix_deck_i
 
 ## `deck_outcomes`
 
-F1 labels, **append-only**, joined to `deck_impressions` by `impression_id` (soft reference, no FK — late/duplicate labels legal, rows never mutated). Written by `server._save_deck_outcome_safe` from: `/api/trades/swipe` (`like`/`pass` + dwell/engagement fields), `/api/trades/flag` (`not_interested`), `/api/trades/propose` (`propose`), and the `/api/events` side-channel (`deck_card_viewed` → `viewed` — client fires it after a card is front-of-deck ≥500 ms — and `swipe_undone` → `undo`). An undo **appends alongside** whatever the original outcome was. All writes require flag `deck.signal_v2` on AND a client-supplied `impression_id`; absent either, zero rows (old clients unaffected).
+F1 labels, **append-only**, joined to `deck_impressions` by `impression_id` (soft reference, no FK — late/duplicate labels legal, rows never mutated). Written by `server._save_deck_outcome_safe` from: `/api/trades/swipe` (`like`/`pass` + dwell/engagement fields), `/api/trades/flag` (`not_interested`), `/api/trades/propose` (`propose`), and the `/api/events` side-channel (`deck_card_viewed` → `viewed` — client fires it after a card is front-of-deck ≥500 ms — and `swipe_undone` → `undo`). An undo **appends alongside** whatever the original outcome was. All writes require flag `deck.signal_v2`, a verified owning HTTP session, an existing owned impression and valid bounded fields. `/api/events` writes only after validated analytics commit; duplicates/races trigger callbacks only for actually inserted event IDs. One view and up to 32 of each other action are retained per impression.
 
 **One exception to duplicates-are-legal (2026-08-29):** `pass` is a disposition and an impression gets at most one *live* pass row. Flag-on clients fire both the decline-reason tile tap (`/api/trades/pass-reason` writes the pass server-side) and the unchanged swipe POST for the same gesture, which double-wrote passes on ~30% of passed impressions in prod; `_save_deck_outcome_safe` now skips a `pass` while `database.deck_pass_outcome_recorded` is true (more `pass` rows than `undo` rows), counted as `dup_pass` in the `/api/admin/analytics/health` reject counters. An undone pass may be passed again.
 
@@ -1118,7 +1118,7 @@ Append-only log of meaningful user actions. Hot reads use the denormalized `user
 | `user_id` | str, indexed | |
 | `event_type` | str | see taxonomy below |
 | `occurred_at` | str | ISO UTC |
-| `league_id`, `session_id` | str | |
+| `league_id`, `session_id` | str | `session_id` is a 77-character domain-separated analytics digest; never a bearer token. |
 | `device_type` | str | `iphone` / `ipad` / `macos` / `web` / `extension` |
 | `os_version`, `app_version` | str | |
 | `source` | str | `mobile` / `web` / `api` / `cron` |
@@ -1636,11 +1636,17 @@ Saved analytics cohorts (Fullstory-style Segments). `id` PK, `name` (unique), `d
 
 `roster_evaluation.mutual_benefit` records each side's reported versus usable gain, readiness, preference source, weakest gain, total, threshold values and eligibility reasons. These are utility/evidence measures, not acceptance probabilities. Existing `trade_policy_shadow` uses lane `mutual_benefit` for structurally safe packages whose benefit remains unknown or insufficient; `roster_check` retains structural failures. The per-job cap still applies. Generator model_arm is preserved. No additional table or column is added for these nested diagnostics.
 
+## Privacy and session identifiers
+
+The private manifest includes `trade_proposals` and `trade_policy_shadow`. On deletion, another manager's proposal record can retain provider/package history, but a deleted target user's attribution and frozen `valuation_json` are cleared.
+
+Server and client analytics session identifiers are domain-separated SHA-256 values, never authentication bearer tokens. `accounts.delete_user_data` deletes credential rows for Sleeper/ESPN/MFL, account aliases, durable sessions, identity links, linked anonymous history, and private recommendation/billing/ranking/mock data transactionally. Shared counterpart records are anonymized or preserved according to the explicit matrix; public draft/transaction data, global aggregates and published ranking snapshots are retained. Export version 2 includes this private scope, aliases, owned outcomes/ranking entries, and account-attributed shared rows; it omits credentials, session identifiers, push tokens and raw billing payloads. Submitted feedback text is replaced on deletion. Counterparties’ embedded JSON and public records may retain incidental personal mentions. Process-local work leases drain active account operations and invalidate queued work after deletion; see ADR-017.
+
 ---
 
 ## Win Now evidence tables
 
-Additive schema for the restricted implementation beta; all feature flags remain off. Defined in `backend/database.py`; persistence lives in `backend/win_now_store.py`. JSON is serialized deterministically with nonfinite numbers rejected. Snapshot timestamps are ISO UTC strings. There are no new dynasty-ranking writes.
+Additive schema for the experimental beta; the release configuration enables all three serving flags under operator authorization, with deployment verification recorded separately. Defined in `backend/database.py`; persistence lives in `backend/win_now_store.py`. JSON is serialized deterministically with nonfinite numbers rejected. Snapshot timestamps are ISO UTC strings. There are no new dynasty-ranking writes.
 
 | Table | Grain / key | Columns besides primary key |
 |---|---|---|
@@ -1650,6 +1656,6 @@ Additive schema for the restricted implementation beta; all feature flags remain
 | `win_now_scenarios` | Directed buyer/partner exchange and evaluated snapshot; `scenario_id` string PK | `user_id` (indexed), `league_id`, `snapshot_id`, `objective`, `asset_key`, `created_at`, `expires_at`, `payload_json` (all required) |
 | `win_now_decisions` | Viewer decision on a scenario; autoincrement integer `id` PK | `user_id` (indexed), `scenario_id`, `decision`, `created_at` required; unique `(user_id,scenario_id)` |
 
-Forecast payloads retain original source capture/publication times, provenance and quality; whole batches prevent joins across publication revisions. Projection payloads retain league facts plus the simulation baseline. Job input JSON freezes the requesting actor’s valuation inputs and parameters and must be treated as private. Pricing/ranking revision hashes and package-level evidence are retained; other managers’ complete boards are not persisted. Job result and scenario payloads retain immutable before/after evidence and metadata; `asset_key` groups repeated exchanges without rewriting prior scenario evidence. Enforced lifecycle is queued → running → complete/failed; interrupted work can be recovered from durable input.
+Forecast payloads retain original source capture/publication times, provenance and quality; whole batches prevent joins across publication revisions. Projection payloads retain league facts plus the simulation baseline. Job input JSON freezes the requesting actor’s valuation inputs and parameters and must be treated as private. Pricing/ranking revision hashes and package-level evidence are retained; other managers’ complete boards are not persisted. Job result and scenario payloads retain immutable before/after evidence and metadata; `asset_key` groups repeated exchanges without rewriting prior scenario evidence. Enforced lifecycle is queued → running → complete/failed; queued work resumes from durable input. Unexpired running jobs are never requeued during overlapping deploys; a crashed running search expires before retry. Account lifecycle admissions drain active searches before deleting all user-owned rows.
 
 Serving expiry does not delete history. Worker housekeeping removes jobs after 7 days, scenarios/decisions after 180 days and forecast/projection snapshots after 400 days. Account export/deletion includes all three user-owned tables. Short account-row-guarded writes prevent queued or calculator work from recreating evidence after account deletion; no simulation holds that lock. References are application-enforced strings, not new SQL foreign-key constraints. Access checks live in the new authenticated routes. See [API contract](api-reference.md#season-projections-and-win-now).

@@ -13,7 +13,7 @@
 
 ## 2026-09-04 — Win Now implementation reviewed, all flags off
 
-Operator authorized the [Win Now build](../docs/plans/win-now/BUILD.md) using Astra subagents and parent review, isolated on `codex/win-now-20260904` from fetched main `606e512c`. Adds external weekly forecasts, legal-lineup season simulation, constrained search/calculator, durable evidence and separate season decisions in mobile/web. **Not merged, deployed, enabled or submitted to TestFlight.** [ADR-017](../docs/adr/adr-017-win-now-external-forecasts.md) / D-183 preserve dynasty Elo and the legacy title-display prohibition.
+Operator authorized the [Win Now build](../docs/plans/win-now/BUILD.md) using Astra subagents and parent review, isolated on `codex/win-now-20260904` from fetched main `606e512c`. Adds external weekly forecasts, legal-lineup season simulation, constrained search/calculator, durable evidence and separate season decisions in mobile/web. **Not merged, deployed, enabled or submitted to TestFlight.** [ADR-018](../docs/adr/adr-018-win-now-external-forecasts.md) / D-184 preserve dynasty Elo and the legacy title-display prohibition.
 
 Client evidence: TypeScript, 24 feature checks, web 185/185, JS syntax and test-ID lint pass. Parent review is complete; backend evidence covers 4,846 passing cases plus one skip after corrected fixture reruns, and synthetic browser review passed. Hosted Python 3.12 CI, physical TestFlight and held-out calibration remain pending. All three flags stay false; current injuries, conservative game-date cutoff and absent game/team correlations remain explicit limits. [Evidence and checklist](../docs/plans/win-now/EVIDENCE.md).
 

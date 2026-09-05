@@ -51,10 +51,9 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     "find_trades_tapped", "trade_card_viewed", "trade_flagged",
     "match_opened",
     # TikTok-discovery deck engine (docs/plans/tiktok-discovery/). The F1
-    # /api/events outcome scan reads deck_card_viewed / swipe_undone BEFORE
-    # taxonomy filtering (server-side deck_outcomes are independent of this
-    # allowlist); registering them here additionally lands the analytics
-    # rows F8's offline-eval harness reads. deck_reranked is F4 telemetry.
+    # /api/events derives verified, owned viewed/undo outcomes only after
+    # taxonomy filtering and successful ingestion. These analytics rows
+    # also feed F8 offline evaluation. deck_reranked is F4 telemetry.
     "deck_card_viewed", "swipe_undone", "deck_reranked",
     # F9 (deck.first_session) — activation instrumentation. Client-fired
     # only on the user's first deck for a league (server-marked
@@ -440,8 +439,8 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # CLIENT-fired, not server-fired, and the split is deliberate. The
     # DURABLE truth of a reasoned pass is the `trade_pass_reasons` row the
     # route upserts plus the `deck_outcomes` action='pass' — neither is
-    # forgeable and neither depends on this allowlist (the deck_card_viewed
-    # precedent above). These two names are the CLIENT-side receipt: they
+    # forgeable and neither depends on this allowlist. These two names are
+    # the CLIENT-side receipt: they
     # carry `ms_since_render`, which only the emitter knows, and they fire
     # at the tap rather than at the write. The server keeps firing
     # `match_swiped` on the pass exactly as the ✕ did, so no existing funnel
@@ -941,7 +940,7 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     "trade_flagged":        frozenset({"reason", "trade_id"}),
     "match_opened":         frozenset({"match_id"}),
     # TikTok-discovery deck engine (F1 viewed/undo joins + F4 rerank moves)
-    "deck_card_viewed":     frozenset({"impression_id", "trade_id", "card_index"}),
+    "deck_card_viewed":     frozenset({"impression_id", "trade_id", "card_index", "dwell_ms"}),
     "swipe_undone":         frozenset({"trade_id", "impression_id"}),
     "deck_reranked":        frozenset({"moved", "moves"}),
     # F9 — `position` is the 1-based disposition ordinal within the first

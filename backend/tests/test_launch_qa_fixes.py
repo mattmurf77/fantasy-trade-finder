@@ -55,6 +55,7 @@ def _bare_session():
     svc = RankingService(players=[Player(id="p1", name="P1", position="RB",
                                          team="AAA", age=25)])
     return {
+        "verified": True,
         "user_id":       ME,
         "services":      {"1qb_ppr": svc},
         "service":       svc,

@@ -1489,6 +1489,10 @@ Neither flag is enabled in this branch's configuration. Current observed adapter
 
 Collection uses only `trade.valuation_telemetry` and `trade.roster_evaluation`; all enforcement switches remain false. On Render, FTF_FLAGS changes require a new deployment to reach the running process. POST /api/feature-flags/reload reloads the current process environment and on-disk file; it does not fetch newly changed Render environment settings. See [rollout procedure](plans/trade-model-activation/rollout.md).
 
+### Legacy authorization rollout flag
+
+`auth.enforce_verified_writes` remains accepted for configuration compatibility but cannot disable private read/write verification. Changing it is not an authorization rollback. Session initialization reports enforcement as true.
+
 ---
 
 ## Win Now beta controls
@@ -1507,7 +1511,7 @@ The 2026-09-05 release candidate sets all three flags to **true** under explicit
 
 Versioned optimizer policy is code in `win_now_optimizer.POLICY` (`win-now-v1`), not a second collection of live `model_config` overrides. It bounds side/total package size, screening and simulation work; market floor is at least 0.75 and the market-evidence fallback floor is at least 0.90. User settings may tighten these constraints. The request freezes the existing shared trade-pricing configuration; a retry must not relax buyer budget, fairness or partner gates. API/client ranges are in [the route reference](api-reference.md#season-projections-and-win-now).
 
-Rollback: set `outlook.season_projections`, `trades.win_now` and `outlook.championship_probabilities` all false, deploy/reload as appropriate, and verify effective server flags. Prior Render commit: `0a8093fe` for code rollback. Retained evidence is not deleted by disabling serving.
+Rollback: set `outlook.season_projections`, `trades.win_now` and `outlook.championship_probabilities` all false, deploy/reload as appropriate, and verify effective server flags. Prior main commit: `a927e3a7` for code rollback. Retained evidence is not deleted by disabling serving.
 
 Known unused K/DEF coefficients are normalized only for absent slots; active K/DEF/IDP remains unsupported. The four explicitly disclosed rare player-event omissions and preserved source/effective scoring are detailed in [BUILD](plans/win-now/BUILD.md#release-scoring-boundaries--2026-09-05).
 

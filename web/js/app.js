@@ -118,32 +118,13 @@
       } catch (e) {
         throw e;
       }
-      // ── Session expiry handling ─────────────────────────────────────
-      // Only a 401 can carry the session_expired marker, so we clone + read
-      // the body for that status alone. Every other response is handed back
-      // untouched — cloning and JSON.parsing every payload (including the
-      // ~4.8MB player blob) was pure overhead.
-      if (res.status === 401) {
-        let _parsedBody = null;
-        try {
-          const raw = await res.clone().text();
-          _parsedBody = raw ? JSON.parse(raw) : null;
-        } catch { /* non-JSON – ignore */ }
-
-        if (_parsedBody && _parsedBody.error === 'session_expired') {
-          localStorage.removeItem(LS_TOKEN);
-          sessionToken = null;
-          showToast('Session expired — reconnecting…');
-          const savedUser   = getSavedUser();
-          const savedLeague = getSavedLeague();
-          if (savedUser && savedLeague) {
-            showInitOverlay('Reconnecting…');
-            await initSession(savedUser, savedLeague);
-            hideInitOverlay();
-          } else {
-            boot();
-          }
-          return;  // caller receives undefined; their try/catch handles it
+      // Missing proof must return to sign-in, never retry session/init using
+      // a public username or leave a cached private board visible.
+      if (res.status === 401 || res.status === 403) {
+        const failure = await res.clone().json().catch(() => ({}));
+        if (['session_expired', 'verification_required'].includes(failure.error)) {
+          requireBrowserVerification();
+          return;
         }
       }
 
@@ -183,6 +164,24 @@
         showAuthScreen();
         return;
       }
+      if (_isDemoUser(user)) {
+        sessionToken = sessionStorage.getItem('ftf_session_token');
+      }
+      if (!sessionToken) { requireBrowserVerification(); return; }
+      try {
+        const check = await apiFetch('/api/me/streak');
+        if (!check) return; // recovery already displayed
+        if (!check.ok) { showAuthScreen(); return; }
+      } catch { showAuthScreen(); return; }
+      if (_isDemoUser(user)) {
+        currentLeagueId = league?.league_id;
+        currentUserId = user.user_id;
+        try { _myRoster = JSON.parse(sessionStorage.getItem('ftf_demo_roster') || '[]'); } catch { _myRoster = []; }
+        hideAuthScreen();
+        renderAccountChip(user);
+        _enterMainApp();
+        return;
+      }
       // Hide the auth-screen immediately so restored sessions don't flash
       // the login page underneath the init overlay or main app.
       hideAuthScreen();
@@ -193,23 +192,6 @@
         return;
       }
 
-      // If we have a stored session token, ping the server to check liveness.
-      // A 401 means the session expired (e.g. server restarted); clear the
-      // token so initSession() will create a fresh one below.
-      if (sessionToken) {
-        try {
-          const pingRes = await fetch('/api/session/ping', {
-            headers: { 'X-Session-Token': sessionToken },
-          });
-          if (pingRes.status === 401) {
-            localStorage.removeItem(LS_TOKEN);
-            sessionToken = null;
-          } else {
-          }
-        } catch (e) {
-        }
-      }
-
       currentLeagueId = league.league_id;
       window.FTFWinNow?.reset();
       currentUserId   = user.user_id || null;
@@ -218,6 +200,7 @@
       hideInitOverlay();
 
       if (!ok) {
+        if (!sessionToken) return;
         clearSavedLeague();
         showLeagueScreen(user);
       } else {
@@ -314,7 +297,7 @@
       document.getElementById('auth-error').textContent = '';
       document.getElementById('username-input').value = '';
       document.getElementById('auth-btn').disabled = false;
-      document.getElementById('auth-btn').textContent = 'Connect with Sleeper →';
+      document.getElementById('auth-btn').textContent = 'Verify with Sleeper →';
       entryReset();
       setTimeout(() => document.getElementById('username-input').focus(), 100);
     }
@@ -323,101 +306,47 @@
       document.getElementById('auth-screen').classList.add('hidden');
     }
 
+    function requireBrowserVerification() {
+      localStorage.removeItem(LS_TOKEN);
+      localStorage.removeItem(LS_USER);
+      sessionToken = null;
+      currentUserId = null;
+      currentLeagueId = null;
+      hideInitOverlay();
+      hideLeagueScreen();
+      hideMethodScreen();
+      showAuthScreen();
+      document.getElementById('auth-error').textContent = 'Verify your Sleeper account to continue. Your saved rankings are unchanged.';
+    }
+
     async function handleLogin() {
-      const input  = document.getElementById('username-input');
-      const btn    = document.getElementById('auth-btn');
-      const errEl  = document.getElementById('auth-error');
-      // Sleeper usernames are always lowercase — normalise so users
-      // Sleeper usernames are always lowercase — normalise so users
-      // don't have to worry about capitalisation
-      const rawInput = input.value;
-      const username = rawInput.trim().toLowerCase();
-
-
-      if (!username) {
-        errEl.textContent = 'Please enter your Sleeper username.';
-        input.classList.add('error');
-        return;
-      }
-
-      // Reflect the normalised value back so the user can see what was sent
-      input.value = username;
-      input.classList.remove('error');
-      errEl.textContent = '';
-      btn.disabled = true;
-      btn.textContent = 'Looking up…';
-      // Pre-auth funnel, same semantics as mobile: the claim is the attempt.
-      try { if (window.FTFTrack) window.FTFTrack('signin_attempted', { method: 'sleeper' }, 'SignIn'); } catch (_) {}
-
-      const url = `/api/sleeper/user/${encodeURIComponent(username)}`;
-
+      const input = document.getElementById('username-input');
+      const button = document.getElementById('auth-btn');
+      const error = document.getElementById('auth-error');
+      const username = input.value.trim().toLowerCase();
+      if (!username) { error.textContent = 'Enter your Sleeper username.'; return; }
+      if (button.disabled) return;
+      button.disabled = true;
+      button.textContent = 'Verifying…';
+      error.textContent = '';
       try {
-        const res  = await apiFetch(url);
-
-        let data;
-        try {
-          data = await res.json();
-        } catch (jsonErr) {
-          errEl.textContent = 'Server returned invalid response. Check the debug log.';
-          btn.disabled = false;
-          btn.textContent = 'Connect with Sleeper →';
-          return;
-        }
-
-        // Diagnose every failure branch individually
-        if (!res.ok) {
-          // Prefer the human-readable message (e.g. Sleeper-outage 503);
-          // fall back to the machine code, then a generic message.
-          errEl.textContent = data.message || data.error || `Server error ${res.status}. Check the debug log.`;
-          try { if (window.FTFTrack) window.FTFTrack('signin_failed', { method: 'sleeper', error_code: `http_${res.status}` }, 'SignIn'); } catch (_) {}
-          input.classList.add('error');
-          btn.disabled = false;
-          btn.textContent = 'Connect with Sleeper →';
-          return;
-        }
-
-        if (data === null) {
-          errEl.textContent = 'Username not found on Sleeper. Check spelling (usernames are lowercase).';
-          try { if (window.FTFTrack) window.FTFTrack('signin_failed', { method: 'sleeper', error_code: 'http_404' }, 'SignIn'); } catch (_) {}
-          input.classList.add('error');
-          btn.disabled = false;
-          btn.textContent = 'Connect with Sleeper →';
-          return;
-        }
-
-        if (data.error) {
-          errEl.textContent = data.error;
-          input.classList.add('error');
-          btn.disabled = false;
-          btn.textContent = 'Connect with Sleeper →';
-          return;
-        }
-
-        if (!data.user_id) {
-          errEl.textContent = 'Unexpected response from Sleeper — no user_id. Check debug log.';
-          input.classList.add('error');
-          btn.disabled = false;
-          btn.textContent = 'Connect with Sleeper →';
-          return;
-        }
-
-
-        const user = {
-          user_id:      data.user_id,
-          display_name: data.display_name || data.username || username,
-          avatar_id:    data.avatar || null,
-        };
+        const verified = await window.FTFBrowserAuth.verify(username);
+        // No username-only result reaches storage, league import or analytics.
+        sessionToken = verified.token;
+        localStorage.setItem(LS_TOKEN, sessionToken);
+        const user = { user_id: verified.user_id, display_name: verified.display_name,
+                       avatar_id: verified.avatar, username: verified.username };
         saveUser(user);
+        clearSavedLeague();
         try { if (window.FTFTrack) window.FTFTrack('signin_succeeded', { method: 'sleeper' }, 'SignIn'); } catch (_) {}
         renderAccountChip(user);
         hideAuthScreen();
         showLeagueScreen(user);
-
-      } catch (e) {
-        errEl.textContent = 'Could not reach server — is server.py running?';
-        try { if (window.FTFTrack) window.FTFTrack('signin_failed', { method: 'sleeper', error_code: 'network' }, 'SignIn'); } catch (_) {}
-        btn.disabled = false;
-        btn.textContent = 'Connect with Sleeper →';
+      } catch (failure) {
+        error.textContent = failure.message || 'Could not verify your account. Please try again.';
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Verify with Sleeper →';
       }
     }
 
@@ -1320,6 +1249,10 @@
     }
 
     function selectEntryPlatform(p) {
+      if (p !== 'sleeper') {
+        document.getElementById('auth-error').textContent = 'For ESPN or MyFantasyLeague, verify and link your account in the Fleeced mobile app. Contact us for TestFlight access.';
+        return;
+      }
       _entryPlatformSel = p;
       _entryPreview = null;
       for (const id of ['sleeper', 'espn', 'mfl']) {
@@ -1373,19 +1306,9 @@
     // and apiFetch's session-expiry handler must not fire here). Rejects
     // with {code, status, message} in the link routes' vocabulary.
     async function _entryPost(body) {
-      const res = await fetch('/api/entry/platform', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(body),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const err = new Error(data.message || data.error || `Request failed (${res.status}).`);
-        err.code = data.error || `http_${res.status}`;
-        err.status = res.status;
-        throw err;
-      }
-      return data;
+      // Team/league discovery cannot prove ownership of a private account.
+      // Browser entry remains disabled until a provider-account flow exists.
+      throw new Error('Use the Fleeced mobile app to verify and link ESPN or MyFantasyLeague.');
     }
     function _entryBusy(btn, busy, label) {
       if (!btn) return;
@@ -1887,7 +1810,8 @@
         const body = await res.json();
         if (body && body.token) {
           try { sessionStorage.setItem('ftf_session_token', body.token); } catch (_) {}
-          try { sessionStorage.setItem('ftf_demo_mode', '1'); } catch (_) {}
+          try { sessionStorage.setItem('ftf_demo_mode', '1');
+            sessionStorage.setItem('ftf_demo_roster', JSON.stringify(body.user_roster || [])); } catch (_) {}
         }
         // Save a "demo" user so the account chip / league state render
         const demoUser = {

@@ -64,6 +64,7 @@ def live(monkeypatch):
     )
     trade_svc.add_league(league)
     sess = {
+        "verified": True,
         "user_id": UID, "league": league, "user_roster": ["g1", "g2"],
         "players": pool, "services": {"1qb_ppr": service},
         "trade_svcs": {"1qb_ppr": trade_svc}, "service": service,

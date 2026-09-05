@@ -169,7 +169,7 @@ def test_link_dead_token_denied_by_oracle(client):
     assert c.get("/api/sleeper/link", headers=_h(token)).get_json()["connected"] is False
 
 
-def test_link_oracle_inconclusive_links_but_unverified(client):
+def test_link_oracle_inconclusive_does_not_store_unproven_token(client):
     """Transport failure during the probe: best-effort per plan §2c — the
     link stores (Send-in-Sleeper keeps working) but verification is NOT
     granted."""
@@ -178,9 +178,9 @@ def test_link_oracle_inconclusive_links_but_unverified(client):
                       MagicMock(side_effect=sw.SleeperWriteError("net", kind="network"))):
         r = c.post("/api/sleeper/link", headers=_h(token),
                    data=json.dumps({"token": _token()}))
-    assert r.status_code == 200
+    assert r.status_code == 503
     body = r.get_json()
-    assert body["connected"] is True and body["verified"] is False
+    assert body["error"] == "verification_unavailable" and body["verified"] is False
     assert not _sess(token).get("verified")
     assert accounts.get_user_verified_via(UID) is None
 
@@ -292,15 +292,15 @@ def test_replay_inconclusive_then_heals_on_retry(client):
                       MagicMock(side_effect=sw.SleeperWriteError("net", kind="network"))):
         r = c.post("/api/sleeper/link", headers=_h(token),
                    data=json.dumps({"token": _token()}))
-    assert r.status_code == 200
+    assert r.status_code == 503
     body = r.get_json()
-    assert body["connected"] is True and body["verified"] is False
+    assert body["error"] == "verification_unavailable" and body["verified"] is False
     assert not _sess(token).get("verified")
     assert _post_method(c, token).status_code == 403            # not weakened
 
-    # Server credential survived the inconclusive outcome.
+    # An unverified request cannot create or overwrite a credential.
     assert c.get("/api/sleeper/link",
-                 headers=_h(token)).get_json()["connected"] is True
+                 headers=_h(token)).get_json()["connected"] is False
 
     with patch.object(server._sleeper_write, "verify_token_live",
                       MagicMock(return_value={"raw": {}})):
@@ -320,14 +320,11 @@ def _post_method(c, token):
                   data=json.dumps({"method": "trio"}))
 
 
-def test_gate_grace_allows_and_logs_unverified_write(client, caplog):
+def test_gate_grace_denies_unverified_write(client):
     c, token, _ = client
-    with caplog.at_level("INFO", logger="trade_finder"):
-        r = _post_method(c, token)
-    assert r.status_code == 200
-    line = [m for m in caplog.messages if m.startswith("AUTH-GRACE")]
-    assert line and f"user_id={UID}" in line[0] \
-        and "path=/api/ranking-method" in line[0]
+    r = _post_method(c, token)
+    assert r.status_code == 403
+    assert r.get_json()["error"] == "verification_required"
 
 
 def test_gate_denies_unverified_when_controller_exists(client):
@@ -367,7 +364,7 @@ def test_gate_get_passes_through_on_mixed_method_route(client):
     c, token, flags_on = client
     flags_on.add("auth.enforce_verified_writes")
     r = c.get("/api/anchor/scale", headers=_h(token))
-    assert r.status_code == 200
+    assert r.status_code == 403
 
 
 def test_first_verified_wins_across_live_sessions(client):
@@ -380,7 +377,7 @@ def test_first_verified_wins_across_live_sessions(client):
         server._sessions[token_b] = {"user_id": UID, "active_format": "1qb_ppr",
                                      "last_active": 0.0}
     try:
-        assert _post_method(c, token_b).status_code == 200      # grace
+        assert _post_method(c, token_b).status_code == 403      # no grace
         with patch.object(server._sleeper_write, "verify_token_live",
                           MagicMock(return_value={"raw": {}})):
             r = c.post("/api/sleeper/link", headers=_h(token_a),
@@ -472,6 +469,15 @@ def init_client(monkeypatch, client):
     monkeypatch.setattr(server, "g_universal_players", pool)
     monkeypatch.setattr(server, "_kickoff_trade_job", MagicMock())
     monkeypatch.setattr(server, "_fetch_sleeper_league_meta", lambda lid: None)
+    def authoritative_sleeper(url):
+        if url.endswith('/rosters'):
+            return [{"owner_id": UID, "players": ["qb_1"]},
+                    {"owner_id": "opp_1", "players": ["rb_1"]}]
+        if url.endswith('/users'):
+            return [{"user_id": UID, "display_name": "Test User"},
+                    {"user_id": "opp_1", "display_name": "Opp"}]
+        return {"league_id": "123456789", "name": "Test League"}
+    monkeypatch.setattr(server, "_sleeper_get", authoritative_sleeper)
 
     # Don't run session_init's fire-and-forget daemon (bg DB writes) — the
     # patched engine is torn down when the test ends. SELECTIVE: only the
@@ -493,7 +499,7 @@ def init_client(monkeypatch, client):
 def _init_body(user_id=UID):
     return json.dumps({
         "user_id": user_id,
-        "league_id": "league_x",
+        "league_id": "123456789",
         "league_name": "Test League",
         "user_player_ids": ["qb_1"],
         "opponent_rosters": [
@@ -502,13 +508,11 @@ def _init_body(user_id=UID):
     })
 
 
-def test_session_init_reports_unverified_by_default(init_client):
+def test_session_init_rejects_unverified_by_default(init_client):
     c, token, _ = init_client
     r = c.post("/api/session/init", headers=_h(token), data=_init_body())
-    assert r.status_code == 200, r.get_data(as_text=True)
-    v = r.get_json()["verification"]
-    assert v == {"session_verified": False, "user_verified": False,
-                 "verified_via": None, "enforced": False}
+    assert r.status_code == 403
+    assert r.get_json()["error"] == "verification_required"
 
 
 def test_session_init_verified_carryover_and_controller_flag(init_client):
@@ -523,12 +527,12 @@ def test_session_init_verified_carryover_and_controller_flag(init_client):
     assert v["session_verified"] is True          # survives same-user re-init
     assert v["user_verified"] is True and v["verified_via"] == "sleeper"
 
-    # Re-pointing the SAME token at a different user_id drops verified.
+    # Re-pointing the SAME token at a different user_id is rejected.
     r = c.post("/api/session/init", headers=_h(token),
                data=_init_body(user_id=OTHER_UID))
-    v = r.get_json()["verification"]
-    assert v["session_verified"] is False
-    assert v["user_verified"] is False
+    assert r.status_code == 403
+    assert r.get_json()["error"] == "identity_mismatch"
+    assert _sess(token)["verified"] is True
 
 
 def test_session_init_reports_verified_after_link_replay(init_client):
@@ -552,26 +556,18 @@ def test_session_init_reports_verified_after_link_replay(init_client):
     assert v["user_verified"] is True and v["verified_via"] == "sleeper"
 
 
-def test_session_init_reports_banner_state_for_unverified_session(init_client):
-    """#126 pin (PRD §4.3, verification-report half): an unverified session
-    of a verified user (dead/absent token — no replay succeeded) reports
-    user_verified: true / session_verified: false — the exact state that
-    shows the R-6 banner. The 403/nothing-stored half of §4.3 is pinned by
-    test_link_dead_token_denied_by_oracle +
-    test_gate_denies_unverified_when_controller_exists."""
+def test_session_init_rejects_unverified_existing_controller(init_client):
     c, token, _ = init_client
     db_module.upsert_user(sleeper_user_id=UID)
     accounts.mark_user_verified(UID, "sleeper")
-
     r = c.post("/api/session/init", headers=_h(token), data=_init_body())
-    assert r.status_code == 200, r.get_data(as_text=True)
-    v = r.get_json()["verification"]
-    assert v["session_verified"] is False
-    assert v["user_verified"] is True and v["verified_via"] == "sleeper"
+    assert r.status_code == 403
+    assert r.get_json()["error"] == "verification_required"
 
 
 def test_session_init_reports_enforcement(init_client):
     c, token, flags_on = init_client
     flags_on.add("auth.enforce_verified_writes")
+    _sess(token)["verified"] = True
     r = c.post("/api/session/init", headers=_h(token), data=_init_body())
     assert r.get_json()["verification"]["enforced"] is True
