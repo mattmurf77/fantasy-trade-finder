@@ -1,0 +1,48 @@
+[
+  {
+    "path": "index.html",
+    "status": 200,
+    "matches_release": true,
+    "sha256": "18ea95fa12d9a740af134d645d770a6f5096273860752a122871ea988f5e87e1"
+  },
+  {
+    "path": "js/app.js",
+    "status": 200,
+    "matches_release": true,
+    "sha256": "e7046bc16ccd1b43b982fe6b28cbe91d59a5167a467d472fc8a044449c5c4e40"
+  },
+  {
+    "path": "js/browser-auth.js",
+    "status": 200,
+    "matches_release": true,
+    "sha256": "58be8f9118943ef7c73865d144e0185d35bcb4cf6c1faa1b2411c54432254ef2"
+  },
+  {
+    "path": "css/styles.css",
+    "status": 200,
+    "matches_release": true,
+    "sha256": "1ea19a24a92e6ddc9edddc59fa94b76498d3e1b162140a2e95dae55d7aef0870"
+  },
+  {
+    "path": "privacy.html",
+    "status": 200,
+    "matches_release": true,
+    "sha256": "d0bf80cd26b9af234605dd9aa89ec9ab8f81760249242a54346cc258d7a7d9a0"
+  },
+  {
+    "path": "/api/feature-flags",
+    "status": 200
+  },
+  {
+    "path": "/api/session/init",
+    "invalid_session_status": 401
+  },
+  {
+    "path": "/api/extension/rankings",
+    "invalid_session_status": 401
+  },
+  {
+    "path": "/api/account/export",
+    "invalid_session_status": 401
+  }
+]

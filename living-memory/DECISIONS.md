@@ -1720,7 +1720,7 @@ No historical 1100-pin repair — indistinguishable from anchor no-value.
 **Related:** [D-181](#d-181--policy-is-an-orthogonal-experiment-dimension-not-a-fourth-generator-arm), [D-085](#d-085) (the placement clamp, honoured by the policy's shrinkage), [D-095](#d-095) (`user_elo_shrink`, the shrink-neither challenger), [D-096](#d-096) (likes-you quality gates), `docs/reviews/2026-08-19-armb-remedy-bucket-a.md`.
 ## D-183 — Verified ownership for private data; deletion drains and invalidates account work
 
-**Date:** 2026-09-04 · **Status:** implemented locally, not deployed.
+**Date:** 2026-09-04 · **Status:** deployed 2026-09-05 via PR #279; physical-device QA remains outstanding.
 
 **Context:** Username/team discovery was being treated as private-account authorization. Row deletion alone also allowed already-authorized requests and delayed sign-in/background work to recreate private data.
 

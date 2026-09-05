@@ -1,3 +1,17 @@
+RELEASE VERIFICATION — 2026-09-05
+PR #279 -> a927e3a7; tested branch ab8f54d0 has identical content.
+CI run 33944570236: all 4 jobs success; 5001 passed / 1 skipped in 589.55s.
+Integrated PostgreSQL: 57 passed in 10.99s.
+Render dep-dadppq17lnhs73e8fqo0 live at 04:40:05 UTC.
+Five live assets matched release bytes; feature flags 200; invalid-session init,
+extension rankings and account export returned 401. See production-smoke.json.
+iOS 1.16.16 (145): EAS build bab54ee5 and submission 815cb2a0 both FINISHED.
+Extension 0.1.1 package published; digest verified.
+Physical-device QA and historical production maintenance remain outstanding.
+Full release IDs and links: deployment.md.
+
+--- PRE-INTEGRATION LOCAL RECORD (before deployment) ---
+
 Security hardening final validation — completed 2026-09-05
 Branch: codex/security-data-hardening-20260904; base origin/main 606e512c.
 Implementation is local/uncommitted. No deployment or production cleanup.

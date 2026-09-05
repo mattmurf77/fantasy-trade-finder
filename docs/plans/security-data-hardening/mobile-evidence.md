@@ -1,6 +1,6 @@
 # Mobile ownership recovery — 2026-09-04
 
-Status: implemented locally; no TestFlight build, deployment, or live credential test performed.
+Status: native build **1.16.16 (145)** and TestFlight submission completed on 2026-09-05. Physical-device and live credential checks remain outstanding. [Release evidence](deployment.md).
 
 ## Code-walk proof
 
@@ -44,4 +44,4 @@ The picker now waits for server initialization rather than navigating optimistic
 
 Web/extension recovery is now implemented and covered separately in [browser evidence](browser-evidence.md). Browser ESPN/MFL entry directs users to mobile verification.
 
-Manual native runtime checks above remain outstanding. The physical-device probe (`xcrun devicectl list devices --timeout 20`) reported no devices; no TestFlight build was distributed and no simulator was used. Incognito WebView, real provider login, Keychain behavior and native navigation still require the checklist on a physical iPhone.
+Manual native runtime checks above remain outstanding. The physical-device probe (`xcrun devicectl list devices --timeout 20`) reported no devices. Build 145 was subsequently built and submitted successfully; no simulator was used. Incognito WebView, real provider login, Keychain behavior and native navigation still require the checklist on a physical iPhone.

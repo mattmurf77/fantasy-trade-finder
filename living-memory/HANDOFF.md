@@ -1,6 +1,6 @@
 # HANDOFF — Fantasy Trade Finder
 
-> **Purpose:** current work and delivery checks.
+> **Purpose:** release state and remaining follow-up.
 >
 > **Read at:** session start. **Write at:** session end.
 >
@@ -11,23 +11,22 @@
 ## 2026-09-05 — Current State
 
 ### Where I stopped
-- Security findings 1–5 and review fixes are local, uncommitted on `codex/security-data-hardening-20260904`, based on `606e512c`.
-- Worktree: `staged-work/security-data-hardening-20260904` under the original project. Preserve its changes and the original checkout's unrelated edits.
-- [Review](../docs/plans/security-data-hardening/review.md), [validation](../docs/plans/security-data-hardening/validation.txt), [reproduction](../docs/plans/security-data-hardening/validation-tools/README.md).
-- Python 3.12: 4,707 pass / 1 skip; PostgreSQL 54 pass; mobile 91 guards/typecheck/testID and Hermes export pass; web 23 auth/180 structure and loaded-MV3 runtime pass.
+- Security findings 1–5 shipped via PR #279, `main` @ `a927e3a7`; Render live since 04:40 UTC.
+- CI: 5,001 backend passes / 1 skip, all four jobs green. PostgreSQL: 57 passes. Live files match; invalid-session init/rankings/export return 401.
+- iOS 1.16.16 (145): build and TestFlight submission FINISHED. Extension 0.1.1 published with unpacked-install instructions.
+- [Release evidence](../docs/plans/security-data-hardening/deployment.md), [recovery](../docs/recovery/2026-09-05-security-release.md).
 
 ### In flight
-- Finish delivery from this worktree after reviewing evidence. Nothing deployed.
-- Coordinate strict backend access with mobile recovery and the updated extension; browser ESPN/MFL verification uses mobile.
+- No implementation or deployment work remains. Evidence-only publication uses `[skip render]`.
+- The isolated release worktree is scheduled for cleanup; the original checkout's unrelated edits are preserved.
 
 ### Blocked on
-- Physical iPhone/TestFlight: no device available. [Checklist](../docs/plans/security-data-hardening/mobile-evidence.md).
-- Historical production token cleanup/revocation and membership resync need a reviewed rollout.
-- Deletion fencing requires one worker; distributed writers need additional coordination (D-183 / ADR-017).
+- Physical iPhone QA remains unperformed. [Checklist](../docs/plans/security-data-hardening/mobile-evidence.md). EAS completion does not prove tester availability.
+- Historical production token cleanup/revocation and contaminated membership resync are separate maintenance work.
 
 ### Don't repeat
-- No simulator/Maestro (D-056); Hermes export is not native proof.
-- Never point synthetic maintenance harnesses at production.
+- Keep one Gunicorn worker until distributed deletion fencing exists (D-183 / ADR-017).
+- No simulator/Maestro (D-056); never run synthetic maintenance harnesses against production.
 
 ## Table of Contents
 - [Current State](#2026-09-05--current-state)

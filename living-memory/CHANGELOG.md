@@ -11,6 +11,10 @@
 
 ---
 
+## 2026-09-05 — Security findings 1–5 SHIPPED (D-183), PR #279
+
+Verified ownership now gates private data; session initialization resolves identity/membership on the server; analytics excludes bearer tokens and admits only owned outcomes; deletion drains work and covers aliases, credentials and new private tables. Mobile rejects stale proof/session callbacks. Export v2 and privacy disclosures updated. Integrated main #277/#278 before release; CI **5,001 passed / 1 skipped**, all four jobs green; PostgreSQL **57 passed**. Render `a927e3a7` live 04:40 UTC, static content matched and invalid-session probes returned 401. iOS **1.16.16 (145)** build and TestFlight submission finished. Extension **0.1.1** published with unpacked-install instructions. Physical-device QA and historical production cleanup remain owed. [Deployment evidence](../docs/plans/security-data-hardening/deployment.md).
+
 ## 2026-09-04 — Personal-market policy BUILT DARK (D-180/D-181) — consensus becomes a guardrail, personal rankings become the ordering signal
 Prod (2026-09-04, 21,363 impressions / 598 decisions / 5 deciding users) said the thesis is right and
 the implementation is not: the top quartile of stored mutual-surplus was liked 38.6% vs 15.5–25.9%,
