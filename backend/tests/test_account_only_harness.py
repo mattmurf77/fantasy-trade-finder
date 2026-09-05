@@ -313,6 +313,13 @@ def test_session_init_reuses_token_and_preserves_verified_for_account_user(
         server._sessions[token]["verified_via"] = "apple"
     db_module.upsert_user(sleeper_user_id=acct_uid)
     accounts.mark_user_verified(acct_uid, "apple")
+    # A verified account can initialize a league imported for its identity.
+    db_module.upsert_espn_league("league_x", acct_uid, "Test League", 2026,
+                                 "public", 1, 2)
+    db_module.replace_espn_league_members("league_x", [
+        {"user_id": acct_uid, "player_ids": ["qb_1"]},
+        {"user_id": "opp_1", "player_ids": ["rb_1"]},
+    ])
 
     r = c.post("/api/session/init",
                headers={"X-Session-Token": token,

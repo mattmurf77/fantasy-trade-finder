@@ -1486,3 +1486,7 @@ Neither flag is enabled in this branch's configuration. Current observed adapter
 `trade.mutual_benefit_v1` defaults false in code, config and all release fixtures. It implies final market and roster enforcement even if their switches are off. Eligible trades require both managers' complete utility evidence, explicit intent, confidence >=0.5 and normalized gain >=0.01. These are uncalibrated defaults of the pure evaluator, not acceptance probabilities; they do not enter MODEL_A_PROFILE. Unknown point data or preferences cannot pass. Order is weaker gain, total gain, then fewer assets, within Core/Conviction quotas. This flag invalidates cached decks when changed.
 
 Collection uses only `trade.valuation_telemetry` and `trade.roster_evaluation`; all enforcement switches remain false. On Render, FTF_FLAGS changes require a new deployment to reach the running process. POST /api/feature-flags/reload reloads the current process environment and on-disk file; it does not fetch newly changed Render environment settings. See [rollout procedure](plans/trade-model-activation/rollout.md).
+
+### Legacy authorization rollout flag
+
+`auth.enforce_verified_writes` remains accepted for configuration compatibility but cannot disable private read/write verification. Changing it is not an authorization rollback. Session initialization reports enforcement as true.

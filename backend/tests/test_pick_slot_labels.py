@@ -308,7 +308,7 @@ PICK_ROWS = [_row(SEASON, 1, 1, traded=1, orig="mattmurf77"),
 
 
 def _mk_sess():
-    return {
+    return {"verified": True,
         "user_id": "u_a", "active_format": "1qb_ppr", "last_active": 0.0,
         "league": SimpleNamespace(league_id=LEAGUE, platform=None, members=[]),
         "players": [], "trade_svc": object(),

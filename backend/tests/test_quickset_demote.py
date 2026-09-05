@@ -94,7 +94,7 @@ def harness():
                     team="AAA", years_exp=5, rookie_year="2021"))
 
     svc = _svc()
-    sess = {
+    sess = {"verified": True,
         "user_id": USER,
         "active_format": FMT,
         "last_active": 0.0,

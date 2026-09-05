@@ -52,7 +52,7 @@ def client(monkeypatch):
     metadata.create_all(engine)
 
     token = "espn-sess-tok"
-    sess = {"user_id": USER, "active_format": "1qb_ppr", "last_active": 0.0}
+    sess = {"verified": True, "user_id": USER, "active_format": "1qb_ppr", "last_active": 0.0}
 
     server.app.config["TESTING"] = True
     c = server.app.test_client()

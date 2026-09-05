@@ -153,7 +153,7 @@ def harness():
     # SUBSET of players_table — exactly like the live `ranking_pool`, which is
     # the universal DP-valued pool rather than the player DB. Picks are never
     # pool members, and P_OFFPOOL is a real player that is not one either.
-    sess = {
+    sess = {"verified": True,
         "user_id":       ME,
         "league":        SimpleNamespace(league_id=LEAGUE),
         "players":       [SimpleNamespace(id=pid, name=nm)

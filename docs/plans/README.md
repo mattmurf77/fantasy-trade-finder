@@ -16,6 +16,7 @@ cited below, [`living-memory/DECISIONS.md`](../../living-memory/DECISIONS.md).
 Per-feedback-item fixes do **not** live here — they live in [`../feedback/items/`](../feedback/items/).
 
 Trade-model activation follow-up: [scope](trade-model-activation/scope.md), [validation](trade-model-activation/validation.md). Items 2/3 built; collection rollout under validation; strict enforcement remains dark.
+Security remediation implemented and independently reviewed: [2026-09-04 scope](security-data-hardening/scope.md) — findings 1–5 plus follow-up race fixes; 4,707 backend tests pass on Python 3.12, 54 PostgreSQL checks pass. [Release limits](security-data-hardening/review.md): native validation pending; not deployed.
 
 ## Status legend
 

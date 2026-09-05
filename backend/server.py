@@ -44,7 +44,7 @@ from dataclasses import dataclass, replace as _dc_replace
 from datetime import datetime, timedelta, timezone
 
 from flask import (
-    Flask, g, jsonify, make_response, redirect, request, send_from_directory,
+    Flask, g, has_request_context, jsonify, make_response, redirect, request, send_from_directory,
 )
 
 # ---------------------------------------------------------------------------
@@ -2319,27 +2319,30 @@ def _persist_session_if_eligible(token: str, sess: dict) -> None:
     session is verified. Also the throttled heartbeat: refreshes
     last_seen_at (rolling expiry) at most once per throttle window. Never
     raises — persistence must not break auth flows."""
-    if not token or not is_enabled("auth.persistent_sessions"):
-        return
-    if not _session_persist_eligible(sess):
-        return
-    now = time.time()
-    if now - sess.get("_persisted_at", 0) < _PERSISTED_TOUCH_THROTTLE_S:
-        return
-    try:
-        persist_session(
-            token,
-            user_id=str(sess["user_id"]),
-            account_id=sess.get("account_id"),
-            verified_via=sess.get("verified_via"),
-            account_only=bool(sess.get("account_only")),
-            username=sess.get("username"),
-            display_name=sess.get("display_name"),
-        )
-        sess["_persisted_at"] = now
-    except Exception as e:
-        log.warning("persist_session failed for user %s: %s",
-                    sess.get("user_id"), e)
+    with _session_restore_lock:
+        if sess.get("_revoked"):
+            return
+        if not token or not is_enabled("auth.persistent_sessions"):
+            return
+        if not _session_persist_eligible(sess):
+            return
+        now = time.time()
+        if now - sess.get("_persisted_at", 0) < _PERSISTED_TOUCH_THROTTLE_S:
+            return
+        try:
+            persist_session(
+                token,
+                user_id=str(sess["user_id"]),
+                account_id=sess.get("account_id"),
+                verified_via=sess.get("verified_via"),
+                account_only=bool(sess.get("account_only")),
+                username=sess.get("username"),
+                display_name=sess.get("display_name"),
+            )
+            sess["_persisted_at"] = now
+        except Exception as e:
+            log.warning("persist_session failed for user %s: %s",
+                        sess.get("user_id"), e)
 
 
 def _persisted_row_expired(row: dict) -> bool:
@@ -2381,6 +2384,14 @@ def _restore_persisted_session(token: str) -> dict | None:
 
     from . import accounts as _accts
     with _session_restore_lock:
+        # Deletion may have revoked this token after the optimistic read.
+        # Re-read under the same lifecycle lock used by deletion/persistence.
+        try:
+            row = load_persisted_session(token)
+        except Exception:
+            return None
+        if row is None or _persisted_row_expired(row):
+            return None
         # Another request may have rebuilt while we waited on the lock.
         with _sessions_lock:
             sess = _sessions.get(token)
@@ -2574,19 +2585,10 @@ def _league_user_id(sess: dict) -> str:
 # users row (verified_at / verified_via='sleeper', shared with P2's
 # Apple/Google anchors via backend/accounts.py).
 #
-# Decision matrix for a mutating request (also in docs/api-reference.md):
-#   session verified                    → allow
-#   unverified + user has a verified
-#     controller (users.verified_via)   → 403 verification_required
-#                                         (first-verified-controller-wins,
-#                                         even during grace)
-#   unverified, no controller, grace
-#     (auth.enforce_verified_writes=F)  → allow + one AUTH-GRACE log line
-#   unverified, no controller, enforce  → 403 verification_required
-#
-# The two highest-blast-radius routes never use this gate's grace path:
-# POST /api/sleeper/link carries its own proof inline, and POST
-# /api/trades/propose requires sess["verified"] outright.
+# Private state always requires proof on THIS session. The historical
+# auth.enforce_verified_writes rollout flag cannot re-enable username-only
+# access. Synthetic demo sessions may exercise their isolated demo state.
+# POST /api/sleeper/link supplies its own identity proof inline.
 # ---------------------------------------------------------------------------
 
 _MUTATING_METHODS = ("POST", "PUT", "PATCH", "DELETE")
@@ -2594,11 +2596,10 @@ _MUTATING_METHODS = ("POST", "PUT", "PATCH", "DELETE")
 
 def _verified_controller_via(user_id: str) -> str | None:
     """users.verified_via for this user_id — the persisted "someone proved
-    control of this account" marker. Shared by the write and read gates.
+    control of this account" marker for account-binding conflict detection.
 
-    Returns None on a DB hiccup (fail open + log): both gates treat an
-    unreadable marker as no-controller rather than locking every session
-    out on a transient DB error.
+    Returns None on a DB hiccup. Private read/write authorization never
+    consults this lookup: an absent marker is not proof of ownership.
     """
     try:
         from . import accounts as _accounts
@@ -2608,31 +2609,20 @@ def _verified_controller_via(user_id: str) -> str | None:
         return None
 
 
-def _verified_write_denial(sess: dict):
-    """Return a Flask (response, status) to DENY this write, or None to allow.
+def _synthetic_demo_session(sess: dict) -> bool:
+    """Only server-created demo identities qualify for the demo exemption."""
+    return bool(sess.get("is_demo") and
+                str(sess.get("user_id") or "").startswith("demo_user_"))
 
-    Assumes `sess` is a live session dict. Reads users.verified_via for
-    unverified sessions so a squatter loses write access the moment the real
-    owner verifies — no restart or session expiry needed.
-    """
-    if sess.get("verified"):
+
+def _verified_write_denial(sess: dict):
+    """Deny private mutations unless this session has proven ownership."""
+    if sess.get("verified") or _synthetic_demo_session(sess):
         return None
-    user_id = sess.get("user_id") or ""
-    controller_via = _verified_controller_via(user_id)
-    if controller_via:
-        log.warning("AUTH-DENY unverified_write user_id=%s method=%s path=%s "
-                    "reason=verified_controller_exists via=%s",
-                    user_id, request.method, request.path, controller_via)
-        return jsonify({"error": "verification_required"}), 403
-    if is_enabled("auth.enforce_verified_writes"):
-        log.warning("AUTH-DENY unverified_write user_id=%s method=%s path=%s "
-                    "reason=enforcement", user_id, request.method, request.path)
-        return jsonify({"error": "verification_required"}), 403
-    # Grace: allowed but instrumented. ONE stable line format — the runbook's
-    # grace-funnel monitoring greps for "AUTH-GRACE" (docs/runbook.md).
-    log.info("AUTH-GRACE unverified_write user_id=%s method=%s path=%s",
-             user_id, request.method, request.path)
-    return None
+    log.warning("AUTH-DENY unverified_write user_id=%s method=%s path=%s "
+                "reason=verification_required",
+                sess.get("user_id") or "", request.method, request.path)
+    return jsonify({"error": "verification_required"}), 403
 
 
 def _gate_unverified_write(fn):
@@ -2656,45 +2646,19 @@ def _gate_unverified_write(fn):
 
 
 # ---------------------------------------------------------------------------
-# Verified-session READ gate — account-auth plan P2.5 (read privacy)
-# (docs/plans/account-auth-plan-2026-07-11.md §"P2.5")
-#
-# "Ranks hidden behind an account" (#102) means reads too: without this, an
-# attacker with just a username can mint a session and VIEW the victim's
-# board even though the write gate blocks mutation. The read rule mirrors
-# the write rule's verified-controller branch ONLY:
-#
-#   session verified                    → allow
-#   unverified + user has a verified
-#     controller (users.verified_via)   → 403 verification_required
-#                                         (no grace — the owner has proven
-#                                         control; squatters get nothing)
-#   unverified, no controller           → allow (grace-era behavior:
-#                                         onboarding users must be able to
-#                                         see their own board)
-#
-# auth.enforce_verified_writes is deliberately NOT consulted here:
-# enforcement hard-denies writes, but a user mid-onboarding (no controller
-# anywhere) must still see their own board or nobody could ever onboard.
+# Verified-session READ gate — private boards require session ownership,
+# including accounts that have never registered a verified controller.
 # ---------------------------------------------------------------------------
 
 
 def _verified_read_denial(sess: dict):
-    """Return a Flask (response, status) to DENY this board-content read,
-    or None to allow. Same per-request users.verified_via check as the
-    write gate, so a squatter loses read access the moment the real owner
-    verifies — no restart or session expiry needed.
-    """
-    if sess.get("verified"):
+    """Deny private reads unless this session has proven ownership."""
+    if sess.get("verified") or _synthetic_demo_session(sess):
         return None
-    user_id = sess.get("user_id") or ""
-    controller_via = _verified_controller_via(user_id)
-    if controller_via:
-        log.warning("AUTH-DENY unverified_read user_id=%s method=%s path=%s "
-                    "reason=verified_controller_exists via=%s",
-                    user_id, request.method, request.path, controller_via)
-        return jsonify({"error": "verification_required"}), 403
-    return None
+    log.warning("AUTH-DENY unverified_read user_id=%s method=%s path=%s "
+                "reason=verification_required",
+                sess.get("user_id") or "", request.method, request.path)
+    return jsonify({"error": "verification_required"}), 403
 
 
 def _gate_unverified_read(fn):
@@ -2820,6 +2784,51 @@ def _device_info_from_request() -> dict:
         "os_version":  request.headers.get("X-OS-Version") or None,
         "app_version": request.headers.get("X-App-Version") or None,
     }
+
+
+# The web service runs one worker. A request keeps its originating user's
+# lease through teardown; deletion waits for those writes before its DB
+# transaction. No global lock serializes unrelated users.
+from . import user_data_lifecycle as _user_data_lifecycle
+
+
+@app.before_request
+def _acquire_user_data_lease():
+    g._user_data_started = _user_data_lifecycle.snapshot()
+    if request.endpoint == "delete_account_route":
+        return  # deletion acquires all account aliases in sorted order
+    token = request.headers.get("X-Session-Token", "")
+    if not token:
+        return
+    sess = _get_session(token)
+    if not sess or not sess.get("user_id"):
+        return
+    _hold_request_user_data(sess["user_id"])
+    if sess.get("_revoked"):
+        raise _SessionExpired()
+
+
+def _hold_request_user_data(user_id):
+    """Keep resolved identity work admitted until response teardown, including auth."""
+    if not has_request_context():
+        return
+    leases = g.setdefault("_user_data_leases", {})
+    if str(user_id) in leases:
+        return
+    lease = _user_data_lifecycle.capture(
+        str(user_id), started=g.get("_user_data_started"))
+    context = lease.active()
+    active = context.__enter__()
+    leases[str(user_id)] = context
+    # A request may have waited behind deletion after looking up its token.
+    if not active:
+        raise _SessionExpired()
+
+
+@app.teardown_request
+def _release_user_data_lease(exc):
+    for context in reversed(list(g.pop("_user_data_leases", {}).values())):
+        context.__exit__(None, None, None)
 
 
 @app.before_request
@@ -4995,8 +5004,12 @@ def _save_deck_outcome_safe(
     acting user, and was served within _DECK_OUTCOME_MAX_AGE_DAYS — anything
     else is counted-and-dropped, so a stale or foreign impression_id can
     never label (or taste-poison) another user's history."""
-    if not impression_id or not isinstance(impression_id, str):
+    if not isinstance(impression_id, str) or not (1 <= len(impression_id) <= 64):
         return
+    if has_request_context():
+        sess = _get_session(request.headers.get("X-Session-Token", ""))
+        if not sess or not sess.get("verified") or sess.get("user_id") != acting_user_id:
+            return
     if not _deck_signal_v2_enabled():
         return
     try:
@@ -5025,14 +5038,17 @@ def _save_deck_outcome_safe(
         if action == "pass" and deck_pass_outcome_recorded(impression_id[:64]):
             _deck_outcome_reject("dup_pass", impression_id)
             return
-        dw = int(dwell_ms) if isinstance(dwell_ms, (int, float)) and not isinstance(dwell_ms, bool) else None
-        save_deck_outcome(
+        dw = dwell_ms
+        written = save_deck_outcome(
+            acting_user_id  = acting_user_id,
             impression_id   = impression_id[:64],
             action          = action,
             dwell_ms        = dw,
-            detail_expanded = bool(detail_expanded) if detail_expanded is not None else None,
-            calc_opened     = bool(calc_opened) if calc_opened is not None else None,
+            detail_expanded = detail_expanded,
+            calc_opened     = calc_opened,
         )
+        if not written:
+            return
         # F5 (deck.taste_vectors) — synchronous taste-vector update riding
         # the outcome write (PRD: minute-level sync at FTF QPS = a SQL
         # write). Flag-gated here AND never-throwing inside, so this
@@ -8042,6 +8058,18 @@ def _kickoff_trade_job(
                     read on its own thread, handed to the worker so it does
                     not read them a second time. See `_run_trade_job`.
     """
+    _job_write_lease = _user_data_lifecycle.capture(
+        user_id, started=g.get("_user_data_started") if has_request_context() else None)
+
+    def _run_leased_job(*args, **kwargs):
+        with _job_write_lease.active() as active:
+            if active:
+                _run_trade_job(*args, **kwargs)
+            else:
+                with _trade_jobs_lock:
+                    _trade_jobs[job_id].update(status="error", error="account_deleted",
+                                               finished_at=time.monotonic())
+
     # Capture before scheduling: session/init may reuse this token for another
     # league while this job waits to run. Request callers supply their view;
     # pregen supplies the freshly built payload; headless cron resolves here.
@@ -8095,7 +8123,7 @@ def _kickoff_trade_job(
         return job_id
 
     if synchronous:
-        _run_trade_job(job_id, sess_token, league_id, fairness_threshold,
+        _run_leased_job(job_id, sess_token, league_id, fairness_threshold,
                        pinned_give or [], pinned_receive or [],
                        opponent_user_id, pinned_give_mode,
                        trade_intent=trade_intent,
@@ -8104,7 +8132,7 @@ def _kickoff_trade_job(
         return job_id
 
     threading.Thread(
-        target=_run_trade_job,
+        target=_run_leased_job,
         args=(job_id, sess_token, league_id, fairness_threshold,
               pinned_give or [], pinned_receive or [], opponent_user_id,
               pinned_give_mode),
@@ -8352,6 +8380,7 @@ def _apply_rookie_scope(rankings: list[dict], sess) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 @app.route("/api/trio")
+@_gate_unverified_read
 def get_trio():
     """GET /api/trio?position=RB  →  next 3 players to rank"""
     sess = _require_session()
@@ -9272,6 +9301,7 @@ def set_ranking_method_route():
 
 
 @app.route("/api/settings/stud-tax", methods=["GET", "PUT"])
+@_gate_unverified_read
 def stud_tax_setting_route():
     """GET/PUT /api/settings/stud-tax — #215 per-user stud-tax mode.
 
@@ -9901,38 +9931,19 @@ def ingest_client_events_route():
     if token:
         with _sessions_lock:
             sess = _sessions.get(token)
-        if sess:
+        if sess and sess.get("verified"):
             user_id = sess.get("user_id")
-    # F1 (deck.signal_v2) — deck-outcome side-channel: the client's viewed
-    # (deck_card_viewed, fired after ≥500ms front-of-deck) and undo
-    # (swipe_undone) signals ride the existing event batches, carrying
-    # props.impression_id. Independent of the analytics pipeline's own
-    # acceptance (taxonomy/rate-limit/ingest-flag): this only ever APPENDS
-    # deck_outcomes rows and never alters the ingest response. Flag off or
-    # no impression_id props ⇒ nothing happens.
-    if _deck_signal_v2_enabled():
-        try:
-            _body = request.get_json(force=True, silent=True) or {}
-            _events = _body.get("events")
-            if isinstance(_events, list):
-                _action_by_type = {"deck_card_viewed": "viewed",
-                                   "swipe_undone":     "undo"}
-                for _env in _events[:_analytics_ingest.MAX_BATCH]:
-                    if not isinstance(_env, dict):
-                        continue
-                    _action = _action_by_type.get(_env.get("event_type"))
-                    _props = _env.get("props")
-                    if not _action or not isinstance(_props, dict):
-                        continue
-                    _save_deck_outcome_safe(
-                        _props.get("impression_id"),
-                        _action,
-                        acting_user_id=user_id,
-                        dwell_ms=_props.get("dwell_ms"),
-                    )
-        except Exception as sig_err:
-            log.warning("deck signal-v2 event outcome scan failed: %s", sig_err)
-    return _analytics_ingest.ingest_request(user_id)
+    # Outcome writes only see validated, scrubbed, newly accepted events.
+    # The shared helper independently requires a verified owning session.
+    def accepted_outcome(row):
+        action = {"deck_card_viewed": "viewed", "swipe_undone": "undo"}.get(row["event_type"])
+        if action:
+            props = json.loads(row["props"] or "{}")
+            _save_deck_outcome_safe(props.get("impression_id"), action,
+                                    acting_user_id=user_id,
+                                    dwell_ms=props.get("dwell_ms"))
+
+    return _analytics_ingest.ingest_request(user_id, on_accepted=accepted_outcome)
 
 
 @app.route("/api/admin/analytics/health", methods=["GET"])
@@ -11920,6 +11931,7 @@ def _user_player_elo(user_id: str, player_id: str, scoring_format: str) -> tuple
 
 
 @app.route("/api/players/<player_id>/profile")
+@_gate_unverified_read
 def get_player_profile_route(player_id):
     """GET /api/players/<id>/profile — the player-profile aggregate (#17).
 
@@ -12061,6 +12073,7 @@ def get_rookies_route():
 
 
 @app.route("/api/league/picks")
+@_gate_unverified_read
 def get_league_picks():
     """
     GET /api/league/picks?league_id=...
@@ -17320,8 +17333,8 @@ def sleeper_link():
                       — the signature oracle (401 token_rejected on a
                       forged/dead token). On proof the session is marked
                       verified and users.verified_via='sleeper' persisted.
-                      If the oracle is unreachable (network/config) the
-                      link still stores, but `verified` stays false.
+                      If the oracle is unreachable (network/config), an
+                      unverified caller gets retryable 503 without storing.
     GET             → {connected, sleeper_user_id, expires_at, expired}. No token.
     DELETE          → drop the stored token (disconnect). Standard write gate.
     """
@@ -17379,8 +17392,8 @@ def sleeper_link():
     # token_sleeper_user_id() decodes without checking the HS256 signature,
     # so we exercise the token once against Sleeper's authenticated GraphQL
     # endpoint. Sleeper rejecting it (401/403) ⇒ forged or dead ⇒ deny.
-    # A transport/config failure is INCONCLUSIVE: store the link (existing
-    # best-effort behavior) but do not verify.
+    # A transport/config failure is INCONCLUSIVE. Only an already verified
+    # owner may store a replacement without this additional live proof.
     proven_live = False
     try:
         _sleeper_write.verify_token_live(token)
@@ -17392,6 +17405,11 @@ def sleeper_link():
     except _sleeper_write.SleeperWriteError as e:
         log.warning("sleeper_link oracle inconclusive [%s] for %s: %s — "
                     "linking unverified", e.kind, user_id, getattr(e, "detail", None))
+        if not sess.get("verified"):
+            # A 503 retains the client's Keychain token for retry without
+            # overwriting a credential before the caller proves ownership.
+            return jsonify({"error": "verification_unavailable",
+                            "verified": False}), 503
 
     exp = _sleeper_write.token_expiry(token)
     expires_at = datetime.fromtimestamp(exp, tz=timezone.utc).isoformat() if exp else None
@@ -18777,6 +18795,7 @@ def disposition_trade_match(match_id):
 
 
 @app.route("/api/leagues")
+@_gate_unverified_read
 def get_leagues():
     """GET /api/leagues  →  current active league"""
     sess = _require_initialized_session()
@@ -18795,6 +18814,7 @@ def get_leagues():
 # ---------------------------------------------------------------------------
 
 @app.route("/api/portfolio")
+@_gate_unverified_read
 def get_portfolio():
     """GET /api/portfolio?league_ids=a,b,c → aggregate exposure across this
     user's leagues. Returns {players: [...]} sorted by exposure desc.
@@ -20124,36 +20144,25 @@ VALID_POSITIONS = {"QB", "RB", "WR", "TE"}
 
 @app.route("/api/session/init", methods=["POST"])
 def session_init():
-    """
-    Initialize the app with a real Sleeper roster.
+    """Initialize/switch a league for the proven session identity.
 
-    Expected body:
-    {
-      "user_id":          "sleeper_user_id",
-      "league_id":        "sleeper_league_id",
-      "league_name":      "My League Name",
-      "user_player_ids":  ["1234", "5678", ...],
-      "opponent_rosters": [
-        { "user_id": "abc", "username": "SomeName", "player_ids": [...] },
-        ...
-      ],
-      # Optional, additive (co-owner support). The caller's LEAGUE identity:
-      # the owner_id of the roster they own OR co-own, plus that owner's
-      # Sleeper display name. Both default to the caller's own values, so a
-      # client that omits them behaves exactly as before.
-      "league_user_id":      "sleeper_user_id_of_the_roster_owner",
-      "league_display_name": "That owner's display name"
-    }
+    Requires a verified bearer token and matching user_id. The caller selects
+    league_id (and optionally active_format); profiles, names, team identity
+    and rosters are resolved server-side. Legacy snapshot fields are ignored.
+    Sleeper membership includes co-owners; platform leagues use imported DB
+    membership. Demo bootstrap remains /api/session/demo.
     """
-    body              = request.get_json(force=True) or {}
-
-    # Fail fast: an authenticated caller (session token present) must say who
-    # it is. Silently defaulting to DEMO_USER_ID here builds a session with an
-    # empty user_roster that only errors much later, at trade generation.
-    # Demo bootstrap (/api/session/demo) and tokenless first-init keep the
-    # default. Surfaced by the mobile-testing S2 drill.
-    if request.headers.get("X-Session-Token") and not body.get("user_id"):
-        return jsonify({"error": "missing_user_id"}), 400
+    body = request.get_json(force=True) or {}
+    if not isinstance(body, dict):
+        return jsonify({"error": "invalid_body"}), 400
+    incoming_token = request.headers.get("X-Session-Token", "")
+    existing_sess = _get_session(incoming_token)
+    from .session_input import resolve_session_input, SessionInputError
+    try:
+        authoritative = resolve_session_input(existing_sess, body, _sleeper_get)
+    except SessionInputError as exc:
+        return jsonify({"error": exc.error}), exc.status
+    body = {**body, **authoritative}
 
     user_id           = body.get("user_id",          DEMO_USER_ID)
     league_id         = body.get("league_id",        "sleeper_league")
@@ -20187,13 +20196,6 @@ def session_init():
     if league_user_id != user_id:
         log.info("  co-owned roster: league identity %r (account %r)",
                  league_user_id, user_id)
-
-    # ── Resolve existing session (league-switch reuses same token) ────────
-    # _get_session reads through to the durable store (flag
-    # auth.persistent_sessions), so a verified session's token — and its
-    # verified state — survives a deploy across the client's re-init.
-    incoming_token = request.headers.get("X-Session-Token", "")
-    existing_sess = _get_session(incoming_token)
 
     # ── Build universal ranking pool (once) ────────────────────────────
     # Rankings are user-level, not league-specific.  The ranking service
@@ -20245,63 +20247,13 @@ def session_init():
             elo_ratings = opp_elo,
         ))
 
-    # ── Merge DB-stored league members (e.g. test users) ──────────────
-    # Any member in the DB's league_members table who has a roster but
-    # wasn't sent by the frontend (not a real Sleeper user) gets injected
-    # so their member_rankings are used during trade generation.
-    # `league_user_id` is in the exclusion set alongside `user_id`: for a
-    # co-owner the league_members row for THEIR OWN roster is keyed on the
-    # primary owner's id, and re-injecting it here would hand the trade
-    # engine a phantom 13th team holding a copy of the caller's roster.
-    existing_member_ids = {m.user_id for m in members} | {user_id, league_user_id}
-    try:
-        db_members = load_league_members(league_id)
-        for dbm in db_members:
-            dbm_uid = dbm["user_id"]
-            if dbm_uid in existing_member_ids:
-                continue  # already in the list or is the logged-in user
-            dbm_ids = [str(x) for x in dbm.get("player_ids", []) if str(x) in players_dict]
-            if not dbm_ids:
-                continue
-            if _v2:
-                # Real league member (DB-stored) — consensus seed, no noise.
-                dbm_elo = {pid: ranking_seed.get(pid, 1500) for pid in dbm_ids}
-            else:
-                dbm_elo = _biased_elo_random(dbm_ids, ranking_seed)
-            members.append(LeagueMember(
-                user_id     = dbm_uid,
-                username    = dbm.get("username") or dbm.get("display_name") or dbm_uid,
-                roster      = dbm_ids,
-                elo_ratings = dbm_elo,
-            ))
-            log.info("  📎 injected DB league member %s (%s) with %d roster players",
-                     dbm_uid, dbm.get("username"), len(dbm_ids))
-    except Exception as db_err:
-        log.warning("  could not merge DB league members: %s", db_err)
-
-    if not members:
-        pool_ids = [p.id for p in ranking_pool if p.id not in set(user_player_ids)]
-        random.shuffle(pool_ids)
-        chunk = max(3, len(pool_ids) // 4)
-        for i, opp_name in enumerate(["DynastyKing", "RookieDrafter", "VetHeavy", "WRCorner"]):
-            opp_ids = pool_ids[i * chunk: (i + 1) * chunk]
-            if not opp_ids:
-                break
-            members.append(LeagueMember(
-                user_id      = f"opp_{i+1}",
-                username     = opp_name,
-                roster       = opp_ids,
-                # Simulated (demo-style) opponents: keep the random-bias
-                # opinions and treat them as "ranked" so demo behavior is
-                # unchanged under trade-engine v2.
-                elo_ratings  = _biased_elo_random(opp_ids, ranking_seed),
-                has_rankings = True,
-            ))
+    # The authoritative snapshot is complete. Never merge stale/shared DB
+    # rows or fabricate opponents for a real league with no opponents.
 
     new_league = League(
         league_id = league_id,
         name      = league_name,
-        platform  = "sleeper",
+        platform  = authoritative["platform"],
         members   = members,
     )
 
@@ -20548,6 +20500,7 @@ def session_init():
 
     # ── Create or update session ─────────────────────────────────────────
     session_payload = {
+        "account_only": authoritative["platform"] == "none",
         "user_id":       user_id,
         # Co-owner support: the caller's team identity in THIS league (the
         # resolved roster's owner_id). Equals `user_id` for a sole owner.
@@ -20618,7 +20571,14 @@ def session_init():
     #     log.exception any escapee).
     _ev_info = getattr(g, "device_info", {}) or {}
 
+    _init_write_lease = _user_data_lifecycle.capture(user_id)
+
     def _session_init_background_writes() -> None:
+        with _init_write_lease.active() as active:
+            if active:
+                _session_init_background_writes_impl()
+
+    def _session_init_background_writes_impl() -> None:
         """Run after-response side effects on a daemon thread.
 
         Wrapped in a single broad except — a daemon that raises silently
@@ -20626,6 +20586,8 @@ def session_init():
         docs/reviews/2026-05-22-silent-bugs.md, so we log.exception on
         any escape rather than letting the thread die quietly.
         """
+        if authoritative["platform"] == "none":
+            return
         # ── One Sleeper league-meta read per init ────────────────────
         # Three daemon steps used to fetch `/league/<id>` for themselves
         # (scoring auto-detect, the FB #41 team-count persist that rides
@@ -21476,19 +21438,23 @@ def _write_inbox_row(
     fanout, a weekly replenish marker) or use
     `notification_exists_with_meta` (the 15-minute match_expiring cron).
     """
-    if not user_id or not kind:
-        return
-    try:
-        create_notification(
-            user_id  = user_id,
-            type_    = kind,
-            title    = title,
-            body     = body,
-            metadata = meta or {},
-        )
-    except Exception as e:
-        log.warning("inbox row failed (non-fatal): user=%s kind=%s err=%s",
-                    user_id, kind, e)
+    started = g.get("_user_data_started") if has_request_context() else None
+    with _user_data_lifecycle.capture(user_id, started=started).active() as active:
+        if not active:
+            return
+        if not user_id or not kind:
+            return
+        try:
+            create_notification(
+                user_id  = user_id,
+                type_    = kind,
+                title    = title,
+                body     = body,
+                metadata = meta or {},
+            )
+        except Exception as e:
+            log.warning("inbox row failed (non-fatal): user=%s kind=%s err=%s",
+                        user_id, kind, e)
 
 
 def _send_typed_push(
@@ -21511,55 +21477,59 @@ def _send_typed_push(
          and exit. The 8am cron drains and bundles.
       5. Otherwise: load device tokens, send via Expo, log + record_event.
     """
-    if not user_id or not kind:
-        return
-    try:
-        prefs = get_notification_prefs(user_id)
-        bucket = NOTIF_KIND_TO_BUCKET.get(kind)
-        if bucket and not int(prefs.get(bucket, 1)):
-            log.info("push skipped (bucket=%s off): user=%s kind=%s", bucket, user_id, kind)
+    started = g.get("_user_data_started") if has_request_context() else None
+    with _user_data_lifecycle.capture(user_id, started=started).active() as active:
+        if not active:
             return
-
-        if _freq_cap_blocks(user_id, kind, dedup_key):
-            log.info("push skipped (cap): user=%s kind=%s dedup=%s", user_id, kind, dedup_key)
+        if not user_id or not kind:
             return
-
-        # Quiet-hours check uses the user's saved tz, falling back to ET.
-        if int(prefs.get("quiet_hours_enabled", 1)) and \
-                _local_hour_in_quiet_window(prefs.get("tz")):
-            queue_notification(
-                user_id, kind,
-                title=title, body=body, data=data or {},
-                deliver_after=_next_8am_utc(prefs.get("tz")),
-                dedup_key=dedup_key,
-            )
-            log.info("push queued (quiet hrs): user=%s kind=%s", user_id, kind)
-            return
-
-        # Active hours — fan out to every registered device for this user.
-        targets = load_device_tokens_for_users([user_id])
-        if not targets:
-            return
-        msgs = [{
-            "to":    t["device_token"],
-            "title": title,
-            "body":  body,
-            "data":  {**(data or {}), "type": kind},
-            "sound": "default",
-        } for t in targets]
-        _send_expo_push(msgs)
-        log_notification_send(user_id, kind, dedup_key=dedup_key)
         try:
-            record_event(
-                user_id, "push_sent",
-                source="api",
-                props={"kind": kind, "dedup_key": dedup_key},
-            )
-        except Exception:
-            pass
-    except Exception as e:
-        log.warning("_send_typed_push failed (non-fatal): user=%s kind=%s err=%s",
-                    user_id, kind, e)
+            prefs = get_notification_prefs(user_id)
+            bucket = NOTIF_KIND_TO_BUCKET.get(kind)
+            if bucket and not int(prefs.get(bucket, 1)):
+                log.info("push skipped (bucket=%s off): user=%s kind=%s", bucket, user_id, kind)
+                return
+
+            if _freq_cap_blocks(user_id, kind, dedup_key):
+                log.info("push skipped (cap): user=%s kind=%s dedup=%s", user_id, kind, dedup_key)
+                return
+
+            # Quiet-hours check uses the user's saved tz, falling back to ET.
+            if int(prefs.get("quiet_hours_enabled", 1)) and \
+                    _local_hour_in_quiet_window(prefs.get("tz")):
+                queue_notification(
+                    user_id, kind,
+                    title=title, body=body, data=data or {},
+                    deliver_after=_next_8am_utc(prefs.get("tz")),
+                    dedup_key=dedup_key,
+                )
+                log.info("push queued (quiet hrs): user=%s kind=%s", user_id, kind)
+                return
+
+            # Active hours — fan out to every registered device for this user.
+            targets = load_device_tokens_for_users([user_id])
+            if not targets:
+                return
+            msgs = [{
+                "to":    t["device_token"],
+                "title": title,
+                "body":  body,
+                "data":  {**(data or {}), "type": kind},
+                "sound": "default",
+            } for t in targets]
+            _send_expo_push(msgs)
+            log_notification_send(user_id, kind, dedup_key=dedup_key)
+            try:
+                record_event(
+                    user_id, "push_sent",
+                    source="api",
+                    props={"kind": kind, "dedup_key": dedup_key},
+                )
+            except Exception:
+                pass
+        except Exception as e:
+            log.warning("_send_typed_push failed (non-fatal): user=%s kind=%s err=%s",
+                        user_id, kind, e)
 
 
 def _valid_iana_tz(name) -> bool:
@@ -21644,6 +21614,7 @@ def register_device_for_push():
 
 
 @app.route("/api/notifications/prefs", methods=["GET"])
+@_gate_unverified_read
 def get_notification_prefs_route():
     """GET /api/notifications/prefs → user's per-bucket toggles + quiet-hours
     setting + tz. Defaults are returned when no row exists; the response
@@ -22530,6 +22501,7 @@ def cron_hourly_tick():
     falls in this window.
     """
     _require_cron_auth()
+    _cron_work_started = _user_data_lifecycle.snapshot()
     now_iso = datetime.now(timezone.utc).isoformat()
 
     # ── 0. Daily value-snapshot fallback guard (market-data readiness) ──
@@ -22575,32 +22547,35 @@ def cron_hourly_tick():
     drained = drain_due_queued_notifications(now_iso)
     bundled_users = 0
     for uid, items in drained.items():
-        if not items:
-            continue
-        targets = load_device_tokens_for_users([uid])
-        if not targets:
-            continue
-        title, body = _summary_push(items)
-        msgs = [{
-            "to":    t["device_token"],
-            "title": title,
-            "body":  body,
-            "data":  {"type": "bundle_summary",
-                      "kinds": [it["kind"] for it in items],
-                      "count": len(items)},
-            "sound": "default",
-        } for t in targets]
-        _send_expo_push(msgs)
-        # Log every kind covered by the bundle so frequency caps stay
-        # accurate. We pass the original dedup_key (threaded through the
-        # queue row) so per-dedup_key caps for kinds in _NOTIF_DEDUP_CAPS
-        # — match_expiring, first_match, match_accepted, league_member_*
-        # — keep working when their pushes were deferred to this morning.
-        for it in items:
-            log_notification_send(
-                uid, it["kind"], dedup_key=it.get("dedup_key"),
-            )
-        bundled_users += 1
+        with _user_data_lifecycle.capture(uid, started=_cron_work_started).active() as active:
+            if not active:
+                continue
+            if not items:
+                continue
+            targets = load_device_tokens_for_users([uid])
+            if not targets:
+                continue
+            title, body = _summary_push(items)
+            msgs = [{
+                "to":    t["device_token"],
+                "title": title,
+                "body":  body,
+                "data":  {"type": "bundle_summary",
+                          "kinds": [it["kind"] for it in items],
+                          "count": len(items)},
+                "sound": "default",
+            } for t in targets]
+            _send_expo_push(msgs)
+            # Log every kind covered by the bundle so frequency caps stay
+            # accurate. We pass the original dedup_key (threaded through the
+            # queue row) so per-dedup_key caps for kinds in _NOTIF_DEDUP_CAPS
+            # — match_expiring, first_match, match_accepted, league_member_*
+            # — keep working when their pushes were deferred to this morning.
+            for it in items:
+                log_notification_send(
+                    uid, it["kind"], dedup_key=it.get("dedup_key"),
+                )
+            bundled_users += 1
 
     # ── 2. Tuesday 9am weekly_digest, Wednesday 9am pending_review ──
     digest_sent = 0
@@ -22619,41 +22594,44 @@ def cron_hourly_tick():
 
     week_window = (datetime.now(timezone.utc) - timedelta(days=6)).isoformat()
     for u in load_all_signed_up_users():
-        prefs = get_notification_prefs(u["sleeper_user_id"])
-        if not int(prefs.get("weekly_digest", 1)):
-            continue
-        try:
-            tz = ZoneInfo(prefs.get("tz") or "America/New_York")
-        except Exception:
-            continue
-        local = datetime.now(tz)
-        # Tuesday=1, Wednesday=2 (Python weekday())
-        if local.weekday() == 1 and local.hour == 9:
-            if count_notification_sends_since(
-                u["sleeper_user_id"], "weekly_digest", week_window) == 0:
-                _send_typed_push(
-                    u["sleeper_user_id"],
-                    "weekly_digest",
-                    title = "Your weekly trade roundup",
-                    body  = "Tap to see what's new in your leagues.",
-                    data  = {"week": local.strftime("%Y-W%U")},
-                )
-                digest_sent += 1
-        elif local.weekday() == 2 and local.hour == 9:
-            unread = load_unread_match_count(u["sleeper_user_id"])
-            if unread <= 0:
+        with _user_data_lifecycle.capture(u["sleeper_user_id"], started=_cron_work_started).active() as active:
+            if not active:
                 continue
-            if count_notification_sends_since(
-                u["sleeper_user_id"], "pending_review", week_window) == 0:
-                _send_typed_push(
-                    u["sleeper_user_id"],
-                    "pending_review",
-                    title = (f"{unread} unreviewed "
-                             f"match{'es' if unread != 1 else ''}"),
-                    body  = "Waiting for your call. Tap to review.",
-                    data  = {"unread_count": unread},
-                )
-                review_sent += 1
+            prefs = get_notification_prefs(u["sleeper_user_id"])
+            if not int(prefs.get("weekly_digest", 1)):
+                continue
+            try:
+                tz = ZoneInfo(prefs.get("tz") or "America/New_York")
+            except Exception:
+                continue
+            local = datetime.now(tz)
+            # Tuesday=1, Wednesday=2 (Python weekday())
+            if local.weekday() == 1 and local.hour == 9:
+                if count_notification_sends_since(
+                    u["sleeper_user_id"], "weekly_digest", week_window) == 0:
+                    _send_typed_push(
+                        u["sleeper_user_id"],
+                        "weekly_digest",
+                        title = "Your weekly trade roundup",
+                        body  = "Tap to see what's new in your leagues.",
+                        data  = {"week": local.strftime("%Y-W%U")},
+                    )
+                    digest_sent += 1
+            elif local.weekday() == 2 and local.hour == 9:
+                unread = load_unread_match_count(u["sleeper_user_id"])
+                if unread <= 0:
+                    continue
+                if count_notification_sends_since(
+                    u["sleeper_user_id"], "pending_review", week_window) == 0:
+                    _send_typed_push(
+                        u["sleeper_user_id"],
+                        "pending_review",
+                        title = (f"{unread} unreviewed "
+                                 f"match{'es' if unread != 1 else ''}"),
+                        body  = "Waiting for your call. Tap to review.",
+                        data  = {"unread_count": unread},
+                    )
+                    review_sent += 1
 
     log.info("hourly-tick: bundled=%d digest=%d review=%d draft_status=%d",
              bundled_users, digest_sent, review_sent, draft_status_checked)
@@ -22674,6 +22652,7 @@ def cron_daily_tick():
     _send_typed_push, so the loop here is the broad scan.
     """
     _require_cron_auth()
+    _cron_work_started = _user_data_lifecycle.snapshot()
     now = datetime.now(timezone.utc)
     cutoff_7d  = (now - timedelta(days=7)).isoformat()
     cutoff_30d = (now - timedelta(days=30)).isoformat()
@@ -22686,80 +22665,83 @@ def cron_daily_tick():
     is_aug25 = (now.month == 8 and now.day == 25)
 
     for u in load_all_signed_up_users():
-        uid = u["sleeper_user_id"]
-        last_active = u.get("last_active_at")
-        signup_at   = u.get("signup_at")
-        unlocked    = u.get("unlocked_formats") or []
+        with _user_data_lifecycle.capture(u["sleeper_user_id"], started=_cron_work_started).active() as active:
+            if not active:
+                continue
+            uid = u["sleeper_user_id"]
+            last_active = u.get("last_active_at")
+            signup_at   = u.get("signup_at")
+            unlocked    = u.get("unlocked_formats") or []
 
-        # ── season_start: Aug 25 fan-out, all signed-up users ──
-        if is_aug25:
-            _send_typed_push(
-                uid, "season_start",
-                title = "Football is back",
-                body  = "Re-rank your players to find this year's trades.",
-                data  = {"season": now.year},
-            )
-            counters["season_start"] += 1
-            continue   # don't double-stack a winback on top of season kickoff
-
-        # ── finish_ranking: signed up >3d ago, no format unlocked ──
-        if signup_at and signup_at < cutoff_3d and not unlocked:
-            _send_typed_push(
-                uid, "finish_ranking",
-                title = "You're 5 minutes from your first trade",
-                body  = "Finish ranking your players to unlock matches.",
-                data  = {},
-            )
-            counters["finish_ranking"] += 1
-            continue
-
-        # ── winback_dormant: 30d inactive ──
-        if last_active and last_active < cutoff_30d:
-            if is_enabled("notif.honest_winbacks"):
-                # Teardown 05-04b. Two gates before any dormant winback:
-                #  1. Lifetime stop — ≥3 winback_dormant sends since the
-                #    user's last session means three consecutive nudges went
-                #    unanswered; stop forever (notification_events_log rows
-                #    after last_active_at ARE the consecutive-unanswered
-                #    count, so no schema change is needed).
-                #  2. Truthful copy — mirror the winback_matches gate below:
-                #    only claim waiting matches when unread matches exist;
-                #    otherwise send nothing.
-                if count_notification_sends_since(
-                        uid, "winback_dormant", last_active) >= 3:
-                    continue
-                unread = load_unread_match_count(uid)
-                if unread <= 0:
-                    continue
+            # ── season_start: Aug 25 fan-out, all signed-up users ──
+            if is_aug25:
                 _send_typed_push(
-                    uid, "winback_dormant",
-                    title = "Your league misses you",
-                    body  = (f"You have {unread} unreviewed trade "
-                             f"match{'es' if unread != 1 else ''} waiting."),
-                    data  = {"unread_count": unread},
+                    uid, "season_start",
+                    title = "Football is back",
+                    body  = "Re-rank your players to find this year's trades.",
+                    data  = {"season": now.year},
                 )
-            else:
+                counters["season_start"] += 1
+                continue   # don't double-stack a winback on top of season kickoff
+
+            # ── finish_ranking: signed up >3d ago, no format unlocked ──
+            if signup_at and signup_at < cutoff_3d and not unlocked:
                 _send_typed_push(
-                    uid, "winback_dormant",
-                    title = "Your league misses you",
-                    body  = "New trade matches are waiting when you're ready.",
+                    uid, "finish_ranking",
+                    title = "You're 5 minutes from your first trade",
+                    body  = "Finish ranking your players to unlock matches.",
                     data  = {},
                 )
-            counters["winback_dormant"] += 1
-            continue
+                counters["finish_ranking"] += 1
+                continue
 
-        # ── winback_matches: 7d inactive AND ≥1 unread match ──
-        if last_active and last_active < cutoff_7d:
-            unread = load_unread_match_count(uid)
-            if unread > 0:
-                _send_typed_push(
-                    uid, "winback_matches",
-                    title = (f"{unread} match{'es' if unread != 1 else ''} "
-                             "waiting"),
-                    body  = "Your leaguemates have been busy. Tap to review.",
-                    data  = {"unread_count": unread},
-                )
-                counters["winback_matches"] += 1
+            # ── winback_dormant: 30d inactive ──
+            if last_active and last_active < cutoff_30d:
+                if is_enabled("notif.honest_winbacks"):
+                    # Teardown 05-04b. Two gates before any dormant winback:
+                    #  1. Lifetime stop — ≥3 winback_dormant sends since the
+                    #    user's last session means three consecutive nudges went
+                    #    unanswered; stop forever (notification_events_log rows
+                    #    after last_active_at ARE the consecutive-unanswered
+                    #    count, so no schema change is needed).
+                    #  2. Truthful copy — mirror the winback_matches gate below:
+                    #    only claim waiting matches when unread matches exist;
+                    #    otherwise send nothing.
+                    if count_notification_sends_since(
+                            uid, "winback_dormant", last_active) >= 3:
+                        continue
+                    unread = load_unread_match_count(uid)
+                    if unread <= 0:
+                        continue
+                    _send_typed_push(
+                        uid, "winback_dormant",
+                        title = "Your league misses you",
+                        body  = (f"You have {unread} unreviewed trade "
+                                 f"match{'es' if unread != 1 else ''} waiting."),
+                        data  = {"unread_count": unread},
+                    )
+                else:
+                    _send_typed_push(
+                        uid, "winback_dormant",
+                        title = "Your league misses you",
+                        body  = "New trade matches are waiting when you're ready.",
+                        data  = {},
+                    )
+                counters["winback_dormant"] += 1
+                continue
+
+            # ── winback_matches: 7d inactive AND ≥1 unread match ──
+            if last_active and last_active < cutoff_7d:
+                unread = load_unread_match_count(uid)
+                if unread > 0:
+                    _send_typed_push(
+                        uid, "winback_matches",
+                        title = (f"{unread} match{'es' if unread != 1 else ''} "
+                                 "waiting"),
+                        body  = "Your leaguemates have been busy. Tap to review.",
+                        data  = {"unread_count": unread},
+                    )
+                    counters["winback_matches"] += 1
 
     # ── F10 (flag deck.replenishment) — weekly deck pre-generation ──
     # Flag off ⇒ this block is a no-op and the response stays byte-identical.
@@ -23240,6 +23222,7 @@ def trends_consensus_gap_route():
 # ---------------------------------------------------------------------------
 
 @app.route("/api/trio/skip", methods=["POST"])
+@_gate_unverified_write
 def post_trio_skip():
     """POST /api/trio/skip
     Body: { player_id: str }  OR  { player_ids: [str, ...] }
@@ -23326,6 +23309,7 @@ def post_tiers_dismiss():
 
 
 @app.route("/api/skips")
+@_gate_unverified_read
 def get_skips():
     """GET /api/skips  →  { skipped_ids: [pid, ...], scoring_format: '...' }
 
@@ -23568,6 +23552,7 @@ def _clean_package_side(raw) -> list[str] | None:
 
 
 @app.route("/api/share/package", methods=["POST"])
+@_gate_unverified_write
 def create_share_package_route():
     """POST /api/share/package — snapshot an arbitrary give/receive package
     for a public share landing. 404 while `growth.share_landing` is dark.
@@ -23684,6 +23669,10 @@ def _extension_build_session(user_id: str, username: str,
 
     Returns (token, session_payload).
     """
+    # Durable restore already holds _session_restore_lock; never invert its
+    # order with deletion's user gates. Fresh auth keeps this lease to teardown.
+    if token is None:
+        _hold_request_user_data(user_id)
     # Ensure the Sleeper player cache is populated — on a cold Render
     # instance the extension could be the first caller.
     if _load_sleeper_cache() is None:
@@ -24242,6 +24231,7 @@ def _compute_invite_impact(username: str, user_id: str) -> dict:
 
 
 @app.route("/api/invite/impact")
+@_gate_unverified_read
 def invite_impact_route():
     """GET /api/invite/impact — returns the inviter's K-factor snapshot.
 
@@ -24708,6 +24698,7 @@ def public_profile_data(username):
 
 
 @app.route("/api/profile/visibility", methods=["GET", "PUT"])
+@_gate_unverified_read
 def profile_visibility():
     """Per-user public-profile opt-in (teardown 06-04, flag
     profiles.user_toggle; 404 while dark).
@@ -25070,10 +25061,14 @@ def _provider_auth_response(provider: str, claims: dict):
     sub = claims.get("sub")
     if not sub:
         return jsonify({"error": "invalid_token", "reason": "missing_sub"}), 401
+    _hold_request_user_data(_accounts.identity_work_key(provider, sub))
     acct = _accounts.find_or_create_account(
         provider, sub, _accounts.hash_email(claims.get("email")),
         email=claims.get("email"),   # stored only when auth.email_capture is on
     )
+    _hold_request_user_data(_accounts.account_user_id(acct["account_id"]))
+    if acct.get("sleeper_user_id"):
+        _hold_request_user_data(acct["sleeper_user_id"])
     sess = _account_session()
 
     out: dict = {
@@ -25124,6 +25119,11 @@ def _provider_auth_response(provider: str, claims: dict):
         return jsonify(out)
 
     bound_uid = acct["sleeper_user_id"]
+    # Provider proof authenticates this provider account, not a Sleeper
+    # username supplied during discovery. Restore the provider's own
+    # binding (or mint its account-only session) until Sleeper is proven.
+    if sess is not None and not sess.get("verified"):
+        sess = None
     if sess is not None and _accounts.is_account_user_id(sess.get("user_id")):
         # An account-keyed session re-authing with a provider: never bind the
         # synthetic key into accounts.sleeper_user_id. Refresh the session's
@@ -25283,6 +25283,7 @@ def auth_google():
 
 
 @app.route("/api/account")
+@_gate_unverified_read
 def get_account_route():
     """Current account: linked identities + bound Sleeper id + verified state."""
     if not is_enabled("auth.accounts"):
@@ -25348,6 +25349,9 @@ def link_sleeper_source():
         return jsonify({"error": "no_account",
                         "message": "Sign in with Apple or Google first."}), 400
 
+    if not sess.get("verified"):
+        return jsonify({"error": "verification_required"}), 403
+
     body = request.get_json(force=True, silent=True) or {}
     username = (body.get("username") or "").strip().lower()
     strategy = (body.get("strategy") or "").strip() or None
@@ -25380,20 +25384,38 @@ def link_sleeper_source():
                                    "different Sleeper username."}), 409
     already_bound = bound == sleeper_uid
 
-    # First-verified-wins: an account cannot take over a Sleeper id whose
-    # control someone already proved (Sleeper-JWT owner or another account).
+    # An Apple/Google account does not prove ownership of a new Sleeper
+    # source. Verify the source before inspecting or merging its board.
     if not already_bound:
-        controller_via = _verified_controller_via(sleeper_uid)
-        if controller_via:
+        proof = body.get("sleeper_token")
+        if not isinstance(proof, str) or not proof:
+            return jsonify({"error": "verification_required",
+                            "message": "Sign in to Sleeper to verify this username."}), 403
+        if (_sleeper_write.is_expired(proof)
+                or _sleeper_write.token_sleeper_user_id(proof) != sleeper_uid):
+            return jsonify({"error": "token_user_mismatch"}), 403
+        try:
+            _sleeper_write.verify_token_live(proof)
+        except _sleeper_write.SleeperAuthError:
+            return jsonify({"error": "token_rejected"}), 403
+        except _sleeper_write.SleeperWriteError:
+            return jsonify({"error": "verification_unavailable",
+                            "message": "Couldn't verify Sleeper. Try again shortly."}), 503
+
+    # A proven Sleeper login can add its first provider anchor. A different
+    # existing provider account must still use account recovery, not merge.
+    if not already_bound:
+        controller = _accounts.get_account_for_user(sleeper_uid)
+        if controller and controller.get("account_id") != account_id:
             log.warning("link-sleeper: DENY account=%s target=%s "
-                        "reason=verified_controller via=%s",
-                        account_id, sleeper_uid, controller_via)
+                        "reason=existing_account", account_id, sleeper_uid)
             return jsonify({
                 "error": "sleeper_already_claimed",
                 "message": "That Sleeper account is already verified by "
                            "another sign-in.",
             }), 403
 
+    _hold_request_user_data(sleeper_uid)
     acct_uid = sess["user_id"]
     provider = sess.get("verified_via") or next(
         (i["provider"] for i in (acct.get("identities") or [])), "apple")
@@ -25474,24 +25496,15 @@ def link_sleeper_source():
 
 
 def _account_data_gates(sess) -> tuple | None:
-    """Shared auth gates for account deletion + export (teardown 06-02):
-    demo sessions have no stored data (400); a verified user's data can
-    only be touched by a verified session (403). Returns a (response,
-    status) tuple to short-circuit with, or None to proceed.
-    """
+    """Export and deletion require proven ownership; demos remain blocked."""
     user_id = sess.get("user_id")
     if sess.get("is_demo") or str(user_id or "").startswith("demo_user_"):
         return jsonify({"error": "demo_session",
                         "message": "Demo sessions have no stored data."}), 400
-    try:
-        verified_via = _accounts.get_user_verified_via(user_id)
-    except Exception:
-        verified_via = None
-    if verified_via and not sess.get("verified"):
+    if not sess.get("verified"):
         return jsonify({
             "error": "verification_required",
-            "message": "This account is verified — verify this session "
-                       "first.",
+            "message": "Verify this session before accessing account data.",
         }), 403
     return None
 
@@ -25501,10 +25514,9 @@ def export_account_route():
     """GET /api/account/export — JSON archive of every user-keyed row
     (teardown 06-02, flag `account.data_export`; 404 while dark).
 
-    Scope = the deletion matrix in accounts.delete_user_data (same table
-    list, so "Download my data" and "Delete account" describe the same data
-    set; sleeper_credentials ciphertext excluded). Same auth gates as
-    deletion: demo-blocked, verified-user step-up.
+    Version 2 uses the explicit alias-aware manifest in accounts.export_user_data.
+    Authentication secrets, push tokens and raw billing payloads are excluded.
+    Same auth gates as deletion: demo-blocked, verified session required.
     """
     if not is_enabled("account.data_export"):
         return jsonify({"error": "not_found"}), 404
@@ -25534,9 +25546,8 @@ def delete_account_route():
     """In-app account deletion (App Store 5.1.1(v)) — NOT flag-gated.
 
     Deletes/anonymizes per the matrix documented in accounts.delete_user_data
-    (honors web/privacy.html §6). When the user record has been verified
-    (users.verified_via set), the calling session must itself be verified —
-    a username-only squatter session cannot delete a verified user's data.
+    (honors web/privacy.html §6). The calling session must itself be verified;
+    a username-only session cannot delete any claimed user's data.
     Also evicts every live session for the user (server-side sign-out).
 
     SIWA revocation (5.1.1(v) companion, teardown 06-02): when a linked
@@ -25563,21 +25574,19 @@ def delete_account_route():
         log.warning("delete_account: apple revocation errored (continuing): %s",
                     revoke_err)
     try:
-        counts = _accounts.delete_user_data(user_id,
-                                            account_id=sess.get("account_id"))
-    except Exception as e:
+        with _accounts.deletion_scope(user_id, sess.get("account_id")) as (user_ids, account_ids):
+            with _session_restore_lock:
+                with _sessions_lock:
+                    counts = _accounts.delete_user_data(
+                        user_id, account_id=sess.get("account_id"))
+                    for t in [t for t, s in _sessions.items()
+                              if s.get("user_id") in user_ids
+                              or s.get("account_id") in account_ids]:
+                        _sessions[t]["_revoked"] = True
+                        _sessions.pop(t, None)
+    except Exception:
         log.exception("delete_account: deletion failed for %s", user_id)
-        return jsonify({"error": "deletion_failed", "message": str(e)}), 500
-    with _sessions_lock:
-        for t in [t for t, s in _sessions.items()
-                  if s.get("user_id") == user_id]:
-            _sessions.pop(t, None)
-    # Durable session rows too (teardown 06-03) — deletion is the
-    # revoke-all path, so no token may survive in the persistent store.
-    try:
-        delete_persisted_sessions_for_user(user_id)
-    except Exception as e:
-        log.warning("delete_account: durable session cleanup failed: %s", e)
+        return jsonify({"error": "deletion_failed"}), 500
     log.info("delete_account: user %s deleted (%s)", user_id, counts)
     return jsonify({"ok": True, "deleted": counts,
                     "apple_revoked": apple_revoked})
@@ -26335,6 +26344,7 @@ def espn_link():
 
 
 @app.route("/api/espn/leagues")
+@_gate_unverified_read
 def espn_leagues():
     """ESPN leagues linked by the session user, with the full membership
     snapshot (Sleeper player ids) so the client can build a standard
@@ -26361,6 +26371,7 @@ def espn_leagues():
 
 
 @app.route("/api/espn/my-leagues")
+@_gate_unverified_read
 def espn_my_leagues():
     """Discover the ESPN fantasy football leagues the session user's ESPN
     account belongs to, via the fan-profile endpoint — so the client can
@@ -28704,6 +28715,7 @@ def mfl_link():
 
 
 @app.route("/api/mfl/leagues")
+@_gate_unverified_read
 def mfl_leagues():
     if not is_enabled("mfl.link"):
         return jsonify({"error": "feature_disabled"}), 404
@@ -29998,6 +30010,7 @@ def respond_trade_in_mfl():
 
 
 @app.route("/api/mfl/pending-trades", methods=["GET"])
+@_gate_unverified_read
 def mfl_pending_trades():
     """List the linker's pending MFL trades — the read surface that makes a
     sent proposal's status visible (and its trade_id revocable via
@@ -30473,6 +30486,7 @@ def fleaflicker_link():
 
 
 @app.route("/api/fleaflicker/leagues")
+@_gate_unverified_read
 def fleaflicker_leagues():
     if not is_enabled("fleaflicker.link"):
         return jsonify({"error": "feature_disabled"}), 404

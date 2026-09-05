@@ -1203,3 +1203,11 @@ Plan of record: [00-platform-foundation.md](plans/monetization/00-platform-found
 ### Roster coverage semantics (2026-09-04; dark)
 
 `roster_evaluation.status` is `safe`, `blocked` or `unknown`; clients must never map unknown/missing/estimated evidence to a green safety claim. Safe refers only to checks with reported coverage. Dynasty values are not fantasy-point projections. A FLEX starter is already used and cannot simultaneously be called a backup. Picks cannot fill lineup slots. No mobile/web mount is shipped; the HTML mockup is an additive design review.
+
+## Verified session activation
+
+Clients must prove ownership before calling `/api/session/init`; legacy roster/profile fields are accepted but server-resolved values prevail. Mobile awaits existing Sleeper token replay before activation. `403 verification_required` is a recovery prompt, not an empty dataset. New account/Sleeper binding requires a matching live `sleeper_token`; provider sign-in alone does not authenticate a claimed Sleeper username.
+
+Mobile source-link and init responses must still belong to the session that started them. Screen/form callbacks also check the current user and whether the component is mounted before adopting proof or navigating. An init response must not restore an echoed old session token.
+
+Web and extension Sleeper sign-in use an explicit gesture to request proof from an open, trusted Sleeper tab. Only the resulting verified Fleeced session reaches the first-party page; the raw Sleeper token is never sent to that page or saved in extension storage. The bridge accepts the production web origin, not localhost. Both clients revalidate before displaying private cached boards. Browser ESPN/MFL entry currently directs users to mobile verification; selecting a public team is not proof of account ownership.

@@ -1026,6 +1026,7 @@ def session(monkeypatch):
                     members=[LeagueMember(user_id=OPERATOR, username="op",
                                           roster=[], elo_ratings={})])
     sess = {
+        "verified": True,
         "user_id":       OPERATOR,
         "league":        league,
         "players":       pool,

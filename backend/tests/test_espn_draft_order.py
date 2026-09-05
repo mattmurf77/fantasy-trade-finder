@@ -410,6 +410,7 @@ def client(mem_db):
     server.app.config["TESTING"] = True
     with server._sessions_lock:
         server._sessions[TOKEN] = {
+            "verified": True,
             "user_id": IMPORTER, "league": _League(), "players": [],
             "services": {"1qb_ppr": MagicMock()}, "service": MagicMock(),
             "trade_svc": MagicMock(), "active_format": "1qb_ppr",

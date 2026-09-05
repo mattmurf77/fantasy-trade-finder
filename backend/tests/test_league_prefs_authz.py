@@ -33,6 +33,7 @@ def _h(token):
 def _mk_sess(user_id):
     """Minimal session that satisfies _require_initialized_session."""
     return {
+        "verified": True,
         "user_id":       user_id,
         "active_format": "1qb_ppr",
         "last_active":   0.0,

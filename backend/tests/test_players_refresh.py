@@ -274,6 +274,16 @@ def init_client(monkeypatch, m0):
     monkeypatch.setattr(server, "g_universal_players", list(pool_v1))
     monkeypatch.setattr(server, "_kickoff_trade_job", MagicMock())
     monkeypatch.setattr(server, "_fetch_sleeper_league_meta", lambda lid: None)
+    # Init resolves membership from this imported snapshot, not request JSON.
+    with engine.begin() as conn:
+        conn.execute(db_module.leagues_table.insert().values(
+            sleeper_league_id="league_m0", user_id=UID, name="M0 League", platform="mfl"))
+    db_module.upsert_league_members("league_m0", [
+        {"user_id": UID, "username": "Owner", "player_ids": ["qb_1"]},
+        {"user_id": "opp_1", "username": "Opp", "player_ids": ["rb_1"]},
+    ])
+    with server._sessions_lock:
+        server._sessions["m0-verified-token"] = {"user_id": UID, "verified": True}
 
     real_thread = server.threading.Thread
 
@@ -293,7 +303,7 @@ def init_client(monkeypatch, m0):
             server._sessions.pop(tok, None)
 
 
-def _init(c, token=None):
+def _init(c, token="m0-verified-token"):
     headers = {"Content-Type": "application/json"}
     if token:
         headers["X-Session-Token"] = token

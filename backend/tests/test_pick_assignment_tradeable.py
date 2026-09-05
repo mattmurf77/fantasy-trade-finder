@@ -82,7 +82,7 @@ class _League:
 @pytest.fixture()
 def client(mem_db):
     server.app.config["TESTING"] = True
-    sess = {
+    sess = {"verified": True,
         "user_id": ME, "league": _League(), "players": [],
         "services": {"1qb_ppr": MagicMock()}, "service": MagicMock(),
         "trade_svc": MagicMock(), "active_format": "1qb_ppr",

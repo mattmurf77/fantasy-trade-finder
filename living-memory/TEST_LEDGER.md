@@ -11,6 +11,28 @@
 
 ---
 
+## 2026-09-05 — Security follow-up independently reviewed: Python 3.12 and PostgreSQL pass; native runtime pending
+
+Same isolated branch, `codex/security-data-hardening-20260904`, based on `606e512c`. Coordinating review fixed late mobile init/link/proof responses after session changes or unmount; browser recovery now uses an explicit trusted extension proof flow; deletion drains active work and invalidates queued jobs, delayed provider proofs and nested counterparty writes. Export v2 and feedback-note scrubbing close the documented data-scope gaps. [Combined review](../docs/plans/security-data-hardening/review.md), [D-183 / ADR-017](../docs/adr/adr-017-account-deletion-work-leases.md).
+
+- **Full backend, final implementation:** Python **3.12.14**, **4,707 passed / 1 skipped in 679.14 s**, exit 0. Includes calibration tests, scratch SQLite and blocked urllib upstream calls. Production config is 3.12.3; same minor version, different patch. Final log: `/private/tmp/ftf-py312-release-final.log`.
+- **Actual PostgreSQL 18.3:** **54 passed in 17.49 s**. Disposable schemas on a local socket; covers deletion/restore/queued-work races, aliases/export, maintenance dry-run/apply/idempotence/rollback, owner/cap checks and simultaneous ingest conflicts. Log: `/private/tmp/ftf-postgres-release-final.log`.
+- **Mobile final sources:** **91/91** guards, full TypeScript and testID lint pass; iOS Hermes JavaScript export succeeds. Deferred-response regressions were RED before their fixes and GREEN afterward. This is not native runtime proof. [Evidence and physical-device checklist](../docs/plans/security-data-hardening/mobile-evidence.md).
+- **Web/extension:** 23 isolated auth checks, **180/180** web structural checks, and actual MV3-loaded Chromium runtime pass with synthetic upstreams, disposable profile and no live credentials. Wrong-account denial, verified success, secret isolation, revocation recovery, unsupported platform fallback and popup cache clearing are exercised. Narrow viewport screenshot inspected. [Browser evidence](../docs/plans/security-data-hardening/browser-evidence.md).
+- **Negative control:** disabling lifecycle invalidation only in memory makes all three targeted stale-work/deletion tests fail at the expected assertions (queued work ran; late auth/provider proof did not reject). No sabotage remains. Log: `/private/tmp/ftf-lifecycle-sabotage.log`.
+- No physical iPhone found. No native build distribution, production cleanup, commit, push or deploy. Web Sleeper requires the updated extension; browser ESPN/MFL verification uses mobile. Single-worker deletion and retained public/counterparty data limits remain explicit. [Reproduction harnesses](../docs/plans/security-data-hardening/validation-tools/README.md).
+
+## 2026-09-04 — Security findings 1–5: initial local implementation, not deployed
+
+Five Astra medium subagents implemented private-session ownership, authoritative session initialization, token-free analytics, credential/account cleanup and admitted/owned outcome writes on `codex/security-data-hardening-20260904` from `origin/main` `606e512c`.
+
+- Integrated security tests: **304 passed** (`/private/tmp/ftf-security-regressions.log`), including deletion/restore and stale persistence races, source-proof-before-board-access, orphan/foreign/anonymous outcomes, and synthetic historical-token cleanup.
+- Additional raced event conflict regression plus analytics-P0 tests: **40 passed**; insert callbacks now use actual RETURNING IDs.
+- Legacy fixture migration: a–m **776 passed / 3 calibration deselected**, n–z **702 passed**. Positive fixtures now represent verified principals; negative authorization tests remain explicit.
+- Mobile: full TypeScript check, testID lint, new ownership check and relevant capture/session/settings guards pass. [Native checklist and code walk](../docs/plans/security-data-hardening/mobile-evidence.md).
+- Named isolated sabotages failed as expected: bypass read gate, bypass session identity check, raw-token encoder, skip locked durable re-read, and unverified client-token persistence. No sabotaged source remains.
+- Tests use synthetic credentials and scratch databases. Initial unpinned runs attempted upstream reads that failed; final combined harness disables network before importing the server, uses a valid import-only DP fixture and removes that override so per-test loader mocks work. Runtime: Python 3.14; production/CI is 3.12. **Final full suite: 4,698 passed / 1 skipped in 384.52 seconds**, including calibration cases. Final TypeScript and testID lint checks also passed.
+- No production cleanup, commit, push or deployment. PostgreSQL maintenance execution and TestFlight runtime verification remain rollout gates; web/extension verified sign-in compatibility and deletion retention limits are documented in the [runbook](../docs/runbook.md).
 ## 2026-09-04 — Trade model/scoring-context integration
 
 Merged main `db6b3a17` (#277) into the requested balance branch before CI. Preserved captured request/format ownership and added captured provider `league_user_id`, which the reduced worker session otherwise omitted. New delayed-job test proves a co-owner roster check cannot follow a later session reinitialization. **104 focused tests passed** in 9.81 seconds. The complete merged-revision CI remains the release gate; pre-merge full local coverage below is not claimed for this merge.

@@ -353,6 +353,7 @@ def harness():
                     ])
     token = "test-token-fit-congruence"
     sess = {
+        "verified": True,
         "user_id":       ME,
         "league":        league,
         "players":       players,

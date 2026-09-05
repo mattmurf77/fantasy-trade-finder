@@ -85,7 +85,7 @@ def harness():
                            connect_args={"check_same_thread": False})
     metadata.create_all(engine)
 
-    sess = {"user_id": USER, "last_active": 0.0}
+    sess = {"verified": True, "user_id": USER, "last_active": 0.0}
     server.app.config["TESTING"] = True
     client = server.app.test_client()
 
@@ -141,7 +141,8 @@ def test_batch_insert_with_session(harness):
     assert first["device_id"] == DEVICE
     assert first["platform"] == "ios"        # derived from X-Device
     assert first["screen"] == "Trades"
-    assert first["session_id"] == "sess-uuid-0001"
+    assert first["session_id"] == db_module.analytics_session_id("sess-uuid-0001")
+    assert first["session_id"] != "sess-uuid-0001"
     assert first["source"] == "mobile"
     assert first["occurred_at"]              # server-stamped
     # screen_viewed row keeps its allowed prop + the seq rider
@@ -278,7 +279,7 @@ def test_rate_limit_accepts_and_drops(harness):
     client, engine = harness
     bucket = int(time.time() // 3600)
     with ingest._rate_lock:
-        ingest._events_rate[DEVICE] = (bucket, 10_000)   # cap already blown
+        ingest._events_rate[USER] = (bucket, 10_000)   # cap already blown
     r = _post(client, [_envelope()], token=TOKEN)
     assert r.status_code == 200
     body = r.get_json()

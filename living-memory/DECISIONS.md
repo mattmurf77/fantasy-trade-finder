@@ -531,6 +531,7 @@
 | D-180 | Consensus Value Is a Non-Bypassable Market Guardrail; Personal Rankings Are the Ordering Signal | 2026-09-04 |
 | D-182 | Observed roster coverage is required before an enforcing trade can publish | 2026-09-04 |
 | D-181 | Policy Is an Orthogonal Experiment Dimension, Not a Fourth Generator Arm | 2026-09-04 |
+| D-183 | Verified ownership for private data; deletion drains and invalidates account work | 2026-09-04 |
 | D-174 | A Card Says Why a Give-Side Piece Is There When the User Rates Him Below Market; the Vehicle Is `reasons`, the Bar Is the Shrunk Board | 2026-09-02 |
 | D-173 | Web Posture Is B, Companion: Marketing Front Door Plus Session-Gated Tools, Not Full Parity | 2026-08-26 |
 
@@ -1717,6 +1718,17 @@ No historical 1100-pin repair — indistinguishable from anchor no-value.
 **Status:** Active (dark). Live enablement requires the operator: telemetry coverage ≥99%, then a within-user crossover schedule.
 
 **Related:** [D-181](#d-181--policy-is-an-orthogonal-experiment-dimension-not-a-fourth-generator-arm), [D-085](#d-085) (the placement clamp, honoured by the policy's shrinkage), [D-095](#d-095) (`user_elo_shrink`, the shrink-neither challenger), [D-096](#d-096) (likes-you quality gates), `docs/reviews/2026-08-19-armb-remedy-bucket-a.md`.
+## D-183 — Verified ownership for private data; deletion drains and invalidates account work
+
+**Date:** 2026-09-04 · **Status:** implemented locally, not deployed.
+
+**Context:** Username/team discovery was being treated as private-account authorization. Row deletion alone also allowed already-authorized requests and delayed sign-in/background work to recreate private data.
+
+**Decision:** All private paths require proven ownership of the current session, independently of the legacy grace flag. Web Sleeper uses explicit extension-mediated proof; ESPN/MFL browser entry directs users to the verified mobile flow. This supersedes the private-access aspect of D-001 and the unverified team-claim activation in D-164/D-177. Account deletion uses shared work admissions, exclusive draining, stable alias/provider-identity keys and generation invalidation in the existing single-worker service. Detailed design: [ADR-017](../docs/adr/adr-017-account-deletion-work-leases.md).
+
+**Alternatives:** Keep grace access (preserves the vulnerability); trust public team selection (does not prove ownership); delete rows without fencing (allows recreation); serialize all account work (unnecessarily blocks ordinary concurrent requests); add distributed coordination now (the checked-in deployment has one worker).
+
+**Consequences:** Legacy clients need verification recovery. Web Sleeper needs the updated extension, and browser ESPN/MFL verification remains mobile-only. Deletion can time out while work drains and require retry. Multiple workers or independent writers require distributed fencing before scaling. Historical token cleanup and membership repair remain explicit production operations. [Review and evidence](../docs/plans/security-data-hardening/review.md).
 
 ## D-179 — On Web, "Sign In to ESPN" Is the Primary Entry and the League ID the Alternate; the Web's Sign-In Is the Cookie Paste, and `espn.league_picker` Picks the Layout
 

@@ -127,6 +127,7 @@ def harness(mem_engine):
 
     sess = {
         "user_id":       ME,
+        "verified":      True,
         "league":        league,
         "user_roster":   ["g1", "g2"],
         "players":       pool,

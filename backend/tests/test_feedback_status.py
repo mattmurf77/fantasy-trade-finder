@@ -33,7 +33,7 @@ def harness():
     metadata.create_all(engine)
 
     token = "test-token-fbstatus"
-    sess = {"user_id": ME, "username": "me", "last_active": 0.0}
+    sess = {"verified": True, "user_id": ME, "username": "me", "last_active": 0.0}
 
     server.app.config["TESTING"] = True
     client = server.app.test_client()
@@ -187,6 +187,7 @@ def test_mine_never_returns_other_users_notes(harness):
     other_token = "test-token-other-user"
     with server._sessions_lock:
         server._sessions[other_token] = {
+            "verified": True,
             "user_id": OTHER, "username": "other", "last_active": 0.0,
         }
     try:

@@ -243,7 +243,7 @@ def _post_as_user(body, monkeypatch, mode_in_db, token="stm-sess"):
     monkeypatch.setattr(db, "get_stud_tax_mode",
                         lambda uid: mode_in_db if uid == USER else "market")
     with srv._sessions_lock:
-        srv._sessions[token] = {"user_id": USER, "active_format": "1qb_ppr",
+        srv._sessions[token] = {"verified": True, "user_id": USER, "active_format": "1qb_ppr",
                                 "last_active": 0.0}
     try:
         with srv.app.test_client() as c:
@@ -304,7 +304,7 @@ def _settings_call(monkeypatch, method, body=None, token="stm-set"):
     monkeypatch.setattr(db, "set_stud_tax_mode",
                         lambda uid, mode: store.__setitem__(uid, mode))
     with srv._sessions_lock:
-        srv._sessions[token] = {"user_id": USER, "active_format": "1qb_ppr",
+        srv._sessions[token] = {"verified": True, "user_id": USER, "active_format": "1qb_ppr",
                                 "last_active": 0.0}
     try:
         with srv.app.test_client() as c:

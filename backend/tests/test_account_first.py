@@ -307,10 +307,13 @@ def _sleeper_lookup(url, *a, **k):
 
 
 def _link(c, token, username="realmanager", strategy=None):
-    body = {"username": username}
+    body = {"username": username, "sleeper_token": "synthetic-source-proof"}
     if strategy:
         body["strategy"] = strategy
-    with patch.object(server, "_sleeper_get", _sleeper_lookup):
+    with patch.object(server, "_sleeper_get", _sleeper_lookup), \
+         patch.object(server._sleeper_write, "is_expired", return_value=False), \
+         patch.object(server._sleeper_write, "token_sleeper_user_id", return_value=SLEEPER_UID), \
+         patch.object(server._sleeper_write, "verify_token_live", return_value={}):
         return c.post("/api/account/link-sleeper", data=json.dumps(body),
                       headers={"X-Session-Token": token,
                                "Content-Type": "application/json"})
@@ -356,6 +359,8 @@ def test_link_denied_when_sleeper_id_already_claimed(client):
     acct = _post_apple(c).get_json()
     _seed_board(engine, SLEEPER_UID, swipes=1)
     accounts.mark_user_verified(SLEEPER_UID, "sleeper")
+    owner = accounts.find_or_create_account("apple", "existing-owner", None)
+    accounts.bind_sleeper_user(owner["account_id"], SLEEPER_UID)
 
     r = _link(c, acct["session_token"])
     assert r.status_code == 403
