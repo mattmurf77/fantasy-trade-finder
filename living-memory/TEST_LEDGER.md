@@ -11,6 +11,16 @@
 
 ---
 
+## 2026-09-05 — Experimental personal-market policy activation verified
+
+Owner explicitly said “I want the experimental policy on.” Independent Astra read-only review found no code/migration blocker and reviewed the single-variable update, exact-source deployment, stale-client/fail-closed boundaries and rollback. Fresh `/private/tmp/ftf-context-venv/bin/python -m pytest backend/tests/test_trade_policy.py backend/tests/test_trade_policy_wiring.py backend/tests/test_owner_policy_contracts.py backend/tests/test_trade_card_privacy.py -q --tb=short` — **114 passed in 3.68 s**. Full source CI remains the 5,455-pass / one-skip record below; no runtime code changed.
+
+Updated only `trade.personal_market_policy_v1` to true within the complete existing Render `FTF_FLAGS` value at **15:59:45.097 UTC**; exact readback preserved every other override. Redeployed commit `4026ebc81eaae50b345b42421641125c5b8d413e` as `dep-dae3oseq1p3s73fs3m50`, **live since 16:01:20.163757 UTC**. At 16:03:54 UTC, verified exactly one delta among 207 effective flags, all 258 model values/tier definitions/experiment summary hashes unchanged from immediate preflight, reviewed root bytes unchanged, public/operator smoke 200 and unauthenticated trade/admin reads 401. Event-ID index present; zero ingest transaction failures. First verification script incorrectly expected JSON from the valid HTML admin 401 response; corrected read-only parsing and reran successfully, with no second mutation or deployment. [Sanitized smoke](../docs/plans/owner-contracts/policy-activation-smoke.json), [scope/rollback](../docs/plans/owner-contracts/policy-activation.md).
+
+All three generator arms remain, but shared eligibility/ordering changes generated-deck output globally; this is not a randomized policy-control experiment or all-entry-point parity. No personalized production trade, real-user session, latency/acceptance/snapshot graduation, new EAS build or physical-device QA is claimed. Valuation telemetry/roster evaluation remain on, roster protection/mutual-benefit enforcement remain off. Checked-in dark defaults remain unchanged.
+
+---
+
 ## 2026-09-05 — Owner-contract backend activation verified
 
 Owner said “Turn it on” after being told backend was undeployed. Final head `f88afabb669aa946de65a3a4a20d8b85b9256724` passed [all four CI jobs](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/33951522857): **5,455 passed / 1 skipped in 624.31 s**, TypeScript/all 93 guards, test-ID lint and 190 web checks. PR #281 merged 09:50:55 UTC as `4026ebc81eaae50b345b42421641125c5b8d413e`; fetched squash tree exactly equals tested head. Build 148's runtime source remains identical.
@@ -3833,6 +3843,8 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+
+- [2026-09-05 — Experimental personal-market policy activation verified](#2026-09-05--experimental-personal-market-policy-activation-verified)
 - [2026-09-05 — Security follow-up independently reviewed: Python 3.12 and PostgreSQL pass; native runtime pending](#2026-09-05--security-follow-up-independently-reviewed-python-312-and-postgresql-pass-native-runtime-pending)
 - [2026-09-04 — Security findings 1–5: initial local implementation, not deployed](#2026-09-04--security-findings-15-initial-local-implementation-not-deployed)
 - [2026-09-04 — Operator-approved revised-input evaluation completed](#2026-09-04--operator-approved-revised-input-evaluation-completed)

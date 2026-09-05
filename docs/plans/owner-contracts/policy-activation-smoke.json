@@ -1,0 +1,54 @@
+{
+  "at": "2026-09-05T16:03:54.173Z",
+  "verified": true,
+  "commit": "4026ebc81eaae50b345b42421641125c5b8d413e",
+  "deploy": "dep-dae3oseq1p3s73fs3m50",
+  "status": "live",
+  "liveSince": "2026-09-05T16:01:20.163757Z",
+  "environmentUpdatedAt": "2026-09-05T15:59:45.097Z",
+  "preflightAt": "2026-09-05T15:58:29.824Z",
+  "previousLiveDeploy": "dep-daduc0bm8hqs73ckbifg",
+  "statuses": {
+    "root": 200,
+    "tierConfig": 200,
+    "featureFlags": 200,
+    "operatorConfig": 200,
+    "operatorHealth": 200,
+    "operatorExperiments": 200,
+    "unauthenticatedTrades": 401,
+    "unauthenticatedAdminConfig": 401
+  },
+  "configCount": 258,
+  "flagCount": 207,
+  "preflightFlagHash": "77b90abc3092c9dff1a7c3ef84971650c801f6c26a07fb7089531f1d05d70941",
+  "hashes": {
+    "configValueHash": "a417117defbbdbb66231e6883108a318bc73e92c4bde3a66f04bf04d4130c91f",
+    "tierHash": "a4e0dd14bf755cefb955de7fb5ab2fe2cfaea619983804a462af4ba239b1e632",
+    "flagHash": "8abb4883dad36476a58d868e761cda4a7c7604dcdadb6319223dc7897e3568fb",
+    "experimentSummaryHash": "ff73c3f8aa942c34dd11a003e354b5a0b29fccd239526825af73404e24dea4e5"
+  },
+  "policyOnlyDelta": true,
+  "flagDelta": {"trade.personal_market_policy_v1": {"before": false, "after": true}},
+  "rootMatchesReviewedBytes": true,
+  "rootSha256": "35b379411f39b205e79e0d2178b7ad222872023965f3802780f6ab84dec516ed",
+  "overrides": {
+    "trade.valuation_telemetry": true,
+    "trade.roster_evaluation": true,
+    "trade.personal_market_policy_v1": true,
+    "trade.roster_protection": false,
+    "trade.mutual_benefit_v1": false
+  },
+  "keyFlags": {
+    "trade.bakeoff": true,
+    "trade.personal_market_policy_v1": true,
+    "trade.roster_evaluation": true,
+    "trade.roster_protection": false,
+    "trade.valuation_telemetry": true,
+    "trade.mutual_benefit_v1": false,
+    "outlook.championship_probabilities": true,
+    "outlook.season_projections": true,
+    "trades.win_now": true
+  },
+  "health": {"event_id_index_present": true, "wal": null, "txn_failed": 0},
+  "limits": "Read-only liveness/configuration and Render deployment-identity verification; no real-user session, personalized production trade generation, acceptance/latency qualification or physical-device QA."
+}

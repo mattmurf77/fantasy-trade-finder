@@ -1,6 +1,6 @@
 # Owner contracts — GitHub and TestFlight release
 
-**Date:** 2026-09-05. **Status:** PR #281 merged; backend live at `4026ebc8` since 09:51:59 UTC. iOS 1.17.0 (148) uploaded to App Store Connect for TestFlight. Apple processing/tester availability and physical-device QA remain unverified. All three trading arms and existing runtime configuration are preserved.
+**Date:** 2026-09-05. **Status:** PR #281 merged; backend live at `4026ebc8`. After the initial 09:51:59 UTC release, the owner separately authorized the experimental personal-market policy, now **on since the 16:01:20 UTC redeploy** of the same code. [Activation evidence and rollback](policy-activation.md). All three trading arms and all other runtime settings are preserved. iOS 1.17.0 (148) uploaded to App Store Connect for TestFlight; Apple processing/tester availability and physical-device QA remain unverified. The sections below retain the initial release's historical boundaries.
 
 The owner explicitly requested “Push to github and testflight” after being informed that `mattmurf77/fantasy-trade-finder` is public. This resolves the previous publication approval block. Publish only the reviewed implementation, tests and focused engineering notes; keep the five raw interview/source documents local.
 
@@ -35,7 +35,7 @@ Hosted CI passed for the exact built source `0fc1b5390894f3a4e5c9ed8c1c480efd562
 
 ## Next / recovery
 
-Check Apple processing and tester availability in [App Store Connect](https://appstoreconnect.apple.com/apps/6771488431/testflight/ios), then execute the manual checklist. Leave experiment flags unchanged. Prior iOS 1.17.0 (147) build/submission records are preserved in the Win Now release record. No existing build, branch or worktree was deleted. The original dirty checkout and five raw source documents remain intact; this release uses the isolated source and archive paths above.
+Check Apple processing and tester availability in [App Store Connect](https://appstoreconnect.apple.com/apps/6771488431/testflight/ios), then execute the manual checklist. Preserve the now-authorized [policy activation](policy-activation.md); no further flag changes are implied. Prior iOS 1.17.0 (147) build/submission records are preserved in the Win Now release record. No existing build, branch or worktree was deleted. The original dirty checkout and five raw source documents remain intact; this release uses the isolated source and archive paths above.
 
 ## Backend activation — 2026-09-05
 
