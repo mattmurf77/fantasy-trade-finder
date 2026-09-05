@@ -17,7 +17,7 @@ Owner said “Turn it on” after being told backend was undeployed. Final head 
 
 Render `dep-daduc0bm8hqs73ckbifg` reports that exact commit **live since 09:51:59.126135 UTC**. Before/after read-only comparison preserves hashes for **207 flags, 258 model values, tier definitions and experiment summaries**. Root HTML matches reviewed bytes; root/tier-config/flags and aggregate operator health/config/experiments return 200, unauthenticated trade/admin-config reads return 401. PostgreSQL event index present, zero ingest transaction failures. No real-user session or personalized production trade used. [Smoke artifact](../docs/plans/owner-contracts/production-smoke.json), [release and rollback](../docs/plans/owner-contracts/release.md).
 
-Live valuation telemetry and roster evaluation were already on and remain on; personal-market policy and roster protection remain off. No flag/config edits, destructive migration, branch/worktree cleanup or new EAS build. Manual TestFlight remains unrun. Documentation-only evidence follow-up uses `[skip render]`; no runtime change or second restart.
+Live valuation telemetry and roster evaluation were already on and remain on; personal-market policy and roster protection remain off. No flag/config edits, destructive migration, branch/worktree cleanup or new EAS build. Manual TestFlight remains unrun. Documentation-only evidence follow-up has no runtime changes; preserve `[skip render]` during its PR merge and verify that no new service restart follows.
 
 ---
 
