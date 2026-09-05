@@ -15,6 +15,8 @@
 
 Final integrated sources, including the privacy follow-up, passed before publication on isolated branch `codex/owner-contracts-20260905`, baseline `5cf34182`. Parent reviewed all lane diffs and independent Astra findings; no flags, profiles, historical control fixtures or production rows changed.
 
+**Checkpoint:** implementation commit `86128700`. Publication safety review rejected the push/PR command before execution because explicit approval is required for the public GitHub destination. No push/PR exists from this attempt; hosted CI remains unrun. Local history verification confirmed the five raw interview/source documents are preserved on disk but absent from new commit history; protected config/fixture/lockfile/secret paths are unchanged. Do not work around the rejection.
+
 - `/private/tmp/ftf-context-venv/bin/python -m pytest backend/tests -q --tb=short` — **5,455 passed / 1 skipped in 566.99 s**, exit 0, Python **3.12.14**. The earlier 5,450-test run predates the privacy patch and is superseded by this result.
 - The same interpreter with `-m pytest backend/tests/test_owner_policy_contracts.py backend/tests/test_owner_ranking_provenance.py backend/tests/test_trade_card_privacy.py backend/tests/test_trade_feedback_tier_bounds.py -q` — **102 passed in 19.49 s**. Serializer/API tests verify counterparty exact-value fields are omitted without mutating internal cards.
 - From `mobile/`: every `tests/check-*.js` executed with Node — **93/93 passed**; `./node_modules/.bin/tsc --noEmit` and `bash scripts/testid-lint.sh` passed. Local Node **24.14.1**; CI's Node 20 remains a separate gate. Local isolated dependency installation used `npm ci --ignore-scripts --no-audit --no-fund`; this is not native-build evidence.

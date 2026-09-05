@@ -1,7 +1,7 @@
 # Owner contracts — parent review and remaining work
 
 **Date:** 2026-09-05. **Baseline:** `origin/main` at `5cf34182`.
-**Status:** implementation reviewed and final local verification passed; feature-branch publication and hosted CI pending. Not merged or deployed. Physical TestFlight is unrun.
+**Status:** implementation reviewed and final local verification passed; code committed locally as `86128700`. Publication is blocked pending explicit owner approval for this public GitHub destination. No push or PR was created; hosted CI is unrun. Not merged or deployed. Physical TestFlight is unrun.
 
 ## What this patch changes
 
@@ -57,4 +57,4 @@ The next data-model scope should explicitly distinguish immutable offer-instance
 
 Final parent integration on Python **3.12.14**: `python -m pytest backend/tests -q --tb=short` — **5,455 passed / 1 skipped in 566.99 s**, exit 0. The final four new owner/privacy suites also passed together: **102 passed in 19.49 s**. Mobile: **all 93 `check-*.js` guards**, `tsc --noEmit` and test-ID lint passed. Web structural guard: **190/190 passed**. Local Node is **24.14.1**; hosted CI uses Node 20 and remains a separate gate. Staged whitespace validation passed. Policy lane and the final full suite include unchanged historical arm-A/challenger and all three generator regressions. Hosted exact-head CI is pending publication; no native-runtime result is implied by these checks.
 
-Only a reviewed feature-branch push is contemplated after local gates. No merge to main, Render deployment, EAS build/submission or production migration is included. Manual TestFlight remains a release follow-up, not a claimed pass. All worktrees are retained for review; no cleanup/deletion is part of this coding change.
+Only a reviewed feature-branch push is contemplated after local gates. The publication safety review rejected the push/PR command before execution because the repository is public and explicit destination-specific approval is required. Do not retry through another account or tool without that approval. Local read-only history checks confirmed all five raw source files remain on disk and are absent from new commit history; config, fixtures, lockfile and secrets are unchanged. No merge to main, Render deployment, EAS build/submission or production migration is included. Manual TestFlight remains a release follow-up, not a claimed pass. All worktrees are retained for review; no cleanup/deletion is part of this coding change.

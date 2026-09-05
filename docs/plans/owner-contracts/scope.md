@@ -5,7 +5,7 @@
 **Builder:** Parent integration review plus independent Astra Ultra mobile and policy builders.
 **Operator sign-off on waivers:** Not needed; no waivers. D-056 prohibits simulator/Maestro evidence.
 **Baseline:** `origin/main` at `5cf34182`; separate worktrees protect the owner's unrelated working changes.
-**Status:** Bounded implementation parent-reviewed; final local gates passed. Feature-branch publication and hosted CI pending. No deployment or experiment activation authorized by this scope.
+**Status:** Bounded implementation parent-reviewed and committed locally as `86128700`; final local gates passed. Publication requires explicit approval for the public repository; no push/PR occurred and hosted CI is unrun. No deployment or experiment activation authorized by this scope.
 
 ## Behavior and boundaries
 
