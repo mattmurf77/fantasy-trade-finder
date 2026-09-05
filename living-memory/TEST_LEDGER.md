@@ -11,6 +11,16 @@
 
 ---
 
+## 2026-09-04 — Operator-approved revised-input evaluation completed
+
+- User accepted available historical data for now and asked to run evaluator. Added explicit exploratory mode; strict default and production behavior unchanged.
+- **144 passed in 0.62s:** historical diagnostic, calibration, history, forecasts and simulator suites. Parent reviewed Astra evaluator changes and replay adapter; regression guards cover opt-in isolation, modern timestamp honesty, prefix-only standings, custom zero and median scoring, and current player metadata isolation.
+- Actual run: 28 Sleeper weekly responses cached; Lakeview 2024 scored at completed weeks 3/6/9/12 with 10,000 draws each. Final-win MAE 2.60/1.81/1.21/0.76 (median wins included); title Brier 0.0535/0.0428/0.0327/0.0288 versus equal odds 0.0764. One league-season/one champion, not four independent championship events. No confidence interval or calibration claim.
+- Lakeview 2025 excluded for missing source-covered lineup at roster 12 / week 13; four FFv3 seasons excluded for K/IDP slots. No projections fabricated. Offline scoring coefficients and past-starter requirement adjustments explicitly logged.
+- Cached rerun and direct evaluator CLI metric groups match exactly; strict CLI control rejects all four revised-input cohorts. [Results, artifacts and commands](../docs/plans/win-now/EXPLORATORY-RESULTS.md). No production/flag/UI changes.
+
+---
+
 ## 2026-09-04 — Historical Sleeper outcome collection and calibration readiness
 
 Continuation on `codex/win-now-20260904`, after `ad3c5346`, no release. [Scope](../docs/plans/win-now/historical-validation-scope.md) and [evidence/code walk](../docs/plans/win-now/HISTORICAL-VALIDATION.md).

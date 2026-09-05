@@ -33,3 +33,7 @@ Backend unit tests cover outcome extraction, historical-chain traversal, missing
 ## 5. Ship gate declaration
 
 Local implementation and evidence only; no merge, push, release, automatic flag graduation, or scheduled capture. Run affected backend tests and source validation. Existing hosted CI and device release gates still apply before shipping the feature. Historical outcomes alone cannot prove the calibration of player forecasts captured after those outcomes; report that gap explicitly rather than relabeling a different model as validated.
+
+## 6. Authorized exploratory run
+
+The operator subsequently accepted the available data as good enough for now and requested running the evaluator. Add an explicit offline diagnostic mode that permits honestly dated, later-revised historical projections. Strict archived-input evaluation remains the default. Use supported offensive slots, retain the exact list of omitted unsupported scoring coefficients, use completed-week roster lists and standings, and record any coverage relaxation or missing-player exclusion. Do not fabricate pregame capture timestamps, player forecasts, or calibrated claims. Unsupported K/IDP starting lineups remain excluded. Evidence: real replay results, regression tests for opt-in isolation and replay bookkeeping, and a dated report. No production/UI/feature-flag changes are part of this request.

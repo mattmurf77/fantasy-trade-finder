@@ -250,3 +250,96 @@ def test_perfect_forecast_bins_include_one_and_log_loss_is_finite():
     assert group["metrics"]["title"]["brier_skill"] == 1
     assert group["metrics"]["title"]["log_loss"] < 1e-12
     assert group["metrics"]["playoff"]["reliability_bins"][9]["count"] == 4
+
+
+def diagnostic_fixture():
+    outcomes, predictions, checkpoints = fixture()
+    record = predictions['records'][0]
+    record.update(forecast_captured_at='2026-09-04T10:00:00Z',
+                  league_state_captured_at='2026-09-04T10:01:00Z',
+                  prediction_created_at='2026-09-04T10:02:00Z',
+                  assumptions=['Historical provider data are revised; outcome leakage is possible.'])
+    record['provenance']['kind'] = 'revised_historical_diagnostic'
+    return outcomes, predictions, checkpoints
+
+
+def test_exploratory_requires_explicit_mode_and_preserves_honest_timestamps():
+    data = diagnostic_fixture()
+    before = deepcopy(data)
+    strict = evaluate_calibration(*data)
+    assert strict['groups'] == []
+    assert strict['prediction_rejections'][0]['reason'] == 'post_cutoff_or_post_creation_snapshot'
+    report = evaluate_calibration(*data, mode='exploratory_revised_inputs')
+    assert data == before
+    assert report['status'] == 'exploratory_diagnostic_metrics'
+    assert report['groups'][0]['prediction_kind'] == 'revised_historical_diagnostic'
+    assert report['groups'][0]['metrics']['playoff']['brier'] == .25
+    assert report['exploratory_assumptions'][0]['assumptions'] == data[1]['records'][0]['assumptions']
+    assert report['production_change'] is report['certified'] is False
+    assert 'not historical calibration' in report['provenance_scope']
+    assert 'outcome leakage' in report['provenance_scope']
+
+
+@pytest.mark.parametrize('assumptions', [None, [], '', [''], ['  '], [False], ['Valid', None]])
+def test_exploratory_rejects_missing_or_invalid_assumptions(assumptions):
+    outcomes, predictions, checkpoints = diagnostic_fixture()
+    predictions['records'][0]['assumptions'] = assumptions
+    report = evaluate_calibration(outcomes, predictions, checkpoints, mode='exploratory_revised_inputs')
+    assert report['status'] == 'missing_eligible_exploratory_predictions'
+    assert report['prediction_rejections'][0]['reason'] == 'missing_exploratory_assumptions'
+
+
+@pytest.mark.parametrize('mutation,reason', [
+    ('capture_after_creation', 'post_cutoff_or_post_creation_snapshot'),
+    ('missing_hash', 'missing_archive_evidence'),
+    ('missing_reference', 'missing_archive_evidence'),
+    ('missing_checkpoint', 'missing_checkpoint_reference'),
+    ('unsupported', 'unsupported_win_now_league'),
+    ('wrong_model', 'wrong_or_missing_model_identity'),
+    ('wrong_origin', 'snapshot_checkpoint_mismatch'),
+    ('partial_horizon', 'incomplete_or_stitched_forecast_horizon'),
+    ('partial_cohort', 'incomplete_duplicate_or_wrong_team_cohort'),
+    ('invalid_probability', 'invalid_probability'),
+])
+def test_exploratory_retains_evidence_model_and_numeric_guards(mutation, reason):
+    outcomes, predictions, checkpoints = diagnostic_fixture()
+    record = predictions['records'][0]
+    if mutation == 'capture_after_creation':
+        record['forecast_captured_at'] = '2026-09-05T00:00:00Z'
+    elif mutation == 'missing_hash':
+        del record['provenance']['forecast_sha256']
+    elif mutation == 'missing_reference':
+        record['provenance']['league_state_evidence_ref'] = ''
+    elif mutation == 'missing_checkpoint':
+        checkpoints = None
+    elif mutation == 'unsupported':
+        outcomes['seasons'][0]['model_support']['supported'] = False
+    elif mutation == 'wrong_model':
+        record['model_family'] = 'outlook'
+    elif mutation == 'wrong_origin':
+        record['forecast_as_of_week'] = 1
+    elif mutation == 'partial_horizon':
+        record['forecast_weeks'].pop()
+    elif mutation == 'partial_cohort':
+        record['teams'].pop()
+    else:
+        record['teams'][0]['playoff_probability'] = float('nan')
+    report = evaluate_calibration(outcomes, predictions, checkpoints, mode='exploratory_revised_inputs')
+    assert report['groups'] == []
+    assert report['prediction_rejections'][0]['reason'] == reason
+
+
+def test_exploratory_does_not_relax_archived_kind_and_strict_rejects_revised_kind():
+    outcomes, predictions, checkpoints = diagnostic_fixture()
+    predictions['records'][0]['provenance']['kind'] = 'archived_prediction'
+    assert not evaluate_calibration(outcomes, predictions, checkpoints, mode='exploratory_revised_inputs')['groups']
+    outcomes, predictions, checkpoints = fixture()
+    predictions['records'][0]['provenance']['kind'] = 'revised_historical_diagnostic'
+    report = evaluate_calibration(outcomes, predictions, checkpoints)
+    assert report['prediction_rejections'][0]['reason'] == 'missing_archived_provenance'
+
+
+def test_explicit_strict_mode_is_identical_to_default():
+    assert evaluate_calibration(*fixture()) == evaluate_calibration(*fixture(), mode='strict')
+    with pytest.raises(ValueError, match='invalid_evaluation_mode'):
+        evaluate_calibration(*fixture(), mode='anything')

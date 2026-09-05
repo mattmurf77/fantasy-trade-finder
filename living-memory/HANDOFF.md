@@ -15,10 +15,12 @@
 
 ## Current State — 2026-09-04
 
-**Where stopped:** Win Now beta plus historical validation tooling in `/private/tmp/ftf-win-now-20260904`, branch `codex/win-now-20260904`, initial beta commit `ad3c5346`. Original dirty checkout preserved. No push/merge/deploy/flag activation. Astra work reviewed by parent.
+**Where stopped:** Win Now beta plus historical/exploratory evaluation in `/private/tmp/ftf-win-now-20260904`, branch `codex/win-now-20260904`; initial beta `ad3c5346`, history tooling `87304dbe`. Original dirty checkout preserved. No push/merge/deploy/flag activation.
 
-**Evidence:** latest affected historical/provider/simulator run 119 passed; real pull recovered 6 completed seasons, 72 team-seasons, 1,008 regular team scores, 6 champions across 2 lineages. Raw local capture `/private/tmp/ftf-win-now-history-20260904.json`; guide, source audit, compact outcomes and readiness report in [historical validation](../docs/plans/win-now/HISTORICAL-VALIDATION.md). Prior beta frontend/backend evidence stays in [EVIDENCE](../docs/plans/win-now/EVIDENCE.md).
+**Latest request completed:** user accepted revised historical inputs and requested evaluator run. Four actual scored origins (after 3/6/9/12 weeks), Lakeview 2024, 10,000 draws each. Final-win MAE 2.60→0.76 (median wins included). Lakeview 2025 excluded for source lineup gap; four FFv3 seasons for K/IDP. [Numeric results/assumptions](../docs/plans/win-now/EXPLORATORY-RESULTS.md). One independent champion; no calibration/generalization claim.
 
-**Outstanding:** authentic pregame full-remaining-season forecast and league-state archives are missing. Current historical projection responses have post-game revisions. Existing sample also fails strict scoring coverage: FFv3 K/IDP; Lakeview retained inactive K/DEF coefficients. Model remains uncalibrated. Hosted Python 3.12 CI and physical TestFlight pending before release; all 3 flags false.
+**Evidence:** 144 affected tests pass; direct evaluator and cached replay groups identical; strict control rejects modern revised inputs. Raw replay files `/private/tmp/ftf-win-now-diagnostic-final-20260904`; source cache `/private/tmp/ftf-revised-weekly-cache`. Parent reviewed Astra changes and local replay adapter.
 
-**Do not repeat:** do not substitute old outlook backtests for the new player model, backdate captures, stitch later weekly forecasts, train dynasty Elo from Win Now decisions, or infer causal trade uplift from actual champions. No Maestro/native simulator (D-056). No recurring capture configured.
+**Outstanding:** production calibration/format coverage and hosted Python 3.12 CI/physical TestFlight before release. All 3 flags false; experimental diagnostic does not alter serving. No authentic pregame full-horizon archive yet.
+
+**Do not repeat:** no silent backdating, future-score standings leakage, fabricated player forecasts, or dynasty Elo updates from Win Now decisions. No Maestro/native simulator (D-056). No recurring capture configured.

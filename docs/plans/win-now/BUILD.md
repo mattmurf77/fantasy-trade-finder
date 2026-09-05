@@ -64,3 +64,5 @@ A local synthetic 12-team, 25-player, 9-slot, 14-week benchmark (1,000 draws, 8 
 ## Historical validation tooling
 
 The [historical validation guide](HISTORICAL-VALIDATION.md) documents the bounded Sleeper outcome collector, offline calibration evaluator and actual source-provenance audit. This completes the outcome collection/evaluation workflow, not the calibration of the new player model. Historical URLs contain post-game revision timestamps; valid full-horizon pregame input archives and supported league configurations are still needed.
+
+The operator subsequently authorized an exploratory run with the available revised data. [Results](EXPLORATORY-RESULTS.md) contain actual model/evaluator measurements and exclusions; strict archived-input evaluation remains unchanged, and production flags/model settings remain off/unchanged.

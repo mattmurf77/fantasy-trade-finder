@@ -19,6 +19,12 @@ cutoff, whereas replay creation can be later. Checkpoints are a separate
 file, or per-season checkpoints. They represent independently reviewed kickoff
 boundaries, not dates inferred from as_of_week or a provider's updated_at.
 
+Explicit mode='exploratory_revised_inputs' additionally accepts provenance kind
+'revised_historical_diagnostic' with record.assumptions (nonempty strings). Its
+capture/creation timestamps remain the actual modern timestamps; season and week
+labels describe the historical origin, and cutoff still needs date evidence.
+These revised inputs are diagnostics, never historical calibration or holdouts.
+
 These fields are ASSERTIONS: this offline tool validates consistency, not archive
 authenticity, model fitting, holdout independence, or kickoff evidence. Hashes and
 citations alone are not proof. All scores remain conditional, never certification
@@ -75,7 +81,9 @@ def _outcome_error(season):
     return None
 
 
-def _validate(record, season, checkpoint):
+def _validate(record, season, checkpoint, *, mode="strict"):
+    diagnostic = (mode == "exploratory_revised_inputs"
+                  and record.get("provenance", {}).get("kind") == "revised_historical_diagnostic")
     if record.get("model_family") != "win_now_player_week" or not record.get("model_version"):
         raise ValueError("wrong_or_missing_model_identity")
     week = record.get("as_of_week")
@@ -92,9 +100,9 @@ def _validate(record, season, checkpoint):
         raise ValueError("checkpoint_mismatch")
     captures = [_time(record.get(k)) for k in ("forecast_captured_at", "league_state_captured_at")]
     created = _time(record.get("prediction_created_at"))
-    if any(t >= cutoff or t > created for t in captures):
+    if any(t > created or (not diagnostic and t >= cutoff) for t in captures):
         raise ValueError("post_cutoff_or_post_creation_snapshot")
-    if any(t.year != int(record["season"]) for t in captures):
+    if not diagnostic and any(t.year != int(record["season"]) for t in captures):
         raise ValueError("snapshot_season_mismatch")
     for prefix in ("forecast", "league_state"):
         if (str(record.get(prefix + "_season")) != str(record["season"])
@@ -106,8 +114,13 @@ def _validate(record, season, checkpoint):
         raise ValueError("incomplete_or_stitched_forecast_horizon")
     provenance = record.get("provenance", {})
     kind = provenance.get("kind")
-    if kind not in {"archived_prediction", "retrospective_replay"}:
+    if not diagnostic and kind not in {"archived_prediction", "retrospective_replay"}:
         raise ValueError("missing_archived_provenance")
+    if diagnostic:
+        assumptions = record.get("assumptions")
+        if (not isinstance(assumptions, list) or not assumptions
+                or any(not isinstance(a, str) or not a.strip() for a in assumptions)):
+            raise ValueError("missing_exploratory_assumptions")
     for prefix in ("forecast", "league_state", "prediction"):
         if (not isinstance(provenance.get(prefix + "_evidence_ref"), str)
                 or not provenance[prefix + "_evidence_ref"].strip()
@@ -212,8 +225,10 @@ def _group_report(cohorts, bootstrap_samples, seed):
     return report
 
 
-def evaluate_calibration(outcomes, predictions=None, checkpoints=None, *, bootstrap_samples=1000, seed=1701):
+def evaluate_calibration(outcomes, predictions=None, checkpoints=None, *, bootstrap_samples=1000, seed=1701, mode="strict"):
     """Return a deterministic readiness/conditional-calibration report, never a gate."""
+    if mode not in {"strict", "exploratory_revised_inputs"}:
+        raise ValueError("invalid_evaluation_mode")
     if not isinstance(outcomes, dict) or outcomes.get("schema_version") != 1 or not isinstance(outcomes.get("seasons"), list):
         raise ValueError("invalid_outcomes_document")
     if predictions is not None and (not isinstance(predictions, dict) or predictions.get("schema_version") != 1 or not isinstance(predictions.get("records"), list)):
@@ -268,6 +283,7 @@ def evaluate_calibration(outcomes, predictions=None, checkpoints=None, *, bootst
     # within a model/checkpoint exclude ALL copies rather than cherry-picking.
     duplicates = Counter((*_key(r), r.get("as_of_week"), r.get("model_version")) for r in records)
     groups, rejections = defaultdict(list), []
+    diagnostic_assumptions = []
     for index, r in enumerate(records):
         try:
             if duplicates[(*_key(r), r.get("as_of_week"), r.get("model_version"))] > 1:
@@ -275,15 +291,18 @@ def evaluate_calibration(outcomes, predictions=None, checkpoints=None, *, bootst
             if _key(r) not in available:
                 raise ValueError("missing_or_invalid_outcome_season")
             s = available[_key(r)]
-            rows = _validate(r, s, references.get((*_key(r), r.get("as_of_week"))))
+            rows = _validate(r, s, references.get((*_key(r), r.get("as_of_week"))), mode=mode)
             group = (r["model_version"], r["as_of_week"], r["provenance"]["kind"])
+            if group[2] == "revised_historical_diagnostic":
+                diagnostic_assumptions.append({"record_index": index, "league_id": r["league_id"],
+                    "season": r["season"], "as_of_week": r["as_of_week"], "assumptions": r["assumptions"]})
             groups[group].append({"rows": rows, "lineage_id": s["lineage_id"], "key": _key(r)})
         except (ValueError, TypeError, KeyError, AttributeError) as exc:
             rejections.append({"record_index": index, "league_id": r.get("league_id"),
                                "season": r.get("season"), "reason": str(exc)})
     eligible = sum(map(len, groups.values()))
     joined = {c["key"] for cohorts in groups.values() for c in cohorts}
-    return {"schema_version": 1, "status": "conditional_metrics" if eligible else "missing_eligible_archived_predictions",
+    report = {"schema_version": 1, "status": "conditional_metrics" if eligible else "missing_eligible_archived_predictions",
         "certified": False, "provenance_scope": "Supplied archive citations, hashes, timestamps, cutoff evidence and holdout claims are unverified assertions; scores are conditional, not proof of historical calibration.",
         "production_change": False, "legacy_outlook_substituted": False,
         "availability": {"captured_seasons": len(seasons), "valid_outcome_seasons": len(available),
@@ -300,3 +319,10 @@ def evaluate_calibration(outcomes, predictions=None, checkpoints=None, *, bootst
         "groups": [{"model_version": model, "as_of_week": week, "prediction_kind": kind,
                     **_group_report(cohorts, bootstrap_samples, seed)}
                    for (model, week, kind), cohorts in sorted(groups.items())]}
+
+    if mode == "exploratory_revised_inputs":
+        report.update(mode=mode,
+            status="exploratory_diagnostic_metrics" if eligible else "missing_eligible_exploratory_predictions",
+            provenance_scope="Revised historical inputs captured after the games may contain outcome leakage. These exploratory diagnostic metrics are not historical calibration, frozen-holdout evidence, or production validation.",
+            exploratory_assumptions=diagnostic_assumptions)
+    return report

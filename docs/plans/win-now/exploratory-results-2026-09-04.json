@@ -1,0 +1,1239 @@
+{
+  "schema_version": 1,
+  "status": "exploratory_diagnostic_metrics",
+  "certified": false,
+  "provenance_scope": "Revised historical inputs captured after the games may contain outcome leakage. These exploratory diagnostic metrics are not historical calibration, frozen-holdout evidence, or production validation.",
+  "production_change": false,
+  "legacy_outlook_substituted": false,
+  "availability": {
+    "captured_seasons": 6,
+    "valid_outcome_seasons": 6,
+    "valid_outcome_lineages": 2,
+    "model_supported_outcome_seasons": 2,
+    "model_support_exclusions": [
+      {
+        "league_id": "867593839303598080",
+        "season": 2022,
+        "reasons": [
+          "unsupported_roster_slots",
+          "unsupported_scoring:blk_kick",
+          "unsupported_scoring:def_st_ff",
+          "unsupported_scoring:def_st_fum_rec",
+          "unsupported_scoring:def_st_td",
+          "unsupported_scoring:def_td",
+          "unsupported_scoring:ff",
+          "unsupported_scoring:fgm_0_19",
+          "unsupported_scoring:fgm_20_29",
+          "unsupported_scoring:fgm_30_39",
+          "unsupported_scoring:fgm_40_49",
+          "unsupported_scoring:fgm_50p",
+          "unsupported_scoring:fgmiss",
+          "unsupported_scoring:fum_rec",
+          "unsupported_scoring:fum_rec_td",
+          "unsupported_scoring:idp_blk_kick",
+          "unsupported_scoring:idp_def_td",
+          "unsupported_scoring:idp_ff",
+          "unsupported_scoring:idp_fum_rec",
+          "unsupported_scoring:idp_int",
+          "unsupported_scoring:idp_pass_def",
+          "unsupported_scoring:idp_sack",
+          "unsupported_scoring:idp_safe",
+          "unsupported_scoring:idp_tkl",
+          "unsupported_scoring:idp_tkl_loss",
+          "unsupported_scoring:int",
+          "unsupported_scoring:pts_allow_0",
+          "unsupported_scoring:pts_allow_14_20",
+          "unsupported_scoring:pts_allow_1_6",
+          "unsupported_scoring:pts_allow_28_34",
+          "unsupported_scoring:pts_allow_35p",
+          "unsupported_scoring:pts_allow_7_13",
+          "unsupported_scoring:sack",
+          "unsupported_scoring:safe",
+          "unsupported_scoring:st_ff",
+          "unsupported_scoring:st_fum_rec",
+          "unsupported_scoring:st_td",
+          "unsupported_scoring:xpm",
+          "unsupported_scoring:xpmiss"
+        ]
+      },
+      {
+        "league_id": "916436765509046272",
+        "season": 2023,
+        "reasons": [
+          "unsupported_roster_slots",
+          "unsupported_scoring:blk_kick",
+          "unsupported_scoring:def_st_ff",
+          "unsupported_scoring:def_st_fum_rec",
+          "unsupported_scoring:def_st_td",
+          "unsupported_scoring:def_td",
+          "unsupported_scoring:ff",
+          "unsupported_scoring:fgm_0_19",
+          "unsupported_scoring:fgm_20_29",
+          "unsupported_scoring:fgm_30_39",
+          "unsupported_scoring:fgm_40_49",
+          "unsupported_scoring:fgm_50p",
+          "unsupported_scoring:fgmiss",
+          "unsupported_scoring:fum_rec",
+          "unsupported_scoring:fum_rec_td",
+          "unsupported_scoring:idp_blk_kick",
+          "unsupported_scoring:idp_def_td",
+          "unsupported_scoring:idp_ff",
+          "unsupported_scoring:idp_fum_rec",
+          "unsupported_scoring:idp_int",
+          "unsupported_scoring:idp_pass_def",
+          "unsupported_scoring:idp_sack",
+          "unsupported_scoring:idp_safe",
+          "unsupported_scoring:idp_tkl",
+          "unsupported_scoring:idp_tkl_loss",
+          "unsupported_scoring:int",
+          "unsupported_scoring:pts_allow_0",
+          "unsupported_scoring:pts_allow_14_20",
+          "unsupported_scoring:pts_allow_1_6",
+          "unsupported_scoring:pts_allow_28_34",
+          "unsupported_scoring:pts_allow_35p",
+          "unsupported_scoring:pts_allow_7_13",
+          "unsupported_scoring:sack",
+          "unsupported_scoring:safe",
+          "unsupported_scoring:st_ff",
+          "unsupported_scoring:st_fum_rec",
+          "unsupported_scoring:st_td",
+          "unsupported_scoring:xpm",
+          "unsupported_scoring:xpmiss"
+        ]
+      },
+      {
+        "league_id": "1048263304533188608",
+        "season": 2024,
+        "reasons": [
+          "unsupported_roster_slots",
+          "unsupported_scoring:blk_kick",
+          "unsupported_scoring:def_st_ff",
+          "unsupported_scoring:def_st_fum_rec",
+          "unsupported_scoring:def_st_td",
+          "unsupported_scoring:def_td",
+          "unsupported_scoring:ff",
+          "unsupported_scoring:fgm_0_19",
+          "unsupported_scoring:fgm_20_29",
+          "unsupported_scoring:fgm_30_39",
+          "unsupported_scoring:fgm_40_49",
+          "unsupported_scoring:fgm_50p",
+          "unsupported_scoring:fgmiss",
+          "unsupported_scoring:fum_rec",
+          "unsupported_scoring:fum_rec_td",
+          "unsupported_scoring:idp_blk_kick",
+          "unsupported_scoring:idp_def_td",
+          "unsupported_scoring:idp_ff",
+          "unsupported_scoring:idp_fum_rec",
+          "unsupported_scoring:idp_int",
+          "unsupported_scoring:idp_pass_def",
+          "unsupported_scoring:idp_sack",
+          "unsupported_scoring:idp_safe",
+          "unsupported_scoring:idp_tkl",
+          "unsupported_scoring:idp_tkl_loss",
+          "unsupported_scoring:int",
+          "unsupported_scoring:pts_allow_0",
+          "unsupported_scoring:pts_allow_14_20",
+          "unsupported_scoring:pts_allow_1_6",
+          "unsupported_scoring:pts_allow_28_34",
+          "unsupported_scoring:pts_allow_35p",
+          "unsupported_scoring:pts_allow_7_13",
+          "unsupported_scoring:sack",
+          "unsupported_scoring:safe",
+          "unsupported_scoring:st_ff",
+          "unsupported_scoring:st_fum_rec",
+          "unsupported_scoring:st_td",
+          "unsupported_scoring:xpm",
+          "unsupported_scoring:xpmiss"
+        ]
+      },
+      {
+        "league_id": "1181674778942836736",
+        "season": 2025,
+        "reasons": [
+          "unsupported_roster_slots",
+          "unsupported_scoring:blk_kick",
+          "unsupported_scoring:def_st_ff",
+          "unsupported_scoring:def_st_fum_rec",
+          "unsupported_scoring:def_st_td",
+          "unsupported_scoring:def_td",
+          "unsupported_scoring:ff",
+          "unsupported_scoring:fgm_0_19",
+          "unsupported_scoring:fgm_20_29",
+          "unsupported_scoring:fgm_30_39",
+          "unsupported_scoring:fgm_40_49",
+          "unsupported_scoring:fgm_50p",
+          "unsupported_scoring:fgmiss",
+          "unsupported_scoring:fum_rec",
+          "unsupported_scoring:fum_rec_td",
+          "unsupported_scoring:idp_blk_kick",
+          "unsupported_scoring:idp_def_td",
+          "unsupported_scoring:idp_ff",
+          "unsupported_scoring:idp_fum_rec",
+          "unsupported_scoring:idp_int",
+          "unsupported_scoring:idp_pass_def",
+          "unsupported_scoring:idp_sack",
+          "unsupported_scoring:idp_safe",
+          "unsupported_scoring:idp_tkl",
+          "unsupported_scoring:idp_tkl_loss",
+          "unsupported_scoring:int",
+          "unsupported_scoring:pts_allow_0",
+          "unsupported_scoring:pts_allow_14_20",
+          "unsupported_scoring:pts_allow_1_6",
+          "unsupported_scoring:pts_allow_28_34",
+          "unsupported_scoring:pts_allow_35p",
+          "unsupported_scoring:pts_allow_7_13",
+          "unsupported_scoring:sack",
+          "unsupported_scoring:safe",
+          "unsupported_scoring:st_ff",
+          "unsupported_scoring:st_fum_rec",
+          "unsupported_scoring:st_td",
+          "unsupported_scoring:xpm",
+          "unsupported_scoring:xpmiss"
+        ]
+      }
+    ],
+    "prediction_records": 4,
+    "eligible_prediction_cohorts": 4,
+    "eligible_unique_league_seasons": 1,
+    "missing_eligible_predictions": [
+      {
+        "league_id": "1048263304533188608",
+        "season": "2024"
+      },
+      {
+        "league_id": "1180999595377590272",
+        "season": "2025"
+      },
+      {
+        "league_id": "1181674778942836736",
+        "season": "2025"
+      },
+      {
+        "league_id": "867593839303598080",
+        "season": "2022"
+      },
+      {
+        "league_id": "916436765509046272",
+        "season": "2023"
+      }
+    ]
+  },
+  "capture_exclusions": [
+    {
+      "league_id": "1312076055586050048",
+      "lineage_id": "1312076055586050048",
+      "reason": "requested_season_not_found",
+      "season": 2022
+    },
+    {
+      "league_id": "1312076055586050048",
+      "lineage_id": "1312076055586050048",
+      "reason": "requested_season_not_found",
+      "season": 2023
+    }
+  ],
+  "outcome_exclusions": [],
+  "prediction_rejections": [],
+  "groups": [
+    {
+      "model_version": "player_week_normal_v1_experimental__revised_offense_diagnostic_v1",
+      "as_of_week": 3,
+      "prediction_kind": "revised_historical_diagnostic",
+      "team_rows": 12,
+      "league_seasons": 1,
+      "lineages": 1,
+      "championship_events": 1,
+      "metrics": {
+        "playoff": {
+          "brier": 0.06779081666666666,
+          "log_loss": 0.2592826078432889,
+          "baseline_brier": 0.25,
+          "baseline_log_loss": 0.6931471805599453,
+          "brier_skill": 0.7288367333333334,
+          "log_loss_skill": 0.6259342674757293,
+          "reliability_bins": [
+            {
+              "lower": 0.0,
+              "upper": 0.1,
+              "count": 2,
+              "mean_prediction": 0.02095,
+              "observed_rate": 0.0
+            },
+            {
+              "lower": 0.1,
+              "upper": 0.2,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.2,
+              "upper": 0.3,
+              "count": 2,
+              "mean_prediction": 0.2504,
+              "observed_rate": 0.0
+            },
+            {
+              "lower": 0.3,
+              "upper": 0.4,
+              "count": 1,
+              "mean_prediction": 0.3198,
+              "observed_rate": 0.0
+            },
+            {
+              "lower": 0.4,
+              "upper": 0.5,
+              "count": 1,
+              "mean_prediction": 0.4235,
+              "observed_rate": 0.0
+            },
+            {
+              "lower": 0.5,
+              "upper": 0.6,
+              "count": 1,
+              "mean_prediction": 0.5849,
+              "observed_rate": 1.0
+            },
+            {
+              "lower": 0.6,
+              "upper": 0.7,
+              "count": 1,
+              "mean_prediction": 0.6348,
+              "observed_rate": 1.0
+            },
+            {
+              "lower": 0.7,
+              "upper": 0.8,
+              "count": 1,
+              "mean_prediction": 0.7217,
+              "observed_rate": 1.0
+            },
+            {
+              "lower": 0.8,
+              "upper": 0.9,
+              "count": 1,
+              "mean_prediction": 0.8817,
+              "observed_rate": 1.0
+            },
+            {
+              "lower": 0.9,
+              "upper": 1.0,
+              "count": 2,
+              "mean_prediction": 0.94545,
+              "observed_rate": 1.0
+            }
+          ],
+          "lineage_bootstrap_95": null
+        },
+        "title": {
+          "brier": 0.05347909666666667,
+          "log_loss": 0.17179748910626005,
+          "baseline_brier": 0.07638888888888888,
+          "baseline_log_loss": 0.28683598305616065,
+          "brier_skill": 0.2999100072727272,
+          "log_loss_skill": 0.4010601903017753,
+          "reliability_bins": [
+            {
+              "lower": 0.0,
+              "upper": 0.1,
+              "count": 9,
+              "mean_prediction": 0.027755555555555554,
+              "observed_rate": 0.0
+            },
+            {
+              "lower": 0.1,
+              "upper": 0.2,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.2,
+              "upper": 0.3,
+              "count": 3,
+              "mean_prediction": 0.25006666666666666,
+              "observed_rate": 0.3333333333333333
+            },
+            {
+              "lower": 0.3,
+              "upper": 0.4,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.4,
+              "upper": 0.5,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.5,
+              "upper": 0.6,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.6,
+              "upper": 0.7,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.7,
+              "upper": 0.8,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.8,
+              "upper": 0.9,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.9,
+              "upper": 1.0,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            }
+          ],
+          "lineage_bootstrap_95": null
+        }
+      },
+      "expected_wins": {
+        "team_rows": 12,
+        "mae": 2.599333333333333
+      },
+      "uncertainty": {
+        "method": "lineage_cluster_percentile_bootstrap",
+        "samples": 1000,
+        "seed": 1701,
+        "status": "insufficient_lineages",
+        "caution": "Conditional on supplied provenance and cohort; few lineages give unstable intervals. Team rows and championships within a lineage are not independent."
+      }
+    },
+    {
+      "model_version": "player_week_normal_v1_experimental__revised_offense_diagnostic_v1",
+      "as_of_week": 6,
+      "prediction_kind": "revised_historical_diagnostic",
+      "team_rows": 12,
+      "league_seasons": 1,
+      "lineages": 1,
+      "championship_events": 1,
+      "metrics": {
+        "playoff": {
+          "brier": 0.025198493333333336,
+          "log_loss": 0.13044600423694608,
+          "baseline_brier": 0.25,
+          "baseline_log_loss": 0.6931471805599453,
+          "brier_skill": 0.8992060266666666,
+          "log_loss_skill": 0.8118061965835772,
+          "reliability_bins": [
+            {
+              "lower": 0.0,
+              "upper": 0.1,
+              "count": 3,
+              "mean_prediction": 0.0203,
+              "observed_rate": 0.0
+            },
+            {
+              "lower": 0.1,
+              "upper": 0.2,
+              "count": 1,
+              "mean_prediction": 0.1031,
+              "observed_rate": 0.0
+            },
+            {
+              "lower": 0.2,
+              "upper": 0.3,
+              "count": 2,
+              "mean_prediction": 0.26335,
+              "observed_rate": 0.0
+            },
+            {
+              "lower": 0.3,
+              "upper": 0.4,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.4,
+              "upper": 0.5,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.5,
+              "upper": 0.6,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.6,
+              "upper": 0.7,
+              "count": 1,
+              "mean_prediction": 0.6789,
+              "observed_rate": 1.0
+            },
+            {
+              "lower": 0.7,
+              "upper": 0.8,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.8,
+              "upper": 0.9,
+              "count": 2,
+              "mean_prediction": 0.857,
+              "observed_rate": 1.0
+            },
+            {
+              "lower": 0.9,
+              "upper": 1.0,
+              "count": 3,
+              "mean_prediction": 0.9721333333333333,
+              "observed_rate": 1.0
+            }
+          ],
+          "lineage_bootstrap_95": null
+        },
+        "title": {
+          "brier": 0.04282914333333334,
+          "log_loss": 0.14571227068346326,
+          "baseline_brier": 0.07638888888888888,
+          "baseline_log_loss": 0.28683598305616065,
+          "brier_skill": 0.439327578181818,
+          "log_loss_skill": 0.4920014248877076,
+          "reliability_bins": [
+            {
+              "lower": 0.0,
+              "upper": 0.1,
+              "count": 9,
+              "mean_prediction": 0.02888888888888889,
+              "observed_rate": 0.0
+            },
+            {
+              "lower": 0.1,
+              "upper": 0.2,
+              "count": 2,
+              "mean_prediction": 0.1945,
+              "observed_rate": 0.0
+            },
+            {
+              "lower": 0.2,
+              "upper": 0.3,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.3,
+              "upper": 0.4,
+              "count": 1,
+              "mean_prediction": 0.351,
+              "observed_rate": 1.0
+            },
+            {
+              "lower": 0.4,
+              "upper": 0.5,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.5,
+              "upper": 0.6,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.6,
+              "upper": 0.7,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.7,
+              "upper": 0.8,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.8,
+              "upper": 0.9,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.9,
+              "upper": 1.0,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            }
+          ],
+          "lineage_bootstrap_95": null
+        }
+      },
+      "expected_wins": {
+        "team_rows": 12,
+        "mae": 1.8132666666666666
+      },
+      "uncertainty": {
+        "method": "lineage_cluster_percentile_bootstrap",
+        "samples": 1000,
+        "seed": 1701,
+        "status": "insufficient_lineages",
+        "caution": "Conditional on supplied provenance and cohort; few lineages give unstable intervals. Team rows and championships within a lineage are not independent."
+      }
+    },
+    {
+      "model_version": "player_week_normal_v1_experimental__revised_offense_diagnostic_v1",
+      "as_of_week": 9,
+      "prediction_kind": "revised_historical_diagnostic",
+      "team_rows": 12,
+      "league_seasons": 1,
+      "lineages": 1,
+      "championship_events": 1,
+      "metrics": {
+        "playoff": {
+          "brier": 0.021740218333333335,
+          "log_loss": 0.09559147271004424,
+          "baseline_brier": 0.25,
+          "baseline_log_loss": 0.6931471805599453,
+          "brier_skill": 0.9130391266666666,
+          "log_loss_skill": 0.8620906563699465,
+          "reliability_bins": [
+            {
+              "lower": 0.0,
+              "upper": 0.1,
+              "count": 4,
+              "mean_prediction": 0.00365,
+              "observed_rate": 0.0
+            },
+            {
+              "lower": 0.1,
+              "upper": 0.2,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.2,
+              "upper": 0.3,
+              "count": 2,
+              "mean_prediction": 0.23795,
+              "observed_rate": 0.0
+            },
+            {
+              "lower": 0.3,
+              "upper": 0.4,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.4,
+              "upper": 0.5,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.5,
+              "upper": 0.6,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.6,
+              "upper": 0.7,
+              "count": 1,
+              "mean_prediction": 0.6262,
+              "observed_rate": 1.0
+            },
+            {
+              "lower": 0.7,
+              "upper": 0.8,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.8,
+              "upper": 0.9,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.9,
+              "upper": 1.0,
+              "count": 5,
+              "mean_prediction": 0.9766600000000001,
+              "observed_rate": 1.0
+            }
+          ],
+          "lineage_bootstrap_95": null
+        },
+        "title": {
+          "brier": 0.03267676333333334,
+          "log_loss": 0.11886975258595056,
+          "baseline_brier": 0.07638888888888888,
+          "baseline_log_loss": 0.28683598305616065,
+          "brier_skill": 0.5722314618181817,
+          "log_loss_skill": 0.58558284313068,
+          "reliability_bins": [
+            {
+              "lower": 0.0,
+              "upper": 0.1,
+              "count": 9,
+              "mean_prediction": 0.0213,
+              "observed_rate": 0.0
+            },
+            {
+              "lower": 0.1,
+              "upper": 0.2,
+              "count": 2,
+              "mean_prediction": 0.18435,
+              "observed_rate": 0.0
+            },
+            {
+              "lower": 0.2,
+              "upper": 0.3,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.3,
+              "upper": 0.4,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.4,
+              "upper": 0.5,
+              "count": 1,
+              "mean_prediction": 0.4396,
+              "observed_rate": 1.0
+            },
+            {
+              "lower": 0.5,
+              "upper": 0.6,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.6,
+              "upper": 0.7,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.7,
+              "upper": 0.8,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.8,
+              "upper": 0.9,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.9,
+              "upper": 1.0,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            }
+          ],
+          "lineage_bootstrap_95": null
+        }
+      },
+      "expected_wins": {
+        "team_rows": 12,
+        "mae": 1.213283333333333
+      },
+      "uncertainty": {
+        "method": "lineage_cluster_percentile_bootstrap",
+        "samples": 1000,
+        "seed": 1701,
+        "status": "insufficient_lineages",
+        "caution": "Conditional on supplied provenance and cohort; few lineages give unstable intervals. Team rows and championships within a lineage are not independent."
+      }
+    },
+    {
+      "model_version": "player_week_normal_v1_experimental__revised_offense_diagnostic_v1",
+      "as_of_week": 12,
+      "prediction_kind": "revised_historical_diagnostic",
+      "team_rows": 12,
+      "league_seasons": 1,
+      "lineages": 1,
+      "championship_events": 1,
+      "metrics": {
+        "playoff": {
+          "brier": 0.0,
+          "log_loss": 9.99600361081321e-16,
+          "baseline_brier": 0.25,
+          "baseline_log_loss": 0.6931471805599453,
+          "brier_skill": 1.0,
+          "log_loss_skill": 0.9999999999999986,
+          "reliability_bins": [
+            {
+              "lower": 0.0,
+              "upper": 0.1,
+              "count": 6,
+              "mean_prediction": 0.0,
+              "observed_rate": 0.0
+            },
+            {
+              "lower": 0.1,
+              "upper": 0.2,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.2,
+              "upper": 0.3,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.3,
+              "upper": 0.4,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.4,
+              "upper": 0.5,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.5,
+              "upper": 0.6,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.6,
+              "upper": 0.7,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.7,
+              "upper": 0.8,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.8,
+              "upper": 0.9,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.9,
+              "upper": 1.0,
+              "count": 6,
+              "mean_prediction": 1.0,
+              "observed_rate": 1.0
+            }
+          ],
+          "lineage_bootstrap_95": null
+        },
+        "title": {
+          "brier": 0.028753744999999997,
+          "log_loss": 0.1103072135767279,
+          "baseline_brier": 0.07638888888888888,
+          "baseline_log_loss": 0.28683598305616065,
+          "brier_skill": 0.6235873381818182,
+          "log_loss_skill": 0.6154345336961072,
+          "reliability_bins": [
+            {
+              "lower": 0.0,
+              "upper": 0.1,
+              "count": 8,
+              "mean_prediction": 0.0178375,
+              "observed_rate": 0.0
+            },
+            {
+              "lower": 0.1,
+              "upper": 0.2,
+              "count": 3,
+              "mean_prediction": 0.12956666666666666,
+              "observed_rate": 0.0
+            },
+            {
+              "lower": 0.2,
+              "upper": 0.3,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.3,
+              "upper": 0.4,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.4,
+              "upper": 0.5,
+              "count": 1,
+              "mean_prediction": 0.4686,
+              "observed_rate": 1.0
+            },
+            {
+              "lower": 0.5,
+              "upper": 0.6,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.6,
+              "upper": 0.7,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.7,
+              "upper": 0.8,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.8,
+              "upper": 0.9,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            },
+            {
+              "lower": 0.9,
+              "upper": 1.0,
+              "count": 0,
+              "mean_prediction": null,
+              "observed_rate": null
+            }
+          ],
+          "lineage_bootstrap_95": null
+        }
+      },
+      "expected_wins": {
+        "team_rows": 12,
+        "mae": 0.7619666666666661
+      },
+      "uncertainty": {
+        "method": "lineage_cluster_percentile_bootstrap",
+        "samples": 1000,
+        "seed": 1701,
+        "status": "insufficient_lineages",
+        "caution": "Conditional on supplied provenance and cohort; few lineages give unstable intervals. Team rows and championships within a lineage are not independent."
+      }
+    }
+  ],
+  "mode": "exploratory_revised_inputs",
+  "exploratory_assumptions": [
+    {
+      "record_index": 0,
+      "league_id": "1101407304802574336",
+      "season": 2024,
+      "as_of_week": 3,
+      "assumptions": [
+        "Revised historical weekly forecasts fetched now, including later information; not a historical calibration backtest.",
+        "Full remaining-season horizon combines later weekly revisions.",
+        "Completed-week roster held fixed thereafter; reserve/taxi eligibility unavailable and all listed players treated as eligible.",
+        "Current injury labels ignored; each usable stat forecast treated as available. Missing rows remain missing.",
+        "Historical feed player positions used; exact historical eligibility not authenticated.",
+        "Projected legal lineups selected using source-covered candidates; actual future manager lineup choices and transactions not modeled.",
+        "Unsupported scoring coefficients omitted only for this offensive-lineup diagnostic: {\"blk_kick\": 2.0, \"def_st_ff\": 1.0, \"def_st_fum_rec\": 1.0, \"def_st_td\": 6.0, \"def_td\": 6.0, \"ff\": 1.0, \"fgm_0_19\": 3.0, \"fgm_20_29\": 3.0, \"fgm_30_39\": 3.0, \"fgm_40_49\": 4.0, \"fgm_50p\": 5.0, \"fgmiss\": -1.0, \"fum_rec\": 2.0, \"fum_rec_td\": 6.0, \"int\": 2.0, \"pts_allow_0\": 10.0, \"pts_allow_14_20\": 1.0, \"pts_allow_1_6\": 7.0, \"pts_allow_28_34\": -1.0, \"pts_allow_35p\": -4.0, \"pts_allow_7_13\": 4.0, \"sack\": 1.0, \"safe\": 2.0, \"st_ff\": 1.0, \"st_fum_rec\": 1.0, \"st_td\": 6.0, \"xpm\": 1.0, \"xpmiss\": -1.0}",
+        "Past-starter coverage requirement relaxed; unprojected players excluded, with missing IDs reported. This can bias estimates."
+      ]
+    },
+    {
+      "record_index": 1,
+      "league_id": "1101407304802574336",
+      "season": 2024,
+      "as_of_week": 6,
+      "assumptions": [
+        "Revised historical weekly forecasts fetched now, including later information; not a historical calibration backtest.",
+        "Full remaining-season horizon combines later weekly revisions.",
+        "Completed-week roster held fixed thereafter; reserve/taxi eligibility unavailable and all listed players treated as eligible.",
+        "Current injury labels ignored; each usable stat forecast treated as available. Missing rows remain missing.",
+        "Historical feed player positions used; exact historical eligibility not authenticated.",
+        "Projected legal lineups selected using source-covered candidates; actual future manager lineup choices and transactions not modeled.",
+        "Unsupported scoring coefficients omitted only for this offensive-lineup diagnostic: {\"blk_kick\": 2.0, \"def_st_ff\": 1.0, \"def_st_fum_rec\": 1.0, \"def_st_td\": 6.0, \"def_td\": 6.0, \"ff\": 1.0, \"fgm_0_19\": 3.0, \"fgm_20_29\": 3.0, \"fgm_30_39\": 3.0, \"fgm_40_49\": 4.0, \"fgm_50p\": 5.0, \"fgmiss\": -1.0, \"fum_rec\": 2.0, \"fum_rec_td\": 6.0, \"int\": 2.0, \"pts_allow_0\": 10.0, \"pts_allow_14_20\": 1.0, \"pts_allow_1_6\": 7.0, \"pts_allow_28_34\": -1.0, \"pts_allow_35p\": -4.0, \"pts_allow_7_13\": 4.0, \"sack\": 1.0, \"safe\": 2.0, \"st_ff\": 1.0, \"st_fum_rec\": 1.0, \"st_td\": 6.0, \"xpm\": 1.0, \"xpmiss\": -1.0}",
+        "Past-starter coverage requirement relaxed; unprojected players excluded, with missing IDs reported. This can bias estimates."
+      ]
+    },
+    {
+      "record_index": 2,
+      "league_id": "1101407304802574336",
+      "season": 2024,
+      "as_of_week": 9,
+      "assumptions": [
+        "Revised historical weekly forecasts fetched now, including later information; not a historical calibration backtest.",
+        "Full remaining-season horizon combines later weekly revisions.",
+        "Completed-week roster held fixed thereafter; reserve/taxi eligibility unavailable and all listed players treated as eligible.",
+        "Current injury labels ignored; each usable stat forecast treated as available. Missing rows remain missing.",
+        "Historical feed player positions used; exact historical eligibility not authenticated.",
+        "Projected legal lineups selected using source-covered candidates; actual future manager lineup choices and transactions not modeled.",
+        "Unsupported scoring coefficients omitted only for this offensive-lineup diagnostic: {\"blk_kick\": 2.0, \"def_st_ff\": 1.0, \"def_st_fum_rec\": 1.0, \"def_st_td\": 6.0, \"def_td\": 6.0, \"ff\": 1.0, \"fgm_0_19\": 3.0, \"fgm_20_29\": 3.0, \"fgm_30_39\": 3.0, \"fgm_40_49\": 4.0, \"fgm_50p\": 5.0, \"fgmiss\": -1.0, \"fum_rec\": 2.0, \"fum_rec_td\": 6.0, \"int\": 2.0, \"pts_allow_0\": 10.0, \"pts_allow_14_20\": 1.0, \"pts_allow_1_6\": 7.0, \"pts_allow_28_34\": -1.0, \"pts_allow_35p\": -4.0, \"pts_allow_7_13\": 4.0, \"sack\": 1.0, \"safe\": 2.0, \"st_ff\": 1.0, \"st_fum_rec\": 1.0, \"st_td\": 6.0, \"xpm\": 1.0, \"xpmiss\": -1.0}",
+        "Past-starter coverage requirement relaxed; unprojected players excluded, with missing IDs reported. This can bias estimates."
+      ]
+    },
+    {
+      "record_index": 3,
+      "league_id": "1101407304802574336",
+      "season": 2024,
+      "as_of_week": 12,
+      "assumptions": [
+        "Revised historical weekly forecasts fetched now, including later information; not a historical calibration backtest.",
+        "Full remaining-season horizon combines later weekly revisions.",
+        "Completed-week roster held fixed thereafter; reserve/taxi eligibility unavailable and all listed players treated as eligible.",
+        "Current injury labels ignored; each usable stat forecast treated as available. Missing rows remain missing.",
+        "Historical feed player positions used; exact historical eligibility not authenticated.",
+        "Projected legal lineups selected using source-covered candidates; actual future manager lineup choices and transactions not modeled.",
+        "Unsupported scoring coefficients omitted only for this offensive-lineup diagnostic: {\"blk_kick\": 2.0, \"def_st_ff\": 1.0, \"def_st_fum_rec\": 1.0, \"def_st_td\": 6.0, \"def_td\": 6.0, \"ff\": 1.0, \"fgm_0_19\": 3.0, \"fgm_20_29\": 3.0, \"fgm_30_39\": 3.0, \"fgm_40_49\": 4.0, \"fgm_50p\": 5.0, \"fgmiss\": -1.0, \"fum_rec\": 2.0, \"fum_rec_td\": 6.0, \"int\": 2.0, \"pts_allow_0\": 10.0, \"pts_allow_14_20\": 1.0, \"pts_allow_1_6\": 7.0, \"pts_allow_28_34\": -1.0, \"pts_allow_35p\": -4.0, \"pts_allow_7_13\": 4.0, \"sack\": 1.0, \"safe\": 2.0, \"st_ff\": 1.0, \"st_fum_rec\": 1.0, \"st_td\": 6.0, \"xpm\": 1.0, \"xpmiss\": -1.0}",
+        "Past-starter coverage requirement relaxed; unprojected players excluded, with missing IDs reported. This can bias estimates."
+      ]
+    }
+  ],
+  "replay_exclusions": [
+    {
+      "league_id": "1180999595377590272",
+      "season": 2025,
+      "as_of_week": 3,
+      "reason": [
+        "incomplete_lineup_coverage:12:13"
+      ]
+    },
+    {
+      "league_id": "1180999595377590272",
+      "season": 2025,
+      "as_of_week": 6,
+      "reason": [
+        "incomplete_lineup_coverage:12:13"
+      ]
+    },
+    {
+      "league_id": "1180999595377590272",
+      "season": 2025,
+      "as_of_week": 9,
+      "reason": [
+        "incomplete_lineup_coverage:12:13"
+      ]
+    },
+    {
+      "league_id": "1180999595377590272",
+      "season": 2025,
+      "as_of_week": 12,
+      "reason": [
+        "incomplete_lineup_coverage:12:13"
+      ]
+    },
+    {
+      "league_id": "867593839303598080",
+      "season": 2022,
+      "reason": "unsupported_kicker_or_idp_starting_slots"
+    },
+    {
+      "league_id": "916436765509046272",
+      "season": 2023,
+      "reason": "unsupported_kicker_or_idp_starting_slots"
+    },
+    {
+      "league_id": "1048263304533188608",
+      "season": 2024,
+      "reason": "unsupported_kicker_or_idp_starting_slots"
+    },
+    {
+      "league_id": "1181674778942836736",
+      "season": 2025,
+      "reason": "unsupported_kicker_or_idp_starting_slots"
+    }
+  ],
+  "simulation_draws": 10000,
+  "source_manifest": [
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2024/4?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "captured_at": "2026-09-05T03:33:24.448983+00:00",
+      "response_sha256": "56d0879732d5a929adb5522eb7f9fec8ec852b1b2774bb9a2ca1eb07f13ebce8"
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2024/5?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "captured_at": "2026-09-05T03:33:25.039658+00:00",
+      "response_sha256": "5da94cfa6e366b3779aa9213796b80f7a2ece7febc86d4632bf6e704f2618b6e"
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2024/6?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "captured_at": "2026-09-05T03:33:25.585750+00:00",
+      "response_sha256": "6f7fb771de0e22457620f8da741db43ffa63156ff823e489e92181b777ff8b43"
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2024/7?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "captured_at": "2026-09-05T03:33:26.173793+00:00",
+      "response_sha256": "07421f0bc6df53089faf7f1958b18909a100d5adc80feffd3cbb40188daa0a5f"
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2024/8?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "captured_at": "2026-09-05T03:33:26.718133+00:00",
+      "response_sha256": "661f15410cb18ad8a00787d9b6834e2fce2f700bd047b9d8f83f47ee3d92173c"
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2024/9?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "captured_at": "2026-09-05T03:33:27.252515+00:00",
+      "response_sha256": "271adc5437c8bd42dbc7a7bca1fbcb234d20c626917b8af12d5d75fd9b701f7d"
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2024/10?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "captured_at": "2026-09-05T03:33:27.762052+00:00",
+      "response_sha256": "acbf691b95de72dd018cc8d37e6f2911b27c5079787eaa8ce327e7ff25826152"
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2024/11?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "captured_at": "2026-09-05T03:33:28.254584+00:00",
+      "response_sha256": "a4cdcabfd43bc355027305eff93323be6ba26392d5d52941f081383b2ee796e5"
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2024/12?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "captured_at": "2026-09-05T03:33:28.810187+00:00",
+      "response_sha256": "b910dcc8d67fd5547b9d685e0c6f3c2ce975c72714e6696c8b73e86f333b9cfc"
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2024/13?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "captured_at": "2026-09-05T03:33:29.300579+00:00",
+      "response_sha256": "18eb3f383216cbd415ef85b7123403a22201582076c8a2f99c7f146a7b220e9d"
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2024/14?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "captured_at": "2026-09-05T03:33:29.863996+00:00",
+      "response_sha256": "3e40c9adf92984f26928a12bc07675a2f5bc70f6b9a2bec562536b28e774c5d8"
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2024/15?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "captured_at": "2026-09-05T03:33:30.670426+00:00",
+      "response_sha256": "a6e594f5226d130d0c5ed660bf9f196344444fa6c61ff4b9d282fb0d53f32621"
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2024/16?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "captured_at": "2026-09-05T03:33:31.403746+00:00",
+      "response_sha256": "4339cd8ac98b84e81c7b92edf9c16834437497a9b25b57924c0cdc3e131ab462"
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2024/17?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "captured_at": "2026-09-05T03:33:31.973904+00:00",
+      "response_sha256": "f34bb55bfb569192c3c28e47e9f39201417afd4fe109bdc6bcf4e1da09988d5c"
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2025/4?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "captured_at": "2026-09-05T03:34:18.036403+00:00",
+      "response_sha256": "66fadfd0635b4c492e015836f7abd7c5165bedb31eba11c73ef19638392f716b"
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2025/5?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "captured_at": "2026-09-05T03:34:18.596867+00:00",
+      "response_sha256": "36d2aa256de6813969e3eb4b052b9dcac4dcb29599e6c028a06644179cb07257"
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2025/6?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "captured_at": "2026-09-05T03:34:19.064040+00:00",
+      "response_sha256": "98d335aaaec9b6d306d0fdd6088bab11b47d3dc402259f14f615bf7b5c818cd9"
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2025/7?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "captured_at": "2026-09-05T03:34:19.674263+00:00",
+      "response_sha256": "ec065603a783250dcaeff1a46a4db5b749181a926b53eaca3eed1500193dd7b3"
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2025/8?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "captured_at": "2026-09-05T03:34:20.240382+00:00",
+      "response_sha256": "1dfcad65d78b1e17c3a47231b7517ef8c4987bcf95dc40a14b27254e6d4920b1"
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2025/9?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "captured_at": "2026-09-05T03:34:20.844060+00:00",
+      "response_sha256": "3734751da38c5d0704093e0c8f78bb25a581b0359353a4137b4a7479e883583c"
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2025/10?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "captured_at": "2026-09-05T03:34:21.630739+00:00",
+      "response_sha256": "a362b2c059474a9d7e6267db161a0a55adbf14b62a4bd5a9b0f07c88e5d52569"
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2025/11?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "captured_at": "2026-09-05T03:34:22.282136+00:00",
+      "response_sha256": "0bcd1574efb0ee6cfdc50009c8f0ee0d1de6179021f71e02a31a778d9a333019"
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2025/12?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "captured_at": "2026-09-05T03:34:22.788627+00:00",
+      "response_sha256": "bc985bf1168b8a9bd06aca89e2a8894a5ffe70e4581988f4ccaa28f1cb996f11"
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2025/13?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "captured_at": "2026-09-05T03:34:24.135468+00:00",
+      "response_sha256": "b0660cd9b106e7cb85ee7e2cc73264223bc6d2e3ca35048b8e7601e4fae82fa6"
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2025/14?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "captured_at": "2026-09-05T03:34:25.529411+00:00",
+      "response_sha256": "fa7a9bcb423d94fad35411bd2df8fa8e8c5eb56a4e90be80e2adb64b6cd90e1a"
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2025/15?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "captured_at": "2026-09-05T03:34:26.569811+00:00",
+      "response_sha256": "65cb37aa02c504ff12be307f5070efdcc5874df45c21b52318442354e9f9eb6b"
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2025/16?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "captured_at": "2026-09-05T03:34:27.779557+00:00",
+      "response_sha256": "729ceae7e0f144f54d6c871ef929e974280b5aaed4fde53a6cc2f9992e03a97a"
+    },
+    {
+      "url": "https://api.sleeper.app/projections/nfl/2025/17?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=pts_ppr",
+      "captured_at": "2026-09-05T03:34:28.584496+00:00",
+      "response_sha256": "77cc2d9b88bb5d9e09eb2ce1c50196f24a0a13ade4f27bb3fbeaf5d66a7ead2c"
+    }
+  ]
+}

@@ -21,11 +21,14 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--bootstrap-samples", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=1701)
+    parser.add_argument("--exploratory-revised-inputs", action="store_true",
+                        help="Score revised historical diagnostics with explicit assumptions; never historical calibration")
     args = parser.parse_args()
     try:
         read = lambda path: json.loads(path.read_text()) if path else None
         result = evaluate_calibration(read(args.outcomes), read(args.predictions), read(args.checkpoints),
-                                      bootstrap_samples=args.bootstrap_samples, seed=args.seed)
+                                      bootstrap_samples=args.bootstrap_samples, seed=args.seed,
+                                      mode="exploratory_revised_inputs" if args.exploratory_revised_inputs else "strict")
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(result, indent=2, allow_nan=False) + "\n")
     except (OSError, ValueError, TypeError, KeyError) as exc:

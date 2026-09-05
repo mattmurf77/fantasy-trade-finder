@@ -2,6 +2,8 @@
 
 Date: 2026-09-04 (America/New_York; capture timestamps use UTC).
 
+**Operator-approved follow-up:** the available revised inputs were subsequently evaluated in explicit exploratory mode. [Actual results](EXPLORATORY-RESULTS.md): four scored origins from Lakeview 2024; other seasons excluded for coverage/format. The strict archived-input assessment below remains unchanged.
+
 ## What the data can establish
 
 Sleeper's historical weekly matchups and winners bracket supply observed team scores, weekly roster lists, playoff qualification, and the champion. This is the outcome half of a calibration dataset. The offline capture and evaluation tools keep it separate from forecast inputs and do not change product flags or model parameters.

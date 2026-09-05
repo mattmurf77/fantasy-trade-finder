@@ -28,7 +28,7 @@ fixtures live in `backend/tests/fixtures/`.
 
 | Script | Purpose |
 |---|---|
-| `evaluate_season_calibration.py` | Scores archived Win Now predictions against captured outcomes; without forecasts, reports the evidence gap. No network or DB; [protocol](../docs/plans/win-now/HISTORICAL-VALIDATION.md) |
+| `evaluate_season_calibration.py` | Scores archived Win Now predictions against captured outcomes; explicit `--exploratory-revised-inputs` also scores labeled later-revised diagnostics. Without forecasts, reports the evidence gap. No network or DB; [protocol](../docs/plans/win-now/HISTORICAL-VALIDATION.md) |
 | `outlook_calibration_backtest.py` | As-of backtest of the outlook odds engine against 6 captured Sleeper league-seasons |
 | `outlook_preseason_backtest.py` | Backtest of the preseason `roster_value` strength source (rewinds standings, rosters, and values) |
 | `outlook_pick_capital_hypothesis.py` | Tests the draft-pick-capital hypotheses (1a upgrade-signal vs 1b rebuild-signal) |
@@ -42,6 +42,7 @@ fixtures live in `backend/tests/fixtures/`.
 
 | Script | Purpose |
 |---|---|
+| `run_season_historical_diagnostic.py` | Runs the opt-in revised-input player simulator diagnostic; public weekly projection cache, completed-week roster/standings replay and explicit approximations; [results](../docs/plans/win-now/EXPLORATORY-RESULTS.md) |
 | `capture_season_history.py` | Bounded public Sleeper league-history, weekly matchup and bracket capture; no profiles or final rosters; local outcome dataset |
 | `probe_season_forecasts.py` | Public weekly stat-forecast horizon probe; optional actually captured snapshot for prospective evidence |
 | `outlook_pick_capital_capture.py` | Captures `traded_picks` + trade transactions from Sleeper's public API into `backend/tests/fixtures/outlook-hypotheses/` |
