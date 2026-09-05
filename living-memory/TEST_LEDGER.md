@@ -27,6 +27,12 @@ User accepted exploratory evidence and authorized shipping season, Win Now and c
 
 ---
 
+## 2026-09-05 — Security release verified in CI, Render and EAS
+
+PR #279: tested `ab8f54d0`, squash `a927e3a7`, content diff empty. [CI run](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/33944570236): **5,001 passed / 1 skipped in 589.55 s**, all four jobs complete/success (Python 3.12; full mobile typecheck + 91 guards; testID lint; 180 web checks). Integrated PostgreSQL: **57 passed in 10.99 s** including incoming proposal/shadow deletion/export and counterparty valuation scrubbing. Disposable cluster stopped.
+
+Render `dep-dadppq17lnhs73e8fqo0` is **live**, commit `a927e3a7`, since 04:40:05 UTC. Five served files matched release bytes; feature flags 200; invalid-session init, extension rankings and account export each 401. iOS **1.16.16 (145)** build `bab54ee5` and submission `815cb2a0` both **FINISHED**; extension **0.1.1** uploaded with matching package digest. This is build/upload and service verification, not physical-device QA or proof of Apple's tester availability. No historical production cleanup was run. [Detailed evidence](../docs/plans/security-data-hardening/deployment.md).
+
 ## 2026-09-05 — Security follow-up independently reviewed: Python 3.12 and PostgreSQL pass; native runtime pending
 
 Same isolated branch, `codex/security-data-hardening-20260904`, based on `606e512c`. Coordinating review fixed late mobile init/link/proof responses after session changes or unmount; browser recovery now uses an explicit trusted extension proof flow; deletion drains active work and invalidates queued jobs, delayed provider proofs and nested counterparty writes. Export v2 and feedback-note scrubbing close the documented data-scope gaps. [Combined review](../docs/plans/security-data-hardening/review.md), [D-183 / ADR-017](../docs/adr/adr-017-account-deletion-work-leases.md).

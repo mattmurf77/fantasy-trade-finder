@@ -1,6 +1,6 @@
 # Browser and extension verification — 2026-09-04
 
-Status: local implementation and isolated Chromium runtime checks passed. The extension is not published and no live account or production service was exercised.
+Status: isolated Chromium runtime checks passed. Extension **0.1.1** was published on 2026-09-05; production static-file and invalid-session checks passed. No live account was exercised. [Release evidence](deployment.md).
 
 ## Trust boundary
 
@@ -8,7 +8,7 @@ Status: local implementation and isolated Chromium runtime checks passed. The ex
 
 The background flow first discovers the requested username and then supplies the captured proof to `/api/sleeper/link`. It returns a Fleeced bearer only after `verified === true`. The raw Sleeper token is transient: it is not returned to the first-party page or stored by the extension. `web/js/browser-auth.js` supplies timeout and recoverable error handling. Cached private boards require session revalidation; a rejection returns to verification without a username/init retry loop.
 
-ESPN/MFL browser entry directs users to mobile, where provider account verification is available. The landing page does not offer team selection as authentication. Sleeper onboarding requires the updated extension; the page links to a request/contact path because no public extension distribution was established in this task.
+ESPN/MFL browser entry directs users to mobile, where provider account verification is available. The landing page does not offer team selection as authentication. Sleeper onboarding requires the updated extension; the deployed page links to the published 0.1.1 package and unpacked-install instructions.
 
 ## Evidence
 
@@ -20,4 +20,4 @@ ESPN/MFL browser entry directs users to mobile, where provider account verificat
 
 Runtime log: `/private/tmp/ftf-browser-runtime-final.log`. Structural log: `/private/tmp/ftf-web-structure-final.log`. These scratch artifacts may expire; the [harness instructions](validation-tools/README.md) are durable.
 
-This proves client behavior with mocked upstream boundaries. Genuine Sleeper login, extension distribution and the deployed API remain rollout checks.
+The browser harness proves client behavior with mocked upstream boundaries. Genuine Sleeper login remains a live-account check; extension publication and deployed static/API-denial checks are recorded in deployment.md.

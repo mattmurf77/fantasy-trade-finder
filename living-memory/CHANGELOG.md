@@ -11,6 +11,10 @@
 
 ---
 
+## 2026-09-05 — Security findings 1–5 SHIPPED (D-183), PR #279
+
+Verified ownership now gates private data; session initialization resolves identity/membership on the server; analytics excludes bearer tokens and admits only owned outcomes; deletion drains work and covers aliases, credentials and new private tables. Mobile rejects stale proof/session callbacks. Export v2 and privacy disclosures updated. Integrated main #277/#278 before release; CI **5,001 passed / 1 skipped**, all four jobs green; PostgreSQL **57 passed**. Render `a927e3a7` live 04:40 UTC, static content matched and invalid-session probes returned 401. iOS **1.16.16 (145)** build and TestFlight submission finished. Extension **0.1.1** published with unpacked-install instructions. Physical-device QA and historical production cleanup remain owed. [Deployment evidence](../docs/plans/security-data-hardening/deployment.md).
+
 ## 2026-09-04 — Win Now implementation reviewed, all flags off
 
 Operator authorized the [Win Now build](../docs/plans/win-now/BUILD.md) using Astra subagents and parent review, isolated on `codex/win-now-20260904` from fetched main `606e512c`. Adds external weekly forecasts, legal-lineup season simulation, constrained search/calculator, durable evidence and separate season decisions in mobile/web. **Not merged, deployed, enabled or submitted to TestFlight.** [ADR-018](../docs/adr/adr-018-win-now-external-forecasts.md) / D-184 preserve dynasty Elo and the legacy title-display prohibition.

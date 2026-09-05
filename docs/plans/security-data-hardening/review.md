@@ -1,6 +1,6 @@
 # Security hardening review — 2026-09-04
 
-The five findings are addressed in local code, with a second review that found and fixed additional client-session and account-deletion races. **These protections are not deployed.** No commit, push, production cleanup or live penetration test was performed.
+The five findings are addressed, with a second review that found and fixed additional client-session and account-deletion races. **Deployed on 2026-09-05 via PR #279.** Render is live, iOS 1.16.16 (145) built and submitted to TestFlight, and extension 0.1.1 is published. See [deployment evidence](deployment.md). Historical production cleanup and physical-device QA remain outstanding; no live penetration test was performed.
 
 Branch: `codex/security-data-hardening-20260904`, based on freshly fetched `origin/main` at `606e512c`. Worktree: `/Users/teresadickens/Documents/Claude/Projects/Fantasy Trade Finder/staged-work/security-data-hardening-20260904`. The original checkout's existing edits were preserved.
 
@@ -22,6 +22,8 @@ Web/extension verification requires a trusted gesture, an exact trusted Sleeper 
 
 ## Final validation
 
+Release integration with main #277/#278 subsequently passed **5,001 backend tests / 1 skip in CI**, all mobile/web CI jobs, and **57 PostgreSQL checks**. Build 145, TestFlight submission and production smoke checks completed; [release evidence](deployment.md) supersedes the pre-integration counts below.
+
 - Full backend suite on Python **3.12.14: 4,707 passed, 1 skipped** in 679.14 seconds, including calibration tests. Scratch SQLite and blocked upstream requests. The configured deployment uses Python 3.12.3; this validates the same minor version, not that exact patch. The earlier 4,698-pass Python 3.14 run is historical evidence.
 - Actual PostgreSQL **18.3: 54 passed** in 17.49 seconds, including maintenance apply/rollback/idempotence, deletion and restoration races, alias export, outcome caps and simultaneous insert conflicts. Disposable local schemas only.
 - Mobile: **91/91 guards**, full TypeScript and testID lint passed. iOS Hermes JavaScript export succeeded. This does not establish native runtime behavior.
@@ -32,8 +34,8 @@ Reproduction: [validation tools](validation-tools/README.md). Details: [mobile e
 
 ## Remaining release and data concerns
 
-1. **Native validation is outstanding.** No physical iPhone was available, and no TestFlight build was distributed. Real login, WebView isolation, Keychain and navigation need the concrete mobile checklist. No simulator was used under D-056.
-2. **Client rollout must be coordinated.** Web Sleeper requires the updated extension, which is not publicly distributed by this task. Browser ESPN/MFL entry now directs users to mobile verification. Legacy username-only sessions lose private access under strict enforcement.
+1. **Native validation is outstanding.** No physical iPhone was available. Build 145 was submitted successfully, but real login, WebView isolation, Keychain and navigation still need the concrete mobile checklist. No simulator was used under D-056.
+2. **Users need the matching client update.** Web Sleeper requires the published extension 0.1.1 and a signed-in Sleeper tab. Browser ESPN/MFL entry directs users to mobile verification. Legacy username-only sessions lose private access under strict enforcement.
 3. **Historical exposure needs an operator-reviewed production operation.** Local code prevents new token leakage; it does not erase prior production analytics, revoke live sessions, or repair previously contaminated imported membership. Follow the runbook for cleanup, worker restart and membership resync.
 4. **Deletion fencing assumes one worker.** This matches the checked-in deployment. Multiple workers, independent writers or durable job queues require distributed fencing first. A drain timeout leaves rows intact and requires retry.
 5. **Deletion is not universal erasure of public/counterparty records.** Shared league/draft/transaction data, published rankings and records owned by other managers have documented retention/anonymization rules. Export intentionally excludes authentication secrets, push tokens and raw billing payloads.

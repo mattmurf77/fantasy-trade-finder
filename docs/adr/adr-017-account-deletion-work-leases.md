@@ -1,7 +1,7 @@
 # ADR-017 — Drain account work before deleting its data
 
 **Date:** 2026-09-04
-**Status:** Implemented locally; not deployed
+**Status:** Deployed 2026-09-05 (PR #279; D-183)
 
 ## Context
 
