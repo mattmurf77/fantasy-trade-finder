@@ -2813,6 +2813,14 @@
        an unshrinkable input) pinned this at 380px inside a 335px parent at
        375px viewport, clipping the primary CTA off the right edge. */
     .cb-connect-wrap { width: 100%; max-width: 380px; }
+    .cb-auth-help {
+      margin-top: 10px;
+      font-size: 13px;
+      line-height: 1.5;
+      color: var(--chalk-dim);
+      overflow-wrap: anywhere;
+    }
+    .cb-auth-help a { color: var(--ice); }
 
     /* ══════════════════════════════════════════════════════════════════
        P2-3 · Landing below-the-fold (how it works / why)

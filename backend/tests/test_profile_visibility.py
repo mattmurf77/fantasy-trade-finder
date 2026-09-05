@@ -29,7 +29,7 @@ def _h():
     return {"X-Session-Token": TOKEN, "Content-Type": "application/json"}
 
 
-def _mk_sess(user_id, verified=False):
+def _mk_sess(user_id, verified=True):
     return {
         "user_id":       user_id,
         "active_format": "1qb_ppr",
@@ -111,6 +111,7 @@ def test_visibility_put_denied_for_squatter_once_owner_verified(env):
     c = env
     from backend import accounts as accounts_module
     accounts_module.mark_user_verified(USER_A, "sleeper")
+    server._sessions[TOKEN]["verified"] = False
     with patch.object(server, "is_enabled", _flags("profiles.user_toggle")):
         r = c.put("/api/profile/visibility", headers=_h(),
                   data=json.dumps({"public": True}))

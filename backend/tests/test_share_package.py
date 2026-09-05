@@ -47,7 +47,7 @@ def env():
     db_patch = patch.object(db_module, "engine", engine)
     db_patch.start()
     with server._sessions_lock:
-        server._sessions[TOKEN] = {
+        server._sessions[TOKEN] = {"verified": True,
             "user_id": USER, "active_format": "1qb_ppr",
             "last_active": time.time(),
         }

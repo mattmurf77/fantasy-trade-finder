@@ -125,17 +125,13 @@
     if (leagueId === loadedLeagueId) return;  // already loaded for this league
 
     const sess = await getSession();
-    if (!sess || !sess.token) return;
-
-    const cache = sess.rankings_cache && sess.rankings_cache[leagueId];
-    const now = Date.now();
-    const stale = !cache || !cache.fetched_at || (now - cache.fetched_at > CACHE_STALE_MS);
-
-    if (cache && !stale) {
-      applyRankingsPayload(cache, leagueId);
+    if (!sess || !sess.token || sess.verified !== true) {
+      clearRankings();
       return;
     }
 
+    const cache = sess.rankings_cache && sess.rankings_cache[leagueId];
+    // Validate with the server before rendering a stored private board.
     // Request fresh fetch via background
     if (fetchInFlightFor === leagueId) return;
     fetchInFlightFor = leagueId;
@@ -144,7 +140,7 @@
       fetchInFlightFor = null;
       if (resp && resp.ok && resp.data) {
         applyRankingsPayload(resp.data, leagueId);
-      } else if (resp && resp.expired) {
+      } else if (resp && (resp.expired || resp.error === 'session_changed')) {
         clearRankings();
       } else if (cache) {
         // Network failed but we have stale cache — show it so the user
@@ -421,6 +417,7 @@
         loadRankingsForCurrentLeague();
         break;
       case 'ftf:signed_in':
+        clearRankings();
         loadRankingsForCurrentLeague();
         break;
       case 'ftf:signed_out':

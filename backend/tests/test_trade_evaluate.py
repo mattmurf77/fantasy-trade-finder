@@ -160,7 +160,7 @@ def _post_authed(body, boards, monkeypatch, token="calc-sess"):
     monkeypatch.setattr(db, "load_member_rankings", lambda *a, **k: boards)
     monkeypatch.setattr(srv, "touch_user_activity", lambda *a, **k: None, raising=False)
     with srv._sessions_lock:
-        srv._sessions[token] = {"user_id": CALLER, "active_format": "1qb_ppr", "last_active": 0.0}
+        srv._sessions[token] = {"verified": True, "user_id": CALLER, "active_format": "1qb_ppr", "last_active": 0.0}
     try:
         with srv.app.test_client() as c:
             return c.post("/api/trade/evaluate", json=body,

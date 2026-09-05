@@ -3735,6 +3735,19 @@ def touch_user_activity(
         print(f"[touch_user_activity] {user_id} failed: {e}")
 
 
+def analytics_session_id(session_id: str | None) -> str | None:
+    """One-way analytics correlation key, deliberately distinct from auth hashes.
+
+    Hash even already-prefixed input: callers must never bypass sanitization by
+    choosing an identifier that looks like an encoded value.
+    """
+    if not session_id:
+        return None
+    return "analytics_v1:" + hashlib.sha256(
+        ("ftf:analytics-session:v1\0" + session_id).encode("utf-8")
+    ).hexdigest()
+
+
 def record_event(
     user_id: str,
     event_type: str,
@@ -3774,7 +3787,7 @@ def record_event(
                     event_type  = event_type,
                     occurred_at = now,
                     league_id   = league_id,
-                    session_id  = session_id,
+                    session_id  = analytics_session_id(session_id),
                     device_type = device_type,
                     os_version  = os_version,
                     app_version = app_version,
@@ -5965,26 +5978,44 @@ def save_deck_outcome(
     dwell_ms: int | None = None,
     detail_expanded: bool | None = None,
     calc_opened: bool | None = None,
-) -> None:
-    """F1 (deck.signal_v2) — append ONE deck_outcomes row.
+    *,
+    acting_user_id: str,
+) -> bool:
+    """Append an owned outcome with bounded values and per-impression volume.
 
-    Append-only by design: an undo appends alongside the original outcome,
-    never mutates it; duplicate/late labels are legal. `action` is validated
-    here (closed enum) so a malformed client payload can't mint junk labels.
+    A view is recorded once. Other actions can repeat after undo, with at
+    most 32 of each action per impression. The owner row serializes these
+    bounds on Postgres; SQLite's single insert/select checks them atomically.
     """
     if action not in ("viewed", "like", "pass", "not_interested", "propose", "undo"):
         raise ValueError(f"unknown deck outcome action: {action!r}")
+    if (not isinstance(impression_id, str) or not 1 <= len(impression_id) <= 64
+            or not acting_user_id):
+        return False
+    if dwell_ms is not None and (type(dwell_ms) is not int or not 0 <= dwell_ms <= 3_600_000):
+        return False
+    if any(v is not None and type(v) is not bool for v in (detail_expanded, calc_opened)):
+        return False
     with engine.begin() as conn:
-        conn.execute(insert(deck_outcomes_table).values(
-            impression_id   = impression_id,
-            action          = action,
-            dwell_ms        = int(dwell_ms) if dwell_ms is not None else None,
-            detail_expanded = (None if detail_expanded is None
-                               else (1 if detail_expanded else 0)),
-            calc_opened     = (None if calc_opened is None
-                               else (1 if calc_opened else 0)),
-            acted_at        = datetime.now(timezone.utc).isoformat(),
-        ))
+        owner = select(deck_impressions_table.c.impression_id).where(
+            deck_impressions_table.c.impression_id == impression_id,
+            deck_impressions_table.c.user_id == acting_user_id)
+        if conn.dialect.name == "postgresql":
+            if conn.execute(owner.with_for_update()).first() is None:
+                return False
+        count = select(func.count()).select_from(deck_outcomes_table).where(
+            deck_outcomes_table.c.impression_id == impression_id,
+            deck_outcomes_table.c.action == action).scalar_subquery()
+        values = select(
+            literal(impression_id), literal(action), literal(dwell_ms),
+            literal(None if detail_expanded is None else int(detail_expanded)),
+            literal(None if calc_opened is None else int(calc_opened)),
+            literal(datetime.now(timezone.utc).isoformat()),
+        ).where(owner.exists(), count < (1 if action == "viewed" else 32))
+        result = conn.execute(insert(deck_outcomes_table).from_select(
+            ["impression_id", "action", "dwell_ms", "detail_expanded", "calc_opened", "acted_at"],
+            values))
+        return result.rowcount == 1
 
 
 def deck_pass_outcome_recorded(impression_id: str) -> bool:
@@ -13732,10 +13763,22 @@ def insert_receipts_grades(rows: list[dict]) -> int:
         from sqlalchemy.dialects.sqlite import insert as _dialect_insert
     else:
         from sqlalchemy.dialects.postgresql import insert as _dialect_insert
+    from . import user_data_lifecycle
+    from contextlib import ExitStack
+    leases = {str(row["user_id"]): user_data_lifecycle.capture(str(row["user_id"]))
+              for row in rows}
     try:
-        with engine.begin() as conn:
+        with ExitStack() as stack, engine.begin() as conn:
+            active = {uid: stack.enter_context(lease.active()) for uid, lease in leases.items()}
             for row in rows:
+                if not active[str(row["user_id"])]:
+                    continue
                 try:
+                    present = conn.execute(select(deck_impressions_table.c.impression_id).where(
+                        deck_impressions_table.c.impression_id == row["impression_id"],
+                        deck_impressions_table.c.user_id == row["user_id"])).first()
+                    if present is None:
+                        continue
                     stmt = _dialect_insert(receipts_grades_table).values(**row)
                     stmt = stmt.on_conflict_do_nothing(
                         index_elements=["impression_id", "window_days",

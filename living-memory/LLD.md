@@ -18,6 +18,7 @@
 - [Code Conventions](#code-conventions)
 - [Living-Memory File Schemas](#living-memory-file-schemas)
 - [Tooling & Constraints](#tooling--constraints)
+- [Ownership and telemetry invariants](#ownership-and-telemetry-invariants)
 - [Guide beats: the GuideStep eligibility convention (2026-08-15, guide-v2)](#guide-beats-the-guidestep-eligibility-convention-2026-08-15-guide-v2)
 - [Trade generation pipeline v2: gen2_* namespace + GenerationReport hand-off (2026-08-16, trade_gen.v2)](#trade-generation-pipeline-v2-gen2_-namespace--generationreport-hand-off-2026-08-16-trade_genv2)
 - [Presentment rules: construction-gate vs presentment-filter layering (2026-08-16, trade.presentment_rules)](#presentment-rules-construction-gate-vs-presentment-filter-layering-2026-08-16-tradepresentment_rules)
@@ -743,3 +744,8 @@ dark — all `monetize.*` flags false, no route wears `@_require_pro`.
 - Every new `load_draft_picks` caller must be sanctioned by name in
   `test_pick_assignment.py::_SANCTIONED_SOURCE_CALLERS` (ADR-010 AST guard) — bare-default calls
   are forbidden.
+
+
+## Ownership and telemetry invariants
+
+Private reads/writes depend on proof on the current session, never the grace flag or absence of a verified controller. Session initialization cannot change account identity and accepts only server-resolved roster snapshots. New Sleeper source binding proves source ownership before inspecting either board. Recommendation labels require a verified actor, valid owned impression and accepted validated ingestion. Analytics stores domain-separated identifiers instead of bearer tokens. Deletion resolves aliases, drains concurrent account work, revokes durable sessions transactionally and invalidates queued work. Version 2 export covers the expanded private scope while omitting credential material. The work gate assumes the deployed single-worker topology; see [ADR-017](../docs/adr/adr-017-account-deletion-work-leases.md). Browser verification uses the explicit extension bridge restricted to the production web origin.

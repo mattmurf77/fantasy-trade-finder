@@ -36,7 +36,7 @@ def harness():
 
     with patch.object(db_module, "engine", engine):
         with server._sessions_lock:
-            server._sessions[token] = {"user_id": ME, "username": "me",
+            server._sessions[token] = {"verified": True, "user_id": ME, "username": "me",
                                        "last_active": 0.0}
         try:
             yield client, token

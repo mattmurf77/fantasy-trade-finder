@@ -69,7 +69,7 @@ def client(monkeypatch):
     metadata.create_all(engine)
 
     token = "mfl-auth-sess-tok"
-    sess = {"user_id": USER, "active_format": "1qb_ppr", "last_active": 0.0}
+    sess = {"verified": True, "user_id": USER, "active_format": "1qb_ppr", "last_active": 0.0}
 
     server.app.config["TESTING"] = True
     c = server.app.test_client()
@@ -189,15 +189,15 @@ def test_auth_link_without_key_falls_back_to_session_only(client, monkeypatch):
     assert len(r2.get_json()["imported"]) == 2
 
 
-# ── auth-link session verification (operator decision 2026-08-11) ────────────
-# A successful MFL login counts as a verified session — the MFL analogue of
-# the Sleeper-JWT oracle — so MFL-only users can pass the hard-verified
-# propose gates. Mirrors test_verified_sessions.py's link assertions.
+# ── Platform linking requires an already verified account owner ──────────
+# MFL credentials alone do not prove control of the claimed app identity.
+# Successful linking records its platform marker without granting a claimant
+# access to somebody else's private state.
 
-def test_auth_link_success_verifies_session_and_persists_marker(client):
+def test_auth_link_verified_owner_persists_platform_marker(client):
     from backend import accounts
     c, token, engine, sess = client
-    assert not sess.get("verified")
+    assert sess.get("verified")
     r = _auth_link(c, token)
     assert r.status_code == 200, r.get_data(as_text=True)
     assert r.get_json()["verified"] is True
@@ -217,7 +217,7 @@ def test_auth_link_bad_credentials_do_not_verify(client):
     with patch.object(mfl, "login", _reject):
         r = _auth_link(c, token)
     assert r.status_code == 403
-    assert not sess.get("verified")
+    assert sess.get("verified")  # A failed platform login cannot revoke account proof.
     assert accounts.get_user_verified_via(USER) is None
 
 
@@ -443,3 +443,15 @@ def test_fetch_my_leagues_error_payload_raises_auth():
 
     with pytest.raises(mfl.MflAuthError):
         mfl.fetch_my_leagues(COOKIE, 2026, _opener=opener)
+
+
+def test_auth_link_unverified_claim_cannot_upgrade_with_unrelated_mfl_login(client):
+    """MFL credentials cannot establish ownership of a claimed app identity."""
+    c, token, _, sess = client
+    sess["verified"] = False
+    with patch.object(mfl, "login") as login:
+        response = _auth_link(c, token)
+    assert response.status_code == 403
+    assert response.get_json()["error"] == "verification_required"
+    login.assert_not_called()
+    assert not sess["verified"]

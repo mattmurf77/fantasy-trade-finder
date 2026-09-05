@@ -48,7 +48,7 @@ def _mk_service(player_ids):
 def _mk_sess(user_id, player_ids):
     """Minimal session satisfying _require_initialized_session + submit."""
     svc = _mk_service(player_ids)
-    return {
+    return {"verified": True,
         "user_id":       user_id,
         "active_format": "1qb_ppr",
         "last_active":   0.0,

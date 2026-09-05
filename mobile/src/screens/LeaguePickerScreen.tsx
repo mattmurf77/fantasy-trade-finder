@@ -29,6 +29,7 @@ import {
 import { seedLeagueSessionCaches } from '../state/queryClient';
 import { maybePregenTrades } from '../api/tradePregen';
 import { track } from '../api/events';
+import { ApiError } from '../api/client';
 import EspnLinkSheet from '../components/EspnLinkSheet';
 import RankChipBadge from '../components/RankChipBadge';
 import PlatformLinkSheet from '../components/PlatformLinkSheet';
@@ -85,6 +86,8 @@ export default function LeaguePickerScreen({
   // like the rest of the screens; only addListener('transitionEnd') is used.
   const navigation = useNavigation<any>();
   const user = useSession((s) => s.user);
+  const verification = useSession((s) => s.verification);
+  const canVerifySleeper = !!user && !user.account_only && !user.user_id.startsWith('demo_user_') && !verification?.session_verified;
   const cached = useSession((s) => s.leagues);
   // P0-3 — the persisted invite intent. SUBSCRIBED (not getState) because the
   // notice row and the companion copy render from it; the auto-pin effect
@@ -433,9 +436,9 @@ export default function LeaguePickerScreen({
       'LeaguePicker',
     );
     try {
-      // INIT-08-client: two-phase optimistic navigation.
+      // Gather the roster preview, then initialize before entering the tabs.
       //
-      // Phase 1 (~2-3s): fetch rosters + users from Sleeper and build the
+      // Fetch rosters + users from Sleeper and build the
       // session_init payload. This is the "data-gather" leg — fast enough
       // that we block on it so we can surface Sleeper errors inline.
       // `seed` collects the rosters + users phase 1 fetches, so the tabs we
@@ -445,32 +448,26 @@ export default function LeaguePickerScreen({
       const body = await buildSessionInitBody(user, { league_id: lg.league_id, name: lg.name }, seed);
       seedLeagueSessionCaches(lg.league_id, seed);
 
-      // Persist the league so RootNav gates to 'Main' immediately and the
-      // user sees their tabs while the backend is still processing.
+      // Keep the picker reachable until the server accepts identity and
+      // membership. A rejected init must not strand the caller in Main.
+      await submitSessionInit(body);
       await setLeague({ league_id: lg.league_id, league_name: lg.name });
       onLeaguePicked();
-
-      // Phase 2 (~5-10s, background): POST to /api/session/init. Runs
-      // detached so it doesn't block the tab transition. On failure we
-      // can't navigate back (the user is already in Main) — surface a
-      // toast or let the tabs' query retry handle it gracefully. Any
-      // queries that fire before this lands will see a 401 or "session
-      // not initialized" and retry via their own error/refetch logic.
-      submitSessionInit(body)
-        .then(() => {
-          // Onboarding item 4 (hazard H3 — hook the EXISTING init path):
-          // pregen the trade deck the moment the league session exists so
-          // cards are ready/streaming when the user reaches Trades.
-          // Flag-gated + deduped inside; fire-and-forget, never throws.
-          maybePregenTrades(lg.league_id);
-        })
-        .catch((e) => {
-          // Non-fatal: the tabs will retry their queries. Log for Sentry
-          // triage but don't interrupt the user's session.
-          console.warn('[INIT-08] background sessionInit failed:', e?.message);
-        });
+      maybePregenTrades(lg.league_id);
     } catch (e: any) {
-      setError(e?.message || 'Failed to import this league');
+      const code = e instanceof ApiError ? (e.body as any)?.error : null;
+      if (code === 'verification_required') {
+        const previous = useSession.getState().verification;
+        useSession.getState().setVerification({
+          session_verified: false,
+          user_verified: previous?.user_verified ?? false,
+          verified_via: previous?.verified_via ?? null,
+          enforced: true,
+        });
+      }
+      setError(code === 'verification_required'
+        ? 'Verify your Sleeper account, then choose your league again.'
+        : e?.message || 'Failed to import this league');
       setSelectingId(null);
     }
   }
@@ -486,6 +483,15 @@ export default function LeaguePickerScreen({
         </View>
         <Button label="Sign out" variant="ghost" compact onPress={onSignOut} />
       </View>
+
+      {canVerifySleeper && (
+        <Button testID="leagues.verify-sleeper" label="Verify Sleeper account"
+          variant="secondary" disabled={!!selectingId}
+          onPress={() => {
+            setError(null);
+            navigation.navigate('SleeperConnect');
+          }} />
+      )}
 
       {loading ? (
         <View style={styles.centered}>

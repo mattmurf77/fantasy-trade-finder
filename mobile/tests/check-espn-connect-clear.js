@@ -198,9 +198,9 @@ for (const call of setCalls) {
 // 3. SleeperConnectScreen — same defect class, incognito fix
 // ═══════════════════════════════════════════════════════════════════════
 
-const sleeperSrc = parse('src/screens/SleeperConnectScreen.tsx');
+const sleeperSrc = parse('src/components/SleeperLoginCapture.tsx');
 const sleeperWebviews = findAll(sleeperSrc, (n) => tagOf(n) === 'WebView');
-assert(sleeperWebviews.length === 1, 'SleeperConnectScreen renders exactly one WebView', `found ${sleeperWebviews.length}`);
+assert(sleeperWebviews.length === 1, 'Shared SleeperLoginCapture renders exactly one WebView', `found ${sleeperWebviews.length}`);
 if (sleeperWebviews.length === 1) {
   const attrNames = attrsOf(sleeperWebviews[0]).map((a) => a.name.getText());
   assert(

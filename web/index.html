@@ -129,9 +129,11 @@
               autocapitalize="off"
               spellcheck="false"
             />
-            <button class="cb-go-btn" id="auth-btn" onclick="handleLogin()">Connect &#8594;</button>
+            <button class="cb-go-btn" id="auth-btn" onclick="handleLogin()">Verify &#8594;</button>
           </div>
-          <div class="auth-error" id="auth-error"></div>
+          <div class="auth-error" id="auth-error" role="status" aria-live="polite"></div>
+          <p class="cb-auth-help">Use the Fleeced browser extension and <a href="https://sleeper.com/login" target="_blank" rel="noopener noreferrer">sign in to Sleeper</a> in another tab, then verify your username. <a href="/contact.html">Request the extension</a>.</p>
+          <p class="cb-auth-help">Your password stays with Sleeper. Fleeced stores its sign-in token encrypted to verify your account and send trades you approve. <a href="/privacy.html">Privacy</a></p>
 
           </div>
 
@@ -286,7 +288,7 @@
             <span class="lp-step-n" aria-hidden="true">1</span>
             <h3 class="lp-step-t">Connect your league</h3>
             <p class="lp-step-d">
-              Sleeper, ESPN, or MyFantasyLeague. Sleeper needs a username and no password.
+              Verify Sleeper with the browser extension, or connect ESPN and MyFantasyLeague in the Fleeced mobile app.
               Your roster, your leaguemates&#8217; rosters, and your league&#8217;s scoring
               settings come across as they are.
             </p>
@@ -1320,6 +1322,7 @@
   <div class="toast" id="toast"></div>
 
   <script src="/js/events.js"></script>
+  <script src="/js/browser-auth.js"></script>
   <script src="/js/app.js"></script>
 </body>
 </html>

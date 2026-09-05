@@ -127,7 +127,7 @@ def prefs_client():
         members = []
 
     token = "avoid-prefs-sess"
-    sess = {"user_id": "u_pref", "league": _L(), "players": [],
+    sess = {"verified": True, "user_id": "u_pref", "league": _L(), "players": [],
             "trade_svc": object(), "active_format": "1qb_ppr",
             "last_active": 0.0, "user_roster": []}
     server.app.config["TESTING"] = True

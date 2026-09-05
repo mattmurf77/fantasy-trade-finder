@@ -1397,3 +1397,8 @@ No feature flag and no `model_config` keys: the harness is a read-only CLI/libra
 | `EVAL_RUNS_DIR` | `backend/eval/persistence.py` | Directory for the append-only `runs.jsonl` run records. Default `data/eval_runs/` (inside the already-gitignored `/data/`). Tests point it at a tmp dir. |
 
 Fixed estimator constants (in `backend/eval/replay.py`, changed only by code review because they change what the numbers mean): propensity-tilt clip bounds `TILT_MIN=0.5` / `TILT_MAX=2.0` (clip **count** is reported on every run), exposure-curve floor `EXPOSURE_FLOOR=0.02`, Laplace `+1/+2` smoothing on the served→viewed curve.
+
+
+### Legacy authorization rollout flag
+
+`auth.enforce_verified_writes` remains accepted for configuration compatibility but cannot disable private read/write verification. Changing it is not an authorization rollback. Session initialization reports enforcement as true.

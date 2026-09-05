@@ -66,7 +66,7 @@ def _post_authed(body, boards_by_fmt, monkeypatch, token="derive-sess"):
             boards_by_fmt.get(scoring_format, {}),
     )
     with srv._sessions_lock:
-        srv._sessions[token] = {"user_id": CALLER, "active_format": "1qb_ppr",
+        srv._sessions[token] = {"verified": True, "user_id": CALLER, "active_format": "1qb_ppr",
                                 "last_active": 0.0}
     try:
         with srv.app.test_client() as c:

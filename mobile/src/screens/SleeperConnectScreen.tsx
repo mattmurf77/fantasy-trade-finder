@@ -1,6 +1,7 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, ActivityIndicator, StyleSheet, Linking } from 'react-native';
-import { WebView, type WebViewMessageEvent } from 'react-native-webview';
+import SleeperLoginCapture from '../components/SleeperLoginCapture';
+import { Button } from '../components/chalkline';
 import { useNavigation } from '@react-navigation/native';
 import { ink, chalk, ice, space, type } from '../theme/chalkline';
 import { linkSleeperToken, persistSleeperToken } from '../api/sendInSleeper';
@@ -19,63 +20,33 @@ import { useSession } from '../state/useSession';
 // protected. We surface that in the success state and mirror it into
 // useSession.verification so the "Verify your account" banner clears.
 
-const SLEEPER_LOGIN_URL = 'https://sleeper.com/login';
-
-// Injected once per page load (guarded). Login is an SPA transition, not a full
-// reload, so we poll localStorage until the token appears, then post it out
-// exactly once. Sends only the token string — nothing else leaves the page.
-const INJECTED_POLLER = `
-(function () {
-  if (window.__ftfSleeperCap) return;
-  window.__ftfSleeperCap = true;
-  var sent = false;
-  function tick() {
-    if (sent) return;
-    try {
-      var t = window.localStorage.getItem('token');
-      if (t && String(t).split('.').length === 3) {
-        sent = true;
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'token', token: t }));
-      }
-    } catch (e) {}
-  }
-  setInterval(tick, 800);
-  tick();
-})();
-true;
-`;
-
 export default function SleeperConnectScreen() {
   const navigation = useNavigation<any>();
   const [phase, setPhase] = useState<'browsing' | 'linking' | 'done' | 'error'>('browsing');
+  const [captureAttempt, setCaptureAttempt] = useState(0);
   const [verified, setVerified] = useState(false);
   const capturedRef = useRef(false);
+  const mountedRef = useRef(true);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    mountedRef.current = false;
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+  }, []);
 
-  const onMessage = useCallback(
-    async (e: WebViewMessageEvent) => {
+  const onToken = useCallback(
+    async (token: string) => {
       if (capturedRef.current) return;
-      let payload: { type?: string; token?: string };
-      try {
-        payload = JSON.parse(e.nativeEvent.data);
-      } catch {
-        return;
-      }
-      if (payload?.type !== 'token' || !payload.token) return;
-
+      const userId = useSession.getState().user?.user_id;
+      if (!userId) return;
       capturedRef.current = true;
       setPhase('linking');
       try {
-        const res = await linkSleeperToken(payload.token);
-        // #126: persist the captured JWT to the device Keychain so future
-        // fresh sessions re-verify via silent replay instead of another
-        // manual capture. Any 200 means the claim matched the session user
-        // (mismatches 403 before storing) — keep the token even when
-        // `verified` is false (inconclusive oracle; worth replaying later).
-        const uid = useSession.getState().user?.user_id;
-        if (uid) {
-          persistSleeperToken(uid, payload.token).catch(() => {});
-        }
+        const res = await linkSleeperToken(token);
+        if (!mountedRef.current || useSession.getState().user?.user_id !== userId) return;
         const isVerified = res?.verified === true;
+        if (!isVerified) throw new Error('verification_incomplete');
+        await persistSleeperToken(userId, token);
+        if (!mountedRef.current || useSession.getState().user?.user_id !== userId) return;
         setVerified(isVerified);
         if (isVerified) {
           // The capture just proved control of this account — clear the
@@ -92,8 +63,9 @@ export default function SleeperConnectScreen() {
         // Brief success beat so the user sees the connected/verified state
         // before the modal closes under them.
         setPhase('done');
-        setTimeout(() => navigation.goBack(), 1200);
+        if (mountedRef.current) closeTimer.current = setTimeout(() => navigation.goBack(), 1200);
       } catch {
+        if (!mountedRef.current || useSession.getState().user?.user_id !== userId) return;
         // Let them retry — the token is still in the webview's localStorage.
         // (A 403 token_user_mismatch / token_rejected also lands here: the
         // Sleeper login doesn't control this FTF account.)
@@ -115,8 +87,8 @@ export default function SleeperConnectScreen() {
         {/* Teardown 09-02 — token disclosure AT the consent moment (the
             policy already discloses this; the decision point didn't). */}
         <Text style={type.bodySm}>
-          We store the sign-in token Sleeper issues — encrypted, used only to
-          send trades you approve. Disconnect anytime in Settings.{' '}
+          We store the sign-in token Sleeper issues — encrypted, used to verify
+          your account and send trades you approve. Disconnect anytime in Settings.{' '}
           <Text
             style={styles.learnMore}
             accessibilityRole="link"
@@ -135,28 +107,15 @@ export default function SleeperConnectScreen() {
         )}
       </View>
 
-      <WebView
-        source={{ uri: SLEEPER_LOGIN_URL }}
-        injectedJavaScript={INJECTED_POLLER}
-        onMessage={onMessage}
-        domStorageEnabled
-        // Fresh-login guarantee (same defect class as the 2026-08-12 ESPN
-        // incident): without this, the WebView's PERSISTENT store keeps the
-        // last Sleeper login (the 365-day JWT in localStorage + session
-        // cookies), Sleeper's SPA restores that session on load, and the
-        // poller captures WHOEVER was last signed in within ~800ms — so the
-        // user can never sign in as a different account. `incognito` gives
-        // this WebView a non-persistent data store: nothing from a prior
-        // session leaks in, nothing survives unmount. Perfectly scoped — no
-        // shared/native cookie is read, written, or cleared (which is also
-        // why sharedCookiesEnabled is gone: it would copy the shared store
-        // back into the fresh session). Capture is unaffected: the JWT is
-        // read from the page's own localStorage via the injected poller,
-        // and persistence lives server-side + in the Keychain (#126).
-        incognito
-        originWhitelist={['https://*']}
-        style={styles.web}
-      />
+      <View style={styles.web}>
+        <SleeperLoginCapture key={captureAttempt} onToken={onToken} />
+      </View>
+      {phase === 'error' && (
+        <Button label="Try Sleeper sign-in again" onPress={() => {
+          setPhase('browsing');
+          setCaptureAttempt((attempt) => attempt + 1);
+        }} />
+      )}
 
       {phase === 'linking' && (
         <View style={styles.overlay} pointerEvents="auto">

@@ -105,6 +105,7 @@ def harness():
     trade_svc.add_league(league)
 
     sess = {
+        "verified": True,
         "user_id":       ME,
         "league":        league,
         "players":       players,

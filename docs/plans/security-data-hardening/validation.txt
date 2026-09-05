@@ -1,0 +1,48 @@
+Security hardening final validation — completed 2026-09-05
+Branch: codex/security-data-hardening-20260904; base origin/main 606e512c.
+Implementation is local/uncommitted. No deployment or production cleanup.
+
+Backend full suite: 4707 passed, 1 skipped in 679.14 seconds; exit 0.
+Runtime: Python 3.12.14 (deployment configuration: 3.12.3).
+Harness: docs/plans/security-data-hardening/validation-tools/run_python312.py.
+Scratch SQLite; startup market-data fixture; urllib upstream requests blocked.
+Includes all calibration tests. Log: /private/tmp/ftf-py312-release-final.log.
+
+Actual PostgreSQL 18.3: 54 passed in 17.49 seconds; exit 0.
+Harness: docs/plans/security-data-hardening/validation-tools/run_postgres.py.
+Explicit disposable database; isolated schemas; no TCP listener.
+Log: /private/tmp/ftf-postgres-release-final.log.
+Own local cluster stopped after completion.
+
+Mobile: 91/91 check-*.js guards pass; full TypeScript exit 0; testID lint OK.
+Logs: /private/tmp/ftf-mobile-all-guards.log, /private/tmp/ftf-typescript-followup.log,
+/private/tmp/ftf-testid-followup.log.
+iOS Hermes JavaScript export passed (9.35 MB); no native compile/runtime claimed.
+Export: /private/tmp/ftf-security-ios-export; log: /private/tmp/ftf-ios-export.log.
+
+Browser auth unit/VM checks: 23 passed.
+Web structural checks: 180/180 passed.
+Actual loaded-MV3 Chromium runtime: passed with synthetic upstream fixtures.
+Wrong-account denial, verified success, raw-proof isolation, revoked-session
+recovery, platform-claim rejection and popup-cache clearing were exercised.
+390 x 844 help layout passed and screenshot was visually inspected.
+Logs: /private/tmp/ftf-browser-runtime-final.log,
+/private/tmp/ftf-web-structure-final.log.
+
+Negative control: disabling deletion invalidation in memory caused all three
+targeted stale-work/deletion regressions to fail at their expected assertions.
+Log: /private/tmp/ftf-lifecycle-sabotage.log. No sabotage remains in source.
+Mobile delayed-response/account-switch/unmount cases failed before their fixes.
+
+Earlier phase only: Python 3.14, 4698 passed/1 skipped in 384.52 seconds;
+integrated security group 304 passed. Superseded by the final follow-up above.
+After the full run, only documentation, a route docstring and privacy copy changed.
+
+Native TestFlight: NOT RUN; physical-device probe found no available iPhone.
+No simulator/Maestro used (D-056). Extension distribution and live credentials
+were not exercised. Production historical-token cleanup/revocation and imported
+membership resync remain separate rollout work. Deletion fencing is single-worker.
+
+Reproduction commands: validation-tools/README.md.
+Detailed boundaries: review.md, mobile-evidence.md, browser-evidence.md.
+Final git diff --check: clean. Security report local links: pass.

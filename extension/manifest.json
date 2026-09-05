@@ -5,15 +5,15 @@
   "version": "0.1.0",
   "description": "See your personal tier and position-rank next to every player on sleeper.com.",
   "icons": {
-    "16":  "icons/16.png",
-    "48":  "icons/48.png",
+    "16": "icons/16.png",
+    "48": "icons/48.png",
     "128": "icons/128.png"
   },
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
-      "16":  "icons/16.png",
-      "48":  "icons/48.png",
+      "16": "icons/16.png",
+      "48": "icons/48.png",
       "128": "icons/128.png"
     }
   },
@@ -39,9 +39,24 @@
         "https://sleeper.com/*",
         "https://sleeper.app/*"
       ],
-      "js":  ["content.js"],
-      "css": ["content.css"],
+      "js": [
+        "sleeper-proof.js",
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
       "run_at": "document_idle",
+      "all_frames": false
+    },
+    {
+      "matches": [
+        "https://fantasy-trade-finder.onrender.com/*"
+      ],
+      "js": [
+        "web-auth.js"
+      ],
+      "run_at": "document_start",
       "all_frames": false
     }
   ]

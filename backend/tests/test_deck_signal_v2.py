@@ -56,7 +56,7 @@ JOB_ID = "job-signal"
 def mem_engine():
     eng = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     metadata.create_all(eng)
-    with patch.object(db_module, "engine", eng):
+    with patch.object(db_module, "engine", eng), patch.object(db_module, "ingest_engine", eng):
         yield eng
 
 
@@ -121,6 +121,7 @@ def harness(mem_engine):
 
     sess = {
         "user_id":       ME,
+        "verified":      True,
         "league":        league,
         "user_roster":   ["g1", "g2"],
         "players":       pool,
@@ -189,6 +190,11 @@ def _outcome_rows(mem_engine):
 
 
 def _post(client, path, body, token=TOKEN):
+    if path == "/api/events":
+        for env in body.get("events", []):
+            env.setdefault("event_id", uuid.uuid4().hex)
+            env.setdefault("session_id", "test-analytics-session")
+            env.setdefault("seq", 1)
     headers = {"X-Device-Id": "dev_test"}
     if token:
         headers["X-Session-Token"] = token
@@ -482,9 +488,11 @@ def test_pass_after_undo_is_recorded_again(harness):
 # ---------------------------------------------------------------------------
 
 def test_outcome_action_enum(mem_engine):
-    save_deck_outcome("imp_1", "propose")
+    with mem_engine.begin() as conn:
+        _insert_impression(conn, "imp_1")
+    save_deck_outcome("imp_1", "propose", acting_user_id=ME)
     with pytest.raises(ValueError):
-        save_deck_outcome("imp_1", "clicked")   # not a legal action
+        save_deck_outcome("imp_1", "clicked", acting_user_id=ME)   # not a legal action
     rows = _outcome_rows(mem_engine)
     assert [(r.impression_id, r.action) for r in rows] == [("imp_1", "propose")]
 

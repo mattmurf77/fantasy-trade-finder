@@ -107,7 +107,7 @@ def harness():
                      elo_ratings={}),
     ]
     token = "standing-offer-sess"
-    sess = {"user_id": ME, "league": _FakeLeague(members),
+    sess = {"verified": True, "user_id": ME, "league": _FakeLeague(members),
             "players": [_Player(PLAYER, "QB", name="Malik Willis")],
             "trade_svc": object(), "active_format": "1qb_ppr",
             "last_active": 0.0, "user_roster": [_pick(2027)]}

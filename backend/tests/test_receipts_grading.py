@@ -1008,7 +1008,7 @@ def client(engine, monkeypatch):
     server.app.config["TESTING"] = True
     token = "tok-receipts"
     with server._sessions_lock:
-        server._sessions[token] = {"user_id": VIEWER, "last_active": 0.0,
+        server._sessions[token] = {"verified": True, "user_id": VIEWER, "last_active": 0.0,
                                    "initialized": True}
     try:
         yield server.app.test_client(), token, server

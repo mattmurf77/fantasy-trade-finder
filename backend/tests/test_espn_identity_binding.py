@@ -150,7 +150,7 @@ def client(monkeypatch):
     metadata.create_all(engine)
 
     token = "fb321-sess-tok"
-    sess = {"user_id": USER, "active_format": "1qb_ppr", "last_active": 0.0}
+    sess = {"verified": True, "user_id": USER, "active_format": "1qb_ppr", "last_active": 0.0}
 
     server.app.config["TESTING"] = True
     c = server.app.test_client()
@@ -499,7 +499,7 @@ def test_migration_nulls_prerelease(client):
 
     # GET honesty gate: an evicted row reads as NOT connected.
     with server._sessions_lock:
-        server._sessions["t9-tok"] = {"user_id": "user-dishonest",
+        server._sessions["t9-tok"] = {"verified": True, "user_id": "user-dishonest",
                                       "active_format": "1qb_ppr",
                                       "last_active": 0.0}
     try:

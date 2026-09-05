@@ -400,7 +400,7 @@ def route():
     )
 
     token = "test-token-g049-route"
-    sess = {
+    sess = {"verified": True,
         "user_id":       ME,
         "league":        League(league_id=ROUTE_LEAGUE, name="Idem Route",
                                 platform="sleeper", members=[

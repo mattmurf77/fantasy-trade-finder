@@ -528,6 +528,7 @@
 | D-177 | The Web Landing Mirrors Platform Entry Through the Same Sessionless Route; Private ESPN on Web Is the Cookie Paste, and Entry Users Read the Platform Snapshot | 2026-09-03 |
 | D-178 | Sleeper Reads Are Fetched Once Per Session Init and Handed Down; the Trades Sweep Is Incremental (Offseason = Leg 1); Cron Sweeps Cover Only Leagues Active in 30 Days, With the Draft Probe Season-Gated | 2026-09-03 |
 | D-179 | On Web, "Sign In to ESPN" Is the Primary Entry and the League ID the Alternate; the Web's Sign-In Is the Cookie Paste, and `espn.league_picker` Picks the Layout | 2026-09-03 |
+| D-180 | Verified ownership for private data; deletion drains and invalidates account work | 2026-09-04 |
 | D-174 | A Card Says Why a Give-Side Piece Is There When the User Rates Him Below Market; the Vehicle Is `reasons`, the Bar Is the Shrunk Board | 2026-09-02 |
 | D-173 | Web Posture Is B, Companion: Marketing Front Door Plus Session-Gated Tools, Not Full Parity | 2026-08-26 |
 
@@ -1675,6 +1676,18 @@ No historical 1100-pin repair — indistinguishable from anchor no-value.
 **Alternatives considered:** (a) keep Apple (D-163 v1) — rejected by the operator; (b) anonymous mint-first then sheets verbatim — smaller, but identity would be device-random: sign-out/reinstall loses boards, worse than the Sleeper bar; (c) extract/refactor the link routes' import bodies into shared helpers for a one-call mint+import — more surface churn in two hot routes for one round-trip saved; (d) platform-native credential auth at entry for public leagues too — needless friction; credentials stay exactly where the link flows already require them.
 
 **Consequences:** Entry sessions are unverified → not server-persisted (client Keychain token + cheap deterministic re-claim is the recovery path); if `auth.enforce_verified_writes` ever flips on, entry users lose write grace — revisit then. Two humans claiming the same team share an identity, same as a shared Sleeper username claim. `signin_*` gains method values `espn`/`mfl` (value-only; addendum `docs/business/analytics/2026-08-26-entry-method-values.md`). `landing.platform_options` is now server-read (gates the route), remaining the one revert lever. The D-163 `platformIntent`/`mflLink` machinery survives on the quiet Apple re-entry link and the Settings CTA.
+## D-180 — Verified ownership for private data; deletion drains and invalidates account work
+
+**Date:** 2026-09-04 · **Status:** implemented locally, not deployed.
+
+**Context:** Username/team discovery was being treated as private-account authorization. Row deletion alone also allowed already-authorized requests and delayed sign-in/background work to recreate private data.
+
+**Decision:** All private paths require proven ownership of the current session, independently of the legacy grace flag. Web Sleeper uses explicit extension-mediated proof; ESPN/MFL browser entry directs users to the verified mobile flow. This supersedes the private-access aspect of D-001 and the unverified team-claim activation in D-164/D-177. Account deletion uses shared work admissions, exclusive draining, stable alias/provider-identity keys and generation invalidation in the existing single-worker service. Detailed design: [ADR-017](../docs/adr/adr-017-account-deletion-work-leases.md).
+
+**Alternatives:** Keep grace access (preserves the vulnerability); trust public team selection (does not prove ownership); delete rows without fencing (allows recreation); serialize all account work (unnecessarily blocks ordinary concurrent requests); add distributed coordination now (the checked-in deployment has one worker).
+
+**Consequences:** Legacy clients need verification recovery. Web Sleeper needs the updated extension, and browser ESPN/MFL verification remains mobile-only. Deletion can time out while work drains and require retry. Multiple workers or independent writers require distributed fencing before scaling. Historical token cleanup and membership repair remain explicit production operations. [Review and evidence](../docs/plans/security-data-hardening/review.md).
+
 ## D-179 — On Web, "Sign In to ESPN" Is the Primary Entry and the League ID the Alternate; the Web's Sign-In Is the Cookie Paste, and `espn.league_picker` Picks the Layout
 
 **Date:** 2026-09-03 · **Status:** shipped — PR [#276](https://github.com/mattmurf77/fantasy-trade-finder/pull/276) squash → `main` @ `0059a8a0`, verified live · **Scope:** [`docs/plans/landing-platform-options/scope.md` §V3.1](../docs/plans/landing-platform-options/scope.md)

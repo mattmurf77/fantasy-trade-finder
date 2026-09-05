@@ -1180,3 +1180,12 @@ Plan of record: [00-platform-foundation.md](plans/monetization/00-platform-found
 - **`display_price` / `per_month_equiv` are FALLBACK COPY.** On iOS the client renders the StoreKit-localized price from the matching RevenueCat offering; the server strings are US-English list prices that know nothing about storefront, currency, or promotional offers. `trial_eligible` is a claim about the SKU, not a per-Apple-ID promise — real eligibility is store-managed.
 
 **Paywall analytics event names** (client-fired; registered in `backend/analytics_taxonomy.py` and all five classified NON_INTENT in `analytics_queries.NON_INTENT_EVENTS`): `paywall_viewed` {`source`, `platform`}, `paywall_purchase_initiated` {`product_id`, `source`}, `paywall_purchase_completed` {`product_id`, `source`}, `paywall_purchase_failed` {`product_id`, `user_cancelled`}, `paywall_restore` {`restored`}. `source` is the 402's `gate` string or a non-gate origin (`settings`, `onboarding`); `platform` is the config **variant** rendered, not the device platform (that is a `user_events` column derived server-side). Conversion truth is the server-fired `entitlement_granted` row, never these echoes.
+
+
+## Verified session activation
+
+Clients must prove ownership before calling `/api/session/init`; legacy roster/profile fields are accepted but server-resolved values prevail. Mobile awaits existing Sleeper token replay before activation. `403 verification_required` is a recovery prompt, not an empty dataset. New account/Sleeper binding requires a matching live `sleeper_token`; provider sign-in alone does not authenticate a claimed Sleeper username.
+
+Mobile source-link and init responses must still belong to the session that started them. Screen/form callbacks also check the current user and whether the component is mounted before adopting proof or navigating. An init response must not restore an echoed old session token.
+
+Web and extension Sleeper sign-in use an explicit gesture to request proof from an open, trusted Sleeper tab. Only the resulting verified Fleeced session reaches the first-party page; the raw Sleeper token is never sent to that page or saved in extension storage. The bridge accepts the production web origin, not localhost. Both clients revalidate before displaying private cached boards. Browser ESPN/MFL entry currently directs users to mobile verification; selecting a public team is not proof of account ownership.

@@ -258,7 +258,7 @@ def test_draft_order_sole_owner_unchanged(rosters):
 # ===========================================================================
 
 @pytest.fixture()
-def init_client(monkeypatch):
+def init_client(monkeypatch, rosters):
     """A session_init harness whose background daemon runs INLINE, so the
     league_members write is observable from the test body."""
     from backend.ranking_service import Player
@@ -277,6 +277,29 @@ def init_client(monkeypatch):
     monkeypatch.setattr(server, "g_universal_players", pool)
     monkeypatch.setattr(server, "_kickoff_trade_job", MagicMock())
     monkeypatch.setattr(server, "_fetch_sleeper_league_meta", lambda lid: None)
+
+    from backend import database as db, accounts
+    from sqlalchemy import create_engine
+    from sqlalchemy.pool import StaticPool
+    engine = create_engine("sqlite://", poolclass=StaticPool,
+                           connect_args={"check_same_thread": False})
+    db.metadata.create_all(engine)
+    monkeypatch.setattr(db, "engine", engine)
+    monkeypatch.setattr(accounts, "get_user_profile", lambda uid: None)
+    def sleeper_get(url):
+        if url.endswith("/rosters"):
+            return rosters
+        if url.endswith("/users"):
+            return [{"user_id": r["owner_id"], "display_name": f"Manager {r['roster_id']}"}
+                    for r in rosters]
+        return {"name": "Bush League"}
+    monkeypatch.setattr(server, "_sleeper_get", sleeper_get)
+    # Authentication is established before selecting a league. Each test
+    # client chooses which proven identity to exercise via the header.
+    sessions = {uid: {"user_id": uid, "verified": True, "verified_via": "sleeper"}
+                for uid in (CO_OWNER, SOLE_OWNER)}
+    monkeypatch.setattr(server, "_get_session", lambda token: sessions.get(token))
+    server._sessions.update(sessions)
 
     captured: dict = {}
 
@@ -306,7 +329,10 @@ def init_client(monkeypatch):
             super().start()
 
     monkeypatch.setattr(server.threading, "Thread", _InlineBgThread)
-    return client, captured
+    yield client, captured
+    for token in sessions:
+        server._sessions.pop(token, None)
+    engine.dispose()
 
 
 def _init_body(rosters, user_id):
@@ -331,6 +357,7 @@ def _init_body(rosters, user_id):
 def test_session_init_co_owner_gets_their_roster(init_client, rosters):
     client, _ = init_client
     res = client.post("/api/session/init", data=_init_body(rosters, CO_OWNER),
+                      headers={"X-Session-Token": CO_OWNER},
                       content_type="application/json")
     assert res.status_code == 200, res.get_data(as_text=True)
     body = res.get_json()
@@ -346,6 +373,7 @@ def test_session_init_co_owner_writes_one_row_per_roster(init_client, rosters):
     owner so a leaguemate's sync lands on the same row."""
     client, captured = init_client
     client.post("/api/session/init", data=_init_body(rosters, CO_OWNER),
+                      headers={"X-Session-Token": CO_OWNER},
                 content_type="application/json")
 
     members = captured["members"]
@@ -368,6 +396,7 @@ def test_session_init_sole_owner_is_unchanged(init_client, rosters):
     was before co-owner support existed."""
     client, captured = init_client
     res = client.post("/api/session/init", data=_init_body(rosters, SOLE_OWNER),
+                      headers={"X-Session-Token": SOLE_OWNER},
                       content_type="application/json")
     assert res.status_code == 200
     assert sorted(p["id"] for p in res.get_json()["user_roster"]) == [
@@ -384,6 +413,7 @@ def test_session_init_without_league_user_id_defaults_to_the_caller(init_client)
     this is what makes the API field additive rather than a contract break."""
     client, captured = init_client
     res = client.post("/api/session/init", content_type="application/json",
+                      headers={"X-Session-Token": SOLE_OWNER},
                       data=json.dumps({
                           "user_id": SOLE_OWNER,
                           "league_id": LEAGUE_ID,
@@ -403,6 +433,7 @@ def test_session_init_stores_the_league_identity_on_the_session(init_client, ros
     through sess['league_user_id'], so it has to survive the request."""
     client, _ = init_client
     res = client.post("/api/session/init", data=_init_body(rosters, CO_OWNER),
+                      headers={"X-Session-Token": CO_OWNER},
                       content_type="application/json")
     token = res.get_json()["token"]
     with server._sessions_lock:

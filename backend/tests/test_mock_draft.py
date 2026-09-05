@@ -1014,7 +1014,7 @@ def session(monkeypatch, tmp_path):
     ]
     league = League(league_id=LAKEVIEW_LEAGUE, name="Lakeview", platform="sleeper",
                     members=opponents)
-    sess = {"user_id": QA_CALLER, "league": league, "players": pool,
+    sess = {"verified": True, "user_id": QA_CALLER, "league": league, "players": pool,
             "user_roster": ["p29", "p30"], "display_name": "QA Caller",
             "services": {"1qb_ppr": service}, "service": service,
             "trade_svc": object(), "active_format": "1qb_ppr", "last_active": 0.0}

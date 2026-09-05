@@ -97,7 +97,7 @@ class _League:
 
 
 def _make_session(user_id: str) -> dict:
-    return {
+    return {"verified": True,
         "user_id": user_id, "league": _League(), "players": [],
         "services": {"1qb_ppr": MagicMock()}, "service": MagicMock(),
         "trade_svc": MagicMock(), "active_format": "1qb_ppr",

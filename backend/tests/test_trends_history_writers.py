@@ -93,7 +93,7 @@ def harness(tmp_path):
             SimpleNamespace(id=pid, name=pid, position=pos, team=None)
             for pid, (elo, pos) in svc._elos.items()
         ]
-        sess = {
+        sess = {"verified": True,
             "user_id": USER,
             "league": SimpleNamespace(league_id=LEAGUE, members=[]),
             "players": players,

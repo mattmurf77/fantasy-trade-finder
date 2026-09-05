@@ -128,7 +128,7 @@ def _install_session(monkeypatch, tmp_path, *, platform, league_id, members):
                  for u in members if str(u) != CALLER]
     league = League(league_id=league_id, name="L", platform=platform,
                     members=opponents)
-    sess = {"user_id": CALLER, "league": league, "players": pool,
+    sess = {"verified": True, "user_id": CALLER, "league": league, "players": pool,
             "user_roster": [], "display_name": "QA Caller",
             "services": {"1qb_ppr": service}, "service": service,
             "trade_svc": object(), "active_format": "1qb_ppr",

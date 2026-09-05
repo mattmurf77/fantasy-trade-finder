@@ -80,6 +80,7 @@
     "test:send-button-platform": "node tests/check-send-button-platform.js",
     "test:session-rerank": "node tests/check-session-rerank.js",
     "test:session-seed": "node tests/check-session-seed.js",
+    "test:sleeper-ownership": "node tests/check-sleeper-ownership.js",
     "test:settings-ia": "node tests/check-settings-ia.js",
     "test:settings-nav": "node tests/check-settings-nav.js",
     "test:settings-testids": "node tests/check-settings-testids.js",

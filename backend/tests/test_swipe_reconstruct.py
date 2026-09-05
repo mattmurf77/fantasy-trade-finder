@@ -55,7 +55,7 @@ def harness():
                     ])
 
     token = "test-token-fb46"
-    sess = {
+    sess = {"verified": True,
         "user_id":       ME,
         "league":        league,
         "players":       players,

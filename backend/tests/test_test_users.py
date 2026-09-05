@@ -13,7 +13,7 @@ Covers:
       ranking_method='quickset'; converted adds verified_at/verified_via
       stamps (+ verified session); power has boards for all four positions
   (e) client_state per stage (exact dicts the mobile client adopts)
-  (f) the minted session drives a real route (/api/tiers/save works)
+  (f) converted verified sessions can save tiers; fresh sessions cannot
   (g) DELETE refuses non-qa_ ids (400); qa_ delete removes users +
       swipe_decisions rows and evicts the live session
   (h) session-user allowlist path (no device header) also opens the gate
@@ -116,7 +116,7 @@ def test_session_user_allowlist_path(harness, monkeypatch):
     client, _, tokens = harness
     monkeypatch.setenv("FTF_TESTER_ALLOWLIST", "matt_user_id")
     with server._sessions_lock:
-        server._sessions["tu-op-token"] = {"user_id": "matt_user_id",
+        server._sessions["tu-op-token"] = {"verified": True, "user_id": "matt_user_id",
                                            "last_active": 0.0}
     tokens.append("tu-op-token")
     r = _spawn(client, "fresh", device_id=None, token="tu-op-token")
@@ -233,18 +233,23 @@ def test_power_has_all_four_boards(harness):
 
 # ── (f) the minted session drives real routes ──────────────────────────────
 
-def test_session_works_for_tiers_save(harness):
+@pytest.mark.parametrize("stage, status", [("fresh", 403), ("converted", 200)])
+def test_tiers_save_requires_verified_stage_session(harness, stage, status):
     client, engine, _ = harness
-    body = _spawn_ok(harness, "fresh")
+    body = _spawn_ok(harness, stage)
     r = client.post("/api/tiers/save",
                     headers={"X-Session-Token": body["session_token"],
                              "Content-Type": "application/json"},
                     data=json.dumps({"position": "QB",
                                      "tiers": {"first_1": ["qb_1", "qb_3"]}}))
-    assert r.status_code == 200, r.get_json()
-    assert r.get_json()["saved"] == ["QB"]
+    assert r.status_code == status, r.get_json()
+    if status == 403:
+        assert r.get_json()["error"] == "verification_required"
+        assert _user_row(engine, body["user_id"])["tiers_saved"] is None
+        return
+    assert set(r.get_json()["saved"]) == {"WR", "QB"}
     row = _user_row(engine, body["user_id"])
-    assert json.loads(row["tiers_saved"])["1qb_ppr"] == ["QB"]
+    assert "QB" in json.loads(row["tiers_saved"])["1qb_ppr"]
 
 
 # ── (g) deletion ───────────────────────────────────────────────────────────

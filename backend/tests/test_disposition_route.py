@@ -98,6 +98,7 @@ def harness():
 
     token = "test-token-fb01"
     sess = {
+        "verified": True,
         "user_id":       ME,
         "league":        league,
         "players":       players,

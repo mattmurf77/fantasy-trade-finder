@@ -228,6 +228,12 @@ def test_mfl_minted_token_drives_the_canonical_import(client):
     entry_uid = f"entry:mfl:{MFL_LEAGUE}.f0001"
     token = _entry(c, platform="mfl", mfl_league_id=MFL_LEAGUE, year=2026,
                    franchise_id="0001").get_json()["session_token"]
+    # Username/team entry is only a claim; the import needs account proof.
+    denied = c.post("/api/mfl/link", headers={"X-Session-Token": token},
+                    json={"mfl_league_id": MFL_LEAGUE, "franchise_id": "0001"})
+    assert denied.status_code == 403
+    assert denied.get_json()["error"] == "verification_required"
+    server._sessions[token]["verified"] = True
     r = c.post("/api/mfl/link",
                headers={"X-Session-Token": token,
                         "Content-Type": "application/json"},
@@ -475,6 +481,9 @@ def test_mfl_unknown_action_400(client):
 # resolves) with a non-empty roster in Sleeper id space.
 
 def _import_then_leagues(c, token, platform, body):
+    # Snapshot assertions model an owner who completed account verification.
+    assert not server._sessions[token].get("verified")
+    server._sessions[token]["verified"] = True
     r = c.post(f"/api/{platform}/link",
                headers={"X-Session-Token": token,
                         "Content-Type": "application/json"},

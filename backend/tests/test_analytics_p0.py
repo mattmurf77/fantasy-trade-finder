@@ -319,6 +319,7 @@ def route_harness(tmp_path):
         db_module._migrate_db()
         svc = _FakeService()
         sess = {
+            "verified": True,
             "user_id": USER,
             "league": SimpleNamespace(league_id=LEAGUE, members=[]),
             "players": [SimpleNamespace(id="p1")],

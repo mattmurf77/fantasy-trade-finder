@@ -1,3 +1,5 @@
+import { API_BASE, verifySleeperSession, verificationSenderAllowed } from './verify.mjs';
+
 // Fantasy Trade Finder — background.js (MV3 service worker)
 //
 // Two jobs:
@@ -9,8 +11,6 @@
 //      current league, so content scripts show fresh rankings without
 //      requiring a manual refresh.
 
-const API_BASE = 'https://fantasy-trade-finder.onrender.com';
-// For local dev: const API_BASE = 'http://127.0.0.1:5000';
 
 const STORAGE_KEY = 'ftf_session';
 const REFRESH_ALARM = 'ftf:refresh';
@@ -36,12 +36,23 @@ async function clearSession() {
   });
 }
 
+async function clearSessionIfCurrent(token) {
+  const current = await getSession();
+  if (current?.token !== token) return false;
+  await clearSession();
+  return true;
+}
+
 async function fetchRankings(token, leagueId) {
   const qs = leagueId ? `?league_id=${encodeURIComponent(leagueId)}` : '';
   const res = await fetch(`${API_BASE}/api/extension/rankings${qs}`, {
     headers: { 'X-Session-Token': token },
   });
   if (res.status === 401) return { expired: true };
+  if (res.status === 403) {
+    const body = await res.json().catch(() => ({}));
+    if (body.error === 'verification_required') return { expired: true };
+  }
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return { data: await res.json() };
 }
@@ -50,15 +61,18 @@ async function fetchRankings(token, leagueId) {
 // shape so the content script's sendMessage resolves cleanly.
 async function fetchAndCache(leagueId) {
   const sess = await getSession();
-  if (!sess || !sess.token) return { ok: false, error: 'no_session' };
+  if (!sess || !sess.token || sess.verified !== true) {
+    if (sess?.token && await clearSessionIfCurrent(sess.token)) broadcast({ type: 'ftf:session_expired' });
+    return { ok: false, expired: true, error: 'verification_required' };
+  }
   try {
     const result = await fetchRankings(sess.token, leagueId);
     if (result.expired) {
-      await clearSession();
-      broadcast({ type: 'ftf:session_expired' });
+      if (await clearSessionIfCurrent(sess.token)) broadcast({ type: 'ftf:session_expired' });
       return { ok: false, expired: true };
     }
     const data = result.data;
+    if ((await getSession())?.token !== sess.token) return { ok: false, error: 'session_changed' };
     sess.rankings_cache = sess.rankings_cache || {};
     if (leagueId) {
       sess.rankings_cache[leagueId] = { ...data, fetched_at: Date.now() };
@@ -174,8 +188,31 @@ async function emitAnalyticsEvent(eventType, props) {
 //  Message hub
 // ─────────────────────────────────────────────────────────────────
 
+let verificationInFlight = false;
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || !msg.type) return false;
+
+  if (msg.type === 'ftf:verify_sleeper') {
+    if (!verificationSenderAllowed(sender, chrome.runtime.id)) {
+      sendResponse({ ok: false, error: 'untrusted_sender' });
+      return false;
+    }
+    if (verificationInFlight) {
+      sendResponse({ ok: false, error: 'verification_busy' });
+      return false;
+    }
+    verificationInFlight = true;
+    verifySleeperSession(msg.username, chrome).then(async sess => {
+      await setSession(sess);
+      broadcast({ type: 'ftf:signed_in' });
+      // Return the FTF session only. No Sleeper proof leaves this worker.
+      sendResponse({ ok: true, session: sess });
+    }).catch(error => {
+      sendResponse({ ok: false, error: error.message || 'verification_failed' });
+    }).finally(() => { verificationInFlight = false; });
+    return true;
+  }
 
   if (msg.type === 'ftf:get_session') {
     getSession().then((sess) => sendResponse(sess));

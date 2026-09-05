@@ -327,7 +327,7 @@ def test_delete_user_data_matrix(engine):
     fb = {r.client_id: r for r in rows(d.app_feedback_table)}
     assert len(fb) == 2
     assert fb[f"fb-{USER}"].user_id is None and fb[f"fb-{USER}"].username is None
-    assert fb[f"fb-{USER}"].text == "note"          # content kept
+    assert fb[f"fb-{USER}"].text == "[Removed following account deletion]"
     assert fb[f"fb-{OTHER}"].user_id == OTHER        # counterparty untouched
 
     # Identity layer fully removed.
@@ -364,6 +364,7 @@ def _h(token):
 def test_flag_off_parity(client, engine):
     """auth.accounts off → sign-in surface 404s; DELETE stays reachable."""
     c, token, _sess = client
+    server._sessions[token]["verified"] = True
     with patch.object(server, "is_enabled", lambda k: False):
         assert c.post("/api/auth/apple", headers=_h(token),
                       data=json.dumps({"identity_token": "x"})).status_code == 404
@@ -380,6 +381,7 @@ def test_flag_off_parity(client, engine):
 
 def test_auth_apple_binds_session_and_verifies(client, engine):
     c, token, sess = client
+    server._sessions[token]["verified"] = True
     with engine.begin() as conn:
         conn.execute(insert(db_module.users_table).values(sleeper_user_id=USER))
     tok = _make_token(_apple_claims())
@@ -467,6 +469,7 @@ def test_auth_apple_restore_session_for_bound_account(client, engine):
 def test_auth_apple_conflict_does_not_rebind(client, engine):
     """A session for a different user can't steal a bound identity."""
     c, token, sess = client
+    server._sessions[token]["verified"] = True
     acct = accounts.find_or_create_account("apple", "bound-sub")
     accounts.bind_sleeper_user(acct["account_id"], OTHER)
     tok = _make_token(_apple_claims(sub="bound-sub"))
@@ -476,7 +479,7 @@ def test_auth_apple_conflict_does_not_rebind(client, engine):
     body = r.get_json()
     assert body["conflict"] is True
     assert body["sleeper_user_id"] == OTHER          # original binding kept
-    assert sess.get("verified") is not True          # no verification granted
+    assert sess.get("verified") is True          # original verified session preserved
 
 
 def test_google_route_unconfigured_503(client, monkeypatch):
@@ -491,6 +494,7 @@ def test_google_route_unconfigured_503(client, monkeypatch):
 
 def test_google_route_verifies_when_configured(client, engine, monkeypatch):
     c, token, sess = client
+    server._sessions[token]["verified"] = True
     monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "client-123")
     with engine.begin() as conn:
         conn.execute(insert(db_module.users_table).values(sleeper_user_id=USER))

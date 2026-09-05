@@ -160,6 +160,7 @@ SLOT_ORDER = {"schema": 1, "season": 2026, "teams": 12, "type": "linear",
 def _mk_sess(user_id="u_a", fmt=FMT):
     """Minimal session satisfying _require_initialized_session."""
     return {
+        "verified": True,
         "user_id":       user_id,
         "active_format": fmt,
         "last_active":   0.0,

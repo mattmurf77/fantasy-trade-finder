@@ -101,7 +101,7 @@ See [`DEPENDENCIES.md`](DEPENDENCIES.md). High-level: Sleeper API (free, public)
 ## Deployment Topology
 - **Local dev:** `python3 run.py` → Flask on `http://0.0.0.0:5000`; SQLite at `data/trade_finder.db` (with legacy duplicate at root).
 - **Mobile dev:** `cd mobile && npx expo start --tunnel --clear`; scan QR via Expo Go.
-- **Production (planned):** Postgres via `DATABASE_URL` env var, hosted backend (Render config exists in `render.yaml`).
+- **Production:** Postgres via `DATABASE_URL`, hosted on Render. The checked-in gunicorn configuration uses one worker; cron services call that worker over HTTP. Account deletion drains active writes and invalidates queued work in that process. Multiple workers or independent writers require distributed fencing before scaling ([ADR-017](../docs/adr/adr-017-account-deletion-work-leases.md)).
 
 ---
 
