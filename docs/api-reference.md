@@ -65,6 +65,14 @@ the operator reaches it by running the server locally.
 
 ## Session / Auth
 
+Scoring selection on session-backed routes is per request: a valid
+`X-Scoring-Format` header overrides the session's `active_format`; an absent
+or invalid header uses that active format, then `1qb_ppr`. The override does
+not change the session default. `POST /api/scoring/switch` persists the default
+for subsequent requests. Trade jobs retain the user, league and format selected
+at kickoff even if that token is subsequently reinitialized. Response fields,
+pre-generation eligibility, cache TTLs and polling contracts are unchanged.
+
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/api/session/init` | Establish session for a Sleeper username. Response includes the additive `verification` field (below). 400 `missing_user_id` if a session token is sent without `user_id` in the body (tokenless demo/first-init still defaults to the demo user). Optional additive body fields `league_user_id` / `league_display_name` carry the caller's **league identity** for co-owned Sleeper rosters — see [League identity](#apisessioninit--league-identity-co-owned-rosters) below |

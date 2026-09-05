@@ -15,6 +15,8 @@ data is fetched from the Sleeper public API (no OAuth required).
 """
 
 import collections
+from collections.abc import Mapping
+import copy
 import concurrent.futures
 import functools
 import hashlib
@@ -38,7 +40,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from dataclasses import replace as _dc_replace
+from dataclasses import dataclass, replace as _dc_replace
 from datetime import datetime, timedelta, timezone
 
 from flask import (
@@ -2204,7 +2206,7 @@ app = Flask(__name__, static_folder=str(_PROJECT_ROOT / "web"), static_url_path=
 # ---------------------------------------------------------------------------
 
 _sessions: dict[str, dict] = {}  # token → per-session dict
-_sessions_lock = threading.Lock()  # guards all _sessions reads/writes
+_sessions_lock = threading.RLock()  # request views may write while callers hold it
 
 if _TEST_MODE:
     # UI-test harness blueprint (/__test__/*) — see backend/test_support.py.
@@ -2449,43 +2451,66 @@ def _get_session(token: str) -> dict | None:
     return _restore_persisted_session(token)
 
 
+class _RequestSession(collections.UserDict):
+    """Stable request reads with ordinary writes forwarded to the live session.
+
+    Only the initial scoring selection is local. Existing route writes (auth,
+    activity, scoring/switch) still persist. A request captured before a token
+    is rebound to another identity must not write into that new identity.
+    Nested service data remains shared; this is not a general transaction.
+    """
+
+    def __init__(self, source, effective_format):
+        self._source = source
+        self._identity = (source.get("user_id"), source.get("account_id"))
+        self.data = dict(source)
+        self.data["_effective_format"] = effective_format
+        for alias, formats in (("service", "services"), ("trade_svc", "trade_svcs")):
+            selected = (source.get(formats) or {}).get(effective_format)
+            if selected is not None:
+                self.data[alias] = selected
+
+    def __setitem__(self, key, value):
+        with _sessions_lock:
+            if self._identity == (self._source.get("user_id"),
+                                  self._source.get("account_id")):
+                self._source[key] = value
+                # Auth routes may establish the account id on this view.
+                self._identity = (self._source.get("user_id"),
+                                  self._source.get("account_id"))
+        self.data[key] = value
+
+    def __delitem__(self, key):
+        with _sessions_lock:
+            if self._identity == (self._source.get("user_id"),
+                                  self._source.get("account_id")):
+                self._source.pop(key, None)
+        del self.data[key]
+
+
 def _require_session() -> dict:
-    """Return the active session dict, or raise _SessionExpired (→ 401).
+    """Return a request-local session view, or raise _SessionExpired (401).
 
-    Also resolves the "effective format" for this request and syncs the
-    sess['service'] / sess['trade_svc'] aliases to match. Priority for the
-    effective format:
-      1. X-Scoring-Format request header (per-call override, no state change)
-      2. sess['active_format'] (set by /api/scoring/switch)
-      3. '1qb_ppr' default
-
-    The header path is useful when the frontend wants to peek at one
-    format's data without changing the user's active view.
+    X-Scoring-Format overrides active_format for this request only. Legacy
+    service aliases are resolved in the view, never changed by a read on the
+    shared session. Repeated calls in one request use the same selection.
     """
     token = request.headers.get("X-Session-Token", "")
+    cached = getattr(g, "_request_session", None)
+    if cached is not None and cached[0] == token:
+        return cached[1]
     sess = _get_session(token)
     if sess is None:
         raise _SessionExpired()
 
-    # Resolve effective format for this single request
     from .database import SCORING_FORMATS as DB_SCORING_FORMATS
     header_fmt = request.headers.get("X-Scoring-Format", "")
-    if header_fmt in DB_SCORING_FORMATS:
-        effective_format = header_fmt
-    else:
-        effective_format = sess.get("active_format") or "1qb_ppr"
-
-    # Sync aliases so legacy endpoints that read sess['service'] / sess['trade_svc']
-    # automatically get the right format's instance for this request.
-    services = sess.get("services") or {}
-    trade_svcs = sess.get("trade_svcs") or {}
-    if effective_format in services:
-        sess["service"] = services[effective_format]
-    if effective_format in trade_svcs:
-        sess["trade_svc"] = trade_svcs[effective_format]
-    sess["_effective_format"] = effective_format
-
-    return sess
+    with _sessions_lock:
+        effective_format = (header_fmt if header_fmt in DB_SCORING_FORMATS
+                            else sess.get("active_format") or "1qb_ppr")
+        view = _RequestSession(sess, effective_format)
+    g._request_session = (token, view)
+    return view
 
 
 def _require_initialized_session() -> dict:
@@ -2508,7 +2533,8 @@ def _require_initialized_session() -> dict:
 
 def _active_format(sess: dict) -> str:
     """Return the format that `_require_session` resolved for this request."""
-    return sess.get("_effective_format") or sess.get("active_format") or "1qb_ppr"
+    return (sess.get("_effective_format") if isinstance(sess, _RequestSession)
+            else None) or sess.get("active_format") or "1qb_ppr"
 
 
 def _league_user_id(sess: dict) -> str:
@@ -5872,6 +5898,49 @@ def _log_presentment_outcome(trade_service, job_id: str, league_id: str,
         log.warning("presentment logging failed (non-fatal): %s", tw_err)
 
 
+@dataclass(frozen=True)
+class _TradeExecutionContext:
+    """Pinned ownership/format and local working state for one accepted job.
+
+    This is an in-process seam, not a serializable durable snapshot. Ranking
+    reads retain their existing execution-time semantics. Card publication and
+    live decision sets stay connected to the selected format's session service.
+    """
+
+    user_id: str
+    league_id: str
+    scoring_format: str
+    service: object
+    trade_service: object
+    league: object
+    user_roster: tuple
+    players: tuple
+
+
+def _capture_trade_execution(sess, user_id, league_id, scoring_format):
+    if not sess:
+        raise RuntimeError("session expired before trade job started")
+    if sess.get("user_id") != user_id:
+        raise RuntimeError("session user changed before trade job started")
+    league = sess.get("league")
+    service = (sess.get("services") or {}).get(scoring_format) or sess.get("service")
+    trade_service = ((sess.get("trade_svcs") or {}).get(scoring_format)
+                     or sess.get("trade_svc"))
+    # Generation overwrites counters and injects member rankings/picks. Copy
+    # this small graph, not the ranking history, generator/client, or card store.
+    league = copy.deepcopy(league)
+    if trade_service is not None:
+        trade_service = copy.copy(trade_service)
+        trade_service._players = dict(getattr(trade_service, "_players", {}))
+        trade_service._leagues = dict(getattr(trade_service, "_leagues", {}))
+        if league is not None:
+            trade_service._leagues[league.league_id] = league
+    return _TradeExecutionContext(
+        user_id, league_id, scoring_format, service, trade_service, league,
+        tuple(sess.get("user_roster") or ()), tuple(sess.get("players") or ()),
+    )
+
+
 def _run_trade_job(
     job_id: str,
     sess_token: str,
@@ -5883,10 +5952,10 @@ def _run_trade_job(
     pinned_give_mode: str = "any",
     trade_intent: str | None = None,
     prefs_preload: dict | None = None,
+    execution_context: _TradeExecutionContext | None = None,
 ):
-    """Daemon-thread entry point. Resolves the session itself (rather than
-    capturing closures over per-request state) so the request that kicked
-    us off can return immediately. All exceptions caught — a thread death
+    """Daemon-thread entry point with context captured before thread start.
+    Direct internal callers may omit context and capture at entry. All exceptions caught — a thread death
     here would leave the job 'running' forever, which is a worse failure
     than surfacing the error to the polling frontend.
 
@@ -5899,22 +5968,23 @@ def _run_trade_job(
     would miss). None = not supplied (pregen from session_init, the
     replenishment cron) ⇒ the worker loads them itself, exactly as before."""
     try:
-        with _sessions_lock:
-            sess = _sessions.get(sess_token)
-        if not sess:
-            raise RuntimeError("session expired before trade job started")
-
-        # Resolve format-scoped service. Mirrors the resolution path used by
-        # /api/trades/generate's request handler — see _require_session.
-        active_format  = sess.get("_effective_format") or sess.get("active_format") or "1qb_ppr"
-        services       = sess.get("services") or {}
-        trade_svcs     = sess.get("trade_svcs") or {}
-        service        = services.get(active_format) or sess.get("service")
-        trade_service  = trade_svcs.get(active_format) or sess.get("trade_svc")
-        g_user_id      = sess["user_id"]
-        g_league       = sess.get("league")
-        g_user_roster  = sess.get("user_roster")
-        g_players      = sess.get("players")
+        if execution_context is None:
+            # Compatibility for internal/test callers that run the job directly.
+            with _sessions_lock:
+                sess = _sessions.get(sess_token)
+                execution_context = _capture_trade_execution(
+                    sess, (sess or {}).get("user_id"), league_id,
+                    _active_format(sess or {}))
+        ctx = execution_context
+        league_id     = ctx.league_id
+        active_format = ctx.scoring_format
+        service       = ctx.service
+        trade_service = ctx.trade_service
+        g_user_id     = ctx.user_id
+        g_league      = ctx.league
+        g_user_roster = list(ctx.user_roster)
+        g_players     = ctx.players
+        sess = {"user_roster": g_user_roster, "players": g_players}
         if not (service and trade_service and g_league
                 and g_user_roster and g_players):
             raise RuntimeError("session missing required state for trade gen")
@@ -6931,6 +7001,7 @@ def _kickoff_trade_job(
     synchronous: bool = False,
     trade_intent: str | None = None,
     prefs_preload: dict | None = None,
+    session_context: Mapping | None = None,
 ) -> str:
     """Register a new job in _trade_jobs and start its worker thread.
     Returns the job_id. Caller is responsible for any pre-existing-job
@@ -6954,6 +7025,23 @@ def _kickoff_trade_job(
                     read on its own thread, handed to the worker so it does
                     not read them a second time. See `_run_trade_job`.
     """
+    # Capture before scheduling: session/init may reuse this token for another
+    # league while this job waits to run. Request callers supply their view;
+    # pregen supplies the freshly built payload; headless cron resolves here.
+    execution_context = None
+    capture_error = None
+    try:
+        with _sessions_lock:
+            execution_context = _capture_trade_execution(
+                session_context if session_context is not None else _sessions.get(sess_token),
+                user_id, league_id, scoring_format)
+    except Exception as exc:
+        # Preserve the job error response for expired/incomplete state rather
+        # than turning a failure formerly caught by the worker into HTTP 500.
+        capture_error = str(exc)
+    pinned_give = list(pinned_give or [])
+    pinned_receive = list(pinned_receive or [])
+    prefs_preload = copy.deepcopy(prefs_preload)
     job_id = uuid.uuid4().hex
     # Pinned flows (give OR receive) and single-opponent scope (#156 Specific
     # Team) bypass the shared per-key cache — they answer a specific
@@ -6982,12 +7070,20 @@ def _kickoff_trade_job(
             # Pin into the per-key index so future generate calls dedupe.
             _trade_jobs_by_key[job["key"]] = job_id
 
+    if capture_error is not None:
+        with _trade_jobs_lock:
+            job["status"] = "error"
+            job["error"] = capture_error
+            job["finished_at"] = time.monotonic()
+        return job_id
+
     if synchronous:
         _run_trade_job(job_id, sess_token, league_id, fairness_threshold,
                        pinned_give or [], pinned_receive or [],
                        opponent_user_id, pinned_give_mode,
                        trade_intent=trade_intent,
-                       prefs_preload=prefs_preload)
+                       prefs_preload=prefs_preload,
+                       execution_context=execution_context)
         return job_id
 
     threading.Thread(
@@ -6996,7 +7092,8 @@ def _kickoff_trade_job(
               pinned_give or [], pinned_receive or [], opponent_user_id,
               pinned_give_mode),
         kwargs={"trade_intent": trade_intent,
-                "prefs_preload": prefs_preload},
+                "prefs_preload": prefs_preload,
+                "execution_context": execution_context},
         daemon=True,
     ).start()
     return job_id
@@ -7103,7 +7200,7 @@ def _pick_rung_year_context(sess) -> tuple[int, int] | None:
     """
     if not is_enabled("picks.rank_year_labels"):
         return None
-    league = sess.get("league") if isinstance(sess, dict) else None
+    league = sess.get("league") if isinstance(sess, Mapping) else None
     league_id = getattr(league, "league_id", None)
     if not league_id or league_id == "league_demo":
         return None
@@ -7189,7 +7286,7 @@ def _requested_scope() -> str | None:
 def _scope_season(sess) -> int:
     """The season whose rookie class is in scope: the active league's, else
     the process default. Mirrors _pick_rung_year_context's league read."""
-    league = sess.get("league") if isinstance(sess, dict) else None
+    league = sess.get("league") if isinstance(sess, Mapping) else None
     league_id = getattr(league, "league_id", None)
     if league_id and league_id != "league_demo":
         ctx = _cached_draft_context(league_id)
@@ -10802,7 +10899,7 @@ def get_player_profile_route(player_id):
     if player is None:
         return jsonify({"error": "Player not found"}), 404
 
-    fmt     = sess.get("_effective_format", DEFAULT_SCORING)
+    fmt     = _active_format(sess)
     user_id = sess["user_id"]
     from .trade_service import elo_to_value
 
@@ -12219,6 +12316,7 @@ def generate_trades():
         opponents_total    = opponents_total,
         trade_intent       = trade_intent,
         prefs_preload      = prefs_preload,
+        session_context    = sess,
     )
     with _trade_jobs_lock:
         snapshot = _trade_job_public_view(_trade_jobs[job_id])
@@ -19887,6 +19985,7 @@ def session_init():
                 fairness_threshold = 0.75,
                 pinned_give        = None,
                 opponents_total    = opp_total,
+                session_context    = session_payload,
             )
             log.info("session/init: kicked off pre-gen trade job for league=%s", league_id)
     except Exception as pregen_err:
