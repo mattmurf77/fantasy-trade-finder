@@ -11,6 +11,12 @@
 
 ---
 
+## 2026-09-04 — Trade activation validation and original items 2/3
+
+Same branch `claude/fleeced-trade-engine-balance-c0c75d`. Two subagents implemented whole-team outlook utility and weaker-manager benefit ranking (49 and 101 tests). Main integrated four final-package tests and the independent dark `trade.mutual_benefit_v1` switch. Existing focused cluster 126 passed; TypeScript, all 90 mobile structural suites, testID lint, and 175 web checks passed. Upgrading an isolated PostgreSQL copy of production's schema twice preserved rows/config; four proposal/attribution contracts passed on PostgreSQL. No provider offers were sent.
+
+The local full run was interrupted after 3,933 passes / one skip, no failures, during slow existing generator tests; remaining modules and full Python 3.12 CI are pending. **Not a full-suite pass.** Live read-only sampling confirms projection/provider/confidence/co-owner gaps. Only background collection is planned; all three strict switches stay false. No native TestFlight proof or acceptance uplift is claimed. Full evidence: [activation validation](../docs/plans/trade-model-activation/validation.md).
+
 ## 2026-09-04 — Personal-market policy built DARK (D-180/D-181): 87 new tests, full suite green, flag-off byte identity proved three ways
 
 Branch `claude/fleeced-trade-engine-balance-c0c75d` off a freshly fetched `origin/main` @ `606e512c`. Backend-only — `git diff --stat -- mobile web extension` is empty. Full gates, no waivers ([scope](../docs/plans/personal-market-policy/scope.md)).

@@ -101,6 +101,8 @@ Full per-route + per-table detail in [`../docs/api-reference.md`](../docs/api-re
 
 Two new leaves, `trade_roster.py` and `trade_roster_adapter.py`, evaluate both final rosters using exact shared-slot allocation, usable depth, capacity and observed-input provenance. The server captures one snapshot after mutations and before market composition; enforcing gates hold progressive card publication. Existing impression/shadow stores carry evidence. Estimated templates cannot pass enforcement; no weekly forecast is claimed. See `docs/plans/post-trade-roster-evaluation/`.
 
+Whole-team benefit extension (2026-09-04): `trade_roster.Context.card` calls pure `trade_outlook_utility` for both complete rosters, then `trade_mutual_benefit` for eligibility and ordering. Explicit outlook provenance is captured before inference. Current production requires supplied fresh point data; dynasty-only evidence cannot enable the strict gate. The worker evaluates after all package mutations, withholds provisional cards in enforcement mode and preserves market lane quotas. Collection lives under existing roster telemetry; `trade.mutual_benefit_v1` remains independently dark. See `docs/plans/trade-model-activation/validation.md`.
+
 ## External Dependencies (technical)
 See [`DEPENDENCIES.md`](DEPENDENCIES.md). High-level: Sleeper API (free, public), DynastyProcess GitHub CSV (free), Anthropic Claude API (optional, paid).
 

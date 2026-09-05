@@ -1627,3 +1627,9 @@ Saved analytics cohorts (Fullstory-style Segments). `id` PK, `name` (unique), `d
 ### Roster evidence in existing telemetry (2026-09-04)
 
 `deck_impressions.features_json.roster_evaluation` freezes schema-v1 both-team inputs/results whenever roster shadow or enforcement computes them. Null means evaluation unavailable; `status: unknown` names incomplete inputs; neither is a pass. Values are consensus dynasty proxies. `schedule_coverage: unknown` explicitly excludes weekly/bye guarantees. `trade_policy_shadow` also holds capped roster rejections: `lane=roster_check`, reason prefixed `roster_blocked:` or `roster_unknown:`, final trade hash/concept and generator arm. Market-only numeric columns remain NULL on those rows. Keep these rows separate from market-floor rejection metrics. Job counts/reasons are ephemeral and are not a durable denominator by themselves. No new tables/columns.
+
+### Whole-team diagnostics in deck_impressions.features_json
+
+`roster_evaluation.teams[team_id].outlook_utility` freezes `normalized_gain`, `confidence`, `basis`, `ready_for_enforcement`, outlook source, component before/after/delta/scale and uncertainties. Production values are null when no fresh point source exists. Dynasty players and picks are one disjoint roster total; depth is diagnostic, not an additional reward.
+
+`roster_evaluation.mutual_benefit` records each side's reported versus usable gain, readiness, preference source, weakest gain, total, threshold values and eligibility reasons. These are utility/evidence measures, not acceptance probabilities. Existing `trade_policy_shadow` uses lane `mutual_benefit` for structurally safe packages whose benefit remains unknown or insufficient; `roster_check` retains structural failures. The per-job cap still applies. Generator model_arm is preserved. No additional table or column is added for these nested diagnostics.

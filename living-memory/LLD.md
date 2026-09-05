@@ -766,3 +766,5 @@ dark — all `monetize.*` flags false, no route wears `@_require_pro`.
 - Every new `load_draft_picks` caller must be sanctioned by name in
   `test_pick_assignment.py::_SANCTIONED_SOURCE_CALLERS` (ADR-010 AST guard) — bare-default calls
   are forbidden.
+
+Whole-team benefit extension (2026-09-04): `trade_roster.Context.card` calls pure `trade_outlook_utility` for both complete rosters, then `trade_mutual_benefit` for eligibility and ordering. Explicit outlook provenance is captured before inference. Current production requires supplied fresh point data; dynasty-only evidence cannot enable the strict gate. The worker evaluates after all package mutations, withholds provisional cards in enforcement mode and preserves market lane quotas. Collection lives under existing roster telemetry; `trade.mutual_benefit_v1` remains independently dark. See `docs/plans/trade-model-activation/validation.md`.

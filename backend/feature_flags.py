@@ -1156,6 +1156,9 @@ FLAG_KEYS: tuple[str, ...] = (
     # Full-roster shadow evidence and independent final-deck enforcement.
     "trade.roster_evaluation",
     "trade.roster_protection",
+    # Whole-team meaningful benefit for both managers; implies final market
+    # and roster gates. Remains dark until point coverage and intent qualify.
+    "trade.mutual_benefit_v1",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

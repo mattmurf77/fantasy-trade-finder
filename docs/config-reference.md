@@ -1480,3 +1480,9 @@ Fixed estimator constants (in `backend/eval/replay.py`, changed only by code rev
 | `trade.roster_protection` | Enforce supported structural/availability checks on final packages; unknown coverage withholds the card. Rank safe candidates by weaker-manager outlook utility, subject to market policy's personal-opportunity priority. | Disable immediately to restore legacy serving. Require observed platform settings, offline/shadow validation and operator cohort rollout. |
 
 Neither flag is enabled in this branch's configuration. Current observed adapter is Sleeper; non-Sleeper templates cannot pass enforcement. Settings/cache changes trigger regeneration on the next deck request. The 48-hour availability freshness limit is conservative source coverage, not an injury forecast. No additional model_config keys or schema are introduced by roster evaluation.
+
+### Whole-team benefit switch
+
+`trade.mutual_benefit_v1` defaults false in code, config and all release fixtures. It implies final market and roster enforcement even if their switches are off. Eligible trades require both managers' complete utility evidence, explicit intent, confidence >=0.5 and normalized gain >=0.01. These are uncalibrated defaults of the pure evaluator, not acceptance probabilities; they do not enter MODEL_A_PROFILE. Unknown point data or preferences cannot pass. Order is weaker gain, total gain, then fewer assets, within Core/Conviction quotas. This flag invalidates cached decks when changed.
+
+Collection uses only `trade.valuation_telemetry` and `trade.roster_evaluation`; all enforcement switches remain false. On Render, FTF_FLAGS changes require a new deployment to reach the running process. POST /api/feature-flags/reload reloads the current process environment and on-disk file; it does not fetch newly changed Render environment settings. See [rollout procedure](plans/trade-model-activation/rollout.md).

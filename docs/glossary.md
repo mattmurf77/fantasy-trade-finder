@@ -492,3 +492,6 @@ The lane-2a import path (D-058): the user opens DLF/Dynasty Nerds in an in-app b
 ### Usable roster coverage
 
 A unique allocation of currently available players meeting the existing dynasty starter-quality threshold to the league's observed slots, plus the remaining coverage across constrained position groups. Legal slot fill can exist with inadequate quality. Neither property predicts weekly points or future availability. An estimated template yields incomplete evidence.
+
+- **Normalized whole-team benefit:** weighted change in complete optimal-lineup point production and complete dynasty asset value, each scaled by the larger before/after total. A value proxy never becomes projected points; missing components retain uncertainty.
+- **Weaker-manager benefit:** the smaller of the two managers' normalized gains. Used before total benefit and simplicity so one large gain cannot conceal the other manager's loss. Meaningful benefit is a policy threshold, not acceptance likelihood.

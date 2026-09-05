@@ -2995,6 +2995,7 @@ def _trade_safety_signature():
         ("market_shadow", _trade_policy.telemetry_enabled()),
         ("roster", getattr(FLAGS, "trade_roster_protection", False)),
         ("roster_shadow", getattr(FLAGS, "trade_roster_evaluation", False)),
+        ("mutual_benefit", getattr(FLAGS, "trade_mutual_benefit_v1", False)),
     ) if enabled]
 
 
@@ -5165,7 +5166,8 @@ def _policy_context_from_session(sess) -> "dict | None":
 
 
 def _build_trade_roster_context(*, sess, league, players, seed_map,
-                              scoring_format, outlook, opponent_outlooks, picks):
+                              scoring_format, outlook, opponent_outlooks, picks,
+                              explicit_outlook=None):
     """Capture provider inputs once after generation; never fetch per card."""
     from .trade_roster_adapter import build_context
     from .trade_roster import Asset
@@ -5207,14 +5209,24 @@ def _build_trade_roster_context(*, sess, league, players, seed_map,
             pid = str(pk["pick_id"])
             ctx.assets[pid] = Asset(pid, frozenset(),
                 float(_priced_pick_value(pk, slot_order, scoring_format)), is_pick=True)
+    # Explicit intent and inferred defaults are different evidence. No live
+    # point provider exists yet: leave projections absent and retain that
+    # uncertainty in the frozen benefit snapshot.
+    for uid, team in ctx.teams.items():
+        declared = explicit_outlook if uid == viewer_id else opponent_outlooks.get(uid)
+        inferred = outlook if uid == viewer_id else None
+        ctx.utility_inputs[uid] = {
+            "explicit_outlook": declared, "inferred_outlook": inferred,
+            "inference_fresh": team.availability_known,
+        }
     return ctx
 
 
-def _evaluate_deck_rosters(cards, ctx, *, enforce):
+def _evaluate_deck_rosters(cards, ctx, *, enforce, require_mutual=False):
     """Final packages only. Unknown coverage cannot pass an enforcing gate."""
     results, retained = {}, []
     diagnostics = {"enforced": enforce, "safe": 0, "blocked": 0, "unknown": 0,
-                   "reasons": {}}
+                   "reasons": {}, "mutual_benefit": {"eligible": 0, "blocked": 0, "unknown": 0}}
     for card in cards:
         try:
             result = ctx.card(card)
@@ -5223,6 +5235,12 @@ def _evaluate_deck_rosters(cards, ctx, *, enforce):
             result = {"schema_version": 1, "status": "unknown", "eligible": False,
                       "unknowns": ["evaluation_unavailable"], "teams": {}}
         results[id(card)] = result
+        mutual_status = result.get("mutual_benefit", {}).get("status", "unknown")
+        diagnostics["mutual_benefit"][mutual_status] += 1
+        if require_mutual and not result.get("mutual_benefit", {}).get("eligible", False):
+            result["eligible"] = False
+            result["status"] = "blocked" if result["status"] == "blocked" or mutual_status == "blocked" else "unknown"
+            result.setdefault("unknowns", []).append("mutual_benefit_not_established")
         diagnostics[result["status"]] += 1
         reasons = list(result.get("unknowns", []))
         for team in result.get("teams", {}).values():
@@ -5236,7 +5254,12 @@ def _evaluate_deck_rosters(cards, ctx, *, enforce):
     if enforce:
         # Market-policy composition, if enabled next, retains precedence.
         # Otherwise this is the soft both-manager outlook ordering signal.
-        retained.sort(key=lambda c: -results[id(c)].get("mutual_utility", 0))
+        if require_mutual:
+            from .trade_mutual_benefit import rank_key
+            retained.sort(key=lambda c: rank_key(results[id(c)]["mutual_benefit"],
+                give_count=len(c.give_player_ids), receive_count=len(c.receive_player_ids)))
+        else:
+            retained.sort(key=lambda c: -results[id(c)].get("mutual_utility", 0))
     return retained, results, diagnostics
 
 
@@ -5246,11 +5269,15 @@ def _log_roster_rejections(cards, results, *, job_id, user_id, league_id, bakeof
     cap = max(0, int(_trade_service_mod._c("policy_shadow_log_cap")))
     for card in cards:
         result = results.get(id(card), {})
-        if result.get("eligible") or len(rows) >= cap:
+        mutual = result.get("mutual_benefit")
+        mutual_rejection = result.get("eligible") and mutual and not mutual.get("eligible")
+        if (result.get("eligible") and not mutual_rejection) or len(rows) >= cap:
             continue
         reasons = list(result.get("unknowns", []))
         for team in result.get("teams", {}).values():
             reasons.extend(team["blockers"] + team["unknowns"])
+        if mutual_rejection:
+            reasons = mutual.get("reasons", [])
         attr = bakeoff_run.attribution_for(card) if bakeoff_run is not None else None
         rows.append({"deck_job_id": job_id, "user_id": user_id, "league_id": league_id,
             "trade_hash": _deck_trade_hash(card.give_player_ids, card.receive_player_ids, card.target_user_id),
@@ -5259,8 +5286,10 @@ def _log_roster_rejections(cards, results, *, job_id, user_id, league_id, bakeof
                 viewer_gives=card.give_player_ids, viewer_receives=card.receive_player_ids),
             "model_arm": attr[0] if attr else None,
             "policy_variant": _trade_policy.active_policy_variant(),
-            "eligible": 0, "reason": "roster_" + result.get("status", "unknown") + ":" + ",".join(sorted(set(reasons))),
-            "lane": "roster_check", "created_at": datetime.now(timezone.utc).isoformat()})
+            "eligible": 0, "reason": ("mutual_benefit_" + mutual.get("status", "unknown") if mutual_rejection
+                else "roster_" + result.get("status", "unknown")) + ":" + ",".join(sorted(set(reasons))),
+            "lane": "mutual_benefit" if mutual_rejection else "roster_check",
+            "created_at": datetime.now(timezone.utc).isoformat()})
     if rows:
         save_trade_policy_shadow(rows)
 
@@ -5377,7 +5406,8 @@ def _evaluate_card_policy(card, ctx, *, model_arm=None,
 
 
 def _evaluate_deck_policy(cards, ctx, *, job_id, user_id, league_id,
-                          bakeoff_run=None, deck_size=None, enforce=None):
+                          bakeoff_run=None, deck_size=None, enforce=None,
+                          mutual_order=False):
     """THE choke point. Evaluate every card in the final deck.
 
     Returns ``(cards, results_by_card_id, shadow_rows)``.
@@ -5451,6 +5481,11 @@ def _evaluate_deck_policy(cards, ctx, *, job_id, user_id, league_id,
     def _policy_order(entry):
         card, result = entry
         roster = getattr(card, "roster_evaluation", None)
+        if mutual_order:
+            from .trade_mutual_benefit import rank_key
+            return (*rank_key(roster["mutual_benefit"],
+                give_count=len(card.give_player_ids), receive_count=len(card.receive_player_ids)),
+                *result.rank_key)
         if roster is not None:
             # Personal opportunity remains primary. Within that signal,
             # prefer the weaker team's outlook utility before market-distance
@@ -6821,6 +6856,8 @@ def _run_trade_job(
         except Exception as pref_err:
             log.warning("trade-job: could not load league preference: %s", pref_err)
 
+        explicit_outlook = outlook_value
+
         # #360 R-9 — avoid ⊕ chase is unsatisfiable and fails SILENTLY: the
         # pool exclusion empties every receive pool of the position while
         # _positions_ok still demands at least one received player at it, so
@@ -6930,8 +6967,9 @@ def _run_trade_job(
         ghost_on = _ghost_holdout_active(
             league_id, pinned_give, pinned_receive, opponent_user_id)
 
-        market_live = _trade_policy.policy_enabled() and league_id != "league_demo"
-        roster_live = getattr(FLAGS, "trade_roster_protection", False) and league_id != "league_demo"
+        mutual_live = getattr(FLAGS, "trade_mutual_benefit_v1", False) and league_id != "league_demo"
+        market_live = (_trade_policy.policy_enabled() or mutual_live) and league_id != "league_demo"
+        roster_live = (getattr(FLAGS, "trade_roster_protection", False) or mutual_live) and league_id != "league_demo"
         roster_shadow = getattr(FLAGS, "trade_roster_evaluation", False) and league_id != "league_demo"
         with _trade_jobs_lock:
             j = _trade_jobs.get(job_id)
@@ -7478,10 +7516,10 @@ def _run_trade_job(
                     sess=sess, league=g_league, players=players_dict,
                     seed_map=seed_map, scoring_format=active_format,
                     outlook=outlook_value, opponent_outlooks=opponent_outlooks,
-                    picks=_job_draft_picks())
+                    picks=_job_draft_picks(), explicit_outlook=explicit_outlook)
                 roster_candidates = final_cards
                 final_cards, roster_results, roster_diag = _evaluate_deck_rosters(
-                    final_cards, roster_ctx, enforce=roster_live)
+                    final_cards, roster_ctx, enforce=roster_live, require_mutual=mutual_live)
                 try:
                     _log_roster_rejections(roster_candidates, roster_results,
                         job_id=job_id, user_id=g_user_id, league_id=league_id,
@@ -7539,6 +7577,7 @@ def _run_trade_job(
                     _evaluate_deck_policy(
                         final_cards, _pol_ctx,
                         enforce=market_live,
+                        mutual_order=mutual_live,
                         job_id    = job_id,
                         user_id   = g_user_id,
                         league_id = league_id,

@@ -30,6 +30,10 @@
 
 ---
 
+### Activation follow-up — original items 2 and 3
+
+The user requested execution. Whole-team outlook utility and mutual-benefit ranking are now integrated on the same branch, with a separate dark flag. See `docs/plans/trade-model-activation/validation.md` and `rollout.md` for exact evidence and rollout state. Collection-only activation is being validated; broad enforcement is blocked by observed data gaps. The HTML mockup is excluded from the product rollout. Earlier "Stage B is not authorized" wording is historical: the current user authorizes activation work, but evidence still limits its scope.
+
 ### Codex roster evaluator and balance review
 
 Requested branch remains `claude/fleeced-trade-engine-balance-c0c75d`. The preceding agent’s balance work is preserved plus Codex review corrections and full-roster evaluation. All four new switches remain false. HTML is `mockups/post-trade-roster-check/index.html`; no client mount. Read `docs/plans/post-trade-roster-evaluation/code-walk.md` for coverage limits, open provenance/identity questions, and `validation.md` for final local gates. Production rollout and manual TestFlight remain pending.

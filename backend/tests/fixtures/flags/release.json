@@ -228,6 +228,7 @@
   "trade.personal_market_policy_v1": false,
   "trade.roster_evaluation": false,
   "trade.roster_protection": false,
+  "trade.mutual_benefit_v1": false,
   "trade.avoid_positions": false,
   "trade.standing_offers": true
 }

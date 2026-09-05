@@ -4,7 +4,7 @@ Values are dynasty-value proxies, not fantasy-point projections. Missing data
 stays unknown. Slots share one exact assignment, so FLEX cannot reuse a starter.
 See docs/plans/post-trade-roster-evaluation/scope.md for rollout boundaries.
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from itertools import combinations
 import math
 from typing import Mapping
@@ -252,6 +252,7 @@ class Context:
     assets: Mapping[str, Asset]
     rules: Rules
     cache: dict = field(default_factory=dict)
+    utility_inputs: Mapping[str, dict] = field(default_factory=dict)
 
     def card(self, card) -> dict:
         key = (card.target_user_id, tuple(sorted(card.give_player_ids)),
@@ -264,4 +265,27 @@ class Context:
                 self.cache[key] = evaluate(viewer=self.teams[self.viewer_id],
                     partner=self.teams[card.target_user_id], give=card.give_player_ids,
                     receive=card.receive_player_ids, assets=self.assets, rules=self.rules)
+                self._add_benefits(self.cache[key], card)
         return self.cache[key]
+
+    def _add_benefits(self, result, card):
+        """Freeze full-team benefit separately from structural eligibility."""
+        from .trade_outlook_utility import evaluate_outlook_utility
+        from .trade_mutual_benefit import evaluate_mutual_benefit
+        for uid, outgoing, incoming in (
+                (self.viewer_id, card.give_player_ids, card.receive_player_ids),
+                (card.target_user_id, card.receive_player_ids, card.give_player_ids)):
+            if uid not in result['teams']:
+                continue
+            before = self.teams[uid]
+            after = replace(before, roster=tuple(sorted(
+                (set(before.roster) - set(outgoing)) | set(incoming))))
+            result['teams'][uid]['outlook_utility'] = evaluate_outlook_utility(
+                before=before, after=after, assets=self.assets, rules=self.rules,
+                **self.utility_inputs.get(uid, {}))
+        benefits = [result['teams'].get(uid, {}).get('outlook_utility', {})
+                    for uid in (self.viewer_id, card.target_user_id)]
+        sources = [{'explicit': 'observed', 'inferred': 'estimated'}.get(
+            b.get('outlook', {}).get('source'), 'unknown') for b in benefits]
+        result['mutual_benefit'] = evaluate_mutual_benefit(
+            *benefits, viewer_preference_source=sources[0], partner_preference_source=sources[1])
