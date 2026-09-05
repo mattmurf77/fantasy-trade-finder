@@ -1,7 +1,7 @@
 {
-  "outlook.season_projections": false,
-  "trades.win_now": false,
-  "outlook.championship_probabilities": false,
+  "outlook.season_projections": true,
+  "trades.win_now": true,
+  "outlook.championship_probabilities": true,
   "_comment": "Feature flags for the 2026-04-19 sprint. Every key defaults to false in backend/feature_flags.py. Flip a value to true here to enable the feature in the running deployment. Unknown keys are ignored with a console warning.",
   "swipe.community_compare": false,
   "swipe.qc_compliments": true,

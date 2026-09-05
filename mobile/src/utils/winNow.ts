@@ -18,7 +18,8 @@ export function sourceReceipt(meta?: SeasonMeta): string {
   const coverage = ` · Coverage ${finite(meta?.coverage) ? probability(meta.coverage) : 'unavailable'}`;
   const time = meta?.as_of && Number.isFinite(Date.parse(meta.as_of)) ? new Date(meta.as_of).toLocaleString() : 'timestamp unavailable';
   const source = meta?.source === 'sleeper_weekly_experimental' ? 'Sleeper weekly projections' : meta?.source || 'Source unavailable';
-  return `${meta?.calibrated === true ? 'Calibrated model' : 'Uncalibrated beta'} · Intervals describe Monte Carlo sampling only; projection/model uncertainty is excluded.\n${source} · ${time}${coverage}`;
+  const warning = meta?.scoring_warning ? `\n${meta.scoring_warning}` : '';
+  return `${meta?.calibrated === true ? 'Calibrated model' : 'Uncalibrated beta'} · Intervals describe Monte Carlo sampling only; projection/model uncertainty is excluded.\n${source} · ${time}${coverage}${warning}`;
 }
 
 export function projectedStandings(teams: SeasonTeam[]): SeasonTeam[] {

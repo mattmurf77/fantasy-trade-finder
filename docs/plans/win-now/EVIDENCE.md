@@ -1,6 +1,6 @@
 # Win Now evidence and remaining verification
 
-2026-09-04 — implementation branch, not a release record. Parent integration review and mechanical verification are complete; rollout/calibration remain separate.
+2026-09-04 evidence checkpoint; updated 2026-09-05 for explicit experimental beta-release authorization. Historical test counts and raw exploratory artifacts below are preserved. Authorization permits season/Win Now/championship before calibration; it does not certify probability accuracy or successful deployment. [2026-09-05 release record](../../business/ops/2026-09-05-win-now.md) tracks pending CI/Render verification and mobile 1.17.0 EAS/TestFlight delivery.
 
 ## Completed client checks
 
@@ -43,14 +43,14 @@ The parent ran a loopback-only synthetic fixture using the actual shipped `web/j
 ## Manual TestFlight and browser checklist
 
 1. All flags off: existing Trade Finder and League behavior remains; stale Win Now deep link shows unavailable with a working Back control. Season flag only: standings entry works while trade search is unavailable. Test full-screen Back/edge swipe and the one FeedbackFAB.
-2. On a supported fixture league, inspect source/timestamp/coverage, final records and distributions. Verify championship control and numbers stay absent with either its flag or snapshot capability false; only a validated fixture with both true may show them.
+2. On a supported fixture league, inspect source/timestamp/coverage, final records and distributions. Verify championship control and numbers stay absent with either its flag or snapshot capability false; a mechanically supported fixture with both true may show experimental, uncalibrated numbers. Confirm the beta disclaimer and any exact scoring-omission warning remain visible.
 3. Search with wins then playoffs. Set budget to 0, 5 and 10%; reject 11%. Check 75/80/100% market balance and reject 70%. Protect a buyer asset and confirm no offered package contains it. A lower requested fairness must never override the server floor.
 4. While requests run, change objective/limits/protection, switch league, leave the view and return. Old cards and late queued jobs must not replace the new state. Exercise Cancel and the bounded-wait message; retry must be explicit.
 5. Open Edit & evaluate on a returned card; verify buyer/partner ownership, three-assets-per-side controls, disabled unavailable assets, rejected-package reasons, and both teams' before/after numbers. A 20% → 25% change must read +5.0 pp. Changed assets must clear the old evaluation.
 6. Force empty results, a network/HTTP error, HTTP-200 unavailable and an expired snapshot. Verify honest copy, no endless spinner, enabled manual recovery, removal of expired cards and no request against expired evidence. Check likes/passes are isolated season decisions with visible save failures.
 7. On a physical supported iPhone and in narrow/wide browsers, inspect long player/pick/league names, keyboard access, focus, VoiceOver/Dynamic Type, asset chooser scrolling and primary actions. Review console/network failures in the real web app; the DOM test harness is not this check.
 
-No simulator, Maestro flow, native build, deployment or production flag changes were performed as client validation.
+No simulator, Maestro flow, native build, deployment or production flag changes were performed as the historical client validation above. The separately authorized 2026-09-05 release is pending execution verification in the release record.
 
 ## Historical outcome follow-up — 2026-09-04
 
@@ -59,3 +59,11 @@ Parent-reviewed Astra collection/evaluator/audit work: 119 affected backend test
 ## Authorized exploratory evaluation — 2026-09-04
 
 Actual revised-source simulation/evaluation completed: Lakeview 2024, after weeks 3/6/9/12, 10,000 draws each. Lakeview 2025 lacked full lineup forecast coverage; FFv3 active K/IDP formats excluded. Parent reviewed the opt-in evaluator changes/replay adapter; **144 affected tests passed in 0.62s**, cached rerun and direct evaluator metrics identical, strict-mode control rejects all four cohorts. [Numeric results and exact assumptions](EXPLORATORY-RESULTS.md). No production flag, model or UI changes.
+
+## Release verification pending — 2026-09-05
+
+The operator accepted exploratory evidence for the experimental beta, including championship. Final merged-revision CI and focused release-scoring regressions must be recorded by the release executor; this documentation pass ran no product tests. Render commit/effective flags, authenticated live behavior, mobile 1.17.0 build/submission/processing and physical TestFlight remain unverified here. Run the [existing checklist](#manual-testflight-and-browser-checklist), including absent-slot K/DEF normalization, active K/DEF refusal, preserved raw scoring, provider-aware rare-event omissions and the exact warning **“Rare special-teams/fumble bonuses are not projected.”** See [implementation boundaries](BUILD.md#release-scoring-boundaries--2026-09-05). No historical result is relabeled as prospective or calibrated.
+
+### Release verification — 2026-09-05
+
+Parent reviewed all Astra scoring, client receipt and deployment lifecycle changes. 93 client commands passed (TypeScript, 91 structural suites, testID lint); Win Now has 28 checks; web structure 185/185. Focused Python 3.12 and full/hosted results are tracked in the [release record](../../business/ops/2026-09-05-win-now.md). Real public Lakeview source smoke returned `unknown_starter_availability:1:1` after 34 reads/27.66 seconds; no availability assumption was relaxed. No physical TestFlight or authenticated production forecast success is claimed.

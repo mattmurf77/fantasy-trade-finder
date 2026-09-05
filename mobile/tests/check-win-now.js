@@ -47,7 +47,15 @@ check('honest budget, evidence and supported-state surfaces', () => {
 // Run the mobile formatters too; transpiling removes their type-only import.
 const ts = require('typescript');
 const utility = {exports: {}};
+const scoringWarning = 'Rare special-teams/fumble bonuses are not projected.';
 vm.runInNewContext(ts.transpileModule(read('mobile/src/utils/winNow.ts'), {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020}}).outputText, {exports: utility.exports, Date});
+check('mobile receipt shows only server-supplied scoring warning', () => {
+  const receipt = utility.exports.sourceReceipt;
+  assert.ok(receipt({scoring_warning: scoringWarning}).endsWith(`\n${scoringWarning}`));
+  assert.equal(receipt({scoring_warning: null}), receipt());
+  assert.equal(receipt({scoring_exclusions: {fum_rec_td: 6}}), receipt());
+  assert.ok(!receipt().includes(scoringWarning));
+});
 check('mobile probability and pp formatting preserves zero and rejects missing data', () => {
   const u = utility.exports;
   assert.equal(u.probability(0), '0.0%'); assert.equal(u.probability(null), '—'); assert.equal(u.probability(1.1), '—');
@@ -114,6 +122,12 @@ const trade = name => ({scenario_id: name, partner_roster_id: 2, partner_usernam
   await reply(old, baseline);
   check('old league baseline cannot render', () => { assert.equal(old.options.signal.aborted, true); assert.doesNotMatch(text('win-now-controls'), /Projected standings/); });
   await click('Refresh season projections'); await reply(requests.at(-1), baseline);
+  check('web receipt invents no scoring warning when absent', () => assert.ok(!text('win-now-controls').includes(scoringWarning)));
+  await click('Refresh season projections');
+  await reply(requests.at(-1), {...baseline, meta: {...baseline.meta, scoring_exclusions: {fum_rec_td: 6}, scoring_warning: scoringWarning}});
+  check('web receipt displays server-supplied scoring warning', () => assert.ok(text('win-now-controls').includes(scoringWarning)));
+  await click('Refresh season projections'); await reply(requests.at(-1), baseline);
+  check('web receipt removes scoring warning when next snapshot omits it', () => assert.ok(!text('win-now-controls').includes(scoringWarning)));
   check('web standings use average finish in sorted order and mark beta', () => {
     const output = text('win-now-controls'); assert.match(output, /Avg finish \/ team/); assert.match(output, /1.12 Earlier finish/);
     assert.ok(output.indexOf('Earlier finish') < output.indexOf('Buyer'));

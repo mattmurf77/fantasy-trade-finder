@@ -239,8 +239,7 @@ def test_search_persists_viewer_objective_and_bounds_pending_work(harness):
 
 def test_durable_worker_resumes_queued_input_and_sanitizes_failures(harness, monkeypatch):
     job = store.create_job("alice", "league", {"actor": {"user_id": "alice"}, "params": {"objective": "wins"}})
-    assert store.claim_job(job["job_id"])
-    assert store.recover_interrupted_jobs() == 1
+    assert store.recover_interrupted_jobs() == 0
     seen = []
     def run(actor, params, fetch, *, job_id=None):
         seen.append((actor, params))
@@ -265,6 +264,7 @@ def test_completed_job_revalidates_actor_and_current_roster_before_serving(harne
     response = harness.client.post("/api/win-now/search", json=evaluate_body())
     job_id = response.json["job_id"]
     result = {"meta": bundle["meta"], "trades": [], "baseline": bundle["baseline"], "buyer_roster_id": 1}
+    assert store.claim_job(job_id)
     store.finish_job(job_id, result=result)
     response = harness.client.get(f"/api/win-now/jobs/{job_id}")
     assert response.status_code == 200 and response.json["status"] == "complete"
@@ -392,6 +392,7 @@ def test_stale_valuation_or_pick_revision_blocks_poll_and_decision(harness, monk
     bundle["meta"]["valuation_revision"] = current["valuation_revision"]
     if route == "poll":
         job_id = harness.client.post("/api/win-now/search", json=evaluate_body()).json["job_id"]
+        assert store.claim_job(job_id)
         store.finish_job(job_id, result={"meta": bundle["meta"], "trades": [],
                          "baseline": bundle["baseline"], "buyer_roster_id": 1})
         request_current = lambda: harness.client.get(f"/api/win-now/jobs/{job_id}")
@@ -529,3 +530,42 @@ def test_stale_session_cannot_recreate_deleted_account_evidence(harness, monkeyp
         assert conn.execute(select(db.win_now_jobs_table)).first() is None
         assert conn.execute(select(db.win_now_decisions_table)).first() is None
         assert len(conn.execute(select(db.win_now_scenarios_table)).all()) == 1
+
+
+@pytest.mark.parametrize("mode", ["FTF_BUILD_MODE", "FTF_TEST_MODE", None])
+def test_startup_suppresses_worker_in_build_and_test_processes(monkeypatch, mode):
+    monkeypatch.delenv("FTF_BUILD_MODE", raising=False)
+    monkeypatch.delenv("FTF_TEST_MODE", raising=False)
+    if mode:
+        monkeypatch.setenv(mode, "1")
+    calls = []
+    monkeypatch.setattr(store, "recover_interrupted_jobs", lambda: calls.append("expire"))
+    monkeypatch.setattr(store, "pending_jobs", lambda limit: calls.append(("pending", limit)) or [{}])
+    fetch = object()
+    monkeypatch.setattr(service, "wake_worker", lambda actual: calls.append(("wake", actual)))
+    service.start_worker_on_startup(fetch)
+    assert calls == ([] if mode else ["expire", ("pending", 1), ("wake", fetch)])
+
+
+def test_cache_bake_sets_build_mode_without_real_dependencies_or_network(tmp_path, monkeypatch):
+    import os
+    from pathlib import Path
+    import subprocess
+    repo = Path(__file__).resolve().parents[2]
+    commands = tmp_path / "bin"
+    commands.mkdir()
+    for name, script in {
+        "pip": "#!/bin/sh\nexit 0\n",
+        "python": '#!/bin/sh\nprintf "%s" "$FTF_BUILD_MODE" > "$BUILD_FLAG_CAPTURE"\n',
+    }.items():
+        path = commands / name
+        path.write_text(script)
+        path.chmod(0o755)
+    flag_file = tmp_path / "flag"
+    monkeypatch.delenv("FTF_BUILD_MODE", raising=False)
+    monkeypatch.setenv("BUILD_FLAG_CAPTURE", str(flag_file))
+    monkeypatch.setenv("PATH", str(commands) + os.pathsep + os.environ["PATH"])
+    completed = subprocess.run(["bash", str(repo / "build.sh")], cwd=tmp_path,
+                               capture_output=True, text=True, timeout=10)
+    assert completed.returncode == 0, completed.stderr
+    assert flag_file.read_text() == "1"

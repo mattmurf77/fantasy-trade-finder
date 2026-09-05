@@ -25,7 +25,8 @@
   const receipt = meta => {
     const date = meta?.as_of && Number.isFinite(Date.parse(meta.as_of)) ? new Date(meta.as_of).toLocaleString() : 'timestamp unavailable';
     const source = meta?.source === 'sleeper_weekly_experimental' ? 'Sleeper weekly projections' : meta?.source || 'Source unavailable';
-    return `${meta?.calibrated === true ? 'Calibrated model' : 'Uncalibrated beta'} · Intervals describe Monte Carlo sampling only; projection/model uncertainty is excluded.\n${source} · ${date} · Coverage ${finite(meta?.coverage) ? pct(meta.coverage) : 'unavailable'}`;
+    const warning = meta?.scoring_warning ? `\n${meta.scoring_warning}` : '';
+    return `${meta?.calibrated === true ? 'Calibrated model' : 'Uncalibrated beta'} · Intervals describe Monte Carlo sampling only; projection/model uncertainty is excluded.\n${source} · ${date} · Coverage ${finite(meta?.coverage) ? pct(meta.coverage) : 'unavailable'}${warning}`;
   };
   const enabled = () => active && !!context.leagueId() && flag('outlook.season_projections');
   const validNumber = (value, min, max) => value.trim() !== '' && Number.isFinite(Number(value)) && Number(value) >= min && Number(value) <= max;

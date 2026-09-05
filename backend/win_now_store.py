@@ -117,30 +117,42 @@ def pending_jobs(limit: int = 8) -> list[dict]:
 
 
 def recover_interrupted_jobs() -> int:
-    """Called once at process startup; committed input survives worker death."""
+    """Expire abandoned work without stealing another container's live job.
+
+    Startup can overlap a rolling deploy. With no worker ownership/heartbeat,
+    an unexpired running row may still be active and must never be requeued.
+    Its existing expiry bounds the wait after a crash; the user can then retry.
+    Queued rows remain eligible for the ordinary atomic claim path.
+    """
     t = db.win_now_jobs_table
+    now = utc_now()
     with db.engine.begin() as conn:
-        result = conn.execute(update(t).where(t.c.status == "running")
-                              .values(status="queued", updated_at=utc_now()))
+        result = conn.execute(update(t).where(t.c.status.in_(("queued", "running")), t.c.expires_at <= now)
+                              .values(status="failed", reason="job_expired", updated_at=now))
     return result.rowcount
 
 
 def claim_job(job_id: str) -> bool:
     t = db.win_now_jobs_table
     with db.engine.begin() as conn:
-        result = conn.execute(update(t).where(t.c.job_id == job_id, t.c.status == "queued")
+        result = conn.execute(update(t).where(t.c.job_id == job_id, t.c.status == "queued",
+                                              t.c.expires_at > utc_now())
                               .values(status="running", updated_at=utc_now()))
     return result.rowcount == 1
 
 
 def finish_job(job_id: str, result: dict | None = None, reason: str | None = None) -> None:
+    # A delayed worker cannot revive deleted, failed or expired work, even if
+    # another container performs expiry while the search is still computing.
     t = db.win_now_jobs_table
-    values = {"status": "failed" if reason else "complete", "updated_at": utc_now(),
+    now = utc_now()
+    values = {"status": "failed" if reason else "complete", "updated_at": now,
               "reason": reason, "result_json": dumps(result) if result is not None else None}
     if result and result.get("meta", {}).get("expires_at"):
         values["expires_at"] = result["meta"]["expires_at"]
     with db.engine.begin() as conn:
-        conn.execute(update(t).where(t.c.job_id == job_id).values(**values))
+        conn.execute(update(t).where(t.c.job_id == job_id, t.c.status == "running",
+                                     t.c.expires_at > now).values(**values))
 
 
 def save_scenario(user_id: str, league_id: str, objective: str,

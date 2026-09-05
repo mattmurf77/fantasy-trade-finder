@@ -29,6 +29,41 @@ POSITION_BONUSES = {"bonus_rec_rb": ("RB", "rec"), "bonus_rec_wr": ("WR", "rec")
                     "bonus_rec_te": ("TE", "rec"), "bonus_rush_td_qb": ("QB", "rush_td")}
 
 
+# Sleeper retains these team-defense and kicker defaults in offense-only leagues.
+# Finite lists deliberately exclude player special teams (st_*), miscellaneous
+# fum_rec_td, and IDP: defensive events can also be credited to offensive players.
+# Categories: https://support.sleeper.com/en/articles/3998131-what-scoring-options-are-available
+KICKER_SCORING_KEYS = frozenset("""
+fgm fgm_0_19 fgm_20_29 fgm_30_39 fgm_40_49 fgm_50p fgm_yds fgm_yds_over_30
+fgmiss fgmiss_0_19 fgmiss_20_29 fgmiss_30_39 fgmiss_40_49 fgmiss_50p xpm xpmiss
+""".split())
+TEAM_DEFENSE_SCORING_KEYS = frozenset("""
+blk_kick def_td ff fum_rec int sack safe qb_hit sack_yd int_ret_yd fum_ret_yd
+tkl_loss tkl_ast tkl_solo tkl pass_def def_2pt def_4_and_stop
+pts_allow pts_allow_0 pts_allow_1_6 pts_allow_7_13 pts_allow_14_20
+pts_allow_21_27 pts_allow_28_34 pts_allow_35p
+yds_allow yds_allow_0_100 yds_allow_100_199 yds_allow_200_299 yds_allow_300_349
+yds_allow_350_399 yds_allow_400_449 yds_allow_450_499 yds_allow_500_549 yds_allow_550p
+def_st_td def_st_ff def_st_fum_rec def_st_tkl_solo def_pr_yd
+""".split())
+
+
+def normalize_scoring_for_slots(scoring_settings, roster_slots):
+    """Remove only known coefficients for absent kicker/team-defense slots.
+
+    Unknown, player special-teams, IDP and bonus rules survive for the scorer to
+    reject when its provider cannot model them. Never infer support from a prefix.
+    Lineup validation still rejects active K/DEF/IDP slots independently.
+    """
+    slots = set(roster_slots)
+    irrelevant = set()
+    if "K" not in slots:
+        irrelevant.update(KICKER_SCORING_KEYS)
+    if not slots.intersection({"DEF", "DST", "D/ST"}):
+        irrelevant.update(TEAM_DEFENSE_SCORING_KEYS)
+    return {key: value for key, value in scoring_settings.items() if key not in irrelevant}
+
+
 class ForecastValidationError(ValueError):
     """A forecast cannot support the requested scoring or horizon."""
 

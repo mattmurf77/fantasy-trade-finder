@@ -583,6 +583,8 @@ export type WinNowObjective = 'wins' | 'playoffs' | 'championship';
 export interface SeasonMeta {
   beta?: boolean;
   calibrated?: boolean;
+  scoring_exclusions?: Record<string, number>;
+  scoring_warning?: string | null;
   uncertainty?: string;
   snapshot_id?: string;
   as_of?: string;

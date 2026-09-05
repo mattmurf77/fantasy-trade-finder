@@ -20,6 +20,7 @@ from . import database as db
 from . import win_now_store as store
 from .feature_flags import is_enabled
 from .sleeper_roster import owns_roster
+from .season_forecasts import normalize_scoring_for_slots
 
 log = logging.getLogger(__name__)
 MODEL_VERSION = "win-now-season-v1-beta"
@@ -164,7 +165,8 @@ def load_league(actor, fetch):
     slots = [s for s in meta.get("roster_positions") or [] if s not in ("BN", "IR", "TAXI", "RESERVE")]
     deadline = int(settings.get("trade_deadline") or 0)
     league = {"league_id": league_id, "season": str(meta["season"]), "teams": teams,
-              "roster_slots": slots, "scoring_settings": meta["scoring_settings"],
+              "roster_slots": slots, "scoring_settings": normalize_scoring_for_slots(meta["scoring_settings"], slots),
+              "source_scoring_settings": copy.deepcopy(meta["scoring_settings"]),
               "schedule": schedule, "completed_weeks": completed,
               "regular_season_weeks": regular, "playoff_slots": playoff_slots,
               "num_byes": 2 ** rounds - playoff_slots, "num_divisions": int(settings.get("divisions") or 0),
@@ -210,6 +212,8 @@ def _forecast_batch(league, fetch, now):
 def load_bundle(actor, fetch):
     from .season_simulator import simulate_season
     league, buyer, meta = load_league(actor, fetch)
+    # Polling and decisions re-read source facts without projection transforms.
+    league_revision = store.identity(league)
     now = now_utc()
     forecasts = _forecast_batch(league, fetch, now)
     if not forecasts.get("supported", True):
@@ -243,6 +247,17 @@ def load_bundle(actor, fetch):
         raise Unavailable("stale_forecasts")
     expires = min(expires, captured + timedelta(seconds=SNAPSHOT_TTL_SECONDS))
     n_sims = max(256, min(4000, int(os.environ.get("FTF_SEASON_SIM_COUNT", "1000"))))
+    # Explicit beta approximation, not provider support or a zero event forecast.
+    # Preserve raw and effective rules in the immutable league/snapshot identity.
+    rare_player_events = {"st_ff", "st_fum_rec", "st_td", "fum_rec_td"}
+    supported_keys = set(forecasts.get("supported_scoring_keys", []))
+    exclusions = {key: value for key, value in league["scoring_settings"].items()
+                  if key in rare_player_events and key not in supported_keys
+                  and isinstance(value, (int, float)) and not isinstance(value, bool)
+                  and math.isfinite(value) and value != 0}
+    league["scoring_exclusions"] = exclusions
+    league["scoring_settings"] = {key: value for key, value in league["scoring_settings"].items()
+                                   if key not in exclusions}
     baseline = simulate_season(league, forecasts, n_sims=n_sims, seed=42)
     if not baseline.get("meta", {}).get("supported"):
         raise Unavailable((baseline.get("meta", {}).get("reasons") or ["model_unavailable"])[0])
@@ -259,8 +274,10 @@ def load_bundle(actor, fetch):
                 "model_version": MODEL_VERSION, "championship_available": is_enabled("outlook.championship_probabilities"),
                 "coverage": min(1, covered_rows / expected_rows) if expected_rows else None,
                 "quality": forecasts.get("quality", {}), "forecast_snapshot_id": forecasts["snapshot_id"],
-                "league_revision": store.identity(league),
-                "cutoff_basis": "source_game_date_or_kickoff", "beta": True}
+                "league_revision": league_revision,
+                "cutoff_basis": "source_game_date_or_kickoff", "beta": True,
+                "scoring_exclusions": exclusions,
+                "scoring_warning": "Rare special-teams/fumble bonuses are not projected." if exclusions else None}
     store.save_forecasts(forecasts)
     store.save_projection(sid, league["league_id"], forecasts["snapshot_id"],
                           {"league": league, "baseline": baseline}, now.isoformat(), expires.isoformat())
@@ -503,6 +520,7 @@ def run_search(actor, params, fetch, *, job_id=None):
 
 
 def process_pending(fetch):
+    store.expire_jobs()
     for job in store.pending_jobs():
         if not store.claim_job(job["job_id"]):
             continue
@@ -521,6 +539,15 @@ def process_pending(fetch):
             store.finish_job(job["job_id"], reason="generation_failed")
 
 
+def start_worker_on_startup(fetch):
+    """Resume queued work only in the serving process, never the cache bake."""
+    if os.environ.get("FTF_TEST_MODE") or os.environ.get("FTF_BUILD_MODE"):
+        return
+    store.recover_interrupted_jobs()
+    if store.pending_jobs(1):
+        wake_worker(fetch)
+
+
 def wake_worker(fetch):
     global _worker_running
     with _worker_lock:
@@ -530,7 +557,6 @@ def wake_worker(fetch):
     def work():
         global _worker_running
         try:
-            store.expire_jobs()
             store.prune_history()
             while True:
                 process_pending(fetch)

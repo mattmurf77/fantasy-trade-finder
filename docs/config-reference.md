@@ -1512,3 +1512,5 @@ Rollback: set `outlook.season_projections`, `trades.win_now` and `outlook.champi
 Known unused K/DEF coefficients are normalized only for absent slots; active K/DEF/IDP remains unsupported. The four explicitly disclosed rare player-event omissions and preserved source/effective scoring are detailed in [BUILD](plans/win-now/BUILD.md#release-scoring-boundaries--2026-09-05).
 
 [Source restrictions](integrations/sleeper.md#weekly-season-projection-feed) · [build status and calibration limits](plans/win-now/BUILD.md)
+
+`FTF_BUILD_MODE=1` is set only for the build-time player-cache import in `build.sh`; it suppresses Win Now worker startup. Do not set it on the serving process.

@@ -50,7 +50,7 @@ def test_projection_snapshot_reuses_exact_payload_without_rewriting(engine):
         store.save_projection(*changed)
 
 
-def test_jobs_survive_connection_replacement_claim_once_and_resume(engine, monkeypatch):
+def test_overlapping_startup_preserves_live_job_and_original_worker_completes(engine, monkeypatch):
     inputs = {"actor": {"user_id": "alice"}, "params": {"objective": "wins", "budget": 3}}
     job = store.create_job("alice", "league", inputs)
     assert store.get_job(job["job_id"], "bob") is None
@@ -64,11 +64,11 @@ def test_jobs_survive_connection_replacement_claim_once_and_resume(engine, monke
         loaded = store.get_job(job["job_id"], "alice")
         assert loaded["status"] == "running"
         assert json.loads(loaded["input_json"]) == inputs
-        assert store.recover_interrupted_jobs() == 1
         assert store.recover_interrupted_jobs() == 0
-        assert store.pending_jobs()[0]["job_id"] == job["job_id"]
-        assert store.claim_job(job["job_id"])
-        result = {"meta": {"expires_at": "2026-09-04T12:05:00Z"}, "trades": []}
+        assert store.get_job(job["job_id"], "alice") == loaded
+        assert store.pending_jobs() == []
+        assert not store.claim_job(job["job_id"])
+        result = {"meta": {"expires_at": job["expires_at"]}, "trades": []}
         store.finish_job(job["job_id"], result=result)
         done = store.get_job(job["job_id"], "alice")
         assert done["status"] == "complete"
@@ -118,6 +118,7 @@ def test_expired_queued_and_running_jobs_stop_consuming_capacity(engine):
     finished = store.create_job("alice", "league", {})
     fresh = store.create_job("alice", "league", {})
     store.claim_job(running["job_id"])
+    assert store.claim_job(finished["job_id"])
     store.finish_job(finished["job_id"], result={"trades": []})
     with engine.begin() as conn:
         conn.execute(update(db.win_now_jobs_table).where(db.win_now_jobs_table.c.job_id.in_(
@@ -195,3 +196,36 @@ def test_account_deletion_removes_personal_win_now_rows_and_blocks_delayed_write
                   lambda: store.save_decision("alice", scenario["scenario_id"], "like", require_user=True)]:
         with pytest.raises(ValueError, match="account_no_longer_available"):
             write()
+
+
+@pytest.mark.parametrize("recover_first", [False, True])
+def test_expired_running_job_cannot_be_revived_by_late_worker(engine, recover_first):
+    job = store.create_job("alice", "league", {}, require_user=True)
+    assert store.claim_job(job["job_id"])
+    with engine.begin() as conn:
+        conn.execute(update(db.win_now_jobs_table).where(db.win_now_jobs_table.c.job_id == job["job_id"])
+                     .values(expires_at="2020-01-01T00:00:00+00:00"))
+    if recover_first:
+        assert store.recover_interrupted_jobs() == 1
+        assert store.recover_interrupted_jobs() == 0
+    before = store.get_job(job["job_id"], "alice")
+    store.finish_job(job["job_id"], result={"meta": {"expires_at": "2099-01-01T00:00:00+00:00"}, "trades": []})
+    store.finish_job(job["job_id"], reason="generation_failed")
+    assert store.get_job(job["job_id"], "alice") == before
+    assert store.pending_jobs() == []
+    assert not store.claim_job(job["job_id"])
+    if recover_first:
+        assert before["status"] == "failed" and before["reason"] == "job_expired"
+
+
+@pytest.mark.parametrize("state", ["queued", "complete", "failed"])
+def test_finish_requires_running_job_and_preserves_terminal_results(engine, state):
+    job = store.create_job("alice", "league", {})
+    if state != "queued":
+        assert store.claim_job(job["job_id"])
+        store.finish_job(job["job_id"], result={"trades": []} if state == "complete" else None,
+                         reason="original_failure" if state == "failed" else None)
+    before = store.get_job(job["job_id"], "alice")
+    store.finish_job(job["job_id"], result={"trades": ["late"]})
+    assert store.get_job(job["job_id"], "alice") == before
+    assert before["status"] == state

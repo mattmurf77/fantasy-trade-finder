@@ -3,7 +3,7 @@ from copy import deepcopy
 import pytest
 
 from backend.season_forecasts import (ForecastValidationError, fetch_projection_snapshot,
-    import_projection_snapshot, score_stat_vector, snapshot_freshness)
+    import_projection_snapshot, normalize_scoring_for_slots, score_stat_vector, snapshot_freshness)
 
 CAPTURE = "2026-09-04T18:00:00Z"
 
@@ -206,3 +206,43 @@ def test_scoring_support_is_limited_to_verified_events_not_aggregate_or_threshol
     for key in ("pts_ppr", "adp_dd_ppr", "bonus_rec_yd_100", "bonus_pass_yd_300", "fgm", "idp_tkl"):
         with pytest.raises(ForecastValidationError, match="unsupported_scoring"):
             score_stat_vector({"positions": ["TE"], "stats": {"rec": 6}}, {key: 1})
+
+
+def test_inactive_sleeper_kicker_defense_defaults_do_not_block_offensive_scoring():
+    scoring = {"rec": 1, "rec_yd": .1, "rec_td": 6, "bonus_rec_te": .5,
+               "fum_lost": -2, "fgm_0_19": 3, "xpm": 1, "xpmiss": -1,
+               "pts_allow_0": 10, "def_td": 6, "def_st_td": 6,
+               "def_st_ff": 1, "def_st_fum_rec": 1, "fum_rec": 2,
+               "blk_kick": 2, "int": 2, "sack": 1, "safe": 2, "ff": 1}
+    original = deepcopy(scoring)
+    normalized = normalize_scoring_for_slots(scoring, ["QB", "RB", "WR", "TE", "FLEX", "BN"])
+    row = {"positions": ["TE"], "stats": {"rec": 6, "rec_yd": 70, "rec_td": 1, "fum_lost": 1}}
+    assert score_stat_vector(row, normalized) == 20
+    assert scoring == original
+
+
+@pytest.mark.parametrize("key", ["st_ff", "st_fum_rec", "st_td", "fum_rec_td",
+    "idp_tkl", "bonus_rec_yd_100", "def_new_rule", "fgm_new_rule", "unknown_offense"])
+def test_normalization_never_erases_unmodeled_player_events_or_unknown_rules(key):
+    row = {"positions": ["WR"], "stats": {"rec": 5}}
+    normalized = normalize_scoring_for_slots({"rec": 1, key: 1}, ["WR"])
+    assert normalized[key] == 1
+    with pytest.raises(ForecastValidationError, match=f"unsupported_scoring:{key}"):
+        score_stat_vector(row, normalized)
+    assert score_stat_vector(row, normalize_scoring_for_slots({"rec": 1, key: 0}, ["WR"])) == 5
+
+
+@pytest.mark.parametrize("slot,key", [("K", "fgm"), ("DEF", "def_td"), ("IDP_FLEX", "idp_tkl")])
+def test_active_unsupported_positions_keep_scoring_and_lineup_refusal(slot, key):
+    from backend.season_simulator import select_projected_lineup
+    normalized = normalize_scoring_for_slots({key: 1}, ["WR", slot])
+    assert normalized[key] == 1
+    with pytest.raises(ForecastValidationError, match="unsupported_roster_slots"):
+        select_projected_lineup([], ["WR", slot], {}, normalized)
+
+
+def test_offensive_return_and_fumble_vectors_are_not_discarded_as_defense():
+    scoring = {"def_fum_td": 6, "def_kr_td": 6, "def_kr_yd": .1, "pr_td": 6, "pr_yd": .1}
+    normalized = normalize_scoring_for_slots(scoring, ["WR"])
+    assert normalized == scoring
+    assert score_stat_vector({"positions": ["WR"], "stats": {"def_fum_td": 1, "def_kr_yd": 40}}, normalized) == 10

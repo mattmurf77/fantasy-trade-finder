@@ -30596,11 +30596,8 @@ _install_win_now(app, require_session=_require_initialized_session,
                  read_denial=_verified_read_denial, write_denial=_verified_write_denial,
                  active_format=_active_format, league_user_id=_league_user_id,
                  pool_provider=_get_universal_pool, fetch_json=_sleeper_get)
-if not os.environ.get("FTF_TEST_MODE"):
-    from . import win_now_store as _win_now_store, win_now_service as _win_now_service
-    _win_now_store.recover_interrupted_jobs()
-    if _win_now_store.pending_jobs(1):
-        _win_now_service.wake_worker(_sleeper_get)
+from . import win_now_service as _win_now_service
+_win_now_service.start_worker_on_startup(_sleeper_get)
 
 
 if __name__ == "__main__":

@@ -11,6 +11,17 @@
 
 ---
 
+## 2026-09-05 — Authorized Win Now beta release checks
+
+User accepted exploratory evidence and authorized shipping season, Win Now and championship beta; calibration is not claimed. Parent reviewed Astra scoring normalization/explicit rare-event omissions, canonical freshness fix, both client receipts and rolling-deploy job fences. Latest production main `0a8093fe` merged cleanly in code; docs resolved preserving both features.
+
+- Client release run: **93 commands passed** — TypeScript, all 91 `check-*.js` suites and testID lint. Win Now suite: **28 checks**. Web structural: **185/185**. No Maestro/native simulator (D-056).
+- Astra Python 3.12 reports: scoring/freshness **122 passed**, then deployment lifecycle **106 passed**. Parent final focused run: **144 passed in 1.95s** on Python 3.12.14. Full suite and hosted exact-head CI are in progress; [release record](../docs/business/ops/2026-09-05-win-now.md) records final outcomes.
+- Public real-source smoke: Lakeview 2026 loaded through production service code into a temporary local DB, 34 reads / 27.66 seconds, refused `unknown_starter_availability:1:1`. This verifies explicit source refusal, not forecast availability or authenticated production flow.
+- Render target and prior live commit `0a8093fe` verified; CRON_SECRET and DATABASE_URL are set. Mobile version 1.17.0 staged for new EAS build. Production activation, hosted CI, binary submission/processing and physical TestFlight are not claimed by these local checks.
+
+---
+
 ## 2026-09-04 — Operator-approved revised-input evaluation completed
 
 - User accepted available historical data for now and asked to run evaluator. Added explicit exploratory mode; strict default and production behavior unchanged.

@@ -461,3 +461,95 @@ def test_authenticated_api_normalizes_confidence_without_returning_private_board
 def test_api_policy_inputs_do_not_coerce_invalid_values(bad):
     with pytest.raises(ValueError):
         service.validate_params({"min_fairness": bad})
+
+
+def test_league_scoring_normalization_preserves_raw_metadata_and_player_rules():
+    actor, meta, _, _, fetch, _ = source_fixture()
+    meta["scoring_settings"].update(fgm_0_19=3, pts_allow_0=10, def_st_td=6,
+                                    bonus_rec_te=.5, st_ff=1, fum_rec_td=6,
+                                    unknown_offense=2)
+    league, _, raw = service.load_league(actor, fetch)
+    assert league["scoring_settings"] == {"rec": 1, "bonus_rec_te": .5,
+                                          "st_ff": 1, "fum_rec_td": 6, "unknown_offense": 2}
+    assert raw["scoring_settings"] == meta["scoring_settings"]
+    assert raw["scoring_settings"]["fgm_0_19"] == 3
+
+
+@pytest.mark.parametrize("provider_supports", [False, True])
+def test_rare_player_bonus_approximation_is_explicit_and_provider_aware(monkeypatch, provider_supports):
+    actor, fetch, snapshot, _ = forecast_bundle_seams(monkeypatch)
+    original_load = service.load_league
+    league, buyer, meta = original_load(actor, fetch)
+    rare = {"st_ff": 1, "st_fum_rec": 1, "st_td": 6, "fum_rec_td": 6}
+    league["scoring_settings"].update(rare)
+    league["source_scoring_settings"].update(rare)
+    snapshot["supported_scoring_keys"] = ["rec"] + (list(rare) if provider_supports else [])
+    source_snapshot = deepcopy(snapshot)
+    monkeypatch.setattr(service, "load_league", lambda *_: (deepcopy(league), buyer, deepcopy(meta)))
+    scored = []
+    def simulate(effective, *_args, **_kwargs):
+        scored.append(deepcopy(effective))
+        return {"meta": {"supported": True}, "teams": []}
+    monkeypatch.setattr(simulator, "simulate_season", simulate)
+    result = service.load_bundle(actor, fetch)
+    expected = {} if provider_supports else rare
+    assert result["meta"]["scoring_exclusions"] == expected
+    assert bool(result["meta"]["scoring_warning"]) is not provider_supports
+    assert scored[0]["scoring_settings"] == ({"rec": 1, **rare} if provider_supports else {"rec": 1})
+    assert scored[0]["source_scoring_settings"] == {"rec": 1, **rare}
+    assert result["forecasts"] == source_snapshot
+    first_id = result["meta"]["snapshot_id"]
+    league["source_scoring_settings"]["st_td"] = 9
+    assert service.load_bundle(actor, fetch)["meta"]["snapshot_id"] != first_id
+
+
+@pytest.mark.parametrize("rule", [{"unknown_offense": 2}, {"bonus_rec_yd_100": 3},
+                                  {"st_ff": float("nan")}, {"st_td": True}])
+def test_beta_approximation_does_not_hide_unknown_or_invalid_scoring(monkeypatch, rule):
+    from backend.season_forecasts import score_stat_vector
+    actor, fetch, _, _ = forecast_bundle_seams(monkeypatch)
+    league, buyer, meta = service.load_league(actor, fetch)
+    league["scoring_settings"].update(rule)
+    monkeypatch.setattr(service, "load_league", lambda *_: (deepcopy(league), buyer, deepcopy(meta)))
+    def simulate(effective, *_args, **_kwargs):
+        score_stat_vector({"positions": ["WR"], "stats": {"rec": 5}}, effective["scoring_settings"])
+    monkeypatch.setattr(simulator, "simulate_season", simulate)
+    # Nonfinite source coefficients may fail canonical JSON hashing first.
+    with pytest.raises(ValueError):
+        service.load_bundle(actor, fetch)
+
+
+@pytest.mark.parametrize("rare_rules", [{}, {"st_td": 6, "fum_rec_td": 6}])
+def test_completed_job_rechecks_source_revision_not_effective_projection_rules(monkeypatch, rare_rules):
+    from backend import win_now_api as api
+    actor, fetch, _, _ = forecast_bundle_seams(monkeypatch)
+    source_league, buyer, meta = service.load_league(actor, fetch)
+    source_league["scoring_settings"].update(rare_rules)
+    source_league["source_scoring_settings"].update(rare_rules)
+    monkeypatch.setattr(service, "load_league", lambda *_: (deepcopy(source_league), buyer, deepcopy(meta)))
+    bundle = service.load_bundle(actor, fetch)
+    bundle["meta"]["valuation_revision"] = "stable-values"
+    # The API builds this actor from the authenticated empty ranking/market pool.
+    current_actor = {**actor, "players": {}, "market_values": {}, "personal_values": {}, "confidence": {}}
+    result = {"meta": bundle["meta"], "baseline": bundle["baseline"], "buyer_roster_id": buyer}
+    job = {"league_id": "league", "expires_at": bundle["meta"]["expires_at"], "status": "complete",
+           "result_json": json.dumps(result),
+           "input_json": json.dumps({"actor": current_actor, "params": service.validate_params({})})}
+    monkeypatch.setattr(service.store, "get_job", lambda *_: deepcopy(job))
+    monkeypatch.setattr(api, "is_enabled", lambda _: True)
+    monkeypatch.setattr(db, "get_league_draft_context", lambda _: {"platform": "sleeper"})
+    monkeypatch.setattr(service, "build_context", lambda *_: {"valuation_revision": "stable-values"})
+    sess = {"user_id": actor["user_id"], "league": SimpleNamespace(league_id="league", platform="sleeper")}
+    app = Flask(__name__)
+    api.install(app, require_session=lambda: sess, read_denial=lambda _: None, write_denial=lambda _: None,
+                active_format=lambda _: actor["scoring_format"], league_user_id=lambda _: actor["league_user_id"],
+                pool_provider=lambda _: ([], {}), fetch_json=fetch)
+    client = app.test_client()
+    response = client.get("/api/win-now/jobs/completed")
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "complete"
+    assert bundle["meta"]["league_revision"] == service.store.identity(source_league)
+    # A real source scoring change still invalidates the completed result.
+    source_league["source_scoring_settings"]["rec"] = 2
+    changed = client.get("/api/win-now/jobs/completed").get_json()
+    assert changed["reason"] == "league_inputs_changed"
