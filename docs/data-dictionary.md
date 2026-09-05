@@ -55,6 +55,8 @@ Source of truth: `backend/database.py`. Keep this file in sync when adding/chang
 - [`deck_fatigue_resets`](#deck_fatigue_resets)
 - [`deck_replenish_log`](#deck_replenish_log)
 - [`bad_trade_flags`](#bad_trade_flags)
+- [`trade_proposals`](#trade_proposals)
+- [`trade_policy_shadow`](#trade_policy_shadow)
 
 **Players / Drafts / Picks**
 
@@ -210,6 +212,8 @@ High-level trade card decisions — audit trail.
 | `receive_player_ids` | JSON text | array |
 | `decision` | str | `'like'` / `'pass'` |
 | `created_at` | str | |
+| `impression_id` | str, nullable | The `deck_impressions` row this decision came from, **validated for ownership** by `server._owned_impression_id` before it is written — a client-supplied id is untrusted input and an unvalidated one would let a client attribute its decision to somebody else's card. NULL while `trade.valuation_telemetry` is off and on every pre-2026-09-04 row. This table is the older audit log and had no reliable impression key, which is exactly why a mutual match could not name the two impressions that produced it. |
+| `trade_concept_id` | str, nullable | Canonical, perspective-independent id for the package (`trade_policy.trade_concept_id`). Same nullability rules. |
 | `retracted_at` | str, nullable | ISO UTC; NULL = live like (#318 awaiting-dismiss). Set (never cleared) by `POST /api/trades/awaiting/dismiss` on every like row sharing the dismissed trade's `(league_id, give-set, receive-set)` key. Retracted rows are invisible to `load_awaiting_trades` / `load_recent_league_likes` / `check_for_match`, but stay visible to swipe-Elo history, impressions joins and the past-decisions deck suppression (deliberate). A re-like writes a fresh NULL row — the revive path. Additive boot migration; existing rows backfill NULL. |
 
 Indexes: `ix_trade_dec_user_league_decision` on `(user_id, league_id, decision)` — `check_for_match` fires on every "like" swipe filtering on these three columns; also serves the write-time replay guard below.
@@ -299,6 +303,15 @@ Latest Elo per (user, league, player). Replaced atomically (delete + insert) on 
 | `elo` | float | |
 | `scoring_format` | str | `'1qb_ppr'` / `'sf_tep'` (null = legacy) |
 | `updated_at` | str | |
+| `comparison_count` | int, nullable | Pairwise/trio votes behind this player's Elo, from `RankingService.comparison_counts()` at publish time. NULL on every pre-2026-09-04 row and on any publish whose confidence read failed. |
+| `confidence_weight` | float, nullable | The weight `w` in `effective_elo = w·personal + (1−w)·consensus`, computed by `trade_policy.confidence_weight_for` and **stored at write time** rather than derived on read — so a later change to `shrink_pseudocount` cannot retroactively rewrite what a past board was worth. |
+| `confidence_source` | str, nullable | `votes` / `seed` / `cross_format` / `explicit`. Decided **per player**: a player in `RankingService.placement_bands()` was explicitly placed (tier save, drag-reorder, anchor) and reads `explicit`; everyone else rides their vote count. The whole snapshot reads `cross_format` on the copy-from-format publish. NULL reads as **legacy ⇒ lowest confidence**. |
+
+**Why these three exist.** The requesting user's live `RankingService` has comparison counts, so `trade_service._shrink_user_elo` could shrink *their* board toward consensus. A league-mate's published snapshot carried only `elo`, so it was used **raw** — the engine trusted a stranger's board more than the owner's own. That asymmetry was measured at 86.9% of boarded-pair cards existing in only one direction (`docs/reviews/2026-08-19-armb-audit-claims-3-4.md` §3) and was called "structural, not tunable" because no knob could close it. These columns are what make symmetric shrinkage possible; `LeagueMember.comparison_counts` / `.confidence_weights` / `.confidence_source` carry them into generation.
+
+**Deliberately not backfilled.** The evidence behind a historical row no longer exists, and a fabricated count would read as trust the user never gave. `trade_policy.shrink_board` treats an absent weight as `0.0` — price that player at consensus — which is the fail-safe direction and exactly what every legacy row gets.
+
+Written by all seven `upsert_member_rankings` call sites in `server.py` (trio/pair submit, tiers save, anchor, reorder, paste import, copy-from-format, `/api/rankings/submit`) via `server._ranking_confidence` + `_confidence_payload`.
 
 Indexes: `ix_member_rankings_league_fmt_user` on `(league_id, scoring_format, user_id)` — `load_member_rankings` filters by `(league_id, scoring_format)` on every `/api/trades/generate`; trailing `user_id` covers per-user replace.
 
@@ -319,6 +332,16 @@ Created when both users like mirrored trades. Lifecycle: `pending → accepted |
 | `user_a_decided_at`, `user_b_decided_at` | str | |
 | `user_a_dismissed`, `user_b_dismissed` | int | 0/1/null — per-user inbox archive. Set by `dismiss_match`; `load_matches` hides the match from that user only. ELO-neutral (distinct from a decline). |
 | `matched_at` | str | |
+| `trade_concept_id` | str, nullable | The canonical concept both users' impressions share. This is what makes a match joinable to the two cards that produced it — `trade_hash` is viewer-relative and cannot. |
+| `user_a_impression_id`, `user_b_impression_id` | str, nullable | Each manager's own impression. **The source of truth**; the timestamps below are denormalized audit fields, so a match stays readable even if event-query semantics later change. |
+| `first_like_at` | str, nullable | When user **B** liked the mirror — earlier, by definition: their like is what made this match possible. |
+| `second_like_at` | str, nullable | When user **A** liked, i.e. `matched_at`. |
+| `match_latency_seconds` | float, nullable | `second_like_at − first_like_at`, clamped at 0. A malformed `first_like_at` yields NULL rather than raising — the match is the product event and must not fail on an audit field. |
+| `match_valuation_json` | text, nullable | A **third** valuation snapshot (`trade_policy` schema v1, `snapshot_stage: "match"`): the unchanged package re-evaluated under the roster / consensus / board state at match time. Answers *"was the concept still valid when mutual interest formed?"* and must never overwrite either user's serve-time snapshot. |
+
+**Why the timing columns exist.** A mutual trade is a **sequence**, not one simultaneous observation: A is served the concept → views → likes → the mirror becomes eligible for B → B may see it minutes or days later. Consensus values, rosters, personal boards and even the active policy can change in between. Evaluating both users against whatever state an analyst finds later is how "A liked and B did not" gets misread as a rejection when B was simply never shown the card. The three snapshots (A's impression, B's impression, this row) answer three different questions.
+
+All seven are NULL on legacy matches and while `trade.valuation_telemetry` is off — which is the honest answer, since those matches genuinely have no impression-level provenance.
 
 Indexes: `ix_trade_matches_user_a_league`, `ix_trade_matches_user_b_league` for cross-league `/api/trades/matches/all` scans.
 
@@ -404,6 +427,47 @@ TikTok-discovery **F1 signal spine** (flag `deck.signal_v2`, `docs/plans/tiktok-
 
 **Job-dict `negmem_note` (not a column).** The same jobs also write a `negmem_note` onto the in-memory `_trade_jobs` progress dict — `{degraded, build_ms, cells}` — following the `suppression_note` precedent. It is an operator-visible progress note, not part of the deck contract and not persisted anywhere; the C1 byte-identity claim covers cards, scores, order and rows, and deliberately excludes this key. Absent when no map was built.
 
+### Personal-market policy columns (2026-09-04)
+
+Scope block: `docs/plans/personal-market-policy/scope.md`. All four are NULL while `trade.valuation_telemetry` is off and on every pre-change row; additive via `_migrate_db`, **no backfill**.
+
+| Column | Type | Notes |
+|---|---|---|
+| `valuation_json` | text, nullable | The frozen **serve-time** valuation snapshot (`trade_policy.build_valuation_snapshot`, `schema_version: 1`). |
+| `trade_concept_id` | str, nullable | Canonical, **perspective-independent** id for the package. |
+| `policy_variant` | str, nullable | `legacy` / `personal_market_v1` — which eligibility/ranking/deck POLICY governed the job. |
+| `source_like_impression_id` | str, nullable | The counterparty's impression, set **only** on a card injected because they had already liked the mirror. |
+
+**`valuation_json` is an audit/replay record, not a replacement for the scalar columns beside it.** `fairness_score`, `base_score` and friends stay exactly where they are. What this adds is the half they cannot answer: the raw *and* effective values each manager's **own** board put on each side, the confidence behind them, the floors that applied, and a per-asset breakdown. `member_rankings` is replace-in-place, so without this the values behind a served card become unrecoverable the moment either manager re-ranks. Written for **served, shadow and ghost** rows alike.
+
+Shape (v1) — direction semantics are viewer-centered for **both** boards, i.e. `gives_*` always names the card's give side, and the partner *gives the card's receive side*:
+
+```
+{schema_version, snapshot_stage, scoring_format, basis,
+ market:        {viewer_gives, viewer_receives, ratio, consensus_asof},
+ viewer_board:  {source, gives_raw, receives_raw, gives_effective,
+                 receives_effective, effective_surplus, gain_pct,
+                 package_confidence, board_updated_at},
+ partner_board: {…same…},
+ mutual:        {personal_opportunity, harmonic_effective_surplus,
+                 trade_confidence},
+ policy:        {policy_version, model_arm, value_basis, requested_floor,
+                 policy_floor, effective_floor, eligibility_lane, eligible,
+                 rejection_reason, relaxed, value_model_version},
+ assets:        {give: [{id, market_value, viewer_raw_value,
+                         viewer_effective_value, viewer_confidence,
+                         partner_raw_value, partner_effective_value,
+                         partner_confidence}], receive: […]}}
+```
+
+`raw` is the personal board **before** confidence shrinkage; `effective` is after shrinkage and the D-085 placement clamp. Package totals are the values the gate actually used (package curve + waiver-slot cost), never simple asset sums. When the opponent has no real board, `partner_board.source` is `"consensus"` and every personal/confidence field is **null** — a fabricated board would make a one-board card indistinguishable from a proven mutual win in every later query.
+
+**Integrity rule enforced at write time:** the snapshot's asset ids and directions must match the row's `assets_json`. A mismatch increments `trade_policy.HEALTH["asset_mismatches"]` and leaves the column NULL — a snapshot built from a different package than the one served is worse than no snapshot.
+
+**`trade_concept_id` does not replace `trade_hash`.** `trade_hash` is viewer-relative — A's card and B's mirror hash differently — which is why it cannot join the two halves of a mutual match. The concept id sorts the two participants and attributes each asset side to the sorted user, so both perspectives produce the same string; league and both participants are inside the hash so identical packages between different managers never collide. `trade_hash` keeps driving viewer-relative fatigue and dedup. The two answer different questions.
+
+**`policy_variant` is orthogonal to `model_arm`.** `model_arm` says which *generator* produced the card (`current` / `challenger` / `gen_v2` / …); `policy_variant` says which *policy* governed the job. Recording them separately is what lets a result be read overall **and** per generator. A deck never mixes variants.
+
 Indexes: `ix_deck_impressions_user_league` on `(user_id, league_id)`; `ix_deck_impressions_job` on `deck_job_id`.
 
 ---
@@ -463,6 +527,61 @@ Indexes: `ix_trade_pass_reasons_user_league` on `(user_id, league_id)`.
 
 ---
 
+## `trade_proposals`
+
+The durable record of a **confirmed provider send**. Scope block: `docs/plans/personal-market-policy/scope.md`. Written by `server._record_trade_proposal` from all three send routes (`/api/trades/propose`, `…/propose-mfl`, `…/propose-espn`) **after** the provider confirms success. Inert while `trade.valuation_telemetry` is off.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | |
+| `proposal_event_id` | str, UNIQUE | Minted **before** the provider call. This is the idempotency key that survives the dangerous case: the provider succeeded, the response was lost, the client retried and the send went out twice. A key generated after success would be fresh on every retry. |
+| `impression_id` | str, nullable | The originating card, when there was one. |
+| `match_id` | int, nullable | The originating match, when there was one. |
+| `user_id`, `league_id` | str | |
+| `target_user_id` | str, nullable | |
+| `provider` | str | `sleeper` / `espn` / `mfl` |
+| `provider_transaction_id` | str, nullable | The second idempotency key, deduped in `save_trade_proposal` by select-then-insert rather than a partial unique index — most sends legitimately have none, so the constraint would have to be `UNIQUE … WHERE NOT NULL`, and `_migrate_db` cannot add indexes to existing tables, so it would exist on fresh databases and silently not in production. |
+| `source` | str | `deck` / `match` / `calculator` |
+| `give_asset_ids`, `receive_asset_ids` | JSON text | The **final** package actually sent. |
+| `origin_trade_hash` | str, nullable | The originating impression's `trade_hash`. |
+| `final_trade_hash` | str | Hash of the package that was sent. |
+| `edited_from_source` | int | 0/1 — `origin_trade_hash != final_trade_hash`. |
+| `valuation_json` | text, nullable | `trade_policy` schema v1 with `snapshot_stage: "proposal"`, **recalculated from the final package**, never copied from the impression. Carries `policy.policy_eligible`, `policy.origin_impression_id`, `policy.provider`, `policy.source`. |
+| `proposed_at` | str | server UTC |
+
+**Two moments, deliberately not conflated.** `deck_impressions.valuation_json` freezes what the engine believed at **suggestion** time. This table freezes what is true at **proposal** time — routinely different, because the user may have swapped an asset, dropped a piece, added a sweetener or rebuilt the trade in the calculator. Treating the first as the truth for the second mis-attributes every edited send.
+
+**`policy_eligible` is telemetry, not a gate.** A user may deliberately send a trade the finder would never generate; that is recorded with its reason and **not blocked**. Blocking manual sends would be a separate product decision and this change does not make it.
+
+Only a confirmed success writes here — an attempted or failed send is not a proposal. A successful send whose *snapshot* failed still writes the row (with NULL `valuation_json`) and increments `trade_policy.HEALTH["snapshot_failures"]`; losing the row would understate the one metric that matters most.
+
+Indexes: `ix_trade_proposals_user_league` on `(user_id, league_id)`; `ix_trade_proposals_impression` on `impression_id`.
+
+---
+
+## `trade_policy_shadow`
+
+Candidates the **treatment policy rejected**, plus liked mirrors that were never eligible to serve. Written by `server._evaluate_deck_policy` and `_mirror_skip_rows`; capped per deck job by `model_config.policy_shadow_log_cap` (default 40).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | |
+| `deck_job_id`, `user_id`, `league_id` | str | |
+| `trade_hash`, `trade_concept_id` | str, nullable | |
+| `model_arm` | str, nullable | The generator that produced the rejected candidate — this is why arm and policy are kept orthogonal. |
+| `policy_variant` | str | |
+| `eligible` | int | Did the card pass the policy **gate**? `0` for a floor or mutual-gain rejection and for every mirror-skip row; **`1` for a card that passed the gate but lost its slot to deck composition** (`reason` = `deck_quota` / `core_share_shortfall`). Those two states are genuinely different — one is "the policy said no", the other is "the policy said yes and the deck was full" — and collapsing them would make the quota look like a quality filter. |
+| `reason` | str | `below_absolute_floor` / `below_effective_floor` / `no_two_sided_gain` / `empty_package` / `deck_quota` / `core_share_shortfall` / `roster_changed` / `already_resolved` / `market_drift` / `expired` |
+| `market_ratio`, `policy_floor`, `effective_floor` | float | |
+| `personal_opportunity`, `trade_confidence` | float, nullable | |
+| `lane` | str | |
+| `created_at` | str | |
+
+**Why this table exists.** Without it the treatment's discarded candidates vanish from the denominator: every card it served passed its own gate, because the ones it killed were never written down. The policy would look artificially precise no matter how much supply it destroyed.
+
+**The mirror-skip rows are the other half.** A liked mirror that is no longer actionable (the counterparty no longer rosters what they offered), or that the viewer already decided, produces no impression and no outcome — so before this table every funnel query read the missing second like as a **rejection by the counterparty**. It is not one; they were never shown the card. `roster_changed` / `already_resolved` make "never eligible" and "passed" distinguishable states.
+
+---
 ## `deck_candidate_sets`
 
 **suggestion.telemetry** counterfactual layer (`docs/plans/matchmaking-engine/telemetry-scope.md`, D-scope-6) — one row per completed generation job **while the flag is on**: the full action set the serving policy chose from at ordering time — the post-gate pre-withhold deck (served + ghost cards) plus the untrimmed F7 exploration over-generation pool. Written by `server._log_deck_signal_impressions` (→ `save_deck_candidate_set`); soft-referenced from `deck_impressions.candidate_set_id` (no FK, house style). This is the "way to reconstruct the candidate set" the OPE literature requires — impossible to backfill, hence logged from day one.
@@ -1504,3 +1623,13 @@ Daily rollup per `(experiment_key, version, variant, metric_key, window)`: `n` (
 
 ### `analytics_segments`
 Saved analytics cohorts (Fullstory-style Segments). `id` PK, `name` (unique), `definition_json`, `created_at`. The definition is a **closed grammar** (`did` / `did_not` / `platform` / `min_events`) evaluated live per query window by `analytics_queries.evaluate_segment` — every operand maps to a code-controlled SQL fragment, so a segment can never inject SQL. Unknown ops/events/platforms raise `BadParam` → 400.
+
+### Roster evidence in existing telemetry (2026-09-04)
+
+`deck_impressions.features_json.roster_evaluation` freezes schema-v1 both-team inputs/results whenever roster shadow or enforcement computes them. Null means evaluation unavailable; `status: unknown` names incomplete inputs; neither is a pass. Values are consensus dynasty proxies. `schedule_coverage: unknown` explicitly excludes weekly/bye guarantees. `trade_policy_shadow` also holds capped roster rejections: `lane=roster_check`, reason prefixed `roster_blocked:` or `roster_unknown:`, final trade hash/concept and generator arm. Market-only numeric columns remain NULL on those rows. Keep these rows separate from market-floor rejection metrics. Job counts/reasons are ephemeral and are not a durable denominator by themselves. No new tables/columns.
+
+### Whole-team diagnostics in deck_impressions.features_json
+
+`roster_evaluation.teams[team_id].outlook_utility` freezes `normalized_gain`, `confidence`, `basis`, `ready_for_enforcement`, outlook source, component before/after/delta/scale and uncertainties. Production values are null when no fresh point source exists. Dynasty players and picks are one disjoint roster total; depth is diagnostic, not an additional reward.
+
+`roster_evaluation.mutual_benefit` records each side's reported versus usable gain, readiness, preference source, weakest gain, total, threshold values and eligibility reasons. These are utility/evidence measures, not acceptance probabilities. Existing `trade_policy_shadow` uses lane `mutual_benefit` for structurally safe packages whose benefit remains unknown or insufficient; `roster_check` retains structural failures. The per-job cap still applies. Generator model_arm is preserved. No additional table or column is added for these nested diagnostics.

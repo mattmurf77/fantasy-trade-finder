@@ -11,11 +11,13 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-071 | Final policy checks can be bypassed by provisional worker snapshots | Trade engine / progressive publication |
 | G-066 | Arm C (`trade_gen_v2`) hardcodes `basis="divergence"` on every card — its consensus-path cards are mis-stamped, so any like-rate split by basis is wrong for that arm | Bake-off / analytics / basis stamp |
 | G-065 | The gap-distribution harness disagrees with itself by 3 cards under `PYTHONHASHSEED=0` — the dominant non-determinism is WALL CLOCK (1.0 s per-pair deadline + sweep budget), not hash order; and the same deadlines mean prod decks depend on machine load | Trade engine / measurement / determinism |
 | G-064 | A bake-off serving knob documented as DARK in four places reads its own inline fallback as `1.0`, so a missing DB row means SERVING — the seed, the `_DEFAULT_CFG`, the docstring and a guardrail comment all say 0.0 | Trade engine / bake-off / config defaults |
 | G-063 | `sess["league"].members` answers NO when you ask "is the CALLER in this league" — it excludes them by design. 4th bite; 3 of the 4 were hidden by a fixture that put the caller in `members` | Backend / session league / test fixtures |
 | G-062 | Flipping one flag in `config/features.json` breaks three test fixtures; the chain reveals one link at a time | Backend / feature flags / test fixtures |
+| G-070 | `fairness_score` on a likes-you SYNTHESIZED card is a raw-Elo ratio, every other card's is a package-VALUE ratio — the two are not comparable and the Elo one flatters a lopsided card (0.851 vs a true 0.29) | Trade engine / likes-you / analytics |
 | G-069 | A generic 401 "session expired, reconnect" handler LOOPS FOREVER when its own recovery path needs a session — entry users hit hundreds of 401s/sec; the read must bypass the shared fetch wrapper | 2026-09-03 |
 | G-068 | A missing request header does not land NULL — it lands the DEFAULT, and the default is another client's name. Web events stamped `source:"mobile"` | Analytics / ingest defaults |
 | G-067 | Web analytics emitted zero events for months: a fire-and-forget flag fetch vs a synchronous `boot()` | Web analytics / flag races |
@@ -86,6 +88,14 @@
 Full entries below — grep the ID. Read the entry before acting; this index is a lookup aid, not the content.
 
 ---
+
+## 2026-09-04
+
+### G-071 — A final policy gate can be bypassed by provisional card publication
+- **Symptom:** a trade rejected by the final market/roster check can already have been shown and swiped through an intermediate worker snapshot.
+- **Cause:** per-opponent callbacks and mutation layers publish independently of the final gate.
+- **Fix:** keep progress counters live but guard every provisional card write with `final_checks_pending`; publish only after enforcing checks. Enforced errors produce no unchecked cards. The AST guard in `test_trade_roster_wiring.py` covers every worker publication before the roster gate.
+- **Related verification:** with all flags off, do not add harmless job keys either; the byte-identity golden covers job shape. Freeze code while source-inspection tests run: edits after module import can make `inspect.getsource` read stale line offsets.
 
 ## 2026-05-21
 
@@ -640,7 +650,25 @@ Number sequentially. Don't delete entries even if "obviously fixed by now" — f
 - **Never fix it by appending the caller to `sess["league"].members`.** That list is shared session state read by the trade engine, the mock draft, power rankings and the likes-you injector, all of which assume the exclusion; a caller left in it is a phantom extra team (the same reason `league_members` keys on the roster's canonical `owner_id` — ADR-012, `backend/CLAUDE.md` § Identity).
 - **Prevention:** any test covering a surface that asks "is the caller in this league" runs against a **production-shape fixture with the caller absent from `members` and their roster only on `sess["user_roster"]`** — and is sabotage-proven red against a revert. Keeping a caller-present fixture too is fine; making it the *only* one is what caused all three misses. `test_calc_trade_queue.py` now carries both (`harness` / `prod_harness`). Note the exclusion is **per-perspective**: the counterparty's own session includes the caller, so a mirror/injection test must build the opponent's league explicitly rather than reusing the caller's object.
 
+- **2026-09-04 roster-evaluator follow-up:** `trade_roster_adapter.build_context` adds the canonical viewer independently of `League.members`, using the raw provider roster. Its regression fixture excludes the viewer from members, includes a co-owner account, and prices holdings outside the generation cap. Do not restore a fixture that requires the caller in members.
+
 ## 2026-09-03
+
+### G-070 — `fairness_score` is on TWO different scales depending on which code path built the card, and the wrong one flatters the most lopsided cards
+- **Symptom, plainly:** a served card carries `features_json.fairness_score = 0.851` while its own `give_value` / `receive_value` on the same row read **704.7 / 2459.6** — the viewer is receiving 3.5× what they give. The card's value bar is honest; its fairness number is not, and nothing on the row says they are measured differently. Found 2026-09-04 by a new assertion comparing the frozen `valuation_json.market.ratio` against the stored scalar: seven of eight cards agreed to four decimals, the eighth was off by 0.56.
+- **Cause — two formulas, one column.** Every ordinary path (v2 `_fairness`, v3 `_fairness_v3`, and the manual calculator) prices fairness as `min/max` of **`package_value_v2` in VALUE space**. The likes-you **synthesized** card does not (`server._inject_likes_you_cards_impl`):
+
+  ```python
+  give_val = sum(seed_map.get(pid, 1500.0) for pid in my_give)   # raw ELO
+  recv_val = sum(seed_map.get(pid, 1500.0) for pid in my_recv)   # raw ELO
+  fairness = round(min(give_val, recv_val) / max(give_val, recv_val), 3)
+  ```
+
+  Raw Elo is a **log** scale (`elo_to_value` is exponential in Elo, `elo_value_k` 0.005), so summed-Elo ratios compress toward 1.0 and a 3.5× value gap reads as 0.85. The code comment beside it already says *"fairness_score above stays on its raw-Elo basis"* — the divergence is known locally, but the column is read globally.
+- **Which cards are affected:** only cards the injector **synthesizes** (`likes_you = True`, `basis = "consensus"`, `mismatch_score = 0.0`, `trade_id` prefix `likesyou_`). An organic card the injector merely *boosted* keeps the fairness its generator computed and is fine. `give_value` / `receive_value` on synthesized cards are correct — they come from `_likes_you_package_delta`, which does use the value space. Only `fairness_score` is on the wrong scale.
+- **Why it matters:** `fairness_score` is serialized to clients (the web meter renders it as a percent), it rides `features_json` on every impression, and it is the field any retrospective "how fair were our cards?" analysis reaches for. Mixing scales silently understates exactly the cards most likely to look insulting — the D-096 likes-you quality gates exist because mirrored likes were tilting against the receiving user, and this is the number that would have shown it.
+- **Not fixed here, deliberately.** Correcting it changes a serialized value on a live surface and is out of scope for a dark telemetry change; the personal-market policy computes its own ratio from `_consensus_packages` and is unaffected. Under `trade.personal_market_policy_v1` this card is judged at **0.29** and rejected — which is the right outcome and an independent argument for the change.
+- **Prevention / workaround:** until it is fixed, exclude `likes_you AND basis='consensus' AND mismatch_score=0` rows from any `fairness_score` aggregate, or read `valuation_json.market.ratio` instead (one scale, all paths). Pinned by `backend/tests/test_trade_policy_wiring.py::test_every_impression_carries_a_parseable_snapshot_matching_its_assets`, which asserts the 0.001 agreement for every other card and asserts this class as a **known** exception — so a fix will make that test fail loudly rather than quietly.
 
 ### G-069 — a generic 401 "session expired, reconnect" handler becomes an INFINITE request loop the moment its recovery path itself needs a session
 - **Symptom, plainly:** an ESPN/MFL entry user returns to the web app after their session died (a Render restart, or the 4h expiry — entry sessions are unverified so they are never server-persisted, D-164). The page issues **hundreds of `GET /api/espn/leagues` 401s per second**, forever, and never renders anything. Reproduced deterministically 2026-09-03 by planting a dead `fumble_session_token` plus a saved `entry:` user and league, then reloading: the server log showed one unbroken second of 401s.

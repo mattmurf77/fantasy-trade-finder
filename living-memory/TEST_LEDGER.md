@@ -11,6 +11,71 @@
 
 ---
 
+## 2026-09-04 — Trade model/scoring-context integration
+
+Merged main `db6b3a17` (#277) into the requested balance branch before CI. Preserved captured request/format ownership and added captured provider `league_user_id`, which the reduced worker session otherwise omitted. New delayed-job test proves a co-owner roster check cannot follow a later session reinitialization. **104 focused tests passed** in 9.81 seconds. The complete merged-revision CI remains the release gate; pre-merge full local coverage below is not claimed for this merge.
+
+## 2026-09-04 — Trade activation validation and original items 2/3
+
+Same branch `claude/fleeced-trade-engine-balance-c0c75d`. Two subagents implemented whole-team outlook utility and weaker-manager benefit ranking (49 and 101 tests). Main integrated four final-package tests and the independent dark `trade.mutual_benefit_v1` switch. Existing focused cluster 126 passed; TypeScript, all 90 mobile structural suites, testID lint, and 175 web checks passed. Upgrading an isolated PostgreSQL copy of production's schema twice preserved rows/config; four proposal/attribution contracts passed on PostgreSQL. No provider offers were sent.
+
+The local full run was interrupted after 3,933 passes / one skip, no failures, during slow existing generator tests; the remaining modules subsequently passed 983 tests (17 overlap), covering all **4,899 unique passes and one skip** across both runs with backend sources unchanged. The full uninterrupted Python 3.12 CI run is pending. Live read-only sampling confirms projection/provider/confidence/co-owner gaps. Only background collection is planned; all three strict switches stay false. No native TestFlight proof or acceptance uplift is claimed. Full evidence: [activation validation](../docs/plans/trade-model-activation/validation.md).
+
+## 2026-09-04 — Personal-market policy built DARK (D-180/D-181): 87 new tests, full suite green, flag-off byte identity proved three ways
+
+Branch `claude/fleeced-trade-engine-balance-c0c75d` off a freshly fetched `origin/main` @ `606e512c`. Backend-only — `git diff --stat -- mobile web extension` is empty. Full gates, no waivers ([scope](../docs/plans/personal-market-policy/scope.md)).
+
+**Both flags default `false` in code AND in `config/features.json`. Nothing is enabled, nothing is deployed, and no production migration was run by this session.**
+
+### Automated
+
+- **`python3 -m pytest backend/tests -q`: 4706 passed, 1 skipped, 0 failed** in 6m26s (local, Python 3.13; CI is 3.12.3 — check CI before attributing a red test here). Baseline on `origin/main` @ `606e512c` was 4619/1; the delta is this change's 87 new tests. The 1 skip is the standing `test_outlook_odds::test_backtest_against_captured_season` opt-in.
+- **New: `backend/tests/test_trade_policy.py` (47) + `test_trade_policy_wiring.py` (40) = 87.** The first pins the evaluator's math, the second pins where it is plugged in. Every test names the brief's numbered behaviour it covers in its docstring.
+- **Coverage against the brief's 23 required behaviours: all 23.** One-board 0.84/0.85 boundary; weak-confidence floor; strong-confidence descent to 0.65; the absolute floor under every knob setting; floor monotonicity in both inputs (parametrized 5×3); missing confidence failing safe; symmetric shrinkage; range overlap unable to rescue a sub-floor point ratio; user preference tightening only; every mutation path re-asking; rank monotonicity in the weaker side's gain; fallback not displacing divergence; Core/Conviction quotas; finder≡calculator consensus pricing; full reversal symmetry; snapshot completeness + asset/direction match; one `propose` outcome per confirmed send; idempotent proposal row (both keys); edited-package origin link; canonical mirrored concept id; match attribution with both impressions and the lag; never-served ≠ pass; stale mirror revalidated with a closed reason.
+
+### Flag-off byte identity — proved three independent ways
+
+1. `test_bakeoff_serving.py::test_flag_off_is_byte_identical_to_the_captured_golden` — the committed pre-bake-off golden, with the four new `deck_impressions` columns added to `NEW_COLUMNS` so the loop below it **asserts each is NULL**.
+2. `test_breaker_seam.py::test_flag_off_features_json_byte_identical` — same golden through a second harness.
+3. `test_trade_policy_wiring.py::test_flag_off_produces_no_policy_state_at_all` + `::test_telemetry_on_does_not_change_which_cards_are_served` — no column populated, no shadow row, and telemetry-on serving identical card-for-card to telemetry-off.
+
+### Sabotage discipline
+
+- **`test_removing_the_choke_point_would_be_caught`** neuters `server._evaluate_deck_policy` to a pass-through and asserts the below-floor cards come back and the shadow log empties. Proved RED against that sabotage, green on revert. Without it the choke point could be deleted with the suite still green.
+- **`test_every_mutation_path_re_asks_the_evaluator`** pins all five in-generator gate sites by source, because the realistic regression is deletion during a sweetener refactor, not a subtle logic error.
+
+### Two defects the tests found in this session's own code, before review
+
+1. **Double-gating on inconsistent value bases.** The first draft applied two-sided personal gain as a universal eligibility veto. The wiring fixture emptied the deck: the engine's own `min_side_surplus` gate runs on **marginal** values when `trade.marginal_value` is on (it is, in prod), while the policy runs on raw confidence-shrunk values, and the two disagree systematically. Fixed by making two-sided gain a **Conviction** requirement — a Core card is market-plausible on its own and is not re-litigated under a definition the generator does not use. The residual divergence is logged as [Q-038](OPEN_QUESTIONS.md); it is a product call, not a bug.
+2. **An unevidenced "gain" was buying floor relief.** `derive_policy_floor` subtracted the surplus discount independently of confidence, so two boards nobody had ranked reached 0.75 — contradicting the brief's own test 2 ("weak-confidence divergence cannot pass below approximately 0.80"). The surplus discount is now scaled by confidence. Caught by `test_weak_confidence_divergence_cannot_pass_below_the_two_board_base`.
+
+### A shipped bug the new assertions found in EXISTING code — [G-070](GOTCHAS.md)
+
+Asserting the frozen snapshot's market ratio against the row's stored `fairness_score` (the brief's "recomputed market ratio matches stored consensus fairness within 0.001") passed on seven of eight cards to four decimals and failed the eighth by **0.56**. Cause: a likes-you **synthesized** card computes `fairness_score` from **summed raw Elo**, while every other path — v2, v3 and the manual calculator — uses `package_value_v2` in value space. Elo is a log scale, so the ratio compresses toward 1.0: the observed card read `0.851` while its own `give_value` / `receive_value` on the same row were **704.7 / 2459.6**, a true ratio of **0.29**. The card's value bar was honest; its fairness number was not, and nothing on the row said they were measured differently.
+
+Not fixed here — it changes a serialized value on a live surface and is out of scope for a dark telemetry change. Pinned instead: the test asserts the 0.001 agreement for every other card and asserts this class as a **known-wrong** exception (including that the snapshot still agrees with the card's own value bar), so fixing G-070 makes the test fail loudly rather than quietly pass. Under the policy flag this card is judged at 0.29 and rejected, which is the right outcome.
+
+A third defect in this session's own code was caught by a test fixture: a second `final_trade_hash` implementation in `trade_policy` would have made `edited_from_source` fire on **every** unedited send once the two drifted. `_record_trade_proposal` now calls `server._deck_trade_hash`, the same function the impression writer used, and `test_a_confirmed_send_labels_its_impression_exactly_once` asserts an unedited send reads as unedited.
+
+### Not run
+
+- **`tsc --noEmit` / `testid-lint` / `check-*.js`** — no mobile file changed (verified: empty `git diff --stat -- mobile web extension`). They still gate the merge in CI.
+- **TestFlight** — not required at this stage (both flags off ⇒ no runtime behavior to verify). The checklist is **written and not yet run**: [testflight-checklist.md](../docs/plans/personal-market-policy/testflight-checklist.md). It is required before `trade.valuation_telemetry` is enabled in production, and Stage A carries the brief's own release blocker (a successful controlled proposal that fails to produce an owned, non-stale impression-linked row).
+- **Production database** — not touched. No query was run against Render Postgres by this session; the prod figures quoted in D-180 are from the brief's own 2026-09-04 read-only analysis, cited as such and not re-derived.
+
+### Codex review and full-roster evaluator — final local validation
+
+On the same requested branch, after the preceding agent's implementation:
+
+- **Final full backend suite: 4,745 passed, 1 skipped in 378.61 s (6m18s), Python 3.14.4.** Code was frozen throughout; six changed backend source hashes verified unchanged afterward. CI Python 3.12 remains a separate release gate.
+- **Final targeted regression set: 233 passed**, covering roster/policy, both sides, exact FLEX matching, canonical viewer absent from session members, picks/capacity, unknown data, attribution, cache invalidation and publication seams. Thirty-nine additional passing cases versus the preceding agent's baseline.
+- Mobile typecheck passed; **90/90** mobile structural suites passed; testID lint passed; **175/175** web structure checks passed. No mobile/web/extension production source changed.
+- HTML subagent exercised six team/scenario combinations at four widths (320–1440px), keyboard disclosures and source fixtures; main review confirmed desktop layout, opposing-team TE gap, incomplete settings and replacement expansion. Artifact: `mockups/post-trade-roster-check/index.html`.
+- Synthetic CPU check: 50 distinct final packages, two 24-player rosters and nine starting slots evaluated in **90.4 ms**. Excludes I/O/DB and is not production latency evidence.
+- Failed attempts were investigated, not hidden: the golden caught flag-off extra job keys; the roster-cut test caught unrelated position groups; the full-run pricing guard required the new roster consumer to be registered. Seven source-inspection failures occurred when the worker file changed after import. All pass in the final stable run. See `docs/plans/post-trade-roster-evaluation/validation.md`.
+
+All four new switches are false; nothing deployed or migrated in production. TestFlight checklist written but not run. Acceptance uplift, cross-format viewer provenance and non-Sleeper observed-slot coverage remain rollout-validation work, not claims from these tests.
+
 ## 2026-09-04 — Scoring execution context: local prerequisite built, unmerged
 
 Branch `codex/scoring-execution-context`, isolated worktree
@@ -3644,6 +3709,7 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-09-04 — Personal-market policy built DARK (D-180/D-181): 87 new tests, full suite green, flag-off byte identity proved three ways](#2026-09-04--personal-market-policy-built-dark-d-180d-181-87-new-tests-full-suite-green-flag-off-byte-identity-proved-three-ways)
 - [2026-09-03d — Web ESPN sign-in-primary (D-179): web gate 175/175, entry route 25/25, browser E2E both flag states + live-ESPN 403](#2026-09-03d--web-espn-sign-in-primary-d-179-web-gate-175175-entry-route-2525-browser-e2e-both-flag-states--live-espn-403)
 - [2026-09-03c — API audit fixes (D-178): merged branch green — pytest 4617 / 1 skipped, tsc 0, testid-lint OK, web 175/175](#2026-09-03c--api-audit-fixes-d-177-merged-branch-green--pytest-4617--1-skipped-tsc-0-testid-lint-ok-web-175175)
 - [2026-09-03b — Web landing platform entry (PR #272): web gate 175/175, entry-route suite 25/25, browser E2E both platforms; sim gate skipped (D-056 posture)](#2026-09-03b--web-landing-platform-entry-pr-272-web-gate-175175-entry-route-suite-2525-browser-e2e-both-platforms-sim-gate-skipped-d-056-posture)

@@ -8,6 +8,36 @@
 
 ---
 
+## 2026-09-04 — Personal-market policy BUILT and DARK on `claude/fleeced-trade-engine-balance-c0c75d`; nothing enabled, nothing deployed
+
+**Where:** branch `claude/fleeced-trade-engine-balance-c0c75d`, cut from a freshly fetched `origin/main` @ `606e512c`, in the worktree `.claude/worktrees/monetization-features-feedback-a6fe77`. **Uncommitted** — the tree holds the change; no commit, no PR, no push. [D-180](DECISIONS.md) + [D-181](DECISIONS.md); [scope](../docs/plans/personal-market-policy/scope.md).
+
+**What it is:** the engineering brief `TRADE_ENGINE_BALANCE_ENGINEERING_BRIEF.md` (untracked, repo root), Phase 1 + the Phase 2 shadow scaffolding. Consensus value stops being 30% of a blended objective and becomes a **non-bypassable market floor**; two-sided personal opportunity — the *weaker* manager's gain — becomes the primary ordering signal; ranking confidence, symmetric across both managers for the first time, sets how far the floor may descend. One new leaf, `backend/trade_policy.py`, called by v2, v3 and a single server-side choke point on the final deck.
+
+**Posture, unambiguously:** `trade.valuation_telemetry` and `trade.personal_market_policy_v1` are **both `false`** in `backend/feature_flags.py` (code default), `config/features.json`, and all four test flag fixtures. No experiment allocation changed. **No production migration was run and no production query was issued by this session** — the prod figures in D-180 come from the brief's own read-only analysis and are cited as such.
+
+**Verified:** full backend suite green (4791 passed / 1 skipped, local Python 3.13 — CI is 3.12.3). 87 new tests across `test_trade_policy.py` + `test_trade_policy_wiring.py`, covering all 23 behaviours the brief enumerates. Flag-off byte identity proved three independent ways; the choke point is sabotage-proved. Backend-only: `git diff --stat -- mobile web extension` is empty.
+
+**Owed, in order:**
+1. **Operator decision on [Q-038](OPEN_QUESTIONS.md)** — the policy prices personal values raw (confidence-shrunk), the generators' own surplus gate prices them **marginal** when `trade.marginal_value` is on. They disagree systematically. That is why two-sided gain gates **Conviction** rather than everything; the first draft applied it universally and emptied the deck. If Conviction cards turn out near-nonexistent in the live phase, this is the cause, not the floors.
+2. **Commit + PR.** The work is a single coherent change; CI must be green on the pushed sha before merge.
+3. **Stage-A TestFlight run** ([checklist](../docs/plans/personal-market-policy/testflight-checklist.md)) before `trade.valuation_telemetry` is turned on in production. It carries the brief's own **release blocker**: a successful controlled proposal that fails to produce an owned, non-stale impression-linked row.
+4. **Stage B is not authorized.** `trade.personal_market_policy_v1` needs the telemetry coverage bar (≥99% parseable snapshots) met *and* an operator-approved within-user crossover schedule. Randomize at the **deck-job** level — a deck must never mix variants, because composition is part of the treatment.
+
+**Two things a follow-up session should not re-litigate:** the surplus discount is scaled by confidence on purpose (an unevidenced "gain" must not buy floor relief — the brief's own worked example contradicts its test 2 without it), and `_record_trade_proposal` uses `server._deck_trade_hash` rather than a second implementation (a duplicate would make `edited_from_source` fire on every unedited send once the two drifted).
+
+**Also worth knowing:** `trade_service.make_consensus_value_fn` is now the single consensus accessor — v2's `_vs`, v3's `_sv` and `trade_gen_v2.cval` all delegate, bodies byte-identical. That was three mirrored copies each carrying a comment telling the next reader to keep them in sync.
+
+---
+
+### Activation follow-up — original items 2 and 3
+
+The user requested execution. Whole-team outlook utility and mutual-benefit ranking are now integrated on the same branch, with a separate dark flag. See `docs/plans/trade-model-activation/validation.md` and `rollout.md` for exact evidence and rollout state. Collection-only activation is being validated; broad enforcement is blocked by observed data gaps. The HTML mockup is excluded from the product rollout. Earlier "Stage B is not authorized" wording is historical: the current user authorizes activation work, but evidence still limits its scope.
+
+### Codex roster evaluator and balance review
+
+Requested branch remains `claude/fleeced-trade-engine-balance-c0c75d`. The preceding agent’s balance work is preserved plus Codex review corrections and full-roster evaluation. All four new switches remain false. HTML is `mockups/post-trade-roster-check/index.html`; no client mount. Read `docs/plans/post-trade-roster-evaluation/code-walk.md` for coverage limits, open provenance/identity questions, and `validation.md` for final local gates. Production rollout and manual TestFlight remain pending.
+
 ## 2026-09-03d — Web ESPN entry now leads with sign-in (D-179) SHIPPED + the entry-session 401 loop guarded (G-069); live and prod-verified
 
 **Where:** `main` @ `0059a8a0` (PR [#276](https://github.com/mattmurf77/fantasy-trade-finder/pull/276), squash, CI ×4 green), Render serving it. [D-179](DECISIONS.md) + [G-069](GOTCHAS.md); [scope §V3.1](../docs/plans/landing-platform-options/scope.md) + code-walk §V3.1. Branch `claude/espn-signin-primary` @ `38d5153e` ledgered in `docs/recovery/2026-09-03c-espn-signin-primary-ship.md` and deleted.
@@ -439,6 +469,7 @@ move, and the avatar lab's anchor test models the brief's described layout, not 
 **none**, so the bubble reads "The Analyst" above a ram, which is D-155's recorded default). Higgsfield credits ~4.35.
 
 ## Table of Contents
+- [2026-09-04 — Personal-market policy BUILT and DARK on `claude/fleeced-trade-engine-balance-c0c75d`; nothing enabled, nothing deployed](#2026-09-04--personal-market-policy-built-and-dark-on-claudefleeced-trade-engine-balance-c0c75d-nothing-enabled-nothing-deployed)
 - [2026-09-03d — Web ESPN entry now leads with sign-in (D-179) — BUILT, PR open, NOT merged](#2026-09-03d--web-espn-entry-now-leads-with-sign-in-d-179--built-pr-open-not-merged)
 - [2026-09-03c — API audit fixes on PR #273 (D-178); finding 3 held, web push deferred](#2026-09-03c--api-audit-fixes-on-pr-273-d-177-finding-3-held-web-push-deferred)
 - [2026-09-03b — Web landing platform entry (Sleeper · ESPN · MFL) SHIPPED (D-177); awaiting the Render deploy + the operator prod check](#2026-09-03b--web-landing-platform-entry-sleeper--espn--mfl-shipped-d-177-awaiting-the-render-deploy--the-operator-prod-check)

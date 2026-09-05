@@ -257,3 +257,29 @@ def test_unregistered_league_override_keeps_existing_engine_error_job(world):
     assert job['status'] == 'error'
     assert job['error'] == "Unknown league: 'unregistered-league'"
     assert job['cards'] == []
+
+
+def test_delayed_roster_check_retains_captured_coowner_identity(world, monkeypatch):
+    import backend.feature_flags as flags
+    monkeypatch.setitem(flags._flags_cache, 'trade.roster_evaluation', True)
+    world['league_user_id'] = 'original-roster-owner'
+    pending = []
+    class DeferredThread:
+        def __init__(self, *, target, args, kwargs, daemon):
+            pending.append((target, args, kwargs))
+        def start(self):
+            pass
+    monkeypatch.setattr(server.threading, 'Thread', DeferredThread)
+    monkeypatch.setattr(TradeService, 'generate_trades', lambda *a, **kw: [])
+    build = Mock()
+    monkeypatch.setattr(server, '_build_trade_roster_context', build)
+    job_id = server._kickoff_trade_job(TOKEN, USER, LEAGUE, FORMATS[0])
+    world.update(league_user_id='different-roster-owner', user_roster=['changed'])
+    target, args, kwargs = pending.pop()
+    assert kwargs['execution_context'].league_user_id == 'original-roster-owner'
+    target(*args, **kwargs)
+    assert server._trade_jobs[job_id]['status'] == 'complete'
+    captured = build.call_args.kwargs['sess']
+    assert captured['user_id'] == USER
+    assert server._league_user_id(captured) == 'original-roster-owner'
+    assert captured['user_roster'] == ['give']

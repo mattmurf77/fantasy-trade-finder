@@ -125,6 +125,7 @@ from .database import (
     set_feedback_status, list_feedback_for_user, FEEDBACK_STATUSES, FEEDBACK_SEVERITIES,
     upsert_league_members, upsert_member_rankings,
     load_member_rankings, load_league_members, get_ranking_coverage,
+    find_mirror_like, save_trade_policy_shadow, save_trade_proposal,
     # FB-147 — Sleeper trade-block snapshot (read side; sync lives in
     # trade_block_service.py)
     load_trade_block,
@@ -244,6 +245,13 @@ from . import draft_status as _draft_status_mod   # W3 M-A — ROOKIE_MAX_ROUNDS
 from . import pick_slots                          # D-090 — real-slot pick labels AND, since D-144, per-slot prices
 from . import api_observability as _api_obs   # obs.api_events — inbound/outbound API event capture
 from . import bakeoff_runner as _bakeoff      # trade.bakeoff — three-model bake-off (Phase 3)
+from types import SimpleNamespace   # proposal-time policy shim (see
+                                   # _record_trade_proposal)
+from . import trade_policy as _trade_policy   # personal-market policy — the ONE
+                                              # trade-policy evaluator (dark: both
+                                              # trade.valuation_telemetry and
+                                              # trade.personal_market_policy_v1
+                                              # default false)
 from . import negmem as _negmem               # trade.negmem — negative-results memory (T1:
                                               # module import, attribute calls only)
 from .feature_flags import FLAGS, is_enabled, flags_dict, reload as reload_flags
@@ -3006,11 +3014,24 @@ def _trade_job_public_view(job: dict) -> dict:
     return out
 
 
+def _trade_safety_signature():
+    """Changing a safety switch invalidates completed cached decks."""
+    return [key for key, enabled in (
+        ("market", _trade_policy.policy_enabled()),
+        ("market_shadow", _trade_policy.telemetry_enabled()),
+        ("roster", getattr(FLAGS, "trade_roster_protection", False)),
+        ("roster_shadow", getattr(FLAGS, "trade_roster_evaluation", False)),
+        ("mutual_benefit", getattr(FLAGS, "trade_mutual_benefit_v1", False)),
+    ) if enabled]
+
+
 def _trade_job_is_fresh(job: dict, fairness_threshold: float, outlook_value,
                         trade_intent: str | None = None) -> bool:
     """True iff this job's result can be returned as-is to a new caller —
     i.e. it's complete, recent, and was generated for the same parameters."""
     if job.get("status") != "complete":
+        return False
+    if job.get("safety_policy", []) != _trade_safety_signature():
         return False
     if job.get("is_pinned"):
         return False
@@ -3052,7 +3073,8 @@ def _make_progress_cb(job_id: str, players_dict: dict, real_user_ids: set, outlo
             if _job_live(j):
                 j["opponents_done"]  = opponents_done
                 j["opponents_total"] = opponents_total
-                j["cards"]           = snapshot
+                if not j.get("final_checks_pending"):
+                    j["cards"] = snapshot
     return _cb
 
 
@@ -3346,6 +3368,109 @@ def _inject_likes_you_cards(cards: list, trade_service, user_id: str,
                                             *args, **kwargs)
 
 
+def _mirror_skip_rows(trade_service, job_id: str, ctx) -> list:
+    """Convert the injector's `_mirror_skips` notes into shadow rows.
+
+    Drains the list so a long-lived TradeService cannot accumulate notes
+    across jobs. Each row is a real evaluation of the skipped package where
+    a context is available, with the CLOSED reason (`roster_changed`,
+    `already_resolved`, …) overriding whatever the evaluator concluded —
+    the mirror was not rejected on value, it was never eligible to serve.
+    """
+    rows: list = []
+    skips = getattr(trade_service, "_mirror_skips", None)
+    if not skips:
+        return rows
+    try:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for note in skips:
+            shim = SimpleNamespace(
+                give_player_ids=note["give"],
+                receive_player_ids=note["receive"],
+                target_user_id=note["partner_user_id"],
+                league_id=note["league_id"], relaxed=False)
+            res = None
+            try:
+                res = _evaluate_card_policy(shim, ctx)
+            except Exception:
+                res = None
+            if res is None:
+                continue
+            row = _trade_policy.shadow_row(
+                deck_job_id=job_id, user_id=note["user_id"],
+                league_id=note["league_id"],
+                trade_hash=_deck_trade_hash(note["give"], note["receive"],
+                                            note["partner_user_id"]),
+                concept_id=_trade_policy.trade_concept_id(
+                    league_id=note["league_id"],
+                    viewer_user_id=note["user_id"],
+                    partner_user_id=note["partner_user_id"],
+                    viewer_gives=note["give"],
+                    viewer_receives=note["receive"]),
+                model_arm=None, result=res, created_at=now_iso)
+            row["reason"] = note["reason"]
+            row["eligible"] = 0
+            rows.append(row)
+    except Exception as err:
+        log.warning("mirror-skip shadow rows failed (non-fatal): %s", err)
+    finally:
+        try:
+            trade_service._mirror_skips = []
+        except Exception:
+            pass
+    return rows
+
+
+def _tp_reason_roster() -> str:
+    return _trade_policy.REASON_ROSTER_CHANGED
+
+
+def _tp_reason_resolved() -> str:
+    return _trade_policy.REASON_ALREADY_RESOLVED
+
+
+def _note_mirror_skip(trade_service, like, opp, user_id, league_id,
+                      reason: str) -> None:
+    """Record that a counterparty's liked mirror was NOT served, and why.
+
+    Personal-market policy (docs/plans/personal-market-policy/scope.md).
+    Accumulates onto the per-job `_mirror_skips` list, which
+    `_run_trade_job` drains into `trade_policy_shadow`.
+
+    The measurement this fixes: a mirror that is never eligible, never
+    generated or never served produces no impression and no outcome, so
+    every funnel query reads the absent second like as a REJECTION by the
+    counterparty. It is not one — the counterparty was never shown the card.
+    "Never eligible" and "passed" have to be distinguishable states or the
+    two-user attribution the whole experiment rests on is unreadable.
+
+    Inert while `trade.valuation_telemetry` is off, and never raises: this
+    is a note, not a gate, and it must not be able to affect what is served.
+    """
+    if not _trade_policy.telemetry_enabled():
+        return
+    try:
+        skips = getattr(trade_service, "_mirror_skips", None)
+        if skips is None:
+            skips = []
+            trade_service._mirror_skips = skips
+        if len(skips) >= 200:          # bound a pathological league
+            return
+        my_give = list(like.get("receive_player_ids") or [])
+        my_recv = list(like.get("give_player_ids") or [])
+        skips.append({
+            "user_id": user_id,
+            "league_id": league_id,
+            "partner_user_id": getattr(opp, "user_id", None),
+            "give": my_give,
+            "receive": my_recv,
+            "reason": reason,
+            "source_like_impression_id": like.get("impression_id"),
+        })
+    except Exception as err:                        # pragma: no cover — belt
+        log.warning("mirror-skip note failed (non-fatal): %s", err)
+
+
 def _inject_likes_you_cards_impl(
     cards: list,
     trade_service,
@@ -3449,9 +3574,20 @@ def _inject_likes_you_cards_impl(
         hand_queued = str(like.get("trade_id") or "").startswith("calcq_")
         # Still actionable? Rosters change — their give must still be theirs,
         # their receive must still be on the user's roster.
+        #
+        # Personal-market policy (2026-09-04) — these two checks ARE the
+        # stale-mirror revalidation, and until now they were silent. That
+        # silence is the measurement bug the brief names: manager B never
+        # saw the mirror, and every downstream query counted the missing
+        # second like as a rejection. `_note_mirror_skip` records a CLOSED
+        # reason so "never eligible" is distinguishable from "passed".
         if not set(their_give) <= set(opp.roster):
+            _note_mirror_skip(trade_service, like, opp, user_id, league_id,
+                              _tp_reason_roster())
             continue
         if not set(their_recv) <= user_roster_set:
+            _note_mirror_skip(trade_service, like, opp, user_id, league_id,
+                              _tp_reason_roster())
             continue
         # Backlog #2 / feedback #95 — untouchables never leave the user's
         # roster, even when the counterparty already liked the mirror. Their
@@ -3482,6 +3618,8 @@ def _inject_likes_you_cards_impl(
         seen_keys.add(key)
         # Don't resurface a trade the user already swiped on.
         if (key[0], key[1]) in trade_service._past_decision_keys:
+            _note_mirror_skip(trade_service, like, opp, user_id, league_id,
+                              _tp_reason_resolved())
             continue
         # G6 R4 #336 (Q-G6-1) — never re-inject a trade that is currently
         # live in the user's match pipeline (awaiting like or pending/
@@ -3495,6 +3633,8 @@ def _inject_likes_you_cards_impl(
         # for arms B/C and every other user.
         if (exclusion_keys and not _r4_bypassed()
                 and (key[0], key[1]) in exclusion_keys):
+            _note_mirror_skip(trade_service, like, opp, user_id, league_id,
+                              _tp_reason_resolved())
             try:
                 trade_service._r4_excluded_keys.add((key[0], key[1]))
             except Exception:
@@ -3543,6 +3683,12 @@ def _inject_likes_you_cards_impl(
         if existing is not None:
             existing.likes_you       = True
             existing.composite_score = boost_score
+            # Personal-market policy — this card was GENERATED organically
+            # and merely boosted here, so the honest record is still the
+            # counterparty's like: without it, "was this mirror served
+            # because they liked it?" is unanswerable for exactly the cards
+            # where the answer matters most.
+            existing.source_like_impression_id = like.get("impression_id")
             injected += 1
             continue
 
@@ -3574,6 +3720,7 @@ def _inject_likes_you_cards_impl(
             likes_you          = True,
             give_value         = round(_gv, 1),
             receive_value      = round(_rv, 1),
+            source_like_impression_id = like.get("impression_id"),
         )
         trade_service._trade_cards[card.trade_id] = card
         new_cards.append(card)
@@ -4428,6 +4575,16 @@ def _log_deck_signal_impressions(
     # §3.4 stamp trichotomy, not a data source: the stamp itself is COPIED
     # off the card. None ⇒ no `negmem` key on any row (C1).
     nm_map=None,
+    # personal-market policy — {id(card): PolicyResult} from the job's ONE
+    # choke point, and the variant the whole job ran under. Empty/None (the
+    # flag-off caller values) ⇒ none of the four new columns is assigned on
+    # any row, so the insert is byte-identical to the pre-change one.
+    # Like the bake-off block below, the stamp COPIES an already-computed
+    # result; nothing is re-evaluated here, so a row can never disagree with
+    # the gate that produced it.
+    policy_results: dict | None = None,
+    policy_variant: str | None = None,
+    roster_results: dict | None = None,
 ) -> dict[int, str]:
     """Write one deck_impressions row per card (final served order) and
     return {id(card): impression_id} so the caller can stamp the ids into
@@ -4618,6 +4775,8 @@ def _log_deck_signal_impressions(
         if _deck_taste_enabled():
             features["taste_attrs"] = _taste_service.card_taste_attrs(
                 card, players_dict, seed_map or {})
+        if roster_results is not None:
+            features["roster_evaluation"] = roster_results.get(id(card))
         # F7 (deck.exploration) — wildcard provenance, frozen at serve time.
         # For wildcard rows the `propensity` column is NOT a Thompson
         # multiplier: it is exploration_rate × 1/|eligible draw pool| (the
@@ -4748,6 +4907,41 @@ def _log_deck_signal_impressions(
                     policy_version or _sugg_tel.serving_policy_version(),
                     _attr[0])
                 if _attr is not None else row.get("policy_version"))
+        # ── personal-market policy stamp ──────────────────────────────────
+        # ON-CONDITION is `policy_results` being a non-empty dict, checked
+        # PER JOB rather than per card, and all four keys are then set on
+        # EVERY row (None where a card has no result). That is the same
+        # every-row rule the bake-off block above follows, for the same
+        # reason: save_deck_impressions inserts with executemany, which
+        # compiles the statement from the FIRST row's keys — a deck led by a
+        # card with no policy result would otherwise silently strip the
+        # snapshot off every row behind it.
+        if policy_results:
+            _pres = policy_results.get(id(card))
+            row["policy_variant"] = policy_variant
+            row["valuation_json"] = None
+            row["trade_concept_id"] = None
+            if _pres is not None:
+                _snap = _trade_policy.dumps(_pres.valuation)
+                # Acceptance criterion: the snapshot's asset ids and
+                # DIRECTIONS must match this row's assets_json exactly. A
+                # snapshot built from a different package than the one served
+                # is worse than no snapshot, so a mismatch is counted and the
+                # column left NULL rather than written.
+                if _snap is not None and not _trade_policy.snapshot_matches_assets(
+                        _pres.valuation, {"give": give, "receive": recv}):
+                    _trade_policy.HEALTH["asset_mismatches"] += 1
+                    _snap = None
+                row["valuation_json"] = _snap
+                row["trade_concept_id"] = _trade_policy.trade_concept_id(
+                    league_id=league_id, viewer_user_id=user_id,
+                    partner_user_id=target,
+                    viewer_gives=give, viewer_receives=recv)
+            # Non-null ONLY on a card injected because the counterparty had
+            # already liked the mirror — the distinction between an organic
+            # mirror and a card shown because of the first manager's action.
+            row["source_like_impression_id"] = getattr(
+                card, "source_like_impression_id", None)
         rows.append(row)
     save_deck_impressions(rows)
     return imp_by_card
@@ -4850,6 +5044,602 @@ def _save_deck_outcome_safe(
                 impression_id[:64], action, dwell_ms=dw)
     except Exception as out_err:
         log.warning("deck signal outcome write failed (non-fatal): %s", out_err)
+
+
+# ---------------------------------------------------------------------------
+# Personal-market policy — server seam (backend/trade_policy.py)
+# ---------------------------------------------------------------------------
+# Scope block: docs/plans/personal-market-policy/scope.md
+# Decisions:   living-memory/DECISIONS.md D-180 / D-181
+#
+# Everything below is inert while `trade.valuation_telemetry` and
+# `trade.personal_market_policy_v1` are both off: no evaluation runs, no
+# column is populated, no extra table is written, and no card is filtered or
+# reordered.
+#
+# THE ONE CHOKE POINT. `_evaluate_deck_policy` is called on `final_cards` —
+# after the whole mutation stack (sweeteners, swaps, likes-you injection,
+# wildcards, first-session shaping, replenishment) and before the ghost split
+# and impression write. That placement is what makes the guarantee real: a
+# card added or altered by ANY of those layers is still evaluated on the
+# package it will actually be served as. Gating only inside the generators
+# would leave every post-generation mutation as a bypass, which is precisely
+# how `fairness_floor_divergence` at 0.55 ended up reachable by six routes.
+
+
+def _owned_impression_id(raw, acting_user_id, *, league_id=None, expected_trade_hash=None) -> "str | None":
+    """Return a client-supplied `impression_id` only if it is real, owned by
+    the acting user and not stale — otherwise None.
+
+    Same three checks `_save_deck_outcome_safe` applies, and for the same
+    reason: an id that arrives in a request body is untrusted input, and
+    writing an unvalidated one onto a `trade_decisions` row would let a
+    client attribute its decision to somebody else's card.
+    """
+    if not raw or not isinstance(raw, str) or not acting_user_id:
+        return None
+    if not _trade_policy.telemetry_enabled():
+        return None
+    try:
+        imp = load_deck_impression(raw[:64])
+        if (imp is None or imp.get("user_id") != acting_user_id
+                or (league_id is not None and str(imp.get("league_id")) != str(league_id))):
+            return None
+        if expected_trade_hash is not None and imp.get("trade_hash") != expected_trade_hash:
+            return None
+        age_days = _taste_service._age_days(
+            imp.get("served_at"), datetime.now(timezone.utc))
+        if age_days > _DECK_OUTCOME_MAX_AGE_DAYS:
+            return None
+        return raw[:64]
+    except Exception as err:
+        log.warning("impression ownership check failed (non-fatal): %s", err)
+        return None
+
+
+def _card_concept_id(card, viewer_user_id) -> "str | None":
+    """Canonical, perspective-independent id for a card's package.
+
+    Uses the SAME two identities the mirror-match path already joins on —
+    the session user id and `card.target_user_id` — so a concept id and a
+    `check_for_match` hit always agree about who the two managers are.
+    Deliberately not "fixed" to league identity here: that is the open
+    co-owner question in living-memory/NEXT.md, and resolving it inside a
+    telemetry change would silently re-key the join for everyone.
+    """
+    if not _trade_policy.telemetry_enabled():
+        return None
+    try:
+        return _trade_policy.trade_concept_id(
+            league_id=getattr(card, "league_id", None),
+            viewer_user_id=viewer_user_id,
+            partner_user_id=getattr(card, "target_user_id", None),
+            viewer_gives=getattr(card, "give_player_ids", None) or [],
+            viewer_receives=getattr(card, "receive_player_ids", None) or [],
+        )
+    except Exception as err:
+        log.warning("concept id computation failed (non-fatal): %s", err)
+        return None
+
+
+def _match_attribution(card, viewer_user_id, mirror, viewer_impression_id,
+                       concept_id, sess) -> dict:
+    """The five temporal-attribution kwargs for `create_trade_match`.
+
+    Returns an EMPTY dict while the telemetry flag is off, so the match row
+    written is byte-identical to the pre-change one.
+
+    `user_a` is the viewer (the second liker, by definition — they are the
+    one deciding right now); `user_b` is the counterparty, whose like is
+    `first_like_at`. The match snapshot is re-evaluated on the unchanged
+    package under CURRENT state, which is the only way to answer whether the
+    concept was still valid when it became mutual — and it is deliberately a
+    third record, never a copy of either impression.
+    """
+    if not _trade_policy.telemetry_enabled():
+        return {}
+    out = {
+        "trade_concept_id":     concept_id or (mirror or {}).get("trade_concept_id"),
+        "user_a_impression_id": viewer_impression_id,
+        "user_b_impression_id": (mirror or {}).get("impression_id"),
+        "first_like_at":        (mirror or {}).get("liked_at"),
+    }
+    try:
+        ctx = _policy_context_from_session(sess)
+        if ctx is not None:
+            res = _evaluate_card_policy(card, ctx, snapshot_stage="match")
+            if res is not None:
+                out["match_valuation_json"] = _trade_policy.dumps(res.valuation)
+    except Exception as err:
+        _trade_policy.HEALTH["snapshot_failures"] += 1
+        log.warning("match valuation snapshot failed (non-fatal): %s", err)
+    return out
+
+
+def _policy_context_from_session(sess) -> "dict | None":
+    """Build a policy context out of a LIVE session (the swipe / propose
+    routes), as opposed to `_policy_context` which builds one inside the
+    trade job where the same state is already unpacked.
+
+    Returns None when the session lacks what the evaluator needs. A None
+    context makes every caller skip telemetry rather than guess — a snapshot
+    built from a half-populated session would be worse than none, because it
+    would look authoritative.
+    """
+    try:
+        fmt = sess.get("_effective_format") or sess.get("active_format") or "1qb_ppr"
+        service = (sess.get("services") or {}).get(fmt) or sess.get("service")
+        league = sess.get("league")
+        players = sess.get("players")
+        if not (service and league and players):
+            return None
+        user_elo = {rp.player.id: rp.elo
+                    for rp in service.get_rankings(position=None).rankings}
+        return _policy_context(
+            user_id=sess.get("user_id"),
+            user_elo=user_elo,
+            seed_elo=service._seed or {},
+            players_dict={p.id: p for p in players},
+            league=league,
+            confidence=service.comparison_counts(),
+            placements=service.placement_bands(),
+            scoring_format=fmt,
+            requested_floor=None,
+        )
+    except Exception as err:
+        log.warning("policy context from session failed (non-fatal): %s", err)
+        return None
+
+
+def _build_trade_roster_context(*, sess, league, players, seed_map,
+                              scoring_format, outlook, opponent_outlooks, picks,
+                              explicit_outlook=None):
+    """Capture provider inputs once after generation; never fetch per card."""
+    from .trade_roster_adapter import build_context
+    from .trade_roster import Asset
+    from .trade_service import make_consensus_value_fn, _startable_ok_fn
+    platform = str(getattr(league, "platform", "unknown")).lower()
+    league_id = league.league_id
+    raw, capacity = None, None
+    slots = _league_lineup_slots(league_id)
+    if platform == "sleeper":
+        # Read the UNFILTERED provider template: silently dropping an unknown
+        # starting slot would turn a partial check into a false success.
+        meta_hit = _FA_LEAGUE_META_CACHE.get(league_id)
+        meta = meta_hit[1] if meta_hit else {}
+        positions = meta.get("roster_positions") or []
+        slots = [s for s in positions if s not in ("BN", "IR", "TAXI")]
+        capacity = sum(s not in ("IR", "TAXI") for s in positions) if positions else None
+        raw = _sleeper_get(f"https://api.sleeper.app/v1/league/{league_id}/rosters")
+    metadata = _load_sleeper_cache() or {}
+    age = _players_cache_age_seconds()
+    owned = {}
+    for pick in picks:
+        owned.setdefault(str(pick.get("owner_user_id")), []).append(str(pick["pick_id"]))
+    viewer_id = _league_user_id(sess)
+    outlooks = dict(opponent_outlooks)
+    outlooks[viewer_id] = outlook or "balanced"
+    ctx = build_context(viewer_id=viewer_id, league=league, players=players,
+        consensus_value=make_consensus_value_fn(seed_map, players),
+        startable=_startable_ok_fn(players, scoring_format), slots=slots,
+        platform=platform, raw_rosters=raw, player_metadata=metadata,
+        outlooks=outlooks, owned_picks=owned, capacity=capacity,
+        viewer_roster=sess.get("user_roster"),
+        availability_fresh=age is not None and age <= 48 * 3600)
+    # The generation pool caps picks per team. The roster snapshot includes
+    # all known holdings so a cap cannot erase value or invent a slot cost.
+    missing = [pk for pk in picks if str(pk["pick_id"]) not in ctx.assets]
+    if missing:
+        slot_order = _league_slot_order(league_id)
+        for pk in missing:
+            pid = str(pk["pick_id"])
+            ctx.assets[pid] = Asset(pid, frozenset(),
+                float(_priced_pick_value(pk, slot_order, scoring_format)), is_pick=True)
+    # Explicit intent and inferred defaults are different evidence. No live
+    # point provider exists yet: leave projections absent and retain that
+    # uncertainty in the frozen benefit snapshot.
+    for uid, team in ctx.teams.items():
+        declared = explicit_outlook if uid == viewer_id else opponent_outlooks.get(uid)
+        inferred = outlook if uid == viewer_id else None
+        ctx.utility_inputs[uid] = {
+            "explicit_outlook": declared, "inferred_outlook": inferred,
+            "inference_fresh": team.availability_known,
+        }
+    return ctx
+
+
+def _evaluate_deck_rosters(cards, ctx, *, enforce, require_mutual=False):
+    """Final packages only. Unknown coverage cannot pass an enforcing gate."""
+    results, retained = {}, []
+    diagnostics = {"enforced": enforce, "safe": 0, "blocked": 0, "unknown": 0,
+                   "reasons": {}, "mutual_benefit": {"eligible": 0, "blocked": 0, "unknown": 0}}
+    for card in cards:
+        try:
+            result = ctx.card(card)
+        except Exception as err:
+            log.warning("roster evaluation failed for a card: %s", err)
+            result = {"schema_version": 1, "status": "unknown", "eligible": False,
+                      "unknowns": ["evaluation_unavailable"], "teams": {}}
+        results[id(card)] = result
+        mutual_status = result.get("mutual_benefit", {}).get("status", "unknown")
+        diagnostics["mutual_benefit"][mutual_status] += 1
+        if require_mutual and not result.get("mutual_benefit", {}).get("eligible", False):
+            result["eligible"] = False
+            result["status"] = "blocked" if result["status"] == "blocked" or mutual_status == "blocked" else "unknown"
+            result.setdefault("unknowns", []).append("mutual_benefit_not_established")
+        diagnostics[result["status"]] += 1
+        reasons = list(result.get("unknowns", []))
+        for team in result.get("teams", {}).values():
+            reasons.extend(team["blockers"] + team["unknowns"])
+        for reason in set(reasons):
+            diagnostics["reasons"][reason] = diagnostics["reasons"].get(reason, 0) + 1
+        if not enforce or result["eligible"]:
+            retained.append(card)
+            if enforce:
+                card.roster_evaluation = result
+    if enforce:
+        # Market-policy composition, if enabled next, retains precedence.
+        # Otherwise this is the soft both-manager outlook ordering signal.
+        if require_mutual:
+            from .trade_mutual_benefit import rank_key
+            retained.sort(key=lambda c: rank_key(results[id(c)]["mutual_benefit"],
+                give_count=len(c.give_player_ids), receive_count=len(c.receive_player_ids)))
+        else:
+            retained.sort(key=lambda c: -results[id(c)].get("mutual_utility", 0))
+    return retained, results, diagnostics
+
+
+def _log_roster_rejections(cards, results, *, job_id, user_id, league_id, bakeoff_run=None):
+    """Bounded rejected-candidate evidence, using the existing shadow ledger."""
+    rows = []
+    cap = max(0, int(_trade_service_mod._c("policy_shadow_log_cap")))
+    for card in cards:
+        result = results.get(id(card), {})
+        mutual = result.get("mutual_benefit")
+        mutual_rejection = result.get("eligible") and mutual and not mutual.get("eligible")
+        if (result.get("eligible") and not mutual_rejection) or len(rows) >= cap:
+            continue
+        reasons = list(result.get("unknowns", []))
+        for team in result.get("teams", {}).values():
+            reasons.extend(team["blockers"] + team["unknowns"])
+        if mutual_rejection:
+            reasons = mutual.get("reasons", [])
+        attr = bakeoff_run.attribution_for(card) if bakeoff_run is not None else None
+        rows.append({"deck_job_id": job_id, "user_id": user_id, "league_id": league_id,
+            "trade_hash": _deck_trade_hash(card.give_player_ids, card.receive_player_ids, card.target_user_id),
+            "trade_concept_id": _trade_policy.trade_concept_id(league_id=league_id,
+                viewer_user_id=user_id, partner_user_id=card.target_user_id,
+                viewer_gives=card.give_player_ids, viewer_receives=card.receive_player_ids),
+            "model_arm": attr[0] if attr else None,
+            "policy_variant": _trade_policy.active_policy_variant(),
+            "eligible": 0, "reason": ("mutual_benefit_" + mutual.get("status", "unknown") if mutual_rejection
+                else "roster_" + result.get("status", "unknown")) + ":" + ",".join(sorted(set(reasons))),
+            "lane": "mutual_benefit" if mutual_rejection else "roster_check",
+            "created_at": datetime.now(timezone.utc).isoformat()})
+    if rows:
+        save_trade_policy_shadow(rows)
+
+
+def _policy_context(*, user_id, user_elo, seed_elo, players_dict, league,
+                    confidence, placements, scoring_format,
+                    requested_floor) -> "dict | None":
+    """Everything `evaluate_trade_policy` needs, built ONCE per job.
+
+    The viewer's effective board is `trade_policy.shrink_board`, not
+    `trade_service._shrink_user_elo`. That is deliberate and is documented on
+    `shrink_board` itself: the legacy function returns the board RAW when
+    confidence is None and skips shrinkage entirely at `user_elo_shrink = 0`,
+    and both of those would let the floor's confidence discount buy relief
+    from evidence the values never used.
+
+    Personal values are `elo_to_value(effective_elo)` — NOT the marginal /
+    over-replacement transform the generators use when `trade.marginal_value`
+    is on. Marginal value is a roster-fit ranking device that differs between
+    arms; the policy's value basis has to mean the same thing for every arm
+    or a cross-arm comparison of the same floor is meaningless.
+    """
+    from .trade_service import elo_to_value, make_consensus_value_fn
+    if not user_elo or not seed_elo:
+        return None
+
+    consensus_value = make_consensus_value_fn(seed_elo, players_dict)
+
+    viewer_conf = _trade_policy.confidence_map(confidence, source="votes")
+    viewer_conf.update({pid: _trade_policy.confidence_weight_for(None, "explicit")
+                        for pid in placements or {}})
+    viewer_eff = _trade_policy.shrink_board(
+        user_elo, seed_elo, viewer_conf, placements=placements)
+    _v_eff_val = {pid: elo_to_value(e) for pid, e in viewer_eff.items()}
+    _v_raw_val = {pid: elo_to_value(e) for pid, e in user_elo.items()}
+
+    def _viewer_effective(pid):
+        v = _v_eff_val.get(pid)
+        return v if v is not None else consensus_value(pid)
+
+    def _viewer_raw(pid):
+        v = _v_raw_val.get(pid)
+        return v if v is not None else consensus_value(pid)
+
+    def _viewer_conf_of(pid):
+        return viewer_conf.get(pid, 0.0)
+
+    partners: dict = {}
+    for m in getattr(league, "members", None) or []:
+        if m.user_id == user_id:
+            continue
+        # has_rankings is the ONE gate. A member without it carries seeded
+        # noise (server.py builds those with `_biased_elo`), and running
+        # divergence math against fabricated values is exactly what the v2
+        # engine already refuses to do.
+        if not getattr(m, "has_rankings", False) or not m.elo_ratings:
+            partners[m.user_id] = None
+            continue
+        p_conf = _trade_policy.confidence_map(
+            getattr(m, "comparison_counts", None),
+            source=getattr(m, "confidence_source", None) or "votes",
+            weights=getattr(m, "confidence_weights", None))
+        p_eff = _trade_policy.shrink_board(m.elo_ratings, seed_elo, p_conf)
+        p_eff_val = {pid: elo_to_value(e) for pid, e in p_eff.items()}
+        p_raw_val = {pid: elo_to_value(e) for pid, e in m.elo_ratings.items()}
+        partners[m.user_id] = {
+            "effective": (lambda d=p_eff_val: (
+                lambda pid: d.get(pid, consensus_value(pid))))(),
+            "raw": (lambda d=p_raw_val: (
+                lambda pid: d.get(pid, consensus_value(pid))))(),
+            "confidence_of": (lambda d=p_conf: (
+                lambda pid: d.get(pid, 0.0)))(),
+            "board_updated_at": getattr(m, "board_updated_at", None),
+        }
+
+    return {
+        "user_id": user_id,
+        "consensus_value": consensus_value,
+        "viewer_effective": _viewer_effective,
+        "viewer_raw": _viewer_raw,
+        "viewer_confidence_of": _viewer_conf_of,
+        "partners": partners,
+        "scoring_format": scoring_format,
+        "requested_floor": requested_floor,
+        "policy_variant": _trade_policy.active_policy_variant(),
+    }
+
+
+def _evaluate_card_policy(card, ctx, *, model_arm=None,
+                          snapshot_stage="serve"):
+    """Evaluate ONE fully-assembled card. Returns a PolicyResult or None."""
+    if ctx is None:
+        return None
+    partner = (ctx["partners"] or {}).get(getattr(card, "target_user_id", None))
+    return _trade_policy.evaluate_trade_policy(
+        give_ids=getattr(card, "give_player_ids", None) or [],
+        receive_ids=getattr(card, "receive_player_ids", None) or [],
+        consensus_value=ctx["consensus_value"],
+        viewer_effective_value=ctx["viewer_effective"],
+        viewer_raw_value=ctx["viewer_raw"],
+        viewer_confidence_of=ctx["viewer_confidence_of"],
+        partner_effective_value=(partner or {}).get("effective"),
+        partner_raw_value=(partner or {}).get("raw"),
+        partner_confidence_of=(partner or {}).get("confidence_of"),
+        partner_has_board=partner is not None,
+        requested_floor=ctx.get("requested_floor"),
+        scoring_format=ctx.get("scoring_format") or "1qb_ppr",
+        relaxed=bool(getattr(card, "relaxed", False)),
+        model_arm=model_arm,
+        policy_variant=ctx.get("policy_variant"),
+        partner_board_updated_at=(partner or {}).get("board_updated_at"),
+        snapshot_stage=snapshot_stage,
+    )
+
+
+def _evaluate_deck_policy(cards, ctx, *, job_id, user_id, league_id,
+                          bakeoff_run=None, deck_size=None, enforce=None,
+                          mutual_order=False):
+    """THE choke point. Evaluate every card in the final deck.
+
+    Returns ``(cards, results_by_card_id, shadow_rows)``.
+
+    Two modes, and the difference between them is the whole safety story:
+
+    * **shadow** (`trade.valuation_telemetry` on, policy flag off) — every
+      card is evaluated and every verdict is kept for the impression
+      snapshot, but the returned list is the input list UNCHANGED. Cards the
+      treatment would have rejected are additionally written to
+      `trade_policy_shadow`, so the treatment's discarded candidates stay in
+      the denominator instead of vanishing.
+    * **live** (policy flag on) — ineligible cards are removed, the survivors
+      are ordered by `PolicyResult.rank_key` (weaker manager's gain first),
+      and `compose_deck` applies the Core/Conviction quotas. A short deck is
+      the specified outcome when safe supply runs out; the guardrail is never
+      weakened to fill slots.
+
+    Shadow failures preserve the existing deck; enforcement never admits an
+    unchecked card. The worker catches failures and publishes an empty deck.
+    """
+    live = _trade_policy.policy_enabled() if enforce is None else enforce
+    if not cards:
+        return cards, {}, []
+    if ctx is None:
+        if live:
+            raise RuntimeError("market policy context unavailable")
+        return cards, {}, []
+    if not (live or _trade_policy.telemetry_enabled()):
+        return cards, {}, []
+
+    results: dict = {}
+    entries: list = []
+    shadow: list = []
+    now_iso = datetime.now(timezone.utc).isoformat()
+    cap = max(0, int(_trade_service_mod._c("policy_shadow_log_cap")))
+
+    for card in cards:
+        arm = None
+        if bakeoff_run is not None:
+            try:
+                attr = bakeoff_run.attribution_for(card)
+                arm = attr[0] if attr else None
+            except Exception:
+                arm = None
+        try:
+            res = _evaluate_card_policy(card, ctx, model_arm=arm)
+        except Exception as err:
+            _trade_policy.HEALTH["snapshot_failures"] += 1
+            log.warning("policy evaluation failed for a card (non-fatal): %s",
+                        err)
+            continue
+        if res is None:
+            continue
+        results[id(card)] = res
+        entries.append((card, res))
+        if not res.eligible and len(shadow) < cap:
+            shadow.append(_trade_policy.shadow_row(
+                deck_job_id=job_id, user_id=user_id, league_id=league_id,
+                trade_hash=_deck_trade_hash(
+                    getattr(card, "give_player_ids", None) or [],
+                    getattr(card, "receive_player_ids", None) or [],
+                    getattr(card, "target_user_id", None)),
+                concept_id=_card_concept_id(card, user_id),
+                model_arm=arm, result=res, created_at=now_iso))
+
+    if not live:
+        return cards, results, shadow
+
+    eligible = [(c, r) for c, r in entries if r.eligible]
+    def _policy_order(entry):
+        card, result = entry
+        roster = getattr(card, "roster_evaluation", None)
+        if mutual_order:
+            from .trade_mutual_benefit import rank_key
+            return (*rank_key(roster["mutual_benefit"],
+                give_count=len(card.give_player_ids), receive_count=len(card.receive_player_ids)),
+                *result.rank_key)
+        if roster is not None:
+            # Personal opportunity remains primary. Within that signal,
+            # prefer the weaker team's outlook utility before market-distance
+            # tie breaks. This also gives no-board fallback real roster order.
+            return (result.rank_key[0], -roster.get("mutual_utility", 0), *result.rank_key[1:])
+        return (result.rank_key[0], 0, *result.rank_key[1:])
+    eligible.sort(key=_policy_order)
+    kept, dropped = _trade_policy.compose_deck(
+        eligible, size=deck_size if deck_size is not None else len(cards))
+    for card, reason in dropped:
+        if len(shadow) < cap:
+            res = results.get(id(card))
+            if res is not None:
+                row = _trade_policy.shadow_row(
+                    deck_job_id=job_id, user_id=user_id, league_id=league_id,
+                    trade_hash=_deck_trade_hash(
+                        getattr(card, "give_player_ids", None) or [],
+                        getattr(card, "receive_player_ids", None) or [],
+                        getattr(card, "target_user_id", None)),
+                    concept_id=_card_concept_id(card, user_id),
+                    model_arm=None, result=res, created_at=now_iso)
+                row["reason"] = reason
+                shadow.append(row)
+    return [c for c, _r in kept], results, shadow
+
+
+def _record_trade_proposal(*, sess, provider: str, user_id: str,
+                           league_id: str, target_user_id,
+                           give_asset_ids: list, receive_asset_ids: list,
+                           impression_id, proposal_event_id: str,
+                           provider_transaction_id=None,
+                           source: str = "deck", match_id=None) -> None:
+    """Record ONE confirmed provider send in `trade_proposals`.
+
+    Called ONLY after the provider has confirmed success — an attempted or
+    failed send is not a proposal, and recording one would corrupt the single
+    metric this table exists to produce.
+
+    Two moments, deliberately not conflated
+    ---------------------------------------
+    `deck_impressions.valuation_json` froze what the engine believed at
+    SUGGESTION time. This freezes what is true at PROPOSAL time, recomputed
+    from the FINAL package — which routinely differs, because the user may
+    have swapped an asset, dropped a piece, added a sweetener or rebuilt the
+    trade in the calculator. `origin_trade_hash` vs `final_trade_hash` is how
+    a reader tells the two apart, and `edited_from_source` is the
+    denormalized answer. The impression snapshot is never copied here.
+
+    `policy_eligible` inside the snapshot is TELEMETRY. A user may
+    deliberately send a trade the finder would never generate; that is
+    recorded with its reason and NOT blocked. Blocking manual sends would be
+    a separate product decision, and this change does not make it.
+
+    Never raises, and never inside the request's critical path in a way the
+    user can feel: the send already succeeded by the time we get here.
+    """
+    if not _trade_policy.telemetry_enabled():
+        return
+    try:
+        give = [str(a) for a in (give_asset_ids or [])]
+        recv = [str(a) for a in (receive_asset_ids or [])]
+        # `_deck_trade_hash` — the SAME function the impression writer used
+        # for `origin_trade_hash`. A second implementation here (even a
+        # faithful-looking one) would make `edited_from_source` fire on
+        # every unedited send the moment the two drifted, which is exactly
+        # the metric this table exists to produce.
+        final_hash = _deck_trade_hash(give, recv, target_user_id)
+        origin_hash = None
+        if impression_id:
+            try:
+                imp = load_deck_impression(impression_id)
+                if imp is not None:
+                    origin_hash = imp.get("trade_hash")
+            except Exception:
+                origin_hash = None
+
+        # Recompute from the FINAL package. A shim card is enough — the
+        # evaluator only reads the four attributes below.
+        valuation_json = None
+        try:
+            ctx = _policy_context_from_session(sess)
+            if ctx is not None:
+                shim = SimpleNamespace(
+                    give_player_ids=give, receive_player_ids=recv,
+                    target_user_id=target_user_id, league_id=league_id,
+                    relaxed=False)
+                res = _evaluate_card_policy(shim, ctx,
+                                            snapshot_stage="proposal")
+                if res is not None:
+                    snap = dict(res.valuation)
+                    snap["policy"] = dict(snap.get("policy") or {})
+                    snap["policy"]["policy_eligible"] = res.eligible
+                    snap["policy"]["origin_impression_id"] = impression_id
+                    snap["policy"]["provider"] = provider
+                    snap["policy"]["source"] = source
+                    valuation_json = _trade_policy.dumps(snap)
+        except Exception as snap_err:
+            _trade_policy.HEALTH["snapshot_failures"] += 1
+            log.warning("proposal valuation snapshot failed (non-fatal): %s",
+                        snap_err)
+
+        _pid, created = save_trade_proposal({
+            "proposal_event_id":       proposal_event_id,
+            "impression_id":           impression_id,
+            "match_id":                match_id,
+            "user_id":                 user_id,
+            "league_id":               league_id,
+            "target_user_id":          (str(target_user_id)
+                                        if target_user_id is not None else None),
+            "provider":                provider,
+            "provider_transaction_id": (str(provider_transaction_id)
+                                        if provider_transaction_id else None),
+            "source":                  source,
+            "give_asset_ids":          json.dumps(give),
+            "receive_asset_ids":       json.dumps(recv),
+            "origin_trade_hash":       origin_hash,
+            "final_trade_hash":        final_hash,
+            "edited_from_source":      (1 if (origin_hash and origin_hash != final_hash)
+                                        else 0),
+            "valuation_json":          valuation_json,
+            "proposed_at":             datetime.now(timezone.utc).isoformat(),
+        })
+        if not created:
+            log.info("trade proposal already recorded (idempotent): event=%s",
+                     proposal_event_id)
+    except Exception as err:
+        _trade_policy.HEALTH["proposal_write_failures"] += 1
+        log.warning("trade proposal record failed (non-fatal): %s", err)
 
 
 # ── F3 (flag deck.fatigue) — fatigue & durable suppression ──────────────────
@@ -5174,6 +5964,67 @@ def _save_decline_suppression(
 
 
 # ── F5 (flag deck.taste_vectors) — board-derived prior refresh ──────────────
+
+def _ranking_confidence(service, *, source: str = "votes") -> dict:
+    """Build the confidence kwargs for a `upsert_member_rankings` publish.
+
+    Personal-market policy, 2026-09-04 (docs/plans/personal-market-policy/).
+    Every ranking publish now records HOW WELL SAMPLED each Elo is, so a
+    league-mate's board can be confidence-shrunk by the same rule the
+    requesting user's already was. Without this the engine trusted a
+    stranger's raw board more than the owner's own — the asymmetry measured
+    in docs/reviews/2026-08-19-armb-audit-claims-3-4.md §3.
+
+    Provenance is decided PER PLAYER, not per snapshot, because a tier save
+    publishes the whole board while only some of it was actually placed:
+
+      * a player in `placement_bands()` was explicitly PLACED (tier save,
+        drag-reorder, anchor) — the strongest statement of value the product
+        accepts, so `explicit`;
+      * everyone else carries their live comparison count and `votes`, and
+        the count decides the weight.
+
+    `source="cross_format"` overrides both: on the copy-from-format path the
+    ENTIRE board is derived from another format's ordering, so no player on it
+    has direct evidence in this one.
+
+    Never raises. A ranking save must not fail because a confidence map could
+    not be read — the caller then publishes with NULL confidence, which every
+    reader treats as the lowest, i.e. exactly the pre-change behaviour.
+    """
+    try:
+        counts = service.comparison_counts() or {}
+    except Exception as err:
+        log.warning("ranking confidence: comparison_counts failed: %s", err)
+        return {}
+    if source == "cross_format":
+        return {"comparison_counts": counts, "confidence_source": "cross_format"}
+    try:
+        placed = set(service.placement_bands() or {})
+    except Exception as err:
+        log.warning("ranking confidence: placement_bands failed: %s", err)
+        placed = set()
+    return {"comparison_counts": counts, "confidence_source": source,
+            "_placed": placed}
+
+
+def _confidence_payload(ranking_payload: list, conf: dict) -> list:
+    """Stamp per-player confidence provenance onto a ranking payload.
+
+    Consumes `conf["_placed"]` (POPPING it, so what is left in `conf` is
+    exactly the kwargs `upsert_member_rankings` accepts and every call site
+    can splat it directly). Returns the SAME list when there is nothing to
+    stamp, so a caller whose confidence read failed publishes rows
+    byte-identical to the pre-change path.
+    """
+    placed = conf.pop("_placed", None) or set()
+    if not placed:
+        return ranking_payload
+    for row in ranking_payload:
+        if row.get("player_id") in placed:
+            row["confidence_source"] = "explicit"
+    return ranking_payload
+
 
 def _refresh_taste_board_prior(user_id: str, service) -> None:
     """F5 (PRD amendment 2026-07-26) — refresh the board-derived taste
@@ -5915,6 +6766,7 @@ class _TradeExecutionContext:
     league: object
     user_roster: tuple
     players: tuple
+    league_user_id: str
 
 
 def _capture_trade_execution(sess, user_id, league_id, scoring_format):
@@ -5938,6 +6790,7 @@ def _capture_trade_execution(sess, user_id, league_id, scoring_format):
     return _TradeExecutionContext(
         user_id, league_id, scoring_format, service, trade_service, league,
         tuple(sess.get("user_roster") or ()), tuple(sess.get("players") or ()),
+        _league_user_id(sess),
     )
 
 
@@ -5984,7 +6837,8 @@ def _run_trade_job(
         g_league      = ctx.league
         g_user_roster = list(ctx.user_roster)
         g_players     = ctx.players
-        sess = {"user_roster": g_user_roster, "players": g_players}
+        sess = {"user_id": g_user_id, "league_user_id": ctx.league_user_id,
+                "user_roster": g_user_roster, "players": g_players}
         if not (service and trade_service and g_league
                 and g_user_roster and g_players):
             raise RuntimeError("session missing required state for trade gen")
@@ -6012,6 +6866,21 @@ def _run_trade_job(
                             # Trade-engine v2: mark members whose values come
                             # from real member_rankings rows (vs. seed/sim).
                             member.has_rankings = True
+                            # Personal-market policy (2026-09-04) — carry the
+                            # opponent's ranking confidence into generation so
+                            # BOTH boards can be shrunk by the same rule. Set
+                            # ONLY on this branch, i.e. only for members whose
+                            # Elo came from real member_rankings rows: a
+                            # confidence map on a member whose ratings are
+                            # seeded noise would dress that noise as evidence.
+                            # `.get` with a default keeps this safe against a
+                            # loader one deploy behind the new columns.
+                            member.comparison_counts = (
+                                rd.get("comparison_counts") or None)
+                            member.confidence_weights = (
+                                rd.get("confidence_weights") or None)
+                            member.confidence_source = rd.get("confidence_source")
+                            member.board_updated_at = rd.get("board_updated_at")
                             real_count += 1
                 real_user_ids = set(real_rankings.keys()) if real_count else set()
         except Exception as db_err:
@@ -6059,6 +6928,8 @@ def _run_trade_job(
                     avoid_positions  = prefs.get("avoid_positions",      []) or []
         except Exception as pref_err:
             log.warning("trade-job: could not load league preference: %s", pref_err)
+
+        explicit_outlook = outlook_value
 
         # #360 R-9 — avoid ⊕ chase is unsatisfiable and fails SILENTLY: the
         # pool exclusion empties every receive pool of the position while
@@ -6168,6 +7039,19 @@ def _run_trade_job(
         # every snapshot publish (streaming + final) filters identically.
         ghost_on = _ghost_holdout_active(
             league_id, pinned_give, pinned_receive, opponent_user_id)
+
+        mutual_live = getattr(FLAGS, "trade_mutual_benefit_v1", False) and league_id != "league_demo"
+        market_live = (_trade_policy.policy_enabled() or mutual_live) and league_id != "league_demo"
+        roster_live = (getattr(FLAGS, "trade_roster_protection", False) or mutual_live) and league_id != "league_demo"
+        roster_shadow = getattr(FLAGS, "trade_roster_evaluation", False) and league_id != "league_demo"
+        with _trade_jobs_lock:
+            j = _trade_jobs.get(job_id)
+            if _job_live(j):
+                if market_live or roster_live:
+                    j["final_checks_pending"] = True
+                safety_signature = _trade_safety_signature()
+                if safety_signature:
+                    j["safety_policy"] = safety_signature
 
         progress_cb  = _make_progress_cb(job_id, players_dict, real_user_ids,
                                          outlook_value, league_id, ghost_on)
@@ -6392,7 +7276,7 @@ def _run_trade_job(
                     snapshot.append(d)
                 with _trade_jobs_lock:
                     j = _trade_jobs.get(job_id)
-                    if _job_live(j):
+                    if _job_live(j) and not j.get("final_checks_pending"):
                         j["cards"] = snapshot
 
         # Tier 2 (2.3a) — likes-you queue. Inject/boost cards league-mates
@@ -6434,7 +7318,7 @@ def _run_trade_job(
                     snapshot.append(d)
                 with _trade_jobs_lock:
                     j = _trade_jobs.get(job_id)
-                    if _job_live(j):
+                    if _job_live(j) and not j.get("final_checks_pending"):
                         j["cards"] = snapshot
             except Exception as ly_err:
                 log.warning("likes-you injection failed (non-fatal): %s", ly_err)
@@ -6494,7 +7378,7 @@ def _run_trade_job(
                         snapshot.append(d)
                     with _trade_jobs_lock:
                         j = _trade_jobs.get(job_id)
-                        if _job_live(j):
+                        if _job_live(j) and not j.get("final_checks_pending"):
                             j["cards"] = snapshot
             except Exception as fat_err:
                 log.warning("deck fatigue layer failed (non-fatal): %s", fat_err)
@@ -6589,7 +7473,7 @@ def _run_trade_job(
                         snapshot.append(d)
                     with _trade_jobs_lock:
                         j = _trade_jobs.get(job_id)
-                        if _job_live(j):
+                        if _job_live(j) and not j.get("final_checks_pending"):
                             j["cards"] = snapshot
             except Exception as ord_err:
                 log.warning("deck ordering (A5/A6) failed (non-fatal): %s", ord_err)
@@ -6630,7 +7514,7 @@ def _run_trade_job(
                         snapshot.append(d)
                     with _trade_jobs_lock:
                         j = _trade_jobs.get(job_id)
-                        if _job_live(j):
+                        if _job_live(j) and not j.get("final_checks_pending"):
                             j["cards"] = snapshot
             except Exception as ex_err:
                 log.warning("deck exploration layer failed (non-fatal): %s", ex_err)
@@ -6678,7 +7562,7 @@ def _run_trade_job(
                             snapshot.append(d)
                         with _trade_jobs_lock:
                             j = _trade_jobs.get(job_id)
-                            if _job_live(j):
+                            if _job_live(j) and not j.get("final_checks_pending"):
                                 j["cards"] = snapshot
                 except Exception as fs_err:
                     log.warning("first-session shaping failed (non-fatal): %s",
@@ -6697,6 +7581,136 @@ def _run_trade_job(
                             j["board_refresh"] = _board_refresh
             except Exception as br_err:
                 log.warning("board-refresh header failed (non-fatal): %s", br_err)
+
+        roster_results = None
+        if roster_live or roster_shadow:
+            try:
+                roster_ctx = _build_trade_roster_context(
+                    sess=sess, league=g_league, players=players_dict,
+                    seed_map=seed_map, scoring_format=active_format,
+                    outlook=outlook_value, opponent_outlooks=opponent_outlooks,
+                    picks=_job_draft_picks(), explicit_outlook=explicit_outlook)
+                roster_candidates = final_cards
+                final_cards, roster_results, roster_diag = _evaluate_deck_rosters(
+                    final_cards, roster_ctx, enforce=roster_live, require_mutual=mutual_live)
+                try:
+                    _log_roster_rejections(roster_candidates, roster_results,
+                        job_id=job_id, user_id=g_user_id, league_id=league_id,
+                        bakeoff_run=bakeoff_run)
+                except Exception as roster_log_err:
+                    log.warning("roster shadow log failed: %s", roster_log_err)
+            except Exception as roster_err:
+                log.warning("roster evaluation failed: %s", roster_err)
+                roster_diag = {"error": "evaluation_unavailable", "enforced": roster_live}
+                if roster_live:
+                    final_cards = []
+            with _trade_jobs_lock:
+                j = _trade_jobs.get(job_id)
+                if j is not None:
+                    j["roster_evaluation"] = roster_diag
+
+        # ── Personal-market policy: THE choke point ───────────────────────
+        # docs/plans/personal-market-policy/scope.md. Runs on `final_cards`,
+        # i.e. AFTER the entire mutation stack (sweeteners, swaps, likes-you
+        # injection, wildcards, first-session shaping, replenishment) and
+        # BEFORE the ghost split and the impression write. That is the whole
+        # point: a card added or altered by any of those layers is judged on
+        # the package it will actually be served as, so none of them is a
+        # bypass. Ghost rows are inside `final_cards` here too, so they get
+        # the same snapshot the served rows do.
+        #
+        # With both flags off this is three cheap boolean reads and a return
+        # — no context is built, no card is touched, no row is written.
+        policy_results: dict = {}
+        policy_variant = _trade_policy.POLICY_V1 if market_live else _trade_policy.POLICY_LEGACY
+        policy_shadow_rows: list = []
+        if ((_trade_policy.telemetry_enabled() or market_live)
+                and league_id != "league_demo"):
+            try:
+                _pol_ctx = _policy_context(
+                    user_id        = g_user_id,
+                    user_elo       = elo_map_rt,
+                    seed_elo       = seed_map,
+                    players_dict   = players_dict,
+                    league         = g_league,
+                    confidence     = confidence_counts,
+                    placements     = placement_bands,
+                    scoring_format = active_format,
+                    # The client's own fairness preference. It may TIGHTEN the
+                    # policy floor and can never loosen it — the max() in
+                    # trade_policy.compose_effective_floor is the correction
+                    # to the live divergence path's min(), which turned a
+                    # user's stricter 0.75 request into a looser 0.55 gate.
+                    requested_floor = fairness_threshold,
+                )
+                if _pol_ctx is not None:
+                    _pol_ctx["policy_variant"] = policy_variant
+                _pre_policy_ids = [id(c) for c in final_cards]
+                final_cards, policy_results, policy_shadow_rows = (
+                    _evaluate_deck_policy(
+                        final_cards, _pol_ctx,
+                        enforce=market_live,
+                        mutual_order=mutual_live,
+                        job_id    = job_id,
+                        user_id   = g_user_id,
+                        league_id = league_id,
+                        bakeoff_run = bakeoff_run,
+                    ))
+                # Republish when the policy actually changed the deck (live
+                # mode only — shadow mode returns the input list unchanged
+                # and this is a no-op). The impression block below also
+                # republishes, but only when deck.signal_v2 is on; the
+                # snapshot the client reads must be correct on every flag
+                # combination, so this republish stands on its own. Same
+                # idiom as the F7/F9/breaker republishes above.
+                if not (market_live or roster_live) and [id(c) for c in final_cards] != _pre_policy_ids:
+                    snapshot = []
+                    for c in _served_cards(final_cards, league_id, ghost_on):
+                        d = trade_card_to_dict(c, players_dict)
+                        d["real_opponent"] = c.target_user_id in real_user_ids
+                        d["outlook"]       = outlook_value
+                        snapshot.append(d)
+                    with _trade_jobs_lock:
+                        j = _trade_jobs.get(job_id)
+                        if _job_live(j):
+                            j["cards"] = snapshot
+                # Drain the likes-you injector's stale-mirror notes into the
+                # same ledger. A mirror that was never eligible, never
+                # generated or never served must be a RECORDED state — the
+                # funnel cannot read a missing second like as a rejection.
+                policy_shadow_rows.extend(
+                    _mirror_skip_rows(trade_service, job_id, _pol_ctx))
+                if policy_shadow_rows:
+                    try:
+                        save_trade_policy_shadow(policy_shadow_rows)
+                    except Exception as sh_err:
+                        _trade_policy.HEALTH["shadow_write_failures"] += 1
+                        log.warning("policy shadow log failed (non-fatal): %s",
+                                    sh_err)
+            except Exception as pol_err:
+                log.warning("trade policy evaluation failed: %s", pol_err)
+                policy_results = {}
+                if market_live:
+                    final_cards = []
+                with _trade_jobs_lock:
+                    j = _trade_jobs.get(job_id)
+                    if j is not None:
+                        j["policy_error"] = "evaluation_unavailable"
+
+        # Publish only evaluated cards, even with impression logging disabled
+        # or an empty result. Later annotation layers do not alter packages.
+        if market_live or roster_live:
+            snapshot = []
+            for c in _served_cards(final_cards, league_id, ghost_on):
+                d = trade_card_to_dict(c, players_dict)
+                d["real_opponent"] = c.target_user_id in real_user_ids
+                d["outlook"] = outlook_value
+                snapshot.append(d)
+            with _trade_jobs_lock:
+                j = _trade_jobs.get(job_id)
+                if _job_live(j):
+                    j["cards"] = snapshot
+                    j["final_checks_pending"] = False
 
         # Counterparty breaker (v1) — evaluate + stamp + (flag 2) narrate.
         # Post-mutation-stack, pre-ghost-split: `final_cards` here is the
@@ -6863,7 +7877,10 @@ def _run_trade_job(
                     seed_map       = seed_map,   # F3 — centerpiece stamping
                     first_deck     = fs_first_deck,   # F9 — frozen features stamp
                     bakeoff_run    = bakeoff_run,     # trade.bakeoff — arm attribution
-                    nm_map         = nm_map,          # trade.negmem — stamp ON-condition
+                    nm_map          = nm_map,         # trade.negmem — stamp ON-condition
+                    roster_results  = roster_results,
+                    policy_results  = policy_results, # personal-market policy
+                    policy_variant  = policy_variant,
                     **telemetry_kw,
                 )
                 if imp_by_card:
@@ -7715,11 +8732,14 @@ def post_rank3():
                     {"player_id": rp.player.id, "elo": rp.elo}
                     for rp in all_rankings.rankings
                 ]
+                _conf = _ranking_confidence(service)
+                ranking_payload = _confidence_payload(ranking_payload, _conf)
                 upsert_member_rankings(
                     user_id        = g_user_id,
                     league_id      = g_league.league_id,
                     rankings       = ranking_payload,
                     scoring_format = fmt,
+                    **_conf,
                 )
         except Exception as db_err:
             log.warning("member_rankings auto-publish failed (continuing): %s", db_err)
@@ -8558,11 +9578,17 @@ def copy_tiers_from_format_route():
                 {"player_id": rp.player.id, "elo": rp.elo}
                 for rp in all_rankings.rankings
             ]
+            # The WHOLE board here is derived from the other format's
+            # ordering, so no player on it has direct evidence in THIS
+            # format — `cross_format`, not per-player provenance.
+            _conf = _ranking_confidence(to_svc, source="cross_format")
+            ranking_payload = _confidence_payload(ranking_payload, _conf)
             upsert_member_rankings(
                 user_id        = g_user_id,
                 league_id      = g_league.league_id,
                 rankings       = ranking_payload,
                 scoring_format = to_format,
+                **_conf,
             )
         except Exception as db_err:
             log.warning("copy-from-format: member_rankings publish failed: %s", db_err)
@@ -9345,11 +10371,14 @@ def save_tiers_route():
                     {"player_id": rp.player.id, "elo": rp.elo}
                     for rp in all_rankings.rankings
                 ]
+                _conf = _ranking_confidence(service)
+                ranking_payload = _confidence_payload(ranking_payload, _conf)
                 upsert_member_rankings(
                     user_id        = g_user_id,
                     league_id      = g_league.league_id,
                     rankings       = ranking_payload,
                     scoring_format = fmt,
+                    **_conf,
                 )
         except Exception as db_err:
             log.warning("member_rankings publish after tiers save failed: %s", db_err)
@@ -9528,11 +10557,14 @@ def save_anchor_route():
                     {"player_id": rp.player.id, "elo": rp.elo}
                     for rp in all_rankings.rankings
                 ]
+                _conf = _ranking_confidence(service)
+                ranking_payload = _confidence_payload(ranking_payload, _conf)
                 upsert_member_rankings(
                     user_id        = g_user_id,
                     league_id      = g_league.league_id,
                     rankings       = ranking_payload,
                     scoring_format = fmt,
+                    **_conf,
                 )
         except Exception as db_err:
             log.warning("member_rankings publish after anchor failed: %s", db_err)
@@ -9912,11 +10944,14 @@ def reorder_rankings():
                     {"player_id": rp.player.id, "elo": rp.elo}
                     for rp in all_rankings.rankings
                 ]
+                _conf = _ranking_confidence(service)
+                ranking_payload = _confidence_payload(ranking_payload, _conf)
                 upsert_member_rankings(
                     user_id        = g_user_id,
                     league_id      = g_league.league_id,
                     rankings       = ranking_payload,
                     scoring_format = fmt,
+                    **_conf,
                 )
         except Exception as db_err:
             log.warning("member_rankings publish after reorder failed: %s", db_err)
@@ -10103,12 +11138,16 @@ def rankings_import_apply():
         try:
             if g_league and g_league.league_id not in ("league_demo",):
                 all_rankings = service.get_rankings(position=None)
+                _conf = _ranking_confidence(service)
+                _import_payload = _confidence_payload(
+                    [{"player_id": rp.player.id, "elo": rp.elo}
+                     for rp in all_rankings.rankings], _conf)
                 upsert_member_rankings(
                     user_id        = g_user_id,
                     league_id      = g_league.league_id,
-                    rankings       = [{"player_id": rp.player.id, "elo": rp.elo}
-                                      for rp in all_rankings.rankings],
+                    rankings       = _import_payload,
                     scoring_format = fmt,
+                    **_conf,
                 )
         except Exception as db_err:
             log.warning("member_rankings publish after import failed: %s", db_err)
@@ -12055,6 +13094,10 @@ def trade_card_to_dict(card, players: dict) -> dict:
         _rr = getattr(card, "relaxed_reason", None)
         if _rr:
             out["relaxed_reason"] = _rr
+    if getattr(FLAGS, "trade_roster_protection", False):
+        roster_evidence = getattr(card, "roster_evaluation", None)
+        if roster_evidence is not None:
+            out["roster_evaluation"] = roster_evidence
     # FB-47 — counterparty positional fit, only when targeting stamped it.
     partner_fit = getattr(card, "partner_fit", None)
     if partner_fit is not None:
@@ -13076,6 +14119,16 @@ def swipe_trade():
             # is what actually stops `trade_k_pass` being applied twice.
             # `check_for_match` below is deliberately NOT skipped: a replayed
             # like must still be able to surface a mutual match.
+            # Personal-market policy (2026-09-04) — carry the impression and
+            # the canonical concept id onto the decision row. Both are NULL
+            # while `trade.valuation_telemetry` is off, so flag-off rows are
+            # byte-identical. The impression id is validated for ownership by
+            # `_owned_impression_id` exactly as the deck-outcome path does:
+            # a client-supplied id must never be trusted into the corpus.
+            _pol_imp = _owned_impression_id(body.get("impression_id"), g_user_id,
+                league_id=card.league_id, expected_trade_hash=_deck_trade_hash(
+                    card.give_player_ids, card.receive_player_ids, card.target_user_id))
+            _pol_concept = _card_concept_id(card, g_user_id)
             wrote_decision = save_trade_decision(
                 user_id            = g_user_id,
                 league_id          = card.league_id,
@@ -13083,6 +14136,8 @@ def swipe_trade():
                 give_player_ids    = card.give_player_ids,
                 receive_player_ids = card.receive_player_ids,
                 decision           = decision,
+                impression_id      = _pol_imp,
+                trade_concept_id   = _pol_concept,
             )
             if wrote_decision:
                 save_trade_swipes(
@@ -13122,7 +14177,13 @@ def swipe_trade():
 
             # Mutual match detection — only on "like" decisions
             if decision == "like" and card.target_user_id and card.league_id != "league_demo":
-                is_mirror = check_for_match(
+                # `find_mirror_like` is `check_for_match` with the row
+                # attached — same matching logic, one implementation. The
+                # counterparty liked this mirror at an EARLIER moment, and
+                # that moment plus their impression is what the match row
+                # needs to record a real interaction lag instead of pretending
+                # both likes happened at once.
+                mirror = find_mirror_like(
                     current_user_id    = g_user_id,
                     league_id          = card.league_id,
                     target_user_id     = card.target_user_id,
@@ -13133,6 +14194,7 @@ def swipe_trade():
                     fuzzy              = _fuzzy_match_enabled(),
                     fuzzy_tau          = _fuzzy_match_tau(),
                 )
+                is_mirror = mirror is not None
                 if is_mirror:
                     already = match_already_exists(
                         league_id          = card.league_id,
@@ -13142,12 +14204,22 @@ def swipe_trade():
                         receive_player_ids = card.receive_player_ids,
                     )
                     if not already:
+                        # Both impressions, both like times, and a THIRD
+                        # valuation snapshot taken on the unchanged package
+                        # under today's state — "was the concept still valid
+                        # when mutual interest formed?". All five arguments
+                        # are None while the telemetry flag is off, so the
+                        # written row is byte-identical to the pre-change one.
+                        _match_extra = _match_attribution(
+                            card, g_user_id, mirror, _pol_imp, _pol_concept,
+                            sess)
                         match_data = create_trade_match(
                             league_id      = card.league_id,
                             user_a_id      = g_user_id,
                             user_b_id      = card.target_user_id,
                             user_a_give    = card.give_player_ids,
                             user_a_receive = card.receive_player_ids,
+                            **_match_extra,
                         )
                         log.info(
                             "🎉 Trade match! league=%s  %s ↔ %s  give=%s receive=%s",
@@ -16530,6 +17602,9 @@ def propose_trade_to_sleeper():
         give_player_ids=give_players, receive_player_ids=recv_players,
         draft_picks=encoded or None,
     )
+    # Request-local ledger id; a fresh client retry creates a fresh id.
+    # This does not provide cross-request provider-send idempotency.
+    _proposal_event_id = uuid.uuid4().hex
     try:
         result = _sleeper_write.propose_trade(token, req)
     except _sleeper_write.SleeperAuthError as e:
@@ -16575,6 +17650,22 @@ def propose_trade_to_sleeper():
         user_id, league_id, give_players, recv_players, encoded,
         result.get("transaction_id"),
         bool(body.get("impression_id")),
+    )
+    # ── Personal-market policy: durable proposal record ───────────────
+    # Only reached on a CONFIRMED provider success — every failure branch
+    # returned above, and an attempted or failed send is not a proposal.
+    # The snapshot is recomputed from the FINAL package (the user may have
+    # edited the card before sending), never copied from the impression.
+    # Idempotent on `proposal_event_id`, minted before the provider call.
+    _record_trade_proposal(
+        sess=sess, provider="sleeper", user_id=user_id,
+        league_id=league_id, target_user_id=their_user_id or their_rid,
+        give_asset_ids=give, receive_asset_ids=receive,
+        impression_id=_owned_impression_id(body.get("impression_id"), user_id, league_id=league_id),
+        proposal_event_id=_proposal_event_id,
+        provider_transaction_id=result.get("transaction_id"),
+        source=(body.get("source") if body.get("source") in
+                ("deck", "match", "calculator") else "deck"),
     )
     return jsonify({
         "status": result.get("status") or "proposed",
@@ -17764,11 +18855,14 @@ def submit_rankings():
     ]
 
     try:
+        _conf = _ranking_confidence(service)
+        payload = _confidence_payload(payload, _conf)
         upsert_member_rankings(
             user_id        = user_id,
             league_id      = league_id,
             rankings       = payload,
             scoring_format = _active_format(sess),
+            **_conf,
         )
         log.info("rankings/submit [%s] — user=%s league=%s players=%d",
                  _active_format(sess), user_id, league_id, len(payload))
@@ -28710,6 +29804,9 @@ def propose_trade_to_mfl():
         comments=(str(body.get("comments") or "").strip() or None),
         expires=int(expires) if expires is not None else None,
     )
+    # Request-local ledger id; a fresh client retry creates a fresh id.
+    # This does not provide cross-request provider-send idempotency.
+    _proposal_event_id = uuid.uuid4().hex
     try:
         result = _mfl_write.propose_trade(cookie, host, year, req)
     except _mfl_write.MflWriteAuthError as e:
@@ -28756,6 +29853,22 @@ def propose_trade_to_mfl():
         )
     except Exception:
         pass
+    # ── Personal-market policy: durable proposal record ───────────────
+    # Only reached on a CONFIRMED provider success — every failure branch
+    # returned above, and an attempted or failed send is not a proposal.
+    # The snapshot is recomputed from the FINAL package (the user may have
+    # edited the card before sending), never copied from the impression.
+    # Idempotent on `proposal_event_id`, minted before the provider call.
+    _record_trade_proposal(
+        sess=sess, provider="mfl", user_id=user_id,
+        league_id=league_id, target_user_id=their_member_id or their_fid,
+        give_asset_ids=give + give_picks, receive_asset_ids=receive + receive_picks,
+        impression_id=_owned_impression_id(body.get("impression_id"), user_id, league_id=league_id),
+        proposal_event_id=_proposal_event_id,
+        provider_transaction_id=None,
+        source=(body.get("source") if body.get("source") in
+                ("deck", "match", "calculator") else "deck"),
+    )
     log.info("mfl propose: user=%s league=%s offered_to=f%s assets=%d/%d",
              user_id, league_id, their_fid,
              len(give) + len(give_picks), len(receive) + len(receive_picks))
@@ -29196,6 +30309,9 @@ def propose_trade_to_espn():
         lineup_slots=_espn_write.extract_lineup_slots(raw),
         comment=(str(body.get("comments") or "").strip()),
     )
+    # Request-local ledger id; a fresh client retry creates a fresh id.
+    # This does not provide cross-request provider-send idempotency.
+    _proposal_event_id = uuid.uuid4().hex
     try:
         result = _espn_write.propose_trade(espn_s2, swid, req)
     except _espn_write.EspnWriteAuthError as e:
@@ -29242,6 +30358,22 @@ def propose_trade_to_espn():
         )
     except Exception:
         pass
+    # ── Personal-market policy: durable proposal record ───────────────
+    # Only reached on a CONFIRMED provider success — every failure branch
+    # returned above, and an attempted or failed send is not a proposal.
+    # The snapshot is recomputed from the FINAL package (the user may have
+    # edited the card before sending), never copied from the impression.
+    # Idempotent on `proposal_event_id`, minted before the provider call.
+    _record_trade_proposal(
+        sess=sess, provider="espn", user_id=user_id,
+        league_id=league_id, target_user_id=their_member_id or their_team_id,
+        give_asset_ids=give, receive_asset_ids=receive,
+        impression_id=_owned_impression_id(body.get("impression_id"), user_id, league_id=league_id),
+        proposal_event_id=_proposal_event_id,
+        provider_transaction_id=result.get("transaction_id"),
+        source=(body.get("source") if body.get("source") in
+                ("deck", "match", "calculator") else "deck"),
+    )
     log.info("espn propose: user=%s league=%s to_team=%s assets=%d/%d",
              user_id, league_id, their_team_id, len(give), len(receive))
     return jsonify({"status": "proposed",

@@ -939,3 +939,27 @@ re-link the league and pick the right team. Wire code is still
 `espn_bad_credentials`; the additive `reason: "wrong_account"` field is
 what drives the dedicated mobile copy. Diagnosis from logs: grep
 `identity mismatch` (store / team-binding / re-sync variants all log it).
+
+## Trade-policy telemetry health (personal-market policy, 2026-09-04)
+
+**Symptom:** a readout built on `deck_impressions.valuation_json` looks wrong, or coverage is below the 99% instrumentation bar.
+
+`backend/trade_policy.HEALTH` is a process-local counter dict, reset on every deploy. Check it **before** trusting any analysis built on the snapshot:
+
+| Counter | Means |
+|---|---|
+| `serialize_failures` | A snapshot could not be JSON-encoded. The column is left NULL and the job continues. |
+| `snapshot_failures` | The evaluator raised while building a snapshot (deck, match or proposal). |
+| `asset_mismatches` | A snapshot's asset ids/directions did not match the row's `assets_json`, so the column was deliberately left NULL. **This one is the serious signal** — it means a snapshot was built from a different package than the one served, which is worse than no snapshot. |
+| `shadow_write_failures` | A `trade_policy_shadow` batch insert failed. The treatment's rejections for that job are lost from the denominator. |
+| `proposal_write_failures` | A `trade_proposals` write failed after a **confirmed** provider send. The trade went out; the record did not. |
+
+**Everything here is best-effort by design** — telemetry may never fail a trade job, so all five paths swallow and count. That is exactly why the counters have to be read rather than assumed: a silent zero in `trade_policy_shadow` is indistinguishable from "the policy rejected nothing", which is the precise misreading those rows exist to prevent.
+
+**Guardrail tests:** `backend/tests/test_trade_policy_wiring.py::test_telemetry_failure_never_fails_the_job` (a raising snapshot builder still yields a completed job and a served deck) and `::test_a_failed_proposal_snapshot_still_records_the_send`.
+
+**If coverage is low:** confirm `trade.valuation_telemetry` is actually on (`GET /api/feature-flags`), then that `_migrate_db()` ran on the instance — every reader uses `getattr(row, col, None)` so an instance one deploy behind the columns degrades silently rather than 500ing, which is safe but invisible.
+
+### Roster gate rollout (built dark, 2026-09-04)
+
+Begin with roster shadow on a staging/limited test cohort. Review status coverage, final-package rejection reasons and offline outcomes. Do not enable enforcement across estimated non-Sleeper lineups, unsupported slots or stale/missing availability: they intentionally yield short/empty decks. Roll back with `trade.roster_protection=false`; keep shadow only if its latency/telemetry is healthy. New deck requests invalidate cached results on safety-switch changes. Production activation, CI on the pushed SHA and the manual checklist in `docs/plans/post-trade-roster-evaluation/` remain release gates.

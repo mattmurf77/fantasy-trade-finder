@@ -1,0 +1,71 @@
+{
+  "dialect": "postgresql",
+  "migration_runs": 2,
+  "added": {
+    "trade_decisions": [
+      "impression_id",
+      "trade_concept_id"
+    ],
+    "trade_matches": [
+      "first_like_at",
+      "match_latency_seconds",
+      "match_valuation_json",
+      "second_like_at",
+      "trade_concept_id",
+      "user_a_impression_id",
+      "user_b_impression_id"
+    ],
+    "member_rankings": [
+      "comparison_count",
+      "confidence_source",
+      "confidence_weight"
+    ],
+    "deck_impressions": [
+      "policy_variant",
+      "source_like_impression_id",
+      "trade_concept_id",
+      "valuation_json"
+    ],
+    "trade_proposals": [
+      "edited_from_source",
+      "final_trade_hash",
+      "give_asset_ids",
+      "id",
+      "impression_id",
+      "league_id",
+      "match_id",
+      "origin_trade_hash",
+      "proposal_event_id",
+      "proposed_at",
+      "provider",
+      "provider_transaction_id",
+      "receive_asset_ids",
+      "source",
+      "target_user_id",
+      "user_id",
+      "valuation_json"
+    ],
+    "trade_policy_shadow": [
+      "created_at",
+      "deck_job_id",
+      "effective_floor",
+      "eligible",
+      "id",
+      "lane",
+      "league_id",
+      "market_ratio",
+      "model_arm",
+      "personal_opportunity",
+      "policy_floor",
+      "policy_variant",
+      "reason",
+      "trade_concept_id",
+      "trade_confidence",
+      "trade_hash",
+      "user_id"
+    ]
+  },
+  "legacy_row_preserved": true,
+  "operator_config_preserved": true,
+  "cross_format_roundtrip": true
+}

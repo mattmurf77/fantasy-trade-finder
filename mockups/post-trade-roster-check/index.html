@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="data:,">
+<title>Fleeced — Post-trade roster evidence</title>
+<style>
+@font-face{font-family:Archivo;src:url('assets/archivo-regular.ttf') format('truetype');font-weight:400;font-display:swap}
+@font-face{font-family:Archivo;src:url('assets/archivo-semibold.ttf') format('truetype');font-weight:600;font-display:swap}
+@font-face{font-family:'Barlow Condensed';src:url('assets/barlow-condensed-semibold.ttf') format('truetype');font-weight:600;font-display:swap}
+@font-face{font-family:'Barlow Condensed';src:url('assets/barlow-condensed-bold.ttf') format('truetype');font-weight:700;font-display:swap}
+@font-face{font-family:'IBM Plex Mono';src:url('assets/ibm-plex-mono-medium.ttf') format('truetype');font-weight:500;font-display:swap}
+:root{--ink-0:#0C0E11;--ink-1:#13161B;--ink-2:#1A1E25;--ink-3:#232833;--line:#262C35;--line-strong:#59647A;--chalk:#ECEFF4;--dim:#97A1AE;--ice:#56D9EC;--ice-press:#3FC2D6;--on-ice:#071013;--flare:#F0508C;--pos:#22C55E;--neg:#EF4444;--warn:#F59E0B;--qb:#F97316;--rb:#22C55E;--wr:#3B82F6;--te:#A855F7;--ui:Archivo,sans-serif;--display:'Barlow Condensed',sans-serif;--mono:'IBM Plex Mono',monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--ink-0);color:var(--chalk);font:400 14px/21px var(--ui)}button,select{font:inherit;color:inherit}button,a,summary,select{-webkit-tap-highlight-color:transparent}button,summary{cursor:pointer}a{color:var(--ice);text-underline-offset:4px}button:focus-visible,a:focus-visible,summary:focus-visible,select:focus-visible{outline:2px solid var(--ice);outline-offset:2px}button{background:transparent}p,h1,h2,h3,h4,figure{margin:0}strong,b{font-weight:600}svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:square;flex:none}svg.small{width:16px;height:16px}[hidden]{display:none!important}
+.wrap{max-width:1232px;padding:0 24px;margin:auto}.masthead{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:24px 0;border-bottom:1px solid var(--line)}.wordmark{font:700 22px/26px var(--display);letter-spacing:.03em;display:flex;gap:12px;align-items:center}.wordmark:before{content:"";width:3px;height:22px;background:var(--ice)}.label{font:600 11px/14px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}.mono{font:500 13px/18px var(--mono);font-variant-numeric:tabular-nums}.muted{color:var(--dim)}.small-copy{font:400 13px/18px var(--ui)}.intro{padding:32px 0 24px;display:flex;justify-content:space-between;gap:32px;align-items:end}.intro h1{font:700 32px/34px var(--display);letter-spacing:.02em;text-transform:uppercase;margin:8px 0 12px}.intro p{max-width:670px;color:var(--dim)}.jump{flex:none;min-height:44px;display:flex;align-items:center;gap:12px;font-weight:600}.workbench{display:grid;grid-template-columns:244px minmax(0,1fr) minmax(0,1.24fr);gap:24px;align-items:start}.pane{min-width:0}.pane-title{display:flex;align-items:center;gap:8px;margin-bottom:8px}.number{font:500 11px/14px var(--mono);color:var(--dim);padding:4px 6px;border:1px solid var(--line);border-radius:2px}.pane h2{font:600 22px/26px var(--display);letter-spacing:.03em;text-transform:uppercase}.caption{font:400 13px/18px var(--ui);color:var(--dim);margin-bottom:16px;min-height:54px}.capture{width:100%;height:auto;display:block;border:1px solid var(--line);border-radius:8px}.capture-link{display:block}.provenance{margin-top:12px;font:400 13px/18px var(--ui);color:var(--dim)}.provenance p+p{margin-top:8px}.provenance a{overflow-wrap:anywhere}.source-frame{padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--ink-1)}.source-frame h3{font:600 16px/22px var(--ui);margin-top:4px}.source-frame .tick{margin:16px 0 8px}.trade-sides{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0 16px}.asset{border:1px solid var(--line);border-left:3px solid var(--wr);border-radius:8px;padding:12px 8px;min-width:0}.asset.te{border-left-color:var(--te)}.asset .name{font:600 13px/18px var(--ui);margin-top:8px}.badge{display:inline-block;border:1px solid var(--line-strong);border-radius:2px;padding:2px 6px;font:600 11px/14px var(--ui);letter-spacing:.08em;text-transform:uppercase}.badge.wr{border-color:var(--wr)}.badge.te{border-color:var(--te)}.baseline-title{border-top:1px solid var(--line);padding-top:12px;margin-top:12px}.current-slot{padding:8px 0;border-bottom:1px solid var(--line)}.current-slot:last-child{border-bottom:0}.current-slot .move{display:grid;grid-template-columns:42px 1fr 16px 1fr;gap:4px;align-items:start;font:400 13px/18px var(--ui)}.rank-move{text-align:right;font:500 11px/18px var(--mono);margin-top:4px;color:var(--dim)}.existing-note{border-left:3px solid var(--line-strong);padding:0 0 0 12px;color:var(--dim);margin-top:20px;font:400 13px/18px var(--ui)}.existing-note strong{color:var(--chalk)}
+.scenario-control{margin-bottom:12px}.scenario-control label{display:block;margin-bottom:8px}.scenario-control select{background:var(--ink-1);border:1px solid var(--line-strong);border-radius:4px;min-height:44px;padding:10px 12px;width:100%;font:600 13px/18px var(--ui)}.scenario-note{margin:8px 0 12px;color:var(--dim);font:400 13px/18px var(--ui);min-height:36px}.app-frame{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:12px}.sample-label{color:var(--flare);font:600 11px/14px var(--ui);letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px}.trade-context{font:400 13px/18px var(--ui);color:var(--dim);padding-bottom:12px}.trade-context strong{color:var(--chalk)}.tick{display:flex;gap:8px;align-items:center;font:600 11px/14px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}.tick:before{content:"";width:3px;height:14px;flex:none;background:var(--ice)}.roster-module{border-top:1px solid var(--line)}summary{list-style:none}summary::-webkit-details-marker{display:none}.module-toggle{padding:12px 0;display:flex;align-items:center;gap:12px;min-height:60px}.module-toggle>div{flex:1}.module-toggle .headline{display:block;font:600 16px/22px var(--ui);margin-top:8px}.module-toggle .overall-sub{display:block;margin-top:4px;color:var(--dim);font:400 13px/18px var(--ui)}.chevron{transition:transform 120ms ease-out;color:var(--dim)}details[open]>.module-toggle>.chevron,details[open]>.replacement-toggle>.chevron,details[open]>.detail-toggle>.chevron{transform:rotate(180deg)}.team-tabs{display:flex;border:1px solid var(--line-strong);border-radius:4px;overflow:hidden;margin:4px 0 12px}.team-tabs button{flex:1;min-height:44px;border:0;border-bottom:2px solid transparent;color:var(--dim);font:600 13px/18px var(--ui);padding:8px 4px}.team-tabs button[aria-pressed=true]{background:var(--ink-3);border-bottom-color:var(--ice);color:var(--chalk)}.team-tabs button:hover{background:var(--ink-3)}.team-tabs button:focus-visible{outline-offset:-3px}.team-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px}.team-head h3{font:600 16px/22px var(--ui)}.state{font:600 11px/14px var(--ui);letter-spacing:.04em;text-transform:uppercase;color:var(--pos);display:flex;align-items:center;gap:4px}.state.warn{color:var(--warn)}.state.neutral{color:var(--dim)}.lead{font:400 13px/18px var(--ui);margin-bottom:8px}.source-note{font:400 13px/18px var(--ui);color:var(--dim)}.estimate-alert{border-left:3px solid var(--warn);padding:8px 12px;background:var(--ink-2);margin-bottom:12px;font:400 13px/18px var(--ui)}.estimate-alert strong{display:block;margin-bottom:4px;color:var(--warn)}
+.replacement{border-top:1px solid var(--line);margin:12px 0 0}.replacement-toggle{min-height:56px;display:flex;gap:8px;align-items:center;padding:12px 0}.replacement-toggle>div{flex:1;min-width:0}.replacement-toggle .title{font:600 13px/18px var(--ui);display:block}.replacement-toggle .hint{font:400 13px/18px var(--ui);display:block;color:var(--dim);margin-top:4px}.slot-chip{font:500 11px/14px var(--mono);color:var(--chalk);border:1px solid var(--line-strong);border-radius:2px;padding:4px;min-width:36px;text-align:center}.replacement-body{padding:0 0 12px}.replace-step{display:grid;grid-template-columns:50px 1fr;gap:12px;padding:8px 0;border-top:1px solid var(--line);font:400 13px/18px var(--ui)}.replace-step .label{padding-top:2px}.replace-step strong{display:block}.replace-step span.note{color:var(--dim);display:block;margin-top:4px}.quality-note{background:var(--ink-2);padding:8px 12px;margin-top:8px;font:400 13px/18px var(--ui);border-radius:4px}.section-title{font:600 11px/14px var(--ui);color:var(--dim);letter-spacing:.08em;text-transform:uppercase;margin:16px 0 8px}.position-table{width:100%;border-collapse:collapse;table-layout:fixed;font:400 13px/18px var(--ui)}.position-table th{text-align:left;font:600 11px/14px var(--ui);letter-spacing:.04em;text-transform:uppercase;color:var(--dim);padding:8px 0;border-bottom:1px solid var(--line)}.position-table th:first-child{width:38px}.position-table th:nth-child(2){width:36%}.position-table th:last-child{text-align:right}.position-table td{padding:12px 0;border-bottom:1px solid var(--line);vertical-align:top}.position-table td:last-child{text-align:right}.position-table .position{font:600 11px/18px var(--ui)}.position-table .position:before{display:inline-block;content:"";width:3px;height:12px;background:var(--position);margin-right:6px;vertical-align:-1px}.position-table small{font:400 11px/16px var(--ui);display:block;color:var(--dim);margin-top:4px}.num{font:500 13px/18px var(--mono);font-variant-numeric:tabular-nums}.warning{color:var(--warn)}.quality{color:var(--chalk);display:block;font:400 11px/16px var(--ui);margin-top:4px}.table-note{font:400 11px/16px var(--ui);color:var(--dim);margin:8px 0 12px}.limits{border-top:1px solid var(--line);padding-top:12px;color:var(--dim);font:400 13px/18px var(--ui)}.limits p+p{margin-top:8px}.detail-toggle{min-height:44px;display:flex;align-items:center;justify-content:space-between;font:600 13px/18px var(--ui);gap:12px;color:var(--dim)}.detail-body{font:400 13px/18px var(--ui);color:var(--dim);padding:4px 0 12px}.detail-body p+p{margin-top:8px}.allocation{display:grid;grid-template-columns:52px 1fr;gap:4px 12px;margin-top:12px}.allocation .num{font-size:11px}.allocation div{padding:4px 0}.coverage-list{margin-top:8px}.coverage-list p{padding:8px 0;border-bottom:1px solid var(--line)}.coverage-list strong{color:var(--chalk)}.app-frame button,.app-frame summary{scroll-margin-top:16px}.design-notes{border-top:1px solid var(--line);margin-top:40px;padding:24px 0 48px}.design-notes h2{font:600 22px/26px var(--display);letter-spacing:.03em;text-transform:uppercase;margin-bottom:12px}.note-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}.note-grid h3{font:600 16px/22px var(--ui);margin-bottom:8px}.note-grid p{font:400 13px/18px var(--ui);color:var(--dim)}.footnote{margin-top:24px;color:var(--dim);font:400 13px/18px var(--ui)}code{font:500 11px/16px var(--mono);overflow-wrap:anywhere;color:var(--chalk)}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+@media(min-width:1300px){.wrap{max-width:1304px}.workbench{grid-template-columns:256px 360px minmax(0,1fr)}}
+@media(max-width:1040px){.workbench{grid-template-columns:1fr 1.15fr}.capture-pane{grid-column:1/-1;display:grid;grid-template-columns:172px 1fr;gap:0 24px}.capture-pane .pane-title,.capture-pane .caption{grid-column:2}.capture-pane .pane-title{align-self:end}.capture-pane .caption{min-height:0}.capture-pane figure{grid-column:1;grid-row:1/4}.capture-pane .provenance{grid-column:2;margin-top:0}.capture-pane .capture{max-height:300px;width:auto;max-width:100%}.caption{min-height:36px}}
+@media(max-width:700px){.wrap{padding:0 16px}.masthead{padding:16px 0;align-items:start}.masthead>.label{max-width:132px;text-align:right}.intro{padding-top:24px;display:block}.intro h1{max-width:340px}.intro .jump{margin-top:8px}.workbench{grid-template-columns:1fr;gap:28px}.capture-pane{grid-template-columns:120px 1fr;gap:0 16px}.capture-pane h2{font-size:22px}.capture-pane .caption{font-size:11px;line-height:16px;margin-bottom:8px}.capture-pane .provenance{font-size:11px;line-height:16px}.capture-pane .capture{max-height:none;width:100%}.source-frame,.app-frame{max-width:460px;margin:auto}.caption{min-height:0}.note-grid{grid-template-columns:1fr;gap:20px}.pane-title .number{flex:none}.source-pane .source-frame{margin-left:0;margin-right:0;max-width:none}.intro p{font-size:13px;line-height:18px}.app-frame{padding:12px}.position-table th:nth-child(2){width:35%}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<svg aria-hidden="true" style="display:none"><defs><symbol id="down" viewBox="0 0 20 20"><path d="m5 7 5 5 5-5"/></symbol><symbol id="arrow" viewBox="0 0 20 20"><path d="M4 10h12m-5-5 5 5-5 5"/></symbol><symbol id="check" viewBox="0 0 20 20"><path d="m4 10 4 4 8-8"/></symbol><symbol id="flag" viewBox="0 0 20 20"><path d="M5 17V3h10l-3 4 3 4H5"/></symbol></defs></svg>
+<div class="wrap">
+  <header class="masthead"><div class="wordmark">FLEECED <span class="label">Design study</span></div><div class="label">Internal prototype · 04 Sep 2026</div></header>
+  <section class="intro"><div><div class="label">Trade roster evidence / 01</div><h1>After the trade, who fills the gap?</h1><p>The starting-lineup comparison already exists. This adds the missing receipt: where the replacement comes from, what depth remains for each team, and what the available data cannot establish.</p></div><a class="jump" href="#prototype">Try the roster check <svg aria-hidden="true"><use href="#down"/></svg></a></section>
+  <main class="workbench">
+    <section class="pane capture-pane" aria-labelledby="capture-title">
+      <div class="pane-title"><span class="number">01</span><h2 id="capture-title">Actual before</h2></div>
+      <p class="caption">Real app capture · 10 Aug 2026.<br>Historical build; not today’s UI.</p>
+      <figure><a class="capture-link" href="assets/trades-populated-2026-08-10.png" target="_blank" rel="noopener" aria-label="Open full existing Trades screenshot from August 10, 2026"><img class="capture" src="assets/trades-populated-2026-08-10.png" width="1178" height="2556" alt="Actual Fleeced Trades screen captured August 10, 2026: Tee Higgins for Tyler Warren, Edit in calculator, Dynasty value swing and Why disclosure."></a></figure>
+      <div class="provenance"><p>Original: <code>screens/mobile/trades/populated.png</code><br><span class="mono">23:42:47 UTC</span></p><p>Unmodified local copy. The capture library is frozen at 11 Aug 2026; the newer lineup block appears in the source reconstruction alongside it.</p></div>
+    </section>
+    <section class="pane source-pane" aria-labelledby="source-title">
+      <div class="pane-title"><span class="number">02</span><h2 id="source-title">Existing evidence</h2></div>
+      <p class="caption">Source reconstruction · main, 04 Sep 2026.<br>Selected card excerpt, hypothetical roster data.</p>
+      <div class="source-frame" aria-label="Source reconstruction of existing TradeCard and CardImpactBlock with illustrative data">
+        <div class="label">Trade with</div><h3>@northside</h3>
+        <div class="trade-sides"><div><div class="tick">You send</div><div class="asset"><span class="badge wr">WR</span><p class="name">Tee Higgins</p></div></div><div><div class="tick">You get</div><div class="asset te"><span class="badge te">TE</span><p class="name">Tyler Warren</p></div></div></div>
+        <div class="baseline-title label">Your starting lineup</div>
+        <div id="existing-slots"></div>
+      </div>
+      <div class="existing-note"><strong>Already present</strong><br>Changed starters and positional-rank movement on the fronted card. The calculator has the full before/after lineup, tier/rank changes, and total lineup value.</div>
+      <div class="existing-note"><strong>Preserve the surrounding flow</strong><br>Pass/Like → value bar → lineup / optional playoff outlook. Existing “Why?”, partner fit, hesitation, and rationale stay where they are. These surrounding blocks are omitted from this excerpt.</div>
+      <div class="existing-note"><strong>Only the next question is new</strong><br>The existing display aligns interchangeable slots to keep changes concise. The additional receipt follows the replacement into WR, through FLEX, and down to the bench—and checks the other team’s TE.</div>
+      <div class="provenance"><p>Geometry and labels: <code>TradeCard.tsx</code> + <code>CardImpactBlock.tsx</code>. Latest relevant changes: 24–31 Aug 2026. All displayed ranks are invented examples.</p></div>
+    </section>
+    <section class="pane proposed-pane" id="prototype" aria-labelledby="prototype-title">
+      <div class="pane-title"><span class="number">03</span><h2 id="prototype-title">One addition</h2></div>
+      <p class="caption">Proposed extension · not shipped UI.<br>One disclosure below existing team impact; opened for review.</p>
+      <div class="scenario-control"><label class="label" for="scenario">Prototype scenario</label><select id="scenario"><option value="covered">01 · Covered roster</option><option value="weakness">02 · New weakness</option><option value="incomplete">03 · Incomplete data</option></select><p class="scenario-note" id="scenario-note"></p></div>
+      <div class="app-frame" aria-label="Proposed roster evidence, all data hypothetical">
+        <div class="sample-label">Hypothetical trade · sample rosters</div>
+        <div class="trade-context"><strong>Tee Higgins</strong> to @northside<br><strong>Tyler Warren</strong> to your team</div>
+        <details class="roster-module" id="roster-module" open>
+          <summary class="module-toggle"><div><span class="tick">Roster after trade</span><span class="headline" id="overall-title"></span><span class="overall-sub" id="overall-sub"></span></div><svg class="chevron" aria-hidden="true"><use href="#down"/></svg></summary>
+          <div class="team-tabs" role="group" aria-label="Team to inspect"><button type="button" data-team="you" aria-pressed="true" aria-controls="team-panel">Your team</button><button type="button" data-team="them" aria-pressed="false" aria-controls="team-panel">@northside</button></div>
+          <div id="team-panel"></div>
+        </details>
+      </div>
+      <p class="provenance">Review controls sit outside the app frame. Switch teams, expand a replacement, then try the gap and estimated-settings examples. Collapse the module to inspect the proposed resting size.</p>
+      <p class="sr-only" id="announcement" role="status" aria-live="polite"></p>
+    </section>
+  </main>
+  <aside class="design-notes" aria-labelledby="notes-title"><h2 id="notes-title">Design notes / separate from app copy</h2><div class="note-grid">
+    <section><h3>A receipt, not a second verdict</h3><p>The only proposed mount is the disclosure after <code>CardImpactBlock</code> (or after the calculator’s existing lineup table). No new value bar, “why you / why them” section, odds model, trade action, or modal. The starter movement above remains the source of the comparison.</p></section>
+    <section><h3>Coverage has a narrow meaning</h3><p>Count supported offensive slots and unique bench players after the complete trade. A player used at FLEX is not a backup. A lower-value replacement can fill a slot; keep that quality loss visible. Bench eligibility does not establish weekly availability or simultaneous injury cover.</p></section>
+    <section><h3>Estimates never earn a green check</h3><p>Current ESPN/MFL/Fleaflicker slot resolution uses a standardized template. The incomplete example labels every count as provisional, withholds confirmed coverage, and identifies unresolved roster entries. Unknown never becomes zero.</p></section>
+  </div><p class="footnote">Source review: <code>606e512c</code> (origin/main; 03 Sep 2026). Relevant mobile source matches local main <code>1d0152fc</code>. No standalone <code>TradeDetail</code> component or route was found at either revision; “Edit in calculator” is the classic full-detail path. See <a href="README.md">README</a> for exact source inventory, provenance, fixture rules, and verification. No simulator was used.</p></aside>
+</div>
+<noscript><p class="wrap">This prototype needs JavaScript for the sample roster checks. The actual screenshot and source reconstruction remain available above.</p></noscript>
+<script>
+'use strict';
+// Hypothetical fixtures only. Values order eligible players; they are NOT fantasy points.
+// Uses the source's dedicated-slot-first, flex-second fill. Receipt alignment is
+// restricted to identical slot types so dedicated-position replacement stays visible.
+// The separate existing-card reconstruction uses the source's full alignment rule.
+const p=(id,name,pos,value)=>({id,name,pos,value});
+const rosters={
+  you:[p('love','Jordan Love','QB',5200),p('geno','Geno Smith','QB',2000),p('hall','Breece Hall','RB',6400),p('cook','James Cook','RB',6100),p('spears','Tyjae Spears','RB',2800),p('smith','DeVonta Smith','WR',6000),p('higgins','Tee Higgins','WR',5600),p('downs','Josh Downs','WR',5200),p('meyers','Jakobi Meyers','WR',4200),p('mooney','Darnell Mooney','WR',3800),p('robinson','Wan’Dale Robinson','WR',2600),p('freiermuth','Pat Freiermuth','TE',3300),p('otton','Cade Otton','TE',2200)],
+  them:[p('dak','Dak Prescott','QB',5200),p('stafford','Matthew Stafford','QB',2100),p('walker','Kenneth Walker','RB',5800),p('montgomery','David Montgomery','RB',4500),p('charbonnet','Zach Charbonnet','RB',3000),p('jaylen','Jaylen Warren','RB',3100),p('olave','Chris Olave','WR',6000),p('kirk','Christian Kirk','WR',4300),p('shaheed','Rashid Shaheed','WR',4000),p('doubs','Romeo Doubs','WR',3500),p('thielen','Adam Thielen','WR',2400),p('warren','Tyler Warren','TE',5900),p('schultz','Dalton Schultz','TE',2700),p('fant','Noah Fant','TE',2000)]
+};
+const slots=['QB','RB1','RB2','WR1','WR2','TE','FLEX1','FLEX2'];
+const base=s=>s.replace(/\d/g,'');
+const allowed=s=>base(s)==='FLEX'?['RB','WR','TE']:[base(s)];
+const fmt=n=>n.toLocaleString('en-US');
+const icon=(name,cls='small')=>`<svg class="${cls}" aria-hidden="true"><use href="#${name}"/></svg>`;
+const configs={
+  covered:{note:'Hypothetical Sleeper league with observed slot settings and complete sample rosters. Every supported slot fills; starter quality still changes.',estimated:false},
+  weakness:{note:'Same hypothetical Sleeper league, thinner rosters. Your WR backups disappear; @northside loses its only TE.',estimated:false},
+  incomplete:{note:'Non-Sleeper example: estimated slot settings and one unresolved roster entry per team. Apparent fill cannot confirm actual coverage.',estimated:true}
+};
+let scenario='covered',team='you';
+function fixture(){
+  const r=structuredClone(rosters);
+  if(scenario==='weakness'){
+    r.you=r.you.filter(x=>x.id!=='robinson');
+    r.them=r.them.filter(x=>!['schultz','fant'].includes(x.id));
+  }
+  if(scenario==='incomplete'){
+    for(const [t,id] of [['you','robinson'],['them','schultz']]){
+      const player=r[t].find(x=>x.id===id); player.pos=null;player.value=null;
+    }
+  }
+  return r;
+}
+function fill(roster){
+  const used=new Set();
+  return slots.map(slot=>{
+    const player=roster.filter(x=>x.pos && Number.isFinite(x.value) && allowed(slot).includes(x.pos) && !used.has(x.id)).sort((a,b)=>b.value-a.value||a.id.localeCompare(b.id))[0]||null;
+    if(player)used.add(player.id);
+    return {slot,player};
+  });
+}
+function align(before,after){
+  // Keep returning starters in place within repeated WR/RB/FLEX slot groups.
+  for(let i=0;i<before.length;i++){
+    if(!before[i].player)continue;
+    const j=after.findIndex(x=>x.player?.id===before[i].player.id);
+    if(j<0||j===i||base(after[i].slot)!==base(after[j].slot))continue;
+    if(allowed(after[i].slot).includes(after[j].player.pos) && (!after[i].player||allowed(after[j].slot).includes(after[i].player.pos))){
+      [after[i].player,after[j].player]=[after[j].player,after[i].player];
+    }
+  }
+  return after;
+}
+function sourceAligned(before,after){
+  const id=x=>x.player?.id??null;
+  const fits=(player,slot)=>!player||allowed(slot).includes(player.pos);
+  function improve(side,other){
+    let any=false,restart=true;
+    while(restart){
+      restart=false;
+      outer:for(let i=0;i<side.length-1;i++)for(let j=i+1;j<side.length;j++){
+        if(!fits(side[j].player,side[i].slot)||!fits(side[i].player,side[j].slot))continue;
+        const old=Number(id(side[i])===id(other[i]))+Number(id(side[j])===id(other[j]));
+        const next=Number(id(side[j])===id(other[i]))+Number(id(side[i])===id(other[j]));
+        if(next>old){[side[i].player,side[j].player]=[side[j].player,side[i].player];any=true;restart=true;break outer;}
+      }
+    }
+    return any;
+  }
+  while(improve(before,after)|improve(after,before)){}
+  return {before,after};
+}
+function renderExisting(){
+  const existing=evaluate('you');
+  const aligned=sourceAligned(fill(rosters.you),fill(existing.afterRoster));
+  const rank={higgins:22,downs:38,mooney:56,freiermuth:19,warren:6};
+  const changes=aligned.before.map((x,i)=>({slot:x.slot,before:x.player,after:aligned.after[i].player})).filter(x=>x.before?.id!==x.after?.id);
+  document.querySelector('#existing-slots').innerHTML=changes.slice(0,3).map(x=>`<div class="current-slot"><div class="move"><span class="muted">${x.slot}</span><span>${x.before?.name||'—'}</span><span class="muted">›</span><strong>${x.after?.name||'—'}</strong></div><div class="rank-move">${x.before.pos} #${rank[x.before.id]} → ${x.after.pos} #${rank[x.after.id]}</div></div>`).join('');
+}
+function evaluate(t){
+  const r=fixture(),outId=t==='you'?'higgins':'warren',inId=t==='you'?'warren':'higgins',other=t==='you'?'them':'you';
+  const incoming=r[other].find(x=>x.id===inId),outgoing=r[t].find(x=>x.id===outId);
+  const afterRoster=r[t].filter(x=>x.id!==outId).concat(incoming);
+  const before=fill(r[t]),after=align(before,fill(afterRoster));
+  const used=new Set(after.map(x=>x.player?.id).filter(Boolean));
+  const bench=afterRoster.filter(x=>x.pos&&Number.isFinite(x.value)&&!used.has(x.id));
+  const index=before.findIndex(x=>x.player?.id===outId),replacement=after[index]?.player;
+  const replacementOrigin=before.find(x=>x.player?.id===replacement?.id);
+  const cascade=replacementOrigin&&replacementOrigin.slot!==before[index].slot?after.find(x=>x.slot===replacementOrigin.slot):null;
+  const unknown=afterRoster.filter(x=>!x.pos||!Number.isFinite(x.value));
+  const positions=['QB','RB','WR','TE'].map(pos=>{
+    const assigned=after.filter(x=>base(x.slot)===pos),prior=before.filter(x=>base(x.slot)===pos);
+    const filled=assigned.filter(x=>x.player).length,backups=bench.filter(x=>x.pos===pos);
+    const beforeBackups=r[t].filter(x=>x.pos===pos&&!before.some(s=>s.player?.id===x.id));
+    const loss=assigned.some((x,i)=>x.player&&prior[i].player&&x.player.value<prior[i].player.value);
+    return {pos,assigned,filled,required:assigned.length,backups,beforeBackups,loss};
+  });
+  return {before,after,afterRoster,outgoing,incoming,replacement,replacementOrigin,cascade,index,bench,positions,unknown,filled:after.filter(x=>x.player).length};
+}
+function quality(e){
+  if(configs[scenario].estimated)return 'Replacement order is provisional: actual slot settings and one roster entry are missing.';
+  if(!e.replacement)return 'No eligible TE remains in this sample roster. Incoming WR Tee Higgins cannot fill the TE slot.';
+  return `${e.replacement.name} fills ${e.before[e.index].slot} with a lower dynasty value than ${e.outgoing.name}. Filling the slot does not mean equal starter quality.`;
+}
+function render(){
+  const c=configs[scenario],a=evaluate('you'),b=evaluate('them'),e=team==='you'?a:b;
+  const gaps=e.after.length-e.filled,noBackup=e.positions.filter(x=>x.backups.length===0&&x.filled===x.required);
+  document.querySelector('#scenario-note').textContent=c.note;
+  const overall=c.estimated?'Roster coverage unconfirmed':(a.filled<a.after.length||b.filled<b.after.length)?'A new gap in @northside’s lineup':'Both rosters fill all 8 supported slots';
+  document.querySelector('#overall-title').textContent=overall;
+  document.querySelector('#overall-sub').textContent=c.estimated?'Estimated settings · unresolved roster entries':scenario==='weakness'?'Your WR depth is also thinner. Review both teams.':'Starter quality changes. Weekly availability isn’t checked.';
+  document.querySelectorAll('[data-team]').forEach(btn=>btn.setAttribute('aria-pressed',String(btn.dataset.team===team)));
+  const state=c.estimated?'Incomplete':gaps?'Open slot':noBackup.length?'No WR backup':'Slots filled';
+  const stateClass=c.estimated||gaps||noBackup.length?'warn':'';
+  const lead=c.estimated?`${e.filled} of 8 assumed slots fill using known players. Actual coverage cannot be confirmed.`:gaps?`${e.filled} of 8 supported slots fill. Trading Tyler Warren leaves TE open.`:noBackup.length?'All 8 supported slots fill, but no WR is left on the bench.':'All 8 supported slots fill, with at least one bench player at each core position.';
+  const replacementLabel=e.replacement?`${e.outgoing.name} → ${e.replacement.name}`:`${e.outgoing.name} → no replacement`;
+  const origin=e.replacementOrigin?`From ${e.replacementOrigin.slot}`:e.replacement?'From the bench':'No eligible player';
+  const estimatedPrefix=c.estimated?'Estimated · ':'';
+  const rows=e.positions.map(x=>{
+    const missing=x.required-x.filled;
+    const backupText=c.estimated?(x.backups.length?`${x.backups.length} listed`:'Unknown'):`${x.backups.length} ${x.backups.length===1?'backup':'backups'}`;
+    const backupChange=c.estimated?'Total unconfirmed':`${x.beforeBackups.length} before → ${x.backups.length} after`;
+    const fillLabel=c.estimated?`${x.filled}/${x.required} assumed`:`${x.filled}/${x.required} filled`;
+    const detail=c.estimated?'Estimated settings':missing?`${missing} open slot`:x.loss?'Lower starter value':'Starter value maintained';
+    return `<tr><td><span class="position" style="--position:var(--${x.pos.toLowerCase()})">${x.pos}</span></td><td><span class="num ${missing?'warning':''}">${fillLabel}</span><span class="quality ${missing?'warning':''}">${detail}</span></td><td><span class="num ${!c.estimated&&!x.backups.length?'warning':''}">${backupText}</span><small>${backupChange}</small></td></tr>`;
+  }).join('');
+  const flex=e.after.filter(x=>base(x.slot)==='FLEX');
+  document.querySelector('#team-panel').innerHTML=`
+    <div class="team-head"><h3>${team==='you'?'Your roster':'@northside’s roster'}</h3><span class="state ${stateClass}">${icon(stateClass?'flag':'check')}${state}</span></div>
+    ${c.estimated?'<div class="estimate-alert"><strong>Incomplete · estimated lineup settings</strong>This preview uses standard slot settings, not settings read from this league. One roster entry is unresolved. Confirm the actual lineup and roster before relying on coverage.</div>':''}
+    <p class="lead">${lead}</p>
+    <p class="source-note">Starter choices use dynasty values, not projected fantasy points.</p>
+    <details class="replacement"><summary class="replacement-toggle"><span class="slot-chip">${e.before[e.index].slot}</span><div><span class="title">${replacementLabel}</span><span class="hint">${estimatedPrefix}${origin} · replacement detail</span></div>${icon('down','chevron small')}</summary>
+      <div class="replacement-body">
+        <div class="replace-step"><span class="label">Out</span><div><strong>${e.outgoing.name}</strong><span class="note">Leaves ${e.before[e.index].slot} in the value-based lineup.</span></div></div>
+        <div class="replace-step"><span class="label">Next</span><div><strong>${e.replacement?.name||'No eligible replacement'}</strong><span class="note">${e.replacement?`${origin}. ${c.estimated?'Highest-value known candidate under assumed settings.':'Highest-value eligible replacement in this sample.'}`:'The remaining WR/RB players cannot start at TE.'}</span></div></div>
+        ${e.cascade?`<div class="replace-step"><span class="label">Then</span><div><strong>${e.cascade.player?.name||'No replacement'} → ${e.cascade.slot}</strong><span class="note">${e.cascade.player&&e.before.some(x=>x.player?.id===e.cascade.player.id)?'Moves from another starting slot.':'Moves from the bench.'} ${e.replacement.name} is already used at ${e.before[e.index].slot} and is not counted twice.</span></div></div>`:''}
+        <p class="quality-note">${quality(e)}</p>
+      </div>
+    </details>
+    <h4 class="section-title">Position coverage after trade</h4>
+    <table class="position-table"><caption class="sr-only">${team==='you'?'Your':'Northside’s'} post-trade dedicated slots and remaining bench players${c.estimated?', estimated and incomplete':''}</caption><thead><tr><th scope="col">Pos</th><th scope="col">Starting slots</th><th scope="col">Bench left</th></tr></thead><tbody>${rows}</tbody></table>
+    <p class="table-note">${c.estimated?'Listed players form a provisional bench under assumed settings. Unresolved players or actual settings may change every count.':'Bench counts exclude every player used in a starting slot, including FLEX. Starter quality is compared by dynasty value.'}</p>
+    <details><summary class="detail-toggle">${c.estimated?'Estimated FLEX use':'FLEX use'} · <span class="num">${flex.filter(x=>x.player).length}/2</span>${icon('down','chevron small')}</summary><div class="detail-body">${flex.map(x=>`<p><strong>${x.slot}</strong> · ${x.player?.name||'Unfilled'}${x.player?' · '+x.player.pos:''}</p>`).join('')}<p>Players here are already starting. They are excluded from the bench counts above.</p></div></details>
+    <details><summary class="detail-toggle">See bench names${icon('down','chevron small')}</summary><div class="detail-body coverage-list">${e.positions.map(x=>`<p><strong>${x.pos}</strong> · ${x.backups.map(y=>y.name).join(', ')||(c.estimated?'None identified; total unknown':'None left')}${c.estimated?' <span class="muted">· known entries only</span>':''}</p>`).join('')}</div></details>
+    <div class="limits"><p>Roster fill only. Injuries, bye weeks and weekly availability aren’t checked. An eligible backup may not be available when needed.</p></div>
+    <details><summary class="detail-toggle">What this check uses${icon('down','chevron small')}</summary><div class="detail-body"><p><strong>Hypothetical snapshot:</strong> 04 Sep 2026, 10:00 AM ET. Sample dynasty values and player rosters; no live account is connected.</p><p><strong>Slot settings:</strong> ${c.estimated?'Estimated standard template for a non-Sleeper league; actual settings were not supplied.':'Observed Sleeper settings in this hypothetical snapshot.'} 1 QB, 2 RB, 2 WR, 1 TE and 2 FLEX (RB/WR/TE).</p><p><strong>Roster data:</strong> ${c.estimated?`One unresolved entry on this team: ${e.unknown.map(x=>x.name).join(', ')}. Position and value missing; excluded from this preview, not treated as zero.`:'Both sample rosters are complete and all sample players have a position and dynasty value.'}</p><p><strong>Scope:</strong> QB, RB, WR, TE and eligible FLEX slots. Kickers, team defenses, individual defenders, IR/taxi eligibility and roster limits are not evaluated. Picks cannot fill a starting slot.</p><div class="allocation">${e.after.map(x=>`<div class="num">${x.slot}</div><div>${x.player?.name||'Unfilled'}</div>`).join('')}</div></div></details>`;
+  document.querySelector('#announcement').textContent=`${configs[scenario].estimated?'Incomplete data':scenario==='weakness'?'New weakness':'Covered roster'}. ${team==='you'?'Your team':'Northside'}. ${lead}`;
+}
+document.querySelector('#scenario').addEventListener('change',event=>{scenario=event.target.value;render()});
+document.querySelectorAll('[data-team]').forEach(button=>button.addEventListener('click',()=>{team=button.dataset.team;render()}));
+renderExisting();
+render();
+</script>
+</body>
+</html>

@@ -54,6 +54,7 @@ from itertools import combinations
 
 from .feature_flags import FLAGS
 from . import trade_service as _ts
+from . import trade_policy as _tp_policy   # the ONE policy evaluator
 from .trade_service import (
     LeagueMember,
     TradeCard,
@@ -65,6 +66,7 @@ from .trade_service import (
     mismatch_damp,
     rank_fairness,
     age_pref_value,
+    make_consensus_value_fn,
     elo_to_value,
     avoid_ok,
     filler_ok,
@@ -179,8 +181,15 @@ def _feasible_after(base_counts: dict[str, int], out_delta: dict[str, int],
     modeled here. A roster already below need at a position yields no
     trades unless the trade itself fills that deficit.
     """
+    from .feature_flags import is_enabled
+    roster_gate = is_enabled("trade.roster_protection")
     for pos, base in base_counts.items():
         need = _starters_at(pos, scoring_format)
+        if roster_gate:
+            # This is only a cheap candidate prefilter. The final evaluator
+            # owns actual slots/quality and permits existing deficits without
+            # allowing any constrained group to worsen.
+            need = min(base, need)
         if base - out_delta.get(pos, 0) + in_delta.get(pos, 0) < need:
             return False
     return True
@@ -226,6 +235,7 @@ def generate_pair_trades_v3(
     target_ids: set | None = None,
     not_interested_ids: set | None = None,
     raw_user_elo: dict[str, float] | None = None,
+    policy_placements: dict | None = None,
     user_needs: set | None = None,
     presentment_ok_fn=None,     # G6 rules R1/R2/R3/R5 (trade.presentment_rules)
                                 # — bound predicate from _generate_trades_v2;
@@ -293,14 +303,25 @@ def generate_pair_trades_v3(
     MULT_CAP     = _c("pos_multiplier_cap")
     _targets     = target_ids or set()
 
-    # Interview 2026-07-17 ("loosen it") — divergence cards are already
-    # gated by both-sides surplus on the members' REAL boards, so the
-    # consensus fairness check here is only an extreme-case veto. All
-    # downstream uses (gate, sweetener band, sweetener target) inherit
-    # the loosened bar. Consensus-basis cards (other generator) keep the
-    # caller's full threshold.
-    fairness_threshold = min(fairness_threshold,
-                             _c("fairness_floor_divergence"))
+    # ── consensus fairness composition ────────────────────────────────────
+    # LEGACY (policy flag off): interview 2026-07-17 ("loosen it") —
+    # divergence cards are already gated by both-sides surplus on the
+    # members' REAL boards, so the consensus fairness check here is only an
+    # extreme-case veto. All downstream uses (gate, sweetener band,
+    # sweetener target) inherit the loosened bar. Consensus-basis cards
+    # (other generator) keep the caller's full threshold.
+    #
+    # personal_market_v1: the same `min()` correction as v2's — a stricter
+    # user request must never become a looser gate. See
+    # trade_service._generate_for_pair_v2 and
+    # trade_policy.compose_effective_floor. The evaluator built below runs
+    # on the FINAL package at every admission point in this function,
+    # including both sweetener passes.
+    _policy_requested_floor = fairness_threshold
+    _policy_on = _tp_policy.policy_enabled()
+    if not _policy_on:
+        fairness_threshold = min(fairness_threshold,
+                                 _c("fairness_floor_divergence"))
 
     # --- per-player value accessors (cached), same spaces as v2 ----------
     _def_uval = elo_to_value(1500.0)
@@ -326,17 +347,36 @@ def generate_pair_trades_v3(
             _vo_cache[pid] = v
         return v
 
-    _sv_cache: dict[str, float] = {}
+    # Age-preference adjusted (2026-08-29). Delegates to the ONE shared
+    # accessor (trade_service.make_consensus_value_fn) so v2, v3,
+    # trade_gen_v2 and trade_policy cannot price an age band differently.
+    _sv = make_consensus_value_fn(seed_elo, players)
 
-    def _sv(pid: str) -> float:
-        v = _sv_cache.get(pid)
-        if v is None:
-            # Age-preference adjusted (2026-08-29) — mirrors v2's _vs so the
-            # two engines cannot price an age band differently.
-            v = age_pref_value(elo_to_value(seed_elo.get(pid, 1500.0)),
-                               players.get(pid))
-            _sv_cache[pid] = v
-        return v
+    # The shared policy evaluator for THIS pair, or None while the flag is
+    # off (one `is None` check at each gate — that is the flag-off
+    # byte-identity). `user_value` is the viewer's confidence-shrunk map;
+    # the opponent's board is shrunk by the same rule inside the factory,
+    # which is what `_vo` above deliberately does NOT do for the legacy
+    # surplus math.
+    _policy_eval = None
+    if _policy_on:
+        _raw_uv = ({pid: elo_to_value(e) for pid, e in raw_user_elo.items()}
+                   if raw_user_elo else None)
+        _policy_eval = _tp_policy.make_pair_evaluator(
+            consensus_value        = _sv,
+            viewer_effective_value = _uv,
+            viewer_raw_value       = ((lambda pid: _raw_uv.get(pid, _uv(pid)))
+                                      if _raw_uv else None),
+            viewer_confidence_of   = (lambda pid: _tp_policy.confidence_weight_for(
+                (confidence or {}).get(pid), _tp_policy.SOURCE_VOTES)),
+            opponent               = opponent,
+            seed_elo               = seed_elo or {},
+            requested_floor        = _policy_requested_floor,
+            scoring_format         = scoring_format,
+            viewer_elo             = raw_user_elo,
+            viewer_counts          = confidence,
+            viewer_placements      = policy_placements,
+        )
 
     # Tier 2 marginal valuation — replacement levels once per pair, from
     # the PRE-trade rosters, in each side's own value space (reused from
@@ -596,6 +636,13 @@ def generate_pair_trades_v3(
                     hm = _harmonic_mean(user_surplus, opp_surplus)
                     near_misses.append((hm, ratio, give_ids, recv_ids))
                 continue
+            # The shared evaluator, on this candidate's FINAL package.
+            # `_fairness_v3` can admit on RANGE OVERLAP with a point ratio
+            # below the bar; the policy re-judges the POINT ratio, so wide
+            # uncertainty cannot rescue a market-imbalanced trade.
+            if _policy_eval is not None and not _policy_eval(
+                    give_ids, recv_ids).eligible:
+                continue
 
             hm = _harmonic_mean(user_surplus, opp_surplus)
             order -= 1   # earlier combos win composite ties (desc sort)
@@ -688,6 +735,12 @@ def generate_pair_trades_v3(
             # (Same re-validation slot the G6 rules already use.)
             if not pick_swap_ok(new_give, new_recv, players, _sv):
                 continue
+            # The sweetener CHANGED the package, so the near-miss verdict is
+            # void. Re-ask on the new package — a sweetener that lifts a card
+            # into the legacy band must still clear the policy floor.
+            if _policy_eval is not None and not _policy_eval(
+                    new_give, new_recv).eligible:
+                continue
             key = (frozenset(new_give), frozenset(new_recv))
             if key in organic_keys:
                 continue
@@ -722,7 +775,11 @@ def generate_pair_trades_v3(
             if not _gap_ok(g, r):
                 return False
             u_s, o_s = _surpluses(g, r)
-            return u_s >= MIN_SIDE and o_s >= MIN_SIDE
+            if u_s < MIN_SIDE or o_s < MIN_SIDE:
+                return False
+            if _policy_eval is not None and not _policy_eval(g, r).eligible:
+                return False
+            return True
 
         for card in cards:
             closed = close_value_gap(
