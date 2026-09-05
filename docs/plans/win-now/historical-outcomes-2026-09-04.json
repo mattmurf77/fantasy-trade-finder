@@ -1,0 +1,900 @@
+{
+  "schema_version": 1,
+  "source": "sleeper_public_v1",
+  "captured_at": "2026-09-05T03:21:06.357299Z",
+  "raw_capture_path": "/private/tmp/ftf-win-now-history-20260904.json",
+  "raw_capture_sha256": "6720141758c08e3eb5e9df8e6233319da406c4cc89728305686c2801609f58bb",
+  "raw_capture_bytes": 1740946,
+  "seasons": [
+    {
+      "league_id": "1101407304802574336",
+      "lineage_id": "1312076055586050048",
+      "season": 2024,
+      "team_count": 12,
+      "regular_weeks": 14,
+      "weekly_team_rows": 216,
+      "model_supported": false,
+      "champion_roster_id": 4,
+      "outcomes": {
+        "reasons": [],
+        "regular_season_weeks": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        "status": "valid",
+        "teams": [
+          {
+            "champion": false,
+            "losses": 23,
+            "playoff": false,
+            "points_for": 1501.68,
+            "roster_id": 1,
+            "ties": 0,
+            "wins": 5
+          },
+          {
+            "champion": false,
+            "losses": 25,
+            "playoff": false,
+            "points_for": 1377.52,
+            "roster_id": 2,
+            "ties": 0,
+            "wins": 3
+          },
+          {
+            "champion": false,
+            "final_rank": 5,
+            "losses": 11,
+            "playoff": true,
+            "points_for": 2032.1799999999998,
+            "roster_id": 3,
+            "ties": 0,
+            "wins": 17
+          },
+          {
+            "champion": true,
+            "final_rank": 1,
+            "losses": 4,
+            "playoff": true,
+            "points_for": 2258.3000000000006,
+            "roster_id": 4,
+            "ties": 0,
+            "wins": 24
+          },
+          {
+            "champion": false,
+            "final_rank": 6,
+            "losses": 10,
+            "playoff": true,
+            "points_for": 2077.3199999999997,
+            "roster_id": 5,
+            "ties": 0,
+            "wins": 18
+          },
+          {
+            "champion": false,
+            "final_rank": 4,
+            "losses": 9,
+            "playoff": true,
+            "points_for": 2056.98,
+            "roster_id": 6,
+            "ties": 0,
+            "wins": 19
+          },
+          {
+            "champion": false,
+            "losses": 19,
+            "playoff": false,
+            "points_for": 1587.2400000000002,
+            "roster_id": 7,
+            "ties": 0,
+            "wins": 9
+          },
+          {
+            "champion": false,
+            "losses": 16,
+            "playoff": false,
+            "points_for": 1841.08,
+            "roster_id": 8,
+            "ties": 0,
+            "wins": 12
+          },
+          {
+            "champion": false,
+            "final_rank": 3,
+            "losses": 9,
+            "playoff": true,
+            "points_for": 2147.3199999999997,
+            "roster_id": 9,
+            "ties": 0,
+            "wins": 19
+          },
+          {
+            "champion": false,
+            "losses": 17,
+            "playoff": false,
+            "points_for": 1959.0199999999995,
+            "roster_id": 10,
+            "ties": 0,
+            "wins": 11
+          },
+          {
+            "champion": false,
+            "losses": 16,
+            "playoff": false,
+            "points_for": 1905.12,
+            "roster_id": 11,
+            "ties": 0,
+            "wins": 12
+          },
+          {
+            "champion": false,
+            "final_rank": 2,
+            "losses": 9,
+            "playoff": true,
+            "points_for": 2147.62,
+            "roster_id": 12,
+            "ties": 0,
+            "wins": 19
+          }
+        ]
+      }
+    },
+    {
+      "league_id": "1180999595377590272",
+      "lineage_id": "1312076055586050048",
+      "season": 2025,
+      "team_count": 12,
+      "regular_weeks": 14,
+      "weekly_team_rows": 216,
+      "model_supported": false,
+      "champion_roster_id": 10,
+      "outcomes": {
+        "reasons": [],
+        "regular_season_weeks": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        "status": "valid",
+        "teams": [
+          {
+            "champion": false,
+            "losses": 15,
+            "playoff": false,
+            "points_for": 1749.1799999999998,
+            "roster_id": 1,
+            "ties": 0,
+            "wins": 13
+          },
+          {
+            "champion": false,
+            "losses": 17,
+            "playoff": false,
+            "points_for": 1787.5400000000002,
+            "roster_id": 2,
+            "ties": 0,
+            "wins": 11
+          },
+          {
+            "champion": false,
+            "final_rank": 6,
+            "losses": 10,
+            "playoff": true,
+            "points_for": 1957.1800000000003,
+            "roster_id": 3,
+            "ties": 0,
+            "wins": 18
+          },
+          {
+            "champion": false,
+            "final_rank": 3,
+            "losses": 9,
+            "playoff": true,
+            "points_for": 2027.94,
+            "roster_id": 4,
+            "ties": 0,
+            "wins": 19
+          },
+          {
+            "champion": false,
+            "final_rank": 5,
+            "losses": 13,
+            "playoff": true,
+            "points_for": 1914.1399999999999,
+            "roster_id": 5,
+            "ties": 0,
+            "wins": 15
+          },
+          {
+            "champion": false,
+            "losses": 19,
+            "playoff": false,
+            "points_for": 1668.96,
+            "roster_id": 6,
+            "ties": 0,
+            "wins": 9
+          },
+          {
+            "champion": false,
+            "final_rank": 4,
+            "losses": 6,
+            "playoff": true,
+            "points_for": 2034.1399999999999,
+            "roster_id": 7,
+            "ties": 0,
+            "wins": 22
+          },
+          {
+            "champion": false,
+            "losses": 22,
+            "playoff": false,
+            "points_for": 1609.28,
+            "roster_id": 8,
+            "ties": 0,
+            "wins": 6
+          },
+          {
+            "champion": false,
+            "final_rank": 2,
+            "losses": 3,
+            "playoff": true,
+            "points_for": 2313.6800000000003,
+            "roster_id": 9,
+            "ties": 0,
+            "wins": 25
+          },
+          {
+            "champion": true,
+            "final_rank": 1,
+            "losses": 7,
+            "playoff": true,
+            "points_for": 2162.22,
+            "roster_id": 10,
+            "ties": 0,
+            "wins": 21
+          },
+          {
+            "champion": false,
+            "losses": 21,
+            "playoff": false,
+            "points_for": 1624.1,
+            "roster_id": 11,
+            "ties": 0,
+            "wins": 7
+          },
+          {
+            "champion": false,
+            "losses": 26,
+            "playoff": false,
+            "points_for": 1382.5,
+            "roster_id": 12,
+            "ties": 0,
+            "wins": 2
+          }
+        ]
+      }
+    },
+    {
+      "league_id": "867593839303598080",
+      "lineage_id": "1312140920132497408",
+      "season": 2022,
+      "team_count": 12,
+      "regular_weeks": 14,
+      "weekly_team_rows": 216,
+      "model_supported": false,
+      "champion_roster_id": 12,
+      "outcomes": {
+        "reasons": [],
+        "regular_season_weeks": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        "status": "valid",
+        "teams": [
+          {
+            "champion": false,
+            "losses": 11,
+            "playoff": false,
+            "points_for": 1450.5600000000002,
+            "roster_id": 1,
+            "ties": 0,
+            "wins": 3
+          },
+          {
+            "champion": false,
+            "final_rank": 3,
+            "losses": 0,
+            "playoff": true,
+            "points_for": 1972.98,
+            "roster_id": 2,
+            "ties": 0,
+            "wins": 14
+          },
+          {
+            "champion": false,
+            "losses": 9,
+            "playoff": false,
+            "points_for": 1808.7800000000002,
+            "roster_id": 3,
+            "ties": 0,
+            "wins": 5
+          },
+          {
+            "champion": false,
+            "final_rank": 5,
+            "losses": 6,
+            "playoff": true,
+            "points_for": 1837.5600000000002,
+            "roster_id": 4,
+            "ties": 0,
+            "wins": 8
+          },
+          {
+            "champion": false,
+            "losses": 8,
+            "playoff": false,
+            "points_for": 1587.5400000000002,
+            "roster_id": 5,
+            "ties": 0,
+            "wins": 6
+          },
+          {
+            "champion": false,
+            "losses": 14,
+            "playoff": false,
+            "points_for": 1571.98,
+            "roster_id": 6,
+            "ties": 0,
+            "wins": 0
+          },
+          {
+            "champion": false,
+            "final_rank": 2,
+            "losses": 3,
+            "playoff": true,
+            "points_for": 2057.3,
+            "roster_id": 7,
+            "ties": 0,
+            "wins": 11
+          },
+          {
+            "champion": false,
+            "losses": 8,
+            "playoff": false,
+            "points_for": 1824.52,
+            "roster_id": 8,
+            "ties": 0,
+            "wins": 6
+          },
+          {
+            "champion": false,
+            "final_rank": 4,
+            "losses": 6,
+            "playoff": true,
+            "points_for": 1804.42,
+            "roster_id": 9,
+            "ties": 0,
+            "wins": 8
+          },
+          {
+            "champion": false,
+            "final_rank": 6,
+            "losses": 4,
+            "playoff": true,
+            "points_for": 1979.3200000000002,
+            "roster_id": 10,
+            "ties": 0,
+            "wins": 10
+          },
+          {
+            "champion": false,
+            "losses": 10,
+            "playoff": false,
+            "points_for": 1660.12,
+            "roster_id": 11,
+            "ties": 0,
+            "wins": 4
+          },
+          {
+            "champion": true,
+            "final_rank": 1,
+            "losses": 5,
+            "playoff": true,
+            "points_for": 2169.64,
+            "roster_id": 12,
+            "ties": 0,
+            "wins": 9
+          }
+        ]
+      }
+    },
+    {
+      "league_id": "916436765509046272",
+      "lineage_id": "1312140920132497408",
+      "season": 2023,
+      "team_count": 12,
+      "regular_weeks": 14,
+      "weekly_team_rows": 216,
+      "model_supported": false,
+      "champion_roster_id": 7,
+      "outcomes": {
+        "reasons": [],
+        "regular_season_weeks": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        "status": "valid",
+        "teams": [
+          {
+            "champion": false,
+            "losses": 10,
+            "playoff": false,
+            "points_for": 1616.4400000000003,
+            "roster_id": 1,
+            "ties": 0,
+            "wins": 4
+          },
+          {
+            "champion": false,
+            "losses": 8,
+            "playoff": false,
+            "points_for": 1839.2200000000003,
+            "roster_id": 2,
+            "ties": 0,
+            "wins": 6
+          },
+          {
+            "champion": false,
+            "losses": 6,
+            "playoff": false,
+            "points_for": 1830.08,
+            "roster_id": 3,
+            "ties": 0,
+            "wins": 8
+          },
+          {
+            "champion": false,
+            "final_rank": 5,
+            "losses": 6,
+            "playoff": true,
+            "points_for": 2173.1400000000003,
+            "roster_id": 4,
+            "ties": 0,
+            "wins": 8
+          },
+          {
+            "champion": false,
+            "final_rank": 4,
+            "losses": 6,
+            "playoff": true,
+            "points_for": 1964.74,
+            "roster_id": 5,
+            "ties": 0,
+            "wins": 8
+          },
+          {
+            "champion": false,
+            "final_rank": 6,
+            "losses": 6,
+            "playoff": true,
+            "points_for": 1833.3799999999999,
+            "roster_id": 6,
+            "ties": 0,
+            "wins": 8
+          },
+          {
+            "champion": true,
+            "final_rank": 1,
+            "losses": 4,
+            "playoff": true,
+            "points_for": 1918.3000000000002,
+            "roster_id": 7,
+            "ties": 0,
+            "wins": 10
+          },
+          {
+            "champion": false,
+            "losses": 11,
+            "playoff": false,
+            "points_for": 1665.4399999999998,
+            "roster_id": 8,
+            "ties": 0,
+            "wins": 3
+          },
+          {
+            "champion": false,
+            "losses": 7,
+            "playoff": false,
+            "points_for": 1623.6000000000001,
+            "roster_id": 9,
+            "ties": 0,
+            "wins": 7
+          },
+          {
+            "champion": false,
+            "losses": 12,
+            "playoff": false,
+            "points_for": 1338.2399999999998,
+            "roster_id": 10,
+            "ties": 0,
+            "wins": 2
+          },
+          {
+            "champion": false,
+            "final_rank": 3,
+            "losses": 6,
+            "playoff": true,
+            "points_for": 1833.1599999999999,
+            "roster_id": 11,
+            "ties": 0,
+            "wins": 8
+          },
+          {
+            "champion": false,
+            "final_rank": 2,
+            "losses": 2,
+            "playoff": true,
+            "points_for": 2062.36,
+            "roster_id": 12,
+            "ties": 0,
+            "wins": 12
+          }
+        ]
+      }
+    },
+    {
+      "league_id": "1048263304533188608",
+      "lineage_id": "1312140920132497408",
+      "season": 2024,
+      "team_count": 12,
+      "regular_weeks": 14,
+      "weekly_team_rows": 216,
+      "model_supported": false,
+      "champion_roster_id": 6,
+      "outcomes": {
+        "reasons": [],
+        "regular_season_weeks": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        "status": "valid",
+        "teams": [
+          {
+            "champion": false,
+            "losses": 10,
+            "playoff": false,
+            "points_for": 1643.3,
+            "roster_id": 1,
+            "ties": 0,
+            "wins": 4
+          },
+          {
+            "champion": false,
+            "final_rank": 2,
+            "losses": 7,
+            "playoff": true,
+            "points_for": 1794.6799999999996,
+            "roster_id": 2,
+            "ties": 0,
+            "wins": 7
+          },
+          {
+            "champion": false,
+            "final_rank": 6,
+            "losses": 7,
+            "playoff": true,
+            "points_for": 1737.22,
+            "roster_id": 3,
+            "ties": 0,
+            "wins": 7
+          },
+          {
+            "champion": false,
+            "final_rank": 3,
+            "losses": 5,
+            "playoff": true,
+            "points_for": 2023.1,
+            "roster_id": 4,
+            "ties": 0,
+            "wins": 9
+          },
+          {
+            "champion": false,
+            "final_rank": 5,
+            "losses": 7,
+            "playoff": true,
+            "points_for": 1909.06,
+            "roster_id": 5,
+            "ties": 0,
+            "wins": 7
+          },
+          {
+            "champion": true,
+            "final_rank": 1,
+            "losses": 2,
+            "playoff": true,
+            "points_for": 1972.5,
+            "roster_id": 6,
+            "ties": 0,
+            "wins": 12
+          },
+          {
+            "champion": false,
+            "final_rank": 4,
+            "losses": 2,
+            "playoff": true,
+            "points_for": 2031.14,
+            "roster_id": 7,
+            "ties": 0,
+            "wins": 12
+          },
+          {
+            "champion": false,
+            "losses": 9,
+            "playoff": false,
+            "points_for": 1717.7400000000002,
+            "roster_id": 8,
+            "ties": 0,
+            "wins": 5
+          },
+          {
+            "champion": false,
+            "losses": 7,
+            "playoff": false,
+            "points_for": 1658.8799999999999,
+            "roster_id": 9,
+            "ties": 0,
+            "wins": 7
+          },
+          {
+            "champion": false,
+            "losses": 10,
+            "playoff": false,
+            "points_for": 1431.4,
+            "roster_id": 10,
+            "ties": 0,
+            "wins": 4
+          },
+          {
+            "champion": false,
+            "losses": 8,
+            "playoff": false,
+            "points_for": 1864.5600000000004,
+            "roster_id": 11,
+            "ties": 0,
+            "wins": 6
+          },
+          {
+            "champion": false,
+            "losses": 10,
+            "playoff": false,
+            "points_for": 1729.9400000000003,
+            "roster_id": 12,
+            "ties": 0,
+            "wins": 4
+          }
+        ]
+      }
+    },
+    {
+      "league_id": "1181674778942836736",
+      "lineage_id": "1312140920132497408",
+      "season": 2025,
+      "team_count": 12,
+      "regular_weeks": 14,
+      "weekly_team_rows": 216,
+      "model_supported": false,
+      "champion_roster_id": 12,
+      "outcomes": {
+        "reasons": [],
+        "regular_season_weeks": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        "status": "valid",
+        "teams": [
+          {
+            "champion": false,
+            "final_rank": 6,
+            "losses": 4,
+            "playoff": true,
+            "points_for": 2065.14,
+            "roster_id": 1,
+            "ties": 0,
+            "wins": 10
+          },
+          {
+            "champion": false,
+            "final_rank": 2,
+            "losses": 5,
+            "playoff": true,
+            "points_for": 1975.4399999999998,
+            "roster_id": 2,
+            "ties": 0,
+            "wins": 9
+          },
+          {
+            "champion": false,
+            "losses": 11,
+            "playoff": false,
+            "points_for": 1513.9,
+            "roster_id": 3,
+            "ties": 0,
+            "wins": 3
+          },
+          {
+            "champion": false,
+            "final_rank": 5,
+            "losses": 4,
+            "playoff": true,
+            "points_for": 2014.5,
+            "roster_id": 4,
+            "ties": 0,
+            "wins": 10
+          },
+          {
+            "champion": false,
+            "losses": 7,
+            "playoff": false,
+            "points_for": 1745.8799999999999,
+            "roster_id": 5,
+            "ties": 0,
+            "wins": 7
+          },
+          {
+            "champion": false,
+            "final_rank": 3,
+            "losses": 3,
+            "playoff": true,
+            "points_for": 1939.0400000000002,
+            "roster_id": 6,
+            "ties": 0,
+            "wins": 11
+          },
+          {
+            "champion": false,
+            "losses": 11,
+            "playoff": false,
+            "points_for": 1650.2,
+            "roster_id": 7,
+            "ties": 0,
+            "wins": 3
+          },
+          {
+            "champion": false,
+            "losses": 11,
+            "playoff": false,
+            "points_for": 1664.1800000000003,
+            "roster_id": 8,
+            "ties": 0,
+            "wins": 3
+          },
+          {
+            "champion": false,
+            "final_rank": 4,
+            "losses": 3,
+            "playoff": true,
+            "points_for": 1903.7799999999997,
+            "roster_id": 9,
+            "ties": 0,
+            "wins": 11
+          },
+          {
+            "champion": false,
+            "losses": 12,
+            "playoff": false,
+            "points_for": 1517.5000000000002,
+            "roster_id": 10,
+            "ties": 0,
+            "wins": 2
+          },
+          {
+            "champion": false,
+            "losses": 7,
+            "playoff": false,
+            "points_for": 1794.4599999999996,
+            "roster_id": 11,
+            "ties": 0,
+            "wins": 7
+          },
+          {
+            "champion": true,
+            "final_rank": 1,
+            "losses": 6,
+            "playoff": true,
+            "points_for": 1806.0400000000002,
+            "roster_id": 12,
+            "ties": 0,
+            "wins": 8
+          }
+        ]
+      }
+    }
+  ],
+  "exclusions": [
+    {
+      "league_id": "1312076055586050048",
+      "lineage_id": "1312076055586050048",
+      "reason": "requested_season_not_found",
+      "season": 2022
+    },
+    {
+      "league_id": "1312076055586050048",
+      "lineage_id": "1312076055586050048",
+      "reason": "requested_season_not_found",
+      "season": 2023
+    }
+  ]
+}

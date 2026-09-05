@@ -181,3 +181,5 @@ All 17 patterns adopted on 2026-05-21. Cross-references existing [`../docs/`](..
 ## Win Now season pipeline
 
 Implementation checkpoint 2026-09-04, D-180 / ADR-017: external weekly forecasts feed supported league scoring and legal lineups, then full-league paired season simulations and constrained search. Durable evidence/jobs and the mobile/web Win Now flow remain separate from dynasty generators and Elo feedback. All three flags default off; parent integration review complete; hosted CI/calibration pending. Authoritative [architecture](../docs/architecture.md#win-now-season-pipeline) and [build limits](../docs/plans/win-now/BUILD.md).
+
+Offline historical validation now has an outcome collector and a conditional archived-prediction evaluator. No serving model or data-store wiring changes. [Protocol and source limitations](../docs/plans/win-now/HISTORICAL-VALIDATION.md).

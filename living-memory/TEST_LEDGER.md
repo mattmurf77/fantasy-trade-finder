@@ -11,6 +11,17 @@
 
 ---
 
+## 2026-09-04 — Historical Sleeper outcome collection and calibration readiness
+
+Continuation on `codex/win-now-20260904`, after `ad3c5346`, no release. [Scope](../docs/plans/win-now/historical-validation-scope.md) and [evidence/code walk](../docs/plans/win-now/HISTORICAL-VALIDATION.md).
+
+- Parent final affected run: `python3 -m pytest backend/tests/test_season_history.py backend/tests/test_season_calibration.py backend/tests/test_season_forecasts.py backend/tests/test_season_simulator.py -q` — **119 passed in 0.95s**, Python 3.14. Earlier affected run 109 passed before final guard additions. CLI source capture and offline evaluator exercised.
+- Live public Sleeper collection: 6 completed seasons, 72 team-seasons, 1,008 regular-season team scores, 6 champions, two lineages; two explicit missing-year exclusions. No profiles, owners, final rosters, database or production mutations. Full local raw capture `/private/tmp/ftf-win-now-history-20260904.json`; compact summary/hash and readiness JSON committed beside guide.
+- Source audit: six historical projection URLs, all dated stat rows carry revision timestamps later than game dates. **No authenticated pregame forecast archive; no championship calibration claimed.** The six outcome-valid seasons also fail current strict model rule coverage (FFv3 K/IDP; Lakeview retained K/DEF coefficients).
+- Astra implementation/audit reviewed by parent. Named sabotage checks (reported by subagents): custom_zero_truthiness, allow_post_cutoff_snapshot, invert_actual_playoff_label each RED then restored GREEN. Final parent run after restoration. No UI changes; no additional mobile runtime gate applies.
+
+---
+
 ## 2026-09-04 — Win Now implementation reviewed; backend and client verification
 
 Branch `codex/win-now-20260904`, isolated at `/private/tmp/ftf-win-now-20260904`; implementation reviewed, not a release. [Scope](../docs/plans/win-now/scope.md), [evidence/code-walk/checklist](../docs/plans/win-now/EVIDENCE.md).

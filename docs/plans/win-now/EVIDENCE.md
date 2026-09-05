@@ -51,3 +51,7 @@ The parent ran a loopback-only synthetic fixture using the actual shipped `web/j
 7. On a physical supported iPhone and in narrow/wide browsers, inspect long player/pick/league names, keyboard access, focus, VoiceOver/Dynamic Type, asset chooser scrolling and primary actions. Review console/network failures in the real web app; the DOM test harness is not this check.
 
 No simulator, Maestro flow, native build, deployment or production flag changes were performed as client validation.
+
+## Historical outcome follow-up — 2026-09-04
+
+Parent-reviewed Astra collection/evaluator/audit work: 119 affected backend tests pass; real Sleeper pull recovered 6 seasons / 72 team-seasons / 1,008 regular-season team scores / 6 champions, and the offline report correctly shows zero eligible archived predictions. Post-game source revisions and cohort scoring coverage are explicit limitations. [Protocol, artifacts, commands and code walk](HISTORICAL-VALIDATION.md). No calibration success, production/model change or UI change claimed.

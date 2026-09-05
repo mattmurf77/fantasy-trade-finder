@@ -60,3 +60,7 @@ Parent review corrected paired confirmation nesting, public scenario/asset contr
 Jobs retain the requesting user’s private input for 7 days; scenarios/decisions retain package evidence for 180 days; forecast/projection batches retain replay evidence for 400 days. No complete partner boards are persisted. Account export/deletion covers the user-owned tables, and short persistence guards prevent worker writes after deletion. The durable queue resumes interrupted jobs on the existing single-worker server. Client cancellation stops local polling, not the server computation.
 
 A local synthetic 12-team, 25-player, 9-slot, 14-week benchmark (1,000 draws, 8 finalists, real paired and independent confirmation runs) took 1.14 seconds baseline plus 46.11 seconds search, screening 11,990 packages and returning one frontier row. This measures local latency only; production load and model accuracy require separate evidence. Bounded search can miss valid packages outside the shortlist.
+
+## Historical validation tooling
+
+The [historical validation guide](HISTORICAL-VALIDATION.md) documents the bounded Sleeper outcome collector, offline calibration evaluator and actual source-provenance audit. This completes the outcome collection/evaluation workflow, not the calibration of the new player model. Historical URLs contain post-game revision timestamps; valid full-horizon pregame input archives and supported league configurations are still needed.
