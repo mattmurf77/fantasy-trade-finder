@@ -484,3 +484,24 @@ The lane-2a import path (D-058): the user opens DLF/Dynasty Nerds in an in-app b
 **Partner evidence** — Confidence/coverage/intent summary describing whether a partner evaluation uses confidence-adjusted personal values or a labeled market estimate. It is not a prediction that the partner consented to rebuild or will accept.
 
 **Percentage points (pp)** — Absolute difference between probabilities after conversion to percent. A move from 20% to 25% is +5 pp; it is not a +5% relative increase.
+
+**Market ratio** — `min(consensus(give), consensus(receive)) / max(...)`, priced with `trade_optimizer._consensus_packages` — the *same* function the manual calculator and all three generators use, so a deck card and the calculator can never disagree. Under `personal_market_v1` it is a **hard eligibility guardrail**, not a scoring term: the point ratio must clear the effective floor, and a confidence interval may inform display or secondary ranking but may never rescue a point ratio below it. That last clause is a reversal — the legacy range-overlap gate admitted a card whose point ratio was under the bar whenever the two value intervals overlapped, which made *low* confidence more permissive.
+
+**Personal opportunity** — `min(viewer_gain_pct, partner_gain_pct)`, where each manager's gain is their own confidence-shrunk surplus over what they give up. Deliberately the **weaker** side's gain, not a mean: a trade excellent for one manager and barely positive for the other should rank below one that is meaningfully positive for both. Primary ordering signal under `personal_market_v1`; the harmonic mutual surplus survives as a secondary, monotone signal.
+
+**Package confidence** — The consensus-value-**weighted** mean of per-asset confidence weights across a package, so a 200-point filler cannot vouch for an unranked centrepiece and an unranked filler cannot condemn a well-ranked one. `trade_confidence` is the minimum of the two managers' package confidences — the weaker board governs.
+
+**Policy floor** — The market ratio a trade must clear, derived per card: `market_floor_one_board` (0.85) when the counterparty has no real board; otherwise `market_floor_two_board_base` (0.80) discounted by confidence and by the weaker side's gain, clamped at `market_floor_absolute` (0.65). Monotone non-increasing in both inputs — more evidence never buys a stricter bar. The user's fairness preference composes with **`max`**, never `min`: a preference may tighten the floor and can never loosen it.
+
+**Core / Conviction / Fallback** — The three deck lanes. **Core** = market ratio at or above `market_core_ratio` (0.80): plausible on its own terms, and the first three deck slots are reserved for it. **Conviction** = below Core but above the dynamic floor, with two real, sufficiently confident boards and positive gain for both managers — the distinctive trades personal rankings enable, capped at two per deck and placed behind the trust-building lead. **Fallback** = the counterparty has no usable board; ranked on market fairness, the viewer's gain and roster fit, and never described as a proven mutual win.
+
+**Trade concept id** — A canonical, **perspective-independent** hash of `(schema_version, league, both participants sorted, each sorted user's give side)`. It is what joins the two halves of a mutual match, which `trade_hash` cannot: `trade_hash` is viewer-relative, so A's card and B's mirror hash differently. Both are kept — `trade_hash` still drives viewer-relative fatigue and dedup, and the two answer different questions.
+
+**Policy variant** — `legacy` or `personal_market_v1`: which eligibility/ranking/deck policy governed a deck job. **Orthogonal to `model_arm`** (which generator produced the card), and recorded separately so a result can be read overall *and* per generator. A deck never mixes variants — composition is part of the treatment and has to be evaluated as a coherent experience.
+
+### Usable roster coverage
+
+A unique allocation of currently available players meeting the existing dynasty starter-quality threshold to the league's observed slots, plus the remaining coverage across constrained position groups. Legal slot fill can exist with inadequate quality. Neither property predicts weekly points or future availability. An estimated template yields incomplete evidence.
+
+- **Normalized whole-team benefit:** weighted change in complete optimal-lineup point production and complete dynasty asset value, each scaled by the larger before/after total. A value proxy never becomes projected points; missing components retain uncertainty.
+- **Weaker-manager benefit:** the smaller of the two managers' normalized gains. Used before total benefit and simplicity so one large gain cannot conceal the other manager's loss. Meaningful benefit is a policy threshold, not acceptance likelihood.

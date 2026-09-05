@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-09-04 — Personal-market policy: answer Q-038, ship the branch, then Stage A telemetry](#2026-09-04--personal-market-policy-answer-q-038-ship-the-branch-then-stage-a-telemetry)
 - [2026-09-03c — API audit fixes: merge the PR, then the held items (ping-then-init, web push, route hygiene)](#2026-09-03c--api-audit-fixes-merge-the-pr-then-the-held-items-ping-then-init-web-push-route-hygiene)
 - [2026-09-03b — Web platform entry: merge PR #272, then the "Connect another league" modal follow-up](#2026-09-03b--web-platform-entry-merge-pr-272-then-the-connect-another-league-modal-follow-up)
 - [2026-09-03 — After the #413 ship: the checklist that closes Q-037, then the G-8 avoid gap D-175 still has, then the impression gap](#2026-09-03--after-the-413-ship-the-checklist-that-closes-q-037-then-the-g-8-avoid-gap-d-175-still-has-then-the-impression-gap)
@@ -43,6 +44,16 @@
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## 2026-09-04 — Personal-market policy: answer Q-038, ship the branch, then Stage A telemetry
+
+**Why now:** the 2026-09-04 prod read is the strongest engine finding in months — the personal-ranking signal is real (top-quartile mutual surplus liked 38.6% vs 15.5–25.9%) and **the final composite has ~zero correlation with likes**, so the engine computes the signal and then discards it. [D-180](DECISIONS.md)/[D-181](DECISIONS.md) are built and dark on `claude/fleeced-trade-engine-balance-c0c75d` (uncommitted; full suite green, 87 new tests, flag-off byte identity proved three ways). In order:
+
+1. **Answer [Q-038](OPEN_QUESTIONS.md) — the one real product call.** The policy prices personal values raw (confidence-shrunk); the generators' own surplus gate prices them **marginal** when `trade.marginal_value` is on. They disagree systematically. Two-sided gain therefore gates **Conviction** rather than everything (a Core card is market-plausible on its own and is not re-litigated under a definition the generator does not use). Answerable from Stage-A shadow data — compare `valuation_json.mutual.personal_opportunity` against the card's own `mismatch_score` — so it does **not** block the merge, only the Stage-B flip.
+2. **Commit, PR, merge.** One coherent change; CI green on the pushed sha. Nothing in it is user-visible while the flags are off.
+3. **Stage A: turn on `trade.valuation_telemetry` only.** Run the [checklist](../docs/plans/personal-market-policy/testflight-checklist.md) first — it carries the brief's own **release blocker** (a successful controlled proposal that fails to produce an owned, non-stale impression-linked row). Bar to clear before Stage B: ≥99% of new divergence impressions carrying a parseable snapshot whose assets match `assets_json`, recomputed ratio within 0.001 of stored fairness, p95 generation latency up ≤5%. Watch `trade_policy.HEALTH.asset_mismatches` — non-zero there means a snapshot was built from a different package than the one served.
+4. **Stage B is not authorized yet.** `trade.personal_market_policy_v1` needs Stage A's bar met **and** an operator-approved within-user crossover schedule. Randomize at the **deck-job** level; a deck must never mix variants, because composition is part of the treatment. Do not delete or pause a generator arm on the present sample — the three arms' 95% intervals fully overlap (n=33/74/47, five deciding users).
+5. **Then the analysis actually becomes possible.** [two-user-funnel.md](../docs/plans/personal-market-policy/two-user-funnel.md) is the contract: nine distinguishable states, so "A liked and B did not" can no longer be read as a rejection without confirming B's exposure. Historically that was unavoidable — a mirror never served left no row at all.
 
 ## 2026-09-03c — API audit fixes: merge the PR, then the held items (ping-then-init, web push, route hygiene)
 

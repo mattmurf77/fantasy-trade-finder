@@ -9,18 +9,18 @@
 ---
 
 ## Table of Contents
-- [Current State — 2026-09-04](#current-state--2026-09-04)
+- [Current State — 2026-09-05](#current-state--2026-09-05)
 
----
+## Current State — 2026-09-05
 
-## Current State — 2026-09-04
+**Active request:** user explicitly accepts exploratory historical evidence and authorizes shipping the Win Now, season-projection and championship-estimate beta. Release is in progress in `/private/tmp/ftf-win-now-20260904`, branch `codex/win-now-20260904`; original dirty checkout is preserved. Latest main `0a8093fe` is being merged before release checks. No deployment is claimed yet.
 
-**Where stopped:** Win Now beta plus historical/exploratory evaluation in `/private/tmp/ftf-win-now-20260904`, branch `codex/win-now-20260904`; initial beta `ad3c5346`, history tooling `87304dbe`. Original dirty checkout preserved. No push/merge/deploy/flag activation.
+**Implementation:** source forecasts feed league-specific legal lineups and full-season simulations; Win Now searches optimize season benefit while bounding dynasty cost and requiring credible partner benefit. Both clients label estimates experimental/uncalibrated. The release normalizes unused K/team-defense defaults and explicitly discloses omitted rare player bonuses. Canonical freshness revision is being verified after that normalization.
 
-**Latest request completed:** user accepted revised historical inputs and requested evaluator run. Four actual scored origins (after 3/6/9/12 weeks), Lakeview 2024, 10,000 draws each. Final-win MAE 2.60→0.76 (median wins included). Lakeview 2025 excluded for source lineup gap; four FFv3 seasons for K/IDP. [Numeric results/assumptions](../docs/plans/win-now/EXPLORATORY-RESULTS.md). One independent champion; no calibration/generalization claim.
+**Evaluation accepted:** four Lakeview 2024 origins (after 3/6/9/12 weeks), 10,000 draws each; one independent champion. Final-win MAE 2.60→0.76. This is exploratory revised-input evidence, not calibration. See [results](../docs/plans/win-now/EXPLORATORY-RESULTS.md) and [release log](../docs/business/ops/release-log.md).
 
-**Evidence:** 144 affected tests pass; direct evaluator and cached replay groups identical; strict control rejects modern revised inputs. Raw replay files `/private/tmp/ftf-win-now-diagnostic-final-20260904`; source cache `/private/tmp/ftf-revised-weekly-cache`. Parent reviewed Astra changes and local replay adapter.
+**Next:** parent review of Astra release fixes; final backend/client checks; exact-head CI; merge and Render verification; iOS 1.17.0 production build and TestFlight submission; record actual outcomes and recovery ledger before worktree cleanup. Physical TestFlight check remains an operator follow-up, never claimed from structural tests.
 
-**Outstanding:** production calibration/format coverage and hosted Python 3.12 CI/physical TestFlight before release. All 3 flags false; experimental diagnostic does not alter serving. No authentic pregame full-horizon archive yet.
+**Other main work preserved:** request-scoring isolation (#277) and collection-only whole-team policy rollout (#278) are integrated; this release changes only the three Win Now flags. Enforcement switches from those initiatives retain main's settings. Their plans and CHANGELOG carry their detailed history.
 
-**Do not repeat:** no silent backdating, future-score standings leakage, fabricated player forecasts, or dynasty Elo updates from Win Now decisions. No Maestro/native simulator (D-056). No recurring capture configured.
+**Do not repeat:** no invented forecasts, backdated revised inputs, championship calibration claim, dynasty Elo updates from Win Now decisions, Maestro/native simulator (D-056), or removal of the original dirty checkout. No recurring source capture configured.

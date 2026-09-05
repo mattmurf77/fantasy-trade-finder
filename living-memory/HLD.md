@@ -96,6 +96,14 @@ A dynasty fantasy football trade-finding app. Users log in via their Sleeper use
 
 Full per-route + per-table detail in [`../docs/api-reference.md`](../docs/api-reference.md) and [`../docs/data-dictionary.md`](../docs/data-dictionary.md).
 
+**`backend/trade_policy.py` — the trade-policy evaluator (2026-09-04, dark).** A leaf module owning the answer to *"may this trade be served, and how good is it for these two managers?"*. It encodes [D-180](DECISIONS.md): consensus value is a **non-bypassable market-plausibility guardrail** rather than 30% of a blended objective, personal rankings are the primary ordering signal among the plausible trades, and ranking confidence — applied symmetrically to **both** managers for the first time — controls how far the floor may descend. Called from three places: v2's candidate loop, v3's candidate loop, and one server-side choke point on the final deck (so every post-generation mutation is covered). Ships behind two flags, both default off: `trade.valuation_telemetry` (snapshots, canonical concept ids, shadow evaluation, proposal and match attribution — additive writes only) and `trade.personal_market_policy_v1` (the evaluator actually gates and orders). `policy_variant` is recorded **orthogonally** to `model_arm`, so the three existing generators keep generating inside both variants and no fourth arm is created ([D-181](DECISIONS.md)).
+
+### Full-roster evaluation (2026-09-04; dark)
+
+Two new leaves, `trade_roster.py` and `trade_roster_adapter.py`, evaluate both final rosters using exact shared-slot allocation, usable depth, capacity and observed-input provenance. The server captures one snapshot after mutations and before market composition; enforcing gates hold progressive card publication. Existing impression/shadow stores carry evidence. Estimated templates cannot pass enforcement; no weekly forecast is claimed. See `docs/plans/post-trade-roster-evaluation/`.
+
+Whole-team benefit extension (2026-09-04): `trade_roster.Context.card` calls pure `trade_outlook_utility` for both complete rosters, then `trade_mutual_benefit` for eligibility and ordering. Explicit outlook provenance is captured before inference. Current production requires supplied fresh point data; dynasty-only evidence cannot enable the strict gate. The worker evaluates after all package mutations, withholds provisional cards in enforcement mode and preserves market lane quotas. Collection lives under existing roster telemetry; `trade.mutual_benefit_v1` remains independently dark. See `docs/plans/trade-model-activation/validation.md`.
+
 ## External Dependencies (technical)
 See [`DEPENDENCIES.md`](DEPENDENCIES.md). High-level: Sleeper API (free, public), DynastyProcess GitHub CSV (free), Anthropic Claude API (optional, paid).
 
@@ -180,6 +188,6 @@ All 17 patterns adopted on 2026-05-21. Cross-references existing [`../docs/`](..
 
 ## Win Now season pipeline
 
-Implementation checkpoint 2026-09-04, D-180 / ADR-017: external weekly forecasts feed supported league scoring and legal lineups, then full-league paired season simulations and constrained search. Durable evidence/jobs and the mobile/web Win Now flow remain separate from dynasty generators and Elo feedback. All three flags default off; parent integration review complete; hosted CI/calibration pending. Authoritative [architecture](../docs/architecture.md#win-now-season-pipeline) and [build limits](../docs/plans/win-now/BUILD.md).
+Implementation checkpoint 2026-09-04, D-183 / ADR-017: external weekly forecasts feed supported league scoring and legal lineups, then full-league paired season simulations and constrained search. Durable evidence/jobs and the mobile/web Win Now flow remain separate from dynasty generators and Elo feedback. The 2026-09-05 release configuration enables all three flags under explicit operator acceptance of exploratory evidence; parent integration review is complete, hosted CI/deployment verification is in progress, and calibration remains unproven. Authoritative [architecture](../docs/architecture.md#win-now-season-pipeline) and [build limits](../docs/plans/win-now/BUILD.md).
 
 Offline historical validation now has an outcome collector and a conditional archived-prediction evaluator. No serving model or data-store wiring changes. [Protocol and source limitations](../docs/plans/win-now/HISTORICAL-VALIDATION.md).

@@ -1,0 +1,97 @@
+{
+  "recent_impressions": [
+    {
+      "day": "2026-09-04",
+      "n": 63
+    },
+    {
+      "day": "2026-09-03",
+      "n": 110
+    },
+    {
+      "day": "2026-09-02",
+      "n": 1058
+    },
+    {
+      "day": "2026-09-01",
+      "n": 101
+    },
+    {
+      "day": "2026-08-31",
+      "n": 380
+    }
+  ],
+  "linked_platforms": [
+    {
+      "platform": "espn",
+      "leagues": 1
+    },
+    {
+      "platform": "sleeper",
+      "leagues": 16
+    },
+    {
+      "platform": "mfl",
+      "leagues": 1
+    }
+  ],
+  "samples": [
+    {
+      "sample": 1,
+      "teams": 12,
+      "lineup_slots": [
+        "QB",
+        "RB",
+        "RB",
+        "WR",
+        "WR",
+        "TE",
+        "FLEX",
+        "K",
+        "DL",
+        "DL",
+        "LB",
+        "LB",
+        "DB",
+        "DB",
+        "IDP_FLEX"
+      ],
+      "coowned_teams": 0,
+      "rostered_assets": 443
+    },
+    {
+      "sample": 2,
+      "teams": 12,
+      "lineup_slots": [
+        "QB",
+        "RB",
+        "RB",
+        "WR",
+        "WR",
+        "TE",
+        "FLEX",
+        "FLEX",
+        "SUPER_FLEX"
+      ],
+      "coowned_teams": 3,
+      "rostered_assets": 282
+    },
+    {
+      "sample": 3,
+      "teams": 12,
+      "lineup_slots": [
+        "QB",
+        "RB",
+        "RB",
+        "WR",
+        "WR",
+        "TE",
+        "FLEX",
+        "FLEX",
+        "FLEX"
+      ],
+      "coowned_teams": 0,
+      "rostered_assets": 281
+    }
+  ]
+}

@@ -1126,6 +1126,43 @@ FLAG_KEYS: tuple[str, ...] = (
     # is still computed — deck, order and rows byte-identical, pinned by
     # backend/tests/test_full_sweep.py.
     "trade.full_sweep",
+    # ── Personal-market policy — 2026-09-04, both ship DARK ───────────────
+    # Scope block: docs/plans/personal-market-policy/scope.md.
+    # Module: backend/trade_policy.py.
+    #
+    # TWO flags, not one, because the brief's own rollout separates
+    # "measure it" from "change it" and a single flag cannot express that.
+    #
+    # `trade.valuation_telemetry` (Phase 1/2) — ON ⇒ every impression carries
+    # a frozen valuation snapshot, a canonical trade_concept_id and a
+    # policy_variant stamp; the evaluator runs in SHADOW and logs the
+    # candidates it would have rejected; confirmed provider sends write a
+    # trade_proposals row; matches record both impressions and the lag.
+    # Eligibility, ordering and every card payload are untouched — these are
+    # additive WRITES only. OFF (default) ⇒ no new column is populated, no
+    # new table is written, and deck_impressions rows are byte-identical to
+    # today's.
+    #
+    # `trade.personal_market_policy_v1` (Phase 3) — ON ⇒ the shared evaluator
+    # actually GATES and ORDERS: consensus becomes a non-bypassable floor
+    # instead of 30% of a blended score, two-sided personal opportunity
+    # becomes the primary sort, and the deck is composed under the
+    # Core/Conviction quotas. OFF (default) ⇒ every generator, every
+    # mutation path and every ordering layer behaves exactly as it does
+    # today, pinned by the flag-off goldens in
+    # backend/tests/test_trade_policy_wiring.py.
+    #
+    # Deploy-free tuning rides model_config: the market_floor_* /
+    # conf_source_* / deck_core_* rows, all settable through
+    # PUT /api/admin/config/<key>.
+    "trade.valuation_telemetry",
+    "trade.personal_market_policy_v1",
+    # Full-roster shadow evidence and independent final-deck enforcement.
+    "trade.roster_evaluation",
+    "trade.roster_protection",
+    # Whole-team meaningful benefit for both managers; implies final market
+    # and roster gates. Remains dark until point coverage and intent qualify.
+    "trade.mutual_benefit_v1",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

@@ -41,7 +41,7 @@ so grep by symptom, not by import path.
 
 | Cluster | Files (examples) |
 |---|---|
-| Trade engine | `test_trade_engine_v2`, `test_trade_optimizer`, `test_trade_gen_prune`, `test_fairness_gate_golden`, `test_user_gain_gate`, `test_three_team_cycles`, `test_presentment_rules`, `test_offer_hard_lock_330`, `test_engine_quality_golden`, `test_bakeoff_arm_a_golden` (12 `test_trade_*` files plus these) |
+| Trade engine | `test_trade_engine_v2`, `test_trade_optimizer`, `test_trade_gen_prune`, `test_fairness_gate_golden`, `test_user_gain_gate`, `test_three_team_cycles`, `test_presentment_rules`, `test_offer_hard_lock_330`, `test_engine_quality_golden`, `test_bakeoff_arm_a_golden`, `test_trade_policy` (the evaluator's math) + `test_trade_policy_wiring` (where it is plugged in, incl. flag-off byte identity) (12 `test_trade_*` files plus these) |
 | Deck / discovery (F1–F10) | `test_deck_*` (9: exploration, fatigue, first_session, ordering, replenishment, signal_v2, taste, thompson_v2, value_model), `test_engine_telemetry`, `test_pass_cooldown` |
 | Ranking / tiers / Elo | `test_rnk_elo_golden`, `test_elo_memoization`, `test_tier_occupancy`, `test_trio_*`, `test_compressed_board`, `test_rankings_import` |
 | Draft | `test_draft_*` (5), `test_mock_draft`, `test_mock_pick_ownership`, `test_pick_*` (8), `test_recorded_picks`, `test_owned_picks` |
@@ -218,3 +218,7 @@ never disagree. Exit codes are a contract: `0` ok · `2` io · `3` refused (toke
   Check CI before attributing a red test to your change.
 - Single-process and CPU-bound. No `pytest-xdist` and no `pytest-timeout` are installed, so `-n auto`
   and `--timeout` are unavailable.
+
+### Full-roster regression coverage (2026-09-04)
+
+`test_trade_roster.py` compares exact slot matching to brute force and pins both-team coverage, backups, existing deficits, cuts, picks and unknown data. `test_trade_roster_wiring.py` exercises real worker publication and telemetry through the policy harness, plus an AST guard over all provisional card writes. All provider seams are offline in tests.

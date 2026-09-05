@@ -13,11 +13,41 @@
 
 ## 2026-09-04 — Win Now implementation reviewed, all flags off
 
-Operator authorized the [Win Now build](../docs/plans/win-now/BUILD.md) using Astra subagents and parent review, isolated on `codex/win-now-20260904` from fetched main `606e512c`. Adds external weekly forecasts, legal-lineup season simulation, constrained search/calculator, durable evidence and separate season decisions in mobile/web. **Not merged, deployed, enabled or submitted to TestFlight.** [ADR-017](../docs/adr/adr-017-win-now-external-forecasts.md) / D-180 preserve dynasty Elo and the legacy title-display prohibition.
+Operator authorized the [Win Now build](../docs/plans/win-now/BUILD.md) using Astra subagents and parent review, isolated on `codex/win-now-20260904` from fetched main `606e512c`. Adds external weekly forecasts, legal-lineup season simulation, constrained search/calculator, durable evidence and separate season decisions in mobile/web. **Not merged, deployed, enabled or submitted to TestFlight.** [ADR-017](../docs/adr/adr-017-win-now-external-forecasts.md) / D-183 preserve dynasty Elo and the legacy title-display prohibition.
 
 Client evidence: TypeScript, 24 feature checks, web 185/185, JS syntax and test-ID lint pass. Parent review is complete; backend evidence covers 4,846 passing cases plus one skip after corrected fixture reruns, and synthetic browser review passed. Hosted Python 3.12 CI, physical TestFlight and held-out calibration remain pending. All three flags stay false; current injuries, conservative game-date cutoff and absent game/team correlations remain explicit limits. [Evidence and checklist](../docs/plans/win-now/EVIDENCE.md).
 
 ---
+
+## 2026-09-04 — Personal-market policy BUILT DARK (D-180/D-181) — consensus becomes a guardrail, personal rankings become the ordering signal
+Prod (2026-09-04, 21,363 impressions / 598 decisions / 5 deciding users) said the thesis is right and
+the implementation is not: the top quartile of stored mutual-surplus was liked 38.6% vs 15.5–25.9%,
+yet the **final composite had ~zero correlation with likes**. The 70/30 blend loses the signal it
+computes. Two structural faults underneath — confidence shrinkage applied to the user's board but not
+a league-mate's (86.9% of boarded-pair cards existed in one orientation only), and a divergence path
+composing the user's fairness preference with `min(...)`, so asking for a stricter 0.75 handed you a
+looser 0.55. New leaf `backend/trade_policy.py` separates the jobs: consensus is a **non-bypassable
+market floor** (point ratio only — range overlap can no longer rescue), two-sided personal
+opportunity (the **weaker** manager's gain) is the primary sort, and symmetric ranking confidence
+sets how far the floor may descend (0.80 → 0.65). Called by v2, v3 **and one server-side choke point
+on the final deck**, so sweeteners / relaxed fallback / swaps / likes-you / wildcards / replenishment
+stop being six routes to six different bars. `policy_variant` is orthogonal to `model_arm` — all
+three generators keep generating inside both variants, **no fourth arm**, `MODEL_A_PROFILE`
+untouched. Adds 16 nullable columns (`member_rankings` confidence ×3, `deck_impressions` ×4,
+`trade_decisions` ×2, `trade_matches` ×7) + `trade_proposals` + `trade_policy_shadow`; no backfill,
+because the board state behind a historical row no longer exists. 87 new tests; full suite green;
+flag-off byte identity proved three ways and the choke point sabotage-proved.
+**Both flags default false in code and in `config/features.json` — nothing enabled, nothing
+deployed, no production migration run.** Open: [Q-038](OPEN_QUESTIONS.md) — the policy and the
+generators judge "both managers gain" on two different value bases (raw vs marginal); that is why
+two-sided gain gates Conviction rather than everything. [scope](../docs/plans/personal-market-policy/scope.md) ·
+[code-walk](../docs/plans/personal-market-policy/code-walk.md) ·
+[funnel](../docs/plans/personal-market-policy/two-user-funnel.md) ·
+[TestFlight checklist](../docs/plans/personal-market-policy/testflight-checklist.md) (written, not run).
+
+### Codex roster evaluator and balance review
+
+Built the full-roster evaluator and reviewed the balance implementation on the same requested branch. Added exact shared-slot assignment, both-manager usable depth and capacity checks, outlook utility, uncertain-input handling, frozen telemetry and additive HTML mockup. Fixed pre-gate streaming, enforcement failure handling, small-deck quotas, confidence-value inconsistencies and impression attribution. All new switches remain false. See `docs/plans/post-trade-roster-evaluation/code-walk.md`.
 
 ## 2026-09-03d — Web ESPN entry leads with sign-in SHIPPED (D-179) + the entry-session 401 loop guarded (G-069) — PR #276 → `main` @ `0059a8a0`, live
 Operator on the live V3 landing: "ESPN option is missing the log in prompt as primary." Correct —

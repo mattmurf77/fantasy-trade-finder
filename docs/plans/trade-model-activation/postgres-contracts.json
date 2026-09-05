@@ -1,0 +1,9 @@
+{
+  "postgres_contracts_passed": [
+    "test_a_confirmed_send_creates_exactly_one_idempotent_proposal_row",
+    "test_an_edited_package_keeps_the_origin_link_and_differing_hashes",
+    "test_a_failed_proposal_snapshot_still_records_the_send",
+    "test_a_confirmed_send_labels_its_impression_exactly_once"
+  ],
+  "provider_offers_sent": 0
+}

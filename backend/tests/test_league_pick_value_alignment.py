@@ -11,7 +11,7 @@ py`). What lives here is what none of those can assert on its own:
 
   A. THE ONE SEAM — an AST walk proving every pricing call in `server.py`
      goes through `_priced_pick_value`, and that its callers are exactly the
-     five known sites. Bidirectional, so both a new site sneaking around the
+     six known sites. Bidirectional, so both a new site sneaking around the
      seam and a known site quietly dropping out fail.
   B. RESOLVE-ONCE — Power Rankings iterates every roster in one request;
      `_league_slot_order` must be hit once per LEAGUE, not once per pick.
@@ -56,12 +56,14 @@ _PRICING_SEAM = "_priced_pick_value"
 #:   get_league_picks     S1 — GET /api/league/picks values + tier badges
 #:   _owned_pick_assets   S3 — the suggestion candidate pool (deck lane)
 #:   _power_picks_by_owner S2 — Power Rankings + the ADR-011 history snapshot
+#:   _build_trade_roster_context — all holdings in the final roster evaluator
 _SEAM_CALLERS = {
     "_roster_eveners",
     "_trade_evaluate_impl",
     "get_league_picks",
     "_owned_pick_assets",
     "_power_picks_by_owner",
+    "_build_trade_roster_context",
 }
 
 
