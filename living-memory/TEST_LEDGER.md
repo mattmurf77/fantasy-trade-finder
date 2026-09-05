@@ -11,11 +11,19 @@
 
 ---
 
+## 2026-09-05 — Owner-contract GitHub and TestFlight release verified
+
+Owner explicitly authorized public GitHub publication and TestFlight distribution, resolving the earlier publication block. [Draft PR #281](https://github.com/mattmurf77/fantasy-trade-finder/pull/281); exact built source `0fc1b5390894f3a4e5c9ed8c1c480efd562a09e2`. [Hosted CI](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/33950667865): **5,455 passed / 1 skipped in 621.36 s**, all four jobs successful; mobile TypeScript/all 93 guards, test-ID lint and 190 web checks passed. Release evidence updates after this source are documentation only, not changes to the tested/built runtime tree.
+
+EAS archive inspected before upload: clean detached worktree, **2,610 files**, **627/627 tracked mobile files byte-identical**, no raw source docs, credentials, node_modules or local DBs; retained Git history also excludes raw docs. Effective production API, test mode false, bundle/project/owner verified. EAS **1.17.0 (148)** build `3f0a5ae0-596d-4094-9e4b-539a395116ad` FINISHED at 06:53:20.750 UTC. After exact-source CI gate, submission `7cfac797-9707-457b-8243-c77c8fc9f660` successfully uploaded to App Store Connect and entered Apple processing. Apple tester availability and physical-device QA are not verified. No main merge, Render deploy, flag change, production DB action or simulator/Maestro. [Release record and remaining gates](../docs/plans/owner-contracts/release.md).
+
+---
+
 ## 2026-09-05 — Owner-contract implementation, final local integration
 
 Final integrated sources, including the privacy follow-up, passed before publication on isolated branch `codex/owner-contracts-20260905`, baseline `5cf34182`. Parent reviewed all lane diffs and independent Astra findings; no flags, profiles, historical control fixtures or production rows changed.
 
-**Checkpoint:** implementation commit `86128700`. Publication safety review rejected the push/PR command before execution because explicit approval is required for the public GitHub destination. No push/PR exists from this attempt; hosted CI remains unrun. Local history verification confirmed the five raw interview/source documents are preserved on disk but absent from new commit history; protected config/fixture/lockfile/secret paths are unchanged. Do not work around the rejection.
+**Historical pre-authorization checkpoint:** implementation commit `86128700`. Publication safety review rejected the initial push/PR command before execution because explicit approval was required for the public GitHub destination. This block was later resolved by explicit owner authorization, not a workaround; final publication/CI evidence is above. Local history verification confirmed the five raw interview/source documents are preserved on disk but absent from new commit history; protected config/fixture/lockfile/secret paths are unchanged.
 
 - `/private/tmp/ftf-context-venv/bin/python -m pytest backend/tests -q --tb=short` — **5,455 passed / 1 skipped in 566.99 s**, exit 0, Python **3.12.14**. The earlier 5,450-test run predates the privacy patch and is superseded by this result.
 - The same interpreter with `-m pytest backend/tests/test_owner_policy_contracts.py backend/tests/test_owner_ranking_provenance.py backend/tests/test_trade_card_privacy.py backend/tests/test_trade_feedback_tier_bounds.py -q` — **102 passed in 19.49 s**. Serializer/API tests verify counterparty exact-value fields are omitted without mutating internal cards.

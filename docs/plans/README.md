@@ -18,7 +18,7 @@ Per-feedback-item fixes do **not** live here — they live in [`../feedback/item
 Trade-model activation follow-up: [scope](trade-model-activation/scope.md), [validation](trade-model-activation/validation.md). Items 2/3 built; collection rollout under validation; strict enforcement remains dark.
 Security remediation **shipped 2026-09-05** via PR #279: [deployment](security-data-hardening/deployment.md), [scope](security-data-hardening/scope.md). Integrated CI: 5,001 backend passes / 1 skip; PostgreSQL: 57 passes. Render live; iOS 1.16.16 (145) submitted; extension 0.1.1 published. Physical-device QA and historical production cleanup remain outstanding.
 
-Owner interview implementation **active 2026-09-05**: [scope](owner-contracts/scope.md). Confirmed search/ranking contracts only; unresolved policy thresholds remain deferred. Parent review and CI precede push/merge; no rollout implied.
+Owner interview implementation **built, backend unmerged; iOS uploaded 2026-09-05**: [scope](owner-contracts/scope.md), [release](owner-contracts/release.md). Draft PR #281, exact-source CI green; iOS 1.17.0 (148) uploaded for TestFlight, Apple/tester confirmation and physical QA remain. Backend/flags unchanged; unresolved policy work remains deferred.
 
 ## Status legend
 
