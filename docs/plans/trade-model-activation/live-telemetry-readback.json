@@ -1,0 +1,14 @@
+{
+  "since_utc": "2026-09-05T03:56:29",
+  "read_only": "on",
+  "missing_schema": {},
+  "rows": 0,
+  "valuation_parseable": 0,
+  "asset_match": 0,
+  "ratio_match": 0,
+  "roster_snapshots": 0,
+  "mutual_unknown": 0,
+  "legacy_variant": 0,
+  "coverage_percent": null,
+  "observation_status": "awaiting_organic_traffic"
+}

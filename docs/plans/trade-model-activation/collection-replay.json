@@ -1,0 +1,10 @@
+{
+  "paired_jobs": 10,
+  "valuation_snapshots": 80,
+  "finite_parseable": 80,
+  "mutual_unknown": 80,
+  "serving_unchanged": true,
+  "baseline_median_ms": 149.9713544981205,
+  "collection_median_ms": 184.28091650275746,
+  "scope": "Synthetic DB/generator fixture including evaluator and logging; provider I/O stubbed. Not production latency graduation."
+}

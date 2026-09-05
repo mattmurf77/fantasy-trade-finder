@@ -1,0 +1,28 @@
+{
+  "observed_flags": {
+    "trade.valuation_telemetry": true,
+    "trade.roster_evaluation": true,
+    "trade.personal_market_policy_v1": false,
+    "trade.roster_protection": false,
+    "trade.mutual_benefit_v1": false
+  },
+  "previous_FTF_FLAGS": null,
+  "collection_flags": {
+    "trade.valuation_telemetry": true,
+    "trade.roster_evaluation": true,
+    "trade.personal_market_policy_v1": false,
+    "trade.roster_protection": false,
+    "trade.mutual_benefit_v1": false
+  },
+  "code_commit": "0a8093fe0d6158540d042dc74f23ab6efe360e3a",
+  "collection_deploy_id": "dep-dadp5cmq1p3s73ekr6hg",
+  "verified_live_at_utc": "2026-09-05T03:56:29.028345Z",
+  "ci_run": "https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/33942432075",
+  "tested_commit": "55a86fdd4b5fdcfc11bbc7c3ecf568ad0680167e",
+  "backend_tests": {
+    "passed": 4910,
+    "skipped": 1,
+    "seconds": 634.68
+  },
+  "pr": "https://github.com/mattmurf77/fantasy-trade-finder/pull/278"
+}

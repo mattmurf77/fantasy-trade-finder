@@ -33,4 +33,4 @@ If the additive application deployment fails boot, leave the prior live deploy s
 
 ## Execution record
 
-Pending exact-SHA CI and deployment at document creation. Update this section with verified revisions and times when complete. TestFlight controlled-send and broad enforcement remain explicitly pending.
+Verified: all four CI jobs passed on `55a86fdd`; Python 3.12 backend 4,910 passed / one skip. PR #278 merged to `0a8093fe`. The dark deployment passed read-only schema and flag checks, then collection deployment `dep-dadp5cmq1p3s73ekr6hg` went live at 2026-09-05 03:56:29 UTC. Running API flags match the JSON above. Initial post-activation traffic count is zero, so empirical coverage/latency remains pending. See `production-readback.json`, `live-telemetry-readback.json` and validation.md. TestFlight controlled-send and broad enforcement remain explicitly pending.

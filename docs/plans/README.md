@@ -15,7 +15,7 @@ For **what's next**, [`living-memory/NEXT.md`](../../living-memory/NEXT.md). For
 cited below, [`living-memory/DECISIONS.md`](../../living-memory/DECISIONS.md).
 Per-feedback-item fixes do **not** live here — they live in [`../feedback/items/`](../feedback/items/).
 
-Trade-model activation follow-up: [scope](trade-model-activation/scope.md), [validation](trade-model-activation/validation.md). Items 2/3 built; collection rollout under validation; strict enforcement remains dark.
+Trade-model activation follow-up: [scope](trade-model-activation/scope.md), [validation](trade-model-activation/validation.md). Items 2/3 built and deployed for collection via PR #278; collection LIVE, strict enforcement remains dark.
 
 ## Status legend
 

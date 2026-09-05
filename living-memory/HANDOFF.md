@@ -8,6 +8,10 @@
 
 ---
 
+## Current trade-model rollout state — 2026-09-04 late ET
+
+**Collection is LIVE; strict filtering is OFF.** PR #278 merged as `0a8093fe`, CI 4,910 passes / one skip. Runtime readback confirms valuation/roster collection on and personal-market/roster-protection/mutual-benefit enforcement off. Initial post-activation traffic is zero; empirical coverage and latency gates remain pending. [Authoritative release evidence](../docs/plans/trade-model-activation/validation.md#verified-release-outcome). Earlier dark-stage and authorization notes below are historical; current user authorization permits activation, while the observed data gaps prevent broader enforcement.
+
 ## 2026-09-04 — Personal-market policy BUILT and DARK on `claude/fleeced-trade-engine-balance-c0c75d`; nothing enabled, nothing deployed
 
 **Where:** branch `claude/fleeced-trade-engine-balance-c0c75d`, cut from a freshly fetched `origin/main` @ `606e512c`, in the worktree `.claude/worktrees/monetization-features-feedback-a6fe77`. **Uncommitted** — the tree holds the change; no commit, no PR, no push. [D-180](DECISIONS.md) + [D-181](DECISIONS.md); [scope](../docs/plans/personal-market-policy/scope.md).
@@ -32,7 +36,7 @@
 
 ### Activation follow-up — original items 2 and 3
 
-The user requested execution. Whole-team outlook utility and mutual-benefit ranking are now integrated on the same branch, with a separate dark flag. See `docs/plans/trade-model-activation/validation.md` and `rollout.md` for exact evidence and rollout state. Collection-only activation is being validated; broad enforcement is blocked by observed data gaps. The HTML mockup is excluded from the product rollout. Earlier "Stage B is not authorized" wording is historical: the current user authorizes activation work, but evidence still limits its scope.
+The user requested execution. PR #278 is merged as `0a8093fe`; all four CI gates passed (4,910 backend tests / one skip). Background valuation + roster collection is LIVE, verified on Render at 2026-09-05 03:56:29 UTC. All three strict filtering flags remain false. No new organic impressions were present at initial readback. Whole-team outlook utility and mutual-benefit ranking are integrated on the requested branch and deployed for collection. See `docs/plans/trade-model-activation/validation.md` and `rollout.md` for exact evidence and rollout state. Collection-only activation is verified; broad enforcement is blocked by observed data gaps. The HTML mockup is excluded from the product rollout. Earlier "Stage B is not authorized" wording is historical: the current user authorizes activation work, but evidence still limits its scope.
 
 ### Codex roster evaluator and balance review
 

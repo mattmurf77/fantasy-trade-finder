@@ -11,6 +11,10 @@
 
 ---
 
+## 2026-09-04 — Trade collection LIVE; strict enforcement remains off
+
+PR [#278](https://github.com/mattmurf77/fantasy-trade-finder/pull/278), tested head `55a86fdd`, merged `0a8093fe`. All four CI jobs green; complete Python 3.12 backend **4,910 passed / one skip**, 634.68 s. Production schema verified read-only, then collection-only Render deployment `dep-dadp5cmq1p3s73ekr6hg` verified live 2026-09-05 03:56:29 UTC. Runtime API: valuation_telemetry and roster_evaluation true; personal_market_policy_v1, roster_protection and mutual_benefit_v1 false. No new organic impressions at final readback; coverage/latency and controlled-send remain pending. No model uplift or TestFlight pass claimed. Evidence: [validation](../docs/plans/trade-model-activation/validation.md).
+
 ## 2026-09-04 — Trade model/scoring-context integration
 
 Merged main `db6b3a17` (#277) into the requested balance branch before CI. Preserved captured request/format ownership and added captured provider `league_user_id`, which the reduced worker session otherwise omitted. New delayed-job test proves a co-owner roster check cannot follow a later session reinitialization. **104 focused tests passed** in 9.81 seconds. The complete merged-revision CI remains the release gate; pre-merge full local coverage below is not claimed for this merge.
