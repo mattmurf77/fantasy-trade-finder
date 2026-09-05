@@ -6,6 +6,7 @@ import { chalk, fonts, ice, ink, radii, space, type } from '../theme/chalkline';
 import { haptics } from '../utils/haptics';
 import type { CalcPlayer } from '../data/calcTypes';
 import type { TradeCard } from '../shared/types';
+import { reconcileCanvasScope } from '../utils/tradeSearchRequest';
 
 // #270 — inline trades home, experiment `trades_home_inline` variant
 // `canvas` (mockups/polish-lab-2026-08/trades-home-inline.html frames B1
@@ -153,22 +154,49 @@ export default function TradeBuildCanvas({
   // file header).
   const [canvasKey, setCanvasKey] = useState(0);
   const [prefill, setPrefill] = useState<CanvasPrefill | null>(null);
+  const previousLeagueRef = React.useRef(leagueId);
+  const previousOpponentRef = React.useRef(opponentUserId);
+  const latestGiveRef = React.useRef<string[] | undefined>(undefined);
+  useEffect(() => {
+    if (previousLeagueRef.current === leagueId) return;
+    previousLeagueRef.current = leagueId;
+    previousOpponentRef.current = opponentUserId;
+    latestGiveRef.current = undefined;
+    setPrefill(null);
+    setCanvasKey((k) => k + 1);
+  }, [leagueId]);
 
   // D-158 — adopt a host prefill on every SEQ change. Absent `prefillSeq`
   // (the #270 experiment path) ⇒ this effect runs once with `undefined` and
   // does nothing, so that path is unchanged.
   useEffect(() => {
     if (prefillSeq === undefined || !hostPrefill) return;
+    latestGiveRef.current = hostPrefill.give;
     setPrefill(hostPrefill);
     setCanvasKey((k) => k + 1);
     // Only the seq may trigger a load — see the file header.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefillSeq]);
 
-  const effectiveOpponentId = prefill?.opponentId ?? opponentUserId ?? undefined;
+  const sameLeague = previousLeagueRef.current === leagueId;
+  const activePrefill = sameLeague
+    ? reconcileCanvasScope(prefill, previousOpponentRef.current, opponentUserId, latestGiveRef.current)
+    : null;
+  useEffect(() => {
+    if (previousOpponentRef.current === opponentUserId) return;
+    previousOpponentRef.current = opponentUserId;
+    setPrefill(activePrefill);
+    if (activePrefill !== prefill) latestGiveRef.current = activePrefill?.give;
+    // The explicit parent change is the trigger, not the saved draft.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opponentUserId]);
+  const effectiveOpponentId = sameLeague
+    ? activePrefill?.opponentId ?? opponentUserId ?? undefined
+    : undefined;
 
   function loadSuggestion(card: TradeCard) {
     haptics.selection();
+    latestGiveRef.current = card.give_player_ids;
     setPrefill({
       opponentId: card.opponent_user_id,
       give: card.give_player_ids,
@@ -181,19 +209,32 @@ export default function TradeBuildCanvas({
     <View style={styles.wrap} testID="trades.build-canvas">
       <TickLabel>Build a trade</TickLabel>
       <InLeagueCalculator
-        key={`${canvasKey}-${effectiveOpponentId ?? 'none'}`}
+        key={`${leagueId}-${canvasKey}-${effectiveOpponentId ?? 'none'}`}
         leagueId={leagueId}
         userId={userId}
         initialOpponentId={effectiveOpponentId}
-        initialGiveIds={prefill?.give}
-        initialReceiveIds={prefill?.receive}
-        onFindATrade={onFindATrade}
+        initialGiveIds={activePrefill?.give}
+        initialReceiveIds={activePrefill?.receive}
+        onFindATrade={onFindATrade ? (opts) => {
+          // Scope synchronization may remount this calculator. Seed that
+          // remount with the actual searched draft, not an empty prefill.
+          latestGiveRef.current = opts.give.map((p) => p.id);
+          setPrefill({
+            opponentId: opts.opponent?.userId,
+            give: opts.give.map((p) => p.id),
+            receive: opts.receive.map((p) => p.id),
+          });
+          onFindATrade(opts);
+        } : undefined}
         onLikeTrade={onLikeTrade}
-        onSidesChange={onSidesChange}
+        onSidesChange={(give, receive) => {
+          latestGiveRef.current = give;
+          onSidesChange?.(give, receive);
+        }}
         browseDecline={browseDecline}
         giveBelowAdd={giveBelowAdd}
         partnerLocked={partnerLocked}
-        seededPrefill={!!prefill?.seeded}
+        seededPrefill={!!activePrefill?.seeded}
         hideFormatChips={hideFormatChips}
       />
 

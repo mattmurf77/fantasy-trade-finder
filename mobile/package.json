@@ -22,6 +22,7 @@
     "test:calc-tour": "node tests/check-calc-tour.js",
     "test:canvas-results": "node tests/check-canvas-results.js",
     "test:results-push": "node tests/check-results-push.js",
+    "test:owner-search-continuity": "node tests/check-owner-search-continuity.js",
     "test:card-disposition": "node tests/check-card-disposition.js",
     "test:card-impact": "node tests/check-card-impact-order.js",
     "test:consensus-balance-claim": "node tests/check-consensus-balance-claim.js",

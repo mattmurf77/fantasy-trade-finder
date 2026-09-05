@@ -230,6 +230,8 @@ Required: H1 with project suffix, purpose blockquote, Table of Contents, ISO dat
 
 ## One policy evaluator, one choke point (2026-09-04, personal-market policy)
 
+**2026-09-05 owner-contract amendment (D-185):** the below describes the existing dark policy, not permission to activate its exact floors or ordering. The owner allows bounded market sacrifice for outlook, strong personal disagreement or a modest strong-need benefit; final numerical caps and deck ordering remain unsettled. Ranking methods have equal authority. Do not revive method/sample-count discounts or infer approval of personal-surplus-primary ranking from this historical section.
+
 **The convention:** eligibility thresholds live in exactly one module (`backend/trade_policy.py`), and every card passes it **after its final package is assembled** — not merely at generation. Generation may prefilter cheaply; the evaluator is the *last* check, and no card reaches a user without it.
 
 **Why it is a convention and not just a feature.** Before this, threshold logic was duplicated across `trade_service`'s v2 pair generator, `trade_optimizer`'s v3 package search and several post-generation mutation paths in `server.py`. That made `fairness_floor_divergence` = 0.55, the relaxed fallback, both sweeteners, swap/edit, likes-you injection, wildcards and weekly replenishment **six independent routes to the deck under different bars** — none of them wrong on its own, all of them a bypass in aggregate. The rule that prevents a seventh is structural: the choke point sits on `final_cards` in `_run_trade_job`, immediately before the ghost split, so a new mutation layer is either above it (and therefore gated) or it has to be inserted between two adjacent statements.
@@ -349,6 +351,8 @@ The presentation-v2 build ([scope](../docs/plans/trade-presentation-v2/scope.md)
 ---
 
 ## Placements vs comparisons: assertion and sample are different inputs (2026-08-19, D-085)
+
+**Owner policy superseded by D-185 (2026-09-05), implementation deliberately partial.** Explicit ranking methods have equal authority in the dark policy: a positive comparison count and a valid deliberate placement retain the current personal value. The placement map still constrains tiers; within-tier changes in the incoming personal board remain effective. Unranked legacy markers remain outside placement authority. The legacy live generator's estimator below is retained for historical-control integrity, pending a separately scoped arm-safe experiment; it is not the owner's desired end state.
 
 The placement tier clamp ([scope](../docs/plans/placement-tier-clamp/scope.md)) establishes a convention for anything that reads a user's board.
 

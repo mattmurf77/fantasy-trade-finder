@@ -2,6 +2,8 @@
 
 High-level data flow and component boundaries. Update when modules are added, removed, or significantly re-wired.
 
+Owner-contract amendment (2026-09-05, D-185): ranking replay derives fixed feedback tier bounds after deliberate ranking actions; trade/disposition signals cannot cross the public tier boundary. Existing per-row member-ranking provenance flows through `load_member_rankings` → `LeagueMember.confidence_sources` → dark policy evaluation. No new service or database column. Legacy live generator method weighting is preserved pending an arm-safe experiment; see [implementation scope](plans/owner-contracts/scope.md).
+
 ## Data flow
 
 ```mermaid

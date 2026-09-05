@@ -1266,7 +1266,7 @@ def gen_v2_cards(trade_service, kwargs: dict) -> list:
     _n_before = len(cards)
     cards = _filter_by_trade_intent(
         cards, effective_trade_intent(kwargs.get("trade_intent")),
-        seed_elo, trade_service._players, scoring_format)
+        seed_elo, trade_service._players, scoring_format, kwargs.get("user_elo"))
     diag["S7_intent_filter"] = _n_before - len(cards)
 
     # C4b give-side headliner cap — the third post-generation step arms A/B get
@@ -1396,7 +1396,7 @@ def gen_fit_cards(trade_service, kwargs: dict) -> list:
     _n_before = len(cards)
     cards = _filter_by_trade_intent(
         cards, effective_trade_intent(kwargs.get("trade_intent")),
-        seed_elo, trade_service._players, scoring_format)
+        seed_elo, trade_service._players, scoring_format, kwargs.get("user_elo"))
     diag["S7_intent_filter"] = _n_before - len(cards)
 
     # C4b give-side headliner cap — same deck-assembly treatment as the

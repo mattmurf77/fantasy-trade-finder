@@ -228,8 +228,9 @@ assert(/opponent: \{ userId: string; name: string \} \| null;/.test(fork),
   assert(indicesOf(trades, 'seeded: true').length === 1,
     'A-14. no other prefill site is marked seeded',
     'a tap/handoff/restore marked seeded stops counting a CHOSEN partner as chosen');
-  assert(/seededPrefill=\{!!prefill\?\.seeded\}/.test(canvas),
-    'A-14. TradeBuildCanvas forwards the marker as seededPrefill');
+  assert(/seededPrefill=\{!!activePrefill\?\.seeded\}/.test(canvas)
+      && /const activePrefill = sameLeague\s*\? reconcileCanvasScope\([^;]+\)\s*: null;/.test(canvas),
+    'A-14. TradeBuildCanvas forwards the current league prefill marker as seededPrefill');
   assert(/seeded\?: boolean;/.test(canvas),
     'A-14. CanvasPrefill declares the optional seeded field');
 }

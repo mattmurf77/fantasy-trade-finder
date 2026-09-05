@@ -11,6 +11,12 @@
 
 ---
 
+## 2026-09-05 — Owner-contract mobile build uploaded; backend remains unmerged (D-185)
+
+Draft PR #281 publishes parent-reviewed Astra work: search continuity, personal-tier intent, tier-bounded feedback and scoped counterparty privacy. Exact built source `0fc1b539` passed hosted CI: **5,455 backend passed / 1 skipped**, all 93 mobile guards/typecheck/test-ID and 190 web checks. iOS **1.17.0 (148)** built and uploaded to App Store Connect for TestFlight; Apple processing/tester availability and physical QA remain unverified. Backend fixes are **not deployed**: main/Render and all three generator arms/flags are unchanged. Raw interview documents stayed local; a clean inspected EAS archive excluded them. [Release evidence and limitations](../docs/plans/owner-contracts/release.md).
+
+---
+
 ## 2026-09-05 — Win Now experimental beta SHIPPED (D-184), PR #280
 
 Season standings, win/playoff/championship projections and constrained Win Now trade discovery are live on web/backend. All three beta flags are enabled under explicit operator acceptance of exploratory evidence; probabilities remain uncalibrated. Parent reviewed Astra work and preserved account-security changes from #279. Final CI: **5,353 passed / 1 skipped**, all four gates green. Render `c28ec6d8` live at 05:07:28 UTC; public flags, exact served JS/CSS and protected endpoint 401s verified. iOS **1.17.0 (147)** built and uploaded to App Store Connect for TestFlight; Apple processing/tester availability and physical-device QA are not verified. Lakeview currently refuses unknown starter availability. [Release evidence and rollback](../docs/business/ops/2026-09-05-win-now.md).

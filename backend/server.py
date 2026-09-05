@@ -5393,7 +5393,8 @@ def _policy_context(*, user_id, user_elo, seed_elo, players_dict, league,
         p_conf = _trade_policy.confidence_map(
             getattr(m, "comparison_counts", None),
             source=getattr(m, "confidence_source", None) or "votes",
-            weights=getattr(m, "confidence_weights", None))
+            weights=getattr(m, "confidence_weights", None),
+            sources=getattr(m, "confidence_sources", None))
         p_eff = _trade_policy.shrink_board(m.elo_ratings, seed_elo, p_conf)
         p_eff_val = {pid: elo_to_value(e) for pid, e in p_eff.items()}
         p_raw_val = {pid: elo_to_value(e) for pid, e in m.elo_ratings.items()}
@@ -6000,9 +6001,10 @@ def _ranking_confidence(service, *, source: str = "votes") -> dict:
       * everyone else carries their live comparison count and `votes`, and
         the count decides the weight.
 
-    `source="cross_format"` overrides both: on the copy-from-format path the
-    ENTIRE board is derived from another format's ordering, so no player on it
-    has direct evidence in this one.
+    `source="cross_format"` marks only IDs actually copied by
+    `apply_value_map`, not every untouched consensus row published alongside
+    them. Copy is an explicit ranking action, with equal authority to votes
+    and placements; provenance is not a method-confidence discount.
 
     Never raises. A ranking save must not fail because a confidence map could
     not be read — the caller then publishes with NULL confidence, which every
@@ -6013,13 +6015,18 @@ def _ranking_confidence(service, *, source: str = "votes") -> dict:
     except Exception as err:
         log.warning("ranking confidence: comparison_counts failed: %s", err)
         return {}
-    if source == "cross_format":
-        return {"comparison_counts": counts, "confidence_source": "cross_format"}
     try:
         placed = set(service.placement_bands() or {})
     except Exception as err:
         log.warning("ranking confidence: placement_bands failed: %s", err)
         placed = set()
+    if source == "cross_format":
+        # Only tiered copied entries have unambiguous existing authority.
+        # Below-tier overrides share storage with historical no-value markers;
+        # treat them consistently with ordinary publishes/live placement reads
+        # until durable action provenance can distinguish those cases.
+        return {"comparison_counts": counts, "confidence_source": "votes",
+                "_copied": set(service._elo_overrides) & placed}
     return {"comparison_counts": counts, "confidence_source": source,
             "_placed": placed}
 
@@ -6027,18 +6034,21 @@ def _ranking_confidence(service, *, source: str = "votes") -> dict:
 def _confidence_payload(ranking_payload: list, conf: dict) -> list:
     """Stamp per-player confidence provenance onto a ranking payload.
 
-    Consumes `conf["_placed"]` (POPPING it, so what is left in `conf` is
+    Consumes `conf["_placed"]` / `conf["_copied"]` (POPPING them, so what is left in `conf` is
     exactly the kwargs `upsert_member_rankings` accepts and every call site
     can splat it directly). Returns the SAME list when there is nothing to
     stamp, so a caller whose confidence read failed publishes rows
     byte-identical to the pre-change path.
     """
     placed = conf.pop("_placed", None) or set()
-    if not placed:
+    copied = conf.pop("_copied", None) or set()
+    if not placed and not copied:
         return ranking_payload
     for row in ranking_payload:
         if row.get("player_id") in placed:
             row["confidence_source"] = "explicit"
+        elif row.get("player_id") in copied:
+            row["confidence_source"] = "cross_format"
     return ranking_payload
 
 
@@ -6896,6 +6906,7 @@ def _run_trade_job(
                             member.confidence_weights = (
                                 rd.get("confidence_weights") or None)
                             member.confidence_source = rd.get("confidence_source")
+                            member.confidence_sources = rd.get("confidence_sources") or None
                             member.board_updated_at = rd.get("board_updated_at")
                             real_count += 1
                 real_user_ids = set(real_rankings.keys()) if real_count else set()
@@ -13171,10 +13182,24 @@ def trade_card_to_dict(card, players: dict) -> dict:
     # are never serialized.
     rationale = getattr(card, "rationale", None)
     if rationale:
-        out["rationale"] = rationale
+        # Public explanations must not reveal exact partner-board values.
+        # Copy only the response: generation and audit evidence stay intact.
+        out["rationale"] = dict(rationale)
+        counterparty = rationale.get("counterparty")
+        if isinstance(counterparty, dict):
+            out["rationale"]["counterparty"] = {
+                k: v for k, v in counterparty.items()
+                if k != "own_board_gain"
+            }
     meso_variants = getattr(card, "meso_variants", None)
     if meso_variants:
-        out["meso_variants"] = meso_variants
+        # The equivalence percentage is also calculated on the private
+        # recipient board; package identities and shapes remain public.
+        out["meso_variants"] = [
+            {k: v for k, v in variant.items()
+             if k != "recipient_value_delta_pct"}
+            for variant in meso_variants
+        ]
     # trade_gen.v2 — tier metadata ("endorsed" | "featured" | "browse"):
     # scarcity lives in this field, not in list length (operator decision
     # 2026-08-16). Only the gen-v2 pipeline stamps it.

@@ -264,11 +264,11 @@ def test_missing_confidence_fails_safe_toward_consensus():
 def test_confidence_weight_shapes_match_the_specified_sources():
     _knobs(shrink_pseudocount=4.0, conf_source_seed=0.0,
            conf_source_cross_format=0.75, conf_source_explicit=1.0)
-    assert tp.confidence_weight_for(4, tp.SOURCE_VOTES) == pytest.approx(0.5)
-    assert tp.confidence_weight_for(12, tp.SOURCE_VOTES) == pytest.approx(0.75)
+    assert tp.confidence_weight_for(4, tp.SOURCE_VOTES) == 1.0
+    assert tp.confidence_weight_for(12, tp.SOURCE_VOTES) == 1.0
     assert tp.confidence_weight_for(0, tp.SOURCE_VOTES) == 0.0
     assert tp.confidence_weight_for(999, tp.SOURCE_SEED) == 0.0
-    assert tp.confidence_weight_for(0, tp.SOURCE_CROSS_FORMAT) == pytest.approx(0.75)
+    assert tp.confidence_weight_for(0, tp.SOURCE_CROSS_FORMAT) == 1.0
     assert tp.confidence_weight_for(0, tp.SOURCE_EXPLICIT) == pytest.approx(1.0)
 
 
@@ -710,7 +710,7 @@ def test_conviction_share_is_based_on_realized_deck_length():
 def test_partial_persisted_confidence_does_not_discard_other_players_counts():
     result = tp.confidence_map({'a': 4, 'b': 8, 'c': 4}, source='votes',
                                weights={'a': 1, 'c': None, 'bad': 'invalid'})
-    assert result == {'a': 1, 'b': pytest.approx(8 / 12), 'c': .5, 'bad': 0}
+    assert result == {'a': 1, 'b': 1, 'c': 1, 'bad': 0}
 
 
 def test_pair_policy_uses_same_effective_basis_even_when_legacy_viewer_shrink_is_off():

@@ -464,8 +464,8 @@ console.log('check-canvas-results:');
   assert(!/onSidesChange/.test(stripComments(featured)),
     '6c. FeaturedTradeWindow does not pass it — the #287 host is byte-identical');
   assert(/onSidesChange\?: \(give: string\[\], receive: string\[\]\) => void;/.test(canvas)
-    && /onSidesChange=\{onSidesChange\}/.test(canvasCode),
-    '6d. TradeBuildCanvas threads it through verbatim');
+    && /onSidesChange=\{\(give, receive\) => \{\s*latestGiveRef.current = give;\s*onSidesChange\?\.\(give, receive\);\s*\}\}/.test(canvasCode),
+    '6d. TradeBuildCanvas observes SEND for scope continuity, then forwards both unchanged sides');
   assert(/onSidesChange=\{browseLive \? handleBrowseSidesChange : undefined\}/.test(trades),
     '6e. the TradesScreen mount passes it ONLY while a session is live',
     'undefined everywhere else keeps the component byte-identical (spec §3)');
@@ -692,10 +692,10 @@ console.log('check-canvas-results:');
 //      defaults. Each pin names the sabotage it would catch.
 // ═══════════════════════════════════════════════════════════════════════
 {
-  // (a) DISPATCH CENSUS — 8 call sites + the definition, nothing raw.
+  // (a) DISPATCH CENSUS — 7 call sites + the definition, nothing raw.
   const calls = count(tradesCode, /dispatchGenerate\(/g);
-  assert(calls === 9,
-    '12a. dispatchGenerate: 8 routed dispatch sites + 1 definition (census pinned)',
+  assert(calls === 8,
+    '12a. dispatchGenerate: 7 routed dispatch sites + 1 definition (both CTAs share handleFindTrades)',
     `saw ${calls} — a new site must be added to the helper's census table AND this count`);
   // (b) the first-run auto-start is the P0: it must create a session.
   assert(/autoGenRef\.current = 'kicked';[\s\S]{0,500}?dispatchGenerate\(\{ auto: true \}\)/.test(tradesCode),
@@ -715,9 +715,12 @@ console.log('check-canvas-results:');
       'order matters: kill before clear before dispatch');
   }
   // (e) INLINE-RESET CENSUS — every setDeck([]) accounted for.
-  assert(count(tradesCode, /setDeck\(\[\]\)/g) === 5,
-    '12e. exactly 5 setDeck([]) sites (fairness toggle, league switch, clear-pin, QuickSet regen, the reset fn)',
-    'a 6th inline reset shipped un-audited — add it to the census and kill the session there');
+  assert(count(tradesCode, /setDeck\(\[\]\)/g) === 6,
+    '12e. exactly 6 setDeck([]) sites (fairness toggle, league switch, clear-pin, QuickSet regen, the reset fn, fair dispatch)',
+    'a new inline reset shipped un-audited — add it to the census and audit its session lifetime');
+  const fairDispatch = functionNamed(host, 'runFairPackages');
+  assert(!!fairDispatch && /setFairPending\(true\);\s*setFairDeck\(true\);\s*setDeck\(\[\]\)/.test(fairDispatch.getText()),
+    '12e. fair dispatch clears stale cards into the current fair session, with an explicit pending state');
   for (const fn of ['handleToggleFairness', 'handleClearPin']) {
     const f = functionNamed(host, fn);
     assert(!!f && /setBrowseSession\(null\)/.test(f.getText())

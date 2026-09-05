@@ -4441,6 +4441,7 @@ class LeagueMember:
     comparison_counts:  dict[str, int] | None = None
     confidence_weights: dict[str, float] | None = None
     confidence_source:  str | None = None
+    confidence_sources: dict[str, str] | None = None
     # ISO UTC of this member's most recent ranking publish, when known. The
     # valuation snapshot records it so a later reader can tell whether a
     # board moved between two impressions of the same concept.
@@ -4645,15 +4646,20 @@ def _best_tier_idx(
     seed_elo: dict[str, float],
     player_db: dict,
     scoring_format: str,
+    user_elo: dict[str, float] | None = None,
 ) -> int:
     """Index into ORDERED_TIERS of the BEST (lowest-index) tier among
-    `ids`, via each asset's seed ELO. Unranked/empty sinks to
+    `ids`, via personal Elo with consensus fallback per absent entry.
+    Seasonal/outlook-adjusted values are deliberately not accepted here.
+    Unranked/empty sinks to
     len(ORDERED_TIERS) — below every real tier — mirroring
     star_tax_adjustment's _top_tier_idx."""
     from .ranking_service import ORDERED_TIERS, RankingService
     best = len(ORDERED_TIERS)
     for pid in ids:
-        elo = _seed_of(pid, seed_elo)
+        elo = (user_elo or {}).get(pid)
+        if elo is None:
+            elo = _seed_of(pid, seed_elo)
         pos = _position_of(pid, player_db)
         t = RankingService.tier_for_elo(elo, pos, scoring_format)
         idx = ORDERED_TIERS.index(t) if t is not None else len(ORDERED_TIERS)
@@ -4668,6 +4674,7 @@ def _filter_by_trade_intent(
     seed_elo: dict[str, float],
     player_db: dict,
     scoring_format: str,
+    user_elo: dict[str, float] | None = None,
 ) -> list[TradeCard]:
     """#172 post-generation filter over an already-generated card list.
     `intent` must already be flag-resolved by the caller (None when the
@@ -4677,8 +4684,8 @@ def _filter_by_trade_intent(
         return cards
 
     def _keep(c: TradeCard) -> bool:
-        give_idx = _best_tier_idx(c.give_player_ids, seed_elo, player_db, scoring_format)
-        recv_idx = _best_tier_idx(c.receive_player_ids, seed_elo, player_db, scoring_format)
+        give_idx = _best_tier_idx(c.give_player_ids, seed_elo, player_db, scoring_format, user_elo)
+        recv_idx = _best_tier_idx(c.receive_player_ids, seed_elo, player_db, scoring_format, user_elo)
         upgrade   = recv_idx < give_idx   # lower ORDERED_TIERS index = better tier
         downgrade = give_idx < recv_idx
         n_give = len(c.give_player_ids)
@@ -4947,7 +4954,7 @@ class TradeService:
                 on_opponent_done=on_opponent_done,
             )
             cards = _filter_by_trade_intent(cards, _intent, seed_elo,
-                                            self._players, scoring_format)
+                                            self._players, scoring_format, user_elo)
             # C4b — this branch returns WITHOUT calling _dedup_and_sort, so it
             # would otherwise be the one serving path with no give-side cap.
             # gen-v2 returns its own ranked survivor set, so the list is
@@ -5013,7 +5020,7 @@ class TradeService:
                 cards = self._relaxed_targeted_pass(_v2_kwargs)
             # #172 — pure post-generation filter, applied last so it never
             # interferes with the #189 relaxed retry above.
-            cards = _filter_by_trade_intent(cards, _intent, seed_elo, self._players, scoring_format)
+            cards = _filter_by_trade_intent(cards, _intent, seed_elo, self._players, scoring_format, user_elo)
             return cards
 
         new_cards: list[TradeCard] = []
@@ -5111,7 +5118,7 @@ class TradeService:
         # #172 — pure post-generation filter (see the flag-off note at the
         # top of this method). Applied before storage: a filtered-out card
         # was never surfaced to this job's caller.
-        new_cards = _filter_by_trade_intent(new_cards, _intent, seed_elo, self._players, scoring_format)
+        new_cards = _filter_by_trade_intent(new_cards, _intent, seed_elo, self._players, scoring_format, user_elo)
 
         # Store
         for card in new_cards:
@@ -5510,7 +5517,12 @@ class TradeService:
                 # line, extended to seed-missing: None never equals a rung,
                 # so these assets never tier-match (the pin included) while
                 # staying band-eligible exactly as today via _v's default.
-                e = seed_elo.get(pid)
+                # Same value names the USER'S tier, not a market tier. Keep
+                # the raw board separate from outlook/seasonal adjustments;
+                # only an absent personal entry falls back to consensus.
+                e = raw_user_elo.get(pid) if raw_user_elo else None
+                if e is None:
+                    e = seed_elo.get(pid)
                 if e is None:
                     return None
                 return RankingService.tier_for_elo(

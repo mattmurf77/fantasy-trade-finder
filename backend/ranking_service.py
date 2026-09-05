@@ -17,6 +17,7 @@ from typing import Optional
 from datetime import datetime, timezone
 from pathlib import Path
 import json
+import math
 import random
 
 
@@ -616,13 +617,11 @@ class RankingService:
         consumed by the trade layer as `placements` (see
         `trade_service._shrink_user_elo` and the `placement_tier_clamp` knob).
 
-        A manual tier save or drag-reorder is the strongest signal the product
-        accepts: an explicit ASSERTION of value, not a sample. The shrinkage
-        weight `w = n/(n+n0)` cannot see assertions — it counts comparisons —
-        so a deliberately placed player with few head-to-head votes was priced
-        toward consensus regardless of where the user put him. This map is what
-        lets the trade engine honour the placement while keeping the shrinkage
-        that protects against fake divergence.
+        A manual tier save or drag-reorder is deliberate input, as are the
+        user's ranking comparisons (equal authority, owner contract D-185).
+        This map lets the trade layer distinguish a zero-comparison placement
+        from untouched consensus and retain its tier boundary. Historically it
+        bounded a sample-count blend; that method discount is superseded.
 
         Deliberately NOT gated on `pin_tier_bounded`: that knob governs how
         VOTES move a pin, and the two questions are independent. With
@@ -1419,6 +1418,37 @@ class RankingService:
             "tier_engine_enabled": _c("tier_engine_enabled") == 1.0,
         }
 
+    def _feedback_bounds(
+        self, pool: list[Player], ratings: dict[str, float],
+    ) -> dict[str, tuple[float, float]]:
+        """Freeze tier membership, not rank, before replaying app feedback.
+
+        Ranking actions have already established this board. Derive bands
+        once for the entire trade history so repeated likes/passes cannot
+        ratchet across tiers. As with placement bands, preserve an existing
+        gap/above-ceiling value without snapping it on the first update.
+        Unranked values may move but cannot become a ranked tier via feedback.
+        """
+        bounds = {}
+        bands_by_pos = {}
+        for player in pool:
+            pos, value = player.position, ratings[player.id]
+            if pos not in bands_by_pos:
+                bands_by_pos[pos] = self.tier_bands_for(pos, self._scoring_format)
+            bands = bands_by_pos[pos]
+            # The public ranking board rounds to one decimal. Use that same
+            # tier membership: a nextafter-only ceiling rounds back up across
+            # the boundary when published, despite a raw-float test passing.
+            tier = self.tier_for_elo(round(value, 1), pos, self._scoring_format)
+            if tier is None:
+                floor = min(lo for lo, _ in bands.values())
+                ceiling = (math.ceil(floor * 10) - 1) / 10
+                bounds[player.id] = (-math.inf, max(ceiling, value))
+            else:
+                lo, hi = bands[tier]
+                bounds[player.id] = (min(lo, value), max(hi, value))
+        return bounds
+
     def _compute_elo(self, pool: list[Player]) -> dict[str, float]:
         # INIT-03 memo: return the cached ratings when neither the ranking
         # state (_version) nor the pool has changed since the last full
@@ -1483,7 +1513,8 @@ class RankingService:
                 return ts is not None and ts > since
             return pid in bounds
 
-        def _apply(pid: str, delta: float, other: str, track: bool) -> None:
+        def _apply(pid: str, delta: float, other: str, track: bool,
+                   feedback_band: tuple[float, float] | None = None) -> None:
             """Add `delta` to `pid`'s rating, clamped to his tier band if any.
 
             A clamped-away update is exactly the case the trade layer must not
@@ -1497,6 +1528,8 @@ class RankingService:
             band = bounds.get(pid)
             if band is not None:
                 after = min(max(after, band[0]), band[1])
+            if feedback_band is not None:
+                after = min(max(after, feedback_band[0]), feedback_band[1])
             if after == before:
                 return
             ratings[pid] = after
@@ -1523,8 +1556,11 @@ class RankingService:
                 _apply(l, elo_k * (0.0 - (1.0 - ea)), w, True)
 
         # Trade-decision swipes — reduced K factor (softer signal).
-        # Same anchoring rule as above. A trade swipe can never RELEASE a pin
-        # (see _pin_release), but it does move an already-released player.
+        # Keep existing pin/timestamp rules, plus the owner's universal
+        # within-tier feedback contract (including unplaced/released players).
+        # Ranking actions can still change an unplaced tier; trade feedback
+        # cannot. The fixed pre-feedback bounds also apply to persisted replay.
+        feedback_bounds = self._feedback_bounds(pool, ratings) if self._trade_swipes else {}
         for s, k in self._trade_swipes:
             w, l = s.winner_id, s.loser_id
             if w not in pool_ids or l not in pool_ids:
@@ -1533,9 +1569,9 @@ class RankingService:
             ra, rb  = ratings[w], ratings[l]
             ea       = 1.0 / (1.0 + 10 ** ((rb - ra) / 400.0))
             if _moves(w, ts):
-                _apply(w, k * (1.0 - ea), l, False)
+                _apply(w, k * (1.0 - ea), l, False, feedback_bounds[w])
             if _moves(l, ts):
-                _apply(l, k * (0.0 - (1.0 - ea)), w, False)
+                _apply(l, k * (0.0 - (1.0 - ea)), w, False, feedback_bounds[l])
 
         self._elo_cache = ratings
         self._elo_cache_version = self._version

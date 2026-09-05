@@ -199,13 +199,14 @@ def test_flag_off_ignores_trade_intent_byte_identical():
     assert {_card_key(c) for c in without} == {_card_key(c) for c in with_intent}
 
 
-def test_flag_on_filters_flat_tier_trade_to_an_honest_empty_deck():
+def test_flag_on_keeps_personal_upgrade_even_when_market_tiers_are_flat():
     _set(**{"trade_engine.v2": True, "trades.intent_modes": True})
     baseline = _v2_gen(_v2_league(), _FLAT_SEED)
     assert baseline, "fixture should surface a card before filtering"
 
     filtered = _v2_gen(_v2_league(), _FLAT_SEED, trade_intent="tier_up")
-    assert filtered == []
+    assert filtered
+    assert {_card_key(c) for c in filtered} == {_card_key(c) for c in baseline}
 
 
 def test_flag_on_keeps_a_genuine_tier_up_trade():

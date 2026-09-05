@@ -5,14 +5,20 @@ Scope block: docs/plans/personal-market-policy/scope.md
 Decisions:   living-memory/DECISIONS.md D-180 (constraint, not objective),
              D-181 (policy is an orthogonal dimension, not a fourth arm).
 
-The product decision this module encodes
-----------------------------------------
+Historical dark-policy implementation
+-------------------------------------
 Consensus value answers **"is this trade plausible in the wider dynasty
 market?"**.  It is a hard, non-bypassable eligibility guardrail — not 30% of a
 blended objective.  Personal rankings answer **"which of the plausible trades
 are these two managers uniquely positioned to prefer?"** and become the primary
 ordering signal.  Ranking **confidence** — applied symmetrically to BOTH
 managers — controls how far the engine may depart from consensus.
+
+September 5 owner decisions supersede this historical ordering/threshold
+proposal as a product specification. This slice corrects authority for known
+deliberate entries only; it does NOT enable the policy, endorse its numeric
+floors/quotas, or alter the three live generator profiles. See
+docs/plans/owner-contracts/policy-scope.md for the retained/deferred boundary.
 
 Why one module
 --------------
@@ -159,32 +165,28 @@ def confidence_weight_for(
 
         effective_elo = w * personal_elo + (1 - w) * consensus_elo
 
-    Comparison-based evidence keeps the existing shape ``n / (n + n0)`` with
-    ``n0 = shrink_pseudocount``.  Other provenances are flat, configurable
-    constants — they are experiment settings, not permanent truths, which is
-    why none of them is hard-coded here.
+    September 5 owner contract: every deliberate ranking workflow has equal
+    authority. A comparison is deliberate input just as a placement or a
+    user-requested format copy is. Counts establish whether input exists; they
+    no longer discount its value by method or sample size. This compatibility
+    function retains its name and persisted field, not the superseded weights.
 
     **Fail-safe.** A missing count with no recognised source returns 0.0 —
     "no evidence" prices the player at consensus and buys the trade no floor
     relief.  That is the conservative direction: weak evidence must make the
     engine LESS willing to depart from the market, never more.
     """
-    if source == SOURCE_EXPLICIT:
-        return _clamp01(_c("conf_source_explicit"))
-    if source == SOURCE_CROSS_FORMAT:
-        return _clamp01(_c("conf_source_cross_format"))
+    if source in (SOURCE_EXPLICIT, SOURCE_CROSS_FORMAT):
+        return 1.0
     if source == SOURCE_SEED:
-        return _clamp01(_c("conf_source_seed"))
+        return 0.0
     # SOURCE_VOTES, SOURCE_LEGACY, None — decided by the count, and a legacy
     # row has none, so it lands at 0.0.
     try:
         n = max(float(comparison_count or 0.0), 0.0)
     except (TypeError, ValueError):
         n = 0.0
-    n0 = _c("shrink_pseudocount")
-    if n0 <= 0:
-        return 1.0 if n > 0 else 0.0
-    return _clamp01(n / (n + n0))
+    return 1.0 if n > 0 else 0.0
 
 
 def confidence_map(
@@ -192,18 +194,24 @@ def confidence_map(
     *,
     source: Optional[str] = None,
     weights: Optional[dict] = None,
+    sources: Optional[dict] = None,
 ) -> dict:
     """Build ``{pid: weight}`` from whichever evidence a board carries.
 
-    `weights` (a persisted ``member_rankings.confidence_weight`` column) wins
-    when present — it is what the writing session actually computed.  Otherwise
-    the counts are converted here.  Both absent ⇒ an empty map, and
-    :func:`shrink_board` then prices the whole board at consensus.
+    Per-player provenance wins over the snapshot's majority source. Historical
+    fractional method weights must not dilute an identified deliberate entry.
+    A legacy weight without provenance remains readable, but does not overwrite
+    a known source/count. No metadata ⇒ no invented personal authority.
     """
-    result = {pid: confidence_weight_for(n, source)
-              for pid, n in (comparison_counts or {}).items()}
-    result.update({pid: _clamp01(w) for pid, w in (weights or {}).items()
-                   if w is not None})
+    counts, weights, sources = comparison_counts or {}, weights or {}, sources or {}
+    result = {}
+    for pid in counts.keys() | weights.keys() | sources.keys():
+        if pid in sources or pid in counts:
+            result[pid] = confidence_weight_for(counts.get(pid), sources.get(pid, source))
+        elif source in (SOURCE_EXPLICIT, SOURCE_CROSS_FORMAT, SOURCE_SEED):
+            result[pid] = confidence_weight_for(None, source)
+        elif weights.get(pid) is not None:
+            result[pid] = _clamp01(weights[pid])
     return result
 
 
@@ -834,7 +842,8 @@ def make_pair_evaluator(*, consensus_value, viewer_effective_value,
         o_conf = confidence_map(
             getattr(opponent, "comparison_counts", None),
             source=getattr(opponent, "confidence_source", None) or SOURCE_VOTES,
-            weights=getattr(opponent, "confidence_weights", None))
+            weights=getattr(opponent, "confidence_weights", None),
+            sources=getattr(opponent, "confidence_sources", None))
         o_eff = shrink_board(opponent.elo_ratings, seed_elo, o_conf)
         o_eff_val = {pid: elo_to_value(e) for pid, e in o_eff.items()}
         o_raw_val = {pid: elo_to_value(e)

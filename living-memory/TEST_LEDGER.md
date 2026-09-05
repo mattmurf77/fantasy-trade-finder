@@ -11,6 +11,34 @@
 
 ---
 
+## 2026-09-05 — Owner-contract GitHub and TestFlight release verified
+
+Owner explicitly authorized public GitHub publication and TestFlight distribution, resolving the earlier publication block. [Draft PR #281](https://github.com/mattmurf77/fantasy-trade-finder/pull/281); exact built source `0fc1b5390894f3a4e5c9ed8c1c480efd562a09e2`. [Hosted CI](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/33950667865): **5,455 passed / 1 skipped in 621.36 s**, all four jobs successful; mobile TypeScript/all 93 guards, test-ID lint and 190 web checks passed. Release evidence updates after this source are documentation only, not changes to the tested/built runtime tree.
+
+EAS archive inspected before upload: clean detached worktree, **2,610 files**, **627/627 tracked mobile files byte-identical**, no raw source docs, credentials, node_modules or local DBs; retained Git history also excludes raw docs. Effective production API, test mode false, bundle/project/owner verified. EAS **1.17.0 (148)** build `3f0a5ae0-596d-4094-9e4b-539a395116ad` FINISHED at 06:53:20.750 UTC. After exact-source CI gate, submission `7cfac797-9707-457b-8243-c77c8fc9f660` successfully uploaded to App Store Connect and entered Apple processing. Apple tester availability and physical-device QA are not verified. No main merge, Render deploy, flag change, production DB action or simulator/Maestro. [Release record and remaining gates](../docs/plans/owner-contracts/release.md).
+
+---
+
+## 2026-09-05 — Owner-contract implementation, final local integration
+
+Final integrated sources, including the privacy follow-up, passed before publication on isolated branch `codex/owner-contracts-20260905`, baseline `5cf34182`. Parent reviewed all lane diffs and independent Astra findings; no flags, profiles, historical control fixtures or production rows changed.
+
+**Historical pre-authorization checkpoint:** implementation commit `86128700`. Publication safety review rejected the initial push/PR command before execution because explicit approval was required for the public GitHub destination. This block was later resolved by explicit owner authorization, not a workaround; final publication/CI evidence is above. Local history verification confirmed the five raw interview/source documents are preserved on disk but absent from new commit history; protected config/fixture/lockfile/secret paths are unchanged.
+
+- `/private/tmp/ftf-context-venv/bin/python -m pytest backend/tests -q --tb=short` — **5,455 passed / 1 skipped in 566.99 s**, exit 0, Python **3.12.14**. The earlier 5,450-test run predates the privacy patch and is superseded by this result.
+- The same interpreter with `-m pytest backend/tests/test_owner_policy_contracts.py backend/tests/test_owner_ranking_provenance.py backend/tests/test_trade_card_privacy.py backend/tests/test_trade_feedback_tier_bounds.py -q` — **102 passed in 19.49 s**. Serializer/API tests verify counterparty exact-value fields are omitted without mutating internal cards.
+- From `mobile/`: every `tests/check-*.js` executed with Node — **93/93 passed**; `./node_modules/.bin/tsc --noEmit` and `bash scripts/testid-lint.sh` passed. Local Node **24.14.1**; CI's Node 20 remains a separate gate. Local isolated dependency installation used `npm ci --ignore-scripts --no-audit --no-fund`; this is not native-build evidence.
+- `/private/tmp/ftf-context-venv/bin/python qa/web/check_web_structure.py` — **190/190 passed**. `git diff --cached --check` passed.
+- No simulator/Maestro (D-056), physical TestFlight, production DB action, merge, deployment or flag activation. [Manual device checklist](../docs/plans/owner-contracts/mobile-testflight.md) is **unrun**. Hosted exact-head CI is pending publication. Raw owner interview/source files remain local and are excluded from the public branch history.
+
+### Initial parent and independent review
+
+Baseline `5cf34182`, isolated worktrees under `/private/tmp/ftf-owner-contracts-e8bWFV`; unrelated owner checkout untouched. Python `/private/tmp/ftf-context-venv/bin/python` **3.12.14**. New feedback regression ran RED **70 failed / 2 passed**, then feedback + pin-bounds + Elo golden/memo + trade-decision idempotency **141 passed**. Independent Astra review found public rounding could cross a tier; corrected precision-aligned bounds and widened unranked ceiling. Updated owner-feedback suite **76 passed**; reviewer separately ran **119 passed** and a **320-case boundary sweep with zero public tier changes**. Per-entry provenance tests initially **3 failed** on the missing policy helper signature (integration dependency, not claimed green).
+
+Review found Browse All's local Undo does not reverse committed feedback; retained-row replay tests do not prove causal Undo. This is explicitly unfinished. Global live shrinkage removal failed the historical arm-A golden; those owned changes were reverted, no golden recaptured. Policy lane reports **412 passed** across 14 files with all three generators and historical arm-A unchanged. Final integrated results are recorded above. [Scope](../docs/plans/owner-contracts/scope.md), [review and remaining work](../docs/plans/owner-contracts/review.md).
+
+---
+
 ## 2026-09-05 — Win Now release verified on final CI and production
 
 PR [#280](https://github.com/mattmurf77/fantasy-trade-finder/pull/280): final head `abb1af118d3fe39f32292e99cecc64cebff1d2f3`, squash `c28ec6d802463e048d59a97967e9bb5bb9fdc6f9`; committed trees compare equal after fetch. [Final CI](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/33945722395): **5,353 passed / 1 skipped in 732.08s**, Python 3.12, all four checks success. Parent merged integration: **220 passed in 15.25s**; TypeScript/all 92 client guards/testID, 190 web structure, 23 auth checks and isolated Chromium/MV3 runtime passed.

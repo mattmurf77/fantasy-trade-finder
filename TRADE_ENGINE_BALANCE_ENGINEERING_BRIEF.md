@@ -1,6 +1,6 @@
 # Trade Engine: Personal Rankings With Market-Fairness Guardrails
 
-**Status:** Proposed engineering change\
+**Status:** Historical research; policy superseded by the [owner-contract implementation scope](docs/plans/owner-contracts/scope.md) and D-185. This brief is not an unqualified build specification.\
 **Date:** 2026-09-04\
 **Product surface:** Fleeced mobile app, primarily the Acquire trade deck\
 **Scope:** Trade generation, scoring, deck composition, telemetry, and experiment rollout. The website is out of scope.

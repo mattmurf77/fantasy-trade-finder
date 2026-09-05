@@ -8583,6 +8583,7 @@ def load_member_rankings(
             "comparison_counts":   { player_id: int, ... },    # may be empty
             "confidence_weights":  { player_id: float, ... },  # may be empty
             "confidence_source":   str | None,
+            "confidence_sources":  { player_id: str, ... },    # may be empty
             "board_updated_at":    str | None,   # newest row's updated_at
         },
         ...
@@ -8600,9 +8601,10 @@ def load_member_rankings(
     not know how well-sampled an opinion is, and the previous behaviour
     (trust the whole board raw) was the opposite.
 
-    `confidence_source` is snapshot-wide.  A snapshot written by more than
-    one provenance reports the source of the majority of its rows; the
-    per-player weights, which are what the math actually uses, stay exact.
+    `confidence_source` retains the legacy snapshot-majority summary.
+    `confidence_sources` preserves row-level provenance so a seeded majority
+    cannot erase explicit entries (or grant untouched entries authority).
+    New readers prefer it over old method-dependent stored weights.
     """
     with engine.connect() as conn:
         # Username lookup from league_members
@@ -8645,6 +8647,7 @@ def load_member_rankings(
                 "comparison_counts":  {},
                 "confidence_weights": {},
                 "confidence_source":  None,
+                "confidence_sources": {},
                 "board_updated_at":   None,
             }
             src_tally[uid] = {}
@@ -8664,6 +8667,7 @@ def load_member_rankings(
         if w is not None:
             result[uid]["confidence_weights"][r.player_id] = w
         if s:
+            result[uid]["confidence_sources"][r.player_id] = s
             src_tally[uid][s] = src_tally[uid].get(s, 0) + 1
 
     for uid, tally in src_tally.items():
