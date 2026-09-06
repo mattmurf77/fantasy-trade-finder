@@ -12,7 +12,7 @@
 
 ## D-187 — Smaller player packages receive a bounded within-class presentation preference
 
-**Date:** 2026-09-06. **Status:** implementation `9ea562dd` root-reviewed and integrated locally; full independent QA/release/activation pending. Default remains off.
+**Date:** 2026-09-06. **Status:** implementation `9ea562dd` root-reviewed and integrated; full independent round-2 QA passes at `7d3e071f`. Hosted CI/release/activation pending. Default remains off.
 **Context:** Owner-scoped research found more players in recorded viewed cards than in completed trades, while completed deals often included picks. The small, observational sample cannot establish a causal acceptance effect or justify banning large packages.
 **Decision:** The default-off `simple_player_presentment` mode permits one post-policy permutation within six absolute slots and the same complete arm/group/lane/basis/policy class. Rank by maximum players on a side, then total players; picks do not add complexity or break ties. Explicit selections, fixed special cards and unknown/pure-pick shapes keep their slots. Preserve every eligible occurrence, package value, policy verdict and experiment slot. This explicitly narrows the old fixed-within-arm-order rule; it does not change generator goldens or arm credit.
 **Alternatives:** blanket asset cap, global score reweighting, removing an arm, adjacent-only sorting with little practical effect, or silently changing served order without frozen provenance.
@@ -22,7 +22,7 @@
 
 ## D-186 — Resolved source interest stays resolved beyond discovery cooldown
 
-**Date:** 2026-09-06. **Status:** backend and mobile reviewed and integrated locally; full independent QA/release pending.
+**Date:** 2026-09-06. **Status:** backend/mobile and episode repair `8f27421d` root-reviewed and integrated; both full independent round-2 QA reviews pass at `7d3e071f`. Hosted CI/release pending.
 **Context:** An expired/amnestied pass could allow an older like to reappear as current interest. Reason-save success also overstated whether its exact pass existed durably.
 **Decision:** Separate source-evidence chronology from discovery cooldown. Later exact own/recipient passes resolve the older source permanently as evidence; a fresh source like may establish new consent. Queue gets only a verified intervening-pass renewal exception. A reason response's `passed` reports durable state, not whether this call first created the reason, and missing dispositions remain repairable.
 **Alternatives:** permanent package bans, longer cooldowns, rewriting historical likes, fabricating missing links, or treating HTTP 200/reason storage as consent evidence.

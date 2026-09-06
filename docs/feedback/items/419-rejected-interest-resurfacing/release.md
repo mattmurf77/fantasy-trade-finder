@@ -4,7 +4,7 @@
 
 The owner explicitly authorized unattended merge, GitHub publication, live delivery and TestFlight where needed for this selected batch. This does not waive review, CI or privacy checks and does not authorize unrelated backlog fixes/closures. The original dirty checkout and private files remain untouched.
 
-**Not released.** Round-1 source `aa4637899a9233a4afffca22f3f90847fca76a62` had a confirmed reason-episode defect. Repair `8f27421d` is integrated and root-reproduced GREEN; a complete independent round 2 is required. [Adjudication](qa-resolution.md). The previous production source remains `4026ebc81eaae50b345b42421641125c5b8d413e`; existing EAS build remains 1.17.0 (148). Native 1.17.1 is prepared, with no new build number assigned or uploaded. Selected feedback records remain `in_progress`.
+**Local review/QA complete; not yet released.** Round-1 source `aa4637899a9233a4afffca22f3f90847fca76a62` had a confirmed reason-episode defect. Repair `8f27421d` is integrated and the original reproduction is GREEN independently in root and both fresh reviewers. Full round 2 passes on `7d3e071f92bac3a087ba63da393109b5eae02f68`; later changes are documentation only. [Adjudication and both reports](qa-resolution.md). Previous production source remains `4026ebc81eaae50b345b42421641125c5b8d413e`; existing EAS build remains 1.17.0 (148). Native 1.17.1 is prepared, with no new build number assigned or uploaded. Selected feedback records remain `in_progress`.
 
 ## Intended delivery
 
@@ -32,8 +32,12 @@ Build completion, App Store Connect upload, Apple tester availability and a phys
 
 Archive-only inspection of `aa463789`: 2,677 files, all 631 tracked mobile files byte-identical; only EAS-created one-commit shallow Git metadata is untracked. No local credentials/env files, raw interview notes, dependency trees or local databases. Effective config: version 1.17.1, production API, test mode false and existing project/bundle/owner identity. Inspection is not an upload; final source must be revalidated after QA repair.
 
+Repaired source `7d3e071f` archive independently verified: 2,682 files and all 631 mobile files byte-identical; no unexpected/private artifacts and one-commit archive history at the exact SHA. GitHub admin/push access and unchanged main verified; latest EAS counter remains 148. GET-only production checks at 16:41 UTC again pass with all historical settings preserved and new knob absent. Public in-app-browser landing renders with no captured warning/error logs; no login or user action performed. Root read-only privacy/history audit covers all 96 final and commit-history paths, with no private transient paths, credential artifacts or unrelated runtime changes.
+
+Local full backend results: root **5,645 passed / 1 optional skip**, independently repeated by both round-2 reviewers; each focused matrix **892 passed**, all 95 mobile guard programs, TypeScript/testID and 190 web checks green. The 23-step consolidated [physical checklist](testflight-checklist.md) is authored, reviewed and **UNRUN**. No simulator or physical-device pass is inferred.
+
 ## Recovery and remaining evidence
 
 Batch worktrees remain under `/private/tmp/ftf-feedback-419-421-f1uMyt`; no branch/worktree cleanup has occurred. Capture exact tips and content-containment evidence in `docs/recovery/` before any eventual cleanup. Do not use the original dirty checkout for EAS or make private scratch research part of the release archive.
 
-Pending: final QA reports, consolidated operator checklist, exact-head CI/PR/merge, source-specific Render deployment, single-key activation, EAS build/submission IDs, selected status readback, Apple availability and physical-device results.
+Pending: exact-head CI/PR/merge, source-specific Render deployment, single-key activation, EAS build/submission IDs, selected status readback, Apple availability and physical-device results. Both final QA reports and the consolidated operator checklist are complete; checklist execution remains UNRUN.
