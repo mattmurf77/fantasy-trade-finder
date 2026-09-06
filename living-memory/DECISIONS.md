@@ -10,6 +10,26 @@
 
 ---
 
+## D-187 — Smaller player packages receive a bounded within-class presentation preference
+
+**Date:** 2026-09-06. **Status:** specification approved; implementation/QA/activation pending.
+**Context:** Owner-scoped research found more players in recorded viewed cards than in completed trades, while completed deals often included picks. The small, observational sample cannot establish a causal acceptance effect or justify banning large packages.
+**Decision:** The default-off `simple_player_presentment` mode permits one post-policy permutation within six absolute slots and the same complete arm/group/lane/basis/policy class. Rank by maximum players on a side, then total players; picks do not add complexity or break ties. Explicit selections, fixed special cards and unknown/pure-pick shapes keep their slots. Preserve every eligible occurrence, package value, policy verdict and experiment slot. This explicitly narrows the old fixed-within-arm-order rule; it does not change generator goldens or arm credit.
+**Alternatives:** blanket asset cap, global score reweighting, removing an arm, adjacent-only sorting with little practical effect, or silently changing served order without frozen provenance.
+**Consequences:** Capture mode at job creation/reuse; version the serving policy separately from valuation. Freeze original/final occurrence indices through #419's final removal, with final index equal to actual impression position. No later polling reorder. Exposure changes are not experiment-neutral, and acceptance conclusions require mode-aware analysis. [Research](../docs/research/2026-09-06-trade-package-shapes.md), [approved contract](../docs/plans/small-trade-packages/prd.md).
+
+---
+
+## D-186 — Resolved source interest stays resolved beyond discovery cooldown
+
+**Date:** 2026-09-06. **Status:** backend reviewed and merged locally; mobile/QA/release pending.
+**Context:** An expired/amnestied pass could allow an older like to reappear as current interest. Reason-save success also overstated whether its exact pass existed durably.
+**Decision:** Separate source-evidence chronology from discovery cooldown. Later exact own/recipient passes resolve the older source permanently as evidence; a fresh source like may establish new consent. Queue gets only a verified intervening-pass renewal exception. A reason response's `passed` reports durable state, not whether this call first created the reason, and missing dispositions remain repairable.
+**Alternatives:** permanent package bans, longer cooldowns, rewriting historical likes, fabricating missing links, or treating HTTP 200/reason storage as consent evidence.
+**Consequences:** All relevant source readers and serve boundaries share the projection, with batched scoped reads and no frozen-history mutation. Ordinary swipe retains its existing best-effort signal contract. Legacy unlinked rows cannot gain invented provenance; standing-offer and post-match lifecycles are held. [API](../docs/api-reference.md#exact-interest-and-pass-disposition), [scope](../docs/feedback/items/419-rejected-interest-resurfacing/scope.md).
+
+---
+
 ## D-185 — Owner tiers define intent; indirect feedback cannot move tiers
 
 **Date:** 2026-09-05. **Status:** bounded implementation parent-reviewed and live after explicit GitHub/TestFlight then backend authorization. PR #281 merged at `4026ebc8`; final head `f88afabb` passed all CI. The owner subsequently explicitly authorized the experimental personal-market policy: **on**, same code redeployed live at 16:01:20 UTC, exactly one effective flag changed; model/tier/experiment settings unchanged. [Activation evidence](../docs/plans/owner-contracts/policy-activation.md). iOS 1.17.0 (148) uploaded; Apple/tester and physical-device verification outstanding. [Release evidence](../docs/plans/owner-contracts/release.md).
@@ -459,6 +479,9 @@
 
 | ID | Title | Date |
 |---|---|---|
+| D-187 | Bounded within-class small-player presentation | 2026-09-06 |
+| D-186 | Resolved source consent is separate from discovery cooldown | 2026-09-06 |
+| D-185 | Owner tiers define intent; feedback cannot move tiers | 2026-09-05 |
 | D-184 | Win Now separates forecasts, season utility and dynasty learning | 2026-09-04 |
 | D-001 | Sleeper as the Sole Identity Provider | Pre-changelog |
 | D-002 | 3-Player Matchups Over 2-Player | Pre-changelog |

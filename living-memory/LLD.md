@@ -46,6 +46,7 @@
 - [Pick assets ride the mixed arrays on every propose route; the server splits and encodes (2026-09-02, D-176)](#pick-assets-ride-the-mixed-arrays-on-every-propose-route-the-server-splits-and-encodes-2026-09-02-d-172)
 - [Request scoring views and captured job ownership (2026-09-04, budget scalability)](#request-scoring-views-and-captured-job-ownership-2026-09-04-budget-scalability)
 - [Win Now snapshot and request isolation](#win-now-snapshot-and-request-isolation)
+- [Exact source interest and durable pass state](#exact-source-interest-and-durable-pass-state)
 
 ---
 
@@ -798,6 +799,12 @@ and [scope/evidence](../docs/plans/budget-scalability/implementation.md).
 ## Ownership and telemetry invariants
 
 Private reads/writes depend on proof on the current session, never the grace flag or absence of a verified controller. Session initialization cannot change account identity and accepts only server-resolved roster snapshots. New Sleeper source binding proves source ownership before inspecting either board. Recommendation labels require a verified actor, valid owned impression and accepted validated ingestion. Analytics stores domain-separated identifiers instead of bearer tokens. Deletion resolves aliases, drains concurrent account work, revokes durable sessions transactionally and invalidates queued work. Version 2 export covers the expanded private scope while omitting credential material. The work gate assumes the deployed single-worker topology; see [ADR-017](../docs/adr/adr-017-account-deletion-work-leases.md). Browser verification uses the explicit extension bridge restricted to the production web origin.
+
+## Exact source interest and durable pass state
+
+2026-09-06, #419: existing decision history has two independent interpretations. Source consent resolves by exact normalized chronology (later own or recipient-mirrored pass, withdrawal), regardless of D-067 discovery amnesty/age; discovery restoration keeps the configured pass window and separate seven-day like window. Queue can renew only on server-verified intervening consent change, not a client bypass. Reason banking is not pass commitment: `passed` reflects verified durable state and remains true on committed retries; missing context/failed persistence can be repaired under the reason row's lock. Reason Elo claim and signal rows commit together.
+
+Job/card-owned public projection performs DB reads outside the global job lock, removes currently passed/unverifiable interested cards and preserves surviving order. Existing own-impression links validate a specific source, never a newer same-package replacement; legacy null links remain unlinked. One history read plus one conditional batched provenance read avoids per-card queries but deliberately scans old history within its selected league/actor scope. Frozen impression indices/rows never change. [Authoritative contract](../docs/api-reference.md#exact-interest-and-pass-disposition), [reviewed code walk](../docs/feedback/items/419-rejected-interest-resurfacing/backend-code-walk.md). Native local commitment integration remains separate from this backend checkpoint.
 
 ---
 
