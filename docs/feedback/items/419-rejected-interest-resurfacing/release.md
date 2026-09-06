@@ -38,6 +38,12 @@ Local full backend results: root **5,645 passed / 1 optional skip**, independent
 
 ## Recovery and remaining evidence
 
+### Publication approval blocker — 2026-09-06
+
+Prepared release head **`e5294748477ece417ea5e10d4f20ba7b1b148c31`** is clean, passes whole-range diff hygiene and is runtime/test/config-identical to the independently reviewed `7d3e071f`. The attempted fetch/push/PR command was rejected **before process creation** by the safety review: the conversation's GitHub publication authorization was not accepted as explicit permission for this exact public destination. No part of that command ran; no push, PR, CI, merge, Render deployment, config activation or EAS upload occurred. The rejection was not bypassed or retried through another route.
+
+Read-only local verification confirms the configured origin is `https://github.com/mattmurf77/fantasy-trade-finder.git`. Publishing to a public repository makes the scoped source/tests/sanitized documents publicly accessible. Root is requesting explicit owner approval naming that destination before retrying normal publication. Existing batch authority for subsequent reviewed delivery remains recorded above; CI and privacy gates are not waived. Preserve all batch worktrees, original dirty files and private research while this approval is outstanding.
+
 Batch worktrees remain under `/private/tmp/ftf-feedback-419-421-f1uMyt`; no branch/worktree cleanup has occurred. Capture exact tips and content-containment evidence in `docs/recovery/` before any eventual cleanup. Do not use the original dirty checkout for EAS or make private scratch research part of the release archive.
 
 Pending: exact-head CI/PR/merge, source-specific Render deployment, single-key activation, EAS build/submission IDs, selected status readback, Apple availability and physical-device results. Both final QA reports and the consolidated operator checklist are complete; checklist execution remains UNRUN.
