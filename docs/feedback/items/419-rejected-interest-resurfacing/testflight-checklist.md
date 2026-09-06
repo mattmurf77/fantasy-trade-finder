@@ -21,7 +21,7 @@ Record the device/OS, installed version/build, backend SHA, controlled fixture r
 10. Delay the projection response to about 16 seconds: it should render beyond the old 15-second limit. Exceed the controlled request and full-attempt budgets at preparation/transport/body stages: loading ends on the next active runtime turn, neutral timeout appears, Refresh is enabled. Leaving the screen prevents a late alert.
 11. Exercise current-session 401, typed unavailable/source refusal, verification denial, 503 and offline/restored network. Preserve truthful errors and current-session expiry; no fabricated zero standings or search on unavailable data. A replacement login must not be cleared by an older request. Verify Dynamic Type/VoiceOver on loading/error/Refresh.
 12. While a cold baseline runs, measure another ordinary read. Record any contention as an outstanding synchronous-backend measurement, not proof that longer client deadlines fixed throughput.
-13. With a valid baseline, check objective/budget/protection controls, title gating, source expiry, search cancellation/refresh, editable evaluation and Back. Do not send a provider proposal.
+13. Exercise League picker → Connect and League → ESPN resync with delayed preparation/current failure: busy state releases, stale results do not navigate, and acknowledged init precedes Main. A delayed old Connect gesture cannot authorize a retry after newer uncertainty. Imported ESPN/MFL/Fleaflicker real leagues retain their existing flows; sentinel/no-league accounts make no projection read. With a valid baseline, check objective/budget/protection controls, title gating, source expiry, search cancellation/refresh, editable evaluation and Back. Do not send a provider proposal.
 
 ## Smaller-package presentation
 
