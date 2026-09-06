@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import {
   View,
@@ -178,6 +178,11 @@ import {
   nextUnrankedPosition,
 } from '../components/analystScript';
 import { useSession } from '../state/useSession';
+import {
+  tradePassKey, projectTradePasses, tradeSourcePosition, settlePassWrite, passWriteStatus,
+  type DispositionProjection, type PassWriteState,
+} from '../utils/tradeDisposition';
+import type { DeclineReasonResult } from '../api/declineReasons';
 import { useTradeQueue } from '../state/useTradeQueue';
 import { useFinderTargets } from '../state/useFinderTargets';
 import { useFlag, useOnboardingFeature, onboardingEnabled } from '../state/useFeatureFlags';
@@ -282,6 +287,60 @@ const EMPTY_QUEUE: never[] = [];
 // the payload are what get recorded (Elo signal, persistence, and mutual-
 // match detection all run on the modified package).
 const EDITED_SUFFIX = '::edited';
+
+// Local acknowledgements survive stacked results pages and remounts, but never
+// become a persisted ban. Scope changes invalidate even A → B → A callbacks.
+function localPassScope() {
+  const s = useSession.getState();
+  return JSON.stringify([s.user?.user_id ?? '', s.league?.league_id ?? '', s.hasToken]);
+}
+let localPassSession = { scope: localPassScope(), epoch: 0, committed: new Set<string>() };
+const localPassListeners = new Set<() => void>();
+function subscribeLocalPasses(listener: () => void) {
+  localPassListeners.add(listener);
+  return () => { localPassListeners.delete(listener); };
+}
+useSession.subscribe(() => {
+  const scope = localPassScope();
+  if (scope === localPassSession.scope) return;
+  localPassSession = { scope, epoch: localPassSession.epoch + 1, committed: new Set() };
+  localPassListeners.forEach((listener) => listener());
+});
+
+interface TradeActionContext {
+  account: string;
+  scope: string;
+  scopeEpoch: number;
+  deckEpoch: number;
+  passKey: string | null;
+  rawId: string;
+}
+interface LocalPassAttempt {
+  context: TradeActionContext;
+  card: TradeCard;
+  state: PassWriteState;
+  requests: Promise<void>[];
+  browseRemoval?: { card: TradeCard; index: number; nextId: string | null; edit?: { give: string[]; receive: string[] } };
+}
+function currentPassContext(context: TradeActionContext) {
+  return context.scope === localPassSession.scope && context.scopeEpoch === localPassSession.epoch;
+}
+function commitLocalPass(attempt: LocalPassAttempt) {
+  const { context } = attempt;
+  if (!currentPassContext(context) || !context.passKey ||
+      passWriteStatus(attempt.state) !== 'committed' || localPassSession.committed.has(context.passKey)) return;
+  localPassSession = { ...localPassSession,
+    committed: new Set([...localPassSession.committed, context.passKey]) };
+  localPassListeners.forEach((listener) => listener());
+}
+
+function observeReasonRequest(attempt: LocalPassAttempt, request: Promise<DeclineReasonResult | null>) {
+  attempt.state = settlePassWrite(attempt.state, { type: 'reason_started' });
+  attempt.requests.push(request.then((result) => {
+    attempt.state = settlePassWrite(attempt.state, { type: 'reason_settled', passed: result?.passed === true });
+    commitLocalPass(attempt);
+  }));
+}
 
 // audit P1-1 / PR-14 — a package holding a draft pick cannot be rendered by
 // the share landing (og_image resolves ids against the players table and a
@@ -521,7 +580,25 @@ export default function TradesScreen({ navigation, route }: any) {
   const [fairnessOn, setFairnessOn] = useState(fairnessOnFromPref(null));
   const [fairnessReady, setFairnessReady] = useState(false);
   const [deck, setDeck] = useState<TradeCard[]>([]);
-  const [deckIdx, setDeckIdx] = useState(0);
+  const [deckSourcePosition, setDeckSourcePosition] = useState(0);
+  const localPassSnapshot = useSyncExternalStore(subscribeLocalPasses, () => localPassSession);
+  const deckProjectionRef = useRef<DispositionProjection<TradeCard>>({ cards: [], sourceIndices: [], index: 0, sourceLength: 0 });
+  // Existing handlers speak visible indices. Store source positions so an
+  // acknowledged pass disappearing behind the cursor cannot skip its successor.
+  function setDeckIdx(update: React.SetStateAction<number>) {
+    const projection = deckProjectionRef.current;
+    setDeckSourcePosition((position) => {
+      const index = projection.sourceIndices.findIndex((i) => i >= position);
+      const current = index < 0 ? projection.cards.length : index;
+      const next = typeof update === 'function' ? update(current) : update;
+      return tradeSourcePosition(projection, next);
+    });
+  }
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   // #288 — the deck snapshot from the moment a "Keep · more offers" tap
   // pins a single player and enters single-pin featured mode (the found-
   // trade-card → "other options for that player" flow). resetDeckForNew-
@@ -611,6 +688,8 @@ export default function TradesScreen({ navigation, route }: any) {
   // Same value as the state above, readable synchronously: the layer-1 tap
   // and a fast follow-up gesture can land in one React batch.
   const reasonBankedIdRef = useRef<string | null>(null);
+  const reasonPassAttemptRef = useRef<LocalPassAttempt | null>(null);
+  const [passRetryVersion, setPassRetryVersion] = useState(0);
   // Card fronted → now, for the SPEC §6 `ms_since_render` property. Its own
   // stamp rather than the F1 dwell ref, which only runs under deck.signal_v2 /
   // deck.session_rerank and is capped + background-paused.
@@ -1872,6 +1951,25 @@ export default function TradesScreen({ navigation, route }: any) {
   // run's deck). Two manual taps without an intervening reset share an
   // epoch — last-write-wins there is pre-existing behavior, out of scope.
   const deckEpochRef = useRef(0);
+  const latestTradeActionRef = useRef(new Map<string, TradeActionContext>());
+
+  function captureTradeAction(card: TradeCard, rawId: string): TradeActionContext {
+    const context = { account: userId, scope: localPassSession.scope, scopeEpoch: localPassSession.epoch,
+      deckEpoch: deckEpochRef.current, rawId,
+      passKey: tradePassKey(userId, leagueId ?? '', card) };
+    latestTradeActionRef.current.set(rawId, context);
+    return context;
+  }
+
+  function makePassAttempt(card: TradeCard, rawId: string): LocalPassAttempt {
+    return { context: captureTradeAction(card, rawId),
+      card: { ...card, give_player_ids: [...card.give_player_ids], receive_player_ids: [...card.receive_player_ids] },
+      state: { swipe: 'pending', reasonsPending: 0, reasonPassed: false }, requests: [] };
+  }
+
+  function actionCanUpdateScreen(context: TradeActionContext) {
+    return mountedRef.current && currentPassContext(context) && context.deckEpoch === deckEpochRef.current;
+  }
 
   const generateMutation = useMutation({
     // `auto` marks the onboarding first-run auto-start (item 4): its
@@ -2243,7 +2341,7 @@ export default function TradesScreen({ navigation, route }: any) {
     }
     autoGenRef.current = 'idle';
     setAutoGenFailed(false);
-  }, [leagueId]);
+  }, [leagueId, userId]);
 
   // F10 (deck.replenishment): a new job (fresh generation) or any deck
   // reset (job → null: league switch, fairness toggle, target change) starts
@@ -2290,9 +2388,11 @@ export default function TradesScreen({ navigation, route }: any) {
   );
 
   const swipeMutation = useMutation({
-    mutationFn: ({ card, decision, signal }: {
+    mutationFn: ({ card, decision, signal, context }: {
       card: TradeCard;
       decision: 'like' | 'pass';
+      context: TradeActionContext;
+      passAttempt?: LocalPassAttempt;
       // F1 (deck.signal_v2): optional per-disposition signal fields; only
       // populated by advance() when the flag is on AND the card carries an
       // impression_id. Absent ⇒ the POST body is byte-identical to pre-F1.
@@ -2300,8 +2400,13 @@ export default function TradesScreen({ navigation, route }: any) {
       // Propose-label spine: every disposition routed through this mutation
       // is the deck spine (advance() — swipes, browse-cell ✕/✓ on the merged
       // landing, held passes); props.source on the server-fired event.
-    }) => swipeTrade(card, decision, signal, 'deck'),
-    onMutate: ({ card }) => {
+    }) => {
+      // A held old-league pass may flush for the same account; it must never
+      // be submitted using a replacement account's token after sign-out.
+      if (useSession.getState().user?.user_id !== context.account) return Promise.reject(new Error('Stale trade action'));
+      return swipeTrade(card, decision, signal, 'deck');
+    },
+    onMutate: ({ card, context }) => {
       const tradeId = card.trade_id;
       // Edited cards (player swap, feedback #86) carry a derived trade_id
       // (`<raw>::edited`); resolve back to the raw deck id so the rollback
@@ -2316,9 +2421,16 @@ export default function TradesScreen({ navigation, route }: any) {
       // keeps the rollback correct under fairness re-sorts that happen
       // between the swipe and the error.
       const dispatchedIdx = deck.findIndex((c) => c.trade_id === rawId);
-      return { tradeId, rawId, dispatchedIdx };
+      return { tradeId, rawId, dispatchedIdx, action: context };
     },
     onSuccess: (res: any, vars, ctx) => {
+      if (vars.passAttempt) {
+        vars.passAttempt.state = settlePassWrite(vars.passAttempt.state, { type: 'swipe', status: 'acknowledged' });
+        // Swipe acknowledgement retains its existing best-effort semantics;
+        // only a reason response attests a verified durable decision row.
+        commitLocalPass(vars.passAttempt);
+      }
+      if (!ctx || !actionCanUpdateScreen(ctx.action)) return;
       // S7 PRD-01 (growth.share_landing): a like that completes a mutual
       // match returns { matched: true, match_id } — remember the match id
       // so shareLikedTrade can point at the /s/trade/<match_id> landing
@@ -2338,57 +2450,81 @@ export default function TradesScreen({ navigation, route }: any) {
         v2OnLikeSwipeSuccess(res);
       }
     },
-    onError: (err, _vars, ctx) => {
-      // Silent-deck-advance was the bug (api-layer review onError + silent
-      // bugs sweep). `advance()` bumps deckIdx synchronously regardless of
-      // mutation outcome; on a network/5xx failure the deck has already
-      // moved on and the user has no signal the swipe didn't land.
-      //
-      // Rewind ONLY when the failed card is exactly one swipe behind the
-      // current top — i.e. the user hasn't already swiped past it. If
-      // they have, jumping the deck backwards would be more disorienting
-      // than just toasting; same logic the api-layer review describes.
-      // Also refetch the liked-trades count in case the optimistic
-      // `like` invalidation has populated a stale entry; idempotent
-      // when no like was in flight.
-      setDeckIdx((cur) => {
-        // Compare on the RAW id — sortedDeck holds the original cards even
-        // when the swiped payload was an edited variant.
-        const rawId = ctx?.rawId;
-        if (!rawId) return cur;
-        // The card that was at the top when we swiped lives at cur-1
-        // post-advance. If sortedDeck no longer has it there, the user
-        // has swiped further or the deck was re-sorted — don't rewind.
-        const prevCard = sortedDeck[cur - 1];
-        if (prevCard && prevCard.trade_id === rawId) return cur - 1;
-        return cur;
-      });
-      // The rewind above re-fronts the card `advance()` just stamped into the
-      // double-fire guard, so clear it — otherwise every later ✕/✓/swipe on
-      // that card is a silent no-op and the deck stalls with no error and no
-      // visual change. Same reason handleLaneFilter clears when a lane change
-      // re-surfaces an already-dispositioned card. Clearing on the id match
-      // (not inside the rewind branch) also covers the no-rewind case, so a
-      // poisoned id is never left behind.
-      if (ctx?.rawId && lastDispositionedRef.current === ctx.rawId) {
-        lastDispositionedRef.current = null;
+    onError: (err, vars, ctx) => {
+      // Do not keep the mutation (and next card controls) pending while a
+      // fire-and-forget reason finishes. Only recovery waits for its evidence.
+      void recoverAfterReasons();
+      async function recoverAfterReasons() {
+        const attempt = vars.passAttempt;
+        if (attempt) {
+          attempt.state = settlePassWrite(attempt.state, { type: 'swipe', status: 'failed' });
+          // A reason and swipe are independent siblings. Wait for outstanding
+          // progressive responses before declaring the whole pass unsuccessful.
+          while (passWriteStatus(attempt.state) === 'pending') await Promise.all(attempt.requests);
+          if (passWriteStatus(attempt.state) === 'committed') return;
+        }
+        if (!ctx || !actionCanUpdateScreen(ctx.action)) return;
+        // Silent-deck-advance was the bug (api-layer review onError + silent
+        // bugs sweep). `advance()` bumps deckIdx synchronously regardless of
+        // mutation outcome; on a network/5xx failure the deck has already
+        // moved on and the user has no signal the swipe didn't land.
+        //
+        // Rewind ONLY when the failed card is exactly one swipe behind the
+        // current top — i.e. the user hasn't already swiped past it. If
+        // they have, jumping the deck backwards would be more disorienting
+        // than just toasting; same logic the api-layer review describes.
+        // Also refetch the liked-trades count in case the optimistic
+        // `like` invalidation has populated a stale entry; idempotent
+        // when no like was in flight.
+        if (latestTradeActionRef.current.get(ctx.rawId) !== ctx.action ||
+            (ctx.action.passKey && localPassSession.committed.has(ctx.action.passKey))) return;
+        if (attempt?.browseRemoval) restoreBrowsedPass(attempt);
+        setDeckIdx((cur) => {
+          // Compare on the RAW id — sortedDeck holds the original cards even
+          // when the swiped payload was an edited variant.
+          const rawId = ctx?.rawId;
+          if (!rawId) return cur;
+          // The card that was at the top when we swiped lives at cur-1
+          // post-advance. If sortedDeck no longer has it there, the user
+          // has swiped further or the deck was re-sorted — don't rewind.
+          const prevCard = sortedDeckRef.current[cur - 1];
+          if (prevCard && prevCard.trade_id === rawId) return cur - 1;
+          return cur;
+        });
+        // The rewind above re-fronts the card `advance()` just stamped into the
+        // double-fire guard, so clear it — otherwise every later ✕/✓/swipe on
+        // that card is a silent no-op and the deck stalls with no error and no
+        // visual change. Same reason handleLaneFilter clears when a lane change
+        // re-surfaces an already-dispositioned card. Clearing on the id match
+        // (not inside the rewind branch) also covers the no-rewind case, so a
+        // poisoned id is never left behind.
+        if (ctx?.rawId && lastDispositionedRef.current === ctx.rawId) {
+          lastDispositionedRef.current = null;
+        }
+        if (attempt && reasonPassAttemptRef.current === attempt) {
+          reasonPassAttemptRef.current = null;
+          reasonBankedIdRef.current = null;
+          setReasonBankedId(null);
+          // Reset the panel's own banked/committed tap guards after total failure.
+          setPassRetryVersion((n) => n + 1);
+        }
+        queryClient.invalidateQueries({ queryKey: ['liked-trades', leagueId] });
+        // No Retry action on either branch. The guard is cleared just above, so
+        // the card's own ✕/✓ now re-POSTS *and* advances the deck — strictly
+        // more than a Retry button could do, which would re-POST while leaving
+        // the card fronted and invite a second, duplicate pass
+        // (`save_trade_decision` is a plain INSERT: a repeat writes a second row
+        // and replays `trade_k_pass` twice). The 403 is a standing gate rather
+        // than a blip, so it says so and points at the verify banner the same
+        // failure just raised.
+        setToast({
+          msg: err instanceof ApiError && err.isVerificationRequired
+            ? 'Verify your account to save swipes — see the banner above.'
+            : "Swipe didn't save. Tap again to retry.",
+          tone: 'warn',
+          holdMs: SWIPE_ERROR_HOLD_MS,
+        });
       }
-      queryClient.invalidateQueries({ queryKey: ['liked-trades', leagueId] });
-      // No Retry action on either branch. The guard is cleared just above, so
-      // the card's own ✕/✓ now re-POSTS *and* advances the deck — strictly
-      // more than a Retry button could do, which would re-POST while leaving
-      // the card fronted and invite a second, duplicate pass
-      // (`save_trade_decision` is a plain INSERT: a repeat writes a second row
-      // and replays `trade_k_pass` twice). The 403 is a standing gate rather
-      // than a blip, so it says so and points at the verify banner the same
-      // failure just raised.
-      setToast({
-        msg: err instanceof ApiError && err.isVerificationRequired
-          ? 'Verify your account to save swipes — see the banner above.'
-          : "Swipe didn't save. Tap again to retry.",
-        tone: 'warn',
-        holdMs: SWIPE_ERROR_HOLD_MS,
-      });
     },
   });
 
@@ -2410,6 +2546,7 @@ export default function TradesScreen({ navigation, route }: any) {
     // the held POST must carry the numbers from when the swipe happened,
     // not from when the undo window expires.
     signal?: SwipeSignal;
+    attempt: LocalPassAttempt;
   } | null>(null);
   // Double-fire guard (S3B-08): last-dispositioned RAW trade_id — the tap
   // and gesture paths can both fire advance() for the same top card.
@@ -2697,7 +2834,9 @@ export default function TradesScreen({ navigation, route }: any) {
     if (!p) return;
     pendingPassRef.current = null;
     clearTimeout(p.timer);
-    swipeMutation.mutate({ card: p.card, decision: 'pass', signal: p.signal });
+    p.attempt.state = settlePassWrite(p.attempt.state, { type: 'swipe', status: 'pending' });
+    swipeMutation.mutate({ card: p.card, decision: 'pass', signal: p.signal,
+      context: p.attempt.context, passAttempt: p.attempt });
   }
   // Latest-instance ref so the unmount cleanup can flush without a stale
   // closure over swipeMutation.
@@ -3517,7 +3656,7 @@ export default function TradesScreen({ navigation, route }: any) {
     // already-pinned state never clobbers the ORIGINAL context with a
     // stale in-between one.
     if (pinnedGive.length + pinnedReceive.length === 0) {
-      preSinglePinSnapshotRef.current = { deck, deckIdx, job };
+      preSinglePinSnapshotRef.current = { deck, deckIdx: deckSourcePosition, job };
     }
     // F1 (deck.signal_v2): a keep-side tap is deeper-than-glance engagement.
     if (signalV2On) engagementRef.current.detailExpanded = true;
@@ -3560,7 +3699,7 @@ export default function TradesScreen({ navigation, route }: any) {
     setSwapTarget(null);
     if (snap) {
       setDeck(snap.deck);
-      setDeckIdx(snap.deckIdx);
+      setDeckSourcePosition(snap.deckIdx);
       setJob(snap.job);
     } else {
       setDeck([]);
@@ -3875,7 +4014,7 @@ export default function TradesScreen({ navigation, route }: any) {
   // get the mismatch re-sort.
   // Phase-2 lane filter applies BEFORE the sort so the likes-you pinning
   // below operates on the filtered pool (pinned lane cards stay pinned).
-  const sortedDeck = useMemo(() => {
+  const orderedDeck = useMemo(() => {
     const pool = laneFilter ? deck.filter((c) => c.lane === laneFilter) : deck;
     // #402 QA B-P5 — ORDER IS FROZEN while a browse session exists: the
     // working set renders in deck order (streaming appends land at the END
@@ -3895,6 +4034,11 @@ export default function TradesScreen({ navigation, route }: any) {
       .sort((a, b) => (b.match_score || 0) - (a.match_score || 0));
     return [...pinned, ...rest];
   }, [deck, fairnessOn, laneFilter, canvasResultsOn, browseSession]);
+  const deckProjection = projectTradePasses(orderedDeck, deckSourcePosition,
+    userId, leagueId ?? '', localPassSnapshot.committed, edits, reasonBankedId);
+  const sortedDeck = deckProjection.cards;
+  const deckIdx = deckProjection.index;
+  deckProjectionRef.current = deckProjection;
   sortedDeckRef.current = sortedDeck;
   browseDeckSyncRef.current = deck; // QA-B nit — see removeBrowsedIdea
 
@@ -4136,6 +4280,7 @@ export default function TradesScreen({ navigation, route }: any) {
     cardRenderedAtRef.current = Date.now();
     reasonBankedIdRef.current = null;
     setReasonBankedId(null);
+    reasonPassAttemptRef.current = null;
   }, [declineReasonsOn, topTradeId]);
 
   // ── Onboarding guided layer (onboarding.guided_layer AND .trades_first,
@@ -5408,7 +5553,7 @@ export default function TradesScreen({ navigation, route }: any) {
     // layer 2 has to answer on the SAME card, so the disposition commits here
     // while the deck advance waits for `commitReasonAdvance()`. Nothing else
     // in this function changes.
-    opts?: { deferDeckAdvance?: boolean },
+    opts?: { deferDeckAdvance?: boolean; passAttempt?: LocalPassAttempt },
   ) {
     if (!topCard) return;
     // S3 PRD-03 (ux.swipe_undo) — double-fire guard: the gesture's
@@ -5564,17 +5709,22 @@ export default function TradesScreen({ navigation, route }: any) {
     // Decline reasons suppress the undo window: the tile tap is a deliberate,
     // reasoned gesture (like the bad-trade flag), and an "Undo" toast under a
     // live layer-2 panel would offer to rewind a deck that has not moved yet.
-    if (swipeUndoOn && decision === 'pass' && !declineReasonsOn) {
+    const passAttempt = decision === 'pass'
+      ? opts?.passAttempt ?? makePassAttempt(topCard, dispatchRawId) : undefined;
+    if (swipeUndoOn && decision === 'pass' && !declineReasonsOn && passAttempt) {
       // Hold the POST for the undo window (design note at pendingPassRef).
       const card = topCard;
+      passAttempt.state = settlePassWrite(passAttempt.state, { type: 'swipe', status: 'held' });
       pendingPassRef.current = {
         card,
         rawId: dispatchRawId,
         timer: setTimeout(() => flushPendingPassRef.current(), UNDO_HOLD_MS),
         signal: dispatchSignal,
+        attempt: passAttempt,
       };
     } else {
-      swipeMutation.mutate({ card: topCard, decision, signal: dispatchSignal });
+      swipeMutation.mutate({ card: topCard, decision, signal: dispatchSignal,
+        context: passAttempt?.context ?? captureTradeAction(topCard, dispatchRawId), passAttempt });
     }
     // F10 (deck.replenishment): session tally for the deck-done summary.
     if (replenishmentOn) {
@@ -5697,10 +5847,15 @@ export default function TradesScreen({ navigation, route }: any) {
   }
 
   function reasonWriteTarget() {
+    const acted = reasonPassAttemptRef.current?.card ?? topCard;
     return {
-      impressionId: rawTopCard?.impression_id,
-      tradeId: rawTopCard?.trade_id ?? topCard?.trade_id ?? '',
-      leagueId: topCard?.league_id || undefined,
+      impressionId: acted?.impression_id,
+      tradeId: acted?.trade_id ?? '',
+      leagueId: acted?.league_id || undefined,
+      givePlayerIds: acted?.give_player_ids,
+      receivePlayerIds: acted?.receive_player_ids,
+      targetUserId: acted?.opponent_user_id || undefined,
+      targetUsername: acted?.opponent_username || undefined,
     };
   }
 
@@ -5712,6 +5867,7 @@ export default function TradesScreen({ navigation, route }: any) {
   // below runs byte-identically.
   function commitReasonAdvance() {
     const rawId = reasonBankedIdRef.current;
+    if (!rawId) return; // a layer-2 tap and overlay dismissal may share a batch
     reasonBankedIdRef.current = null;
     setReasonBankedId(null);
     if (browseLive && rawId) {
@@ -5725,6 +5881,10 @@ export default function TradesScreen({ navigation, route }: any) {
     if (!topCard) return;
     const rawId = rawTopCard?.trade_id ?? topCard.trade_id;
     const firstForThisCard = reasonBankedIdRef.current !== rawId;
+    if (firstForThisCard || !reasonPassAttemptRef.current) {
+      reasonPassAttemptRef.current = makePassAttempt(topCard, rawId);
+    }
+    const attempt = reasonPassAttemptRef.current;
     track(
       'trade_pass_layer1',
       { reason, switched_from: switchedFrom, ...reasonEventProps() },
@@ -5737,7 +5897,7 @@ export default function TradesScreen({ navigation, route }: any) {
     // omit it: the disposition-time signal already landed, and dwell read at
     // switch time would include the layer-2 panel.
     const signal = firstForThisCard ? signalForCard(rawTopCard) : undefined;
-    void postDeclineReason({
+    observeReasonRequest(attempt, postDeclineReason({
       ...reasonWriteTarget(),
       layer: 1,
       reason,
@@ -5749,22 +5909,24 @@ export default function TradesScreen({ navigation, route }: any) {
             calcOpened: signal.calc_opened,
           }
         : {}),
-    });
+    }));
     // A tile switch refines the existing answer; only the FIRST tile tap on a
     // card carries the disposition.
     if (!firstForThisCard) return;
     reasonBankedIdRef.current = rawId;
     setReasonBankedId(rawId);
-    advance('pass', { deferDeckAdvance: true });
+    advance('pass', { deferDeckAdvance: true, passAttempt: attempt });
   }
 
   function handleReasonLayer2Select(reason: Layer1Code, detail: Layer2Code) {
+    const attempt = reasonPassAttemptRef.current;
+    if (!attempt || !actionCanUpdateScreen(attempt.context)) return;
     track(
       'trade_pass_layer2',
       { reason, detail, has_free_text: false, ...reasonEventProps() },
       'Trades',
     );
-    void postDeclineReason({ ...reasonWriteTarget(), layer: 2, reason, detail });
+    observeReasonRequest(attempt, postDeclineReason({ ...reasonWriteTarget(), layer: 2, reason, detail }));
     commitReasonAdvance();
   }
 
@@ -5773,7 +5935,9 @@ export default function TradesScreen({ navigation, route }: any) {
   // here — `trade_pass_layer2` fires at the two moments that ADVANCE (a fixed
   // option tap, or the free-text send), so the funnel never double-counts.
   function handleReasonLayer2Bank(reason: Layer1Code, detail: Layer2Code) {
-    void postDeclineReason({ ...reasonWriteTarget(), layer: 2, reason, detail });
+    const attempt = reasonPassAttemptRef.current;
+    if (!attempt || !actionCanUpdateScreen(attempt.context)) return;
+    observeReasonRequest(attempt, postDeclineReason({ ...reasonWriteTarget(), layer: 2, reason, detail }));
   }
 
   function handleReasonLayer2Send(
@@ -5781,6 +5945,8 @@ export default function TradesScreen({ navigation, route }: any) {
     detail: Layer2Code,
     freeText: string,
   ) {
+    const attempt = reasonPassAttemptRef.current;
+    if (!attempt || !actionCanUpdateScreen(attempt.context)) return;
     track(
       'trade_pass_layer2',
       {
@@ -5793,13 +5959,13 @@ export default function TradesScreen({ navigation, route }: any) {
       },
       'Trades',
     );
-    void postDeclineReason({
+    observeReasonRequest(attempt, postDeclineReason({
       ...reasonWriteTarget(),
       layer: 2,
       reason,
       detail,
       freeText: freeText || undefined,
-    });
+    }));
     Keyboard.dismiss();
     commitReasonAdvance();
   }
@@ -5932,12 +6098,9 @@ export default function TradesScreen({ navigation, route }: any) {
   // #402 §4 — a completed pass removes the browsed idea from the working
   // set. The swipe POST already went out via advance() — the same server
   // state as a deck pass (decision row, D-067 cooldown), so a passed idea
-  // never reappears in a later session. This is session-side bookkeeping
-  // only. Degradation contract: if that POST later fails,
-  // swipeMutation.onError's rewind looks for the card one slot behind the
-  // cursor and won't find a spliced card — it toasts without rewinding,
-  // exactly like today's "user already swiped past it" branch, and the
-  // un-saved pass means the idea can honestly return in a future session.
+  // is masked after acknowledgement. Retain the removed row on this attempt
+  // until settlement: if both writes fail, restore it for retry without
+  // disturbing a later browsed card. Durable history remains the server's.
   function removeBrowsedIdea(rawId: string) {
     // QA-B nit — `remaining` was computed from the render-closure `deck`,
     // so a same-batch double removal (two ✕ commits before a re-render)
@@ -5946,10 +6109,23 @@ export default function TradesScreen({ navigation, route }: any) {
     // advanced synchronously here, so each removal in a batch sees the one
     // before it; the setDeck updater stays functional (it re-derives from
     // React's own prev).
-    const next = browseDeckSyncRef.current.filter((c) => c.trade_id !== rawId);
+    const prior = browseDeckSyncRef.current;
+    const next = prior.filter((c) => c.trade_id !== rawId);
     if (next.length === browseDeckSyncRef.current.length) return; // already removed this batch
     browseDeckSyncRef.current = next;
-    const remaining = next.length;
+    // The current idea was removed at the source cursor. Map the splice's
+    // remaining visible cards before clamping, including earlier local passes.
+    const projected = projectTradePasses(next, deckSourcePosition, userId,
+      leagueId ?? '', localPassSession.committed, edits);
+    const attempt = reasonPassAttemptRef.current;
+    if (attempt?.context.rawId === rawId) {
+      attempt.browseRemoval = { card: prior.find((c) => c.trade_id === rawId)!,
+        index: prior.findIndex((c) => c.trade_id === rawId),
+        nextId: projected.cards[Math.min(projected.index, projected.cards.length - 1)]?.trade_id ?? null,
+        edit: browseSession?.edits[rawId] };
+    }
+    deckProjectionRef.current = projected;
+    const remaining = projected.cards.length;
     setDeck((prev) => prev.filter((c) => c.trade_id !== rawId));
     // Clamp the cursor: a mid-set splice slides the next idea into the same
     // index; splicing the LAST idea steps back onto the new last — never
@@ -5976,6 +6152,31 @@ export default function TradesScreen({ navigation, route }: any) {
       setCanvasPrefill({ give: [], receive: [] });
       setCanvasPrefillSeq((n) => n + 1);
     }
+  }
+
+  function restoreBrowsedPass(attempt: LocalPassAttempt) {
+    const removed = attempt.browseRemoval;
+    if (!removed || !browseSession || !actionCanUpdateScreen(attempt.context)) return;
+    const current = browseDeckSyncRef.current;
+    if (current.some((c) => c.trade_id === removed.card.trade_id)) return;
+    const projection = deckProjectionRef.current;
+    const frontId = projection.cards[projection.index]?.trade_id ?? null;
+    const position = projection.sourceIndices[projection.index] ?? projection.sourceLength;
+    const insertion = Math.min(removed.index, current.length);
+    const insert = (cards: TradeCard[]) => cards.some((c) => c.trade_id === removed.card.trade_id)
+      ? cards : [...cards.slice(0, insertion), removed.card, ...cards.slice(insertion)];
+    const next = insert(current);
+    const restoredPosition = frontId === removed.nextId ? insertion
+      : position + (insertion <= position ? 1 : 0);
+    browseDeckSyncRef.current = next;
+    deckProjectionRef.current = projectTradePasses(next, restoredPosition, userId,
+      leagueId ?? '', localPassSession.committed, edits);
+    setDeck(insert);
+    lastDispositionedRef.current = null;
+    setDeckSourcePosition(restoredPosition);
+    setBrowseSession((s) => s ? { ...s, passed: Math.max(0, s.passed - 1),
+      edits: removed.edit ? { ...s.edits, [removed.card.trade_id]: removed.edit } : s.edits } : s);
+    attempt.browseRemoval = undefined;
   }
 
   // #402 §2 — end the session and restore the canvas (blank by default; the
@@ -8353,7 +8554,7 @@ export default function TradesScreen({ navigation, route }: any) {
                 </View>
               )}
               <SwipableTopCard
-                key={topCard.trade_id}
+                key={`${topCard.trade_id}:${passRetryVersion}`}
                 card={topCard}
                 cardImpact={topCardImpact}
                 // #402/#403 — give-side keep chip relabels to "More offers"
@@ -8857,6 +9058,7 @@ export default function TradesScreen({ navigation, route }: any) {
                 testID="trades.canvas-results.reason-overlay"
               >
                 <DeclineReasonPanel
+                  key={passRetryVersion}
                   onLayer1={(r, from) => declineReasonProps.onLayer1(r, from)}
                   onLayer2Select={(r, d) => {
                     setBrowseReasonOpen(false);

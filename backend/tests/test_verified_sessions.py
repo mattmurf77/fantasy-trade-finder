@@ -535,6 +535,47 @@ def test_session_init_verified_carryover_and_controller_flag(init_client):
     assert _sess(token)["verified"] is True
 
 
+def test_win_now_restored_verified_session_requires_real_init(init_client, monkeypatch):
+    """G420 T6: actual durable restore → installed 409 guard → authorized init.
+
+    Retains the real restore/builder/route guards. Only forecast/provider data
+    and the existing init fixture's heavy/background seams are isolated.
+    """
+    from backend import win_now_api, win_now_service
+    c, token, flags_on = init_client
+    flags_on.update({"auth.persistent_sessions", "outlook.season_projections"})
+    monkeypatch.setattr(win_now_api, "is_enabled", lambda key: key in flags_on)
+    db_module.upsert_user(sleeper_user_id=UID, username="Synthetic Tester")
+    accounts.mark_user_verified(UID, "sleeper")
+    db_module.persist_session(token, user_id=UID, verified_via="sleeper")
+    with server._sessions_lock:
+        server._sessions.pop(token, None)
+    forecasts = []
+
+    def unavailable(actor, fetch):
+        forecasts.append(actor["league_id"])
+        raise win_now_service.Unavailable("synthetic_source_unavailable", "Synthetic source unavailable.")
+
+    monkeypatch.setattr(win_now_service, "load_bundle", unavailable)
+    path = "/api/league/season-projections?league_id=123456789"
+    before = c.get(path, headers=_h(token))
+    assert before.status_code == 409
+    assert before.get_json()["error"] == "session_not_initialized"
+    assert forecasts == []
+    assert server._sessions[token]["verified"] is True
+    assert "league" not in server._sessions[token]
+
+    initialized = c.post("/api/session/init", headers=_h(token), data=_init_body())
+    assert initialized.status_code == 200, initialized.get_json()
+    assert initialized.get_json()["token"] == token
+    after = c.get(path, headers=_h(token))
+    assert after.status_code == 200
+    assert after.get_json() == {"status": "unavailable", "reason": "synthetic_source_unavailable", "message": "Synthetic source unavailable."}
+    assert forecasts == ["123456789"]
+    foreign = c.get("/api/league/season-projections?league_id=foreign-synthetic", headers=_h(token))
+    assert foreign.status_code == 403
+    assert forecasts == ["123456789"]
+
 def test_session_init_reports_verified_after_link_replay(init_client):
     """#126 pin (PRD §4.2): session becomes verified via the actual replay
     route (POST /api/sleeper/link, oracle OK) — not a direct session stamp —

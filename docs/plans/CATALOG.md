@@ -6,7 +6,7 @@ Status records describe the last documented disposition; they are not a fresh pr
 
 Use the [active index](README.md) for normal work. This catalog also includes inactive and archived history.
 
-110 entries. Counts and rows come from the same status records.
+111 entries. Counts and rows come from the same status records.
 
 | Initiative / item | Status | Updated | Summary |
 |---|---|---|---|
@@ -82,7 +82,7 @@ Use the [active index](README.md) for normal work. This catalog also includes in
 | [onboarding-conversion](onboarding-conversion/status.md) | built-dark | 2026-08-11 | onboarding conversion |
 | [onboarding-tour-merge](onboarding-tour-merge/status.md) | planned | 2026-08-23 | onboarding tour merge |
 | [open-access-phase-a-gates.md](open-access-phase-a-gates.md) | needs-review | — | Open-access onboarding — Phase A pre-flip gates |
-| [owner-contracts](owner-contracts/status.md) | built-unmerged | 2026-09-05 | Owner contract implementation and release |
+| [owner-contracts](owner-contracts/status.md) | partly-shipped | 2026-09-05 | Owner contracts: PR #281 merged, backend and experimental policy live; iOS uploaded, native validation pending |
 | [package-benchmark-sweetener](package-benchmark-sweetener/status.md) | built-unmerged | 2026-08-21 | Package benchmark sweetener |
 | [pass-cooldown](pass-cooldown/status.md) | needs-review | — | pass cooldown |
 | [pending-trades-inbox-plan-2026-08-12.md](pending-trades-inbox-plan-2026-08-12.md) | planned | — | Pending Trades Inbox — Plan (2026-08-12) |
@@ -108,6 +108,7 @@ Use the [active index](README.md) for normal work. This catalog also includes in
 | [sleeper-pending-trades-feasibility-2026-08-12.md](sleeper-pending-trades-feasibility-2026-08-12.md) | reference | — | Sleeper Pending Trades — Feasibility Memo (2026-08-12) |
 | [sleeper-write-capture-runbook.md](sleeper-write-capture-runbook.md) | reference | — | Sleeper Write API — Capture Runbook (Spikes C1–C4) |
 | [slot-pricing-unconditional](slot-pricing-unconditional/status.md) | needs-review | — | slot pricing unconditional |
+| [small-trade-packages](small-trade-packages/status.md) | shipped | 2026-09-06 | Bounded small-player-package presentation is live with simple_player_presentment=1 |
 | [sweetener-relative-band](sweetener-relative-band/status.md) | built-unmerged | 2026-09-02 | sweetener relative band |
 | [three-model-bakeoff](three-model-bakeoff/status.md) | partly-shipped | 2026-08-18 | three model bakeoff |
 | [tiktok-discovery](tiktok-discovery/status.md) | partly-shipped | — | tiktok discovery |
@@ -128,11 +129,11 @@ Use the [active index](README.md) for normal work. This catalog also includes in
 | abandoned | 2 |
 | active | 7 |
 | built-dark | 4 |
-| built-unmerged | 8 |
+| built-unmerged | 7 |
 | in-progress | 3 |
 | needs-review | 37 |
-| partly-shipped | 7 |
+| partly-shipped | 8 |
 | planned | 8 |
 | reference | 13 |
-| shipped | 14 |
+| shipped | 15 |
 | superseded | 7 |

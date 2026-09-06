@@ -1,0 +1,36 @@
+{
+  "recordType": "sanitized release verification summary",
+  "serviceId": "srv-d7g37ftckfvc73a32gvg",
+  "deploymentId": "dep-daeq1h740ujc73897oog",
+  "commit": "988fa2d690dfa9188f43c33e87dff9d60a5fabaa",
+  "deploymentStatus": "live",
+  "liveSince": "2026-09-06T17:21:19.905609Z",
+  "verifiedDefaultOffAt": "2026-09-06T17:22:30.042Z",
+  "activationCliTimestamp": "2026-09-06T17:23:58.015131+00:00",
+  "activationSource": "feedback-419-421-simple-player-v1-20260906",
+  "verifiedActivatedAt": "2026-09-06T17:24:18.005Z",
+  "independentActivatedReadbackAt": "2026-09-06T17:33:55.804Z",
+  "autoDeployStillEnabledVerifiedAt": "2026-09-06T17:34:21.618Z",
+  "simplePlayerPresentment": {"before": 0, "after": 1},
+  "existingFlagCount": 207,
+  "existingConfigCount": 258,
+  "totalConfigCountAfterSeeding": 259,
+  "changedExistingFlagKeys": [],
+  "changedExistingConfigKeys": [],
+  "newConfigKeys": ["simple_player_presentment"],
+  "hashes": {
+    "flagHash": "8abb4883dad36476a58d868e761cda4a7c7604dcdadb6319223dc7897e3568fb",
+    "existingConfigValueHash": "a417117defbbdbb66231e6883108a318bc73e92c4bde3a66f04bf04d4130c91f",
+    "tierHash": "a4e0dd14bf755cefb955de7fb5ab2fe2cfaea619983804a462af4ba239b1e632",
+    "experimentSummaryHash": "ff73c3f8aa942c34dd11a003e354b5a0b29fccd239526825af73404e24dea4e5",
+    "rootSha256": "35b379411f39b205e79e0d2178b7ad222872023965f3802780f6ab84dec516ed"
+  },
+  "httpStatuses": {
+    "root": 200, "tierConfig": 200, "featureFlags": 200,
+    "operatorConfig": 200, "operatorHealth": 200, "operatorExperiments": 200,
+    "unauthenticatedTrades": 401, "unauthenticatedAdminConfig": 401
+  },
+  "health": {"eventIdIndexPresent": true, "ingestTransactionFailuresSinceDeploy": 0},
+  "verified": true,
+  "limits": "GET-only smoke around one separately authorized audited config write. No real-user session or trade generation, provider proposal, latency/acceptance claim, Apple availability or physical-device verification."
+}

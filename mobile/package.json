@@ -29,6 +29,7 @@
     "test:contrarian-format-key": "node tests/check-contrarian-format-key.js",
     "test:contrast": "node scripts/check-contrast.js",
     "test:decline-reasons": "node tests/check-decline-reasons.js",
+    "test:trade-disposition": "node tests/check-trade-disposition.js",
     "test:demo-calc-removed": "node tests/check-demo-calc-removed.js",
     "test:dna-side-order": "node tests/check-dna-side-order.js",
     "test:espn-connect-clear": "node tests/check-espn-connect-clear.js",
@@ -99,6 +100,7 @@
     "test:vault-subsumes-legacy": "node tests/check-vault-subsumes-legacy.js",
     "test:window-composite": "node tests/check-window-composite.js",
     "test:win-now": "node tests/check-win-now.js",
+    "test:win-now-recovery": "node tests/check-win-now-recovery.js",
     "test:window-signals": "node tests/check-window-signals.js",
     "web": "expo start --web"
   },

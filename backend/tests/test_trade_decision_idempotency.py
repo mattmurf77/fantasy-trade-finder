@@ -328,14 +328,18 @@ def test_swipe_trade_route_gates_the_elo_write_on_the_decision_write():
 
 
 def test_reasoned_pass_route_gates_the_elo_write_on_the_decision_write():
-    """Same pin for the decline-reason pass path (`_apply_reasoned_pass`),
-    which has its own save_trade_decision → save_trade_swipes pair."""
+    """#419: verified durable pass + an atomic once-only reason Elo write.
+
+    The ordinary ten-second replay guard is insufficient for reason repairs
+    after a restart; later value detail can legitimately supply deferred Elo.
+    """
     import backend.server as server
-    src = _swipe_gate_src(server._apply_reasoned_pass)
-    assert "wrote_decision = save_trade_decision(" in src, \
-        "the reasoned-pass path must capture the replay verdict too"
-    assert "if elo and wrote_decision:" in src, \
-        "its Elo write must require BOTH the elo flag and a real decision write"
+    src = _swipe_gate_src(server.trade_pass_reason)
+    assert "passed, wrote_pass = ensure_reasoned_trade_pass(" in src
+    assert "elif passed and _pass_reason_writes_elo(code_now):" in src
+    elo = _swipe_gate_src(server._apply_reasoned_pass_elo_only)
+    assert "pass_reason_key = reason_key" in elo
+    assert "if wrote:" in elo.split("record_trade_signal(", 1)[0]
 
 
 def test_check_for_match_is_not_gated_on_the_replay_verdict():

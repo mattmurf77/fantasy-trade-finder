@@ -268,12 +268,12 @@ Mapping lives in `get_pref_bucket()` in `backend/server.py`. **Add a new kind in
 
 ## Match bucket labels & semantics (feedback #91)
 
-Every trade a user has acted on sits in exactly **one** of two buckets, everywhere they're counted or listed:
+Every currently displayed match or actionable one-sided like sits in exactly **one** of two buckets, everywhere they're counted or listed. A resolved/withdrawn one-sided like may belong to neither:
 
 | Bucket | `/api/league/summary` key | Definition | Sub/definition copy |
 |---|---|---|---|
 | Mutual matches | `matches_mutual` | Non-dismissed `trade_matches` rows involving the caller, **any** disposition status | `Liked by both sides` |
-| Awaiting them | `matches_awaiting` | Caller's one-sided likes not yet matured into a match (repeat likes of the same trade deduped) | `Your like, waiting on theirs` |
+| Awaiting them | `matches_awaiting` | Caller's actionable one-sided likes not yet matured into a match (repeat likes of the same trade deduped; older source likes resolved by exact own/recipient passes or withdrawal do not reappear when discovery cooldown expires) | `Your like, waiting on theirs` |
 
 A trade leaves "Awaiting them" and becomes a mutual match the moment the `trade_matches` row is created; disposition status never moves a match between buckets (see `backend/tests/test_league_summary_buckets.py`). The League tab's two Matches tiles must always equal the Matches screen's two segments. Casing follows each client's local convention (mobile sentence case "Mutual matches" / "Awaiting them"; web title-cases summary-card labels), but the wording and sub copy are shared.
 

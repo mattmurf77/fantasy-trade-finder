@@ -223,13 +223,26 @@ Throwaway eval workspaces and packaged `.skill` bundles are archived in `archive
 1. Either user `POST /api/trades/swipe` with `like` — **or**, behind `calc.merged_layout`,
    `POST /api/trades/queue` (#384 ✓ cell, [D-152]), which records a HAND-BUILT package as a like
    through the same `_reconstruct_swipe_card` → `record_decision` → `save_trade_decision` path.
-   The queue route does **not** run step 2: it refuses up front unless the likes-you injector's
-   own gates would mirror the like into the counterparty's deck, and the match is then minted by
-   *their* swipe on that mirrored card — one place, not two.
+   The queue route does **not** run step 2: D-170 records a well-formed like for a resolved
+   counterparty without an up-front mirror/fairness refusal. A server-verified intervening
+   exact pass permits deliberate renewal inside the usual ten-second dedupe window; retries
+   remain idempotent. The match is minted by *their* later swipe, not by queueing.
 2. `server.py` checks for a mirrored existing like from the other side (`database.check_for_match`). With flag `trade.fuzzy_match`, a near-mirror also matches: Jaccard ≥ `fuzzy_match_tau` (0.8) per side, and only low-value players (`search_rank ≥ 120`) may differ.
 3. If found: insert `trade_matches` row (status `pending`), insert two `notifications` rows, dispatch typed push for both users.
 4. Either user `POST /api/trades/matches/<id>/disposition` with `accept` or `decline`. Updates `user_a_decision` / `user_b_decision`; rolls `status` → `accepted` / `declined` once both have decided (or any user declines).
 5. Counterparties receive `trade_accepted` / `trade_declined` notifications + push.
+
+**Source and serve revalidation (#419):** `database.TradeInterestHistory` interprets existing normalized action chronology for injection, exact/fuzzy-source admission, queue and Awaiting/summary readers. An older like resolved by a later exact own/mirrored pass remains resolved independently of D-067 discovery expiry/amnesty. Full init and headless replenishment restore the same per-type discovery keys. Reason capture verifies/repairs its durable exact pass separately from banking the reason; committed retries remain truthful and Elo claims persist atomically with their signal. Public deck reads and final pre-impression publication project current disposition outside the global job lock, preserving survivor order and frozen rows. Serialized interested cards use one additional batched owned-impression provenance read when needed to validate their specific source. See [API disposition contract](api-reference.md#exact-interest-and-pass-disposition).
+
+**Bounded presentation:** `small_trade_presentment` is a pure, once-per-job
+post-policy permutation before the first evaluated snapshot. Six absolute
+slots bound movement within identical source/group/lane/basis/policy classes;
+player counts rank simplicity, not pick counts or value. Eligibility,
+packages, experiment slots and larger-deal availability remain unchanged.
+Captured mode/version travels through every cache probe and writer. The later
+#419 cut removes authoritative dispositions without another sort, remapping
+per-occurrence records before final impression indices freeze. No client
+re-sort, generator change or new service. [Contract](plans/small-trade-packages/prd.md).
 
 ## Push dispatcher
 
@@ -318,6 +331,17 @@ The restricted beta adds a separate season objective without changing the dynast
 `season_forecasts.py` normalizes external weekly stat/availability forecasts → `season_simulator.py` applies supported league scoring, legal projected lineups and the actual remaining schedule/bracket → `win_now_optimizer.py` screens season-oriented exchanges and applies the same legality/budget/fairness/partner gates for search and calculator → `win_now_service.py` binds current league facts, in-memory pricing/ranking evidence, revision hashes, paired/independent confirmation simulations and expiry → `win_now_store.py` retains immutable evidence and durable jobs → `win_now_api.py` serves authenticated mobile/web views.
 
 A bounded in-process worker consumes durable database jobs; this is not an external worker service or a promised latency SLA. League/source inputs and player/week random worlds are reusable, but personalized scenario results remain viewer-scoped. Clients preserve server order, cancel stale local requests and remove expired recommendations. Search/decision state never enters the legacy deck cache or Elo swipe path. Likelihood of actual partner acceptance is not the season model.
+
+Native baseline reads first join the state-owned league-initialization lifecycle
+(`useSession` / `leagueSession`), shared with picker, switch, connection,
+foreground and resync writers. API remains a transport/seed producer.
+An exact lost-context 409 permits one forced reconciliation and one safe GET
+replay within a single 90-second attempt; the projection request itself has
+a 30-second cap. Ambiguous dispatched init completion blocks automatic retry,
+not merely the current screen, until a fresh deliberate action or replacement
+token. Same-token serialization is guaranteed only for acknowledged settlement;
+the client cannot guarantee server final-writer order after a timed-out accepted
+POST. The backend API and worker protocol are unchanged.
 
 The simulator's normal residuals and availability assumptions are explicitly experimental. Shared NFL game/team effects and multiweek injury correlation are absent. Unsupported live play, forecast gaps, scoring/roster/bracket rules and stale source data fail unavailable. Experimental title output is operator-authorized before calibration and still requires its flag plus snapshot capability; the old outlook title display prohibition remains unchanged. [ADR-018](adr/adr-018-win-now-external-forecasts.md) records the separation.
 

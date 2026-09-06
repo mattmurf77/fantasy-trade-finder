@@ -1,6 +1,6 @@
 # mobile/src/utils/
 
-25 helpers. **No React.** The annotated map — including which values are cross-client contracts and which must stay in lockstep with backend code — is [CLAUDE.md](CLAUDE.md).
+Helpers with **no React**. The annotated map — including which values are cross-client contracts and which must stay in lockstep with backend code — is [CLAUDE.md](CLAUDE.md).
 
 | File | One line |
 |---|---|
@@ -29,6 +29,7 @@
 | `tickerWindow.ts` | #322/#325 — the mock-draft ticker's ascending last-`depth` window |
 | `tierBands.ts` | Elo/value → tier key + label (8-tier pick ladder, #117); holds the server tier-config cache |
 | `tradeCalcMath.ts` | Client-side calculator math for demo mode |
+| `tradeDisposition.ts` | Pure exact pass identity, durable settlement and source-index-preserving deck projection (#419) |
 | `tradeText.ts` | Copy-trade text + send-platform resolution (P0-6) |
 | `verification.ts` | Account-verification state helpers |
 

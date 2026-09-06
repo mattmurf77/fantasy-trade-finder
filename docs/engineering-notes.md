@@ -29,6 +29,9 @@ These records preserve detailed implementation reasoning and unresolved limits. 
 | Season snapshots, observed data versus forecast claims, request isolation | [Win Now build](plans/win-now/BUILD.md), [evidence](plans/win-now/EVIDENCE.md) |
 | Offline grade isolation and append-only measurement | [Receipts](plans/receipts/README.md) |
 | Provider identity and provider-driven presentation | [Connected rankings](plans/connected-rankings/status.md), [shared invariants](cross-client-invariants.md) |
+| Exact interest/pass disposition and immutable reason episodes | [API reference](api-reference.md), [episode repair](feedback/items/419-rejected-interest-resurfacing/backend-code-walk.md#qa-a-episode-repair--final-path-atop-e02d074e), [data dictionary](data-dictionary.md) |
+| Win Now request generations, shared session recovery and status errors | [Mobile state ownership](../mobile/src/state/README.md), [recovery evidence](feedback/items/420-win-now-loading/code-walk.md) |
+| Bounded preference for smaller eligible player packages | [Small-package contract](plans/small-trade-packages/prd.md), [architecture](architecture.md) |
 | Settings route/query ownership | [Settings IA](plans/settings-ia-hub/plan.md) |
 | Synthesized cards, generation/presentment gates, bake-off attribution, pricing waterfalls, board assertions, mock-draft ownership and picker contracts | [Shared invariants](cross-client-invariants.md), applicable [feedback item](feedback/items/INDEX.md), and preserved LLD sections below |
 

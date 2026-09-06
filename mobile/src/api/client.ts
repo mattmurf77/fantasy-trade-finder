@@ -12,6 +12,9 @@ import * as SecureStore from 'expo-secure-store';
 import { AppState, Platform } from 'react-native';
 
 const SECURE_TOKEN_KEY = 'ftf.sessionToken';
+// Invalidated synchronously, before secure storage yields to another request.
+let sessionRevision = 0;
+export const getSessionRevision = () => sessionRevision;
 // Survives app deletion (Keychain default). Used to prefill SignInScreen
 // for returning users, even after sign-out or token expiry.
 const SECURE_LAST_USERNAME_KEY = 'ftf.lastUsername';
@@ -93,10 +96,12 @@ export async function getSessionToken(): Promise<string | null> {
 }
 
 export async function setSessionToken(token: string): Promise<void> {
+  sessionRevision += 1;
   await SecureStore.setItemAsync(SECURE_TOKEN_KEY, token);
 }
 
 export async function clearSessionToken(): Promise<void> {
+  sessionRevision += 1;
   try {
     await SecureStore.deleteItemAsync(SECURE_TOKEN_KEY);
   } catch {
@@ -160,9 +165,12 @@ export async function setLastUsername(username: string): Promise<void> {
 }
 
 export class ApiError extends Error {
+  // Internal receipt for THIS request's authorized token clear. No token,
+  // wire field or analytics property: identity guards may preserve its 401.
+  sessionExpiry?: {from: number; to: number};
   // isTimeout marks an error produced by the internal request deadline (FR-4),
-  // so UI layers can surface "Server is waking up — retry." instead of a
-  // generic network failure. A caller-supplied signal abort (e.g. TanStack
+  // so UI layers can show a truthful deadline failure instead of a
+  // hosting diagnosis. A caller-supplied signal abort (e.g. TanStack
   // Query cancellation) is NOT a timeout and never sets this.
   constructor(
     public status: number,
@@ -199,6 +207,13 @@ export class ApiError extends Error {
       (this.body as any).error === 'espn_auth_required'
     );
   }
+}
+
+export function isCurrentSessionExpiry(error: unknown, fromRevision: number): boolean {
+  return error instanceof ApiError && error.status === 401
+    && error.sessionExpiry?.from === fromRevision
+    && error.sessionExpiry.to === fromRevision + 1
+    && error.sessionExpiry.to === getSessionRevision();
 }
 
 // ── verification_required listener (account-auth P2.5) ─────────────────────
@@ -269,16 +284,61 @@ const SESSION_INIT_ERROR = 'session_not_initialized';
 const SESSION_INIT_BACKOFF_MS = [400, 1200]; // 2 retries, ~1.6s of waiting
 
 // User-facing copy for a deadline abort (FR-4).
-const TIMEOUT_MESSAGE = 'Server is waking up — please retry.';
+export const TIMEOUT_MESSAGE = 'This request took too long. Please try again.';
+
+export function requestAborted(): Error {
+  const error = new Error('Aborted');
+  error.name = 'AbortError';
+  return error;
+}
+
+/** A complete logical operation, including uncancelable preparation/body reads.
+ * The work must check its signal again before publishing/dispatching after an
+ * await. Joining shared work can ignore this private signal and simply detach. */
+export function runWithDeadline<T>(
+  work: (signal: AbortSignal) => Promise<T>, deadlineAt: number, caller?: AbortSignal,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const controller = new AbortController();
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const cleanup = () => { clearTimeout(timer); caller?.removeEventListener('abort', abort); };
+    const fail = () => {
+      if (settled) return;
+      settled = true; cleanup();
+      reject(caller?.aborted ? requestAborted() : new ApiError(0, null, TIMEOUT_MESSAGE, true));
+      controller.abort();
+    };
+    const abort = () => fail();
+    if (caller?.aborted || Date.now() >= deadlineAt) { fail(); return; }
+    caller?.addEventListener('abort', abort, {once: true});
+    timer = setTimeout(fail, deadlineAt - Date.now());
+    Promise.resolve().then(() => {
+      if (controller.signal.aborted) throw requestAborted();
+      if (Date.now() >= deadlineAt) throw new ApiError(0, null, TIMEOUT_MESSAGE, true);
+      return work(controller.signal);
+    }).then(value => {
+      if (settled) return;
+      if (caller?.aborted || Date.now() >= deadlineAt) { fail(); return; }
+      settled = true; cleanup(); resolve(value);
+    }, error => {
+      if (settled) return;
+      if (caller?.aborted || Date.now() >= deadlineAt) { fail(); return; }
+      settled = true; cleanup(); reject(caller?.aborted ? requestAborted() : error);
+    });
+  });
+}
 
 function timeoutForRequest(path: string, method: string): number {
+  const pathname = path.replace(/^https?:\/\/[^/]+/, '').split(/[?#]/)[0];
+  if (method === 'GET' && pathname === '/api/league/season-projections') return SLOW_TIMEOUT_MS;
   if (method === 'POST' && SLOW_POST_PATHS.some((p) => path.includes(p))) {
     return SLOW_TIMEOUT_MS;
   }
   return DEFAULT_TIMEOUT_MS;
 }
 
-interface RequestOptions {
+export interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
   body?: unknown;
   headers?: Record<string, string>;
@@ -286,6 +346,10 @@ interface RequestOptions {
   skipAuth?: boolean;
   // Abort signal for TanStack Query cancellation.
   signal?: AbortSignal;
+  // A caller's whole-operation cap; never extends the route's own allowance.
+  deadlineAt?: number;
+  // State-owned identity fence. No store import belongs in this layer.
+  beforeDispatch?: () => void;
 }
 
 // ── Universal API-failure observability (tracking plan addendum 2026-07-19) ──
@@ -387,8 +451,9 @@ export async function apiRequest<T = unknown>(
 ): Promise<T> {
   const startedAt = _clockMs();
   const foregroundEpoch = _leftForegroundCount;
+  const deadlineAt = Math.min(opts.deadlineAt ?? Infinity, Date.now() + timeoutForRequest(path, opts.method || 'GET'));
   try {
-    return await _apiRequestInner<T>(path, opts);
+    return await runWithDeadline(signal => _apiRequestInner<T>(path, {...opts, signal, deadlineAt}), deadlineAt, opts.signal);
   } catch (err) {
     _reportApiFailure(
       path,
@@ -406,6 +471,7 @@ async function _apiRequestInner<T = unknown>(
   opts: RequestOptions = {},
 ): Promise<T> {
   const base = getBaseUrl();
+  const requestRevision = getSessionRevision();
   const url = path.startsWith('http') ? path : `${base}${path}`;
   const headers: Record<string, string> = {
     Accept: 'application/json',
@@ -465,6 +531,9 @@ async function _apiRequestInner<T = unknown>(
 
   const fetchOnce = async (): Promise<Response> => {
     try {
+      if (timeoutController.signal.aborted) throw requestAborted();
+      if (Date.now() >= opts.deadlineAt!) throw new ApiError(0, null, TIMEOUT_MESSAGE, true);
+      opts.beforeDispatch?.();
       return await fetch(url, {
         method,
         headers,
@@ -517,6 +586,8 @@ async function _apiRequestInner<T = unknown>(
         } else {
           // Successful response or non-retryable error — process normally.
           const text = await res!.text();
+          if (timeoutController.signal.aborted) throw requestAborted();
+          if (Date.now() >= opts.deadlineAt!) throw new ApiError(0, null, TIMEOUT_MESSAGE, true);
           let parsed: any = null;
           if (text) {
             try {
@@ -527,6 +598,7 @@ async function _apiRequestInner<T = unknown>(
           }
 
           if (!res!.ok) {
+            let sessionExpiry: ApiError['sessionExpiry'];
             // 401 = session expired. Caller should redirect to sign-in.
             // FB-45 guard: only clear when the token THIS request sent is
             // still the stored one — a background revalidateSession() may
@@ -535,12 +607,17 @@ async function _apiRequestInner<T = unknown>(
             if (res!.status === 401) {
               const sent = headers['X-Session-Token'];
               const current = await getSessionToken();
-              if (sent && current && sent === current) {
-                await clearSessionToken();
+              if (sent && current && sent === current && requestRevision === getSessionRevision() && !timeoutController.signal.aborted && Date.now() < opts.deadlineAt!) {
+                const clearing = clearSessionToken();
+                const clearedRevision = getSessionRevision();
+                await clearing;
+                if (clearedRevision === getSessionRevision() && !timeoutController.signal.aborted && Date.now() < opts.deadlineAt!) {
+                  sessionExpiry = {from: requestRevision, to: clearedRevision};
+                }
                 // The stored token is definitively dead — let the session
                 // store decide whether to route to re-auth (account-only,
                 // flag-gated inside the handler).
-                if (_onSessionExpired) {
+                if (_onSessionExpired && clearedRevision === getSessionRevision() && !timeoutController.signal.aborted && Date.now() < opts.deadlineAt!) {
                   try {
                     _onSessionExpired();
                   } catch {
@@ -551,10 +628,18 @@ async function _apiRequestInner<T = unknown>(
             }
             const msg = (parsed && (parsed.message || parsed.error)) || `HTTP ${res!.status}`;
             const apiErr = new ApiError(res!.status, parsed, msg);
+            apiErr.sessionExpiry = sessionExpiry;
             // Central read-gate signal — see setOnVerificationRequired above.
             if (apiErr.isVerificationRequired && _onVerificationRequired) {
+              const sent = headers['X-Session-Token'];
+              const current = await getSessionToken();
               try {
-                _onVerificationRequired();
+                // This callback runs BEFORE the caller receives its rejection.
+                // A later screen/store guard cannot undo a stale banner write.
+                if (sent && sent === current && requestRevision === getSessionRevision() && !timeoutController.signal.aborted && Date.now() < opts.deadlineAt!) {
+                  opts.beforeDispatch?.();
+                  _onVerificationRequired();
+                }
               } catch {
                 /* listener errors must never mask the API error */
               }

@@ -8,7 +8,7 @@ Start here for current work and unresolved status reviews. Use the [full catalog
 
 `needs-review` preserves an uncertain or conflicting legacy claim; it does not mean the feature is unbuilt.
 
-57 entries. Counts and rows come from the same status records.
+60 entries. Counts and rows come from the same status records.
 
 | Initiative / item | Status | Updated | Summary |
 |---|---|---|---|
@@ -69,12 +69,16 @@ Start here for current work and unresolved status reviews. Use the [full catalog
 | [396-flex-slot-label](396-flex-slot-label/status.md) | planned | 2026-08-24 | FB-396 |
 | [397-swipe-tour-placement](397-swipe-tour-placement/status.md) | planned | 2026-08-24 | FB-397 + FB-398 — swipe tour step placement (Group B canonical) |
 | [398-swipe-tour-top](398-swipe-tour-top/status.md) | planned | 2026-08-24 | FB-398 |
+| [419-rejected-interest-resurfacing](419-rejected-interest-resurfacing/status.md) | partly-shipped | 2026-09-06 | #419 rejected-interest fix: backend live; iOS 1.17.1 (149) uploaded, native validation pending |
+| [420-win-now-loading](420-win-now-loading/status.md) | in-progress | 2026-09-06 | #420/#421 Win Now recovery: merged and iOS 1.17.1 (149) uploaded; native delivery validation pending |
+| [421-win-now-timeout-message](421-win-now-timeout-message/status.md) | in-progress | 2026-09-06 | #421 neutral Win Now timeout copy: merged and iOS uploaded; native validation pending; canonical #420 |
 
 ## Status counts
 
 | Status | Count |
 |---|---|
 | built-dark | 4 |
-| in-progress | 36 |
+| in-progress | 38 |
 | needs-review | 5 |
+| partly-shipped | 1 |
 | planned | 12 |

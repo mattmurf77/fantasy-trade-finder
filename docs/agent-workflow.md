@@ -42,7 +42,7 @@ Settled contracts belong in canonical references; implementation evidence and un
 
 ## Files, credentials, collaboration
 
-- Durable feedback output: `docs/feedback/items/<id>-<slug>/`; groups use the lowest ID and satellites link to the owner. Initiative docs: `docs/plans/`. Gitignored `feedback-workspace/<id>/` is scratch, never the sole home of decisions or release results.
+- Durable feedback output: `docs/feedback/items/<id>-<slug>/`; groups use the lowest ID and satellites link to the owner. Initiative docs: `docs/plans/`. Gitignored `_local/feedback/<id>/` is scratch, never the sole home of decisions or release results.
 - Give parallel collaborators bounded tasks, canonical references, and one owner per edited file. Review their diffs and evidence. The same gates apply to agent-generated and direct work.
 - Credentials belong in gitignored `secrets.local.env`; read only required keys, never print or commit them. If needed values are missing, have the operator fill that file. Never copy credential backups/local settings into review artifacts. Synthetic seed/demo scripts must not target production.
 - Search tracked files or relevant directories. Exclude dependencies, archives, and nested worktrees by default. Historical local paths are breadcrumbs, not portable commands.

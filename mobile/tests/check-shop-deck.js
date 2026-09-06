@@ -1740,19 +1740,19 @@ for (const rel of [BODY_REL, MODE_REL]) {
       n.arguments.length === 2,
   );
 
-  // cs1 — the league-switch effect (deps exactly [leagueId], the one that
-  // also drops the deck) clears the chooser.
+  // cs1 — the identity/league reset effect also drops the deck and chooser.
+  // #419 extends the existing boundary to account changes in the same league.
   const leagueSwitch = effects.find(
     (e) =>
       ts.isArrayLiteralExpression(e.arguments[1]) &&
-      txt(sf, e.arguments[1]).replace(/\s+/g, '') === '[leagueId]' &&
+      txt(sf, e.arguments[1]).replace(/\s+/g, '') === '[leagueId,userId]' &&
       referencesIdentifier(sf, e.arguments[0], 'setDeck'),
   );
   assert(
     !!leagueSwitch &&
       referencesIdentifier(sf, leagueSwitch.arguments[0], 'setShopChooserCard'),
     "cs1: the league-switch effect clears shopChooserCard (a pick can never pair the new leagueId with the old league's asset)",
-    leagueSwitch ? 'league-switch effect found but it does not clear the chooser' : 'no [leagueId]-keyed deck-reset effect found',
+    leagueSwitch ? 'league-switch effect found but it does not clear the chooser' : 'no [leagueId, userId]-keyed deck-reset effect found',
   );
 
   // cs2 — resetDeckForNewTargets clears the chooser with the rest of the

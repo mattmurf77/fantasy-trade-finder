@@ -6,7 +6,7 @@ Status records describe the last documented disposition; they are not a fresh pr
 
 Use the [active index](INDEX.md) for normal work. This catalog also includes inactive and archived history.
 
-205 entries. Counts and rows come from the same status records.
+208 entries. Counts and rows come from the same status records.
 
 | Initiative / item | Status | Updated | Summary |
 |---|---|---|---|
@@ -212,6 +212,9 @@ Use the [active index](INDEX.md) for normal work. This catalog also includes ina
 | [414-lopsided-one-for-one](414-lopsided-one-for-one/status.md) | shipped | 2026-09-02 | FB-414 — lopsided 1-for-1 served (London for Lamb straight up) |
 | [415-queue-loss-refusal-no-advance](415-queue-loss-refusal-no-advance/status.md) | shipped | 2026-09-02 | FB-415 — "this trade would be a loss for Bcork", then no advance |
 | [416-liked-card-stays-no-swipe](416-liked-card-stays-no-swipe/status.md) | shipped | 2026-09-02 | FB-416 — liked card doesn't disappear; swipe is gone |
+| [419-rejected-interest-resurfacing](419-rejected-interest-resurfacing/status.md) | partly-shipped | 2026-09-06 | #419 rejected-interest fix: backend live; iOS 1.17.1 (149) uploaded, native validation pending |
+| [420-win-now-loading](420-win-now-loading/status.md) | in-progress | 2026-09-06 | #420/#421 Win Now recovery: merged and iOS 1.17.1 (149) uploaded; native delivery validation pending |
+| [421-win-now-timeout-message](421-win-now-timeout-message/status.md) | in-progress | 2026-09-06 | #421 neutral Win Now timeout copy: merged and iOS uploaded; native validation pending; canonical #420 |
 | [78-calc-suggestions](78-calc-suggestions/status.md) | shipped | 2026-07-17 | #78 — Calculator suggestions disagree with the evaluator |
 | [api-observability](api-observability/status.md) | shipped | 2026-08-09 | API observability — status |
 | [espn-webview-escape](espn-webview-escape/status.md) | shipped | 2026-08-09 | espn-webview-escape — status |
@@ -222,8 +225,9 @@ Use the [active index](INDEX.md) for normal work. This catalog also includes ina
 |---|---|
 | built-dark | 4 |
 | declined | 2 |
-| in-progress | 36 |
+| in-progress | 38 |
 | needs-review | 5 |
+| partly-shipped | 1 |
 | planned | 12 |
 | reference | 1 |
 | shipped | 145 |

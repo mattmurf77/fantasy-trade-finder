@@ -13,7 +13,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
 import { ink, chalk, ice, semantic, space, type } from '../theme/chalkline';
 import { Badge, Button, Icon } from '../components/chalkline';
-import { useSession, inviteIntentAgeMs } from '../state/useSession';
+import { useSession, inviteIntentAgeMs, beginLeagueContext, completeLeagueContext, currentSessionGuard } from '../state/useSession';
 import { useFlag, onboardingEnabled } from '../state/useFeatureFlags';
 import { requestGuideStep, advanceGuideIfActive, guidedAvatarActive } from '../state/useGuide';
 import { S as GUIDE } from '../components/analystScript';
@@ -21,12 +21,8 @@ import { getLeagues } from '../api/sleeper';
 import { getEspnLeagues } from '../api/espn';
 import { getPlatformLeagues, LinkPlatform } from '../api/platformLink';
 import {
-  buildSessionInitBody,
-  submitSessionInit,
   type LinkSleeperResponse,
-  type SessionInitSeed,
 } from '../api/auth';
-import { seedLeagueSessionCaches } from '../state/queryClient';
 import { maybePregenTrades } from '../api/tradePregen';
 import { track } from '../api/events';
 import { ApiError } from '../api/client';
@@ -435,26 +431,24 @@ export default function LeaguePickerScreen({
       },
       'LeaguePicker',
     );
+    let guard = currentSessionGuard();
     try {
-      // Gather the roster preview, then initialize before entering the tabs.
-      //
-      // Fetch rosters + users from Sleeper and build the
-      // session_init payload. This is the "data-gather" leg — fast enough
-      // that we block on it so we can surface Sleeper errors inline.
-      // `seed` collects the rosters + users phase 1 fetches, so the tabs we
-      // are about to navigate into read them from cache instead of asking
-      // Sleeper for the same two payloads again (state/queryClient).
-      const seed: SessionInitSeed = {};
-      const body = await buildSessionInitBody(user, { league_id: lg.league_id, name: lg.name }, seed);
-      seedLeagueSessionCaches(lg.league_id, seed);
-
-      // Keep the picker reachable until the server accepts identity and
-      // membership. A rejected init must not strand the caller in Main.
-      await submitSessionInit(body);
-      await setLeague({ league_id: lg.league_id, league_name: lg.name });
+      const pending = beginLeagueContext(user, {league_id: lg.league_id, name: lg.name}, opts?.auto ? 'automatic' : 'selection');
+      // Intent changes synchronously, before token preparation can fail. Error
+      // publication checks identity only: an expired deadline must show retry.
+      guard = currentSessionGuard();
+      const context = await pending;
+      guard = context.assertIdentity;
+      // Shared ordering and guarded cache seeding, still BEFORE entering Main.
+      await completeLeagueContext(context);
+      context.assertCurrent();
+      await setLeague({ league_id: lg.league_id, league_name: lg.name }, context.assertCurrent);
+      context.assertCurrent();
       onLeaguePicked();
       maybePregenTrades(lg.league_id);
     } catch (e: any) {
+      if (e?.name === 'AbortError') return;
+      try { guard(e); } catch { return; }
       const code = e instanceof ApiError ? (e.body as any)?.error : null;
       if (code === 'verification_required') {
         const previous = useSession.getState().verification;

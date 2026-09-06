@@ -408,3 +408,34 @@ def test_replenish_reuses_fresh_cached_job_without_regenerating(live_session):
     kick.assert_not_called()
     assert second is not None
     assert second[0] == first[0]
+
+
+@pytest.mark.parametrize("cached", [True, False])
+def test_419_replenish_count_rechecks_pass_after_final_publish(live_session, cached):
+    _client, _engine, _flags = live_session
+    original_kickoff = server._kickoff_trade_job
+    prior_count = []
+
+    def pass_card(job_id):
+        cards = server._trade_jobs[job_id]["cards"]
+        assert cards
+        prior_count.append(len(cards))
+        row = cards[0]
+        db_module.save_trade_decision(UID, LEAGUE, "419-after-publish",
+            [p["id"] for p in row["give"]], [p["id"] for p in row["receive"]], "pass")
+
+    def kickoff_then_pass(**kwargs):
+        job_id = original_kickoff(**kwargs)
+        pass_card(job_id)
+        return job_id
+
+    if cached:
+        assert server._replenish_deck_for(UID, LEAGUE) is not None
+        pass_card(server._trade_jobs_by_key[(UID, LEAGUE, "1qb_ppr")])
+        with patch.object(server, "_kickoff_trade_job", MagicMock()) as kick:
+            result = server._replenish_deck_for(UID, LEAGUE)
+        kick.assert_not_called()
+    else:
+        with patch.object(server, "_kickoff_trade_job", kickoff_then_pass):
+            result = server._replenish_deck_for(UID, LEAGUE)
+    assert result is not None and result[0] == prior_count[0] - 1

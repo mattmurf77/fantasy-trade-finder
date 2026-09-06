@@ -6,9 +6,13 @@ Recent outcomes; current release state is in [HANDOFF](HANDOFF.md).
 
 Created an independent current-main organization branch, consolidated product/workflow references, generated status indexes, archived closed plans and retired tooling, and preserved local-only work with integrity manifests. Startup memory is explicitly bounded. [Migration and validation](../docs/recovery/2026-09-06-project-organization.md). This is local repository work; no product rollout.
 
-## 2026-09-05 — Owner-contract mobile build uploaded; backend remains unmerged (D-185)
+## 2026-09-06 — Feedback 419–421 released; smaller-package preference ON
 
-Draft PR #281 publishes parent-reviewed Astra work: search continuity, personal-tier intent, tier-bounded feedback and scoped counterparty privacy. Exact built source `0fc1b539` passed hosted CI: **5,455 backend passed / 1 skipped**, all 93 mobile guards/typecheck/test-ID and 190 web checks. iOS **1.17.0 (148)** built and uploaded to App Store Connect for TestFlight; Apple processing/tester availability and physical QA remain unverified. Backend fixes are **not deployed**: main/Render and all three generator arms/flags are unchanged. Raw interview documents stayed local; a clean inspected EAS archive excluded them. [Release evidence and limitations](../docs/plans/owner-contracts/release.md).
+PR #283 merged `988fa2d6` after exact-head CI: **5,645 backend passed / 1 skipped**, 95 mobile guards/typecheck/test-ID and 190 web checks; both independent Astra Ultra QA reviews passed. Render is LIVE; only `simple_player_presentment` changed to **1**, preserving all prior flags/settings and three arms. Fixes stale rejected-interest resurfacing and native Win Now initialization/timeout behavior. iOS **1.17.1 (149)** build and exact submission are FINISHED. Only 419–421 marked `fixed`; the 45-report audit made no unrelated closures. Apple availability and the 23-step physical checklist remain unverified/UNRUN. [Release evidence](../docs/feedback/items/419-rejected-interest-resurfacing/release.md), [trade-shape research](../docs/research/2026-09-06-trade-package-shapes.md).
+
+## 2026-09-05 — Owner-contract first wave LIVE; mobile build uploaded (D-185)
+
+PR #281 merged after explicit activation authorization: search continuity, personal-tier intent, tier-bounded feedback and scoped counterparty privacy. Final head `f88afabb` passed CI: **5,455 backend / 1 skip**, all 93 mobile guards/typecheck/test-ID and 190 web checks. Render `4026ebc8` live at **09:51:59 UTC**; smoke passed and all 207 flags, 258 model settings, tiers and experiment summaries were unchanged at that checkpoint. The owner then separately authorized [personal-market activation](../docs/plans/owner-contracts/policy-activation.md), live at **16:01:20 UTC** with exactly one flag changed; three arms preserved. iOS **1.17.0 (148)** uploaded for TestFlight; Apple/tester confirmation and physical QA remain. Raw interviews stayed local. [Release evidence, rollback and unfinished work](../docs/plans/owner-contracts/release.md).
 
 ---
 
@@ -108,22 +112,3 @@ browser E2E on the fixture-stubbed app for both platforms
 [#272](https://github.com/mattmurf77/fantasy-trade-finder/pull/272) squash → `main` @ `ca5fac46`, CI ×4 green, branch content-verified and ledgered
 (`docs/recovery/2026-09-03b-web-platform-entry-ship.md`). Web-only — Render redeploys, no EAS build.
 Owed: the operator's 4-step prod check (scope §V3).
-
-## 2026-09-03 — Weekly feedback run SHIPPED: #413 Sleeper pick-send fix (D-176, v1.16.15); #415/#416 verify-closed; a parallel #414 build superseded by D-175
-Operator ask (2026-09-02): "all my open feedback from this week". **#415/#416 → `fixed`** (already
-shipped by D-170 at 21:29Z and D-171/v1.16.14 on 08-31; a minute-level timeline showed #415 filed
-63 min before D-170 landed and #416 after it). **#413 ([D-176](DECISIONS.md))** — Send in Sleeper had
-NO pick handling: picks went to Sleeper as player ids (502) and the validator flagged every pick as a
-moved player. Server now splits the mixed arrays, resolves existence on the platform `draft_picks`
-grid + holder on live `traded_picks`, encodes `orig,season,round,from,to` itself, and refuses the
-whole send (422 `sleeper_pick_unmapped` / `sleeper_pick_not_owned`, both with `detail == message`
-so fielded builds read the reason); validate gains `asset_unmapped` / `pick_moved`; mobile adds
-count-aware alerts. Field 1 on an acquired pick is [Q-037](OPEN_QUESTIONS.md) (TestFlight step 3).
-Dual-QA PASS, +20 tests, 40+ sabotage cycles. **#414:** this session built a *tightening* frac knob
-(`min(1539, 0.10×max)`, two-tier accept, sibling rule, +29 tests, dual-QA green) on a base cut
-before the OTHER session shipped [D-175](DECISIONS.md) (`max(threshold, frac×max)` band +
-`sweetener_best_effort`, corpus-measured, live at 750/0.12/1) for the same report — main's answer
-stands; the parallel build is **not shipped**, kept as history in
-`docs/feedback/items/414-lopsided-one-for-one/`. Its one finding main still lacks — the gap pass's
-receive-side equalizer never re-checks #360 avoid on v3/v2 (G-8) — is a NEXT follow-up. Lessons ×14
-in the skill. Evidence: TEST_LEDGER 2026-09-02/-03.

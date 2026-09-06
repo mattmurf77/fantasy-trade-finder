@@ -133,7 +133,7 @@ def _canonical_rows(engine):
 
 
 def run_capture(extra_patches=(), seed_like=True, trade_intent=None,
-                prefs_preload=None):
+                prefs_preload=None, scoring_format="1qb_ppr"):
     """Run one full trade job and return the canonical capture dict."""
     engine = create_engine("sqlite:///:memory:",
                            connect_args={"check_same_thread": False})
@@ -161,15 +161,15 @@ def run_capture(extra_patches=(), seed_like=True, trade_intent=None,
         "league":        league,
         "user_roster":   list(ME_ROSTER),
         "players":       pool,
-        "services":      {"1qb_ppr": service},
-        "trade_svcs":    {"1qb_ppr": trade_svc},
+        "services":      {scoring_format: service},
+        "trade_svcs":    {scoring_format: trade_svc},
         "service":       service,
         "trade_svc":     trade_svc,
-        "active_format": "1qb_ppr",
+        "active_format": scoring_format,
         "last_active":   0.0,
     }
     job = {
-        "job_id": JOB_ID, "key": (ME, LEAGUE, "1qb_ppr"), "status": "running",
+        "job_id": JOB_ID, "key": (ME, LEAGUE, scoring_format), "status": "running",
         "started_at": time.monotonic(), "finished_at": None,
         "opponents_done": 0, "opponents_total": 2, "cards": [],
         "error": None, "fairness_threshold": 0.75,
@@ -208,7 +208,7 @@ def run_capture(extra_patches=(), seed_like=True, trade_intent=None,
                 server._sessions.pop(TOKEN, None)
             with server._trade_jobs_lock:
                 server._trade_jobs.pop(JOB_ID, None)
-                server._trade_jobs_by_key.pop((ME, LEAGUE, "1qb_ppr"), None)
+                server._trade_jobs_by_key.pop((ME, LEAGUE, scoring_format), None)
 
         capture = {
             "status":      job.get("status"),

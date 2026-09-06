@@ -2,10 +2,10 @@
 
 ## Current State — 2026-09-06
 
-**Where I stopped:** organization is complete on `codex/project-organization-20260906`, based on freshly cloned main `4026ebc8`. The durable working directory is the sibling `Fleeced` project. See the [organization record](../docs/recovery/2026-09-06-project-organization.md) for changes, validation and recovery.
+**Where I stopped:** current work belongs in the sibling `Fleeced` workspace. Organization commit `52630df3` consolidates knowledge and preserves local recovery. The publication branch integrates newer main `4c343a48`; see the [organization record](../docs/recovery/2026-09-06-project-organization.md) and [GitHub main history](https://github.com/mattmurf77/fantasy-trade-finder/commits/main) for publication evidence.
 
-**In flight:** product acceptance and rollout questions remain with their own initiative/release evidence. Organization did not push, deploy, submit or enable anything. A main commit alone does not prove tester availability or production rollout.
+**In flight:** the separate feedback release merged as `988fa2d6`; its [release record](../docs/feedback/items/419-rejected-interest-resurfacing/release.md) verifies Render LIVE and iOS 1.17.1 (149) upload. Apple tester availability and the 23 device steps remain unverified/UNRUN. Organization requires no new mobile build or flag changes.
 
-**Blocked on:** no organization blocker. Original dirty work, private artifacts and unresolved proposals remain preserved; the [prior queue and snapshots](archive/static-2026-09-06/README.md) retain their evidence.
+**Blocked on:** no local organization blocker. Hosted CI and merge results must be checked for the exact published source. Private artifacts and original dirty work remain preserved.
 
-**Don't repeat:** use the clean workspace for new work. Do not overwrite it with old source mirrors, repeat stale unmerged claims, execute retired simulator tools or treat historical plans as shipped behavior. All existing nested worktrees remain excluded and untouched by this task.
+**Don't repeat:** retain the clean structure and latest application changes together. Do not apply old source mirrors, revive retired simulator tools, repeat superseded release claims or rebuild/re-submit build149. Existing nested worktrees remain outside this task.

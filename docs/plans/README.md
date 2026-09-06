@@ -55,7 +55,7 @@ Start here for current work and unresolved status reviews. Use the [full catalog
 | [onboarding-conversion](onboarding-conversion/status.md) | built-dark | 2026-08-11 | onboarding conversion |
 | [onboarding-tour-merge](onboarding-tour-merge/status.md) | planned | 2026-08-23 | onboarding tour merge |
 | [open-access-phase-a-gates.md](open-access-phase-a-gates.md) | needs-review | — | Open-access onboarding — Phase A pre-flip gates |
-| [owner-contracts](owner-contracts/status.md) | built-unmerged | 2026-09-05 | Owner contract implementation and release |
+| [owner-contracts](owner-contracts/status.md) | partly-shipped | 2026-09-05 | Owner contracts: PR #281 merged, backend and experimental policy live; iOS uploaded, native validation pending |
 | [package-benchmark-sweetener](package-benchmark-sweetener/status.md) | built-unmerged | 2026-08-21 | Package benchmark sweetener |
 | [pass-cooldown](pass-cooldown/status.md) | needs-review | — | pass cooldown |
 | [pending-trades-inbox-plan-2026-08-12.md](pending-trades-inbox-plan-2026-08-12.md) | planned | — | Pending Trades Inbox — Plan (2026-08-12) |
@@ -92,8 +92,8 @@ Start here for current work and unresolved status reviews. Use the [full catalog
 |---|---|
 | active | 7 |
 | built-dark | 4 |
-| built-unmerged | 8 |
+| built-unmerged | 7 |
 | in-progress | 3 |
 | needs-review | 36 |
-| partly-shipped | 7 |
+| partly-shipped | 8 |
 | planned | 8 |

@@ -1,4 +1,4 @@
-import { api, apiRequest, ApiError, getSessionToken, setSessionToken } from './client';
+import { api, apiRequest, ApiError, getSessionToken, requestAborted, setSessionToken } from './client';
 import { getDeviceId } from './events';
 import { getPersistedSleeperToken, maybeReplaySleeperVerification } from './sendInSleeper';
 import {
@@ -239,22 +239,37 @@ export interface SessionInitResponse {
   verification?: SessionVerification;
 }
 
+/** State owns the lifecycle; every init writer supplies this same fence. */
+export interface SessionInitControl {
+  token: string;
+  signal: AbortSignal;
+  deadlineAt: number;
+  assertCurrent: () => void;
+  onDispatch: () => void;
+  submit: <T>(send: () => Promise<T>) => Promise<T>;
+}
+
 async function requireSameSession(token: string | null): Promise<void> {
   if (!token || await getSessionToken() !== token) {
     throw new ApiError(409, {error: 'session_changed'}, 'Your session changed. Please try again.');
   }
 }
 
-export async function sessionInit(body: SessionInitBody): Promise<SessionInitResponse> {
-  const sessionToken = await getSessionToken();
+export async function sessionInit(body: SessionInitBody, control: SessionInitControl): Promise<SessionInitResponse> {
+  control.assertCurrent();
+  const sessionToken = control.token;
   // The protected init must follow proof, including cold-start replay and
   // the sign-in replay already in flight. Account-only sessions skip this
   // helper because their provider proof was established at mint.
   await maybeReplaySleeperVerification(body.user_id);
+  control.assertCurrent();
   await requireSameSession(sessionToken);
-  const res = await api.post<SessionInitResponse>('/api/session/init', body,
-    {skipAuth: true, headers: {'X-Session-Token': sessionToken!}});
+  control.assertCurrent();
+  const res = await control.submit(() => api.post<SessionInitResponse>('/api/session/init', body,
+    {skipAuth: true, headers: {'X-Session-Token': sessionToken}, signal: control.signal,
+      deadlineAt: control.deadlineAt, beforeDispatch: () => { control.assertCurrent(); control.onDispatch(); }}));
   await requireSameSession(sessionToken);
+  control.assertCurrent();
   // Mirror the server's verified-session state into the store so the
   // verify banner reacts to every init/revalidate. Loaded inline to avoid
   // a circular import (same pattern as consumeInvitedBy below).
@@ -293,6 +308,7 @@ export async function sessionInit(body: SessionInitBody): Promise<SessionInitRes
           .then((late) => {
             if (late !== 'verified') return;
             try {
+              control.assertCurrent();
               const { useSession } = require('../state/useSession');
               const state = useSession.getState();
               const cur = state.verification;
@@ -317,6 +333,7 @@ export async function sessionInit(body: SessionInitBody): Promise<SessionInitRes
       // 'rejected' / 'inconclusive' / 'none' → mirror server values unchanged.
     }
     try {
+      control.assertCurrent();
       const { useSession } = require('../state/useSession');
       useSession.getState().setVerification(verification);
     } catch {
@@ -342,11 +359,9 @@ export async function sessionPing(): Promise<{ ok: true }> {
 // are short (~2-3s); sessionInit is the slow leg (5–10s on
 // Render's free tier when rebuilding rosters + members).
 //
-// INIT-08-client: LeaguePickerScreen calls the two phases separately so
-// the user can navigate to Main after phase-1 (Sleeper) completes, while
-// phase-2 (sessionInit) runs in the background. switchLeague still uses
-// the combined `initLeagueSession` path (inline league switch must be
-// atomic — no backgrounding needed there).
+// The state-owned lifecycle uses the combined path for picker, switch,
+// connect, foreground and resync. All await server acceptance before
+// publishing the selected league; builders return seeds, not cache writes.
 export interface LeagueLite { league_id: string; name: string }
 
 /** The Sleeper reads the session-init builders already performed, handed
@@ -406,7 +421,9 @@ function buildSleeperRosterPayload(
 export async function initLeagueSession(
   user: SavedUser,
   lg: LeagueLite,
+  control: SessionInitControl,
 ): Promise<SessionInitSeed> {
+  control.assertCurrent();
   // ESPN-imported leagues (flag `espn.link`) have no Sleeper rosters — the
   // proxy routes would 404 on their numeric ids. Build the init body from
   // the backend's imported snapshot instead (api/espn.ts); the resulting
@@ -414,19 +431,22 @@ export async function initLeagueSession(
   // cached league list's `platform` field (hydrated from AsyncStorage).
   if (isEspnLeague(lg.league_id)) {
     const espnBody = await buildEspnSessionInitBody(user, lg);
-    await submitSessionInit(espnBody);
+    await submitSessionInit(espnBody, control);
     return {};
   }
   // MFL / Fleaflicker imports work the same way — rosters come from the
   // backend snapshot (api/platformLink.ts), not Sleeper proxies.
   if (isMflLeague(lg.league_id)) {
-    await submitSessionInit(await buildPlatformSessionInitBody('mfl', user, lg));
+    await submitSessionInit(await buildPlatformSessionInitBody('mfl', user, lg), control);
     return {};
   }
   if (isFleaflickerLeague(lg.league_id)) {
-    await submitSessionInit(await buildPlatformSessionInitBody('fleaflicker', user, lg));
+    await submitSessionInit(await buildPlatformSessionInitBody('fleaflicker', user, lg), control);
     return {};
   }
+  // An account-only working key is not a Sleeper identity. Imported leagues
+  // above remain supported; a missing platform row must not proxy acct_*.
+  if (user.account_only) throw requestAborted();
   // Warm the backend's Sleeper player-DB cache in parallel with the
   // roster/users fetches. session_init below errors with
   //   "Player database not cached — call GET /api/sleeper/players first"
@@ -458,6 +478,8 @@ export async function initLeagueSession(
   const { myPlayerIds, opponentRosters, leagueUserId, leagueDisplayName } =
     buildSleeperRosterPayload(rosters, usernameMap, user.user_id);
 
+  control.assertCurrent();
+
   // Pull (and clear) any in-memory referral attribution captured from a
   // deep link. Backend stores invited_by on the users row only on insert,
   // so it's safe to forward on every session_init — repeat calls are no-ops.
@@ -485,7 +507,7 @@ export async function initLeagueSession(
   };
 
   try {
-    await sessionInit(initBody);
+    await sessionInit(initBody, control);
   } catch (e: any) {
     // Cold-restart recovery (INIT-12 FR-7 / AC-6): if the backend process lost
     // its player cache *after* this launch warmed once, warmedThisLaunch is
@@ -493,9 +515,10 @@ export async function initLeagueSession(
     // "Player database not cached". Reset the flag, re-warm for real, and retry
     // session_init exactly once. Any other failure bubbles unchanged.
     if (_isPlayerCacheMissing(e)) {
+      control.assertCurrent();
       resetWarmedFlag();
       await warmPlayerCache();
-      await sessionInit(initBody);
+      await sessionInit(initBody, control);
     } else {
       throw e;
     }
@@ -581,14 +604,15 @@ export async function buildSessionInitBody(
 // recovery. Await before entering Main so ownership or membership failures
 // remain recoverable in the league picker. Does not throw on "player database not cached" —
 // retries once automatically (same recovery path as initLeagueSession).
-export async function submitSessionInit(body: SessionInitBody): Promise<void> {
+export async function submitSessionInit(body: SessionInitBody, control: SessionInitControl): Promise<void> {
   try {
-    await sessionInit(body);
+    await sessionInit(body, control);
   } catch (e: any) {
     if (_isPlayerCacheMissing(e)) {
+      control.assertCurrent();
       resetWarmedFlag();
       await warmPlayerCache();
-      await sessionInit(body);
+      await sessionInit(body, control);
     } else {
       throw e;
     }

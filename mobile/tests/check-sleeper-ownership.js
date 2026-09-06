@@ -72,7 +72,11 @@ async function staleAuthResponseTest(method) {
     './events':{}, './sendInSleeper':{maybeReplaySleeperVerification:async()=> 'none'},
     './sleeper':{}, './espn':{}, './platformLink':{},
   });
-  const pending=method==='init' ? auth.sessionInit({user_id:'original'}) :
+  // The lifecycle seam supplies the captured token. Keep its publication fence
+  // inert here so THIS test still exercises auth.ts's real token-reuse check.
+  const control = {token: currentToken, signal: new AbortController().signal,
+    deadlineAt: Date.now()+90_000, assertCurrent:()=>{}, onDispatch:()=>{}, submit:send=>send()};
+  const pending=method==='init' ? auth.sessionInit({user_id:'original'}, control) :
     auth.linkSleeperUsername('manager',undefined,'proof.jwt.sig');
   await flush();
   currentToken='new-session';
@@ -164,7 +168,8 @@ async function formTest(mode) {
   for (const mode of ['verified','unverified','cancel','closed','switched']) await formTest(mode);
   const picker = source('src/screens/LeaguePickerScreen.tsx');
   const pick = picker.slice(picker.indexOf('async function pickLeague'));
-  assert(pick.indexOf('await submitSessionInit(body)') < pick.indexOf('await setLeague('));
+  const initialized = pick.indexOf('await completeLeagueContext(context)');
+  assert(initialized >= 0 && initialized < pick.indexOf('await setLeague('));
   assert(picker.includes('leagues.verify-sleeper') && picker.includes("navigation.navigate('SleeperConnect')"));
   const auth = source('src/api/auth.ts').split('export async function sessionInit')[1];
   assert(auth.indexOf('await maybeReplaySleeperVerification') < auth.indexOf('api.post'));

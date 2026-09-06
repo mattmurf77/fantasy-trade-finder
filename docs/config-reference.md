@@ -653,6 +653,25 @@ Props are a **key allowlist** — the registry does not validate values, so the 
 
 ## `model_config` keys
 
+### Small-player presentation
+
+`simple_player_presentment` is a Float-valued backend presentation setting,
+default **0.0** in both default registries. Exactly finite numeric **1.0**
+selects `simple-player-v1`; missing, unsupported and malformed values mean
+off (booleans do not enable it). Six-position windows are versioned code, not
+another setting. This is not an arm-profile, fairness or generation knob.
+
+The worker applies it once after successful live final policy evaluation on
+organic untargeted decks, preserving arm/group/lane/basis/policy slots.
+Explicit selections, demo/ghost/shadow/dark-validation paths are exempt.
+Each request captures its mode/version through reuse, kickoff and writers;
+all completed/running/pregen/replenishment cache probes require compatibility.
+Changing to **0.0** rolls back fresh generation, not already rendered decks
+or old job IDs. Old decks retain their order subject to ordinary disposition
+removal. Activation is a separate recorded operator-authorized release
+action; default seeding never overwrites a saved value.
+[Contract and evidence](plans/small-trade-packages/prd.md).
+
 Two layers, both read through `trade_service._cfg` at runtime:
 
 1. **DB-seeded keys** — `_MODEL_CONFIG_DEFAULTS` in `backend/database.py` seeds the `model_config` table (INSERT OR IGNORE on startup). Tunable live via `PUT /api/admin/config/<key>`.

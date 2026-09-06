@@ -13,6 +13,7 @@ The annotated per-module map (contracts, error codes, flag gates, known contract
 | League platforms | `sleeper.ts`, `espn.ts`, `platformLink.ts` (MFL + Fleaflicker), `league.ts` |
 | Rankings & values | `rankings.ts`, `market.ts`, `calc.ts`, `leaderboard.ts` |
 | Trades | `trades.ts`, `tradePregen.ts`, `declineReasons.ts` |
+| Season baseline / Win Now | `winNow.ts` (wire calls; native readiness/recovery is coordinated by state) |
 | Trade send | `sendInSleeper.ts`, `sendInMfl.ts`, `sendInEspn.ts` |
 | Rookie draft | `draft.ts`, `mockDraft.ts`, `pickAssignment.ts`, `recordedPicks.ts` |
 | App plumbing | `flags.ts`, `events.ts` (analytics), `notifications.ts`, `feedback.ts` |
@@ -25,6 +26,20 @@ The annotated per-module map (contracts, error codes, flag gates, known contract
 - **Open vs closed enums matter.** `notice.code`, typed-empty `reason`, and `suggested_order_source` are OPEN — an unknown value must degrade to generic copy, not crash. `state`, `kind`, `order_confidence` are CLOSED.
 - **Two offline write queues exist** — `events.ts` (analytics) and `recordedPicks.ts` (live draft picks). They share the pure primitives in `_queue.ts` (uuid idempotency keys, backoff ladder, accepted/deduped/rejected purge) but keep their own flush loops on purpose. A third queue copies that contract; it does not invent a new one.
 - **Backend contract of record:** [docs/api-reference.md](../../../docs/api-reference.md). Route changes there and here move together.
+
+Native projection reads use a 30-second logical-request cap for exact GET
+`/api/league/season-projections`, including token preparation, retries and body
+consumption. Other route allowances remain unchanged. State may pass a shorter
+absolute deadline and an identity fence; API never imports the coordinator or
+query cache. Caller cancellation is silent. A timeout says “This request took
+too long. Please try again.”, not a diagnosis of the hosting service. Shared
+401/verification callbacks check the session that sent the request before
+changing current identity/verification.
+
+Reason capture returns its structured result (or null on transport failure).
+`ok` means the reason was saved; only `passed === true` confirms its durable
+exact pass. A companion swipe is an independent request. Existing actual-card
+context fields identify edited packages after a server restart.
 
 ## Adding a module
 

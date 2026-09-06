@@ -160,23 +160,25 @@ assert(
 // S-1 — every initLeagueSession caller in the state layer seeds
 // ═══════════════════════════════════════════════════════════════════════
 const useSessionSrc = read('src/state/useSession.ts');
-const initCalls = (useSessionSrc.match(/initLeagueSession\(/g) || []).length;
-const seedCalls = (useSessionSrc.match(/seedLeagueSessionCaches\(/g) || []).length;
+const lifecycleSrc = read('src/state/leagueSession.ts');
 assert(
-  initCalls > 0 && seedCalls >= initCalls,
-  'S-1a every useSession initLeagueSession call is paired with a seed',
-  `${initCalls} initLeagueSession call(s), ${seedCalls} seed call(s)`,
+  /initialize:\s*initLeagueSession/.test(useSessionSrc)
+    && /onReady:[\s\S]{0,180}context\.assertCurrent\(\);[\s\S]{0,80}seedLeagueSessionCaches\(context\.league\.league_id, seed\)/.test(useSessionSrc)
+    && /const seed = await deps\.initialize[\s\S]{0,160}assertCurrent\(\);[\s\S]{0,100}deps\.onReady\(context, seed\)/.test(lifecycleSrc),
+  'S-1a every shared initialization seeds only after guarded success',
 );
 assert(
-  /revalidateSession[\s\S]{0,1200}?seedLeagueSessionCaches\(/.test(useSessionSrc),
-  'S-1b revalidateSession seeds — the cold-start / foreground-resume path',
+  /revalidateSession: async[\s\S]{0,1200}await initializeLeagueSession\(/.test(useSessionSrc),
+  'S-1b cold-start / foreground revalidation uses the shared seeding owner',
 );
 
 const pickerSrc = read('src/screens/LeaguePickerScreen.tsx');
 assert(
-  /buildSessionInitBody\([^)]*seed\)/.test(pickerSrc)
-    && /seedLeagueSessionCaches\(/.test(pickerSrc),
-  'S-1c LeaguePicker passes the seedOut to buildSessionInitBody and seeds it',
+  /const pending = beginLeagueContext\(/.test(pickerSrc)
+    && /const context = await pending/.test(pickerSrc)
+    && /await completeLeagueContext\(context\);[\s\S]{0,200}await setLeague\(/.test(pickerSrc)
+    && !/seedLeagueSessionCaches\(/.test(pickerSrc),
+  'S-1c picker awaits shared guarded init/seed before selecting the league',
 );
 
 // ═══════════════════════════════════════════════════════════════════════

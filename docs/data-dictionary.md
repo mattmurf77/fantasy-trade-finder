@@ -410,6 +410,26 @@ TikTok-discovery **F1 signal spine** (flag `deck.signal_v2`, `docs/plans/tiktok-
 
 `features_json` additionally carries `also_proposed_by` (list of arm names) on a bake-off card that ANOTHER arm also proposed — the duplicate ledger. Credit is first-picker, so the trade appears once; agreement is recorded rather than discarded.
 
+**Bounded small-player presentation:** enabled eligible jobs add
+`features_json.presentation = {version: "simple-player-v1", window_size: 6,
+original_index, final_index, give_player_count, receive_player_count}` to every
+served occurrence, including locked/unmoved ones. `original_index` is its
+post-policy/pre-permutation position. Records travel through the final
+order-preserving pass/source filter; `final_index` equals the actual F1
+`card_index` at insertion. Known counts are integers; unknown sides are null.
+Duplicate-shaped objects and repeated occurrences retain separate position
+records; removed occurrences get no row. Subsequent polling cannot rewrite
+frozen indices. Off/exempt jobs have no presentation key.
+
+The captured serving version adds `/pp:simple-player-v1` before
+`/bo:<arm>`. Existing `model_arm`, original arm/group ranks, real propensity,
+and separate valuation `policy_variant` are unchanged. Presentation stamping
+does not enable suggestion/candidate/ghost telemetry and never writes an
+impression while F1 logging is disabled. This uses existing JSON/string
+columns, not a schema migration. Exposure analysis must distinguish this
+serving order from original model rank and cannot infer causal acceptance
+improvement from the before/after labels.
+
 **Fit challenger keys (PR-F3, LLD §3.3 — T2 contract):** on EVERY bake-off row — never conditionally, because `save_deck_impressions`' executemany compiles from the first row's keys and the M4 null-share tripwire needs absence to be impossible — `features_json` carries two more keys, null-valued when absent: `fit` (the arm-fit dual-score payload `{you, them, aggregate (0–200), bucket ∈ {both_high, mixed, you_tilt, them_tilt, both_ok, weak}, boards ∈ {both, viewer, partner, none}, ver, r5_fail, lenses: {you|them: {board, vs_consensus, consensus}}}` — non-null only on served `model_arm='fit'` cards; lens nulls DO serialize) and `fit_diag` (the M3 stamp `{you, them, bucket, ver, lenses}`, present on every card of every arm the post-ranking `stamp_fit_diag` pass reached, null when a card was unscorable). Analysis keys on `fit.boards` — **never** on `basis`, which on a fit card means data-availability, not divergence supply. A `fit_diag` null-share > 5% per arm marks the window suspect (readout §7f). Flag-off rows are byte-identical — both keys sit inside the `bakeoff_run is not None` guard. **`surplus_margin` on `model_arm='fit'` rows** inherits `mismatch_score` = the harmonic mean of the two 0–100 team scores (HLD F-4 — zero when either side scores zero, never used for ranking), NOT a value-space surplus.
 
 **Counterparty-breaker keys (2026-08-21, flag `trade.breaker`; [LLD](plans/counterparty-breaker/LLD.md) §1.4/§2.1/§2.5):** on EVERY row of a flag-on deck — **organic rows included**, unlike the two fit keys above, because the breaker's copy sits *outside* the `bakeoff_run is not None` guard — `features_json` carries two more keys, `breaker` and `breaker_shadow`. Same executemany reasoning as the fit keys, one step stricter: the value is **never a bare null**. A card the evaluator could not score carries a labeled minimal marker `{ver, degraded, objections: null}` instead, so "we did not score this" and "the key went missing" are different states in the data.
@@ -518,10 +538,12 @@ The three tiles (Value · Fit · Neither) replace the card's ✕, so **tapping a
 | `free_text` | text | the user's own words, ≤500 chars, trimmed. **Stored here and nowhere else** — never an analytics property (SPEC §3.4); `trade_pass_layer2` carries only the boolean `has_free_text` |
 | `switched_from` | str | the prior layer-1 reason when the user moved to another tile, else NULL. Derived server-side from the stored row, never taken from the client. A stored `detail` is deliberately **kept** across a switch (a refinement, not a reset) |
 | `elo_signal_at` | str | ISO UTC of the Elo write this pass produced, or NULL when the reason suppressed it (SPEC §4). Doubles as the once-only guard: the write is claimed with `UPDATE … WHERE elo_signal_at IS NULL`, so no retry or re-tap double-counts a pass into ranking math |
-| `created_at` | str | ISO UTC — the tap that passed the card |
+| `created_at` | str | Immutable ISO UTC of the first reason-bank write; independent of whether a pass disposition was persisted. Refinements never reset this episode anchor |
 | `updated_at` | str | ISO UTC — the most recent tap |
 
 Indexes: `ix_trade_pass_reasons_user_league` on `(user_id, league_id)`.
+
+Companion-pass checks bind the immutable reason episode to exact actor/league/trade/exposure evidence. The legacy pass-before-reason bridge is limited to ten seconds and respects intervening consent; elapsed time never resets a surrogate reason key into a new episode. See the [episode-repair trace](feedback/items/419-rejected-interest-resurfacing/backend-code-walk.md#qa-a-episode-repair--final-path-atop-e02d074e).
 
 **This table's `detail` vocabulary now has a second consumer** (2026-08-21, flag `trade.breaker`): the counterparty breaker *predicts* an objection in exactly these layer-2 codes and stamps it into `deck_impressions.features_json.breaker` (above), so the calibration question — did the predicted objection match the reason actually filed? — is a join on `impression_id` and not a mapping table. Two rules follow from that and belong here: a code added to `PASS_REASON_LAYER2` gains a **producer** (who may emit it — user, breaker, or a future sibling), and the breaker's one extension code `roster_crunch` has **no filed-reason anchor**, so it can never be scored for precision against this table. `other_text` rows are unmatched by construction and are excluded from every per-class precision denominator.
 
