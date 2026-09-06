@@ -5,7 +5,7 @@
 **Builder:** Parent integration review plus independent Astra Ultra mobile and policy builders.
 **Operator sign-off on waivers:** Not needed; no waivers. D-056 prohibits simulator/Maestro evidence.
 **Baseline:** `origin/main` at `5cf34182`; separate worktrees protect the owner's unrelated working changes.
-**Status:** Bounded implementation parent-reviewed; local and final hosted gates passed. Explicit follow-up requests authorized GitHub/TestFlight, then backend activation: PR #281 merged, Render live at `4026ebc8`, iOS 1.17.0 (148) uploaded. Existing runtime settings remain unchanged; no experimental policy activation. Apple processing/tester availability and physical QA remain unverified. [Release evidence](release.md).
+**Status:** Bounded implementation parent-reviewed; local and final hosted gates passed. Explicit follow-up requests authorized GitHub/TestFlight, then backend activation: PR #281 merged, Render live at `4026ebc8`, iOS 1.17.0 (148) uploaded. That code release preserved settings; the later separately authorized [policy activation](policy-activation.md) changed only the personal-market flag. Apple processing/tester availability and physical QA remain unverified. [Release evidence](release.md).
 
 ## Behavior and boundaries
 

@@ -1,7 +1,7 @@
 # Owner contracts — parent review and remaining work
 
 **Date:** 2026-09-05. **Baseline:** `origin/main` at `5cf34182`.
-**Status:** parent-reviewed implementation merged via PR #281 and live on Render at `4026ebc8`. Final PR head `f88afabb` passed all hosted CI checks. iOS 1.17.0 (148) uploaded to TestFlight/App Store Connect; Apple processing/tester availability and physical QA remain unverified. All three arms and existing settings are unchanged; personal-market treatment stays off. [Release evidence](release.md).
+**Status:** parent-reviewed implementation merged via PR #281 and live on Render at `4026ebc8`. Final PR head `f88afabb` passed all hosted CI checks. iOS 1.17.0 (148) uploaded to TestFlight/App Store Connect; Apple processing/tester availability and physical QA remain unverified. All three arms remain. Personal-market treatment initially shipped off, then was separately authorized and [activated at 16:01 UTC](policy-activation.md). [Release evidence](release.md).
 
 ## What this patch changes
 

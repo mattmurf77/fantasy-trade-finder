@@ -1,5 +1,9 @@
 # G420 reconciliation log — #420 / #421
 
+## Parent phase-1 exit — 2026-09-06
+
+The original planner independently approved the completed revision `764e0ee9bdbbcc6cf90baaf1c5bdd994d2c4bbde`: uncertainty survives automatic lifecycle re-entry and the shared stale-403 callback is fenced before publication. The parent read all three documents and the revisions, accepts those resolutions and the explicit residual server-ordering limit, and approved bounded native implementation. Fresh `origin/main` at 05:12 UTC remains `4026ebc8`, with no overlapping changes. Earlier pending labels below describe the author checkpoint, not the current gate. No runtime or delivery success follows from this approval.
+
 Date: 2026-09-06
 
 Planner: `ux_astra`, completed [plan-g420.md](plan-g420.md) at `7fd1ba9a49904287a80e14cad545c9bce5160eeb`

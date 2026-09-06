@@ -13,7 +13,7 @@
 
 ## 2026-09-05 — Owner-contract first wave LIVE; mobile build uploaded (D-185)
 
-PR #281 merged after explicit activation authorization: search continuity, personal-tier intent, tier-bounded feedback and scoped counterparty privacy. Final head `f88afabb` passed CI: **5,455 backend / 1 skip**, all 93 mobile guards/typecheck/test-ID and 190 web checks. Render `4026ebc8` live at **09:51:59 UTC**; smoke passed and all 207 flags, 258 model settings, tiers and experiment summaries are unchanged. Personal-market treatment remains off; three arms preserved. iOS **1.17.0 (148)** uploaded for TestFlight; Apple/tester confirmation and physical QA remain. Raw interviews stayed local. [Release evidence, rollback and unfinished work](../docs/plans/owner-contracts/release.md).
+PR #281 merged after explicit activation authorization: search continuity, personal-tier intent, tier-bounded feedback and scoped counterparty privacy. Final head `f88afabb` passed CI: **5,455 backend / 1 skip**, all 93 mobile guards/typecheck/test-ID and 190 web checks. Render `4026ebc8` live at **09:51:59 UTC**; smoke passed and all 207 flags, 258 model settings, tiers and experiment summaries were unchanged at that checkpoint. The owner then separately authorized [personal-market activation](../docs/plans/owner-contracts/policy-activation.md), live at **16:01:20 UTC** with exactly one flag changed; three arms preserved. iOS **1.17.0 (148)** uploaded for TestFlight; Apple/tester confirmation and physical QA remain. Raw interviews stayed local. [Release evidence, rollback and unfinished work](../docs/plans/owner-contracts/release.md).
 
 ---
 
