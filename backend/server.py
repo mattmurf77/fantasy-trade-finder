@@ -15050,7 +15050,8 @@ def trade_pass_reason():
         try:
             passed, wrote_pass = ensure_reasoned_trade_pass(
                 key, g_user_id, card.league_id, card.trade_id,
-                card.give_player_ids, card.receive_player_ids)
+                card.give_player_ids, card.receive_player_ids,
+                target_user_id=card.target_user_id)
         except Exception as err:
             log.warning("reason banked; pass commit unverified: %s", err)
     if passed:

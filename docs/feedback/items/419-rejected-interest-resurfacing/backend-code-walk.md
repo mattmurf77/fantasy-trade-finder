@@ -5,6 +5,10 @@ Runtime diff personally read end-to-end against `4026ebc8`; this is backend
 evidence, not native UI or release verification. Shared spec-doc edits belong
 to root. Detailed runs and honest RED limitations: [build evidence](build-evidence.md).
 
+The original-build sections below cite `e02d074e` line numbers. The final
+QA-A episode repair and its current line references are traced separately at
+the end; original source/projection behavior is unchanged by that repair.
+
 ## Source evidence, not a permanent discovery ban
 
 | Contract | Final path and check |
@@ -91,3 +95,92 @@ five physical TestFlight sequences remain root/operator work. No Maestro,
 simulator, capture, push, deployment or production mutation was performed.
 Remote-only retained client invalidation, post-match Decline/fuzzy exemptions,
 and standing-offer lifecycle remain held; no UI behavior is claimed verified.
+
+## QA-A episode repair — final path atop `e02d074e`
+
+The old verifier accepted any historical same-ID/same-package pass. That is
+insufficient when the counterpart renewed their like before this reason was
+first banked. This repair changes only the verifier, its actual-counterparty
+argument at the existing route call, and isolated reason-route tests. Line
+references in this section are for the completed repair, not the baseline.
+
+1. `server.py:14828` retains existing owned-impression/F1 versus legacy reason
+   key selection. The route resolves the actual card or reconstructs the
+   already-supported echoed context at `15024`; it banks the reason at
+   `15035`. `database.py:6704` assigns `created_at` once, while refinements at
+   `6715` update `updated_at` and supplied answers, never the first-bank time
+   or key source. No request-supplied timestamp becomes episode evidence.
+2. `server.py:15051` passes the resolved card's actual target along with its
+   actual league/ID/oriented assets. `database.py:6769` retains the reason-row
+   transaction lock (`FOR UPDATE` on PostgreSQL) and verifies owner, league
+   and trade ID. `6776` normalizes the durable first-bank timestamp with the
+   existing UTC helper at `5890`; absent/malformed episode time yields
+   `(false, false)`, not a false committed acknowledgement or a new pass.
+3. For a real impression key, `6781` reads only the existing impression's
+   `served_at`, scoped by ID, owner and same league. Existing exact pass rows
+   are selected at `6788`, still requiring the acting user, league, actual
+   trade ID, pass decision and no retraction. Parsed oriented asset sets must
+   match (`6799`). A non-null, explicitly different impression ID is excluded
+   at `6801`; unknown/unlinked legacy decision metadata is not invented.
+4. A valid matching pass at or after first bank proves this episode already
+   committed (`6807`). Earlier passes can only be companion candidates when
+   they followed the validated exposure's served time, or, for a legacy key,
+   meet the existing ten-second replay bridge at `6812`. A validated exposure
+   allows a genuinely delayed first reason after an ordinary swipe; an
+   arbitrary historical same-card pass does not qualify. Malformed pass or
+   served timestamps cannot establish that older companion.
+5. Only if earlier candidates exist, `6823` fetches positive decisions once,
+   constrained to this league and the actor/actual counterparty. `6834`
+   compares actor-side exact assets or counterparty-side exact mirror assets;
+   unrelated actor, league, package and direction do not split an episode.
+   Relevant positives at or before first bank form barriers (`6838`). The
+   `(normalized timestamp, numeric decision ID)` tuples at `6815`/`6839`
+   preserve insertion order for equal-time decision rows. Any later barrier
+   invalidates that candidate; malformed relevant chronology also prevents
+   verifying it. A later retraction does not erase the fact that new consent
+   separated the earlier action. Positives after the immutable first-bank
+   anchor are deliberately excluded: a reason refinement is not a fresh pass.
+6. If one companion survives, the existing pass is acknowledged without an
+   insert (`6840`). Otherwise `6843` writes the genuine current requested
+   pass with the unchanged decision fields. It does not amend/backdate old
+   history, invent a decision for a source card or rewrite an impression.
+   `(true, true)` returns only after transaction commit; the route's existing
+   exception path returns an unverified `passed:false` if persistence fails.
+7. Existing follow-through at `server.py:15057` binds all current-format live
+   exclusions and records the actual card's pass only after durable evidence.
+   Only `wrote_pass` invokes outcome/event work at `15063`. The first reason
+   following an already-committed companion consumes the existing Elo claim
+   at `15071`; a genuine new value-giving reason can write the signal through
+   `15076`. Existing atomic claim-plus-swipe persistence, once-only outcomes,
+   edited-card checks, late-league isolation and failed-insert repair are
+   unchanged and stay covered by the consolidated suite. Ordinary swipe's
+   existing claim bridge is now at `database.py:6852`; its behavior is unchanged.
+8. The newly committed pass enters the existing normalized source history.
+   `load_recent_league_likes` at `6066`, matching now at `9092`, Awaiting now
+   at `9477`, and every unchanged projection boundary above therefore stop
+   treating the renewed source as actionable. The original QA script and
+   new real-route tests inspect that reader, not just the HTTP status.
+
+The verifier's query count is two base SELECTs (locked reason and exact pass
+rows), one conditional owned-impression SELECT for real keys, and at most one
+conditional positive-history SELECT for earlier companions. The latter reads
+the selected actor/league histories without a textual timestamp bound; UTC
+normalization and malformed barriers are applied in memory. No N+1 loop,
+serving projection query change, new index/schema, wire field or dependency.
+PostgreSQL lock semantics are code-walk evidence; the reported executable
+gates use isolated SQLite, not a production concurrency/load benchmark.
+
+Identity is intentionally not reset by time. The legacy
+`local:<user>:<trade_id>` reason key cannot distinguish a new episode from a
+very late retry of that same key. Likewise, refining an existing real-key
+episode must not silently reject a newer like. A fresh validated impression
+provides a distinct reason identity; an actual new ordinary swipe retains
+its normal replay window and can reject a later renewed source. Tests cover
+both the preserved later source on refinement and its resolution by that
+subsequent genuine swipe. No new lifecycle protocol is claimed.
+
+Final executable evidence: 23 new reason-episode cases plus all 401 existing
+focused cases, **424 passed in 9.41s**; unchanged-runtime RED and original QA
+replay commands/results are in [build evidence](build-evidence.md). Root's
+fresh independent QA/integration gates and operator TestFlight work remain
+pending; this is a reviewed backend repair, not a release claim.

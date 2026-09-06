@@ -496,6 +496,173 @@ def test_419_ordinary_pass_before_reason_repair_does_not_repeat_elo(harness, ban
     assert len(service._trade_swipes) == before_memory
 
 
+@pytest.mark.parametrize("linked,old_at,source_at", [
+    (True, "2026-08-01T12:00:00+00:00", "2026-09-05T12:00:00+00:00"),
+    (False, "2026-08-01T12:00:00+00:00", "2026-09-05T12:00:00+00:00"),
+    # The old pass fits even a ten-second companion bridge and follows the
+    # impression's serve time, but new opposing consent separates episodes.
+    (True, "2026-09-06T11:59:52+00:00", "2026-09-06T11:59:56+00:00"),
+    (False, "2026-09-06T07:59:52-04:00", "2026-09-06T11:59:56"),
+])
+def test_419_reason_episode_old_same_id_pass_cannot_resolve_renewed_offer(harness, linked, old_at, source_at):
+    client, service, svc, eng = harness
+    with eng.begin() as conn:
+        conn.execute(db_module.deck_impressions_table.update().values(
+            served_at="2026-09-06T11:50:00+00:00"))
+    with patch.object(db_module, "_now", lambda: old_at):
+        db_module.save_trade_decision(ME, LEAGUE, TRADE, ["g1"], ["r1"], "pass")
+    with patch.object(db_module, "_now", lambda: source_at):
+        db_module.save_trade_decision(OPP, LEAGUE, "renewed-source", ["r1"], ["g1"], "like")
+    assert db_module.load_recent_league_likes(LEAGUE, ME)
+    body = {"trade_id": TRADE, "detail": "value_giving", "league_id": LEAGUE,
+            "target_user_id": OPP, "give_player_ids": ["g1"], "receive_player_ids": ["r1"]}
+    if linked:
+        body["impression_id"] = IMP
+    with _knob(1), patch.object(server, "record_event") as events:
+        with patch.object(db_module, "_now", lambda: "2026-09-06T12:00:00+00:00"):
+            response = _post(client, body).get_json()
+        assert response["passed"] is True and response["elo_written"] is True
+        assert len(_decision_rows(eng)) == 3
+        assert not db_module.load_recent_league_likes(LEAGUE, ME)
+        assert len(_outcome_rows(eng)) == int(linked)
+        assert len(_swipe_rows(eng)) == 1
+        frozen = list(_decision_rows(eng))
+        svc._trade_cards.pop(TRADE)  # restart-like loss; retry uses echoed actual package
+        with patch.object(db_module, "_now", lambda: "2026-09-07T12:00:00+00:00"):
+            assert _post(client, body).get_json() == {**response, "elo_written": False}
+        assert _decision_rows(eng) == frozen and events.call_count == 1
+        assert len(_swipe_rows(eng)) == len(service._trade_swipes) == 1
+
+
+@pytest.mark.parametrize("linked", [False, True])
+@pytest.mark.parametrize("swipe_first", [False, True])
+def test_419_reason_episode_companion_ordering_stays_one_pass(harness, linked, swipe_first):
+    client, _service, _svc, eng = harness
+    with eng.begin() as conn:
+        conn.execute(db_module.deck_impressions_table.update().values(
+            served_at="2026-09-06T10:00:00+00:00"))
+    reason = {"trade_id": TRADE, "reason": "value"}
+    swipe = {"trade_id": TRADE, "decision": "pass"}
+    if linked:
+        reason["impression_id"] = swipe["impression_id"] = IMP
+    first, second = ((swipe, reason) if swipe_first else (reason, swipe))
+    with _knob(1), patch.object(db_module, "_now", lambda: "2026-09-06T11:59:55+00:00"):
+        response = _post(client, first, path=("/api/trades/swipe" if swipe_first else "/api/trades/pass-reason"))
+        assert response.status_code == 200
+    # A validated impression permits a late reason to join the already
+    # swiped exposure, not only responses inside the ordinary ten seconds.
+    later = "2026-09-06T13:00:00+00:00" if linked and swipe_first else "2026-09-06T12:00:00+00:00"
+    with _knob(1), patch.object(db_module, "_now", lambda: later):
+        response = _post(client, second, path=("/api/trades/pass-reason" if swipe_first else "/api/trades/swipe"))
+        assert response.status_code == 200
+        assert _post(client, {**reason, "detail": "value_giving"}).get_json()["passed"] is True
+    assert len(_decision_rows(eng)) == len(_swipe_rows(eng)) == 1
+    assert len(_outcome_rows(eng)) == int(linked)
+
+
+@pytest.mark.parametrize("linked", [False, True])
+def test_419_reason_episode_retry_does_not_reject_later_new_consent(harness, linked):
+    client, _service, _svc, eng = harness
+    body = {"trade_id": TRADE, "reason": "fit"}
+    if linked:
+        body["impression_id"] = IMP
+    with patch.object(db_module, "_now", lambda: "2026-09-06T12:00:00+00:00"):
+        assert _post(client, body).get_json()["passed"] is True
+    with patch.object(db_module, "_now", lambda: "2026-09-07T12:00:00+00:00"):
+        db_module.save_trade_decision(OPP, LEAGUE, "future-source", ["r1"], ["g1"], "like")
+    before = list(_decision_rows(eng))
+    with patch.object(db_module, "_now", lambda: "2026-09-08T12:00:00+00:00"):
+        assert _post(client, {**body, "detail": "fit_outlook"}).get_json()["passed"] is True
+    assert _decision_rows(eng) == before
+    assert db_module.load_recent_league_likes(LEAGUE, ME)
+    assert len(_outcome_rows(eng)) == int(linked)
+    # A genuinely new ordinary pass still follows its existing replay window
+    # and can reject the renewal. The reason key itself is never time-reset.
+    swipe = {"trade_id": TRADE, "decision": "pass"}
+    if linked:
+        swipe["impression_id"] = IMP
+    with patch.object(db_module, "_now", lambda: "2026-09-08T12:00:01+00:00"):
+        assert _post(client, swipe, path="/api/trades/swipe").status_code == 200
+    assert len(_decision_rows(eng)) == len(before) + 1
+    assert not db_module.load_recent_league_likes(LEAGUE, ME)
+
+
+@pytest.mark.parametrize("source_after", [False, True])
+@pytest.mark.parametrize("actor", [ME, OPP])
+def test_419_reason_episode_equal_timestamp_positive_uses_decision_id(harness, source_after, actor):
+    client, _service, _svc, eng = harness
+    stamp = "2026-09-06T11:59:55+00:00"
+    with eng.begin() as conn:
+        conn.execute(db_module.deck_impressions_table.update().values(served_at="2026-09-06T11:00:00+00:00"))
+    args = [(ME, LEAGUE, TRADE, ["g1"], ["r1"], "pass"),
+            (actor, LEAGUE, "source", *((["g1"], ["r1"]) if actor == ME else (["r1"], ["g1"])), "like")]
+    with patch.object(db_module, "_now", lambda: stamp):
+        for values in (args if source_after else args[::-1]):
+            db_module.save_trade_decision(*values)
+    with patch.object(db_module, "_now", lambda: "2026-09-06T12:00:00+00:00"):
+        result = _post(client, _reason({"detail": "value_giving"})).get_json()
+    assert result["passed"] is True and result["elo_written"] is source_after
+    assert len(_decision_rows(eng)) == 2 + int(source_after)
+
+
+@pytest.mark.parametrize("scope", ["different_actor", "different_league", "different_package", "wrong_direction"])
+def test_419_reason_episode_unrelated_positive_does_not_split_companion(harness, scope):
+    client, _service, _svc, eng = harness
+    with eng.begin() as conn:
+        conn.execute(db_module.deck_impressions_table.update().values(served_at="2026-09-06T11:00:00+00:00"))
+    with patch.object(db_module, "_now", lambda: "2026-09-06T11:59:52+00:00"):
+        db_module.save_trade_decision(ME, LEAGUE, TRADE, ["g1"], ["r1"], "pass")
+    actor, league, give, receive = OPP, LEAGUE, ["r1"], ["g1"]
+    if scope == "different_actor":
+        actor = "third-user"
+    elif scope == "different_league":
+        league = "other-league"
+    elif scope == "different_package":
+        give = ["r2"]
+    else:
+        give, receive = receive, give
+    with patch.object(db_module, "_now", lambda: "2026-09-06T11:59:56+00:00"):
+        db_module.save_trade_decision(actor, league, "unrelated", give, receive, "like")
+    with patch.object(db_module, "_now", lambda: "2026-09-06T12:00:00+00:00"):
+        assert _post(client, _reason({"reason": "fit"})).get_json()["passed"] is True
+    assert len(_decision_rows(eng)) == 2
+
+
+@pytest.mark.parametrize("malformed", ["pass_time", "positive_time", "served_time", "episode_time"])
+def test_419_reason_episode_unordered_history_cannot_verify_old_pass(harness, malformed):
+    client, _service, _svc, eng = harness
+    with eng.begin() as conn:
+        conn.execute(db_module.deck_impressions_table.update().values(served_at=
+            "bad-time" if malformed == "served_time" else "2026-09-06T11:00:00+00:00"))
+    with patch.object(db_module, "_now", lambda: "bad-time" if malformed == "pass_time" else "2026-09-06T11:59:55+00:00"):
+        db_module.save_trade_decision(ME, LEAGUE, TRADE, ["g1"], ["r1"], "pass")
+    if malformed == "positive_time":
+        with patch.object(db_module, "_now", lambda: "bad-time"):
+            db_module.save_trade_decision(OPP, LEAGUE, "unorderable", ["r1"], ["g1"], "like")
+    if malformed == "episode_time":
+        with patch.object(db_module, "_now", lambda: "bad-time"):
+            db_module.upsert_trade_pass_reason(IMP, ME, league_id=LEAGUE, trade_id=TRADE,
+                reason="fit", key_source="impression")
+    before = len(_decision_rows(eng))
+    with patch.object(db_module, "_now", lambda: "2026-09-06T12:00:00+00:00"):
+        result = _post(client, _reason({"reason": "fit"})).get_json()
+    assert result["passed"] is (malformed != "episode_time")
+    assert len(_decision_rows(eng)) == before + int(malformed != "episode_time")
+
+
+def test_419_reason_episode_other_explicit_impression_is_not_this_companion(harness):
+    client, _service, _svc, eng = harness
+    _seed_impression("other-exposure", TRADE, card_index=1)
+    with eng.begin() as conn:
+        conn.execute(db_module.deck_impressions_table.update().values(served_at="2026-09-06T11:00:00+00:00"))
+    with patch.object(db_module, "_now", lambda: "2026-09-06T11:59:55+00:00"):
+        db_module.save_trade_decision(ME, LEAGUE, TRADE, ["g1"], ["r1"], "pass", impression_id="other-exposure")
+    with patch.object(db_module, "_now", lambda: "2026-09-06T12:00:00+00:00"):
+        result = _post(client, _reason({"reason": "fit"})).get_json()
+    assert result["passed"] is True
+    assert len(_decision_rows(eng)) == 2
+
+
 def test_layer1_then_layer2_keeps_both(harness):
     client, _service, _svc, eng = harness
     _post(client, _reason({"reason": "value"}))

@@ -6755,6 +6755,7 @@ def upsert_trade_pass_reason(
 def ensure_reasoned_trade_pass(
     impression_id: str, user_id: str, league_id: str, trade_id: str,
     give_player_ids: list[str], receive_player_ids: list[str],
+    *, target_user_id: str | None = None,
 ) -> tuple[bool, bool]:
     """Verify/repair a banked reason's exact card pass; return (passed, wrote).
 
@@ -6772,6 +6773,18 @@ def ensure_reasoned_trade_pass(
         if (reason is None or reason.user_id != user_id
                 or reason.league_id != league_id or reason.trade_id != trade_id):
             return False, False
+        episode_at = _trade_decision_time(reason.created_at)
+        if episode_at is None:
+            return False, False  # no ordered durable episode to verify/repair
+        served_at = None
+        if reason.key_source == "impression":
+            impression = conn.execute(select(deck_impressions_table.c.served_at).where(and_(
+                deck_impressions_table.c.impression_id == impression_id,
+                deck_impressions_table.c.user_id == user_id,
+                deck_impressions_table.c.league_id == league_id,
+            ))).first()
+            if impression is not None:
+                served_at = _trade_decision_time(impression.served_at)
         rows = conn.execute(select(trade_decisions_table).where(and_(
             trade_decisions_table.c.user_id == user_id,
             trade_decisions_table.c.league_id == league_id,
@@ -6780,13 +6793,53 @@ def ensure_reasoned_trade_pass(
             trade_decisions_table.c.retracted_at.is_(None),
         ))).fetchall()
         give, receive = set(give_player_ids), set(receive_player_ids)
+        companions = []
         for row in rows:
             try:
                 if (set(json.loads(row.give_player_ids)) == give
                         and set(json.loads(row.receive_player_ids)) == receive):
-                    return True, False
+                    if (reason.key_source == "impression" and row.impression_id is not None
+                            and row.impression_id != impression_id):
+                        continue  # known other exposure cannot be this episode
+                    passed_at = _trade_decision_time(row.created_at)
+                    if passed_at is None:
+                        continue
+                    if passed_at >= episode_at:
+                        return True, False
+                    # A real exposure permits a delayed companion reason.
+                    # Unlinked legacy gestures get only the existing ten-second
+                    # replay bridge, never an arbitrary old same-card pass.
+                    if ((served_at is not None and served_at <= passed_at)
+                            or (reason.key_source != "impression"
+                                and _decision_replay_gap_ok(row.created_at, reason.created_at))):
+                        companions.append((passed_at, row.id))
             except (TypeError, ValueError):
                 continue
+        if companions:
+            # Renewed exact consent before THIS episode separates an old pass
+            # even when it falls within the retained impression/legacy bridge.
+            # Later consent after the immutable first-bank anchor is not a
+            # reason refinement's new pass; updated_at must never reset it.
+            positives = conn.execute(select(trade_decisions_table).where(and_(
+                trade_decisions_table.c.league_id == league_id,
+                trade_decisions_table.c.user_id.in_([user_id, target_user_id] if target_user_id else [user_id]),
+                trade_decisions_table.c.decision == "like",
+            ))).fetchall()
+            barriers = []
+            for row in positives:
+                try:
+                    sides = (set(json.loads(row.give_player_ids)), set(json.loads(row.receive_player_ids)))
+                except (TypeError, ValueError):
+                    continue
+                expected = (give, receive) if row.user_id == user_id else (receive, give)
+                if sides != expected:
+                    continue
+                stamp = _trade_decision_time(row.created_at)
+                if stamp is None or stamp <= episode_at:
+                    barriers.append(None if stamp is None else (stamp, row.id))
+            if any(not any(barrier is None or barrier > candidate for barrier in barriers)
+                   for candidate in companions):
+                return True, False
         conn.execute(insert(trade_decisions_table).values(
             user_id=user_id, league_id=league_id, trade_id=trade_id,
             give_player_ids=json.dumps(give_player_ids),
