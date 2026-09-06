@@ -54,22 +54,26 @@ previous batch does not carry over.
 
 ## 3. Ship (on "go")
 
-```bash
-# Git: release branch → trade-engine-v2 → main
-git checkout trade-engine-v2 && git merge --no-ff feat/feedback-<date>
-git checkout main && git merge trade-engine-v2 && git push origin main   # Render auto-deploys
-git checkout trade-engine-v2 && git push origin trade-engine-v2
-```
+Use the current repository's normal PR workflow and exact-head green CI; do not
+use the historical `trade-engine-v2` merge path or push directly to main.
+Inspect the **complete proposed squash message**, not just its subject,
+for inherited deployment-skip markers. If an authorized runtime release was
+skipped, first verify service settings and absence of a duplicate/active deploy;
+then use a single exact-commit deployment API call, preserving auto-deploy and
+cache settings, and verify that source reaches LIVE. Intentionally skip Render
+for documentation-only release bookkeeping.
 
-If `main` and `trade-engine-v2` have diverged in a way that makes this merge
-non-trivial, stop and confirm the merge plan with the operator — branch
-topology has changed before.
+Publish the reviewed release branch, create its PR against current main, verify
+every required check on its exact head, then merge through the normal PR flow.
+Fetch the merged source and verify content equality with the tested tree; any
+concurrent overlap requires reconciliation before merge.
 
 ```bash
 # Mobile: EAS production build → TestFlight (profiles in mobile/eas.json)
 cd mobile
 eas build --platform ios --profile production --non-interactive
-eas submit --platform ios --profile production --latest --non-interactive
+# After verifying that exact build completed and no submission already exists:
+eas submit --platform ios --profile production --id <verified-build-id> --non-interactive
 ```
 
 - Verify Render: poll `https://fantasy-trade-finder.onrender.com/` (and one
@@ -78,6 +82,12 @@ eas submit --platform ios --profile production --latest --non-interactive
   (`eas build:list --limit 1`), then submit. If the build fails, fix and
   re-run — do not leave the batch half-shipped (backend live, app not) any
   longer than necessary; note the mismatch to the operator if it persists.
+- Submit the **verified exact build ID**, not a moving `--latest` target. Read
+  submission status before any retry. Optional release-note/changelog submission
+  may be plan-restricted; if rejected, inspect submission history to prove no new
+  submission exists before retrying the standard exact-ID submission without that
+  optional field. Never upgrade billing or regenerate credentials as a workaround.
+  FINISHED upload does not prove Apple tester availability or physical-device QA.
 
 ## 4. Close the loop
 

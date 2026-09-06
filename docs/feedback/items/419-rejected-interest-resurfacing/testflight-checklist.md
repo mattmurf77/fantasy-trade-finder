@@ -1,6 +1,8 @@
 # Feedback 419–421 and smaller packages — physical TestFlight checklist
 
-**Status: UNRUN.** This consolidates the approved PRD checks; final passing QA reports may add cases. An EAS build, upload or Apple processing result is not a device pass. No simulator/Maestro/captures are used.
+**Status: UNRUN.** These 23 checks consolidate the approved PRDs and both passing independent round-2 reviews. An EAS build, upload or Apple processing result is not a device pass. No simulator/Maestro/captures are used.
+
+Release reference: backend `988fa2d690dfa9188f43c33e87dff9d60a5fabaa` is live; the presentation setting is 1. iOS 1.17.1 (149), build `87f9ce05-f91f-4bbd-8c1a-bc7c49932e2d`, and submission `a07afa27-7b21-47d8-9fb9-8e17518232b6` are FINISHED. Apple processing/tester availability remains unverified. Confirm the actually installed binary before running any step; no step below has been executed. [Release evidence](release.md).
 
 Record the device/OS, installed version/build, backend SHA, controlled fixture revision, entry route and sanitized result for each step. Use authorized test accounts and staging fixtures for dated history, injected failures and config changes. Do not restart production, change real league membership, send a provider proposal or write real-user learning data to perform these checks.
 

@@ -1,6 +1,6 @@
 # Feedback 419–421 — selected fixes and open-backlog audit
 
-**Date:** 2026-09-06. **Base:** freshly fetched `origin/main` at `4026ebc81eaae50b345b42421641125c5b8d413e` (rechecked during finishing review). **Status:** G419 backend/mobile, G420 and bounded package presentation are root-reviewed and integrated locally, including repair of the confirmed round-1 reason-episode defect. Root's frozen-source regression passes 5,645 backend tests / one optional skip, all 95 mobile guards, TypeScript/testID and 190 web checks. Backlog audit and package research are complete. Full redundant round-2 verdicts, CI and release verification remain separate gates. The owner explicitly authorized unattended shipping of this batch in the current conversation after review and validation. [Current release state](release.md).
+**Date:** 2026-09-06. **Build base:** freshly fetched `origin/main` at `4026ebc81eaae50b345b42421641125c5b8d413e` (rechecked during finishing review). **Status:** G419 backend/mobile, G420 and bounded package presentation passed root review, both complete independent round-2 reviews and all four PR #283 CI jobs on `d97459dc` (5,645 backend passed / one optional skip in 717.99s). Root also passed all 95 mobile guards, TypeScript/testID and 190 web checks. PR #283 merged as `988fa2d6` at 17:16:56 UTC; Render was live at 17:21:19.905609 UTC. Only `simple_player_presentment=1` was activated at 17:23:58 UTC and verified by readback at 17:24:18 UTC. iOS 1.17.1 (149) build/submission are FINISHED; Apple processing/tester availability and physical-device verification remain outstanding. Backlog audit and package research are complete. The owner explicitly authorized this reviewed release and public GitHub destination. [Release evidence](release.md).
 
 ## Selected groups
 
@@ -13,7 +13,7 @@
 
 ## Execution gates
 
-The owner selected 419–421. These three production records were changed from new to planned via the existing admin API and read back individually. Other feedback records are research-only. The fresh read-only production snapshot at 04:03:22 UTC contained 45 open records. The original checkout remains dirty and untouched; build lanes start from the fetched main, not that checkout.
+The owner selected 419–421. These three production records were initially changed from new to planned via the existing admin API and read back individually. After verified delivery they were set to `fixed` and read back at 17:41:48.077159, 17:41:51.397001 and 17:41:56.234037 UTC respectively on 2026-09-06. No other feedback record was closed; the all-45 audit remains research-only. The initial read-only production snapshot at 04:03:22 UTC contained 45 open records. The original checkout remains dirty and untouched; build lanes started from the fetched main, not that checkout.
 
 Each fix group follows planner → separate author → planner critique/reconciliation → parent gate → build → independent QA. Scope, numbered requirements, regression tests proven RED against the defect, code-walk evidence and concrete manual TestFlight steps precede release. D-056 forbids Maestro and simulator use. Shared reference docs, index and living-memory updates belong to the parent at integration; agents own only their scoped item docs and assigned runtime/test files.
 

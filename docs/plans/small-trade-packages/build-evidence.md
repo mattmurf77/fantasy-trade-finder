@@ -1,12 +1,23 @@
 # Small-player presentation — build evidence
 
-2026-09-06. **Built default off; root-reviewed runtime integrated; full QA/release gates pending.**
+2026-09-06. **Shipped through PR #283; Render `988fa2d6` live and `simple_player_presentment=1` verified. Code defaults remain off; physical-device checks remain UNRUN.**
 Runtime/test commits `0bafa3a54f29dc9b38f4dbd6023d0b981c9499ca` and
 `9ea562dd98861bcfae388146feca97e7e4c04942` (final), based on reviewed
 #419 integration `741710c188a27e3e43b25e0b77372c5358617e72`.
 Scope: approved [PRD](prd.md), [scope](scope.md), [reconciliation](reconciliation-log.md).
 No activation, production write, generator/profile change, migration, dependency,
 mobile edit or device run was performed by this builder.
+
+Final release checkpoint: both complete independent round-2 reviews passed on
+`7d3e071f`; all four CI jobs passed on runtime-equivalent `d97459dc`
+(5,645 backend passed / one skip in 717.99s). PR #283 merged as `988fa2d6`
+at 17:16:56 UTC and Render was live at 17:21:19.905609 UTC. Root's separate
+17:23:58 UTC activation changed only `simple_player_presentment` to 1;
+17:24:18 UTC readback preserved all 207 flags, 258 prior settings, tiers and
+experiments. iOS 1.17.1 (149) build/submission are FINISHED. Apple processing/
+tester availability remains unverified. Earlier builder checkpoints below
+remain historical evidence, not a claim that release is still pending.
+[Exact release artifacts and verification](../../feedback/items/419-rejected-interest-resurfacing/release.md).
 
 ## Results
 
@@ -137,7 +148,7 @@ remain unchanged, neither entire job is a no-op. First-six player load cannot
 change when merely permuting a full six-position window; its unchanged total
 is expected, not missing supply. Larger packages remain available.
 
-## Remaining handoff
+## Original builder handoff — historical checkpoint
 
 Root owns independent/full backend QA, mobile guards/typecheck/testID lint,
 shared documentation/decision updates, release and activation. PRD §6 physical
