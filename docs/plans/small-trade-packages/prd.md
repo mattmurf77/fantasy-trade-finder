@@ -24,7 +24,7 @@ This is an **explicit narrow exception** to bakeoff's fixed post-generation/with
 
 ### Scope exclusions
 
-No calculator edit/evaluate/queue/propose, `/api/trades/fair-packages`, `/api/trades/asset-ideas`, Win Now, matches/Awaiting, manually assembled/shared offer, or mobile browse-session sibling ordering changes. An empty organic canvas reaching the ordinary generator is in scope; any supplied explicit player/opponent selection is not. Normal/forced generation, Find More, session-init pregeneration and headless/synchronous replenishment share the same worker and eligibility rule. Saved preferences and trade-intent semantics are unchanged.
+No calculator edit/evaluate/queue/propose, `/api/trades/fair-packages`, `/api/trades/asset-ideas`, Win Now, matches/Awaiting, manually assembled/shared offer, or mobile browse-session sibling ordering changes. An empty organic canvas reaching the ordinary generator is in scope; any supplied explicit player/opponent selection is not. A private raw-receive exemption preserves this exclusion even when the existing targeting flag ignores receive pins: mode-on requests bypass organic cache reuse/seeding without changing generator normalization or default fairness. Normal/forced generation, Find More, session-init pregeneration and headless/synchronous replenishment share the same worker and eligibility rule. Saved preferences and trade-intent semantics are unchanged.
 
 ## 3. Algorithm and exact worker placement
 
