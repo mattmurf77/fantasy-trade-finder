@@ -223,13 +223,16 @@ Throwaway eval workspaces and packaged `.skill` bundles are archived in `archive
 1. Either user `POST /api/trades/swipe` with `like` — **or**, behind `calc.merged_layout`,
    `POST /api/trades/queue` (#384 ✓ cell, [D-152]), which records a HAND-BUILT package as a like
    through the same `_reconstruct_swipe_card` → `record_decision` → `save_trade_decision` path.
-   The queue route does **not** run step 2: it refuses up front unless the likes-you injector's
-   own gates would mirror the like into the counterparty's deck, and the match is then minted by
-   *their* swipe on that mirrored card — one place, not two.
+   The queue route does **not** run step 2: D-170 records a well-formed like for a resolved
+   counterparty without an up-front mirror/fairness refusal. A server-verified intervening
+   exact pass permits deliberate renewal inside the usual ten-second dedupe window; retries
+   remain idempotent. The match is minted by *their* later swipe, not by queueing.
 2. `server.py` checks for a mirrored existing like from the other side (`database.check_for_match`). With flag `trade.fuzzy_match`, a near-mirror also matches: Jaccard ≥ `fuzzy_match_tau` (0.8) per side, and only low-value players (`search_rank ≥ 120`) may differ.
 3. If found: insert `trade_matches` row (status `pending`), insert two `notifications` rows, dispatch typed push for both users.
 4. Either user `POST /api/trades/matches/<id>/disposition` with `accept` or `decline`. Updates `user_a_decision` / `user_b_decision`; rolls `status` → `accepted` / `declined` once both have decided (or any user declines).
 5. Counterparties receive `trade_accepted` / `trade_declined` notifications + push.
+
+**Source and serve revalidation (#419):** `database.TradeInterestHistory` interprets existing normalized action chronology for injection, exact/fuzzy-source admission, queue and Awaiting/summary readers. An older like resolved by a later exact own/mirrored pass remains resolved independently of D-067 discovery expiry/amnesty. Full init and headless replenishment restore the same per-type discovery keys. Reason capture verifies/repairs its durable exact pass separately from banking the reason; committed retries remain truthful and Elo claims persist atomically with their signal. Public deck reads and final pre-impression publication project current disposition outside the global job lock, preserving survivor order and frozen rows. Serialized interested cards use one additional batched owned-impression provenance read when needed to validate their specific source. See [API disposition contract](api-reference.md#exact-interest-and-pass-disposition).
 
 ## Push dispatcher
 
