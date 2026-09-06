@@ -10,13 +10,33 @@
 
 ---
 
+## D-187 — Smaller player packages receive a bounded within-class presentation preference
+
+**Date:** 2026-09-06. **Status:** implementation `9ea562dd` root-reviewed and integrated; full independent round-2 QA passes at `7d3e071f`. Hosted CI/release/activation pending. Default remains off.
+**Context:** Owner-scoped research found more players in recorded viewed cards than in completed trades, while completed deals often included picks. The small, observational sample cannot establish a causal acceptance effect or justify banning large packages.
+**Decision:** The default-off `simple_player_presentment` mode permits one post-policy permutation within six absolute slots and the same complete arm/group/lane/basis/policy class. Rank by maximum players on a side, then total players; picks do not add complexity or break ties. Explicit selections, fixed special cards and unknown/pure-pick shapes keep their slots. Preserve every eligible occurrence, package value, policy verdict and experiment slot. This explicitly narrows the old fixed-within-arm-order rule; it does not change generator goldens or arm credit.
+**Alternatives:** blanket asset cap, global score reweighting, removing an arm, adjacent-only sorting with little practical effect, or silently changing served order without frozen provenance.
+**Consequences:** Capture mode at job creation/reuse; version the serving policy separately from valuation. Freeze original/final occurrence indices through #419's final removal, with final index equal to actual impression position. No later polling reorder. Exposure changes are not experiment-neutral, and acceptance conclusions require mode-aware analysis. [Research](../docs/research/2026-09-06-trade-package-shapes.md), [approved contract](../docs/plans/small-trade-packages/prd.md).
+
+---
+
+## D-186 — Resolved source interest stays resolved beyond discovery cooldown
+
+**Date:** 2026-09-06. **Status:** backend/mobile and episode repair `8f27421d` root-reviewed and integrated; both full independent round-2 QA reviews pass at `7d3e071f`. Hosted CI/release pending.
+**Context:** An expired/amnestied pass could allow an older like to reappear as current interest. Reason-save success also overstated whether its exact pass existed durably.
+**Decision:** Separate source-evidence chronology from discovery cooldown. Later exact own/recipient passes resolve the older source permanently as evidence; a fresh source like may establish new consent. Queue gets only a verified intervening-pass renewal exception. A reason response's `passed` reports durable state, not whether this call first created the reason, and missing dispositions remain repairable.
+**Alternatives:** permanent package bans, longer cooldowns, rewriting historical likes, fabricating missing links, or treating HTTP 200/reason storage as consent evidence.
+**Consequences:** All relevant source readers and serve boundaries share the projection, with batched scoped reads and no frozen-history mutation. Ordinary swipe retains its existing best-effort signal contract. Legacy unlinked rows cannot gain invented provenance; standing-offer and post-match lifecycles are held. [API](../docs/api-reference.md#exact-interest-and-pass-disposition), [scope](../docs/feedback/items/419-rejected-interest-resurfacing/scope.md).
+
+---
+
 ## D-185 — Owner tiers define intent; indirect feedback cannot move tiers
 
-**Date:** 2026-09-05. **Status:** bounded implementation parent-reviewed, published in draft PR #281, exact built source `0fc1b539` validated by hosted CI. Follow-up owner authorization covered GitHub/TestFlight; iOS 1.17.0 (148) uploaded. Backend remains unmerged/undeployed; Apple/tester and physical-device verification outstanding. [Release evidence](../docs/plans/owner-contracts/release.md).
+**Date:** 2026-09-05. **Status:** bounded implementation parent-reviewed and live after explicit GitHub/TestFlight then backend authorization. PR #281 merged at `4026ebc8`; final head `f88afabb` passed all CI. The owner subsequently explicitly authorized the experimental personal-market policy: **on**, same code redeployed live at 16:01:20 UTC, exactly one effective flag changed; model/tier/experiment settings unchanged. [Activation evidence](../docs/plans/owner-contracts/policy-activation.md). iOS 1.17.0 (148) uploaded; Apple/tester and physical-device verification outstanding. [Release evidence](../docs/plans/owner-contracts/release.md).
 **Context:** The owner clarified that personal rankings identify desired acquisitions/sales, while market values shape credible package terms. They explicitly rejected method-based conviction levels and tier changes from app feedback. Earlier D-085/D-180 records describe different assumptions.
 **Decision:** User tiers define trade direction; consensus fills absent evidence and prices companion pieces. Every deliberate ranking workflow has equal authority. Replayed trade/disposition feedback is clamped to the tier established after ranking actions, using the same one-decimal membership exposed by `get_rankings`. Fix mobile intent handoffs/retries without adding confirmation panels or silently broadening selections. Keep private partner tiers private and historical offer snapshots immutable.
 **Alternatives considered:** reweight personal gain as the universal ordering objective; globally replace generator shrinkage; recapture the historical arm-A golden; invent fairness caps or a soft-untouchable premium. The owner left ordering/caps unsettled, and global shrinkage changes break the preserved experimental control. None is authorized by this first patch.
-**Consequences / implementation limits:** Personal intent filtering and the feedback tier bound are implemented; equal-authority weights apply to the existing **dark policy**, with additive per-player source reads. The legacy live `_shrink_user_elo` rule remains until an arm-safe experiment is scoped. No flag, profile, floor or allocation changes. Missing-entry candidate expansion, committed-action Browse Undo, soft untouchables, partial-selection fallback, precise interest expiry and legacy Off migration remain unfinished. Below-tier legacy markers retain conservative existing semantics until durable provenance can distinguish intentional values. [Scope](../docs/plans/owner-contracts/scope.md), [review and remaining work](../docs/plans/owner-contracts/review.md). Raw owner interview/source documents remain local, not published to this public repository.
+**Consequences / implementation limits:** Personal intent filtering and the feedback tier bound are implemented; equal-authority weights apply to the existing policy, with additive per-player source reads. That policy shipped dark and is now explicitly activated globally for new generated decks, not as a randomized control experiment. All three generator arms remain; the legacy `_shrink_user_elo` rule remains. Only the personal-market flag changed; no profile, floor or allocation changes. Missing-entry candidate expansion, committed-action Browse Undo, soft untouchables, partial-selection fallback, precise interest expiry and legacy Off migration remain unfinished. Below-tier legacy markers retain conservative existing semantics until durable provenance can distinguish intentional values. [Scope](../docs/plans/owner-contracts/scope.md), [review and remaining work](../docs/plans/owner-contracts/review.md). Raw owner interview/source documents remain local, not published to this public repository.
 
 ---
 
@@ -459,6 +479,9 @@
 
 | ID | Title | Date |
 |---|---|---|
+| D-187 | Bounded within-class small-player presentation | 2026-09-06 |
+| D-186 | Resolved source consent is separate from discovery cooldown | 2026-09-06 |
+| D-185 | Owner tiers define intent; feedback cannot move tiers | 2026-09-05 |
 | D-184 | Win Now separates forecasts, season utility and dynasty learning | 2026-09-04 |
 | D-001 | Sleeper as the Sole Identity Provider | Pre-changelog |
 | D-002 | 3-Player Matchups Over 2-Player | Pre-changelog |

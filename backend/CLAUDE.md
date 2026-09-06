@@ -37,6 +37,14 @@ inside, `import backend.server` from tests). There is no `setup.py` / install st
 **The two giants.** `server.py` (~25.1k lines) and `database.py` (~12.4k lines) hold most of the
 backend. Never read either end-to-end — grep for the route path or the table name.
 
+`small_trade_presentment.py` is a pure post-policy presentation helper (D-187):
+one stable six-slot permutation within the same complete source/lane class,
+player/pick classification through existing parsers, and occurrence metadata
+retention through authoritative removal. No generator, value or eligibility
+changes. `server.py` owns the default-off mode capture, explicit-selection
+exclusions, cache compatibility and frozen impression metadata. Never re-sort
+an old job during polling or refill an offer removed by #419's disposition check.
+
 | File | Lines | Responsibility |
 |---|---:|---|
 | `server.py` | 25.1k | **Every HTTP route** — 186 `@app.route` decorators over 180 distinct paths — on one `Flask` app. The only blueprint is `test_support`'s `/__test__/*`, installed via `_test_support_mod.install(app, …)` and inert unless `FTF_TEST_MODE=1`. Also owns the session store, the Sleeper HTTP client (`_sleeper_get`), the universal player pool, and the background threads (trade jobs, `_cleanup_loop`, players refresh, roster-history daemon). Grep `@app.route("/api/…`. |

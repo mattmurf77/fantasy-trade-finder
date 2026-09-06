@@ -415,6 +415,56 @@ def test_the_id_is_the_package_not_the_call():
         ME, LEAGUE, OPP, ["r1", "r2"], ["g1", "g2"])
 
 
+@pytest.mark.parametrize("pass_actor", [ME, OPP])
+def test_419_exact_pass_allows_fresh_queue_inside_dedupe_window(prod_harness, monkeypatch, pass_actor):
+    """R2/T3: real queue→pass→queue at 0/1/2 seconds, not a reader-only fix."""
+    client, engine, sess, service, trade_svc, league = prod_harness
+    now = ["2026-09-05T12:00:00+00:00"]
+    monkeypatch.setattr(db_module, "_now", lambda: now[0])
+    from datetime import datetime, timezone
+
+    class QueueClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            stamp = datetime.fromisoformat(now[0])
+            return stamp.astimezone(tz or timezone.utc)
+
+    monkeypatch.setattr(db_module, "datetime", QueueClock)
+    first = _queue(client).get_json()
+    now[0] = "2026-09-05T12:00:01+00:00"
+    body = {"trade_id": first["trade_id"], "decision": "pass"}
+    if pass_actor == OPP:
+        # A separate account/session views the exact mirrored package.
+        peer = dict(sess, user_id=OPP, user_roster=THEIR_ROSTER,
+                    trade_svc=TradeService(players=trade_svc._players),
+                    trade_svcs={})
+        monkeypatch.setitem(server._sessions, "419-peer", peer)
+        body.update(trade_id="mirrored_card", give_player_ids=GOOD_RECV,
+                    receive_player_ids=GOOD_GIVE, target_user_id=ME,
+                    target_username="me", league_id=LEAGUE)
+    response = client.post("/api/trades/swipe", json=body, headers={
+        "X-Session-Token": "419-peer" if pass_actor == OPP else TOKEN})
+    assert response.status_code == 200, response.get_json()
+    now[0] = "2026-09-05T12:00:02+00:00"
+    before_signals = len(service._trade_swipes)
+    before_events = server.record_event.call_count
+    before_swipes = len(_swipe_rows(engine))
+    renewed = _queue(client).get_json()
+    assert renewed == {"queued": True, "already_queued": False,
+                       "trade_id": first["trade_id"]}
+    assert len([r for r in _decision_rows(engine) if r.decision == "like"]) == 2
+    assert len(_swipe_rows(engine)) == before_swipes + 1
+    assert len(service._trade_swipes) == before_signals + 1
+    assert server.record_event.call_count == before_events + 1
+    for stamp in ("2026-09-05T12:00:03+00:00", "2026-09-05T12:01:00+00:00"):
+        now[0] = stamp
+        assert _queue(client).get_json()["already_queued"] is True
+    assert len(_decision_rows(engine)) == 3
+    assert len(_swipe_rows(engine)) == before_swipes + 1
+    assert len(service._trade_swipes) == before_signals + 1
+    assert server.record_event.call_count == before_events + 1
+
+
 # ---------------------------------------------------------------------------
 # The one surviving refusal — not_league_member. A refusal writes nothing.
 # ---------------------------------------------------------------------------

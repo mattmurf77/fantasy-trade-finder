@@ -13,15 +13,10 @@
 //
 // Fire-and-forget by contract, exactly like api/events.ts: a reason write must
 // never block the deck or surface an error to a tester who is mid-triage. The
-// disposition itself rides the unchanged `/api/trades/swipe` POST, so a failed
-// reason write costs the reason, never the pass.
-//
-// ── BACKEND CONTRACT ASSUMPTION (reconcile at integration) ────────────────
-// The backend half is being built on `feat/decline-reasons-backend`. This
-// module is written against SPEC §3/§6 and is deliberately the ONLY place
-// mobile knows the route shape — if the sibling agent's route differs (name,
-// verb, field names, or folding layer-1 into `/api/trades/swipe`), the fix is
-// this file and nothing else. Callers only ever see the typed helpers below.
+// companion `/api/trades/swipe` remains independent. Since #419 the existing
+// `passed` response also reports a verified durable pass (including repair
+// after a reason was banked without its card). A caller must read that field,
+// not infer commitment from HTTP success or from `ok`.
 
 import { api } from './client';
 
@@ -60,6 +55,10 @@ export interface DeclineReasonWrite {
   impressionId?: string;
   tradeId: string;
   leagueId?: string;
+  givePlayerIds?: string[];
+  receivePlayerIds?: string[];
+  targetUserId?: string;
+  targetUsername?: string;
   layer: 1 | 2;
   reason: Layer1Code;
   /** Layer 1 only — the prior layer-1 reason when the tester switched tiles,
@@ -84,15 +83,28 @@ export interface DeclineReasonWrite {
 
 /**
  * POST /api/trades/pass-reason — upsert the decline-reason row for this
- * impression. Resolves to `true` on a committed write, `false` on any
- * failure; never throws, never surfaces UI.
+ * impression. `ok` acknowledges the reason; only `passed === true` confirms
+ * the exact durable pass. Null means transport failure. Never throws or shows UI.
  */
-export async function postDeclineReason(w: DeclineReasonWrite): Promise<boolean> {
+export interface DeclineReasonResult {
+  ok?: boolean;
+  passed?: boolean;
+  reason?: Layer1Code | null;
+  detail?: Layer2Code | null;
+  switched_from?: Layer1Code | null;
+  elo_written?: boolean;
+}
+
+export async function postDeclineReason(w: DeclineReasonWrite): Promise<DeclineReasonResult | null> {
   try {
-    await api.post('/api/trades/pass-reason', {
+    return await api.post<DeclineReasonResult>('/api/trades/pass-reason', {
       impression_id: w.impressionId || undefined,
       trade_id: w.tradeId,
       league_id: w.leagueId || undefined,
+      give_player_ids: w.givePlayerIds,
+      receive_player_ids: w.receivePlayerIds,
+      target_user_id: w.targetUserId || undefined,
+      target_username: w.targetUsername || undefined,
       layer: w.layer,
       reason: w.reason,
       switched_from: w.switchedFrom || undefined,
@@ -104,10 +116,9 @@ export async function postDeclineReason(w: DeclineReasonWrite): Promise<boolean>
       detail_expanded: typeof w.detailExpanded === 'boolean' ? w.detailExpanded : undefined,
       calc_opened: typeof w.calcOpened === 'boolean' ? w.calcOpened : undefined,
     });
-    return true;
   } catch {
-    // Swallowed by contract (see the header). The pass is already recorded by
-    // the swipe POST; losing the reason degrades the diagnostic, not the deck.
-    return false;
+    // A companion swipe may still succeed; absence of this response is not
+    // evidence either for or against that independent request.
+    return null;
   }
 }

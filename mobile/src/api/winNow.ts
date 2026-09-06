@@ -1,8 +1,9 @@
 import { api } from './client';
+import type { RequestOptions } from './client';
 import type { SeasonProjection, WinNowSearchParams, WinNowJob, WinNowEvaluation } from '../shared/types';
 
-export const getSeasonProjections = (leagueId: string, signal?: AbortSignal) =>
-  api.get<SeasonProjection>(`/api/league/season-projections?league_id=${encodeURIComponent(leagueId)}`, {signal});
+export const getSeasonProjections = (leagueId: string, signal?: AbortSignal, options: RequestOptions = {}) =>
+  api.get<SeasonProjection>(`/api/league/season-projections?league_id=${encodeURIComponent(leagueId)}`, {...options, signal});
 export const searchWinNow = (params: WinNowSearchParams, signal?: AbortSignal) =>
   api.post<WinNowJob>('/api/win-now/search', params, {signal});
 export const getWinNowJob = (jobId: string, signal?: AbortSignal) =>

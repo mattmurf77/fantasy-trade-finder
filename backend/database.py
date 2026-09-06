@@ -2939,6 +2939,7 @@ _MODEL_CONFIG_DEFAULTS = [
     ("policy_confidence_band_high",      0.66, "policy: trade confidence at/above which a card's privacy-safe confidence_band reads 'high'"),
     ("policy_confidence_band_med",       0.33, "policy: trade confidence at/above which a card's confidence_band reads 'medium' (below it reads 'low')"),
     ("policy_shadow_log_cap",           40.0,  "policy: max trade_policy_shadow rows written per deck job — bounds a pathological league without hiding the treatment's rejections"),
+    ("simple_player_presentment",       0.0,  "presentation: 1 enables bounded simple-player ordering after live policy; 0 preserves the existing order"),
 ]
 
 
@@ -5608,7 +5609,9 @@ def save_trade_swipes(
     k_factor: float,
     decision_type: str = "trade",
     scoring_format: str = DEFAULT_SCORING,
-) -> None:
+    *,
+    pass_reason_key: str | None = None,
+) -> bool | None:
     """
     Persist pairwise trade-signal swipes.
 
@@ -5618,6 +5621,11 @@ def save_trade_swipes(
     decision_type: 'trade' (default) | 'disposition' — both are replayed
     identically (non-rank swipes with stored k_factor); the label is just
     for auditing.
+
+    With pass_reason_key, atomically claim that existing reason's once-only
+    Elo AND persist the signal. Returns True only after both commit; a lost
+    swipe write rolls back the claim so a contextful reason retry can repair.
+    Ordinary callers retain their existing return/behavior.
     """
     now  = _now()
     rows = []
@@ -5636,7 +5644,21 @@ def save_trade_swipes(
             })
     if rows:
         with engine.begin() as conn:
+            if pass_reason_key is not None:
+                reason = conn.execute(select(trade_pass_reasons_table).where(and_(
+                    trade_pass_reasons_table.c.impression_id == pass_reason_key,
+                    trade_pass_reasons_table.c.user_id == user_id,
+                )).with_for_update()).first()
+                if reason is None or reason.elo_signal_at is not None:
+                    return False
             conn.execute(insert(swipe_decisions_table), rows)
+            if pass_reason_key is not None:
+                conn.execute(update(trade_pass_reasons_table).where(
+                    trade_pass_reasons_table.c.impression_id == pass_reason_key
+                ).values(elo_signal_at=now))
+        if pass_reason_key is not None:
+            return True
+    return False if pass_reason_key is not None else None
 
 
 def load_swipe_decisions(
@@ -5721,6 +5743,7 @@ def save_trade_decision(
     *,
     impression_id: str | None = None,
     trade_concept_id: str | None = None,
+    queue_target_user_id: str | None = None,
 ) -> bool:
     """Persist a high-level trade card decision (like/pass).
 
@@ -5783,6 +5806,7 @@ def save_trade_decision(
         if trade_id:
             prev = conn.execute(
                 select(
+                    trade_decisions_table.c.id,
                     trade_decisions_table.c.created_at,
                     trade_decisions_table.c.give_player_ids,
                     trade_decisions_table.c.receive_player_ids,
@@ -5804,6 +5828,13 @@ def save_trade_decision(
                 and prev.give_player_ids    == give_json
                 and prev.receive_player_ids == receive_json
                 and _decision_replay_gap_ok(prev.created_at, now)
+                # #419: an explicit queue renewal after either actor's exact
+                # pass is a NEW like, including within the double-fire window.
+                # Only the queue route supplies this server-resolved identity.
+                and not (decision == "like" and queue_target_user_id
+                         and _queue_like_resolved(
+                             conn, user_id, league_id, queue_target_user_id,
+                             prev.id, give_player_ids, receive_player_ids))
             ):
                 log.info(
                     "save_trade_decision: replay suppressed (G-049) "
@@ -5857,6 +5888,182 @@ def load_trade_decisions(
     return result
 
 
+def _trade_decision_time(value):
+    """Comparable UTC history time; legacy naive stamps are UTC (#419)."""
+    try:
+        stamp = datetime.fromisoformat(value)
+        return (stamp.replace(tzinfo=timezone.utc) if stamp.tzinfo is None
+                else stamp.astimezone(timezone.utc))
+    except (TypeError, ValueError):
+        return None
+
+
+class TradeInterestHistory:
+    """One scoped, read-only exact-action projection shared by like readers.
+
+    History has no target column. Callers supply only an actually resolved
+    counterparty; roster containment is present actionability, not historical
+    recipient attribution. No discovery cooldown/amnesty enters this map.
+    """
+
+    def __init__(self, rows, since=None):
+        self.rows = []
+        self.passes = {}
+        self.withdrawn = {}
+        for raw in rows:
+            row = dict(raw._mapping) if hasattr(raw, "_mapping") else dict(raw)
+            stamp = _trade_decision_time(row.get("created_at"))
+            # Normalize BEFORE cutoff/order: SQL string comparisons disagree
+            # for mixed offsets. Keep unknown stamps as conservative barriers.
+            if since is not None and stamp is not None and stamp < since:
+                continue
+            try:
+                for field in ("give_player_ids", "receive_player_ids"):
+                    value = row[field]
+                    value = json.loads(value) if isinstance(value, str) else value
+                    if not isinstance(value, list) or not value or not all(
+                            isinstance(pid, str) and pid for pid in value):
+                        raise ValueError("invalid asset list")
+                    row[field] = value
+                key = self.key(row)
+            except (KeyError, ValueError, TypeError):
+                continue
+            row["_order"] = (stamp, row["id"]) if stamp is not None else None
+            self.rows.append(row)
+            barrier = (self.passes if row["decision"] == "pass" or stamp is None else
+                       self.withdrawn if row.get("retracted_at") else None)
+            if barrier is not None:
+                order = row["_order"]
+                if key not in barrier or order is None or (
+                        barrier[key] is not None and order > barrier[key]):
+                    barrier[key] = order
+
+    @staticmethod
+    def key(row):
+        return (row["league_id"], row["user_id"],
+                frozenset(row["give_player_ids"]),
+                frozenset(row["receive_player_ids"]))
+
+    def discovery_keys(self, user_id, *, pass_days=14.0, like_days=7.0,
+                       amnesty_epoch=0.0, now=None):
+        """Existing D-067 windows, separate from permanent source resolution.
+
+        Reuse normalized history without a lossy VARCHAR/integer-day SQL cut.
+        Malformed stamps remain excluded; only passes receive the amnesty.
+        """
+        now = now or datetime.now(timezone.utc)
+        mixed, passes = set(), set()
+        for row in self.rows:
+            if row["user_id"] != user_id or row["decision"] not in ("like", "pass"):
+                continue
+            is_pass = row["decision"] == "pass"
+            stamp = row["_order"][0] if row["_order"] is not None else None
+            if stamp is not None:
+                if is_pass and amnesty_epoch > 0 and stamp.timestamp() < amnesty_epoch:
+                    continue
+                if (now - stamp).total_seconds() > (pass_days if is_pass else like_days) * 86400:
+                    continue
+            key = (frozenset(row["give_player_ids"]), frozenset(row["receive_player_ids"]))
+            mixed.add(key)
+            if is_pass:
+                passes.add(key)
+        return mixed, passes
+
+    def resolved(self, row, receiver_id=None):
+        key = self.key(row)
+        keys = [key]
+        if receiver_id:
+            keys.append((key[0], receiver_id, key[3], key[2]))
+        order = row.get("_order")
+        if order is None:
+            return True
+        return any(k in self.passes and (
+            self.passes[k] is None or self.passes[k] > order) for k in keys)
+
+    def actionable(self, row, receiver_id=None):
+        if row["decision"] != "like" or row.get("retracted_at"):
+            return False
+        key = self.key(row)
+        if self.resolved(row, receiver_id):
+            return False
+        return not (key in self.withdrawn and (
+            self.withdrawn[key] is None or self.withdrawn[key] > row["_order"]))
+
+    def renewable(self, row, receiver_id=None):
+        """Only an orderable actual intervening pass authorizes queue renewal.
+
+        Unknown chronology blocks affirmative interest, but is not permission
+        to turn every queue retry into another like/Elo write.
+        """
+        key = self.key(row)
+        keys = {key}
+        if receiver_id:
+            keys.add((key[0], receiver_id, key[3], key[2]))
+        now = datetime.now(timezone.utc)
+        return bool(row["_order"] and any(
+            action["decision"] == "pass" and action["_order"]
+            and self.key(action) in keys
+            and row["_order"] < action["_order"]
+            and action["_order"][0] <= now for action in self.rows))
+
+    def likes(self, *, user_id=None, exclude_user_id=None, receiver_id=None):
+        rows = [row for row in self.rows
+                if (user_id is None or row["user_id"] == user_id)
+                and row["user_id"] != exclude_user_id
+                and self.actionable(row, receiver_id)]
+        return sorted(rows, key=lambda row: row["_order"], reverse=True)
+
+
+def load_trade_interest_history(league_ids, *, user_ids=None, since=None, conn=None):
+    """One batched league/actor read; normalized time bounds the projection.
+
+    Do not use a VARCHAR timestamp cutoff: it can omit a valid offset stamp
+    or an unorderable exact pass and thereby manufacture positive consent.
+    No per-card or per-arm reads, and no cap that could discard later passes.
+    """
+    query = select(*(trade_decisions_table.c[name] for name in (
+        "id", "user_id", "league_id", "trade_id", "give_player_ids",
+        "receive_player_ids", "decision", "created_at", "retracted_at",
+        "impression_id", "trade_concept_id",
+    ))).where(
+        trade_decisions_table.c.league_id.in_(set(league_ids)))
+    if user_ids is not None:
+        query = query.where(trade_decisions_table.c.user_id.in_(set(user_ids)))
+    if conn is not None:
+        return TradeInterestHistory(conn.execute(query).fetchall(), since)
+    with engine.connect() as connection:
+        return TradeInterestHistory(connection.execute(query).fetchall(), since)
+
+
+def load_trade_card_source_likes(user_id: str, league_id: str, impression_ids) -> dict:
+    """Batch existing owned snapshot→source links; never invent legacy links.
+
+    Public cards retain their own impression ID, not the counterparty source
+    ID. The frozen row already has that provenance when telemetry captured it.
+    """
+    if not impression_ids:
+        return {}
+    with engine.connect() as conn:
+        rows = conn.execute(select(
+            deck_impressions_table.c.impression_id,
+            deck_impressions_table.c.source_like_impression_id,
+        ).where(and_(
+            deck_impressions_table.c.user_id == user_id,
+            deck_impressions_table.c.league_id == league_id,
+            deck_impressions_table.c.impression_id.in_(set(impression_ids)),
+        ))).fetchall()
+    return {row.impression_id: row.source_like_impression_id for row in rows}
+
+
+def _queue_like_resolved(conn, user_id, league_id, target_id, row_id, give, receive):
+    history = load_trade_interest_history(
+        [league_id], user_ids=[user_id, target_id], conn=conn)
+    row = next((row for row in history.rows if row["id"] == row_id), None)
+    return bool(row and set(row["give_player_ids"]) == set(give)
+                and set(row["receive_player_ids"]) == set(receive)
+                and history.renewable(row, target_id))
+
+
 def load_recent_league_likes(
     league_id: str,
     exclude_user_id: str,
@@ -5874,53 +6081,16 @@ def load_recent_league_likes(
     like (`calcq_…`, the calculator ✓ cell) from an engine/deck like — D-170
     exempts the former from the preference-list and D-096 quality gates.
     """
-    cutoff = (datetime.now(timezone.utc).replace(tzinfo=None)
-              - timedelta(days=days)).isoformat()
-    with engine.connect() as conn:
-        rows = conn.execute(
-            select(
-                trade_decisions_table.c.user_id,
-                trade_decisions_table.c.trade_id,
-                trade_decisions_table.c.give_player_ids,
-                trade_decisions_table.c.receive_player_ids,
-                trade_decisions_table.c.created_at,
-                # Personal-market policy — the counterparty's own impression,
-                # so an injected mirror can name the like that caused it.
-                trade_decisions_table.c.impression_id,
-            ).where(
-                and_(
-                    trade_decisions_table.c.league_id  == league_id,
-                    trade_decisions_table.c.user_id    != exclude_user_id,
-                    trade_decisions_table.c.decision   == "like",
-                    trade_decisions_table.c.created_at >= cutoff,
-                    # #318 — a retracted like must not feed the receiver's
-                    # likes-you deck injection.
-                    trade_decisions_table.c.retracted_at.is_(None),
-                )
-            ).order_by(trade_decisions_table.c.id.desc())
-        ).fetchall()
-
-    result = []
-    for r in rows:
-        try:
-            give    = json.loads(r.give_player_ids)
-            receive = json.loads(r.receive_player_ids)
-        except (json.JSONDecodeError, TypeError):
-            continue
-        result.append({
-            "user_id":            r.user_id,
-            "trade_id":           r.trade_id,
-            "give_player_ids":    give,
-            "receive_player_ids": receive,
-            "created_at":         r.created_at,
-            # Additive key; None on every pre-change row and on any decision
-            # the client sent without an impression.
-            "impression_id":      getattr(r, "impression_id", None),
-        })
-    return result
+    history = load_trade_interest_history(
+        [league_id], since=datetime.now(timezone.utc) - timedelta(days=days))
+    fields = ("user_id", "trade_id", "give_player_ids", "receive_player_ids",
+              "created_at", "impression_id")
+    return [{field: row.get(field) for field in fields} for row in history.likes(
+        exclude_user_id=exclude_user_id, receiver_id=exclude_user_id)]
 
 
-def find_live_trade_like(user_id: str, league_id: str, trade_id: str) -> dict | None:
+def find_live_trade_like(user_id: str, league_id: str, trade_id: str,
+                         target_user_id: str | None = None) -> dict | None:
     """The newest still-live (`retracted_at IS NULL`) 'like' row for this
     (user, league, trade_id), or None. Read-only.
 
@@ -5936,24 +6106,15 @@ def find_live_trade_like(user_id: str, league_id: str, trade_id: str) -> dict | 
     """
     if not (user_id and league_id and trade_id):
         return None
-    with engine.connect() as conn:
-        row = conn.execute(
-            select(
-                trade_decisions_table.c.id,
-                trade_decisions_table.c.created_at,
-            ).where(
-                and_(
-                    trade_decisions_table.c.user_id      == user_id,
-                    trade_decisions_table.c.league_id    == league_id,
-                    trade_decisions_table.c.trade_id     == trade_id,
-                    trade_decisions_table.c.decision     == "like",
-                    trade_decisions_table.c.retracted_at.is_(None),
-                )
-            ).order_by(trade_decisions_table.c.id.desc()).limit(1)
-        ).fetchone()
+    history = load_trade_interest_history(
+        [league_id], user_ids=[user_id, target_user_id] if target_user_id else [user_id])
+    row = next((row for row in sorted(history.rows, key=lambda r: r["id"], reverse=True)
+                if row["user_id"] == user_id and row["trade_id"] == trade_id
+                and row["decision"] == "like" and not row.get("retracted_at")
+                and not history.renewable(row, target_user_id)), None)
     if row is None:
         return None
-    return {"id": row.id, "created_at": row.created_at}
+    return {"id": row["id"], "created_at": row["created_at"]}
 
 
 # ---------------------------------------------------------------------------
@@ -6506,8 +6667,8 @@ def upsert_trade_pass_reason(
 
     Returns::
 
-        {"created":       bool,   # True ⇒ this call minted the row, i.e.
-                                  #        THIS is the tap that passed the card
+        {"created":       bool,   # True ⇒ this call minted the REASON row;
+                                  # not evidence of a committed disposition
          "reason":        str|None,   # post-write state
          "detail":        str|None,
          "switched_from": str|None,
@@ -6590,6 +6751,118 @@ def upsert_trade_pass_reason(
             # the row, not a field a later tap gets to revise.
             "key_source":    p.get("key_source"),
         }
+
+
+def ensure_reasoned_trade_pass(
+    impression_id: str, user_id: str, league_id: str, trade_id: str,
+    give_player_ids: list[str], receive_player_ids: list[str],
+    *, target_user_id: str | None = None,
+) -> tuple[bool, bool]:
+    """Verify/repair a banked reason's exact card pass; return (passed, wrote).
+
+    Unlike ordinary swipe replay detection, a reason episode is idempotent
+    beyond ten seconds and across service restarts. Its existing row is the
+    serialization key (FOR UPDATE on Postgres); no synthetic history or new
+    lifecycle column is needed. A mismatched reason identity is never proof.
+    The return happens after the transaction commits, so DB failure cannot
+    masquerade as a successful pass. Ordinary swipe remains best-effort.
+    """
+    with engine.begin() as conn:
+        reason = conn.execute(select(trade_pass_reasons_table).where(
+            trade_pass_reasons_table.c.impression_id == impression_id
+        ).with_for_update()).first()
+        if (reason is None or reason.user_id != user_id
+                or reason.league_id != league_id or reason.trade_id != trade_id):
+            return False, False
+        episode_at = _trade_decision_time(reason.created_at)
+        if episode_at is None:
+            return False, False  # no ordered durable episode to verify/repair
+        served_at = None
+        if reason.key_source == "impression":
+            impression = conn.execute(select(deck_impressions_table.c.served_at).where(and_(
+                deck_impressions_table.c.impression_id == impression_id,
+                deck_impressions_table.c.user_id == user_id,
+                deck_impressions_table.c.league_id == league_id,
+            ))).first()
+            if impression is not None:
+                served_at = _trade_decision_time(impression.served_at)
+        rows = conn.execute(select(trade_decisions_table).where(and_(
+            trade_decisions_table.c.user_id == user_id,
+            trade_decisions_table.c.league_id == league_id,
+            trade_decisions_table.c.trade_id == trade_id,
+            trade_decisions_table.c.decision == "pass",
+            trade_decisions_table.c.retracted_at.is_(None),
+        ))).fetchall()
+        give, receive = set(give_player_ids), set(receive_player_ids)
+        companions = []
+        for row in rows:
+            try:
+                if (set(json.loads(row.give_player_ids)) == give
+                        and set(json.loads(row.receive_player_ids)) == receive):
+                    if (reason.key_source == "impression" and row.impression_id is not None
+                            and row.impression_id != impression_id):
+                        continue  # known other exposure cannot be this episode
+                    passed_at = _trade_decision_time(row.created_at)
+                    if passed_at is None:
+                        continue
+                    if passed_at >= episode_at:
+                        return True, False
+                    # A real exposure permits a delayed companion reason.
+                    # Unlinked legacy gestures get only the existing ten-second
+                    # replay bridge, never an arbitrary old same-card pass.
+                    if ((served_at is not None and served_at <= passed_at)
+                            or (reason.key_source != "impression"
+                                and _decision_replay_gap_ok(row.created_at, reason.created_at))):
+                        companions.append((passed_at, row.id))
+            except (TypeError, ValueError):
+                continue
+        if companions:
+            # Renewed exact consent before THIS episode separates an old pass
+            # even when it falls within the retained impression/legacy bridge.
+            # Later consent after the immutable first-bank anchor is not a
+            # reason refinement's new pass; updated_at must never reset it.
+            positives = conn.execute(select(trade_decisions_table).where(and_(
+                trade_decisions_table.c.league_id == league_id,
+                trade_decisions_table.c.user_id.in_([user_id, target_user_id] if target_user_id else [user_id]),
+                trade_decisions_table.c.decision == "like",
+            ))).fetchall()
+            barriers = []
+            for row in positives:
+                try:
+                    sides = (set(json.loads(row.give_player_ids)), set(json.loads(row.receive_player_ids)))
+                except (TypeError, ValueError):
+                    continue
+                expected = (give, receive) if row.user_id == user_id else (receive, give)
+                if sides != expected:
+                    continue
+                stamp = _trade_decision_time(row.created_at)
+                if stamp is None or stamp <= episode_at:
+                    barriers.append(None if stamp is None else (stamp, row.id))
+            if any(not any(barrier is None or barrier > candidate for barrier in barriers)
+                   for candidate in companions):
+                return True, False
+        conn.execute(insert(trade_decisions_table).values(
+            user_id=user_id, league_id=league_id, trade_id=trade_id,
+            give_player_ids=json.dumps(give_player_ids),
+            receive_player_ids=json.dumps(receive_player_ids),
+            decision="pass", created_at=_now(),
+        ))
+    return True, True
+
+
+def mark_reasoned_trade_pass_elo(user_id: str, league_id: str, trade_id: str) -> None:
+    """An ordinary swipe supplied Elo for an already-banked reason episode.
+
+    Consume the existing once-only claim so a later value detail cannot
+    write the same signal again. No reason is minted by an ordinary swipe.
+    """
+    with engine.begin() as conn:
+        conn.execute(update(trade_pass_reasons_table).where(and_(
+            trade_pass_reasons_table.c.user_id == user_id,
+            trade_pass_reasons_table.c.league_id == league_id,
+            trade_pass_reasons_table.c.trade_id == trade_id,
+            trade_pass_reasons_table.c.elo_signal_at.is_(None),
+        )).values(elo_signal_at=_now()))
 
 
 def claim_trade_pass_elo(impression_id: str) -> bool:
@@ -8847,44 +9120,21 @@ def find_mirror_like(
     give_set    = set(give_player_ids)
     receive_set = set(receive_player_ids)
 
-    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=90)
-    with engine.connect() as conn:
-        rows = conn.execute(
-            select(
-                trade_decisions_table.c.give_player_ids,
-                trade_decisions_table.c.receive_player_ids,
-                trade_decisions_table.c.impression_id,
-                trade_decisions_table.c.trade_concept_id,
-                trade_decisions_table.c.created_at,
-            ).where(
-                and_(
-                    trade_decisions_table.c.user_id    == target_user_id,
-                    trade_decisions_table.c.league_id  == league_id,
-                    trade_decisions_table.c.decision   == "like",
-                    trade_decisions_table.c.created_at >= cutoff.isoformat(),
-                    # #318 — a retracted like can never mature into a match.
-                    trade_decisions_table.c.retracted_at.is_(None),
-                )
-            )
-        ).fetchall()
-
-    parsed: list[tuple[set, set, object]] = []
-    for r in rows:
-        try:
-            their_give    = set(json.loads(r.give_player_ids))
-            their_receive = set(json.loads(r.receive_player_ids))
-        except (json.JSONDecodeError, TypeError):
-            continue
-        parsed.append((their_give, their_receive, r))
+    history = load_trade_interest_history(
+        [league_id], user_ids=[current_user_id, target_user_id],
+        since=datetime.now(timezone.utc) - timedelta(days=90))
+    parsed = [(set(row["give_player_ids"]), set(row["receive_player_ids"]), row)
+              for row in history.likes(user_id=target_user_id,
+                                       receiver_id=current_user_id)]
 
     def _detail(row, exact: bool) -> dict:
         return {
             # getattr defaults: an instance one deploy behind _migrate_db has
             # no such column, and match detection must not start failing over
             # a telemetry field.
-            "impression_id":    getattr(row, "impression_id", None),
-            "trade_concept_id": getattr(row, "trade_concept_id", None),
-            "liked_at":         getattr(row, "created_at", None),
+            "impression_id":    row.get("impression_id"),
+            "trade_concept_id": row.get("trade_concept_id"),
+            "liked_at":         row.get("created_at"),
             "exact":            exact,
         }
 
@@ -9285,6 +9535,13 @@ def load_awaiting_trades(user_id: str) -> list[dict]:
         # has liked trades in — needed to resolve the counterparty by
         # roster ownership.
         league_ids = {r.league_id for r in like_rows}
+        # #419: one batched exact-action projection for all selected leagues,
+        # reused below after the existing roster-based partner resolution.
+        stamps = [_trade_decision_time(r.created_at) for r in like_rows]
+        history = load_trade_interest_history(
+            league_ids, since=min((s for s in stamps if s is not None), default=None),
+            conn=conn)
+        history_by_id = {row["id"]: row for row in history.rows}
         member_rows = []
         if league_ids:
             member_rows = conn.execute(
@@ -9294,10 +9551,8 @@ def load_awaiting_trades(user_id: str) -> list[dict]:
             ).fetchall()
 
     # Build a per-(league_id, player_id) → owner_user_id index from rosters.
-    # Multiple owners of the same player ID inside a single league shouldn't
-    # exist (Sleeper rosters are exclusive), but if the data is dirty we
-    # take the first hit.
-    owner_by_league_pid: dict[tuple[str, str], str] = {}
+    # Dirty/ambiguous roster ownership cannot identify an offer's recipient.
+    owner_by_league_pid: dict[tuple[str, str], str | None] = {}
     owner_username_by_id: dict[tuple[str, str], str] = {}
     for mr in member_rows:
         try:
@@ -9308,7 +9563,11 @@ def load_awaiting_trades(user_id: str) -> list[dict]:
             mr.username or mr.display_name or mr.user_id
         )
         for pid in roster_ids:
-            owner_by_league_pid.setdefault((mr.league_id, pid), mr.user_id)
+            key = (mr.league_id, pid)
+            if key not in owner_by_league_pid:
+                owner_by_league_pid[key] = mr.user_id
+            elif owner_by_league_pid[key] != mr.user_id:
+                owner_by_league_pid[key] = None
 
     # Build a set of matched player-set keys so we can skip already-matched
     # trades. We normalise by league + frozenset(give) + frozenset(receive)
@@ -9331,7 +9590,9 @@ def load_awaiting_trades(user_id: str) -> list[dict]:
 
     result = []
     seen_keys: set[tuple[str, frozenset, frozenset]] = set()
-    for r in like_rows:
+    for r in sorted(like_rows, key=lambda row: (
+            _trade_decision_time(row.created_at) or datetime.min.replace(tzinfo=timezone.utc),
+            row.id), reverse=True):
         try:
             give    = json.loads(r.give_player_ids)
             receive = json.loads(r.receive_player_ids)
@@ -9346,17 +9607,19 @@ def load_awaiting_trades(user_id: str) -> list[dict]:
                        # one awaiting entry per underlying trade (#91)
         seen_keys.add(key)
 
-        # Recover counterparty: owner of any of the receive players in this
-        # league. If we can't find one (stale roster cache, missing member
-        # data), skip — we can't render a useful tile without naming the
-        # other owner.
-        partner_id: str | None = None
-        for pid in receive:
-            cand = owner_by_league_pid.get((r.league_id, pid))
-            if cand and cand != user_id:
-                partner_id = cand
-                break
-        if not partner_id:
+        # Present actionability only, never invented historical attribution.
+        # Owned/generic picks are not in player rosters. Keep the existing
+        # known-player anchor for a mixed package; unknown assets contribute
+        # no owner, never an invented one. Contradictory known owners (or an
+        # ambiguous roster entry represented by None) remain ineligible.
+        owners = {owner_by_league_pid[(r.league_id, pid)] for pid in receive
+                  if (r.league_id, pid) in owner_by_league_pid}
+        if len(owners) != 1 or None in owners or user_id in owners:
+            continue
+        partner_id = next(iter(owners))
+
+        source = history_by_id.get(r.id)
+        if source is None or not history.actionable(source, partner_id):
             continue
 
         partner_name = owner_username_by_id.get(

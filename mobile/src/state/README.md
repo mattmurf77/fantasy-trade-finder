@@ -1,6 +1,6 @@
 # mobile/src/state/
 
-Cross-screen state: 19 modules, three shapes. What each one does and why is in [CLAUDE.md](CLAUDE.md).
+Cross-screen stores and coordination. What each module does and why is in [CLAUDE.md](CLAUDE.md).
 
 ## The three shapes
 
@@ -13,6 +13,24 @@ Cross-screen state: 19 modules, three shapes. What each one does and why is in [
 `queryClient.ts` is neither — it is the single `QueryClient` instance, shared between `App.tsx`'s provider and non-React modules that invalidate caches imperatively (e.g. `useSession` swapping the active league outside any component tree). Defaults are tuned for a consumer mobile app: retry once, 30s `staleTime`, 30min `gcTime`, refetch on mount/focus/reconnect.
 
 `guideTargets.ts` is a registry, not a store: screens register views by testID and the guide overlay measures them at show time.
+
+`leagueSession.ts` is an internal initialization coordinator, instantiated by
+`useSession`, not another persisted store. Every native init writer joins or
+supersedes the same captured account/league/token generation. Acknowledged
+same-token writers are serialized; an ambiguous dispatched timeout is not
+server cancellation and blocks automatic re-entry until a new deliberate
+action or replacement token. Readiness is never inferred from a busy boolean
+or throttle alone. API builders return cache seeds; state publishes them only
+after a current accepted initialization.
+
+Win Now's full load has one 90-second budget before token preparation, shared
+init, projection GET, and at most one exact `session_not_initialized` repair
+and read replay. Canceling a reader detaches it without canceling another
+reader's shared initialization. No write operation is automatically replayed
+by this recovery path. Native storage operations already dispatched cannot
+be canceled by later identity guards; those guards prevent stale in-memory,
+cache and navigation publication, not an unconditional persistent-store
+ordering guarantee.
 
 ## Persistence keys
 
