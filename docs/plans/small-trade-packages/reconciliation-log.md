@@ -26,7 +26,7 @@ Root relayed original planner `cleanup_astra`'s **approval of `07d98473` without
 - The ≤5 movement/class-vector invariants govern the pre-removal permutation. Subsequent authoritative removal compacts the deck without constituting another presentation reorder. After impressions freeze, later poll/cache removal cannot rewrite their indices.
 - PRD T4/T6 now require a held-worker pass/drop regression, distinct duplicate-shaped survivor objects and repeated same-object occurrence records. Prove original metadata survives, final indices match actual rows, dropped occurrences receive no row and no new impression-ID design is introduced.
 
-**Revised root read/gate remains pending before runtime implementation.** Parent owns shared index, decision, docs and evidence updates; this author owns exactly `prd.md`, `scope.md`, `reconciliation-log.md`.
+**Revised root gate approved on 2026-09-06:** root read the complete `5171f13a` revision and accepted the occurrence-remapping condition above. A fresh fetch at 15:09 UTC still resolves `origin/main` to `4026ebc81eaae50b345b42421641125c5b8d413e`; no upstream runtime drift requires a plan change. Runtime work remains sequenced after final #419 backend review/integration because both touch the publication and cache seams. This is build authorization, not QA or activation evidence. Parent owns shared index, decision, docs and evidence updates.
 
 ## Author verification
 
