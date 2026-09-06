@@ -2,6 +2,8 @@
 
 Helpers. **No React**, ever. Most are pure; a handful touch native modules or `../api/` (marked below). Full file list + the node-testable/not split: [README.md](README.md).
 
+- `tradeDisposition.ts` — exact account/league/partner/asset-set pass keys, durable-write settlement, and render projection with source-index cursor mapping (#419). Pure, type-only imports; `check-trade-disposition.js` executes it. TradesScreen owns the session-scoped record and callbacks. A held Undo or reason-only `ok` is not durable pass evidence; no raw-ID-only or fuzzy package suppression.
+
 - `relativeTime.ts` — "2h ago"–style formatting
 - `tierBands.ts` — maps Elo / value → tier key and label (8-tier pick-value ladder, #117: 4+ 1sts / 3 1sts / 2 1sts / 1st / 2nd / 3rd / 4th / FA — the bottom label renamed from "Waivers" 2026-07-17, key still `waivers`). The former `pickTerms.ts` sublabel helper was removed 2026-07-11 — tier labels ARE pick terms now.
 - `anchorRows.ts` — **draft-extensions W1 (2026-08-06)**: the pick-anchor rung grid (`ANCHOR_ROWS`, two rows of four, `4_firsts`…`no_value`). Extracted from `PickAnchorScreen` the moment a SECOND surface (`components/AnchorSheet`, the Draft Room's "Set my value") started asking the same question — the keys are a cross-client enum shared with `backend/server.py:VALID_ANCHORS` (see `docs/cross-client-invariants.md` § Pick anchor keys), so a copied table would be a silent mis-valuation, not a layout bug. Data only; order is presentational, the keys are the contract.

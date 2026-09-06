@@ -5,7 +5,7 @@
 **Builder:** separate backend/mobile owners assigned by root after Phase-1 critique
 **Operator sign-off on waivers:** not needed (no evidence or analytics waivers)
 
-Source: [PRD](prd.md), requirements R1–R4 and acceptance T1–T8; [planner diagnosis](plan-g419.md). Revised after independent critique to include the narrow queue renewal write exception and truthful durable-pass response/repair. Root ratified R1 and held boundaries; focused planner review of these corrections remains pending. This scope is planned, not evidence of implementation. Root owns shared-document edits.
+Source: [PRD](prd.md), requirements R1–R4 and acceptance T1–T8; [planner diagnosis](plan-g419.md). Independent planner approved revised specification `481b1809`; root ratified the contract and held boundaries. Backend `e02d074e` passed root review and the dependent build gate; mobile `396d92fc` has passed root diff review and focused behavioral checks. Full combined independent QA and release remain pending. Root owns shared-document edits.
 
 ## 1. Analytics scope
 
@@ -31,11 +31,11 @@ Source: [PRD](prd.md), requirements R1–R4 and acceptance T1–T8; [planner dia
 
 | Doc | Planned disposition | Section / owner |
 |---|---|---|
-| `docs/api-reference.md` | Update at integration | Root: Trades route rows for actionable likes, queue renewal within ten seconds, Awaiting, consistent pass/cache semantics, and `passed` as verified durable disposition state (including existing committed retries), not reason-row creation. Contextless/best-effort failed writes return passed false and remain repairable. Field names/types/status codes unchanged; the boolean meaning correction is explicit. |
-| `living-memory/LLD.md` | Update at integration | Root: exact source-evidence projection separate from discovery cooldown; narrow queue replay exception, idempotent banked-reason repair, structured client commit evidence, shared pass binding/restoration and job-owned serve projection. |
-| `docs/architecture.md` | Update at integration | Root: existing trade-card lifecycle/read flow gains shared history projection and serve revalidation. No new subsystem. |
+| `docs/api-reference.md` | Updated | Root: Trades route rows for actionable likes, queue renewal within ten seconds, Awaiting, consistent pass/cache semantics, and `passed` as verified durable disposition state (including existing committed retries), not reason-row creation. Contextless/best-effort failed writes return passed false and remain repairable. Field names/types/status codes unchanged; the boolean meaning correction is explicit. |
+| `living-memory/LLD.md` | Updated | Root: exact source-evidence projection separate from discovery cooldown; narrow queue replay exception, idempotent banked-reason repair, structured client commit evidence, shared pass binding/restoration and job-owned serve projection. |
+| `docs/architecture.md` | Updated | Root: existing trade-card lifecycle/read flow gains shared history projection and serve revalidation. No new subsystem. |
 | `living-memory/HLD.md` | n/a | No new module/subsystem/client/major flow; detailed changes belong to architecture and LLD. Reassess only if implementation expands. |
-| `docs/cross-client-invariants.md` | Update at integration | Root: existing Match bucket semantics clarify only actionable one-sided likes appear in Awaiting; visible summary counts retain parity. Existing pass controls, enums and constants stay unchanged. |
+| `docs/cross-client-invariants.md` | Updated | Root: existing Match bucket semantics clarify only actionable one-sided likes appear in Awaiting; visible summary counts retain parity. Existing pass controls, enums and constants stay unchanged. |
 | `docs/glossary.md` | n/a | No new user-facing term; interested, like, pass, Awaiting and match retain their UI vocabulary. |
 | ADR or `DECISIONS.md` | Decision entry at integration | Root records ratified exact stale-source precedence and its separation from D-067 discovery amnesty/expiry, plus reviewed truthful passed/repair semantics. These are bounded semantic corrections with explicit fresh-like/idempotency cases, not a broad cooldown policy reversal. |
 | `docs/data-dictionary.md` | n/a | No schema or stored-field meaning change; existing retraction ownership and timestamps remain history. |
@@ -48,4 +48,4 @@ Source: [PRD](prd.md), requirements R1–R4 and acceptance T1–T8; [planner dia
 - **Evidence recorded:** root's `living-memory/TEST_LEDGER.md` entry names focused/full checks, incident RED, named sabotages and final code-walk. No execution claimed in this Phase-1 artifact.
 - **TestFlight verification:** operator runs PRD checklist and logs the exact build/backend result before mobile runtime behavior is described as verified.
 - Express lane declared? **No.** Full evidence/doc gates apply. `FTF_SKIP_SIM_GATE=1` is the D-056 standing posture if a later authorized push runs the old hook.
-- Current authorization covers the fix and local commits. This author task stops after the documents and independent critique handoff; no push/deploy or production/user action.
+- Current-batch owner authorization covers reviewed merge/live/TestFlight delivery, as recorded in the batch plan. It does not waive QA/CI/privacy gates or authorize unrelated changes and real-user trade actions. Build completion is not delivery or physical-device verification.

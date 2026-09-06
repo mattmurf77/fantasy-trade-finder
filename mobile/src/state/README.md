@@ -1,6 +1,6 @@
 # mobile/src/state/
 
-Cross-screen state: 19 modules, three shapes. What each one does and why is in [CLAUDE.md](CLAUDE.md).
+Cross-screen stores and coordination. What each module does and why is in [CLAUDE.md](CLAUDE.md).
 
 ## The three shapes
 

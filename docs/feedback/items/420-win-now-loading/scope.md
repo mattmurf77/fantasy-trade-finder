@@ -4,11 +4,11 @@
 
 **Entry point:** feedback #420 and #421
 
-**Builder:** G420 implementation owner, not yet assigned in this author pass
+**Builder:** G420 Astra Ultra implementation owner; root review and integration complete at `ff205431`.
 
 **Operator sign-off on waivers:** not needed; no waivers requested
 
-**Stage:** Phase-1 author revision after independent critique of `25347324`; focused planner recheck pending. No runtime evidence or release completion claimed.
+**Stage:** Specification `764e0ee9` independently approved; implementation `2de3e1d9` and evidence `ff205431` reviewed and integrated by root. Root independently repeated 38 recovery cases, 128 focused backend tests, TypeScript and testID lint successfully. Full combined redundant QA, CI, release and physical TestFlight verification remain pending; detailed results are in [build evidence](build-evidence.md).
 
 Specification: [PRD](prd.md). Investigation: [plan](plan-g420.md), [production evidence](production-evidence.md). Decisions and limitations: [reconciliation log](reconciliation-log.md).
 
@@ -48,13 +48,13 @@ Rows below declare the required follow-through; “required” is intentionally 
 | Doc | Updated? | Section / reason n/a |
 |---|---|---|
 | `docs/api-reference.md` | n/a: no HTTP route or wire contract change | Existing init and projection request/response/error shapes are pinned in PRD §4.4. Native-only timing/lifecycle changes belong in the mobile API/state references, not a fictitious server API delta. |
-| `living-memory/LLD.md` | Required at integration | Targeted native session-generation, shared init ordering, uncertain completion, and 30-second projection / 90-second total attempt invariants; no schema section change. |
-| `docs/architecture.md` | Required at integration | Targeted native data-flow note: state-owned join/repair, every init writer participating, API layering unchanged. Embedded HLD/LLD in PRD §§3–4 are the Phase-1 contract. |
-| `living-memory/HLD.md` | Required at integration | Concise update to existing native session reconciliation flow, not a new backend service or async baseline architecture. |
+| `living-memory/LLD.md` | Updated | Targeted native session-generation, shared init ordering, uncertain completion, and 30-second projection / 90-second total attempt invariants; no schema section change. |
+| `docs/architecture.md` | Updated | Targeted native data-flow note: state-owned join/repair, every init writer participating, API layering unchanged. Embedded HLD/LLD in PRD §§3–4 are the Phase-1 contract. |
+| `living-memory/HLD.md` | Updated | Concise update to existing native session reconciliation flow, not a new backend service or async baseline architecture. |
 | `docs/cross-client-invariants.md` | n/a: no shared constants/enums/colors or wire behavior changed | Preserve current verified identity, account/co-owner distinction, source/freshness rules, error bodies and result order; native deadline is not imposed on web. |
 | `docs/glossary.md` | n/a: no new domain term | Context generation / request budget are internal implementation terms. |
 | ADR or `DECISIONS.md` | n/a: bounded correction, not a new architectural platform decision | Non-obvious local choice (serialization is conditional on acknowledged settlement; no server cancellation guarantee) is explicit in PRD §4.2 and reconciliation. A stronger server protocol would require a separately reviewed design. |
-| `mobile/src/api/README.md`, `mobile/src/state/README.md` | Required at integration where their current maps describe these paths | Correct changed lifecycle/timeout and stale “mint/optimistic” descriptions in touched code; API returns seed, state owns cache remains intact. No general auth documentation rewrite. |
+| `mobile/src/api/README.md`, `mobile/src/state/README.md` | Updated | Correct changed lifecycle/timeout and stale “mint/optimistic” descriptions in touched code; API returns seed, state owns cache remains intact. No general auth documentation rewrite. |
 | `living-memory/TEST_LEDGER.md` and selected item status/index | Required, orchestrator-owned | Exact RED/GREEN/CI evidence and actual implementation/delivery/device status; do not close the reports or label runtime verification complete from this author pass. |
 
 No HLD/LLD/API requirement is silently waived. No separate feature-path delta files are added because this is the requested lighter-path native bug fix with full interfaces embedded in the PRD.

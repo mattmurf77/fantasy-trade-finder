@@ -41,11 +41,11 @@ Shared follow-through below is **required at integration, not completed by this 
 
 | Doc | Disposition | Scope |
 |---|---|---|
-| `docs/api-reference.md` | Required | Generated-deck ordering and mode-compatible cache semantics; no endpoint or JSON wire shape change. |
-| `docs/config-reference.md` | Required | The single default-off knob, exact values, capture timing and rollback limits. |
-| `docs/data-dictionary.md` | Required | Frozen nested presentation fields and serving-version suffix; distinguish served position from original arm/group rank. |
-| `living-memory/LLD.md` | Required | Six absolute slots, class locks, publication ordering, captured-mode reuse checks and frozen provenance. |
-| `docs/architecture.md` | Required | One post-policy/pre-publication helper and writer/cache flow. |
+| `docs/api-reference.md` | Updated | Generated-deck ordering and mode-compatible cache semantics; no endpoint or JSON wire shape change. |
+| `docs/config-reference.md` | Updated | The single default-off knob, exact values, capture timing and rollback limits. |
+| `docs/data-dictionary.md` | Updated | Frozen nested presentation fields and serving-version suffix; distinguish served position from original arm/group rank. |
+| `living-memory/LLD.md` | Updated | Six absolute slots, class locks, publication ordering, captured-mode reuse checks and frozen provenance. |
+| `docs/architecture.md` | Updated | One post-policy/pre-publication helper and writer/cache flow. |
 | `living-memory/HLD.md` | n/a | No new service/client/subsystem or major flow; targeted module wiring is covered by architecture/LLD. |
 | `docs/cross-client-invariants.md` | n/a | No shared client enum/color/constant; clients do not gain a re-sort. Existing wire/identity invariants preserved. |
 | `docs/glossary.md` | n/a | No new user-facing domain term. |
