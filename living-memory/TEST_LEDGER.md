@@ -13,6 +13,20 @@
 
 ## 2026-09-06 — Owner construction challenger, implementation checkpoints
 
+**Release update:** repaired65fa7720 passed all four exact-head CI jobs,
+backend5765passed/1skip655.89s; parent frozen local5765passed/1skip400.05s,
+mobile TypeScript/all97guards/testID, web190 and native syntax green. PR285
+merged21:19:11UTC as0e3d6b70, fetched tree identical. Render exact-source
+dep-daethkbbc2fs73cmot5g LIVE21:20:25.109775UTC. Only new include knob0→1 at
+21:21:19.888685UTC via audited CLI; readback preserves207flags/259oldsettings,
+serve0 and all existing controls. EAS1.17.2(150) exact65fa7720 build
+fd9537fb-fead-46c2-a3b7-efd4a5516b11 FINISHED21:26:38.848UTC; exact-ID
+submission76b98762-44dc-430d-862d-8b5141cbe9a9 FINISHED/error-null readback
+21:32:08.141UTC. Final production readback21:30:23UTC remains healthy and
+shadow-only. Apple tester availability remains unverified. Serving
+waits for intended tester installation, not merely upload completion. No
+physical-device pass or production quality claim. [Current release evidence](../docs/plans/owner-engine-challenger/release.md).
+
 New isolated `codex/owner-engine-challenger-20260906` from `4c343a48` introduces
 an actual separate `owner_v1` constructor and selected-route attribution;
 existing control goldens/profiles are retained. Owner clarification is joint

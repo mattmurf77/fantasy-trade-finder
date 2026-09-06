@@ -962,8 +962,10 @@ goldens are retained. Include without serve is not a live test; serve without
 include cannot introduce the arm. The independent serving bit applies to both
 group composition and the plain team-draft path. A job captures permission once;
 hot flips apply to subsequent jobs, and completed cache freshness compares the
-captured owner state with current settings. First turn off serve to stop new
-treatment jobs, then include to stop computation; preserve evidence and controls.
+captured owner state with current settings. First turn off serve to prevent
+treatment exposure for newly captured requests, then include to stop new owner
+computation; preserve evidence and controls. Already captured jobs/cards are
+not revoked by either switch.
 Serving is global, not client-version gated. Old mobile builds do not implement
 the new ordering/partial-notice/selected-view contracts. Enable include-only
 before binary uptake; verify the intended testers use 1.17.2 or later before
