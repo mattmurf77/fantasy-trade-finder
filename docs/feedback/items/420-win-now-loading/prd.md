@@ -1,0 +1,191 @@
+# G420 PRD — bounded Win Now session recovery
+
+Date: 2026-09-06
+
+Feedback: #420 (lost initialized league context) and #421 (projection deadline / misleading timeout)
+
+Work type: bounded native bug fix; HLD/LLD deltas are embedded below.
+
+Source checked: runtime `4026ebc81eaae50b345b42421641125c5b8d413e`, planner commit `7fd1ba9a49904287a80e14cad545c9bce5160eeb`.
+
+Status: author draft for independent planner critique. **Not implemented, tested, shipped, or approved to build.**
+
+Inputs: [planner investigation](plan-g420.md), [sanitized production evidence](production-evidence.md), [feature scope](scope.md), [reconciliation](reconciliation-log.md). Source line references below identify the reviewed baseline, not future edited line numbers.
+
+## 1. Outcome and evidence boundaries
+
+A signed-in user opening League → season projections or Acquire → Win Now must get one bounded attempt that can repair lost server league initialization, interpret a legitimately slow projection response, and explain a real failure without inventing a hosting condition. Recovery cannot revive a superseded account, token, league, or screen.
+
+The report-associated sequence establishes a real missing-context refusal after a deploy: successful init, process rollover, repeated exact `409 session_not_initialized`, later successful init. A later projection response completed HTTP 200 in 15,186 ms while the native request timed out at 15,034 ms. The captured evidence does **not** establish that the 200 body contained available forecasts. It also does not prove free-tier sleep, the exact expensive source operation, or the transport queue duration of a contemporaneous unrelated read. Both reports identify iOS 1.17.0, not a native build number. The later experimental-policy activation cannot have caused the earlier incident.
+
+This scope fixes the missing-context recovery path, the exact projection GET's deadline, and the false timeout explanation. It does **not** promise to remove synchronous worker contention or meet a new latency SLO. A separate contention limitation remains in the release note even if the bounded recovery passes.
+
+## 2. Requirements and mechanical acceptance
+
+| Requirement | Contract | Proof |
+|---|---|---|
+| R-1 — recover missing context | Join a current-context init already running. On an exact projection `409 session_not_initialized`, perform at most one forced reconciliation, bypassing the ordinary foreground throttle, then at most one logical replay of that GET. End loading on any terminal failure; explicit Refresh starts a fresh bounded attempt. | T1, T2, T3, T10 |
+| R-2 — account / token / league / generation safety | Share ownership across every native init writer. Guard dispatch and every affected client publication against the captured identity and generation. Serialize normal successful same-token A→B init requests. Supersession must discard A's pending work/results; ambiguous dispatched-init failure must fail closed for automatic continuation, not claim server cancellation or unconditional final-writer ordering. | T4, T5, T10, T11 |
+| R-3 — finite exact-route budget | Exact normalized pathname plus method `GET /api/league/season-projections` gets 30,000 ms for one logical request, including preparation, response-body consumption, retries and backoff. One user attempt gets 90,000 ms total across waits, normal reconciliation if necessary, initial GET, forced repair and replay. Neither clock resets on retry. Unrelated transport rules remain unchanged. | T7, T10 |
+| R-4 — truthful failure and existing UI | Shared transport deadline copy is exactly “This request took too long. Please try again.” with `ApiError.status === 0` and `isTimeout === true`. Preserve typed refusals and current server messages. Caller cancellation is silent, not a timeout. Use the existing loading/error/Refresh area; Back remains usable. | T3, T8, T10; manual 1–5 |
+| R-5 — unchanged native/server safety contract | Keep verified identity, co-owner account/team separation, authenticated exact-league authorization, initialized-session guard, available/unavailable response bodies, source/freshness refusal and cache expiry. No made-up standings, missing-as-zero values, stale-success fallback, or dynasty substitute. | T6, T8, T9 |
+| R-6 — existing observability, private context | Preserve existing normalized `api_request_failed` reporting, caller-abort exclusion and background-duration omission. Do not persist or report coordination keys, tokens, account/league IDs, bodies, roster selections, or private ranking values. No new event or property. | T5, T8, T12 |
+| R-7 — bounded integration and unchanged product behavior | No backend runtime, schema, flags, models, ranking/policy, worker configuration, web, or async-API change. Retain local-first launch, supported platform flows, init-before-Main, query-cache ownership, search's separate 90-second polling cap, request epochs, expiry, title gating, server order, independent scenario decisions, and existing controls. | T9, T11, T12; scope gates |
+
+Feedback mapping: #420 → R-1, R-2, R-5; #421 → R-3, R-4. R-6/R-7 constrain both.
+
+## 3. HLD delta — one owner, existing transport and screen
+
+The state layer owns the reconciliation lifecycle. The API layer performs requests and returns data; it does not gain a React dependency, QueryClient, or new upward store import. A small dependency-injected state helper is allowed if it makes the lifecycle executable under the existing Node test harness. No new Context, persistent queue, authentication service, endpoint, or background job is needed.
+
+The flow becomes: focused Win Now attempt captures context and its deadline → state-owned readiness/join → existing projection API → on exact missing-context refusal, one forced state-owned init → one projection replay → current-context screen publication. `App.tsx` boot/foreground may still request reconciliation without blocking local-first launch; its in-flight completion must be joinable by a real consumer.
+
+The shared API submission choke point must participate in the owner's ordering/guard protocol. Merely adding a Win Now-only mutex leaves current writers outside the contract. This author verified these existing callers:
+
+| Existing writer / publication | Baseline touch point | Required integration |
+|---|---|---|
+| Boot/foreground `revalidateSession` | `mobile/src/state/useSession.ts:352`; `mobile/App.tsx:117`, `:210` | Replace “already running means return success” with awaitable joining. Keep normal throttle, keyed to successful current context; forced repair bypasses it. Preserve detached boot behavior. |
+| `switchLeague` | `mobile/src/state/useSession.ts:442` | Register new selection intent before asynchronous work; share same-token ordering with all other writers, not just the existing switch-only lock. Guard cache, league persistence and completion. |
+| `connectLeague` | `mobile/src/state/useSession.ts:644` | Use the same lifecycle and guarded completion; preserve merging imported platform leagues. |
+| Picker's two-phase init | `mobile/src/screens/LeaguePickerScreen.tsx:441` | Keep membership/init acceptance before `setLeague`/Main. Current seed write precedes submission: defer it to guarded success or otherwise prove it cannot publish a superseded/failed context. |
+| ESPN resync | `mobile/src/screens/LeagueScreen.tsx:157` | Preserve explicit import behavior; join/serialize only its existing init leg. No new automatic import/replay. Guard the success message, dependent refetch and busy cleanup after supersession. |
+| All actual init POSTs and cache-missing retry | `mobile/src/api/auth.ts:248`, `:406`, `:584` | Include all platform branches and the existing one-time player-cache-missing retry. No path may dispatch a stale prepared body around the owner. Guard the verification mirror, including its late replay callback, as part of affected completion. |
+
+Existing root registration and both entry routes remain unchanged (`mobile/src/navigation/RootNav.tsx:142`, `:787`; `LeagueSummaryScreen.tsx:1518`; `TradesScreen.tsx:6473`). The screen's user+league keyed subtree and its other operation epochs remain (`WinNowScreen.tsx:52`, `:90`). There is no new navigation parameter that can override authenticated league ownership.
+
+## 4. LLD delta — lifecycle and request contract
+
+### 4.1 Private context, intents and readiness
+
+An operation captures `(account identity, real league ID, token identity, context generation)` plus a per-screen attempt generation. Capture uses the currently authenticated account, not the co-owned team's primary owner. The token stays in process memory/secure storage and is never part of a persisted key, error message, test output, analytics property or document fixture.
+
+The state owner exposes an awaitable operation equivalent to `ensureLeagueSession(context, {force, signal, deadlineAt})`; exact helper naming is an implementation detail, not permission for a second lifecycle. It resolves only on a successful current-context reconciliation or an already-established current-context hint when no matching work is pending. It rejects on failure, supersession, caller cancellation, or elapsed caller deadline. A boolean “busy” is not a readiness result. In-flight matching work is joined by promise; work for another context is not joined as success.
+
+Readiness is **a local hint, not proof the server retained its session**. Even previously successful same-context work must permit one forced repair after the exact typed 409. No failure advances successful-throttle timestamps. A forced same-context repair joins another current repair instead of duplicating it. Existing background callers may catch/log-free-ignore their returned failure, but the awaited operation used by Win Now must not swallow it.
+
+Invalidate context generation synchronously when a new account/token/league intent supersedes the old one, including before asynchronous sign-out cleanup and before beginning a same-token league switch. Distinguish desired selection intent from a committed active league: selecting B while A remains displayed does not license A's pending init to dispatch or publish. Guard again after asynchronous token lookup, provider preparation, queue waits, POST settlement and verification replay, and immediately before cache/verification/league/readiness/navigation publication. A stale `finally` must not clear the current operation's busy state.
+
+Null user, null/`no_league` league, account-only sentinel context and non-real demo context do not trigger a protected projection read or real-league repair. Preserve existing demo behavior; do not fabricate a real context to make recovery proceed.
+
+### 4.2 Same-token serialization and its honest limit
+
+Use one in-process ordered lane per token identity for actual init submission/settlement, owned by the shared reconciliation protocol. Payload preparation may happen earlier, but dispatch rechecks generation and identity. If A becomes obsolete before its POST, discard A. If A's POST is already dispatched, a normal B init waits for A's acknowledged settlement and is then dispatched, provided B remains current. No automatic abort of a shared init merely because one screen leaves. For **successful acknowledged A then B**, the test must show POST(A) → acknowledgement(A) → POST(B) → acknowledgement(B), with only B's client publications applicable.
+
+A local transport timeout, caller abort after dispatch, or network loss without an authoritative response cannot prove that the server stopped processing A. Do **not** release that uncertainty as an automatic “A canceled, B safe” success. Mark the lane/context uncertain for the current automatic chain, reject its queued dependent continuations, and do not automatically issue their init, protected read, cache/readiness or success/navigation publication. Late completion from the abandoned generation is ignored. The active screen gets an honest bounded failure and a usable manual retry; an already departed screen remains silent.
+
+A later explicit Refresh/selection can start a new bounded reconciliation after the previous local transport has settled. It must recheck the full current context, initialize that context, and subject the subsequent projection GET to the existing server actor check and local publication guards. It does not retroactively prove the fate of a previously accepted server request. A new token invalidates the old lane. **Residual limitation:** no client-only queue, request abort, timeout or successful init response provides unconditional final-writer ordering against a previously accepted request still running on the server. There is no server generation/CAS/cancellation protocol in this fix. Tests and release text must state this limit instead of claiming it solved. If independent review requires that stronger guarantee, return to scope review rather than secretly adding an API or auth redesign.
+
+### 4.3 One Win Now attempt and finite composed budget
+
+One mount/focus/manual-Refresh attempt starts a fixed deadline of **90,000 ms** before any readiness wait or token/provider preparation. It has one screen AbortController and one immutable captured context. Every await in this chain must be bounded by the remaining attempt time and detachable by its caller signal: token lookup, lane/join wait, provider/verification preparation, init, response parsing, initial read, repair and replay. Before starting or publishing after any awaited work, check deadline, generation and context again. If JavaScript was suspended, check on resume before any dispatch/publication; timers cannot promise UI scheduling while the runtime itself is suspended.
+
+The shared initializer must also have a finite own lifecycle budget (at most 90,000 ms from that initialization's creation, including preparation/queueing/retries); this is not reset when another consumer joins. A caller joining older work uses the earlier of its own deadline and the operation's remaining lifetime. A caller abort detaches its wait without canceling another consumer's valid shared initialization. A timed-out caller cannot keep awaiting or publish later even if shared work legitimately continues for another consumer. Expiry after dispatch follows §4.2's uncertain-write rule; expiry before dispatch must never send a late POST.
+
+For the active attempt:
+
+1. Await matching pending reconciliation; if current context has no successful readiness hint, perform normal reconciliation first. Normal foreground throttle must not pretend a pending, failed, different-context or uncertain reconciliation is ready.
+2. Recheck context and issue logical projection GET #1. Its timeout is `min(30,000 ms, remaining attempt time)`.
+3. Only if it finally rejects as `ApiError` with `status === 409` and body object's exact `error === 'session_not_initialized'`, recheck context and invoke forced reconciliation once. No string matching against display copy.
+4. After successful, unambiguous, current-context repair, issue logical projection GET #2, with the same remaining attempt deadline. This is the only recovery replay.
+5. A second such refusal, repair failure, other error or expired deadline terminates loading; there is no recursive retry. Explicit Refresh increments the screen attempt generation and creates a new deadline.
+
+The existing transport allows two gateway/network retries and separately two typed-init guard retries per logical projection GET: at most **five physical GET attempts per logical read, ten across the initial read plus replay**, often fewer because deadlines/terminal responses intervene. Do not increase these limits. The recovery adds at most one forced init operation; a normal pre-read operation can also exist if readiness was absent, or be joined if already in flight. The existing init helper may repeat its init POST once only for its recognized player-cache-missing denial. Preserve existing narrowly safe pre-handler retry behavior; add no new automatic POST replay policy. All helper retries/preparation/waits consume their original operation deadline and the foreground caller's remaining attempt time, not new 90-second windows.
+
+Use a narrowly scoped optional absolute caller deadline/remaining-budget parameter through the actual request path if needed; this is an internal TypeScript option, not a wire parameter or a default whole-app timeout increase. The new projection deadline must cover header/token preparation and response-body parsing as well as fetch/backoff; racing a wait also requires a post-wait guard so uncancelable preparation cannot later dispatch. This is stronger than merely changing the current fetch timer's constant.
+
+Do not add automatic recovery around `searchWinNow`, `evaluateWinNow`, `decideWinNow`, or unrelated write helpers. Their existing server/client behavior is unchanged. The search polling budget already equals 90 seconds but is an independent operation and must not be replaced by this baseline budget.
+
+### 4.4 Existing HTTP interfaces — no server or wire change
+
+**Projection request (existing):** `GET /api/league/season-projections?league_id=<URL-encoded string>`; no request body; current captured `X-Session-Token` header plus existing device/version headers. The native wrapper always sends its captured real league ID. Server-side omission fallback exists but is not a license to omit the native binding. New timeout matching uses normalized pathname and uppercase method, not substring: query strings do not alter eligibility; lookalike prefixes/suffixes and POST to the same pathname do not gain the GET allowance. Absolute/relative path handling must match the existing wrapper's accepted URL forms.
+
+**Projection response (existing JSON):** `SeasonProjection` in `mobile/src/shared/types.ts:624` remains the native type:
+
+```ts
+{
+  status: 'available' | 'unavailable';
+  reason?: string; message?: string;
+  meta?: SeasonMeta; teams?: SeasonTeam[];
+  buyer_roster_id?: number; assets?: WinNowAsset[];
+}
+```
+
+`SeasonMeta` retains optional `beta`, `calibrated`, `championship_available`, `stale` booleans; `scoring_exclusions: Record<string, number>`; nullable `scoring_warning`; string `uncertainty`, `snapshot_id`, `as_of`, `source`, `model_version`, `expires_at`; and `coverage: number | Record<string, unknown>`. `SeasonTeam` retains required numeric `roster_id`; optional strings `user_id`, `username`; optional numeric wins/losses/ties/seed/remaining-wins/matchup/playoff/bye fields; nullable optional numeric `championship_probability`; `weekly_win_probabilities: Record<string, number> | {week: number; win_probability: number}[]`; and `finish_distribution: Record<string, number>`. `WinNowAsset` retains required string `id`/`name`, optional string `position`, numeric `owner_roster_id`, and boolean `is_pick`/`tradable`. These interfaces are unchanged, not new telemetry fields.
+
+The installed route (`backend/win_now_api.py:76`) emits HTTP 200 with `status:'available'`, `meta`, `teams`, `buyer_roster_id`, `assets`, or HTTP 200 `{status:'unavailable', reason:string, message:string}`. Do not treat HTTP 200 alone as available. No `202`, job handle, polling response, new body fields, or native-version negotiation is introduced.
+
+**Init request (existing):** `POST /api/session/init`, JSON `SessionInitBody` from `mobile/src/api/auth.ts:196`; verified token explicitly captured in `X-Session-Token`, with current `skipAuth:true` preventing a fresh token lookup from substituting another account mid-request. Required native fields: `user_id:string`, `league_id:string`, `league_name:string`, `user_player_ids:string[]`, `opponent_rosters:{user_id:string, username:string, player_ids:string[]}[]`. Optional: `username`, `display_name`, `league_user_id`, `league_display_name` strings; `avatar`, `invited_by` nullable strings; `active_format:'1qb_ppr'|'sf_tep'`. Keep platform builders and separate `SessionInitSeed {rosters?, leagueUsers?}` return data; seed never enters the posted body.
+
+The backend resolves authoritative identity, membership, names and roster data server-side and ignores legacy client snapshots (`backend/server.py:20173`); client body fields do not authorize an account/league or prove membership. `user_id` is the authenticated account, while `league_user_id` identifies the co-owned team where applicable. Never substitute one for the other to get an init accepted.
+
+**Init response (existing JSON):** `SessionInitResponse {ok:boolean, token:string, player_count?:number, pick_count?:number, user_roster?:unknown[], league_id?:string, opponents?:number, verification?:SessionVerification}`. `SessionVerification` contains required `session_verified`, `user_verified`, `enforced` booleans and optional nullable string `verified_via`. Successful init reuses/echoes an existing verified token; it cannot mint or restore a signed-out session. Membership/proof/invalid-input refusals remain authoritative. Preserve verification-before-init and current token checks; add context-generation guards to affected late mirrors rather than weakening proof or introducing broad auth changes.
+
+**Error contract and UI interpretation:** the server's global session handlers return `401 {error:'session_expired', message:string}` and `409 {error:'session_not_initialized', message:string}`. Win Now keeps feature-off `404 {error:'feature_disabled'}`, forbidden `403 {error:'forbidden'}`, verification denial, invalid-input `400 {error:string}`, and service errors. Native internal supersession is distinct from the server missing-context code: preserve `session_changed` or use a silent caller-abort result for obsolete work, never feed it into forced recovery.
+
+| Outcome | Required behavior |
+|---|---|
+| Available 200 | Publish only to the same still-focused, current, unexpired attempt; apply existing source freshness/search gates. |
+| Unavailable 200 | Render current `message`, otherwise formatted `reason`, otherwise existing fallback; no forced init, zero standings or search enablement. |
+| Exact missing-context 409 | One repair/replay only, as above. |
+| Other 409 / 400 / 403 / 404 | Existing typed refusal/error handling; no forced init. Preserve verification banner behavior without late cross-context writes. |
+| 401 | Existing sent-token-versus-stored-token safeguard clears only the current token and delegates auth handling. No mint, forced repair, or replay with a new token and old league. A stale 401 must not clear a replacement token. |
+| Exhausted 502/503/504 | Finite existing transport retries; preserve final structured server message when supplied, otherwise existing HTTP/service copy. Do not label as sleep. |
+| Network/offline rejection | Existing truthful network error, terminal after applicable finite retries; explicit retry allowed. Do not manufacture source-unavailable data. |
+| Transport or active-attempt deadline | Neutral exact timeout copy, status 0 / typed timeout; release current loading and enable Refresh. An outer wait deadline may use the same typed error but must not fabricate an HTTP failure event for a request that never happened. |
+| Caller abort / blur / unmount / flag removal / supersession | Detach and discard silently, no late error or failure event. If caller abort and deadline coincide, caller cancellation wins classification. Shared work still follows its own guarded lifecycle. |
+
+The shared timeout text change intentionally affects other consumers of that shared `ApiError`; it does not authorize editing unrelated screen-specific error copy. Existing ordinary GETs retain the 15-second transport allowance; the existing slow POST rules retain 30 seconds. Preserve error-body parsing and one failure report per logical `apiRequest`, not one per physical retry.
+
+## 5. Test plan — prospective RED/GREEN gates
+
+These are requirements for Phase 2, **not results from this author pass**. Execute actual exported/transpiled production modules with deferred requests and fake clocks; AST guards only supplement behavioral coverage. Use isolated synthetic accounts/leagues/tokens and test databases, never repository/production DBs or real provider loops. Every new behavioral test needs a stored failing run against baseline or the named meaningful sabotage, followed by GREEN; a test-only reconstruction of the desired algorithm is not evidence.
+
+| Test | Fixture / action and mechanical pass criterion | Required RED target |
+|---|---|---|
+| T1 `restored_bare_session_repairs_once` | Locally ready same-context projection gets exact typed 409; state repair uses captured context once; one logical GET replay returns available and separately unavailable; no second tap. Second 409 terminates without recursion. | Baseline missing-repair path; sabotage removing repair limit. |
+| T2 `pending_init_is_joined` | Deferred existing same-context init exceeds 1.6 seconds; open actual native orchestration. No early GET, duplicate init or ready result. Completion triggers current baseline. Include two simultaneous consumers. | Baseline boolean early return; dropped-await sabotage. |
+| T3 `failed_repair_can_refresh` | Offline/proof refusal/player-cache denial and exhausted repair terminate loading. New explicit Refresh is not blocked by a failed/throttled timestamp. Retain exactly one existing player-cache retry, not a retry loop. | Swallowed-failure / failure-marks-success / unlimited-cache-retry sabotages. |
+| T4 `same_token_A_to_B_ordering` | Defer A before dispatch: selecting B drops A. Separately defer an already-dispatched successful A: B POST cannot start until A acknowledges; then B completes. Run both preparation orders and rapid A→B→A intents. No A seed/readiness/navigation/GET replay/result/busy cleanup can affect later generation. | Token-only guard and separate-writer-lane sabotages. |
+| T5 `supersession_and_shared_abort` | Sign-out/replacement token/account, same-token league switch, blur/unmount and season flag kill while awaiting each boundary. No stale cache/verification/token/league/screen publication or old-context read under new token. One consumer abort leaves another legitimate joiner alive. Caller-abort has no alert/telemetry even at deadline coincidence. | Missing-generation / shared-controller-abort / late-verification-mirror sabotages. |
+| T6 `installed_guard_restoration` | Restore synthetic persisted verified session missing initialized league context through the real installed guard. Before init exact 409 and zero forecast calls; after authorized init available or typed unavailable. Foreign league, invalid membership, unverified and signed-out cases remain denied. Existing ready-session-injected API harness alone is insufficient. | Remove initialized-session guard or replace missing context with fake-ready fixture; record that the guard assertion fails. |
+| T7 `projection_exact_deadline` | Actual wrapper/transport body completes at ~15.2 seconds and renders its available/unavailable shape. At 30 seconds it times out once. Retry/backoff/body-read time consumes original deadline. Query-string and accepted absolute-path forms match; lookalike/prefix/suffix and POST exact path do not. Ordinary GET remains 15 seconds; existing slow POSTs remain 30. | Baseline 15-second projection timeout; substring-match / timer-reset-per-retry / body-outside-deadline sabotages. |
+| T8 `native_error_matrix` | Execute shipped parser plus native orchestration for available/unavailable 200, exact/unrelated 409, 401, verification 403, 503 with/without message, network failure, timeout, and AbortError. Only exact 409 invokes repair. Stale 401 preserves replacement token; structured reason/message survives. | Always-repair / obsolete wake-up copy / error-body discard / unconditional-401-clear sabotages. |
+| T9 `feature_and_freshness_preserved` | Existing Win Now/forecast tests plus lifecycle guards cover warm/expired cache, live-week/unsupported-source refusal, missing forecasts, source expiry, disabled season/title flags, search order/epochs/expiry and independent decisions. No numbers or search from unavailable/expired baseline. | Stale fallback / missing-as-zero / bypass-title-gate sabotages appropriate to each new assertion. |
+| T10 `whole_attempt_and_uncertain_init` | Fake clock bounds token/preparation/verification waits, lane wait, response body, normal init, first GET, forced repair and replay under one 90-second cap, including a near-deadline transition. Abort detaches each wait. Post-deadline preparation cannot dispatch. Dispatched A timeout/network ambiguity rejects queued automatic B and produces no dependent POST/read/publication; late A response has no effect. Explicit later retry is separate and never claims A was canceled server-side. | Deadline-reset / unbounded-await / auto-release-uncertain-lane / late-dispatch sabotages. |
+| T11 `all_init_writers_use_owner` | Execute or spy actual revalidate, switch, connect, picker, ESPN resync and player-cache retry through the shared init seam; supplement with a census structural guard. Verify init-before-Main, guarded seed ownership and platform-list merge. Keep `check-session-seed.js`'s real behavioral contract if structure changes. | Bypass coordinator at each caller / seed-before-guard / navigate-before-init sabotages. |
+| T12 `telemetry_and_scope_contract` | Actual client event spy: one failure per exhausted logical request, normalized route/no query IDs, allowed properties only, no caller-abort event, background duration omitted. No synthetic HTTP event for lane-only deadline. Structural guard pins safe GET-only recovery and no new API→store/cache dependency. Diff gate proves no forbidden runtime/config files changed. | Duplicate-report / raw-route / abort-report / upward-import / write-replay sabotages. |
+
+Implement `mobile/tests/check-win-now-recovery.js` (dependency-free entry runnable by plain Node, following existing transpilation harness patterns) and a matching `npm run test:win-now-recovery`. Use executable helper/consumer coverage; merely asserting that the screen contains an `await` or helper name cannot pass T1/T2/T4/T10. Add narrow assertions to existing `check-win-now.js` and `check-session-seed.js` as needed without weakening their contracts. Relevant backend suites include `backend/tests/test_win_now_api.py`, Win Now source/forecast tests, and verified/persistent-session regression files discovered by the validation owner; the real-guard regression can live in the existing session test file selected after fixture review.
+
+Before integration: all mobile `check-*.js`, TypeScript `--noEmit`, testID lint, targeted backend tests, and `git diff --check`. The orchestrator owns full integrated backend/CI validation and ledger; passing this group alone is not a release claim. Record exact test paths, test counts, commands, RED failures and GREEN SHA after implementation.
+
+### Code-walk proof required after implementation
+
+Use final implementation file:line references, not this baseline trace: both entry points → captured user/league/token/generation → pending-init join → all init writers' dispatch fence → exact typed-409 branch → one forced repair → one same-context GET replay → screen publication. Include separate traces for pre-POST supersession, successful in-flight A→B serialization, ambiguous POST failure, late verification callback, caller detach, 401 with replacement token and deadline expiry during preparation/body parsing. The baseline gap is directly visible at `WinNowScreen.tsx:90` → `api/winNow.ts:4` → `api/client.ts:562` (short GET retries only), while `useSession.ts:352` is non-joinable; this is a diagnosis, not proof of the future fix.
+
+### Manual TestFlight checklist — required operator evidence, not executed
+
+Use authorized tester accounts and controlled staging responses/restarts for induced failures; no production restart, real-user membership change or provider trade submission just to test. Record binary/build and backend SHA, entry route, timings and sanitized results. Uploaded build 148 or a previous upload does not establish availability of this future fix or Apple tester availability.
+
+1. Open League → season projections immediately during deliberately slow init; then repeat from Acquire → Win Now. Existing loading stays responsive, Back works, and acknowledged init leads to available standings **or the actual refusal**, without another tap.
+2. In authorized staging, restore a signed-in persisted token across a backend process rollover. Open/Refresh Win Now without signing out. Confirm one bounded missing-context repair/replay in sanitized traces; no repeated “try again” loop.
+3. During repair, leave the screen and select another league under the same token. Exercise both delayed preparation and already-dispatched successful init. Only the new league may finish visibly; no old data, selection, success toast or late error. Repeat with sign-out/new test login. Separately inject ambiguous init timeout: the automatic chain must stop honestly, not announce cancellation or safe server ordering.
+4. Delay a projection response to ~16 seconds; it renders after the old 15-second boundary. Exceed the request/whole-attempt budget at controlled stages: loading ends on the next active runtime turn with the neutral timeout and enabled Refresh. Leaving the screen prevents any late timeout alert. Record the composed deadline, not only individual request duration.
+5. Return typed source/live-week unavailable, verification denial, 503, offline and then restored network. Preserve each truthful explanation; no zero standings or search on unavailable data; manual Refresh can recover. Verify Dynamic Type/VoiceOver for existing loading/error/Refresh controls.
+6. Observe another ordinary read while a cold baseline runs. Log any delay as the remaining synchronous-contention measurement, **not** a pass/fail claim that the new budget fixed server throughput. Escalate if a broader performance fix is desired; do not expand this change silently.
+7. With a valid baseline, verify existing objective/budget/protection controls, title gating, source expiry, search cancel/refresh, editable evaluation and Back behavior using authorized test fixtures. Do not issue real provider proposals or production learning writes for this checklist.
+
+## 6. Non-goals, rollout and ownership
+
+No schema/migration, new config/env/model key, flag flip, forecast/ranking/personal-market-policy change, whole-app timeout increase, async baseline API, server concurrency change, new analytics, new panels or visual redesign. No web edits or speculative spike is required for the bounded fix. Old native clients keep their existing synchronous API contract; the new behavior ships in a new native artifact, not by claiming a backend-only deploy fixes old binaries.
+
+No push, TestFlight build/submission, deployment, feedback closure, or production mutation is authorized by this document. Parent batch instructions govern later actions. Independent planner critique must resolve blocking objections before Phase 2. Before runtime work, the orchestrator re-diffs fresh main and reconciles overlapping security/session changes.
+
+| Owner | Exclusive Phase-2 file boundary |
+|---|---|
+| G420 client implementation owner | `mobile/src/state/useSession.ts`; one narrowly scoped state lifecycle helper if needed; `mobile/src/api/auth.ts`, `client.ts`, `winNow.ts`; `mobile/src/screens/WinNowScreen.tsx`, `LeaguePickerScreen.tsx`, `LeagueScreen.tsx` only for the traced lifecycle integrations. One owner coordinates this connected change; splitting it requires explicit disjoint reassignment. |
+| G420 evidence owner | `mobile/tests/check-win-now-recovery.js`, focused additions to `check-win-now.js` / `check-session-seed.js`; selected existing backend session/Win Now test files. No backend runtime edits. |
+| Orchestrator/integrator | `mobile/package.json` test-script registration (coordinate with #419), shared architecture/API-facing documentation, index/status/ledger, integration/release evidence. This author owns only this PRD, scope and reconciliation log. |
+| G419 owner, excluded here | #419 rejection/ranking backend changes, including any `backend/server.py` runtime edits. No overlapping G420 runtime ownership; share requested test evidence through the orchestrator. |
+
+No deploy-free rollback switch is added: this is a bounded bug correction using existing flags unchanged. A bad native artifact requires withholding/withdrawing distribution and releasing the reviewed previous behavior/fix through the normal native process; already installed binaries are not instantaneously rolled back. An existing product kill switch would disable its existing surface only with separate owner approval, not silently revert the session lifecycle or shared timeout text. Record delivery and device verification separately from implementation and CI.
