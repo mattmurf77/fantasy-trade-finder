@@ -87,7 +87,7 @@ from .database import (
     save_ranking_swipes, save_trade_swipes,
     save_trade_decision, load_swipe_decisions, load_trade_decisions,
     load_recent_league_likes, find_live_trade_like, log_trade_impressions,
-    load_trade_interest_history,
+    load_trade_interest_history, load_trade_card_source_likes,
     # #362 standing offers
     create_standing_offer, load_standing_offers, load_user_standing_offers,
     revoke_standing_offer, league_pick_seasons,
@@ -3023,8 +3023,9 @@ def _trade_job_public_view(job: dict) -> dict:
     board_refresh = job.get("board_refresh")
     if board_refresh:
         out["board_refresh"] = board_refresh
-    user_id, league_id, _format = job["key"]
-    out["cards"] = _project_trade_dispositions(out["cards"], user_id, league_id)
+    if out["cards"]:
+        user_id, league_id, _format = job["key"]
+        out["cards"] = _project_trade_dispositions(out["cards"], user_id, league_id)
     return out
 
 
@@ -3041,16 +3042,22 @@ def _project_trade_dispositions(cards, user_id: str, league_id: str):
         return cards
     try:
         history = load_trade_interest_history([league_id])
+        own_impressions = {card.get("impression_id") for card in cards
+                           if isinstance(card, dict) and card.get("likes_you")
+                           and not card.get("standing_offer_reason")
+                           and isinstance(card.get("impression_id"), str)}
+        source_links = load_trade_card_source_likes(user_id, league_id, own_impressions)
         _, pass_keys = history.discovery_keys(
             user_id, pass_days=float(_deck_cfg("pass_cooldown_days", 14.0)),
             amnesty_epoch=float(_deck_cfg("pass_cooldown_start_epoch", 0.0)))
         cutoff = datetime.now(timezone.utc) - timedelta(days=90)
-        active_interest = {
+        active_sources = {
             (frozenset(row["receive_player_ids"]), frozenset(row["give_player_ids"]),
-             row["user_id"])
+             row["user_id"], row.get("impression_id"))
             for row in history.likes(exclude_user_id=user_id, receiver_id=user_id)
             if row["_order"] is not None and row["_order"][0] >= cutoff
         }
+        active_interest = {source[:3] for source in active_sources}
         kept = []
         for card in cards:
             if isinstance(card, dict):
@@ -3059,14 +3066,22 @@ def _project_trade_dispositions(cards, user_id: str, league_id: str):
                 target = card.get("target_user_id")
                 interested = card.get("likes_you")
                 standing = card.get("standing_offer_reason")
+                source_id = source_links.get(card.get("impression_id"))
             else:
                 give, receive = frozenset(card.give_player_ids), frozenset(card.receive_player_ids)
                 target = card.target_user_id
                 interested = getattr(card, "likes_you", False)
                 standing = getattr(card, "standing_offer_reason", None)
+                source_id = getattr(card, "source_like_impression_id", None)
             if (give, receive) in pass_keys:
                 continue
             if interested and not standing and (give, receive, target) not in active_interest:
+                continue
+            if interested and not standing and source_id is not None and (
+                    give, receive, target, source_id) not in active_sources:
+                # A new same-package like cannot validate an old snapshot's
+                # known source attribution. Null/unlinked legacy keeps the
+                # exact current-evidence rule above, with no invented link.
                 continue
             kept.append(card)
         return kept
@@ -3075,6 +3090,18 @@ def _project_trade_dispositions(cards, user_id: str, league_id: str):
         # pass. No history/impression mutation; the next request can retry.
         log.warning("trade disposition projection unavailable: %s", err)
         return []
+
+
+def _load_trade_disposition_keys(user_id: str, league_id: str):
+    """Both session builders restore the same unchanged D-067 windows.
+
+    Pass cooldown/amnesty and seven-day likes stay independent. Normalized
+    DB history avoids truncating fractional windows or offset timestamps.
+    """
+    history = load_trade_interest_history([league_id], user_ids=[user_id])
+    return history.discovery_keys(
+        user_id, pass_days=float(_deck_cfg("pass_cooldown_days", 14.0)),
+        amnesty_epoch=float(_deck_cfg("pass_cooldown_start_epoch", 0.0)))
 
 
 def _trade_safety_signature():
@@ -14842,6 +14869,11 @@ def _pass_reason_key(impression_id, user_id: str, trade_id: str) -> tuple[str, s
 def _bind_live_trade_pass(sess, card) -> None:
     """D-067 pass-only exclusion on every live format, including legacy alias."""
     try:
+        league = sess.get("league")
+        if league is not None and league.league_id != card.league_id:
+            # A delayed echoed card can belong to the previous league. Its
+            # durable pass is valid there, not in the currently live services.
+            return
         key = (frozenset(card.give_player_ids), frozenset(card.receive_player_ids))
         svcs = list((sess.get("trade_svcs") or {}).values())
         alias = sess.get("trade_svc")
@@ -15055,14 +15087,12 @@ def trade_pass_reason():
 
 
 def _apply_reasoned_pass_elo_only(sess, card, reason_key: str) -> bool:
-    """The deferred half of SPEC §4: write the pass's Elo signal on a LATER
-    tap than the one that passed the card.
+    """SPEC §4's independently claimed Elo half, on a first or later tap.
 
-    Reached only when the knob is on and the user's layer-2 answer was
-    `value_giving` — the one code that actually asserts "my side is worth
-    more". The disposition was already written by the layer-1 tap; this adds
-    the ranking signal it deliberately withheld, at the same K and with the
-    same fit-congruence weight the swipe path would have used.
+    With suppression on, only `value_giving` asserts a valuation; with it
+    off, every reason qualifies. The underlying pass is already verified.
+    The claim and persisted signal commit together before the derived live
+    board updates, with unchanged K/fit/bakeoff multipliers.
     """
     fit_mult = _trade_service_mod.fit_congruence_mult(
         getattr(card, "lane_shift", None), "pass")
@@ -20473,47 +20503,10 @@ def session_init():
     # suppression. One shared set object across formats, like its parent.
     past_pass_keys: set = set()
     try:
-        pass_days = float(_deck_cfg("pass_cooldown_days", 14.0))
-        like_days = 7.0
-        # One query at the widest window; the per-type cut happens below.
-        past_td = load_trade_decisions(
-            user_id=user_id, league_id=league_id,
-            since_days=int(max(pass_days, like_days)) or 1,
-        )
-        now_utc = datetime.now(timezone.utc)
-        # Legacy-dismiss amnesty (operator 2026-08-17): a dismiss recorded
-        # before decline-reason capture went live carries no reason, so the
-        # avoidance rule must not be applied to it — the user was never given
-        # the chance to say why. Applies to dismisses ONLY; likes are unchanged.
-        amnesty_epoch = float(_deck_cfg("pass_cooldown_start_epoch", 0.0))
-        n_pass = n_like = n_amnesty = 0
-        for td in past_td:
-            is_pass = td.get("decision") == "pass"
-            window = pass_days if is_pass else like_days
-            try:
-                decided_at = datetime.fromisoformat(td["created_at"])
-                if decided_at.tzinfo is None:
-                    decided_at = decided_at.replace(tzinfo=timezone.utc)
-                if is_pass and amnesty_epoch > 0 and \
-                        decided_at.timestamp() < amnesty_epoch:
-                    n_amnesty += 1
-                    continue
-                if (now_utc - decided_at).total_seconds() > window * 86400.0:
-                    continue
-            except (KeyError, TypeError, ValueError):
-                pass  # unparseable stamp ⇒ keep excluding (fail closed)
-            key = (frozenset(td["give_player_ids"]), frozenset(td["receive_player_ids"]))
-            past_decision_keys.add(key)
-            if is_pass:
-                past_pass_keys.add(key)     # QA-B F2 — asset-ideas subset
-                n_pass += 1
-            else:
-                n_like += 1
+        past_decision_keys, past_pass_keys = _load_trade_disposition_keys(user_id, league_id)
         if past_decision_keys:
-            log.info("  loaded %d past trade decisions (%d dismissed / %.0fd, "
-                     "%d liked / %.0fd, %d pre-reason dismissals amnestied)",
-                     len(past_decision_keys), n_pass, pass_days,
-                     n_like, like_days, n_amnesty)
+            log.info("  loaded %d past trade package keys (%d active dismissals)",
+                     len(past_decision_keys), len(past_pass_keys))
     except Exception as db_err:
         log.warning("  could not load past trade decisions: %s", db_err)
 
@@ -21809,24 +21802,13 @@ def _build_replenish_session(user_id: str, league_id: str) -> str | None:
         if not user_roster:
             raise RuntimeError("user roster empty after pool filter")
 
-        # 7-day deck memory, same as session_init.
+        # Same per-type cooldown/amnesty as interactive session_init (#419).
         past_decision_keys: set = set()
-        # QA-B F2 — the pass-only subset asset-ideas consults (this path's
-        # sessions serve deck jobs, but the exclusion travels with the
-        # service either way). Cut from the same 7-day query this path has
-        # always used — a narrower window than session_init's 14-day
-        # pass_cooldown_days cut, a pre-existing gap of this builder.
         past_pass_keys: set = set()
         try:
-            for td in load_trade_decisions(user_id=user_id,
-                                           league_id=league_id, since_days=7):
-                _k = (frozenset(td["give_player_ids"]),
-                      frozenset(td["receive_player_ids"]))
-                past_decision_keys.add(_k)
-                if td.get("decision") == "pass":
-                    past_pass_keys.add(_k)
-        except Exception:
-            pass
+            past_decision_keys, past_pass_keys = _load_trade_disposition_keys(user_id, league_id)
+        except Exception as err:
+            log.warning("replenish: could not restore trade dispositions: %s", err)
 
         try:
             fmt = get_league_scoring(league_id)
@@ -21929,6 +21911,9 @@ def _replenish_deck_for(user_id: str, league_id: str) -> tuple[int, int] | None:
                 return None
             cards = list(job.get("cards") or [])
 
+    # The notification count is a serve boundary too: a pass may have landed
+    # after publication or while this cached deck was waiting for the cron.
+    cards = _project_trade_dispositions(cards, user_id, league_id)
     return len(cards), _count_expired_dropped(prior_rows, cards)
 
 

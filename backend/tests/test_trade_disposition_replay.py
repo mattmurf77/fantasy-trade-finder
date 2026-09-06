@@ -9,7 +9,7 @@ import time
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import event, insert, select
+from sqlalchemy import event, insert, select, update
 
 from backend import database as db, server
 from backend.tests.test_decline_reasons import (
@@ -135,6 +135,104 @@ def test_419_unverifiable_nonstanding_badge_is_not_affirmative_interest(replay):
     assert response.get_json()["cards"] == siblings
 
 
+def _renewed_source_fixture(engine):
+    with engine.begin() as conn:
+        for source, at in (("i1", "2026-08-14T12:00:00Z"), ("i2", "2026-09-04T12:00:00Z")):
+            conn.execute(insert(db.trade_decisions_table).values(
+                user_id=OPP, league_id=LEAGUE, trade_id=f"source_{source}",
+                give_player_ids='["r1"]', receive_player_ids='["g1"]', decision="like",
+                created_at=at, impression_id=source))
+        conn.execute(update(db.deck_impressions_table).where(
+            db.deck_impressions_table.c.impression_id == IMP
+        ).values(source_like_impression_id="i1"))
+    _pass(engine, at="2026-08-16T12:00:00Z")  # expired; new i2 may be served
+
+
+def test_419_cached_exact_source_cannot_be_revalidated_by_fresh_like(replay):
+    from backend.tests.test_decline_reasons import _seed_impression
+    client, _svc, engine, job, siblings = replay
+    _renewed_source_fixture(engine)
+    old = job["cards"][1]
+    old.update(likes_you=True, impression_id=IMP)
+    _seed_impression("viewer-new", "fresh-card", card_index=1)
+    with engine.begin() as conn:
+        conn.execute(update(db.deck_impressions_table).where(
+            db.deck_impressions_table.c.impression_id == "viewer-new"
+        ).values(source_like_impression_id="i2"))
+        frozen = conn.execute(select(db.deck_impressions_table)).all()
+    fresh = dict(old, trade_id="fresh-card", impression_id="viewer-new")
+    job["cards"].append(fresh)
+    statements = []
+
+    def audit(_conn, _cursor, statement, *_):
+        assert not server._trade_jobs_lock.locked()
+        if "FROM trade_decisions" in statement or "FROM deck_impressions" in statement:
+            statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", audit)
+    try:
+        response = client.get("/api/trades/status?job_id=419-job", headers={"X-Session-Token": TOKEN})
+    finally:
+        event.remove(engine, "before_cursor_execute", audit)
+    assert response.get_json()["cards"] == [*siblings, fresh]
+    assert len(statements) == 2  # one history + one batched owned provenance read
+    with engine.connect() as conn:
+        assert conn.execute(select(db.deck_impressions_table)).all() == frozen
+
+
+@pytest.mark.parametrize("old_source", ["i1", "", "unresolvable-source"])
+def test_419_internal_projection_checks_specific_source_before_freezing(replay, old_source):
+    _client, svc, engine, _job, _siblings = replay
+    _renewed_source_fixture(engine)
+    old = copy.copy(svc._trade_cards[TRADE])
+    old.likes_you, old.source_like_impression_id = True, old_source
+    fresh = copy.copy(old)
+    fresh.trade_id, fresh.source_like_impression_id = "fresh", "i2"
+    assert server._project_trade_dispositions([old, fresh], ME, LEAGUE) == [fresh]
+
+
+def test_419_provenance_db_failure_does_not_serve_unverified_source(replay):
+    client, _svc, engine, job, _siblings = replay
+    _renewed_source_fixture(engine)
+    job["cards"][1].update(likes_you=True, impression_id=IMP)
+
+    def fail(_conn, _cursor, statement, *_):
+        if "FROM deck_impressions" in statement:
+            raise RuntimeError("fixture provenance database unavailable")
+
+    event.listen(engine, "before_cursor_execute", fail)
+    try:
+        response = client.get("/api/trades/status?job_id=419-job", headers={"X-Session-Token": TOKEN})
+    finally:
+        event.remove(engine, "before_cursor_execute", fail)
+    assert response.status_code == 200 and response.get_json()["cards"] == []
+
+
+def test_419_null_source_link_retains_legacy_exact_evidence_semantics(replay):
+    client, _svc, engine, job, _siblings = replay
+    _renewed_source_fixture(engine)
+    with engine.begin() as conn:
+        conn.execute(update(db.deck_impressions_table).where(
+            db.deck_impressions_table.c.impression_id == IMP
+        ).values(source_like_impression_id=None))
+    job["cards"][1].update(likes_you=True, impression_id=IMP)
+    response = client.get("/api/trades/status?job_id=419-job", headers={"X-Session-Token": TOKEN})
+    assert response.get_json()["cards"] == job["cards"]
+
+
+def test_419_source_link_batch_is_actor_and_league_scoped(replay):
+    from backend.tests.test_decline_reasons import _seed_impression
+    _client, _svc, engine, _job, _siblings = replay
+    _renewed_source_fixture(engine)
+    _seed_impression("foreign", "foreign-card", user_id="third", card_index=2)
+    _seed_impression("wrong-league", "other-card", card_index=3)
+    with engine.begin() as conn:
+        conn.execute(update(db.deck_impressions_table).where(
+            db.deck_impressions_table.c.impression_id == "wrong-league"
+        ).values(league_id="other-league", source_like_impression_id="unrelated"))
+    assert db.load_trade_card_source_likes(ME, LEAGUE, [IMP, "foreign", "wrong-league"]) == {IMP: "i1"}
+
+
 def test_419_initial_generate_snapshot_is_projected(replay, monkeypatch):
     client, _svc, engine, job, siblings = replay
     _pass(engine)
@@ -193,3 +291,23 @@ def test_419_serve_projection_has_no_global_job_lock_and_worker_precedes_impress
     source = inspect.getsource(server._run_trade_job)
     assert source.index("final_cards = _project_trade_dispositions(") < source.index("log_trade_impressions(")
     assert "_project_trade_dispositions(" in inspect.getsource(server.get_trades)
+
+
+def test_419_live_bind_ast_is_under_pass_or_verified_pass_guard():
+    import ast
+    import inspect
+
+    def calls_bind(node):
+        return any(isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+                   and call.func.id == "_bind_live_trade_pass" for call in ast.walk(node))
+
+    swipe = ast.parse(inspect.getsource(server.swipe_trade))
+    assert any(isinstance(node, ast.If) and isinstance(node.test, ast.Compare)
+               and isinstance(node.test.left, ast.Name) and node.test.left.id == "decision"
+               and len(node.test.comparators) == 1
+               and isinstance(node.test.comparators[0], ast.Constant)
+               and node.test.comparators[0].value == "pass" and calls_bind(node)
+               for node in ast.walk(swipe))
+    reason = ast.parse(inspect.getsource(server.trade_pass_reason))
+    assert any(isinstance(node, ast.If) and isinstance(node.test, ast.Name)
+               and node.test.id == "passed" and calls_bind(node) for node in ast.walk(reason))

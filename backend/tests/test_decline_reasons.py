@@ -469,6 +469,16 @@ def test_419_reason_binds_both_sets_on_all_live_formats_and_alias(harness):
         assert exact in svc._dismissed_decision_keys
 
 
+def test_419_late_old_league_reason_does_not_bind_current_league(harness):
+    client, _service, svc, eng = harness
+    server._sessions[TOKEN]["league"] = League(
+        league_id="current_other_league", name="Other", platform="sleeper", members=[])
+    response = _post(client, _reason({"reason": "fit", "league_id": LEAGUE})).get_json()
+    assert response["passed"] is True
+    assert [row.league_id for row in _decision_rows(eng)] == [LEAGUE]
+    assert svc._past_decision_keys == svc._dismissed_decision_keys == set()
+
+
 @pytest.mark.parametrize("bank_first", [False, True])
 def test_419_ordinary_pass_before_reason_repair_does_not_repeat_elo(harness, bank_first):
     client, service, svc, eng = harness

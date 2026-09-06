@@ -345,7 +345,7 @@ def test_likes_you_injection_does_not_reorder_the_interleave():
     a = [_card(["qb1"], ["rb2"], composite=0.1)]
     b = [_card(["rb1"], ["wr1"], composite=0.2)]
     c = []
-    injected = _card(["te1"], ["rb3"], composite=99.0)
+    injected = _card(["te1"], ["rb3"], target=H.OPP2, composite=99.0)
     injected.likes_you = True
 
     def fake_inject(cards, **kwargs):
@@ -354,7 +354,7 @@ def test_likes_you_injection_does_not_reorder_the_interleave():
         # actual mirror like it would require. Existing arm/order/original
         # policy-version assertions below remain byte-for-byte unchanged.
         import backend.database as db
-        db.save_trade_decision(H.OPP, H.LEAGUE, "interleave-source",
+        db.save_trade_decision(H.OPP2, H.LEAGUE, "interleave-source",
                                ["rb3"], ["te1"], "like")
         # What the real injector does: prepend + re-sort by composite desc.
         return sorted(list(cards) + [injected],

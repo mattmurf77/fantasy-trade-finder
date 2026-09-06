@@ -6034,6 +6034,26 @@ def load_trade_interest_history(league_ids, *, user_ids=None, since=None, conn=N
         return TradeInterestHistory(connection.execute(query).fetchall(), since)
 
 
+def load_trade_card_source_likes(user_id: str, league_id: str, impression_ids) -> dict:
+    """Batch existing owned snapshot→source links; never invent legacy links.
+
+    Public cards retain their own impression ID, not the counterparty source
+    ID. The frozen row already has that provenance when telemetry captured it.
+    """
+    if not impression_ids:
+        return {}
+    with engine.connect() as conn:
+        rows = conn.execute(select(
+            deck_impressions_table.c.impression_id,
+            deck_impressions_table.c.source_like_impression_id,
+        ).where(and_(
+            deck_impressions_table.c.user_id == user_id,
+            deck_impressions_table.c.league_id == league_id,
+            deck_impressions_table.c.impression_id.in_(set(impression_ids)),
+        ))).fetchall()
+    return {row.impression_id: row.source_like_impression_id for row in rows}
+
+
 def _queue_like_resolved(conn, user_id, league_id, target_id, row_id, give, receive):
     history = load_trade_interest_history(
         [league_id], user_ids=[user_id, target_id], conn=conn)

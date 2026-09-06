@@ -1,6 +1,6 @@
 # G419 backend build evidence
 
-**Status:** in-progress · 2026-09-06 · `codex/feedback-419-trade-disposition-20260906`
+**Status:** backend implementation complete; root integration/native verification pending · 2026-09-06 · `codex/feedback-419-trade-disposition-20260906`
 
 Backend owner only; PRD at `481b1809`. No mobile, shared docs, flags, schema or production changes. Runtime base `4026ebc8`. Python `/private/tmp/ftf-context-venv/bin/python3.12`; all reported suites use `DATABASE_URL=sqlite:///:memory:`, `PYTHONDONTWRITEBYTECODE=1`, `-p no:cacheprovider` and isolated fixture engines.
 
@@ -12,10 +12,7 @@ Backend owner only; PRD at `481b1809`. No mobile, shared docs, flags, schema or 
 - Automatic approval review rejected the requested temporary queue-defect mutation, describing it as disabling the authorized fix. No such mutation landed or was retried. Root approved testing unchanged baseline runtime as the safer alternative. The baseline reader+queue failure does not independently isolate the second writer guard; the GREEN test checks the actual second durable like and Elo row, so bypassing only the reader cannot satisfy it.
 - Query shape: the multi-card fixture has **20 scoped history rows / 20 candidate cards / one history SELECT**, not one query per card. History SQL is bounded by selected league/actor scope; timestamps are normalized before the in-memory time cutoff so mixed offsets and malformed exact-action barriers cannot be silently dropped. This deliberately scans older rows in those selected scopes; it is not described as a time-bounded SQL scan. Parent notified of the tradeoff.
 
-## Remaining backend work
-
-Reason durable-pass repair/truthful response, live and cached snapshot consistency, restoration parity, final code-walk and targeted integration checks remain in progress. Operator TestFlight/native checks have not run. No Maestro/simulator/capture work, push or deployment.
-# Reason repair increment
+## Reason repair increment
 
 `test_decline_reasons.py -k 419` reproduced five assertion failures on
 `c09e8a2f` (reason implementation still baseline): contextless false commit,
@@ -91,3 +88,80 @@ receive_player_ids, decision, created_at, retracted_at, impression_id,
 trade_concept_id. This measures the disclosed all-scoped-history tradeoff,
 not production capacity. Each response reuses its one history projection for
 both pass-window and source-interest filtering; no per-card DB loop.
+
+## Restoration and final integration
+
+The new restoration suite executes both real production builders with the
+existing isolated session-init harness. Before the helper wiring: **7 failed,
+13 passed** (day-8/day-13 replenishment, fractional boundary and UTC-offset
+selection, amnesty-disabled replenishment). The same unmodified fixtures on
+explicitly pinned, pre-import-confirmed baseline `4026ebc8` again produced
+**7 behavioral failures / 13 controls / 1 structural case deselected**.
+Current restoration + replenishment + cooldown + init-call-budget run:
+**51 passed**. No copied window predicate or changed policy defaults.
+
+Two parent-reviewed follow-ups have direct pre-fix RED evidence: delayed
+old-league reason binding (**1 failed**) and replenishment cached/final counts
+after a just-committed pass (**2 failed**). All now pass. Replenishment uses
+the same batched projection outside the job lock before counting inventory;
+no notification lifecycle/flag change. Empty public snapshots do not need a
+history read or key, preserving existing pure empty-payload shape tests.
+
+Pre-provenance pinned consolidated run: **393 passed in 8.07s** across these 18 files:
+
+- `test_trade_interest_disposition.py`, `test_trade_disposition_replay.py`,
+  `test_trade_disposition_restoration.py`, `test_decline_reasons.py`
+- `test_trade_match_flow.py`, `test_pass_cooldown.py`,
+  `test_awaiting_dismiss.py`, `test_deck_fatigue.py`
+- `test_trade_decision_idempotency.py`, `test_swipe_reconstruct.py`,
+  `test_bakeoff_serving.py`, `test_calc_trade_queue.py`
+- `test_deck_replenishment.py`, `test_standing_offers.py`,
+  `test_trade_job_read_amplification.py`, `test_scoring_execution_context.py`
+- `test_deck_first_session.py`, `test_force_supersedes_running_job.py`
+
+## Specific source provenance — final parent finding
+
+An old cached interested card linked to source `i1` must not be validated by
+a later same-package like `i2` after the old source was resolved. Internal
+cards now check their non-null `source_like_impression_id` against that
+specific actionable source. Serialized cards use their own impression IDs
+to read the existing owned, same-league frozen source links in one batch.
+Null or absent legacy links retain the existing exact-current-evidence rule;
+no source ID is invented and no frozen row or public payload is modified.
+
+Verified unchanged runtime `cf8cc2cc` in a detached baseline checkout, with
+both imported module paths asserted before pytest importlib loading and
+the same explicit provider fixtures, produced **4 behavioral assertion
+failures / 16 deselected**: the real cached `/status` route and three internal
+source variants retained the old card incorrectly. This baseline already
+contains the cache projection, so the failures isolate its missing source
+identity check. No production source was disabled. A further test against
+the recovered worktree found a non-null empty source ID fell through as
+legacy (**1 failed / 2 passed / 17 deselected**); changing the guard from
+truthiness to `is not None` honors the reviewed contract.
+
+The new tests also pin failure-closed provenance reads, null legacy links,
+account/league scoping, unchanged frozen rows and ordered survivors. The
+real linked-card response issues **two SELECTs total: one decision-history
+read plus one batched owned-provenance read**, outside the global job lock.
+There is no provenance SELECT for internal or unlinked legacy cards without
+their own impression IDs; the earlier one-SELECT fixture measurements above
+remain valid for that case, not a universal claim about all responses.
+
+Final exact 18-file command listed above, with the stated DB/provider pins:
+**401 passed in 7.49s**. An intermediate recovery run before the empty-source
+edge test was added passed **399 tests in 7.79s**. No full repository or
+mobile QA is claimed by these focused runs.
+
+`git diff --check` passed. Two attempted suite commands named nonexistent
+winnowing/bakeoff filenames and ran no tests; corrected explicit paths are
+listed above. One intermediate consolidated run caught an empty-snapshot
+fixture's missing internal key (363 passed / 1 failed); the nonempty-only
+projection fix restored that existing contract without changing its fixture.
+
+Backend code-walk: [backend-code-walk.md](backend-code-walk.md). Root owns the
+full repository/combined mobile run and shared spec-doc/ledger updates.
+Operator TestFlight checklist remains **not run**. No Maestro, simulator,
+captures, production writes, push or deployment. Remote-only invalidation of
+already retained mobile decks, post-match Decline/fuzzy exemptions, and
+standing-offer lifecycle remain explicitly held as in the reviewed PRD.
