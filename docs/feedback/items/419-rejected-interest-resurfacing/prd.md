@@ -1,0 +1,120 @@
+# G419 — honor exact passes when resolving interest
+
+**Status:** planned · 2026-09-06 · `codex/feedback-419-trade-disposition-20260906`
+
+Phase-1 author specification; **runtime build has not started**. Requires the separate planner's critique and reconciliation before implementation. Source plan: [plan-g419.md](plan-g419.md), commit `19b927aa2ce5bd7f4abb3ba0df2635ed311994a5`; code verified against `4026ebc81eaae50b345b42421641125c5b8d413e`. This PRD pins the plan's open precedence cases and separates the implementation seams.
+
+## Problem and outcome
+
+Feedback #419 reports an exact player-for-player package repeatedly returning with “They're interested” after the receiver passes. The supplied bounded history has an unretracted source like on August 14, a receiver's mirrored pass on August 16, and another receiver pass shortly after the September 5 report. The earlier pass is outside the normal 14-day discovery window and predates the existing legacy-pass amnesty; the source like is inside its reader's 90-day lookback. There is no exact-package match. The one supplied match is a different package. No private identities, assets, raw rows or free text belong in tracked evidence.
+
+The old like must cease to justify an interested card once either participant later passes that exact offer. Expiry or amnesty of the receiver's discovery cooldown must not revive that old like. A materially different package remains independently eligible, and a deliberate new like can start a fresh offer.
+
+This diagnosis does not prove which job or local deck produced the reported impression: the exact-pair history has no impression/concept linkage. The plan also confirms independently reproducible reason-only, cached-job, replenishment and mobile-lane replay holes. They are included below as separate mechanical fixes so a newly honored pass is not undone by an older representation of the same card.
+
+## Requirements
+
+### R1. Resolve source evidence without rewriting history
+
+Use a read-side projection over existing `trade_decisions`. Candidate sources remain subject to their reader's existing bounds: 90 days for league likes and mirror matching; the existing 500-candidate bound for Awaiting; the queue's existing windowless idempotency lookup. Do not add an interest-expiry clock, schema, flag, attribution field, or decision uniqueness constraint.
+
+An exact package is **two direction-aware sets**: `(give IDs, receive IDs)`, within the acting account and league. Resolve the counterparty from the existing explicit route/job/member context; mirror by swapping the two sides. Retain actor and league boundaries in every shared map. The same IDs reordered or a regenerated card ID are the same package; adding or replacing an asset, changing the known counterpart, changing league, or changing orientation is not. Do not use player names, one union of all assets, fuzzy overlap, or optional `trade_concept_id` as this key. Persisted legacy decisions have no target-user column: do not pretend they do or infer historical recipients beyond the existing roster-resolution evidence. Ambiguous/unresolvable membership cannot authorize an interested badge or match.
+
+For source like L by A toward B, L is actionable only while unretracted and there is no later exact pass by A in L's orientation or B in the mirrored orientation. A pass resolves every older source like for that exact interaction. A later like cannot erase that resolution for an older row; it is a new source row. Evaluate each source row against the full relevant sequence, including superseded/retracted positives when determining that an older positive must not be selected as fallback. Choose the newest actionable source evidence for a package, preserving that row's existing like time/impression attribution. Do not rewrite timestamps, append synthetic likes/passes, or set A's `retracted_at` because B passed.
+
+“Later” means normalized UTC `created_at`, with numeric decision-row `id` as the deterministic tie-break for equal timestamps. Naive legacy timestamps are UTC. A malformed source or an exact conflicting sequence that cannot be ordered must not supply affirmative interest; unrelated packages remain usable. Preserve the existing conservative malformed-timestamp behavior in discovery suppression separately.
+
+Pin the following sequence table in tests; arrows denote actual new persisted user decisions, not retries:
+
+| Sequence for exact P | Required result |
+|---|---|
+| A likes → B passes; B's pass later expires or is amnestied | A's old like stays resolved. No injection, boost, cached interest, or automatic match from it. Ordinary unbadged organic rediscovery is allowed when existing discovery rules allow it. |
+| A likes → A passes | A's old like cannot supply interest or mutual consent. No withdrawal is fabricated. |
+| A likes → B passes → A deliberately likes again | New A like is actionable evidence; B's still-active exact cooldown continues blocking discovery. After that cooldown expires, normal source gates apply. No permanent package ban. |
+| A likes → B passes → B deliberately likes | B's new like is an offer to A. It does not revive A's resolved old row; no mutual match until A supplies new consent. |
+| A likes → A passes → B likes → A deliberately likes | Latest A/B positives can match through the existing swipe path; fresh intent is not permanently blocked. |
+| A likes → A withdraws; or A likes → A re-likes → withdraws | No older source row falls back into eligibility. Existing withdrawal marks caller-owned matching live rows only. |
+| An actionable like is retried, including queue taps after ten seconds | Keep existing queue idempotency: no second decision/Elo/event merely to refresh a source time. |
+| A's previous queue like is resolved by either participant's exact pass, then A deliberately queues again | This is a new offer: `already_queued:false`, one fresh like/signal, followed by idempotent repeats. Queue still creates no mutual match itself. |
+
+R1 is an offer-evidence rule, not an override of D-067. Keep `pass_cooldown_days`, `pass_cooldown_start_epoch`, the independent seven-day like discovery window and all normal amnesty behavior unchanged. A deliberate like does not remove an active discovery pass. It can serve as new consent through existing explicit actions, without automatically lifting that pass from the deck.
+
+### R2. Make existing readers agree on actionable likes
+
+| Consumer | Required interpretation / boundary |
+|---|---|
+| `database.load_recent_league_likes` → `_inject_likes_you_cards_impl` | Only actionable exact source evidence can synthesize a card or add likes-you provenance/boost to an organic card. Apply before the cap so discarded evidence consumes no slot. Preserve engine-like quality gates and D-170's hand-queued quality exemption; neither bypasses an exact decision. |
+| `database.find_mirror_like` / `check_for_match` | Reject source candidates superseded by R1 before exact or existing fuzzy matching. Exact-pass invalidation compares the **candidate's own exact package**; a pass on nearby P must not suppress actionable Q. Preserve fuzzy thresholds, low-value guard and exact-before-fuzzy order. No automatic match from a source that the caller previously resolved. Keep existing detail keys and select the actual surviving source attribution. |
+| `database.find_live_trade_like` → `/queue` | A superseded old row cannot keep a deliberate fresh queue permanently `already_queued`. Supply existing explicit counterpart/package context internally as needed; do not change the request. Keep dedupe ahead of all Elo/event/decision writes. |
+| `database.load_awaiting_trades` | Return only actionable caller-owned likes; resolved old offers are no longer waiting on the recipient. Preserve output shape, existing match subtraction, roster partner resolution and per-package dedupe. Do not change match statuses or inbox dismissal. |
+| `_load_presentment_exclusions`, league-summary counts | Continue deriving from Awaiting plus existing pending/accepted match readers, so visible rows and counts agree. This may release R4 exclusion for an old resolved offer; D-067 remains independent. |
+
+One batched history projection per reader request/job scope, reused across its candidates. Bound it by the selected candidate leagues/actors and earliest required source time; never perform a query for each card, each candidate, or each generator arm. Keep the existing candidate caps; do not truncate later conflicting decisions such that an older source is falsely revived. Queue's windowless semantics must not silently become 90-day semantics. Keep `database.py` independent of `server.py`.
+
+### R3. Honor a pass across live services and server snapshots
+
+Factor the existing pass-only in-memory binding into a shared server helper and call it from both the ordinary swipe pass and `_apply_reasoned_pass`. Bind `_past_decision_keys` and `_dismissed_decision_keys` across all relevant format services and the alias-only legacy session. Preserve ordinary best-effort write behavior and first-write/progressive-reason/Elo idempotency; no synthetic second swipe, added event, or extra outcome.
+
+At public serving boundaries, project both current exact-pass state and actionable likes-you evidence onto serialized cards. Cover fresh generation, complete cache hits, shared running jobs, provisional/final publication and polling an old job ID. A cached `likes_you` card whose source has resolved is removed; its pre-boost organic state cannot reliably be recovered from that serialized artifact. Fresh generation may rediscover P organically without stale interest when D-067 allows it. Other cards retain order and metadata. Never edit frozen impression records to match a later response.
+
+The projection uses the job's captured account/league/format, not whatever league the polling session has since opened. Preserve current ownership checks and foreign-job 404 behavior. Fresh live pass state remains visible to captured workers. Copy the minimum snapshot under `_trade_jobs_lock`, then perform any DB work outside that global lock; do not hold it across a history query. Invalidation may supplement this boundary but does not replace it. `GET /api/trades` pending-card reads must obey the same relevant exact state. Do not introduce a TTL beyond existing ones or rescue exclusions to fill the deck.
+
+Restore full-init/replenishment parity with one narrow helper for the existing decision windows/amnesty. Full initialization currently queries at the widest pass/like window; replenishment incorrectly uses seven days for all decisions. Both paths must honor day-eight through day-fourteen recent passes and the configured boundary; expired/amnestied organic controls remain eligible. Both mixed and pass-only sets must be populated.
+
+### R4. Keep the mobile working deck consistent
+
+Backend projection alone cannot remove a retained local card: `TradesScreen` appends snapshots by card ID and lane changes reset the cursor across the old working set. Keep an exact package + counterpart + league disposition record for the current screen/session so lane changes, new IDs, same-length snapshot updates, back/restored deck state and “Find more” cannot re-front a committed pass. Derive identity from the package the user actually acted on, including edited variants. Do not suppress the unedited package merely because it shares a raw display ID.
+
+Pending/held/in-flight removal must be reversible. Existing short Undo cancels only a held pass POST; it must make no persistent exclusion. Failed writes with no successful sibling restore retryability. A successful reason write with resolvable card context is sufficient commitment even if the companion swipe fails; a failed reason write alone is not proof of a saved pass. Capture the existing `postDeclineReason` boolean result instead of discarding it. Populate the server's already-supported optional give/receive/target/league echo fields in `mobile/src/api/declineReasons.ts`, and send the actual acted card's ID (including its existing edited ID), not the raw unedited display ID. The present serializer sends no package/target context: a reason-only success after card loss may mean merely a banked reason. Cover restart/reinitialized service with valid echoes and no companion swipe. No new public field or response is needed. Delayed callbacks carry their original league/package/epoch so switching leagues cannot poison the new deck.
+
+Keep the currently open layer-2 reason panel attached to its card until the existing advance/dismiss transition finishes, even if layer 1 has committed. Removing the card and also incrementing an index must not skip the next card. Preserve existing browse-session removal, frozen sibling order, error copy, reason UI, gesture guards, tally/Undo behavior and navigation. No new controls or strings are needed. No durable local ban, new unswipe route, or timeout-based interpretation of acceptance.
+
+## Wire contracts and exclusions
+
+All current auth/feature gates, request validation, response fields and status codes remain unchanged. Only candidate eligibility and existing `already_queued` truthfulness change.
+
+| Route | Contract retained |
+|---|---|
+| `POST /api/trades/swipe` | `trade_id`, `decision:like\|pass`; optional echoed package/target/league and impression signal. Existing reconstruction, result/match payloads, validation and best-effort persistence. |
+| `POST /api/trades/pass-reason` | Required `trade_id` and valid reason/detail/text combination; optional current card context. First progressive write passes; later writes refine. Existing `{ok,passed,reason,detail,switched_from,elo_written}`, 400 validation, 404 flag-off, 500 `write_failed`. No requirement for an impression ID or companion swipe. |
+| `POST /api/trades/generate`, `GET /api/trades/status?job_id=…` | Existing parameters and `{job_id,status,opponents_done,opponents_total,cards,error}` plus existing optional metadata. A filtered empty deck uses the existing empty state. No client upgrade required for backend filtering. |
+| `GET /api/trades`, `GET /api/trades/awaiting` | Existing bare arrays and card/tile fields. Awaiting summary counts continue sharing its reader. |
+| `POST /api/trades/queue` | Existing required league, opponent and oriented arrays. `{queued:true,already_queued,trade_id}`; existing structural refusal/errors and deterministic ID. No restored fairness refusal, new reason code, or queue-time match creation. |
+| `POST /api/trades/awaiting/dismiss` | Caller-owned exact-like retraction only; same counts/events/index invalidation, idempotent zero result. |
+
+Held: post-match Decline policy, its likes-you/near-duplicate suppression exemption, fuzzy-match policy, standing-offer expiry/revocation and the separate owner timing redesign. A standing-offer mirror must still honor the shared active exact-pass filter, but its general player-for-pick intent is not rewritten as a specific historical player-for-player like. Keep all tier, valuation, policy, generation-arm, ranking, floor, knob and experiment math unchanged. No real league proposals, messages, production mutation, push or deploy is authorized by this author artifact.
+
+## Acceptance and test plan — not run
+
+Use synthetic A/B/C accounts, asset IDs and league IDs, in-memory SQLite, fixed UTC clocks and injected Flask sessions. Existing provider/network seams stay offline. Tests exercise real helpers/endpoints/workers; do not copy the proposed rule into a test-only oracle.
+
+| ID | Executable case / expected result | Home |
+|---|---|---|
+| T1, incident RED | Fix now to September 5; A like August 14, B mirrored pass August 16 before unchanged amnesty, no exact match, no newer positive. Actual injector neither synthesizes nor boosts from A; fresh organic P can survive unbadged. Test absent concept/impression data. Current code must fail this test before implementation. | New `backend/tests/test_trade_interest_disposition.py` + real injector harness from `test_trade_match_flow.py` |
+| T2, precedence | Every R1 sequence, both A/B orientations, equal timestamps/id order, naive UTC, malformed relevant stamps, withdrawal/no fallback, changed/reordered sides, new IDs, different actor/league/opponent and 1x2 control. Assert histories are unchanged by reads. | Same new DB/consumer suite |
+| T3, readers | Exercise exact/fuzzy mirror candidates, queue first/repeat/resolved/requeue, Awaiting plus summary and R4. Own-like→own-pass cannot match; receiver re-like cannot revive old source. Existing fresh withdrawal→re-like works. Candidate-specific fuzzy pass isolation remains. Record bounded query counts on a multi-card fixture. | New suite; extend `test_calc_trade_queue.py`, `test_awaiting_dismiss.py`, `test_league_summary_buckets.py` as needed |
+| T4, pass binding RED | Real reason-only layer 1, layer 2 first, no-Elo reason, later value detail; both orientations, all format services, alias-only legacy service. Same-session injection/pending/asset-ideas cannot return P. Pair reason→swipe and swipe→reason; repeat/reordered writes keep existing row/outcome/Elo rules. | `test_decline_reasons.py`, `test_pass_cooldown.py`, existing swipe idempotency suite |
+| T5, snapshot RED | Seed serialized likes-you P plus ordered siblings in complete/running jobs. Pass, call real cached generate and old-ID status; hold worker before publication, pass, resume. P stays absent under a new ID. Also resolve an old like with an expired/amnestied pass: cached interested P is removed. Switch caller league/format; never filter foreign job state using the current league. Assert unchanged survivor metadata and frozen impression data. | New server suite `backend/tests/test_trade_disposition_replay.py` using existing worker harness |
+| T6, restoration RED | Execute shared production restoration through both builders: day 8/day 13, inside/outside configured fractional boundary, seven-day like boundary, pre/post amnesty, amnesty disabled, malformed stamp. Mixed and pass-only sets agree; no permanent organic ban. | `test_pass_cooldown.py`, `test_deck_replenishment.py` |
+| T7, client RED | Extracted dependency-free state tests for pass→lane change, stale/new-ID/same-length snapshot, restored deck, edited package identity, next-card no skip, league switch with late success. Held Undo sends nothing and restores P. Both writes fail ⇒ retry; reason success + swipe failure ⇒ P remains committed. Assert the reason serializer supplies existing echoed context/acted ID, then real reason-only route rebuilds after card loss and binds exactly the edited package. Layer 2 remains usable. | New `mobile/tests/check-trade-disposition.js` and minimal reusable helper only if needed; existing decline/browse/Undo guards stay green; real rebuild case in backend reason tests |
+| T8, wiring / boundaries | AST/call-walk pins all relevant serve/publication/read sites, shared reason binding and both restoration callers. Active exact passes beat organic/boost/synthesized/standing-offer paths and every serving arm, including arm-A R4 bypass. No flag/profile/quality-math diff or changed-package exclusion. | New/extended backend AST tests; existing bakeoff/standing-offer suites |
+
+Record named sabotage RED→GREEN for the source-resolution bypass, omitted reason bind, cached/publication projection bypass, restored seven-day replenish query and mobile acted-card reset. Do not claim a regex-only match proves state behavior. Preserve existing fuzzy, D-170, decline-fatigue/Undo, reconstruction, double-fire and arm-A golden fixtures. Root runs full backend, mobile typecheck, structural suites and test-ID lint after focused checks, and records actual outcomes in the shared ledger. No tests or runtime checks were executed during this author phase.
+
+### Manual TestFlight checklist — operator-run, not run
+
+Use controlled test accounts/league and record device build plus backend revision; no real platform proposal.
+
+1. Seed T1's dated history in a controlled fixture. B generates both fresh and cached results: no interested card/boost from the resolved old like. An eligible organic same-package result, if any, carries no false interest. Different-package controls still work.
+2. Create a fresh exact A like. B passes through layer 1 only and separately each layer-2 completion path. Change Value/Outlook/All lanes, reopen results, Find more, refresh and switch scoring format: no exact replay; layer-2 completion and the next card remain usable.
+3. Exercise a paused worker and reopen/poll its old job after passing; repeat after switching league. Restore both normal and replenishment sessions with an eight-day pass. No cross-league removal or same-package return.
+4. With reason capture off in the controlled configuration, pass then Undo within the hold window: no POST/history row and the card is actionable again. Inject total write failure: retry works. Inject reason success plus swipe failure: the committed pass remains honored.
+5. A deliberately re-likes after B's pass: active cooldown remains. After its existing expiry, new evidence may surface. B re-likes before A renews: no automatic match from A's old row; A then deliberately likes and the normal match path works. Repeat reversed orientation and with a changed package.
+
+D-056 forbids Maestro authoring/execution and simulator captures. This checklist stays pending until physical-device results are recorded.
+
+## Implementation ownership
+
+Backend builder: `backend/database.py` exact-interest reader projection; `backend/server.py` reader context, pass bind, snapshot projection and restoration seams; relevant backend tests. Split incident/source-reader, live/cache and restoration changes into reviewable commits. Mobile builder designated by root: narrowly scoped `TradesScreen.tsx` state/callback wiring, `api/declineReasons.ts` serialization of existing optional context, a small helper only if executable state testing needs it, structural test and its package script. Read mobile/API subtree instructions before those changes. Root integrates overlapping `server.py` work sequentially.
+
+Author owns only this `prd.md`, [scope.md](scope.md) and [reconciliation-log.md](reconciliation-log.md). Planner owns the source plan and independent critique. Root owns shared reference docs, decisions, index/status/ledger and eventual delivery. No runtime source may change before independent planner review is resolved; this is the assigned Phase-1 boundary, not a new user permission request.
