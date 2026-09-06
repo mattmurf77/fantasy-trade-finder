@@ -2,7 +2,7 @@
 
 **Status:** planned · 2026-09-06 · `codex/feedback-419-trade-disposition-20260906`
 
-Author pass against plan commit `19b927aa2ce5bd7f4abb3ba0df2635ed311994a5` and code base `4026ebc81eaae50b345b42421641125c5b8d413e`. [PRD](prd.md) and [scope](scope.md) are ready for the separate planner's critique. **No runtime source, tests, flags, schema, private history or shared ledger was edited by this author; no tests were run.** Independent review is pending, not implied by this log.
+Author pass against plan commit `19b927aa2ce5bd7f4abb3ba0df2635ed311994a5` and code base `4026ebc81eaae50b345b42421641125c5b8d413e`; initial docs commit `fd74cbf1`. The original planner's critique was relayed by root and its two blockers are incorporated in Round 2. Root ratified R1 and all held policy boundaries. [PRD](prd.md) and [scope](scope.md) now await focused planner review of the corrections. **No runtime source, tests, flags, schema, private history or shared ledger was edited by this author; no tests were run.** This log does not imply focused review is complete.
 
 ## Round 1 — author verification and resolutions
 
@@ -37,11 +37,24 @@ The source plan is diagnosis and proposed scope; this PRD is the executable auth
 
 No analytics waiver: existing events/history suffice for new controlled evidence, without filling historical attribution gaps. No schema/flag/config change. Root owns API/LLD/architecture, the Awaiting invariant clarification, the non-obvious exact-source precedence decision, central status/index and test ledger. HLD/glossary/data-dictionary/config-reference have explicit n/a reasons in scope. D-056 replacement evidence is unit/AST/state tests, final code-walk and manual TestFlight; no Maestro/simulator work.
 
-## Independent critique queue
+## Round 2 — original planner critique incorporated
 
-1. Ratify or correct the R1 sequence table, especially receiver-pass→receiver-like and resolved queue→fresh queue, without reviving stale consent or changing discovery amnesty.
-2. Check the batch-history boundary, deterministic timestamp/id order and unknown-recipient handling against legacy records; prove no N+1 queries or cross-league bleed.
-3. Validate all public job serve/publication entrypoints and mobile layer-2/pending transitions have a concrete T5/T7 test before implementation.
-4. Confirm the included reader/secondary seams and explicitly held match-Decline/standing-offer policies. Record critique and final resolution here (or a linked review document) before runtime build.
+Root supplied two blocking findings and two scope clarifications. The author re-read the relevant code; this round supersedes Round 1's assumption that populating context and reading the adapter boolean alone proves a pass.
 
-No new operator choice is requested by the author. The remaining gate is the independently assigned planner critique; this log does not declare it complete.
+| Review finding | Evidence / incorporated contract | Focused verification |
+|---|---|---|
+| **Blocker 1: fresh requeue still hits the ten-second same-like guard** | `database.py:5780` selects the last same-decision live row; `:5802` can suppress the fresh like even after the revised queue probe returns none. `server.py:14580` and `:14623` are two separate dedupe layers. PRD R2 now requires a narrow explicit-queue exception verified against an intervening exact own or receiver-mirrored pass after the old source row. No client bypass, new global dedupe behavior or unrelated-pass exception. | T3 executes real queue at t=0, source-own or receiver-mirrored swipe pass at t=1, requeue at t=2 and repeats. Exactly one new positive row/Elo/event for renewal; no duplicate signal/events on retries. Ordinary swipe guards remain green. |
+| **Blocker 2: HTTP 200 / reason creation is not durable pass commitment** | `server.py:15002` banks a reason when no card resolves; `:15017` only applies a pass when `state.created`; `:15028` reports `passed=bool(created)` regardless of persistence. `_apply_reasoned_pass` swallows DB failure. Thus contextful retry of an already banked row never repairs the pass. PRD R3 now requires durable exact-pass verification/once-only repair on contextful progressive requests and truthful existing `passed` state; true includes verified previously committed retries, false includes contextless/failed/unverified disposition. `ok` still acknowledges the reason, with existing error/status surface. | T4 adds contextless bank→valid-context repair without swipe, failure→recovery, repeat/reordered requests beyond ten seconds, service loss and actual edited identity. Assert decision/outcome/Elo/event counts and preserved reason data. No new table or marker field. |
+| Client must consume response evidence, not transport success | `api/declineReasons.ts:90` currently resolves true after any successful HTTP response. R4 changes the internal adapter to expose existing response fields and distinguish transport failure, accepts only `passed === true` as reason commitment, and sends existing optional echo fields for the actual acted/edited ID. A false/absent response does not erase an already confirmed local pass. | T7 pins 200/ok/false, missing evidence, verified true, retry true, sibling failure and delayed callbacks. Fielded clients discard the body and keep the existing companion swipe; field names/types/status codes stay compatible. Tests pinning duplicate passed false are intentionally updated while all count/invariant assertions remain. |
+| Append-only local merge cannot prove removal of remote-only invalidation | R4 is narrowed to passes locally observed in the current screen/session. Remote-only invalidation of an already retained local deck with no local pass record is held. R3 still filters fresh/cached server responses; a newly loaded deck receives corrected state. | T7/manual steps explicitly state the local-action boundary and do not claim a server-only filtered snapshot deletes existing local cards. |
+| Legacy recipient and normalized time evidence | R1 keeps unknown historical recipients unknown. Current roster containment is actionability evidence only. Mixed timezone/naive/equal timestamps are tested through actual DB readers and cutoff selection, preventing a pure helper test from masking SQL text-order bugs. | T2 must exercise DB-backed source/match consumers, including reordered IDs and unrelated account/league/package controls. |
+
+The response change is explicit: `passed` means verified durable disposition state rather than “this request created a reason row.” Ordinary `/swipe` best-effort behavior is preserved and its response is not upgraded to a durable persistence guarantee. Reason repair retains the existing once-only Elo claim and outcome dedupe, makes no new synthetic action, and does not use a claimed Elo slot or in-memory mask as pass evidence. Ancillary telemetry/ranking failures do not erase an already durable decision or justify re-running all side effects.
+
+## Focused review queue
+
+1. Original planner verifies R2/T3's intervening-pass writer exception closes the sub-ten-second renewal blocker without relaxing ordinary retries.
+2. Verify R3/R4/T4/T7's truthful passed state, durable repair evidence, idempotency and response consumption close the banked-reason blocker while keeping fielded clients compatible.
+3. Confirm T2's DB-backed timestamp/legacy identity evidence and the explicit local-action-only client boundary; R1 and held policy choices are already ratified by root.
+
+No new operator choice is requested by the author. Runtime work remains untouched until the assigned focused review is resolved; this log does not declare that review complete.
