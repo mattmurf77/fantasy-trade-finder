@@ -14577,7 +14577,8 @@ def queue_trade_for_opponent():
 
     # Idempotency probe — BEFORE any signal or write. See the docstring.
     try:
-        existing = find_live_trade_like(g_user_id, league_id, trade_id)
+        existing = find_live_trade_like(g_user_id, league_id, trade_id,
+                                        target_user_id=opponent.user_id)
     except Exception as dup_err:
         log.warning("trades/queue: idempotency probe failed: %s", dup_err)
         existing = None
@@ -14626,6 +14627,7 @@ def queue_trade_for_opponent():
             give_player_ids    = card.give_player_ids,
             receive_player_ids = card.receive_player_ids,
             decision           = "like",
+            queue_target_user_id = opponent.user_id,
         )
         if wrote_decision:
             save_trade_swipes(
