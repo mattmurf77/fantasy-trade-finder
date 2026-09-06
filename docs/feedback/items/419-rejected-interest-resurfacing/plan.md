@@ -1,6 +1,6 @@
 # Feedback 419–421 — selected fixes and open-backlog audit
 
-**Date:** 2026-09-06. **Base:** freshly fetched `origin/main` at `4026ebc81eaae50b345b42421641125c5b8d413e` (rechecked during finishing review). **Status:** G419 backend/mobile and G420 implementations root-reviewed and integrated locally; all 95 combined mobile guards, TypeScript and testID lint pass. Package presentation is in final root review. Backlog audit and package research are complete. Full redundant independent QA, CI and release verification remain pending. The owner explicitly authorized unattended shipping of this batch in the current conversation after review and validation.
+**Date:** 2026-09-06. **Base:** freshly fetched `origin/main` at `4026ebc81eaae50b345b42421641125c5b8d413e` (rechecked during finishing review). **Status:** G419 backend/mobile, G420 and bounded package presentation are root-reviewed and integrated locally, including repair of the confirmed round-1 reason-episode defect. Root's frozen-source regression passes 5,645 backend tests / one optional skip, all 95 mobile guards, TypeScript/testID and 190 web checks. Backlog audit and package research are complete. Full redundant round-2 verdicts, CI and release verification remain separate gates. The owner explicitly authorized unattended shipping of this batch in the current conversation after review and validation. [Current release state](release.md).
 
 ## Selected groups
 

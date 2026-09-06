@@ -5,7 +5,7 @@
 **Builder:** separate backend/mobile owners assigned by root after Phase-1 critique
 **Operator sign-off on waivers:** not needed (no evidence or analytics waivers)
 
-Source: [PRD](prd.md), requirements R1–R4 and acceptance T1–T8; [planner diagnosis](plan-g419.md). Independent planner approved revised specification `481b1809`; root ratified the contract and held boundaries. Backend `e02d074e` passed root review and the dependent build gate; mobile `396d92fc` has passed root diff review and focused behavioral checks. Full combined independent QA and release remain pending. Root owns shared-document edits.
+Source: [PRD](prd.md), requirements R1–R4 and acceptance T1–T8; [planner diagnosis](plan-g419.md). Independent planner approved revised specification `481b1809`; root ratified the contract and held boundaries. Backend `e02d074e`, mobile `396d92fc` and current-episode repair `8f27421d` are root-reviewed and integrated. Frozen round-2 source is `7d3e071f`; root full regression passes 5,645 tests with one optional skip. Final independent verdicts and release remain separate gates. Root owns shared-document edits.
 
 ## 1. Analytics scope
 
@@ -19,6 +19,8 @@ Source: [PRD](prd.md), requirements R1–R4 and acceptance T1–T8; [planner dia
 - New env vars / `model_config` keys: **none**. Preserve `pass_cooldown_days` (14 default), `pass_cooldown_start_epoch`, independent like window, fatigue and quality knobs. Existing cooldown knob is not a rollback for stale-evidence resolution; the bounded code commits are reverted through normal release process if necessary. No flag or deploy-free rollback lever is invented.
 
 ## 3. Evidence scope
+
+**Executed evidence:** [backend tests and named RED controls](build-evidence.md), [backend code walk](backend-code-walk.md), [28 mobile behavioral cases and baseline controls](mobile-build-evidence.md), [mobile code walk](mobile-code-walk.md). Root reran the original round-1 defect reproduction GREEN and 424 focused backend cases on the repair, then all 95 integrated mobile guards, TypeScript/testID and the full backend suite. The requirements below describe implemented coverage; not every proposed sabotage was executed, and no blanket per-test RED or physical-device pass is claimed. Actual commands and distinctions are retained in the linked evidence and QA reports.
 
 - [x] **Structural guard planned:** `mobile/tests/check-trade-disposition.js` plus matching `npm run test:trade-disposition`; pins extracted state behavior for locally observed passes, structured reason response consumption (`passed === true`), context/edited identity serialization and narrow screen wiring. Backend AST guards pin public snapshot/publication routes, shared pass binding/repair and restoration callers. Existing decline, browse and Undo checks remain required. Remote-only invalidation of a retained append-only deck without a local pass record is explicitly held.
 - [x] **Unit tests planned:** new `test_trade_interest_disposition.py`, `test_trade_disposition_replay.py`; extend existing trade-match, decline-reason, pass-cooldown, queue, Awaiting, summary and replenishment tests as required by PRD T1–T8. Required focused additions: actual queue→own/receiver mirrored pass→requeue inside ten seconds with retry/Elo/event counts; contextless reason bank→valid-context repair with no companion swipe; failed disposition persistence→repair; truthful passed state on repeats beyond ten seconds; edited identity; mixed timestamp normalization/order through DB consumers. All DB data in isolated memory/scratch, clock fixed and egress stubbed. No global fixture broadening.
@@ -45,7 +47,7 @@ Source: [PRD](prd.md), requirements R1–R4 and acceptance T1–T8; [planner dia
 ## 5. Ship gate declaration
 
 - **CI green required before eventual ship:** `backend-tests`, `mobile-typecheck` and `maestro-testid-lint` on the actual pushed SHA. Structural scripts also run explicitly; the legacy job name does not authorize Maestro.
-- **Evidence recorded:** root's `living-memory/TEST_LEDGER.md` entry names focused/full checks, incident RED, named sabotages and final code-walk. No execution claimed in this Phase-1 artifact.
+- **Evidence recorded:** root's `living-memory/TEST_LEDGER.md` entry names actual focused/full checks, original incident RED/GREEN, meaningful baseline controls, attributed builder evidence and final code walks. Proposed-but-unrun sabotages are not passing evidence; no simulator or physical-device execution is claimed.
 - **TestFlight verification:** operator runs PRD checklist and logs the exact build/backend result before mobile runtime behavior is described as verified.
 - Express lane declared? **No.** Full evidence/doc gates apply. `FTF_SKIP_SIM_GATE=1` is the D-056 standing posture if a later authorized push runs the old hook.
 - Current-batch owner authorization covers reviewed merge/live/TestFlight delivery, as recorded in the batch plan. It does not waive QA/CI/privacy gates or authorize unrelated changes and real-user trade actions. Build completion is not delivery or physical-device verification.
