@@ -4,7 +4,7 @@
 
 The owner explicitly authorized unattended merge, GitHub publication, live delivery and TestFlight where needed for this selected batch. This does not waive review, CI or privacy checks and does not authorize unrelated backlog fixes/closures. The original dirty checkout and private files remain untouched.
 
-**Not released.** Round-1 source `aa4637899a9233a4afffca22f3f90847fca76a62` has a confirmed reason-episode defect under repair. The previous production source remains `4026ebc81eaae50b345b42421641125c5b8d413e`; existing EAS build remains 1.17.0 (148). Native 1.17.1 is prepared, with no new build number assigned or uploaded. Selected feedback records remain `in_progress`.
+**Not released.** Round-1 source `aa4637899a9233a4afffca22f3f90847fca76a62` had a confirmed reason-episode defect. Repair `8f27421d` is integrated and root-reproduced GREEN; a complete independent round 2 is required. [Adjudication](qa-resolution.md). The previous production source remains `4026ebc81eaae50b345b42421641125c5b8d413e`; existing EAS build remains 1.17.0 (148). Native 1.17.1 is prepared, with no new build number assigned or uploaded. Selected feedback records remain `in_progress`.
 
 ## Intended delivery
 
