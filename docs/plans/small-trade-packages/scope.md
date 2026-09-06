@@ -4,7 +4,7 @@
 
 **Entry point:** owner-requested package-shape research and separately reviewed presentation change; [planner](plan.md), [PRD](prd.md).
 
-**Builder:** parent-assigned backend owner after original-planner critique and root gate. Author writes only this scope, PRD and reconciliation.
+**Builder:** parent-assigned backend owner after original-planner critique and root gate; final runtime `9ea562dd` and evidence `a194efd7` are reviewed and integrated. Shared reference/evidence updates belong to root.
 
 **Operator sign-off on waivers:** not needed; none requested. No express lane.
 
@@ -27,8 +27,8 @@ Record original/final indices and player counts, never private board values or n
 ## 3. Evidence scope
 
 - **Structural guard:** no new mobile suite required because no mobile code, control or sorting changes. Backend AST/wiring guards supplement the executable worker tests; existing mobile structural suites still run at integration.
-- **Unit tests, required/not run:** `backend/tests/test_small_trade_presentment.py`; narrow worker/cache/impression assertions in existing bakeoff/policy harnesses. T1–T8 in the PRD cover meaningful three-arm movement, no-op controls, all invariants, first publication, captured settings, every cache probe and frozen telemetry. T4/T6 hold the worker after presentation/publication, introduce a pass, then verify the final #419 cut and surviving occurrence/index alignment, including duplicate-shaped distinct objects and repeated same-object records. Generator goldens are not rewritten to bless the new serving order.
-- **Code-walk, required after build:** exact final SHA/file:line trace from request/pregen/replenishment capture through reuse checks, kickoff, final policy survivors, one reorder, first evaluated publication, final `_project_trade_dispositions` removal, occurrence remapping, serialization and both impression writers. Include mid-job knob change, logging disabled and post-freeze poll filtering. The ≤5 movement and class-vector checks apply before authoritative removal/compaction; no stale parallel zip, second sort or later index rewrite.
+- **Unit tests, implemented and run:** `backend/tests/test_small_trade_presentment.py` and narrow worker/cache/impression assertions cover PRD T1–T8: meaningful three-arm movement, no-op controls, invariants, first publication, captured settings, all cache probes and frozen telemetry. T4/T6 include a late pass, final #419 removal and surviving occurrence/index alignment, including distinct duplicate-shaped objects and repeated same-object records. Root's final seven-suite gate passed **224 tests**; integrated full backend passes **5,645 / 1 optional skip**. [Exact commands, RED/GREEN and limitations](build-evidence.md). Generator goldens were not rewritten to bless serving order.
+- **Code-walk, completed:** [final file:line trace](code-walk.md) covers request/pregen/replenishment capture, reuse checks, kickoff, final policy survivors, one reorder, first publication, final disposition removal, occurrence remapping and both writers, including mid-job mode change, logging disabled and post-freeze filtering. The ≤5 movement and class-vector checks apply before authoritative removal/compaction; no second sort or historical index rewrite.
 - **Manual TestFlight, required/not run:** PRD §6 names organic generation, larger-package reachability, picks, explicit selections, Find More/pass suppression, Back and retained-deck order. No simulator, Maestro, mockups or captures under D-056.
 - **Waivers:** none. No new mobile structural suite/testID is applicable, not a waived backend behavior test.
 - **testIDs:** none added/renamed; parent still runs existing testID lint and TypeScript checks.

@@ -121,4 +121,3 @@ Outside Git, in the task workspace:
 - `trade-shape-detail-aggregate.json`: supplemental pure-player/pick/mixed and September 5 arm breakdown from the identical stored corpus.
 
 No raw owner/league/player identifiers or private board values were written to this report or either aggregate. Counts were verified to reconcile across shape distributions, composition buckets, source-arm totals and the repeated-view reduction. No runtime code changed and no tests/deployment are claimed by this research.
-
