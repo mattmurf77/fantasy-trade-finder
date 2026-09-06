@@ -2939,6 +2939,7 @@ _MODEL_CONFIG_DEFAULTS = [
     ("policy_confidence_band_high",      0.66, "policy: trade confidence at/above which a card's privacy-safe confidence_band reads 'high'"),
     ("policy_confidence_band_med",       0.33, "policy: trade confidence at/above which a card's confidence_band reads 'medium' (below it reads 'low')"),
     ("policy_shadow_log_cap",           40.0,  "policy: max trade_policy_shadow rows written per deck job — bounds a pathological league without hiding the treatment's rejections"),
+    ("simple_player_presentment",       0.0,  "presentation: 1 enables bounded simple-player ordering after live policy; 0 preserves the existing order"),
 ]
 
 

@@ -1289,6 +1289,8 @@ _DEFAULT_CFG: dict[str, float] = {
     "policy_confidence_band_high":      0.66,
     "policy_confidence_band_med":       0.33,
     "policy_shadow_log_cap":           40.0,
+    # Post-generator presentation only; no arm consumes or pins this key.
+    "simple_player_presentment":        0.0,
 }
 
 # Live config — updated by reload_config().  Starts as a copy of defaults.
