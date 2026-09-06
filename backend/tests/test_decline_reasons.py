@@ -390,12 +390,108 @@ def test_layer1_alone_leaves_a_complete_row(harness):
     assert trade_svc._trade_cards[TRADE].decision == "pass"
 
 
+def test_419_banked_reason_repairs_actual_edited_card_once(harness):
+    """HTTP 200 banks an answer; only durable exact-card evidence is a pass."""
+    client, service, trade_svc, eng = harness
+    edited_id = "edited_419"
+    payload = {"trade_id": edited_id, "detail": "value_giving"}
+    with patch.object(server, "record_event") as events:
+        banked = _post(client, payload).get_json()
+        assert banked["ok"] is True and banked["passed"] is False
+        assert _decision_rows(eng) == [] and _swipe_rows(eng) == []
+        context = {**payload, "league_id": LEAGUE, "target_user_id": OPP,
+                   "give_player_ids": ["g2"], "receive_player_ids": ["r2"]}
+        assert _post(client, context).get_json()["passed"] is True
+        trade_svc._trade_cards.pop(edited_id)  # service/card memory loss
+        with patch.object(db_module, "_now", lambda: "2026-09-07T12:00:00+00:00"):
+            assert _post(client, context).get_json()["passed"] is True
+        assert events.call_count == 1
+    rows = _decision_rows(eng)
+    assert [(r.trade_id, json.loads(r.give_player_ids),
+             json.loads(r.receive_player_ids)) for r in rows] == [
+                 (edited_id, ["g2"], ["r2"])]
+    assert len(_swipe_rows(eng)) == len(service._trade_swipes) == 1
+    assert trade_svc._trade_cards[TRADE].decision is None
+
+
+def test_419_failed_pass_commit_is_false_and_can_repair(harness):
+    from sqlalchemy import event
+    client, service, _svc, eng = harness
+
+    def fail_decision(_conn, _cursor, statement, _params, _context, _many):
+        if statement.startswith("INSERT INTO trade_decisions "):
+            raise RuntimeError("fixture decision database failure")
+
+    event.listen(eng, "before_cursor_execute", fail_decision)
+    try:
+        response = _post(client, _reason({"detail": "value_giving"})).get_json()
+    finally:
+        event.remove(eng, "before_cursor_execute", fail_decision)
+    assert response["ok"] is True and response["passed"] is False
+    assert _row_count(eng) == 1 and _decision_rows(eng) == []
+    assert _swipe_rows(eng) == [] and service._trade_swipes == []
+    assert _outcome_rows(eng) == []
+    repaired = _post(client, _reason({"detail": "value_giving"})).get_json()
+    assert repaired["passed"] is True
+    assert len(_decision_rows(eng)) == len(_swipe_rows(eng)) == 1
+
+
+def test_419_failed_elo_write_rolls_back_claim_but_not_durable_pass(harness):
+    from sqlalchemy import event
+    client, service, _svc, eng = harness
+
+    def fail_elo(_conn, _cursor, statement, _params, _context, _many):
+        if statement.startswith("INSERT INTO swipe_decisions "):
+            raise RuntimeError("fixture Elo database failure")
+
+    event.listen(eng, "before_cursor_execute", fail_elo)
+    try:
+        response = _post(client, _reason({"detail": "value_giving"})).get_json()
+    finally:
+        event.remove(eng, "before_cursor_execute", fail_elo)
+    assert response["passed"] is True and response["elo_written"] is False
+    assert len(_decision_rows(eng)) == 1 and _swipe_rows(eng) == []
+    assert load_trade_pass_reason(IMP)["elo_signal_at"] is None
+    assert service._trade_swipes == []
+    assert _post(client, _reason({"detail": "value_giving"})).get_json()["elo_written"] is True
+    assert len(_decision_rows(eng)) == len(_swipe_rows(eng)) == 1
+
+
+def test_419_reason_binds_both_sets_on_all_live_formats_and_alias(harness):
+    client, _service, alias, _eng = harness
+    other = TradeService(players={})
+    sess = server._sessions[TOKEN]
+    sess["trade_svcs"] = {"sf_ppr": other}  # legacy alias is not in map
+    assert _post(client, _reason({"reason": "fit"})).get_json()["passed"] is True
+    exact = (frozenset(["g1"]), frozenset(["r1"]))
+    for svc in (other, alias):
+        assert exact in svc._past_decision_keys
+        assert exact in svc._dismissed_decision_keys
+
+
+@pytest.mark.parametrize("bank_first", [False, True])
+def test_419_ordinary_pass_before_reason_repair_does_not_repeat_elo(harness, bank_first):
+    client, service, svc, eng = harness
+    if bank_first:
+        card = svc._trade_cards.pop(TRADE)
+        _post(client, _reason({"reason": "value"}))
+        svc._trade_cards[TRADE] = card
+    _post(client, {"trade_id": TRADE, "decision": "pass", "impression_id": IMP},
+          path="/api/trades/swipe")
+    before_memory = len(service._trade_swipes)
+    with patch.object(db_module, "_now", lambda: "2026-09-07T12:00:00+00:00"):
+        response = _post(client, _reason({"detail": "value_giving"})).get_json()
+        assert response["passed"] is True and response["elo_written"] is False
+    assert len(_decision_rows(eng)) == len(_swipe_rows(eng)) == 1
+    assert len(service._trade_swipes) == before_memory
+
+
 def test_layer1_then_layer2_keeps_both(harness):
     client, _service, _svc, eng = harness
     _post(client, _reason({"reason": "value"}))
     r = _post(client, _reason({"detail": "value_getting"}))
     assert r.status_code == 200
-    assert r.get_json()["passed"] is False      # the pass already happened
+    assert r.get_json()["passed"] is True       # durable pass still exists (#419)
 
     row = load_trade_pass_reason(IMP)
     assert row["reason"] == "value"             # layer 1 NOT lost
@@ -538,7 +634,7 @@ def test_retapping_the_same_tile_is_a_no_op_pass_wise(harness):
     client, _service, _svc, eng = harness
     _post(client, _reason({"reason": "value"}))
     r = _post(client, _reason({"reason": "value"}))
-    assert r.get_json()["passed"] is False
+    assert r.get_json()["passed"] is True       # state, not reason-row creation
     assert load_trade_pass_reason(IMP)["switched_from"] is None
     assert len(_decision_rows(eng)) == 1
     assert _row_count(eng) == 1

@@ -15,3 +15,27 @@ Backend owner only; PRD at `481b1809`. No mobile, shared docs, flags, schema or 
 ## Remaining backend work
 
 Reason durable-pass repair/truthful response, live and cached snapshot consistency, restoration parity, final code-walk and targeted integration checks remain in progress. Operator TestFlight/native checks have not run. No Maestro/simulator/capture work, push or deployment.
+# Reason repair increment
+
+`test_decline_reasons.py -k 419` reproduced five assertion failures on
+`c09e8a2f` (reason implementation still baseline): contextless false commit,
+unrepairable failed decision insert, missing all-format binding, and both
+ordinary-swipe/reason ordering cases. The unchanged fixtures now pass.
+
+Focused current run: decline reasons, pass cooldown, decision idempotency,
+calculator queue: **153 passed**. Two old `passed:false` assertions were
+intentionally corrected to `true` on committed repeats, exactly the revised
+API contract: state, not reason-row creation. Structural guards follow the
+extracted live binding and durable ensure/atomic Elo paths instead of pinning
+the removed inline implementations; no behavioral fixture was weakened.
+
+Reason repair locks the existing reason row, verifies actor/league/actual card
+ID and oriented package, and inserts only a missing durable pass. `passed`
+does not depend on HTTP success or best-effort memory writes. A failed decision
+insert remains banked and repairable. Elo claim + swipe rows share a transaction
+for reason writes; a failed Elo insert rolls back its claim while retaining the
+already committed pass. Ordinary swipe's pre-DB in-memory D-073 behavior stays
+unchanged. Ordinary durable Elo consumes a matching banked reason's claim so a
+late value detail cannot repeat it. Outcome/event side effects run only for a
+newly committed reason pass; progressive retries bind live state but do not
+repeat decisions or telemetry.

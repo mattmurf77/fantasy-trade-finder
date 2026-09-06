@@ -5608,7 +5608,9 @@ def save_trade_swipes(
     k_factor: float,
     decision_type: str = "trade",
     scoring_format: str = DEFAULT_SCORING,
-) -> None:
+    *,
+    pass_reason_key: str | None = None,
+) -> bool | None:
     """
     Persist pairwise trade-signal swipes.
 
@@ -5618,6 +5620,11 @@ def save_trade_swipes(
     decision_type: 'trade' (default) | 'disposition' — both are replayed
     identically (non-rank swipes with stored k_factor); the label is just
     for auditing.
+
+    With pass_reason_key, atomically claim that existing reason's once-only
+    Elo AND persist the signal. Returns True only after both commit; a lost
+    swipe write rolls back the claim so a contextful reason retry can repair.
+    Ordinary callers retain their existing return/behavior.
     """
     now  = _now()
     rows = []
@@ -5636,7 +5643,21 @@ def save_trade_swipes(
             })
     if rows:
         with engine.begin() as conn:
+            if pass_reason_key is not None:
+                reason = conn.execute(select(trade_pass_reasons_table).where(and_(
+                    trade_pass_reasons_table.c.impression_id == pass_reason_key,
+                    trade_pass_reasons_table.c.user_id == user_id,
+                )).with_for_update()).first()
+                if reason is None or reason.elo_signal_at is not None:
+                    return False
             conn.execute(insert(swipe_decisions_table), rows)
+            if pass_reason_key is not None:
+                conn.execute(update(trade_pass_reasons_table).where(
+                    trade_pass_reasons_table.c.impression_id == pass_reason_key
+                ).values(elo_signal_at=now))
+        if pass_reason_key is not None:
+            return True
+    return False if pass_reason_key is not None else None
 
 
 def load_swipe_decisions(
@@ -6596,8 +6617,8 @@ def upsert_trade_pass_reason(
 
     Returns::
 
-        {"created":       bool,   # True ⇒ this call minted the row, i.e.
-                                  #        THIS is the tap that passed the card
+        {"created":       bool,   # True ⇒ this call minted the REASON row;
+                                  # not evidence of a committed disposition
          "reason":        str|None,   # post-write state
          "detail":        str|None,
          "switched_from": str|None,
@@ -6680,6 +6701,65 @@ def upsert_trade_pass_reason(
             # the row, not a field a later tap gets to revise.
             "key_source":    p.get("key_source"),
         }
+
+
+def ensure_reasoned_trade_pass(
+    impression_id: str, user_id: str, league_id: str, trade_id: str,
+    give_player_ids: list[str], receive_player_ids: list[str],
+) -> tuple[bool, bool]:
+    """Verify/repair a banked reason's exact card pass; return (passed, wrote).
+
+    Unlike ordinary swipe replay detection, a reason episode is idempotent
+    beyond ten seconds and across service restarts. Its existing row is the
+    serialization key (FOR UPDATE on Postgres); no synthetic history or new
+    lifecycle column is needed. A mismatched reason identity is never proof.
+    The return happens after the transaction commits, so DB failure cannot
+    masquerade as a successful pass. Ordinary swipe remains best-effort.
+    """
+    with engine.begin() as conn:
+        reason = conn.execute(select(trade_pass_reasons_table).where(
+            trade_pass_reasons_table.c.impression_id == impression_id
+        ).with_for_update()).first()
+        if (reason is None or reason.user_id != user_id
+                or reason.league_id != league_id or reason.trade_id != trade_id):
+            return False, False
+        rows = conn.execute(select(trade_decisions_table).where(and_(
+            trade_decisions_table.c.user_id == user_id,
+            trade_decisions_table.c.league_id == league_id,
+            trade_decisions_table.c.trade_id == trade_id,
+            trade_decisions_table.c.decision == "pass",
+            trade_decisions_table.c.retracted_at.is_(None),
+        ))).fetchall()
+        give, receive = set(give_player_ids), set(receive_player_ids)
+        for row in rows:
+            try:
+                if (set(json.loads(row.give_player_ids)) == give
+                        and set(json.loads(row.receive_player_ids)) == receive):
+                    return True, False
+            except (TypeError, ValueError):
+                continue
+        conn.execute(insert(trade_decisions_table).values(
+            user_id=user_id, league_id=league_id, trade_id=trade_id,
+            give_player_ids=json.dumps(give_player_ids),
+            receive_player_ids=json.dumps(receive_player_ids),
+            decision="pass", created_at=_now(),
+        ))
+    return True, True
+
+
+def mark_reasoned_trade_pass_elo(user_id: str, league_id: str, trade_id: str) -> None:
+    """An ordinary swipe supplied Elo for an already-banked reason episode.
+
+    Consume the existing once-only claim so a later value detail cannot
+    write the same signal again. No reason is minted by an ordinary swipe.
+    """
+    with engine.begin() as conn:
+        conn.execute(update(trade_pass_reasons_table).where(and_(
+            trade_pass_reasons_table.c.user_id == user_id,
+            trade_pass_reasons_table.c.league_id == league_id,
+            trade_pass_reasons_table.c.trade_id == trade_id,
+            trade_pass_reasons_table.c.elo_signal_at.is_(None),
+        )).values(elo_signal_at=_now()))
 
 
 def claim_trade_pass_elo(impression_id: str) -> bool:

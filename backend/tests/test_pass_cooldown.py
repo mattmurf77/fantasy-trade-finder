@@ -203,7 +203,9 @@ def test_route_gates_the_bind_on_pass_only():
     src = inspect.getsource(server.swipe_trade)
     assert 'decision == "pass"' in src, \
         "the in-memory dismiss bind must be gated on pass"
-    assert 'sess.get("trade_svcs")' in src, \
+    assert '_bind_live_trade_pass(sess, card)' in src
+    bind = inspect.getsource(server._bind_live_trade_pass)
+    assert 'sess.get("trade_svcs")' in bind, \
         "the bind must traverse every format's service, not the alias alone"
 
 
