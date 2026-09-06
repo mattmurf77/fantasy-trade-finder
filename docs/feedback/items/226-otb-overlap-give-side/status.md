@@ -1,3 +1,18 @@
+# Status — 226-otb-overlap-give-side
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-01",
+  "summary": "FB-226 — OTB tag overlaps the position tag on the user's own (give) side",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-01 — `PlayerCard.badgeSlot` `572f5aa` — CHANGELOG 2026-08-01. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # FB-226 — OTB tag overlaps the position tag on the user's own (give) side
 
 - **Type:** bug · **Status:** fixed 2026-08-01 (branch

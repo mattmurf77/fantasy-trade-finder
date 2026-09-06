@@ -1,3 +1,18 @@
+# Status — 148-tep-te-copy
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-07-18",
+  "summary": "#148 — SF-TEP TE rankings copied from 1QB demote TEs — status",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-18 — FB-148 `tep_te_uplift=1.18` — CHANGELOG 2026-07-18, v1.9.0. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #148 — SF-TEP TE rankings copied from 1QB demote TEs — status
 
 **State:** built + tested (2026-07-17, branch `trade-engine-v2`). Seed-layer

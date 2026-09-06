@@ -1,3 +1,18 @@
+# Status — 186-see-other-side
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-07-25",
+  "summary": "#186 — Keep one side, see other options · status",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-25 — teardown-remediation (#156 batch). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #186 — Keep one side, see other options · status
 
 **State:** SHIPPED (2026-07-25, branch `teardown-remediation`, #156 finish batch).

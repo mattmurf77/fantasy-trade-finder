@@ -1,3 +1,18 @@
+# Status — 249-matches-lock
+
+```project-status
+{
+  "status": "in-progress",
+  "updated": "2026-08-05",
+  "summary": "#249 — Remove the lock button from the Matches screen",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: in-progress 2026-08-05 — teardown-remediation. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #249 — Remove the lock button from the Matches screen
 
 **Report (2026-08-05, screen Matches, severity bug):** "Lock button not

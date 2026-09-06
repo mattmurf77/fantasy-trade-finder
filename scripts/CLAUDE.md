@@ -4,11 +4,11 @@ One-off utility / seeding / research scripts. Run from the repo root with the sa
 env as the backend. Index + safety grouping: [`README.md`](README.md). This file carries the
 per-script traps.
 
-**Safety, in one line:** the four seeding/demo scripts (`create_test_league.py`,
-`seed_test_user*.py`, `publish_test_rankings.py`, `demo_matchup.py`) write the local DB —
-never point them at production. Every `outlook_*` analysis script and `deck_eval.py` are
-read-only and safe anywhere; the two `*_capture.py` scripts hit the network (public
-Sleeper / GitHub endpoints only) and write fixtures.
+The [command index](README.md) is the authority on invocation, status, and effects.
+Local seed commands must never target production. Operational backfills and knob
+commands can write to their selected database or service; read the per-command
+prerequisites before use. Research scripts may fetch public data, and some are
+imported by automated tests.
 
 ## Seeding / demo
 

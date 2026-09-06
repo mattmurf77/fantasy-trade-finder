@@ -1,3 +1,18 @@
+# Status — 240-idea-row-overlap
+
+```project-status
+{
+  "status": "in-progress",
+  "updated": "2026-08-02",
+  "summary": "#240 — More-trades idea rows blocking player names",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: in-progress 2026-08-02 — teardown-remediation (pending merge). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #240 — More-trades idea rows blocking player names
 
 **Status: fixed (worktree branch `teardown-remediation`, pending merge) — 2026-08-02**

@@ -1,3 +1,18 @@
+# Status — 149-espn-trade-away
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-07-25",
+  "summary": "Status — #149 ESPN league: trade-away button dead, positional pages empty",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-25 — platform-routing proxy fix `52be577` (#149/#150) — CHANGELOG 2026-07-25. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # Status — #149 ESPN league: trade-away button dead, positional pages empty
 
 **2026-07-25 — fixed on worktree branch `worktree-agent-ae33eec5a00d24264` (worktree agent).**

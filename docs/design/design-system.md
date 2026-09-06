@@ -26,7 +26,7 @@ These override any default tendency. If generated UI contains one of these, it i
 
 Dark-only (unchanged). All values hex; define as CSS variables in `web/css/styles.css`, mirror in `mobile/src/theme/colors.ts` and `extension/*.css`.
 
-Palette v2 ("ice/flare", ADR-005) — graphite ink, ice-cyan primary, flare-pink secondary. Replaced v1's turf ink + volt lime after operator color review (`web/color-lab-2.html`, option B1).
+Palette v2 ("ice/flare", ADR-005) — graphite ink, ice-cyan primary, flare-pink secondary. Replaced v1's turf ink + volt lime after operator color review (`archive/design-explorations/color-lab-2.html`, option B1).
 
 ### Ink (surfaces)
 

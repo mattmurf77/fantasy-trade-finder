@@ -1055,7 +1055,7 @@
     //  LANDING PLATFORM OPTIONS — Sleeper · ESPN · MFL entry
     //  (flag landing.platform_options; web mirror of mobile SignInScreen's
     //  chip row + the D-164 sessionless entry —
-    //  docs/plans/landing-platform-options/scope.md §V3)
+    //  docs/plans/archive/2026/landing-platform-options/scope.md §V3)
     //
     //  Sleeper (default) is today's username door, untouched. ESPN/MFL swap
     //  the form for that platform's panel:

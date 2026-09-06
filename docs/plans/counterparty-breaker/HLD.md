@@ -34,7 +34,7 @@ nothing.
 Why this is worth building at all: the engine argues one side (96.3% of 1-for-1 cards exist in
 one direction; 84.5% of served cards never consult a partner board; the consensus-path viewer
 receives more on 86.3% of cards — arm-B audit,
-[docs/reviews/2026-08-19-armb-audit-consolidated.md](../../reviews/2026-08-19-armb-audit-consolidated.md)).
+[docs/reviews/2026/2026-08-19-armb-audit-consolidated.md](../../reviews/2026/2026-08-19-armb-audit-consolidated.md)).
 And why it is dangerous: the hesitation line claims something about a *third person's judgment*,
 rendered to someone who knows that person — a property no existing surface has. Three background
 facts make "confidently wrong" the default outcome absent counter-design:

@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>D · Inline chips, no sheet — Decline Reason Capture</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --line-strong:#59647A;
+  --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+  --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --rb:#22C55E; --wr:#3B82F6;
+  --tier-second:#38bdf8; --tier-third:#f472b6;
+  --r-xs:2px; --r-sm:4px; --r-md:8px; --r-pill:999px;
+  --shadow-sheet:0 12px 32px rgba(0,0,0,0.55);
+  --f-display:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090C;color:var(--chalk);font:400 14px/21px var(--f-ui);padding:28px 16px 90px}
+a{color:var(--ice);text-decoration:none} a:hover{text-decoration:underline}
+.wrap{max-width:1300px;margin:0 auto}
+.pagehead{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:8px}
+h1.display{font:700 28px/30px var(--f-display);text-transform:uppercase;letter-spacing:.02em}
+.crumb{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim)}
+.spacer{flex:1}
+.lede{font:400 14px/21px var(--f-ui);color:var(--chalk-dim);max-width:82ch;margin-bottom:22px}
+.label{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim)}
+.tick-label{display:flex;align-items:center;gap:8px}
+.tick-label::before{content:"";width:3px;height:14px;background:var(--ice);flex:none}
+.title{font:600 16px/22px var(--f-ui)}
+.body-sm{font:400 13px/18px var(--f-ui)}
+.dim{color:var(--chalk-dim)}.faint{color:var(--chalk-faint)}
+.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+code{font:500 12px/16px var(--f-mono);color:var(--chalk)}
+
+.rowframes{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start;justify-content:center}
+.frame{width:390px}
+.frame-cap{margin-bottom:9px;min-height:78px}
+.frame-cap .label{color:var(--chalk)}
+.frame-cap p{font:400 13px/18px var(--f-ui);color:var(--chalk-dim);margin-top:3px}
+.phone{position:relative;width:390px;background:var(--ink0);border:1px solid var(--line-strong);border-radius:var(--r-md);overflow:hidden}
+.appbar{height:52px;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid var(--line);gap:10px}
+.lg-cluster{display:flex;align-items:center;gap:9px;flex:1;min-width:0}
+.lg-tick{width:3px;height:22px;background:var(--ice);flex:none}
+.lg-micro{font:600 11px/12px var(--f-ui);letter-spacing:.08em;color:var(--chalk-faint);text-transform:uppercase}
+.lg-name{font:600 15px/18px var(--f-ui);display:flex;align-items:center;gap:5px;white-space:nowrap}
+.icon-btn{width:32px;height:32px;border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;color:var(--chalk-dim);flex:none}
+.screen{padding:14px 14px 20px;min-height:600px;display:flex;flex-direction:column;gap:12px}
+
+.card{background:var(--ink1);border:1px solid var(--line);border-radius:var(--r-md);padding:14px}
+.trade-cols{display:grid;grid-template-columns:1fr 1px 1fr;gap:0 12px;margin-top:10px}
+.divider{background:var(--line)}
+.asset{display:flex;gap:8px;padding:7px 0;border-bottom:1px solid var(--line);align-items:flex-start}
+.asset:last-child{border-bottom:0}
+.rail{width:3px;align-self:stretch;flex:none}
+.rail.rb{background:var(--rb)}.rail.wr{background:var(--wr)}
+.rail.p2{background:var(--tier-second)}.rail.p3{background:var(--tier-third)}
+.a-body{min-width:0;flex:1}
+.a-name{font:600 13px/17px var(--f-ui)}
+.a-meta{font:600 11px/14px var(--f-ui);color:var(--chalk-dim);letter-spacing:.03em}
+.a-meta .prb{color:var(--rb)}.a-meta .pwr{color:var(--wr)}
+.a-val{font:500 11px/17px var(--f-mono);color:var(--chalk-dim);font-variant-numeric:tabular-nums}
+.swing{border-top:1px solid var(--line);margin-top:11px;padding-top:9px;display:flex;align-items:center;gap:8px}
+.swing .v{font:600 13px/18px var(--f-ui);color:var(--pos)}
+.swing .m{font:500 11px/14px var(--f-mono);color:var(--chalk-dim);margin-left:auto}
+.disp-row{display:flex;gap:10px;margin-top:12px}
+.disp-btn{flex:1;height:44px;border-radius:var(--r-sm);border:1px solid var(--line-strong);display:flex;align-items:center;justify-content:center;background:transparent}
+.disp-btn.pass{border-color:var(--neg);color:var(--neg)}
+.disp-btn.like{border-color:var(--pos);color:var(--pos)}
+
+/* the collapsed receipt that replaces the passed card in the feed */
+.receipt-row{background:var(--ink1);border:1px solid var(--line);border-left:3px solid var(--neg);border-radius:var(--r-md);padding:11px 13px}
+.receipt-head{display:flex;align-items:center;gap:9px}
+.receipt-head .t{font:400 14px/20px var(--f-ui);color:var(--chalk-dim)}
+.receipt-head .t b{color:var(--chalk);font-weight:600}
+.receipt-head .undo{margin-left:auto;color:var(--ice);font:600 13px var(--f-ui)}
+.inline-why{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+.inline-why .cap{margin-bottom:8px}
+.iwchips{display:flex;flex-wrap:wrap;gap:7px}
+.iwchip{min-height:44px;display:inline-flex;align-items:center;padding:0 11px;border:1px solid var(--line-strong);border-radius:var(--r-sm);background:var(--ink0);color:var(--chalk-dim);font:400 13px/17px var(--f-ui)}
+.iwchip.sel{border-color:var(--ice);background:var(--ink3);color:var(--chalk);font-weight:600}
+.iwchip.sel::before{content:"";width:3px;height:16px;background:var(--ice);margin-right:8px;flex:none}
+.iwchip.more{color:var(--chalk-faint)}
+.outcome{margin-top:10px;padding-top:10px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:flex-start}
+.outcome svg{flex:none;color:var(--ice);margin-top:2px}
+.outcome p{font:400 13px/18px var(--f-ui);color:var(--chalk-dim)}
+.hairline-receipt{display:flex;align-items:center;gap:8px;padding:8px 2px;border-bottom:1px solid var(--line);color:var(--chalk-faint)}
+.hairline-receipt .t{font:400 13px/18px var(--f-ui)}
+.hairline-receipt .k{margin-left:auto;font:500 11px/14px var(--f-mono)}
+.scrollcue{display:flex;align-items:center;justify-content:center;gap:7px;padding:6px 0;color:var(--chalk-faint);font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em}
+
+.evalstrip{margin:26px 0 0;border:1px solid var(--line);border-radius:var(--r-md);background:var(--ink1);display:grid;grid-template-columns:repeat(5,1fr)}
+.evalstrip > div{padding:12px 14px;border-right:1px solid var(--line)}
+.evalstrip > div:last-child{border-right:0}
+.evalstrip .k{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim);margin-bottom:5px}
+.evalstrip .v{font:400 13px/18px var(--f-ui)}
+.risk-lo{color:var(--pos)}.risk-md{color:var(--warn)}.risk-hi{color:var(--neg)}
+@media (max-width:900px){.evalstrip{grid-template-columns:1fr 1fr}.evalstrip > div{border-right:0;border-bottom:1px solid var(--line)}}
+
+table.map{width:100%;border-collapse:collapse;margin-top:12px;background:var(--ink1);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden}
+table.map th{text-align:left;font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim);padding:10px 12px;border-bottom:1px solid var(--line);background:var(--ink2)}
+table.map td{padding:10px 12px;border-bottom:1px solid var(--line);font:400 13px/18px var(--f-ui);vertical-align:top}
+table.map tr:last-child td{border-bottom:0}
+.act{display:inline-block;padding:2px 6px;border:1px solid var(--line-strong);border-radius:var(--r-xs);font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}
+.act.revise{border-color:var(--ice);color:var(--ice)}
+.act.assets{border-color:var(--warn);color:var(--warn)}
+.act.party{border-color:var(--flare);color:var(--flare)}
+.act.suppress{border-color:var(--line-strong);color:var(--chalk-dim)}
+.act.none{border-color:var(--line);color:var(--chalk-faint)}
+
+.caption{margin-top:26px;background:var(--ink1);border:1px solid var(--line);border-left:3px solid var(--flare);border-radius:var(--r-md);padding:12px 15px}
+.caption .label{color:var(--flare);margin-bottom:4px}
+.caption p{font:400 13px/19px var(--f-ui);color:var(--chalk-dim)}
+.caption p + p{margin-top:8px}
+h2.sec{font:600 22px/26px var(--f-display);text-transform:uppercase;letter-spacing:.03em;margin:34px 0 4px}
+.pagelinks{display:flex;justify-content:space-between;margin-top:34px;padding-top:16px;border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="pagehead">
+  <a class="crumb" href="index.html">&larr; Index</a>
+  <h1 class="display">D &middot; Inline chips, no sheet</h1>
+  <div class="spacer"></div>
+  <a class="crumb" href="03-two-question-microflow.html">&lsaquo; Prev</a>
+  <a class="crumb" href="05-sampled-quick-question.html">Next &rsaquo;</a>
+</div>
+<p class="lede">No overlay anywhere. The passed card collapses <em>in the feed</em> into a receipt strip carrying the reason chips, and the next trade is already sitting under it, fully interactive. Nothing is on top of anything &mdash; the question is a piece of content the user can answer, ignore, or scroll away from, and scrolling away is a first-class outcome rather than a dismissal. The reason stays answerable for as long as the strip is on screen, which turns the two-tap cost into a two-tap <em>option</em>.</p>
+
+<div class="rowframes">
+
+  <!-- STATE 1 default -->
+  <div class="frame">
+    <div class="frame-cap">
+      <div class="label">State 1 &middot; Default (just passed)</div>
+      <p>The card that was passed shrinks to a receipt with a <code>neg</code> left rail; chips sit inside it; the next trade is <strong>already usable</strong> below. No scrim, no focus trap, no blocked next action.</p>
+    </div>
+    <div class="phone">
+      <div class="appbar">
+        <div class="lg-cluster"><span class="lg-tick"></span><div>
+          <div class="lg-micro">League</div>
+          <div class="lg-name">Gridiron Syndicate <svg class="ic" width="14" height="14" viewBox="0 0 20 20"><polyline points="6 8 10 12 14 8"/></svg></div>
+        </div></div>
+        <div class="icon-btn"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><path d="M10 3.5c-2.6 0-4.2 1.9-4.2 4.5v3.2L4 14h12l-1.8-2.8V8c0-2.6-1.6-4.5-4.2-4.5z"/><path d="M8.5 16.5c.3.9 2.7.9 3 0"/></svg></div>
+      </div>
+      <div class="screen">
+        <div class="tick-label label" style="color:var(--chalk)">Trades</div>
+
+        <div class="receipt-row">
+          <div class="receipt-head">
+            <svg class="ic" width="16" height="16" viewBox="0 0 20 20" style="color:var(--neg);flex:none"><path d="M5 5l10 10M15 5L5 15"/></svg>
+            <span class="t">Passed on <b>Brett</b> &mdash; Smith + 2nd for Cook + 3rd</span>
+            <span class="undo">Undo</span>
+          </div>
+          <div class="inline-why">
+            <div class="cap"><span class="label">Why? (optional)</span></div>
+            <div class="iwchips">
+              <div class="iwchip">Not enough back</div>
+              <div class="iwchip">Don&rsquo;t want Cook</div>
+              <div class="iwchip">Not moving Smith</div>
+              <div class="iwchip more">More&hellip;</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="border-color:var(--line-strong)">
+          <div class="title">Trade with Priya</div>
+          <div class="body-sm dim">She&rsquo;s deep at WR &mdash; a natural seller</div>
+          <div class="trade-cols">
+            <div>
+              <div class="tick-label label" style="margin-bottom:2px">You send</div>
+              <div class="asset"><span class="rail rb"></span><div class="a-body"><div class="a-name">Rachaad White</div><div class="a-meta"><span class="prb">RB</span> &middot; TB &middot; 26</div></div><span class="a-val">1,880</span></div>
+            </div>
+            <div class="divider"></div>
+            <div>
+              <div class="tick-label label" style="margin-bottom:2px">You get</div>
+              <div class="asset"><span class="rail wr"></span><div class="a-body"><div class="a-name">Jayden Reed</div><div class="a-meta"><span class="pwr">WR</span> &middot; GB &middot; 25</div></div><span class="a-val">2,010</span></div>
+            </div>
+          </div>
+          <div class="swing"><span class="label">Swing</span><span class="v">Even</span><span class="m">130 apart</span></div>
+          <div class="disp-row">
+            <div class="disp-btn pass"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg></div>
+            <div class="disp-btn like"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><polyline points="4 11 8 15 16 5"/></svg></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STATE 2 chosen -->
+  <div class="frame">
+    <div class="frame-cap">
+      <div class="label">State 2 &middot; Chosen</div>
+      <p>Chips collapse to the single answer plus a plain-language outcome line. Undo still available &mdash; and it now undoes the reason too. The strip persists until the user scrolls it out or the deck refreshes.</p>
+    </div>
+    <div class="phone">
+      <div class="appbar">
+        <div class="lg-cluster"><span class="lg-tick"></span><div>
+          <div class="lg-micro">League</div>
+          <div class="lg-name">Gridiron Syndicate <svg class="ic" width="14" height="14" viewBox="0 0 20 20"><polyline points="6 8 10 12 14 8"/></svg></div>
+        </div></div>
+        <div class="icon-btn"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><path d="M10 3.5c-2.6 0-4.2 1.9-4.2 4.5v3.2L4 14h12l-1.8-2.8V8c0-2.6-1.6-4.5-4.2-4.5z"/><path d="M8.5 16.5c.3.9 2.7.9 3 0"/></svg></div>
+      </div>
+      <div class="screen">
+        <div class="tick-label label" style="color:var(--chalk)">Trades</div>
+
+        <div class="receipt-row" style="border-left-color:var(--ice)">
+          <div class="receipt-head">
+            <svg class="ic" width="16" height="16" viewBox="0 0 20 20" style="color:var(--neg);flex:none"><path d="M5 5l10 10M15 5L5 15"/></svg>
+            <span class="t">Passed on <b>Brett</b> &mdash; Smith + 2nd for Cook + 3rd</span>
+            <span class="undo">Undo</span>
+          </div>
+          <div class="inline-why">
+            <div class="iwchips">
+              <div class="iwchip sel">Don&rsquo;t want Cook</div>
+            </div>
+          </div>
+          <div class="outcome">
+            <svg class="ic" width="16" height="16" viewBox="0 0 20 20"><path d="M4 10h12M12 6l4 4-4 4"/></svg>
+            <p>Cook is off your board for now. Next idea keeps Smith and the 2nd on the table and changes only what&rsquo;s coming back.</p>
+          </div>
+        </div>
+
+        <div class="card" style="border-color:var(--line-strong)">
+          <div class="title">Trade with Priya</div>
+          <div class="body-sm dim">She&rsquo;s deep at WR &mdash; a natural seller</div>
+          <div class="trade-cols">
+            <div>
+              <div class="tick-label label" style="margin-bottom:2px">You send</div>
+              <div class="asset"><span class="rail rb"></span><div class="a-body"><div class="a-name">Rachaad White</div><div class="a-meta"><span class="prb">RB</span> &middot; TB &middot; 26</div></div><span class="a-val">1,880</span></div>
+            </div>
+            <div class="divider"></div>
+            <div>
+              <div class="tick-label label" style="margin-bottom:2px">You get</div>
+              <div class="asset"><span class="rail wr"></span><div class="a-body"><div class="a-name">Jayden Reed</div><div class="a-meta"><span class="pwr">WR</span> &middot; GB &middot; 25</div></div><span class="a-val">2,010</span></div>
+            </div>
+          </div>
+          <div class="swing"><span class="label">Swing</span><span class="v">Even</span><span class="m">130 apart</span></div>
+          <div class="disp-row">
+            <div class="disp-btn pass"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg></div>
+            <div class="disp-btn like"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><polyline points="4 11 8 15 16 5"/></svg></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STATE 3 ignored -->
+  <div class="frame">
+    <div class="frame-cap">
+      <div class="label">State 3 &middot; Ignored (scrolled past)</div>
+      <p>The user swiped straight on. Chips retract; the receipt degrades to a hairline &ldquo;Passed&rdquo; divider so the feed stays legible. <strong>Nothing was blocked and nothing was lost</strong> &mdash; the pass itself was written on tap 1.</p>
+    </div>
+    <div class="phone">
+      <div class="appbar">
+        <div class="lg-cluster"><span class="lg-tick"></span><div>
+          <div class="lg-micro">League</div>
+          <div class="lg-name">Gridiron Syndicate <svg class="ic" width="14" height="14" viewBox="0 0 20 20"><polyline points="6 8 10 12 14 8"/></svg></div>
+        </div></div>
+        <div class="icon-btn"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><path d="M10 3.5c-2.6 0-4.2 1.9-4.2 4.5v3.2L4 14h12l-1.8-2.8V8c0-2.6-1.6-4.5-4.2-4.5z"/><path d="M8.5 16.5c.3.9 2.7.9 3 0"/></svg></div>
+      </div>
+      <div class="screen">
+        <div class="scrollcue">
+          <svg class="ic" width="14" height="14" viewBox="0 0 20 20"><polyline points="6 12 10 8 14 12"/></svg>
+          scrolled
+        </div>
+        <div class="hairline-receipt">
+          <svg class="ic" width="13" height="13" viewBox="0 0 20 20" style="flex:none"><path d="M5 5l10 10M15 5L5 15"/></svg>
+          <span class="t">Passed on Brett</span>
+          <span class="k">no reason</span>
+        </div>
+
+        <div class="card" style="border-color:var(--line-strong)">
+          <div class="title">Trade with Priya</div>
+          <div class="body-sm dim">She&rsquo;s deep at WR &mdash; a natural seller</div>
+          <div class="trade-cols">
+            <div>
+              <div class="tick-label label" style="margin-bottom:2px">You send</div>
+              <div class="asset"><span class="rail rb"></span><div class="a-body"><div class="a-name">Rachaad White</div><div class="a-meta"><span class="prb">RB</span> &middot; TB &middot; 26</div></div><span class="a-val">1,880</span></div>
+            </div>
+            <div class="divider"></div>
+            <div>
+              <div class="tick-label label" style="margin-bottom:2px">You get</div>
+              <div class="asset"><span class="rail wr"></span><div class="a-body"><div class="a-name">Jayden Reed</div><div class="a-meta"><span class="pwr">WR</span> &middot; GB &middot; 25</div></div><span class="a-val">2,010</span></div>
+            </div>
+          </div>
+          <div class="swing"><span class="label">Swing</span><span class="v">Even</span><span class="m">130 apart</span></div>
+          <div class="disp-row">
+            <div class="disp-btn pass"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg></div>
+            <div class="disp-btn like"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><polyline points="4 11 8 15 16 5"/></svg></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="title">Trade with Marcus</div>
+          <div class="body-sm dim">He needs a TE &mdash; you&rsquo;re two deep</div>
+          <div class="trade-cols">
+            <div>
+              <div class="tick-label label" style="margin-bottom:2px">You send</div>
+              <div class="asset"><span class="rail p2"></span><div class="a-body"><div class="a-name">2027 2nd (own)</div><div class="a-meta">Pick &middot; 2nd</div></div><span class="a-val">610</span></div>
+            </div>
+            <div class="divider"></div>
+            <div>
+              <div class="tick-label label" style="margin-bottom:2px">You get</div>
+              <div class="asset"><span class="rail p3"></span><div class="a-body"><div class="a-name">2027 3rd (LAR)</div><div class="a-meta">Pick &middot; 3rd</div></div><span class="a-val">395</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<h2 class="sec">Reason &rarr; engine action (this approach&rsquo;s subset)</h2>
+<table class="map">
+  <tr><th style="width:30%">Chip</th><th style="width:22%">Code</th><th style="width:26%">Engine action</th><th>Taps</th></tr>
+  <tr><td>Not enough back</td><td><code>value_low</code></td><td><span class="act revise">Revise package</span></td><td>2 (pass + chip)</td></tr>
+  <tr><td>Don&rsquo;t want Cook</td><td><code>blocker_incoming</code></td><td><span class="act assets">Change assets</span></td><td>2</td></tr>
+  <tr><td>Not moving Smith</td><td><code>blocker_outgoing</code></td><td><span class="act assets">Change assets</span></td><td>2</td></tr>
+  <tr><td>More&hellip; &rarr; Doesn&rsquo;t fit my roster</td><td><code>fit</code></td><td><span class="act suppress">Suppress archetype</span></td><td>3</td></tr>
+  <tr><td>More&hellip; &rarr; Not Brett right now</td><td><code>partner</code></td><td><span class="act party">Change counterparty</span></td><td>3</td></tr>
+  <tr><td>More&hellip; &rarr; Not right now</td><td><code>timing</code></td><td><span class="act none">No action + cooldown</span></td><td>3</td></tr>
+  <tr><td>More&hellip; &rarr; Too good for me</td><td><code>value_overpay_them</code></td><td><span class="act revise">Revise package</span></td><td>3</td></tr>
+  <tr><td>Scrolled past / deck refreshed</td><td><code>unknown</code></td><td><span class="act none">No action</span></td><td>1</td></tr>
+</table>
+<p class="body-sm dim" style="margin-top:10px">The visible three are chosen per card, not fixed: the two blocker chips are <em>named after the actual assets on that card</em>, which is what makes them a one-tap identified blocker rather than a category.</p>
+
+<div class="evalstrip">
+  <div><div class="k">Taps to pass</div><div class="v"><strong>1</strong>, unchanged. Reason is <strong>+1</strong> and optional, <strong>+2</strong> behind &ldquo;More&hellip;&rdquo;.</div></div>
+  <div><div class="k">Friction risk</div><div class="v risk-lo"><strong>Low.</strong> No overlay, no focus trap, next card never blocked. The only cost is vertical space.</div></div>
+  <div><div class="k">Signal richness</div><div class="v"><strong>High.</strong> Full taxonomy reachable, asset-named blockers, and answers can arrive late.</div></div>
+  <div><div class="k">Ignore path</div><div class="v">Scroll, swipe, or do nothing. Degrades to a hairline; no dismissal gesture required.</div></div>
+  <div><div class="k">Engine actions reachable</div><div class="v">All five.</div></div>
+</div>
+
+<div class="caption">
+  <div class="label">Rationale</div>
+  <p>This is the shape that best satisfies round&#8209;2&rsquo;s hardest constraint &mdash; declining must stay <em>effortless, guilt-free and invisible</em> &mdash; while still asking a question. Nothing about a pass becomes a moment. There is no modal to escape, so there is no way for the flow to feel like a toll booth, and round&#8209;3 &sect;5.2&rsquo;s &ldquo;register the decline first, never gate it&rdquo; is satisfied literally: the write happens on tap&nbsp;1 and the strip is an artefact of it, not a step before it.</p>
+  <p>It also buys something none of the modal shapes can: <strong>a late answer.</strong> The user can pass three cards, notice the strip on the way back up, and label one. And because the receipt persists, the &ldquo;More&hellip;&rdquo; overflow can carry the rare codes without stealing a primary slot &mdash; which is how <code>value_overpay_them</code> and <code>partner</code> stay reachable at all.</p>
+  <p><strong>The honest weakness:</strong> vertical space. A deck that is already tall gains a persistent strip per pass, and on a small phone that pushes the next card below the fold &mdash; which risks the one metric we must protect, since round&#8209;2 &sect;1.5 only counts a dismissal as a strong negative when the card was <em>demonstrably viewed</em>. If this ships, the strip must collapse to the hairline after one card-height of scroll, and viewport-visibility logging must land <em>before</em> it, not after.</p>
+</div>
+
+<div class="pagelinks">
+  <a class="crumb" href="03-two-question-microflow.html">&larr; C &middot; Two-question micro-flow</a>
+  <a class="crumb" href="05-sampled-quick-question.html">E &middot; Sampled quick question &rsaquo;</a>
+</div>
+
+</div>
+</body>
+</html>

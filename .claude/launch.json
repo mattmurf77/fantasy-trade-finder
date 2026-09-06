@@ -68,6 +68,18 @@
         "import os, sys; root='/Users/teresadickens/Documents/Claude/Projects/JobPilot'; os.chdir(root); sys.path.insert(0, root); from backend.app import create_app; create_app().run(port=5252)"
       ],
       "port": 5252
+    },
+    {
+      "name": "scripts/codecity",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8770",
+        "--directory",
+        "scripts/codecity"
+      ],
+      "port": 8770
     }
   ]
 }

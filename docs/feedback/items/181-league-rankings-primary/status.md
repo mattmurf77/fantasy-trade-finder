@@ -1,3 +1,18 @@
+# Status — 181-league-rankings-primary
+
+```project-status
+{
+  "status": "in-progress",
+  "updated": "2026-07-25",
+  "summary": "#181 — League rankings becomes the League tab's primary page — status",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: in-progress 2026-07-25 — teardown-remediation (worktree). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #181 — League rankings becomes the League tab's primary page — status
 
 **Status: built** · 2026-07-25 · branch `teardown-remediation` worktree

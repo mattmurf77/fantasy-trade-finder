@@ -1,3 +1,18 @@
+# Status — 376-finder-filters-regression
+
+```project-status
+{
+  "status": "planned",
+  "updated": "2026-08-24",
+  "summary": "FB-376 + FB-379 + FB-394 — finder filters / outlook & prefs regression (Group A canonical)",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: planned 2026-08-24 — **canonical** G-A of the 2026-08-24 wave (#376/#379/#394, +#333 verify) — outlook & prefs entry missing again on 1.16.2 post-#384 rebuild; operator: \"most critical bug\". Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # FB-376 + FB-379 + FB-394 — finder filters / outlook & prefs regression (Group A canonical)
 - **Status:** built 2026-08-24 — on `feat/fb376-outlook-filters-row-mobile`, all static gates green (see Build report below); awaiting review/merge + operator TestFlight checklist (prd.md §6d)
 - **Covered:** #376, #379, #394 (+#333 verified delivered on the merged calculator, `InLeagueCalculator.tsx:784-824` — no work; see prd.md §5)

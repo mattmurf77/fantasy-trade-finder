@@ -5,7 +5,7 @@
 The tracking plan (`2026-07-17-tracking-plan-v2.md` §"Pre-auth funnel")
 enumerates `signin_attempted.method` as `apple/sleeper/last_user/demo`. The
 sessionless platform entry (landing platform options v2, D-164;
-`docs/plans/landing-platform-options/scope.md` §V2) adds two values on the
+`docs/plans/archive/2026/landing-platform-options/scope.md` §V2) adds two values on the
 already-whitelisted `method` prop:
 
 | Value | Fires when | Emitter |

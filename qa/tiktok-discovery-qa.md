@@ -21,7 +21,7 @@ F8 harness unflagged. TestFlight: builds 58 (W1), 59 (W2), 60 (W3), 61 (W4), 62 
 | 7 | F7 Exploration (`deck.exploration`) | ✅ | ⬜ | Every deck ≥8 cards has exactly one "WILDCARD — OUTSIDE YOUR USUAL" chip at position ~5; wildcard is a legit trade (gate-passing), just off-taste |
 | 8 | F8 Eval harness (unflagged) | ✅ | ⬜ | Operator: `python3 -m backend.eval.replay --self-check` on prod data once ~2 weeks of impressions accrue → SELF-CHECK PASS; nightly `runs.jsonl` accumulating |
 | 9 | F9 First session (`deck.first_session`) | ✅ | ⬜ | Fresh league (or qa_* stage user): first deck ≤10 cards, first 5 simple/high-confidence; after a board edit, next deck shows "Built from your updated board — N players ranked"; adaptation card appears at most once and only when literally true |
-| 10 | F6 Value model (`deck.value_model`) | ✅ | 🚫 DARK | Nothing to verify until graduation. Do NOT flip without the F8 gate (see FEATURES.md §10) |
+| 10 | F6 Value model (`deck.value_model`) | ✅ | 🚫 DARK | Nothing to verify until graduation. Do NOT flip without the F8 gate (see docs/plans/archive/2026/competitor-feature-waves.md §10) |
 
 ## Cross-feature interaction watch-list
 

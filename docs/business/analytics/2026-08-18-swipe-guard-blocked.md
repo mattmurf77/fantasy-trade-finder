@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-18 · **Status:** adopted with the B4 follow-up commit
 **Parent:** [2026-07-17-tracking-plan-v2.md](2026-07-17-tracking-plan-v2.md) §S3
-**Origin:** [../../reviews/2026-08-18-bug-sweep/ticket.md](../../reviews/2026-08-18-bug-sweep/ticket.md) §B4 · `living-memory/DECISIONS.md` **D-068** (which deferred this event) · `living-memory/GOTCHAS.md` **G-049**
+**Origin:** [../../reviews/2026/2026-08-18-bug-sweep/ticket.md](../../reviews/2026/2026-08-18-bug-sweep/ticket.md) §B4 · `living-memory/DECISIONS.md` **D-068** (which deferred this event) · `living-memory/GOTCHAS.md` **G-049**
 **Registries touched:** `backend/analytics_taxonomy.py` (`ALLOWED_CLIENT_EVENTS`, `CLIENT_EVENT_PROPS`). **Not** `FUNNEL_CRITICAL`, **not** `analytics_queries.NON_INTENT_EVENTS`, **not** `SERVER_FIRED_EVENTS` — each omission is argued below.
 
 The taxonomy is **default-deny**: an unregistered client event is counted and

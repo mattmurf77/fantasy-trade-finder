@@ -1,42 +1,33 @@
-# docs/
+# Project documentation
 
-Project reference material. Start here when you need to look something up.
+Start with [the product overview](product/overview.md) for current scope, [the root README](../README.md) to run the project, and [the shared agent contract](../AGENTS.md) for working rules. Read only the topic needed for the task.
 
-**Anyone changing the project (humans or Claude):** keep these docs current with your code changes. See [CLAUDE.md](CLAUDE.md) for the per-file update triggers.
+## Current reference — one owner per topic
 
-## Root reference docs
-
-| Doc | What it covers |
+| Topic | Authoritative document |
 |---|---|
-| [data-dictionary.md](data-dictionary.md) | Every DB table, column, type, and lifecycle |
-| [api-reference.md](api-reference.md) | All `/api/*` routes by feature area |
-| [glossary.md](glossary.md) | Domain terms (Elo, K-factor, tier bands, outlook, etc.) |
-| [cross-client-invariants.md](cross-client-invariants.md) | Values that must stay in sync across backend/web/mobile/extension |
-| [architecture.md](architecture.md) | Component diagram + request lifecycles |
-| [config-reference.md](config-reference.md) | Env vars, feature flags, runtime `model_config` |
-| [runbook.md](runbook.md) | Local dev, deploy, debug, common failures |
-| [coding-guidelines.md](coding-guidelines.md) | Behavioral guardrails (Karpathy four principles) |
-| [agent-collab-protocol.md](agent-collab-protocol.md) | How primary/subagent Claude sessions hand off work inside `plans/` |
-| [web-feedback.html](web-feedback.html) | Standalone form that ingests operator feedback into `feedback/` |
-| [competitor-teardown-dynastydealer.md](competitor-teardown-dynastydealer.md) | DynastyDealer iOS app teardown |
-| [competitor-teardown-dynastygm.md](competitor-teardown-dynastygm.md) | DynastyGM (Dynasty Nerds) mobile app teardown |
-| [competitor-teardown-ti-calc.md](competitor-teardown-ti-calc.md) | Friend's TI-CALC trade calculator teardown |
-| [competitor-teardown-web-tools.md](competitor-teardown-web-tools.md) | FantasyCalc, Dynasty Daddy, and 3 other web trade-tool teardowns |
+| Product purpose and capabilities | [Product overview](product/overview.md) |
+| Architecture and data flow | [Architecture](architecture.md) |
+| Route contracts | [API reference](api-reference.md) |
+| Tables and data lifecycle | [Data dictionary](data-dictionary.md) |
+| Flags, environment and tuning | [Configuration reference](config-reference.md) |
+| Shared client constants | [Cross-client invariants](cross-client-invariants.md) |
+| Domain language | [Glossary](glossary.md) |
+| Operations and incident recovery | [Runbook](runbook.md) |
+| UI and writing conventions | [Design system](design/design-system.md), [components](design/components.md) |
+| External APIs | [Integrations](integrations/README.md) |
+| Engineering workflow | [Agent workflow](agent-workflow.md), [coding guidelines](coding-guidelines.md) |
+| Architectural rationale | [Decision records](adr/) |
 
-## Subdirectories
+## Work and evidence
 
-| Dir | What's in it |
-|---|---|
-| [adr/](adr/) | Architecture decision records |
-| [business/](business/) | Company-ops strategy deliverables from the role skills — not code work |
-| [code-audit/](code-audit/) | Legacy, mostly superseded by `plans/` — one orphaned thread remains |
-| [design/](design/) | Chalkline design system: tokens, component specs, brand doc, icon/naming program (`brand/`) — read before any UI work |
-| [feedback/](feedback/) | In-app feedback queue + per-item fix folders (`items/`, indexed by `items/INDEX.md`) |
-| [integrations/](integrations/) | One file per external service FTF calls (Sleeper, ESPN, MFL, DynastyProcess, nflverse, Anthropic, Expo push) — endpoints, auth, error modes, redaction rules |
-| [plans/](plans/) | Initiative docs (plan/scope/PRD/HLD/LLD per thread). **Start at [plans/README.md](plans/README.md)** — it marks each one shipped / active / superseded / abandoned |
-| [recovery/](recovery/) | Branch/worktree deletion ledger — capture tip sha before deleting |
-| [research/](research/) | External research corpora gathered to inform design — `matchmaking/` (how dating/two-sided matchers build models, 3 rounds, 2026-08-15/16) and `onboarding/`. Memos carry per-claim confidence flags and source URLs |
-| [reviews/](reviews/) | Point-in-time audit snapshots — dated, not current truth |
-| [templates/](templates/) | `feature-scope.md` — copy into a feature's home before building |
+- [Initiatives](plans/README.md): generated from each initiative's status source. Proposed work and shipped behavior are distinct.
+- [Feedback](feedback/items/INDEX.md): stable item IDs, status and links; generated from item records.
+- [Trade-engine owner decisions](plans/trade-engine-balance/README.md): answers, open questions and superseded proposals in one place.
+- [Research](research/README.md): outside evidence and competitor observations; these do not override accepted product decisions.
+- [Dated reviews](reviews/README.md): point-in-time findings; never assume an old finding still applies.
+- [Recovery](recovery/): append-only records, including [the organization migration](recovery/2026-09-06-project-organization.md).
+- [Business](business/README.md): business assumptions and deliverables, with product facts linked to the overview.
+- [Session memory](../living-memory/README.md): short handoff and priorities; detailed history is retrieved on demand.
 
-`references/` exists on disk but is **empty** — no tracked files. External-API notes live in `integrations/`.
+`../_local/` holds private recovery archives, captured research and scratch. It is ignored by Git and excluded from app builds. It is not a source of current product behavior. Historical source mirrors have been archived with integrity manifests; do not copy them over working code.

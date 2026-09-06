@@ -21,8 +21,8 @@ pre-filtered to their league. No new feature flag anywhere (see C-7 below).
 | `mobile/src/components/TradeCard.tsx` | :93 (prop), :141 (destructure), :676 (`{footer ?? null}`) | **footer prop only** — optional, rendered once as the card's final block; nothing else in the file changed (S-2/S-6 pin it) |
 | `mobile/src/screens/MatchesScreen.tsx` | :135–136 (#307 param), :742 (#307 chip testIDs), :220 (`dismissAwaitingMutation`), :255 (generalized `pendingDismissRef` union), :271/:282 (flush/undo, both kinds), :344 (`handleDismissAwaiting`), :386 (`handleOpenInCalc`, `switchLeague` at :406), :927 (mutual footer mount), :1038–1046 (awaiting footer: Dismiss `matches.awaiting-dismiss` + section), :1321 (style) | all three workstreams |
 | `mobile/tests/check-match-value-section.js` (19) · `check-matches-calc-handoff.js` (12) · `check-awaiting-dismiss.js` (21) · `check-matches-league-param.js` (9) | new | sabotage-pinned suites, S-1…S-10 |
-| `mobile/.maestro/capture/matches.yaml` | extended | expand asserts both segments, open-in-calc → `calc.find-a-trade`, evaluate-500 → "Could not value this trade." |
-| `mobile/.maestro/flows/matches-awaiting-dismiss.yaml` | new | M-2 rollback-under-500 first, M-1 happy, M-3 empty state; **needs wave-backend's route to run green** |
+| `archive/retired-tooling/mobile/maestro/capture/matches.yaml` | extended | expand asserts both segments, open-in-calc → `calc.find-a-trade`, evaluate-500 → "Could not value this trade." |
+| `archive/retired-tooling/mobile/maestro/flows/matches-awaiting-dismiss.yaml` | new | M-2 rollback-under-500 first, M-1 happy, M-3 empty state; **needs wave-backend's route to run green** |
 | `mobile/scripts/testid-lint-allow.txt` | +`matches.league-chip.*` | template-literal chip ids (frozen #307 grammar) |
 | `docs/feedback/items/318-awaiting-dismiss/scope.md` | new | gates record; C-7 rationale |
 
@@ -171,7 +171,7 @@ $ node mobile/tests/check-matches-league-param.js    → ALL CHECKS PASSED (9)
 
 ## Proposed shared-doc text (orchestrator applies at wave merge)
 
-- `docs/plans/mobile-testing/lld.md` Appendix A, Matches row →
+- `docs/plans/archive/2026/mobile-testing/lld.md` Appendix A, Matches row →
   `` `matches.segment.<mutual\|awaiting>` `matches.league-chip.<league_id\|all>` `matches.value-details` `matches.open-in-calc` `matches.awaiting-dismiss` `matches.card.<n>` `matches.dismiss.<n>` `matches.empty-text` ``
   (note: `matches.filter.*` was never implemented; the frozen #307 grammar `matches.league-chip.*` supersedes it — recommend replacing the stale token.)
 - `mobile/src/components/CLAUDE.md` → new row:

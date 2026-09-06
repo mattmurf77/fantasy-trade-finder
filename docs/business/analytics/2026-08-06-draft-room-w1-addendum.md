@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-06 · **Status:** adopted with the W1 build
 **Parent:** [2026-07-17-tracking-plan-v2.md](2026-07-17-tracking-plan-v2.md) §S3
-**Build:** [../../plans/draft-extensions/build-w1.md](../../plans/draft-extensions/build-w1.md) · plan §4 · lld §2.2
+**Build:** [../../plans/archive/2026/draft-extensions/build-w1.md](../../plans/archive/2026/draft-extensions/build-w1.md) · plan §4 · lld §2.2
 **Registries:** `backend/analytics_taxonomy.py` (`ALLOWED_CLIENT_EVENTS` + `CLIENT_EVENT_PROPS`)
 
 The taxonomy is **default-deny**: an unregistered client event is counted and

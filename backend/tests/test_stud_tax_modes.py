@@ -145,7 +145,7 @@ def test_depth_benchmarks_own_best_at_kill_value():
 def test_depth_benchmarks_trade_best_at_default():
     # …and at the live default the benchmark IS the trade's best asset:
     # the same package prices LOWER against a 9000 stud than against a
-    # 4500 headliner (docs/reviews/2026-08-21-market-curve-comparison.md
+    # 4500 headliner (docs/reviews/2026/2026-08-21-market-curve-comparison.md
     # §3b — the four-quarters-buy-a-dollar fix). Full shape pins live in
     # test_package_benchmark.py.
     ts._cfg["crown_rate_market"] = 0.0

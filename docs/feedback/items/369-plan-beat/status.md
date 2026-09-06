@@ -1,3 +1,18 @@
+# Status — 369-plan-beat
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-20",
+  "summary": "Team Review plan beat (#369)",
+  "evidence": "Last documented disposition preserved by unique feedback ID despite the prior index slug differing from the existing folder: prior index: closed in builds 124/125; checklist unrun, DB in_progress pending graduation read 2026-08-24. Original row: ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md. Not a fresh release audit."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # Status — #369, the plan beat
 
 **Item:** #369 (`mattmurf77`, screen `TeamReview`) — *"The plan summary page only shows

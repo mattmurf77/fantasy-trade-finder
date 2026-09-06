@@ -5,7 +5,7 @@ Status: Accepted (revises the palette section of ADR-004; all other Chalkline de
 
 ## Context
 
-The operator reviewed the v1 palette (turf-undertone ink + single volt-lime accent, shipped to TestFlight as 1.0.0 build 18) against alternatives rendered as identical Trios-screen mockups (`web/color-lab.html`, `web/color-lab-2.html`) and rejected volt. v1 also had no secondary accent — informational highlights borrowed volt or semantic colors, overloading their meaning.
+The operator reviewed the v1 palette (turf-undertone ink + single volt-lime accent, shipped to TestFlight as 1.0.0 build 18) against alternatives rendered as identical Trios-screen mockups (`archive/design-explorations/color-lab.html`, `archive/design-explorations/color-lab-2.html`) and rejected volt. v1 also had no secondary accent — informational highlights borrowed volt or semantic colors, overloading their meaning.
 
 ## Decision
 

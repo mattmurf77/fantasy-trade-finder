@@ -159,7 +159,7 @@ long-shipped Trends surface.
 
 ## 6. Maestro regression flow
 
-`mobile/.maestro/flows/smoke/12-market-movers.yaml` (tags `[smoke, league]`,
+`archive/retired-tooling/mobile/maestro/flows/smoke/12-market-movers.yaml` (tags `[smoke, league]`,
 profile `standard`, flags `release`) — extends the `09-league.yaml` path:
 
 ```

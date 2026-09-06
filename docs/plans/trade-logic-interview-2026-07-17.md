@@ -1,3 +1,12 @@
+```project-status
+{
+  "status": "reference",
+  "updated": "",
+  "summary": "Trade-Logic Interview — 2026-07-17",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: reference  — The operator's trade philosophy, transcribed — the source for roster-fit and lane rules. Prior row preserved at ../reviews/2026/2026-09-06-project-status-migration/plans-index.md."
+}
+```
+
 # Trade-Logic Interview — 2026-07-17
 
 Matt asked to be interviewed about how he identifies, analyzes, and decides

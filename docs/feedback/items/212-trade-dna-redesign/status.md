@@ -1,3 +1,18 @@
+# Status — 212-trade-dna-redesign
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-02",
+  "summary": "#212 — Trade DNA panel redesign (covers #231 deck bias receipt, #206 hint tags)",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-02 — teardown-remediation. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #212 — Trade DNA panel redesign (covers #231 deck bias receipt, #206 hint tags)
 
 **Status:** built 2026-08-02 (isolated worktree, branch `teardown-remediation`) — ships live, no feature flag.

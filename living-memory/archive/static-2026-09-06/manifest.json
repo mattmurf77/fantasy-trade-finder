@@ -1,0 +1,114 @@
+{
+  "snapshot_date": "2026-09-06",
+  "source_commit": "4026ebc8",
+  "files": [
+    {
+      "source_path": "living-memory/CONTEXT.md",
+      "archive_file": "CONTEXT.md",
+      "bytes": 4130,
+      "sha256": "865b4f53430bdeb96b6b0c8b17fb2e3066e95b04a32482d6544eeaad781446c8"
+    },
+    {
+      "source_path": "living-memory/HLD.md",
+      "archive_file": "HLD.md",
+      "bytes": 19283,
+      "sha256": "41615f027363590dbbba809cd0faf9c8a2a51b6a0a606e14526a2ae82a5af1e2"
+    },
+    {
+      "source_path": "living-memory/LLD.md",
+      "archive_file": "LLD.md",
+      "bytes": 92625,
+      "sha256": "8723dcf9a0b0a9b5cda880cca7d101000b11b2533030347118952414efd1dbeb"
+    },
+    {
+      "source_path": "living-memory/BRAND.md",
+      "archive_file": "BRAND.md",
+      "bytes": 9090,
+      "sha256": "f6a67e9c3dfed9b931355dd532fbf35084ec226b488c9348b761ee7726196331"
+    },
+    {
+      "source_path": "living-memory/GLOSSARY.md",
+      "archive_file": "GLOSSARY.md",
+      "bytes": 6327,
+      "sha256": "4e0002223233d75da5da0f82d9589bcdff9d5e22a44b18ebd75e92b5060565ca"
+    },
+    {
+      "source_path": "living-memory/PRACTICES.md",
+      "archive_file": "PRACTICES.md",
+      "bytes": 5325,
+      "sha256": "836e29dfdbae2c0d498285d8c5f395ba3c218488414ce8741e77107477427a75"
+    },
+    {
+      "source_path": "living-memory/DEPENDENCIES.md",
+      "archive_file": "DEPENDENCIES.md",
+      "bytes": 13980,
+      "sha256": "5a7d1b8f5c0f5c002292b58f55317993c24d12f077d270f5d033b502f0fd23d2"
+    },
+    {
+      "source_path": "living-memory/THIRD_PARTY.md",
+      "archive_file": "THIRD_PARTY.md",
+      "bytes": 4677,
+      "sha256": "3a72d04cf7c679d25b41b7ea43e2e4bb4082a6612b167a0f2a8e559dd38d7f2c"
+    },
+    {
+      "source_path": "living-memory/SOURCES.md",
+      "archive_file": "SOURCES.md",
+      "bytes": 4891,
+      "sha256": "4987d61670c2dfc18bec1c1aff680cf5edd59ed0b3edd88fc95fd9ac789ac68d"
+    },
+    {
+      "source_path": "living-memory/SUBAGENT_PRINCIPLES.md",
+      "archive_file": "SUBAGENT_PRINCIPLES.md",
+      "bytes": 8660,
+      "sha256": "5b82d894e80a58f20727cbca62f319cb5fa16557eea9abbbb065aad7747e4652"
+    },
+    {
+      "source_path": "living-memory/HANDOFF.md",
+      "archive_file": "HANDOFF.md",
+      "bytes": 1902,
+      "sha256": "a61766068479924df392ac40a2067b3fa91636773fa9dfb0880a4d60f8615bde"
+    },
+    {
+      "source_path": "living-memory/NEXT.md",
+      "archive_file": "NEXT.md",
+      "bytes": 66240,
+      "sha256": "e920d74f34cf6ad5b043dbb7427a5846d81a4802fb9fa431edfcc06b06d6925a"
+    },
+    {
+      "source_path": "living-memory/FORMAT.md",
+      "archive_file": "FORMAT.md",
+      "bytes": 11528,
+      "sha256": "1a083769a3bfc92ace8abd9d4d518990f4fbe441254dc63313f572a01d0197f9"
+    },
+    {
+      "source_path": "living-memory/README.md",
+      "archive_file": "memory-readme.snapshot.md",
+      "bytes": 9901,
+      "sha256": "f79979de05b1c5279abf5bf9e880a0029e635f43111fc5932712a47466fe5e61"
+    },
+    {
+      "source_path": "CLAUDE.md",
+      "archive_file": "root-claude.snapshot.md",
+      "bytes": 17384,
+      "sha256": "fe851f3e49060f9bafdcc8babdd98c65e0df7e490a717970feee3ceb790281f2"
+    },
+    {
+      "source_path": "README.md",
+      "archive_file": "root-readme.snapshot.md",
+      "bytes": 6539,
+      "sha256": "2ab9d3b0b7f93da6e90fe946f45d38ec6aff2d46dba3f171d3129f9c13b34c80"
+    },
+    {
+      "source_path": "context.md",
+      "archive_file": "root-context.snapshot.md",
+      "bytes": 13759,
+      "sha256": "54bbd856ec660eff368b39517e7251368b9a7913c98695e0d27a06a3352a0f16"
+    },
+    {
+      "source_path": "docs/business/context.md",
+      "archive_file": "business-context.snapshot.md",
+      "bytes": 5182,
+      "sha256": "eab633a75835440fa609cf765245d39bfdfd0ae8710c8f135f1b8d286951dbc7"
+    }
+  ]
+}

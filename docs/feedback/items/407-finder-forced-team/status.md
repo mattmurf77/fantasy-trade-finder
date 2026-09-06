@@ -1,3 +1,18 @@
+# Status — 407-finder-forced-team
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-30",
+  "summary": "FB-407",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-30 — fast-track bug, fix `8f722676` (auto-defaulted partner no longer scopes Find a Trade); PR #250. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # FB-407
 - **Status:** built 2026-08-30 — awaiting orchestrator review + merge; TestFlight checklist pending
 - **Group:** G-407 (fast-track bug). Batch plan: [406-target-any-leaguemate/plan.md](../406-target-any-leaguemate/plan.md)

@@ -3,7 +3,7 @@
 **Date:** 2026-08-18
 **Entry point:** operator design decision, relayed 2026-08-18; [PLAN.md](PLAN.md) Phase 0 lineage. Supersedes parts of
 [scope-phase0.md](scope-phase0.md), which shipped hours earlier as `e8ae476`.
-**Driven by:** [docs/reviews/2026-08-18-valuation-age-audit.md](../../reviews/2026-08-18-valuation-age-audit.md) §3.4 / §5.1.
+**Driven by:** [docs/reviews/2026/2026-08-18-valuation-age-audit.md](../../reviews/2026/2026-08-18-valuation-age-audit.md) §3.4 / §5.1.
 **Builder:** backend build agent, branch `feat/tier-bounded-pins`.
 
 **The operator's words:** *"for deliberately placed players in tiers, the voting can just
@@ -232,7 +232,7 @@ votes do nothing. Three options were on the table:
 
 **Recommendation: (c), on top of the (b) that shipped.** (c) is a client change and is
 explicitly **not built here** — this branch is backend-only. It is the natural home for
-[audit F3](../../reviews/2026-08-18-valuation-age-audit.md#8-recommended-fixes-cheapest-high-confidence-first)
+[audit F3](../../reviews/2026/2026-08-18-valuation-age-audit.md#8-recommended-fixes-cheapest-high-confidence-first)
 ("surface the pin in the ranking UI"), which the operator already backlogged in `NEXT.md` as
 the *"your vote can't move him"* cue — that cue should now read *"your vote can't move him
 **further**"*, and should fire on the band edge rather than on the pin, because under

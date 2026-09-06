@@ -1,3 +1,18 @@
+# Status — 218-hub-fit-to-screen
+
+```project-status
+{
+  "status": "in-progress",
+  "updated": "2026-08-01",
+  "summary": "#218/#219 — Trade-Finding Hub fits above the fold",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: in-progress 2026-08-01 — teardown-remediation (worktree, pending merge). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #218/#219 — Trade-Finding Hub fits above the fold
 
 **Status: built (worktree branch, pending merge) — 2026-08-01**

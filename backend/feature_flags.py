@@ -88,19 +88,19 @@ FLAG_KEYS: tuple[str, ...] = (
     "trade_math.star_tax",
     "trade_math.roster_clogger",
     "trade_math.human_explanations",
-    # Trade engine v2 — Tier 1 scorer rebuild (docs/plans/trade-engine-tier1-fixes.md)
+    # Trade engine v2 — Tier 1 scorer rebuild (docs/plans/archive/2026/trade-engine-tier1-fixes.md)
     "trade_engine.v2",
-    # Trade engine Tier 2 (docs/plans/trade-engine-tier2-models.md)
+    # Trade engine Tier 2 (docs/plans/archive/2026/trade-engine-tier2-models.md)
     "trade.marginal_value",   # 2.1 over-replacement valuation (trade_service.py)
     "trade.outlook_blend",    # 2.2 now/future valuation blend (trade_service.py)
     "trade.likes_you",        # 2.3a likes-you queue (server.py)
     "trade.fuzzy_match",      # 2.3b fuzzy mirror matching (database.py)
     "trade.thompson_deck",    # A5 Thompson-sampled deck ordering (server.py)
     "trade.deck_diversity",   # A6 league-wide deck diversification (server.py)
-    # Trade engine Tier 3 (docs/plans/trade-engine-tier3-rebuild.md)
+    # Trade engine Tier 3 (docs/plans/archive/2026/trade-engine-tier3-rebuild.md)
     "trade_engine.v3",        # exact per-pair package construction + sweeteners
     "trade.three_team",       # 3-team cycle generation (no client surface yet)
-    # FB-47 finder targeting (docs/plans/trade-finder-targeting.md)
+    # FB-47 finder targeting (docs/plans/archive/2026/trade-finder-targeting.md)
     "trade.finder_targeting", # pinned-receive + counterparty positional fit
     # FB-96 — automatic positional-need fit (feedback #96; kin of FB-47)
     "trade.need_fit",         # boost swaps that cross-fill positional needs
@@ -146,7 +146,7 @@ FLAG_KEYS: tuple[str, ...] = (
     # trade.need_fit). Default ON (bounded/kill-switchable); off or knob 0 ⇒
     # composite byte-identical. backend/trade_service.py
     "trade.block_boost",
-    # Account-auth P2 — Apple/Google identity anchors (docs/plans/account-auth-plan-2026-07-11.md)
+    # Account-auth P2 — Apple/Google identity anchors (docs/plans/archive/2026/account-auth-plan-2026-07-11.md)
     # Gates the sign-in surface (/api/auth/apple, /api/auth/google,
     # GET /api/account + mobile Sign in with Apple UI). DELETE /api/account
     # is deliberately NOT gated — App Store 5.1.1(v) in-app deletion.
@@ -164,7 +164,7 @@ FLAG_KEYS: tuple[str, ...] = (
     # privacy-policy update — the policy currently says "no email addresses".
     "auth.email_capture",
     # ESPN league linking Phase 1 — read-only import of ESPN leagues via the
-    # unofficial v3 API (docs/plans/espn-league-linking-plan-2026-07-11.md).
+    # unofficial v3 API (docs/plans/archive/2026/espn-league-linking-plan-2026-07-11.md).
     # Gates /api/espn/* routes + the mobile link affordance. Also the kill
     # switch if ESPN blocks reads or Apple objects (plan §4/§6).
     "espn.link",
@@ -174,7 +174,7 @@ FLAG_KEYS: tuple[str, ...] = (
     # fallback). No backend routes: POST /api/espn/link already accepts the
     # cookies. Requires `espn.link` on to have any effect. Default OFF until a
     # TestFlight build with the native cookie dependency validates against a
-    # real private league (docs/plans/espn-connect-webview/scope.md).
+    # real private league (docs/plans/archive/2026/espn-connect-webview/scope.md).
     "espn.webview_capture",
     # ESPN league linking — "my leagues" picker (2026-08-09, field feedback:
     # "can't we fetch all their ESPN leagues and let them pick, instead of
@@ -352,7 +352,7 @@ FLAG_KEYS: tuple[str, ...] = (
     "growth.rating_prompt",
     # ── Tier-board sharing — OFF, and meant to stay off ─────────────────
     # P1 audit remediation, operator decision D-P1-12
-    # (docs/plans/audit-p1-remediation/DECISIONS-p1.md): "sharing of
+    # (docs/plans/archive/2026/audit-p1-remediation/DECISIONS-p1.md): "sharing of
     # rankings must not be live in any form." Sharing a tier board is not
     # a product surface. Gates GET /og/tiers/<pos>/<username>.png and
     # GET /s/tiers/<pos>/<username>; both 404 while dark, matching how the
@@ -611,7 +611,7 @@ FLAG_KEYS: tuple[str, ...] = (
     # starter 0.60 / playoff 0.40); starter and playoff at 0 neutralise the
     # new terms without changing the payload shape.
     "trade.outlook_composite",
-    # ── Rookie draft (docs/plans/rookie-draft/) ────────────────────────────
+    # ── Rookie draft (docs/plans/archive/2026/rookie-draft/) ────────────────────────────
     # M2 — `?scope=rookie` on /api/rankings + /api/trio, and `scope` in the
     # /api/tiers/save body. A POST-Elo VIEW filter over the ONE existing board:
     # scoped Elo == unscoped Elo for every rookie, and a scoped tier save uses
@@ -649,7 +649,7 @@ FLAG_KEYS: tuple[str, ...] = (
     # Live mode is release-gated separately: a drafting MFL league reports
     # state:"live" honestly, but MFL's mid-draft update latency is
     # UNVERIFIED, so recurring refresh stays behind `draft.live_poll` until
-    # the timed probe in docs/plans/rookie-draft/build-m5.md passes.
+    # the timed probe in docs/plans/archive/2026/rookie-draft/build-m5.md passes.
     "draft.mfl",
     # M6 — per-slot draft-pick market prices on the Draft Room board, read
     # from DynastyProcess's SECOND file (files/values.csv PICK rows) via
@@ -686,7 +686,7 @@ FLAG_KEYS: tuple[str, ...] = (
     # own change once no shipped build reads the key.
     "trade.slot_pricing",
     # draft-extensions W1 — per-player ACTIONS on the Draft Room's undrafted
-    # rows (docs/plans/draft-extensions/plan.md §4, lld §4.1). ON ⇒ a
+    # rows (docs/plans/archive/2026/draft-extensions/plan.md §4, lld §4.1). ON ⇒ a
     # long-press (plus the `accessibilityActions` custom action, the shipped
     # TradeCard vocabulary) on an undrafted row opens the shared
     # PlayerContextMenu with Set my value → an anchor sheet on the SHIPPED
@@ -714,7 +714,7 @@ FLAG_KEYS: tuple[str, ...] = (
     # replaced the single global reach cap with the operator's round-tiered
     # policy and the operator accepted THAT rule as the definition of "bots
     # draft plausibly", so `mock_draft_service.CPU_MODEL_VALIDATED` is now True
-    # (see its comment, and docs/plans/draft-extensions/mock-calibration-2026-08d.md).
+    # (see its comment, and docs/plans/archive/2026/draft-extensions/mock-calibration-2026-08d.md).
     # The typed-empty `{"empty": true, "reason": "cpu_model_unvalidated"}`
     # contract still exists and is what the create route would answer if
     # `CPU_MODEL_VALIDATED` were flipped back to False.

@@ -1,10 +1,10 @@
 """draft-extensions W3 M-C — asserted picks priced across all seven read sites.
 
-Plan `docs/plans/draft-extensions/plan.md` §6.4 + operator decision 4 (**full
+Plan `docs/plans/archive/2026/draft-extensions/plan.md` §6.4 + operator decision 4 (**full
 engine parity** — all seven sites light up, including `_roster_eveners` and
 generated suggestions; S1→S4 is a BUILD SEQUENCE, not a set of release gates);
 LLD §4.5; the delivered M-A contract in
-`docs/plans/draft-extensions/build-w3-ma-mb.md`.
+`docs/plans/archive/2026/draft-extensions/build-w3-ma-mb.md`.
 
 M-A shipped the store with the containment being the READ DEFAULT. This wave
 is the opt-in, and everything it can break is pinned here:

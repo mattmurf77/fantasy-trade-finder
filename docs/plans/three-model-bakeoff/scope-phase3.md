@@ -208,7 +208,7 @@ flag-off golden.
 
 ### Channel 3 — the threshold a card was generated under
 
-*(Added 2026-08-18 after `docs/reviews/2026-08-18-trade-logic-archaeology.md`.)*
+*(Added 2026-08-18 after `docs/reviews/2026/2026-08-18-trade-logic-archaeology.md`.)*
 
 `fairness_threshold` arrives per-request from the mobile client (0.75 fairness
 toggle on / 0.50 off) and was persisted **nowhere** — not a `deck_impressions`

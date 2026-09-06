@@ -76,7 +76,7 @@ deliberately untouched.
 The threshold a card was generated under is captured too — see
 `effective_fairness_threshold()`. `fairness_threshold` arrives per-request from
 the client and was previously persisted NOWHERE
-(docs/reviews/2026-08-18-trade-logic-archaeology.md), so a per-arm comparison
+(docs/reviews/2026/2026-08-18-trade-logic-archaeology.md), so a per-arm comparison
 spanning sessions with different client settings would have compared arms AND
 thresholds at once, with nothing in the data to separate them.
 

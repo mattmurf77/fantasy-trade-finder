@@ -25,7 +25,7 @@ makes the final call.
    are live (e.g. `trade_engine.v3`, `trade.finder_targeting`, `trade.need_fit`),
    recent `docs/plans/` batches for what just changed, and `mobile/tests/README.md`
    for what's already guarded automatically (the `check-*.js` suites; per
-   [D-056](../../../living-memory/DECISIONS.md) the `mobile/.maestro/` flows are
+   [D-056](../../../living-memory/DECISIONS.md) the `archive/retired-tooling/mobile/maestro/` flows are
    historical artifacts, never run — don't read them as live coverage).
 4. For real evidence: tester complaints via the `/feedback` pipeline's open items, and
    measured usage via an-user-data. Your own walkthrough is the primary instrument.

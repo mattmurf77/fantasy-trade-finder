@@ -132,7 +132,7 @@ behind SwapSuggestSheet.
 
 ## 7. Maestro regression flow
 
-`mobile/.maestro/flows/regression/264-calc-one-sided-options.yaml` (spec — the
+`archive/retired-tooling/mobile/maestro/flows/regression/264-calc-one-sided-options.yaml` (spec — the
 batch QA round owns authoring/running it; this build is static-verified only):
 
 1. Launch → sign in (smoke profile) → `tab.trades` → `trades.finder-mode.calc`.

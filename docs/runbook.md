@@ -94,8 +94,7 @@ Port conflicts: macOS AirPlay Receiver uses :5000. Free it: `lsof -ti:5000 | xar
 
 > **RETIRED (2026-08-15, D-056 — extending D-P1-08).** Maestro/simulator work is retired
 > **entirely**: no flow authoring, no runs, no captures, for any change. TestFlight is
-> primary QA; automated evidence is `check-*.js` suites + unit tests; `FTF_SKIP_SIM_GATE=1`
-> is the standing posture for the pre-push hook. Everything below is historical.
+> primary QA; automated evidence is `check-*.js` suites + unit tests; the pre-push hook is now a no-op. Everything below is historical.
 
 `main` auto-deploys (Render) and feeds EAS → TestFlight, so the Maestro/simulator check
 sits **before merge/push to `main`**. CI cannot run the iOS simulator (no free macOS
@@ -106,8 +105,8 @@ execution — the operator keeps the decision, the system keeps the receipts.
 
 | Tier | Change class | Required before merge to `main` |
 |---|---|---|
-| 1 | Mobile screen / navigation / state change | Full smoke suite (11 flows) + the feature's own flow, on sim **+ `mobile/scripts/screen-capture.sh --screen <touched>` for every screen whose visuals changed** |
-| 2 | Mobile logic touched, no UI change | Feature's flow + affected smoke subset **+ run `mobile/scripts/screen-freshness.sh`; re-capture only the screens it flags** |
+| 1 | Mobile screen / navigation / state change | Full smoke suite (11 flows) + the feature's own flow, on sim **+ `archive/retired-tooling/mobile/scripts/screen-capture.sh --screen <touched>` for every screen whose visuals changed** |
+| 2 | Mobile logic touched, no UI change | Feature's flow + affected smoke subset **+ run `archive/retired-tooling/mobile/scripts/screen-freshness.sh`; re-capture only the screens it flags** |
 | 3 | Backend route/schema consumed by mobile | Smoke subset that exercises the route |
 | 4 | Backend-only, web-only, docs-only | No sim run; pytest / `tsc --noEmit` (CI covers these) |
 
@@ -147,8 +146,8 @@ like instead of from memory. Two scripts own it — nothing else writes there:
 
 | Script | Cost | What it does |
 |---|---|---|
-| `mobile/scripts/screen-freshness.sh` | < 1 s, no sim | Rehashes each screen's declared source files against `screens/manifest.json`. Exit `0` fresh · `1` stale · `2` no manifest. `--quiet` for scripting. |
-| `mobile/scripts/screen-capture.sh --screen <x>` | 4–7 min, needs sim | Re-captures screen `<x>` in every state and rewrites its manifest entry. `--interactive` leaves the sim parked in that state instead. |
+| `archive/retired-tooling/mobile/scripts/screen-freshness.sh` | < 1 s, no sim | Rehashes each screen's declared source files against `screens/manifest.json`. Exit `0` fresh · `1` stale · `2` no manifest. `--quiet` for scripting. |
+| `archive/retired-tooling/mobile/scripts/screen-capture.sh --screen <x>` | 4–7 min, needs sim | Re-captures screen `<x>` in every state and rewrites its manifest entry. `--interactive` leaves the sim parked in that state instead. |
 
 **Evidence is the manifest**, not the run: `screens/manifest.json` records each capture's
 flow, profile, injections, `captured_at`, and the source-file hash that freshness compares
@@ -436,9 +435,9 @@ React Native's `fetch` auto-negotiates `Accept-Encoding: gzip, deflate, br` on e
 > still runs in CI. See `docs/templates/feature-scope.md` §3.
 >
 > **Still live from this section:** the `testID` registry in
-> `docs/plans/mobile-testing/lld.md` Appendix A, which `testid-lint.sh` reads.
+> `docs/plans/archive/2026/mobile-testing/lld.md` Appendix A, which `testid-lint.sh` reads.
 
-Spec: `docs/plans/mobile-testing/` (plan/prd/hld/lld/test-cases). Day-to-day driver was the `/maestro-test` skill (`.claude/skills/maestro-test/SKILL.md`) — feature / page / whole-app scopes, encoded the traps below. Built so far: backend seams + blueprint (`backend/test_support.py`, seams in `server.py` — all env-gated, `pytest backend/tests/test_test_support.py` pins them incl. inertness), build contract (`mobile/app.config.js`), scripts (`mobile/scripts/sim-build.sh`, `sim-run.sh`, `testid-lint.sh`), S1-spike testIDs (SignIn + tab bar).
+Spec: `docs/plans/archive/2026/mobile-testing/` (plan/prd/hld/lld/test-cases). Day-to-day driver was the `/maestro-test` skill (`archive/retired-tooling/maestro-skill/SKILL.md`) — feature / page / whole-app scopes, encoded the traps below. Built so far: backend seams + blueprint (`backend/test_support.py`, seams in `server.py` — all env-gated, `pytest backend/tests/test_test_support.py` pins them incl. inertness), build contract (`mobile/app.config.js`), scripts (`archive/retired-tooling/mobile/scripts/sim-build.sh`, `sim-run.sh`, `testid-lint.sh`), S1-spike testIDs (SignIn + tab bar).
 
 - **Test build:** `./mobile/scripts/sim-build.sh --env test` → Release sim app pointed at `http://127.0.0.1:5000`, Sentry DSN nulled, `resolved-config.json` emitted for the rails. `--env prod-check` statically asserts the shipping config (never builds).
 - **Boot a hermetic cell:** `./mobile/scripts/sim-run.sh --udid <UDID> --app <path/to/.app> --profile standard` → seeds the profile, starts Flask in test mode, handshakes `/__test__/whoami`, erases+boots the sim, installs + launches. Without `--flow` it stops there (manual/S2 verification); with `--flow` it runs Maestro (once installed: `brew install maestro`).
@@ -499,7 +498,7 @@ The ladder was revised to eight tiers (`firsts_4plus / firsts_3 / firsts_2 / fir
 
 ## ESPN league linking — API fragility monitoring (`espn.link`, 2026-07-12)
 
-Phase 1 reads ESPN's **unsanctioned** v3 API (`lm-api-reads.fantasy.espn.com`). Expect ~one breaking change per season (host moved silently in the 2023→2024 window; non-browser User-Agents get intermittently 403'd — `backend/espn_service.py` sends browser-signature headers, same lesson as the Sleeper Cloudflare-1010 fix). Full risk table: [plan §1](plans/espn-league-linking-plan-2026-07-11.md).
+Phase 1 reads ESPN's **unsanctioned** v3 API (`lm-api-reads.fantasy.espn.com`). Expect ~one breaking change per season (host moved silently in the 2023→2024 window; non-browser User-Agents get intermittently 403'd — `backend/espn_service.py` sends browser-signature headers, same lesson as the Sleeper Cloudflare-1010 fix). Full risk table: [plan §1](plans/archive/2026/espn-league-linking-plan-2026-07-11.md).
 
 - **Symptoms of endpoint churn:** spike of `espn_unavailable` (502) responses or `espn fetch failed [http]` log lines on `/api/espn/link` / `/api/espn/import`. A sudden shift of everything to 403 (`espn_auth_required`) on previously-public leagues can also mean ESPN started auth-gating or UA-blocking us — probe by hand before blaming user cookies.
 - **Hand probe:** `python3 -m backend.espn_service <league_id> [season]` (env `ESPN_S2`/`SWID` for private). Run this against a real public league **before every flag flip to ON** — the test suite runs on recorded fixtures and cannot see live endpoint changes. Note: 404 can be correct (ESPN purges old leagues each season, verified 2026-07-11).
@@ -522,7 +521,7 @@ Both read **official/sanctioned** APIs (far lower churn risk than ESPN), zero-au
 
 This repo uses the Expo **bare workflow** — `mobile/ios/` is tracked in git and `expo prebuild` is never run — so `app.json` iOS config plugins and `ios.usesAppleSignIn` are silently ignored at build time. The native files under `mobile/ios/` (entitlements, Info.plist, project.pbxproj) are the source of truth. Incident: #131 — `app.json` declared `"usesAppleSignIn": true` + the `expo-apple-authentication` plugin, but `mobile/ios/DTFDynastyTradeFinder/DTFDynastyTradeFinder.entitlements` never got the `com.apple.developer.applesignin` key, so builds 40/41 were signed without the capability and `signInAsync()` rejected (code 1000) on device. Fix: add the key to the entitlements file directly. A config-drift sweep found the Apple entitlement to be the only such drift. When changing iOS-native config, edit `mobile/ios/` — treat `app.json` entries as declared intent for a hypothetical future prebuild only.
 
-- **Pinned failure copy:** the Maestro regression guard (`mobile/.maestro/flows/smoke/11-apple-entitlement.yaml`) asserts on error strings pinned from `expo-apple-authentication@8.0.8` (`ios/AppleAuthenticationExceptions.swift`); `package.json` floats `~8.0.8`, so re-verify those strings whenever that package is upgraded.
+- **Pinned failure copy:** the Maestro regression guard (`archive/retired-tooling/mobile/maestro/flows/smoke/11-apple-entitlement.yaml`) asserts on error strings pinned from `expo-apple-authentication@8.0.8` (`ios/AppleAuthenticationExceptions.swift`); `package.json` floats `~8.0.8`, so re-verify those strings whenever that package is upgraded.
 
 ## Universal Links AASA is CDN-cached by Apple (feedback #239, 2026-08-02)
 
@@ -587,7 +586,7 @@ A `ftf-test-apple:` token hitting a production server is rejected as a malformed
 
 ## Operator-only onboarding test — `trades_first_operator_test` (P0-9, 2026-08-11)
 
-**The full seven-step recipe — collision check, experiment body, the eight-key overlay, the pre-flight verification call and the one-call rollback — is in [`plans/audit-p0-remediation/prd-p0-8-9.md` §5](plans/audit-p0-remediation/prd-p0-8-9.md), with per-claim code citations in `lld-p0-8-9.md` §6.** It is reproduced there rather than here because it is a one-off operator procedure with a defined end state. The load-bearing points, so they are not lost if the plan folder is archived:
+**The full seven-step recipe — collision check, experiment body, the eight-key overlay, the pre-flight verification call and the one-call rollback — is in [`plans/audit-p0-remediation/prd-p0-8-9.md` §5](plans/archive/2026/audit-p0-remediation/prd-p0-8-9.md), with per-claim code citations in `lld-p0-8-9.md` §6.** It is reproduced there rather than here because it is a one-off operator procedure with a defined end state. The load-bearing points, so they are not lost if the plan folder is archived:
 
 - **`CRON_SECRET` lives in `secrets.local.env`.** Read it from there; never paste it into chat.
 - **Step 0 is a collision check, not a formality.** `validate_spec(for_launch=True)` rejects a launch whose buckets overlap any **running *or paused*** experiment in the same layer, and `onboarding_v2_rollout` occupies the whole `onboarding` range. If it is already running with a matching overlay, **create nothing** — skip to the device-id step.
@@ -763,7 +762,7 @@ Adding `FTF_TESTER_ALLOWLIST` to `render.yaml` envVars and deploying did NOT set
 - **Sanity first, always:** `python3 -m backend.eval.replay --self-check` replays the logged policy against its own logs; the observed like/propose rate must fall inside the replayed CI (exit 1 otherwise). Run it before trusting any candidate readout — a self-check failure means the log or the estimator is broken, not the candidate.
 - **`UNRELIABLE` verdict** = ESS below the gate (`EVAL_ESS_MIN`, default 100). That is the harness refusing to bless the number, not a failure — collect more log or narrow the question. The `random` scorer is a permanent canary: it must grade worse than `production`; if it ever grades level on healthy volume, stop and debug the harness.
 - **Trainable scorers (F6):** the harness enforces the time-ordered protocol — `--eval-start` is mandatory for any scorer with `fit()`; fitting sees only pre-split decks, scoring only post-split. There is deliberately no shuffled-CV mode.
-- **Nightly re-runs:** `python3 -m backend.eval.nightly` (or `backend.eval.nightly.run_all()`) grades every registered scorer on the trailing 30d, idempotent per (UTC day, scorer, window) via `runs.jsonl` — safe to re-invoke. Per-scorer failures are recorded as `status:"error"` records and counted, never raised. **The `/api/cron/daily-tick` hook is NOT wired yet** (W4 handoff — F7 owned server.py that wave); until the lead pastes the snippet from `feedback-workspace/tiktok-discovery/build/W4-F8.md`, nightly runs are manual.
+- **Nightly re-runs:** `python3 -m backend.eval.nightly` (or `backend.eval.nightly.run_all()`) grades every registered scorer on the trailing 30d, idempotent per (UTC day, scorer, window) via `runs.jsonl` — safe to re-invoke. Per-scorer failures are recorded as `status:"error"` records and counted, never raised. **The `/api/cron/daily-tick` hook is NOT wired yet** (W4 handoff — F7 owned server.py that wave); until the lead pastes the snippet from `docs/plans/tiktok-discovery/evidence/unresolved-cron-setup.md`, nightly runs are manual.
 - **The gate (process):** no ranking-affecting change (F5 η's, F6, tweaks) graduates without (a) a replay win with adequate ESS, then (b) an interleaving/experiment win. Cite run records, not vibes.
 
 ## MFL numeric league ids wiped draft picks on session init (#200, 2026-07-27)
@@ -795,7 +794,7 @@ Until M0 the player pipeline had **no refresh path at all**: the only bulk fetch
 
 **Rookie class-load monitor.** `daily-tick` runs one indexed `COUNT` for `rookie_year == <next season>` and logs `CLASS-LOAD <year> rookie class has appeared` once per process the first time it is non-empty. Sleeper's dump carries **no** rows for a class until ~late April, so Feb–Apr is a structurally empty window the Draft Room has to design around; this log line is the only signal that the window closed. It uses the EXACT `rookie_year` test on purpose — the `years_exp == 0 AND team` proxy in THE rookie predicate is season-independent and would fire on day one.
 
-**Measuring the class.** `python3 -m backend.scripts.measure_rookie_pool --refresh` runs a synchronous refresh, then writes `docs/plans/rookie-draft/measurement.md` with valued-rookie counts per scoring format × position plus the plan's abort criterion (any format under 15 valued rookies ⇒ rookie scope ships for Pick Anchors + Tiers only). Re-run it before any rookie UI wave — the numbers move as DynastyProcess picks up more of the class.
+**Measuring the class.** `python3 -m backend.scripts.measure_rookie_pool --refresh` runs a synchronous refresh, then writes `docs/plans/archive/2026/rookie-draft/measurement.md` with valued-rookie counts per scoring format × position plus the plan's abort criterion (any format under 15 valued rookies ⇒ rookie scope ships for Pick Anchors + Tiers only). Re-run it before any rookie UI wave — the numbers move as DynastyProcess picks up more of the class.
 
 ## Rookie-scope board restore (rookie-draft M2, 2026-08-06)
 

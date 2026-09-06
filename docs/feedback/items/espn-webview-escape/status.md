@@ -1,3 +1,18 @@
+# Status — espn-webview-escape
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-09",
+  "summary": "espn-webview-escape — status",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-09 — build 95 — operator-directed program, no feedback id; device walkthrough was owed at ship. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # espn-webview-escape — status
 
 **Reported:** 2026-08-09, by the operator via chat (a real TestFlight user's
@@ -5,7 +20,7 @@ private-league link attempt). **No in-app feedback item exists for this** —
 the folder slug stands in for an ID.
 
 **Feature:** ESPN Connect WebView cookie capture (`espn.webview_capture`,
-Phase 1b — `docs/plans/espn-connect-webview/scope.md`), shipped in build 90.
+Phase 1b — `docs/plans/archive/2026/espn-connect-webview/scope.md`), shipped in build 90.
 
 **Status:** fixed in code on branch `worktree-agent-a01b25987626b4e84`
 (commit "espn-webview: keep login in-app; capture survives background

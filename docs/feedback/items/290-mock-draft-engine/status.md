@@ -1,3 +1,18 @@
+# Status — 290-mock-draft-engine
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-10",
+  "summary": "Status — G2 backend build (#290 / #292 / D-16 / D-5)",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-10 — PR #103 → `6c304c7` — G2 **canonical** (#290/#291/#292). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # Status — G2 backend build (#290 / #292 / D-16 / D-5)
 
 > **Phase 2 — backend only.** The mobile half of #291 and #292 is a separate
@@ -499,7 +514,7 @@ by clearing `postRefusal`, not by lying about the state.
 Structural, with one behavioural half. Registered as
 `npm run test:mock-lifecycle`. See §M4.
 
-### `mobile/.maestro/flows/rookie/d3-mock-draft-loop.yaml` — new
+### `archive/retired-tooling/mobile/maestro/flows/rookie/d3-mock-draft-loop.yaml` — new
 
 Two full laps. **Not executed here** — authored and statically verified only,
 per instruction; execution belongs to the batch QA round. Non-colliding with

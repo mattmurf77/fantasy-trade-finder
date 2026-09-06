@@ -1,3 +1,18 @@
+# Status — 413-sleeper-send-draft-picks
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-09-02",
+  "summary": "FB-413 — Send in Sleeper fails on trades with draft picks",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-09-02 — **canonical** of the 2026-09-02 weekly run — Send in Sleeper has no draft-pick split/encode; batch `plan.md` + `investigation.md` here. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # FB-413 — Send in Sleeper fails on trades with draft picks
 
 **Status:** in_progress · Phase 3 complete 2026-09-02 — dual-QA PASS, awaiting the operator ship go (branch `feat/fb413-sleeper-send-draft-picks` @ `d49611be`, local, unpushed) — ready for build

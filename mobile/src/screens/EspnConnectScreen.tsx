@@ -15,7 +15,7 @@ import {
 import { track } from '../api/events';
 
 // ESPN Connect WebView — Phase 1b of ESPN league linking
-// (docs/plans/espn-connect-webview/scope.md, plan §4 Option 1). Modeled on
+// (docs/plans/archive/2026/espn-connect-webview/scope.md, plan §4 Option 1). Modeled on
 // SleeperConnectScreen: the user logs in to ESPN's OWN page in an in-app
 // WebView — we never handle the password. Once they're logged in, ESPN's
 // private-league cookies (espn_s2 + SWID) let the backend read the league.

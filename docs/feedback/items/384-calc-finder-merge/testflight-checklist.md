@@ -1,6 +1,6 @@
 # TestFlight checklist — #384 merged calculator (W0–W7)
 
-**Under [D-056](../../../living-memory/DECISIONS.md) this is the ONLY runtime evidence any of
+**Under [D-056](../../../../living-memory/DECISIONS.md) this is the ONLY runtime evidence any of
 this can get.** Everything below is structurally verified and has never run on a device.
 
 **Nothing is live.** `calc.merged_layout` ships **false**. Section A is the flag-off regression
@@ -109,8 +109,8 @@ defect in the gating, not in the feature.
     review-§11 regression.)* ☐
 12. **The narrow cells.** The bottom row reads **Find a Trade · Clear · ✓** — three cells,
     **50/30/20** (`InLeagueCalculator.tsx:1850-1852`). The middle cell is the **labeled
-    "Clear"** button, not a bare ✕ — [D-157](../../../living-memory/DECISIONS.md) amended
-    [D-153](../../../living-memory/DECISIONS.md)'s 70/15/15 row after a tester read the ✕ as
+    "Clear"** button, not a bare ✕ — [D-157](../../../../living-memory/DECISIONS.md) amended
+    [D-153](../../../../living-memory/DECISIONS.md)'s 70/15/15 row after a tester read the ✕ as
     "close" and wiped his canvas mid-tour. There is **no "Include players" toggle** (W6-B
     removed it; the canvas is always the anchor). Tap **✓** — it is now the narrowest cell and
     must still be comfortably tappable one-handed. **This is the operator-flagged risk:** the

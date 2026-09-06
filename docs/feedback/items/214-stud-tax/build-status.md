@@ -38,7 +38,7 @@ aggression-reweight paths; `server._evaluate_adjustments`).
 
 ## Constant re-fit (proposal §4)
 
-Harness: `feedback-workspace/214/fit_matrix.py` (extends `run_matrix.py`;
+Harness: `docs/feedback/items/214-stud-tax/evidence/scripts/fit_matrix.py` (extends `run_matrix.py`;
 in-process Flask test client over a worktree copy of the dev DB).
 Competitor medians pool ALL per-cell observations from BOTH captures —
 `research/competitor-values.md` (2026-08-02: KTC, DD×3 sources,
@@ -102,7 +102,7 @@ Note the structure the proposal asked for: crown credit now appears on
 package sides (T1/T4 recv), phases out on lopsided trades (T3/T5), and the
 depth discounts run −2% to −8% of naive sums (was −25% to −62%).
 
-## Deck sanity diff (`feedback-workspace/214/deck_diff.py`)
+## Deck sanity diff (`docs/feedback/items/214-stud-tax/evidence/scripts/deck_diff.py`)
 
 Operator's real league (Lakeview `1312076055586050048`), 1QB board
 (503 member_rankings rows → 338 in-pool overrides), 11 opponents at

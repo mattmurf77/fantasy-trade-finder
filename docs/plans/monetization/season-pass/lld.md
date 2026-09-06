@@ -224,7 +224,7 @@ fixture + frozen clock):
 - `test_milestone_grant_season_end_expiry_and_once_per_season`
 - `test_manual_grant_pass_comp_via_admin_route`
 
-**Maestro — `mobile/.maestro/`** (display flows only; IAP sandbox purchase is
+**Maestro — `archive/retired-tooling/mobile/maestro/`** (display flows only; IAP sandbox purchase is
 manual QA per eng-qa charter — Maestro can't drive the App Store sheet):
 
 - `07-paywall-season-pass-display.yaml` — flag on, sales window: paywall shows 3

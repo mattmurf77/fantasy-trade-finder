@@ -39,9 +39,9 @@ never freelance around it.
    X, open **every** PNG under `screens/mobile/<x>/` — that folder is the exact
    ground truth for what the app looks like in each state. Reading source is not a
    substitute; source tells you what renders, captures tell you what it looks like.
-   - If `screens/mobile/<x>/` is missing, or `mobile/scripts/screen-freshness.sh`
+   - If `screens/mobile/<x>/` is missing, or `archive/retired-tooling/mobile/scripts/screen-freshness.sh`
      flags X as stale, **say so in the deliverable and request a capture run**
-     (`mobile/scripts/screen-capture.sh --screen <x>`, 4–7 min) before designing.
+     (`archive/retired-tooling/mobile/scripts/screen-capture.sh --screen <x>`, 4–7 min) before designing.
      Do not proceed on a remembered version.
    - Polish-lab and other mockups revising an existing screen embed the real
      capture as the "current"/"before" pane, via a relative

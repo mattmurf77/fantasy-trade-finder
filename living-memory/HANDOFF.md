@@ -1,26 +1,11 @@
-# HANDOFF — Fantasy Trade Finder
+# HANDOFF
 
-> **Purpose:** current release state and remaining follow-up.
->
-> **Read at:** session start. **Write at:** session end.
->
-> Companion files: [TEST_LEDGER.md](TEST_LEDGER.md), [NEXT.md](NEXT.md).
+## Current State — 2026-09-06
 
-## Current State — 2026-09-05
+**Where I stopped:** organization is complete on `codex/project-organization-20260906`, based on freshly cloned main `4026ebc8`. The durable working directory is the sibling `Fleeced` project. See the [organization record](../docs/recovery/2026-09-06-project-organization.md) for changes, validation and recovery.
 
-**Where I stopped:** owner-contract first wave published in draft PR #281 on `codex/owner-contracts-20260905`. iOS **1.17.0 (148)** built from `0fc1b539` and uploaded to App Store Connect for TestFlight. Exact-source CI passed: **5,455 backend / 1 skip**, 93 mobile guards, typecheck/test-ID and 190 web checks. [Release IDs/evidence](../docs/plans/owner-contracts/release.md).
+**In flight:** product acceptance and rollout questions remain with their own initiative/release evidence. Organization did not push, deploy, submit or enable anything. A main commit alone does not prove tester availability or production rollout.
 
-**In flight:** Apple processing/tester availability and [physical checklist](../docs/plans/owner-contracts/mobile-testflight.md) unverified. Backend owner-contract changes remain unmerged/undeployed; all three arms/flags unchanged. [Remaining engine/Undo/data work](../docs/plans/owner-contracts/review.md).
+**Blocked on:** no organization blocker. Original dirty work, private artifacts and unresolved proposals remain preserved; the [prior queue and snapshots](archive/static-2026-09-06/README.md) retain their evidence.
 
-**Blocked on:** separate main/Render authorization; no answer received. Existing [Win Now release](../docs/business/ops/2026-09-05-win-now.md) and [security release](../docs/plans/security-data-hardening/deployment.md) remain intact; forecast quality/availability and historical token cleanup are still separate follow-ups.
-
-**Don't repeat:** preserve the dirty original checkout and raw interview docs. Integration: `/private/tmp/ftf-owner-contracts-e8bWFV/integration`; clean build worktree: sibling `testflight`. EAS ignores Git ignore rules when `.easignore` exists: use the verified clean archive, never the raw-doc checkout. No simulator/Maestro, cleanup, flag flips or causal-Undo completion claims.
-
-## Table of Contents
-
-- [Current State — 2026-09-05](#current-state--2026-09-05)
-- [Handoff Template](#handoff-template)
-
-## Handoff Template
-
-Replace the four current-state buckets; link durable evidence instead of accumulating history.
+**Don't repeat:** use the clean workspace for new work. Do not overwrite it with old source mirrors, repeat stale unmerged claims, execute retired simulator tools or treat historical plans as shipped behavior. All existing nested worktrees remain excluded and untouched by this task.

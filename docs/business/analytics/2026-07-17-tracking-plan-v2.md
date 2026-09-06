@@ -144,7 +144,7 @@ Envelope addition: `user_events.country` — ISO-3166 alpha-2 from CDN geo heade
 
 ## Addendum 2026-08-08 — ESPN Connect WebView (Phase 1b, flag `espn.webview_capture`)
 
-Four client-fired events (`POST /api/events`) for the in-app ESPN login → native-cookie-store capture flow (`EspnConnectScreen`; scope `docs/plans/espn-connect-webview/scope.md`). Registered in `backend/analytics_taxonomy.py` (`ALLOWED_CLIENT_EVENTS` + `CLIENT_EVENT_PROPS`).
+Four client-fired events (`POST /api/events`) for the in-app ESPN login → native-cookie-store capture flow (`EspnConnectScreen`; scope `docs/plans/archive/2026/espn-connect-webview/scope.md`). Registered in `backend/analytics_taxonomy.py` (`ALLOWED_CLIENT_EVENTS` + `CLIENT_EVENT_PROPS`).
 
 | Event | Fires | Key props |
 |---|---|---|
@@ -197,7 +197,7 @@ The response-leg sibling of `trade_sent`, added with the MFL trade-lifecycle rou
 `league_id` rides the envelope column. **No trade contents, no MFL `trade_id`, no PII in props** — the funnel question is "are responses happening, and which kind", not which trade. Same WAT posture as `trade_sent`: in the taxonomy, not in `WAT_LIVE`.
 ## Addendum 2026-08-11 — P1 remediation, commit T1 (share loop + invite CTA)
 
-Registration-only. Four client-fired names and **two extended prop rows** landed in `backend/analytics_taxonomy.py` **before any P1 emitter shipped**, because that registry is default-deny behind a 200 (`analytics_ingest.py` counts + drops an unknown `event_type`, and pops an unregistered prop, with no error on either side). Plans: `docs/plans/audit-p1-remediation/` (`HLD-p1.md` §A.2, `LLD-p1-1-2.md` §10, `LLD-p1-5.md` §8). Binding decisions: `DECISIONS-p1.md`.
+Registration-only. Four client-fired names and **two extended prop rows** landed in `backend/analytics_taxonomy.py` **before any P1 emitter shipped**, because that registry is default-deny behind a 200 (`analytics_ingest.py` counts + drops an unknown `event_type`, and pops an unregistered prop, with no error on either side). Plans: `docs/plans/archive/2026/audit-p1-remediation/` (`HLD-p1.md` §A.2, `LLD-p1-1-2.md` §10, `LLD-p1-5.md` §8). Binding decisions: `DECISIONS-p1.md`.
 
 | Event | Class | Fires | Key props |
 |---|---|---|---|

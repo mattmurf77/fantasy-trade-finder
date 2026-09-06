@@ -1,3 +1,18 @@
+# Status — 279-aggregate-tier-labels
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-16",
+  "summary": "#279 — Aggregate pick-equivalent labels (LeagueSummaryScreen)",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-16 — experiment GRADUATED to all users (D-064) in the 2026-08-16 wave; no longer in features.json. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #279 — Aggregate pick-equivalent labels (LeagueSummaryScreen)
 
 **Status:** built-dark · 2026-08-09 · branch `worktree-agent-a1e9ac18717f11781`, experiment `aggregate_tier_labels`

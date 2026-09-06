@@ -1,7 +1,7 @@
 """Taxonomy registration for `swipe_guard_blocked` (deck double-fire guards).
 
 Tracking plan: docs/business/analytics/2026-08-18-swipe-guard-blocked.md
-Origin: docs/reviews/2026-08-18-bug-sweep/ticket.md §B4 · D-068 · G-049
+Origin: docs/reviews/2026/2026-08-18-bug-sweep/ticket.md §B4 · D-068 · G-049
 
 The registry is DEFAULT-DENY BEHIND A 200 — analytics_ingest counts and drops
 an unknown event type, and strips an unregistered prop, with a success-shaped

@@ -1,3 +1,12 @@
+```project-status
+{
+  "status": "needs-review",
+  "updated": "",
+  "summary": "Open-access onboarding — Phase A pre-flip gates",
+  "evidence": "Disposition remains absent, unclear, or internally qualified; preserve existing claims until reconciled. No explicit current status found in the prior index or the document set; see retained sources."
+}
+```
+
 # Open-access onboarding — Phase A pre-flip gates
 
 *QA run 2026-08-15. Gates specified by [`docs/business/product/2026-08-14-open-access-onboarding.md`](../business/product/2026-08-14-open-access-onboarding.md) §5 Phase A item 3, ratified by the operator 2026-08-15.*
@@ -167,11 +176,11 @@ inconclusive — it is positive evidence of defect 1**, and the rubric would hav
 
 *(measured.)* The harness was made to run on this machine: `maestro 2.5.1` with
 `JAVA_HOME=/opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home`, a fresh
-`mobile/scripts/sim-build.sh` Release build (the pre-existing binary was from 2026-08-11 07:28, which
+`archive/retired-tooling/mobile/scripts/sim-build.sh` Release build (the pre-existing binary was from 2026-08-11 07:28, which
 predates `e47d865` — the P0-8 tour commit S-43 belongs to — so it was not usable as evidence), and
-`mobile/scripts/sim-run.sh` against the canonical simulator `FTF-iOS18`, profile `fresh`, flags
+`archive/retired-tooling/mobile/scripts/sim-run.sh` against the canonical simulator `FTF-iOS18`, profile `fresh`, flags
 `backend/tests/fixtures/flags/onboarding-v2.json`, flow
-`mobile/.maestro/capture/onboarding-tour@fresh.yaml` (which already carries the S-43 variant walk — the rung
+`archive/retired-tooling/mobile/maestro/capture/onboarding-tour@fresh.yaml` (which already carries the S-43 variant walk — the rung
 loop taps `quick-set.chip.*` at `index: 0/1/2` before each save, `:269-318`).
 
 **Result: `[Passed] onboarding-tour@fresh (3m 43s)` — and it captured `onboarding__s5-0.png`. No `s5-1.png`
@@ -257,7 +266,7 @@ library entry) and a line in `living-memory/TEST_LEDGER.md`.
 | `fresh` computation, `pendingRegenRef` cleared on the first `complete` pass, `s5.1`/`s5.0` ternary | `mobile/src/screens/TradesScreen.tsx:2693-2715` | code-verified |
 | `s5.1` copy | `mobile/src/components/analystScript.ts:72-75` | code-verified |
 | Quick Set posts the handoff even on an all-skip walk | `mobile/src/screens/QuickSetTiersScreen.tsx:309`, `:336` | code-verified |
-| S-43 variant walk (real chip selections) already in the flow | `mobile/.maestro/capture/onboarding-tour@fresh.yaml:269-343` | code-verified |
+| S-43 variant walk (real chip selections) already in the flow | `archive/retired-tooling/mobile/maestro/capture/onboarding-tour@fresh.yaml:269-343` | code-verified |
 | **Simulator run: `[Passed] onboarding-tour@fresh (3m 43s)`, captured `s5-0`, no `s5-1`** | 11 frames + `flask.log` + `junit.xml` in this session's scratch dir (`…/scratchpad/capture-out/`, `…/scratchpad/capture-report/`) — **ephemeral, copy them out before the session ends if they are wanted as a durable artifact**; the backend log shows 2× `POST /api/tiers/save` (18:22:14, 18:22:21) then the forced `POST /api/trades/generate` (18:22:24) and its completed status poll (18:22:33), with `s5-0.png` written at 18:22:43 | measured |
 | `s5-1.png` still absent from the screen library | `screens/mobile/onboarding/` (has `s5-0.png`) | measured |
 

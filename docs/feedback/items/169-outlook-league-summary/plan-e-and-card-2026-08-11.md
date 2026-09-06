@@ -73,7 +73,7 @@ Two client-only mobile changes, one branch, one PR:
 |---|---|---|---|
 | W1 | Frame E strip + its analytics event | `mobile/src/screens/LeagueSummaryScreen.tsx`, new `mobile/src/state/outlookStrip.ts`, `backend/analytics_taxonomy.py` (+ its test), `docs/business/analytics/2026-07-17-tracking-plan-v2.md` (addendum) | build agent A |
 | W2 | Card disposition move | `mobile/src/components/TradeCard.tsx`, `mobile/src/screens/TradesScreen.tsx` | build agent B |
-| W3 | Tests + flows | `mobile/tests/check-card-disposition.js` (new), `mobile/package.json` (`test:card-disposition` runner), `mobile/.maestro/flows/smoke/06-trades-deck.yaml` (positional extend), `mobile/.maestro/capture/onboarding-tour@fresh.yaml` (re-derive disposition anchors) | build agent B |
+| W3 | Tests + flows | `mobile/tests/check-card-disposition.js` (new), `mobile/package.json` (`test:card-disposition` runner), `archive/retired-tooling/mobile/maestro/flows/smoke/06-trades-deck.yaml` (positional extend), `archive/retired-tooling/mobile/maestro/capture/onboarding-tour@fresh.yaml` (re-derive disposition anchors) | build agent B |
 | W4 | Docs + invariants | `docs/cross-client-invariants.md` (Pass/Like), `living-memory/*`, screen/component CLAUDE.md rows | primary session |
 
 W1 and W2/W3 touch disjoint files → parallel build agents. W4 stays with the

@@ -63,7 +63,7 @@
   families; `mobile/scripts/testid-lint.sh` must stay green)
 - **Capture delta:** none — simulator captures retired per D-056; visual
   verification of the count construction is TestFlight checklist steps 7–8
-- Smoke-suite impact: n/a per D-056 (`mobile/.maestro/` flows are historical
+- Smoke-suite impact: n/a per D-056 (`archive/retired-tooling/mobile/maestro/` flows are historical
   artifacts, never run)
 - Backend: pytest files added/updated: **none — no backend change** (#318
   route and `retracted_at` suppression verified correct and untouched:

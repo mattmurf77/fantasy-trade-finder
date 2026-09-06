@@ -1,3 +1,12 @@
+```project-status
+{
+  "status": "reference",
+  "updated": "",
+  "summary": "ESPN One-Click Trade Send — Research Report (2026-08-11)",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: reference  — Per-platform trade-lifecycle research. Prior row preserved at ../reviews/2026/2026-09-06-project-status-migration/plans-index.md."
+}
+```
+
 # ESPN One-Click Trade Send — Research Report (2026-08-11)
 
 > Subagent research: how to give ESPN users the same one-click trade send Sleeper users have today. Companion report: [send-in-mfl-research-2026-08-11.md](send-in-mfl-research-2026-08-11.md). Research only — no code written.
@@ -23,7 +32,7 @@ Key fact for parity thinking: **the entire UX is one tap because the backend hol
 - **Routes** (all 404 dark unless `espn.link` is on): `POST /api/espn/link` (`server.py:18619`), `GET /api/espn/leagues`, `GET /api/espn/my-leagues` (fan.api.espn.com, behind `espn.league_picker`), `POST /api/espn/import`.
 - **Flags**: `espn.link` (master + kill switch), `espn.webview_capture` (native cookie-store capture, mirrors SleeperConnectScreen), `espn.league_picker` — all default OFF (`backend/feature_flags.py:144-168`).
 - **Trade surfaces**: ESPN leagues are read-only; `SendInSleeperButton` deliberately returns null for ESPN leagues (#146 — with a known UX gap: no copy explains why; see `backend/tests/fixtures/profiles/espn.json`).
-- **Standing decision**: `docs/plans/espn-league-linking-plan-2026-07-11.md` §2/§7 says **"Send in ESPN (write) — ❌ never on this plan"** — rationale: writes against a Disney property are a categorically worse legal/ban posture than reads; "copy trade to clipboard is the ceiling." Also notes ESPN dynasty leagues don't expose tradeable future picks the way Sleeper's `traded_picks` does → any ESPN send is players-only. Reversing this requires a DECISIONS.md check per project rules.
+- **Standing decision**: `docs/plans/archive/2026/espn-league-linking-plan-2026-07-11.md` §2/§7 says **"Send in ESPN (write) — ❌ never on this plan"** — rationale: writes against a Disney property are a categorically worse legal/ban posture than reads; "copy trade to clipboard is the ceiling." Also notes ESPN dynasty leagues don't expose tradeable future picks the way Sleeper's `traded_picks` does → any ESPN send is players-only. Reversing this requires a DECISIONS.md check per project rules.
 
 ## 3. ESPN's surface (external research)
 
@@ -94,11 +103,11 @@ Suggested sequence: C+D behind an `espn.send` flag → spike A (see unknowns) �
 3. **`espn_s2` lifetime & refresh UX.** Measure actual expiry on a live token; design silent re-auth (FTF's Sleeper Keychain-replay pattern won't transfer since ESPN cookies rotate more aggressively).
 4. **Dynasty pick handling.** ESPN doesn't expose tradeable future picks like Sleeper — confirm whether picks can even be included in an ESPN `TRADE_PROPOSAL` item, or whether every ESPN send is players-only (and word the UI accordingly).
 5. **League-vote / approval mechanics.** ESPN leagues route proposals through league vote/veto and (in some settings) commissioner review — confirm the proposal lands as PENDING correctly and that "proposed" means the same thing it does on Sleeper.
-6. **ToS/decision reversal.** Operator sign-off + DECISIONS.md entry required before any A work, given the explicit NO-GO in `docs/plans/espn-league-linking-plan-2026-07-11.md`.
+6. **ToS/decision reversal.** Operator sign-off + DECISIONS.md entry required before any A work, given the explicit NO-GO in `docs/plans/archive/2026/espn-league-linking-plan-2026-07-11.md`.
 
 ## Sources
 
-- FTF codebase: `backend/sleeper_write.py`, `backend/espn_service.py`, `backend/server.py` (routes 12163/12294/18619/20751), `backend/database.py` (1273/1299), `backend/feature_flags.py`, `mobile/src/components/SendInSleeperButton.tsx`, `mobile/src/screens/SleeperConnectScreen.tsx`, `web/js/app.js`, `extension/manifest.json`, `docs/plans/espn-league-linking-plan-2026-07-11.md`, `backend/tests/fixtures/profiles/espn.json`
+- FTF codebase: `backend/sleeper_write.py`, `backend/espn_service.py`, `backend/server.py` (routes 12163/12294/18619/20751), `backend/database.py` (1273/1299), `backend/feature_flags.py`, `mobile/src/components/SendInSleeperButton.tsx`, `mobile/src/screens/SleeperConnectScreen.tsx`, `web/js/app.js`, `extension/manifest.json`, `docs/plans/archive/2026/espn-league-linking-plan-2026-07-11.md`, `backend/tests/fixtures/profiles/espn.json`
 - https://github.com/cwendt94/espn-api and issues [#547](https://github.com/cwendt94/espn-api/issues/547), [#58](https://github.com/cwendt94/espn-api/issues/58); [mkreiser/ESPN-Fantasy-Football-API #132](https://github.com/mkreiser/ESPN-Fantasy-Football-API/issues/132)
 - https://github.com/garavitgabriel/espn-fantasy-claude-openclaw (write API brief + trade payload)
 - https://github.com/AbdulsaboorS/fantasybasketballbot, https://github.com/mcolen5050/FantasyFootballAutomation_public

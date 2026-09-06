@@ -247,10 +247,10 @@ const inNewTree = (id) => [...(idsToFiles.get(id) || [])].some((f) => f.startsWi
            + 'plan §5 removes the header close control along with the page-sheet');
   }
 
-  // 3b. mobile/.maestro — flows are frozen artifacts under D-056, but a flow
+  // 3b. archive/retired-tooling/mobile/maestro — flows are frozen artifacts under D-056, but a flow
   // that taps a control the build no longer has is a lie in the record.
   if (!fs.existsSync(MAESTRO)) {
-    ok('mobile/.maestro absent — nothing to check');
+    ok('archive/retired-tooling/mobile/maestro absent — nothing to check');
   } else {
     const yamls = [];
     const walkY = (dir) => {
@@ -269,9 +269,9 @@ const inNewTree = (id) => [...(idsToFiles.get(id) || [])].some((f) => f.startsWi
       });
     }
     if (hits.length === 0) {
-      ok(`${DELETED} is gone from mobile/.maestro (${yamls.length} flow files scanned)`);
+      ok(`${DELETED} is gone from archive/retired-tooling/mobile/maestro (${yamls.length} flow files scanned)`);
     } else {
-      fail(`${DELETED} is gone from mobile/.maestro`,
+      fail(`${DELETED} is gone from archive/retired-tooling/mobile/maestro`,
            `still tapped at ${hits.join(', ')} — the control no longer exists in the build`);
     }
   }

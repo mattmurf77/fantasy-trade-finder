@@ -1,3 +1,18 @@
+# Status — 277-tier-labels-appwide
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-09",
+  "summary": "#277 / #278 / #280 / #281 — Tier labels wherever players display (app-wide deep pass)",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-09 — #277/#278/#280/#281 fable deep pass, 28 files — CHANGELOG 2026-08-09 wave 3. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #277 / #278 / #280 / #281 — Tier labels wherever players display (app-wide deep pass)
 
 > Status: **in-progress** (built on worktree branch `teardown-remediation`,

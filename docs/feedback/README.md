@@ -16,5 +16,5 @@ Historical intake/audit snapshots at this level, not the current queue:
 [`perf-audit-2026-05-21.md`](perf-audit-2026-05-21.md).
 
 Scratch work goes in the gitignored root-level `feedback-workspace/<id>/`, never in here.
-Batches before item #64 stay in [`../plans/feedback-batch-2/`](../plans/feedback-batch-2/),
+Batches before item #64 stay in [`../plans/feedback-batch-2/`](../plans/archive/2026/feedback-batch-2),
 [`-3/`](../plans/feedback-batch-3/), [`-4/`](../plans/feedback-batch-4/) as history.

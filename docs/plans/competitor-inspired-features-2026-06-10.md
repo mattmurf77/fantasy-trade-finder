@@ -1,6 +1,15 @@
+```project-status
+{
+  "status": "reference",
+  "updated": "",
+  "summary": "Competitor-Inspired Feature Ideas — 2026-06-10",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: reference  — The 92-item ranked backlog that [competitor-top20/](competitor-top20/) drills into. Prior row preserved at ../reviews/2026/2026-09-06-project-status-migration/plans-index.md."
+}
+```
+
 # Competitor-Inspired Feature Ideas — 2026-06-10
 
-Operator ideas sparked by the competitor teardowns ([DynastyGM](../competitor-teardown-dynastygm.md), [DynastyDealer](../competitor-teardown-dynastydealer.md), [web tools](../competitor-teardown-web-tools.md)). Status: captured, not yet scheduled. Engine references are to `backend/trade_service.py` config keys as of branch `trade-engine-v2`.
+Operator ideas sparked by the competitor teardowns ([DynastyGM](../research/competitors/competitor-teardown-dynastygm.md), [DynastyDealer](../research/competitors/competitor-teardown-dynastydealer.md), [web tools](../research/competitors/competitor-teardown-web-tools.md)). Status: captured, not yet scheduled. Engine references are to `backend/trade_service.py` config keys as of branch `trade-engine-v2`.
 
 ---
 

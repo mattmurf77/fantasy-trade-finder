@@ -536,7 +536,7 @@ number of new test functions).
 
 ### Simulator / Maestro
 
-- **Relevant existing flows:** `mobile/.maestro/flows/rookie/d1-draft-room-complete.yaml`
+- **Relevant existing flows:** `archive/retired-tooling/mobile/maestro/flows/rookie/d1-draft-room-complete.yaml`
   and `d2-draft-room-order-not-set.yaml`. Both drive the Draft Room through the
   QA harness user `qa_standard` on the **Sleeper** Lakeview corpus
   (`1312076055586050048`). They are the right *no-regression* check and prove

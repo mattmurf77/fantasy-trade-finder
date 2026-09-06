@@ -1,3 +1,18 @@
+# Status — 266-espn-link-buttons
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-08",
+  "summary": "#266 — Both link buttons dead on LeaguePicker when arriving via the Settings ESPN row",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-08 — transitionEnd deferral; merge `b682ee2` → `8c3c742`, build 91. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #266 — Both link buttons dead on LeaguePicker when arriving via the Settings ESPN row
 
 **Covered feedback IDs:** #266

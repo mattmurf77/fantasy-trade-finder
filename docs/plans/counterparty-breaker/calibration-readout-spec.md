@@ -97,7 +97,7 @@ automatically — which is exactly what makes §2.4 dangerous.
 Render deploy following immediately. The merge SHA is the boundary marker; the bracketing
 `model_config_changes` rows date it. It re-benchmarks the package depth discount to **the
 trade's best asset** (the "4 mids for a stud scored fair" defect, analysed in
-`docs/reviews/2026-08-21-market-curve-comparison.md`, now on `main`). The breaker's
+`docs/reviews/2026/2026-08-21-market-curve-comparison.md`, now on `main`). The breaker's
 `value_giving` math reads package-adjusted values, so **its severities inherit the semantics
 change**. Rollback note: **D-143** records the pair-rollback rule — the benchmark fix and the
 sweetener revert TOGETHER, never separately.

@@ -49,7 +49,7 @@
 - Screens compose from [`../components/`](../components/CLAUDE.md) and read tokens from [`../theme/`](../theme/CLAUDE.md). No inline hexes or px.
 - **Root-stack pushes mount their own `<FeedbackFAB activeScreen="<RouteName>" aboveTabBar={false} />`.** Tab-stack screens do not — RootNav's global mount covers them, and a second one is the #196/#197 bug. Screens with a pinned bottom bar call `setPinnedBottomBarHeight` instead.
 - **Root-stack pushes over the `headerShown:false` Main tabs need the explicit `HeaderBack` control** — native back is dead on iOS 26 (RNS#3294).
-- Every interactive element gets a `testID` from the grammar in [docs/plans/mobile-testing/lld.md](../../../docs/plans/mobile-testing/lld.md) Appendix A; `bash ../../scripts/testid-lint.sh` enforces it in CI (this survived the Maestro retirement).
+- Every interactive element gets a `testID` from the grammar in [docs/plans/archive/2026/mobile-testing/lld.md](../../../docs/plans/archive/2026/mobile-testing/lld.md) Appendix A; `bash ../../scripts/testid-lint.sh` enforces it in CI (this survived the Maestro retirement).
 
 ## Adding a screen
 

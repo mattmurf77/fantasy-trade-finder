@@ -13,7 +13,7 @@ Batch under test: #126 verify-persistence, #131 apple-entitlement, plus built it
 - Rails audit at end of runs: `vcr_misses=0, sleeper_live_egress_attempts=0, completed_proposes=0` — clean.
 - Fixture DB note: for the #126 R-6/R-7 checks I set `users.verified_via='sleeper'` for qa_standard directly in `data/ui-test/standard.db` (verified-controller state is not otherwise reachable on sim — no injection route exists). DB re-seeded to pristine afterward.
 - pytest: `backend/tests/test_verified_sessions.py -q` → **20 passed** (0.70s). Full `backend/tests/ -q` → **558 passed** (6.40s). `test_dp_crosswalk_position.py` alone → 4 passed.
-- Ad-hoc scratch flows + full Maestro/Flask/pytest logs preserved at `feedback-workspace/126/qa-round-1-agent-A/` (nothing added to `mobile/.maestro/`). Screenshots in `mobile/.maestro/screenshots/`; Maestro failure artifacts in `~/.maestro/tests/2026-07-12_*/`.
+- Ad-hoc scratch flows + full Maestro/Flask/pytest logs preserved at `feedback-workspace/126/qa-round-1-agent-A/` (nothing added to `archive/retired-tooling/mobile/maestro/`). Screenshots in `archive/retired-tooling/mobile/maestro/screenshots/`; Maestro failure artifacts in `~/.maestro/tests/2026-07-12_*/`.
 
 ## Results
 
@@ -53,7 +53,7 @@ Batch under test: #126 verify-persistence, #131 apple-entitlement, plus built it
 
 ### F-1: legacy smoke 01-launch asserts stale copy "Connect"
 - Severity: minor (brittle test — app renders correctly)
-- Repro: `maestro --device <UDID> test mobile/.maestro/01-launch.yaml`
+- Repro: `maestro --device <UDID> test archive/retired-tooling/mobile/maestro/01-launch.yaml`
 - Expected (flow) "Connect" visible vs actual: sign-in screen now reads "Sign in with Apple" / "Continue with Sleeper →" (account-first redesign, 1.7.x); "Dynasty Fantasy Football" assert still passes. App boot itself is healthy.
 - Evidence: `~/.maestro/tests/2026-07-12_124336/screenshot-❌-*.png`
 - Suspicion for resolution: selector update needed, not an app fix. Do NOT loosen; per README, update the matcher.
@@ -71,7 +71,7 @@ Batch under test: #126 verify-persistence, #131 apple-entitlement, plus built it
 
 ### F-4: flow 11 Part 2 blocked by a persistent OS alert on a sim with no Apple ID [SIM-ENV-SUSPECT]
 - Severity: minor (environment/flow-design surface; the regression sensor — Part 1 — is green)
-- Repro: run `mobile/.maestro/flows/smoke/11-apple-entitlement.yaml` on FTF-iOS18 with no Apple Account signed in. Part 1 taps `signin.apple-btn`; instead of the pinned failure copy (which would indicate the entitlement regression) iOS raises the **system alert "Sign in to your Apple Account — You need to sign in to your Apple Account in Settings."** Part 1's asserts correctly pass (no pinned copy, no `signin.error-text` — the flow comment explicitly counts a native sheet as PASS). Part 2's `launchApp (stopApp)` then relaunches the app, but this alert belongs to the OS layer and **survives the relaunch**, occluding the hierarchy → `signin.username-input` never matches within 15s.
+- Repro: run `archive/retired-tooling/mobile/maestro/flows/smoke/11-apple-entitlement.yaml` on FTF-iOS18 with no Apple Account signed in. Part 1 taps `signin.apple-btn`; instead of the pinned failure copy (which would indicate the entitlement regression) iOS raises the **system alert "Sign in to your Apple Account — You need to sign in to your Apple Account in Settings."** Part 1's asserts correctly pass (no pinned copy, no `signin.error-text` — the flow comment explicitly counts a native sheet as PASS). Part 2's `launchApp (stopApp)` then relaunches the app, but this alert belongs to the OS layer and **survives the relaunch**, occluding the hierarchy → `signin.username-input` never matches within 15s.
 - Expected (PRD R-5 note) vs actual: the flow comment assumes "Relaunch (state kept — still signed out) to dismiss any native sheet" — that assumption does not hold for this alert class. The PRD's known-flake note anticipated a code-1000 rejection on sim; the observed behavior is a third variant (OS sign-in prompt), which is *consistent with the entitlement being honored* but makes Part 2 unrunnable in this cell without manually closing the alert (I dismissed it via a scratch tap-Close flow to unblock the rest of the batch).
 - Verdict recording per orchestrator adjudication: observation only; NOT claimed as a build defect. Entitlement ground truth remains the R-8 device-artifact codesign (BLOCKED here).
 - Evidence: `~/.maestro/tests/2026-07-12_125836/screenshot-❌-*.png` (alert over sign-in screen), maestro-11-apple.log.
@@ -97,4 +97,4 @@ Batch under test: #126 verify-persistence, #131 apple-entitlement, plus built it
 
 - Flow 11 Part 1's optional 3s probe emitted the expected "Warning: Assertion is false" (the probe timing out is the green path) — not a failure.
 - The Tiers screen lands on the QB tab by default with the SF TEP format pre-selected for qa_standard (legacy 03 expected an RB-default; irrelevant once selectors are fixed, but noted for whoever updates the flow).
-- All ad-hoc flows were scratch files under the session scratchpad (copies preserved in `feedback-workspace/126/qa-round-1-agent-A/`); nothing was added to or changed in `mobile/.maestro/` and no test YAML, app code, or fixture code was modified. The only environment mutations were: one fixture-DB `verified_via` UPDATE (reverted by reseed), Flask start/stop on :5001, and dismissing the F-4 OS alert.
+- All ad-hoc flows were scratch files under the session scratchpad (copies preserved in `feedback-workspace/126/qa-round-1-agent-A/`); nothing was added to or changed in `archive/retired-tooling/mobile/maestro/` and no test YAML, app code, or fixture code was modified. The only environment mutations were: one fixture-DB `verified_via` UPDATE (reverted by reseed), Flask start/stop on :5001, and dismissing the F-4 OS alert.

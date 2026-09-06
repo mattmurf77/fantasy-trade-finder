@@ -55,7 +55,7 @@ reachability later needs measuring, that is a new event on `RankHome`, not on th
 - `testID`s added/renamed: **none** (`rank.more-ways` keeps its id; `stack.back-btn` still
   ships on League/Draft/RankHome headers). `testid-lint OK`.
 - Backend pytest: **n/a** — client-only navigation change.
-- **Existing `mobile/.maestro/` flows that tap `rank.more-ways` expecting the sheet
+- **Existing `archive/retired-tooling/mobile/maestro/` flows that tap `rank.more-ways` expecting the sheet
   (`capture/sheets/sheets-rank-menu.yaml` and others) now document stale behavior.** Left
   in place per [D-056] ("historical artifacts — kept, never run"); flagged here so a future
   reader doesn't mistake them for current truth.

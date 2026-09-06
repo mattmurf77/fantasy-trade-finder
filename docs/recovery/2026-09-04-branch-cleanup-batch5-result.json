@@ -1,0 +1,390 @@
+{
+  "batch": 5,
+  "completed": true,
+  "deleted": 76,
+  "deletedRefs": [
+    {
+      "ref": "refs/remotes/origin/analytics-300",
+      "sha": "0b6487163b14990af330612a6b1818ca31da6d2d",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/chore/commit-docs-and-claude-tree",
+      "sha": "e00940d8c4ce36be2d082f985c76c99bb2c49e11",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/chore/eas-submit-ascappid",
+      "sha": "8353ec3075826d6db89efbf4231e86d137450959",
+      "evidence": "All changed-path contents equal current main"
+    },
+    {
+      "ref": "refs/remotes/origin/chore/session-wrapup",
+      "sha": "4340b60473bc1ab6d39fd80f3d312ad4a6e8c778",
+      "evidence": "ANCESTOR"
+    },
+    {
+      "ref": "refs/remotes/origin/claude/api-audit-redundancies-9a6075",
+      "sha": "b8c8dd598e5d5302b240a4fc3e78b9265bd76ede",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/claude/busy-swartz-521ff5",
+      "sha": "18f15f7ad36ca988ef364fc4d0041218f7313a52",
+      "evidence": "ANCESTOR"
+    },
+    {
+      "ref": "refs/remotes/origin/claude/finder-gap-analysis-writeback",
+      "sha": "3f5af51c3e496c48a958171425933177cf9f9691",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/claude/ftf-file-continuation-c9185e",
+      "sha": "5adc848474f4b766101f2f1d56127577d066ab88",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/claude/new-user-feedback-55320e",
+      "sha": "f7833d566f9fddf1c320e7f217a843ce7435a1e0",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/claude/new-user-feedback-d4c47d",
+      "sha": "62bd658f65639772a8ca70f92bb74f769b1f2389",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/claude/propose-label-writeback",
+      "sha": "f7885524c22e648c9941061c58ebb665dd2623fc",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/claude/q035-q036-operator-answers",
+      "sha": "832d9ca1e34f3808ecebef3c3ceb7a1910e626e4",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/claude/ram-mascot-fleeced",
+      "sha": "a9b86950dad2975976f383cd1fa8beb242425f02",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/claude/team-outlook-experience-27a7a1",
+      "sha": "b3f7d92bd20a68cd7af9eb36da0d463a69326b9a",
+      "evidence": "ANCESTOR"
+    },
+    {
+      "ref": "refs/remotes/origin/closeout-mock-draft",
+      "sha": "aaa98449d4fdcb4c2c351018f03b1a7613c7dc88",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/closeout-wave",
+      "sha": "68e0b4dfc6ca28bc52d0279344f7e805e283f112",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/context-slim-2026-08-08",
+      "sha": "4a381f7eefd535a02018f0b2c7587175c66d9f0f",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/docs-297-302-artifacts",
+      "sha": "7f7524c3822d4feaf3e86223cc204626d3961a2b",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/docs/feedback-batch-2-prds",
+      "sha": "b59951c984db0318946e11c798b67788ff929f0a",
+      "evidence": "All changed-path contents equal current main"
+    },
+    {
+      "ref": "refs/remotes/origin/docs/navdoc-refresh-2026-08-18",
+      "sha": "38a989c88b054ac2d90f443e4866a4faa10f96a3",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/docs/null-dwell-writeback",
+      "sha": "80bb318c0b6e31db48f155edd1eaca4cbb8e3412",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/feat/datetime-utcnow-cleanup",
+      "sha": "4a8722959d4c20ab7a324292eff4e3042de0727b",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/feat/espn-credential-verify",
+      "sha": "2fa1ff24f0ceb143d7b23b79ed5ea874a218a619",
+      "evidence": "ANCESTOR"
+    },
+    {
+      "ref": "refs/remotes/origin/feat/fb-07-trios-cleanup",
+      "sha": "fa9979bda197ca601b919f938fec55d2fd9a6314",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/feat/feedback-admin-list",
+      "sha": "8eabe6c3d111b83fe97fdbe9a20e4bb42356fa4e",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/feat/feedback-batch-4-polish",
+      "sha": "1d3ffca88de44f41a62e45bf3d3d43437d018785",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/feat/feedback-liked-trades-waiting",
+      "sha": "8026b7fbc32c3c2a7ddd69aa7585eaf20d94979f",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/feat/init10-player-view-param",
+      "sha": "2cb2ce792269736d2f41817c54eac77031170334",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/feat/jon-360-362",
+      "sha": "482b07dd9b86438c20e4593570fd8eeb87d07273",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/feat/light-tier-flags",
+      "sha": "a362a15ad810b579d73940ffa0a485d1ec55ce86",
+      "evidence": "ANCESTOR"
+    },
+    {
+      "ref": "refs/remotes/origin/feat/mfl-send-integrated",
+      "sha": "3af201ac7ddd3f18c58fe0f6d7c7fd39c9ccfd4e",
+      "evidence": "ANCESTOR"
+    },
+    {
+      "ref": "refs/remotes/origin/feat/send-auth-lazy",
+      "sha": "7315d8c62ec30ad47f2a27fdc7d6cbf5ef84aa05",
+      "evidence": "ANCESTOR"
+    },
+    {
+      "ref": "refs/remotes/origin/feat/send-in-espn",
+      "sha": "f89d8805c4ebd436705f5d59da1edc4fa9c2c82f",
+      "evidence": "ANCESTOR"
+    },
+    {
+      "ref": "refs/remotes/origin/feat/sleeper-reachability-probe",
+      "sha": "1f349bd3cbb7742ff3e4301e77e8e7c296eff72d",
+      "evidence": "ANCESTOR"
+    },
+    {
+      "ref": "refs/remotes/origin/feat/team-review-batch-2",
+      "sha": "f56216e5931d336051648b889c23700ce74a1398",
+      "evidence": "ANCESTOR"
+    },
+    {
+      "ref": "refs/remotes/origin/feat/wave1-perf-code",
+      "sha": "f248197bbd348fd6790506c51fc6d474c7acb1a5",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/feat/wave2-init07",
+      "sha": "241f2232fc4030e410a902433d69de43fb6ff792",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/feat/wave2-init08-client",
+      "sha": "8c2b5ec37c42e4aded02dfd7bb06bd6fd7fc4575",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/feat/wave2-init09-trade-prune",
+      "sha": "bec210780d0049e28c9f91c6f1c3cb4e3688c927",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/feat/wave2-init11a-13",
+      "sha": "040188162b92af41f980d1694d47f69ca0f0ab8c",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/feat/wave2-init12b",
+      "sha": "20bebe4ceb3065752f954c24d97b259a0bffe158",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/feat/wave2-init14b-db-hygiene",
+      "sha": "cd1248c2b314c536e119c3b130e4b1157bd7f9cf",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/feat/wave2-init15-docs",
+      "sha": "a75ba55a6cf00d6f8a9714764e980f913bceb2f5",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/feat/window-composite",
+      "sha": "bbc2e4b166925c4417bb5ec559a9241354b1b9fb",
+      "evidence": "ANCESTOR"
+    },
+    {
+      "ref": "refs/remotes/origin/feedback-289-294",
+      "sha": "660004c13c74e18d3ef2054e87bb925091c97cd1",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/feedback-integration-v2",
+      "sha": "8cbedf8c6927d0f1413146b2e7a3d4b248ef1174",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/fix-easignore-screens",
+      "sha": "978910a4741dc511358931c5de337ec35aea9497",
+      "evidence": "All changed-path contents equal current main"
+    },
+    {
+      "ref": "refs/remotes/origin/fix/feedback-qc-trio-throttle",
+      "sha": "973ad489cda2b18880fb623eab269bd7bff921e9",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/fix/feedback-rehydrate-unsynced",
+      "sha": "cacde8af44ab65befae2b3941ccb777d617915a3",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/fix/feedback-tiers-ux",
+      "sha": "c693581795c7b62138a348d4b60d0c4d9003b247",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/fix/feedback-trade-match-100",
+      "sha": "317e42969a449c3ec34920d9e8540f65eed24114",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/fix/feedback-trios-polish",
+      "sha": "cdeb130914e8f72916216764910caaeaf77ab1ab",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/fix/finder-conditions-and-partners-copy",
+      "sha": "bda0d51844b289dc509f84c71c8a44a15f742fac",
+      "evidence": "ANCESTOR"
+    },
+    {
+      "ref": "refs/remotes/origin/fix/pick-assignment-missing-user-team-clean",
+      "sha": "fc260dea52f39590f4e8b3ac100e83a0d4a5c424",
+      "evidence": "ANCESTOR"
+    },
+    {
+      "ref": "refs/remotes/origin/fix/review-batch-backend-perf",
+      "sha": "8c3a5550b63a53f27af467bbfac280266f41df76",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/fix/review-cache-and-mutations",
+      "sha": "9d99ab81efec8e35f3a1f5aa08f3a931b850f325",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/fix/review-flags-and-notifications",
+      "sha": "78b1568fa9275544bb2b32220b169816d208825d",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/fix/session-init-parallelization",
+      "sha": "5e1a5a879b6cad551b4e0d38f35c51dddd47fef4",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/fix/test-user-logins",
+      "sha": "be9afbd4482fbd432bb2c283bf778d2eafa970a5",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/fix/test-user-logins-tev2",
+      "sha": "34b8d4c3eeaf835efd4bcae94721cf30ae126965",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/fix/tiers-drag-worklet-crash",
+      "sha": "ee8c48b5ca0db2d80a9ae0d0f61cb34b709a03f1",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/fix/tiers-drop-coord-space",
+      "sha": "0a924974a990b96ec7ba98d8a1bfa45ddb430c1d",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/fix/tiers-multiselect",
+      "sha": "ad8471b51f6d92b6c35871c42055061dbd2d32c9",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/living-memory-2026-08-10",
+      "sha": "3f073a57543b0cb1b76319d80aca6040fa02bd2c",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/living-memory-revival",
+      "sha": "f949fec2639dc509d92af217d5c84be52ea76f75",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/mobile-version-1.12.0",
+      "sha": "c65493dec2b847ef08ad0a7f08bf8217ed90630c",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/mock-draft-fix",
+      "sha": "258940ff7a41b8c3fca9f56eb3e7f393a77993ce",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/perf/league-matches-progressive-paint",
+      "sha": "9a3475dfae187d8c7de27170a17de9c651b3e086",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/perf/trade-tier-priority",
+      "sha": "b12488d25c2454b461d4b830d0ed79415d08fed0",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/perf/trios-fast-load",
+      "sha": "dd8f95b0d2d5d433ac42c3492c549a1a0eab3163",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/perf/warm-endpoint-and-boot-ping",
+      "sha": "0eca3c4e003a90578a3ed6f0e3a4bc64f478bd05",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/screen-library-2026-08-09",
+      "sha": "dc91a91bd4a88e08f5a9c4e907e698fded436785",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/session-closeout-2026-08-12",
+      "sha": "bc5521f713a05feecbd230027ce183e8330f877f",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    },
+    {
+      "ref": "refs/remotes/origin/teardown-remediation",
+      "sha": "2c10f4cc22bdb8dda49957ac7b6e92c76bee99a8",
+      "evidence": "ANCESTOR"
+    },
+    {
+      "ref": "refs/remotes/origin/trade-engine-v2",
+      "sha": "ca2b26aad6c695a662895fee8c5108fd291af200",
+      "evidence": "ANCESTOR"
+    },
+    {
+      "ref": "refs/remotes/origin/wave-integration",
+      "sha": "11e468bb852404c7e26a88b3acea60b05f7b5ca8",
+      "evidence": "Whitespace-preserving aggregate patch equal main integration"
+    }
+  ],
+  "held": [],
+  "authenticatedAccount": "mattmurf77",
+  "globalAccountChanged": false
+}

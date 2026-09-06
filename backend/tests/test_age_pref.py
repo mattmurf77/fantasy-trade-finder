@@ -1,4 +1,4 @@
-"""Age-preference consensus value multiplier (docs/plans/age-pref-value/scope.md,
+"""Age-preference consensus value multiplier (docs/plans/archive/2026/age-pref-value/scope.md,
 evidence docs/business/analytics/2026-08-29-trade-disposition-review.md).
 
 Covers `trade_service.age_pref_value`: band boundaries at the taste_service

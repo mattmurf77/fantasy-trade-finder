@@ -1,3 +1,18 @@
+# Status — 261-risers-exclude-picks
+
+```project-status
+{
+  "status": "in-progress",
+  "updated": "2026-08-08",
+  "summary": "#261 — Exclude draft picks from Risers / Fallers",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: in-progress 2026-08-08 — worktree agent-a795927256b2f29e7. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #261 — Exclude draft picks from Risers / Fallers
 
 **Report (app v1.11.0, screen LeagueHome, severity bug):** "Draft picks
@@ -98,7 +113,7 @@ $ grep -n "_is_pick_asset\|GENERIC_PICK_ID_PREFIX" backend/trends_service.py
 
 **Not run** (batch QA round owns these): iOS simulator, Maestro, any live
 Flask server. The regression flow is specified but not authored — see
-[`prd.md` §6](prd.md) for why (`mobile/.maestro/flows/smoke/12-market-movers.yaml`
+[`prd.md` §6](prd.md) for why (`archive/retired-tooling/mobile/maestro/flows/smoke/12-market-movers.yaml`
 needs the UI-test seed DB to carry two `player_value_history` days with a
 moved pick rung before the sheet exists at all).
 

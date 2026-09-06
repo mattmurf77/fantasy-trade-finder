@@ -1,3 +1,18 @@
+# Status — 409-like-not-league-member
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-30",
+  "summary": "FB-409 — \"error when liking trades that a user isn't in this league\"",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-30 — ✓ queue 100% refusal since 2026-08-22 (G-063 caller exclusion); backend PR #254, superseded by D-170 (2026-08-31) which removed the validation gate entirely. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # FB-409 — "error when liking trades that a user isn't in this league"
 
 **Status:** open · 2026-08-30 · triage only, no branch (fix not yet built)

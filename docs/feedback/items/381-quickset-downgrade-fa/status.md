@@ -1,3 +1,18 @@
+# Status — 381-quickset-downgrade-fa
+
+```project-status
+{
+  "status": "planned",
+  "updated": "2026-08-24",
+  "summary": "FB-381",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: planned 2026-08-24 — G-F satellite (detailed repro), canonical `346-quickset-tier-drop/`. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # FB-381
 - **Status:** planned 2026-08-24
 - **Group:** F — QuickSet tier drop (this item holds the detailed repro)

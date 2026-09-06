@@ -110,7 +110,7 @@ def test_three_player_exact_sequential():
 
 # ── 4. Override pinning ─────────────────────────────────────────────────────
 #
-# UPDATED 2026-08-18 (F2, docs/reviews/2026-08-18-valuation-age-audit.md §8).
+# UPDATED 2026-08-18 (F2, docs/reviews/2026/2026-08-18-valuation-age-audit.md §8).
 # The pin is no longer permanent: a ranking swipe recorded AFTER it releases
 # the player, because the user's most recent expression of preference should
 # beat their older one. The old contract — "an overridden player's Elo never

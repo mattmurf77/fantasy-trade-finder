@@ -1,3 +1,18 @@
+# Status — 294-picks-position-filters
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-10",
+  "summary": "FB-294 — Position filters drop draft-pick value",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-10 — PR #103 — G3, canonical `293-picks-in-subsets/`. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # FB-294 — Position filters drop draft-pick value
 
 - **Type:** polish (design reversal) · **Status:** planned 2026-08-10

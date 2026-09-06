@@ -201,7 +201,7 @@ fixtures like `fixtures/flags/release.json`):
 | `test_admin_grants_pro.py` | grant by username/acct/email; bulk grant; revoke; dormant while entitlements OFF |
 | `test_account_delete_entitlements.py` | §2.4 matrix: revoked rows, ledger tombstone, referral re-key, counterparty grant intact |
 
-**Maestro** (`mobile/.maestro/`, `NN-slug.yaml` convention, demo-CTA bootstrap per README —
+**Maestro** (`archive/retired-tooling/mobile/maestro/`, `NN-slug.yaml` convention, demo-CTA bootstrap per README —
 new flows need the monetize flags ON in the test flag set):
 
 - `07-paywall-renders.yaml` — onboarding reaches paywall after matches; pages swipe;
@@ -232,4 +232,4 @@ Maestro-drivable reliably) — checklist in the release runbook.
   first code lands)
 - `docs/runbook.md` — webhook replay procedure, observe-mode log grep, manual-grant curl
   recipes
-- `mobile/src/screens/CLAUDE.md` — PaywallScreen row; `mobile/.maestro/README.md` — new flows
+- `mobile/src/screens/CLAUDE.md` — PaywallScreen row; `archive/retired-tooling/mobile/maestro/README.md` — new flows

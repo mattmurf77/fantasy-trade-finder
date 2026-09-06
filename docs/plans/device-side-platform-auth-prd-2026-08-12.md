@@ -1,3 +1,12 @@
+```project-status
+{
+  "status": "active",
+  "updated": "",
+  "summary": "PRD: Device-Held Platform Credentials",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: **active** **active** — Device-held platform credentials. Dual-agent final, 4 rounds. Operator defaults ratified as [D-047]; ADR-011 on `main`.. Prior row preserved at ../reviews/2026/2026-09-06-project-status-migration/plans-index.md."
+}
+```
+
 # PRD: Device-Held Platform Credentials
 
 > **FINAL — dual-agent validated over 4 rounds; both lenses signed off.**

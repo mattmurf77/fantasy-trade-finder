@@ -1,3 +1,18 @@
+# Status — 166-league-format-default
+
+```project-status
+{
+  "status": "in-progress",
+  "updated": "2026-07-25",
+  "summary": "FB-166 + FB-167 — ranking format should default to league settings",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: in-progress 2026-07-25 — teardown-remediation (worktree). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # FB-166 + FB-167 — ranking format should default to league settings
 
 - **Covers:** feedback #166 ("This should default to your league's settings, eg superflex") and #167 ("Would also default to SFTEP. No one plays 1QB.")

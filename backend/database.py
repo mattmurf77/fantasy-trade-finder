@@ -477,7 +477,7 @@ member_rankings_table = Table("member_rankings", metadata,
     # carried only `elo`, so it was used RAW — the engine trusted a
     # stranger's board more than the user's own. That asymmetry is measured
     # at 86.9% of boarded-pair cards existing in only one direction
-    # (docs/reviews/2026-08-19-armb-audit-claims-3-4.md §3). These columns
+    # (docs/reviews/2026/2026-08-19-armb-audit-claims-3-4.md §3). These columns
     # are what make symmetric shrinkage possible at all.
     #
     #   comparison_count  — pairwise/trio votes behind this player's Elo.
@@ -762,7 +762,7 @@ deck_impressions_table = Table("deck_impressions", metadata,
     #     (#189) cards ride min(requested, relaxed_fairness_threshold), and
     #     divergence cards ride min(…, fairness_floor_divergence) while
     #     consensus cards keep the full bar. Before this it was persisted
-    #     NOWHERE (docs/reviews/2026-08-18-trade-logic-archaeology.md), so a
+    #     NOWHERE (docs/reviews/2026/2026-08-18-trade-logic-archaeology.md), so a
     #     per-arm comparison spanning sessions with different client settings
     #     compared arms AND thresholds at once. NULL on an arm `gen_v2` card
     #     (trade_gen_v2 takes no fairness_threshold — its bar is the gen2_*
@@ -2170,7 +2170,7 @@ mfl_credentials_table = Table("mfl_credentials", metadata,
 # ---------------------------------------------------------------------------
 #
 # Thin identity layer above the app's working key (`sleeper_user_id`) — see
-# docs/plans/account-auth-plan-2026-07-11.md §2d / §3-P2. Engine/ranking/match
+# docs/plans/archive/2026/account-auth-plan-2026-07-11.md §2d / §3-P2. Engine/ranking/match
 # tables stay keyed on sleeper_user_id; an account is the durable anchor a
 # provider identity (Sign in with Apple / Google) hangs off, and it *binds*
 # to at most one sleeper_user_id (accounts.sleeper_user_id, nullable until
@@ -2619,9 +2619,9 @@ _MODEL_CONFIG_DEFAULTS = [
     ("trio_boundary_margin",  60.0,   "Elo window on each side of a tier edge to pull boundary straddlers from"),
     ("trio_within_tier_rate",  0.35,  "Share of trios comparing top-vs-bottom of the SAME tier (intra-tier order); remainder after boundary+within = tightest local ordering"),
     ("trio_repeat_avoid",      8.0,   "Avoid reusing a player seen in the last N served trios (anti-repeat); relaxes gracefully (oldest-seen first) when the pool is too small"),
-    # ── Forced deck regeneration (docs/reviews/2026-08-18-bug-sweep) ─────
+    # ── Forced deck regeneration (docs/reviews/2026/2026-08-18-bug-sweep) ─────
     ("force_supersedes_running", 1.0, "/api/trades/generate: 1 = `force: true` supersedes an already-RUNNING job for the same key (the superseded worker finishes quietly — no further snapshots, no impression rows, no trades_generated event); 0 restores the pre-2026-08-18 behaviour where a forced request silently returned the in-flight job and the regeneration never happened"),
-    # ── Board-override pins (docs/reviews/2026-08-18-valuation-age-audit.md) ──
+    # ── Board-override pins (docs/reviews/2026/2026-08-18-valuation-age-audit.md) ──
     # Read by ranking_service. pin_tier_bounded=0 with the other three at their
     # shipped values restores the pre-2026-08-18 freeze exactly (goldens:
     # backend/tests/test_pin_tier_bounded.py, test_override_pin_unpin.py).
@@ -3062,7 +3062,7 @@ def _migrate_db() -> None:
         ("users",              "last_rank_tz",          "VARCHAR"),
         # PR3 — dedup_key threading on quiet-hours queue
         ("notification_queue", "dedup_key",             "VARCHAR"),
-        # Account-auth plan (docs/plans/account-auth-plan-2026-07-11.md) —
+        # Account-auth plan (docs/plans/archive/2026/account-auth-plan-2026-07-11.md) —
         # verified-session persistence. Written by P1 (Sleeper-JWT proof,
         # verified_via='sleeper') and P2 (identity anchors,
         # verified_via='apple'|'google'). Guards are idempotent, so it is
@@ -3076,7 +3076,7 @@ def _migrate_db() -> None:
         # M6b — per-user pick-pricing mode ('tier_ladder'|'market_slots')
         ("users",              "pick_pricing_mode",     "VARCHAR"),
         # ESPN league linking Phase 1 (flag `espn.link`; plan
-        # docs/plans/espn-league-linking-plan-2026-07-11.md) — see
+        # docs/plans/archive/2026/espn-league-linking-plan-2026-07-11.md) — see
         # leagues_table column comments.
         ("leagues",            "platform",              "VARCHAR"),
         ("leagues",            "espn_season",           "INTEGER"),
@@ -4839,7 +4839,7 @@ def set_ranking_method_if_unset(
     `allow_over` is the one deliberate widening: 'anchor' is the only method
     string whose unlock rule can never succeed (it falls to the trio branch),
     so a completeness-marking tiers/quickset save is allowed to overwrite it
-    and ONLY it. See docs/plans/audit-p0-remediation/lld-p0-1.md §4.2.
+    and ONLY it. See docs/plans/archive/2026/audit-p0-remediation/lld-p0-1.md §4.2.
     """
     if method not in RANKING_METHODS:
         return False
@@ -5081,7 +5081,7 @@ def get_tiers_saved(
 
 
 # ── Override write timestamps (F2, 2026-08-18) ───────────────────────────────
-# `docs/reviews/2026-08-18-valuation-age-audit.md` §8 F2: a swipe recorded
+# `docs/reviews/2026/2026-08-18-valuation-age-audit.md` §8 F2: a swipe recorded
 # AFTER a pin should release it, which needs to know WHEN the pin was written.
 # Stored as a SIBLING key — {fmt: {pid: iso8601}} — rather than by changing the
 # per-format value shape from `{pid: elo}` to `{pid: {elo, at}}`. The sibling

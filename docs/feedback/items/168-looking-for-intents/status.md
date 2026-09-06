@@ -1,3 +1,18 @@
+# Status — 168-looking-for-intents
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-08",
+  "summary": "#168 / #172 — \"Looking for\" intents on the guided finder — status",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-08 — closed done — CHANGELOG 2026-08-08; PRD objection reconciled by #172. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #168 / #172 — "Looking for" intents on the guided finder — status
 
 **Status:** open · 2026-07-25 · n/a

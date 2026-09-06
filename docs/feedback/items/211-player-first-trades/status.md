@@ -1,3 +1,18 @@
+# Status — 211-player-first-trades
+
+```project-status
+{
+  "status": "planned",
+  "updated": "2026-08-08",
+  "summary": "#211 — Player-first trades mockup lab · status",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: mockup-only 2026-08-08 — branch worktree-agent-aba27261d3ac0e30a — design lab `mockups/polish-lab-2026-08/trades-player-first.html`, no code. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #211 — Player-first trades mockup lab · status
 
 **Status:** mockup-only · 2026-08-08 · branch `worktree-agent-aba27261d3ac0e30a`, mockups/polish-lab-2026-08/trades-player-first.html

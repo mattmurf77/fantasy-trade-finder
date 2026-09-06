@@ -1,3 +1,18 @@
+# Status — 216-featured-trade-window
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-02",
+  "summary": "#216 — Featured-trade window for single-pin find-a-trade (covers the #209 order fix)",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-02 — #216/#209 featured-trade window `ba78631` — CHANGELOG 2026-08-02. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #216 — Featured-trade window for single-pin find-a-trade (covers the #209 order fix)
 
 **Status: built (worktree branch `teardown-remediation`, pending merge) — 2026-08-02**

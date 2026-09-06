@@ -1,3 +1,18 @@
+# Status — 192-ranked-badges
+
+```project-status
+{
+  "status": "in-progress",
+  "updated": "2026-07-25",
+  "summary": "FB-192 — replace the misleading pink ranked-dots with R/NR badges",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: in-progress 2026-07-25 — teardown-remediation (worktree). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # FB-192 — replace the misleading pink ranked-dots with R/NR badges
 
 - **Type:** polish (operator-filed) · **Status:** built 2026-07-25 (branch `teardown-remediation` worktree)

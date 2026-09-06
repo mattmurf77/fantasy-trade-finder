@@ -998,7 +998,7 @@ applies at narration time).
 > v1's pinned `'market'` mode. The operator-approved `fix/package-benchmark-sweetener` branch
 > (merge held for the Monday window boundary) changes exactly that benchmarked quantity: the
 > depth discount re-benchmarks to the **trade's best asset** (the "4-mids-for-a-stud scored
-> fair" defect, `docs/reviews/2026-08-21-market-curve-comparison.md`). Breaker severities
+> fair" defect, `docs/reviews/2026/2026-08-21-market-curve-comparison.md`). Breaker severities
 > inherit the fix automatically through the module-level `ts.package_value_v2` call — no
 > breaker code change. Sequencing: the pre-flag-on dry run, the calibration cohort (§8), and
 > the arm-A golden re-capture (PLAN A-1(c)) all start **at/after** that Monday merge — nothing

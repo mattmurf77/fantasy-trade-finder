@@ -1,3 +1,18 @@
+# Status — 175-outlook-directional-suggestions
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-07-25",
+  "summary": "Status — #175 directional outlook weighting",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-25 — `trade.outlook_direction` flag ON in features.json; `outlook_direction_mult` live per DECISIONS. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # Status — #175 directional outlook weighting
 
 **State:** built + tested, DARK (`trade.outlook_direction` = false everywhere).

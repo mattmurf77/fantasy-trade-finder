@@ -177,7 +177,7 @@ the only contract that works in every flag state.
    is only ever defined when finderMode === 'team'") predates #269 and is now
    false in the shipped flag state. Nothing to fix in reference docs (both are
    status snapshots), but the Author must not design against them.
-2. `mobile/.maestro/README.md:40-47` flow table is self-acknowledged stale
+2. `archive/retired-tooling/mobile/maestro/README.md:40-47` flow table is self-acknowledged stale
    (:53-56 points at the real `flows/` families). Cosmetic.
 3. `docs/api-reference.md:350` (power-rankings) was checked field-by-field
    against `power_rankings.py` + the route — **current, no drift**.
@@ -391,7 +391,7 @@ In the drill-in roster panel (the screen's only player tiles, :1210-1229):
 | `mobile/src/components/…` (optional) | If the candidates strip is extracted as `TradeCandidatesSection` to keep the screen diff small — Author's call; the screen must still mount it |
 | `config/features.json` + `backend/feature_flags.py:284` registry | Two new flags (+ `_comment_*` entries) |
 | `backend/analytics_taxonomy.py` | Two new client events + props (§7) |
-| `mobile/.maestro/flows/league/05..0N-*.yaml` (+ `scripts/testid-lint-allow.txt`) | Maestro delta (§6) |
+| `archive/retired-tooling/mobile/maestro/flows/league/05..0N-*.yaml` (+ `scripts/testid-lint-allow.txt`) | Maestro delta (§6) |
 | `docs/config-reference.md`, `docs/glossary.md` ("trade candidate"), `living-memory/LLD.md` | Docs (§8) |
 
 **Sequencing (from triage): #300 lands AFTER #299/#302 (LeagueSummaryScreen
@@ -429,9 +429,9 @@ if the operator re-orders, rebase cost is contained to that one file.
 
 ## 6. Test plan
 
-Maestro flows in `mobile/.maestro/flows/league/` (family exists: 01-04), id
+Maestro flows in `archive/retired-tooling/mobile/maestro/flows/league/` (family exists: 01-04), id
 selectors only (`testid-lint.sh` bans text-taps), per the 23 authoring laws
-(`mobile/.maestro/README.md:67-167`). Dynamic ids (`league-summary.player-row.
+(`archive/retired-tooling/mobile/maestro/README.md:67-167`). Dynamic ids (`league-summary.player-row.
 <player_id>`, `league-summary.candidates.row.<user_id>`) are template
 literals → `mobile/scripts/testid-lint-allow.txt` entries naming
 LeagueSummaryScreen.tsx (law 4; lint matches static prefixes for dynamic

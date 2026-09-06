@@ -5,8 +5,8 @@
 > **Trigger:** operator reaction to P1-9's in-app inbox row — *"we should also use that
 > notification list for other things we want users to do: invite league members, rank
 > players every so often, inform them of new league members that have joined the app."*
-> **Companions:** [`../../plans/audit-p1-remediation/PRD-p1-9.md`](../../plans/audit-p1-remediation/PRD-p1-9.md),
-> [`../../plans/audit-p1-remediation/DECISIONS-p1.md`](../../plans/audit-p1-remediation/DECISIONS-p1.md).
+> **Companions:** [`../../plans/archive/2026/audit-p1-remediation/PRD-p1-9.md`](../../plans/archive/2026/audit-p1-remediation/PRD-p1-9.md),
+> [`../../plans/archive/2026/audit-p1-remediation/DECISIONS-p1.md`](../../plans/archive/2026/audit-p1-remediation/DECISIONS-p1.md).
 > **This document changes no source file.** Specs and recommendations only.
 
 ## Contents

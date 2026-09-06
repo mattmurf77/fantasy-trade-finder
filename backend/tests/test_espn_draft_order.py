@@ -5,9 +5,9 @@ final standings, so a user corrects traded picks instead of drag-ordering 12–1
 teams by hand.
 
 Sources (binding):
-  * `docs/plans/draft-extensions/espn-auto-draft-order-feasibility.md` — the
+  * `docs/plans/archive/2026/draft-extensions/espn-auto-draft-order-feasibility.md` — the
     live-verified spike against real league 11896 (2026-08-08).
-  * The operator decision recorded in `docs/plans/draft-extensions/plan.md`:
+  * The operator decision recorded in `docs/plans/archive/2026/draft-extensions/plan.md`:
     **non-playoff teams order by INVERSE REGULAR-SEASON standings, NOT by
     `rankCalculatedFinal` and NOT by ESPN's consolation ladder.** Playoff teams
     order by `rankCalculatedFinal` (§6c verified it is exactly the post-playoff

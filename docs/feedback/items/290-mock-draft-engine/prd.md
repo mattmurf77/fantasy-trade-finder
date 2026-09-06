@@ -677,7 +677,7 @@ options, to be sized by the build agent before authoring the flow:
 Also for the flow author: ffv3's **top-level `rounds` is `null`** — the 4 lives in
 `settings.rounds`.
 
-**New flow:** `mobile/.maestro/flows/rookie/d3-mock-draft-loop.yaml`,
+**New flow:** `archive/retired-tooling/mobile/maestro/flows/rookie/d3-mock-draft-loop.yaml`,
 `tags: [rookie, draft-room, mock]`, profile `standard` + the `ffv3-predraft`
 corpus merged into the fixture dir (identical to `d2`), flags `draft.room` /
 `draft.mock` / `draft.tab` ON.
@@ -730,7 +730,7 @@ the linter permits — `d2` already uses `assertVisible: "Round ownership"`).
   it is a distribution over seeds. Covered by T-290-01…T-290-11.
 - **D-16.** *Reason:* the harness is Sleeper-fixture-driven with **zero** MFL
   references in `backend/test_users.py`, `backend/test_support.py`, `qa/` or
-  `mobile/.maestro/*.yaml`; an MFL flow is not authorable without first building
+  `archive/retired-tooling/mobile/maestro/*.yaml`; an MFL flow is not authorable without first building
   harness support. Covered by T-290-12/13 and folded into G1's live-league QA
   pass on Dependables (62846) — record the Mock Draft screen's owner names in the
   same pass.

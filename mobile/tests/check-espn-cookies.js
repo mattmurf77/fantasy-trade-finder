@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Regression test for the ESPN Connect cookie extractor (Phase 1b, flag
-// espn.webview_capture; scope docs/plans/espn-connect-webview/scope.md).
+// espn.webview_capture; scope docs/plans/archive/2026/espn-connect-webview/scope.md).
 //
 // Pins the pure core of src/utils/espnCookies.ts — pickEspnCookies() — which
 // selects the first native-cookie-store bag carrying BOTH espn_s2 and SWID.

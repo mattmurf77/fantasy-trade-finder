@@ -61,7 +61,15 @@ mockups/*/node_modules/
 docs/design/icon-explorations/
 
 # Maestro ad-hoc screenshot output (screen-library captures live in /screens; run artifacts in mobile/test-artifacts)
-mobile/.maestro/screenshots/
+archive/retired-tooling/mobile/maestro/screenshots/
 
 # 42MB, 3,073,019 rows — regenerable, deliberately not committed (see README)
-docs/reviews/2026-08-19-knockout-waterfall/knockout-all-candidates.csv.gz
+docs/reviews/2026/2026-08-19-knockout-waterfall/knockout-all-candidates.csv.gz
+
+# Local recovery, captured research and disposable task output (never publish).
+/_local/
+.pytest_cache/
+# Generated Code City outputs; source lives beside these files.
+/scripts/codecity/city.html
+/scripts/codecity/city-data.js
+/scripts/codecity/city-data.json

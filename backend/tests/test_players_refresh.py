@@ -1,6 +1,6 @@
 """Rookie-draft M0 — the player-cache refresh lifecycle.
 
-Test matrix T-M0-01..09 from docs/plans/rookie-draft/lld.md §7.
+Test matrix T-M0-01..09 from docs/plans/archive/2026/rookie-draft/lld.md §7.
 
 What M0 fixes: the player pipeline had NO refresh path (the only bulk fetch
 was on a disk-cache miss, and the 24 h sync gate re-synced from that same

@@ -1,3 +1,18 @@
+# Status — 198-upgrade-semantics
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-07-27",
+  "summary": "#198 — Upgrade ideas semantics: position-centric — status",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-27 — `0106aba` — CHANGELOG 2026-07-27 (#198/#200). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #198 — Upgrade ideas semantics: position-centric — status
 
 **Status: fixed (backend semantics + panel copy)** · 2026-07-27 · branch

@@ -1,3 +1,18 @@
+# Status — 225-notifications-dechalk
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-01",
+  "summary": "#225 — Notifications de-chalk (emoji out, Chalkline rows in)",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped ~2026-08-01 — teardown-remediation (worktree). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #225 — Notifications de-chalk (emoji out, Chalkline rows in)
 
 **Status:** built · ships live (no flag) · isolated worktree branch `teardown-remediation`

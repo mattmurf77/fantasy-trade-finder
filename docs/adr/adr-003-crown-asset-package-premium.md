@@ -10,7 +10,7 @@
 
 The v2 engine handled only *half* of the package-asymmetry problem. `package_value_v2` (amendment A2) discounts the **depth** side — each asset contributes `v · (0.15 + 0.85 · (v/v_max)^γ)`, so lesser assets bottom out at 15% of raw value ("four quarters ≠ a dollar"). What no path had was the **premium** side: in an N-for-1, the single consolidated asset is worth *more* than its sticker price because consolidation is scarce.
 
-Two independent competitors converge on the same fix (docs/competitor-teardown-web-tools.md): FPTrack's **Crown Asset** boost ("best asset gains value in 1-for-many deals") and Dynasty Daddy's **Value Adjustment** ("I wanted to make sure the fair trades weren't splitting a dollar into 100 pennies… the formula takes into consideration who is the key player and what proportion of the trade he accounts for"). The recorded resolution for the watch item was explicitly "explicit multiplier, not a hard gate."
+Two independent competitors converge on the same fix (docs/research/competitors/competitor-teardown-web-tools.md): FPTrack's **Crown Asset** boost ("best asset gains value in 1-for-many deals") and Dynasty Daddy's **Value Adjustment** ("I wanted to make sure the fair trades weren't splitting a dollar into 100 pennies… the formula takes into consideration who is the key player and what proportion of the trade he accounts for"). The recorded resolution for the watch item was explicitly "explicit multiplier, not a hard gate."
 
 ## Decision
 
@@ -41,7 +41,7 @@ Add a crown premium to `package_value_v2`, gated by `trade.crown_asset` (default
 ## References
 
 - Plan: docs/plans/competitor-top20/10-key-asset-package-adjustment.md
-- Teardown: docs/competitor-teardown-web-tools.md (FPTrack Value Boosts, Dynasty Daddy Value Adjustment)
+- Teardown: docs/research/competitors/competitor-teardown-web-tools.md (FPTrack Value Boosts, Dynasty Daddy Value Adjustment)
 - Tests: backend/tests/test_crown_asset.py (unit precision + 1-for-1 neutrality + N-for-1 effect)
 - Config: docs/config-reference.md (`trade.crown_asset`, `crown_rate`, `crown_share_floor`)
 - Prior art: ADR-002 (v2/v3 rebuild, `package_value_v2` origin)

@@ -616,7 +616,7 @@ def _fetch_dynasty_process(
         scoring = DP_SCORING_PARAM[scoring]
     value_col = f"value_{scoring}"
 
-    # UI-test harness seam (docs/plans/mobile-testing/lld.md §4.3): the DP CSV
+    # UI-test harness seam (docs/plans/archive/2026/mobile-testing/lld.md §4.3): the DP CSV
     # is a live egress the fixture seam can't see. FTF_DP_VALUES_FILE serves a
     # local DP-shaped CSV through the IDENTICAL parse path; under FTF_TEST_MODE
     # it is mandatory — the silent flat-Elo fallback below would otherwise

@@ -1,3 +1,18 @@
+# Status — 126-verify-persistence
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-07-12",
+  "summary": "#126 — Build status: durable verification without weakening the gate",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-12 — FB-126 Keychain JWT + silent replay `2b5e07a` — CHANGELOG 2026-07-12. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #126 — Build status: durable verification without weakening the gate
 
 *Build agent (G2 fast-track, mobile + backend tests), 2026-07-12. Spec: [prd.md](prd.md) (round-3 converged) + [reconciliation-log.md](reconciliation-log.md). Branch `trade-engine-v2`, uncommitted.*
@@ -48,4 +63,4 @@ None from the PRD's normative requirements. Two implementation notes:
 - R-2.1's *optional* local `exp` decode was omitted (PRD: "Optionally…"; simplicity-first — the server's `is_expired` 400 maps to the same delete+`'rejected'` row, costing one round-trip only in the already-rare expired case).
 - R-5's "wherever `unlinkSleeper()` is invoked" resolved to the API function itself because no call site exists yet (see map above).
 
-Out-of-scope rows from the PRD files table left to the orchestrator (not in this agent's owned paths): `docs/plans/account-auth-plan-2026-07-11.md` status appendix; privacy-disclosure flag (N-6, no gate); no runbook note warranted.
+Out-of-scope rows from the PRD files table left to the orchestrator (not in this agent's owned paths): `docs/plans/archive/2026/account-auth-plan-2026-07-11.md` status appendix; privacy-disclosure flag (N-6, no gate); no runbook note warranted.

@@ -1,3 +1,18 @@
+# Status — 248-combined-bars
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-05",
+  "summary": "#248 — Combined rank bars (V2: ghost tick + delta arrows) — status",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-05 — ghost ticks + delta chips `2e3f61f` — CHANGELOG 2026-08-05. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #248 — Combined rank bars (V2: ghost tick + delta arrows) — status
 
 **Status:** BUILT (2026-08-05) — on branch `teardown-remediation` (worktree), not merged/pushed.

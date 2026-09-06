@@ -1,7 +1,7 @@
 # Feature Scope — Full sweep (`trade.full_sweep`)
 
 **Date:** 2026-08-22
-**Entry point:** direct ask (operator, 2026-08-22: "generate everything and rank globally — for all arms"), from [`docs/reviews/2026-08-22-trade-model-second-read.html`](../../reviews/2026-08-22-trade-model-second-read.html) (on branch `claude/trade-model-restrictiveness-7f3975` until that review PR merges) §03
+**Entry point:** direct ask (operator, 2026-08-22: "generate everything and rank globally — for all arms"), from [`docs/reviews/2026/2026-08-22-trade-model-second-read.html`](../../reviews/2026/2026-08-22-trade-model-second-read.html) (on branch `claude/trade-model-restrictiveness-7f3975` until that review PR merges) §03
 **Builder:** lead session (Fable 5) + Opus build agents A1/A2, reviewer A3 — see [`plan.md`](plan.md) §4
 **Operator sign-off on waivers:** not needed (no waivers — every section answered)
 

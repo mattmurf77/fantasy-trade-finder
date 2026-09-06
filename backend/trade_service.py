@@ -98,7 +98,7 @@ _DEFAULT_CFG: dict[str, float] = {
     "package_adj_gamma_market":  0.5,
     "package_discount_cap":      0.35,
     # 2026-08-21 cross-package benchmark fix (operator-approved; evidence
-    # docs/reviews/2026-08-21-market-curve-comparison.md §3b: the own-max
+    # docs/reviews/2026/2026-08-21-market-curve-comparison.md §3b: the own-max
     # benchmark let 4 mids buy a stud at ~5% haircut — the served
     # Rice+Etienne+Swift+Corum → Nacua card scored 0.939/fair vs
     # FantasyCalc 1.362 / KTC 2.260). > 0 ⇒ a multi-asset side that does
@@ -214,7 +214,7 @@ _DEFAULT_CFG: dict[str, float] = {
     "range_base":            0.35,    # value half-width FRACTION at n=0 comparisons
     # ------------------------------------------------------------------
     # Tier 2 — work item 2.1: marginal (over-replacement) valuation
-    # (flag: trade.marginal_value — docs/plans/trade-engine-tier2-models.md)
+    # (flag: trade.marginal_value — docs/plans/archive/2026/trade-engine-tier2-models.md)
     # ------------------------------------------------------------------
     "bench_credit_rate":         0.15,   # fallback fraction of raw value depth keeps
     # Interview 2026-07-17 — the depth discount is position- and
@@ -845,7 +845,7 @@ _DEFAULT_CFG: dict[str, float] = {
 
     # ------------------------------------------------------------------
     # Knockout refine — 2026-08-23 (docs/plans/knockout-refine/plan.md §3;
-    # verdict + evidence docs/reviews/2026-08-22-knockout-rules-judged.html
+    # verdict + evidence docs/reviews/2026/2026-08-22-knockout-rules-judged.html
     # §03). Four refinements to the G6 knockouts above, each with its own
     # kill knob whose 0 restores the predicate byte-identically and is a
     # deploy-free revert (PUT /api/admin/config/<key>). Same five-
@@ -1607,7 +1607,7 @@ def package_value(individual_values: list[float]) -> float:
 
 # ---------------------------------------------------------------------------
 # Trade engine v2 — single value space + package math
-# (flag: trade_engine.v2 — see docs/plans/trade-engine-tier1-fixes.md and
+# (flag: trade_engine.v2 — see docs/plans/archive/2026/trade-engine-tier1-fixes.md and
 #  docs/reviews/trade-engine-external-research.md §6 amendments A1–A4)
 # ---------------------------------------------------------------------------
 
@@ -1739,7 +1739,7 @@ def _package_value_market(values: list[float],
        TOTAL discount capped at package_discount_cap × the naive sum.
        A single-asset side is never depth-discounted.
     1a. THE BENCHMARK (2026-08-21 fix, operator-approved; evidence
-       docs/reviews/2026-08-21-market-curve-comparison.md §3b). The
+       docs/reviews/2026/2026-08-21-market-curve-comparison.md §3b). The
        original #214 shape benchmarked every piece against the package's
        OWN best asset, so four similar mid-tier players took a ~5%
        haircut while buying a stud — the served Rice+Etienne+Swift+Corum
@@ -3059,7 +3059,7 @@ def _presentment_ctx(opp_profile: dict, user_startable: dict,
 
 # ---------------------------------------------------------------------------
 # FB-47 — finder targeting (flag: trade.finder_targeting)
-# docs/plans/trade-finder-targeting.md
+# docs/plans/archive/2026/trade-finder-targeting.md
 # ---------------------------------------------------------------------------
 
 
@@ -3193,7 +3193,7 @@ def _load_on_block_by_uid(league_id: str) -> dict[str, frozenset]:
 
 # ---------------------------------------------------------------------------
 # Tier 2 — work item 2.1: marginal (over-replacement) valuation
-# (flag: trade.marginal_value — docs/plans/trade-engine-tier2-models.md)
+# (flag: trade.marginal_value — docs/plans/archive/2026/trade-engine-tier2-models.md)
 # ---------------------------------------------------------------------------
 
 
@@ -4425,7 +4425,7 @@ class LeagueMember:
     #
     # Until now this dataclass had NO field for opponent confidence and
     # `member_rankings` had no column to fill one from, which is why the
-    # asymmetry documented in docs/reviews/2026-08-19-armb-audit-claims-3-4.md
+    # asymmetry documented in docs/reviews/2026/2026-08-19-armb-audit-claims-3-4.md
     # §3 was called "structural, not tunable": the user's board was shrunk
     # toward consensus by how well-sampled it was, and a league-mate's board
     # was trusted raw. These three fields are the missing half.
@@ -6110,7 +6110,7 @@ class TradeService:
 
     # ------------------------------------------------------------------
     # Trade engine v2 (flag: trade_engine.v2)
-    # Tier 1 plan (docs/plans/trade-engine-tier1-fixes.md) with research
+    # Tier 1 plan (docs/plans/archive/2026/trade-engine-tier1-fixes.md) with research
     # amendments A1–A4 (docs/reviews/trade-engine-external-research.md §6):
     #   - single value space via elo_to_value()           (Change 1)
     #   - KTC-style package_value_v2 in each side's space  (Change 2 + A2)

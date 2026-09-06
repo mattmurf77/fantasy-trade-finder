@@ -306,7 +306,7 @@ def test_the_measured_reshaping_direction_is_deflation_not_inflation():
     now **-0.284** and the 2027 gap **-0.244**.
 
     THE REMAINING GAP IS INTENTIONAL, NOT UNFINISHED WORK. Option B in
-    docs/reviews/2026-08-19-ktc-pick-value-comparison.md — pushing every rung
+    docs/reviews/2026/2026-08-19-ktc-pick-value-comparison.md — pushing every rung
     to its market-median rank — was measured and rejected: it breaks
     test_tier_occupancy.py in three places and buckets the Mid 3rd seed as
     `second`. DynastyProcess's pick curve is also the most convex and most

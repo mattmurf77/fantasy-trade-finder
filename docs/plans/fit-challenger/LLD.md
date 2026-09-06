@@ -5,7 +5,7 @@
 [PLAN-v2.md](PLAN-v2.md) (authoritative; rulings R-1..R-12 binding) and
 [HLD.md](HLD.md) (architecture; findings F-1..F-9 all resolved in §8 below). Product
 spec: [PRD.md](PRD.md) (§3 knockouts operator-CLOSED). Review concerns C1–C7 / traps
-T1–T4: [../../reviews/2026-08-20-fit-challenger-review.md](../../reviews/2026-08-20-fit-challenger-review.md).
+T1–T4: [../../reviews/2026/2026-08-20-fit-challenger-review.md](../../reviews/2026/2026-08-20-fit-challenger-review.md).
 **Rule of citation:** every signature and line anchor below was re-verified against this
 checkout on 2026-08-20. Where this LLD had to rule on something no upstream doc ruled,
 the ruling is listed in §8 so no build agent decides it silently.

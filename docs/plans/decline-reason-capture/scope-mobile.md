@@ -90,11 +90,11 @@ stored table are **backend-branch** work.
 ## 3. Test scope (mobile test platform)
 
 - **New flows** (no waiver — this is user-visible, SPEC §7):
-  - `mobile/.maestro/flows/decline-reasons-fixed-option.yaml` (`TC-DECLINE-01`)
+  - `archive/retired-tooling/mobile/maestro/flows/decline-reasons-fixed-option.yaml` (`TC-DECLINE-01`)
     — the ✕ is gone / the ✓ is present, tile tap opens layer 2 **on the same
     card** (the deck has not advanced), a fixed option advances to the next
     trade with no receipt in between.
-  - `mobile/.maestro/flows/decline-reasons-other-free-text.yaml`
+  - `archive/retired-tooling/mobile/maestro/flows/decline-reasons-other-free-text.yaml`
     (`TC-DECLINE-02`) — Fit → Other → composer, **the send button is asserted
     visible with the keyboard up** (the regression guard for the keyboard
     problem in §7), text typed, send commits and advances.
@@ -121,7 +121,7 @@ stored table are **backend-branch** work.
   failure (the feature genuinely is not on), not a flaky one. Both flow
   headers say so in place.
 - **Capture delta:** `trades` (the deck card gains a whole block) — run
-  `mobile/scripts/screen-capture.sh --screen trades` at ship, with the flag
+  `archive/retired-tooling/mobile/scripts/screen-capture.sh --screen trades` at ship, with the flag
   on, so the screen library shows the tile row rather than the ✕.
 - **Smoke-suite impact:** only `smoke/06-trades-deck.yaml` crosses this
   surface. Under the release flag set it is untouched. Re-run at ship.
