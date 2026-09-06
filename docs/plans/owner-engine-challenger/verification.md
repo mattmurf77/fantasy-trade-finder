@@ -1,6 +1,8 @@
 # Verification and release status
 
-Status: **implemented, independently reviewed and locally green; not released or activated**.
+Current status: **backend live; shadow-only generation enabled; serving off**.
+See the [release record](release.md) for current source, configuration and mobile
+build state. The checkpoints below retain their original scope and timing.
 Source baseline: `4c343a488644299901655bd932f67f52355f42bd`.
 Isolated branch: `codex/owner-engine-challenger-20260906`.
 No production database, user session, live preference or release switch was
@@ -66,7 +68,7 @@ No backend source was edited during this final run. The earlier nine failures
 are resolved; the known isolated receipt-worker diagnostics recur without test
 failures. This is a local regression result, not hosted CI or production health.
 
-## Remaining release gates
+## Release gate checkpoints and completion
 
 Published checkpoint `13b941614a426d7a06a1dd2a737c9436a845cb09` passed all four
 [hosted CI jobs](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/34058864206)
@@ -96,7 +98,16 @@ keys. No production mutation occurred.
 2. Separately verified backend deployment/config and new TestFlight build if
    released; actual Apple availability and device steps are not implied.
 
-The new switches remain default-off in source. Prior releases and the older
-personal-market policy are not evidence that this new constructor is live.
+Final repaired source passed local **5,765/1skip in400.05s** and all four
+[exact-head hosted CI jobs](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/34059989947),
+backend **5,765/1skip in655.89s**. Final mobile TypeScript/all97 guards/testID
+and web190 passed. Merged-tree equality and backend deployment are verified;
+mobile delivery and serving are tracked separately in the release record.
+Exact 1.17.2 (150) build and submission are FINISHED; Apple availability and
+intended tester installation remain unverified. All 12 manual checks are UNRUN.
+
+The new switches remain default-off in source; production include is now1 and
+serve remains0. Prior releases and the older personal-market policy are not
+evidence that the new constructor is being served.
 Readout: [trial protocol](trial-protocol.md). Device supplement:
 [12 unexecuted checks](manual-testflight.md). Review map: [code walk](code-walk.md).

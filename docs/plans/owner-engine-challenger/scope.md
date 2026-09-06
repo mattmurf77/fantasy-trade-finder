@@ -5,7 +5,8 @@
 **Builder:** Parent integration, separate Astra Ultra generator and route builders, independent Astra Ultra acceptance review.
 **Baseline:** freshly fetched `origin/main` at `4c343a48`; isolated Fleeced worktree. Existing organization and legacy checkouts are preserved.
 **Waivers:** none. Simulator/Maestro remains retired (D-056).
-**Status:** implemented and locally validated; publication/release gates remain separate.
+**Status:** implemented, reviewed, CI-green and backend deployed; shadow enabled,
+serving off pending matching client installation. [Release record](release.md).
 
 ## Behavior and testable boundaries
 
@@ -36,7 +37,10 @@ Measure outcomes using viewed impressions (not all generated cards), stratified 
 - New model configuration: `bakeoff_include_owner` and `bakeoff_serve_owner`, both default **0**. Include enables generation/logging; serve separately authorizes exposure. Add bounded generator tuning only where needed, document experimental defaults and preserve baseline exclusions.
 - Organic comparison: new arm joins existing team-draft attribution without replacing the three current controls. Treatment must not be silently reinterpreted or removed by the superseded personal-gain policy after it passes its own owner-aligned evaluator.
 - Selected-route comparison: retain a labelled legacy control and owner treatment on the same surface; preserve complete package, ordering/assignment and exposure metadata. Generated-only treatment is not a served experiment. Never misattribute a legacy fallback to `owner_v1`.
-- Rollback: serve=0 removes treatment exposure; include=0 stops its generation. Existing controls and stored evidence remain intact. No production switch is changed during implementation.
+- Rollback: serve=0 prevents treatment exposure for newly captured requests;
+  include=0 stops new owner generation. Already captured jobs/cards are not
+  revoked. Existing controls and stored evidence remain intact. No production
+  switch was changed during implementation; release operations are separate.
 
 The versioned first-test utility uses raw personal package gain plus an outlook
 component (coefficient 0.5) and a usable-roster-change component (0.25; rebuilding
