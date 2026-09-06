@@ -87,6 +87,7 @@ from .database import (
     save_ranking_swipes, save_trade_swipes,
     save_trade_decision, load_swipe_decisions, load_trade_decisions,
     load_recent_league_likes, find_live_trade_like, log_trade_impressions,
+    load_trade_interest_history, load_trade_card_source_likes,
     # #362 standing offers
     create_standing_offer, load_standing_offers, load_user_standing_offers,
     revoke_standing_offer, league_pick_seasons,
@@ -99,6 +100,7 @@ from .database import (
     # Decline-reason capture (feedback.decline_reasons) — one upsert row per
     # passed card, keyed on impression_id
     upsert_trade_pass_reason, claim_trade_pass_elo,
+    ensure_reasoned_trade_pass, mark_reasoned_trade_pass_elo,
     PASS_REASON_LAYER1, PASS_REASON_LAYER2, PASS_REASON_PARENT,
     PASS_REASON_TEXT_MAX,
     # suggestion.telemetry — candidate-set persistence + ratio dashboard
@@ -2993,7 +2995,8 @@ def _job_superseded(job_id: str) -> bool:
 
 def _trade_job_public_view(job: dict) -> dict:
     """Shape returned to the mobile app by /api/trades/generate + /status.
-    Hides internal-only fields like the cache key."""
+    Hides internal-only fields like the cache key. Call OUTSIDE the job lock
+    with a copied snapshot: one current history projection owns every card."""
     out = {
         "job_id":          job["job_id"],
         "status":          job["status"],
@@ -3020,7 +3023,85 @@ def _trade_job_public_view(job: dict) -> dict:
     board_refresh = job.get("board_refresh")
     if board_refresh:
         out["board_refresh"] = board_refresh
+    if out["cards"]:
+        user_id, league_id, _format = job["key"]
+        out["cards"] = _project_trade_dispositions(out["cards"], user_id, league_id)
     return out
+
+
+def _project_trade_dispositions(cards, user_id: str, league_id: str):
+    """Read-only exact pass/source-interest cut, with no arm or floor bypass.
+
+    Accept internal cards or serialized snapshots; survivors are unchanged.
+    A serialized interested card cannot recover its old pre-boost score, so
+    remove it if its source is resolved. Standing offers keep their separate
+    lifecycle, but never bypass an active exact pass. All DB work is batched
+    once at the actual serve/final-publication boundary, outside the job lock.
+    """
+    if not cards or league_id == "league_demo":
+        return cards
+    try:
+        history = load_trade_interest_history([league_id])
+        own_impressions = {card.get("impression_id") for card in cards
+                           if isinstance(card, dict) and card.get("likes_you")
+                           and not card.get("standing_offer_reason")
+                           and isinstance(card.get("impression_id"), str)}
+        source_links = load_trade_card_source_likes(user_id, league_id, own_impressions)
+        _, pass_keys = history.discovery_keys(
+            user_id, pass_days=float(_deck_cfg("pass_cooldown_days", 14.0)),
+            amnesty_epoch=float(_deck_cfg("pass_cooldown_start_epoch", 0.0)))
+        cutoff = datetime.now(timezone.utc) - timedelta(days=90)
+        active_sources = {
+            (frozenset(row["receive_player_ids"]), frozenset(row["give_player_ids"]),
+             row["user_id"], row.get("impression_id"))
+            for row in history.likes(exclude_user_id=user_id, receiver_id=user_id)
+            if row["_order"] is not None and row["_order"][0] >= cutoff
+        }
+        active_interest = {source[:3] for source in active_sources}
+        kept = []
+        for card in cards:
+            if isinstance(card, dict):
+                give = frozenset(p["id"] for p in card.get("give", []))
+                receive = frozenset(p["id"] for p in card.get("receive", []))
+                target = card.get("target_user_id")
+                interested = card.get("likes_you")
+                standing = card.get("standing_offer_reason")
+                source_id = source_links.get(card.get("impression_id"))
+            else:
+                give, receive = frozenset(card.give_player_ids), frozenset(card.receive_player_ids)
+                target = card.target_user_id
+                interested = getattr(card, "likes_you", False)
+                standing = getattr(card, "standing_offer_reason", None)
+                source_id = getattr(card, "source_like_impression_id", None)
+            if (give, receive) in pass_keys:
+                continue
+            if interested and not standing and (give, receive, target) not in active_interest:
+                continue
+            if interested and not standing and source_id is not None and (
+                    give, receive, target, source_id) not in active_sources:
+                # A new same-package like cannot validate an old snapshot's
+                # known source attribution. Null/unlinked legacy keeps the
+                # exact current-evidence rule above, with no invented link.
+                continue
+            kept.append(card)
+        return kept
+    except Exception as err:
+        # An unverified old snapshot must not assert interest or replay a
+        # pass. No history/impression mutation; the next request can retry.
+        log.warning("trade disposition projection unavailable: %s", err)
+        return []
+
+
+def _load_trade_disposition_keys(user_id: str, league_id: str):
+    """Both session builders restore the same unchanged D-067 windows.
+
+    Pass cooldown/amnesty and seven-day likes stay independent. Normalized
+    DB history avoids truncating fractional windows or offset timestamps.
+    """
+    history = load_trade_interest_history([league_id], user_ids=[user_id])
+    return history.discovery_keys(
+        user_id, pass_days=float(_deck_cfg("pass_cooldown_days", 14.0)),
+        amnesty_epoch=float(_deck_cfg("pass_cooldown_start_epoch", 0.0)))
 
 
 def _trade_safety_signature():
@@ -7825,6 +7906,9 @@ def _run_trade_job(
         # ghost cards (ghosts keep their would-have-been position for the
         # counterfactual log). ghost_on=False ⇒ served_final IS final_cards
         # and every downstream write is byte-identical to pre-telemetry.
+        # #419: recheck after generation/mutation work, before freezing
+        # impressions. A pass may have arrived while the worker was running.
+        final_cards = _project_trade_dispositions(final_cards, g_user_id, league_id)
         served_final = final_cards
         ghost_cards: list = []   # [(would_be_pos, card)]
         if ghost_on:
@@ -7838,6 +7922,19 @@ def _run_trade_job(
             except Exception as gs_err:
                 log.warning("ghost split failed (serving unfiltered): %s", gs_err)
                 served_final, ghost_cards = final_cards, []
+
+        # Publish the filtered final list even with F1 disabled. Later F1
+        # annotation adds impression IDs without altering package membership.
+        snapshot = []
+        for card in served_final:
+            row = trade_card_to_dict(card, players_dict)
+            row["real_opponent"] = card.target_user_id in real_user_ids
+            row["outlook"] = outlook_value
+            snapshot.append(row)
+        with _trade_jobs_lock:
+            job = _trade_jobs.get(job_id)
+            if _job_live(job):
+                job["cards"] = snapshot
 
         # G6 R-9 — per-rule kill counters + tripwire, on the POST-GHOST
         # served count (lld §5 amendment). Flag off ⇒ no line at all.
@@ -13350,6 +13447,7 @@ def generate_trades():
     except Exception:
         pass
 
+    reuse_snapshot = None
     with _trade_jobs_lock:
         existing_id = _trade_jobs_by_key.get(key) if not _any_pinned else None
         existing    = _trade_jobs.get(existing_id) if existing_id else None
@@ -13357,7 +13455,7 @@ def generate_trades():
         if existing and not _any_pinned:
             # Cache hit: complete + fresh + same params → return instantly.
             if not force_fresh and _trade_job_is_fresh(existing, fairness_threshold, outlook_value, trade_intent):
-                return jsonify(_trade_job_public_view(existing))
+                reuse_snapshot = copy.deepcopy(existing)
             # In-flight: share the current job. Note: if the request used
             # different fairness/outlook, the snapshot will reflect the
             # original params — the frontend can re-tap once status flips.
@@ -13371,16 +13469,21 @@ def generate_trades():
             # and it is the same reason a board change that alters values
             # (e.g. an override released by a newer vote) could be invisible.
             # Supersede the running job and fall through to spawn a fresh one.
-            if existing.get("status") == "running":
+            elif existing.get("status") == "running":
                 if not (force_fresh and _force_supersede_enabled()):
-                    return jsonify(_trade_job_public_view(existing))
-                existing["superseded"]    = True
-                existing["superseded_at"] = time.monotonic()
-                log.info("trade-job %s superseded by force=true (key=%s)",
-                         existing_id, key)
+                    reuse_snapshot = copy.deepcopy(existing)
+                else:
+                    existing["superseded"]    = True
+                    existing["superseded_at"] = time.monotonic()
+                    log.info("trade-job %s superseded by force=true (key=%s)",
+                             existing_id, key)
             # Otherwise: stale or errored → drop the index entry and fall
             # through to spawn a new job.
-            _trade_jobs_by_key.pop(key, None)
+            if reuse_snapshot is None:
+                _trade_jobs_by_key.pop(key, None)
+
+    if reuse_snapshot is not None:
+        return jsonify(_trade_job_public_view(reuse_snapshot))
 
     # Kick off a fresh job. No locks held during the worker spawn so we
     # don't accidentally serialize parallel users.
@@ -13400,8 +13503,8 @@ def generate_trades():
         session_context    = sess,
     )
     with _trade_jobs_lock:
-        snapshot = _trade_job_public_view(_trade_jobs[job_id])
-    return jsonify(snapshot)
+        snapshot = copy.deepcopy(_trade_jobs[job_id])
+    return jsonify(_trade_job_public_view(snapshot))
 
 
 @app.route("/api/trades/asset-ideas", methods=["POST"])
@@ -13928,7 +14031,7 @@ def undo_deck_suppression():
 @_gate_unverified_read
 def trade_job_status():
     """GET /api/trades/status?job_id=X
-    Cheap dict lookup. Used by the mobile app to poll an in-flight
+    Snapshot plus one batched disposition read. Used to poll an in-flight
     /api/trades/generate job. 404 if the job has been evicted."""
     sess = _require_session()
     sess["last_active"] = time.time()
@@ -13941,7 +14044,8 @@ def trade_job_status():
         # user_id, but we double-check here in case of a stale id.
         if job["key"][0] != sess["user_id"]:
             return jsonify({"error": "job not found"}), 404
-        return jsonify(_trade_job_public_view(job))
+        snapshot = copy.deepcopy(job)
+    return jsonify(_trade_job_public_view(snapshot))
 
 
 @app.route("/api/trades")
@@ -13958,6 +14062,13 @@ def get_trades():
         user_id   = g_user_id,
         league_id = league_id,
     )
+    # Pending services can contain a newly minted card ID for an old package.
+    # Filter by each card's league, never by a switched session's active alias.
+    allowed = set()
+    for lid in {card.league_id for card in cards}:
+        allowed.update(id(card) for card in _project_trade_dispositions(
+            [card for card in cards if card.league_id == lid], g_user_id, lid))
+    cards = [card for card in cards if id(card) in allowed]
     players_dict = {p.id: p for p in g_players}
     return jsonify([trade_card_to_dict(c, players_dict) for c in cards])
 
@@ -14126,26 +14237,7 @@ def swipe_trade():
         # scoring format's service and the card returns after a format switch.
         # Best-effort: a swipe must never fail on bookkeeping.
         if decision == "pass":
-            try:
-                _dismiss_key = (frozenset(card.give_player_ids),
-                                frozenset(card.receive_player_ids))
-                _svcs = list((sess.get("trade_svcs") or {}).values())
-                if trade_service is not None and trade_service not in _svcs:
-                    _svcs.append(trade_service)
-                for _svc in _svcs:
-                    # #402 rev-3 QA-B F2 — the dismiss ALSO binds the
-                    # pass-only subset the asset-ideas sweep consults, so a
-                    # package dismissed in the shop is gone from the very
-                    # next asset-ideas fetch (D-067: "the cooldown binds
-                    # every live service immediately"), not just the deck.
-                    for _attr in ("_past_decision_keys",
-                                  "_dismissed_decision_keys"):
-                        keys = getattr(_svc, _attr, None)
-                        if keys is not None:
-                            keys.add(_dismiss_key)
-            except Exception as _mem_err:
-                log.warning("dismiss cooldown: in-memory update skipped: %s",
-                            _mem_err)
+            _bind_live_trade_pass(sess, card)
 
         # Persist to DB — write-through
         match_data = None
@@ -14185,6 +14277,10 @@ def swipe_trade():
                     k_factor       = k_factor,
                     scoring_format = _active_format(sess),
                 )
+                if decision == "pass":
+                    # A banked reason can precede this fielded client's
+                    # companion swipe. Its later detail must not add Elo.
+                    mark_reasoned_trade_pass_elo(g_user_id, card.league_id, trade_id)
 
             try:
                 record_event(
@@ -14577,7 +14673,8 @@ def queue_trade_for_opponent():
 
     # Idempotency probe — BEFORE any signal or write. See the docstring.
     try:
-        existing = find_live_trade_like(g_user_id, league_id, trade_id)
+        existing = find_live_trade_like(g_user_id, league_id, trade_id,
+                                        target_user_id=opponent.user_id)
     except Exception as dup_err:
         log.warning("trades/queue: idempotency probe failed: %s", dup_err)
         existing = None
@@ -14626,6 +14723,7 @@ def queue_trade_for_opponent():
             give_player_ids    = card.give_player_ids,
             receive_player_ids = card.receive_player_ids,
             decision           = "like",
+            queue_target_user_id = opponent.user_id,
         )
         if wrote_decision:
             save_trade_swipes(
@@ -14768,44 +14866,35 @@ def _pass_reason_key(impression_id, user_id: str, trade_id: str) -> tuple[str, s
     return candidate, "impression"
 
 
-def _apply_reasoned_pass(sess, card, body: dict, elo: bool) -> None:
-    """The pass disposition for a layer-1 tap. Mirrors swipe_trade's pass
-    branch; `elo` is SPEC §4's one divergence.
+def _bind_live_trade_pass(sess, card) -> None:
+    """D-067 pass-only exclusion on every live format, including legacy alias."""
+    try:
+        league = sess.get("league")
+        if league is not None and league.league_id != card.league_id:
+            # A delayed echoed card can belong to the previous league. Its
+            # durable pass is valid there, not in the currently live services.
+            return
+        key = (frozenset(card.give_player_ids), frozenset(card.receive_player_ids))
+        svcs = list((sess.get("trade_svcs") or {}).values())
+        alias = sess.get("trade_svc")
+        if alias is not None and alias not in svcs:
+            svcs.append(alias)
+        for svc in svcs:
+            for attr in ("_past_decision_keys", "_dismissed_decision_keys"):
+                keys = getattr(svc, attr, None)
+                if keys is not None:
+                    keys.add(key)
+    except Exception as err:
+        log.warning("dismiss cooldown: in-memory update skipped: %s", err)
 
-    Runs EXACTLY ONCE per impression — the caller only reaches here when the
-    upsert reports it minted the row. Every side effect is individually
-    non-fatal, same as the route it mirrors: a reasoned pass that lost its
-    analytics row is a bad day, a reasoned pass that 500s is a lost pass.
+
+def _apply_reasoned_pass(sess, card, body: dict) -> None:
+    """Once-only outcome/event for a newly COMMITTED reasoned disposition.
+
+    The durable decision is the caller's verdict, not a reason-row creation
+    or a best-effort write. Elo retains its independent existing claim.
     """
     g_user_id = sess["user_id"]
-    service   = sess["service"]
-
-    # Fit-congruence weighting (D-060) — computed identically to the swipe
-    # path so the in-memory signal and the persisted k_factor agree; unused
-    # when `elo` is False.
-    fit_mult = _trade_service_mod.fit_congruence_mult(
-        getattr(card, "lane_shift", None), "pass")
-    # trade.bakeoff §3.4 Channel 1 — zero the trade-swipe K factors for
-    # the duration of a bake-off run, so an arm's card cannot teach the
-    # shared board the next deck's arms read. Applied at the multiplier
-    # BOTH halves already share (the in-memory record_trade_signal and
-    # the persisted swipe_decisions k_factor), so the live board and the
-    # DB replay can never disagree. Flag off ⇒ returns fit_mult unchanged.
-    fit_mult = _bakeoff.elo_freeze_mult(fit_mult)
-
-    # Not gated on the replay verdict, same as swipe_trade — see the G-049 /
-    # D-073 note there. `elo` is SPEC §4's suppression, a different question.
-    if elo:
-        service.record_trade_signal(
-            winner_ids = card.give_player_ids,
-            loser_ids  = card.receive_player_ids,
-            decision   = "pass",
-            fit_mult   = fit_mult,
-        )
-
-    # F1 (deck.signal_v2) — the disposition itself. This is the row that
-    # replaces what the ✕ used to write; it is NOT conditional on the Elo
-    # decision, because the user did pass whatever their reason was.
     _save_deck_outcome_safe(
         body.get("impression_id"),
         "pass",
@@ -14816,48 +14905,20 @@ def _apply_reasoned_pass(sess, card, body: dict, elo: bool) -> None:
     )
 
     try:
-        # See the swipe_trade site above: False ⇒ double-fire replay, so the
-        # swipe write (the one _compute_elo replays) is skipped to keep
-        # trade_k_pass single-counted.
-        wrote_decision = save_trade_decision(
-            user_id            = g_user_id,
-            league_id          = card.league_id,
-            trade_id           = card.trade_id,
-            give_player_ids    = card.give_player_ids,
-            receive_player_ids = card.receive_player_ids,
-            decision           = "pass",
+        record_event(
+            g_user_id, "match_swiped", league_id=card.league_id, source="api",
+            props={
+                "decision": "pass", "trade_id": card.trade_id,
+                "give": card.give_player_ids, "receive": card.receive_player_ids,
+                "target": card.target_user_id,
+                "aggression_variant": getattr(card, "aggression_variant", None),
+                "lane": getattr(card, "lane", None),
+                "fit_premium": bool(getattr(card, "fit_premium", None)),
+            },
+            **(getattr(g, "device_info", {}) or {}),
         )
-        if elo and wrote_decision:
-            from .ranking_service import _c as _rs_c
-            save_trade_swipes(
-                user_id        = g_user_id,
-                winner_ids     = card.give_player_ids,
-                loser_ids      = card.receive_player_ids,
-                k_factor       = _rs_c("trade_k_pass") * fit_mult,
-                scoring_format = _active_format(sess),
-            )
-        try:
-            record_event(
-                g_user_id,
-                "match_swiped",
-                league_id = card.league_id,
-                source    = "api",
-                props     = {
-                    "decision":   "pass",
-                    "trade_id":   card.trade_id,
-                    "give":       card.give_player_ids,
-                    "receive":    card.receive_player_ids,
-                    "target":     card.target_user_id,
-                    "aggression_variant": getattr(card, "aggression_variant", None),
-                    "lane":               getattr(card, "lane", None),
-                    "fit_premium":        bool(getattr(card, "fit_premium", None)),
-                },
-                **(getattr(g, "device_info", {}) or {}),
-            )
-        except Exception as ev_err:
-            log.warning("record_event(reasoned pass) failed: %s", ev_err)
-    except Exception as db_err:
-        log.warning("DB write failed for reasoned pass (continuing): %s", db_err)
+    except Exception as err:
+        log.warning("record_event(reasoned pass) failed: %s", err)
 
 
 @app.route("/api/trades/pass-reason", methods=["POST"])
@@ -14886,13 +14947,10 @@ def trade_pass_reason():
     request) and `switched_from` (derived server-side from the stored row, so
     it can never disagree with the row it describes).
 
-    THE CONTRACT (SPEC §3): every call commits on its own and no call can
-    lose an earlier one. The FIRST call for an impression — whichever layer
-    it carries — performs the pass; later calls only sharpen the row. A
-    repeated or re-ordered call is therefore safe: re-sending layer 1 does
-    not pass the card twice, and a layer-2 write that arrives with no layer
-    1 (dropped request, app restart mid-flow) still passes the card and
-    names its own reason from the detail's prefix.
+    Every call banks its reason independently. With valid card context it
+    verifies or repairs the episode's durable exact pass, including when an
+    earlier request lacked context or lost its decision write. `passed` is
+    that verified state (also True on committed retries), not row creation.
 
     Elo (SPEC §4) is decided per write from the MOST SPECIFIC code known and
     claimed at most once per impression — see ranking_service.
@@ -14987,39 +15045,40 @@ def trade_pass_reason():
         log.exception("pass-reason upsert failed")
         return jsonify({"error": "write_failed"}), 500
 
-    # SPEC §4 — the Elo decision, from the most specific code THIS write
-    # knows. Layer-1-only always suppresses (no valuation was claimed), so
-    # with the knob on the write lands at the moment `value_giving` arrives,
-    # not at the tile tap. claim_trade_pass_elo makes it once-only.
+    passed = wrote_pass = False
+    if card is not None:
+        try:
+            passed, wrote_pass = ensure_reasoned_trade_pass(
+                key, g_user_id, card.league_id, card.trade_id,
+                card.give_player_ids, card.receive_player_ids)
+        except Exception as err:
+            log.warning("reason banked; pass commit unverified: %s", err)
+    if passed:
+        _bind_live_trade_pass(sess, card)
+        try:
+            trade_service.record_decision(trade_id=card.trade_id, decision="pass")
+        except Exception as err:
+            log.warning("pass-reason record_decision failed: %s", err)
+        if wrote_pass:
+            _apply_reasoned_pass(sess, card, body)
+
+    # SPEC §4 remains once-only. A first reason can follow an ordinary
+    # swipe: its durable pass already supplied Elo, so consume (don't use)
+    # the reason claim. Bank-first companion swipes consume it at their write.
     code_now = state.get("detail") or state.get("reason")
     elo_now  = False
-    if card is not None and _pass_reason_writes_elo(code_now):
+    if passed and state["created"] and not wrote_pass:
         try:
-            elo_now = claim_trade_pass_elo(key)
-        except Exception as e:
-            log.warning("pass-reason elo claim failed (non-fatal): %s", e)
-
-    if state["created"]:
-        if card is None:
-            # Nothing to pass against: the reason row is banked (the user's
-            # answer is never thrown away) but the disposition cannot be
-            # written. Loud, because it means the client stopped echoing the
-            # card context.
-            log.warning("pass-reason: no card for trade_id=%s — reason stored, "
-                        "disposition NOT written", trade_id)
-        else:
-            try:
-                trade_service.record_decision(trade_id=trade_id, decision="pass")
-            except Exception as rd_err:
-                log.warning("pass-reason record_decision failed: %s", rd_err)
-            _apply_reasoned_pass(sess, card, body, elo=elo_now)
-    elif elo_now and card is not None:
+            claim_trade_pass_elo(key)
+        except Exception as err:
+            log.warning("pass-reason prior-swipe Elo claim failed: %s", err)
+    elif passed and _pass_reason_writes_elo(code_now):
         # A later write earned the Elo signal the layer-1 tap suppressed.
-        _apply_reasoned_pass_elo_only(sess, card)
+        elo_now = _apply_reasoned_pass_elo_only(sess, card, key)
 
     return jsonify({
         "ok":            True,
-        "passed":        bool(state["created"]),
+        "passed":        bool(passed),
         "reason":        state.get("reason"),
         "detail":        state.get("detail"),
         "switched_from": state.get("switched_from"),
@@ -15027,15 +15086,13 @@ def trade_pass_reason():
     })
 
 
-def _apply_reasoned_pass_elo_only(sess, card) -> None:
-    """The deferred half of SPEC §4: write the pass's Elo signal on a LATER
-    tap than the one that passed the card.
+def _apply_reasoned_pass_elo_only(sess, card, reason_key: str) -> bool:
+    """SPEC §4's independently claimed Elo half, on a first or later tap.
 
-    Reached only when the knob is on and the user's layer-2 answer was
-    `value_giving` — the one code that actually asserts "my side is worth
-    more". The disposition was already written by the layer-1 tap; this adds
-    the ranking signal it deliberately withheld, at the same K and with the
-    same fit-congruence weight the swipe path would have used.
+    With suppression on, only `value_giving` asserts a valuation; with it
+    off, every reason qualifies. The underlying pass is already verified.
+    The claim and persisted signal commit together before the derived live
+    board updates, with unchanged K/fit/bakeoff multipliers.
     """
     fit_mult = _trade_service_mod.fit_congruence_mult(
         getattr(card, "lane_shift", None), "pass")
@@ -15047,22 +15104,23 @@ def _apply_reasoned_pass_elo_only(sess, card) -> None:
     # DB replay can never disagree. Flag off ⇒ returns fit_mult unchanged.
     fit_mult = _bakeoff.elo_freeze_mult(fit_mult)
     try:
-        sess["service"].record_trade_signal(
-            winner_ids = card.give_player_ids,
-            loser_ids  = card.receive_player_ids,
-            decision   = "pass",
-            fit_mult   = fit_mult,
-        )
         from .ranking_service import _c as _rs_c
-        save_trade_swipes(
+        wrote = save_trade_swipes(
             user_id        = sess["user_id"],
             winner_ids     = card.give_player_ids,
             loser_ids      = card.receive_player_ids,
             k_factor       = _rs_c("trade_k_pass") * fit_mult,
             scoring_format = _active_format(sess),
+            pass_reason_key = reason_key,
         )
+        if wrote:
+            sess["service"].record_trade_signal(
+                winner_ids=card.give_player_ids, loser_ids=card.receive_player_ids,
+                decision="pass", fit_mult=fit_mult)
+        return bool(wrote)
     except Exception as e:
         log.warning("deferred pass-reason Elo write failed (non-fatal): %s", e)
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -20445,47 +20503,10 @@ def session_init():
     # suppression. One shared set object across formats, like its parent.
     past_pass_keys: set = set()
     try:
-        pass_days = float(_deck_cfg("pass_cooldown_days", 14.0))
-        like_days = 7.0
-        # One query at the widest window; the per-type cut happens below.
-        past_td = load_trade_decisions(
-            user_id=user_id, league_id=league_id,
-            since_days=int(max(pass_days, like_days)) or 1,
-        )
-        now_utc = datetime.now(timezone.utc)
-        # Legacy-dismiss amnesty (operator 2026-08-17): a dismiss recorded
-        # before decline-reason capture went live carries no reason, so the
-        # avoidance rule must not be applied to it — the user was never given
-        # the chance to say why. Applies to dismisses ONLY; likes are unchanged.
-        amnesty_epoch = float(_deck_cfg("pass_cooldown_start_epoch", 0.0))
-        n_pass = n_like = n_amnesty = 0
-        for td in past_td:
-            is_pass = td.get("decision") == "pass"
-            window = pass_days if is_pass else like_days
-            try:
-                decided_at = datetime.fromisoformat(td["created_at"])
-                if decided_at.tzinfo is None:
-                    decided_at = decided_at.replace(tzinfo=timezone.utc)
-                if is_pass and amnesty_epoch > 0 and \
-                        decided_at.timestamp() < amnesty_epoch:
-                    n_amnesty += 1
-                    continue
-                if (now_utc - decided_at).total_seconds() > window * 86400.0:
-                    continue
-            except (KeyError, TypeError, ValueError):
-                pass  # unparseable stamp ⇒ keep excluding (fail closed)
-            key = (frozenset(td["give_player_ids"]), frozenset(td["receive_player_ids"]))
-            past_decision_keys.add(key)
-            if is_pass:
-                past_pass_keys.add(key)     # QA-B F2 — asset-ideas subset
-                n_pass += 1
-            else:
-                n_like += 1
+        past_decision_keys, past_pass_keys = _load_trade_disposition_keys(user_id, league_id)
         if past_decision_keys:
-            log.info("  loaded %d past trade decisions (%d dismissed / %.0fd, "
-                     "%d liked / %.0fd, %d pre-reason dismissals amnestied)",
-                     len(past_decision_keys), n_pass, pass_days,
-                     n_like, like_days, n_amnesty)
+            log.info("  loaded %d past trade package keys (%d active dismissals)",
+                     len(past_decision_keys), len(past_pass_keys))
     except Exception as db_err:
         log.warning("  could not load past trade decisions: %s", db_err)
 
@@ -21781,24 +21802,13 @@ def _build_replenish_session(user_id: str, league_id: str) -> str | None:
         if not user_roster:
             raise RuntimeError("user roster empty after pool filter")
 
-        # 7-day deck memory, same as session_init.
+        # Same per-type cooldown/amnesty as interactive session_init (#419).
         past_decision_keys: set = set()
-        # QA-B F2 — the pass-only subset asset-ideas consults (this path's
-        # sessions serve deck jobs, but the exclusion travels with the
-        # service either way). Cut from the same 7-day query this path has
-        # always used — a narrower window than session_init's 14-day
-        # pass_cooldown_days cut, a pre-existing gap of this builder.
         past_pass_keys: set = set()
         try:
-            for td in load_trade_decisions(user_id=user_id,
-                                           league_id=league_id, since_days=7):
-                _k = (frozenset(td["give_player_ids"]),
-                      frozenset(td["receive_player_ids"]))
-                past_decision_keys.add(_k)
-                if td.get("decision") == "pass":
-                    past_pass_keys.add(_k)
-        except Exception:
-            pass
+            past_decision_keys, past_pass_keys = _load_trade_disposition_keys(user_id, league_id)
+        except Exception as err:
+            log.warning("replenish: could not restore trade dispositions: %s", err)
 
         try:
             fmt = get_league_scoring(league_id)
@@ -21901,6 +21911,9 @@ def _replenish_deck_for(user_id: str, league_id: str) -> tuple[int, int] | None:
                 return None
             cards = list(job.get("cards") or [])
 
+    # The notification count is a serve boundary too: a pass may have landed
+    # after publication or while this cached deck was waiting for the cron.
+    cards = _project_trade_dispositions(cards, user_id, league_id)
     return len(cards), _count_expired_dropped(prior_rows, cards)
 
 
