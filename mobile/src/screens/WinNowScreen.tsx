@@ -4,9 +4,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
 import Text from '../components/chalkline/Text';
 import FeedbackFAB from '../components/FeedbackFAB';
-import { useSession } from '../state/useSession';
+import { useSession, loadSeasonProjections } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
-import { getSeasonProjections, searchWinNow, getWinNowJob, evaluateWinNow, decideWinNow } from '../api/winNow';
+import { searchWinNow, getWinNowJob, evaluateWinNow, decideWinNow } from '../api/winNow';
 import type { SeasonProjection, SeasonTeam, WinNowAsset, WinNowScenario, WinNowObjective, WinNowEvaluation, SeasonMeta } from '../shared/types';
 import { probability, numeric, impact, nextThree, sourceReceipt, seasonStale, projectedStandings, samplingEvidence } from '../utils/winNow';
 import { ink, chalk, ice, space, radii, type } from '../theme/chalkline';
@@ -63,6 +63,7 @@ function WinNowContent({leagueId}: {leagueId?: string}) {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [refresh, setRefresh] = useState(0);
+  const explicitRefresh = useRef(false);
   const [objective, setObjective] = useState<WinNowObjective>('wins');
   const [budget, setBudget] = useState('3');
   const [fairness, setFairness] = useState('90');
@@ -93,9 +94,11 @@ function WinNowContent({leagueId}: {leagueId?: string}) {
     setBaseline(null); setLoadError(''); setLoading(false);
     if (seasonOn && leagueId && focused) {
       setLoading(true);
-      getSeasonProjections(leagueId, request.signal).then(data => {
+      const cause = explicitRefresh.current ? 'refresh' : 'automatic';
+      explicitRefresh.current = false;
+      loadSeasonProjections(leagueId, request.signal, cause).then(data => {
         if (active) setBaseline(data);
-      }).catch(error => { if (active) setLoadError(errorCopy(error)); })
+      }).catch(error => { if (active && error?.name !== 'AbortError') setLoadError(errorCopy(error)); })
         .finally(() => { if (active) setLoading(false); });
     }
     return () => { active = false; request.abort(); };
@@ -186,7 +189,7 @@ function WinNowContent({leagueId}: {leagueId?: string}) {
       <Text variant="heading">Season projections & Win Now</Text>
       <Text style={s.body}>Improve this season while keeping dynasty sacrifice within your limit. Forecasts are estimates, not guarantees.</Text>
       {!seasonOn || !leagueId ? <Text testID="win-now.disabled" style={s.body}>Season projections are not available for this league yet.</Text> : <>
-        <Action id="win-now.refresh" label={loading ? 'Loading season projections…' : 'Refresh season projections'} onPress={() => setRefresh(n => n + 1)} disabled={loading} />
+        <Action id="win-now.refresh" label={loading ? 'Loading season projections…' : 'Refresh season projections'} onPress={() => { explicitRefresh.current = true; setRefresh(n => n + 1); }} disabled={loading} />
         {!!loadError && <Text accessibilityRole="alert" style={s.body}>{loadError}</Text>}
         {baseline && <Text testID="win-now.source" style={s.caption}>{sourceReceipt(baseline.meta)}</Text>}
         {baseline?.status === 'unavailable' && <Text testID="win-now.unavailable" style={s.body}>{baseline.message || baseline.reason?.replace(/_/g, ' ') || 'This league format or forecast source is not supported yet.'}</Text>}

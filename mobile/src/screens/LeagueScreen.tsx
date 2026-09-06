@@ -48,8 +48,7 @@ import { getPickAssignments, pickAssignmentSubline } from '../api/pickAssignment
 import { getProgress, getTiersStatus } from '../api/rankings';
 import { importEspnLeague } from '../api/espn';
 import { ApiError } from '../api/client';
-import { initLeagueSession } from '../api/auth';
-import { useSession } from '../state/useSession';
+import { useSession, beginLeagueContext, completeLeagueContext, currentSessionGuard } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
 import { track } from '../api/events';
 import { useWhatsNew } from '../hooks/useWhatsNew';
@@ -151,16 +150,22 @@ export default function LeagueScreen() {
     setResyncing(true);
     setResyncMsg(null);
     setResyncAuthFail(false);
+    let guard = currentSessionGuard();
     try {
+      const pending = beginLeagueContext(user, {league_id: leagueId, name: league?.league_name || ''});
+      guard = currentSessionGuard();
+      const context = await pending;
+      guard = context.assertIdentity;
       const res = await importEspnLeague(leagueId);
+      context.assertCurrent();
       // Rebuild the server session so the refreshed rosters are live.
-      await initLeagueSession(user, {
-        league_id: leagueId,
-        name: res.name || league?.league_name || '',
-      });
+      await completeLeagueContext(context, {force: true});
+      context.assertCurrent();
       setResyncMsg(`Re-synced ${res.teams_imported} rosters from ESPN.`);
       refetchAll();
     } catch (e: any) {
+      if (e?.name === 'AbortError') return;
+      try { guard(); } catch { return; }
       if (e instanceof ApiError && e.isEspnAuthRequired) {
         setResyncAuthFail(true);
         setResyncMsg(
@@ -172,7 +177,7 @@ export default function LeagueScreen() {
         setResyncMsg(e?.message || 'Re-sync failed — try again shortly.');
       }
     } finally {
-      setResyncing(false);
+      try { guard(); setResyncing(false); } catch { /* superseded */ }
     }
   }
 
