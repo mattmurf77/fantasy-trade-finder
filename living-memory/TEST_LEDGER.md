@@ -11,6 +11,21 @@
 
 ---
 
+## 2026-09-06 — Feedback 419–421 implementation checkpoints, not release evidence
+
+Selected scope only: [batch plan](../docs/feedback/items/419-rejected-interest-resurfacing/plan.md). Fresh main remained `4026ebc8` at 05:12 UTC. Owner explicitly preauthorized this batch's reviewed merge/live/TestFlight delivery; no express-lane or physical-QA waiver. All 45 open reports were audited read-only; no unrelated status closure. The three selected records are now in progress. Current code checkpoints below are **not the final integrated QA round**.
+
+- Parent baseline on unchanged `4026ebc8` runtime: Python **3.12.14**, `DATABASE_URL=sqlite:///:memory:`, `PYTHONDONTWRITEBYTECODE=1`, `pytest -q -p no:cacheprovider` across `test_trade_match_flow`, `test_pass_cooldown`, `test_decline_reasons`, `test_awaiting_dismiss`, `test_deck_fatigue`, `test_trade_decision_idempotency`, `test_swipe_reconstruct`, `test_bakeoff_serving`, `test_bakeoff_arm_a_golden`, `test_calc_trade_queue`, `test_deck_replenishment`, `test_win_now_api`: **310 passed in 21.20 s**.
+- Parent independent isolated checkpoint at **`b396b645676b5f69d896373e6fd61655adcb0cab`**, same interpreter/env/pytest options: `backend/tests/test_trade_interest_disposition.py`, `test_trade_match_flow.py`, `test_calc_trade_queue.py`, `test_decline_reasons.py`, `test_pass_cooldown.py`, `test_trade_decision_idempotency.py`, `test_awaiting_dismiss.py`, `test_league_summary_buckets.py`: **212 passed in 4.89 s**. Source-interest/queue and durable reason handling were committed; cache/restoration/mobile work was still in progress. Root review separately identified a mixed-player/pick Awaiting compatibility gap for correction, so passing this checkpoint is not acceptance of the complete patch.
+- Research validation: fresh public Sleeper sweep **57/57 successful legs**, three verified current leagues, **28 completed trades** exactly matching stored transaction IDs. Parent independently recomputed distribution sums, weighted player means and large-side counts for **24 original aggregate summaries and 32 detailed summaries**; all reconcile, no unknown impression assets. [Sanitized research and limitations](../docs/research/2026-09-06-trade-package-shapes.md). No causal acceptance-rate claim, real-user trade generation or provider trade write.
+- Locked local mobile dependencies installed independently with `npm ci --ignore-scripts --no-audit --no-fund` in implementation/integration and both isolated QA checkouts; **801 packages** each, no symlinked dependencies or lockfile edits. Node **24.14.1**; hosted Node 20 is a separate future gate. Latest existing EAS build read back at 05:14 UTC remains **1.17.0 (148), FINISHED**; this is not a new batch build or tester-availability proof.
+
+The parent repeated the same eight-suite `b396b645` checkpoint with both import-time provider inputs explicitly pinned: `FTF_DP_VALUES_FILE` to that checkout's `backend/tests/fixtures/outlook-hypotheses/dp-values-players-2026-08-09.csv` and `FTF_DP_PICK_VALUES_FILE` to `backend/tests/fixtures/dp_values_picks_2026-08-06.csv`: **212 passed in 5.12 s**. The earlier invocation did not explicitly pin the player curve and is not claimed to have prevented startup fetch attempts. These are per-command targeted fixtures, not a global conftest or historical golden change; full-suite/CI evidence remains separate.
+
+RED proof is recorded in item-local build evidence: use the actual unchanged original runtime, with module identity and hermetic fixtures verified. An automatic safety review blocked a temporary queue-defect mutation; no mutation landed or was retried. Unchanged-baseline behavioral failures are the safe alternative, not a claim that every proposed fault-injection test ran. No simulator/Maestro, new deployment, CI run or physical-device pass is claimed at this checkpoint.
+
+---
+
 ## 2026-09-05 — Experimental personal-market policy activation verified
 
 Owner explicitly said “I want the experimental policy on.” Independent Astra read-only review found no code/migration blocker and reviewed the single-variable update, exact-source deployment, stale-client/fail-closed boundaries and rollback. Fresh `/private/tmp/ftf-context-venv/bin/python -m pytest backend/tests/test_trade_policy.py backend/tests/test_trade_policy_wiring.py backend/tests/test_owner_policy_contracts.py backend/tests/test_trade_card_privacy.py -q --tb=short` — **114 passed in 3.68 s**. Full source CI remains the 5,455-pass / one-skip record below; no runtime code changed.
@@ -3844,6 +3859,7 @@ deliberately decoupled for that reason.
 
 ## Table of Contents
 
+- [2026-09-06 — Feedback 419–421 implementation checkpoints, not release evidence](#2026-09-06--feedback-419421-implementation-checkpoints-not-release-evidence)
 - [2026-09-05 — Experimental personal-market policy activation verified](#2026-09-05--experimental-personal-market-policy-activation-verified)
 - [2026-09-05 — Security follow-up independently reviewed: Python 3.12 and PostgreSQL pass; native runtime pending](#2026-09-05--security-follow-up-independently-reviewed-python-312-and-postgresql-pass-native-runtime-pending)
 - [2026-09-04 — Security findings 1–5: initial local implementation, not deployed](#2026-09-04--security-findings-15-initial-local-implementation-not-deployed)
