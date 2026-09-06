@@ -165,3 +165,108 @@ Operator TestFlight checklist remains **not run**. No Maestro, simulator,
 captures, production writes, push or deployment. Remote-only invalidation of
 already retained mobile decks, post-match Decline/fuzzy exemptions, and
 standing-offer lifecycle remain explicitly held as in the reviewed PRD.
+
+## QA-A repair — bind a reason to its rejection episode
+
+Repair base: unchanged `e02d074ed37b1ba81cbe4f53cbf90378c49f38de` in
+`/private/tmp/ftf-feedback-419-421-f1uMyt/trade`. Independent QA reproduced
+the finding on root's frozen integration `aa463789`: an August same-ID pass
+incorrectly satisfied a new September reason after a renewed opposing like.
+The response said `passed:true`, wrote no current pass/outcome, and left the
+renewed source actionable. This section supersedes the earlier reason gate
+for this newly identified episode boundary; it does not erase prior results.
+
+The repair uses the reason row's immutable first-bank `created_at`, not its
+later `updated_at`. Earlier ordinary companion swipes must fit the validated
+owned/same-league impression interval, or the existing ten-second legacy
+bridge. Exact intervening positive consent before the first-bank anchor
+invalidates that old companion, including a retained impression or a pass
+inside ten seconds. UTC-normalized timestamp plus numeric decision ID orders
+equal-time decision rows. A known different impression is not this exposure.
+Malformed chronology cannot verify an old pass. A later reason refinement
+does not manufacture a new rejection of consent that arrived after first bank.
+
+RED command, run before runtime edits on the unchanged repair base:
+
+```sh
+env DATABASE_URL=sqlite:///:memory: PYTHONDONTWRITEBYTECODE=1 \
+  FTF_DP_VALUES_FILE=backend/tests/fixtures/outlook-hypotheses/dp-values-players-2026-08-09.csv \
+  FTF_DP_PICK_VALUES_FILE=backend/tests/fixtures/dp_values_picks_2026-08-06.csv \
+  /private/tmp/ftf-context-venv/bin/python -m pytest -q -p no:cacheprovider \
+  backend/tests/test_decline_reasons.py -k reason_episode --tb=line --show-capture=no
+```
+
+Result: **4 failed, 5 passed, 81 deselected in 1.87s**. All four failures
+were behavioral old-pass/coalescing assertions, not import/setup failures.
+After the first runtime repair, decline-reason/decision-idempotency/source-
+interest tests passed **129 in 6.50s**. Expanded coverage then exposed the
+known-other-impression case before its guard: **1 failed, 22 passed,
+81 deselected in 1.83s**. No source-disabling mutation was used or retried.
+
+Final consolidated GREEN command, in that same author worktree:
+
+```sh
+env DATABASE_URL=sqlite:///:memory: PYTHONDONTWRITEBYTECODE=1 \
+  FTF_DP_VALUES_FILE=backend/tests/fixtures/outlook-hypotheses/dp-values-players-2026-08-09.csv \
+  FTF_DP_PICK_VALUES_FILE=backend/tests/fixtures/dp_values_picks_2026-08-06.csv \
+  /private/tmp/ftf-context-venv/bin/python -m pytest -q -p no:cacheprovider \
+  backend/tests/test_decline_reasons.py \
+  backend/tests/test_trade_interest_disposition.py \
+  backend/tests/test_trade_disposition_replay.py \
+  backend/tests/test_trade_disposition_restoration.py \
+  backend/tests/test_trade_match_flow.py backend/tests/test_pass_cooldown.py \
+  backend/tests/test_awaiting_dismiss.py backend/tests/test_deck_fatigue.py \
+  backend/tests/test_trade_decision_idempotency.py backend/tests/test_swipe_reconstruct.py \
+  backend/tests/test_bakeoff_serving.py backend/tests/test_calc_trade_queue.py \
+  backend/tests/test_deck_replenishment.py backend/tests/test_standing_offers.py \
+  backend/tests/test_trade_job_read_amplification.py \
+  backend/tests/test_scoring_execution_context.py \
+  backend/tests/test_deck_first_session.py backend/tests/test_force_supersedes_running_job.py
+```
+
+Final result: **424 passed in 9.41s** (401 existing + 23 new cases).
+An earlier run before adding the ordinary-new-swipe assertion passed the
+same 424 cases in 9.66s. New cases execute real Flask reason/swipe routes:
+old same-ID passes, retained exposure, mixed offsets, same-time ID ordering
+for both actors, unrelated actor/league/package/direction controls, malformed
+timestamps, known other exposure, both companion orderings, delayed valid
+companions, memory-loss/contextful retries, once-only Elo/outcomes, and later
+renewal surviving reason refinement but being rejected by a genuine new swipe.
+No existing fixture, oracle, golden or global conftest changed.
+
+The unchanged external QA-A script was also replayed:
+
+```sh
+env DATABASE_URL=sqlite:///:memory: PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. \
+  FTF_DP_VALUES_FILE=backend/tests/fixtures/outlook-hypotheses/dp-values-players-2026-08-09.csv \
+  FTF_DP_PICK_VALUES_FILE=backend/tests/fixtures/dp_values_picks_2026-08-06.csv \
+  /private/tmp/ftf-context-venv/bin/python \
+  /private/tmp/ftf-feedback-419-421-f1uMyt/qa-a-reason-episode-repro.py
+```
+
+It printed both imported module paths under the author worktree and exited
+**0**: three ordered decisions (old pass, renewed like, current pass),
+`passed:true`, `elo_written:true`, renewed source inactive, one outcome,
+retry still three decisions. Its isolated global observability sink emitted
+a non-fatal missing-`user_events` warning; this script is not evidence for
+that unrelated sink. The focused tests separately assert repair event counts.
+
+Query scope: the reason transaction retains its reason/pass reads and adds
+one owned impression lookup for a real impression key, plus one conditional
+actor/actual-counterparty/league positive-history read only when an earlier
+companion needs verification. That history is not SQL-time-bounded; Python
+normalization preserves offsets and malformed barriers. No per-candidate
+query or serving-query-budget change. No schema, public fields, source/history
+rewrite, policy/flag, ranking math or ordinary swipe dedupe change.
+
+Held identity limit: `local:<user>:<trade_id>` has no distinct identity for a
+brand-new reason episode versus a very late retry of the same key. It is not
+reset by elapsed time or a later like; a fresh validated impression supplies
+a distinct reason episode. An actual new ordinary swipe retains its existing
+ten-second behavior and can reject later renewal. This is documented, not
+silently resolved with invented lifecycle state.
+
+`git diff --check` passed. Root must independently replay the original QA
+case, the focused suite, full integration and fresh QA round before release.
+No native/TestFlight execution, production access, push or deployment by this
+builder; the manual operator checklist and earlier held scope remain unchanged.
