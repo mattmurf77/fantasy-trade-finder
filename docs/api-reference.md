@@ -282,6 +282,14 @@ When roster collection is enabled, stored `features_json.roster_evaluation` incl
 
 ### Exact interest and pass disposition
 
+New organic generated jobs may apply the default-off
+`simple_player_presentment` rule after final live policy checks. It only
+changes nearby order within existing arm/group/lane/basis/policy slots, never
+the package or eligibility; explicit pins/partners and manual/asset-idea/Win
+Now routes are exempt. Fresh requests require mode-compatible cached jobs.
+An old job ID retains its captured order; the safety removals below are not
+permission to re-sort it. No request field or card wire shape is added.
+
 Trade interest is source-specific evidence, separate from discovery cooldown. An exact later own pass or mirrored recipient pass resolves an older like even after that pass becomes amnestied or older than the discovery window. A fresh source like can establish new interest; a recipient's later like cannot revive the older source. Retraction cannot fall back to an older like. Existing source recency windows, matching math and standing-offer lifecycle remain unchanged.
 
 Queue idempotency still suppresses repeated identical requests. A server-verified intervening exact pass additionally permits one deliberate requeue, even inside ten seconds; its retry does not emit a second like/Elo/event. Awaiting and summary counts share the same actionable-source projection. Unknown or contradictory roster ownership cannot assert a waiting counterparty; a known player can anchor a mixed player/pick package without inventing a pick owner.

@@ -304,7 +304,7 @@ The likes-you injector (`server._inject_likes_you_cards_impl`) synthesizes `Trad
 
 - **Telemetry keyed by participant must be keyed by the SAME participant the producer used.** `BakeoffRun.run_row` read `draft.forfeits.get(arm)` against a dict the composed draft keys by GROUP, so arm `current` — whose groups are `current_divergence` + `current_consensus` — recorded a flat `0` in every run ever written, while arm C's single-group key coincidentally matched and looked like the only arm that forfeits. `forfeits_for_arm()` now sums over an arm's groups. When a refactor changes what the participants ARE (D-078 moved them from arms to groups), grep every reader of the participant-keyed structure — a `.get(k, 0)` default turns the mismatch into a plausible number instead of an error.
 
-- **Measurement hygiene lives in a predicate, not in reviewer discipline.** `elo_freeze_mult()` (swipe K → 0 while the bake-off runs) and `bypass_rerankers()` (no post-generation layer may reorder an interleaved deck) are single functions with tests, because both failures are invisible: contaminated Elo and a re-ranked deck both produce plausible numbers. A new post-generation layer must consult `bypass_rerankers()`; a new swipe path must apply `elo_freeze_mult()` (a structural test scans `server.py` for the second one).
+- **Measurement hygiene lives in a predicate, not in reviewer discipline.** `elo_freeze_mult()` (swipe K → 0 while the bake-off runs) and `bypass_rerankers()` (normally no post-generation layer may reorder an interleaved deck) are single functions with tests, because both failures are invisible: contaminated Elo and a re-ranked deck both produce plausible numbers. A new post-generation layer must consult `bypass_rerankers()`; a new swipe path must apply `elo_freeze_mult()` (a structural test scans `server.py` for the second one). **D-187's sole bounded exception:** the default-off small-player presentation helper may permute within six absolute slots and identical final arm/group/lane/basis/policy classes after live policy evaluation. It preserves source attribution, membership and each class's slots; it does not relax the rule for other layers or change generator goldens. Per-occurrence original indices travel through the final #419 removal, and final indices freeze from actual writer positions. No subsequent polling sort; mode-compatible reuse at all four cache probes. [Contract](../docs/plans/small-trade-packages/prd.md).
 
 ## Mock-draft ownership honesty: resolver-owned labels (2026-08-16, #328)
 
@@ -809,5 +809,18 @@ Job/card-owned public projection performs DB reads outside the global job lock, 
 ---
 
 ## Win Now snapshot and request isolation
+
+2026-09-06 native correction (#420/#421): `leagueSession` owns generation,
+single-flight joins, acknowledged same-token ordering and an uncertainty latch
+that survives screen lifecycle/throttles. Only a later deliberate authorization
+or replacement token permits a new bounded attempt; a Connect gesture receives
+its authorization before the target-resolution await. State seeds caches and
+navigates only after accepted current init. Reader cancellation detaches from
+shared work. One 90-second baseline-attempt deadline contains the exact GET's
+30-second request budget, one typed-409 repair and one read replay. Current
+structured failures stay authoritative; stale callbacks cannot alter a
+replacement session. No backend concurrency change or cancellation claim.
+Already dispatched native storage cannot be canceled by a later guard.
+[Native references](../mobile/src/state/README.md), [PRD](../docs/feedback/items/420-win-now-loading/prd.md).
 
 Implementation checkpoint 2026-09-04: immutable whole forecast batches and league/model revisions identify baselines; viewer-scoped job/scenario IDs retain objective, constraints and expiry. A stable exchange asset key groups history without replacing evaluated evidence. Clients cancel by viewer/league/objective/parameter epoch and preserve server order; expired results are not recommendations. Probabilities are fractions and deltas display absolute pp. Budget uses fixed baseline roster value. Like/pass writes only the season decision store. Routes, schema and shared bounds are in the [API](../docs/api-reference.md#season-projections-and-win-now), [data dictionary](../docs/data-dictionary.md#win-now-evidence-tables) and [invariants](../docs/cross-client-invariants.md#win-now-objective-and-evidence-semantics); parent integration review and local mechanical verification are complete. The explicit platform-only pick read in `win_now_service.build_context` is sanctioned in the existing ADR-010 containment test.

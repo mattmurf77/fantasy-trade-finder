@@ -123,7 +123,15 @@ See [`DEPENDENCIES.md`](DEPENDENCIES.md). High-level: Sleeper API (free, public)
 4. Player cache (`.sleeper_players_cache.json`) refreshed if empty or >24h old.
 5. Initial Elo ratings seeded from DynastyProcess CSV via `data_loader.py`.
 
+Native session reconciliation (2026-09-06, #420/#421) is state-owned across all
+init writers and awaited by Win Now baseline reads. Captured identity,
+acknowledged-writer ordering and a bounded attempt replace optimistic readiness;
+uncertain accepted POST completion requires a new deliberate retry. This is
+client coordination, not backend cancellation or a new durable job protocol.
+[Architecture](../docs/architecture.md#win-now-season-pipeline).
+
 ### Flow B — Ranking a player trio
+
 1. Client requests next matchup: `GET /api/trio`.
 2. `smart_matchup_generator.py` proposes ~10 candidate trios; Claude (or fallback) picks the most informative one.
 3. User submits a 3-player ranking: `POST /api/rank3`.
