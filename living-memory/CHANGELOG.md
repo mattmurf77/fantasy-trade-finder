@@ -11,6 +11,10 @@
 
 ---
 
+## 2026-09-06 — Feedback 419–421 released; smaller-package preference ON
+
+PR #283 merged `988fa2d6` after exact-head CI: **5,645 backend passed / 1 skipped**, 95 mobile guards/typecheck/test-ID and 190 web checks; both independent Astra Ultra QA reviews passed. Render is LIVE; only `simple_player_presentment` changed to **1**, preserving all prior flags/settings and three arms. Fixes stale rejected-interest resurfacing and native Win Now initialization/timeout behavior. iOS **1.17.1 (149)** build and exact submission are FINISHED. Only 419–421 marked `fixed`; the 45-report audit made no unrelated closures. Apple availability and the 23-step physical checklist remain unverified/UNRUN. [Release evidence](../docs/feedback/items/419-rejected-interest-resurfacing/release.md), [trade-shape research](../docs/research/2026-09-06-trade-package-shapes.md).
+
 ## 2026-09-05 — Owner-contract first wave LIVE; mobile build uploaded (D-185)
 
 PR #281 merged after explicit activation authorization: search continuity, personal-tier intent, tier-bounded feedback and scoped counterparty privacy. Final head `f88afabb` passed CI: **5,455 backend / 1 skip**, all 93 mobile guards/typecheck/test-ID and 190 web checks. Render `4026ebc8` live at **09:51:59 UTC**; smoke passed and all 207 flags, 258 model settings, tiers and experiment summaries were unchanged at that checkpoint. The owner then separately authorized [personal-market activation](../docs/plans/owner-contracts/policy-activation.md), live at **16:01:20 UTC** with exactly one flag changed; three arms preserved. iOS **1.17.0 (148)** uploaded for TestFlight; Apple/tester confirmation and physical QA remain. Raw interviews stayed local. [Release evidence, rollback and unfinished work](../docs/plans/owner-contracts/release.md).

@@ -8,7 +8,7 @@
 
 **Operator sign-off on waivers:** not needed; no waivers requested
 
-**Stage:** Specification `764e0ee9` independently approved; implementation `2de3e1d9` and evidence `ff205431` reviewed and integrated by root. Root independently repeated 38 recovery cases, 128 focused backend tests, TypeScript and testID lint successfully. Full combined redundant QA, CI, release and physical TestFlight verification remain pending; detailed results are in [build evidence](build-evidence.md).
+**Stage:** Specification `764e0ee9` independently approved; implementation `2de3e1d9` and evidence `ff205431` reviewed and integrated by root. Root independently repeated 38 recovery cases, 128 focused backend tests, TypeScript and testID lint successfully. Both complete independent round-2 reviews and all four PR #283 CI jobs passed; `d97459dc` merged as `988fa2d6`. iOS 1.17.1 (149) build/submission are FINISHED, and feedback 420/421 were individually read back `fixed`. Apple processing/tester availability remains unverified and physical TestFlight verification is UNRUN. [Build evidence](build-evidence.md), [verified release](../419-rejected-interest-resurfacing/release.md).
 
 Specification: [PRD](prd.md). Investigation: [plan](plan-g420.md), [production evidence](production-evidence.md). Decisions and limitations: [reconciliation log](reconciliation-log.md).
 
@@ -43,7 +43,7 @@ Independent-critique additions are mandatory evidence, not advisory tests: T10 m
 
 ## 4. Docs scope — HLD / LLD / API
 
-Rows below record the integrator's completed reference updates for reviewed runtime `2de3e1d9` / evidence `ff205431`. Final batch QA, delivery and device verification remain distinct gates.
+Rows below record the integrator's completed reference updates for reviewed runtime `2de3e1d9` / evidence `ff205431`. Independent batch QA, CI and native submission are complete; Apple processing/tester availability and device verification remain distinct outstanding checks.
 
 | Doc | Updated? | Section / reason n/a |
 |---|---|---|
@@ -55,7 +55,7 @@ Rows below record the integrator's completed reference updates for reviewed runt
 | `docs/glossary.md` | n/a: no new domain term | Context generation / request budget are internal implementation terms. |
 | ADR or `DECISIONS.md` | n/a: bounded correction, not a new architectural platform decision | Non-obvious local choice (serialization is conditional on acknowledged settlement; no server cancellation guarantee) is explicit in PRD §4.2 and reconciliation. A stronger server protocol would require a separately reviewed design. |
 | `mobile/src/api/README.md`, `mobile/src/state/README.md` | Updated | Correct changed lifecycle/timeout and stale “mint/optimistic” descriptions in touched code; API returns seed, state owns cache remains intact. No general auth documentation rewrite. |
-| `living-memory/TEST_LEDGER.md` and selected item status/index | Updated | Root checkpoint evidence and integrated status are recorded. Final redundant QA/CI and delivery are pending; physical device checklist remains UNRUN. |
+| `living-memory/TEST_LEDGER.md` and selected item status/index | Updated | Root checkpoints, both passing independent reviews, exact-head CI, completed native build/submission and individual fixed-status readbacks are recorded. Physical device checklist remains UNRUN; Apple processing/tester availability is unverified. |
 
 No HLD/LLD/API requirement is silently waived. No separate feature-path delta files are added because this is the requested lighter-path native bug fix with full interfaces embedded in the PRD.
 
@@ -63,8 +63,8 @@ No HLD/LLD/API requirement is silently waived. No separate feature-path delta fi
 
 - **Independent spec review:** planner critiques completed author documents sequentially; blocking objections resolved and reconciliation updated before Phase 2. Current author completion is not this gate's completion.
 - **Fresh-main reconciliation:** orchestrator re-diffs before runtime edits and before final integration, preserving newer security/session/Win Now changes and the disjoint #419 boundary.
-- **CI green:** `backend-tests`, `mobile-typecheck` (including the `check-*.js` suites), and `maestro-testid-lint`, plus every required PR check, pass on the pushed reviewed SHA. The historical CI job name does not authorize Maestro execution.
+- **CI green:** all four PR #283 jobs passed on `d97459dc`, including `backend-tests` (5,645 passed / one skip), `mobile-typecheck` with `check-*.js`, and `maestro-testid-lint`. The historical CI job name does not authorize Maestro execution.
 - **Evidence recorded:** orchestrator-owned `living-memory/TEST_LEDGER.md` entry records executable RED/GREEN proof, targeted and integrated tests, final code-walk, limitations, and exact source/artifact identifiers. A 30-second response allowance is not a throughput benchmark result.
-- **TestFlight verification:** operator runs the PRD checklist with the actual new binary and records outcome. Build submission, Apple processing/tester availability and observed behavior are separate facts; none is complete now.
+- **TestFlight verification:** build 1.17.1 (149) and its submission are FINISHED. Operator must still confirm Apple processing/tester availability and run the checklist with the actually installed new binary. All physical steps remain UNRUN; submission does not establish observed behavior.
 - **Privacy/release safety:** only sanitized paraphrases/fixtures and intended source/docs may enter the commit/archive. No raw DB snapshots, tokens, account/league IDs, private rankings, env files, or screenshots of private accounts. No network, production changes or publication performed by this author.
 - Express lane declared by the operator? **No.** No gates skipped; no waivers requested.

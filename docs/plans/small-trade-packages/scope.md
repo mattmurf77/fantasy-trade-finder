@@ -8,6 +8,8 @@
 
 **Operator sign-off on waivers:** not needed; none requested. No express lane.
 
+**Current stage:** shipped through PR #283; both complete independent reviews and all four CI jobs passed before merge `988fa2d6`. Render was live at 2026-09-06T17:21:19.905609Z. Root activated only `simple_player_presentment=1` at 17:23:58 UTC; readback at 17:24:18 UTC verified all 207 existing flags, 258 prior settings, tiers and experiments preserved. Code defaults remain 0. iOS 1.17.1 (149) submission is FINISHED; Apple processing/tester availability is unverified and physical checks remain UNRUN. [Release evidence](../../feedback/items/419-rejected-interest-resurfacing/release.md).
+
 ## 1. Analytics scope
 
 - [ ] **(a) New events specced:** none.
@@ -37,7 +39,7 @@ Every new behavioral test needs a preserved RED against the original missing beh
 
 ## 4. Docs scope
 
-Shared references below are updated by root for reviewed runtime `9ea562dd` and evidence `a194efd7`. Final redundant batch QA, deployment, activation and physical-device results remain separate gates.
+Shared references below are updated by root for reviewed runtime `9ea562dd` and evidence `a194efd7`. Final redundant batch QA, exact-head CI, deployment and single-key activation are complete; physical-device results and Apple processing/tester availability remain unverified.
 
 | Doc | Disposition | Scope |
 |---|---|---|
@@ -50,8 +52,8 @@ Shared references below are updated by root for reviewed runtime `9ea562dd` and 
 | `docs/cross-client-invariants.md` | n/a | No shared client enum/color/constant; clients do not gain a re-sort. Existing wire/identity invariants preserved. |
 | `docs/glossary.md` | n/a | No new user-facing domain term. |
 | ADR or `DECISIONS.md` | Updated | D-187 records the narrow exception to fixed within-arm serving order; no generator-golden, group-drafting or arm-allocation changes. |
-| Plan index, ledger, release note | Updated | Root-reviewed build/RED/GREEN evidence, conditional exposure diagnostic and pending QA/deployment/activation/device facts are recorded. No release is claimed. |
+| Plan index, ledger, release note | Updated | Root-reviewed build/RED/GREEN evidence, conditional exposure diagnostic, passing independent QA/CI, verified deployment and single-key activation are recorded. Physical checks remain UNRUN; no acceptance-rate or Apple availability claim. |
 
 ## 5. Ship gates
 
-Original planner approved author `07d98473` without baseline blockers. Root and planner accepted the narrowly documented #419 `cf8cc2cc` pre-freeze disposition/occurrence-alignment condition; root approved the complete revised `5171f13a` specification on 2026-09-06. Fresh-main verification at 15:09 UTC remains `4026ebc8`. `server.py` changes are sequenced after final #419 backend review/integration by the parent. Full backend CI, all mobile guards/typecheck and testID lint must pass on the reviewed release SHA. Parent records precise RED/GREEN/code-walk evidence and the manual checklist's actual outcome. Existing batch release authorization is conditional on review/QA; this build gate does not activate the knob or perform a release. No express waiver.
+Original planner approved author `07d98473` without baseline blockers. Root and planner accepted the narrowly documented #419 `cf8cc2cc` pre-freeze disposition/occurrence-alignment condition; root approved the complete revised `5171f13a` specification on 2026-09-06. The pre-build fresh-main check at 15:09 UTC was `4026ebc8`; implementation followed #419 integration. Both complete independent reviews passed on `7d3e071f`; all four PR #283 CI jobs passed on runtime-equivalent `d97459dc`, including 5,645 backend tests / one skip. Merge `988fa2d6`, live deployment and the separate one-key activation are verified in the release record. The original build gate itself did not authorize activation; root performed that reviewed release action separately. Physical checklist outcome remains UNRUN. No express waiver.

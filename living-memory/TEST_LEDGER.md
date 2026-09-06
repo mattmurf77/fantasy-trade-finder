@@ -11,6 +11,14 @@
 
 ---
 
+## 2026-09-06 — Feedback release CI, merge and delivery
+
+Final head `d97459dc9f72ebe158f70fcbb86f29051659c206` passed [CI run 34047364058](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/34047364058): **5,645 backend passed / 1 skipped in 717.99 s**, TypeScript/all 95 mobile guards, testID lint and 190 web checks. [PR #283](https://github.com/mattmurf77/fantasy-trade-finder/pull/283) merged **17:16:56 UTC** as `988fa2d690dfa9188f43c33e87dff9d60a5fabaa`; root fetched and verified complete tree equality with the exact CI head. D-056 standing `FTF_SKIP_SIM_GATE=1` used; no simulator or physical-device claim. Destination-specific public publication approval was explicitly supplied by the owner.
+
+Render did not create an automatic deploy because the squash body inherited old documentation skip markers. With no duplicate/in-progress deploy, exact-SHA API dispatch returned HTTP201 at **17:20:04 UTC**, `dep-daeq1h740ujc73897oog`, **LIVE 17:21:19.905609 UTC**. No environment/autodeploy change. The only authorized config mutation was `simple_player_presentment` **0→1**, CLI timestamp **17:23:58.015131 UTC**. GET-only readback at **17:24:18 UTC**, independently repeated **17:33:55 UTC**, verified exact live source, 207 flags/258 prior settings unchanged, stable tiers/experiments, expected 200/401 responses and healthy ingest. [Sanitized smoke](../docs/feedback/items/419-rejected-interest-resurfacing/production-smoke.json).
+
+Final archive independently verified by root and QA-A: **2,684 files / 631 mobile byte-identical**, exact one-commit history and no private artifact additions. EAS **1.17.1 (149)** build `87f9ce05-f91f-4bbd-8c1a-bc7c49932e2d` finished **17:25:01.357 UTC** from clean CI head. Initial optional changelog scheduling was plan-restricted; history verified no submission before retrying without that optional field. Exact-build submission `a07afa27-7b21-47d8-9fb9-8e17518232b6` verified **FINISHED/error:null** independently **17:34:02 UTC**, repeated by root **17:40:08 UTC**. Only 419–421 transitioned to `fixed` and were read back at 17:41–17:42 UTC. Apple availability and 23 physical-device steps remain unverified/UNRUN. [Release record](../docs/feedback/items/419-rejected-interest-resurfacing/release.md).
+
 ## 2026-09-06 — Feedback 419–421 implementation checkpoints, not release evidence
 
 **Publication blocked, not shipped:** clean prepared head `e5294748477ece417ea5e10d4f20ba7b1b148c31` retained exact reviewed runtime/test/config and whole-range diff hygiene. Safety review rejected the combined fetch/push/PR command before process creation because it requires explicit owner authorization for the named public GitHub destination. The command did not run; no remote write or later deployment/activation/upload occurred, and no bypass was attempted. Root confirmed configured origin read-only and requested destination-specific approval. [Blocker and release gates](../docs/feedback/items/419-rejected-interest-resurfacing/release.md).
@@ -3885,6 +3893,7 @@ deliberately decoupled for that reason.
 
 ## Table of Contents
 
+- [2026-09-06 — Feedback release CI, merge and delivery](#2026-09-06--feedback-release-ci-merge-and-delivery)
 - [2026-09-06 — Feedback 419–421 implementation checkpoints, not release evidence](#2026-09-06--feedback-419421-implementation-checkpoints-not-release-evidence)
 - [2026-09-05 — Experimental personal-market policy activation verified](#2026-09-05--experimental-personal-market-policy-activation-verified)
 - [2026-09-05 — Security follow-up independently reviewed: Python 3.12 and PostgreSQL pass; native runtime pending](#2026-09-05--security-follow-up-independently-reviewed-python-312-and-postgresql-pass-native-runtime-pending)

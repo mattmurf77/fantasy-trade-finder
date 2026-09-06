@@ -5,6 +5,8 @@ appends after every phase: `- YYYY-MM-DD [phase] lesson`. Keep entries
 actionable ("do X instead of Y because Z"), prune ones folded into the skill
 files. Seeded from history before this skill existed:
 
+- 2026-09-06 [ship] Inspect the full proposed squash body for inherited Render skip markers. PR #283's runtime release inherited three documentation markers and did not auto-deploy despite unchanged enabled service settings. After verifying no active/duplicate deployment, one exact-SHA deployment API call delivered the reviewed source without disabling auto-deploy or clearing cache. Documentation-only follow-up should intentionally skip Render.
+- 2026-09-06 [ship] Optional EAS submission changelog fields can be plan-restricted. The first scheduling request was rejected before creating a submission; read-only history established that fact before a standard exact-ID retry without the optional field. Verify the resulting submission FINISHED, preserve the existing plan/signing/profile, and distinguish upload from Apple availability and device acceptance.
 - 2026-07-12 [build] Tiers drag is `react-native-draggable-flatlist` with
   `PlayerCard` in `<View pointerEvents="none">`; any new gesture capturing
   list touches crashes — this broke TestFlight builds #11/#12.

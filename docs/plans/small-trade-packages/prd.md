@@ -1,8 +1,8 @@
 # Small-player-package presentation — PRD
 
-Date: 2026-09-06. **Original planner approved author `07d98473`; root approved revised `5171f13a` and its #419 integration condition. Build underway from reviewed backend integration `741710c1`; final QA and activation pending.**
+Date: 2026-09-06. **Original planner approved author `07d98473`; root approved revised `5171f13a` and its #419 integration condition. Implementation passed both complete independent reviews and all four PR #283 CI jobs; merge `988fa2d6` is live and `simple_player_presentment=1` is verified. Code defaults remain off. Physical-device checks and Apple processing/tester availability remain unverified.** [Release evidence](../../feedback/items/419-rejected-interest-resurfacing/release.md).
 
-Inputs: [plan](plan.md) at `ea5cc2b5`, [research](../../research/2026-09-06-trade-package-shapes.md), [scope](scope.md), [reconciliation](reconciliation-log.md). Line citations identify audited runtime `4026ebc8`; §3.3 and §4 additionally reconcile #419 `cf8cc2cc`'s final disposition filter. Parent must reconcile current integration changes before build.
+Inputs: [plan](plan.md) at `ea5cc2b5`, [research](../../research/2026-09-06-trade-package-shapes.md), [scope](scope.md), [reconciliation](reconciliation-log.md). Line citations identify audited design baseline `4026ebc8`; §3.3 and §4 additionally reconcile #419 `cf8cc2cc`'s final disposition filter. Final implementation traces and executed tests are in [code walk](code-walk.md) and [build evidence](build-evidence.md); historical baseline line numbers are not current-source citations.
 
 ## 1. Outcome and bounded exception
 
@@ -89,7 +89,9 @@ Capture the existing base serving version with the job; for applied v1 append `/
 
 These data distinguish original model rank from served exposure. They do not invent a new randomized propensity or permit unversioned before/after outcome comparisons.
 
-## 5. Test contract — prospective, no tests run
+## 5. Test contract — executed evidence recorded separately
+
+The table preserves the approved acceptance contract and proposed RED targets. [Build evidence](build-evidence.md) records the actual executed baseline failures, passing controls and final gates; unrun proposed sabotages are not claimed as results. Both complete independent reviews and exact-head CI passed before release. Physical tests in §6 remain UNRUN.
 
 Use `backend/tests/test_small_trade_presentment.py` plus narrow extensions to existing `test_trade_policy_wiring.py`, bakeoff serving/cache and standing-offer harnesses. Run real worker/publication/writer code with synthetic deterministic upstream outputs; do not stub the helper's expected output. Every new behavior must fail against baseline or its named sabotage, then pass after restoration. No real-user generation, external calls, repository DB, changed historical generator outputs or relaxed invariant assertions.
 

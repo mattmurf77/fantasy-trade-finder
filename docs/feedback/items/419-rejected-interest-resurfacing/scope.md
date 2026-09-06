@@ -5,7 +5,7 @@
 **Builder:** separate backend/mobile owners assigned by root after Phase-1 critique
 **Operator sign-off on waivers:** not needed (no evidence or analytics waivers)
 
-Source: [PRD](prd.md), requirements R1–R4 and acceptance T1–T8; [planner diagnosis](plan-g419.md). Independent planner approved revised specification `481b1809`; root ratified the contract and held boundaries. Backend `e02d074e`, mobile `396d92fc` and current-episode repair `8f27421d` are root-reviewed and integrated. Frozen round-2 source is `7d3e071f`; root full regression passes 5,645 tests with one optional skip. Final independent verdicts and release remain separate gates. Root owns shared-document edits.
+Source: [PRD](prd.md), requirements R1–R4 and acceptance T1–T8; [planner diagnosis](plan-g419.md). Independent planner approved revised specification `481b1809`; root ratified the contract and held boundaries. Backend `e02d074e`, mobile `396d92fc` and current-episode repair `8f27421d` passed root review and both full independent round-2 reviews on `7d3e071f`. All four PR #283 CI jobs passed on runtime-equivalent `d97459dc`, including 5,645 backend tests / one skip; merge `988fa2d6` is live on Render. iOS 1.17.1 (149) build/submission are FINISHED and feedback #419 is verified `fixed`. Apple processing/tester availability and physical-device checks remain unverified/UNRUN. [Release evidence](release.md). Root owns shared-document edits.
 
 ## 1. Analytics scope
 
@@ -42,11 +42,11 @@ Source: [PRD](prd.md), requirements R1–R4 and acceptance T1–T8; [planner dia
 | ADR or `DECISIONS.md` | Updated | D-186 records exact stale-source precedence and its separation from D-067 discovery amnesty/expiry, plus truthful passed/repair semantics. QA's current-episode repair remains an implementation gate, not a broad cooldown policy reversal. |
 | `docs/data-dictionary.md` | n/a | No schema or stored-field meaning change; existing retraction ownership and timestamps remain history. |
 | `docs/config-reference.md` | n/a | No new/changed setting, default, flag, or experiment surface. |
-| Item documents / central index / test ledger | Updated | Root records integrated build checks, confirmed QA finding, repair/re-review requirement and not-released state. Consolidated physical TestFlight checklist is authored and UNRUN. |
+| Item documents / central index / test ledger | Updated | Root records integrated checks, confirmed round-1 finding/repair, both passing round-2 reviews, exact-head CI, live deployment, completed native submission and selected feedback readback. Consolidated 23-step physical TestFlight checklist remains UNRUN. |
 
 ## 5. Ship gate declaration
 
-- **CI green required before eventual ship:** `backend-tests`, `mobile-typecheck` and `maestro-testid-lint` on the actual pushed SHA. Structural scripts also run explicitly; the legacy job name does not authorize Maestro.
+- **CI gate passed:** all four PR #283 jobs on `d97459dc`, including `backend-tests`, `mobile-typecheck` and `maestro-testid-lint`. Structural scripts also ran explicitly; the legacy job name does not authorize Maestro. Merge/live source is `988fa2d6`.
 - **Evidence recorded:** root's `living-memory/TEST_LEDGER.md` entry names actual focused/full checks, original incident RED/GREEN, meaningful baseline controls, attributed builder evidence and final code walks. Proposed-but-unrun sabotages are not passing evidence; no simulator or physical-device execution is claimed.
 - **TestFlight verification:** operator runs PRD checklist and logs the exact build/backend result before mobile runtime behavior is described as verified.
 - Express lane declared? **No.** Full evidence/doc gates apply. `FTF_SKIP_SIM_GATE=1` is the D-056 standing posture if a later authorized push runs the old hook.
