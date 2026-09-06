@@ -12,7 +12,7 @@
 
 **In flight:** local review complete; both fresh Astra Ultra reviewers PASS full round 2 (5,645 / 1 skip each; focused 892). [Research](../docs/research/2026-09-06-trade-package-shapes.md) and all-45 read-only audit complete. Version 1.17.1 and privacy-checked archive prepared; 23-step physical checklist UNRUN.
 
-**Blocked on:** safety review rejected push before execution; requires owner confirmation naming public `mattmurf77/fantasy-trade-finder`. No retry/bypass or remote change. Reviewed head `e5294748`, then blocker docs only. After approval: exact-head CI, merge, Render, single-key activation, clean EAS build/submit. Live `4026ebc8`, personal-market ON, new knob absent; latest build148.
+**Next gate:** owner explicitly confirmed public `mattmurf77/fantasy-trade-finder` publication and CI/Render/TestFlight; prior safety approval blocker resolved. Reviewed runtime remains `7d3e071f`, later docs only. Next: exact-head CI, merge, Render, single-key activation, clean EAS build/submit. Live `4026ebc8`, personal-market ON, new knob absent; latest build148.
 
 **Don't repeat:** original dirty checkout/private files untouched. Batch trees `/private/tmp/ftf-feedback-419-421-f1uMyt/`; integration `codex/feedback-419-421-20260906`. EAS only from clean verified archive. No source-disabling retry after prior safety denial; actual baseline REDs suffice. No simulator, direct-main push, unrelated closures or cleanup without recovery ledger.
 
