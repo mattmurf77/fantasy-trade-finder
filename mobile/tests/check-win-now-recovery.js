@@ -459,6 +459,38 @@ async function main() {
     h.setResponder(() => response(401, {error: 'session_expired'})); await h.client.api.get('/api/ordinary').catch(() => {});
     assert.equal(await h.client.getSessionToken(), null);
   });
+  await check('T8 current projection 401 retains its server error through the actual mounted screen', async () => {
+    const h = sessionHarness(); await h.state.useSession.getState().revalidateSession();
+    h.setResponder(() => response(401, {error: 'session_expired', message: 'Please sign in again.'}));
+    const screen = mountWinNow(h); await flush();
+    assert.equal(screen.values[2], 'Please sign in again.', 'current401 was hidden as cancellation');
+    assert.equal(screen.values[1], false); assert.equal(screen.values[0], null);
+    assert.equal(h.state.useSession.getState().hasToken, false); assert.equal(initRequests(h).length, 1);
+    screen.cleanup();
+  });
+  await check('T8 actual picker and resync release current401 errors without hiding them', async () => {
+    const h = sessionHarness(), screen = picker(h);
+    h.setResponder(() => response(401, {error: 'session_expired', message: 'Please sign in again.'}));
+    await screen.invoke({league_id: 'synthetic-b', name: 'B'});
+    assert.equal(screen.ui.error, 'Please sign in again.'); assert.equal(screen.ui.selecting, null);
+    const r = sessionHarness(), ui = {busy: false, message: null};
+    r.setResponder(() => response(401, {error: 'session_expired', message: 'Please sign in again.'}));
+    const invoke = screenHandler('src/screens/LeagueScreen.tsx', 'resyncEspn', {
+      ...r.state, user: r.user, leagueId: r.league.league_id, league: r.league, resyncing: false,
+      tapAction: () => {}, setResyncing: value => { ui.busy = value; }, setResyncMsg: value => { ui.message = value; },
+      setResyncAuthFail: () => {}, importEspnLeague: async () => ({teams_imported: 2}), ApiError: r.client.ApiError, refetchAll: () => {},
+    }, r.time);
+    await invoke(); assert.equal(ui.message, 'Please sign in again.'); assert.equal(ui.busy, false);
+  });
+  await check('T8 stale projection401 after replacement remains silent and preserves its token', async () => {
+    const h = sessionHarness(), pending = deferred();
+    await h.state.useSession.getState().revalidateSession(); h.setResponder(() => pending.promise);
+    const result = h.state.loadSeasonProjections(h.league.league_id, new AbortController().signal).catch(error => error);
+    await flush(); await h.client.setSessionToken('synthetic-token-b');
+    pending.resolve(response(401, {error: 'session_expired', message: 'Old error'}));
+    assert.equal((await result).name, 'AbortError'); assert.equal(await h.client.getSessionToken(), 'synthetic-token-b');
+    assert.equal(h.state.useSession.getState().hasToken, true);
+  });
   await check('T8 expired callback cannot follow a replacement token during secure deletion', async () => {
     const h = transport(), pending = deferred(); let expired = 0;
     h.client.setOnSessionExpired(() => { expired++; });

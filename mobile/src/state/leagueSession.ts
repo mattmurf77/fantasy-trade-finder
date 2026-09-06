@@ -1,4 +1,4 @@
-import { ApiError, getSessionRevision, getSessionToken, requestAborted, runWithDeadline, TIMEOUT_MESSAGE } from '../api/client';
+import { ApiError, getSessionRevision, getSessionToken, isCurrentSessionExpiry, requestAborted, runWithDeadline, TIMEOUT_MESSAGE } from '../api/client';
 import type { LeagueLite, SessionInitControl, SessionInitSeed } from '../api/auth';
 import type { SavedUser } from './useSession';
 
@@ -11,7 +11,7 @@ export interface LeagueContext {
   generation: number;
   authorization: number;
   deadlineAt: number;
-  assertIdentity: () => void;
+  assertIdentity: (error?: unknown) => void;
   assertCurrent: () => void;
 }
 interface Lane {
@@ -38,8 +38,9 @@ export function createLeagueSessionLifecycle(deps: {
   const advance = () => { generation++; for (const cancel of cancelObsolete) cancel(); return generation; };
   const invalidate = () => { advance(); intent = undefined; };
   const currentGeneration = () => generation;
-  const assertIdentity = (user: SavedUser, expected: number, tokenRevision: number) => {
-    if (generation !== expected || getSessionRevision() !== tokenRevision || deps.currentUser()?.user_id !== user.user_id) throw requestAborted();
+  const assertIdentity = (user: SavedUser, expected: number, tokenRevision: number, error?: unknown) => {
+    if (generation !== expected || deps.currentUser()?.user_id !== user.user_id
+      || (getSessionRevision() !== tokenRevision && !isCurrentSessionExpiry(error, tokenRevision))) throw requestAborted();
   };
   async function capture(user: SavedUser, league: LeagueLite, cause: InitCause, deadlineAt: number, signal?: AbortSignal, selectionAuthorization?: number): Promise<LeagueContext> {
     if (deps.currentUser()?.user_id !== user.user_id) throw requestAborted();
@@ -62,7 +63,7 @@ export function createLeagueSessionLifecycle(deps: {
     if (obsoleteIntent) throw requestAborted();
     if (lane.uncertain && authorization > lane.uncertain) expected = advance();
     return {user, league, token, generation: expected, authorization, deadlineAt,
-      assertIdentity: () => assertIdentity(user, expected, tokenRevision),
+      assertIdentity: error => assertIdentity(user, expected, tokenRevision, error),
       assertCurrent: () => {
         assertIdentity(user, expected, tokenRevision);
         if (Date.now() >= deadlineAt) throw new ApiError(0, null, TIMEOUT_MESSAGE, true);

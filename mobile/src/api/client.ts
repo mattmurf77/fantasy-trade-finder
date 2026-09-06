@@ -165,6 +165,9 @@ export async function setLastUsername(username: string): Promise<void> {
 }
 
 export class ApiError extends Error {
+  // Internal receipt for THIS request's authorized token clear. No token,
+  // wire field or analytics property: identity guards may preserve its 401.
+  sessionExpiry?: {from: number; to: number};
   // isTimeout marks an error produced by the internal request deadline (FR-4),
   // so UI layers can show a truthful deadline failure instead of a
   // hosting diagnosis. A caller-supplied signal abort (e.g. TanStack
@@ -204,6 +207,13 @@ export class ApiError extends Error {
       (this.body as any).error === 'espn_auth_required'
     );
   }
+}
+
+export function isCurrentSessionExpiry(error: unknown, fromRevision: number): boolean {
+  return error instanceof ApiError && error.status === 401
+    && error.sessionExpiry?.from === fromRevision
+    && error.sessionExpiry.to === fromRevision + 1
+    && error.sessionExpiry.to === getSessionRevision();
 }
 
 // ── verification_required listener (account-auth P2.5) ─────────────────────
@@ -588,6 +598,7 @@ async function _apiRequestInner<T = unknown>(
           }
 
           if (!res!.ok) {
+            let sessionExpiry: ApiError['sessionExpiry'];
             // 401 = session expired. Caller should redirect to sign-in.
             // FB-45 guard: only clear when the token THIS request sent is
             // still the stored one — a background revalidateSession() may
@@ -600,6 +611,9 @@ async function _apiRequestInner<T = unknown>(
                 const clearing = clearSessionToken();
                 const clearedRevision = getSessionRevision();
                 await clearing;
+                if (clearedRevision === getSessionRevision() && !timeoutController.signal.aborted && Date.now() < opts.deadlineAt!) {
+                  sessionExpiry = {from: requestRevision, to: clearedRevision};
+                }
                 // The stored token is definitively dead — let the session
                 // store decide whether to route to re-auth (account-only,
                 // flag-gated inside the handler).
@@ -614,6 +628,7 @@ async function _apiRequestInner<T = unknown>(
             }
             const msg = (parsed && (parsed.message || parsed.error)) || `HTTP ${res!.status}`;
             const apiErr = new ApiError(res!.status, parsed, msg);
+            apiErr.sessionExpiry = sessionExpiry;
             // Central read-gate signal — see setOnVerificationRequired above.
             if (apiErr.isVerificationRequired && _onVerificationRequired) {
               const sent = headers['X-Session-Token'];

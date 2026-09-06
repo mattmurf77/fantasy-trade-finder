@@ -6,6 +6,7 @@ import {
   clearSessionToken,
   getSessionRevision,
   getSessionToken,
+  isCurrentSessionExpiry,
   requestAborted,
   runWithDeadline,
   setOnSessionExpired,
@@ -701,11 +702,12 @@ const leagueSessions = createLeagueSessionLifecycle({
 });
 
 /** Snapshot before an existing pre-init import/read, including same-token intent. */
-export function currentSessionGuard(): () => void {
+export function currentSessionGuard(): (error?: unknown) => void {
   const user = useSession.getState().user;
   const generation = leagueSessions.currentGeneration(), revision = getSessionRevision();
-  return () => {
-    if (useSession.getState().user !== user || generation !== leagueSessions.currentGeneration() || revision !== getSessionRevision()) throw requestAborted();
+  return error => {
+    if (useSession.getState().user !== user || generation !== leagueSessions.currentGeneration()
+      || (revision !== getSessionRevision() && !isCurrentSessionExpiry(error, revision))) throw requestAborted();
   };
 }
 export function beginLeagueContext(user: SavedUser, league: LeagueLite, cause: InitCause = 'automatic', deadlineAt = Date.now() + LEAGUE_ATTEMPT_MS, signal?: AbortSignal, selectionAuthorization?: number) {
@@ -763,7 +765,7 @@ export function loadSeasonProjections(leagueId: string, signal: AbortSignal, cau
   }, deadlineAt, signal).catch(error => {
     // Selection intent can change while the old league is still displayed.
     // Silence its terminal error too, not just successful baseline results.
-    guard();
+    guard(error);
     throw error;
   });
 }

@@ -151,6 +151,7 @@ export default function LeagueScreen() {
     setResyncMsg(null);
     setResyncAuthFail(false);
     let guard = currentSessionGuard();
+    let failure: unknown;
     try {
       const pending = beginLeagueContext(user, {league_id: leagueId, name: league?.league_name || ''});
       guard = currentSessionGuard();
@@ -164,8 +165,9 @@ export default function LeagueScreen() {
       setResyncMsg(`Re-synced ${res.teams_imported} rosters from ESPN.`);
       refetchAll();
     } catch (e: any) {
+      failure = e;
       if (e?.name === 'AbortError') return;
-      try { guard(); } catch { return; }
+      try { guard(e); } catch { return; }
       if (e instanceof ApiError && e.isEspnAuthRequired) {
         setResyncAuthFail(true);
         setResyncMsg(
@@ -177,7 +179,7 @@ export default function LeagueScreen() {
         setResyncMsg(e?.message || 'Re-sync failed — try again shortly.');
       }
     } finally {
-      try { guard(); setResyncing(false); } catch { /* superseded */ }
+      try { guard(failure); setResyncing(false); } catch { /* superseded */ }
     }
   }
 

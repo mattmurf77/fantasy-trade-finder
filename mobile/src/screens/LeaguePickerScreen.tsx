@@ -448,7 +448,7 @@ export default function LeaguePickerScreen({
       maybePregenTrades(lg.league_id);
     } catch (e: any) {
       if (e?.name === 'AbortError') return;
-      try { guard(); } catch { return; }
+      try { guard(e); } catch { return; }
       const code = e instanceof ApiError ? (e.body as any)?.error : null;
       if (code === 'verification_required') {
         const previous = useSession.getState().verification;
