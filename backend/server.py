@@ -254,6 +254,7 @@ from . import trade_policy as _trade_policy   # personal-market policy — the O
                                               # trade.valuation_telemetry and
                                               # trade.personal_market_policy_v1
                                               # default false)
+from . import small_trade_presentment as _simple_presentment
 from . import negmem as _negmem               # trade.negmem — negative-results memory (T1:
                                               # module import, attribute calls only)
 from .feature_flags import FLAGS, is_enabled, flags_dict, reload as reload_flags
@@ -3115,11 +3116,29 @@ def _trade_safety_signature():
     ) if enabled]
 
 
+def _capture_trade_presentation():
+    # Read raw Float config outside every arm overlay; bool/string coercion
+    # must not accidentally enable the rule. The base version travels too.
+    return (*_simple_presentment.mode(
+        _trade_service_mod._cfg.get("simple_player_presentment", 0.0)),
+        _sugg_tel.serving_policy_version())
+
+
+def _trade_presentation_matches(job, captured):
+    previous = job.get("presentation_capture")
+    return (not (captured[0] and job.get("presentation_exempt"))
+            and (previous[:2] if previous is not None else _simple_presentment.OFF) == captured[:2])
+
+
 def _trade_job_is_fresh(job: dict, fairness_threshold: float, outlook_value,
-                        trade_intent: str | None = None) -> bool:
+                        trade_intent: str | None = None, presentation_capture=None) -> bool:
     """True iff this job's result can be returned as-is to a new caller —
     i.e. it's complete, recent, and was generated for the same parameters."""
     if job.get("status") != "complete":
+        return False
+    if not _trade_presentation_matches(
+            job, presentation_capture if presentation_capture is not None
+            else _capture_trade_presentation()):
         return False
     if job.get("safety_policy", []) != _trade_safety_signature():
         return False
@@ -4675,6 +4694,7 @@ def _log_deck_signal_impressions(
     policy_results: dict | None = None,
     policy_variant: str | None = None,
     roster_results: dict | None = None,
+    presentation: dict | None = None,  # captured records/version, NOT a telemetry enable gate
 ) -> dict[int, str]:
     """Write one deck_impressions row per card (final served order) and
     return {id(card): impression_id} so the caller can stamp the ids into
@@ -4867,6 +4887,8 @@ def _log_deck_signal_impressions(
                 card, players_dict, seed_map or {})
         if roster_results is not None:
             features["roster_evaluation"] = roster_results.get(id(card))
+        if presentation is not None:
+            features["presentation"] = {**presentation["records"][pos], "final_index": pos}
         # F7 (deck.exploration) — wildcard provenance, frozen at serve time.
         # For wildcard rows the `propensity` column is NOT a Thompson
         # multiplier: it is exploration_rate × 1/|eligible draw pool| (the
@@ -4957,6 +4979,10 @@ def _log_deck_signal_impressions(
             row["candidate_set_id"]   = cand_set_id
             row["candidate_set_size"] = cand_set_size
             row["assets_json"]        = json.dumps({"give": give, "receive": recv})
+        if presentation is not None:
+            # Every row, including a locked/unattributed first row. Do not
+            # enable candidate or ghost logging merely to version serving.
+            row["policy_version"] = presentation["policy_version"]
         # trade.bakeoff — per-card model attribution (PLAN.md §5). model_arm
         # is the denormalized column every query reads; the arm is ALSO
         # encoded into policy_version so an impression row is self-describing
@@ -4994,7 +5020,7 @@ def _log_deck_signal_impressions(
             # (None when suggestion.telemetry is off).
             row["policy_version"] = (
                 _bakeoff.policy_version_for_arm(
-                    policy_version or _sugg_tel.serving_policy_version(),
+                    row.get("policy_version") or policy_version or _sugg_tel.serving_policy_version(),
                     _attr[0])
                 if _attr is not None else row.get("policy_version"))
         # ── personal-market policy stamp ──────────────────────────────────
@@ -6913,6 +6939,8 @@ def _run_trade_job(
     trade_intent: str | None = None,
     prefs_preload: dict | None = None,
     execution_context: _TradeExecutionContext | None = None,
+    presentation_capture=None,
+    presentation_exempt: bool = False,
 ):
     """Daemon-thread entry point with context captured before thread start.
     Direct internal callers may omit context and capture at entry. All exceptions caught — a thread death
@@ -6928,6 +6956,14 @@ def _run_trade_job(
     would miss). None = not supplied (pregen from session_init, the
     replenishment cron) ⇒ the worker loads them itself, exactly as before."""
     try:
+        if presentation_capture is None:
+            presentation_capture = _capture_trade_presentation()
+            # Direct internal callers capture at entry. Missing off captures
+            # on historical/internal jobs remain the canonical off value.
+            if presentation_capture[0]:
+                with _trade_jobs_lock:
+                    if job_id in _trade_jobs:
+                        _trade_jobs[job_id]["presentation_capture"] = presentation_capture
         if execution_context is None:
             # Compatibility for internal/test callers that run the job directly.
             with _sessions_lock:
@@ -7222,6 +7258,7 @@ def _run_trade_job(
             league_id, pinned_give, pinned_receive, opponent_user_id)
         bakeoff_fixed_order = _bakeoff.bypass_rerankers(
             league_id, pinned_give, pinned_receive, opponent_user_id)
+        presentation_grouped = _bakeoff.group_size() > 0 if bakeoff_on else False
 
         explore_active = (
             _deck_exploration_enabled() and league_id != "league_demo"
@@ -7730,6 +7767,7 @@ def _run_trade_job(
         # With both flags off this is three cheap boolean reads and a return
         # — no context is built, no card is touched, no row is written.
         policy_results: dict = {}
+        policy_evaluated = False
         policy_variant = _trade_policy.POLICY_V1 if market_live else _trade_policy.POLICY_LEGACY
         policy_shadow_rows: list = []
         if ((_trade_policy.telemetry_enabled() or market_live)
@@ -7764,6 +7802,7 @@ def _run_trade_job(
                         league_id = league_id,
                         bakeoff_run = bakeoff_run,
                     ))
+                policy_evaluated = True
                 # Republish when the policy actually changed the deck (live
                 # mode only — shadow mode returns the input list unchanged
                 # and this is a no-op). The impression block below also
@@ -7798,12 +7837,31 @@ def _run_trade_job(
             except Exception as pol_err:
                 log.warning("trade policy evaluation failed: %s", pol_err)
                 policy_results = {}
+                policy_evaluated = False
                 if market_live:
                     final_cards = []
                 with _trade_jobs_lock:
                     j = _trade_jobs.get(job_id)
                     if j is not None:
                         j["policy_error"] = "evaluation_unavailable"
+
+        # One bounded post-policy permutation, before the FIRST evaluated
+        # publication. Every later boundary retains this order or removes
+        # authoritative dispositions; none re-sorts an old snapshot.
+        presentation = None
+        if (presentation_capture[0] and market_live and policy_evaluated
+                and not presentation_exempt
+                and not ghost_on and not pinned_give and not pinned_receive
+                and not opponent_user_id
+                and (bakeoff_run is None or bakeoff_run.served_arm is None)):
+            final_cards, records = _simple_presentment.present(
+                final_cards, players=players_dict, league_id=league_id,
+                owned_pick_parser=_parse_owned_pick_id, policy_results=policy_results,
+                player_positions=VALID_POSITIONS, is_pick_asset=_trade_service_mod.is_pick_asset,
+                bakeoff_expected=bakeoff_on, bakeoff_run=bakeoff_run,
+                grouped=presentation_grouped)
+            presentation = {"records": records,
+                "policy_version": f"{presentation_capture[2]}/pp:{presentation_capture[1]}"}
 
         # Publish only evaluated cards, even with impression logging disabled
         # or an empty result. Later annotation layers do not alter packages.
@@ -7908,7 +7966,11 @@ def _run_trade_job(
         # and every downstream write is byte-identical to pre-telemetry.
         # #419: recheck after generation/mutation work, before freezing
         # impressions. A pass may have arrived while the worker was running.
+        before_disposition = final_cards
         final_cards = _project_trade_dispositions(final_cards, g_user_id, league_id)
+        if presentation is not None:
+            presentation["records"] = _simple_presentment.retain_occurrences(
+                before_disposition, presentation["records"], final_cards)
         served_final = final_cards
         ghost_cards: list = []   # [(would_be_pos, card)]
         if ghost_on:
@@ -7985,7 +8047,7 @@ def _run_trade_job(
                 telemetry_kw: dict = {}
                 if _suggestion_telemetry_enabled():
                     telemetry_kw = {
-                        "policy_version": _sugg_tel.serving_policy_version(),
+                        "policy_version": presentation_capture[2],
                         "ghost_cards":    ghost_cards,
                         "candidate_pool": exploration_pool,
                     }
@@ -8005,6 +8067,7 @@ def _run_trade_job(
                     roster_results  = roster_results,
                     policy_results  = policy_results, # personal-market policy
                     policy_variant  = policy_variant,
+                    presentation    = presentation,
                     **telemetry_kw,
                 )
                 if imp_by_card:
@@ -8143,6 +8206,8 @@ def _kickoff_trade_job(
     trade_intent: str | None = None,
     prefs_preload: dict | None = None,
     session_context: Mapping | None = None,
+    presentation_capture=None,
+    presentation_exempt: bool = False,
 ) -> str:
     """Register a new job in _trade_jobs and start its worker thread.
     Returns the job_id. Caller is responsible for any pre-existing-job
@@ -8166,6 +8231,8 @@ def _kickoff_trade_job(
                     read on its own thread, handed to the worker so it does
                     not read them a second time. See `_run_trade_job`.
     """
+    if presentation_capture is None:
+        presentation_capture = _capture_trade_presentation()
     _job_write_lease = _user_data_lifecycle.capture(
         user_id, started=g.get("_user_data_started") if has_request_context() else None)
 
@@ -8214,12 +8281,15 @@ def _kickoff_trade_job(
         "outlook_value":      None,    # populated when the worker reads prefs
         "is_pinned":          is_pinned,
         "trade_intent":       trade_intent,
+        "presentation_capture": presentation_capture,
     }
     if source:
         job["source"] = source
+    if presentation_exempt:
+        job["presentation_exempt"] = True
     with _trade_jobs_lock:
         _trade_jobs[job_id] = job
-        if not is_pinned:
+        if not is_pinned and not (presentation_capture[0] and presentation_exempt):
             # Pin into the per-key index so future generate calls dedupe.
             _trade_jobs_by_key[job["key"]] = job_id
 
@@ -8236,7 +8306,9 @@ def _kickoff_trade_job(
                        opponent_user_id, pinned_give_mode,
                        trade_intent=trade_intent,
                        prefs_preload=prefs_preload,
-                       execution_context=execution_context)
+                       execution_context=execution_context,
+                       presentation_capture=presentation_capture,
+                       presentation_exempt=presentation_exempt)
         return job_id
 
     threading.Thread(
@@ -8246,7 +8318,9 @@ def _kickoff_trade_job(
               pinned_give_mode),
         kwargs={"trade_intent": trade_intent,
                 "prefs_preload": prefs_preload,
-                "execution_context": execution_context},
+                "execution_context": execution_context,
+                "presentation_capture": presentation_capture,
+                "presentation_exempt": presentation_exempt},
         daemon=True,
     ).start()
     return job_id
@@ -13447,14 +13521,22 @@ def generate_trades():
     except Exception:
         pass
 
+    presentation_capture = _capture_trade_presentation()
+    # The presentation exclusion honors supplied intent even when the existing
+    # targeting flag ignores receive pins. Do not change generation/fairness
+    # normalization, or let this unpresented search seed the organic on-cache.
+    presentation_exempt = bool(body.get("pinned_receive_players"))
+    presentation_uncached = bool(presentation_capture[0] and presentation_exempt)
     reuse_snapshot = None
     with _trade_jobs_lock:
-        existing_id = _trade_jobs_by_key.get(key) if not _any_pinned else None
+        existing_id = (_trade_jobs_by_key.get(key)
+                       if not _any_pinned and not presentation_uncached else None)
         existing    = _trade_jobs.get(existing_id) if existing_id else None
 
         if existing and not _any_pinned:
             # Cache hit: complete + fresh + same params → return instantly.
-            if not force_fresh and _trade_job_is_fresh(existing, fairness_threshold, outlook_value, trade_intent):
+            if not force_fresh and _trade_job_is_fresh(existing, fairness_threshold, outlook_value, trade_intent,
+                                                      presentation_capture=presentation_capture):
                 reuse_snapshot = copy.deepcopy(existing)
             # In-flight: share the current job. Note: if the request used
             # different fairness/outlook, the snapshot will reflect the
@@ -13469,7 +13551,8 @@ def generate_trades():
             # and it is the same reason a board change that alters values
             # (e.g. an override released by a newer vote) could be invisible.
             # Supersede the running job and fall through to spawn a fresh one.
-            elif existing.get("status") == "running":
+            elif (existing.get("status") == "running"
+                  and _trade_presentation_matches(existing, presentation_capture)):
                 if not (force_fresh and _force_supersede_enabled()):
                     reuse_snapshot = copy.deepcopy(existing)
                 else:
@@ -13501,6 +13584,8 @@ def generate_trades():
         trade_intent       = trade_intent,
         prefs_preload      = prefs_preload,
         session_context    = sess,
+        presentation_capture = presentation_capture,
+        presentation_exempt = presentation_exempt,
     )
     with _trade_jobs_lock:
         snapshot = copy.deepcopy(_trade_jobs[job_id])
@@ -21070,10 +21155,11 @@ def session_init():
         # this point (set above). Don't re-read from the session dict —
         # we already have the right values.
         pregen_key = _trade_job_key(user_id, league_id, active_format)
+        presentation_capture = _capture_trade_presentation()
         with _trade_jobs_lock:
             existing_id = _trade_jobs_by_key.get(pregen_key)
             existing    = _trade_jobs.get(existing_id) if existing_id else None
-            should_kickoff = (existing is None) or (
+            should_kickoff = (existing is None) or not _trade_presentation_matches(existing, presentation_capture) or (
                 existing.get("status") == "complete"
                 and (time.monotonic() - (existing.get("finished_at") or 0)) > _PREGEN_TTL_SECONDS
             )
@@ -21088,6 +21174,7 @@ def session_init():
                 pinned_give        = None,
                 opponents_total    = opp_total,
                 session_context    = session_payload,
+                presentation_capture = presentation_capture,
             )
             log.info("session/init: kicked off pre-gen trade job for league=%s", league_id)
     except Exception as pregen_err:
@@ -21873,6 +21960,7 @@ def _replenish_deck_for(user_id: str, league_id: str) -> tuple[int, int] | None:
     except Exception:
         fmt = DEFAULT_SCORING
     key = _trade_job_key(user_id, league_id, fmt)
+    presentation_capture = _capture_trade_presentation()
 
     # Prior deck snapshot BEFORE generation appends a new impression batch.
     try:
@@ -21886,6 +21974,7 @@ def _replenish_deck_for(user_id: str, league_id: str) -> tuple[int, int] | None:
         job = _trade_jobs.get(jid) if jid else None
         if (job and job.get("status") == "complete"
                 and not job.get("is_pinned")
+                and _trade_presentation_matches(job, presentation_capture)
                 and (time.monotonic() - (job.get("finished_at") or 0))
                     <= _PREGEN_TTL_SECONDS):
             cards = list(job.get("cards") or [])   # cached deck still fresh
@@ -21902,6 +21991,7 @@ def _replenish_deck_for(user_id: str, league_id: str) -> tuple[int, int] | None:
             scoring_format = fmt,
             source         = "replenish",
             synchronous    = True,
+            presentation_capture = presentation_capture,
         )
         with _trade_jobs_lock:
             job = _trade_jobs.get(job_id) or {}

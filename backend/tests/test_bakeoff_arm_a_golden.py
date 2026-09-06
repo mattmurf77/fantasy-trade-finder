@@ -524,7 +524,11 @@ def test_r4_bypass_is_thread_local():
 #: un-recaptured. `age_pref_boost_cap` is EXCLUDED from the profile: it is
 #: never read while both mults are 1.0 (the `package_floor_cross` rule).
 #: Disposition in docs/plans/three-model-bakeoff/scope-phase2.md.
+# simple_player_presentment is explicitly post-generator, outside arm overlays;
+# its default-off presentation policy never enters MODEL_A_PROFILE or goldens.
+# Contract: docs/plans/small-trade-packages/prd.md §4.
 _PINNED_KNOBS = frozenset("""
+simple_player_presentment
 age_pref_mult_u23 age_pref_mult_30plus age_pref_boost_cap
 aggression_weight asset_floor_abs asset_ideas_group_cap
 bakeoff_deck_limit bakeoff_serve_interleaved bakeoff_group_size
