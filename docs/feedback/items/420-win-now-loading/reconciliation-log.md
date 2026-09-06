@@ -32,20 +32,22 @@ This is the author incorporating the completed planner investigation and the orc
 
 The orchestrator explicitly instructed the author to keep the fix bounded and distinguish local transport termination from server mutation cancellation. A local timeout is not proof that the server stopped. Normal deferred successful A→B serialization must be tested; ambiguous init must have safe client publication/read gating and a documented residual limit. A 90-second total user-attempt cap is acceptable only when every wait, init, read and replay is bounded within it and caller abort detaches cleanly. No new server API or broad auth redesign is authorized.
 
-The author has incorporated that direction, not inferred a product choice to remove server-side safety guards. The PRD intentionally stops a current automatic chain after ambiguous init; a later deliberate attempt does not retroactively certify server cancellation or final ordering. The reviewer should scrutinize whether this bounded safety contract is sufficiently precise for implementation.
+The original author incorporated that direction without inferring a product choice to remove server-side safety guards. Round 1 below strengthens the original current-chain wording to a token-lane uncertainty latch surviving automatic lifecycle re-entry; a later deliberate attempt still does not retroactively certify server cancellation or final ordering.
 
-## Independent critique — pending
+## Round 1 — independent planner critique and author response
 
-The author pass is complete once the three documentation files are committed and delivered to the orchestrator. The original planner must then review that exact author SHA. No parallel “review” of half-written documents is counted.
+The original planner `ux_astra` reviewed completed author commit `25347324e77abbdbea6058e3a074ae9f199a111b`. The orchestrator relayed one blocking ambiguity and one nonblocking implementation trap. The author accepts both; no arbitration or scope expansion is needed.
 
-Requested focus, not unresolved product decisions:
+| Objection | Review classification | Author resolution / proof |
+|---|---|---|
+| Uncertainty was described only for the current automatic chain; a later mount/focus/foreground could silently retry and bypass the intended deliberate-retry safety rule. | **Blocking** | PRD R-2 / §§4.1–4.3 now latch uncertainty for the same in-process token lane, invalidate readiness and reject automatic re-entry with zero init/projection requests. Only a new deliberate Refresh/selection after uncertainty, or real replacement-token authorization, permits a new bounded reconciliation; `force`, throttle expiry, old queued selection and same-token generation changes cannot. T10 covers ambiguous A → rejected queued B → repeated lifecycle re-entry → explicit bounded retry, late A completion, relatching, and replacement token. Scope and manual step 3 carry the same contract. Accepted and addressed in this revision; focused planner confirmation pending. |
+| A stale `403 verification_required` can mutate the new session through `_onVerificationRequired` before the state/screen continuation's stale-result guard runs. | Nonblocking review note; mandatory implementation/test clarification | Independently rechecked `mobile/src/api/client.ts:555` and `mobile/src/state/useSession.ts:691`. PRD §4.1 explicitly fences callback dispatch/publication using captured sent-token identity and applicable context guards without an API→store import. T8 executes the actual callback path after replacement sign-in and requires no verification/banner change; a current-session refusal still applies. Added the meaningful unfenced-callback sabotage and code-walk/scope obligations. |
 
-1. Does §4.2's uncertain-write behavior avoid both an unsafe automatic continuation and a falsely permanent success hint? Does the later explicit retry wording avoid claiming server cancellation?
-2. Does §4.3's 90-second composition actually constrain token/provider/verification preparation, lane wait, body consumption, init cache retry and both logical GETs, while one consumer abort cannot kill another's valid shared init?
-3. Can every existing native init writer participate through the proposed state/API seam without adding an upward dependency or changing identity/verification/membership behavior? Are all affected late publications fenced?
-4. Do T1–T12 execute the production behavior and prove RED/GREEN sensitivity rather than merely repeat the specification in a mock?
+Unchanged constraints: exact projection GET 30 seconds; one non-resetting whole attempt 90 seconds including all waits/preparation/body reads; shared caller detach; successful acknowledged A→B serialization only; no server cancellation/final-writer guarantee, new API, broad auth redesign, runtime edit or production action. Uncertainty is in-memory owner state surviving screen lifecycle transitions, not a new disk record containing session identity.
 
-No independent blocking objections have yet been raised because critique has not happened. **Do not interpret that as zero unresolved blockers or a Phase-1 exit.** The orchestrator records each critique round below; accepted/rebutted objections require concrete paths and reasoning, with any remaining arbitration explicit. Build begins only after that gate.
+### Focused gate — pending
+
+Return the exact revision commit to `ux_astra` to confirm the blocker is closed and the stale-callback clarification is adequate. The author considers both addressed, but does **not** self-declare independent approval or Phase-1 exit. No runtime implementation starts in this author task. Record the planner's gate result at its reviewed SHA before the orchestrator proceeds.
 
 ## Author verification performed
 

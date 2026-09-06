@@ -8,7 +8,7 @@
 
 **Operator sign-off on waivers:** not needed; no waivers requested
 
-**Stage:** Phase-1 author draft; independent critique pending. No runtime evidence or release completion claimed.
+**Stage:** Phase-1 author revision after independent critique of `25347324`; focused planner recheck pending. No runtime evidence or release completion claimed.
 
 Specification: [PRD](prd.md). Investigation: [plan](plan-g420.md), [production evidence](production-evidence.md). Decisions and limitations: [reconciliation log](reconciliation-log.md).
 
@@ -32,12 +32,14 @@ Keep one failure event per logical request, not per physical retry; caller-abort
 
 - [ ] **Structural guard — required, not yet run:** new `mobile/tests/check-win-now-recovery.js`, registered as `npm run test:win-now-recovery`, pins actual lifecycle wiring, all init callers, safe GET-only recovery, finite attempts, and layer boundaries. It must execute production logic with deferred transports/fake time, not rely only on source strings. Preserve/extend `check-win-now.js` and `check-session-seed.js`; package-script registration belongs to the integrator to avoid a shared-file conflict.
 - [ ] **Unit tests — required, not yet run:** native behavioral T1–T5/T7–T12 in the executable guard/helper harness; existing `backend/tests/test_win_now_api.py` and a narrow real installed persistent/verified-session guard regression in the existing session test suite selected by the evidence owner. The latter is required because a harness injected with an already-ready session cannot prove restoration. No backend runtime change or live provider access is implied.
-- [ ] **Code-walk proof — required after implementation:** final file:line trace for every init writer, generation-before-intent transition, init dispatch/settlement, seeds/verification/navigation commits, exact 409 repair/replay, same-token successful A→B ordering, ambiguous init failure, caller detach, stale 401, and all deadline-bound awaits. Baseline diagnosis and required trace appear in [PRD §§3–5](prd.md); the baseline is not a GREEN proof.
+- [ ] **Code-walk proof — required after implementation:** final file:line trace for every init writer, generation-before-intent transition, init dispatch/settlement, seeds/verification/navigation commits, exact 409 repair/replay, same-token successful A→B ordering, uncertainty latched across automatic re-entry until new explicit retry/selection or replacement-token authorization, caller detach, stale 401, the earlier shared API stale-403 verification callback, and all deadline-bound awaits. Baseline diagnosis and required trace appear in [PRD §§3–5](prd.md); the baseline is not a GREEN proof.
 - [ ] **Manual TestFlight checklist — required and not executed:** [PRD §5](prd.md) has seven numbered steps, including both entry points, process rollover, same-token switch, ambiguous POST, ~16-second response, complete attempt deadline, structured refusal, accessibility, and existing feature preservation. This is the required runtime net; never infer device availability or success from a build upload.
 - [ ] **WAIVED:** no evidence waiver requested. D-056 retires simulator/Maestro/capture work; it is not permission to omit executable guards or the manual checklist.
 - `testID`s added/renamed: none required. Preserve `win-now.refresh`, `win-now.source`, `win-now.unavailable`, `win-now.stale`, `win-now.disabled` and both entry IDs. An additive `win-now.load-error` is allowed only if needed for the existing error surface's focused guard; no new UI structure. Run `mobile/scripts/testid-lint.sh` regardless.
 
 Every new behavioral test must have a saved failing baseline or named meaningful-sabotage run and a passing fixed run. Record commands, test names/counts, failure reasons and exact SHAs in the parent-owned ledger. All T1–T12 map to R-1–R-7 in the PRD. No screenshot, simulator, flow authoring, or production-user mutation is part of the evidence plan.
+
+Independent-critique additions are mandatory evidence, not advisory tests: T10 must show ambiguous A → queued B rejected → automatic refocus/foreground causes zero init/read → new explicit retry is bounded, with no readiness hint in between. T8 must exercise the actual shared client's verification callback before caller rejection, proving a stale 403 cannot mutate replacement-session verification while a valid current-session denial still can. Neither addition broadens the wire/API or runtime file ownership.
 
 ## 4. Docs scope — HLD / LLD / API
 
