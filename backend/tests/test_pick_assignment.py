@@ -220,6 +220,11 @@ _SEVEN_READ_SITES = frozenset({
     # its seven neighbours use it. It is also the only site of the eight that
     # is reached ONLY behind a feature flag (`trade.outlook_net_firsts`, off).
     "_first_round_ledgers",
+    # ADR-019 owner construction: selected-route final roster protection
+    # needs the same complete pick holdings as the organic worker. This is
+    # an explicitly reviewed reader, not a new ownership writer. The shared
+    # helper preserves platform-only when asserted trading is disabled.
+    "_owner_selected_ideas",
 })
 
 #: The assignment surface's own reads. These name a LITERAL provenance

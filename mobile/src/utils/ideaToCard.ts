@@ -66,6 +66,13 @@ export function ideaToCard(idea: AssetIdea, leagueId: string): TradeCard {
     favors: idea.favors,
     gap: idea.gap,
     ...(idea.basis ? { basis: idea.basis } : {}),
+    ...(idea.impression_id ? { impression_id: idea.impression_id } : {}),
+    ...(idea.model_arm ? { model_arm: idea.model_arm } : {}),
+    ...(idea.generator_version ? { generator_version: idea.generator_version } : {}),
+    ...(idea.preserve_server_order === true ? { preserve_server_order: true } : {}),
+    ...(idea.selection_coverage ? { selection_coverage: idea.selection_coverage } : {}),
+    ...(idea.selection_notice ? { selection_notice: idea.selection_notice } : {}),
+    ...(idea.recommendation_rank != null ? { recommendation_rank: idea.recommendation_rank } : {}),
   };
 }
 

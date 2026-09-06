@@ -1156,6 +1156,15 @@ _DEFAULT_CFG: dict[str, float] = {
     # (PLAN-v2 F5b): generalize on the second consumer, not the first.
     "bakeoff_serve_fit":          0.0,
 
+    # Separate owner-interview generator: these only govern the experiment,
+    # never change existing engine arms or their pinned profiles.
+    "bakeoff_include_owner":      0.0,
+    "bakeoff_serve_owner":        0.0,
+    # Owner arm only, computational limits (not pricing permissions).
+    "owner_pool_size":           16.0,
+    "owner_pair_budget":         4096.0,
+    "owner_total_budget":        60000.0,
+
     # ------------------------------------------------------------------
     # Counterparty breaker — 25 evaluation-layer knobs
     # (docs/plans/counterparty-breaker/LLD.md §4). Consumed ONLY by

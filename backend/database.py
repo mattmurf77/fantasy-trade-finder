@@ -2846,6 +2846,11 @@ _MODEL_CONFIG_DEFAULTS = [
     ("ghost_holdout_one_in",        0.0, "suggestion telemetry: withhold ~1-in-N organic deck cards as ghosts; <=0 disables ghosting. DEFAULT 0 per the operator ruling 2026-08-21 (ghosts ruled out entirely)"),
     ("bakeoff_include_fit",         0.0, "bake-off roster bit: 1 = arm fit generates + logs; 0 = not rostered (default)"),
     ("bakeoff_serve_fit",           0.0, "bake-off serve bit: 1 = fit cards join the served draft; 0 = dark (generate + log only)"),
+    ("bakeoff_include_owner",       0.0, "owner_v1 generator: 1 = generate and log; 0 = disabled (default); existing arms unchanged"),
+    ("bakeoff_serve_owner",         0.0, "owner_v1 exposure: 1 = join organic draft and selected-search experiment; 0 = no treatment exposure"),
+    ("owner_pool_size",            16.0, "owner_v1 bounded candidate pool per team; computational limit, not a value gate"),
+    ("owner_pair_budget",        4096.0, "owner_v1 maximum candidate evaluations per opponent"),
+    ("owner_total_budget",      60000.0, "owner_v1 maximum candidate evaluations per generation"),
 
     # ── Receipts — OFFLINE grading knobs (docs/plans/receipts/LLD.md §1) ──
     # Consumed ONLY by backend/receipts_service.py, which runs after the

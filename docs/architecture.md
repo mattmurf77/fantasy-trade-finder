@@ -4,6 +4,45 @@ High-level data flow and component boundaries. Update when modules are added, re
 
 Owner-contract amendment (2026-09-05, D-185): ranking replay derives fixed feedback tier bounds after deliberate ranking actions; trade/disposition signals cannot cross the public tier boundary. Existing per-row member-ranking provenance flows through `load_member_rankings` → `LeagueMember.confidence_sources` → dark policy evaluation. No new service or database column. Legacy live generator method weighting is preserved pending an arm-safe experiment; see [implementation scope](plans/owner-contracts/scope.md).
 
+## Owner-driven construction challenger
+
+`backend/trade_gen_owner.py` is a separate, bounded constructor (`owner_v1`),
+not a reranker of legacy survivors. Personal rankings **plus outlook and needs**
+jointly select both teams' candidate assets before pool truncation; shared
+market package pricing sets feasible terms. Organic structures are 1×1, 1×2
+and 2×1 assets. Larger packages require explicit multi-asset selection.
+
+`server._owner_generation_context` captures raw per-entry ranking provenance,
+preferences, rosters, available lineup settings and configuration before arm
+execution. It clones members instead of mutating the controls' inputs. The same
+constructor serves organic bakeoff, pinned/partner-targeted jobs, fair packages
+and asset ideas (including More Offers and league buy/sell entrances).
+Declared outlook wins; absent personal entries use consensus. Utility can admit
+an outlook/usable-roster benefit despite a bounded dynasty-value loss. This
+usable-roster model is a market-value proxy, not a points forecast.
+
+Frozen owner evidence binds the exact package and market totals. Final serving
+revalidates it and retains actual roster/ownership/disposition protections,
+without reapplying the legacy personal-gain veto. The existing three controls
+keep their generators/profiles. New include/serve knobs default off; organic
+serving uses the existing draft, selected serving uses a recorded stable
+request-input assignment against a named legacy control. Mobile retains server
+trial order and joins genuine visible selected-card views and exact-package
+responses to stored impressions. Private counterparty values never enter the
+public response.
+
+The worker's captured owner-serving decision is passed into the bakeoff runner,
+not reread after generation. That same capture labels the job's owner safety
+signature: a hot switch cannot turn a shadow-start job into a serving trial or
+make its cached control deck appear to have been generated under the live arm.
+
+Contracts: [API](api-reference.md#owner-construction-trial-additions),
+[snapshots](data-dictionary.md#owner-v1-snapshot-namespace),
+[configuration](config-reference.md),
+[ADR-019](adr/adr-019-owner-construction-before-market-terms.md).
+Activation, device verification and statistical conclusions remain separate
+from implementation; see the [trial protocol](plans/owner-engine-challenger/trial-protocol.md).
+
 ## Data flow
 
 ```mermaid

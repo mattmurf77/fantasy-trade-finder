@@ -5,6 +5,13 @@ Tokens: [`design-system.md`](design-system.md). Live examples: [`web/style-guide
 
 Every component below maps to an existing class/component (web class · mobile component noted). New UI composes these; don't invent parallel variants.
 
+Owner trial partial-selection caption (2026-09-06): `TradeCard`,
+`FeaturedTradeWindow` and `ShopOffersBody` reuse Chalkline `Text`, `type.bodySm`
+and `chalk.dim` for a brief server-provided notice when only part of the requested
+selection could be included. No new badge, palette or layout family. Suppress
+the original-package caption after editing. Exact asset columns remain the
+authoritative terms; this adds no counterparty tier/value disclosure.
+
 ---
 
 ## Buttons
