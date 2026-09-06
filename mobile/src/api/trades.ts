@@ -203,6 +203,16 @@ function normalizeTradeCard(raw: any): TradeCard {
     // F1 signal spine (flag deck.signal_v2): server sends impression_id per
     // card only when the flag is on; absent → undefined and nothing changes.
     impression_id:      typeof raw?.impression_id === 'string' ? raw.impression_id : undefined,
+    ...(typeof raw?.model_arm === 'string' && raw.model_arm ? { model_arm: raw.model_arm } : {}),
+    ...(typeof raw?.generator_version === 'string' && raw.generator_version
+      ? { generator_version: raw.generator_version } : {}),
+    ...(raw?.preserve_server_order === true ? { preserve_server_order: true } : {}),
+    ...(raw?.selection_coverage === 'full' || raw?.selection_coverage === 'partial'
+      ? { selection_coverage: raw.selection_coverage } : {}),
+    ...(typeof raw?.selection_notice === 'string' && raw.selection_notice
+      ? { selection_notice: raw.selection_notice } : {}),
+    ...(Number.isInteger(raw?.recommendation_rank) && raw.recommendation_rank >= 0
+      ? { recommendation_rank: raw.recommendation_rank } : {}),
     // F3 retest marker (serialized only when true) + F7's wildcard marker
     // (flag deck.exploration, serialized only when true) — both position-
     // locked by F4's session re-rank; wildcard also drives TradeCard's
@@ -320,6 +330,13 @@ export interface AssetIdea {
   // render. Asset ideas carry neither, so their cards are unchanged.
   trade_id?: string;
   basis?: 'divergence' | 'consensus';
+  impression_id?: string;
+  model_arm?: string;
+  generator_version?: string;
+  preserve_server_order?: boolean;
+  selection_coverage?: 'full' | 'partial';
+  selection_notice?: string;
+  recommendation_rank?: number;
 }
 
 export interface AssetIdeasResponse {
@@ -377,6 +394,19 @@ function normalizeAssetIdea(raw: any): AssetIdea {
     ...(typeof raw?.trade_id === 'string' && raw.trade_id
       ? { trade_id: raw.trade_id }
       : {}),
+    ...(typeof raw?.impression_id === 'string' && raw.impression_id
+      ? { impression_id: raw.impression_id } : {}),
+    ...(typeof raw?.model_arm === 'string' && raw.model_arm
+      ? { model_arm: raw.model_arm } : {}),
+    ...(typeof raw?.generator_version === 'string' && raw.generator_version
+      ? { generator_version: raw.generator_version } : {}),
+    ...(raw?.preserve_server_order === true ? { preserve_server_order: true } : {}),
+    ...(raw?.selection_coverage === 'full' || raw?.selection_coverage === 'partial'
+      ? { selection_coverage: raw.selection_coverage } : {}),
+    ...(typeof raw?.selection_notice === 'string' && raw.selection_notice
+      ? { selection_notice: raw.selection_notice } : {}),
+    ...(Number.isInteger(raw?.recommendation_rank) && raw.recommendation_rank >= 0
+      ? { recommendation_rank: raw.recommendation_rank } : {}),
     ...(raw?.basis === 'consensus' || raw?.basis === 'divergence'
       ? { basis: raw.basis as 'consensus' | 'divergence' }
       : {}),
@@ -603,12 +633,14 @@ export async function queueTradeForOpponent(args: {
   opponentUserId: string;
   giveIds: string[];
   receiveIds: string[];
+  signal?: SwipeSignal;
 }): Promise<CalcQueueResult> {
   const res = await api.post<any>('/api/trades/queue', {
     league_id:          args.leagueId,
     opponent_user_id:   args.opponentUserId,
     give_player_ids:    args.giveIds,
     receive_player_ids: args.receiveIds,
+    ...(args.signal ?? {}),
   });
   return {
     queued:         !!res?.queued,

@@ -377,6 +377,55 @@ Indexes: `ix_trade_impressions_user_league` on `(user_id, league_id)` — traini
 
 ## `deck_impressions`
 
+### Owner-v1 snapshot namespace
+
+The owner-construction trial uses existing columns/JSON; there is no new table
+or column. When owner generation is included, real served-card impressions are
+also written for selected routes and organic jobs even if the legacy F1 write
+switch is off. Client view emitters still require `deck.signal_v2`; generated
+or served rows alone are **not** views.
+
+For `policy_variant="owner_v1"`, `valuation_json` has
+`generator="owner_v1"`, `generator_version="owner-v1"`, `schema_version=1`.
+This is an **owner-specific schema**, not the historical personal-market
+valuation-v1 shape. Consumers must dispatch on the generator/policy discriminator,
+never on the schema integer alone. It freezes exact selections/coverage,
+market give/receive/ratio and applied limits, both managers' personal package
+values/provenance, declared versus inferred outlook, usable-roster components,
+lineup source and provisional utility coefficients. It binds the actual package;
+post-construction mutation invalidates eligibility. Raw values remain private.
+
+`features_json.owner_experiment` records selected surface, version
+`owner-selected-v1`, stable request hash, assignment unit/probability,
+captured time and package-scoped inputs; `served_market` freezes the control's
+displayed totals too. Organic owner rows use `owner_request` (team-draft unit,
+no invented equal-arm probability). `owner_generation` contains budget, pool,
+shape, rejection and shortage diagnostics. The exact owner fairness floor is
+recorded without applying the legacy divergence/relaxation discount.
+
+The once-per-run selected `bakeoff_runs.config_json` contains the full captured
+input ledger; organic runs store it under `config_json.owner_request`. Each
+joins the package-scoped impression record by request hash and capture time,
+including board/pool values, lineup context, rosters and preferences. Capture
+timestamps are not market source timestamps:
+unavailable market-as-of is labelled unavailable. `model_arm` additionally
+accepts `owner_v1`, `legacy_fair`, `legacy_asset_ideas`, `legacy_targeted`;
+historical attribution remains unchanged. Real group occurrences can have
+separate impressions for the same package. Use manager-specific later outcome
+timestamps to distinguish their views/actions from offer creation.
+
+Existing `propensity` is an ordering multiplier, **not** selected assignment
+probability; the latter lives in explicit experiment JSON. Selected repeated
+identical requests share assignment and are not independent trials.
+
+Serving trial snapshots are withheld until all returned cards have real IDs;
+failure/incomplete persistence produces a named unavailable job rather than
+exposing an unmeasured owner draft. Run-ledger writes remain best-effort and are
+not proof of exposure. The separate client `deck.signal_v2` flag must be enabled
+for the trial readout's viewed denominator.
+
+### Legacy F1 columns
+
 TikTok-discovery **F1 signal spine** (flag `deck.signal_v2`, `docs/plans/tiktok-discovery/prds/F1-signal-foundation.md`). One row per card in the **final served deck order**, written once per completed generation job by `server._log_deck_signal_impressions` (→ `save_deck_impressions`), **only when the flag is on**. Additive: `trade_impressions` keeps writing unchanged. Demo league excluded. The row's `impression_id` is returned per card in `/api/trades/generate` + `/status` snapshots and echoed back by flag-on clients so `deck_outcomes` rows join to it.
 
 | Column | Type | Notes |
@@ -649,6 +698,13 @@ Indexes: `ix_suggestion_trade_links_league` on `league_id`; unique `uq_suggestio
 ---
 
 ## `bakeoff_runs`
+
+Owner-trial addition: organic `arms_json.owner_v1.diagnostics` records the
+independent construction report; an included-only arm is shadow supply, not
+exposure. Selected routes also write a run row with two named arms, served arm,
+both generation counts, owner error/report, exact served count and full frozen
+assignment/input `config_json`. An empty treatment has a run row even with zero
+impressions. See [owner snapshot namespace](#owner-v1-snapshot-namespace).
 
 **trade.bakeoff** three-model bake-off run ledger (`docs/plans/three-model-bakeoff/PLAN.md` §5, scope block `scope-phase3.md`) — **one row per organic trade job while the flag is on**, the per-JOB half of the record; the per-CARD half rides `deck_impressions.model_arm` / `.arm_rank`. Written best-effort by `server._run_trade_job` (→ `save_bakeoff_run`) after the deck is assembled; a failure here never fails the job. Written for **every** run including a superseded one — this is a RUN ledger, and the empty-arm/cost questions it answers are just as valid for a deck nobody saw.
 

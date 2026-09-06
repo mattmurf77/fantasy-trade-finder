@@ -27,6 +27,7 @@ import { Button, Icon, Text, TickLabel } from './chalkline';
 import PositionChip from './PositionChip';
 import { TRADE_INTENT_LABEL } from './TradeDnaSheet';
 import { useReducedMotionSafe } from '../hooks/useReducedMotionSafe';
+import { useSelectedOfferSignals } from '../hooks/useSelectedOfferSignals';
 import { useFlag } from '../state/useFeatureFlags';
 import { getLeaguePreferences } from '../api/league';
 import {
@@ -34,6 +35,7 @@ import {
   swipeTrade,
   type AssetIdea,
   type AssetIdeasResponse,
+  type SwipeSignal,
 } from '../api/trades';
 import { track } from '../api/events';
 import { haptics } from '../utils/haptics';
@@ -146,6 +148,8 @@ export interface ShopToast extends QueueToast {
 
 interface Props {
   leagueId: string;
+  /** Captured Find a Trade setting; older entrances retain the .50 default. */
+  fairnessThreshold?: number;
   /** The shopped give-side asset (player or pick pseudo-asset). */
   asset: Player;
   /** Screen-owned toast mount (queue outcomes + the Dismissed·Undo toast).
@@ -293,6 +297,7 @@ function SwapPosChip({
 export default function ShopOffersBody({
   leagueId,
   asset,
+  fairnessThreshold = 0.50,
   onToast,
   onToastRetract,
 }: Props) {
@@ -384,13 +389,15 @@ export default function ShopOffersBody({
     // Same query/key pattern as TradesScreen's `assetIdeasQuery`; distinct
     // key ('shop-ideas') so shopping never evicts the single-pin panel's
     // cache entry. The settled swap key is the fourth element ('' = no
-    // selection), so every selection owns its own cache row.
-    queryKey: ['shop-ideas', leagueId, asset.id, debouncedSwapKey],
+    // selection), so every selection owns its own cache row. The captured
+    // fairness setting also keys BOTH sweeps; strict and wide results never mix.
+    queryKey: ['shop-ideas', leagueId, asset.id, debouncedSwapKey, fairnessThreshold],
     queryFn: () =>
       fetchAssetIdeas({
         league_id: leagueId,
         asset_id: asset.id,
         direction: 'give',
+        fairness_threshold: fairnessThreshold,
         // Rev-3 §3 — the shop client ALWAYS sends the tier scope: the Same
         // value pool is tier membership, not the ±band. Unconditional on
         // purpose (never keyed to the active mode or the selection): the
@@ -439,12 +446,13 @@ export default function ShopOffersBody({
     ideasQuery.isSuccess &&
     (ideasQuery.data?.groups.lateral.length ?? 0) === 0;
   const widenedQuery = useQuery({
-    queryKey: ['shop-ideas', leagueId, asset.id, widenKey],
+    queryKey: ['shop-ideas', leagueId, asset.id, widenKey, fairnessThreshold],
     queryFn: () =>
       fetchAssetIdeas({
         league_id: leagueId,
         asset_id: asset.id,
         direction: 'give',
+        fairness_threshold: fairnessThreshold,
         lateral_scope: 'tier',
         swap_positions: widenKey.split('+'),
       }),
@@ -517,12 +525,20 @@ export default function ShopOffersBody({
     return out;
   }, [groups, locallyRemoved, suppressed]);
   const visibleIdeas = visibleByMode[mode];
+  const measuredOfferRef = useRef<View>(null);
+  const [pagerMoving, setPagerMoving] = useState(false);
+  const activeIdea = visibleIdeas[index];
+  const activeCard = useMemo(() => activeIdea ? ideaToCard(activeIdea, leagueId) : null,
+    [activeIdea, leagueId]);
+  const signalForOffer = useSelectedOfferSignals(activeCard, 'ShopAsset', index,
+    measuredOfferRef, !pagerMoving);
 
   // ── Dismiss: held POST + true undo (lld-delta.md §6) ──────────────────
   const pendingDismissRef = useRef<{
     idea: AssetIdea;
     key: string;
     restoreIndex: number;
+    signal?: SwipeSignal;
     timer: ReturnType<typeof setTimeout>;
   } | null>(null);
   // QA B-4 — the exact "Dismissed · Undo" descriptor the screen is (as far
@@ -531,7 +547,7 @@ export default function ShopOffersBody({
   // pending dismiss resolves any way at all (undo, expiry, early flush).
   const undoToastRef = useRef<ShopToast | null>(null);
 
-  function commitDismiss(idea: AssetIdea) {
+  function commitDismiss(idea: AssetIdea, signal?: SwipeSignal) {
     const key = assetIdeaKey(idea);
     // Fix A — the commit is the ONE gate into the suppression set: from
     // here the dismissal is client-authoritative for the shop session
@@ -550,7 +566,7 @@ export default function ShopOffersBody({
     // refetch so the card reappears rather than staying invisibly
     // un-dismissed (the S-9 honesty rule MatchesScreen states for the
     // same shape) — the one legal subtraction from the suppression set.
-    swipeTrade(ideaToCard(idea, leagueId), 'pass', undefined, 'shop').catch(() => {
+    swipeTrade(ideaToCard(idea, leagueId), 'pass', signal, 'shop').catch(() => {
       setSuppressed((s) => {
         const n = new Set(s);
         n.delete(key);
@@ -580,7 +596,7 @@ export default function ShopOffersBody({
       onToastRetract(undoToastRef.current);
     }
     undoToastRef.current = null;
-    commitDismiss(p.idea);
+    commitDismiss(p.idea, p.signal);
   }
   // Latest-instance ref (the TradesScreen `pendingPassRef` convention) so
   // the unmount flush never closes over a stale query/state instance.
@@ -628,6 +644,7 @@ export default function ShopOffersBody({
       idea,
       key,
       restoreIndex,
+      signal: signalForOffer(ideaToCard(idea, leagueId)),
       // Timer armed BEFORE any network call — Undo cancels it and the
       // request is never sent (R-9). The natural expiry is the ONE flush
       // that must not retract the toast: it dismisses itself at the same
@@ -707,6 +724,7 @@ export default function ShopOffersBody({
         giveIds: idea.give_player_ids,
         receiveIds: idea.receive_player_ids,
         screen: 'ShopAsset',
+        signal: signalForOffer(ideaToCard(idea, leagueId)),
       });
       onToast(res.toast);
     } finally {
@@ -956,6 +974,8 @@ export default function ShopOffersBody({
             </Text>
           </View>
           <View
+            ref={measuredOfferRef}
+            collapsable={false}
             onLayout={(e: LayoutChangeEvent) => setPagerW(e.nativeEvent.layout.width)}
             style={styles.pagerWrap}
           >
@@ -973,8 +993,17 @@ export default function ShopOffersBody({
                 index: i,
               })}
               onMomentumScrollEnd={(e) => {
+                setPagerMoving(false);
                 if (pagerW > 0) {
                   setIndex(Math.round(e.nativeEvent.contentOffset.x / pagerW));
+                }
+              }}
+              onScrollBeginDrag={() => setPagerMoving(true)}
+              onScrollEndDrag={(e) => {
+                const offset = pagerW > 0 ? e.nativeEvent.contentOffset.x / pagerW : NaN;
+                if (Number.isFinite(offset) && Math.abs(offset - Math.round(offset)) < 0.01) {
+                  setIndex(Math.round(offset));
+                  setPagerMoving(false);
                 }
               }}
               renderItem={({ item }) => {
@@ -983,6 +1012,9 @@ export default function ShopOffersBody({
                 const gain = item.difference >= 0;
                 return (
                   <View style={[styles.tile, { width: pagerW || 1 }]} testID={`shop.card.${key}`}>
+                    {item.selection_coverage === 'partial' && item.selection_notice ? (
+                      <Text style={[type.bodySm, styles.pickerHint]}>{item.selection_notice}</Text>
+                    ) : null}
                     <View style={styles.tileSplit}>
                       <TileSide label="You send" players={item.give} />
                       <View style={styles.vrule} />

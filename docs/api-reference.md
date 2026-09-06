@@ -246,6 +246,47 @@ Account-auth plan P2 + P2.6 account-first (docs/plans/account-auth-plan-2026-07-
 
 ## Trades
 
+### Owner construction trial additions
+
+When `trade.bakeoff` and `bakeoff_include_owner` are enabled outside demo,
+`POST /api/trades/generate` (organic and pinned/partner-targeted),
+`POST /api/trades/fair-packages`, and `POST /api/trades/asset-ideas` can execute
+the independent `owner_v1` constructor. `bakeoff_serve_owner` separately permits
+exposure; include-only does not serve it. Organic jobs retain draft attribution;
+selected jobs record a stable request-input assignment against `legacy_fair`,
+`legacy_asset_ideas` or `legacy_targeted`, not a disguised owner fallback.
+
+Additive public card/idea fields: `impression_id`, `model_arm`,
+`generator_version`, `preserve_server_order: true`,
+`selection_coverage: "full" | "partial"`, optional `selection_notice`, and
+selected owner ideas' zero-based global `recommendation_rank`. Other manager
+rankings, tier placements, utility components and private request snapshots are
+never included. Partial alternatives keep at least one requested asset on each
+requested side and are labelled; full feasible selections take precedence.
+An empty owner selection remains empty rather than returning a mislabeled
+legacy package. Selected trial capture/write failures return a named
+`owner_experiment_unavailable` 503 while serving is enabled; shadow failures
+may fall back to the unchanged legacy response.
+
+Serving trial jobs do not publish a draft before real impression IDs are
+available for every card. Missing/failed impression persistence yields an empty
+job error `owner_impression_unavailable`; it cannot expose unattributed trial
+cards. Legacy and include-only jobs retain their existing logging behavior.
+
+Both selected arms receive the same explicit request `fairness_threshold`.
+Omitted selected/pinned values retain the existing 0.50 default (ordinary
+unpinned generation defaults to 0.75). Mobile's current toggle maps to 0.75/0.50
+and now travels into More Offers, including both base and widened request/cache
+keys. No new account-setting interpretation or DB preference is introduced.
+
+`POST /api/trades/queue` accepts the existing optional **flat** swipe-signal
+fields (`impression_id`, `dwell_ms`, `detail_expanded`, `calc_opened`). A supplied
+impression is linked only if it belongs to the acting manager, league and exact
+package/partner. Omitted, invalid, foreign or edited-package signals confer no
+attribution; normal queue behavior and idempotence are unchanged.
+
+The sections below describe the unchanged legacy generators unless noted.
+
 ### Whole-team benefit evaluation (backend collection)
 
 When roster collection is enabled, stored `features_json.roster_evaluation` includes per-team `outlook_utility` and aggregate `mutual_benefit`. These distinguish supplied point production, dynasty assets, depth, explicit/inferred outlook, confidence and readiness. Missing projections remain null. Client serving remains unchanged in collection mode. The dark `trade.mutual_benefit_v1` switch requires final market + roster + both-manager benefit checks before publication and ranks by the weaker benefit within market lane quotas. See [activation evidence](plans/trade-model-activation/validation.md).

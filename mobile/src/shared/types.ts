@@ -203,6 +203,12 @@ export interface TradeCard {
   // on at generation time; echoed back (with dwell/engagement fields) on
   // dispositions + events so the backend can append deck_outcomes rows.
   impression_id?: string;
+  model_arm?: string;
+  generator_version?: string;
+  preserve_server_order?: boolean;
+  selection_coverage?: 'full' | 'partial';
+  selection_notice?: string;
+  recommendation_rank?: number;
   // F3 (flag deck.fatigue): true when this card is the ONE low-exposure
   // retest of an expired decline-suppression window (server.py
   // trade_card_to_dict serializes `retest` only when true). Read by F4's

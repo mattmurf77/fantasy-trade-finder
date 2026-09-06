@@ -564,6 +564,30 @@ Canonical set: `championship`, `contender`, `rebuilder`, `jets`, `not_sure`.
 
 ---
 
+## Owner trial metadata and ordering
+
+Owner trial metadata is additive to the existing card/idea shapes:
+`model_arm`, `generator_version`, `impression_id`,
+`preserve_server_order: true`, `selection_coverage` (`full`/`partial`),
+`selection_notice`, and a nonnegative integer `recommendation_rank`.
+Normalizers must whitelist these public fields, not forward raw server objects
+or private owner evidence. Preserve them through `ideaToCard`.
+
+`preserve_server_order` applies to the **whole serving trial**, including
+controls: client fairness-off sorting and session reranking may not compare
+different models' local scores. Owner featured ideas use the server's global
+recommendation rank, not the largest signed market gain. Legacy ordering stays
+unchanged absent the marker. More Offers carries the current fairness threshold
+in navigation, both requests and both cache keys; old callers default to 0.50.
+
+Selected views require active screen, foreground app and at least 500 ms of
+continuous visible exposure. Exact package/impression identity binds dwell and
+responses; an edited calculator package cannot borrow the original impression.
+Delayed Shop passes retain the tapped card's signal through the Undo interval.
+Updates must keep `server.py`, mobile API/shared types, `ideaToCard`, selected
+exposure helpers, Shop/Featured and TradesScreen consistent. Executable guards:
+`check-owner-offer-signals.js` and `check-owner-trial-order.js`.
+
 ## Trade-card lane enum (phase 2, 2026-07-17)
 
 Canonical set: `window`, `value` — the optional `lane` field on trade cards (flag `trade.lanes`; absent when the user has no declared/seeded window). `window` = the trade moves roster composition toward the user's contend/rebuild window; `value` = pure value play. Classified by `trade_service.classify_lane`; also logged in swipe `user_events` props for A/B joins.

@@ -11,6 +11,28 @@
 
 ---
 
+## 2026-09-06 — Owner construction challenger, implementation checkpoints
+
+New isolated `codex/owner-engine-challenger-20260906` from `4c343a48` introduces
+an actual separate `owner_v1` constructor and selected-route attribution;
+existing control goldens/profiles are retained. Owner clarification is joint
+personal rankings + outlook + needs before market-priced terms. This is **not
+a deployment or activation**. Parent and Astra Ultra builders/reviewer are
+validating final integration. Checkpoints: parent 102 control/runner tests and
+74 core/acceptance/runner tests passed; web190 and all97 mobile guard scripts
+passed at the pre-final-canvas checkpoint. Broad backend **5734 passed / 1 skip /
+9 failed (644.46s)**, not green: concurrent source edits invalidated eight
+inspect-based function slices; one new pick-reader inventory requires an
+explicit sanctioned-site update. Fresh frozen-source full rerun is required.
+No production credentials/data used. Final frozen backend rerun: **5754 passed /
+1 skipped in420.01s**, exit0; parent focused rerun235passed, builder matrix369passed.
+Independent final mobile review caught original-impression credit on an edited
+classic-deck action; actual-function RED/GREEN repair and independent re-review
+now pass. Final parent TypeScript/all97guards/testID, web190 and native1.17.2
+plist/project checks pass (offer signals26, trial order13). Parent final diff
+review is complete. Nothing pushed, deployed or activated at this local
+checkpoint. [Exact evidence and remaining gates](../docs/plans/owner-engine-challenger/verification.md).
+
 ## 2026-09-06 — Feedback release CI, merge and delivery
 
 Final head `d97459dc9f72ebe158f70fcbb86f29051659c206` passed [CI run 34047364058](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/34047364058): **5,645 backend passed / 1 skipped in 717.99 s**, TypeScript/all 95 mobile guards, testID lint and 190 web checks. [PR #283](https://github.com/mattmurf77/fantasy-trade-finder/pull/283) merged **17:16:56 UTC** as `988fa2d690dfa9188f43c33e87dff9d60a5fabaa`; root fetched and verified complete tree equality with the exact CI head. D-056 standing `FTF_SKIP_SIM_GATE=1` used; no simulator or physical-device claim. Destination-specific public publication approval was explicitly supplied by the owner.

@@ -94,6 +94,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import random
 import threading
 import time
@@ -126,6 +127,9 @@ ARM_CHALLENGER = "challenger"
 #: Roster bit `bakeoff_include_fit` (default 0); serve bit `bakeoff_serve_fit`
 #: (default 0 — generates, logs, stamped, excluded from the draft).
 ARM_FIT = "fit"
+# Owner-interview construction is a separate generator, never a relabelled
+# landability challenger. Its include/serve bits default off independently.
+ARM_OWNER = "owner_v1"
 
 #: Every arm that EXISTS. Not every arm that runs — see `arm_roster()`, which
 #: is what the fan-out and the draft actually iterate. Order here is the
@@ -141,7 +145,7 @@ ARMS: tuple[str, ...] = (ARM_BASELINE, ARM_CURRENT, ARM_GEN_V2)
 #: Every arm the runner knows about, in canonical listing order. This is what
 #: `arm_roster()` filters; `ARMS` is a historical fixture, not a superset.
 ALL_ARMS: tuple[str, ...] = (ARM_BASELINE, ARM_CURRENT, ARM_CHALLENGER,
-                             ARM_GEN_V2, ARM_FIT)
+                             ARM_GEN_V2, ARM_FIT, ARM_OWNER)
 
 #: Arms that run the v1/v3 engine and therefore produce BOTH bases —
 #: `divergence` for opponents with real rankings, `consensus` for the
@@ -199,7 +203,7 @@ INTENT_MODES: frozenset[str] = frozenset(
 #: fallback and what the progress bar tracks — and fit, like arms A/C/D,
 #: runs with progress streaming suppressed.
 GENERATION_ORDER: tuple[str, ...] = (ARM_CURRENT, ARM_CHALLENGER,
-                                     ARM_BASELINE, ARM_GEN_V2, ARM_FIT)
+                                     ARM_BASELINE, ARM_GEN_V2, ARM_FIT, ARM_OWNER)
 
 #: The single arm served in Phase-4 dark validation.
 DARK_SERVED_ARM = ARM_CURRENT
@@ -256,6 +260,15 @@ def serve_fit() -> bool:
     return _cfg("bakeoff_serve_fit", 0.0) >= 1.0
 
 
+def serve_owner() -> bool:
+    """Exposure permission, separate from generation's include bit.
+
+    The caller must also be in an enabled experiment. Keeping the predicate
+    arm-local lets the same permission govern organic and selected searches.
+    """
+    return _cfg("bakeoff_serve_owner", 0.0) >= 1.0
+
+
 def deck_limit() -> int | None:
     """`bakeoff_deck_limit` — max cards in the served bake-off deck. Default
     30: three groups of ten. 0 = uncapped, which together with
@@ -299,6 +312,7 @@ def arm_roster() -> tuple[str, ...]:
         # Fit challenger (LLD §2.1) — default OFF the roster; rostering is a
         # W3 operator decision, and serving is a SECOND bit (`serve_fit()`).
         ARM_FIT:        _cfg("bakeoff_include_fit", 0.0) >= 1.0,
+        ARM_OWNER:      _cfg("bakeoff_include_owner", 0.0) >= 1.0,
     }
     return tuple(a for a in ALL_ARMS if included[a])
 
@@ -456,6 +470,14 @@ def effective_fairness_threshold(card, requested: float | None,
     it is itself the fact a reader needs: an arm-C card was never subject to
     the client's fairness toggle.
     """
+    owner = getattr(card, "owner_evaluation", None)
+    if owner is not None:
+        # Owner construction composes max(requested, absolute), never the
+        # legacy divergence/relaxed min. Log the actual captured admission bar.
+        floor = getattr(owner, "effective_floor", None)
+        return (float(floor) if isinstance(floor, (int, float))
+                and not isinstance(floor, bool) and math.isfinite(floor)
+                and 0 <= floor <= 1 else None)
     if requested is None:
         return None
     thr = float(requested)
@@ -1485,6 +1507,7 @@ def run_bakeoff(
     gen_fit: Callable[..., list] | None = None,   # NEW — arm `fit` (additive
     # keyword, default None, so every existing caller compiles unchanged;
     # rostered-without-a-callable is a recorded arm error, HLD F-3)
+    gen_owner: Callable | None = None,  # returns (cards, OwnerGenerationReport)
     league_id: str,
     fairness_threshold: float | None = None,
     trade_intent: str | None = None,
@@ -1529,6 +1552,7 @@ def run_bakeoff(
         t0 = time.monotonic()
         err = None
         cfg_seen: dict = {}
+        owner_diag: dict = {}
         try:
             if arm == ARM_BASELINE:
                 # `model_a()` applies the pinned config profile AND the R4
@@ -1562,6 +1586,13 @@ def run_bakeoff(
                     raise RuntimeError(  # recorded arm error, never a job failure
                         "arm fit rostered but no gen_fit callable bound")
                 cards = list(gen_fit(**quiet) or [])
+            elif arm == ARM_OWNER:
+                cfg_seen = snapshot_config()
+                if gen_owner is None:
+                    raise RuntimeError("arm owner_v1 rostered but no gen_owner callable bound")
+                owner_cards, owner_report = gen_owner(**quiet)
+                cards = list(owner_cards or [])
+                owner_diag = dict(owner_report.diagnostics())
             else:
                 cfg_seen = snapshot_config()
                 cards = list(gen_v2(**quiet) or [])
@@ -1576,6 +1607,8 @@ def run_bakeoff(
             diag = last_gen_v2_diagnostics()
         elif arm == ARM_FIT:
             diag = last_fit_diagnostics()
+        elif arm == ARM_OWNER:
+            diag = owner_diag
         else:
             diag = {}
         arms[arm] = ArmResult(
@@ -1597,7 +1630,8 @@ def run_bakeoff(
     # still shows up in `also_proposed_by` (LLD §8 R-a: free telemetry, no
     # serving effect, since fit is absent from every participant order).
     serving_roster = tuple(a for a in roster
-                           if a != ARM_FIT or serve_fit())  # F5b
+                           if (a != ARM_FIT or serve_fit())
+                           and (a != ARM_OWNER or serve_owner()))
     groups, group_order, draft = compose_deck(
         arm_lists, league_id=league_id, iso_week=iso_week,
         roster=serving_roster, limit=limit)

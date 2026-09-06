@@ -943,6 +943,30 @@ Consumed **only** by `backend/receipts_service.py`, which runs after the fact ag
 
 ### Three-model bake-off (flag `trade.bakeoff`)
 
+#### Owner-interview construction trial (`owner_v1`, 2026-09-06)
+
+`owner_v1` is a separate generator, not the existing `challenger` arm and not
+the `simple_player_presentment` reorder. Its model-config defaults are dark:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `bakeoff_include_owner` | 0 | Generate and record the new arm; leave the current three controls intact. |
+| `bakeoff_serve_owner` | 0 | Separately permit treatment exposure in the organic draft and selected-search experiment. Include must also be enabled. |
+| `owner_pool_size` | 16 | Bounded per-team candidate pool, with explicit selections retained. Computational limit, not a pricing permission. |
+| `owner_pair_budget` | 4096 | Maximum candidate evaluations for one opponent. |
+| `owner_total_budget` | 60000 | Maximum candidate evaluations for one search. Exhaustion is diagnostic data, not a reason to silently widen fairness. |
+
+These keys do not enter `MODEL_A_PROFILE` or `MODEL_CHALLENGER_PROFILE`:
+no historical generator consumes them. Existing controls' generators and
+goldens are retained. Include without serve is not a live test; serve without
+include cannot introduce the arm. The independent serving bit applies to both
+group composition and the plain team-draft path. First turn off serve to stop
+exposure, then include to stop computation; preserve evidence and controls.
+See the [trial scope](plans/owner-engine-challenger/scope.md) for evidence and
+activation gates. Checked-in defaults do not establish production settings.
+
+#### Existing draft and control settings
+
 Read via `bakeoff_runner._cfg` (the `_deck_cfg` pattern — `trade_service._DEFAULT_CFG` defaults, live-tunable through `model_config` without a deploy). **Every key here is inert while the flag is off.** Plan: [docs/plans/three-model-bakeoff/PLAN.md](plans/three-model-bakeoff/PLAN.md). Deck composition (the six-knob block below the first two): [scope-composition.md](plans/three-model-bakeoff/scope-composition.md).
 
 Because these live in `trade_service._DEFAULT_CFG`, `bakeoff_runs.config_json` snapshots them with every run — the configuration a deck was composed under is recorded by construction, not by remembering to log it.
