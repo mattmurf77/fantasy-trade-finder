@@ -1,6 +1,6 @@
 # Feedback 419–421 — selected fixes and open-backlog audit
 
-**Date:** 2026-09-06. **Base:** freshly fetched `origin/main` at `4026ebc81eaae50b345b42421641125c5b8d413e`. **Status:** selected; investigation and dual-agent planning underway. No shipping authorization for this batch has been inferred from prior releases.
+**Date:** 2026-09-06. **Base:** freshly fetched `origin/main` at `4026ebc81eaae50b345b42421641125c5b8d413e`. **Status:** G419 reviewed and building; G420 authoring; backlog audit complete. The owner explicitly authorized unattended shipping of this batch in the current conversation after review and validation.
 
 ## Selected groups
 
@@ -9,6 +9,7 @@
 | G419 | 419 | Prevent a rejected exact offer from resurfacing as current counterparty interest | Trade-disposition worktree; exact backend/client boundaries to be pinned by reviewed PRD |
 | G420 | 420, 421 | Repair Win Now initialization/loading behavior and distinguish request timeout from hosting claims | Win Now worktree; exact client/backend boundaries to be pinned by reviewed PRD |
 | Audit | All 45 open records | Research which are actually implemented and released, with per-item evidence | Independent reviewer; audit report only, no status changes or unrelated fixes |
+| Package research | New owner request, no feedback ID | Compare completed trades in the owner's linked Sleeper leagues with recorded viewed/generated chips; derive a bounded preference for smaller packages if supported | Read-only research first; any implementation receives its own reviewed scope and regression evidence. Never block an explicit owner-selected package as a side effect. |
 
 ## Execution gates
 
@@ -20,4 +21,6 @@ Preserve all live policy/experiment settings, original package/identity semantic
 
 ## Release boundary
 
-GitHub/Render/TestFlight release remains a separate go/no-go after the reviewed implementation and evidence are available. Code presence, enabled server flags, binary upload and verified tester availability are distinct facts. The backlog audit must not close a report solely from a plan, stale index status, code resemblance or unverified native delivery.
+The owner, before leaving for the night, explicitly authorized merge/push/live delivery and TestFlight where needed for the selected fixes and the package-size follow-up. This is a current-batch preauthorization, not an inference from an earlier release and not an express-lane waiver. All specification, independent QA, fresh-main overlap, CI, docs and release-verification gates remain required. Unrelated backlog fixes, status closures, flag activations and real-user/provider trade actions remain out of scope. If research does not justify a safe package adjustment, retain the recommendation/evidence rather than force a policy change.
+
+Code presence, enabled server flags, binary upload and verified tester availability remain distinct facts. The backlog audit must not close a report solely from a plan, stale index status, code resemblance or unverified native delivery. Manual physical-device QA is not fabricated by shipping authorization.

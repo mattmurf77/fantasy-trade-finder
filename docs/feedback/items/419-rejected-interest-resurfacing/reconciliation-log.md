@@ -1,5 +1,9 @@
 # G419 — Phase-1 reconciliation
 
+## Parent phase-1 exit — 2026-09-06
+
+The original planner independently re-read the completed revision at `481b1809` and approved backend implementation with no remaining specification blockers. The parent read the revised contract, ratified the exact-interest and held-policy boundaries, and refreshed `origin/main` immediately before build; it remains `4026ebc8` with no overlap. The queue renewal exception, truthful durable `passed` evidence/repair, real DB timestamp tests and limited local mobile guarantee are now the reviewed contract. Earlier planned/pending language below records the author phase, not the current gate state.
+
 **Status:** planned · 2026-09-06 · `codex/feedback-419-trade-disposition-20260906`
 
 Author pass against plan commit `19b927aa2ce5bd7f4abb3ba0df2635ed311994a5` and code base `4026ebc81eaae50b345b42421641125c5b8d413e`; initial docs commit `fd74cbf1`. The original planner's critique was relayed by root and its two blockers are incorporated in Round 2. Root ratified R1 and all held policy boundaries. [PRD](prd.md) and [scope](scope.md) now await focused planner review of the corrections. **No runtime source, tests, flags, schema, private history or shared ledger was edited by this author; no tests were run.** This log does not imply focused review is complete.
