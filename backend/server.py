@@ -3126,7 +3126,8 @@ def _capture_trade_presentation():
 
 def _trade_presentation_matches(job, captured):
     previous = job.get("presentation_capture")
-    return (previous[:2] if previous is not None else _simple_presentment.OFF) == captured[:2]
+    return (not (captured[0] and job.get("presentation_exempt"))
+            and (previous[:2] if previous is not None else _simple_presentment.OFF) == captured[:2])
 
 
 def _trade_job_is_fresh(job: dict, fairness_threshold: float, outlook_value,
@@ -6939,6 +6940,7 @@ def _run_trade_job(
     prefs_preload: dict | None = None,
     execution_context: _TradeExecutionContext | None = None,
     presentation_capture=None,
+    presentation_exempt: bool = False,
 ):
     """Daemon-thread entry point with context captured before thread start.
     Direct internal callers may omit context and capture at entry. All exceptions caught — a thread death
@@ -7848,6 +7850,7 @@ def _run_trade_job(
         # authoritative dispositions; none re-sorts an old snapshot.
         presentation = None
         if (presentation_capture[0] and market_live and policy_evaluated
+                and not presentation_exempt
                 and not ghost_on and not pinned_give and not pinned_receive
                 and not opponent_user_id
                 and (bakeoff_run is None or bakeoff_run.served_arm is None)):
@@ -8204,6 +8207,7 @@ def _kickoff_trade_job(
     prefs_preload: dict | None = None,
     session_context: Mapping | None = None,
     presentation_capture=None,
+    presentation_exempt: bool = False,
 ) -> str:
     """Register a new job in _trade_jobs and start its worker thread.
     Returns the job_id. Caller is responsible for any pre-existing-job
@@ -8281,9 +8285,11 @@ def _kickoff_trade_job(
     }
     if source:
         job["source"] = source
+    if presentation_exempt:
+        job["presentation_exempt"] = True
     with _trade_jobs_lock:
         _trade_jobs[job_id] = job
-        if not is_pinned:
+        if not is_pinned and not (presentation_capture[0] and presentation_exempt):
             # Pin into the per-key index so future generate calls dedupe.
             _trade_jobs_by_key[job["key"]] = job_id
 
@@ -8301,7 +8307,8 @@ def _kickoff_trade_job(
                        trade_intent=trade_intent,
                        prefs_preload=prefs_preload,
                        execution_context=execution_context,
-                       presentation_capture=presentation_capture)
+                       presentation_capture=presentation_capture,
+                       presentation_exempt=presentation_exempt)
         return job_id
 
     threading.Thread(
@@ -8312,7 +8319,8 @@ def _kickoff_trade_job(
         kwargs={"trade_intent": trade_intent,
                 "prefs_preload": prefs_preload,
                 "execution_context": execution_context,
-                "presentation_capture": presentation_capture},
+                "presentation_capture": presentation_capture,
+                "presentation_exempt": presentation_exempt},
         daemon=True,
     ).start()
     return job_id
@@ -13514,9 +13522,15 @@ def generate_trades():
         pass
 
     presentation_capture = _capture_trade_presentation()
+    # The presentation exclusion honors supplied intent even when the existing
+    # targeting flag ignores receive pins. Do not change generation/fairness
+    # normalization, or let this unpresented search seed the organic on-cache.
+    presentation_exempt = bool(body.get("pinned_receive_players"))
+    presentation_uncached = bool(presentation_capture[0] and presentation_exempt)
     reuse_snapshot = None
     with _trade_jobs_lock:
-        existing_id = _trade_jobs_by_key.get(key) if not _any_pinned else None
+        existing_id = (_trade_jobs_by_key.get(key)
+                       if not _any_pinned and not presentation_uncached else None)
         existing    = _trade_jobs.get(existing_id) if existing_id else None
 
         if existing and not _any_pinned:
@@ -13571,6 +13585,7 @@ def generate_trades():
         prefs_preload      = prefs_preload,
         session_context    = sess,
         presentation_capture = presentation_capture,
+        presentation_exempt = presentation_exempt,
     )
     with _trade_jobs_lock:
         snapshot = copy.deepcopy(_trade_jobs[job_id])

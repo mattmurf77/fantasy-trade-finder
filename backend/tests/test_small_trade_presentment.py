@@ -391,25 +391,28 @@ def test_t5_replenish_cache_mode_boundaries(replay, monkeypatch, old, new):
         assert calls[0]["presentation_capture"][:2] == sp.mode(new)
 
 
-def test_t5_actual_kickoff_passes_one_capture_to_held_worker(replay, monkeypatch):
-    _client, _svc, _engine, _job, _siblings = replay
+@pytest.mark.parametrize("exempt", [False, True])
+def test_t5_actual_kickoff_passes_one_capture_to_held_worker(replay, monkeypatch, exempt):
+    _client, _svc, _engine, old_job, _siblings = replay
     captured, calls = (1, sp.VERSION, "request-base"), []
 
     def worker_spy(*args, **kwargs):
-        calls.append(kwargs["presentation_capture"])
+        calls.append((kwargs["presentation_capture"], kwargs["presentation_exempt"]))
 
     monkeypatch.setattr(server, "_run_trade_job", worker_spy)
     ts._cfg["simple_player_presentment"] = 0  # changed after caller's decision
     jid = server._kickoff_trade_job(sess_token=TOKEN, user_id=ME, league_id=LEAGUE,
-        scoring_format="1qb_ppr", synchronous=True, presentation_capture=captured)
+        scoring_format="1qb_ppr", synchronous=True, presentation_capture=captured,
+        presentation_exempt=exempt)
     try:
-        assert calls == [captured]
+        assert calls == [(captured, exempt)]
         assert server._trade_jobs[jid]["presentation_capture"] == captured
+        assert server._trade_jobs_by_key[old_job["key"]] == (old_job["job_id"] if exempt else jid)
     finally:
         server._trade_jobs.pop(jid, None)
 
 
-@pytest.mark.parametrize("exemption", ["give", "receive", "opponent", "demo", "ghost", "shadow", "dark", "failure"])
+@pytest.mark.parametrize("exemption", ["give", "receive", "ignored_receive", "opponent", "demo", "ghost", "shadow", "dark", "failure"])
 def test_t3_t7_actual_worker_exemptions_have_no_presentation(exemption):
     real_worker = server._run_trade_job
 
@@ -420,6 +423,8 @@ def test_t3_t7_actual_worker_exemptions_have_no_presentation(exemption):
                           "receive": ("pinned_receive", ["rb2"]),
                           "opponent": ("opponent_user_id", H.OPP)}[exemption]
             bound.arguments[key] = value
+        elif exemption == "ignored_receive":
+            bound.arguments["presentation_exempt"] = True
         return real_worker(*bound.args, **bound.kwargs)
 
     def run(mode):
@@ -467,3 +472,33 @@ def test_t6_locked_unknown_unattributed_first_row_keeps_uniform_provenance():
     assert rows[0]["policy_version"].endswith("/pp:simple-player-v1")
     assert all("/pp:simple-player-v1" in row["policy_version"] for row in rows)
     assert [row["model_arm"] for row in rows[1:]] == ["current", "gen_v2", "baseline", "current", "gen_v2"]
+
+
+@pytest.mark.parametrize("status", ["complete", "running"])
+@pytest.mark.parametrize("mode", [0, 1])
+@pytest.mark.parametrize("supplied", [False, True])
+def test_t3_raw_receive_exemption_survives_targeting_off_route(replay, monkeypatch, status, mode, supplied):
+    client, _svc, _engine, job, _siblings = replay
+    job.update(status=status, presentation_capture=(*sp.mode(mode), "matched-base"))
+    ts._cfg["simple_player_presentment"] = mode
+    actual_flag, calls = server.is_enabled, []
+    monkeypatch.setattr(server, "is_enabled", lambda key: False if key == "trade.finder_targeting" else actual_flag(key))
+
+    def kickoff(**kwargs):
+        calls.append(kwargs)
+        fresh = dict(job, job_id="explicit-uninterpreted-search")
+        monkeypatch.setitem(server._trade_jobs, fresh["job_id"], fresh)
+        return fresh["job_id"]
+
+    monkeypatch.setattr(server, "_kickoff_trade_job", kickoff)
+    body = {"league_id": LEAGUE, "pinned_receive_players": ["r1"] if supplied else []}
+    response = _post(client, body, path="/api/trades/generate")
+    assert response.status_code == 200
+    bypass = bool(mode and supplied)
+    assert len(calls) == int(bypass)
+    assert response.get_json()["job_id"] == ("explicit-uninterpreted-search" if bypass else job["job_id"])
+    assert server._trade_jobs_by_key[job["key"]] == job["job_id"]
+    if bypass:
+        assert calls[0]["presentation_exempt"] is True
+        assert calls[0]["pinned_receive"] is None  # generation still ignores unsupported targeting
+        assert calls[0]["fairness_threshold"] == .75  # no new pin/fairness semantics
