@@ -349,6 +349,13 @@ def test_likes_you_injection_does_not_reorder_the_interleave():
     injected.likes_you = True
 
     def fake_inject(cards, **kwargs):
+        # #419 source-evidence prerequisite (root-reviewed fixture repair):
+        # this order-only stub bypasses the real injector, so supply the
+        # actual mirror like it would require. Existing arm/order/original
+        # policy-version assertions below remain byte-for-byte unchanged.
+        import backend.database as db
+        db.save_trade_decision(H.OPP, H.LEAGUE, "interleave-source",
+                               ["rb3"], ["te1"], "like")
         # What the real injector does: prepend + re-sort by composite desc.
         return sorted(list(cards) + [injected],
                       key=lambda x: x.composite_score, reverse=True)

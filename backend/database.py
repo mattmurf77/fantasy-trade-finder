@@ -5943,6 +5943,31 @@ class TradeInterestHistory:
                 frozenset(row["give_player_ids"]),
                 frozenset(row["receive_player_ids"]))
 
+    def discovery_keys(self, user_id, *, pass_days=14.0, like_days=7.0,
+                       amnesty_epoch=0.0, now=None):
+        """Existing D-067 windows, separate from permanent source resolution.
+
+        Reuse normalized history without a lossy VARCHAR/integer-day SQL cut.
+        Malformed stamps remain excluded; only passes receive the amnesty.
+        """
+        now = now or datetime.now(timezone.utc)
+        mixed, passes = set(), set()
+        for row in self.rows:
+            if row["user_id"] != user_id or row["decision"] not in ("like", "pass"):
+                continue
+            is_pass = row["decision"] == "pass"
+            stamp = row["_order"][0] if row["_order"] is not None else None
+            if stamp is not None:
+                if is_pass and amnesty_epoch > 0 and stamp.timestamp() < amnesty_epoch:
+                    continue
+                if (now - stamp).total_seconds() > (pass_days if is_pass else like_days) * 86400:
+                    continue
+            key = (frozenset(row["give_player_ids"]), frozenset(row["receive_player_ids"]))
+            mixed.add(key)
+            if is_pass:
+                passes.add(key)
+        return mixed, passes
+
     def resolved(self, row, receiver_id=None):
         key = self.key(row)
         keys = [key]
@@ -5995,7 +6020,11 @@ def load_trade_interest_history(league_ids, *, user_ids=None, since=None, conn=N
     or an unorderable exact pass and thereby manufacture positive consent.
     No per-card or per-arm reads, and no cap that could discard later passes.
     """
-    query = select(trade_decisions_table).where(
+    query = select(*(trade_decisions_table.c[name] for name in (
+        "id", "user_id", "league_id", "trade_id", "give_player_ids",
+        "receive_player_ids", "decision", "created_at", "retracted_at",
+        "impression_id", "trade_concept_id",
+    ))).where(
         trade_decisions_table.c.league_id.in_(set(league_ids)))
     if user_ids is not None:
         query = query.where(trade_decisions_table.c.user_id.in_(set(user_ids)))
@@ -9505,7 +9534,12 @@ def load_awaiting_trades(user_id: str) -> list[dict]:
         seen_keys.add(key)
 
         # Present actionability only, never invented historical attribution.
-        owners = {owner_by_league_pid.get((r.league_id, pid)) for pid in receive}
+        # Owned/generic picks are not in player rosters. Keep the existing
+        # known-player anchor for a mixed package; unknown assets contribute
+        # no owner, never an invented one. Contradictory known owners (or an
+        # ambiguous roster entry represented by None) remain ineligible.
+        owners = {owner_by_league_pid[(r.league_id, pid)] for pid in receive
+                  if (r.league_id, pid) in owner_by_league_pid}
         if len(owners) != 1 or None in owners or user_id in owners:
             continue
         partner_id = next(iter(owners))

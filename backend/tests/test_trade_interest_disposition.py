@@ -136,12 +136,79 @@ def test_source_withdrawal_cannot_fall_back_to_older_like(history):
     assert [row["trade_id"] for row in db.load_recent_league_likes(LEAGUE, ME)] == ["fresh"]
 
 
+@pytest.mark.parametrize("pick", ["generic_pick_1_Mid", f"{LEAGUE}_2027_1_7"])
+def test_awaiting_mixed_player_pick_uses_known_player_anchor(history, pick):
+    with history.begin() as conn:
+        for uid, roster in ((ME, ["g1"]), (OPP, ["r1"])):
+            conn.execute(insert(db.league_members_table).values(
+                user_id=uid, league_id=LEAGUE, username=uid,
+                roster_data=json.dumps(roster), updated_at="2026-09-05T00:00:00Z"))
+    decision(history, actor=ME, receive=["r1", pick])
+    rows = db.load_awaiting_trades(ME)
+    assert [(row["partner_id"], row["my_receive"]) for row in rows] == [(OPP, ["r1", pick])]
+    decision(history, actor=OPP, action="pass", at="2026-08-16T12:00:00Z",
+             give=["r1", pick], receive=["g1"])
+    assert db.load_awaiting_trades(ME) == []
+
+
+def test_awaiting_never_invents_partner_from_unknown_or_conflicting_rosters(history):
+    with history.begin() as conn:
+        for uid, roster in ((ME, ["g1"]), (OPP, ["r1"]), ("third", ["r1", "r2"])):
+            conn.execute(insert(db.league_members_table).values(
+                user_id=uid, league_id=LEAGUE, username=uid,
+                roster_data=json.dumps(roster), updated_at="2026-09-05T00:00:00Z"))
+    for i, receive in enumerate((["r1"], ["r1", "r2"], ["generic_pick_1_Mid"])):
+        decision(history, actor=ME, receive=receive, trade=f"ambiguous_{i}")
+    assert db.load_awaiting_trades(ME) == []
+
+
 def test_normalized_90_day_cutoff_includes_offset_timestamp(history):
     # Cutoff is June 7 12:00 UTC. Lexically earlier day, actually 13:00 UTC.
     decision(history, at="2026-06-07T00:00:00-13:00")
     assert len(db.load_recent_league_likes(LEAGUE, ME)) == 1
     decision(history, actor=ME, action="pass", at="2026-06-07T15:00:00+01:00")
     assert db.load_recent_league_likes(LEAGUE, ME) == []
+
+
+def test_batched_5000_row_history_measurement(history):
+    """Hermetic diagnostic, not a machine-dependent latency assertion."""
+    from time import perf_counter
+    from sqlalchemy import event
+    rows = [dict(user_id=OPP, league_id=LEAGUE, trade_id=f"bulk_{i}",
+                 give_player_ids=json.dumps([f"r{i}"]), receive_player_ids='["g1"]',
+                 decision="like", created_at="2026-08-14T12:00:00Z")
+            for i in range(5000)]
+    with history.begin() as conn:
+        conn.execute(insert(db.trade_decisions_table), rows)
+    statements = []
+
+    def count(_conn, _cursor, statement, *_):
+        if "FROM trade_decisions" in statement:
+            statements.append(statement)
+
+    event.listen(history, "before_cursor_execute", count)
+    started = perf_counter()
+    try:
+        result = db.load_recent_league_likes(LEAGUE, ME)
+    finally:
+        elapsed = (perf_counter() - started) * 1000
+        event.remove(history, "before_cursor_execute", count)
+    assert len(result) == 5000 and len(statements) == 1
+    print(f"419 history: 5000 selected rows / 5000 likes / 1 SELECT / {elapsed:.2f} ms")
+    print(statements[0].split("FROM")[0].strip())
+    statements.clear()
+    cards = [dict(trade_id=f"card_{i}", give=[{"id": "g1"}],
+                  receive=[{"id": f"r{i}"}], target_user_id=OPP, likes_you=True)
+             for i in range(20)]
+    event.listen(history, "before_cursor_execute", count)
+    started = perf_counter()
+    try:
+        projected = server._project_trade_dispositions(cards, ME, LEAGUE)
+    finally:
+        elapsed = (perf_counter() - started) * 1000
+        event.remove(history, "before_cursor_execute", count)
+    assert projected == cards and len(statements) == 1
+    print(f"419 serve: 5000 selected rows / 20 cards / 1 SELECT / {elapsed:.2f} ms")
 
 
 def test_multi_card_projection_is_one_history_read(history):

@@ -87,6 +87,7 @@ from .database import (
     save_ranking_swipes, save_trade_swipes,
     save_trade_decision, load_swipe_decisions, load_trade_decisions,
     load_recent_league_likes, find_live_trade_like, log_trade_impressions,
+    load_trade_interest_history,
     # #362 standing offers
     create_standing_offer, load_standing_offers, load_user_standing_offers,
     revoke_standing_offer, league_pick_seasons,
@@ -2994,7 +2995,8 @@ def _job_superseded(job_id: str) -> bool:
 
 def _trade_job_public_view(job: dict) -> dict:
     """Shape returned to the mobile app by /api/trades/generate + /status.
-    Hides internal-only fields like the cache key."""
+    Hides internal-only fields like the cache key. Call OUTSIDE the job lock
+    with a copied snapshot: one current history projection owns every card."""
     out = {
         "job_id":          job["job_id"],
         "status":          job["status"],
@@ -3021,7 +3023,58 @@ def _trade_job_public_view(job: dict) -> dict:
     board_refresh = job.get("board_refresh")
     if board_refresh:
         out["board_refresh"] = board_refresh
+    user_id, league_id, _format = job["key"]
+    out["cards"] = _project_trade_dispositions(out["cards"], user_id, league_id)
     return out
+
+
+def _project_trade_dispositions(cards, user_id: str, league_id: str):
+    """Read-only exact pass/source-interest cut, with no arm or floor bypass.
+
+    Accept internal cards or serialized snapshots; survivors are unchanged.
+    A serialized interested card cannot recover its old pre-boost score, so
+    remove it if its source is resolved. Standing offers keep their separate
+    lifecycle, but never bypass an active exact pass. All DB work is batched
+    once at the actual serve/final-publication boundary, outside the job lock.
+    """
+    if not cards or league_id == "league_demo":
+        return cards
+    try:
+        history = load_trade_interest_history([league_id])
+        _, pass_keys = history.discovery_keys(
+            user_id, pass_days=float(_deck_cfg("pass_cooldown_days", 14.0)),
+            amnesty_epoch=float(_deck_cfg("pass_cooldown_start_epoch", 0.0)))
+        cutoff = datetime.now(timezone.utc) - timedelta(days=90)
+        active_interest = {
+            (frozenset(row["receive_player_ids"]), frozenset(row["give_player_ids"]),
+             row["user_id"])
+            for row in history.likes(exclude_user_id=user_id, receiver_id=user_id)
+            if row["_order"] is not None and row["_order"][0] >= cutoff
+        }
+        kept = []
+        for card in cards:
+            if isinstance(card, dict):
+                give = frozenset(p["id"] for p in card.get("give", []))
+                receive = frozenset(p["id"] for p in card.get("receive", []))
+                target = card.get("target_user_id")
+                interested = card.get("likes_you")
+                standing = card.get("standing_offer_reason")
+            else:
+                give, receive = frozenset(card.give_player_ids), frozenset(card.receive_player_ids)
+                target = card.target_user_id
+                interested = getattr(card, "likes_you", False)
+                standing = getattr(card, "standing_offer_reason", None)
+            if (give, receive) in pass_keys:
+                continue
+            if interested and not standing and (give, receive, target) not in active_interest:
+                continue
+            kept.append(card)
+        return kept
+    except Exception as err:
+        # An unverified old snapshot must not assert interest or replay a
+        # pass. No history/impression mutation; the next request can retry.
+        log.warning("trade disposition projection unavailable: %s", err)
+        return []
 
 
 def _trade_safety_signature():
@@ -7826,6 +7879,9 @@ def _run_trade_job(
         # ghost cards (ghosts keep their would-have-been position for the
         # counterfactual log). ghost_on=False ⇒ served_final IS final_cards
         # and every downstream write is byte-identical to pre-telemetry.
+        # #419: recheck after generation/mutation work, before freezing
+        # impressions. A pass may have arrived while the worker was running.
+        final_cards = _project_trade_dispositions(final_cards, g_user_id, league_id)
         served_final = final_cards
         ghost_cards: list = []   # [(would_be_pos, card)]
         if ghost_on:
@@ -7839,6 +7895,19 @@ def _run_trade_job(
             except Exception as gs_err:
                 log.warning("ghost split failed (serving unfiltered): %s", gs_err)
                 served_final, ghost_cards = final_cards, []
+
+        # Publish the filtered final list even with F1 disabled. Later F1
+        # annotation adds impression IDs without altering package membership.
+        snapshot = []
+        for card in served_final:
+            row = trade_card_to_dict(card, players_dict)
+            row["real_opponent"] = card.target_user_id in real_user_ids
+            row["outlook"] = outlook_value
+            snapshot.append(row)
+        with _trade_jobs_lock:
+            job = _trade_jobs.get(job_id)
+            if _job_live(job):
+                job["cards"] = snapshot
 
         # G6 R-9 — per-rule kill counters + tripwire, on the POST-GHOST
         # served count (lld §5 amendment). Flag off ⇒ no line at all.
@@ -13351,6 +13420,7 @@ def generate_trades():
     except Exception:
         pass
 
+    reuse_snapshot = None
     with _trade_jobs_lock:
         existing_id = _trade_jobs_by_key.get(key) if not _any_pinned else None
         existing    = _trade_jobs.get(existing_id) if existing_id else None
@@ -13358,7 +13428,7 @@ def generate_trades():
         if existing and not _any_pinned:
             # Cache hit: complete + fresh + same params → return instantly.
             if not force_fresh and _trade_job_is_fresh(existing, fairness_threshold, outlook_value, trade_intent):
-                return jsonify(_trade_job_public_view(existing))
+                reuse_snapshot = copy.deepcopy(existing)
             # In-flight: share the current job. Note: if the request used
             # different fairness/outlook, the snapshot will reflect the
             # original params — the frontend can re-tap once status flips.
@@ -13372,16 +13442,21 @@ def generate_trades():
             # and it is the same reason a board change that alters values
             # (e.g. an override released by a newer vote) could be invisible.
             # Supersede the running job and fall through to spawn a fresh one.
-            if existing.get("status") == "running":
+            elif existing.get("status") == "running":
                 if not (force_fresh and _force_supersede_enabled()):
-                    return jsonify(_trade_job_public_view(existing))
-                existing["superseded"]    = True
-                existing["superseded_at"] = time.monotonic()
-                log.info("trade-job %s superseded by force=true (key=%s)",
-                         existing_id, key)
+                    reuse_snapshot = copy.deepcopy(existing)
+                else:
+                    existing["superseded"]    = True
+                    existing["superseded_at"] = time.monotonic()
+                    log.info("trade-job %s superseded by force=true (key=%s)",
+                             existing_id, key)
             # Otherwise: stale or errored → drop the index entry and fall
             # through to spawn a new job.
-            _trade_jobs_by_key.pop(key, None)
+            if reuse_snapshot is None:
+                _trade_jobs_by_key.pop(key, None)
+
+    if reuse_snapshot is not None:
+        return jsonify(_trade_job_public_view(reuse_snapshot))
 
     # Kick off a fresh job. No locks held during the worker spawn so we
     # don't accidentally serialize parallel users.
@@ -13401,8 +13476,8 @@ def generate_trades():
         session_context    = sess,
     )
     with _trade_jobs_lock:
-        snapshot = _trade_job_public_view(_trade_jobs[job_id])
-    return jsonify(snapshot)
+        snapshot = copy.deepcopy(_trade_jobs[job_id])
+    return jsonify(_trade_job_public_view(snapshot))
 
 
 @app.route("/api/trades/asset-ideas", methods=["POST"])
@@ -13929,7 +14004,7 @@ def undo_deck_suppression():
 @_gate_unverified_read
 def trade_job_status():
     """GET /api/trades/status?job_id=X
-    Cheap dict lookup. Used by the mobile app to poll an in-flight
+    Snapshot plus one batched disposition read. Used to poll an in-flight
     /api/trades/generate job. 404 if the job has been evicted."""
     sess = _require_session()
     sess["last_active"] = time.time()
@@ -13942,7 +14017,8 @@ def trade_job_status():
         # user_id, but we double-check here in case of a stale id.
         if job["key"][0] != sess["user_id"]:
             return jsonify({"error": "job not found"}), 404
-        return jsonify(_trade_job_public_view(job))
+        snapshot = copy.deepcopy(job)
+    return jsonify(_trade_job_public_view(snapshot))
 
 
 @app.route("/api/trades")
@@ -13959,6 +14035,13 @@ def get_trades():
         user_id   = g_user_id,
         league_id = league_id,
     )
+    # Pending services can contain a newly minted card ID for an old package.
+    # Filter by each card's league, never by a switched session's active alias.
+    allowed = set()
+    for lid in {card.league_id for card in cards}:
+        allowed.update(id(card) for card in _project_trade_dispositions(
+            [card for card in cards if card.league_id == lid], g_user_id, lid))
+    cards = [card for card in cards if id(card) in allowed]
     players_dict = {p.id: p for p in g_players}
     return jsonify([trade_card_to_dict(c, players_dict) for c in cards])
 

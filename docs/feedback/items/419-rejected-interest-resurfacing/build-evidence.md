@@ -39,3 +39,55 @@ unchanged. Ordinary durable Elo consumes a matching banked reason's claim so a
 late value detail cannot repeat it. Outcome/event side effects run only for a
 newly committed reason pass; progressive retries bind live state but do not
 repeat decisions or telemetry.
+
+Independent unchanged-runtime alternative: pre-imported
+`integration/backend/database.py` and `integration/backend/server.py` at
+runtime base `4026ebc8`, then ran the author test file with pytest importlib.
+Explicit player/pick CSV fixture envs were pinned. All **6 reason regression
+cases failed on behavioral assertions**, including failed Elo rollback;
+74 deselected. This is not an import-error or modified-runtime RED.
+
+## Snapshot/source follow-up evidence
+
+Before projection, `test_trade_disposition_replay.py` produced **7 assertion
+failures / 1 pass** on the author tree's unchanged cache implementation.
+Then the unchanged integration baseline, with explicit provider fixture pins,
+produced **10 behavioral assertion failures / 1 structural test deselected**:
+complete/running cached generate/status, old-ID league-switch, stale interest,
+pending new ID after reason, standing-offer exact pass, initial fresh response,
+and a real worker passed mid-generation before final publication. Projection
+never mutates frozen impressions or snapshot payloads; the live final worker
+filters before new impressions. Tests inspect SQL execution outside the global
+job lock and require one decision-history SELECT per response.
+
+Parent review identified mixed player/pick Awaiting ownership: **2 RED** tests
+at the first source commit, for generic and owned picks absent from player
+rosters. The correction retains the existing known-player anchor and rejects
+contradictory/no-known owners, without assigning historical pick recipients.
+Queue renewal tests now freeze `database.datetime` as well as `_now`.
+
+Hermetic correction: a verbose first 5k measurement exposed import-time DP
+fetch attempts when ordinary pytest ran without provider envs (DNS failed,
+no data received). That timing is discarded. All final validation commands
+explicitly pin `FTF_DP_VALUES_FILE` to
+`backend/tests/fixtures/outlook-hypotheses/dp-values-players-2026-08-09.csv`
+and `FTF_DP_PICK_VALUES_FILE` to
+`backend/tests/fixtures/dp_values_picks_2026-08-06.csv`, in addition to the
+in-memory DB/no-bytecode/no-pytest-cache settings. Tests' isolated DB fixtures
+remain unchanged; there is no production benchmark or fixture recapture.
+
+Pinned final snapshot/source/queue/read-amplification/bakeoff-serving/standing-
+offer run: **150 passed in 3.70s**. Root explicitly approved one prerequisite
+fixture correction in `test_bakeoff_serving.py`: its fake injector now supplies
+the true matching source like that the real injector would require. Every
+existing interleave/attribution/policy-version assertion and golden file is
+unchanged. Strict unverifiable-source removal remains covered by its own test.
+
+Pinned 5,000-row diagnostic (SQLite fixture, no hard latency oracle): reader
+selected 5,000 rows and returned 5,000 likes in **38.15 ms / one SELECT**;
+public projection of 20 cards used the same 5,000-row scope in **71.68 ms /
+one SELECT**. Columns: id, user_id, league_id, trade_id, give_player_ids,
+receive_player_ids, decision, created_at, retracted_at, impression_id,
+trade_concept_id. This measures the disclosed all-scoped-history tradeoff,
+not production capacity. Each response reuses its one history projection for
+both pass-window and source-interest filtering; no per-card DB loop.

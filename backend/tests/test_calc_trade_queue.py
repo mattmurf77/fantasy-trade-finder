@@ -421,6 +421,15 @@ def test_419_exact_pass_allows_fresh_queue_inside_dedupe_window(prod_harness, mo
     client, engine, sess, service, trade_svc, league = prod_harness
     now = ["2026-09-05T12:00:00+00:00"]
     monkeypatch.setattr(db_module, "_now", lambda: now[0])
+    from datetime import datetime, timezone
+
+    class QueueClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            stamp = datetime.fromisoformat(now[0])
+            return stamp.astimezone(tz or timezone.utc)
+
+    monkeypatch.setattr(db_module, "datetime", QueueClock)
     first = _queue(client).get_json()
     now[0] = "2026-09-05T12:00:01+00:00"
     body = {"trade_id": first["trade_id"], "decision": "pass"}
