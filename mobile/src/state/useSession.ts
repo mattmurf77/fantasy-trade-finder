@@ -2,12 +2,21 @@ import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   api,
+  ApiError,
   clearSessionToken,
+  getSessionRevision,
   getSessionToken,
+  isCurrentSessionExpiry,
+  requestAborted,
+  runWithDeadline,
   setOnSessionExpired,
   setOnVerificationRequired,
 } from '../api/client';
 import { initLeagueSession, startDemoSession as apiStartDemoSession } from '../api/auth';
+import type { LeagueLite } from '../api/auth';
+import { getSeasonProjections } from '../api/winNow';
+import { createLeagueSessionLifecycle, LEAGUE_ATTEMPT_MS } from './leagueSession';
+import type { InitCause, LeagueContext } from './leagueSession';
 import { maybePregenTrades } from '../api/tradePregen';
 import { connectLeague as apiConnectLeague } from '../api/league';
 import { getLeagues } from '../api/sleeper';
@@ -53,12 +62,9 @@ interface InviteIntent {
 export type RankMethodPref = 'quickset' | 'trio' | 'anchor' | 'tiers' | 'manual';
 const RANK_METHOD_PREFS: readonly RankMethodPref[] = ['quickset', 'trio', 'anchor', 'tiers', 'manual'];
 
-// FB-45 — revalidation bookkeeping (module-level: internal, not UI state).
-// The throttle keeps quick app-switches from re-running the full league
-// handshake; the in-flight flag prevents overlapping handshakes.
-let _revalidating = false;
-let _lastRevalidateMs = 0;
+// Throttle successful current-context background work, never awaited joins.
 const REVALIDATE_MIN_INTERVAL_MS = 60_000;
+let switchRequestId = 0;
 
 // P0-3 — capture time of the live invite intent (ms epoch, 0 = none).
 // Module-level rather than store state: nothing renders from it, it is only
@@ -185,16 +191,16 @@ interface SessionState {
   setVerification: (v: SessionVerification | null) => void;
   /** Hide the "Verify your account" banner for the rest of this launch. */
   dismissVerifyBanner: () => void;
-  /** FB-45 — server sessions are in-memory; a deploy/restart orphans the
-   *  stored token while the app still routes to Main. Re-run the league
-   *  handshake to mint a fresh server session on cold launch and on
+  /** A deploy/restart can lose league context while the verified token
+   *  survives. Re-run the shared league handshake with that same token on
+   *  cold launch and on
    *  foreground resume. No-ops without a persisted user+league (or in
    *  demo mode); throttled; never throws — offline keeps the cached
    *  token, which may still be valid. */
   revalidateSession: () => Promise<void>;
   setUser: (u: SavedUser | null) => Promise<void>;
-  setLeague: (lg: SavedLeague | null) => Promise<void>;
-  setLeagues: (lgs: LeagueSummary[]) => Promise<void>;
+  setLeague: (lg: SavedLeague | null, guard?: () => void) => Promise<void>;
+  setLeagues: (lgs: LeagueSummary[], guard?: () => void) => Promise<void>;
   /** Atomically swap the active league: re-runs initLeagueSession on the
    *  backend, then updates the persisted active league locally. Throws on
    *  failure; UI should wrap in try/catch. No-ops if `lg` matches the
@@ -352,28 +358,17 @@ export const useSession = create<SessionState>((set, get) => ({
   revalidateSession: async () => {
     const { user, league, isDemo } = get();
     if (!user || !league || isDemo) return;
-    // Account-only sessions (P2.6) have no Sleeper league to re-handshake
-    // with — identity tokens are one-shot, so a lost server session needs a
-    // fresh Apple tap at SignIn (documented limitation until P3 persists
-    // sessions server-side).
-    if (user.account_only || league.league_id === NO_LEAGUE_ID) return;
-    const now = Date.now();
-    if (_revalidating || now - _lastRevalidateMs < REVALIDATE_MIN_INTERVAL_MS) return;
-    _revalidating = true;
+    // The sentinel has no league to initialize. Account-only identities may
+    // still own a real imported ESPN/MFL/Fleaflicker league.
+    if (league.league_id === NO_LEAGUE_ID) return;
     try {
-      // initLeagueSession mints a fresh server session + token and stores
-      // it in secure-store, replacing whatever (possibly orphaned) token
-      // the app restored at boot.
-      const seed = await initLeagueSession(user, {
+      // Reuses the verified token. Consumers join this exact in-flight work;
+      // a lost server context can force reconciliation past this throttle.
+      const context = await initializeLeagueSession(user, {
         league_id: league.league_id,
         name:      league.league_name,
-      });
-      // The handshake just fetched this league's rosters + users. Hand them
-      // to the cache so Trades / the calculator / the DNA sheet / the hub
-      // don't re-request the same two endpoints on their next mount.
-      seedLeagueSessionCaches(league.league_id, seed);
-      _lastRevalidateMs = Date.now();
-      set({ hasToken: true });
+      }, {maxAgeMs: REVALIDATE_MIN_INTERVAL_MS});
+      context.assertCurrent();
       // Onboarding item 4 (hazard H3): the silent re-init is the returning-
       // user auto path — pregen the trade deck now so Trades opens warm.
       // Flag-gated + per-launch-deduped inside; fire-and-forget.
@@ -381,8 +376,6 @@ export const useSession = create<SessionState>((set, get) => ({
     } catch {
       // Offline or backend down — keep current state. The cached token may
       // still be valid; never sign the user out from a failed revalidate.
-    } finally {
-      _revalidating = false;
     }
   },
 
@@ -391,9 +384,12 @@ export const useSession = create<SessionState>((set, get) => ({
   },
 
   setUser: async (u) => {
+    leagueSessions.invalidate();
+    const generation = leagueSessions.currentGeneration();
+    set({user: u, switching: false});
     if (u) await AsyncStorage.setItem(SU_KEY, JSON.stringify(u));
     else   await AsyncStorage.removeItem(SU_KEY);
-    set({ user: u });
+    if (generation !== leagueSessions.currentGeneration() || get().user !== u) return;
     // Tag Sentry events with the pseudonymous Sleeper user_id ONLY — no
     // username (privacy decision 2026-07-17, analytics-platform PRD OQ-1:
     // crash triage joins on id via our own DB; the handle never leaves us).
@@ -412,9 +408,13 @@ export const useSession = create<SessionState>((set, get) => ({
     if (u?.user_id) void initPurchases(u.user_id);
   },
 
-  setLeague: async (lg) => {
+  setLeague: async (lg, guard) => {
+    if (guard) guard(); else leagueSessions.invalidate();
+    const generation = leagueSessions.currentGeneration();
     if (lg) await AsyncStorage.setItem(SL_KEY, JSON.stringify(lg));
     else    await AsyncStorage.removeItem(SL_KEY);
+    guard?.();
+    if (generation !== leagueSessions.currentGeneration()) throw requestAborted();
     // When a league is pinned, a successful sessionInit just happened
     // upstream — which means a valid session token is now in secure-store.
     // Flip hasToken to true so consumers that gate on it (e.g. RootNav's
@@ -428,7 +428,8 @@ export const useSession = create<SessionState>((set, get) => ({
     set({ league: lg, hasToken: !!lg, formatExplicit: false });
   },
 
-  setLeagues: async (lgs) => {
+  setLeagues: async (lgs, guard) => {
+    guard?.();
     // Persist alongside the active league/user so the multi-league
     // switcher repopulates without a network round-trip on next launch.
     try {
@@ -436,6 +437,7 @@ export const useSession = create<SessionState>((set, get) => ({
     } catch {
       /* non-fatal — cache is opportunistic */
     }
+    guard?.();
     set({ leagues: lgs });
   },
 
@@ -459,18 +461,16 @@ export const useSession = create<SessionState>((set, get) => ({
       return { ...state, switching: true };
     });
     if (!acquired || !userSnapshot) return;
-
+    const pending = beginLeagueContext(userSnapshot, {league_id: lg.league_id, name: lg.league_name}, 'selection');
+    const requestId = ++switchRequestId;
     try {
       // initLeagueSession owns the backend handshake (rosters → users →
       // /api/session/init). On success, persist the new active league.
-      const seed = await initLeagueSession(userSnapshot, {
-        league_id: lg.league_id,
-        name:      lg.league_name,
-      });
-      // Seed the NEW league's roster/user caches from the handshake's own
-      // fetches — see seedLeagueSessionCaches.
-      seedLeagueSessionCaches(lg.league_id, seed);
-      await get().setLeague(lg);
+      const context = await pending;
+      await leagueSessions.ensure(context, {deadlineAt: Date.now() + LEAGUE_ATTEMPT_MS});
+      context.assertCurrent();
+      await get().setLeague(lg, context.assertCurrent);
+      context.assertCurrent();
       // Invalidate league-agnostic caches whose CONTENTS change on a
       // league swap. `[leagueId]`-keyed queries auto-refetch on key
       // change, but stable keys don't — so portfolio, the cross-league
@@ -487,7 +487,7 @@ export const useSession = create<SessionState>((set, get) => ({
       queryClient.invalidateQueries({ queryKey: ['streak'] });
       queryClient.invalidateQueries({ queryKey: ['tiers-status'] });
     } finally {
-      set({ switching: false });
+      if (requestId === switchRequestId) set({ switching: false });
     }
   },
 
@@ -596,9 +596,13 @@ export const useSession = create<SessionState>((set, get) => ({
     if (!state.user || state.user.account_only) {
       return { ok: false, league_id: '', league_name: '', platform: '', supported: false };
     }
+    const guard = currentSessionGuard();
+    const deadlineAt = Date.now() + LEAGUE_ATTEMPT_MS;
+    const selectionAuthorization = leagueSessions.reserveSelectionAuthorization();
     // 1. Validate the URL with the backend. Sleeper-only is "supported";
     //    ESPN/MFL come back as supported=false so we bubble that up.
-    const result = await apiConnectLeague(sleeperUrl);
+    const result = await runWithDeadline(() => apiConnectLeague(sleeperUrl), deadlineAt);
+    guard();
     if (!result.ok) return result;
 
     // 2. Refresh the cached league list from Sleeper so the new league
@@ -606,7 +610,8 @@ export const useSession = create<SessionState>((set, get) => ({
     //    authoritative — Sleeper's GET /v1/user/:id/leagues is what
     //    LeaguePickerScreen uses too.
     try {
-      const lgs = await getLeagues(state.user.user_id);
+      const lgs = await runWithDeadline(() => getLeagues(state.user!.user_id), deadlineAt);
+      guard();
       // P-1 (draft-extensions W3 M-A) — MERGE, don't replace. `getLeagues`
       // hits /api/sleeper/leagues/<user_id>, whose local-league append
       // filters to NON-NUMERIC ids, and a platform-imported league carries
@@ -633,7 +638,7 @@ export const useSession = create<SessionState>((set, get) => ({
           name: result.league_name,
         });
       }
-      await get().setLeagues(merged);
+      await get().setLeagues(merged, guard);
     } catch {
       // Non-fatal — caller still gets ok=true; switcher may need a manual
       // refresh from LeaguePickerScreen.
@@ -641,19 +646,24 @@ export const useSession = create<SessionState>((set, get) => ({
 
     // 3. Initialize a session against the new league and persist as
     //    active. Same handshake LeaguePickerScreen runs.
-    const seed = await initLeagueSession(state.user, {
+    guard();
+    const context = await initializeLeagueSession(state.user, {
       league_id: result.league_id,
       name:      result.league_name,
-    });
-    seedLeagueSessionCaches(result.league_id, seed);
+    }, {cause: 'selection', deadlineAt, selectionAuthorization});
+    context.assertCurrent();
     await get().setLeague({
       league_id:   result.league_id,
       league_name: result.league_name,
-    });
+    }, context.assertCurrent);
+    context.assertCurrent();
     return result;
   },
 
   signOut: async () => {
+    leagueSessions.invalidate();
+    set({user: null, league: null, hasToken: false, switching: false});
+    const generation = leagueSessions.currentGeneration();
     api.post('/api/session/signout').catch(() => {});   // best-effort server-side revoke (W2C handoff; route evicts the token + its durable row)
     await Promise.all([
       AsyncStorage.removeItem(SU_KEY),
@@ -663,6 +673,7 @@ export const useSession = create<SessionState>((set, get) => ({
       AsyncStorage.removeItem(INVITE_KEY),
       clearSessionToken(),
     ]);
+    if (generation !== leagueSessions.currentGeneration() || get().user) return;
     _inviteTs = 0;
     set({
       user:              null,
@@ -679,6 +690,85 @@ export const useSession = create<SessionState>((set, get) => ({
     });
   },
 }));
+
+const leagueSessions = createLeagueSessionLifecycle({
+  currentUser: () => useSession.getState().user,
+  initialize: initLeagueSession,
+  onReady: (context, seed) => {
+    context.assertCurrent();
+    seedLeagueSessionCaches(context.league.league_id, seed);
+    useSession.setState({hasToken: true});
+  },
+});
+
+/** Snapshot before an existing pre-init import/read, including same-token intent. */
+export function currentSessionGuard(): (error?: unknown) => void {
+  const user = useSession.getState().user;
+  const generation = leagueSessions.currentGeneration(), revision = getSessionRevision();
+  return error => {
+    if (useSession.getState().user !== user || generation !== leagueSessions.currentGeneration()
+      || (revision !== getSessionRevision() && !isCurrentSessionExpiry(error, revision))) throw requestAborted();
+  };
+}
+export function beginLeagueContext(user: SavedUser, league: LeagueLite, cause: InitCause = 'automatic', deadlineAt = Date.now() + LEAGUE_ATTEMPT_MS, signal?: AbortSignal, selectionAuthorization?: number) {
+  return leagueSessions.capture(user, league, cause, deadlineAt, signal, selectionAuthorization);
+}
+export async function initializeLeagueSession(user: SavedUser, league: LeagueLite, options: {cause?: InitCause; force?: boolean; maxAgeMs?: number; signal?: AbortSignal; deadlineAt?: number; selectionAuthorization?: number} = {}): Promise<LeagueContext> {
+  const deadlineAt = options.deadlineAt ?? Date.now() + LEAGUE_ATTEMPT_MS;
+  const context = await beginLeagueContext(user, league, options.cause, deadlineAt, options.signal, options.selectionAuthorization);
+  return completeLeagueContext(context, {...options, deadlineAt});
+}
+export async function completeLeagueContext(context: LeagueContext, options: {force?: boolean; maxAgeMs?: number; signal?: AbortSignal; deadlineAt?: number} = {}): Promise<LeagueContext> {
+  await leagueSessions.ensure(context, {...options, deadlineAt: options.deadlineAt ?? Date.now() + LEAGUE_ATTEMPT_MS});
+  context.assertCurrent();
+  return context;
+}
+
+/** Only this safe projection GET is replayed; no trade/write helper enters here. */
+export function loadSeasonProjections(leagueId: string, signal: AbortSignal, cause: InitCause = 'automatic') {
+  const deadlineAt = Date.now() + LEAGUE_ATTEMPT_MS;
+  let guard = currentSessionGuard();
+  return runWithDeadline(async attemptSignal => {
+    const {user, league, isDemo} = useSession.getState();
+    if (!user || !league || isDemo || league.league_id !== leagueId || leagueId === NO_LEAGUE_ID) throw requestAborted();
+    const pending = beginLeagueContext(user, {league_id: leagueId, name: league.league_name}, cause, deadlineAt, attemptSignal);
+    guard = currentSessionGuard();
+    const context = await pending;
+    guard = context.assertIdentity;
+    // Cancel this consumer on new selection intent, even before the selected
+    // league commits to the screen. Shared initialization keeps its own signal.
+    const request = new AbortController();
+    const cancel = () => request.abort();
+    attemptSignal.addEventListener('abort', cancel, {once: true});
+    if (attemptSignal.aborted) cancel();
+    const unsubscribe = leagueSessions.onSuperseded(context, cancel);
+    try {
+      await leagueSessions.ensure(context, {deadlineAt, signal: request.signal});
+      const read = async () => {
+        context.assertCurrent();
+        const data = await getSeasonProjections(leagueId, request.signal, {deadlineAt, skipAuth: true,
+          headers: {'X-Session-Token': context.token}, beforeDispatch: context.assertCurrent});
+        context.assertCurrent();
+        return data;
+      };
+      try { return await read(); }
+      catch (error) {
+        if (!(error instanceof ApiError && error.status === 409 && (error.body as {error?: string} | null)?.error === 'session_not_initialized')) throw error;
+        context.assertCurrent();
+        await leagueSessions.ensure(context, {force: true, deadlineAt, signal: request.signal});
+        return await read();
+      }
+    } finally {
+      unsubscribe();
+      attemptSignal.removeEventListener('abort', cancel);
+    }
+  }, deadlineAt, signal).catch(error => {
+    // Selection intent can change while the old league is still displayed.
+    // Silence its terminal error too, not just successful baseline results.
+    guard(error);
+    throw error;
+  });
+}
 
 // ── Read-gate signal (account-auth P2.5) ────────────────────────────────
 // Any API call answered with 403 verification_required means this session

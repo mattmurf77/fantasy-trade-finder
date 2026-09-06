@@ -61,3 +61,19 @@ Return the exact revision commit to `ux_astra` to confirm the blocker is closed 
 - Documentation validation: 14 local Markdown links resolve; all seven requirement rows and twelve test rows are present. The author handoff also requires staged `git diff --check` and exact three-file commit scope. No app test execution or release status is claimed from these checks.
 
 Potential lesson for the orchestrator to evaluate after critique (not appended to the shared lessons file by this bounded author): inventory every writer at the actual session-init choke point before promising switch safety, and distinguish acknowledged client ordering from ambiguous server completion after transport timeout.
+
+## Build reconciliation — 2026-09-06
+
+The orchestrator approved runtime work against `764e0ee9` and retained ownership of the release/shared-doc gates. Final runtime implementation is `2de3e1d95dbcb98d491bc0dee2811c5380ec0bec` (initial implementation `b988df7d` plus parent-reviewed current-401 correction); [build evidence](build-evidence.md) and [code walk](code-walk.md) record actual results and remaining physical verification.
+
+Finishing review resolved three bounded interpretation details with the orchestrator:
+
+- The invariant blocks the **account-only sentinel**, not a real imported league merely because its owner has `account_only:true`. Existing ESPN/MFL/Fleaflicker builders remain usable, with no invalid account-only Sleeper provider lookup. This preserves the existing platform flow rather than broadening ownership/authentication.
+- Connect learns its target after asynchronous URL/list work. Its original gesture's authorization and 90-second deadline are now captured before that work and carried forward unchanged. An invocation predating a newly uncertain writer cannot masquerade as a fresh retry. Existing endpoint allowances and retry rules are unchanged.
+- Identity-only guards govern current failure/busy publication; deadline-inclusive guards govern successful dispatch/publication. Otherwise a legitimate 90-second timeout could fail its own catch/finally guard and leave the UI stuck. Automatic picker pinning is not deliberate retry permission.
+
+An already dispatched native AsyncStorage operation cannot be canceled by the later context guard; only guarded dispatch and subsequent in-memory/UI publication are claimed. Similarly, local transport termination is not server mutation cancellation. No new persistence transaction, server ordering protocol, API, schema, flag, or metric was added. The parent explicitly accepted documenting these boundaries rather than expanding into those protocols.
+
+Parent consistency review additionally caught a legitimate current 401 being classified as stale after its own token clear advanced the local revision. The actual mounted-screen and picker regressions reproduced that error. An internal ApiError receipt records only the exact local revision transition caused by that request's authorized clear, allowing its current auth error through while still enforcing the captured account, generation and absence of a replacement token. This adds no wire field or telemetry property. Actual picker/resync busy/error behavior and a stale-401 replacement control pass.
+
+Verification uses seven assertion-level failures against unchanged original runtime plus actual inherited-implementation regression RED→GREEN cases and final 38/38 recovery tests, 94/94 mobile suites, typecheck/testID lint, and 128 targeted backend tests. Individual execution of every proposed source-disabling sabotage is not claimed. Physical TestFlight remains unexecuted and release remains orchestrator-owned.
