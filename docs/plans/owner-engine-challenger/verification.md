@@ -68,6 +68,29 @@ failures. This is a local regression result, not hosted CI or production health.
 
 ## Remaining release gates
 
+Published checkpoint `13b941614a426d7a06a1dd2a737c9436a845cb09` passed all four
+[hosted CI jobs](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/34058864206)
+(backend **5,754 passed / 1 skipped in708.27s**). It is **not** the final release
+head: the last rollout review found an in-flight owner-serving hot-flip race
+and a related cached-signature mismatch. Eight new runner cases reproduced
+the draft race RED, then passed after capturing permission before generators;
+a real worker route regression also reproduced missing forwarding RED. The
+repaired source requires fresh full validation and exact-head CI before merge.
+
+Final rollout repair is independently reviewed GREEN: runner21 checks,
+builder192 focused checks in6.55s and reviewer120 in2.80s. Worker forwarding,
+shadow-cache drift and demo-cache compatibility each have RED/GREEN evidence;
+the independent original hot-flip harness now rejects the stale shadow cache.
+Parent reviewed the final diff and started a fresh frozen full backend/mobile
+rerun; web190 passes. Runtime is frozen during those runs.
+
+The prior clean archive is likewise superseded by this repair. Its independent
+privacy/identity result was 2,673 files, 635/635 mobile files byte-identical,
+one retained commit and no scratch DBs/credentials/dependency copies. Production
+GET-only preflight20:46:20UTC found207flags/259existingsettings, all three
+measurement prerequisites enabled, existing controls unchanged and no new owner
+keys. No production mutation occurred.
+
 1. Recorded published source revision and green exact-head hosted CI before
    any merge/deployment.
 2. Separately verified backend deployment/config and new TestFlight build if

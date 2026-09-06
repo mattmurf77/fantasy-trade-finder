@@ -31,6 +31,11 @@ trial order and joins genuine visible selected-card views and exact-package
 responses to stored impressions. Private counterparty values never enter the
 public response.
 
+The worker's captured owner-serving decision is passed into the bakeoff runner,
+not reread after generation. That same capture labels the job's owner safety
+signature: a hot switch cannot turn a shadow-start job into a serving trial or
+make its cached control deck appear to have been generated under the live arm.
+
 Contracts: [API](api-reference.md#owner-construction-trial-additions),
 [snapshots](data-dictionary.md#owner-v1-snapshot-namespace),
 [configuration](config-reference.md),

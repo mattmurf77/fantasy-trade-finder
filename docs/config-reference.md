@@ -960,8 +960,14 @@ These keys do not enter `MODEL_A_PROFILE` or `MODEL_CHALLENGER_PROFILE`:
 no historical generator consumes them. Existing controls' generators and
 goldens are retained. Include without serve is not a live test; serve without
 include cannot introduce the arm. The independent serving bit applies to both
-group composition and the plain team-draft path. First turn off serve to stop
-exposure, then include to stop computation; preserve evidence and controls.
+group composition and the plain team-draft path. A job captures permission once;
+hot flips apply to subsequent jobs, and completed cache freshness compares the
+captured owner state with current settings. First turn off serve to stop new
+treatment jobs, then include to stop computation; preserve evidence and controls.
+Serving is global, not client-version gated. Old mobile builds do not implement
+the new ordering/partial-notice/selected-view contracts. Enable include-only
+before binary uptake; verify the intended testers use 1.17.2 or later before
+serving, and separate older-client observations from the measured trial.
 See the [trial scope](plans/owner-engine-challenger/scope.md) for evidence and
 activation gates. Checked-in defaults do not establish production settings.
 

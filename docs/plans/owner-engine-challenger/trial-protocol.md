@@ -49,6 +49,11 @@ automatically increase the asking price.
 6. Complete parent and independent review, full automated gates, exact-head
    hosted CI and release verification. Mobile physical checks remain separately
    labelled until actually performed on the identified TestFlight build.
+7. Verify the intended tester has installed 1.17.2 or later before enabling
+   serving. EAS submission completion does not establish installation. Include
+   may run in shadow first. There is no version allowlist on global serving:
+   older clients can omit partial notices and selected exposure metadata or
+   apply legacy sorting, so their results are not a clean test of this contract.
 
 ## Readout
 

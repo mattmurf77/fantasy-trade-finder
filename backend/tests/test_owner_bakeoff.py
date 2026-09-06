@@ -71,6 +71,31 @@ def test_serving_bit_without_inclusion_never_runs_or_serves_owner(config):
     assert bo.ARM_OWNER not in run.arms
 
 
+@pytest.mark.parametrize("group_size", [0.0, 10.0])
+@pytest.mark.parametrize("initial", [False, True])
+def test_owner_serving_is_frozen_before_generators_run(config, group_size, initial):
+    config.update(bakeoff_include_owner=1.0, bakeoff_group_size=group_size,
+                  bakeoff_serve_owner=float(initial))
+    owner = _card("owner")
+
+    def generate_owner(**_):
+        config["bakeoff_serve_owner"] = float(not initial)
+        return [owner], _Report()
+
+    run = _run(gen_owner=generate_owner)
+    assert (owner in run.draft.deck) is initial
+
+
+@pytest.mark.parametrize("group_size", [0.0, 10.0])
+@pytest.mark.parametrize("captured", [False, True])
+def test_worker_captured_owner_permission_wins_over_later_config(config, group_size, captured):
+    config.update(bakeoff_include_owner=1.0, bakeoff_group_size=group_size,
+                  bakeoff_serve_owner=float(not captured))
+    owner = _card("owner")
+    run = _run(gen_owner=lambda **_: ([owner], _Report()), owner_serving=captured)
+    assert (owner in run.draft.deck) is captured
+
+
 def test_owner_failure_is_explicit_and_not_misattributed_to_control(config):
     config.update(bakeoff_include_owner=1.0, bakeoff_serve_owner=1.0)
     run = _run()

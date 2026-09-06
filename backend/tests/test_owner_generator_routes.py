@@ -476,3 +476,64 @@ def test_selected_final_roster_picks_use_shared_authorized_source(owner_harness,
     assert response.status_code == 200 and response.json["ideas"]
     assert calls == [source]
     assert captured == [pick_rows]
+
+
+def test_worker_forwards_captured_owner_permission_before_hot_activation(owner_harness, monkeypatch):
+    _, engine, _, _, _ = owner_harness
+    ts._cfg.update(bakeoff_serve_owner=0., bakeoff_serve_interleaved=1.,
+                   bakeoff_group_size=0., bakeoff_include_challenger=0.,
+                   bakeoff_include_gen_v2=0.)
+    original_context = server._owner_generation_context
+    original_run = server._bakeoff.run_bakeoff
+    forwarded = []
+    def capture(**kwargs):
+        context = original_context(**kwargs)
+        # The worker already captured SHADOW. A live reload arrives before
+        # the runner starts, so a fresh runner flag read would expose owner.
+        ts._cfg["bakeoff_serve_owner"] = 1.
+        return context
+    def run(**kwargs):
+        forwarded.append(kwargs.get("owner_serving"))
+        assert kwargs.get("owner_serving") is False
+        return original_run(**kwargs)
+    monkeypatch.setattr(server, "_owner_generation_context", capture)
+    monkeypatch.setattr(server._bakeoff, "run_bakeoff", run)
+    job = worker(owner_harness, monkeypatch)
+    assert forwarded == [False]
+    assert all(c.get("model_arm") != "owner_v1" for c in job["cards"])
+    run_row = rows(engine, db.bakeoff_runs_table)[0]
+    assert json.loads(run_row["arms_json"])["owner_v1"]["cards"] > 0
+    assert all(r["model_arm"] != "owner_v1" for r in rows(engine, db.deck_impressions_table))
+
+
+def test_worker_signature_uses_captured_shadow_permission_and_rejects_hot_cache(owner_harness, monkeypatch):
+    ts._cfg.update(bakeoff_serve_owner=0., bakeoff_serve_interleaved=1.,
+                   bakeoff_group_size=0., bakeoff_include_challenger=0.,
+                   bakeoff_include_gen_v2=0.)
+    original = server._bakeoff.serve_owner
+    captured = []
+    def permission():
+        value = original()
+        if not captured:
+            captured.append(value)
+            # Reload immediately after the worker captures its permission,
+            # before its cache signature is assembled.
+            ts._cfg["bakeoff_serve_owner"] = 1.
+        return value
+    monkeypatch.setattr(server._bakeoff, "serve_owner", permission)
+    job = worker(owner_harness, monkeypatch)
+    assert captured == [False]
+    assert "owner_include" in job["safety_policy"]
+    assert "owner_serve" not in job["safety_policy"]
+    assert all(c.get("model_arm") != "owner_v1" for c in job["cards"])
+    assert "owner_serve" in server._trade_safety_signature()
+    assert not server._trade_job_is_fresh(job, .5, job.get("outlook_value"))
+
+
+def test_demo_cache_ignores_owner_activation_but_real_league_does_not(owner_harness):
+    job = {"status": "complete", "key": (ME, "league_demo", "1qb_ppr"),
+           "finished_at": time.monotonic(), "fairness_threshold": .5,
+           "safety_policy": server._trade_safety_signature((False, False))}
+    assert server._trade_job_is_fresh(job, .5, None)
+    job["key"] = (ME, LEAGUE, "1qb_ppr")
+    assert not server._trade_job_is_fresh(job, .5, None)

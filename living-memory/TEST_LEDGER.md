@@ -33,6 +33,19 @@ plist/project checks pass (offer signals26, trial order13). Parent final diff
 review is complete. Nothing pushed, deployed or activated at this local
 checkpoint. [Exact evidence and remaining gates](../docs/plans/owner-engine-challenger/verification.md).
 
+Published13b94161 passed all four [hosted CI jobs](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/34058864206),
+backend5754passed/1skip708.27s. A final rollout review then found a hot-flip
+race between captured worker permission and the runner's later global read,
+plus the same-state cache signature seam. Eight new runner cases RED then
+21runner checks GREEN; worker forwarding test RED before repair. This makes
+13b94161 a superseded checkpoint, not release approval. No merge/build/activation
+occurred; repaired-source full checks and CI remain required.
+Final bounded rollout repair: builder192checks passed6.55s, independent120
+passed2.80s, parentrunner21passed andweb190green. Worker forwarding,
+captured-shadow cache and demo compatibility all have RED/GREEN proofs; parent
+approved the final diff. Fresh full backend and mobile checks running on frozen
+source; no production write or release yet.
+
 ## 2026-09-06 — Feedback release CI, merge and delivery
 
 Final head `d97459dc9f72ebe158f70fcbb86f29051659c206` passed [CI run 34047364058](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/34047364058): **5,645 backend passed / 1 skipped in 717.99 s**, TypeScript/all 95 mobile guards, testID lint and 190 web checks. [PR #283](https://github.com/mattmurf77/fantasy-trade-finder/pull/283) merged **17:16:56 UTC** as `988fa2d690dfa9188f43c33e87dff9d60a5fabaa`; root fetched and verified complete tree equality with the exact CI head. D-056 standing `FTF_SKIP_SIM_GATE=1` used; no simulator or physical-device claim. Destination-specific public publication approval was explicitly supplied by the owner.

@@ -3105,17 +3105,19 @@ def _load_trade_disposition_keys(user_id: str, league_id: str):
         amnesty_epoch=float(_deck_cfg("pass_cooldown_start_epoch", 0.0)))
 
 
-def _trade_safety_signature():
-    """Changing a safety switch invalidates completed cached decks."""
+def _trade_safety_signature(owner_state: tuple[bool, bool] | None = None):
+    """Stamp captured owner permission; freshness checks read live defaults."""
+    if owner_state is None:
+        owner_include = _bakeoff.bakeoff_enabled() and "owner_v1" in _bakeoff.arm_roster()
+        owner_state = (owner_include, owner_include and _bakeoff.serve_owner())
     return [key for key, enabled in (
         ("market", _trade_policy.policy_enabled()),
         ("market_shadow", _trade_policy.telemetry_enabled()),
         ("roster", getattr(FLAGS, "trade_roster_protection", False)),
         ("roster_shadow", getattr(FLAGS, "trade_roster_evaluation", False)),
         ("mutual_benefit", getattr(FLAGS, "trade_mutual_benefit_v1", False)),
-        ("owner_include", _bakeoff.bakeoff_enabled() and "owner_v1" in _bakeoff.arm_roster()),
-        ("owner_serve", _bakeoff.bakeoff_enabled() and "owner_v1" in _bakeoff.arm_roster()
-         and _bakeoff.serve_owner()),
+        ("owner_include", owner_state[0]),
+        ("owner_serve", owner_state[1]),
     ) if enabled]
 
 
@@ -3143,7 +3145,12 @@ def _trade_job_is_fresh(job: dict, fairness_threshold: float, outlook_value,
             job, presentation_capture if presentation_capture is not None
             else _capture_trade_presentation()):
         return False
-    if job.get("safety_policy", []) != _trade_safety_signature():
+    # Demo jobs never enter the owner experiment, even when it is globally on.
+    job_key = job.get("key") or ()
+    expected_safety = (_trade_safety_signature((False, False))
+                       if len(job_key) > 1 and job_key[1] == "league_demo"
+                       else _trade_safety_signature())
+    if job.get("safety_policy", []) != expected_safety:
         return False
     if job.get("is_pinned"):
         return False
@@ -7240,7 +7247,7 @@ def _run_trade_job(
             if _job_live(j):
                 if market_live or roster_live or owner_on:
                     j["final_checks_pending"] = True
-                safety_signature = _trade_safety_signature()
+                safety_signature = _trade_safety_signature((owner_on, owner_serve))
                 if safety_signature:
                     j["safety_policy"] = safety_signature
 
@@ -7448,6 +7455,7 @@ def _run_trade_job(
                 gen_fit   = lambda **ov: _bakeoff.gen_fit_cards(
                     trade_service, {**_generate_kwargs, **ov}),
                 gen_owner = _gen_owner,
+                owner_serving = owner_serve,
                 league_id = league_id,
                 # Recorded, not inferred: both arrive per-request from the
                 # client and were persisted nowhere else. The trade settings

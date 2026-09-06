@@ -1513,6 +1513,7 @@ def run_bakeoff(
     trade_intent: str | None = None,
     iso_week: str | None = None,
     interleave: bool | None = None,
+    owner_serving: bool | None = None,
     limit: int | None = None,
     roster: tuple[str, ...] | list[str] | None = None,
 ) -> BakeoffRun:
@@ -1538,6 +1539,10 @@ def run_bakeoff(
     roster = tuple(roster)
     if interleave is None:
         interleave = serve_interleaved()
+    # The worker binds its captured permission so drafting, ordering and
+    # atomic impression publication share one decision across live knob flips.
+    if owner_serving is None:
+        owner_serving = serve_owner()
     if limit is None:
         limit = deck_limit()
     intent = effective_trade_intent(trade_intent)
@@ -1631,7 +1636,7 @@ def run_bakeoff(
     # serving effect, since fit is absent from every participant order).
     serving_roster = tuple(a for a in roster
                            if (a != ARM_FIT or serve_fit())
-                           and (a != ARM_OWNER or serve_owner()))
+                           and (a != ARM_OWNER or owner_serving))
     groups, group_order, draft = compose_deck(
         arm_lists, league_id=league_id, iso_week=iso_week,
         roster=serving_roster, limit=limit)
