@@ -37,7 +37,7 @@ Every new behavioral test needs a preserved RED against the original missing beh
 
 ## 4. Docs scope
 
-Shared follow-through below is **required at integration, not completed by this author**; parent owns assignments and final status.
+Shared references below are updated by root for reviewed runtime `9ea562dd` and evidence `a194efd7`. Final redundant batch QA, deployment, activation and physical-device results remain separate gates.
 
 | Doc | Disposition | Scope |
 |---|---|---|
@@ -49,8 +49,8 @@ Shared follow-through below is **required at integration, not completed by this 
 | `living-memory/HLD.md` | n/a | No new service/client/subsystem or major flow; targeted module wiring is covered by architecture/LLD. |
 | `docs/cross-client-invariants.md` | n/a | No shared client enum/color/constant; clients do not gain a re-sort. Existing wire/identity invariants preserved. |
 | `docs/glossary.md` | n/a | No new user-facing domain term. |
-| ADR or `DECISIONS.md` | Required | Explicit narrow exception to fixed within-arm serving order; not permission to change generator goldens, group drafting or arm allocation. |
-| Plan index, ledger, release note | Required, parent-owned | Review outcome, RED/GREEN evidence, deployment/activation/device facts and exposure-analysis limitations. |
+| ADR or `DECISIONS.md` | Updated | D-187 records the narrow exception to fixed within-arm serving order; no generator-golden, group-drafting or arm-allocation changes. |
+| Plan index, ledger, release note | Updated | Root-reviewed build/RED/GREEN evidence, conditional exposure diagnostic and pending QA/deployment/activation/device facts are recorded. No release is claimed. |
 
 ## 5. Ship gates
 

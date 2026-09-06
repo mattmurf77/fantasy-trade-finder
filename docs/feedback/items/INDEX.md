@@ -284,8 +284,8 @@
 | 414 | lopsided-one-for-one | shipped | 2026-09-02 | shipped by the OTHER session as D-175 (`sweetener_gap_frac` band + `sweetener_best_effort`, PR #268, live 750/0.12/1); this folder's parallel D-173 build is superseded, kept as history; G-8 avoid follow-up in NEXT |
 | 415 | queue-loss-refusal-no-advance | shipped | 2026-09-02 | verify-closed — refusal half = D-170 (server, live 2026-08-31T21:29Z), advance half = D-171 v1.16.14 build 143; proof = finder-results-push scope §7 step 5 |
 | 416 | liked-card-stays-no-swipe | shipped | 2026-09-02 | verify-closed — D-171 v1.16.14 restores the classic swipe deck; proof = scope §7 steps 1/5/6 |
-| 419 | rejected-interest-resurfacing | in-progress | 2026-09-06 | Reviewed G419 contract; backend implementation and parent review underway. Batch plan and completed 45-item audit; no release yet. |
-| 420 | win-now-loading | in-progress | 2026-09-06 | Reviewed G420 contract covers initialization recovery and truthful timeout handling; native implementation underway. No release yet. |
+| 419 | rejected-interest-resurfacing | in-progress | 2026-09-06 | Backend/mobile integrated; independent QA found same-ID reason-episode coalescing defect, under repair. Completed 45-item audit is read-only. No release yet. |
+| 420 | win-now-loading | in-progress | 2026-09-06 | Native bounded recovery and neutral timeout implemented and root-reviewed; combined QA/CI/TestFlight delivery pending. No release yet. |
 | 421 | win-now-timeout-message | in-progress | 2026-09-06 | Selected by owner; satellite of 420-win-now-loading. No release yet. |
 | — | 2026-07-26-adjustments-breakdown | shipped | 2026-07-26 | n/a |
 | — | 2026-07-26-asset-trade-ideas | shipped | 2026-07-26 | teardown-remediation / `trade.asset_ideas` ON |

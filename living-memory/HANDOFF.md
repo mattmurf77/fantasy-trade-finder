@@ -6,19 +6,19 @@
 >
 > Companion files: [TEST_LEDGER.md](TEST_LEDGER.md), [NEXT.md](NEXT.md).
 
-## Current State — 2026-09-05
+## Current State — 2026-09-06
 
-**Where I stopped:** owner-contract PR #281 merged at `4026ebc8`. Owner then explicitly authorized the experimental personal-market policy: **on**, same code redeployed live **16:01:20 UTC**; verified exactly one flag delta and unchanged model/tier/experiment hashes. [Activation/evidence](../docs/plans/owner-contracts/policy-activation.md). Final source CI: **5,455 backend / 1 skip**, 93 guards, client gates. Fresh policy preflight: **114 passed**. iOS **1.17.0 (148)** already uploaded.
+**Where I stopped:** selected 419–421 fixes and bounded smaller-package presentation integrated locally; NOT shipped. Round-1 `aa463789` has confirmed old-pass/new-reason episode defect under backend repair. Root and QA-A full suite: **5,622 passed / 1 skip**; 95 mobile guards and client/web gates pass. [Release gates](../docs/feedback/items/419-rejected-interest-resurfacing/release.md).
 
-**In flight:** Apple/tester availability and [physical checklist](../docs/plans/owner-contracts/mobile-testflight.md) unverified. Three arms preserved; shared policy applies to new generated decks, not every trade entrance. [Remaining engine/Undo/data work](../docs/plans/owner-contracts/review.md).
+**In flight:** Astra backend repair and independent QA reports; fresh full two-agent round after code change. QA-B's in-memory suite lost tables; isolated file-backed 149-test rerun passed. [Research](../docs/research/2026-09-06-trade-package-shapes.md) and all-45 read-only audit complete. Version 1.17.1 prepared; physical checklist UNRUN.
 
-**Blocked on:** no activation blocker. Acceptance uplift, latency/supply qualification and unfinished product decisions are not established. Win Now/security releases remain intact; their quality/cleanup follow-ups remain.
+**Blocked on:** QA defect/re-review, exact-head CI and delivery verification. Current-batch owner preauthorization covers reviewed merge/live/TestFlight; no waiver. Live remains `4026ebc8`, personal-market policy ON, all three arms; new presentation knob absent. Existing build 148 uploaded, Apple availability unverified.
 
-**Don't repeat:** preserve original dirty checkout/raw interviews. Isolated worktrees: `/private/tmp/ftf-owner-contracts-e8bWFV/`. EAS uses `.easignore`: never upload the raw-doc checkout. Evidence PR #282 only; no direct-main push. No simulator/Maestro, cleanup, extra flag flips or causal-Undo completion claims.
+**Don't repeat:** original dirty checkout/private files untouched. Batch trees `/private/tmp/ftf-feedback-419-421-f1uMyt/`; integration `codex/feedback-419-421-20260906`. EAS only from clean verified archive. No source-disabling retry after prior safety denial; actual baseline REDs suffice. No simulator, direct-main push, unrelated closures or cleanup without recovery ledger.
 
 ## Table of Contents
 
-- [Current State — 2026-09-05](#current-state--2026-09-05)
+- [Current State — 2026-09-06](#current-state--2026-09-06)
 - [Handoff Template](#handoff-template)
 
 ## Handoff Template

@@ -1,0 +1,35 @@
+# Feedback 419–421 and smaller packages — physical TestFlight checklist
+
+**Status: UNRUN.** This consolidates the approved PRD checks; final passing QA reports may add cases. An EAS build, upload or Apple processing result is not a device pass. No simulator/Maestro/captures are used.
+
+Record the device/OS, installed version/build, backend SHA, controlled fixture revision, entry route and sanitized result for each step. Use authorized test accounts and staging fixtures for dated history, injected failures and config changes. Do not restart production, change real league membership, send a provider proposal or write real-user learning data to perform these checks.
+
+## Rejected offers — 419
+
+1. With A's old like followed by B's exact pass and no newer source like, B opens fresh and cached results. Neither may present the old like as current interest. An independently eligible organic same-package offer must be unbadged; different packages remain possible.
+2. A creates fresh exact interest; B passes using layer 1 only and then separately each layer-2 completion. Switch Value/Outlook/All, reopen results, Find More, refresh and change scoring format. The exact locally rejected package stays absent; the next card and progressive reason controls remain usable. Repeat on an edited package and in Browse All.
+3. Pause a test worker, pass its package, then release it and poll/reopen its old result. Repeat after a league switch. Restore normal and replenished sessions containing an eight-day pass: no exact replay or cross-league removal.
+4. With reason capture disabled in staging, pass and Undo within the hold window: no request/history write and the card is usable again. Inject total write failure: retry works. Contextless/failed reason persistence returns `passed:false`; valid-context retry repairs once. Verified reason `passed:true` plus companion swipe failure must still remove the exact card locally. These checks do not promise remote-only invalidation of a retained deck.
+5. A deliberately re-likes after B's pass, including requeue within ten seconds: exactly one new source row, retries idempotent and the existing cooldown still applies. B re-liking before A renews cannot match A's old interest. A's subsequent deliberate like follows the normal match path. Reverse orientation and change-package controls.
+6. Re-serve a deterministic same-ID package with a **new impression/reason episode**, after an old pass and newer partner like. A new reason rejection must commit one current pass and resolve that renewed interest; later detail/retry must not duplicate it. Preserve swipe-before-reason companion coalescing. An unlinked legacy surrogate does not invent a distinguishable new episode.
+
+## Win Now loading and timeout — 420/421
+
+7. Enter League → season projections during slow initialization; repeat Acquire → Win Now. Loading remains responsive and Back works. Acknowledged initialization leads to available data or the actual source refusal without another tap.
+8. Restore a persisted signed-in token across a **staging** backend rollover. Open/Refresh Win Now without signing out. Sanitized traces show at most one missing-context repair and one logical GET replay; no repeated retry loop.
+9. During repair, leave and select another league under the same token. Test delayed preparation and an already-dispatched successful init. Only the new league may finish visibly; no stale selection/data/toast/error. Repeat sign-out/new login with a delayed old verification 403. Separately test ambiguous init timeout: automatic refocus/foreground starts no new init/read; an explicit new Refresh permits one bounded retry. Do not infer server cancellation.
+10. Delay the projection response to about 16 seconds: it should render beyond the old 15-second limit. Exceed the controlled request and full-attempt budgets at preparation/transport/body stages: loading ends on the next active runtime turn, neutral timeout appears, Refresh is enabled. Leaving the screen prevents a late alert.
+11. Exercise current-session 401, typed unavailable/source refusal, verification denial, 503 and offline/restored network. Preserve truthful errors and current-session expiry; no fabricated zero standings or search on unavailable data. A replacement login must not be cleared by an older request. Verify Dynamic Type/VoiceOver on loading/error/Refresh.
+12. While a cold baseline runs, measure another ordinary read. Record any contention as an outstanding synchronous-backend measurement, not proof that longer client deadlines fixed throughput.
+13. With a valid baseline, check objective/budget/protection controls, title gating, source expiry, search cancellation/refresh, editable evaluation and Back. Do not send a provider proposal.
+
+## Smaller-package presentation
+
+14. With mode 1 and the PRD's synthetic A/B/C six-card fixture, fresh organic Find a Trade leads with the expected simpler order; all larger cards remain reachable and unchanged. Repeat both ranking formats. This verifies presentation, not acceptance or globally smaller generated supply.
+15. Mixed pick-heavy packages do not become “player heavy”; pure-pick and special/unknown cards retain their positions. No new badge, panel or valuation display appears.
+16. Repeat explicit SEND, explicit GET, named partner, calculator edit and More Offers. The helper does not override selected packages or those entry-point orders. Pass a card and use lanes/Find More/Back: no rejected offer returns merely to fill a presentation slot.
+17. Retain an old deck while changing the **staging** knob, then poll/return to it: captured order remains. Fresh generation takes the new mode. Repeat rollback to 0; do not change unrelated flags or experimental arms.
+
+## Evidence and limits
+
+Record PASS/FAIL/BLOCKED per step with exact artifact identity; leave unperformed steps UNRUN. Source contracts: [419 PRD](prd.md), [420/421 PRD](../420-win-now-loading/prd.md), [package PRD](../../../plans/small-trade-packages/prd.md). Current release state: [release record](release.md). No production quality, Apple availability or physical-device result is implied by this document.

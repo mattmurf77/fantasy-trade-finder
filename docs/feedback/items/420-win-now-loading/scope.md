@@ -43,7 +43,7 @@ Independent-critique additions are mandatory evidence, not advisory tests: T10 m
 
 ## 4. Docs scope — HLD / LLD / API
 
-Rows below declare the required follow-through; “required” is intentionally not “updated.” Only this scope, PRD and reconciliation are this author task's file ownership. The integrator assigns shared documentation edits during implementation and marks them complete at the exact reviewed code SHA.
+Rows below record the integrator's completed reference updates for reviewed runtime `2de3e1d9` / evidence `ff205431`. Final batch QA, delivery and device verification remain distinct gates.
 
 | Doc | Updated? | Section / reason n/a |
 |---|---|---|
@@ -55,7 +55,7 @@ Rows below declare the required follow-through; “required” is intentionally 
 | `docs/glossary.md` | n/a: no new domain term | Context generation / request budget are internal implementation terms. |
 | ADR or `DECISIONS.md` | n/a: bounded correction, not a new architectural platform decision | Non-obvious local choice (serialization is conditional on acknowledged settlement; no server cancellation guarantee) is explicit in PRD §4.2 and reconciliation. A stronger server protocol would require a separately reviewed design. |
 | `mobile/src/api/README.md`, `mobile/src/state/README.md` | Updated | Correct changed lifecycle/timeout and stale “mint/optimistic” descriptions in touched code; API returns seed, state owns cache remains intact. No general auth documentation rewrite. |
-| `living-memory/TEST_LEDGER.md` and selected item status/index | Required, orchestrator-owned | Exact RED/GREEN/CI evidence and actual implementation/delivery/device status; do not close the reports or label runtime verification complete from this author pass. |
+| `living-memory/TEST_LEDGER.md` and selected item status/index | Updated | Root checkpoint evidence and integrated status are recorded. Final redundant QA/CI and delivery are pending; physical device checklist remains UNRUN. |
 
 No HLD/LLD/API requirement is silently waived. No separate feature-path delta files are added because this is the requested lighter-path native bug fix with full interfaces embedded in the PRD.
 

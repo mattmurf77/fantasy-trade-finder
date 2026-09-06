@@ -37,10 +37,10 @@ Source: [PRD](prd.md), requirements R1–R4 and acceptance T1–T8; [planner dia
 | `living-memory/HLD.md` | n/a | No new module/subsystem/client/major flow; detailed changes belong to architecture and LLD. Reassess only if implementation expands. |
 | `docs/cross-client-invariants.md` | Updated | Root: existing Match bucket semantics clarify only actionable one-sided likes appear in Awaiting; visible summary counts retain parity. Existing pass controls, enums and constants stay unchanged. |
 | `docs/glossary.md` | n/a | No new user-facing term; interested, like, pass, Awaiting and match retain their UI vocabulary. |
-| ADR or `DECISIONS.md` | Decision entry at integration | Root records ratified exact stale-source precedence and its separation from D-067 discovery amnesty/expiry, plus reviewed truthful passed/repair semantics. These are bounded semantic corrections with explicit fresh-like/idempotency cases, not a broad cooldown policy reversal. |
+| ADR or `DECISIONS.md` | Updated | D-186 records exact stale-source precedence and its separation from D-067 discovery amnesty/expiry, plus truthful passed/repair semantics. QA's current-episode repair remains an implementation gate, not a broad cooldown policy reversal. |
 | `docs/data-dictionary.md` | n/a | No schema or stored-field meaning change; existing retraction ownership and timestamps remain history. |
 | `docs/config-reference.md` | n/a | No new/changed setting, default, flag, or experiment surface. |
-| Item documents / central index / test ledger | Item docs authored; shared updates pending root | Author's three files are complete for critique. Root records reviewed status, actual tests, manual results and release state; no claim this is built or shipped. |
+| Item documents / central index / test ledger | Updated | Root records integrated build checks, confirmed QA finding, repair/re-review requirement and not-released state. Consolidated physical TestFlight checklist is authored and UNRUN. |
 
 ## 5. Ship gate declaration
 
