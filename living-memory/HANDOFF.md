@@ -8,13 +8,13 @@
 
 ## Current State — 2026-09-05
 
-**Where I stopped:** owner-contract first wave published in draft PR #281 on `codex/owner-contracts-20260905`. iOS **1.17.0 (148)** built from `0fc1b539` and uploaded to App Store Connect for TestFlight. Exact-source CI passed: **5,455 backend / 1 skip**, 93 mobile guards, typecheck/test-ID and 190 web checks. [Release IDs/evidence](../docs/plans/owner-contracts/release.md).
+**Where I stopped:** owner-contract PR #281 merged at `4026ebc8`. Owner then explicitly authorized the experimental personal-market policy: **on**, same code redeployed live **16:01:20 UTC**; verified exactly one flag delta and unchanged model/tier/experiment hashes. [Activation/evidence](../docs/plans/owner-contracts/policy-activation.md). Final source CI: **5,455 backend / 1 skip**, 93 guards, client gates. Fresh policy preflight: **114 passed**. iOS **1.17.0 (148)** already uploaded.
 
-**In flight:** Apple processing/tester availability and [physical checklist](../docs/plans/owner-contracts/mobile-testflight.md) unverified. Backend owner-contract changes remain unmerged/undeployed; all three arms/flags unchanged. [Remaining engine/Undo/data work](../docs/plans/owner-contracts/review.md).
+**In flight:** Apple/tester availability and [physical checklist](../docs/plans/owner-contracts/mobile-testflight.md) unverified. Three arms preserved; shared policy applies to new generated decks, not every trade entrance. [Remaining engine/Undo/data work](../docs/plans/owner-contracts/review.md).
 
-**Blocked on:** separate main/Render authorization; no answer received. Existing [Win Now release](../docs/business/ops/2026-09-05-win-now.md) and [security release](../docs/plans/security-data-hardening/deployment.md) remain intact; forecast quality/availability and historical token cleanup are still separate follow-ups.
+**Blocked on:** no activation blocker. Acceptance uplift, latency/supply qualification and unfinished product decisions are not established. Win Now/security releases remain intact; their quality/cleanup follow-ups remain.
 
-**Don't repeat:** preserve the dirty original checkout and raw interview docs. Integration: `/private/tmp/ftf-owner-contracts-e8bWFV/integration`; clean build worktree: sibling `testflight`. EAS ignores Git ignore rules when `.easignore` exists: use the verified clean archive, never the raw-doc checkout. No simulator/Maestro, cleanup, flag flips or causal-Undo completion claims.
+**Don't repeat:** preserve original dirty checkout/raw interviews. Isolated worktrees: `/private/tmp/ftf-owner-contracts-e8bWFV/`. EAS uses `.easignore`: never upload the raw-doc checkout. Evidence PR #282 only; no direct-main push. No simulator/Maestro, cleanup, extra flag flips or causal-Undo completion claims.
 
 ## Table of Contents
 

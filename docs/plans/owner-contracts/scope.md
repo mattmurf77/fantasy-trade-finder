@@ -5,7 +5,7 @@
 **Builder:** Parent integration review plus independent Astra Ultra mobile and policy builders.
 **Operator sign-off on waivers:** Not needed; no waivers. D-056 prohibits simulator/Maestro evidence.
 **Baseline:** `origin/main` at `5cf34182`; separate worktrees protect the owner's unrelated working changes.
-**Status:** Bounded implementation parent-reviewed; local and hosted gates passed. Explicit follow-up authorization covered GitHub and TestFlight: draft PR #281 published and iOS 1.17.0 (148) uploaded. Backend is unmerged/undeployed; no experiment activation. Apple processing/tester availability and physical QA remain unverified. [Release evidence](release.md).
+**Status:** Bounded implementation parent-reviewed; local and final hosted gates passed. Explicit follow-up requests authorized GitHub/TestFlight, then backend activation: PR #281 merged, Render live at `4026ebc8`, iOS 1.17.0 (148) uploaded. Existing runtime settings remain unchanged; no experimental policy activation. Apple processing/tester availability and physical QA remain unverified. [Release evidence](release.md).
 
 ## Behavior and boundaries
 
@@ -50,4 +50,4 @@ This is a bounded first implementation, not completion of every interview idea. 
 - No subagent pushes, merges, deployment, or worktree deletion. Parent reviews each diff before integration.
 - Python 3.12 complete backend suite, mobile TypeScript plus **every** `check-*.js` guard, web structural guard, and test-ID lint must pass locally before a reviewed branch push. CI must then pass on the pushed SHA before considering merge.
 - Record exact commands, outcomes, environment, and pending physical-device evidence in `living-memory/TEST_LEDGER.md` and the parent review.
-- No express-lane exemption. A later explicit request authorized GitHub publication and EAS/TestFlight distribution; [release.md](release.md) records execution. Main merge and Render release were not assumed.
+- No express-lane exemption. Later explicit requests authorized GitHub/TestFlight, then main/Render release. [release.md](release.md) records exact-head CI, merge-tree equality, production smoke and unchanged runtime settings.
