@@ -1,54 +1,60 @@
-# Feature Scope — team overhaul roadmap
+# Feature Scope — Team overhaul (v1 build)
 
-**Date:** 2026-09-06  
-**Entry point:** direct owner request; approved core mockups and requested engineering handoff  
-**Builder:** Codex planning task; implementation owners to be assigned  
-**Operator sign-off on waivers:** not needed; this change adds documentation/prototypes, with no runtime gates waived for future implementation.
+**Date:** 2026-09-07 (supersedes the 2026-09-06 documentation-only scope)
+**Entry point:** direct owner request — "Team overhaul is ready for engineering scoping … spin up subagents to build it"; NEXT item "Build Team overhaul"
+**Builder:** Claude scoping session + three parallel build agents (backend, mobile A, mobile B) on `claude/team-overhaul-scoping-ea1c72`
+**Operator sign-off on waivers:** not needed (no waivers)
+
+Binding design: [BUILD-CONTRACT.md](BUILD-CONTRACT.md). Product rules: [PRODUCT-SPEC.md](PRODUCT-SPEC.md). Decision record: [D-188](../../../living-memory/DECISIONS.md).
+
+---
 
 ## 1. Analytics scope
 
-**(a) New events specced as proposals, not registered/emitted.** Engineering must reconcile names and privacy/intent classification against the existing taxonomy before adding emitters. Include only opaque plan/league context IDs, counts, enums and outcome codes; omit credentials, audio and freeform notes.
+- [x] **(a) New events specced** (registered in `backend/analytics_taxonomy.py` in the same change as the emitters; properties are ids, counts and enums only):
 
-| Proposed event | Properties | Trigger | Emitter |
-|---|---|---|---|
-| `overhaul_started` | entry, outlook (when known) | User starts a new draft | Client, once per explicit action |
-| `overhaul_generation_completed` | candidate_count, compatible_roadmap_count, shortfall_reason | Generation completes | Backend, once per generation |
-| `overhaul_roadmap_selected` | roadmap_id, package_count | User selects a roadmap | Client |
-| `overhaul_batch_requested` | batch_id, package_count, offer_count, tied_package_count | User confirms the previewed batch | Client or server, one canonical emitter |
-| `overhaul_batch_reconciled` | batch_id, sent_count, failed_count, unknown_count | Submission outcomes reconcile | Backend/integration owner |
-| `overhaul_fallback_requested` | package_id, priority, offer_count | User explicitly sends the next tier | Client or server, one canonical emitter |
+  | Event | Properties | Fires when | Client |
+  |---|---|---|---|
+  | `overhaul_started` | league_id, outlook?, entry | User taps Start overhaul on the Acquire card | mobile |
+  | `overhaul_roadmap_selected` | overhaul_id, roadmap_id, package_count | User picks a roadmap to set priorities | mobile |
+  | `overhaul_batch_requested` | overhaul_id, batch_id?, package_count, offer_count, tied_package_count | User confirms Send all offers | mobile |
+  | `overhaul_fallback_requested` | overhaul_id, package_id, tier, offer_count | User explicitly sends a package's next tier | mobile |
+  | `overhaul_generation_completed` | overhaul_id, candidate_count, compatible_roadmap_count, shortfall_reason | `POST /api/overhauls/{id}/generate` finishes | backend (server-fired) |
+  | `overhaul_batch_reconciled` | overhaul_id, batch_id, sent_count, failed_count, unknown_count | `POST /api/overhauls/{id}/send` finishes dispatch | backend (server-fired) |
 
-Do not count submission as acceptance or generation as intent. Register final names in `backend/analytics_taxonomy.py`, classify non-intent events in `analytics_queries.NON_INTENT_EVENTS`, and document storage when implemented.
+  → follow-through: the two server events are classified in `analytics_queries.NON_INTENT_EVENTS`; storage is the existing `events` path (no new table).
 
 ## 2. Schema & flag scope
 
-- This handoff changes no live tables, routes, flags, credentials, environment or model configuration.
-- Proposed persistence: draft/settings, eligible assets, generations/likes, immutable roadmap versions and packages, ordered alternatives, send batches/attempts and provider status history. See [engineering spec](ENGINEERING-SPEC.md); final tables/migrations must be reviewed and added to the data dictionary during build.
-- Proposed shared release gate: entry/generation disabled until validated; choose/register its exact name in `config/features.json`, backend flag registry and config reference during implementation. Preserve resume/status access for live sent work when creation is disabled.
-- No new environment variables or model knobs are specified. Reuse existing authenticated integration/configuration boundaries.
+- New tables: `overhauls`, `overhaul_offers`, `overhaul_roadmaps`, `overhaul_attempts`, `overhaul_reservations` → `docs/data-dictionary.md` (one section each). Created by `metadata.create_all`; no ALTER migration rows needed.
+- New feature flag: `overhaul.enabled` → `config/features.json` (**false**), `backend/feature_flags.py` `FLAG_KEYS` + mirror fixtures, `docs/config-reference.md`. Gates the entry card and the create/generate/assemble/send routes only; reads, decisions, priorities, prepare-send, refresh and status assertions stay reachable so live sends are never stranded by a rollback. **Graduation criterion:** the operator runs the [QA.md](QA.md) physical-device checklist on a TestFlight build and confirms D1 (Sleeper-only sends) and D9 (Acquire placement).
+- New env vars / `model_config` keys: **none**. Search bounds are module constants in `backend/overhaul_service.py`. Deploy-free rollback lever: flip `overhaul.enabled` false and `POST /api/feature-flags/reload`.
 
 ## 3. Evidence scope
 
-- Structural guards planned for final entry/root-stack routing (Acquire placement is proposed), one-package priority flow, test IDs and isolation from regular finder settings.
-- Backend tests planned for selected-pool enforcement, pick identity, compatible-set construction, version changes, reservations, idempotent attempts and partial outcomes.
-- Code-walk proof: inspected reuse surfaces and baseline qualifications in [engineering spec](ENGINEERING-SPEC.md).
-- Manual physical-device/TestFlight checklist: [QA.md](QA.md), unrun until a real build exists. Prototype screenshots do not satisfy it.
-- Proposed test-ID families: `overhaul-entry`, `overhaul-resume`, `overhaul-outlook-*`, `overhaul-asset-*`, `overhaul-continue`, `overhaul-priority-*`, `overhaul-send-all`, `overhaul-send-next`. Final dynamic naming must follow the repository linter.
-- No backend test run is required for this documentation-only handoff; future implementation gates are not waived.
+- [x] **Structural guard:** `mobile/tests/check-team-overhaul.js` (`npm run test:team-overhaul`) — pins: all eight overhaul screens registered once, in the Trades stack, none in RootNav; no `FeedbackFAB` import in any overhaul screen; entry card rendered in `TradesScreen` after `TeamReviewEntryCard` gated on `useFlag('overhaul.enabled')`; no overhaul file references league-preference, tiers-save or swipe-learning helpers; priorities screen uses `react-native-draggable-flatlist` with `accessibilityActions`; summary renders races keyed by `package_id`; every `AttemptState` has a label used by the plan screen; every testID family present.
+- [x] **Unit tests:** `backend/tests/test_overhaul_service.py` (pool/E01–E15 fixtures, D4), `test_overhaul_store.py` (reservations, CAS), `test_overhaul_api.py` (flag gating, ownership scoping, idempotency, prepare/send/refresh/status with fake generator and fake Sleeper propose), plus the existing `/api/trades/propose` tests proving the extraction is behavior-preserving.
+- [x] **Code-walk proof:** [BUILD-CONTRACT §6–§7](BUILD-CONTRACT.md) name the seams; the build report in [status.md](status.md) cites the final file:line trace for pool enforcement, reservation claim and attempt state transitions.
+- [x] **Manual TestFlight checklist:** [QA.md](QA.md) "Manual physical-device checklist" (10 items) — **unrun** until a build exists; the only runtime evidence mobile gets.
+- `testID`s added: families `overhaul.entry-card`, `overhaul.entry-start`, `overhaul.entry-resume`, `overhaul.outlook.<key>`, `overhaul.asset.<id>`, `overhaul.continue`, `overhaul.review.like|pass|build`, `overhaul.roadmap.<id>`, `overhaul.priority.list`, `overhaul.priority.move.<id>`, `overhaul.summary.send-all|copy`, `overhaul.plan.refresh|send-next` (static prefixes; passes `mobile/scripts/testid-lint.sh`).
 
-## 4. Docs scope
+## 4. Docs scope (MANDATORY — HLD / LLD / API)
 
-| Canonical reference | This handoff | Required during implementation |
+| Doc | Updated? | Section / reason n/a |
 |---|---|---|
-| API reference | n/a: proposed contracts only | Final routes, errors and idempotency behavior |
-| Data dictionary | n/a: no schema changes | Tables, lifecycle, analytics storage |
-| Architecture / engineering notes | n/a: no module wiring changes | Generation, persistence and integration ownership |
-| Cross-client invariants | n/a: proposed vocabulary local to initiative | Final enums, identifiers and state contracts |
-| Glossary | n/a: new feature unbuilt | Roadmap vs package vs offer tier |
-| ADR / decisions | Owner decisions preserved in initiative product spec | Durable non-obvious implementation choices |
-| Product/design/components | n/a: prototype and planned behavior only | Shipped entry/flow, approved new components and copy |
-| Config / integrations | n/a: no runtime config/provider changes | Launch gate, supported capabilities and verified call shapes |
+| `docs/api-reference.md` | updated | new section "Team overhaul (flag `overhaul.enabled`)" — 13 routes, error codes, idempotency, prepare-token lifetime |
+| `living-memory/LLD.md` | n/a | no schema/route *convention* shifted; the feature follows the `win_now_api.install` route-module convention and existing JSON-as-Text tables |
+| `docs/architecture.md` | updated | "Team overhaul" wiring: service / store / api modules, generation reuse of the owner constructor, extraction of `_sleeper_propose_core` |
+| `living-memory/HLD.md` | n/a | compatibility pointer per docs/agent-workflow; architecture.md carries the change |
+| `docs/cross-client-invariants.md` | updated | outlook enum, attempt-state enum, shortfall enum, validation codes |
+| `docs/glossary.md` | updated | overhaul, package, tier, roadmap, attempt |
+| ADR or `DECISIONS.md` entry | updated | D-188 (nine defaults, v1 execution posture) + ADR-020 (plan-level roster policy) |
+| `docs/data-dictionary.md` | updated | five tables |
+| `docs/config-reference.md` | updated | `overhaul.enabled` row |
 
 ## 5. Ship gate declaration
 
-No release is requested or claimed. Implementation must pass the current CI jobs, appropriate behavioral tests and the physical-device checklist, then record evidence in the initiative and TEST_LEDGER. Follow repository merge/deploy/TestFlight gates and preserve platform-specific limitations. No express lane was requested.
+- **CI green:** `backend-tests` + `mobile-typecheck` (incl. `check-*.js`) + `web-structure` + `maestro-testid-lint` on the pushed sha — recorded in [status.md](status.md) and TEST_LEDGER before merge.
+- **Evidence recorded:** `living-memory/TEST_LEDGER.md` entry naming the backend suite result, the guard run, typecheck, and the unrun device checklist.
+- **TestFlight verification:** [QA.md](QA.md) checklist to be run by the operator on the next build that includes this branch; outcome logged in TEST_LEDGER. Flag stays **false** until then.
+- Express lane declared by the operator? **no** — full gates.

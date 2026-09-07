@@ -6,7 +6,7 @@ This revision exists because the engineering spec describes a complete execution
 
 ## 0. Engineering decisions on the nine open choices
 
-These adopt the product spec §8 *proposed defaults* as v1 engineering decisions. They are **not** owner approvals; they are recorded in `living-memory/DECISIONS.md` (D-321) as reversible.
+These adopt the product spec §8 *proposed defaults* as v1 engineering decisions. They are **not** owner approvals; they are recorded in `living-memory/DECISIONS.md` (D-188) as reversible.
 
 | ID | v1 decision |
 |---|---|
