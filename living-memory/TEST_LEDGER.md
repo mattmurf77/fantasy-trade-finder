@@ -11,6 +11,20 @@
 
 ---
 
+## 2026-09-07 — Team overhaul v1 build (branch, flag off): full backend suite green
+
+Branch `claude/team-overhaul-scoping-ea1c72` (from `origin/main` `0e3d6b70`), head `d23a3b81` + this write-back. Not merged, not deployed, no EAS build. Scope: [scope.md](../docs/plans/team-overhaul/scope.md), full gates, no express.
+
+- **Backend, full suite** on `d23a3b81`: `python3 -m pytest backend/tests -q` → **5810 passed / 1 skipped in 1238.52s**, exit 0 (local, Python 3.14; CI runs 3.12). Includes the three new files `test_overhaul_service.py` / `test_overhaul_store.py` / `test_overhaul_api.py` (**45 passed**) and the existing `/api/trades/propose` tests, which prove the `_sleeper_propose_core` extraction preserved route behavior (108 propose/send/flags-mirror tests). One sanctioned-name entry in `test_pick_assignment.py` moved with the extraction.
+- **Independent backend review** (read-only agent, code-walk + probes) found 1 high (refresh read pick ownership from the stale DB table → false `resolved_elsewhere`), 4 medium (zombie live attempts after a crash, exhausted subsets persisting across settings changes, send not gated on `can_propose`, tie partners double-counted in the D6 union check) and 8 low. All fixed with RED→GREEN regression tests (9 RED → 45 GREEN).
+- **Mobile:** `npx tsc --noEmit` 0 errors; every `mobile/tests/check-*.js` passes incl. new `check-team-overhaul.js` (18 assertions, sabotage-proven ×7); `bash mobile/scripts/testid-lint.sh` OK.
+- **Web:** `python3 qa/web/check_web_structure.py` → 190/190.
+- **Code-walk proof:** pool enforcement `overhaul_service.filter_cards` (post-filter independent of the generator) + prepare-time `pool_violation`/`asset_not_owned` blockers; reservations claimed in one transaction before any provider call (`overhaul_store.claim_reservations`, `overhaul_api.overhaul_send_route`); attempt CAS transitions refuse regressions (`overhaul_store`, `overhaul_service._ATTEMPT_TRANSITIONS`); decisions never touch swipe/Elo (`overhaul_decisions_route` → `store.set_decision` only).
+- **Hosted CI on the PR merge ref** (`c190f52a` merged with `origin/main` `16bb6fd1`): [run 34090353672](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/34090353672) — backend-tests, mobile-typecheck, web-structure, maestro-testid-lint all **success**. Targeted backend rerun on the merged tree: 81 + 142 passed.
+- **iOS build:** EAS production build `2e13ce3d` → **1.17.2 (151)** FINISHED from the merged tree; submission `695bcad3` uploaded to App Store Connect 2026-09-07 (Apple processing pending). Flag `overhaul.enabled` is false in the build.
+- **Merge to `main`:** operator-authorized; the squash merge of [PR #288](https://github.com/mattmurf77/fantasy-trade-finder/pull/288) was blocked by the session's permission classifier and is left for the operator. Nothing is on `main` or Render until it lands.
+- **UNRUN:** the 10-item physical-device checklist in [QA.md](../docs/plans/team-overhaul/QA.md) — build 151 now contains this branch; run it there. `supports_conflicting_offer_race` stays `unverified` until step 8 runs against Sleeper.
+
 ## 2026-09-06 — Owner-only uncapped discovery, implementation checkpoint
 
 Operator explicitly requests owner generation on, all other generated arms off,
@@ -46,6 +60,7 @@ Release-day independent focused rerun2026-09-07 05:07:20UTC: five owner suites,
 **164passed49.37s**, no failures/skips, unchanged824884ff runtime. Fresh isolated
 SQLite and pinned local DP fixtures; hot-off/ghost/cache/64-card coverage passes.
 Dense synthetic generation28.55s under high host load, no production SLA claim.
+
 
 ## 2026-09-06 — Owner construction challenger, implementation checkpoints
 
@@ -3963,6 +3978,7 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-09-07 — Team overhaul v1 build (branch, flag off): full backend suite green](#2026-09-07--team-overhaul-v1-build-branch-flag-off-full-backend-suite-green)
 
 - [2026-09-06 — Feedback release CI, merge and delivery](#2026-09-06--feedback-release-ci-merge-and-delivery)
 - [2026-09-06 — Feedback 419–421 implementation checkpoints, not release evidence](#2026-09-06--feedback-419421-implementation-checkpoints-not-release-evidence)

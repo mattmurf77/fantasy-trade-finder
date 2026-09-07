@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-09-07 — Team overhaul: PR review, operator D1/D9 confirmation, TestFlight checklist, then flag flip](#2026-09-07--team-overhaul-pr-review-operator-d1d9-confirmation-testflight-checklist-then-flag-flip)
 - [2026-09-04 — Personal-market policy: answer Q-038, ship the branch, then Stage A telemetry](#2026-09-04--personal-market-policy-answer-q-038-ship-the-branch-then-stage-a-telemetry)
 - [2026-09-03c — API audit fixes: merge the PR, then the held items (ping-then-init, web push, route hygiene)](#2026-09-03c--api-audit-fixes-merge-the-pr-then-the-held-items-ping-then-init-web-push-route-hygiene)
 - [2026-09-03b — Web platform entry: merge PR #272, then the "Connect another league" modal follow-up](#2026-09-03b--web-platform-entry-merge-pr-272-then-the-connect-another-league-modal-follow-up)
@@ -44,6 +45,14 @@
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## 2026-09-07 — Team overhaul: PR review, operator D1/D9 confirmation, TestFlight checklist, then flag flip
+
+1. **Review and merge the branch** `claude/team-overhaul-scoping-ea1c72` (flag off, additive tables, propose route unchanged) — *why now:* the build is complete and green locally; CI on the PR is the pre-ship gate.
+2. **Operator confirms D1 and D9** ([D-188](DECISIONS.md), [PRODUCT-SPEC §8](../docs/plans/team-overhaul/PRODUCT-SPEC.md)) — Sleeper-only sends with copy handoff elsewhere; Acquire card below Team review.
+3. **Cut a TestFlight build and run the 10-item [device checklist](../docs/plans/team-overhaul/QA.md)**, especially step 8 (tied offers against Sleeper — `supports_conflicting_offer_race` is `unverified`).
+4. Flip `overhaul.enabled` for the operator device first (tester allowlist pattern), then widen.
+5. Separate feature, unchanged: **first come, first served — single sell asset** ([plan §Separate future feature](../docs/plans/team-overhaul/plan.md#separate-future-feature)).
 
 ## 2026-09-04 — Personal-market policy: answer Q-038, ship the branch, then Stage A telemetry
 

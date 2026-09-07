@@ -427,6 +427,13 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     "team_review_opened", "team_review_beat_viewed",
     "team_review_exited", "team_review_action_taken",
     "awaiting_segment_viewed",
+    # ── Team overhaul (flag `overhaul.enabled`, BUILD-CONTRACT §2) ────────
+    # Registered in the SAME commit as the mobile emitters. All four are
+    # deliberate user actions (start a plan, pick a roadmap, confirm a send
+    # batch, ask for a fallback tier) and therefore INTENT — none is listed
+    # in analytics_queries.NON_INTENT_EVENTS. Props are ids/counts/enums only.
+    "overhaul_started", "overhaul_roadmap_selected",
+    "overhaul_batch_requested", "overhaul_fallback_requested",
     # ── Decline-reason capture, 2026-08-17 ──────────────────────────────
     # Spec: docs/plans/decline-reason-capture/SPEC.md §6 (operator-approved;
     # it IS the tracking-plan entry for these two names).
@@ -742,6 +749,11 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     # Committed Win Now search objective/budget, server-authoritative. Never
     # submitted by a client event emitter and never used to update dynasty Elo.
     "win_now_objective_selected",
+    # Team overhaul (flag `overhaul.enabled`) — fired by backend/overhaul_api.py
+    # with ids/counts/enums only. Both are outcome/reconciliation class and
+    # are classified in analytics_queries.NON_INTENT_EVENTS: the user already
+    # emitted overhaul_started / overhaul_batch_requested to reach them.
+    "overhaul_generation_completed", "overhaul_batch_reconciled",
     # P0-7 — the north-star SEND leg. analytics_queries reserved this and
     # its two client siblings in WAT_DARK on 2026-07-17 and nothing ever
     # fired them; the same commit as this one moves all three to WAT_LIVE.
@@ -1391,6 +1403,12 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     "team_review_beat_viewed": frozenset({"league_id", "beat", "index"}),
     "team_review_exited":      frozenset({"league_id", "beat", "index", "outcome"}),
     "team_review_action_taken": frozenset({"league_id", "beat", "action"}),
+    # Team overhaul (BUILD-CONTRACT §2): ids, counts and enums only.
+    "overhaul_started":            frozenset({"league_id", "outlook", "entry"}),
+    "overhaul_roadmap_selected":   frozenset({"overhaul_id", "roadmap_id", "package_count"}),
+    "overhaul_batch_requested":    frozenset({"overhaul_id", "batch_id", "package_count",
+                                              "offer_count", "tied_package_count"}),
+    "overhaul_fallback_requested": frozenset({"overhaul_id", "package_id", "tier", "offer_count"}),
     # `side` ∈ give | receive — the targeting board half the pin landed on
     # (the same vocabulary as player_menu_opened.side).
     "finder_target_pinned":    frozenset({"side", "source"}),

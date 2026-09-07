@@ -265,7 +265,10 @@ _SANCTIONED_SOURCE_CALLERS = frozenset({
     # `draft_picks` encoding, and a user-asserted row's `original_roster_id`
     # is an opaque slot label that cannot be encoded into a Sleeper roster id.
     # These reads must never follow `picks.assign_tradeable`.
-    "propose_trade_to_sleeper",  # server.py  — POST /api/trades/propose pick encode
+    # 2026-09-07 (team overhaul): the route body was extracted verbatim into
+    # `_sleeper_propose_core` so the overhaul send loop reuses it; the read
+    # moved with it — same call, same literal, one enclosing function.
+    "_sleeper_propose_core",     # server.py  — POST /api/trades/propose pick encode (extracted core)
     "trades_validate",           # server.py  — POST /api/trades/validate pick advisories
 })
 

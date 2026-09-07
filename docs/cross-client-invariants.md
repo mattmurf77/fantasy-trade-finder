@@ -1252,3 +1252,21 @@ Experimental beta; the release configuration enables `outlook.season_projections
 - Win Now likes/passes use the separate scenario decision endpoint/table. They do not reach legacy swipe/queue/Elo learning and do not constitute the partner's action or a real league proposal.
 
 Locations: `backend/win_now_api.py`, `win_now_service.py`, `win_now_optimizer.py`, `season_simulator.py`; `mobile/src/shared/types.ts`, `utils/winNow.ts`, `screens/WinNowScreen.tsx`; `web/js/win-now.js`. [Build and outstanding calibration](plans/win-now/BUILD.md).
+
+## Team overhaul enums
+
+Shared by `backend/overhaul_service.py` and `mobile/src/api/overhaul.ts` (the one TypeScript definition; screens import from it). Contract: [plans/team-overhaul/BUILD-CONTRACT.md](plans/team-overhaul/BUILD-CONTRACT.md) §1, §5–§7.
+
+- **Outlook** — `push_all_in` | `blow_it_up`. The evaluator adapter maps these to the engine's utility names `championship` / `jets`; that mapping lives server-side only and is applied to the generation context dict, never written to league preferences.
+- **Overhaul status** — `setup` → `reviewing` → `assembled` → `executing` → `complete`; `archived` is terminal.
+- **Decision** — `like` | `pass` | `undecided`. Overhaul decisions never reach the swipe / Elo learning path.
+- **Availability** — `fresh` | `stale`.
+- **Attempt state** — `queued`, `sending`, `proposed`, `send_failed`, `outcome_unknown`, `accepted`, `declined`, `expired`, `withdrawn`, `invalidated`, `resolved_elsewhere`, `stale`. **Live** = `queued | sending | proposed | outcome_unknown`. User-assertable (`/attempts/{id}/status`) = `declined | withdrawn | expired`, only from `proposed | outcome_unknown`. Terminal states never regress (compare-and-swap in `overhaul_store.transition_attempt`). Refresh sweeps stuck live states after `LIVE_STUCK_AFTER_S` (300 s): `sending → outcome_unknown`, `queued → stale`, both `state_source: server` with `error.code: worker_lost`. `accepted` is ownership-derived only; an un-arrived receive side made solely of picks never terminalizes an attempt unless a live traded-picks read confirms it.
+- **Attempt state source** — `server` | `provider` | `ownership_refresh` | `user_reported`.
+- **Package status** (derived at read time) — `open` | `pending` (a live attempt exists) | `complete` (an accepted attempt) | `blocked` (no fresh liked alternative left). Package `reason` — `outlook_move` | `recover_own_first`; `advisory_rank` is 1 only for `recover_own_first`.
+- **Recovery state** — `owned` | `missing_with_known_holder` | `unknown` | `unsupported` | `not_yet_available`. An empty pick table is `unknown`, never missing. `draft_order_rule` is `unknown` unless the league payload carries a rule.
+- **Shortfall reason** — `insufficient_likes`, `overlapping_sells`, `competing_incoming`, `no_return_supply`, `recovery_unresolved`, `roster_limitation`, `stale_ownership`, `budget_restriction`, `search_exhausted`.
+- **Validation codes** (`ValidationReceipt.blockers[].code` / `warnings[].code`) — blockers: `give_overlap`, `receive_overlap`, `asset_not_owned`, `counterparty_asset_not_owned`, `pool_violation`, `capacity_exceeded`, `lineup_illegal`, `offer_stale`, `offer_not_liked`, `tier_duplicate_counterparty`, `asset_reserved`; warnings: `recovery_unresolved`, `depth_reduced`. `unknowns[]` carries `capacity_unknown`, `counterparty_roster_unknown` and the `trade_roster` unknown strings verbatim.
+- **Capabilities.auth_state** — `linked` | `unlinked` | `expired` | `unverified` | `n/a` (non-Sleeper). `can_propose` is true only for Sleeper + `linked` + `trade.send_in_sleeper` on. `can_read_terminal_status` and `can_withdraw` are always `false` in v1; `supports_conflicting_offer_race` is `unverified`.
+- **Handoff mode** — `send` (Sleeper) | `copy` (MFL/ESPN, with `text`).
+- **Id prefixes** — `ovh_` (overhaul **and** offer), `rm_` (roadmap), `pk_` (package), `bt_` (batch), `at_` (attempt); all 12 hex.

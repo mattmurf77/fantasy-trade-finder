@@ -143,6 +143,8 @@ import { resolveShareUrl } from '../utils/shareLinks';
 import { useInterruptSlot, useMutedDuringTour } from '../state/useInterruptCoordinator';
 import InviteLeaguematesBanner from '../components/InviteLeaguematesBanner';
 import TeamReviewEntryCard from '../components/TeamReviewEntryCard';
+import OverhaulEntryCard from '../components/OverhaulEntryCard';
+import { getActiveOverhaul } from '../api/overhaul';
 import FormatGate, { formatLabel } from '../components/FormatGate';
 import ProvenanceChip from '../components/ProvenanceChip';
 import SkeletonTradeCard from '../components/SkeletonTradeCard';
@@ -757,6 +759,15 @@ export default function TradesScreen({ navigation, route }: any) {
   const standingOfferReady = standingOffersOn && likesYouOn && picksInPoolOn;
   // #357/#358/#359 — Team Review entry (dark until the operator flips it).
   const teamReviewOn = useFlag('trades.team_review');
+  // Team overhaul entry (BUILD-CONTRACT §9 / D9). The active-overhaul probe
+  // runs only while the flag is on: flag off ⇒ no request and no card.
+  const overhaulOn = useFlag('overhaul.enabled');
+  const activeOverhaulQ = useQuery({
+    queryKey: ['overhaul', leagueId],
+    queryFn: () => getActiveOverhaul(leagueId!),
+    enabled: !!leagueId && overhaulOn,
+  });
+  const activeOverhaul = activeOverhaulQ.data?.active ?? null;
   // #269 — specific-team targeting + league picker move into the full
   // sheet; the mode-bar's Team and Player chips go away.
   const sheetTargetingOn = useFlag('trades.sheet_targeting');
@@ -7040,6 +7051,24 @@ export default function TradesScreen({ navigation, route }: any) {
                 track('team_review_opened', { league_id: leagueId, source });
               } catch { /* analytics must never block navigation */ }
               navigation.navigate('TeamReview' as never);
+            }}
+          />
+        ) : null}
+
+        {/* Team overhaul entry — directly after Team Review, by contract (D9).
+            Shown while `overhaul.enabled` is on or a saved plan exists. */}
+        {(overhaulOn || !!activeOverhaul) && leagueId ? (
+          <OverhaulEntryCard
+            leagueId={leagueId}
+            active={activeOverhaul}
+            onStart={() => {
+              try {
+                track('overhaul_started', { league_id: leagueId, entry: 'trades_home_card' });
+              } catch { /* analytics must never block navigation */ }
+              navigation.navigate('OverhaulOutlook' as never);
+            }}
+            onResume={(overhaulId) => {
+              navigation.navigate('OverhaulPlan' as never, { overhaulId } as never);
             }}
           />
         ) : null}

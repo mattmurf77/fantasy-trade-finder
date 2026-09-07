@@ -23,6 +23,7 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
 - [Flags — Trade generation pipeline v2 (matchmaking research — ships dark)](#flags-trade-generation-pipeline-v2-matchmaking-research-ships-dark)
 - [Flags — Trade presentment rules (G6 2026-08-16 — ships ON)](#flags-trade-presentment-rules-g6-2026-08-16-ships-on)
 - [Flags — Send in Sleeper (flagged beta)](#flags-send-in-sleeper-flagged-beta)
+- [Flags — Team overhaul (ships dark)](#flags-team-overhaul-ships-dark)
 - [Flags — Account auth (account-auth plan P2 — ships dark)](#flags-account-auth-account-auth-plan-p2-ships-dark)
 - [Flags — ESPN league linking (Phase 1 — ships dark)](#flags-espn-league-linking-phase-1-ships-dark)
 - [Flags — Multi-platform league linking — MFL / Fleaflicker (Phase 1 — ships dark; [plan](plans/multi-platform-linking-plan-2026-07-17.md))](#flags-multi-platform-league-linking-mfl-fleaflicker-phase-1-ships-dark-plan)
@@ -274,6 +275,12 @@ earlier pre-deploy reads landed on exactly 30 only because every batch was a ful
 | `trade.send_in_sleeper` | false | ⚠️ **ToS-adverse.** `POST/GET/DELETE /api/sleeper/link` + `POST /api/trades/propose` (all 404 when off) — sends trades through Sleeper's *undocumented* private write API (`propose_trade` GraphQL mutation). Requires `SLEEPER_TOKEN_KEY`. Adapter: `backend/sleeper_write.py`; token store: `sleeper_credentials`. Capture + ToS/risk (C4): [runbook](plans/sleeper-write-capture-runbook.md). |
 | `trade.send_in_mfl` | false | "Send in MFL" — `POST /api/trades/propose-mfl` + the MFL branch of `POST /api/trades/validate` + the mobile send button on MFL leagues (404 / unmounted when off). Rides MFL's **documented** import API (`import?TYPE=tradeProposal`) with the #177 `MFL_USER_ID` cookie (`mfl_credentials`; requires `SLEEPER_TOKEN_KEY` for at-rest encryption). Adapter: `backend/mfl_write.py`. **Keep off until the operator live-verification checklist passes** (import response shape, wwwNN import host, pick encodings, MFL client registration): [scope block](feedback/items/177-mfl-auth-link/send-in-mfl-scope.md). |
 | `espn.send` | false | ⚠️ **Undocumented ESPN write API.** "Send in ESPN" — `POST /api/trades/propose-espn` + the mobile send button on ESPN leagues (404 / P0-6 copy fallback when off). Players only; picks hard-block. Payload live-verified for football 2026-08-11 ([capture](plans/espn-send-live-capture-2026-08-11.md)); adapter `backend/espn_write.py`; cookies from `espn_credentials` (requires `SLEEPER_TOKEN_KEY`). **Deliberately ABSENT from `config/features.json` (D-026)** — do not add the key until the auth probe proves `espn_s2`+`SWID` alone authorize a server-side POST (the captures were browser-session; a CSRF/session token may be required). |
+
+## Flags — Team overhaul (ships dark)
+
+| Flag | Default | Gates |
+|---|---|---|
+| `overhaul.enabled` | false | **Team overhaul v1** ([contract](plans/team-overhaul/BUILD-CONTRACT.md)): the mobile `OverhaulEntryCard` on the Acquire landing and `POST /api/overhauls`, `/generate`, `/assemble`, `/send` (404 `feature_disabled` when off). Deliberately **not** gated so live sends stay reachable after a rollback: every GET, `/settings`, `/decisions`, `/priorities`, `/prepare-send`, `/refresh`, `/attempts/{id}/status`. Sleeper is the only platform that can send in v1 (through `_sleeper_propose_core`, so `trade.send_in_sleeper` and the verified gate still apply); MFL/ESPN get the planning flow plus a copy handoff. **No new env vars and no `model_config` keys** — search bounds are module constants in `backend/overhaul_service.py` (`OVERHAUL_BATCH_SIZE=24`, `OVERHAUL_MAX_SUBSETS=40`, `OVERHAUL_MAX_ROADMAPS=5`, `OVERHAUL_MIN_PACKAGES=4`, `OVERHAUL_MAX_PACKAGES=5`, `OVERHAUL_MAX_ALTS_PER_PACKAGE=6`, `OVERHAUL_GENERATION_BUDGET_S=20.0`). Off ⇒ no entry card, gated routes 404, every existing path byte-identical. Graduation: the operator TestFlight checklist in `docs/plans/team-overhaul/QA.md`. |
 
 ## Flags — Account auth (account-auth plan P2 — ships dark)
 

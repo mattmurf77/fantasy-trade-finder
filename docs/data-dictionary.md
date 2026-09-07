@@ -8,6 +8,7 @@ Source of truth: `backend/database.py`. Keep this file in sync when adding/chang
 ## Table of Contents
 
 - [Win Now evidence tables](#win-now-evidence-tables)
+- [Team overhaul tables](#team-overhaul-tables) — `overhauls`, `overhaul_offers`, `overhaul_roadmaps`, `overhaul_attempts`, `overhaul_reservations`
 
 **Core / Users / Auth**
 
@@ -1746,3 +1747,27 @@ Additive schema for the experimental beta; the release configuration enables all
 Forecast payloads retain original source capture/publication times, provenance and quality; whole batches prevent joins across publication revisions. Projection payloads retain league facts plus the simulation baseline. Job input JSON freezes the requesting actor’s valuation inputs and parameters and must be treated as private. Pricing/ranking revision hashes and package-level evidence are retained; other managers’ complete boards are not persisted. Job result and scenario payloads retain immutable before/after evidence and metadata; `asset_key` groups repeated exchanges without rewriting prior scenario evidence. Enforced lifecycle is queued → running → complete/failed; queued work resumes from durable input. Unexpired running jobs are never requeued during overlapping deploys; a crashed running search expires before retry. Account lifecycle admissions drain active searches before deleting all user-owned rows.
 
 Serving expiry does not delete history. Worker housekeeping removes jobs after 7 days, scenarios/decisions after 180 days and forecast/projection snapshots after 400 days. Account export/deletion includes all three user-owned tables. Short account-row-guarded writes prevent queued or calculator work from recreating evidence after account deletion; no simulation holds that lock. References are application-enforced strings, not new SQL foreign-key constraints. Access checks live in the new authenticated routes. See [API contract](api-reference.md#season-projections-and-win-now).
+
+## Team overhaul tables
+
+Five additive tables for the durable multi-trade plan ([BUILD-CONTRACT §4](plans/team-overhaul/BUILD-CONTRACT.md)). Defined in `backend/database.py`; persistence in `backend/overhaul_store.py`. JSON columns hold `json.dumps` text; timestamps are ISO-8601 UTC via `_now()`. No `_migrate_db` rows (new tables are created by `create_all`). References are application-enforced strings.
+
+### `overhauls`
+
+One row per planning session. `overhaul_id` (`ovh_` + 12 hex) unique. Columns: `account_user_id` (= `sess.user_id`), `league_user_id` (= `_league_user_id(sess)`, the roster identity), `league_id`, `platform`, `scoring_format`, `status` (`setup|reviewing|assembled|executing|complete|archived`), `revision` (bumps on every settings PUT), `client_key` (create idempotency within account + league — **added beyond the contract's column list** because the contract requires create idempotency and nothing else could hold the key), `settings_json` (OverhaulSettings §5.1), `snapshot_json` (§5.2, refreshed on generate / prepare-send / refresh; also carries `my_roster_id` and `rosters` per user), `recovery_json` (RecoveryRequirement §5.3), `generation_json` (last run summary incl. `exhausted_subsets`), `selected_roadmap_id`, `created_at`, `updated_at`. Indexes `(account_user_id, league_id)`, `(league_id, status)`.
+
+### `overhaul_offers`
+
+One generated exchange with one counterparty. `offer_id` (`ovh_` + 12 hex) unique; `overhaul_id`; `revision` it was generated under; `package_hash` = sha1 of `platform|league|seller|counterparty|sorted give|sorted receive`; `counterparty_user_id`, `counterparty_username`; `give_ids_json`, `receive_ids_json` (mixed player + FTF pick ids); `card_json` (the public `trade_card_to_dict` payload plus `offer_id`); **`evidence_json` — PRIVATE**: `OwnerDecisionContext.as_dict()` and never returned to any client; `is_recovery` (1 when the receive side targets the user's own next-season first); `decision` (`like|pass|undecided`), `decided_at`, `decision_client_key` (decisions idempotency — **added beyond the contract's column list** for the same reason as `client_key`); `availability` (`fresh|stale`); `created_at`. **Unique `(overhaul_id, package_hash)`** — regeneration cannot resurrect a passed exact offer.
+
+### `overhaul_roadmaps`
+
+Immutable rows; a priorities write inserts a new `version` and flips the previous row's `is_current` to 0. `roadmap_id` (`rm_` + 12 hex), `overhaul_id`, `version`, `revision`, `packages_json` (Package[] §5.5 — `status` stored as `open`, recomputed at read time from attempts), `compat_json` (ValidationReceipt §5.6), `summary_json` (`outgoing_ids, incoming_ids, counterparties, unused_eligible_ids, score, diversity_key` + `rank`, `recovery_resolved`), `is_current`, `created_at`. Unique `(roadmap_id, version)`.
+
+### `overhaul_attempts`
+
+One send attempt of one offer inside one batch. `attempt_id` unique; `batch_id`; `overhaul_id`; `roadmap_id`, `roadmap_version`; `package_id`, `tier`, `offer_id`; `idempotency_key` (batch-level client key); `request_hash` (sha1 of the exact offer set + roadmap version); `state` (cross-client enum, see [cross-client-invariants](cross-client-invariants.md#team-overhaul-enums)); `state_source` (`server|provider|ownership_refresh|user_reported`); `provider_transaction_id`; `proposal_event_id` (the id handed to `_sleeper_propose_core` and therefore `trade_proposals`); `error_json` (`{code, message}`); `created_at`, `updated_at`, `observed_at`. Unique `(batch_id, offer_id)`; index `(overhaul_id, state)`. Transitions are compare-and-swap on `state` and terminal states never regress.
+
+### `overhaul_reservations`
+
+One ACTIVE row per outgoing asset per seller per league while a send is live. `league_id`, `seller_user_id`, `asset_id`, `overhaul_id`, `package_id`, `batch_id`, `active` (1 while active, **NULL once released** so the unique constraint only binds active rows), `created_at`, `released_at`. Unique `(league_id, seller_user_id, asset_id, active)`. Claims are all-or-nothing inside one transaction; a conflict lists every reserved asset and writes nothing.

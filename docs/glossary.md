@@ -505,3 +505,19 @@ A unique allocation of currently available players meeting the existing dynasty 
 
 - **Normalized whole-team benefit:** weighted change in complete optimal-lineup point production and complete dynasty asset value, each scaled by the larger before/after total. A value proxy never becomes projected points; missing components retain uncertainty.
 - **Weaker-manager benefit:** the smaller of the two managers' normalized gains. Used before total benefit and simplicity so one large gain cannot conceal the other manager's loss. Meaningful benefit is a policy threshold, not acceptance likelihood.
+
+## Team overhaul
+
+**Overhaul** — The durable planning session for a substantial roster change (one `overhauls` row): an outlook (`push_all_in` | `blow_it_up`), a user-approved eligible pool, reviewed offers, assembled roadmaps and the send attempts made from them. One active overhaul per (account, league). Flag `overhaul.enabled`.
+
+**Eligible pool** — The asset ids (players + owned FTF picks) the user permits to leave. Every generated or sent offer's give set is a subset of it — enforced by a post-filter independent of the generator (E01), so a sweetener can never be added silently. Unused pool assets are allowed and reported (`unused_eligible_ids`).
+
+**Package** — Inside one roadmap, a fixed outgoing asset set plus its liked alternative offers (all sharing that exact give set). Product copy "Package N of M". One accepted offer consumes the package's assets and invalidates its other alternatives.
+
+**Tier** (overhaul) — Integer priority rank ≥ 1 inside a package. Offers in the same tier are sent together and race on a first-come, first-served basis for the same outgoing assets; at most one offer per counterparty per tier (D4). Distinct from player **tiers** on the ranking board.
+
+**Roadmap** — One alternative full plan: 4–5 give-disjoint, receive-disjoint packages built only from liked, fresh, in-pool offers; ≤5 materially distinct roadmaps (by `diversity_key`, the sorted tuple of package give sets) are offered. Immutable versions — a priorities write creates `version+1`.
+
+**Attempt** — One send of one offer inside one batch (`overhaul_attempts`), with a cross-client state enum (`queued … stale`), a state source (server / provider / ownership refresh / user-reported) and, for Sleeper, the `provider_transaction_id`. Accepted is derived from ownership change on refresh, never asserted by the client.
+
+**Recovery (Priority 1: Recover your first)** — For `blow_it_up`, the exact-identity requirement to own the user's **own original** next-season (league season + 1) first-round pick; when a league-mate holds it, a targeted search against that holder produces `is_recovery` offers. Advisory: it never blocks other sends.
