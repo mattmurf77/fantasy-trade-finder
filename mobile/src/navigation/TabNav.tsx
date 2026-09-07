@@ -39,6 +39,17 @@ import TradesScreen from '../screens/TradesScreen';
 import PortfolioScreen from '../screens/PortfolioScreen';
 import TradeCalculatorScreen from '../screens/TradeCalculatorScreen';
 import TeamReviewScreen from '../screens/TeamReviewScreen';
+// Team overhaul (flag `overhaul.enabled`, docs/plans/team-overhaul/BUILD-CONTRACT.md §9).
+// All eight register UNCONDITIONALLY in the Trades stack — the flag gates the
+// entry card on TradesHome, never the navigator entry.
+import OverhaulOutlookScreen from '../screens/OverhaulOutlookScreen';
+import OverhaulAssetsScreen from '../screens/OverhaulAssetsScreen';
+import OverhaulTargetsScreen from '../screens/OverhaulTargetsScreen';
+import OverhaulReviewScreen from '../screens/OverhaulReviewScreen';
+import OverhaulRoadmapsScreen from '../screens/OverhaulRoadmapsScreen';
+import OverhaulPrioritiesScreen from '../screens/OverhaulPrioritiesScreen';
+import OverhaulSummaryScreen from '../screens/OverhaulSummaryScreen';
+import OverhaulPlanScreen from '../screens/OverhaulPlanScreen';
 // Presentation v2 (flag `trades.presentation_v2`, docs/plans/
 // trade-presentation-v2/scope.md). Both screens register UNCONDITIONALLY,
 // per the house rule that a flag gates the ENTRY POINT, not the navigator
@@ -495,6 +506,51 @@ function TradesStackNav() {
         name="TeamReview"
         component={TeamReviewScreen}
         options={subScreenOptions('Team review', 'TradesHome')}
+      />
+      {/* Team overhaul (BUILD-CONTRACT §9) — the eight-step plan flow, entered
+          from OverhaulEntryCard directly below Team Review on TradesHome.
+          Tab-stack screens: NO local FeedbackFAB on any of them (#188/#196).
+          Params: every screen takes `{overhaulId}` (Outlook's is optional);
+          Priorities adds `{roadmapId, packageIndex}`, Summary `{roadmapId}`. */}
+      <TradesStack.Screen
+        name="OverhaulOutlook"
+        component={OverhaulOutlookScreen}
+        options={subScreenOptions('Team overhaul', 'TradesHome')}
+      />
+      <TradesStack.Screen
+        name="OverhaulAssets"
+        component={OverhaulAssetsScreen}
+        options={subScreenOptions('Your trade pool', 'TradesHome')}
+      />
+      <TradesStack.Screen
+        name="OverhaulTargets"
+        component={OverhaulTargetsScreen}
+        options={subScreenOptions('Targets', 'TradesHome')}
+      />
+      <TradesStack.Screen
+        name="OverhaulReview"
+        component={OverhaulReviewScreen}
+        options={subScreenOptions('Review offers', 'TradesHome')}
+      />
+      <TradesStack.Screen
+        name="OverhaulRoadmaps"
+        component={OverhaulRoadmapsScreen}
+        options={subScreenOptions('Roadmaps', 'TradesHome')}
+      />
+      <TradesStack.Screen
+        name="OverhaulPriorities"
+        component={OverhaulPrioritiesScreen}
+        options={subScreenOptions('Priorities', 'TradesHome')}
+      />
+      <TradesStack.Screen
+        name="OverhaulSummary"
+        component={OverhaulSummaryScreen}
+        options={subScreenOptions('Send offers', 'TradesHome')}
+      />
+      <TradesStack.Screen
+        name="OverhaulPlan"
+        component={OverhaulPlanScreen}
+        options={subScreenOptions('Your overhaul', 'TradesHome')}
       />
       <TradesStack.Screen
         name="TradeCalculator"

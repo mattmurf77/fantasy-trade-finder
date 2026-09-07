@@ -93,6 +93,7 @@
     "test:standing-offer-362": "node tests/check-standing-offer-362.js",
     "test:swipe-failure-recovery": "node tests/check-swipe-failure-recovery.js",
     "test:swipe-guard-telemetry": "node tests/check-swipe-guard-telemetry.js",
+    "test:team-overhaul": "node tests/check-team-overhaul.js",
     "test:team-review": "node tests/check-team-review.js",
     "test:team-review-depth": "node tests/check-team-review-depth.js",
     "test:tier-move-placement": "node tests/check-tier-move-placement.js",
