@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-09-07 — Owner-only: ship the paged insert, restore budgets, then slim per-row evidence](#2026-09-07--owner-only-ship-the-paged-insert-restore-budgets-then-slim-per-row-evidence)
 - [2026-09-07 — Team overhaul: PR review, operator D1/D9 confirmation, TestFlight checklist, then flag flip](#2026-09-07--team-overhaul-pr-review-operator-d1d9-confirmation-testflight-checklist-then-flag-flip)
 - [2026-09-04 — Personal-market policy: answer Q-038, ship the branch, then Stage A telemetry](#2026-09-04--personal-market-policy-answer-q-038-ship-the-branch-then-stage-a-telemetry)
 - [2026-09-03c — API audit fixes: merge the PR, then the held items (ping-then-init, web push, route hygiene)](#2026-09-03c--api-audit-fixes-merge-the-pr-then-the-held-items-ping-then-init-web-push-route-hygiene)
@@ -45,6 +46,13 @@
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## 2026-09-07 — Owner-only: ship the paged insert, restore budgets, then slim per-row evidence
+
+1. **Ship `claude/owner-only-impression-chunking` after PR #288 lands** (operator sequencing). Rebase on fresh `origin/main`, exact-head CI, squash-merge, verify Render LIVE on the merge sha. Fix + evidence: [G-072](GOTCHAS.md), [runbook row](../docs/runbook.md#common-failure-modes), `backend/tests/test_deck_impressions_paging.py`.
+2. **Restore the stopgap budgets.** `python3 scripts/set_knob.py owner_pair_budget 4096` and `owner_total_budget 60000` (source `owner-only-oom-recovery-20260907`), then one real Find a Trade and confirm in Render logs a `bake-off run … roster=owner_v1` line with no `impression logging failed` after it. Until then decks are ~250 cards, not uncapped.
+3. **Slim the per-row evidence** — separate PR, touches `docs/data-dictionary.md`. Every owner impression row repeats two run-wide blobs: `features_json.owner_generation` (~5 KB, identical across the deck) and the 309-key `config` block inside `owner_request` (~9 KB). Both already live once per run in `bakeoff_runs.config_json`. Keep per-card `valuation_json` and the per-card input projection; reference the run for the rest. Halves the write for the same evidence.
+4. **Then the owner_v1 tuning recommendations** from the 2026-09-07 interview review, in order: rank by the weaker side's utility; give the fairness setting the R01 meaning (personal-loss allowance); stop counting age three times (market map is already `age_pref_value`-adjusted, then `_now_lean` in selection/utility, then `age_now_mult` in the lineup proxy); demote counterparties on pure consensus fallback; asymmetric middle-outlook weights; headliner-repeat demotion. Each is a scope block against `docs/plans/owner-engine-challenger/scope.md`.
 
 ## 2026-09-07 — Team overhaul: PR review, operator D1/D9 confirmation, TestFlight checklist, then flag flip
 

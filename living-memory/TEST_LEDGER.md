@@ -11,6 +11,13 @@
 
 ---
 
+## 2026-09-07 — Owner-only outage diagnosis and paged impression insert
+
+**Production evidence (read-only, Render logs API):** web service at 06:13:23 and 06:13:51 UTC ran `roster=owner_v1 … arms={'owner_v1': (1037, 7852)}` and `(1456, 9347)`; both followed by `impression logging failed … SSL SYSCALL error: EOF detected` and `ValueError: owner_impression_unavailable`. Postgres `dpg-d7g36mdckfvc73a329k0-a` (basic_256mb) logged `terminated by signal 9: Killed` + `database system is in recovery mode` at 06:13:31 and 06:14:10. Deploy `dep-daf4ma15efls73aeq5j0` LIVE on `16bb6fd1`.
+**Local reproduction (synthetic 12-team, 28 assets/team, default budgets):** 1,351 cards / 45,056 evaluations / 20.7 s; per-row payload `valuation_json` 4,127 B + `owner_generation` 5,066 B + `config` block 8,904 B ≈ 21 KB → ≈28.5 MB for one deck. Under 300 / 3,000 budgets: 251 cards / 0.5 s / ≈5.3 MB.
+**Mitigation applied 13:55:22 UTC** via `scripts/set_knob.py` (source `owner-only-oom-mitigation-20260907`): `owner_pair_budget` 4096→300, `owner_total_budget` 60000→3000. Not yet exercised by a real search at time of writing.
+**Fix:** `save_deck_impressions` paged at `DECK_IMPRESSION_INSERT_ROWS` = 100. Focused run `test_deck_impressions_paging.py` + `test_decline_reasons.py` + `test_bakeoff_serving.py` + `test_owner_only_routes.py` + `test_owner_bakeoff.py`: **211 passed in 7.22 s**. Full backend suite on the fix commit: **5,813 passed / 1 skipped in 371.84 s** (local, Python 3.12). Gates: not express — scope is a one-function reliability fix with no schema/API/flag change; evidence is this ledger + guardrail test; docs updated (runbook, G-072).
+
 ## 2026-09-07 — Team overhaul: sends on MFL and ESPN (owner D1 revision), branch evidence
 
 Branch `claude/overhaul-all-platform-sends` from `origin/main` `6f115d1b`. Owner revised D1: "MFL and ESPN trade sending has been validated. It should work for all." Backend: `/api/trades/propose-mfl` and `/api/trades/propose-espn` bodies extracted verbatim into `_mfl_propose_core` / `_espn_propose_core` (routes are thin wrappers; codes/statuses/messages unchanged); overhaul `capabilities.can_propose` per platform behind `trade.send_in_sleeper` / `trade.send_in_mfl` / `espn.send`, `can_propose_picks` false on ESPN with `pick_unsupported_on_platform` blockers, `reconnect_required` when unlinked, fresh MFL/ESPN roster reads for refresh with a `roster_source` guard that never terminalizes attempts from session-stale data; additive `overhaul_attempts.provider_status`. Mobile: platform-aware summary/assets copy; guard `check-team-overhaul.js` now 21 assertions.
