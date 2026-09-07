@@ -1,7 +1,20 @@
 # Release and activation record
 
-**Status:** not yet released or activated. Complete the evidence below only
-after exact-head checks, deployment and effective configuration readback.
+**Status:** publication and activation explicitly authorized; release in progress.
+No new deployment or activation yet. Reviewed implementation commit: `824884ff`.
+
+The push to public `mattmurf77/fantasy-trade-finder` was rejected by the
+publication safeguard before process creation. No alternate account,
+transport or indirect publication was attempted. After the public repository
+and production/shadow status were disclosed, the owner explicitly requested
+“Oh. I thought it was live. Push it live” on September 7. This authorizes the
+public release and the previously requested owner-only/uncapped activation.
+Exact-head hosted CI, merge/deployment and activation remain required gates.
+
+Fresh main fetch on September 7 still resolves to `0e3d6b70`; no rebase or
+runtime change is needed. Read-only production preflight at 05:06:08 UTC
+confirms that baseline LIVE, owner include=1/serve=0, controls unchanged and
+healthy analytics. The new `bakeoff_owner_only` key is absent until deployment.
 
 ## Authorized scope
 

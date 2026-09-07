@@ -33,6 +33,20 @@ deck60/group0 and prior controls; no activation is established here. Scope
 distinguishes uncapped output from unchanged computational search budgets.
 [Scope and evidence](../docs/plans/owner-only-uncapped/verification.md).
 
+Local release commit824884ff prepared; public GitHub push rejected before
+execution by publication safeguard. No retry via another route, PR, deployment
+or activation. Destination-specific disclosure approval requested; source and
+all local evidence retained. On September 7, following public destination and
+shadow-status disclosure, owner explicitly requested “Push it live.” Fresh main
+fetch remains0e3d6b70 and GET-only05:06UTC preflight is healthy; source unchanged.
+Publication now authorized; exact-head hosted CI/deployment/activation remain
+pending. [Release gate](../docs/plans/owner-only-uncapped/release.md).
+
+Release-day independent focused rerun2026-09-07 05:07:20UTC: five owner suites,
+**164passed49.37s**, no failures/skips, unchanged824884ff runtime. Fresh isolated
+SQLite and pinned local DP fixtures; hot-off/ghost/cache/64-card coverage passes.
+Dense synthetic generation28.55s under high host load, no production SLA claim.
+
 ## 2026-09-06 — Owner construction challenger, implementation checkpoints
 
 New isolated `codex/owner-engine-challenger-20260906` from `4c343a48` introduces

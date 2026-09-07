@@ -108,6 +108,24 @@ organization memory was not edited. No mobile/web/feature-flag source delta.
 
 Hosted exact-head CI, actual merge/deployment and live configuration readback
 are recorded separately in [release](release.md); this gate alone is not activation.
+Local reviewed release commit `824884ff` was created, but its push was rejected
+before execution by the public-publication safeguard. No alternate publication
+was attempted. On September 7, after public repository and shadow-status
+disclosure, the owner explicitly renewed the request to push live. Publication
+is now authorized; exact-head CI and verified deployment/activation remain
+separate gates recorded in the release record. No runtime source changed from
+the fully tested `824884ff` implementation.
+
+## Release-day focused rerun
+
+Release-day independent rerun at **2026-09-07 05:07:20 UTC**, unchanged runtime
+`824884ff`: all five owner suites (bakeoff, constructor, acceptance, exclusive
+routes and generator routes) passed **164 tests in 49.37s**, no skips/failures.
+Python 3.12.14; fresh isolated SQLite outside the repository and pinned local
+DP fixtures, no production access. This repeats ghost/captured hot-off/cache,
+rollback and 64-card publication checks. The dense synthetic case still emits
+6,622 packages from 45,056 evaluations but took 28.55s on this loaded local
+host (load averages 9.83/13.07/9.61); prior timings are not a production SLA.
 
 ## Manual device checklist — UNRUN
 
