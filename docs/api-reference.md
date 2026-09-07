@@ -257,6 +257,15 @@ exposure; include-only does not serve it. Organic jobs retain draft attribution;
 selected jobs record a stable request-input assignment against `legacy_fair`,
 `legacy_asset_ideas` or `legacy_targeted`, not a disguised owner fallback.
 
+When `bakeoff_owner_only` is also enabled, newly captured requests execute and
+serve only owner generation: selected assignment probability becomes 1 and
+no legacy fallback/control is generated. Organic returned-card/group quotas
+are bypassed. All distinct eligible packages found are retained, subject to
+existing request, safety and computational search bounds; this does not promise
+exhaustive enumeration. Real inbound-interest cards are separate sources, not
+owner-generated recommendations. No response field or client upgrade beyond
+the existing owner-trial contract is introduced by this server-only mode.
+
 Additive public card/idea fields: `impression_id`, `model_arm`,
 `generator_version`, `preserve_server_order: true`,
 `selection_coverage: "full" | "partial"`, optional `selection_notice`, and

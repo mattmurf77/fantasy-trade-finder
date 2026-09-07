@@ -1160,6 +1160,7 @@ _DEFAULT_CFG: dict[str, float] = {
     # never change existing engine arms or their pinned profiles.
     "bakeoff_include_owner":      0.0,
     "bakeoff_serve_owner":        0.0,
+    "bakeoff_owner_only":         0.0,
     # Owner arm only, computational limits (not pricing permissions).
     "owner_pool_size":           16.0,
     "owner_pair_budget":         4096.0,

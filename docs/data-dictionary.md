@@ -419,6 +419,15 @@ Existing `propensity` is an ordering multiplier, **not** selected assignment
 probability; the latter lives in explicit experiment JSON. Selected repeated
 identical requests share assignment and are not independent trials.
 
+Owner-exclusive mode (`bakeoff_owner_only` with owner include/serve) records a
+distinct policy version `owner-only-v1` and assignment probability 1; there is no
+concurrently generated legacy control. Analyze this configuration window
+separately from the historical 50/50 selected experiment. Stored historical
+rows are not rewritten. Organic diagnostics/configuration capture the exclusive
+roster and bypassed output quotas; owner organic impressions also use
+`policy_version="owner-only-v1"` with unit `owner_only`. Computational budgets
+remain recorded; generator/version remains `owner_v1` / `owner-v1`.
+
 Serving trial snapshots are withheld until all returned cards have real IDs;
 failure/incomplete persistence produces a named unavailable job rather than
 exposing an unmeasured owner draft. Run-ledger writes remain best-effort and are
