@@ -8,6 +8,8 @@ All fixtures are synthetic and use no provider or database reads/writes.
 
 from copy import deepcopy
 from dataclasses import FrozenInstanceError
+import json
+import time
 
 import pytest
 
@@ -403,3 +405,73 @@ def test_batch_does_not_reauthorize_partial_against_different_request():
     kwargs["pinned_give_players"] = ["g", "different"]
     result = owner.evaluate_owner_trades([card], **kwargs)[0]
     assert not result.eligible and result.reason == "selection_mismatch"
+
+
+def test_distinct_same_headliner_companions_are_not_collapsed():
+    kwargs = world({"g": ("WR", 26, 1000), "r": ("WR", 26, 700),
+                    "s1": ("WR", 26, 300), "s2": ("WR", 26, 300)},
+        ["g"], ["r", "s1", "s2"], viewer={"g": 600, "r": 1000, "s1": 500, "s2": 500},
+        opponent={"g": 1600, "r": 400, "s1": 100, "s2": 100})
+    cards, report = generate_owner_trades(**kwargs)
+    assert {(tuple(c.give_player_ids), frozenset(c.receive_player_ids)) for c in cards} == {
+        (("g",), frozenset(("r", "s1"))), (("g",), frozenset(("r", "s2")))}
+    assert report.as_dict()["emitted"] == 2
+
+
+def test_more_than_sixty_distinct_eligible_offers_return_without_output_limit():
+    give, receive = [f"g{i}" for i in range(8)], [f"r{i}" for i in range(8)]
+    kwargs = world({pid: ("WR", 26, 1000) for pid in give + receive}, give, receive,
+        viewer={pid: 800 if pid in give else 1200 for pid in give + receive},
+        opponent={pid: 1200 if pid in give else 800 for pid in give + receive})
+    cards, report = generate_owner_trades(**kwargs)
+    assert len(cards) == len(keys(cards)) == 64
+    assert report.as_dict()["limits"] == {"pool": 16, "per_pair": 4096, "total": 60000}
+
+
+def test_exact_package_duplicates_are_still_suppressed(monkeypatch):
+    original = owner._Search.candidates
+    def repeated(self, member, *, partial=False):
+        for card in original(self, member, partial=partial):
+            yield card
+            yield deepcopy(card)
+    monkeypatch.setattr(owner._Search, "candidates", repeated)
+    assert len(generate_owner_trades(**favorable())[0]) == 1
+
+
+def test_twelve_team_dense_search_reports_output_cost_without_capping(capsys):
+    # Plausible league/roster sizes with intentionally dense reciprocal
+    # preferences: a stress bound, not a forecast of production demand.
+    values = [300, 500, 800, 1000, 1500, 2200]
+    positions = ["QB", "RB", "WR", "WR", "TE", "RB"]
+    spec, rosters = {}, {}
+    for team in range(12):
+        uid = f"team{team}"
+        rosters[uid] = []
+        for index in range(24):
+            pid = f"{uid}_asset{index}"
+            rosters[uid].append(pid)
+            spec[pid] = (positions[index % 6], [23, 25, 28, 31][index % 4], values[index % 6])
+    viewer = "team0"
+    kwargs = world(spec, rosters[viewer], rosters["team1"], user_id=viewer,
+        viewer={p: value * (.85 if p in rosters[viewer] else 1.15)
+                for p, (_, _, value) in spec.items()})
+    kwargs["league"].members = [ts.LeagueMember(uid, uid, ids,
+        {p: ts.value_to_elo(spec[p][2] * (1.15 if p in rosters[viewer] else .85))
+         for p in rosters[viewer] + ids}, True) for uid, ids in rosters.items() if uid != viewer]
+    kwargs["opponent_outlooks"] = {m.user_id: "not_sure" for m in kwargs["league"].members}
+    start = time.perf_counter()
+    cards, report = generate_owner_trades(**kwargs)
+    elapsed = time.perf_counter() - start
+    data = report.as_dict()
+    assert data["evaluated"] == 11 * 4096
+    assert data["budget_exhausted"]
+    assert len(cards) > 60
+    assert len(cards) == len({(c.target_user_id, frozenset(c.give_player_ids),
+                              frozenset(c.receive_player_ids)) for c in cards})
+    with capsys.disabled():
+        print(json.dumps({"synthetic_teams": 12, "assets_per_team": 24,
+            "elapsed_seconds": round(elapsed, 3), "evaluated": data["evaluated"],
+            "emitted": len(cards), "budget_exhausted": data["budget_exhausted"],
+            "limits": data["limits"], "private_decision_context_bytes_total":
+            sum(len(c.owner_evaluation.snapshot_json.encode()) for c in cards),
+            "report_json_bytes": len(json.dumps(data).encode())}))

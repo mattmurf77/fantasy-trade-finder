@@ -11,6 +11,28 @@
 
 ---
 
+## 2026-09-06 — Owner-only uncapped discovery, implementation checkpoint
+
+Operator explicitly requests owner generation on, all other generated arms off,
+and no returned-offer quotas. Fresh `0e3d6b70` isolated Fleeced-derived source;
+the dirty canonical organization and historical checkouts are preserved.
+Parent mobile TypeScript, all97 guard scripts, testID lint and web190 passed
+on unchanged client/web source; lockfile-pinned isolated install801packages.
+Parent core/runner/acceptance **102passed5.52s**, including dense synthetic
+12-team stress:45056evaluated/6622emitted4.594s; computationalbudgetsunchanged.
+Server focused321passed6.93s. First broad run interrupted after1503pass/1fail
+for missing serving-knob inventory registration; no golden drift. Explicit
+exclusion added, all12arm-A tests passed; fresh full frozen-source run started.
+Final frozen parent fullbackend **5809passed/1skip369.10s**, exit0; final97mobile
+guards passed again. Independent253passed8.73s plus173consumer retention probe,
+both original real-worker races RED/GREEN, and actual selected routes0.03–1.54s.
+Parent approved complete diff and bounded performance evidence. Hosted CI,
+merge/deployment and activation are still separate gates. Production
+GET-only preflight at2026-09-07 01:23UTC still shows owner include1/serve0,
+deck60/group0 and prior controls; no activation is established here. Scope
+distinguishes uncapped output from unchanged computational search budgets.
+[Scope and evidence](../docs/plans/owner-only-uncapped/verification.md).
+
 ## 2026-09-06 — Owner construction challenger, implementation checkpoints
 
 New isolated `codex/owner-engine-challenger-20260906` from `4c343a48` introduces

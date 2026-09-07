@@ -3105,11 +3105,12 @@ def _load_trade_disposition_keys(user_id: str, league_id: str):
         amnesty_epoch=float(_deck_cfg("pass_cooldown_start_epoch", 0.0)))
 
 
-def _trade_safety_signature(owner_state: tuple[bool, bool] | None = None):
+def _trade_safety_signature(owner_state: tuple[bool, ...] | None = None):
     """Stamp captured owner permission; freshness checks read live defaults."""
     if owner_state is None:
-        owner_include = _bakeoff.bakeoff_enabled() and "owner_v1" in _bakeoff.arm_roster()
-        owner_state = (owner_include, owner_include and _bakeoff.serve_owner())
+        owner_include = _bakeoff.bakeoff_enabled() and "owner_v1" in _bakeoff.arm_roster(exclusive=False)
+        owner_serve = owner_include and _bakeoff.serve_owner()
+        owner_state = (owner_include, owner_serve, owner_serve and _bakeoff.owner_only())
     return [key for key, enabled in (
         ("market", _trade_policy.policy_enabled()),
         ("market_shadow", _trade_policy.telemetry_enabled()),
@@ -3118,6 +3119,7 @@ def _trade_safety_signature(owner_state: tuple[bool, bool] | None = None):
         ("mutual_benefit", getattr(FLAGS, "trade_mutual_benefit_v1", False)),
         ("owner_include", owner_state[0]),
         ("owner_serve", owner_state[1]),
+        ("owner_only", len(owner_state) > 2 and owner_state[2]),
     ) if enabled]
 
 
@@ -5099,6 +5101,8 @@ def _log_deck_signal_impressions(
                 request_evidence = getattr(card, "owner_request_evidence", None)
                 features["owner_request"] = (_owner_request_snapshot(request_evidence, card)
                                              if request_evidence is not None else None)
+                if request_evidence is not None and request_evidence.get("exclusive"):
+                    row["policy_version"] = request_evidence["version"]
                 features["owner_generation"] = getattr(card, "owner_generation_diagnostics", None)
                 row["valuation_json"] = json.dumps(evidence.as_dict())
                 row["policy_variant"] = "owner_v1"
@@ -7242,12 +7246,16 @@ def _run_trade_job(
         roster_shadow = getattr(FLAGS, "trade_roster_evaluation", False) and league_id != "league_demo"
         owner_on = _owner_enabled(league_id)
         owner_serve = owner_on and _bakeoff.serve_owner()
+        owner_exclusive = owner_serve and _bakeoff.owner_only()
+        if owner_exclusive:
+            # Return every eligible owner offer, not a counterfactual holdout.
+            ghost_on = False
         with _trade_jobs_lock:
             j = _trade_jobs.get(job_id)
             if _job_live(j):
                 if market_live or roster_live or owner_on:
                     j["final_checks_pending"] = True
-                safety_signature = _trade_safety_signature((owner_on, owner_serve))
+                safety_signature = _trade_safety_signature((owner_on, owner_serve, owner_exclusive))
                 if safety_signature:
                     j["safety_policy"] = safety_signature
 
@@ -7310,9 +7318,13 @@ def _run_trade_job(
         bakeoff_run = None
         bakeoff_on = _bakeoff.bakeoff_active(
             league_id, pinned_give, pinned_receive, opponent_user_id)
+        if owner_exclusive and not pinned_give and not pinned_receive and not opponent_user_id:
+            # A live master-switch reload cannot reroute this captured
+            # exclusive organic request into a legacy generator.
+            bakeoff_on = True
         bakeoff_fixed_order = _bakeoff.bypass_rerankers(
             league_id, pinned_give, pinned_receive, opponent_user_id) or owner_serve
-        presentation_grouped = _bakeoff.group_size() > 0 if bakeoff_on else False
+        presentation_grouped = _bakeoff.group_size() > 0 if bakeoff_on and not owner_exclusive else False
 
         explore_active = (
             _deck_exploration_enabled() and league_id != "league_demo"
@@ -7425,9 +7437,11 @@ def _run_trade_job(
                         "not_interested": list(not_interested_ids), "avoid_positions": avoid_positions},
                     pinned_give_players=pinned_give, pinned_receive_players=pinned_receive,
                     opponent_user_id=opponent_user_id, trade_intent=trade_intent)
-                owner_request_evidence = _owner_selected_assignment(owner_context, "organic", serve=False)
-                owner_request_evidence.update(model_arm="owner_v1", unit="team_draft",
-                                              assignment_probability=None)
+                owner_request_evidence = _owner_selected_assignment(
+                    owner_context, "organic", serve=owner_exclusive, exclusive=owner_exclusive)
+                owner_request_evidence.update(model_arm="owner_v1",
+                    unit="owner_only" if owner_exclusive else "team_draft",
+                    assignment_probability=1.0 if owner_exclusive else None)
             except Exception:
                 log.exception("owner context capture unavailable")
         def _gen_owner(**_overrides):
@@ -7435,9 +7449,10 @@ def _run_trade_job(
             if owner_context is None:
                 raise ValueError("owner_context_unavailable")
             cards, report = generate_owner_trades(**owner_context)
+            diagnostics = report.diagnostics()
             for card in cards:
                 card.owner_request_evidence = owner_request_evidence
-                card.owner_generation_diagnostics = report.diagnostics()
+                card.owner_generation_diagnostics = diagnostics
                 trade_service._trade_cards[card.trade_id] = card
             return cards, report
         if bakeoff_on:
@@ -7456,6 +7471,7 @@ def _run_trade_job(
                     trade_service, {**_generate_kwargs, **ov}),
                 gen_owner = _gen_owner,
                 owner_serving = owner_serve,
+                owner_exclusive = owner_exclusive,
                 league_id = league_id,
                 # Recorded, not inferred: both arrive per-request from the
                 # client and were persisted nowhere else. The trade settings
@@ -7473,7 +7489,7 @@ def _run_trade_job(
             except Exception:
                 log.exception("owner targeted generation unavailable")
                 proposed, owner_report, owner_error = [], None, "generation_unavailable"
-            legacy_cards = trade_service.generate_trades(**_generate_kwargs)
+            legacy_cards = [] if owner_exclusive else trade_service.generate_trades(**_generate_kwargs)
             if owner_context is None and owner_serve:
                 # Do not expose a legacy fallback as treatment when capture
                 # itself failed. The whole job is unavailable, not a trial.
@@ -7481,7 +7497,8 @@ def _run_trade_job(
             if owner_context is None:
                 final_cards = legacy_cards
             else:
-                assignment = _owner_selected_assignment(owner_context, "targeted_deck", serve=owner_serve)
+                assignment = _owner_selected_assignment(owner_context, "targeted_deck",
+                                                       serve=owner_serve, exclusive=owner_exclusive)
                 assignment["captured_at"] = owner_request_evidence["captured_at"]
                 final_cards = proposed if assignment["model_arm"] == "owner_v1" else legacy_cards
                 for card in final_cards:
@@ -14020,6 +14037,7 @@ def asset_trade_ideas():
 
     if _owner_enabled(league_id):
         serve_owner = _bakeoff.serve_owner()
+        owner_exclusive = serve_owner and _bakeoff.owner_only()
         try:
             context = _owner_generation_context(
                 sess=sess, service=service, league=g_league, players=players_dict,
@@ -14030,6 +14048,7 @@ def asset_trade_ideas():
                 opponent_user_id=opponent_user_id, swap_positions=swap_positions,
                 lateral_scope=lateral_scope)
             groups = _owner_selected_ideas(context=context, surface="asset_ideas", serve=serve_owner,
+                                          exclusive=owner_exclusive,
                                           legacy=_legacy_ideas, trade_service=trade_service, sess=sess)
         except Exception:
             log.exception("asset-ideas owner experiment unavailable")
@@ -14084,11 +14103,12 @@ def asset_trade_ideas():
 # unchanged and still runs the model deck (the #330 hand-off auto-run).
 
 _OWNER_SELECTED_VERSION = "owner-selected-v1"
+_OWNER_EXCLUSIVE_VERSION = "owner-only-v1"
 
 
 def _owner_enabled(league_id):
     return (league_id != "league_demo" and _bakeoff.bakeoff_enabled()
-            and "owner_v1" in _bakeoff.arm_roster())
+            and "owner_v1" in _bakeoff.arm_roster(exclusive=False))
 
 
 def _owner_generation_context(*, sess, service, league, players, seed_map,
@@ -14210,23 +14230,23 @@ def _owner_request_snapshot(assignment, card):
 
     The request hash joins the once-per-run full frozen input ledger.
     """
-    result = copy.deepcopy(assignment)
-    inputs = result["input"]
+    # Project before copying: a long deck must not clone every manager's
+    # unrelated boards once per card. The returned snapshot remains detached.
+    inputs = dict(assignment["input"])
     assets = set(card.give_player_ids + card.receive_player_ids)
     for key in ("user_elo", "seed_elo", "user_sources", "players"):
         inputs[key] = {pid: value for pid, value in inputs.get(key, {}).items() if pid in assets}
-    inputs["members"] = [m for m in inputs["members"] if m["id"] == card.target_user_id]
-    for member in inputs["members"]:
-        member["elo"] = {pid: value for pid, value in member["elo"].items() if pid in assets}
+    inputs["members"] = [{**m, "elo": {pid: value for pid, value in m["elo"].items() if pid in assets}}
+                         for m in inputs["members"] if m["id"] == card.target_user_id]
     inputs["opponent_sources"] = {card.target_user_id: {
         pid: source for pid, source in inputs.get("opponent_sources", {}).get(card.target_user_id, {}).items()
         if pid in assets}}
     inputs["manager_preferences"] = {uid: prefs for uid, prefs in inputs.get("manager_preferences", {}).items()
                                       if uid in {inputs["user_id"], card.target_user_id}}
-    return result
+    return copy.deepcopy({**assignment, "input": inputs})
 
 
-def _owner_selected_assignment(context, surface, *, serve):
+def _owner_selected_assignment(context, surface, *, serve, exclusive=False):
     """Stable request/input assignment, not a client-selected model or user trial.
 
     Do not hash capture time: identical repeated requests stay in the same arm.
@@ -14242,7 +14262,8 @@ def _owner_selected_assignment(context, surface, *, serve):
                           for pid, p in context["players"].items()}
     canonical = copy.deepcopy(inputs)
     canonical["config"] = {k: v for k, v in canonical["config"].items()
-                           if not k.startswith("bakeoff_include_") and not k.startswith("bakeoff_serve_")}
+                           if not k.startswith("bakeoff_include_") and not k.startswith("bakeoff_serve_")
+                           and k != "bakeoff_owner_only"}
     for key in ("user_roster", "pinned_give_players", "pinned_receive_players", "acquire_positions",
                 "trade_away_positions", "avoid_positions", "swap_positions"):
         if canonical.get(key) is not None:
@@ -14256,15 +14277,18 @@ def _owner_selected_assignment(context, surface, *, serve):
                     "trade_away_positions", "avoid_positions"):
             if isinstance(prefs.get(key), list):
                 prefs[key] = sorted(prefs[key])
+    exclusive = bool(serve and exclusive)
+    version = _OWNER_EXCLUSIVE_VERSION if exclusive else _OWNER_SELECTED_VERSION
     digest = hashlib.sha256(json.dumps(
-        [_OWNER_SELECTED_VERSION, surface, canonical], sort_keys=True,
+        [version, surface, canonical], sort_keys=True,
         separators=(",", ":"), default=str).encode()).hexdigest()
     control = {"fair_packages": "legacy_fair", "asset_ideas": "legacy_asset_ideas"}.get(surface, "legacy_targeted")
-    treatment = serve and int(digest[:16], 16) % 2 == 1
-    return {"version": _OWNER_SELECTED_VERSION, "surface": surface,
+    treatment = exclusive or (serve and int(digest[:16], 16) % 2 == 1)
+    return {"version": version, "surface": surface,
             "request_hash": digest, "unit": "request_inputs",
             "model_arm": "owner_v1" if treatment else control,
-            "assignment_probability": 0.5 if serve else 1.0,
+            "assignment_probability": 0.5 if serve and not exclusive else 1.0,
+            **({"exclusive": True} if exclusive else {}),
             "serve_enabled": serve, "input": inputs,
             "captured_at": datetime.now(timezone.utc).isoformat(), "market_as_of": "unavailable"}
 
@@ -14273,29 +14297,32 @@ def _log_owner_selected_run(run_id, context, run, served_count):
     assignment = run["assignment"]
     control = {"fair_packages": "legacy_fair", "asset_ideas": "legacy_asset_ideas"}.get(
         assignment["surface"], "legacy_targeted")
+    arms = {"owner_v1": {"cards": run["owner_cards"], "error": run["error"],
+                         "diagnostics": run["report"].as_dict() if run["report"] else {}}}
+    if not assignment.get("exclusive"):
+        arms = {control: {"cards": run["control_cards"]}, **arms}
     save_bakeoff_run({"run_id": run_id, "deck_job_id": run_id,
         "user_id": context["user_id"], "league_id": context["league"].league_id,
-        "arm_order": json.dumps([control, "owner_v1"]),
+        "arm_order": json.dumps(list(arms)),
         "served_arm": assignment["model_arm"], "deck_size": served_count,
         "total_ms": run["total_ms"],
-        "arms_json": json.dumps({control: {"cards": run["control_cards"]},
-            "owner_v1": {"cards": run["owner_cards"], "error": run["error"],
-                         "diagnostics": run["report"].as_dict() if run["report"] else {}}}),
+        "arms_json": json.dumps(arms),
         "groups_json": "{}", "agreement_json": "{}",
         "config_json": json.dumps(assignment, default=str),
         "created_at": datetime.now(timezone.utc).isoformat()})
 
 
-def _owner_selected_ideas(*, context, surface, legacy, trade_service, sess, serve):
-    """Generate a held-out owner arm, serve one assigned arm, log BOTH counts.
+def _owner_selected_ideas(*, context, surface, legacy, trade_service, sess, serve, exclusive=False):
+    """Serve one recorded arm; exclusive requests never generate controls.
 
     The legacy callable is unchanged and receives no owner-only arguments.
-    Include-only is shadow. Failure never relabels a legacy result as owner.
+    Comparison mode logs both counts; include-only is shadow. Failure never
+    relabels a legacy result as owner or provides an exclusive fallback.
     """
     from .trade_gen_owner import generate_owner_trades
     started = time.monotonic()
-    assignment = _owner_selected_assignment(context, surface, serve=serve)
-    legacy_result = legacy()
+    assignment = _owner_selected_assignment(context, surface, serve=serve, exclusive=exclusive)
+    legacy_result = {} if assignment.get("exclusive") else legacy()
     legacy_groups = (legacy_result if surface == "asset_ideas" else
                      {"ideas": legacy_result.get("ideas") or []})
     owner_cards, report, error = [], None, None
@@ -14308,6 +14335,7 @@ def _owner_selected_ideas(*, context, surface, legacy, trade_service, sess, serv
     arm = assignment["model_arm"]
     selected = {}
     if arm == "owner_v1":
+        diagnostics = report.diagnostics() if report else {}
         for rank, card in enumerate(owner_cards):
             keys = getattr(card, "owner_groups", (card.owner_group,)) if surface == "asset_ideas" else ("ideas",)
             idea = {
@@ -14325,7 +14353,7 @@ def _owner_selected_ideas(*, context, surface, legacy, trade_service, sess, serv
             for key in keys:
                 # Each visible group occurrence owns its own real impression.
                 occurrence = copy.deepcopy(card)
-                occurrence.owner_generation_diagnostics = report.diagnostics() if report else {}
+                occurrence.owner_generation_diagnostics = diagnostics
                 occurrence.owner_surface_group = key
                 selected.setdefault(key, []).append((occurrence, dict(idea)))
     else:
@@ -14558,6 +14586,7 @@ def fair_packages():
 
     if _owner_enabled(league_id):
         serve_owner = _bakeoff.serve_owner()
+        owner_exclusive = serve_owner and _bakeoff.owner_only()
         try:
             context = _owner_generation_context(
                 sess=sess, service=service, league=g_league, players=players_dict,
@@ -14566,6 +14595,7 @@ def fair_packages():
                 pinned_give_players=give_ids, pinned_receive_players=recv_ids,
                 exact_give=True, opponent_user_id=opponent_user_id)
             result = _owner_selected_ideas(context=context, surface="fair_packages", serve=serve_owner,
+                                          exclusive=owner_exclusive,
                                           legacy=_legacy_packages, trade_service=trade_service, sess=sess)
         except Exception:
             log.exception("fair-packages owner experiment unavailable")

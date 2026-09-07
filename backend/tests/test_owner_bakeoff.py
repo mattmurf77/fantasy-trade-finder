@@ -106,13 +106,73 @@ def test_owner_failure_is_explicit_and_not_misattributed_to_control(config):
 
 
 def test_owner_config_cannot_modify_historical_profiles(config):
+    from backend.database import _MODEL_CONFIG_DEFAULTS
     from backend.bakeoff_profiles import MODEL_A_PROFILE, MODEL_CHALLENGER_PROFILE
-    for key in ("bakeoff_include_owner", "bakeoff_serve_owner", "owner_pool_size",
+    for key in ("bakeoff_include_owner", "bakeoff_serve_owner", "bakeoff_owner_only", "owner_pool_size",
                 "owner_pair_budget", "owner_total_budget"):
         assert key not in MODEL_A_PROFILE
         assert key not in MODEL_CHALLENGER_PROFILE
     assert ts._DEFAULT_CFG["bakeoff_include_owner"] == 0
     assert ts._DEFAULT_CFG["bakeoff_serve_owner"] == 0
+    assert ts._DEFAULT_CFG["bakeoff_owner_only"] == 0
+    assert next(value for key, value, _ in _MODEL_CONFIG_DEFAULTS if key == "bakeoff_owner_only") == 0
+
+
+@pytest.mark.parametrize("interleave", [False, True])
+@pytest.mark.parametrize("group_size", [0., 10.])
+def test_exclusive_runs_only_owner_and_returns_every_card(config, interleave, group_size):
+    config.update(bakeoff_include_owner=1., bakeoff_serve_owner=1., bakeoff_owner_only=1.,
+                  bakeoff_group_size=group_size, bakeoff_deck_limit=30.)
+    cards = [_card(str(i)) for i in range(73)]
+    def forbidden(**_):
+        pytest.fail("exclusive mode ran another generator")
+    run = bo.run_bakeoff(generate=forbidden, gen_v2=forbidden, gen_fit=forbidden,
+                         gen_owner=lambda **_: (cards, _Report()), league_id="league",
+                         interleave=interleave, limit=12)
+    assert bo.arm_roster() == (bo.ARM_OWNER,)
+    assert list(run.arms) == [bo.ARM_OWNER]
+    assert run.served_arm == bo.ARM_OWNER
+    assert run.served_deck() == cards
+    assert run.groups == {}
+    assert {run.attribution_for(c)[0] for c in cards} == {bo.ARM_OWNER}
+
+
+@pytest.mark.parametrize("include,serve", [(False, False), (False, True), (True, False)])
+def test_exclusive_requires_owner_include_and_serving(config, include, serve):
+    config.update(bakeoff_include_owner=float(include), bakeoff_serve_owner=float(serve),
+                  bakeoff_owner_only=1.)
+    assert bo.ARM_CURRENT in bo.arm_roster()
+    run = _run(gen_owner=lambda **_: ([_card("owner")], _Report()))
+    assert bo.ARM_CURRENT in run.arms
+    assert any(a != bo.ARM_OWNER for a, _ in run.draft.attribution.values())
+
+
+@pytest.mark.parametrize("captured", [False, True])
+def test_captured_exclusive_mode_ignores_later_switch(config, captured):
+    config.update(bakeoff_include_owner=float(not captured), bakeoff_serve_owner=float(not captured),
+                  bakeoff_owner_only=float(not captured))
+    run = _run(gen_owner=lambda **_: ([_card("owner")], _Report()),
+               owner_exclusive=captured, owner_serving=True)
+    assert (bo.ARM_CURRENT not in run.arms) is captured
+    assert any(bo.card_key(c) == bo.card_key(_card("owner")) for c in run.served_deck())
+
+
+@pytest.mark.parametrize("initial", [False, True])
+def test_exclusive_default_is_frozen_before_generators(config, initial):
+    config.update(bakeoff_include_owner=1., bakeoff_serve_owner=1., bakeoff_owner_only=float(initial))
+    def generate_owner(**_):
+        config["bakeoff_owner_only"] = float(not initial)
+        return [_card("owner")], _Report()
+    run = _run(gen_owner=generate_owner)
+    assert (bo.ARM_CURRENT not in run.arms) is initial
+
+
+def test_exclusive_failure_does_not_fall_back_to_current(config):
+    config.update(bakeoff_include_owner=1., bakeoff_serve_owner=1., bakeoff_owner_only=1.)
+    run = _run()
+    assert list(run.arms) == [bo.ARM_OWNER]
+    assert run.arms[bo.ARM_OWNER].error
+    assert run.served_deck() == []
 
 
 def test_owner_fairness_telemetry_never_uses_legacy_divergence_discount():
