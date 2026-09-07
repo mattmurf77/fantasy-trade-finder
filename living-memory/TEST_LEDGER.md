@@ -20,7 +20,10 @@ Branch `claude/team-overhaul-scoping-ea1c72` (from `origin/main` `0e3d6b70`), he
 - **Mobile:** `npx tsc --noEmit` 0 errors; every `mobile/tests/check-*.js` passes incl. new `check-team-overhaul.js` (18 assertions, sabotage-proven ×7); `bash mobile/scripts/testid-lint.sh` OK.
 - **Web:** `python3 qa/web/check_web_structure.py` → 190/190.
 - **Code-walk proof:** pool enforcement `overhaul_service.filter_cards` (post-filter independent of the generator) + prepare-time `pool_violation`/`asset_not_owned` blockers; reservations claimed in one transaction before any provider call (`overhaul_store.claim_reservations`, `overhaul_api.overhaul_send_route`); attempt CAS transitions refuse regressions (`overhaul_store`, `overhaul_service._ATTEMPT_TRANSITIONS`); decisions never touch swipe/Elo (`overhaul_decisions_route` → `store.set_decision` only).
-- **UNRUN:** the 10-item physical-device checklist in [QA.md](../docs/plans/team-overhaul/QA.md) — no build contains this branch. `supports_conflicting_offer_race` stays `unverified` until step 8 runs against Sleeper.
+- **Hosted CI on the PR merge ref** (`c190f52a` merged with `origin/main` `16bb6fd1`): [run 34090353672](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/34090353672) — backend-tests, mobile-typecheck, web-structure, maestro-testid-lint all **success**. Targeted backend rerun on the merged tree: 81 + 142 passed.
+- **iOS build:** EAS production build `2e13ce3d` → **1.17.2 (151)** FINISHED from the merged tree; submission `695bcad3` uploaded to App Store Connect 2026-09-07 (Apple processing pending). Flag `overhaul.enabled` is false in the build.
+- **Merge to `main`:** operator-authorized; the squash merge of [PR #288](https://github.com/mattmurf77/fantasy-trade-finder/pull/288) was blocked by the session's permission classifier and is left for the operator. Nothing is on `main` or Render until it lands.
+- **UNRUN:** the 10-item physical-device checklist in [QA.md](../docs/plans/team-overhaul/QA.md) — build 151 now contains this branch; run it there. `supports_conflicting_offer_race` stays `unverified` until step 8 runs against Sleeper.
 
 ## 2026-09-06 — Owner-only uncapped discovery, implementation checkpoint
 

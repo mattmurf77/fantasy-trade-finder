@@ -10,9 +10,9 @@
 
 **Where I stopped:** Team overhaul v1 built dark on `claude/team-overhaul-scoping-ea1c72` (worktree `.claude/worktrees/open-feedback-summary-b43796`, from `origin/main` `0e3d6b70`). Five commits: handoff packet import, build contract + `api/overhaul.ts`, D-188/scope, mobile flow, backend + docs. Flag `overhaul.enabled` false. [Status](../docs/plans/team-overhaul/status.md) · [contract](../docs/plans/team-overhaul/BUILD-CONTRACT.md).
 
-**In flight:** branch push + PR to `main` pending the final full backend suite (targeted suites green; see TEST_LEDGER). Nothing merged, deployed, or built for TestFlight.
+**In flight:** [PR #288](https://github.com/mattmurf77/fantasy-trade-finder/pull/288) is CI-green and mergeable; the operator authorized merge + TestFlight. iOS **1.17.2 (151)** (EAS `2e13ce3d`) is uploaded to App Store Connect from the identical tree. The squash merge itself was blocked by the session's permission classifier — **operator merges PR #288**; Render then deploys `main`.
 
-**Blocked on:** operator confirmation of D1 (iOS + Sleeper-only sends, copy handoff for MFL/ESPN) and D9 (Acquire entry card below Team review) before the flag flips; the [device checklist](../docs/plans/team-overhaul/QA.md) needs a TestFlight build that includes the branch.
+**Blocked on:** operator confirmation of D1 (iOS + Sleeper-only sends, copy handoff for MFL/ESPN) and D9 (Acquire entry card below Team review) before the flag flips; run the [device checklist](../docs/plans/team-overhaul/QA.md) on build 151 once Apple finishes processing.
 
 **Don't repeat:** the Fleeced checkout (`codex/team-overhaul-discovery`, uncommitted reorg + this packet) was read, never modified — leave it alone. Do not merge to `main` without operator say-so (Render auto-deploys). `supports_conflicting_offer_race` is `unverified`: do not claim Sleeper's tied-offer behavior until the checklist exercises it. Prepare tokens and the refresh throttle are in-process (single worker) — note before scaling workers.
 
