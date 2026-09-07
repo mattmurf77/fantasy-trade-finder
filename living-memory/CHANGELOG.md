@@ -11,12 +11,12 @@
 
 ---
 
-## 2026-09-07 — Team overhaul v1 BUILT DARK on a branch (D-188, ADR-020); not merged
+## 2026-09-07 — Team overhaul v1 MERGED dark (D-188, ADR-020); iOS 1.17.2 (151) uploaded
 
 **What:** the full Team overhaul flow from the 2026-09-06 handoff ([docs/plans/team-overhaul](../docs/plans/team-overhaul/README.md)) built behind `overhaul.enabled=false` on `claude/team-overhaul-scoping-ea1c72` (from `origin/main` `0e3d6b70`). Backend: `overhaul_service.py` (pure domain: pool enforcement, own-first recovery identity, bounded assembly of 4–5 give/receive-disjoint packages into ≤5 distinct roadmaps, priorities/prepare validation, attempt state machine), `overhaul_store.py` (five additive tables, transactional reservations, CAS transitions), `overhaul_api.py` (14 `/api/overhauls` routes installed like Win Now), `_sleeper_propose_core` extracted from `/api/trades/propose` with byte-identical route behavior. Mobile: `OverhaulEntryCard` on the Acquire landing below Team review, eight Trades-stack screens (outlook → pool → targets → review → roadmaps → one-package priorities → send summary → saved plan), `api/overhaul.ts`, `check-team-overhaul.js`. Docs: api-reference, data-dictionary, config-reference, cross-client-invariants, architecture, glossary, ADR-020.
 **Why:** owner approved the core mocks and asked for engineering scoping and build. The engineering spec's full execution platform (workers, leases, withdrawal) was narrowed to an honest v1 ([BUILD-CONTRACT](../docs/plans/team-overhaul/BUILD-CONTRACT.md)): Sleeper-only sends, copy handoff for MFL/ESPN, status from ownership refresh (live traded-picks read) plus user assertions, manual fallback.
 **Evidence:** independent backend review found 1 high / 4 medium / 8 low defects; all fixed with RED→GREEN regression tests (45 overhaul tests). Mobile tsc clean; all structural guards and testid-lint pass; web checks 190/190. Full backend suite result in [TEST_LEDGER](TEST_LEDGER.md). Device checklist ([QA.md](../docs/plans/team-overhaul/QA.md)) unrun — no build exists.
-**Not done:** not merged/pushed to `main`, not deployed, no EAS build. Owner confirmation of D1/D9 and the physical-device checklist gate the flag flip.
+**Shipped:** operator authorized merge + TestFlight. PR #288 squash-merged as `a8ef182e` (tree identical to the branch); Render deploys `main` with `overhaul.enabled=false`. iOS **1.17.2 (151)** (EAS `2e13ce3d`) uploaded to App Store Connect from the identical tree; it supersedes build 150, whose source had no mobile/config differences from main. [Recovery](../docs/recovery/2026-09-07-team-overhaul-release.md). Flag flip still gated on D1/D9 confirmation and the device checklist on build 151.
 
 ## 2026-09-06 — Feedback 419–421 released; smaller-package preference ON
 
