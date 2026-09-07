@@ -6,19 +6,19 @@
 >
 > Companion files: [TEST_LEDGER.md](TEST_LEDGER.md), [NEXT.md](NEXT.md).
 
-## Current State — 2026-09-06
+## Current State — 2026-09-07
 
-**Where I stopped:** PR #283 merged `988fa2d6`; Render LIVE and smaller-player presentation preference ON. Three arms, personal-market policy and prior settings preserved. iOS **1.17.1 (149)** build and exact TestFlight submission FINISHED. Only 419–421 marked `fixed`. [Release evidence](../docs/feedback/items/419-rejected-interest-resurfacing/release.md).
+**Where I stopped:** Team overhaul v1 built dark on `claude/team-overhaul-scoping-ea1c72` (worktree `.claude/worktrees/open-feedback-summary-b43796`, from `origin/main` `0e3d6b70`). Five commits: handoff packet import, build contract + `api/overhaul.ts`, D-188/scope, mobile flow, backend + docs. Flag `overhaul.enabled` false. [Status](../docs/plans/team-overhaul/status.md) · [contract](../docs/plans/team-overhaul/BUILD-CONTRACT.md).
 
-**In flight:** Apple tester availability and [23 device steps](../docs/feedback/items/419-rejected-interest-resurfacing/testflight-checklist.md) remain unverified/UNRUN. Research and all-45 audit complete; no acceptance uplift or unrelated closure claimed. Final bookkeeping is docs-only.
+**In flight:** branch push + PR to `main` pending the final full backend suite (targeted suites green; see TEST_LEDGER). Nothing merged, deployed, or built for TestFlight.
 
-**Blocked on:** no delivery blocker. Device acceptance needs the operator on build149. Two independent final Astra Ultra QA passes and exact-head CI: 5,645 backend/1 optional skip, 95 mobile guards/typecheck/test-ID, 190 web checks.
+**Blocked on:** operator confirmation of D1 (iOS + Sleeper-only sends, copy handoff for MFL/ESPN) and D9 (Acquire entry card below Team review) before the flag flips; the [device checklist](../docs/plans/team-overhaul/QA.md) needs a TestFlight build that includes the branch.
 
-**Don't repeat:** preserve original dirty checkout and concurrent Fleeced organization branch; new work belongs in sibling Fleeced per its AGENTS.md. This isolated worktree only finishes its existing release. No duplicate build/submit, simulator, direct-main push, unrelated closure or cleanup without [recovery capture](../docs/recovery/2026-09-06-feedback-419-421-release.md). Rollback key0 for fresh jobs; old decks retain order.
+**Don't repeat:** the Fleeced checkout (`codex/team-overhaul-discovery`, uncommitted reorg + this packet) was read, never modified — leave it alone. Do not merge to `main` without operator say-so (Render auto-deploys). `supports_conflicting_offer_race` is `unverified`: do not claim Sleeper's tied-offer behavior until the checklist exercises it. Prepare tokens and the refresh throttle are in-process (single worker) — note before scaling workers.
 
 ## Table of Contents
 
-- [Current State — 2026-09-06](#current-state--2026-09-06)
+- [Current State — 2026-09-07](#current-state--2026-09-07)
 - [Handoff Template](#handoff-template)
 
 ## Handoff Template
