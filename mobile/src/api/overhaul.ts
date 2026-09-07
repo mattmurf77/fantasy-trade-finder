@@ -366,6 +366,7 @@ export async function sendBatch(
   return apiRequest(`${BASE}/${enc(overhaulId)}/send`, { method: 'POST', body });
 }
 
+// Throttled server-side to one call per 15 s per overhaul: a second call inside the window is 429 `rate_limited`.
 export async function refreshOverhaul(overhaulId: string): Promise<OverhaulView> {
   return apiRequest(`${BASE}/${enc(overhaulId)}/refresh`, { method: 'POST', body: {} });
 }

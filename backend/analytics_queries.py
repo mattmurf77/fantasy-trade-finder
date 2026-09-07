@@ -104,6 +104,16 @@ NON_INTENT_EVENTS = frozenset({
     # both are intent, the peers of find_trades_tapped and league_candidate_pinned.
     "team_review_beat_viewed",
     "team_review_exited",
+    # Team overhaul (flag `overhaul.enabled`), added in the SAME commit that
+    # registered them (BUILD-CONTRACT §2). Both are SERVER-fired outcomes:
+    #   overhaul_generation_completed — a generation run finished; the user
+    #     already emitted overhaul_started (intent) to get here.
+    #   overhaul_batch_reconciled — the send loop settled its attempt states;
+    #     overhaul_batch_requested (intent, client-fired) preceded it.
+    # The four client events (overhaul_started / _roadmap_selected /
+    # _batch_requested / _fallback_requested) are deliberately ABSENT: intent.
+    "overhaul_generation_completed",
+    "overhaul_batch_reconciled",
     # Feedback #300, 2026-08-12 — added in the SAME commit that added it to
     # ALLOWED_CLIENT_EVENTS, for the reason stated at the top of this block.
     # Tracking plan:

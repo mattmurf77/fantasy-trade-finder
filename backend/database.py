@@ -114,6 +114,107 @@ win_now_decisions_table = Table("win_now_decisions", metadata,
 )
 
 # ---------------------------------------------------------------------------
+# Team overhaul (docs/plans/team-overhaul/BUILD-CONTRACT.md §4). Five tables,
+# persistence in backend/overhaul_store.py. JSON columns hold json.dumps;
+# timestamps are ISO-8601 UTC via _now(). New tables need no _migrate_db rows.
+# ---------------------------------------------------------------------------
+overhauls_table = Table("overhauls", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("overhaul_id", String, nullable=False, unique=True),   # 'ovh_' + 12 hex
+    Column("account_user_id", String, nullable=False),            # sess['user_id']
+    Column("league_user_id", String, nullable=False),             # _league_user_id(sess)
+    Column("league_id", String, nullable=False),
+    Column("platform", String, nullable=False),
+    Column("scoring_format", String, nullable=False),
+    Column("status", String, nullable=False),   # setup|reviewing|assembled|executing|complete|archived
+    Column("revision", Integer, nullable=False, default=1),
+    Column("client_key", String),               # create idempotency within (account, league)
+    Column("settings_json", Text, nullable=False),
+    Column("snapshot_json", Text),
+    Column("recovery_json", Text),
+    Column("generation_json", Text),
+    Column("selected_roadmap_id", String),
+    Column("created_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+    Index("ix_overhauls_account_league", "account_user_id", "league_id"),
+    Index("ix_overhauls_league_status", "league_id", "status"),
+)
+overhaul_offers_table = Table("overhaul_offers", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("offer_id", String, nullable=False, unique=True),       # 'ovh_' + 12 hex
+    Column("overhaul_id", String, nullable=False),
+    Column("revision", Integer, nullable=False),
+    Column("package_hash", String, nullable=False),
+    Column("counterparty_user_id", String, nullable=False),
+    Column("counterparty_username", String),
+    Column("give_ids_json", Text, nullable=False),
+    Column("receive_ids_json", Text, nullable=False),
+    Column("card_json", Text, nullable=False),                    # public TradeCard dict (+ offer_id)
+    Column("evidence_json", Text),                                # PRIVATE — never on the wire
+    Column("is_recovery", Integer, nullable=False, default=0),
+    Column("decision", String, nullable=False, default="undecided"),
+    Column("decided_at", String),
+    Column("decision_client_key", String),                        # decisions idempotency
+    Column("availability", String, nullable=False, default="fresh"),   # fresh|stale
+    Column("created_at", String, nullable=False),
+    UniqueConstraint("overhaul_id", "package_hash", name="uq_overhaul_offer_hash"),
+    Index("ix_overhaul_offers_overhaul", "overhaul_id"),
+)
+overhaul_roadmaps_table = Table("overhaul_roadmaps", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("roadmap_id", String, nullable=False),                  # 'rm_' + 12 hex
+    Column("overhaul_id", String, nullable=False),
+    Column("version", Integer, nullable=False),                    # immutable rows; new row per priorities write
+    Column("revision", Integer, nullable=False),
+    Column("packages_json", Text, nullable=False),
+    Column("compat_json", Text, nullable=False),
+    Column("summary_json", Text, nullable=False),
+    Column("is_current", Integer, nullable=False, default=1),
+    Column("created_at", String, nullable=False),
+    UniqueConstraint("roadmap_id", "version", name="uq_overhaul_roadmap_version"),
+    Index("ix_overhaul_roadmaps_overhaul", "overhaul_id"),
+)
+overhaul_attempts_table = Table("overhaul_attempts", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("attempt_id", String, nullable=False, unique=True),
+    Column("batch_id", String, nullable=False),
+    Column("overhaul_id", String, nullable=False),
+    Column("roadmap_id", String, nullable=False),
+    Column("roadmap_version", Integer, nullable=False),
+    Column("package_id", String, nullable=False),
+    Column("tier", Integer, nullable=False),
+    Column("offer_id", String, nullable=False),
+    Column("idempotency_key", String, nullable=False),
+    Column("request_hash", String, nullable=False),
+    Column("state", String, nullable=False),
+    Column("state_source", String, nullable=False),  # server|provider|ownership_refresh|user_reported
+    Column("provider_transaction_id", String),
+    Column("proposal_event_id", String),
+    Column("error_json", Text),
+    Column("created_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+    Column("observed_at", String),
+    UniqueConstraint("batch_id", "offer_id", name="uq_overhaul_attempt_batch_offer"),
+    Index("ix_overhaul_attempts_overhaul_state", "overhaul_id", "state"),
+)
+overhaul_reservations_table = Table("overhaul_reservations", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("league_id", String, nullable=False),
+    Column("seller_user_id", String, nullable=False),
+    Column("asset_id", String, nullable=False),
+    Column("overhaul_id", String, nullable=False),
+    Column("package_id", String, nullable=False),
+    Column("batch_id", String, nullable=False),
+    # 1 while active; released rows store NULL so the unique constraint only
+    # ever binds one ACTIVE reservation per asset (NULLs are distinct).
+    Column("active", Integer),
+    Column("created_at", String, nullable=False),
+    Column("released_at", String),
+    UniqueConstraint("league_id", "seller_user_id", "asset_id", "active",
+                     name="uq_overhaul_reservation_active"),
+)
+
+# ---------------------------------------------------------------------------
 # Analytics platform engines & PRAGMAs (docs/plans/analytics-platform/lld.md §3.3)
 # ---------------------------------------------------------------------------
 # Three engines, one DB:

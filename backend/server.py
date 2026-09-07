@@ -18275,16 +18275,55 @@ def propose_trade_to_sleeper():
                 "receive_player_ids; the server encodes them.")
         return jsonify({"error": "bad_request", "message": _msg, "detail": _msg}), 400
 
+    # Request-local ledger id; a fresh client retry creates a fresh id.
+    # This does not provide cross-request provider-send idempotency.
+    payload, status = _sleeper_propose_core(
+        sess, league_id=league_id, their_user_id=their_user_id, give_ids=give, receive_ids=receive,
+        proposal_event_id=uuid.uuid4().hex,
+        source=(body.get("source") if body.get("source") in
+                ("deck", "match", "calculator") else "deck"),
+        impression_id=body.get("impression_id"), their_roster_id=their_roster_id_in)
+    return jsonify(payload), status
+
+
+def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
+                          proposal_event_id, source, impression_id=None,
+                          their_roster_id=None) -> tuple[dict, int]:
+    """The body of POST /api/trades/propose, callable without a request body.
+
+    Returns `(payload, http_status)` with the route's exact error codes. The
+    fail-closed test-mode check, the `trade.send_in_sleeper` flag and the
+    verified-session gate live HERE so every caller — the route and the
+    team-overhaul send loop (backend/overhaul_api.py) — inherits them. The
+    route wrapper repeats its own prefix checks first so its ordering is
+    byte-identical; on that path these re-checks are no-ops.
+    """
+    if _TEST_MODE:
+        return {"error": "test_mode_propose_disabled"}, 599
+    if not is_enabled("trade.send_in_sleeper"):
+        return {"error": "feature_disabled"}, 404
+    user_id = sess.get("user_id")
+    if not user_id:
+        return {"error": "no_user"}, 401
+    if not sess.get("verified"):
+        return {"error": "verification_required"}, 403
+    league_id = str(league_id or "").strip()
+    their_roster_id_in = their_roster_id
+    give = [str(p) for p in (give_ids or [])]
+    receive = [str(p) for p in (receive_ids or [])]
+    if not league_id.isdigit() or (their_user_id is None and their_roster_id_in is None):
+        return {"error": "bad_request"}, 400
+
     cred = get_sleeper_credential(user_id)
     if not cred:
-        return jsonify({"error": "sleeper_not_linked"}), 409
+        return {"error": "sleeper_not_linked"}, 409
     try:
         token = _sleeper_write.decrypt_token(cred["token_encrypted"])
     except _sleeper_write.SleeperWriteError:
-        return jsonify({"error": "sleeper_unconfigured"}), 503
+        return {"error": "sleeper_unconfigured"}, 503
     if _sleeper_write.is_expired(token):
         delete_sleeper_credential(user_id)
-        return jsonify({"error": "sleeper_expired"}), 409
+        return {"error": "sleeper_expired"}, 409
 
     # Resolve BOTH rosters server-authoritatively from one public rosters fetch:
     # mine from the linked Sleeper account, the counterparty's from their user_id
@@ -18292,16 +18331,16 @@ def propose_trade_to_sleeper():
     rosters = _fetch_league_rosters(league_id)
     my_roster_id = _roster_id_for_owner(rosters, cred.get("sleeper_user_id"))
     if my_roster_id is None:
-        return jsonify({"error": "roster_not_found"}), 400
+        return {"error": "roster_not_found"}, 400
     if their_roster_id_in is not None:
         try:
             their_rid = int(their_roster_id_in)
         except (TypeError, ValueError):
-            return jsonify({"error": "bad_request"}), 400
+            return {"error": "bad_request"}, 400
     else:
         their_rid = _roster_id_for_owner(rosters, their_user_id)
         if their_rid is None:
-            return jsonify({"error": "opponent_roster_not_found"}), 400
+            return {"error": "opponent_roster_not_found"}, 400
 
     # #413 — FTF's trade surfaces carry picks in the SAME arrays as players.
     # Split them out and encode owned picks server-side: existence is the
@@ -18331,22 +18370,20 @@ def propose_trade_to_sleeper():
             _msg = ("Some draft picks in this trade couldn’t be matched to a pick in this "
                     "Sleeper league, so nothing was sent. Generic picks like “Early 1st” "
                     "can’t be sent — use a specific pick.")
-            return jsonify({"error": "sleeper_pick_unmapped", "picks": unmapped,
-                            "message": _msg, "detail": _msg}), 422
+            return {"error": "sleeper_pick_unmapped", "picks": unmapped,
+                    "message": _msg, "detail": _msg}, 422
         if not_owned:
             _msg = ("Some draft picks in this trade have already changed hands, so nothing "
                     "was sent. Rebuild the trade and try again.")
-            return jsonify({"error": "sleeper_pick_not_owned", "picks": not_owned,
-                            "message": _msg, "detail": _msg}), 422
+            return {"error": "sleeper_pick_not_owned", "picks": not_owned,
+                    "message": _msg, "detail": _msg}, 422
 
     req = _sleeper_write.ProposeTradeRequest(
         league_id=league_id, my_roster_id=my_roster_id, their_roster_id=their_rid,
         give_player_ids=give_players, receive_player_ids=recv_players,
         draft_picks=encoded or None,
     )
-    # Request-local ledger id; a fresh client retry creates a fresh id.
-    # This does not provide cross-request provider-send idempotency.
-    _proposal_event_id = uuid.uuid4().hex
+    _proposal_event_id = proposal_event_id
     try:
         result = _sleeper_write.propose_trade(token, req)
     except _sleeper_write.SleeperAuthError as e:
@@ -18358,17 +18395,17 @@ def propose_trade_to_sleeper():
         # reconnecting) plus a short detail so we can see WHY Sleeper says no.
         log.warning("sleeper propose auth-rejected: %s", getattr(e, "detail", None))
         delete_sleeper_credential(user_id)
-        return jsonify({
+        return {
             "error": "sleeper_rejected",
             "detail": (str(getattr(e, "detail", "") or ""))[:200],
-        }), 409
+        }, 409
     except _sleeper_write.SleeperWriteError as e:
         log.warning("sleeper propose write-failed [%s]: %s", e.kind, getattr(e, "detail", None))
-        return jsonify({
+        return {
             "error": "sleeper_write_failed",
             "kind": e.kind,
             "detail": (str(getattr(e, "detail", "") or ""))[:200],
-        }), 502
+        }, 502
     # A real outbound Sleeper send happened — the gating guardrail counter.
     # Unreachable under FTF_TEST_MODE (fail-closed above); the import is lazy
     # so normal operation never touches test_support.
@@ -18378,7 +18415,7 @@ def propose_trade_to_sleeper():
     # F1 (deck.signal_v2) — proposal-sent outcome when the deck card that
     # sourced this send carried an impression_id. Additive/optional; only
     # reached on a successful Sleeper propose.
-    _save_deck_outcome_safe(body.get("impression_id"), "propose",
+    _save_deck_outcome_safe(impression_id, "propose",
                             acting_user_id=user_id)
     # P0-7 — the send actually landed in Sleeper. This is the ONLY place
     # in the product that knows that, which is why the success leg is
@@ -18391,7 +18428,7 @@ def propose_trade_to_sleeper():
     _record_send_success(
         user_id, league_id, give_players, recv_players, encoded,
         result.get("transaction_id"),
-        bool(body.get("impression_id")),
+        bool(impression_id),
     )
     # ── Personal-market policy: durable proposal record ───────────────
     # Only reached on a CONFIRMED provider success — every failure branch
@@ -18403,16 +18440,15 @@ def propose_trade_to_sleeper():
         sess=sess, provider="sleeper", user_id=user_id,
         league_id=league_id, target_user_id=their_user_id or their_rid,
         give_asset_ids=give, receive_asset_ids=receive,
-        impression_id=_owned_impression_id(body.get("impression_id"), user_id, league_id=league_id),
+        impression_id=_owned_impression_id(impression_id, user_id, league_id=league_id),
         proposal_event_id=_proposal_event_id,
         provider_transaction_id=result.get("transaction_id"),
-        source=(body.get("source") if body.get("source") in
-                ("deck", "match", "calculator") else "deck"),
+        source=source,
     )
-    return jsonify({
+    return {
         "status": result.get("status") or "proposed",
         "transaction_id": result.get("transaction_id"),
-    })
+    }, 200
 
 
 @app.route("/api/account/reset-rankings", methods=["POST"])
@@ -31296,6 +31332,24 @@ _install_win_now(app, require_session=_require_initialized_session,
                  pool_provider=_get_universal_pool, fetch_json=_sleeper_get)
 from . import win_now_service as _win_now_service
 _win_now_service.start_worker_on_startup(_sleeper_get)
+
+# Team overhaul (docs/plans/team-overhaul/BUILD-CONTRACT.md §3) — same seam
+# as Win Now: routes live in overhaul_api, server-private helpers are injected.
+from .overhaul_api import install as _install_overhaul
+from .trade_gen_owner import generate_owner_trades as _overhaul_generate
+_install_overhaul(app, require_session=_require_initialized_session,
+                  read_denial=_verified_read_denial, write_denial=_verified_write_denial,
+                  active_format=_active_format, league_user_id=_league_user_id,
+                  owner_generation_context=_owner_generation_context, generate=_overhaul_generate,
+                  roster_context=_build_trade_roster_context, sleeper_propose=_sleeper_propose_core,
+                  fetch_rosters=_fetch_league_rosters, roster_id_for_owner=_roster_id_for_owner,
+                  load_picks=load_draft_picks, pick_source_platform=PICK_SOURCE_PLATFORM,
+                  draft_context=get_league_draft_context, card_to_dict=trade_card_to_dict,
+                  is_pick_asset=_is_ftf_pick_asset, owned_picks_available=_owned_picks_available,
+                  inject_owned_picks=_inject_owned_picks, pick_label=_owned_pick_label,
+                  slot_order=_league_slot_order, priced_pick_value=_priced_pick_value,
+                  elo_to_value=_trade_service_mod.elo_to_value, sleeper_credential=get_sleeper_credential,
+                  sleeper_write=_sleeper_write, record_event=record_event, fetch_json=_sleeper_get)
 
 
 if __name__ == "__main__":
