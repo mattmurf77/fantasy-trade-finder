@@ -31,6 +31,17 @@ trial order and joins genuine visible selected-card views and exact-package
 responses to stored impressions. Private counterparty values never enter the
 public response.
 
+The operator's subsequent owner-only request is implemented by
+`bakeoff_owner_only`, effective with owner include and serve enabled. It removes
+all other generated arms from execution and serving, including selected-route
+legacy control work; dark/interleaved configuration cannot silently substitute
+current. Selected exposure has probability 1 with separate exclusive policy
+attribution. The mode is captured with serving permission and cache identity.
+Exclusive output bypasses deck/group quotas and retains distinct companion
+packages sharing headliners. Computational search budgets, exact-duplicate
+suppression and all safety/selection/small-shape constraints remain. Genuine
+incoming-interest cards retain their separate provenance.
+
 The worker's captured owner-serving decision is passed into the bakeoff runner,
 not reread after generation. That same capture labels the job's owner safety
 signature: a hot switch cannot turn a shadow-start job into a serving trial or

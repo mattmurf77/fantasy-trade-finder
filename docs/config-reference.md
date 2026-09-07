@@ -952,9 +952,28 @@ the `simple_player_presentment` reorder. Its model-config defaults are dark:
 |---|---|---|
 | `bakeoff_include_owner` | 0 | Generate and record the new arm; leave the current three controls intact. |
 | `bakeoff_serve_owner` | 0 | Separately permit treatment exposure in the organic draft and selected-search experiment. Include must also be enabled. |
+| `bakeoff_owner_only` | 0 | With owner include and serve enabled, run and serve only `owner_v1` on organic and selected routes. Bypass returned-deck/group quotas; no legacy control generation or fallback. Inert without owner inclusion/serving. |
 | `owner_pool_size` | 16 | Bounded per-team candidate pool, with explicit selections retained. Computational limit, not a pricing permission. |
 | `owner_pair_budget` | 4096 | Maximum candidate evaluations for one opponent. |
 | `owner_total_budget` | 60000 | Maximum candidate evaluations for one search. Exhaustion is diagnostic data, not a reason to silently widen fairness. |
+
+Owner-exclusive serving supersedes the earlier comparison when explicitly
+enabled. It captures the mode once per request, includes it in cache freshness,
+serves owner even if interleaved drafting is off, and returns every distinct
+eligible package found rather than one package per headliner pair. The selected
+assignment probability is 1, not 0.5. Real inbound-interest offers remain
+separately attributed, not competing generator arms. Exact duplicates and
+ineligible packages are still removed. `bakeoff_deck_limit`,
+`bakeoff_group_size`, first-session and per-target returned-card quotas do not
+truncate an exclusive owner deck.
+Random ghost-holdout withholding is also bypassed in exclusive mode. Existing
+ownership, invalid-package and prior user-disposition suppression remain.
+
+This is **uncapped output, not exhaustive search**. `owner_pool_size`,
+`owner_pair_budget` and `owner_total_budget` retain their computational bounds;
+zero is not an unlimited sentinel for them (it clamps to 4, 1 and 1).
+The small-package construction rules remain unchanged. Scope and activation
+evidence: [owner-only discovery](plans/owner-only-uncapped/scope.md).
 
 These keys do not enter `MODEL_A_PROFILE` or `MODEL_CHALLENGER_PROFILE`:
 no historical generator consumes them. Existing controls' generators and
@@ -962,8 +981,12 @@ goldens are retained. Include without serve is not a live test; serve without
 include cannot introduce the arm. The independent serving bit applies to both
 group composition and the plain team-draft path. A job captures permission once;
 hot flips apply to subsequent jobs, and completed cache freshness compares the
-captured owner state with current settings. First turn off serve to stop new
-treatment jobs, then include to stop computation; preserve evidence and controls.
+captured owner state with current settings. Setting owner-only to 0 restores
+the configured comparison path for newly captured requests, not deleted code.
+Setting serve to 0 prevents newly authorized owner exposure; include=1 can
+continue shadow generation. Setting include to 0 stops new owner computation.
+Already captured jobs/cards are not revoked. Restore other arm/deck settings
+explicitly if they were disabled for the exclusive test; preserve stored evidence.
 Serving is global, not client-version gated. Old mobile builds do not implement
 the new ordering/partial-notice/selected-view contracts. Enable include-only
 before binary uptake; verify the intended testers use 1.17.2 or later before

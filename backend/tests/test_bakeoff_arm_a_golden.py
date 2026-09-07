@@ -527,11 +527,11 @@ def test_r4_bypass_is_thread_local():
 # simple_player_presentment is explicitly post-generator, outside arm overlays;
 # its default-off presentation policy never enters MODEL_A_PROFILE or goldens.
 # Contract: docs/plans/small-trade-packages/prd.md §4.
-# Owner include/serve switches are runner-only: no historical generator reads
+# Owner include/serve/exclusive switches are runner-only: no historical generator reads
 # them. Listing the new keys is an inventory disposition, not a golden recapture.
 _PINNED_KNOBS = frozenset("""
 simple_player_presentment
-bakeoff_include_owner bakeoff_serve_owner
+bakeoff_include_owner bakeoff_serve_owner bakeoff_owner_only
 owner_pool_size owner_pair_budget owner_total_budget
 age_pref_mult_u23 age_pref_mult_30plus age_pref_boost_cap
 aggression_weight asset_floor_abs asset_ideas_group_cap

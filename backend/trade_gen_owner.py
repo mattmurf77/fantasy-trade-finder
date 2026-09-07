@@ -622,11 +622,10 @@ def generate_owner_trades(**kwargs):
         survivors.sort(key=key)
         seen, emitted = set(), []
         for card in survivors:
-            # One best companion variant per pair of headliners and shape.
-            signature = (card.target_user_id,
-                search._head(card.give_player_ids, search.market),
-                search._head(card.receive_player_ids, search.market),
-                len(card.give_player_ids), len(card.receive_player_ids))
+            # Distinct companions are distinct offers, even when headliners
+            # and shape match. Only the exact two-sided package is redundant.
+            signature = (card.target_user_id, frozenset(card.give_player_ids),
+                         frozenset(card.receive_player_ids))
             if signature in seen:
                 continue
             seen.add(signature)
