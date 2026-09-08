@@ -306,20 +306,46 @@ THEIR_2026_1ST = f"{LEAGUE}_2026_1_2"
 T3_BODY = {"give_player_ids": ["100", "101", MY_2027_2ND], "receive_player_ids": ["200"]}
 
 
-def _propose(client, body, *, grid=GRID, traded=TRADED, fake=None, deck_outcome=None):
+# #428 tradability ground truth (prd.md §5, production shape). `_sleeper_get`
+# is patched for EVERY URL below, so the drafts + league-meta reads the pick
+# path now makes are patched explicitly via `drafts=` / `meta=`. The helper
+# default is the PRE-draft list so every #413 test above keeps its fixture
+# (T-5 sends THEIR_2026_1ST); the #428 tests pass `drafts=DRAFTS_DONE`.
+META = {"season": "2026", "status": "in_season", "total_rosters": 2,
+        "settings": {"draft_rounds": 4}}
+DRAFTS_DONE = [{"draft_id": "d1", "season": "2026", "status": "complete",
+                "type": "linear", "last_picked": 1787707582674,
+                "settings": {"rounds": 4}}]
+DRAFTS_PRE = [{"draft_id": "d1", "season": "2026", "status": "pre_draft",
+               "type": "linear", "settings": {"rounds": 4}}]
+TRADED_2026 = [{"season": "2026", "round": 4, "roster_id": 11, "owner_id": 1,
+                "previous_owner_id": 11}]
+SPENT_2026_4TH = f"{LEAGUE}_2026_4_11"
+GRID_WITH_SPENT = GRID + [
+    {"pick_id": SPENT_2026_4TH, "season": 2026, "round": 4, "original_roster_id": "11"},
+]
+
+
+def _propose(client, body, *, grid=GRID, traded=TRADED, fake=None, deck_outcome=None,
+             drafts=DRAFTS_PRE, meta=META):
     """Link, then POST /api/trades/propose with the pick ground truth patched
     directly (never through `_sleeper_get`). Returns (response, propose_trade
-    mock, load_draft_picks mock, _fetch_sleeper_traded_picks mock)."""
+    mock, load_draft_picks mock, _fetch_sleeper_traded_picks mock). `drafts` /
+    `meta` may be a MagicMock when the test needs to assert on the fetch."""
     c, token = client
     c.post("/api/sleeper/link", headers=_h(token), data=json.dumps({"token": _token()}))
     fake = fake or MagicMock(return_value={"transaction_id": "TX9", "status": "proposed", "raw": {}})
     grid_mock = MagicMock(return_value=grid)
     traded_mock = MagicMock(return_value=traded)
+    drafts_mock = drafts if isinstance(drafts, MagicMock) else MagicMock(return_value=drafts)
+    meta_mock = meta if isinstance(meta, MagicMock) else MagicMock(return_value=meta)
     patches = [
         patch.object(server, "_sleeper_get", return_value=ROSTERS_1V2),
         patch.object(server._sleeper_write, "propose_trade", fake),
         patch.object(server, "load_draft_picks", grid_mock),
         patch.object(server, "_fetch_sleeper_traded_picks", traded_mock),
+        patch.object(server, "_fetch_sleeper_drafts", drafts_mock),
+        patch.object(server, "_fetch_sleeper_league_meta", meta_mock),
     ]
     if deck_outcome is not None:
         patches.append(patch.object(server, "_save_deck_outcome_safe", deck_outcome))
@@ -509,6 +535,129 @@ def test_propose_reports_unmapped_before_not_owned(client):
     assert body["error"] == "sleeper_pick_unmapped"
     assert body["picks"] == ["generic_pick_1_early"]
     fake.assert_not_called()
+
+
+# ── #428 — spent-season picks are refused before Sleeper sees them ────────
+# FFV3 on 2026-09-08: the 2026 rookie draft is `complete`, `traded_picks`
+# still lists 2026 rows, and the grid still carried 2026 (a flaked drafts read
+# re-populated it). The holder check passed and Sleeper answered "These draft
+# picks cannot be traded." — the send path had no tradability test.
+
+def test_propose_refuses_spent_current_season_pick(client):
+    """T-15 — RED before the fix (200 and draft_picks == ["11,2026,4,1,2"]):
+    roster 11's 2026 4th, held by me, in a league whose 2026 draft is complete
+    → 422 sleeper_pick_untradable naming the pick and Sleeper's window;
+    nothing sent, no success row, no deck outcome."""
+    outcome = MagicMock()
+    r, fake, _, _ = _propose(client, {"give_player_ids": [SPENT_2026_4TH],
+                                      "receive_player_ids": ["200"],
+                                      "impression_id": "imp-1"},
+                             grid=GRID_WITH_SPENT, traded=TRADED + TRADED_2026,
+                             drafts=DRAFTS_DONE, deck_outcome=outcome)
+    assert r.status_code == 422, r.get_data(as_text=True)
+    body = r.get_json()
+    assert body["error"] == "sleeper_pick_untradable"
+    assert body["picks"] == [SPENT_2026_4TH]
+    assert body["season_window"] == [2027, 2029]
+    assert body["detail"] == body["message"]
+    assert "1 draft pick " in body["message"]
+    assert "2026" in body["message"] and "2027–2029" in body["message"]
+    fake.assert_not_called()
+    assert _send_succeeded_rows() == []
+    outcome.assert_not_called()
+
+
+def test_propose_refuses_untradable_on_receive_side(client):
+    """T-16 — the receive side is judged by the same window: asking for their
+    2026 1st after the 2026 draft is refused (orig 2 = them, so the holder
+    check alone would have passed it)."""
+    r, fake, _, _ = _propose(client, {"give_player_ids": ["100"],
+                                      "receive_player_ids": [THEIR_2026_1ST]},
+                             drafts=DRAFTS_DONE)
+    assert r.status_code == 422, r.get_data(as_text=True)
+    body = r.get_json()
+    assert body["error"] == "sleeper_pick_untradable"
+    assert body["picks"] == [THEIR_2026_1ST]
+    fake.assert_not_called()
+
+
+def test_propose_untradable_reported_after_unmapped_before_not_owned(client):
+    """T-17 — ordering: a generic rung (unmapped) wins over a spent pick; a
+    spent pick wins over a traded-away pick (the window is checked after the
+    grid lookup and before the holder test, so `picks` lists only the spent
+    one and never the not-owned one)."""
+    traded_away = [{"season": "2027", "round": 2, "roster_id": 1, "owner_id": 9,
+                    "previous_owner_id": 1}]
+    r, fake, _, _ = _propose(client, {
+        "give_player_ids": ["generic_pick_1_early", SPENT_2026_4TH, MY_2027_2ND],
+        "receive_player_ids": ["200"]},
+        grid=GRID_WITH_SPENT, traded=traded_away + TRADED_2026, drafts=DRAFTS_DONE)
+    assert r.status_code == 422, r.get_data(as_text=True)
+    assert r.get_json()["error"] == "sleeper_pick_unmapped"
+    assert r.get_json()["picks"] == ["generic_pick_1_early"]
+    fake.assert_not_called()
+
+    r, fake, _, _ = _propose(client, {
+        "give_player_ids": [SPENT_2026_4TH, MY_2027_2ND],
+        "receive_player_ids": ["200"]},
+        grid=GRID_WITH_SPENT, traded=traded_away + TRADED_2026, drafts=DRAFTS_DONE)
+    assert r.status_code == 422, r.get_data(as_text=True)
+    assert r.get_json()["error"] == "sleeper_pick_untradable"
+    assert r.get_json()["picks"] == [SPENT_2026_4TH]
+    fake.assert_not_called()
+
+
+def test_propose_in_window_pick_still_sends(client):
+    """T-18 — a 2027 pick under the SAME completed 2026 draft sends exactly as
+    before #428: 200, byte-identical encoding."""
+    r, fake, _, _ = _propose(client, {"give_player_ids": [MY_2027_2ND],
+                                      "receive_player_ids": ["200"]},
+                             grid=GRID_WITH_SPENT, traded=TRADED + TRADED_2026,
+                             drafts=DRAFTS_DONE)
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert fake.call_args[0][1].draft_picks == ["1,2027,2,1,2"]
+
+
+def test_propose_drafts_flake_without_verdict_does_not_block(client):
+    """T-19 — `/drafts` → [] with no cached #207 verdict (the in-memory DB has
+    no leagues row): the window abstains on the spent class, the send
+    proceeds and Sleeper stays the final authority (F3 shows its reason)."""
+    r, fake, _, _ = _propose(client, {"give_player_ids": [SPENT_2026_4TH],
+                                      "receive_player_ids": ["200"]},
+                             grid=GRID_WITH_SPENT, traded=TRADED + TRADED_2026,
+                             drafts=[])
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert fake.call_args[0][1].draft_picks == ["11,2026,4,1,2"]
+
+
+def test_propose_pick_free_send_makes_no_drafts_or_meta_fetch(client):
+    """T-20 — R-4/R-12 of #413 stand: a player-only send reads neither
+    `/drafts` nor `/league/{id}` (on top of T-10's grid + traded_picks)."""
+    drafts_mock, meta_mock = MagicMock(return_value=DRAFTS_DONE), MagicMock(return_value=META)
+    r, fake, grid_mock, traded_mock = _propose(client, {
+        "give_player_ids": ["100"], "receive_player_ids": ["200"]},
+        drafts=drafts_mock, meta=meta_mock)
+    assert r.status_code == 200, r.get_data(as_text=True)
+    drafts_mock.assert_not_called()
+    meta_mock.assert_not_called()
+    grid_mock.assert_not_called()
+    traded_mock.assert_not_called()
+
+
+def test_propose_502_detail_is_sleepers_sentence(client):
+    """T-21 — F3: when Sleeper itself refuses, the 502 body's `detail` is the
+    adapter's sentence and `message` equals it (the fielded catch-all renders
+    `detail`; before #428 it was a JSON fragment)."""
+    from backend.sleeper_write import SleeperWriteError
+    boom = MagicMock(side_effect=SleeperWriteError(
+        "Sleeper GraphQL error", detail="These draft picks cannot be traded."))
+    r, _, _, _ = _propose(client, {"give_player_ids": [MY_2027_2ND],
+                                   "receive_player_ids": ["200"]}, fake=boom)
+    assert r.status_code == 502, r.get_data(as_text=True)
+    body = r.get_json()
+    assert body["error"] == "sleeper_write_failed"
+    assert body["detail"] == "These draft picks cannot be traded."
+    assert body["message"] == body["detail"]
 
 
 def test_propose_failure_fires_no_trade_sent(client):

@@ -18,7 +18,10 @@
 **F1 — one tradability predicate, `backend/draft_status.py`.**
 ```python
 def completed_draft_seasons(drafts, current_season) -> set[int]
-    # {int(d.season) for rookie-shaped-or-unknown d if d.status == "complete" and int(d.season) >= current_season}
+    # {int(d.season) for ANY d if d.status == "complete" and int(d.season) >= current_season}
+    # shape-blind (Phase 4 amendment, QA round 1 A F-1 / B F-2): a completed STARTUP draft consumes the class too —
+    # Sleeper refuses the season's picks either way — so the #207 rookie/startup discriminator is NOT applied here,
+    # matching the pre-#428 sync loop this replaces.
 def sleeper_pick_window(current_season, drafts, traded_picks=(), cached_verdict=None) -> tuple[int, int] | None
     # exclude = completed_draft_seasons(...)
     # if not drafts and cached_verdict is a positive `drafted` DraftStatus: exclude |= {current_season}   ← NEW fallback
