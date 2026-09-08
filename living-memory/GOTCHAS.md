@@ -11,6 +11,7 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-072 | An uncapped owner-only deck (~1,400 cards × ~21 KB evidence) renders as ONE ~28 MB multi-row INSERT and OOM-kills the 256 MB prod Postgres; every Find a Trade then reads "Search failed" | Backend / deck impressions / Postgres |
 | G-071 | Final policy checks can be bypassed by provisional worker snapshots | Trade engine / progressive publication |
 | G-066 | Arm C (`trade_gen_v2`) hardcodes `basis="divergence"` on every card — its consensus-path cards are mis-stamped, so any like-rate split by basis is wrong for that arm | Bake-off / analytics / basis stamp |
 | G-065 | The gap-distribution harness disagrees with itself by 3 cards under `PYTHONHASHSEED=0` — the dominant non-determinism is WALL CLOCK (1.0 s per-pair deadline + sweep budget), not hash order; and the same deadlines mean prod decks depend on machine load | Trade engine / measurement / determinism |
@@ -88,6 +89,14 @@
 Full entries below — grep the ID. Read the entry before acting; this index is a lookup aid, not the content.
 
 ---
+
+## 2026-09-07
+
+### G-072 — One multi-row INSERT of an uncapped deck OOM-kills production Postgres
+- **Symptom:** after the owner-only activation (PR #287, 05:29 UTC) every Find a Trade — including the pre-gen job at app open — ended in "Search failed". Web log: `deck signal-v2 impression logging failed (trial withheld): SSL SYSCALL error: EOF detected`, then `ValueError: owner_impression_unavailable`. Postgres log: `client backend … terminated by signal 9: Killed` → `the database system is in recovery mode`. Two searches, two DB restarts.
+- **Cause:** exclusive mode returns every eligible package (1,037 and 1,456 cards on the operator's league) and each impression row carries ~21 KB of frozen evidence (`valuation_json` ≈ 4 KB, `features_json.owner_generation` ≈ 5 KB, `features_json.owner_request` ≈ 9 KB of which the full 309-key `config` block is most). `save_deck_impressions` passed the whole deck to one executemany; SQLAlchemy 2.0 insertmanyvalues renders up to 1,000 rows per statement, so the first statement was ~21 MB and the backend on the `basic_256mb` plan was OOM-killed parsing it. Exclusive mode then refuses to serve treatment without impressions (by design), so the whole job failed. Measured locally on a synthetic 12-team league: 1,351 cards, 45,056 evaluations, 20.7 s, ≈28.5 MB.
+- **Fix:** `save_deck_impressions` pages the insert (`DECK_IMPRESSION_INSERT_ROWS` = 100 → ≈2 MB per statement, one transaction, all-or-nothing preserved). Guardrail `backend/tests/test_deck_impressions_paging.py`. Interim prod mitigation (operator-approved, 13:55 UTC): `owner_pair_budget` 4096→300, `owner_total_budget` 60000→3000 (source `owner-only-oom-mitigation-20260907`) — ~250 cards, ≈5 MB. Restore after the paged insert is live.
+- **Lesson:** "no artificial limit on offers" moved the deck from ~30 to ~1,400 rows, and the per-row evidence contract was sized for 30. Any writer that takes a whole deck must page; and per-row duplication of run-wide blobs (`owner_generation`, the `config` block) is the next thing to trim — see [NEXT.md](NEXT.md). Diagnose from the Render logs API (web service: `bake-off run` / `impression logging failed`; Postgres resource: `signal 9`) — direct prod DB reads are not needed.
 
 ## 2026-09-04
 

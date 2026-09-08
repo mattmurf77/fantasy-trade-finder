@@ -6532,6 +6532,12 @@ def log_deck_replenish(user_id: str, league_id: str, iso_week: str,
         ))
 
 
+#: Rows per INSERT statement in `save_deck_impressions`. At the observed
+#: ~21 KB per owner-only row this caps a statement near 2 MB; the pre-page
+#: behaviour (one statement per 1,000 rows) reached ~28 MB and crashed prod.
+DECK_IMPRESSION_INSERT_ROWS = 100
+
+
 def save_deck_impressions(rows: list[dict]) -> None:
     """F1 (deck.signal_v2) — batch-insert pre-built deck_impressions rows.
 
@@ -6543,8 +6549,17 @@ def save_deck_impressions(rows: list[dict]) -> None:
     """
     if not rows:
         return
+    # One transaction, MANY statements. SQLAlchemy's insertmanyvalues renders
+    # up to 1,000 rows into a single INSERT ... VALUES statement, and an
+    # owner-only deck of ~1,400 cards at ~21 KB/row (frozen evidence JSON)
+    # produced a ~28 MB statement that OOM-killed the 256 MB Postgres backend
+    # (2026-09-07, docs/runbook.md § Common failure modes). Paging bounds the
+    # statement size regardless of deck size; all-or-nothing semantics are
+    # unchanged because every page shares the transaction.
     with engine.begin() as conn:
-        conn.execute(insert(deck_impressions_table), rows)
+        for start in range(0, len(rows), DECK_IMPRESSION_INSERT_ROWS):
+            conn.execute(insert(deck_impressions_table),
+                         rows[start:start + DECK_IMPRESSION_INSERT_ROWS])
 
 
 # ---------------------------------------------------------------------------
