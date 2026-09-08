@@ -6,3 +6,4 @@
 
 ## Phase log
 - 2026-09-08: Phase 0 — selected; folder created; planner launched.
+- 2026-09-08: Phase 1 complete — PRD, scope, investigation (live-config worked example); rulings in reconciliation-log.md. Build launched.
