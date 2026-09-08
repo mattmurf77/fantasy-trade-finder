@@ -567,9 +567,11 @@ def _obj_value_giving(view: _CardView, pctx: PartnerContext,
                       {"basis": basis, "margin": 0.0, "n_give": 0, "n_recv": 0})
     v_max = max(rvals + gvals)
     recvd = ts.package_value_v2(rvals, v_max, n_other=len(gvals),
-                                other_values=gvals)
+                                other_values=gvals,
+                                exempt=ts.first_round_pick_mask(view.recv_ids))
     sent = ts.package_value_v2(gvals, v_max, n_other=len(rvals),
-                               other_values=rvals)
+                               other_values=rvals,
+                               exempt=ts.first_round_pick_mask(view.give_ids))
     extra = _net_player_bodies(view, ctx.players)
     if extra > 0:
         recvd -= ctx.cfg["waiver_slot_cost"] * extra

@@ -1008,17 +1008,22 @@ def _evaluate_adjustments(give: list[str], recv: list[str],
     gvals = [seed_value(p) for p in give]
     rvals = [seed_value(p) for p in recv]
     v_max = max(gvals + rvals)
+    # #427: the same first-round mask _consensus_packages prices with, so a
+    # side of firsts shows no "Package depth" row (its depth delta is 0).
+    g_exempt = _trade_service_mod.first_round_pick_mask(give)
+    r_exempt = _trade_service_mod.first_round_pick_mask(recv)
 
     rows: dict[str, list[dict]] = {}
     naive_totals: dict[str, float] = {}
     # #214: other_values feeds the market-mode crown credit (both-sides
     # elite eligibility + naive-skew phase-out); heavy mode ignores it.
-    for side, vals, other, n_other in (("give", gvals, rvals, len(recv)),
-                                       ("receive", rvals, gvals, len(give))):
+    for side, vals, other, n_other, exempt in (
+            ("give", gvals, rvals, len(recv), g_exempt),
+            ("receive", rvals, gvals, len(give), r_exempt)):
         naive = round(sum(vals), 1)
-        base = pkg(vals, v_max)                      # depth weighting only
+        base = pkg(vals, v_max, exempt=exempt)       # depth weighting only
         full = pkg(vals, v_max, n_other=n_other,     # + crown premium, if any
-                   other_values=other)
+                   other_values=other, exempt=exempt)
         depth = round(base - naive, 1)
         crown = round(full - base, 1)
         side_rows = []
