@@ -23,3 +23,7 @@ QA-A FAIL (1 major to adjudicate, 3 minor); QA-B PASS (3 minor). Both suites 589
 | A F-4 (cached verdict not season-checked; `leagues.season` literal), B F-3 (far-side copy wording) | accepted as pre-existing / verbatim-spec | no change; A F-4 is a 2027 rollover item for NEXT.md |
 
 Verification on `c4f8a6f7`: targeted suites (`test_owned_picks`, `test_sleeper_write_route`, `test_sleeper_write`, `test_sleeper_pick_tradability`, `test_pick_assignment`, `test_trade_send_validate`, `test_pick_horizon`) → 173 passed; `npx tsc --noEmit` → 0 errors; `node tests/check-send-button-platform.js` → all pass. Full-suite line recorded in status.md / TEST_LEDGER by the orchestrator.
+
+## Phase 3 round 2 — 2026-09-08
+
+QA-A PASS (0 defects, 1 wording note), QA-B PASS (0 defects, 3 observations). Both suites 5892 / 1 skipped; RED-first 18/18; guard check 9 RED with the operand removed. Startup-shaped draft exclusion verified end to end on scratch DBs by both. A F-1 wording ("rookie draft already ran" → shape-neutral) fixed in this commit. **Group ship-ready.**
