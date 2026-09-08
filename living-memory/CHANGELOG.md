@@ -15,6 +15,12 @@
 
 The owner-only activation (PR #287 `16bb6fd1`, LIVE 05:28 UTC, knobs flipped 05:29 UTC by the release session) crashed production on its first two searches: uncapped decks of 1,037 / 1,456 cards × ~21 KB evidence rows became a single ~28 MB `INSERT`, the 256 MB Postgres backend was OOM-killed twice, and exclusive mode failed the job (`owner_impression_unavailable`) → "Search failed" on every Find a Trade. Operator chose to keep owner-only live: budgets cut to 300 / 3,000 at 13:55 UTC (≈250 cards). Fix: `save_deck_impressions` pages at 100 rows per statement in one transaction (`DECK_IMPRESSION_INSERT_ROWS`), guarded by `test_deck_impressions_paging.py`. Shipped 2026-09-08 as [PR #289](https://github.com/mattmurf77/fantasy-trade-finder/pull/289) `609cb79e`, Render LIVE 02:41 UTC; both budgets restored to 4096 / 60000 at 02:41 UTC, so decks are uncapped again on the paged insert. First real uncapped search still to be confirmed in the logs. No mobile change: build 1.17.2 (150) already carries the owner contract. [Runbook row](../docs/runbook.md#common-failure-modes), [G-072](GOTCHAS.md).
 
+## 2026-09-08 — Team overhaul flag ON in production (operator: "push the flag")
+
+**What:** `overhaul.enabled` true on `main` (`d59a86d7`; `config/features.json` + the release fixture mirror). Production `GET /api/feature-flags` served it as true ~2 min after the push. The Acquire "Team overhaul" card and the create/generate/assemble/send routes are live for TestFlight testers on builds 151+ (all-platform sends need 152/153).
+**Why:** the operator asked to see the feature on Acquire; D1 revised and D2–D9 confirmed on 2026-09-07. Rollback lever: flip the two files back to false.
+**Evidence:** [TEST_LEDGER](TEST_LEDGER.md) 2026-09-08. Device checklist still unrun.
+
 ## 2026-09-07b — Team overhaul sends on MFL and ESPN (owner D1 revision) MERGED; iOS 152 and 153 uploaded
 
 **What:** the owner confirmed D2–D9 and revised D1 to "should work for all". Overhaul sends now dispatch through per-platform propose cores (`_sleeper_propose_core`, new `_mfl_propose_core`, `_espn_propose_core`, all extracted verbatim from their routes); capabilities are per platform (`can_propose`, `can_propose_picks` false on ESPN, Sleeper tied offers `supported`); MFL/ESPN refresh reads fresh rosters and refuses to terminalize on stale data. Mobile copy is platform-aware. Owner record: [owner-decisions.md](../docs/plans/team-overhaul/owner-decisions.md).

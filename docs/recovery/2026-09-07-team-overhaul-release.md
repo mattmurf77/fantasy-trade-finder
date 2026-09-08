@@ -17,3 +17,7 @@ Full tip: `4203d0593ef31c8dc05acdf7f8a468a700397270` (PR #288 head). Recovery: `
 ## Follow-up branch (same day)
 
 [PR #290](https://github.com/mattmurf77/fantasy-trade-finder/pull/290) head `5894ae34d06b666b8e9ced4c95931a95f4ae8daa` (branch `claude/overhaul-all-platform-sends`) squash-merged as `8cacc1f2`; `git diff --stat origin/main 5894ae34d06b666b8e9ced4c95931a95f4ae8daa` empty (complete-tree equality). Hosted CI run 34178143105 all green; local full suite 5863 passed / 1 skipped; iOS 1.17.2 (152), EAS `032d7ed2`, and 1.17.2 (153), EAS `b3267ae7`, both built from the merged tree (`5894ae34` ≡ `8cacc1f2`). Branch deleted locally and remotely after this capture. Recovery: `git branch <name> 5894ae34d06b666b8e9ced4c95931a95f4ae8daa` or `git fetch origin refs/pull/290/head`.
+
+## Flag-flip checkout (2026-09-08)
+
+Throwaway detached checkout `/private/tmp/claude-501/ftf-flagflip` held only the two-file flag flip, committed and pushed to `main` as `d59a86d7` (`git diff --stat origin/main d59a86d7` empty at removal). Removed with `git worktree remove` after that check; nothing unique discarded.
