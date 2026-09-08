@@ -66,7 +66,7 @@
   "outlook.odds": true,
   "outlook.trade_impact": true,
   "trades.team_review": true,
-  "overhaul.enabled": false,
+  "overhaul.enabled": true,
   "trade.outlook_net_firsts": false,
   "trades.window_from_odds": false,
   "trade.outlook_composite": false,
