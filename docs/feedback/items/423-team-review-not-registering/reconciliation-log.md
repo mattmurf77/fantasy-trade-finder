@@ -14,3 +14,7 @@ QA-A PASS (5 minor), QA-B PASS (4 minor). Both independently found: a TopBar lea
 - **A F-4 / B F-4 (`state/README.md`)** — added: store row (13) and a `ftf_team_review_completed` persistence-key row carrying the deliberate not-user-scoped note.
 - **A F-5 / B F-1 (loading flash)** — accepted per Phase 3 ruling; no change. QA-B pytest row — accepted, no backend file in the diff.
 - Verification on `cb893b09`: `tsc --noEmit` 0 errors; `check-outlook-row-source` 19/0; `check-team-review` 13/0; `check-calc-merged-layout` pass; `check-finder-conditions-reachable` 6/0; `check-inline-home` pass; `check-team-review-depth` 8/0; `testid-lint` OK.
+
+## Phase 3 round 2 — 2026-09-08
+
+QA-A PASS (2 minor), QA-B PASS (1 minor). All eleven sabotages RED on both reads; the render-phase reset verified (no loop, same-component setState, no cross-league carry-over). A F-1 (guard could also pin `setStepLeague`/`setOutlook(null)`) accepted as a later hardening; B F-1 stale guard cite in screens/CLAUDE.md fixed in this commit. **Group ship-ready.**
