@@ -18443,7 +18443,7 @@ def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_i
         if untradable:
             _msg = _sleeper_untradable_copy(untradable, grid_rows, window)
             return {"error": "sleeper_pick_untradable", "picks": untradable,
-                    "season_window": list(window) if window else None,
+                    "season_window": list(window),
                     "message": _msg, "detail": _msg}, 422
         if not_owned:
             _msg = ("Some draft picks in this trade have already changed hands, so nothing "
@@ -30401,10 +30401,12 @@ def _sleeper_pick_window_for_send(league_id: str, meta, traded_picks: list
 
 
 def _sleeper_untradable_copy(untradable: list, grid_rows: list,
-                             window: tuple[int, int] | None) -> str:
+                             window: tuple[int, int]) -> str:
     """The one sentence both routes show for a spent / out-of-window pick.
     Count-aware like #413's copy; names the offending seasons and Sleeper's
-    current window so the user knows what to rebuild with."""
+    current window so the user knows what to rebuild with. `window` is never
+    None here: `sleeper_pick_tradable` abstains on a None window, so
+    `untradable` is empty and neither route reaches this."""
     grid = {str(r.get("pick_id")): r for r in (grid_rows or [])}
     seasons: set[int] = set()
     for pid in untradable:
@@ -30415,7 +30417,7 @@ def _sleeper_untradable_copy(untradable: list, grid_rows: list,
     n = len(untradable)
     ss = [str(s) for s in sorted(seasons)]
     season_list = (" and ".join(ss) if len(ss) == 2 else ", ".join(ss)) or "Those"
-    first, last = window if window else ("?", "?")
+    first, last = window
     return (f"{n} draft pick{'s' if n != 1 else ''} in this trade can’t be traded in "
             f"Sleeper right now — {season_list} picks are no longer tradable (Sleeper is "
             f"trading {first}–{last} picks). Rebuild the trade with one of those.")

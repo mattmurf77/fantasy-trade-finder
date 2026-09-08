@@ -482,17 +482,34 @@ function walk(node, cb) {
 
   // 9 — the untradable branch renders the server's `detail` (the sentence
   // names the spent seasons and Sleeper's window; the client must not guess).
+  // Asserted on the Alert.alert CALL's message argument, not on the branch
+  // text: the branch comment also says "detail", so a text match passed
+  // with the operand deleted (G-428 QA round 1, B F-1). The identifier must
+  // sit inside the second argument's AST — comments are not nodes.
   {
     let untradableBranch = null;
     walk(sf, (node) => {
       if (!untradableBranch && ts.isIfStatement(node) && UNTRADABLE.test(condText(node))) untradableBranch = node;
     });
-    const body = untradableBranch ? untradableBranch.thenStatement.getText(sf) : '';
-    if (untradableBranch && /\bdetail\b/.test(body)) {
+    let alertCall = null;
+    if (untradableBranch) {
+      walk(untradableBranch.thenStatement, (node) => {
+        if (!alertCall && ts.isCallExpression(node)
+            && node.expression.getText(sf).replace(/\s+/g, '') === 'Alert.alert') alertCall = node;
+      });
+    }
+    const messageArg = alertCall && alertCall.arguments.length >= 2 ? alertCall.arguments[1] : null;
+    let passesDetail = false;
+    if (messageArg) {
+      walk(messageArg, (node) => {
+        if (ts.isIdentifier(node) && node.text === 'detail') passesDetail = true;
+      });
+    }
+    if (passesDetail) {
       ok('sleeper button: sleeper_pick_untradable renders the server detail');
     } else {
       fail('sleeper button: sleeper_pick_untradable renders the server detail',
-           'the branch must reference `detail` — the server sentence carries the season window');
+           `the Alert.alert message argument must pass \`detail\` — the server sentence carries the season window (got: ${messageArg ? messageArg.getText(sf).replace(/\s+/g, ' ').slice(0, 80) : 'no Alert.alert(title, message) call in the branch'})`);
     }
   }
 

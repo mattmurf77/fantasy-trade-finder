@@ -42,6 +42,12 @@ TRADED_2026_2028 = TRADED_2026 + [
     {"season": "2028", "round": 1, "roster_id": 3, "owner_id": 1,
      "previous_owner_id": 3}]
 CACHED_DRAFTED = ds.DraftStatus(ds.DRAFTED, ds.HIGH, ds.SRC_SLEEPER)
+# A first-season dynasty league after its startup draft (rounds >= 15 —
+# `_is_rookie_shaped` is False). G-428 QA round 1 (A F-1 / B F-2): the class
+# is consumed all the same, so the send window must start the following class.
+STARTUP_DONE = [{"draft_id": "s1", "season": "2026", "status": "complete",
+                 "type": "snake", "last_picked": 1787707582674,
+                 "settings": {"rounds": 25}}]
 
 
 # ---------------------------------------------------------------------------
@@ -56,10 +62,23 @@ class TestSleeperPickWindow:
              "settings": {"rounds": 4}},                       # last year — irrelevant
             {"draft_id": "d2", "season": "2027", "status": "pre_draft",
              "settings": {"rounds": 4}},                       # not complete
-            {"draft_id": "s1", "season": "2026", "status": "complete",
-             "settings": {"rounds": 25}},                      # startup-shaped
+            {"draft_id": "s2", "season": "2027", "status": "complete",
+             "settings": {"rounds": 25}},                      # startup-shaped — still counts
         ]
-        assert ds.completed_draft_seasons(drafts, 2026) == {2026}
+        assert ds.completed_draft_seasons(drafts, 2026) == {2026, 2027}
+
+    def test_completed_draft_seasons_is_shape_blind(self):
+        """G-428 QA round 1 (A F-1 / B F-2): a completed STARTUP draft consumes
+        the current class too — the pre-#428 sync excluded any `complete`
+        current-season draft regardless of shape, and so must this."""
+        assert ds.completed_draft_seasons(STARTUP_DONE, 2026) == {2026}
+        # Shape-less entries (no `settings`) count as well, as they always did.
+        assert ds.completed_draft_seasons(
+            [{"season": "2026", "status": "complete"}], 2026) == {2026}
+
+    def test_sleeper_pick_window_post_startup_starts_next_class(self):
+        assert ds.sleeper_pick_window(2026, STARTUP_DONE, TRADED_2026) == (2027, 2029)
+        assert ds.sleeper_pick_tradable(2026, ds.sleeper_pick_window(2026, STARTUP_DONE)) is False
 
     def test_sleeper_pick_window_post_draft_is_next_three_classes(self):
         """Spent-season rows in traded_picks must NOT widen the window back

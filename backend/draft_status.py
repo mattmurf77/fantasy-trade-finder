@@ -163,10 +163,12 @@ class DraftStatus:
 # the propose + validate routes (which decide what may be sent).
 
 def completed_draft_seasons(drafts, current_season) -> set[int]:
-    """Seasons whose rookie draft Sleeper reports `complete`, at or after
-    `current_season`. Startup-shaped drafts (`_is_rookie_shaped` is False)
-    are ignored — a completed startup says nothing about the rookie class;
-    an unknown shape counts (the #228 sync never discriminated either).
+    """Seasons whose draft Sleeper reports `complete`, at or after
+    `current_season`. Shape-blind on purpose (G-428 QA round 1): a completed
+    startup draft consumes that season's class exactly as a rookie draft
+    does — Sleeper refuses the season's picks either way — so the shape
+    discriminator that #207's *verdict* needs has no place here, and the
+    #228 sync this replaces never discriminated either.
     Malformed entries are skipped; `drafts` None/[] ⇒ empty set."""
     try:
         current_season = int(current_season)
@@ -175,8 +177,6 @@ def completed_draft_seasons(drafts, current_season) -> set[int]:
     out: set[int] = set()
     for d in drafts or ():
         if not isinstance(d, dict) or d.get("status") != "complete":
-            continue
-        if _is_rookie_shaped(d) is False:
             continue
         try:
             season = int(d.get("season") or 0)
