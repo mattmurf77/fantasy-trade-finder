@@ -55,6 +55,12 @@
 //      (catch-all first, then the pick copy), so chain membership is the
 //      claim. 7c pins the catch-all's own copy so the branches were added,
 //      not substituted. Presence of exact wirings, not behavior.
+//   9. (#428, 2026-09-08) A third pick refusal, 422 `sleeper_pick_untradable`
+//      (the pick's class is outside Sleeper's tradable window — its rookie
+//      draft already ran). Same claims as 7–8: its own Alert branch, never
+//      `goConnect`, inside the ladder before the catch-all, and it renders
+//      the server `detail` (which carries the season window) rather than
+//      inventing its own seasons.
 //
 // Run: node tests/check-send-button-platform.js
 //   (or: npm run test:send-button-platform)
@@ -444,6 +450,7 @@ function walk(node, cb) {
   const condText = (node) => node.expression.getText(sf).replace(/\s+/g, ' ');
   const UNMAPPED = /code\s*===\s*'sleeper_pick_unmapped'/;
   const NOT_OWNED = /code\s*===\s*'sleeper_pick_not_owned'/;
+  const UNTRADABLE = /code\s*===\s*'sleeper_pick_untradable'/;
 
   // 7 / 8 — presence: an `if` whose condition names the code, whose branch
   // calls Alert.alert and never references goConnect. Every matching `if`
@@ -471,6 +478,23 @@ function walk(node, cb) {
   }
   branchCheck('sleeper button: sleeper_pick_unmapped has its own Alert branch, no goConnect', UNMAPPED);
   branchCheck('sleeper button: sleeper_pick_not_owned has its own Alert branch, no goConnect', NOT_OWNED);
+  branchCheck('sleeper button: sleeper_pick_untradable has its own Alert branch, no goConnect', UNTRADABLE);
+
+  // 9 — the untradable branch renders the server's `detail` (the sentence
+  // names the spent seasons and Sleeper's window; the client must not guess).
+  {
+    let untradableBranch = null;
+    walk(sf, (node) => {
+      if (!untradableBranch && ts.isIfStatement(node) && UNTRADABLE.test(condText(node))) untradableBranch = node;
+    });
+    const body = untradableBranch ? untradableBranch.thenStatement.getText(sf) : '';
+    if (untradableBranch && /\bdetail\b/.test(body)) {
+      ok('sleeper button: sleeper_pick_untradable renders the server detail');
+    } else {
+      fail('sleeper button: sleeper_pick_untradable renders the server detail',
+           'the branch must reference `detail` — the server sentence carries the season window');
+    }
+  }
 
   // 7b — reachability: follow elseStatement links from the chain's root
   // (`sleeper_not_linked`) to the terminal non-if `else`, collecting each
@@ -492,13 +516,14 @@ function walk(node, cb) {
   }
   const unmappedInChain = chain.some((c) => UNMAPPED.test(c));
   const notOwnedInChain = chain.some((c) => NOT_OWNED.test(c));
-  if (root && finalElse && unmappedInChain && notOwnedInChain) {
-    ok('sleeper button: both pick branches sit inside the ladder before the catch-all else');
+  const untradableInChain = chain.some((c) => UNTRADABLE.test(c));
+  if (root && finalElse && unmappedInChain && notOwnedInChain && untradableInChain) {
+    ok('sleeper button: all three pick branches sit inside the ladder before the catch-all else');
   } else {
-    fail('sleeper button: both pick branches sit inside the ladder before the catch-all else',
+    fail('sleeper button: all three pick branches sit inside the ladder before the catch-all else',
          !root ? 'could not find the ladder root `if (code === \'sleeper_not_linked\' …)`'
          : !finalElse ? 'the ladder has no terminal `else` — the catch-all was removed'
-         : `chain conditions: [${chain.join(' | ')}] — missing ${[!unmappedInChain && 'sleeper_pick_unmapped', !notOwnedInChain && 'sleeper_pick_not_owned'].filter(Boolean).join(', ')}; a branch appended after the catch-all is unreachable through the chain and double-alerts`);
+         : `chain conditions: [${chain.join(' | ')}] — missing ${[!unmappedInChain && 'sleeper_pick_unmapped', !untradableInChain && 'sleeper_pick_untradable', !notOwnedInChain && 'sleeper_pick_not_owned'].filter(Boolean).join(', ')}; a branch appended after the catch-all is unreachable through the chain and double-alerts`);
   }
 
   // 7c — the catch-all still carries its own copy: the branches were added,

@@ -4,7 +4,7 @@
 // by the shared client. Errors surface as ApiError; callers branch on
 // `(err.body as any)?.error` (sleeper_not_linked | sleeper_expired |
 // sleeper_write_failed | sleeper_unconfigured | feature_disabled |
-// sleeper_pick_unmapped | sleeper_pick_not_owned).
+// sleeper_pick_unmapped | sleeper_pick_untradable | sleeper_pick_not_owned).
 
 import * as SecureStore from 'expo-secure-store';
 
@@ -212,7 +212,7 @@ export async function proposeTradeToSleeper(
 // data unreachable (nothing validated).
 
 export interface TradeSendWarning {
-  code: string;                    // league_archived | player_moved | roster_limit | roster_not_found | asset_unmapped | pick_moved
+  code: string;                    // league_archived | player_moved | roster_limit | roster_not_found | asset_unmapped | pick_untradable | pick_moved
   severity: 'blocking' | 'warning';
   message: string;
 }
