@@ -21,3 +21,7 @@ Full tip: `4203d0593ef31c8dc05acdf7f8a468a700397270` (PR #288 head). Recovery: `
 ## Flag-flip checkout (2026-09-08)
 
 Throwaway detached checkout `/private/tmp/claude-501/ftf-flagflip` held only the two-file flag flip, committed and pushed to `main` as `d59a86d7` (`git diff --stat origin/main d59a86d7` empty at removal). Removed with `git worktree remove` after that check; nothing unique discarded.
+
+## Device-fix branch (2026-09-08)
+
+[PR #291](https://github.com/mattmurf77/fantasy-trade-finder/pull/291) head `64b0ff5f148dd9483e8c5d9038ae4260a3f059bf` (branch `claude/overhaul-device-fixes`) squash-merged as `167f93ff`; complete-tree equality verified before deletion. CI run 34197788940 green. iOS 1.17.2 (154), EAS `5aeed6cc`, built from `12d6ef0e` (identical mobile tree). Branch deleted locally and remotely. Recovery: `git branch <name> 64b0ff5f148dd9483e8c5d9038ae4260a3f059bf` or `git fetch origin refs/pull/291/head`.
