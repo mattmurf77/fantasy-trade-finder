@@ -27,7 +27,7 @@ Binding design: [BUILD-CONTRACT.md](BUILD-CONTRACT.md). Product rules: [PRODUCT-
 ## 2. Schema & flag scope
 
 - New tables: `overhauls`, `overhaul_offers`, `overhaul_roadmaps`, `overhaul_attempts`, `overhaul_reservations` → `docs/data-dictionary.md` (one section each). Created by `metadata.create_all`; no ALTER migration rows needed.
-- New feature flag: `overhaul.enabled` → `config/features.json` (**false**), `backend/feature_flags.py` `FLAG_KEYS` + mirror fixtures, `docs/config-reference.md`. Gates the entry card and the create/generate/assemble/send routes only; reads, decisions, priorities, prepare-send, refresh and status assertions stay reachable so live sends are never stranded by a rollback. **Graduation criterion:** the operator runs the [QA.md](QA.md) physical-device checklist on a TestFlight build and confirms D1 (Sleeper-only sends) and D9 (Acquire placement).
+- New feature flag: `overhaul.enabled` → `config/features.json` (**false**), `backend/feature_flags.py` `FLAG_KEYS` + mirror fixtures, `docs/config-reference.md`. Gates the entry card and the create/generate/assemble/send routes only; reads, decisions, priorities, prepare-send, refresh and status assertions stay reachable so live sends are never stranded by a rollback. **Graduation criterion:** the operator runs the [QA.md](QA.md) physical-device checklist on a TestFlight build containing the all-platform send path. D1 (revised to Sleeper + MFL + ESPN sends, 2026-09-07) and D9 are owner-confirmed.
 - New env vars / `model_config` keys: **none**. Search bounds are module constants in `backend/overhaul_service.py`. Deploy-free rollback lever: flip `overhaul.enabled` false and `POST /api/feature-flags/reload`.
 
 ## 3. Evidence scope
