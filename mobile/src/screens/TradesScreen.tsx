@@ -66,6 +66,7 @@ import { registerScrollToTop } from '../navigation/scrollToTop';
 import OutlookSheet from '../components/OutlookSheet';
 import TradeFinderModeBar from '../components/TradeFinderModeBar';
 import OutlookBiasReceipt, {
+  OUTLOOK_DISPLAY_NAME,
   outlookReceiptCovers,
 } from '../components/OutlookBiasReceipt';
 import TradeDnaSheet, {
@@ -9835,20 +9836,11 @@ function cap(s: string) {
 }
 
 // #376/#394 — display names for the minimized "Outlook & filters" row.
-// The four directional values use OutlookBiasReceipt's LEAN names (#253
-// canonical order) so the row and the receipt share one vocabulary; the
-// map is duplicated here because the receipt keeps LEAN private.
-// `not_sure` IS a declared value (TradeDnaSheet persists it when positions
-// are saved without an outlook pick) — it renders "Not sure", never the
-// cap() literal "Not_sure" and never "Not set". "Not set" is reserved for
-// null/absent, applied at the call site.
-const OUTLOOK_FALLBACK_LABEL: Record<string, string> = {
-  championship: 'All-in',
-  contender: 'Contending',
-  rebuilder: 'Rebuilding',
-  jets: 'Tanking',
-  not_sure: 'Not sure',
-};
+// #424 — aliased to OutlookBiasReceipt's exported table (it owns LEAN) so
+// this row and the merged calculator's `calc.outlook-fallback` twin can
+// never drift apart again. `not_sure` renders "Not sure"; "Not set" is
+// reserved for null/absent, applied at the call site.
+const OUTLOOK_FALLBACK_LABEL = OUTLOOK_DISPLAY_NAME;
 
 // ── Styles — Chalkline (docs/design/design-system.md) ───────────────
 const styles = StyleSheet.create({

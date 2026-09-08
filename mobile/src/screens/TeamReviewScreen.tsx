@@ -110,6 +110,7 @@ export default function TeamReviewScreen() {
   const [shed, setShed] = useState<string[]>([]);
   const [scoped, setScoped] = useState<{ id: string; name: string } | null>(null);
   const [saving, setSaving] = useState(false);
+  const qc = useQueryClient();
   // Actions actually COMMITTED this session — the `plan` beat recaps only what
   // the user did, never what they skipped past.
   const done = useRef<Set<string>>(new Set());
@@ -129,6 +130,16 @@ export default function TeamReviewScreen() {
   }, [data]);
 
   const beat = beats[step];
+
+  // #423 — COMPLETION = reaching the `plan` beat (operator ruling 2026-09-08):
+  // the beat is the standing summary of everything set, so a user who reads it
+  // has "gone through it" whether they leave by "Find my trades", the back
+  // gesture, the header or the tab bar. The finish button keeps its own call
+  // (the store's `mark` is idempotent); this effect is what makes the other
+  // three exits count, which the button-only write never did.
+  useEffect(() => {
+    if (beat === 'plan' && leagueId) markTeamReviewCompleted(leagueId);
+  }, [beat, leagueId]);
 
   const emit = useCallback((name: string, props: Record<string, unknown>) => {
     try { track(name, { league_id: leagueId, ...props }); } catch { /* never block */ }
@@ -166,6 +177,12 @@ export default function TeamReviewScreen() {
       await saveLeaguePreferences(
         leagueId, { team_outlook: fallbackOutlook, ...patch } as any,
       );
+      // #424 — every write through here invalidates the shared
+      // ['league-prefs', leagueId] key, not just the plan beat's. The window
+      // and depth beats used to leave TradesHome's 5-minute-stale copy (and
+      // now the merged calculator's outlook row, which reads the same key)
+      // showing the pre-review value to a user who backed out early.
+      qc.invalidateQueries({ queryKey: ['league-prefs', leagueId] });
       done.current.add(action);
       emit('team_review_action_taken', { beat, action });
       // The shared adoption receipt — deliberately the SAME event the guide and
@@ -180,7 +197,7 @@ export default function TeamReviewScreen() {
     } finally {
       setSaving(false);
     }
-  }, [leagueId, beat, emit, outlook, data]);
+  }, [leagueId, beat, emit, outlook, data, qc]);
 
   if (!leagueId) {
     return (
@@ -1019,7 +1036,6 @@ function Plan({
   onSave: (patch: Record<string, unknown>, action: string) => Promise<boolean>;
   saving: boolean;
 }) {
-  const qc = useQueryClient();
   // Read-only flag consumption, so a lever that is dark is never advertised.
   const listsOn = useFlag('trade.preference_lists');
   const intentOn = useFlag('trades.intent_modes');
@@ -1085,7 +1101,6 @@ function Plan({
       trade_away_positions: next.shed,
     }, action);
     setFailed(!ok);
-    if (ok) qc.invalidateQueries({ queryKey: ['league-prefs', leagueId] });
   };
 
   const toggle = (list: string[], v: string) =>
