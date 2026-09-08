@@ -3995,6 +3995,7 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-09-08 — Feedback batch #422/#423/#424/#425/#426/#427/#428: five groups QA-green on `feat/feedback-2026-09-08`](#2026-09-08--feedback-batch-422423424425426427428-five-groups-qa-green-on-featfeedback-2026-09-08)
 - [2026-09-08 — Team overhaul: device-found card-shape bug (blank chips, two crashes) fixed](#2026-09-08--team-overhaul-device-found-card-shape-bug-blank-chips-two-crashes-fixed)
 - [2026-09-08 — Team overhaul flag flipped ON; production verified](#2026-09-08--team-overhaul-flag-flipped-on-production-verified)
 - [2026-09-07 — Team overhaul: sends on MFL and ESPN (owner D1 revision), branch evidence](#2026-09-07--team-overhaul-sends-on-mfl-and-espn-owner-d1-revision-branch-evidence)

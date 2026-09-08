@@ -10,6 +10,46 @@
 
 ---
 
+## D-189 — Sleeper pick sends refuse classes outside the platform's tradable window; the sync excludes completed-draft seasons shape-blind, with the cached verdict only as a fallback for an empty `/drafts`
+
+**Date:** 2026-09-08. **Status:** built and QA-green on `feat/feedback-2026-09-08` (feedback #428, [folder](../docs/feedback/items/428-sleeper-pick-send-refused/)); ships with the batch.
+**Context:** On FFV3 Sleeper answered `"These draft picks cannot be traded."` to a #413-encoded send. The 2026 draft completed 2026-08-26, but Sleeper keeps spent-season rows in `traded_picks` and our grid kept pricing them; validate passed and Sleeper refused. The pre-fix sync excluded the current season only from a live `/drafts` read that fails soft to "exclude nothing" (D-089).
+**Decision:** `draft_status.sleeper_pick_window` anchors the tradable window (three classes) at the first undrafted season; any `complete` draft with season ≥ current excludes that season (shape-blind — a completed startup draft consumes the class too); the cached #207 verdict is consulted ONLY when `/drafts` returns `[]` (a positive `drafted` excludes the current season; anything else keeps the D-089 fail-safe). Propose and validate refuse out-of-window picks before any provider call (422 `sleeper_pick_untradable` with `picks`, `season_window`, `message == detail`; validate `pick_untradable`), fetching drafts/meta only on pick-bearing sends. The 502 body for a Sleeper GraphQL error now carries Sleeper's first message as `detail`. Unknown season abstains, never refuses.
+**Alternatives:** fold into `sleeper_pick_unmapped` (misleading copy on fielded builds); trust the cached verdict over the live read (wrong when the cache is stale); rookie-only exclusion (regresses first-year startup leagues — caught by both QA readers).
+**Consequences:** Q-037 closes (Sleeper's element is `{roster_id=original, previous_owner_id=from, owner_id=to}`; both captures were acquired-pick trades). Overhaul sends inherit the same core. Follow-up candidate: first-year startup leagues have no linked example to verify live.
+
+---
+
+## D-190 — First-round picks are exempt from the stud (consolidation) tax; other rounds and players stay taxed; `stud_tax_exempt_first_round` is the rollback knob
+
+**Date:** 2026-09-08. **Status:** built and QA-green (feedback #427, [folder](../docs/feedback/items/427-first-round-picks-stud-tax-exempt/)); ships with the batch.
+**Context:** Owner: "First round picks should not be devalued. Two firsts straight up for a player in the 2 1sts tier should be considered even. Other draft picks should still be subject to the tax." `package_value_v2` discounted a 2117-value first exactly like a 2117 WR, so two mid firsts vs a `firsts_2`-floor player read 0.828 (favors the player).
+**Decision:** a per-asset `exempt` mask (generic `generic_pick_1_*` and owned round-1 ids) makes first-round picks contribute face value on the multi-asset side; the curve and the per-side cap apply to the taxable subset only; benchmark selection and crown credit still read all values; gen-v2's `consolidated_value` changes in step; every call site passes the mask (35 sites, zero unmasked). Knob `stud_tax_exempt_first_round = 1.0`; ≤0 is byte-identical to before (proven by an 18-way identity test); both goldens pin 0 and were not re-captured. Firsts are the currency, not quarters.
+**Alternatives:** tax firsts at a reduced rate (still contradicts the owner's rule); exempt all picks (owner said other rounds stay taxed); re-capture goldens (hides the change).
+**Consequences:** report case 0.828 → 0.997 (even); two seconds 0.824 unchanged; [1st, WR] 0.912 (WR still taxed). Open by design, surfaced to the owner: elite-player crown credit still applies when the other side is all firsts (three firsts vs a `firsts_3`-floor player reads 0.926).
+
+---
+
+## D-191 — Team Review completion means reaching the plan beat; the Acquire landing's outlook row reads the saved preference query
+
+**Date:** 2026-09-08. **Status:** built and QA-green (feedback #423/#424, [folder](../docs/feedback/items/423-team-review-not-registering/)); ships with the batch.
+**Context:** The merged Acquire landing's outlook fallback was a literal "Outlook · Not set" with no data source (the receipt covered no declared value with `trade.outlook_direction` off), and the completion marker wrote only on the "Find my trades" button and was read once per mount under a screen that stays mounted.
+**Decision:** the calculator fallback subscribes to `['league-prefs', leagueId]` and shows the declared outlook's display name ("Not set" only for null); every review write invalidates that key inside the single `savePrefs`; completion is recorded on reaching the plan beat (and still on the button) into a synchronous zustand store mirrored to the same AsyncStorage key; a league switch mid-review resets the step and selections during render so the new league is never marked done by the old position.
+**Alternatives:** a focus-effect re-read (races the fire-and-forget write); keep "button only" completion (the operator's back-out path never counted).
+**Consequences:** known minor: a one-round-trip "Not set" on a cold cache; `inferred_outlook` never renders as "set" (#394 rule, now pinned by a guard).
+
+---
+
+## D-192 — The Team overhaul entry is a full-width hero tile in ice that replaces the utility row's Draft cell; a true red needs a design-system token
+
+**Date:** 2026-09-08. **Status:** built and QA-green (feedback #425/#426, [folder](../docs/feedback/items/425-overhaul-tile-replaces-draft/)); ships with the batch.
+**Context:** Owner: "The overhaul tile should replace the draft button. Too much content on one page." and "should be a big red button." The Draft entry on the inline-strip landing is the utility row's leading cell; three other Draft entries remain (mode-bar chip for the control cohort, the seasonal Draft tab, the League tab tile). Chalkline has no red action accent (ice = actions, flare = highlights, `--neg` = status).
+**Decision:** the hero mounts directly above the mode-bar/utility wrapper inside the main scroll, removes the Draft cell unconditionally, keeps the gate, testIDs and analytics, and takes its colour from ONE constant (`HERO_TONE`, ice). A true red is a one-object change once the operator adds a token (ADR-004/005 decision) — asked in the ship summary.
+**Alternatives:** flare fill (barred from actions); `semantic.neg` (status colour); a new hex literal (rule 9 forbids new hues).
+**Consequences:** ice fills on the landing: hero + un-collapsed Team review CTA (≤3 rule holds); flag off → no hero and no Draft cell.
+
+---
+
 ## D-188 — Team overhaul v1 adopts the nine proposed defaults as reversible engineering decisions; Sleeper-only sends, manual fallback, ownership-derived status
 
 **Date:** 2026-09-07. **Status:** merged dark as `a8ef182e`; flag `overhaul.enabled` **false**. **Owner-confirmed 2026-09-07** for D2–D9; **D1 revised by the owner** to sends on Sleeper, MFL and ESPN (ESPN players only) — follow-up branch `claude/overhaul-all-platform-sends`. Sleeper tied offers confirmed supported by the owner. Record: [owner-decisions.md](../docs/plans/team-overhaul/owner-decisions.md).
