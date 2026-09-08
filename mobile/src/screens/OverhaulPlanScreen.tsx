@@ -72,13 +72,15 @@ function sourceHint(a: AttemptView): string | null {
 }
 
 function assetName(view: OverhaulView, id: string): string {
-  const a = view.eligible_assets.find((x) => x.id === id);
+  const a = (view.eligible_assets ?? []).find((x) => x.id === id);
   if (!a) return id;
   return a.kind === 'pick' ? a.label || a.name : a.name;
 }
 
+// Server data is guarded (`?? []`, `?.`) everywhere it is read in render: a
+// malformed card or package must degrade to '—', never throw mid-render.
 function receiveLine(offer: Offer | undefined): string {
-  return offer?.card.receive_players.map((p) => p.name).join(' + ') || '—';
+  return (offer?.card?.receive_players ?? []).map((p) => p?.name).filter(Boolean).join(' + ') || '—';
 }
 
 function fmtWhen(iso: string | null | undefined): string {
@@ -98,8 +100,8 @@ function errorCode(e: unknown): string | null {
 /** The lowest tier none of whose offers has ever been attempted. */
 function nextTier(pkg: Package, attempts: AttemptView[]): { tier: number; offer_ids: string[] } | null {
   const tried = new Set(attempts.map((a) => a.offer_id));
-  const sorted = [...pkg.tiers].sort((a, b) => a.tier - b.tier);
-  const t = sorted.find((x) => x.offer_ids.length > 0 && x.offer_ids.every((id) => !tried.has(id)));
+  const sorted = [...(pkg.tiers ?? [])].sort((a, b) => a.tier - b.tier);
+  const t = sorted.find((x) => (x.offer_ids ?? []).length > 0 && x.offer_ids.every((id) => !tried.has(id)));
   return t ? { tier: t.tier, offer_ids: t.offer_ids } : null;
 }
 
@@ -118,7 +120,7 @@ export default function OverhaulPlanScreen() {
   });
   const view = query.data;
   const roadmap = useMemo(
-    () => view?.roadmaps.find((r) => r.roadmap_id === view.selected_roadmap_id) ?? null,
+    () => view?.roadmaps?.find((r) => r.roadmap_id === view.selected_roadmap_id) ?? null,
     [view],
   );
 
@@ -180,9 +182,11 @@ export default function OverhaulPlanScreen() {
     );
   }
 
-  const liveAttempts = view.attempts.filter((a) => LIVE_ATTEMPT_STATES.has(a.state));
+  const attemptsAll = view.attempts ?? [];
+  const liveAttempts = attemptsAll.filter((a) => LIVE_ATTEMPT_STATES.has(a.state));
   const recovery = view.recovery;
-  const completeCount = roadmap?.packages.filter((p) => p.status === 'complete').length ?? 0;
+  const packages = roadmap?.packages ?? [];
+  const completeCount = packages.filter((p) => p.status === 'complete').length;
 
   const onStartNew = () => {
     if (liveAttempts.length) {
@@ -202,9 +206,9 @@ export default function OverhaulPlanScreen() {
         <View style={styles.rowBetween}>
           <View style={styles.flex}>
             <ChalkText variant="title">
-              {`${view.settings.outlook ? OUTLOOK_LABEL[view.settings.outlook] : 'Overhaul'} · ${view.status}`}
+              {`${view.settings?.outlook ? OUTLOOK_LABEL[view.settings.outlook] ?? 'Overhaul' : 'Overhaul'} · ${view.status}`}
             </ChalkText>
-            <ChalkText variant="bodySm" style={styles.dim}>{`Last checked ${fmtWhen(view.snapshot.captured_at)}`}</ChalkText>
+            <ChalkText variant="bodySm" style={styles.dim}>{`Last checked ${fmtWhen(view.snapshot?.captured_at)}`}</ChalkText>
           </View>
           <Button
             label="Refresh"
@@ -221,10 +225,10 @@ export default function OverhaulPlanScreen() {
           <Card>
             <View style={styles.rowBetween}>
               <TickLabel>Progress</TickLabel>
-              <ChalkText variant="data">{`${completeCount} / ${roadmap.packages.length} complete`}</ChalkText>
+              <ChalkText variant="data">{`${completeCount} / ${packages.length} complete`}</ChalkText>
             </View>
             <View style={styles.progress}>
-              {roadmap.packages.map((p) => (
+              {packages.map((p) => (
                 <View key={p.package_id} style={[styles.tick, p.status === 'complete' && styles.tickOn]} />
               ))}
             </View>
@@ -242,7 +246,7 @@ export default function OverhaulPlanScreen() {
           </Card>
         )}
 
-        {recovery.applicable && !recovery.resolved ? (
+        {recovery?.applicable && !recovery.resolved ? (
           <Card rail={flare.base} padding={space.md}>
             <ChalkText style={[type.label, styles.flare]}>PRIORITY 1: RECOVER YOUR FIRST</ChalkText>
             <ChalkText variant="bodySm">
@@ -251,26 +255,26 @@ export default function OverhaulPlanScreen() {
           </Card>
         ) : null}
 
-        {roadmap?.packages.map((pkg, i) => {
-          const attempts = view.attempts
+        {roadmap ? packages.map((pkg, i) => {
+          const attempts = attemptsAll
             .filter((a) => a.package_id === pkg.package_id)
-            .sort((a, b) => (a.tier - b.tier) || a.created_at.localeCompare(b.created_at));
+            .sort((a, b) => (a.tier - b.tier) || (a.created_at ?? '').localeCompare(b.created_at ?? ''));
           const live = attempts.filter((a) => LIVE_ATTEMPT_STATES.has(a.state));
           const next = pkg.status === 'complete' ? null : nextTier(pkg, attempts);
-          const stale = pkg.tiers.flatMap((t) => t.offer_ids).filter((id) => roadmap.offers[id]?.availability === 'stale');
+          const stale = (pkg.tiers ?? []).flatMap((t) => t.offer_ids ?? []).filter((id) => roadmap.offers?.[id]?.availability === 'stale');
           return (
             <Card key={pkg.package_id}>
               <View style={styles.rowBetween}>
                 <TickLabel>{`Package ${i + 1}`}</TickLabel>
-                <Pill label={STATUS_LABEL[pkg.status]} color={STATUS_COLOR[pkg.status]} />
+                <Pill label={STATUS_LABEL[pkg.status] ?? String(pkg.status)} color={STATUS_COLOR[pkg.status] ?? chalk.dim} />
               </View>
-              <ChalkText variant="title">{pkg.give_ids.map((id) => assetName(view, id)).join(' + ')}</ChalkText>
+              <ChalkText variant="title">{(pkg.give_ids ?? []).map((id) => assetName(view, id)).join(' + ')}</ChalkText>
               {pkg.reason === 'recover_own_first' ? (
                 <ChalkText style={[type.label, styles.flare]}>PRIORITY 1 · RECOVER YOUR FIRST</ChalkText>
               ) : null}
 
               {attempts.map((a) => {
-                const offer = roadmap.offers[a.offer_id];
+                const offer = roadmap.offers?.[a.offer_id];
                 const hint = sourceHint(a);
                 const isLive = a.state === 'proposed' || a.state === 'outcome_unknown';
                 return (
@@ -280,7 +284,7 @@ export default function OverhaulPlanScreen() {
                         <ChalkText variant="body">{offer?.counterparty_username ?? a.offer_id}</ChalkText>
                         <ChalkText variant="bodySm" style={styles.dim}>{`${receiveLine(offer)} · Priority ${a.tier}`}</ChalkText>
                       </View>
-                      <Pill label={ATTEMPT_STATE_LABEL[a.state]} color={stateColor(a.state)} />
+                      <Pill label={ATTEMPT_STATE_LABEL[a.state] ?? String(a.state)} color={stateColor(a.state)} />
                     </View>
                     {hint ? <ChalkText variant="bodySm" style={styles.faint}>{hint}</ChalkText> : null}
                     {a.state === 'send_failed' && a.error?.message ? (
@@ -314,7 +318,7 @@ export default function OverhaulPlanScreen() {
               ) : next ? (
                 <View style={styles.next}>
                   <ChalkText variant="bodySm" style={styles.dim}>
-                    {`Next: Priority ${next.tier} · ${next.offer_ids.map((id) => roadmap.offers[id]?.counterparty_username ?? id).join(', ')}`}
+                    {`Next: Priority ${next.tier} · ${next.offer_ids.map((id) => roadmap.offers?.[id]?.counterparty_username ?? id).join(', ')}`}
                   </ChalkText>
                   <Button
                     label={`Send next tier${next.offer_ids.length > 1 ? ` (${next.offer_ids.length} offers)` : ''}`}
@@ -336,7 +340,7 @@ export default function OverhaulPlanScreen() {
               ) : null}
             </Card>
           );
-        })}
+        }) : null}
 
         <Button label="Start a new overhaul" variant="secondary" onPress={onStartNew} />
       </ScrollView>

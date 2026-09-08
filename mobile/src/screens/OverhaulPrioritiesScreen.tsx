@@ -54,10 +54,10 @@ const DRAG_ACTIVATION_MS = 220;
  *  never stored: the contiguity rule is a property of this shape. */
 type TierState = string[][];
 
-function fromWire(tiers: PriorityTier[]): TierState {
-  return [...tiers]
+function fromWire(tiers: PriorityTier[] | undefined): TierState {
+  return [...(tiers ?? [])]
     .sort((a, b) => a.tier - b.tier)
-    .map((t) => [...t.offer_ids])
+    .map((t) => [...(t.offer_ids ?? [])])
     .filter((ids) => ids.length > 0);
 }
 
@@ -83,8 +83,15 @@ function duplicateCounterpartyTier(tiers: TierState, offers: Record<string, Offe
   return null;
 }
 
+// Server data is guarded (`?? []`, `?.`, Number.isFinite) everywhere it is
+// read in render: a malformed card must degrade to '—', never throw.
 function receiveLine(offer: Offer): string {
-  return offer.card.receive_players.map((p) => p.name).join(' + ') || '—';
+  return (offer.card?.receive_players ?? []).map((p) => p?.name).filter(Boolean).join(' + ') || '—';
+}
+
+function fairnessLine(offer: Offer): string {
+  const f = offer.card?.fairness;
+  return Number.isFinite(f) ? `${Math.round(f * 100)}% fair` : '—';
 }
 
 export default function OverhaulPrioritiesScreen() {
@@ -102,10 +109,10 @@ export default function OverhaulPrioritiesScreen() {
   });
   const view = query.data;
   const roadmap = useMemo(
-    () => view?.roadmaps.find((r) => r.roadmap_id === roadmapId) ?? null,
+    () => view?.roadmaps?.find((r) => r.roadmap_id === roadmapId) ?? null,
     [view, roadmapId],
   );
-  const pkg = roadmap?.packages[packageIndex] ?? null;
+  const pkg = roadmap?.packages?.[packageIndex] ?? null;
   const offers = roadmap?.offers ?? {};
 
   // Local tier layout. Re-seeded from the wire only while untouched, so a
@@ -260,7 +267,7 @@ export default function OverhaulPrioritiesScreen() {
                   ) : null}
                 </View>
                 <ChalkText variant="data" style={styles.dim}>
-                  {`${Math.round(offer.card.fairness * 100)}% fair`}
+                  {fairnessLine(offer)}
                 </ChalkText>
               </View>
             </Pressable>
@@ -315,7 +322,7 @@ export default function OverhaulPrioritiesScreen() {
     if (leagueId) void queryClient.invalidateQueries({ queryKey: ['overhaul', leagueId] });
   }, [queryClient, overhaulId, leagueId]);
 
-  const packageCount = roadmap?.packages.length ?? 0;
+  const packageCount = roadmap?.packages?.length ?? 0;
   const isLast = packageIndex >= packageCount - 1;
 
   const goNext = useCallback(() => {
@@ -335,7 +342,7 @@ export default function OverhaulPrioritiesScreen() {
         if (!(e instanceof ApiError) || errorCode(e) !== 'stale_version') throw e;
         // Another write bumped the version — re-read and re-apply once.
         const fresh: OverhaulView = await getOverhaul(overhaulId);
-        const rm = fresh.roadmaps.find((r) => r.roadmap_id === roadmapId);
+        const rm = (fresh.roadmaps ?? []).find((r) => r.roadmap_id === roadmapId);
         if (!rm) throw e;
         await savePriorities(overhaulId, roadmapId, { version: rm.version, ...body });
       }
@@ -378,7 +385,7 @@ export default function OverhaulPrioritiesScreen() {
   const tied = tiers.map((ids, i) => ({ tier: i + 1, n: ids.length })).filter((t) => t.n > 1);
   const nextPkg = roadmap.packages[packageIndex + 1];
   const nextLabel = nextPkg
-    ? `Next: ${nextPkg.give_ids.map((id) => assetName(view, id)).join(' + ')}`
+    ? `Next: ${(nextPkg.give_ids ?? []).map((id) => assetName(view, id)).join(' + ')}`
     : 'Next: review and send';
 
   return (
@@ -410,8 +417,8 @@ export default function OverhaulPrioritiesScreen() {
             </View>
             <TickLabel>This package sends</TickLabel>
             <View style={styles.assets}>
-              {pkg.give_ids.map((id) => {
-                const a = view.eligible_assets.find((x) => x.id === id);
+              {(pkg.give_ids ?? []).map((id) => {
+                const a = (view.eligible_assets ?? []).find((x) => x.id === id);
                 const pos = a?.position;
                 return (
                   <View key={id} style={styles.assetRow}>
@@ -471,7 +478,7 @@ export default function OverhaulPrioritiesScreen() {
 }
 
 function assetName(view: OverhaulView, id: string): string {
-  const a = view.eligible_assets.find((x) => x.id === id);
+  const a = (view.eligible_assets ?? []).find((x) => x.id === id);
   if (!a) return id;
   return a.kind === 'pick' ? a.label || a.name : a.name;
 }

@@ -36,6 +36,16 @@
 //      send). The summary handles the ESPN pick blocker and the
 //      reconnect_required blocker, and never gates the send CTA on a literal
 //      Sleeper platform check — that gate is what used to hide Send on MFL/ESPN.
+//  10. Offer cards are normalized at the fetch boundary (TestFlight 1.17.2
+//      build 153: empty chips on review, crashes on "Build roadmaps" and
+//      "Set priorities"). The server's `Offer.card` is the RAW
+//      trade_card_to_dict dict (`give`/`receive`/`target_user_id`/
+//      `fairness_score`), and the client TradeCard type is not. So:
+//      api/overhaul.ts imports the deck's `normalizeTradeCard` and every
+//      fetcher returning an Offer / RoadmapView / OverhaulView passes its
+//      result through a normalize* call; no screen re-shapes the card
+//      (`toCardData`) or reads the raw keys; and every screen that reads a
+//      card's players in render guards the array (`receive_players ?? []`).
 //
 // Comment-stripped before matching, dependency-free, exits 1 on any failure.
 
@@ -208,6 +218,62 @@ const overhaulFiles = { ...screens, OverhaulEntryCard: entry, 'api/overhaul': ap
   } else ok('9b. summary has no `platform === \'sleeper\'` / `platform !== \'sleeper\'` gate');
   if (!/reconnect_required/.test(s)) bad('9c. summary handles reconnect_required', 'OverhaulSummaryScreen never references reconnect_required');
   else ok('9c. summary handles reconnect_required');
+}
+
+// 10 — offer cards normalized at the fetch boundary; screens read guarded TradeCards
+{
+  // (a) api/overhaul.ts imports normalizeTradeCard from ./trades and uses it
+  if (!/import \{[^}]*\bnormalizeTradeCard\b[^}]*\} from '\.\/trades'/.test(api)) {
+    bad('10a. api/overhaul.ts imports normalizeTradeCard from ./trades', "no `import { normalizeTradeCard } from './trades'` in api/overhaul.ts");
+  } else if (!/normalizeTradeCard\(/.test(api)) {
+    bad('10a. api/overhaul.ts calls normalizeTradeCard', 'imported but never called');
+  } else ok('10a. api/overhaul.ts imports and calls normalizeTradeCard');
+
+  // (b) every fetcher that returns an Offer / RoadmapView / OverhaulView normalizes
+  const fetchers = [
+    'getActiveOverhaul', 'getOverhaul', 'createOverhaul', 'updateOverhaulSettings',
+    'generateOffers', 'getOffers', 'assembleRoadmaps', 'selectRoadmap', 'savePriorities',
+    'refreshOverhaul',
+  ];
+  // A fetcher body runs from its `export async function` to the next
+  // top-level `export` (param type literals may close with `}` at column 0).
+  const unnormalized = [];
+  for (const fn of fetchers) {
+    const start = api.search(new RegExp(`^export async function ${fn}\\b`, 'm'));
+    if (start < 0) { unnormalized.push(`${fn} (not found)`); continue; }
+    const rest = api.slice(start + 1);
+    const nextExport = rest.search(/^export /m);
+    const body = nextExport < 0 ? rest : rest.slice(0, nextExport);
+    if (!/\bnormalize(Offer|Roadmap|OverhaulView)\b/.test(body)) unnormalized.push(fn);
+  }
+  if (unnormalized.length) {
+    bad('10b. every Offer/RoadmapView/OverhaulView fetcher normalizes its result',
+      `no normalize* call in: ${unnormalized.join(', ')} — the raw server dict would reach a screen`);
+  } else ok(`10b. all ${fetchers.length} Offer/RoadmapView/OverhaulView fetchers normalize`);
+
+  // (c) no screen re-shapes the card or reads the raw server keys
+  const rawReads = [];
+  for (const r of SCREENS) {
+    const src = screens[r];
+    if (/\btoCardData\b/.test(src)) rawReads.push(`${r}: toCardData`);
+    if (/\.card\??\.(give|receive)\b/.test(src)) rawReads.push(`${r}: .card.give/.receive`);
+    if (/\btarget_user(name|_id)\b/.test(src)) rawReads.push(`${r}: target_user_*`);
+  }
+  if (rawReads.length) {
+    bad('10c. no overhaul screen re-shapes the card or reads raw server keys',
+      `${rawReads.join('; ')} — normalization lives in api/overhaul.ts, screens read TradeCard fields only`);
+  } else ok('10c. no overhaul screen defines toCardData or reads .card.give/.receive/target_user_*');
+
+  // (d) every screen that renders a card's players guards the array
+  const readers = ['OverhaulRoadmaps', 'OverhaulPriorities', 'OverhaulSummary', 'OverhaulPlan'];
+  const unguarded = readers.filter((r) => !/receive_players\s*\?\?\s*\[\]/.test(screens[r]));
+  if (unguarded.length) {
+    bad('10d. card player arrays guarded in render', `${unguarded.join(', ')} read receive_players without \`?? []\``);
+  } else ok(`10d. ${readers.length} screens guard receive_players with \`?? []\``);
+  const pr = screens.OverhaulPriorities;
+  if (/\.fairness\s*\*/.test(pr) || !/Number\.isFinite\(/.test(pr)) {
+    bad('10e. priorities guards card.fairness', 'OverhaulPrioritiesScreen does arithmetic on card.fairness directly / has no Number.isFinite guard — a missing score must render as —, not NaN or a throw');
+  } else ok('10e. priorities screen guards card.fairness with Number.isFinite (no raw `.fairness *`)');
 }
 
 console.log(`\ncheck-team-overhaul: ${pass.length} passed, ${fail.length} failed`);
