@@ -8,3 +8,4 @@
 - 2026-09-08: Phase 0 — selected; folder created; planner launched.
 - 2026-09-08: Phase 1 complete — PRD, scope, investigation (live-config worked example); rulings in reconciliation-log.md. Build launched.
 - 2026-09-08: Phase 2 build `9778c2a7` (full suite 5912/1); QA launched.
+- 2026-09-08: Phase 3 round 1 — QA-A PASS, QA-B PASS; ship-ready (branch feat/fb427-first-round-pick-tax-exempt).
