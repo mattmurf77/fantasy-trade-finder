@@ -569,3 +569,19 @@ def test_cache_bake_sets_build_mode_without_real_dependencies_or_network(tmp_pat
                                capture_output=True, text=True, timeout=10)
     assert completed.returncode == 0, completed.stderr
     assert flag_file.read_text() == "1"
+
+
+def test_projection_route_returns_slot_refusal_message_verbatim(harness, monkeypatch):
+    # FB-422: the route passes the service's specific slot message through unchanged.
+    slots = ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "K", "DL", "DL", "LB", "LB", "DB", "DB", "IDP_FLEX"]
+    refusal = service.Unavailable("unsupported_roster_slots", service.unsupported_slots_message(slots))
+    def refused(*_):
+        raise refusal
+    monkeypatch.setattr(service, "load_bundle", refused)
+    response = harness.client.get("/api/league/season-projections")
+    assert response.status_code == 200
+    assert response.json["status"] == "unavailable"
+    assert response.json["reason"] == "unsupported_roster_slots"
+    assert response.json["message"] == refusal.message
+    assert "IDP_FLEX" in response.json["message"] and "8 of 15" in response.json["message"]
+    assert "teams" not in response.json
