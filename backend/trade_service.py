@@ -16,6 +16,7 @@ Core algorithm:
   (prevents surfacing wildly imbalanced trades that nobody would accept)
 """
 
+import functools
 import hashlib
 import heapq
 import math
@@ -29,6 +30,7 @@ from itertools import combinations
 from typing import Optional
 
 from .feature_flags import FLAGS
+from .pick_values import parse_generic_pick_id
 from .trade_narrative import build_narrative
 # trade.negmem — MODULE import, attribute calls only (T1, LLD §6.2). A value
 # import (`from .negmem import effective_mult`) would freeze the binding and
@@ -113,6 +115,16 @@ _DEFAULT_CFG: dict[str, float] = {
     # FantasyCalc (0.734) and the pre-#214 heavy shape (0.692). Inert
     # while package_bench_trade_wide ≤ 0.
     "package_floor_cross":       0.40,
+    # #427 (2026-09-08) — first-round picks are exempt from the stud tax.
+    # > 0 ⇒ an asset flagged exempt by the caller's mask
+    # (`first_round_pick_mask` — generic `generic_pick_1_*` rungs and owned
+    # `{league}_{season}_1_{orig}` ids) contributes its FACE value inside a
+    # multi-asset side in every stud-tax mode; the taxable subset keeps the
+    # depth formula and per-side cap, benchmark selection and the crown
+    # credit/premium are unchanged. ≤ 0 ⇒ the mask is ignored and every
+    # path is byte-identical to the pre-#427 math (deploy-free rollback;
+    # arm A's pin). Gen-v2's `consolidated_value` reads the same knob.
+    "stud_tax_exempt_first_round": 1.0,
     # Positional preference multipliers
     "pos_acquire_bonus":     0.20,
     "pos_tradeaway_bonus":   0.15,
@@ -1657,9 +1669,20 @@ def value_to_elo(value: float) -> float:
 
 def package_value_v2(values: list[float], v_max: float,
                      n_other: int | None = None,
-                     other_values: list[float] | None = None) -> float:
+                     other_values: list[float] | None = None,
+                     exempt: list[bool] | None = None) -> float:
     """
     KTC-style package value for the v2 engine (amendment A2).
+
+    #427 (2026-09-08) — ``exempt``: a per-asset mask, same length and order
+    as ``values``, built by the caller from asset IDS via
+    `first_round_pick_mask`. A flagged asset contributes its FACE value in
+    'market' and 'heavy' mode instead of riding the depth curve; only the
+    taxable subset is depth-discounted (and, in market mode, capped).
+    Benchmark selection (``v_max`` / own-max, over ALL values) and the crown
+    credit/premium (over ALL values) are unchanged. ``None``, an all-False
+    mask, or knob `stud_tax_exempt_first_round` ≤ 0 are byte-identical to
+    the pre-#427 math on every path.
 
     #214/#215: behavior branches on the thread-local stud-tax mode (see
     stud_tax_override / current_stud_tax_mode above):
@@ -1711,13 +1734,26 @@ def package_value_v2(values: list[float], v_max: float,
     mode = current_stud_tax_mode()
     if mode == "off":
         return round(sum(values), 1)
+    # #427 — resolve the exemption ONCE: no mask, an all-False mask, or the
+    # knob at its kill value all collapse to `None`, and every branch below
+    # is then the pre-#427 code path bit for bit.
+    if exempt is not None and not (
+            any(exempt) and _c("stud_tax_exempt_first_round") > 0):
+        exempt = None
     if mode == "market":
-        return _package_value_market(values, other_values, v_max)
+        return _package_value_market(values, other_values, v_max, exempt)
 
     # ── 'heavy' — pre-#214 legacy math, byte-identical ──────────────────
     v_max = max(v_max, 1e-9)
     gamma = _c("package_adj_gamma")
-    total = sum(v * (0.15 + 0.85 * (v / v_max) ** gamma) for v in values)
+    if exempt is None:
+        total = sum(v * (0.15 + 0.85 * (v / v_max) ** gamma) for v in values)
+    else:
+        # #427 — exempt pieces at face; the curve over the taxable subset
+        # only. The crown premium below still reads ALL values.
+        total = (sum(v for v, e in zip(values, exempt) if e)
+                 + sum(v * (0.15 + 0.85 * (v / v_max) ** gamma)
+                       for v, e in zip(values, exempt) if not e))
 
     if (FLAGS.trade_crown_asset and n_other is not None
             and len(values) < n_other):
@@ -1742,14 +1778,23 @@ def package_value_v2(values: list[float], v_max: float,
 
 def _package_value_market(values: list[float],
                           other_values: list[float] | None,
-                          v_max: float | None = None) -> float:
+                          v_max: float | None = None,
+                          exempt: list[bool] | None = None) -> float:
     """#214 'market' stud-tax shapes (tuning-proposal.md §1–3), amended
-    2026-08-21 by the cross-package benchmark fix (shape 1a below).
+    2026-08-21 by the cross-package benchmark fix (shape 1a below) and
+    2026-09-08 by the #427 first-round exemption (shape 1b).
 
     1. Depth discount — contribution(v) = v · (floor + (1−floor) ·
        (v/bench)^γ) with γ = package_adj_gamma_market, and the side's
        TOTAL discount capped at package_discount_cap × the naive sum.
        A single-asset side is never depth-discounted.
+    1b. #427 — ``exempt`` (already resolved by package_value_v2: None
+       unless at least one piece is flagged AND the knob is > 0) splits the
+       side into an exempt sum X (face value, no curve) and the taxable
+       subset T: total = X + max(Σ_T contribution, ΣT · (1 − cap)). The
+       cap therefore binds on the TAXABLE subset only. The benchmark test
+       (`len(values) > 1`, `own_max`) and the crown credit in 2–3 still
+       read ALL values.
     1a. THE BENCHMARK (2026-08-21 fix, operator-approved; evidence
        docs/reviews/2026-08-21-market-curve-comparison.md §3b). The
        original #214 shape benchmarked every piece against the package's
@@ -1787,10 +1832,17 @@ def _package_value_market(values: list[float],
             and _c("package_bench_trade_wide") > 0):
         bench = v_max
         floor = _c("package_floor_cross")
-    contrib = sum(v * (floor + (1.0 - floor) * (v / bench) ** gamma)
-                  for v in values)
     cap = _c("package_discount_cap")
-    total = max(contrib, naive * (1.0 - cap))
+    if exempt is None:
+        contrib = sum(v * (floor + (1.0 - floor) * (v / bench) ** gamma)
+                      for v in values)
+        total = max(contrib, naive * (1.0 - cap))
+    else:
+        taxable = [v for v, e in zip(values, exempt) if not e]
+        exempt_sum = sum(v for v, e in zip(values, exempt) if e)
+        contrib = sum(v * (floor + (1.0 - floor) * (v / bench) ** gamma)
+                      for v in taxable)
+        total = exempt_sum + max(contrib, sum(taxable) * (1.0 - cap))
 
     if FLAGS.trade_crown_asset and other_values:
         other_naive = sum(other_values)
@@ -1970,9 +2022,11 @@ def rank_fairness(fairness: float, give_ids: list[str], recv_ids: list[str],
     rvals = [seed_value(p) for p in core_recv]
     v_max = max(gvals + rvals)
     gv = package_value_v2(gvals, v_max, n_other=len(core_recv),
-                          other_values=rvals)
+                          other_values=rvals,
+                          exempt=first_round_pick_mask(core_give))
     rv = package_value_v2(rvals, v_max, n_other=len(core_give),
-                          other_values=gvals)
+                          other_values=gvals,
+                          exempt=first_round_pick_mask(core_recv))
     if gv <= 0 or rv <= 0:
         return fairness
     return round(min(gv, rv) / max(gv, rv), 3)
@@ -2222,9 +2276,11 @@ def price_consensus_package(
     rvals = [value_of(p) for p in recv_ids]
     v_max = max(gvals + rvals)
     gv = package_value_v2(gvals, v_max, n_other=len(recv_ids),
-                          other_values=rvals)
+                          other_values=rvals,
+                          exempt=first_round_pick_mask(give_ids))
     rv = package_value_v2(rvals, v_max, n_other=len(give_ids),
-                          other_values=gvals)
+                          other_values=gvals,
+                          exempt=first_round_pick_mask(recv_ids))
     if gv <= 0 or rv <= 0:
         return None
     return min(gv, rv) / max(gv, rv), gv, rv
@@ -2288,6 +2344,41 @@ def is_pick_asset(p) -> bool:
     return bool(p is not None and (
         getattr(p, "position", None) == "PICK"
         or getattr(p, "team", None) == "PICK"))
+
+
+@functools.lru_cache(maxsize=65536)
+def _is_first_round_pick_id(pid) -> bool:
+    """#427 — True only for a ROUND-ONE draft-pick id, by id shape alone:
+
+      • generic rung `generic_pick_1_{early|mid|late}` (pick_values
+        .parse_generic_pick_id — validated against GENERIC_PICK_SEEDS);
+      • owned pick `{league}_{season}_{round}_{orig}` (database.make_pick_id)
+        with a 4-digit season and round "1" — `rsplit("_", 3)` so a league
+        id may itself contain underscores.
+
+    Every player id in the pools is a bare digit string (Sleeper ids; ESPN /
+    MFL crosswalk onto them) and has no underscore, so it can never parse
+    as either shape — test_first_round_pick_exempt.py guards that against
+    the checked-in DP id snapshot. Rounds ≥ 2, malformed ids and non-strings
+    are False. Cached: the generators build masks inside hot loops."""
+    if not isinstance(pid, str):
+        return False
+    parsed = parse_generic_pick_id(pid)
+    if parsed is not None:
+        return parsed[0] == 1
+    parts = pid.rsplit("_", 3)
+    return (len(parts) == 4 and parts[0] != ""
+            and len(parts[1]) == 4 and parts[1].isdigit()
+            and parts[2] == "1" and parts[3] != "")
+
+
+def first_round_pick_mask(ids) -> list[bool]:
+    """#427 — the `exempt` mask for `package_value_v2` /
+    `trade_gen_v2.consolidated_value`: one bool per id, in order, True for a
+    first-round pick (see _is_first_round_pick_id). Built at every pricing
+    call site from the asset IDS next to the values — never inferred from a
+    value, which is what let picks be taxed like players."""
+    return [_is_first_round_pick_id(p) for p in ids]
 
 
 def _pos_for_avoid(p) -> "str | None":
@@ -2454,9 +2545,11 @@ def overpay_ok(give_ids, recv_ids, seed_value) -> bool:
             return True
         v_max = max(both)
         g = package_value_v2(gvals, v_max, n_other=len(recv_ids),
-                             other_values=rvals)
+                             other_values=rvals,
+                             exempt=first_round_pick_mask(give_ids))
         r = package_value_v2(rvals, v_max, n_other=len(give_ids),
-                             other_values=gvals)
+                             other_values=gvals,
+                             exempt=first_round_pick_mask(recv_ids))
     else:
         g = sum(seed_value(p) for p in give_ids)
         r = sum(seed_value(p) for p in recv_ids)
@@ -6621,10 +6714,14 @@ class TradeService:
                     v_max = max(gvals + rvals)
                     gv = package_value_v2(gvals, v_max,
                                           n_other=len(rvals),
-                                          other_values=rvals)
+                                          other_values=rvals,
+                                          exempt=first_round_pick_mask(
+                                              c.give_player_ids))
                     rv = package_value_v2(rvals, v_max,
                                           n_other=len(gvals),
-                                          other_values=gvals)
+                                          other_values=gvals,
+                                          exempt=first_round_pick_mask(
+                                              c.receive_player_ids))
                     tilt = ((rv - gv) / max(gv, rv)) if max(gv, rv) > 0 else 0.0
                     if _variant == "light":
                         mult = 1.0 + w_ab * tilt
@@ -6936,9 +7033,11 @@ class TradeService:
             rvals = [seed_value(p) for p in recv_ids]
             v_max = max(gvals + rvals)
             gv = package_value_v2(gvals, v_max, n_other=len(recv_ids),
-                                  other_values=rvals)
+                                  other_values=rvals,
+                                  exempt=first_round_pick_mask(give_ids))
             rv = package_value_v2(rvals, v_max, n_other=len(give_ids),
-                                  other_values=gvals)
+                                  other_values=gvals,
+                                  exempt=first_round_pick_mask(recv_ids))
             if gv <= 0 or rv <= 0:
                 return 1.0
             fairness = min(gv, rv) / max(gv, rv)
@@ -6999,10 +7098,12 @@ class TradeService:
                 uvals_give = [_uv(p) for p in give_ids]
                 uvals_recv = [_uv(p) for p in recv_ids]
             u_max = max(uvals_give + uvals_recv)
+            g_exempt = first_round_pick_mask(give_ids)      # #427
+            r_exempt = first_round_pick_mask(recv_ids)
             give_val_user = package_value_v2(uvals_give, u_max, n_other=len(recv_ids),
-                                             other_values=uvals_recv)
+                                             other_values=uvals_recv, exempt=g_exempt)
             recv_val_user = package_value_v2(uvals_recv, u_max, n_other=len(give_ids),
-                                             other_values=uvals_give)
+                                             other_values=uvals_give, exempt=r_exempt)
 
             if MARGINAL:
                 ovals_give = [_mo(p) for p in give_ids]
@@ -7012,9 +7113,9 @@ class TradeService:
                 ovals_recv = [_vo(p) for p in recv_ids]
             o_max = max(ovals_give + ovals_recv)
             give_val_opp = package_value_v2(ovals_give, o_max, n_other=len(recv_ids),
-                                            other_values=ovals_recv)  # opp receives
+                                            other_values=ovals_recv, exempt=g_exempt)  # opp receives
             recv_val_opp = package_value_v2(ovals_recv, o_max, n_other=len(give_ids),
-                                            other_values=ovals_give)  # opp gives
+                                            other_values=ovals_give, exempt=r_exempt)  # opp gives
 
             # Waiver-slot cost (A3): the side receiving MORE players drops a
             # waiver-level player per extra slot — subtract from that side's
@@ -7486,9 +7587,11 @@ class TradeService:
             rvals2 = [seed_value(p) for p in r]
             v_max2 = max(gvals2 + rvals2)
             gv2 = package_value_v2(gvals2, v_max2, n_other=len(r),
-                                   other_values=rvals2)
+                                   other_values=rvals2,
+                                   exempt=first_round_pick_mask(g))
             rv2 = package_value_v2(rvals2, v_max2, n_other=len(g),
-                                   other_values=gvals2)
+                                   other_values=gvals2,
+                                   exempt=first_round_pick_mask(r))
             if gv2 <= 0 or rv2 <= 0:
                 return False
             if not _both_ways and rv2 - gv2 < _c("user_gain_epsilon"):
@@ -7521,9 +7624,11 @@ class TradeService:
             rvals = [seed_value(p) for p in recv_ids]
             v_max = max(gvals + rvals)
             gv = package_value_v2(gvals, v_max, n_other=len(recv_ids),
-                                  other_values=rvals)
+                                  other_values=rvals,
+                                  exempt=first_round_pick_mask(give_ids))
             rv = package_value_v2(rvals, v_max, n_other=len(give_ids),
-                                  other_values=gvals)
+                                  other_values=gvals,
+                                  exempt=first_round_pick_mask(recv_ids))
             if gv <= 0 or rv <= 0:
                 return
             # #108 — on a consensus card the user's board IS consensus:
