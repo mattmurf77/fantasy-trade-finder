@@ -11,6 +11,11 @@
 
 ---
 
+## 2026-09-07b — Team overhaul sends on MFL and ESPN (owner D1 revision), PR pending
+
+**What:** the owner confirmed D2–D9 and revised D1 to "should work for all". Overhaul sends now dispatch through per-platform propose cores (`_sleeper_propose_core`, new `_mfl_propose_core`, `_espn_propose_core`, all extracted verbatim from their routes); capabilities are per platform (`can_propose`, `can_propose_picks` false on ESPN, Sleeper tied offers `supported`); MFL/ESPN refresh reads fresh rosters and refuses to terminalize on stale data. Mobile copy is platform-aware. Owner record: [owner-decisions.md](../docs/plans/team-overhaul/owner-decisions.md).
+**Evidence:** [TEST_LEDGER](TEST_LEDGER.md) same date. Ships as the next TestFlight build; `overhaul.enabled` flip for build 151 review was prepared but the session could not push it (permission classifier) — operator pushes.
+
 ## 2026-09-07 — Team overhaul v1 MERGED dark (D-188, ADR-020); iOS 1.17.2 (151) uploaded
 
 **What:** the full Team overhaul flow from the 2026-09-06 handoff ([docs/plans/team-overhaul](../docs/plans/team-overhaul/README.md)) built behind `overhaul.enabled=false` on `claude/team-overhaul-scoping-ea1c72` (from `origin/main` `0e3d6b70`). Backend: `overhaul_service.py` (pure domain: pool enforcement, own-first recovery identity, bounded assembly of 4–5 give/receive-disjoint packages into ≤5 distinct roadmaps, priorities/prepare validation, attempt state machine), `overhaul_store.py` (five additive tables, transactional reservations, CAS transitions), `overhaul_api.py` (14 `/api/overhauls` routes installed like Win Now), `_sleeper_propose_core` extracted from `/api/trades/propose` with byte-identical route behavior. Mobile: `OverhaulEntryCard` on the Acquire landing below Team review, eight Trades-stack screens (outlook → pool → targets → review → roadmaps → one-package priorities → send summary → saved plan), `api/overhaul.ts`, `check-team-overhaul.js`. Docs: api-reference, data-dictionary, config-reference, cross-client-invariants, architecture, glossary, ADR-020.

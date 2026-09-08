@@ -6,11 +6,11 @@ This revision exists because the engineering spec describes a complete execution
 
 ## 0. Engineering decisions on the nine open choices
 
-These adopt the product spec §8 *proposed defaults* as v1 engineering decisions. They are **not** owner approvals; they are recorded in `living-memory/DECISIONS.md` (D-188) as reversible.
+These adopted the product spec §8 *proposed defaults* as v1 engineering decisions (D-188). **Owner-confirmed 2026-09-07** ([owner-decisions.md](owner-decisions.md)): D2–D9 as written; **D1 revised** — sends on Sleeper, MFL and ESPN behind their existing send flags, ESPN players only (no picks), iOS the only client. Sleeper tied offers confirmed supported.
 
 | ID | v1 decision |
 |---|---|
-| D1 launch scope | iOS client only. Sleeper is the only platform that can **send** in v1 (`capabilities.canPropose = true` only for `platform == 'sleeper'` with a linked, verified credential). MFL and ESPN leagues get the full planning flow and a **copy-to-clipboard handoff** on the summary ("Send in MFL/ESPN" is not offered). Web and extension: no surface. |
+| D1 launch scope | iOS client only. **Revised 2026-09-07:** sends on Sleeper, MFL and ESPN through each platform's extracted propose core (`_sleeper_propose_core`, `_mfl_propose_core`, `_espn_propose_core`) behind `trade.send_in_sleeper` / `trade.send_in_mfl` / `espn.send`; `capabilities.can_propose` is true when the platform flag is on and the account is linked; `can_propose_picks` is false on ESPN (pick-bearing offers are blocked with `pick_unsupported_on_platform`). Copy handoff remains only for platforms with no send path. Web and extension: no surface. |
 | D2 draft-order rules | Copy states a draft-position benefit only as *possible* and names the rule as unknown (`draft_order_rule: 'unknown'`) unless the league payload carries a known rule. No specific slot is ever claimed. |
 | D3 review completion | Complete-review flow. Generation batch size is `model_config`-free: constant `OVERHAUL_BATCH_SIZE = 24` in `overhaul_service.py`. "Build roadmaps" is enabled once every card in the current batch has a decision. |
 | D4 same counterparty | Assembly prefers distinct counterparties (diversity penalty). Within one package tier, **at most one offer per counterparty** (server rejects the priorities write with `tier_duplicate_counterparty`). Two *different* packages may target the same counterparty only if the combined two-sided roster check passes. |

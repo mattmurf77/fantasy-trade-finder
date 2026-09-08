@@ -126,7 +126,9 @@ export type ValidationCode =
   | 'recovery_unresolved'
   | 'tier_duplicate_counterparty'
   | 'asset_reserved'
-  | 'depth_reduced';
+  | 'depth_reduced'
+  | 'pick_unsupported_on_platform'
+  | 'reconnect_required';
 
 export interface ValidationItem {
   code: ValidationCode | string;
@@ -205,6 +207,8 @@ export interface AttemptView {
 export interface Capabilities {
   platform: string;
   can_propose: boolean;
+  /** False on ESPN: its trade API takes players only, so an offer with a pick is a blocker. */
+  can_propose_picks: boolean;
   can_read_terminal_status: false;
   can_withdraw: false;
   supports_conflicting_offer_race: 'unverified' | 'supported' | 'unsupported';

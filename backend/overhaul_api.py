@@ -8,6 +8,13 @@ Server-private helpers arrive as keyword callables from `server.py`, the
 same seam `win_now_api.install` uses. `fetch_json` (the Sleeper GET) is
 optional: with it the snapshot reads current pick holders live; without it
 picks come from the DB table and refresh refuses to terminalize on them.
+
+Sends (2026-09-07, all platforms): each attempt dispatches through the
+platform's extracted propose core — `sleeper_propose` / `mfl_propose` /
+`espn_propose` — behind that platform's own send flag (`service.SEND_FLAGS`).
+`platform_rosters` is the fresh MFL/ESPN roster read; when it is absent or
+fails the snapshot is stamped `roster_source: session` and refresh never
+terminalizes an attempt from it.
 """
 from __future__ import annotations
 
@@ -49,12 +56,24 @@ def _error(code, detail=None, status=409, **extra):
     return jsonify(body), status
 
 
+def _past(stamp) -> bool:
+    """True when an ISO timestamp is in the past; unparseable/naive -> False
+    (the same leniency GET /api/espn/link applies to `expires_hint_at`)."""
+    if not stamp:
+        return False
+    try:
+        return datetime.fromisoformat(str(stamp)) <= datetime.now(timezone.utc)
+    except Exception:
+        return False
+
+
 def install(app, *, require_session, read_denial, write_denial, active_format, league_user_id,
             owner_generation_context, generate, roster_context, sleeper_propose, fetch_rosters,
             roster_id_for_owner, load_picks, pick_source_platform, draft_context, card_to_dict,
             is_pick_asset, owned_picks_available, inject_owned_picks, pick_label, slot_order,
             priced_pick_value, elo_to_value, sleeper_credential, sleeper_write, record_event,
-            fetch_json=None):
+            fetch_json=None, mfl_propose=None, espn_propose=None, mfl_credential=None,
+            espn_credential=None, platform_rosters=None):
 
     # ── plumbing ────────────────────────────────────────────────────────
     def guarded(fn):
@@ -157,7 +176,12 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
         platform = league_platform(sess)
         lu_id = str(league_user_id(sess))
         rosters, my_players, my_roster_id = {}, None, None
-        raw = fetch_rosters(league_id) if platform == "sleeper" and league_id != "league_demo" else None
+        raw = None
+        if league_id != "league_demo":
+            if platform == "sleeper":
+                raw = fetch_rosters(league_id)
+            elif platform in service.SEND_FLAGS and platform_rosters is not None:
+                raw = platform_rosters(sess, league_id, platform)   # None when no fresh read is possible
         if raw:
             for r in raw:
                 owner = str(r.get("owner_id") or "")
@@ -175,7 +199,7 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
             my_players = [str(p) for p in (sess.get("user_roster") or []) if not is_pick_asset(league_id, p)]
         rosters[lu_id] = list(my_players)
         rows = pick_rows(league_id)
-        live = live_pick_owners(league_id, rows, raw) if raw else None
+        live = live_pick_owners(league_id, rows, raw) if raw and platform == "sleeper" else None
         my_picks = []
         for r in rows:
             pid = str(r.get("pick_id"))
@@ -189,6 +213,7 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
                     "my_roster_ids": my_players, "my_pick_ids": my_picks, "rosters": rosters,
                     "picks_supported": platform != "espn", "source": platform,
                     "pick_ownership_source": "live" if live is not None else "db",
+                    "roster_source": "live" if raw else "session",
                     "my_roster_id": my_roster_id}
         return snapshot, rows
 
@@ -202,27 +227,58 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
         return list(snapshot.get("my_roster_ids") or []) + list(snapshot.get("my_pick_ids") or [])
 
     def auth_state(sess):
-        if league_platform(sess) != "sleeper":
+        """Per-platform link state, mirroring each platform's link-status GET."""
+        platform = league_platform(sess)
+        user_id = str(sess["user_id"])
+        if platform == "sleeper":
+            cred = sleeper_credential(user_id)
+            if not cred:
+                return "unlinked"
+            try:
+                token = sleeper_write.decrypt_token(cred["token_encrypted"])
+            except Exception:
+                return "unlinked"
+            if sleeper_write.is_expired(token):
+                return "expired"
+        elif platform == "mfl":
+            # GET /api/mfl/auth-link: a stored cookie row OR the key-less
+            # session-only copy. MFL stamps no expiry — a dead cookie surfaces
+            # as `mfl_auth_expired` from the core at send time.
+            cred = None
+            if mfl_credential is not None:
+                try:
+                    cred = mfl_credential(user_id)
+                except Exception:
+                    cred = None
+            if not cred and not sess.get("mfl_cookie"):
+                return "unlinked"
+        elif platform == "espn":
+            # GET /api/espn/link: both cookie halves AND a verified_at stamp;
+            # an `expires_hint_at` in the past reads as expired.
+            cred = espn_credential(user_id) if espn_credential is not None else None
+            if not cred or not cred.get("swid") or not cred.get("verified_at"):
+                return "unlinked"
+            if _past(cred.get("expires_hint_at")):
+                return "expired"
+        else:
             return "n/a"
-        cred = sleeper_credential(str(sess["user_id"]))
-        if not cred:
-            return "unlinked"
-        try:
-            token = sleeper_write.decrypt_token(cred["token_encrypted"])
-        except Exception:
-            return "unlinked"
-        if sleeper_write.is_expired(token):
-            return "expired"
         return "linked" if sess.get("verified") else "unverified"
 
     def capabilities(sess):
         platform = league_platform(sess)
         state = auth_state(sess)
+        flag = service.SEND_FLAGS.get(platform)
         return {"platform": platform,
-                "can_propose": platform == "sleeper" and state == "linked" and is_enabled("trade.send_in_sleeper"),
+                "can_propose": state == "linked" and flag is not None and is_enabled(flag),
+                "can_propose_picks": platform in service.PICK_SEND_PLATFORMS,
                 "can_read_terminal_status": False, "can_withdraw": False,
-                "supports_conflicting_offer_race": "unverified", "auth_state": state,
-                "checked_at": store.db._now()}
+                # Owner-confirmed 2026-09-07: Sleeper accepts the same asset in
+                # concurrent offers to different teams. MFL/ESPN unexercised.
+                "supports_conflicting_offer_race": "supported" if platform == "sleeper" else "unverified",
+                "auth_state": state, "checked_at": store.db._now()}
+
+    def send_core(platform):
+        return {"sleeper": sleeper_propose, "mfl": mfl_propose, "espn": espn_propose}.get(platform)
 
     # ── generation inputs (built the way the deck / asset-ideas routes do) ──
     def generation_inputs(sess):
@@ -317,6 +373,7 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
         return {"attempt_id": a["attempt_id"], "batch_id": a["batch_id"], "package_id": a["package_id"],
                 "tier": a["tier"], "offer_id": a["offer_id"], "state": a["state"],
                 "state_source": a["state_source"], "provider_transaction_id": a.get("provider_transaction_id"),
+                "provider_status": a.get("provider_status"),
                 "error": a.get("error"), "created_at": a["created_at"], "updated_at": a["updated_at"],
                 "observed_at": a.get("observed_at")}
 
@@ -723,7 +780,7 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
                                    compat=rm["compat"], summary=rm["summary"])
         return jsonify(roadmap_view(new, by_id, store.list_attempts(row["overhaul_id"])))
 
-    def receipt_for(sess, row, rm, selected, by_id, *, with_legality):
+    def receipt_for(sess, row, rm, selected, by_id, *, with_legality, caps):
         snapshot = row.get("snapshot") or {}
         attempts = store.list_attempts(row["overhaul_id"])
         states = {p["package_id"]: service.package_status(p, by_id, attempts) for p in rm["packages"]}
@@ -737,12 +794,16 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
                                                  pick_rows(row["league_id"]), chosen)
             except _Conflict:
                 legality, capacity = None, None
-        return service.validate_prepare(
+        pick_fn = is_pick(row["league_id"])
+        receipt = service.validate_prepare(
             selected=selected, packages=rm["packages"], offers_by_id=by_id,
             my_roster_ids=snapshot.get("my_roster_ids") or [], my_pick_ids=snapshot.get("my_pick_ids") or [],
             pool=effective_pool(row), rosters=snapshot.get("rosters") or {}, reserved_asset_ids=reserved,
             capacity=capacity, recovery=row.get("recovery") or {}, package_states=states,
-            legality=legality, checked_at=store.db._now(), is_pick=is_pick(row["league_id"]))
+            legality=legality, checked_at=store.db._now(), is_pick=pick_fn)
+        return service.with_blockers(receipt, service.platform_blockers(
+            selected=selected, packages=rm["packages"], offers_by_id=by_id, platform=caps["platform"],
+            auth_state=caps["auth_state"], picks_sendable=caps["can_propose_picks"], is_pick=pick_fn))
 
     def handoff_text(selected, by_id):
         lines = []
@@ -776,8 +837,8 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
         if not isinstance(selected, list) or not selected:
             raise service.ValidationError("bad_request", "offer_ids required")
         selected = [str(o) for o in selected]
-        receipt = receipt_for(sess, row, rm, selected, by_id, with_legality=True)
         caps = capabilities(sess)
+        receipt = receipt_for(sess, row, rm, selected, by_id, with_legality=True, caps=caps)
         package_of = {oid: p["package_id"] for p in rm["packages"] for t in p["tiers"] for oid in t["offer_ids"]}
         packages = {package_of[o] for o in selected if o in package_of}
         race_rows = []
@@ -790,7 +851,7 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
         _PREPARES[token] = {"overhaul_id": row["overhaul_id"], "roadmap_id": rm["roadmap_id"],
                             "version": rm["version"], "offer_ids": selected, "summary_hash": digest,
                             "expires": expires}
-        mode = "send" if caps["platform"] == "sleeper" else "copy"
+        mode = service.handoff_mode(caps["platform"])
         handoff = {"mode": mode}
         if mode == "copy":
             handoff["text"] = handoff_text(selected, by_id)
@@ -828,7 +889,8 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
         if data.get("summary_hash") != prep["summary_hash"]:
             raise _Conflict("summary_mismatch")
         caps = capabilities(sess)
-        if caps["platform"] != "sleeper":
+        core = send_core(caps["platform"])
+        if core is None or service.handoff_mode(caps["platform"]) != "send":
             raise _Conflict("capability_unavailable")
         if caps["auth_state"] in ("unlinked", "expired"):
             raise _Conflict("reconnect_required", caps["auth_state"])
@@ -838,7 +900,7 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
             raise _Conflict("capability_unavailable", "send_disabled")
         selected = list(prep["offer_ids"])
         by_id = {o["offer_id"]: o for o in store.list_offers(row["overhaul_id"])}
-        receipt = receipt_for(sess, row, rm, selected, by_id, with_legality=False)
+        receipt = receipt_for(sess, row, rm, selected, by_id, with_legality=False, caps=caps)
         if receipt["blockers"]:
             raise _Conflict(receipt["blockers"][0]["code"], receipt=receipt)
         package_of = {oid: p["package_id"] for p in rm["packages"] for t in p["tiers"] for oid in t["offer_ids"]}
@@ -863,7 +925,8 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
             if not store.transition_attempt(a["attempt_id"], "queued", "sending", source="server"):
                 continue
             try:
-                payload, status = sleeper_propose(
+                # Same keyword contract on every core (Sleeper / MFL / ESPN).
+                payload, status = core(
                     sess, league_id=row["league_id"], their_user_id=offer["counterparty_user_id"],
                     give_ids=list(offer["give_ids"]), receive_ids=list(offer["receive_ids"]),
                     proposal_event_id=a["proposal_event_id"], source="overhaul")
@@ -873,14 +936,19 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
                                          error={"code": "transport_error", "message": str(exc)[:200]})
                 counts["unknown"] += 1
                 continue
+            payload = payload or {}
             if status == 200:
+                # MFL confirms with a status word and no transaction id; ESPN
+                # returns both. Store whatever the provider actually said.
                 store.transition_attempt(a["attempt_id"], "sending", "proposed", source="provider",
-                                         provider_transaction_id=(payload or {}).get("transaction_id"), observed=True)
+                                         provider_transaction_id=payload.get("transaction_id"),
+                                         provider_status=payload.get("mfl_status") or payload.get("espn_status"),
+                                         observed=True)
                 counts["sent"] += 1
             else:
                 store.transition_attempt(a["attempt_id"], "sending", "send_failed", source="provider",
-                                         error={"code": (payload or {}).get("error") or "send_failed",
-                                                "message": (payload or {}).get("detail") or (payload or {}).get("message")})
+                                         error={"code": payload.get("error") or "send_failed",
+                                                "message": payload.get("detail") or payload.get("message")})
                 counts["failed"] += 1
                 release_if_idle(row["overhaul_id"], a["package_id"])
         store.update_overhaul(row["overhaul_id"], status="executing")
@@ -934,12 +1002,17 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
         pick_fn = is_pick(row["league_id"])
         mine_set = set(mine)
         holder = (lambda a: a in mine_set) if snapshot.get("pick_ownership_source") == "live" else None
+        # Players: only a live platform read (snapshot.roster_source == 'live')
+        # is evidence. A session fallback (MFL/ESPN read failed, or no reader)
+        # never terminalizes an attempt.
+        fresh = snapshot.get("roster_source") == "live"
         outcomes = []
         for a in store.list_attempts(row["overhaul_id"]):
             if a["state"] not in ("proposed", "outcome_unknown"):
                 continue
             offer = by_id.get(a["offer_id"])
-            outcome = (service.reconcile_attempt(offer, my_assets=mine, is_pick=pick_fn, live_pick_holder=holder)
+            outcome = (service.reconcile_attempt(offer, my_assets=mine, is_pick=pick_fn, live_pick_holder=holder,
+                                                 roster_fresh=fresh)
                        if offer else None)
             if outcome is not None:
                 outcomes.append((a, outcome))

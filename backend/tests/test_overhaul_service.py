@@ -345,3 +345,34 @@ def test_recommendations_are_outlook_specific():
                                  pick_budget={"max_round": 1}, pick_meta={"L1_2027_1_3": {"round": 1}})
     assert {a["id"] for a in allin if a["recommended"]} == {"r3", "L1_2027_1_3"}  # bench depth + budget picks
     assert not any(a["recommended"] for a in svc.recommend_assets([dict(a) for a in assets], outlook=None))
+
+
+def test_reconcile_attempt_refuses_a_non_fresh_roster_source():
+    """All-platform sends (2026-09-07): a session-sourced roster is never
+    evidence, however conclusive it looks."""
+    offer = {"give_ids": ["A"], "receive_ids": ["X1"]}
+    assert svc.reconcile_attempt(offer, my_assets=["B", "X1"], roster_fresh=False) is None
+    assert svc.reconcile_attempt(offer, my_assets=["B"], roster_fresh=False) is None
+    assert svc.reconcile_attempt(offer, my_assets=["B", "X1"], roster_fresh=True) == "accepted"
+
+
+def test_platform_blockers_and_handoff_mode():
+    is_pick = lambda a: a.startswith("L1_")
+    packages = [{"package_id": "pk_1", "tiers": [{"tier": 1, "offer_ids": ["o1", "o2"]}]}]
+    offers = {"o1": {"give_ids": ["A"], "receive_ids": ["L1_2027_1_2"]}, "o2": {"give_ids": ["B"], "receive_ids": ["X"]}}
+    common = dict(selected=["o1", "o2"], packages=packages, offers_by_id=offers, is_pick=is_pick)
+    assert svc.handoff_mode("sleeper") == svc.handoff_mode("mfl") == svc.handoff_mode("espn") == "send"
+    assert svc.handoff_mode("fleaflicker") == svc.handoff_mode(None) == "copy"
+    # Copy platforms: nothing to block, whatever the auth state.
+    assert svc.platform_blockers(platform="fleaflicker", auth_state="n/a", picks_sendable=False, **common) == []
+    # ESPN: the pick offer is named; the players-only one passes.
+    got = svc.platform_blockers(platform="espn", auth_state="linked", picks_sendable=False, **common)
+    assert [(b["code"], b["package_id"], b["offer_id"]) for b in got] == [("pick_unsupported_on_platform", "pk_1", "o1")]
+    # MFL carries picks; an unlinked user gets exactly one reconnect blocker naming the platform.
+    got = svc.platform_blockers(platform="mfl", auth_state="unlinked", picks_sendable=True, **common)
+    assert [b["code"] for b in got] == ["reconnect_required"] and "MFL" in got[0]["message"]
+    assert svc.platform_blockers(platform="mfl", auth_state="linked", picks_sendable=True, **common) == []
+    receipt = svc.with_blockers({"ok": True, "blockers": []}, got)
+    assert receipt["ok"] is False and receipt["blockers"] == got
+    assert svc.with_blockers({"ok": True, "blockers": []}, [])["ok"] is True
+    assert {"pick_unsupported_on_platform", "reconnect_required"} <= set(svc.VALIDATION_CODES)

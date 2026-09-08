@@ -189,6 +189,7 @@ overhaul_attempts_table = Table("overhaul_attempts", metadata,
     Column("state", String, nullable=False),
     Column("state_source", String, nullable=False),  # server|provider|ownership_refresh|user_reported
     Column("provider_transaction_id", String),
+    Column("provider_status", String),      # provider's own status word (MFL/ESPN); NULL for Sleeper
     Column("proposal_event_id", String),
     Column("error_json", Text),
     Column("created_at", String, nullable=False),
@@ -3286,6 +3287,9 @@ def _migrate_db() -> None:
         ("trade_matches",      "second_like_at",            "VARCHAR"),
         ("trade_matches",      "match_latency_seconds",     "FLOAT"),
         ("trade_matches",      "match_valuation_json",      "TEXT"),
+        # ── team overhaul, all-platform sends (2026-09-07): MFL/ESPN cores
+        # report a status word without a transaction id.
+        ("overhaul_attempts",  "provider_status",           "VARCHAR"),
     ]
     # Each ALTER TABLE gets its own transaction so a "column already exists"
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the

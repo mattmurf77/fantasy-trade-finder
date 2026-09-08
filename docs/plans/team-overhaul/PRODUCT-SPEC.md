@@ -200,6 +200,8 @@ The following defaults make an initial implementation plan concrete. They are **
 
 ## 8. Nine unresolved discovery choices
 
+> **Resolved 2026-09-07.** The owner confirmed D2–D9 as proposed and revised D1: sending is offered on Sleeper, MFL and ESPN (ESPN players only). See [owner-decisions.md](owner-decisions.md) § 2026-09-07 and [D-188](../../../living-memory/DECISIONS.md). The table below is retained as the discovery record.
+
 The nine resolved choices are pool semantics, regrouping, own-first recovery ordering, rebuild-return balance, manual fallback, insufficient-like handling, position-preference semantics, user-defined pick budget, and settings isolation. The following nine remain unanswered in the recorded evidence. They are planning decisions to retain, not a new question set for the owner.
 
 | ID / discovery key | Unresolved choice | Proposed default for planning; not owner-confirmed |

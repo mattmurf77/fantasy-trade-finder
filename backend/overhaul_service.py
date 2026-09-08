@@ -44,7 +44,20 @@ SHORTFALL_REASONS = ("insufficient_likes", "overlapping_sells", "competing_incom
 VALIDATION_CODES = ("give_overlap", "receive_overlap", "asset_not_owned",
                     "counterparty_asset_not_owned", "pool_violation", "capacity_exceeded",
                     "lineup_illegal", "offer_stale", "offer_not_liked", "recovery_unresolved",
-                    "tier_duplicate_counterparty", "asset_reserved", "depth_reduced")
+                    "tier_duplicate_counterparty", "asset_reserved", "depth_reduced",
+                    "pick_unsupported_on_platform", "reconnect_required")
+
+# All-platform sends (owner decision 2026-09-07). A platform sends through its
+# existing propose core behind its existing send flag; anything else is a
+# copy handoff. ESPN has no representation for future picks (the propose route
+# hard-blocks them), so an ESPN offer carrying a pick is refused at prepare.
+SEND_FLAGS = {"sleeper": "trade.send_in_sleeper", "mfl": "trade.send_in_mfl", "espn": "espn.send"}
+PICK_SEND_PLATFORMS = frozenset(("sleeper", "mfl"))
+PLATFORM_LABELS = {"sleeper": "Sleeper", "mfl": "MFL", "espn": "ESPN"}
+
+
+def handoff_mode(platform) -> str:
+    return "send" if platform in SEND_FLAGS else "copy"
 
 ATTEMPT_STATES = ("queued", "sending", "proposed", "send_failed", "outcome_unknown", "accepted",
                   "declined", "expired", "withdrawn", "invalidated", "resolved_elsewhere", "stale")
@@ -693,6 +706,46 @@ def validate_prepare(*, selected, packages, offers_by_id, my_roster_ids, my_pick
             "unknowns": unknowns, "outgoing_ids": outgoing, "incoming_ids": incoming}
 
 
+def platform_blockers(*, selected, packages, offers_by_id, platform, auth_state, picks_sendable, is_pick) -> list[dict]:
+    """Send blockers that depend on the platform, layered on `validate_prepare`.
+
+    Copy-handoff platforms get none (nothing is sent). Otherwise: an auth
+    state other than `linked` -> `reconnect_required` (one item, names the
+    platform); on a platform that cannot carry picks, every selected offer
+    whose give OR receive side holds a pick -> `pick_unsupported_on_platform`
+    naming the offer — the pick is refused, never silently dropped.
+    """
+    if handoff_mode(platform) != "send":
+        return []
+    label = PLATFORM_LABELS.get(platform, str(platform))
+    items = []
+    if auth_state != "linked":
+        what = ("Verify this session (sign in again)" if auth_state == "unverified"
+                else f"Reconnect {label}")
+        items.append(_item("reconnect_required", f"{what} before sending in {label}."))
+    if not picks_sendable:
+        package_of = {oid: pkg["package_id"] for pkg in packages
+                      for t in pkg.get("tiers", []) for oid in t.get("offer_ids", [])}
+        for oid in _ids(selected):
+            offer = offers_by_id.get(oid)
+            if offer is None:
+                continue
+            if any(is_pick(a) for a in _ids(offer["give_ids"]) + _ids(offer["receive_ids"])):
+                items.append(_item("pick_unsupported_on_platform",
+                                   f"{label} can't carry draft picks; this offer includes one.",
+                                   package_of.get(oid), oid))
+    return items
+
+
+def with_blockers(receipt: dict, items) -> dict:
+    """Append blockers to a receipt and recompute `ok`."""
+    items = list(items or [])
+    if items:
+        receipt["blockers"] = list(receipt.get("blockers") or []) + items
+        receipt["ok"] = False
+    return receipt
+
+
 def races(selected, packages) -> list[dict]:
     package_of = {oid: pkg["package_id"] for pkg in packages for t in pkg.get("tiers", []) for oid in t.get("offer_ids", [])}
     groups = {}
@@ -748,7 +801,8 @@ def can_transition(current: str, new: str) -> bool:
     return new in _ATTEMPT_TRANSITIONS.get(current, frozenset())
 
 
-def reconcile_attempt(offer, *, my_assets, is_pick=None, live_pick_holder=None) -> str | None:
+def reconcile_attempt(offer, *, my_assets, is_pick=None, live_pick_holder=None,
+                      roster_fresh=True) -> str | None:
     """Ownership-derived outcome for one live attempt (refresh, D8).
 
     Every give asset gone AND every receive asset arrived -> 'accepted'.
@@ -760,7 +814,13 @@ def reconcile_attempt(offer, *, my_assets, is_pick=None, live_pick_holder=None) 
     of picks is never evidence. It earns 'accepted' when `live_pick_holder`
     (a live traded-picks read) confirms every one of them is now the user's;
     otherwise the attempt is left unchanged rather than terminalized.
+
+    `roster_fresh=False` means `my_assets` came from the session, not a live
+    platform read (snapshot.roster_source != 'live'): nothing is evidence
+    then and the attempt is always left unchanged.
     """
+    if not roster_fresh:
+        return None
     mine = set(_ids(my_assets))
     is_pick = is_pick or (lambda _a: False)
     give, recv = _ids(offer["give_ids"]), _ids(offer["receive_ids"])

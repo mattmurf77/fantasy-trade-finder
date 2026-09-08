@@ -34,12 +34,25 @@ import {
 // replays the same batch instead of sending twice. A re-prepare (token
 // expired) mints a new key because it is a new reviewed batch.
 //
+// Sends go to Sleeper, MFL and ESPN (handoff.mode 'send', 2026-09-07); every
+// platform-facing string resolves through platformName(), never a literal.
 // `handoff.mode === 'copy'` platforms never see a send button: the CTA copies
 // the server-composed text and the label says "Copied", never "Sent".
 //
 // Tab-stack screen: NO FeedbackFAB.
 
 const COPIED_MS = 2000;
+
+const PLATFORM_NAME: Record<string, string> = { sleeper: 'Sleeper', mfl: 'MFL', espn: 'ESPN' };
+function platformName(platform: string | null | undefined): string {
+  return (platform && PLATFORM_NAME[platform]) || 'your league platform';
+}
+/** One line for every "not linked" state: the FAB-less summary has no connect webview of its own. */
+function connectLine(platform: string | null | undefined): string {
+  if (platform === 'espn' || platform === 'mfl') return `Sign in to ${platformName(platform)} in Settings to send`;
+  return `Connect your ${platformName(platform)} account in Settings to send`;
+}
+const RACE_UNVERIFIED = ' Your platform’s handling of overlapping offers hasn’t been verified.';
 
 type Prepared = { view: PrepareView; idempotencyKey: string };
 
@@ -176,7 +189,7 @@ export default function OverhaulSummaryScreen() {
         setConflict(errorDetail(e) ?? 'Some of these assets are already tied up in a live offer.');
         invalidate();
       } else if (code === 'capability_unavailable' || code === 'reconnect_required' || code === 'verification_required') {
-        setConflict('This league can’t be sent to from the app right now — reconnect Sleeper in Settings.');
+        setConflict(connectLine(view?.platform));
       } else {
         setToast({ msg: errorDetail(e) ?? 'Send failed — nothing went out', tone: 'error' });
       }
@@ -184,7 +197,7 @@ export default function OverhaulSummaryScreen() {
       sendingRef.current = false;
       setSending(false);
     }
-  }, [prepared, roadmap, overhaulId, invalidate, navigation, prepare]);
+  }, [prepared, roadmap, overhaulId, invalidate, navigation, prepare, view]);
 
   const onCopy = useCallback(() => {
     const text = prepared?.view.handoff.text;
@@ -225,14 +238,17 @@ export default function OverhaulSummaryScreen() {
     p.tiers.some((t) => t.offer_ids.some((id) => batchSet.has(id))),
   );
   const recovery = view.recovery;
-  const platformLabel = caps.platform ? caps.platform.toUpperCase() : 'your league';
+  const platform = caps.platform || view.platform;
+  const platformLabel = platformName(platform);
   const linked = caps.auth_state === 'linked';
+  const copyMode = pv ? pv.handoff.mode === 'copy' : !caps.can_propose;
+  const raceSuffix = caps.supports_conflicting_offer_race === 'unverified' ? RACE_UNVERIFIED : '';
   const sendBlockedWhy = !receipt
     ? null
     : !receipt.ok
       ? 'Fix the blockers above before sending.'
       : !linked
-        ? `Sleeper isn’t linked (${caps.auth_state}). Reconnect in Settings to send.`
+        ? connectLine(platform)
         : null;
 
   return (
@@ -274,13 +290,13 @@ export default function OverhaulSummaryScreen() {
         {receipt?.blockers.length ? (
           <Card rail={semantic.neg} padding={space.md}>
             <ChalkText style={[type.label, styles.neg]}>CAN’T SEND YET</ChalkText>
-            {receipt.blockers.map((b, i) => <ReceiptLine key={`b${i}`} item={b} offers={roadmap.offers} />)}
+            {receipt.blockers.map((b, i) => <ReceiptLine key={`b${i}`} item={b} offers={roadmap.offers} platform={platform} />)}
           </Card>
         ) : null}
         {receipt?.warnings.length ? (
           <Card rail={semantic.warn} padding={space.md}>
             <ChalkText style={[type.label, styles.warn]}>WORTH KNOWING</ChalkText>
-            {receipt.warnings.map((w, i) => <ReceiptLine key={`w${i}`} item={w} offers={roadmap.offers} />)}
+            {receipt.warnings.map((w, i) => <ReceiptLine key={`w${i}`} item={w} offers={roadmap.offers} platform={platform} />)}
             {receipt.unknowns.includes('capacity_unknown') ? (
               <ChalkText variant="bodySm" style={styles.dim}>Roster size limit unknown for this league — not checked.</ChalkText>
             ) : null}
@@ -310,7 +326,7 @@ export default function OverhaulSummaryScreen() {
               {race ? (
                 <View style={styles.race}>
                   <ChalkText variant="bodySm">
-                    {`These ${race.offer_ids.length} offers share the same outgoing assets and go out together — first come, first served; only one can complete.`}
+                    {`These ${race.offer_ids.length} offers share the same outgoing assets and go out together — first come, first served; only one can complete.${raceSuffix}`}
                   </ChalkText>
                 </View>
               ) : null}
@@ -342,16 +358,16 @@ export default function OverhaulSummaryScreen() {
         })}
 
         <ChalkText variant="bodySm" style={styles.dim}>
-          {caps.can_propose
+          {!copyMode
             ? `Sends go through ${platformLabel} · ${linked ? 'linked' : caps.auth_state}. Replies show up on the saved roadmap after a refresh.`
-            : `This league’s platform can’t be sent to from the app yet — paste these into ${platformLabel}.`}
+            : 'This league’s platform can’t be sent to from the app — paste these into it.'}
         </ChalkText>
 
-        {pv?.handoff.mode === 'copy' ? (
+        {copyMode ? (
           <Button
             label={copied ? 'Copied' : 'Copy offers'}
             onPress={onCopy}
-            disabled={!pv.handoff.text}
+            disabled={!pv?.handoff.text}
             testID="overhaul.summary.copy"
           />
         ) : (
@@ -384,10 +400,18 @@ export default function OverhaulSummaryScreen() {
   );
 }
 
-function ReceiptLine({ item, offers }: { item: ValidationItem; offers: Record<string, Offer> }) {
+function receiptMessage(item: ValidationItem, platform: string): string {
+  if (item.code === 'pick_unsupported_on_platform') {
+    return `${platformName(platform)} can’t receive draft picks from the app — this offer includes a pick`;
+  }
+  if (item.code === 'reconnect_required') return connectLine(platform);
+  return item.message;
+}
+
+function ReceiptLine({ item, offers, platform }: { item: ValidationItem; offers: Record<string, Offer>; platform: string }) {
   const who = item.offer_id ? offers[item.offer_id]?.counterparty_username : null;
   const prefix = who ? `${who}: ` : item.package_id ? 'Package: ' : '';
-  return <ChalkText variant="bodySm">{`${prefix}${item.message}`}</ChalkText>;
+  return <ChalkText variant="bodySm">{`${prefix}${receiptMessage(item, platform)}`}</ChalkText>;
 }
 
 const styles = StyleSheet.create({

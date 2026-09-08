@@ -27,13 +27,13 @@ Binding design: [BUILD-CONTRACT.md](BUILD-CONTRACT.md). Product rules: [PRODUCT-
 ## 2. Schema & flag scope
 
 - New tables: `overhauls`, `overhaul_offers`, `overhaul_roadmaps`, `overhaul_attempts`, `overhaul_reservations` → `docs/data-dictionary.md` (one section each). Created by `metadata.create_all`; no ALTER migration rows needed.
-- New feature flag: `overhaul.enabled` → `config/features.json` (**false**), `backend/feature_flags.py` `FLAG_KEYS` + mirror fixtures, `docs/config-reference.md`. Gates the entry card and the create/generate/assemble/send routes only; reads, decisions, priorities, prepare-send, refresh and status assertions stay reachable so live sends are never stranded by a rollback. **Graduation criterion:** the operator runs the [QA.md](QA.md) physical-device checklist on a TestFlight build and confirms D1 (Sleeper-only sends) and D9 (Acquire placement).
+- New feature flag: `overhaul.enabled` → `config/features.json` (**false**), `backend/feature_flags.py` `FLAG_KEYS` + mirror fixtures, `docs/config-reference.md`. Gates the entry card and the create/generate/assemble/send routes only; reads, decisions, priorities, prepare-send, refresh and status assertions stay reachable so live sends are never stranded by a rollback. **Graduation criterion:** the operator runs the [QA.md](QA.md) physical-device checklist on a TestFlight build containing the all-platform send path. D1 (revised to Sleeper + MFL + ESPN sends, 2026-09-07) and D9 are owner-confirmed.
 - New env vars / `model_config` keys: **none**. Search bounds are module constants in `backend/overhaul_service.py`. Deploy-free rollback lever: flip `overhaul.enabled` false and `POST /api/feature-flags/reload`.
 
 ## 3. Evidence scope
 
 - [x] **Structural guard:** `mobile/tests/check-team-overhaul.js` (`npm run test:team-overhaul`) — pins: all eight overhaul screens registered once, in the Trades stack, none in RootNav; no `FeedbackFAB` import in any overhaul screen; entry card rendered in `TradesScreen` after `TeamReviewEntryCard` gated on `useFlag('overhaul.enabled')`; no overhaul file references league-preference, tiers-save or swipe-learning helpers; priorities screen uses `react-native-draggable-flatlist` with `accessibilityActions`; summary renders races keyed by `package_id`; every `AttemptState` has a label used by the plan screen; every testID family present.
-- [x] **Unit tests:** `backend/tests/test_overhaul_service.py` (pool/E01–E15 fixtures, D4), `test_overhaul_store.py` (reservations, CAS), `test_overhaul_api.py` (flag gating, ownership scoping, idempotency, prepare/send/refresh/status with fake generator and fake Sleeper propose), plus the existing `/api/trades/propose` tests proving the extraction is behavior-preserving.
+- [x] **Unit tests:** `backend/tests/test_overhaul_service.py` (pool/E01–E15 fixtures, D4), `test_overhaul_store.py` (reservations, CAS), `test_overhaul_api.py` (flag gating, ownership scoping, idempotency, prepare/send/refresh/status with fake generator and fake Sleeper/MFL/ESPN propose cores), plus the existing `/api/trades/propose` tests proving the extraction is behavior-preserving.
 - [x] **Code-walk proof:** [BUILD-CONTRACT §6–§7](BUILD-CONTRACT.md) name the seams; the build report in [status.md](status.md) cites the final file:line trace for pool enforcement, reservation claim and attempt state transitions.
 - [x] **Manual TestFlight checklist:** [QA.md](QA.md) "Manual physical-device checklist" (10 items) — **unrun** until a build exists; the only runtime evidence mobile gets.
 - `testID`s added: families `overhaul.entry-card`, `overhaul.entry-start`, `overhaul.entry-resume`, `overhaul.outlook.<key>`, `overhaul.asset.<id>`, `overhaul.continue`, `overhaul.review.like|pass|build`, `overhaul.roadmap.<id>`, `overhaul.priority.list`, `overhaul.priority.move.<id>`, `overhaul.summary.send-all|copy`, `overhaul.plan.refresh|send-next` (static prefixes; passes `mobile/scripts/testid-lint.sh`).
@@ -49,7 +49,7 @@ Binding design: [BUILD-CONTRACT.md](BUILD-CONTRACT.md). Product rules: [PRODUCT-
 | `docs/cross-client-invariants.md` | updated | outlook enum, attempt-state enum, shortfall enum, validation codes |
 | `docs/glossary.md` | updated | overhaul, package, tier, roadmap, attempt |
 | ADR or `DECISIONS.md` entry | updated | D-188 (nine defaults, v1 execution posture) + ADR-020 (plan-level roster policy) |
-| `docs/data-dictionary.md` | updated | five tables |
+| `docs/data-dictionary.md` | updated | five tables; 2026-09-07 follow-up adds `overhaul_attempts.provider_status` |
 | `docs/config-reference.md` | updated | `overhaul.enabled` row |
 
 ## 5. Ship gate declaration
