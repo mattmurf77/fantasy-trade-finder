@@ -14,9 +14,12 @@
 //
 //   1. The merged calculator's `calc.outlook-fallback` text derives from the
 //      saved `team_outlook` via `outlookDisplayName`; 'Not set' is ONLY a
-//      null fallback (`?? 'Not set'` / `: 'Not set'`), never the whole line.
+//      null fallback (`?? 'Not set'` / `: 'Not set'`), never the whole line;
+//      and the expression reads the DECLARED value only — `inferred_outlook`
+//      never appears in the block (#394: an inference is not "set").
 //   2. InLeagueCalculator carries the shared ['league-prefs', leagueId] query
-//      (`getLeaguePreferences`) that every preference writer invalidates.
+//      (`getLeaguePreferences`) that every preference writer invalidates, and
+//      the query is live (`enabled` gates on `!!leagueId`, never `false`).
 //   3. ONE display-name table: `outlookDisplayName` is exported from
 //      OutlookBiasReceipt (which owns LEAN — exactly the four directional
 //      values, `not_sure` → "Not sure" alongside) and imported by the
@@ -26,7 +29,11 @@
 //      `savePrefs` (between its declaration and its dependency array), so the
 //      window and depth beats invalidate too, not just the plan beat.
 //   5. TeamReviewScreen records completion when the `plan` beat becomes
-//      current AND still from the `team-review.finish` handler.
+//      current AND still from the `team-review.finish` handler; the effect's
+//      condition is exactly `beat === 'plan' && leagueId` (not neutered), and
+//      `step` is reset to 0 during render when `leagueId` changes, so a
+//      TopBar league switch while parked on the plan beat cannot mark the
+//      NEW league done (QA round 1, A F-1 / B F-2).
 //   6. TeamReviewEntryCard derives `completed` from the
 //      `useTeamReviewCompletion` store — no mount-time read of the done key —
 //      and `markTeamReviewCompleted` marks the store before anything touches
@@ -93,6 +100,16 @@ const store = strip(read(STORE));
     bad('1c. "Not set" appears only as a null fallback',
       `'Not set' on line(s) ${offenders.map((o) => o.n).join(', ')} is not a \`?? 'Not set'\` / \`: 'Not set'\` fallback`);
   } else ok('1c. "Not set" appears only as a null fallback');
+
+  if (block && /inferred_outlook/.test(block)) {
+    bad('1d. the fallback reads the DECLARED team_outlook only',
+      'inferred_outlook appears inside the calc.outlook-fallback block. An inference is not "set" (#394 ruling); ' +
+      'a saved null must read "Not set" even when the model has a guess.');
+  } else if (block && !/outlookDisplayName\(prefsQ\.data\?\.team_outlook\)/.test(block)) {
+    bad('1d. the fallback reads the DECLARED team_outlook only',
+      'the outlook expression is not exactly outlookDisplayName(prefsQ.data?.team_outlook) — a fallback chain ' +
+      '(`?? inferred_outlook`, a session value, a literal) is a second source for one row.');
+  } else if (block) ok('1d. fallback expression is outlookDisplayName(prefsQ.data?.team_outlook), no inferred_outlook');
 }
 
 // ── 2. the calculator carries the shared prefs query ────────────────────────
@@ -106,6 +123,14 @@ const store = strip(read(STORE));
       'The row must read the SAME key the writers invalidate (TradeDnaSheet, TradesScreen, ' +
       'TradeFinderHubScreen, TeamReviewScreen) or it can disagree with all of them.');
   } else ok("2. InLeagueCalculator queries ['league-prefs', leagueId] via getLeaguePreferences");
+
+  const prefsQuery = between(calc, "queryKey: ['league-prefs', leagueId]", '});');
+  const enabled = (prefsQuery.match(/enabled:\s*([^,\n]+)/) || [])[1];
+  if (!prefsQuery) bad('2b. the prefs query block is isolable', "no `queryKey: ['league-prefs', leagueId]` … `});` in InLeagueCalculator");
+  else if (!enabled || !/!!leagueId/.test(enabled) || /\bfalse\b/.test(enabled)) {
+    bad('2b. the prefs query is live (enabled gates on !!leagueId, never false)',
+      `enabled: ${enabled ? enabled.trim() : 'MISSING'}. A disabled query never fetches, so the row reads "Not set" for every user with the query "present".`);
+  } else ok('2b. the prefs query is live (enabled gates on !!leagueId)');
 }
 
 // ── 3. one display-name table ───────────────────────────────────────────────
@@ -191,6 +216,32 @@ const store = strip(read(STORE));
     bad('5b. the finish handler still records completion',
       'team-review.finish no longer calls markTeamReviewCompleted — the store is idempotent, keep both writers');
   } else ok('5b. the finish handler still records completion');
+
+  const effectAt = (() => {
+    const call = screen.indexOf("if (beat === 'plan'");
+    return call === -1 ? -1 : screen.lastIndexOf('useEffect(() => {', call);
+  })();
+  const effect = effectAt === -1 ? '' : screen.slice(effectAt, screen.indexOf('}, [', effectAt) + 32);
+  if (!effect) bad('5c. the completion effect is isolable', "no `useEffect(() => {` enclosing `if (beat === 'plan'` in TeamReviewScreen");
+  else if (!/if \(beat === 'plan' && leagueId\)\s*markTeamReviewCompleted\(leagueId\);/.test(effect) || /\bfalse\b/.test(effect)) {
+    bad("5c. the completion effect's condition is exactly beat === 'plan' && leagueId",
+      'the effect no longer reads `if (beat === \'plan\' && leagueId) markTeamReviewCompleted(leagueId);` — an extra conjunct ' +
+      '(`&& false`, a flag, a ref) neuters the write while 5a still sees the call next to the test.');
+  } else if (!/\}, \[beat, leagueId\]/.test(effect)) {
+    bad('5c. the completion effect depends on [beat, leagueId]', 'the dependency array is not [beat, leagueId] — the effect would miss the render in which the plan beat becomes current');
+  } else ok("5c. completion effect is exactly `if (beat === 'plan' && leagueId) markTeamReviewCompleted(leagueId)` with deps [beat, leagueId]");
+
+  const resetAt = screen.search(/if \([A-Za-z]+ !== leagueId\) \{/);
+  const reset = resetAt === -1 ? '' : screen.slice(resetAt, screen.indexOf('\n  }', resetAt));
+  const lead = resetAt === -1 ? '' : screen.slice(Math.max(0, resetAt - 200), resetAt);
+  if (!reset || !/setStep\(0\)/.test(reset)) {
+    bad('5d. step is reset to 0 when leagueId changes',
+      'no `if (<prev> !== leagueId) {` block containing setStep(0) in TeamReviewScreen. Without it a TopBar league switch ' +
+      'while parked on the plan beat lands on the NEW league\'s plan beat and the effect marks that league done (QA round 1).');
+  } else if (/useEffect\(/.test(lead) && !/\}\);/.test(lead.slice(lead.lastIndexOf('useEffect(')))) {
+    bad('5d. the step reset runs during render, not in an effect',
+      'the reset sits inside useEffect( — with the new league\'s review already cached, an effect-based reset runs in the same commit as the completion effect and loses the race');
+  } else ok('5d. step (and the beat selections) reset during render when leagueId changes');
 }
 
 // ── 6. the card reads the store; the marker writes memory first ─────────────

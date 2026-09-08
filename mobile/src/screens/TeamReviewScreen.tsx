@@ -115,6 +115,26 @@ export default function TeamReviewScreen() {
   // the user did, never what they skipped past.
   const done = useRef<Set<string>>(new Set());
 
+  // #423 (QA round 1) — a league switch from the TopBar while this screen is
+  // mounted RESTARTS the review. `step` used to survive the switch, so a user
+  // parked on league A's plan beat who picked league B arrived on B's plan
+  // beat — and the completion effect below then marked B done without anyone
+  // walking it; A's chip selections would also have posted as B's fallback
+  // outlook in `savePrefs`. Reset during render (React's documented pattern
+  // for state that follows a prop), NOT in an effect: when B's review is
+  // already cached, an effect-based reset would run in the same commit as the
+  // completion effect and lose the race.
+  const [stepLeague, setStepLeague] = useState(leagueId);
+  if (stepLeague !== leagueId) {
+    setStepLeague(leagueId);
+    setStep(0);
+    setOutlook(null);
+    setAcquire([]);
+    setShed([]);
+    setScoped(null);
+    done.current = new Set();
+  }
+
   const q = useQuery({
     queryKey: ['team-review', leagueId],
     queryFn: () => getTeamReview(leagueId as string),
