@@ -11,6 +11,14 @@
 
 ---
 
+## 2026-09-07 — Team overhaul: sends on MFL and ESPN (owner D1 revision), branch evidence
+
+Branch `claude/overhaul-all-platform-sends` from `origin/main` `6f115d1b`. Owner revised D1: "MFL and ESPN trade sending has been validated. It should work for all." Backend: `/api/trades/propose-mfl` and `/api/trades/propose-espn` bodies extracted verbatim into `_mfl_propose_core` / `_espn_propose_core` (routes are thin wrappers; codes/statuses/messages unchanged); overhaul `capabilities.can_propose` per platform behind `trade.send_in_sleeper` / `trade.send_in_mfl` / `espn.send`, `can_propose_picks` false on ESPN with `pick_unsupported_on_platform` blockers, `reconnect_required` when unlinked, fresh MFL/ESPN roster reads for refresh with a `roster_source` guard that never terminalizes attempts from session-stale data; additive `overhaul_attempts.provider_status`. Mobile: platform-aware summary/assets copy; guard `check-team-overhaul.js` now 21 assertions.
+
+- Backend targeted: overhaul + pick-assignment guard **90 passed**; `-k "propose or mfl or espn or sleeper_write or flags_mirror"` **508 passed** (mfl/espn subset 446 before and after the extraction). Full suite result appended below when it lands.
+- Mobile: `npx tsc --noEmit` 0 errors; every `check-*.js` passes; testid-lint OK. Web 190/190.
+- UNRUN: device checklist on a build containing this branch (the next TestFlight upload); `supports_conflicting_offer_race` is `supported` for Sleeper by owner statement, `unverified` for MFL/ESPN.
+
 ## 2026-09-07 — Team overhaul v1 build (branch, flag off): full backend suite green
 
 Branch `claude/team-overhaul-scoping-ea1c72` (from `origin/main` `0e3d6b70`), head `d23a3b81` + this write-back. Not merged, not deployed, no EAS build. Scope: [scope.md](../docs/plans/team-overhaul/scope.md), full gates, no express.
@@ -3978,6 +3986,7 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-09-07 — Team overhaul: sends on MFL and ESPN (owner D1 revision), branch evidence](#2026-09-07--team-overhaul-sends-on-mfl-and-espn-owner-d1-revision-branch-evidence)
 - [2026-09-07 — Team overhaul v1 build (branch, flag off): full backend suite green](#2026-09-07--team-overhaul-v1-build-branch-flag-off-full-backend-suite-green)
 
 - [2026-09-06 — Feedback release CI, merge and delivery](#2026-09-06--feedback-release-ci-merge-and-delivery)

@@ -229,6 +229,9 @@ from .database import (
     save_bad_trade_flag, list_bad_trade_flags,
     # "Send in Sleeper" — encrypted Sleeper write-token storage (flagged beta)
     upsert_sleeper_credential, get_sleeper_credential, delete_sleeper_credential,
+    # Team overhaul all-platform sends (2026-09-07): link-state reads for
+    # overhaul_api.auth_state, mirroring GET /api/mfl/auth-link and /api/espn/link
+    get_mfl_credential, get_espn_credential,
     # Persistent sessions (teardown 06-03, flag auth.persistent_sessions)
     persist_session, load_persisted_session, touch_persisted_session,
     delete_persisted_session, delete_persisted_sessions_for_user,
@@ -26404,28 +26407,35 @@ def _espn_member_id(league_id: str, team) -> str:
     return f"espn:{league_id}.t{team.team_id}"
 
 
-def _espn_error_response(e):
-    """Map an EspnError to a (json, status) response."""
+def _espn_error_payload(e) -> tuple[dict, int]:
+    """Map an EspnError to a (payload, status) pair — the jsonify-free form
+    the propose cores return."""
     kind = getattr(e, "kind", "http")
     if kind == "auth":
-        return jsonify({
+        return {
             "error": "espn_auth_required",
             "message": "ESPN wouldn't share this league — it's private or the "
                        "saved cookies expired. Paste fresh espn_s2 + SWID "
                        "cookies to continue.",
-        }), 403
+        }, 403
     if kind == "not_found":
-        return jsonify({
+        return {
             "error": "espn_league_not_found",
             "message": "ESPN has no league with that ID for that season. "
                        "ESPN purges old leagues — check the ID and season.",
-        }), 404
+        }, 404
     if kind == "input":
-        return jsonify({"error": "espn_bad_league_id",
-                        "message": "ESPN league IDs are numeric."}), 400
+        return {"error": "espn_bad_league_id",
+                "message": "ESPN league IDs are numeric."}, 400
     log.warning("espn fetch failed [%s]: %s", kind, e)
-    return jsonify({"error": "espn_unavailable",
-                    "message": "Couldn't reach ESPN — try again shortly."}), 502
+    return {"error": "espn_unavailable",
+            "message": "Couldn't reach ESPN — try again shortly."}, 502
+
+
+def _espn_error_response(e):
+    """Map an EspnError to a (json, status) response."""
+    payload, status = _espn_error_payload(e)
+    return jsonify(payload), status
 
 
 def _espn_import_payload(league_id: str, season: int, espn_s2: str | None,
@@ -29291,23 +29301,30 @@ def _platform_report_json(report: dict) -> dict:
     }
 
 
-def _platform_error_response(e, platform: str):
-    """Map an MflError/FleaflickerError to a (json, status) response."""
+def _platform_error_payload(e, platform: str) -> tuple[dict, int]:
+    """Map an MflError/FleaflickerError to a (payload, status) pair — the
+    jsonify-free form the propose cores return."""
     kind = getattr(e, "kind", "http")
     label = "MFL" if platform == "mfl" else "Fleaflicker"
     if kind == "auth":
-        return jsonify({"error": f"{platform}_auth_required",
-                        "message": f"{label} wouldn't share this league — it's "
-                                   "private or the credentials expired."}), 403
+        return {"error": f"{platform}_auth_required",
+                "message": f"{label} wouldn't share this league — it's "
+                           "private or the credentials expired."}, 403
     if kind == "not_found":
-        return jsonify({"error": f"{platform}_league_not_found",
-                        "message": f"{label} has no league with that ID."}), 404
+        return {"error": f"{platform}_league_not_found",
+                "message": f"{label} has no league with that ID."}, 404
     if kind == "input":
-        return jsonify({"error": f"{platform}_bad_league_id",
-                        "message": f"{label} league IDs are numeric."}), 400
+        return {"error": f"{platform}_bad_league_id",
+                "message": f"{label} league IDs are numeric."}, 400
     log.warning("%s fetch failed [%s]: %s", platform, kind, e)
-    return jsonify({"error": f"{platform}_unavailable",
-                    "message": f"Couldn't reach {label} — try again shortly."}), 502
+    return {"error": f"{platform}_unavailable",
+            "message": f"Couldn't reach {label} — try again shortly."}, 502
+
+
+def _platform_error_response(e, platform: str):
+    """Map an MflError/FleaflickerError to a (json, status) response."""
+    payload, status = _platform_error_payload(e, platform)
+    return jsonify(payload), status
 
 
 # ── MFL ─────────────────────────────────────────────────────────────────────
@@ -30461,65 +30478,108 @@ def propose_trade_to_mfl():
                     "reason=hard_route", user_id, request.method, request.path)
         return jsonify({"error": "verification_required"}), 403
 
+    body = request.get_json(force=True) or {}
+    # Request-local ledger id; a fresh client retry creates a fresh id.
+    # This does not provide cross-request provider-send idempotency.
+    payload, status = _mfl_propose_core(
+        sess, league_id=str(body.get("league_id") or "").strip(),
+        their_user_id=body.get("their_user_id"),
+        give_ids=[str(p) for p in (body.get("give_player_ids") or [])],
+        receive_ids=[str(p) for p in (body.get("receive_player_ids") or [])],
+        proposal_event_id=uuid.uuid4().hex,
+        source=(body.get("source") if body.get("source") in
+                ("deck", "match", "calculator") else "deck"),
+        impression_id=body.get("impression_id"),
+        their_franchise_id=body.get("their_franchise_id"),
+        give_pick_assets=[str(p) for p in (body.get("give_pick_assets") or [])],
+        receive_pick_assets=[str(p) for p in (body.get("receive_pick_assets") or [])],
+        comments=body.get("comments"), expires=body.get("expires"))
+    return jsonify(payload), status
+
+
+def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
+                      proposal_event_id, source, impression_id=None,
+                      their_franchise_id=None, give_pick_assets=None,
+                      receive_pick_assets=None, comments=None,
+                      expires=None) -> tuple[dict, int]:
+    """The body of POST /api/trades/propose-mfl, callable without a request body.
+
+    Returns `(payload, http_status)` with the route's exact error codes. The
+    fail-closed test-mode check, the `trade.send_in_mfl` flag and the
+    verified-session gate live HERE so every caller — the route and the
+    team-overhaul send loop (backend/overhaul_api.py) — inherits them. The
+    route wrapper repeats its own prefix checks first so its ordering is
+    byte-identical; on that path these re-checks are no-ops. Extracted
+    2026-09-07 exactly the way `_sleeper_propose_core` was.
+    """
+    if _TEST_MODE:
+        return {"error": "test_mode_propose_disabled"}, 599
+    if not is_enabled("trade.send_in_mfl"):
+        return {"error": "feature_disabled"}, 404
+    user_id = sess.get("user_id")
+    if not user_id:
+        return {"error": "no_user"}, 401
+    if not sess.get("verified"):
+        return {"error": "verification_required"}, 403
+
     from . import mfl_service as _mfl
     from . import mfl_write as _mfl_write
     from .database import get_platform_league, delete_mfl_credential
 
-    body = request.get_json(force=True) or {}
-    league_id = str(body.get("league_id") or "").strip()
-    their_member_id = body.get("their_user_id")
-    their_franchise_in = body.get("their_franchise_id")
-    give = [str(p) for p in (body.get("give_player_ids") or [])]
-    receive = [str(p) for p in (body.get("receive_player_ids") or [])]
-    give_picks = [str(p) for p in (body.get("give_pick_assets") or [])]
-    receive_picks = [str(p) for p in (body.get("receive_pick_assets") or [])]
+    league_id = str(league_id or "").strip()
+    their_member_id = their_user_id
+    their_franchise_in = their_franchise_id
+    give = [str(p) for p in (give_ids or [])]
+    receive = [str(p) for p in (receive_ids or [])]
+    give_picks = [str(p) for p in (give_pick_assets or [])]
+    receive_picks = [str(p) for p in (receive_pick_assets or [])]
     if not league_id.isdigit() or \
             (their_member_id is None and their_franchise_in is None):
-        return jsonify({"error": "bad_request"}), 400
+        return {"error": "bad_request"}, 400
     if not (give or receive or give_picks or receive_picks):
-        return jsonify({"error": "bad_request"}), 400
+        return {"error": "bad_request"}, 400
     for p in give_picks + receive_picks:
         if not _mfl_write.is_pick_asset_id(p):
-            return jsonify({"error": "bad_request",
-                            "message": f"bad pick asset encoding: {p}"}), 400
+            return {"error": "bad_request",
+                            "message": f"bad pick asset encoding: {p}"}, 400
 
     # Server-authoritative platform + franchise resolution from the leagues
     # row — the client never asserts its own franchise id.
     row = get_platform_league(league_id, "mfl")
     if not row:
-        return jsonify({"error": "mfl_not_linked",
-                        "message": "Link this MFL league first."}), 404
+        return {"error": "mfl_not_linked",
+                        "message": "Link this MFL league first."}, 404
     if str(row.get("user_id") or "") != str(user_id):
         # One linker per platform-league row; only the linker has a franchise
         # binding, so nobody else can send from it.
-        return jsonify({"error": "mfl_not_linked",
+        return {"error": "mfl_not_linked",
                         "message": "This MFL league isn't linked to your "
-                                   "account."}), 404
+                                   "account."}, 404
     my_fid = str(row.get("platform_my_team") or "").strip()
     if not my_fid:
-        return jsonify({"error": "mfl_franchise_unknown",
+        return {"error": "mfl_franchise_unknown",
                         "message": "Couldn't determine your franchise — "
-                                   "re-link this league."}), 409
+                                   "re-link this league."}, 409
 
     their_fid = (str(their_franchise_in).strip() if their_franchise_in is not None
                  else _mfl_franchise_from_member_id(league_id, their_member_id))
     if not their_fid or not str(their_fid).isdigit():
-        return jsonify({"error": "bad_request",
+        return {"error": "bad_request",
                         "message": "Couldn't resolve the counterparty "
-                                   "franchise."}), 400
+                                   "franchise."}, 400
     try:
         if (_mfl_write.normalize_franchise_id(their_fid)
                 == _mfl_write.normalize_franchise_id(my_fid)):
-            return jsonify({"error": "bad_request",
+            return {"error": "bad_request",
                             "message": "You can't send a trade to your own "
-                                       "franchise."}), 400
+                                       "franchise."}, 400
     except _mfl_write.MflWriteError:
-        return jsonify({"error": "bad_request"}), 400
+        return {"error": "bad_request"}, 400
 
     cookie = _mfl_cookie_for(sess, user_id)
     if not cookie:
-        return jsonify({"error": "mfl_not_connected",
-                        "message": "Sign in with MFL first."}), 409
+        return {"error": "mfl_not_connected",
+                        "message": "Sign in with MFL first."}, 409
 
     # FTF's trade surfaces carry picks in the same arrays as players — split
     # them out so each class maps through its own ground truth.
@@ -30540,10 +30600,10 @@ def propose_trade_to_mfl():
     unmapped = ([p for p in give_players + recv_players if p not in inverse]
                 + pick_unmapped)
     if unmapped:
-        return jsonify({"error": "mfl_asset_unmapped",
+        return {"error": "mfl_asset_unmapped",
                         "unmapped": unmapped,
                         "message": "Some assets couldn't be matched to MFL "
-                                   "asset ids, so nothing was sent."}), 422
+                                   "asset ids, so nothing was sent."}, 422
 
     year = int(row.get("platform_season") or _MFL_DEFAULT_YEAR)
     host = row.get("platform_host")
@@ -30551,9 +30611,8 @@ def propose_trade_to_mfl():
         if not host:
             host = _mfl.resolve_host(league_id, year)
     except _mfl.MflError as e:
-        return _platform_error_response(e, "mfl")
+        return _platform_error_payload(e, "mfl")
 
-    expires = body.get("expires")
     req = _mfl_write.ProposeTradeRequest(
         league_id=league_id,
         offered_to=their_fid,
@@ -30563,12 +30622,12 @@ def propose_trade_to_mfl():
         will_receive=([inverse[p] for p in recv_players]
                       + [pick_encoded[p] for p in recv_ftf_picks]
                       + receive_picks),
-        comments=(str(body.get("comments") or "").strip() or None),
+        comments=(str(comments or "").strip() or None),
         expires=int(expires) if expires is not None else None,
     )
     # Request-local ledger id; a fresh client retry creates a fresh id.
     # This does not provide cross-request provider-send idempotency.
-    _proposal_event_id = uuid.uuid4().hex
+    _proposal_event_id = proposal_event_id
     try:
         result = _mfl_write.propose_trade(cookie, host, year, req)
     except _mfl_write.MflWriteAuthError as e:
@@ -30580,23 +30639,23 @@ def propose_trade_to_mfl():
         except Exception:
             log.exception("mfl propose: credential delete failed")
         sess.pop("mfl_cookie", None)
-        return jsonify({
+        return {
             "error": "mfl_auth_expired",
             "message": "Your MFL sign-in expired — sign in again.",
             "detail": (str(getattr(e, "detail", "") or ""))[:200],
-        }), 409
+        }, 409
     except _mfl_write.MflWriteError as e:
         log.warning("mfl propose write-failed [%s]: %s", e.kind,
                     getattr(e, "detail", None))
-        return jsonify({
+        return {
             "error": "mfl_write_failed",
             "kind": e.kind,
             "detail": (str(getattr(e, "detail", "") or ""))[:200],
-        }), 502
+        }, 502
 
     # F1 (deck.signal_v2) — same proposal-sent outcome hook as the Sleeper
     # route; additive/optional, only reached on a successful MFL import.
-    _save_deck_outcome_safe(body.get("impression_id"), "propose",
+    _save_deck_outcome_safe(impression_id, "propose",
                             acting_user_id=user_id)
     # trade_sent (server-fired, taxonomy 2026-08-11) — confirmed-success
     # only; every failure branch (incl. the mfl_asset_unmapped hard block)
@@ -30625,16 +30684,15 @@ def propose_trade_to_mfl():
         sess=sess, provider="mfl", user_id=user_id,
         league_id=league_id, target_user_id=their_member_id or their_fid,
         give_asset_ids=give + give_picks, receive_asset_ids=receive + receive_picks,
-        impression_id=_owned_impression_id(body.get("impression_id"), user_id, league_id=league_id),
+        impression_id=_owned_impression_id(impression_id, user_id, league_id=league_id),
         proposal_event_id=_proposal_event_id,
         provider_transaction_id=None,
-        source=(body.get("source") if body.get("source") in
-                ("deck", "match", "calculator") else "deck"),
+        source=source,
     )
     log.info("mfl propose: user=%s league=%s offered_to=f%s assets=%d/%d",
              user_id, league_id, their_fid,
              len(give) + len(give_picks), len(receive) + len(receive_picks))
-    return jsonify({"status": "proposed", "mfl_status": result.get("status")})
+    return {"status": "proposed", "mfl_status": result.get("status")}, 200
 
 
 @app.route("/api/trades/respond-mfl", methods=["POST"])
@@ -30931,54 +30989,94 @@ def propose_trade_to_espn():
                     "reason=hard_route", user_id, request.method, request.path)
         return jsonify({"error": "verification_required"}), 403
 
+    body = request.get_json(force=True) or {}
+    # Request-local ledger id; a fresh client retry creates a fresh id.
+    # This does not provide cross-request provider-send idempotency.
+    payload, status = _espn_propose_core(
+        sess, league_id=str(body.get("league_id") or "").strip(),
+        their_user_id=body.get("their_user_id"),
+        give_ids=[str(p) for p in (body.get("give_player_ids") or [])],
+        receive_ids=[str(p) for p in (body.get("receive_player_ids") or [])],
+        proposal_event_id=uuid.uuid4().hex,
+        source=(body.get("source") if body.get("source") in
+                ("deck", "match", "calculator") else "deck"),
+        impression_id=body.get("impression_id"),
+        their_team_id=body.get("their_team_id"), comments=body.get("comments"))
+    return jsonify(payload), status
+
+
+def _espn_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
+                       proposal_event_id, source, impression_id=None,
+                       their_team_id=None, comments=None) -> tuple[dict, int]:
+    """The body of POST /api/trades/propose-espn, callable without a request body.
+
+    Returns `(payload, http_status)` with the route's exact error codes. The
+    fail-closed test-mode check, the `espn.send` flag and the verified-session
+    gate live HERE so every caller — the route and the team-overhaul send
+    loop (backend/overhaul_api.py) — inherits them. The route wrapper repeats
+    its own prefix checks first so its ordering is byte-identical; on that
+    path these re-checks are no-ops. Extracted 2026-09-07 exactly the way
+    `_sleeper_propose_core` was. Picks still hard-block here (422
+    `espn_pick_unsupported`); the overhaul refuses them earlier, at
+    prepare-send, so nothing is half-sent.
+    """
+    if _TEST_MODE:
+        return {"error": "test_mode_propose_disabled"}, 599
+    if not is_enabled("espn.send"):
+        return {"error": "feature_disabled"}, 404
+    user_id = sess.get("user_id")
+    if not user_id:
+        return {"error": "no_user"}, 401
+    if not sess.get("verified"):
+        return {"error": "verification_required"}, 403
+
     from . import espn_service as _espn
     from . import espn_write as _espn_write
     from .database import (get_espn_league, get_espn_credential,
                            delete_espn_credential)
 
-    body = request.get_json(force=True) or {}
-    league_id = str(body.get("league_id") or "").strip()
-    their_member_id = body.get("their_user_id")
-    their_team_in = body.get("their_team_id")
-    give = [str(p) for p in (body.get("give_player_ids") or [])]
-    receive = [str(p) for p in (body.get("receive_player_ids") or [])]
+    league_id = str(league_id or "").strip()
+    their_member_id = their_user_id
+    their_team_in = their_team_id
+    give = [str(p) for p in (give_ids or [])]
+    receive = [str(p) for p in (receive_ids or [])]
     if not league_id.isdigit() or \
             (their_member_id is None and their_team_in is None):
-        return jsonify({"error": "bad_request"}), 400
+        return {"error": "bad_request"}, 400
     if not (give or receive):
-        return jsonify({"error": "bad_request"}), 400
+        return {"error": "bad_request"}, 400
 
     # Server-authoritative platform + team resolution from the leagues row —
     # the client never asserts its own team id.
     row = get_espn_league(league_id)
     if not row:
-        return jsonify({"error": "espn_not_linked",
-                        "message": "Link this ESPN league first."}), 404
+        return {"error": "espn_not_linked",
+                        "message": "Link this ESPN league first."}, 404
     if str(row.get("user_id") or "") != str(user_id):
         # One linker per ESPN league row; only the linker has a team binding,
         # so nobody else can send from it.
-        return jsonify({"error": "espn_not_linked",
+        return {"error": "espn_not_linked",
                         "message": "This ESPN league isn't linked to your "
-                                   "account."}), 404
+                                   "account."}, 404
     my_team_id = row.get("espn_my_team_id")
     if my_team_id is None:
-        return jsonify({"error": "espn_team_unknown",
+        return {"error": "espn_team_unknown",
                         "message": "Couldn't determine your team — re-link "
-                                   "this league."}), 409
+                                   "this league."}, 409
 
     # A write ALWAYS needs the cookie pair, even for a public-league link.
     cred = get_espn_credential(user_id)
     swid = (cred or {}).get("swid")
     if not cred or not swid:
-        return jsonify({"error": "espn_not_connected",
-                        "message": "Connect your ESPN account first."}), 409
+        return {"error": "espn_not_connected",
+                        "message": "Connect your ESPN account first."}, 409
     try:
         espn_s2 = _sleeper_write.decrypt_token(cred["espn_s2_encrypted"])
     except Exception:
         log.warning("espn propose: stored cookie undecryptable for %s", user_id)
-        return jsonify({"error": "espn_not_connected",
+        return {"error": "espn_not_connected",
                         "message": "Your saved ESPN sign-in couldn't be read "
-                                   "— connect ESPN again."}), 409
+                                   "— connect ESPN again."}, 409
 
     # PICKS HARD-BLOCK (players only). This is PERMANENT, not a TODO.
     #
@@ -30996,10 +31094,10 @@ def propose_trade_to_espn():
     # never silently dropped.
     picks = [p for p in give + receive if _is_ftf_pick_asset(league_id, p)]
     if picks:
-        return jsonify({"error": "espn_pick_unsupported",
+        return {"error": "espn_pick_unsupported",
                         "picks": picks,
                         "message": "Draft picks can't be sent to ESPN yet, "
-                                   "so nothing was sent."}), 422
+                                   "so nothing was sent."}, 422
 
     # Player mapping — HARD BLOCK on any miss. An offer must never silently
     # drop an asset: a partially-mapped trade is a DIFFERENT trade, so the
@@ -31007,10 +31105,10 @@ def propose_trade_to_espn():
     inverse = _sleeper_to_espn_map()
     unmapped = [p for p in give + receive if p not in inverse]
     if unmapped:
-        return jsonify({"error": "espn_asset_unmapped",
+        return {"error": "espn_asset_unmapped",
                         "unmapped": unmapped,
                         "message": "Some assets couldn't be matched to ESPN "
-                                   "player ids, so nothing was sent."}), 422
+                                   "player ids, so nothing was sent."}, 422
 
     # Pre-flight league read (the same authenticated read the importer uses):
     # resolves the counterparty's teamId against LIVE team data, yields the
@@ -31027,38 +31125,38 @@ def propose_trade_to_espn():
             delete_espn_credential(user_id)
         except Exception:
             log.exception("espn propose: credential delete failed")
-        return jsonify({
+        return {
             "error": "espn_auth_expired",
             "message": "Your ESPN sign-in expired — connect ESPN again.",
-        }), 409
+        }, 409
     except _espn.EspnError as e:
-        return _espn_error_response(e)
+        return _espn_error_payload(e)
     league = _espn.parse_league(raw)
     teams = league["teams"]
     if not any(t.team_id == int(my_team_id) for t in teams):
-        return jsonify({"error": "espn_team_unknown",
+        return {"error": "espn_team_unknown",
                         "message": "Your team is no longer in this ESPN "
-                                   "league — re-link it."}), 409
+                                   "league — re-link it."}, 409
 
     if their_team_in is not None:
         try:
             their_team_id = int(their_team_in)
         except (TypeError, ValueError):
-            return jsonify({"error": "bad_request"}), 400
+            return {"error": "bad_request"}, 400
         if not any(t.team_id == their_team_id for t in teams):
-            return jsonify({"error": "bad_request",
-                            "message": "That team isn't in this league."}), 400
+            return {"error": "bad_request",
+                            "message": "That team isn't in this league."}, 400
     else:
         their_team_id = _espn_team_id_from_member_id(league_id,
                                                      their_member_id, teams)
         if their_team_id is None:
-            return jsonify({"error": "bad_request",
+            return {"error": "bad_request",
                             "message": "Couldn't resolve the counterparty "
-                                       "team."}), 400
+                                       "team."}, 400
     if int(their_team_id) == int(my_team_id):
-        return jsonify({"error": "bad_request",
+        return {"error": "bad_request",
                         "message": "You can't send a trade to your own "
-                                   "team."}), 400
+                                   "team."}, 400
 
     req = _espn_write.EspnTradeProposalRequest(
         league_id=league_id,
@@ -31070,11 +31168,11 @@ def propose_trade_to_espn():
         receive_espn_player_ids=[int(inverse[p]) for p in receive],
         scoring_period_id=_espn_write.current_scoring_period(raw),
         lineup_slots=_espn_write.extract_lineup_slots(raw),
-        comment=(str(body.get("comments") or "").strip()),
+        comment=(str(comments or "").strip()),
     )
     # Request-local ledger id; a fresh client retry creates a fresh id.
     # This does not provide cross-request provider-send idempotency.
-    _proposal_event_id = uuid.uuid4().hex
+    _proposal_event_id = proposal_event_id
     try:
         result = _espn_write.propose_trade(espn_s2, swid, req)
     except _espn_write.EspnWriteAuthError as e:
@@ -31086,23 +31184,23 @@ def propose_trade_to_espn():
             delete_espn_credential(user_id)
         except Exception:
             log.exception("espn propose: credential delete failed")
-        return jsonify({
+        return {
             "error": "espn_auth_expired",
             "message": "ESPN rejected the sign-in — connect ESPN again.",
             "detail": (str(getattr(e, "detail", "") or ""))[:200],
-        }), 409
+        }, 409
     except _espn_write.EspnWriteError as e:
         log.warning("espn propose write-failed [%s]: %s", e.kind,
                     getattr(e, "detail", None))
-        return jsonify({
+        return {
             "error": "espn_write_failed",
             "kind": e.kind,
             "detail": (str(getattr(e, "detail", "") or ""))[:200],
-        }), 502
+        }, 502
 
     # F1 (deck.signal_v2) — same proposal-sent outcome hook as the Sleeper/MFL
     # routes; additive/optional, only reached on a successful ESPN write.
-    _save_deck_outcome_safe(body.get("impression_id"), "propose",
+    _save_deck_outcome_safe(impression_id, "propose",
                             acting_user_id=user_id)
     # trade_sent (server-fired, taxonomy 2026-08-11, rescoped to non-Sleeper
     # platforms only) — confirmed-success ONLY; every failure branch (incl.
@@ -31131,17 +31229,16 @@ def propose_trade_to_espn():
         sess=sess, provider="espn", user_id=user_id,
         league_id=league_id, target_user_id=their_member_id or their_team_id,
         give_asset_ids=give, receive_asset_ids=receive,
-        impression_id=_owned_impression_id(body.get("impression_id"), user_id, league_id=league_id),
+        impression_id=_owned_impression_id(impression_id, user_id, league_id=league_id),
         proposal_event_id=_proposal_event_id,
         provider_transaction_id=result.get("transaction_id"),
-        source=(body.get("source") if body.get("source") in
-                ("deck", "match", "calculator") else "deck"),
+        source=source,
     )
     log.info("espn propose: user=%s league=%s to_team=%s assets=%d/%d",
              user_id, league_id, their_team_id, len(give), len(receive))
-    return jsonify({"status": "proposed",
-                    "transaction_id": result.get("transaction_id"),
-                    "espn_status": result.get("status")})
+    return {"status": "proposed",
+            "transaction_id": result.get("transaction_id"),
+            "espn_status": result.get("status")}, 200
 
 
 # ── Fleaflicker ──────────────────────────────────────────────────────────────
@@ -31365,6 +31462,66 @@ _win_now_service.start_worker_on_startup(_sleeper_get)
 
 # Team overhaul (docs/plans/team-overhaul/BUILD-CONTRACT.md §3) — same seam
 # as Win Now: routes live in overhaul_api, server-private helpers are injected.
+def _overhaul_platform_rosters(sess, league_id: str, platform: str):
+    """Fresh rosters for a linked MFL / ESPN league, in the Sleeper-style
+    `[{roster_id, owner_id, players}]` shape `_fetch_league_rosters` returns,
+    or None when no fresh read is possible (the overhaul snapshot then falls
+    back to the session, stamps `roster_source: session`, and refresh refuses
+    to terminalize an attempt on it).
+
+    Runs the SAME fetch + crosswalk the import wrote `league_members` with
+    (`_mfl_import_league_authed` / `_espn_import_payload`) so a fresh read and
+    the session agree on player identity — an id-only read would report a
+    name-matched player as "gone". Persists nothing. Member ids follow the
+    import: the linker's own team is `user_id`, every other team the synthetic
+    `mfl:{L}.f{FID}` / `espn:{SWID}` id. Credentials never leave this function.
+    """
+    user_id = str(sess.get("user_id") or "")
+    if not user_id or not str(league_id).isdigit():
+        return None
+    try:
+        if platform == "mfl":
+            from . import mfl_service as _mfl
+            from .database import get_platform_league
+            row = get_platform_league(league_id, "mfl")
+            if not row or str(row.get("user_id") or "") != user_id:
+                return None
+            my_fid = str(row.get("platform_my_team") or "").strip()
+            year = int(row.get("platform_season") or _MFL_DEFAULT_YEAR)
+            host = row.get("platform_host") or _mfl.resolve_host(league_id, year)
+            raw = _mfl.fetch_league_bundle(league_id, year, host,
+                                           cookie=_mfl_cookie_for(sess, user_id))
+            parsed = _mfl.parse_bundle(raw)
+            rosters = _mfl.map_franchises(parsed, _shared_crosswalk())["rosters"]
+            return [{"roster_id": fr["franchise_id"],
+                     "owner_id": (user_id if fr["franchise_id"] == my_fid
+                                  else _mfl_member_id(league_id, fr["franchise_id"])),
+                     "players": list(rosters.get(fr["franchise_id"], []))}
+                    for fr in parsed["franchises"]]
+        if platform == "espn":
+            from .database import get_espn_league, get_espn_credential
+            row = get_espn_league(league_id)
+            if not row or str(row.get("user_id") or "") != user_id:
+                return None
+            my_team_id = row.get("espn_my_team_id")
+            cred = get_espn_credential(user_id) or {}
+            espn_s2 = swid = None
+            if cred.get("swid") and cred.get("espn_s2_encrypted"):
+                espn_s2 = _sleeper_write.decrypt_token(cred["espn_s2_encrypted"])
+                swid = cred["swid"]
+            season = int(row.get("espn_season") or _ESPN_DEFAULT_SEASON)
+            league, mapped = _espn_import_payload(league_id, season, espn_s2, swid)
+            return [{"roster_id": t.team_id,
+                     "owner_id": (user_id if t.team_id == my_team_id
+                                  else _espn_member_id(league_id, t)),
+                     "players": list(mapped["rosters"].get(t.team_id, []))}
+                    for t in league["teams"]]
+    except Exception as exc:
+        log.warning("overhaul: fresh %s roster read failed for league %s: %s",
+                    platform, league_id, exc)
+    return None
+
+
 from .overhaul_api import install as _install_overhaul
 from .trade_gen_owner import generate_owner_trades as _overhaul_generate
 _install_overhaul(app, require_session=_require_initialized_session,
@@ -31372,6 +31529,9 @@ _install_overhaul(app, require_session=_require_initialized_session,
                   active_format=_active_format, league_user_id=_league_user_id,
                   owner_generation_context=_owner_generation_context, generate=_overhaul_generate,
                   roster_context=_build_trade_roster_context, sleeper_propose=_sleeper_propose_core,
+                  mfl_propose=_mfl_propose_core, espn_propose=_espn_propose_core,
+                  mfl_credential=get_mfl_credential, espn_credential=get_espn_credential,
+                  platform_rosters=_overhaul_platform_rosters,
                   fetch_rosters=_fetch_league_rosters, roster_id_for_owner=_roster_id_for_owner,
                   load_picks=load_draft_picks, pick_source_platform=PICK_SOURCE_PLATFORM,
                   draft_context=get_league_draft_context, card_to_dict=trade_card_to_dict,

@@ -31,6 +31,11 @@ const RETURN_MIX: { key: RebuildReturn; label: string }[] = [
   { key: 'mixed', label: 'Mixed' },
 ];
 
+const PLATFORM_NAME: Record<string, string> = { sleeper: 'Sleeper', mfl: 'MFL', espn: 'ESPN' };
+function platformName(platform: string | null | undefined): string {
+  return (platform && PLATFORM_NAME[platform]) || 'your league platform';
+}
+
 /** Season of an owned pick: from its label ("2027 1st") or its FTF id
  *  (`{league}_{season}_{round}_{roster}`). Null when neither carries one. */
 function pickSeason(a: AssetView): number | null {
@@ -203,6 +208,10 @@ export default function OverhaulAssetsScreen({ navigation, route }: any) {
 
   const recovery = outlook === 'blow_it_up' ? recoveryCopy(view.recovery) : null;
   const count = selected.size;
+  // ESPN: snapshot.picks_supported is false — say so instead of an empty section.
+  const picksUnsupportedNote = view.snapshot.picks_supported === false
+    ? `Draft picks can’t be traded from the app on ${platformName(view.platform)}`
+    : undefined;
 
   const renderAsset = (a: AssetView) => {
     const on = selected.has(a.id);
@@ -237,14 +246,14 @@ export default function OverhaulAssetsScreen({ navigation, route }: any) {
     );
   };
 
-  const section = (title: string, items: AssetView[]) => items.length === 0 ? null : (
+  const section = (title: string, items: AssetView[], emptyNote?: string) => items.length === 0 && !emptyNote ? null : (
     <View key={title} style={styles.section}>
       <View style={styles.sectionHdr}>
         <View style={styles.sectionRail} />
         <ChalkText style={styles.sectionTitle}>{title}</ChalkText>
         <ChalkText style={styles.sectionCount}>{items.length}</ChalkText>
       </View>
-      {items.map(renderAsset)}
+      {items.length ? items.map(renderAsset) : <ChalkText style={styles.controlNote}>{emptyNote}</ChalkText>}
     </View>
   );
 
@@ -285,7 +294,7 @@ export default function OverhaulAssetsScreen({ navigation, route }: any) {
             <ChalkText style={styles.controlNote}>
               {pickSeasons.length > 0
                 ? `Seasons: ${pickSeasons.join(', ')}. Only picks you select below can move.`
-                : 'No owned picks found for this league.'}
+                : picksUnsupportedNote ?? 'No owned picks found for this league.'}
             </ChalkText>
           </View>
         ) : null}
@@ -321,7 +330,7 @@ export default function OverhaulAssetsScreen({ navigation, route }: any) {
 
         {POS_GROUPS.map((p) => section(p, groups.byPos[p]))}
         {section('Other', groups.byPos.other)}
-        {section('Draft picks', groups.picks)}
+        {section('Draft picks', groups.picks, picksUnsupportedNote)}
 
         {error ? <ChalkText style={styles.error}>{error}</ChalkText> : null}
       </ScrollView>

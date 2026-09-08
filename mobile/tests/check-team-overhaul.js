@@ -32,6 +32,10 @@
 //      new state cannot ship unlabeled.
 //   8. Every testID family in §9 appears literally in overhaul source, so a
 //      renamed id cannot silently lose its harness hook.
+//   9. Sends are platform-agnostic (2026-09-07: Sleeper, MFL and ESPN all
+//      send). The summary handles the ESPN pick blocker and the
+//      reconnect_required blocker, and never gates the send CTA on a literal
+//      Sleeper platform check — that gate is what used to hide Send on MFL/ESPN.
 //
 // Comment-stripped before matching, dependency-free, exits 1 on any failure.
 
@@ -191,6 +195,19 @@ const overhaulFiles = { ...screens, OverhaulEntryCard: entry, 'api/overhaul': ap
   const missing = families.filter((f) => !all.includes(f));
   if (missing.length) bad('8. every §9 testID family appears literally', `missing: ${missing.join(', ')}`);
   else ok(`8. all ${families.length} testID families present`);
+}
+
+// 9 — all-platform sends: no Sleeper-literal gating, new blockers handled
+{
+  const s = screens.OverhaulSummary;
+  if (!/can_propose_picks|pick_unsupported_on_platform/.test(s)) {
+    bad('9a. summary handles the ESPN pick blocker', 'OverhaulSummaryScreen references neither can_propose_picks nor the pick_unsupported_on_platform code');
+  } else ok('9a. summary references can_propose_picks / pick_unsupported_on_platform');
+  if (/platform\s*[!=]==\s*'sleeper'/.test(s)) {
+    bad('9b. send CTA not gated on a Sleeper platform check', "OverhaulSummaryScreen contains `platform === 'sleeper'` / `platform !== 'sleeper'` — sends go to Sleeper, MFL and ESPN; gate on handoff.mode and auth_state instead");
+  } else ok('9b. summary has no `platform === \'sleeper\'` / `platform !== \'sleeper\'` gate');
+  if (!/reconnect_required/.test(s)) bad('9c. summary handles reconnect_required', 'OverhaulSummaryScreen never references reconnect_required');
+  else ok('9c. summary handles reconnect_required');
 }
 
 console.log(`\ncheck-team-overhaul: ${pass.length} passed, ${fail.length} failed`);

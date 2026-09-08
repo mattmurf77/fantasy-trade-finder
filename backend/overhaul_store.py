@@ -284,7 +284,8 @@ def batch_by_key(overhaul_id: str, idempotency_key: str) -> list[dict]:
 
 
 def transition_attempt(attempt_id: str, expected: str, new_state: str, *, source: str,
-                       error=None, provider_transaction_id=None, observed=False) -> bool:
+                       error=None, provider_transaction_id=None, provider_status=None,
+                       observed=False) -> bool:
     """Compare-and-swap `state`; False when the row moved or the move is illegal."""
     if not service.can_transition(expected, new_state):
         return False
@@ -294,6 +295,8 @@ def transition_attempt(attempt_id: str, expected: str, new_state: str, *, source
         values["error_json"] = _dumps(error)
     if provider_transaction_id is not None:
         values["provider_transaction_id"] = str(provider_transaction_id)
+    if provider_status is not None:
+        values["provider_status"] = str(provider_status)
     if observed:
         values["observed_at"] = now
     with db.engine.begin() as conn:

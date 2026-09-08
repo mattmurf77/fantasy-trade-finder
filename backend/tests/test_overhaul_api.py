@@ -16,7 +16,11 @@ never terminalizes on the stale pick table and accepts a pick return only
 from a live traded_picks read; stuck `queued`/`sending` attempts are swept;
 a settings change clears exhausted subsets and regeneration re-freshens
 stale undecided rows; send gates on `can_propose`; the D6 legality check
-excludes tie partners. In-memory SQLite.
+excludes tie partners. All-platform sends (2026-09-07): MFL/ESPN dispatch
+through their own fake cores, ESPN pick offers are blocked at prepare and
+send, an unlinked MFL user gets `reconnect_required`, a session-sourced
+roster never terminalizes on refresh, copy platforms cannot send.
+In-memory SQLite.
 """
 import json
 from dataclasses import dataclass
@@ -57,10 +61,14 @@ class _Ranking:
 class _League:
     league_id = LEAGUE
     name = "T"
-    platform = "sleeper"
 
-    def __init__(self):
+    def __init__(self, world):
+        self._world = world
         self.members = [SimpleNamespace(user_id=u, username=u.upper(), roster=list(r)) for u, r in OPPONENTS.items()]
+
+    @property
+    def platform(self):
+        return self._world.platform
 
 
 class World:
@@ -73,12 +81,20 @@ class World:
                        ("B",): [(["B"], ["X3"], "o3"), (["B", "F"], ["X3"], "o3")],   # 2nd escapes the pool
                        ("C",): [(["C"], ["X4"], "o4")], ("D",): [(["D"], ["X5"], "o5")]}
         self.propose = []      # queue of ("ok", tx) | ("fail", code, status) | ("raise",)
-        self.propose_calls = []
+        self.propose_calls = []   # every core call, tagged with `_core` = the platform whose fake took it
         self.events = []
         self.generate_calls = []
         self.picks = []        # draft_picks rows (the DB table, synced only at session init)
         self.traded = None     # Sleeper traded_picks payload; None = the live read is unavailable
         self.roster_ctx = None # trade_roster context for the legality check; None = unavailable
+        # All-platform sends (2026-09-07): the league's platform, the stored
+        # link rows auth_state reads, and whether the fresh MFL/ESPN roster
+        # read succeeds (True -> raw_rosters(), False -> None = session fallback).
+        self.platform = "sleeper"
+        self.mfl_cred = {"mfl_username": "m", "cookie_encrypted": "ck", "year": 2026}
+        self.espn_cred = {"swid": "{S}", "espn_s2_encrypted": "s2", "verified_at": "2026-09-01T00:00:00+00:00",
+                          "expires_hint_at": None}
+        self.platform_read_ok = True
 
     def raw_rosters(self):
         return [{"roster_id": i + 1, "owner_id": uid, "players": list(r)} for i, (uid, r) in enumerate(self.rosters.items())]
@@ -112,14 +128,22 @@ def api(world):
             return [], None
         return [_card(*spec) for spec in world.script.get(key, [])], None
 
-    def sleeper_propose(sess, **kw):
-        world.propose_calls.append(kw)
-        step = world.propose.pop(0) if world.propose else ("ok", "tx-default")
-        if step[0] == "ok":
+    def _core(platform):
+        def propose(sess, **kw):
+            world.propose_calls.append(dict(kw, _core=platform))
+            step = world.propose.pop(0) if world.propose else ("ok", "tx-default")
+            if step[0] == "raise":
+                raise TimeoutError("socket timeout")
+            if step[0] != "ok":
+                return {"error": step[1], "detail": "nope"}, step[2]
+            # Each real core's success payload: Sleeper {status, transaction_id};
+            # MFL {status, mfl_status} (no id); ESPN {status, transaction_id, espn_status}.
+            if platform == "mfl":
+                return {"status": "proposed", "mfl_status": "ok"}, 200
+            if platform == "espn":
+                return {"status": "proposed", "transaction_id": step[1], "espn_status": "PENDING"}, 200
             return {"status": "proposed", "transaction_id": step[1]}, 200
-        if step[0] == "raise":
-            raise TimeoutError("socket timeout")
-        return {"error": step[1], "detail": "nope"}, step[2]
+        return propose
 
     def roster_id_for_owner(rosters, owner):
         return next((r["roster_id"] for r in rosters or [] if r["owner_id"] == owner), None)
@@ -134,7 +158,10 @@ def api(world):
         write_denial=server._verified_write_denial, active_format=server._active_format,
         league_user_id=server._league_user_id,
         owner_generation_context=lambda **kw: {"players": kw["players"], "user_roster": kw["user_roster"], "outlook": None},
-        generate=generate, roster_context=lambda **kw: world.roster_ctx, sleeper_propose=sleeper_propose,
+        generate=generate, roster_context=lambda **kw: world.roster_ctx, sleeper_propose=_core("sleeper"),
+        mfl_propose=_core("mfl"), espn_propose=_core("espn"),
+        mfl_credential=lambda uid: world.mfl_cred, espn_credential=lambda uid: world.espn_cred,
+        platform_rosters=lambda sess, league_id, platform: world.raw_rosters() if world.platform_read_ok else None,
         fetch_rosters=lambda league_id: world.raw_rosters(), roster_id_for_owner=roster_id_for_owner,
         load_picks=lambda league_id, source=None: list(world.picks), pick_source_platform="platform",
         draft_context=lambda league_id: {"season": 2026},
@@ -155,12 +182,13 @@ def api(world):
     ranking = _Ranking([p.id for p in players])
 
     def sess(user):
-        return {"verified": True, "user_id": user, "league": _League(), "players": players,
+        return {"verified": True, "user_id": user, "league": _League(world), "players": players,
                 "trade_svc": object(), "service": ranking, "active_format": "1qb_ppr",
                 "last_active": 0.0, "user_roster": list(MY_PLAYERS)}
 
     saved = ff._flags_cache
-    ff._flags_cache = {**ff.DEFAULT_FLAGS, "overhaul.enabled": True, "trade.send_in_sleeper": True}
+    ff._flags_cache = {**ff.DEFAULT_FLAGS, "overhaul.enabled": True, "trade.send_in_sleeper": True,
+                       "trade.send_in_mfl": True, "espn.send": True}
     overhaul_api._PREPARES.clear()
     overhaul_api._REFRESH_AT.clear()
     with patch.object(db, "engine", eng):
@@ -392,6 +420,10 @@ def test_prepare_send_counts_and_race(api, world):
     assert sorted(prep["races"][0]["counterparties"]) == ["o1", "o2"]
     assert prep["receipt"]["ok"] is True and prep["receipt"]["unknowns"] == ["capacity_unknown"]
     assert prep["handoff"] == {"mode": "send"} and prep["capabilities"]["can_propose"] is True
+    assert prep["capabilities"] == {"platform": "sleeper", "can_propose": True, "can_propose_picks": True,
+                                    "can_read_terminal_status": False, "can_withdraw": False,
+                                    "supports_conflicting_offer_race": "supported", "auth_state": "linked",
+                                    "checked_at": prep["capabilities"]["checked_at"]}
     assert prep["prepare_token"] and prep["summary_hash"] and prep["expires_at"]
     # Default selection (no offer_ids) is tier 1 of every open package.
     r = api.post(f"/api/overhauls/{oid}/roadmaps/{rm['roadmap_id']}/prepare-send", json={"version": rm["version"]}, headers=_h())
@@ -413,7 +445,10 @@ def test_send_partial_success_replay_and_conflicts(api, world):
     assert sent["attempts"][2]["error"]["code"] == "transport_error"
     assert len(world.propose_calls) == 5 and world.propose_calls[0]["source"] == "overhaul"
     assert set(sent["attempts"][0]) == {"attempt_id", "batch_id", "package_id", "tier", "offer_id", "state", "state_source",
-                                        "provider_transaction_id", "error", "created_at", "updated_at", "observed_at"}
+                                        "provider_transaction_id", "provider_status", "error", "created_at", "updated_at",
+                                        "observed_at"}
+    assert sent["attempts"][0]["provider_status"] is None                 # Sleeper reports no status word
+    assert all(c["_core"] == "sleeper" for c in world.propose_calls)
     assert world.events[-1][0] == "overhaul_batch_reconciled"
     assert world.events[-1][1]["sent_count"] == 3 and world.events[-1][1]["failed_count"] == 1 and world.events[-1][1]["unknown_count"] == 1
     # Replay: same key + hash -> the same batch, no new provider calls.
@@ -668,3 +703,146 @@ def test_legality_check_excludes_tie_partners_and_counts_one_alternative_per_pac
     seen = dict(calls)
     assert "A" in seen["o1"] and "A" in seen["o2"]          # the tie partner is an alternative, not a trade
     assert "B" not in seen["o1"] and "X3" in seen["o1"]     # other packages' gives out, receives in
+
+
+# ── all-platform sends (2026-09-07) ─────────────────────────────────────────
+# Owner decision: "MFL and ESPN trade sending has been validated. It should
+# work for all." Each platform sends through its extracted propose core behind
+# its own send flag; ESPN cannot carry picks; a session-only roster read is
+# never evidence for refresh.
+
+def _mine(oid):
+    return {o["offer_id"]: o for o in store.list_offers(oid)}
+
+
+def test_mfl_linked_prepares_send_mode_and_dispatches_through_the_mfl_core(api, world):
+    world.platform = "mfl"
+    oid, rm, prep = _tie_then_prepare(api, world)
+    caps = prep["capabilities"]
+    assert prep["handoff"] == {"mode": "send"}
+    assert (caps["platform"], caps["auth_state"], caps["can_propose"], caps["can_propose_picks"]) == ("mfl", "linked", True, True)
+    assert caps["supports_conflicting_offer_race"] == "unverified"
+    assert prep["receipt"]["ok"] is True and prep["receipt"]["blockers"] == []
+    sent = _send_all(api, oid, rm, prep)
+    assert [a["state"] for a in sent["attempts"]] == ["proposed"] * 5
+    # MFL confirms with a status word and no transaction id — stored as such.
+    assert all(a["provider_transaction_id"] is None and a["provider_status"] == "ok" for a in sent["attempts"])
+    assert len(world.propose_calls) == 5 and {c["_core"] for c in world.propose_calls} == {"mfl"}
+    assert world.propose_calls[0]["source"] == "overhaul" and world.propose_calls[0]["league_id"] == LEAGUE
+    assert store.get_overhaul(oid)["snapshot"]["roster_source"] == "live"
+    # The MFL send flag alone turns can_propose off, and send refuses before any attempt.
+    ff._flags_cache = {**ff._flags_cache, "trade.send_in_mfl": False}
+    view = api.get(f"/api/overhauls/{oid}", headers=_h()).get_json()
+    assert view["capabilities"]["can_propose"] is False and view["capabilities"]["auth_state"] == "linked"
+
+
+def test_espn_offer_with_a_pick_is_blocked_at_prepare_and_refused_at_send(api, world):
+    world.platform = "espn"
+    world.script[("A",)] = [(["A"], [PICK], "o1")]
+    world.picks = [{"pick_id": PICK, "season": 2027, "round": 1, "original_roster_id": "2",
+                    "original_user_id": "o1", "owner_user_id": "o1", "owner_username": "O1"}]
+    v, gen = _setup(api)
+    _like_all(api, v, gen["offers"])
+    oid, rm, prep = _select_and_prepare(api, v)
+    pick_offer = next(o for o in _mine(oid).values() if o["receive_ids"] == [PICK])
+    assert prep["handoff"] == {"mode": "send"} and prep["capabilities"]["can_propose_picks"] is False
+    assert prep["receipt"]["ok"] is False
+    blockers = [b for b in prep["receipt"]["blockers"] if b["code"] == "pick_unsupported_on_platform"]
+    assert len(blockers) == 1 and blockers[0]["offer_id"] == pick_offer["offer_id"] and blockers[0]["package_id"]
+    assert "ESPN" in blockers[0]["message"]
+    assert [b["code"] for b in prep["receipt"]["blockers"]] == ["pick_unsupported_on_platform"]
+    body = {"prepare_token": prep["prepare_token"], "summary_hash": prep["summary_hash"], "version": rm["version"],
+            "idempotency_key": "idem1"}
+    r = api.post(f"/api/overhauls/{oid}/send", json=body, headers=_h())
+    assert r.status_code == 409 and r.get_json()["error"] == "pick_unsupported_on_platform"
+    assert r.get_json()["receipt"]["ok"] is False
+    assert world.propose_calls == [] and store.list_attempts(oid) == [] and store.active_reservations(LEAGUE, USER) == []
+
+
+def test_espn_players_only_sends_through_the_espn_core(api, world):
+    world.platform = "espn"
+    oid, rm, prep = _tie_then_prepare(api, world)
+    assert prep["handoff"] == {"mode": "send"} and prep["receipt"]["ok"] is True
+    assert prep["capabilities"]["auth_state"] == "linked" and prep["capabilities"]["can_propose"] is True
+    world.propose = [("ok", "e1")]
+    sent = _send_all(api, oid, rm, prep)
+    assert [a["state"] for a in sent["attempts"]] == ["proposed"] * 5
+    assert sent["attempts"][0]["provider_transaction_id"] == "e1" and sent["attempts"][0]["provider_status"] == "PENDING"
+    assert {c["_core"] for c in world.propose_calls} == {"espn"}
+    assert store.get_overhaul(oid)["snapshot"]["picks_supported"] is False
+
+
+def test_espn_auth_state_follows_the_link_route(api, world):
+    world.platform = "espn"
+    world.espn_cred = dict(world.espn_cred, expires_hint_at="2000-01-01T00:00:00+00:00")
+    assert _create(api, key="k1")["capabilities"]["auth_state"] == "expired"
+    world.espn_cred = dict(world.espn_cred, expires_hint_at=None, verified_at=None)   # never proven against ESPN
+    assert _create(api, key="k2")["capabilities"]["auth_state"] == "unlinked"
+    world.espn_cred = None
+    assert _create(api, key="k3")["capabilities"]["auth_state"] == "unlinked"
+
+
+def test_unlinked_mfl_cannot_send(api, world):
+    world.platform = "mfl"
+    world.mfl_cred = None
+    oid, rm, prep = _tie_then_prepare(api, world)
+    caps = prep["capabilities"]
+    assert caps["auth_state"] == "unlinked" and caps["can_propose"] is False
+    assert prep["handoff"]["mode"] == "send"                       # the platform can send; this user must reconnect
+    assert prep["receipt"]["ok"] is False
+    assert [b["code"] for b in prep["receipt"]["blockers"]] == ["reconnect_required"]
+    assert "MFL" in prep["receipt"]["blockers"][0]["message"]
+    body = {"prepare_token": prep["prepare_token"], "summary_hash": prep["summary_hash"], "version": rm["version"],
+            "idempotency_key": "idem1"}
+    r = api.post(f"/api/overhauls/{oid}/send", json=body, headers=_h())
+    # Same code and status the Sleeper path returns for an unlinked user.
+    assert r.status_code == 409 and r.get_json() == {"error": "reconnect_required", "detail": "unlinked"}
+    assert world.propose_calls == [] and store.list_attempts(oid) == [] and store.active_reservations(LEAGUE, USER) == []
+    # The key-less deployment's session-only cookie counts as linked (GET /api/mfl/auth-link parity).
+    with server._sessions_lock:
+        server._sessions[TOKEN]["mfl_cookie"] = "session-cookie"
+    view = api.get(f"/api/overhauls/{oid}", headers=_h()).get_json()
+    assert view["capabilities"]["auth_state"] == "linked" and view["capabilities"]["can_propose"] is True
+
+
+def test_refresh_on_a_session_roster_source_never_terminalizes(api, world):
+    """When the fresh MFL/ESPN read fails, the snapshot falls back to the
+    session (`roster_source: session`) and refresh leaves every live attempt
+    alone — even when that stale data would read as accepted or resolved.
+    SABOTAGE: drop the roster_fresh guard in reconcile_attempt."""
+    world.platform = "mfl"
+    oid, rm, prep = _tie_then_prepare(api, world)
+    sent = _send_all(api, oid, rm, prep)
+    assert all(a["state"] == "proposed" for a in sent["attempts"])
+    offers = _mine(oid)
+    a_to_o1 = next(a for a in sent["attempts"] if offers[a["offer_id"]]["counterparty_user_id"] == "o1")
+    b_attempt = next(a for a in sent["attempts"] if offers[a["offer_id"]]["give_ids"] == ["B"])
+    world.platform_read_ok = False
+    world.rosters[USER] = [p for p in MY_PLAYERS if p not in ("A", "B")] + ["X1"]   # would be accepted / resolved_elsewhere
+    world.rosters["o1"] = ["A"]
+    overhaul_api._REFRESH_AT.clear()
+    view = api.post(f"/api/overhauls/{oid}/refresh", json={}, headers=_h()).get_json()
+    assert store.get_overhaul(oid)["snapshot"]["roster_source"] == "session"
+    assert all(a["state"] == "proposed" for a in view["attempts"])
+    assert all(p["status"] == "pending" for p in view["roadmaps"][0]["packages"])
+    # The fresh read is back: the same ownership picture now counts.
+    world.platform_read_ok = True
+    overhaul_api._REFRESH_AT.clear()
+    view = api.post(f"/api/overhauls/{oid}/refresh", json={}, headers=_h()).get_json()
+    states = {a["attempt_id"]: a["state"] for a in view["attempts"]}
+    assert store.get_overhaul(oid)["snapshot"]["roster_source"] == "live"
+    assert states[a_to_o1["attempt_id"]] == "accepted" and states[b_attempt["attempt_id"]] == "resolved_elsewhere"
+
+
+def test_copy_handoff_platform_gets_no_send(api, world):
+    world.platform = "fleaflicker"
+    oid, rm, prep = _tie_then_prepare(api, world)
+    caps = prep["capabilities"]
+    assert prep["handoff"]["mode"] == "copy" and prep["handoff"]["text"]
+    assert caps["auth_state"] == "n/a" and caps["can_propose"] is False
+    assert prep["receipt"]["ok"] is True                           # no reconnect blocker on a copy handoff
+    body = {"prepare_token": prep["prepare_token"], "summary_hash": prep["summary_hash"], "version": rm["version"],
+            "idempotency_key": "idem1"}
+    r = api.post(f"/api/overhauls/{oid}/send", json=body, headers=_h())
+    assert r.status_code == 409 and r.get_json()["error"] == "capability_unavailable"
+    assert world.propose_calls == []
