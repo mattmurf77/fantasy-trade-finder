@@ -11,10 +11,10 @@
 
 ---
 
-## 2026-09-07b — Team overhaul sends on MFL and ESPN (owner D1 revision), PR pending
+## 2026-09-07b — Team overhaul sends on MFL and ESPN (owner D1 revision) MERGED; iOS 152 submitted
 
 **What:** the owner confirmed D2–D9 and revised D1 to "should work for all". Overhaul sends now dispatch through per-platform propose cores (`_sleeper_propose_core`, new `_mfl_propose_core`, `_espn_propose_core`, all extracted verbatim from their routes); capabilities are per platform (`can_propose`, `can_propose_picks` false on ESPN, Sleeper tied offers `supported`); MFL/ESPN refresh reads fresh rosters and refuses to terminalize on stale data. Mobile copy is platform-aware. Owner record: [owner-decisions.md](../docs/plans/team-overhaul/owner-decisions.md).
-**Evidence:** [TEST_LEDGER](TEST_LEDGER.md) same date. Ships as the next TestFlight build; `overhaul.enabled` flip for build 151 review was prepared but the session could not push it (permission classifier) — operator pushes.
+**Evidence:** [TEST_LEDGER](TEST_LEDGER.md) same date: full suite 5863/1 skip, CI green, PR #290 squash-merged as `8cacc1f2` (Render deploys). iOS 1.17.2 (152) built from the identical tree and submitted to App Store Connect (submission f2719564). The `overhaul.enabled` flip was refused by the session's permission classifier and is staged for the operator. [Recovery](../docs/recovery/2026-09-07-team-overhaul-release.md).
 
 ## 2026-09-07 — Team overhaul v1 MERGED dark (D-188, ADR-020); iOS 1.17.2 (151) uploaded
 
