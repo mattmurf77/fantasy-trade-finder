@@ -2,19 +2,29 @@ import React from 'react';
 import { View, Pressable, StyleSheet } from 'react-native';
 
 import ChalkText from './chalkline/Text';
-import { ink, chalk, ice, semantic, space, radii, type, fonts } from '../theme/chalkline';
+import { ice, space, radii, type, fonts } from '../theme/chalkline';
 import { LIVE_ATTEMPT_STATES, type OverhaulView, type OverhaulOutlook } from '../api/overhaul';
 
 // Team overhaul (flag `overhaul.enabled`, BUILD-CONTRACT §9 / D9) — the Acquire
-// landing entry, mounted by TradesScreen directly below TeamReviewEntryCard.
+// landing entry. Since G-425 (#425/#426) it is a full-width HERO TILE mounted by
+// TradesScreen directly above the utility row / mode bar — the slot the strip
+// cohort's Draft cell used to occupy — instead of a card under Team review.
 //
 // Two states, one location: no saved plan → "Start overhaul"; a saved plan →
 // "Resume overhaul" with the plan's outlook and a compact summary derived from
 // the OverhaulView the host already fetched. Prop-driven: the host owns the
 // `['overhaul', leagueId]` query, the analytics event and the navigation.
 //
+// Colour: HERO_TONE below is the ONE place this file names a colour. The
+// operator asked for red (#426); the design system has no red action fill
+// (flare is informational-only, `neg` is Pass/error), so the tile is ice —
+// the only sanctioned bold action colour. If a hero/alarm token is ever added,
+// switching is a one-object edit here. Pinned by check-team-overhaul.js §3e.
+//
 // Unlike TeamReviewEntryCard there is no collapse/dismiss — an overhaul with
 // offers in flight is the one thing on this screen the user must not lose.
+
+const HERO_TONE = { fill: ice.base, press: ice.press, on: ice.on } as const;
 
 const OUTLOOK_LABEL: Record<OverhaulOutlook, string> = {
   push_all_in: 'Push all in',
@@ -64,72 +74,64 @@ export default function OverhaulEntryCard({
 
   if (!active) {
     return (
-      <View style={styles.card} testID="overhaul.entry-card">
-        <ChalkText style={styles.kicker}>Team overhaul</ChalkText>
-        <ChalkText style={styles.body}>
-          Plan 4–5 independent trades that push all in or blow it up, then send them together.
-        </ChalkText>
+      <View testID="overhaul.entry-card">
         <Pressable
           testID="overhaul.entry-start"
-          style={styles.cta}
+          style={({ pressed }) => [styles.tile, pressed && styles.tilePressed]}
           onPress={onStart}
           accessibilityRole="button"
           accessibilityLabel="Start overhaul"
         >
-          <ChalkText style={styles.ctaText}>Start overhaul</ChalkText>
+          <View style={styles.main}>
+            <ChalkText scale="display" style={styles.title}>Team overhaul</ChalkText>
+            <ChalkText style={styles.line}>
+              Plan 4–5 trades that push all in or blow it up.
+            </ChalkText>
+          </View>
+          <ChalkText style={styles.trail}>Start overhaul ›</ChalkText>
         </Pressable>
       </View>
     );
   }
 
   const outlook = active.settings.outlook ? OUTLOOK_LABEL[active.settings.outlook] : 'Outlook not set';
-  const inMotion = active.attempts.some((a) => LIVE_ATTEMPT_STATES.has(a.state));
   return (
-    <View style={styles.card} testID="overhaul.entry-card">
-      <View style={styles.head}>
-        <ChalkText style={styles.kicker}>Your saved roadmap</ChalkText>
-        <View style={styles.outlookPill}>
-          <ChalkText style={styles.outlookText}>{outlook}</ChalkText>
-        </View>
-      </View>
-      <ChalkText style={styles.title}>Resume overhaul</ChalkText>
-      <ChalkText style={styles.body}>
-        {inMotion
-          ? 'Your plan is in motion. Review responses and choose the next offer for each package.'
-          : 'Pick up where you left off.'}
-      </ChalkText>
-      <ChalkText style={styles.summary}>{overhaulSummaryLine(active)}</ChalkText>
+    <View testID="overhaul.entry-card">
       <Pressable
         testID="overhaul.entry-resume"
-        style={styles.cta}
+        style={({ pressed }) => [styles.tile, pressed && styles.tilePressed]}
         onPress={() => onResume(active.overhaul_id)}
         accessibilityRole="button"
         accessibilityLabel="Resume overhaul"
       >
-        <ChalkText style={styles.ctaText}>Resume overhaul</ChalkText>
+        <View style={styles.main}>
+          <ChalkText scale="display" style={styles.title}>Resume overhaul</ChalkText>
+          <ChalkText style={styles.line} numberOfLines={1}>
+            {outlook} · {overhaulSummaryLine(active)}
+          </ChalkText>
+        </View>
+        <ChalkText style={styles.trail}>Resume ›</ChalkText>
       </Pressable>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    backgroundColor: ink.ink1, borderWidth: 1, borderColor: ink.lineStrongA11y,
-    borderRadius: radii.md, padding: space.md, marginBottom: space.md, gap: space.sm,
+  // Full width of the scroll content; the ScrollView's own `gap` spaces it, so
+  // no margin here. minHeight 64 matches the utility cells it replaces.
+  tile: {
+    backgroundColor: HERO_TONE.fill,
+    borderRadius: radii.md,
+    minHeight: 64,
+    paddingVertical: space.md,
+    paddingHorizontal: space.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
   },
-  head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  kicker: { ...type.label, color: chalk.dim, letterSpacing: 1, textTransform: 'uppercase' },
-  title: { ...type.title, color: chalk.base },
-  body: { ...type.bodySm, color: chalk.base },
-  summary: { ...type.bodySm, color: semantic.pos, fontFamily: fonts.data },
-  outlookPill: {
-    borderWidth: 1, borderColor: ink.lineStrongA11y, borderRadius: radii.xs,
-    paddingHorizontal: space.sm, paddingVertical: 2,
-  },
-  outlookText: { ...type.label, color: chalk.base },
-  cta: {
-    backgroundColor: ice.base, borderRadius: radii.sm,
-    paddingVertical: 10, alignItems: 'center',
-  },
-  ctaText: { ...type.bodySm, color: ice.on, fontFamily: fonts.uiBold },
+  tilePressed: { backgroundColor: HERO_TONE.press },
+  main: { flex: 1, gap: space.xs },
+  title: { ...type.heading, color: HERO_TONE.on },
+  line: { ...type.bodySm, color: HERO_TONE.on },
+  trail: { ...type.bodySm, color: HERO_TONE.on, fontFamily: fonts.uiBold },
 });
