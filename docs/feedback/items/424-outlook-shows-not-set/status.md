@@ -6,3 +6,4 @@
 
 ## Phase log
 - 2026-09-08: Phase 0 — selected; folder created; investigation planner launched.
+- 2026-09-08: Phase 1 — planner done. Root cause is NOT staleness: the merged landing's only outlook surface is the hosted calculator's fallback, which renders a literal "Outlook · Not set" whenever the receipt hides (`InLeagueCalculator.tsx:925-931`; receipt always hidden with `trade.outlook_direction` false, `OutlookBiasReceipt.tsx:49-53`); the 17:58:47 158-byte prefs GET shows the client cache already held `rebuilder`. Mini-PRD, scope and code-walk in [423-team-review-not-registering/](../423-team-review-not-registering/prd.md) (canonical). No server change.

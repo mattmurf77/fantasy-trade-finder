@@ -6,3 +6,4 @@
 
 ## Phase log
 - 2026-09-08: Phase 0 — selected; folder created; investigation planner launched.
+- 2026-09-08: Phase 1 complete — mini-PRD, scope, investigation; orchestrator adopted the three recommended defaults (reconciliation-log.md). Build launched.
