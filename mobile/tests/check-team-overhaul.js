@@ -174,7 +174,7 @@ const overhaulFiles = { ...screens, OverhaulEntryCard: entry, 'api/overhaul': ap
   const barMount = trades.indexOf('<TradeFinderModeBar');
   const barEnd = barMount < 0 ? -1 : trades.indexOf('/>', barMount);
   const barSlice = barMount < 0 ? '' : trades.slice(barMount, barEnd < 0 ? undefined : barEnd);
-  if (!/\bDRAFT_CHIP\b/.test(modebar)) {
+  if (!/\bconst DRAFT_CHIP\b/.test(modebar)) {
     bad('3d. TradeFinderModeBar still declares DRAFT_CHIP', 'DRAFT_CHIP missing from TradeFinderModeBar.tsx — G-425 must not reach into the control cohort\'s Draft chip (2026-08-06 permanent home)');
   } else if (barMount < 0) bad('3d. TradeFinderModeBar still mounted', 'no <TradeFinderModeBar in TradesScreen.tsx');
   else if (!/\bonDraft=/.test(barSlice)) {
