@@ -7,3 +7,4 @@
 ## Phase log
 - 2026-09-08: Phase 0 — selected; folder created; investigation planner launched.
 - 2026-09-08: Phase 1 complete — spent current-season pick mechanism strongly indicated from public Sleeper data; new 422 approved (reconciliation-log.md). Build launched.
+- 2026-09-08: Phase 2 build `26ab3147`; Phase 3 round 1 QA-A FAIL (adjudicated: startup-draft exclusion), QA-B PASS; Phase 4 resolution launched.
