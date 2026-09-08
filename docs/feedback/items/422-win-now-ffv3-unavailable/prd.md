@@ -47,7 +47,7 @@ Effect: FFV3 is refused in one round-trip (league meta + rosters + users), no pr
 
 ## 5. Regression guards (pytest; each defect test must be shown RED on `b8d37085` before the fix)
 
-Fixture `ffv3_source_fixture()` in `test_win_now_service.py`: the **real FFV3 shape** — the exact 36-entry `roster_positions`, `settings` {`playoff_week_start` 15, `playoff_teams` 6, `league_average_match` 0, `divisions` 0, `start_week` 1, `playoff_round_type` 0, `playoff_seed_type` 0, `best_ball` 0, `trade_deadline` 12, `trade_review_days` 0}, the real 55-key `scoring_settings` (12 `idp_*`, 9 kicker keys), 12 rosters at 0-0-0 with synthetic ids, 14 weeks of 6-pair matchups, fetch stub recording `calls` and returning `[]` for any `/projections/` URL.
+Fixture `ffv3_source_fixture()` in `test_win_now_service.py`: the **real FFV3 shape** — the exact 36-entry `roster_positions`, `settings` {`playoff_week_start` 15, `playoff_teams` 6, `league_average_match` 0, `divisions` 0, `start_week` 1, `playoff_round_type` 0, `playoff_seed_type` 0, `best_ball` 0, `trade_deadline` 12, `trade_review_days` 0}, the real 55-key `scoring_settings` (13 `idp_*`, 8 kicker keys), 12 rosters at 0-0-0 with synthetic ids, 14 weeks of 6-pair matchups, fetch stub recording `calls` and returning `[]` for any `/projections/` URL.
 
 | Test | Proves | RED today because |
 |---|---|---|
