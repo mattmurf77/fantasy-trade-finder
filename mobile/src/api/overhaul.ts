@@ -12,6 +12,7 @@
 // learning. Likes here are assembly input, not Elo signal.
 
 import { apiRequest } from './client';
+import { normalizeTradeCard } from './trades';
 import type { TradeCard } from '../shared/types';
 
 export type OverhaulOutlook = 'push_all_in' | 'blow_it_up';
@@ -273,36 +274,86 @@ export interface SendResult {
 const BASE = '/api/overhauls';
 const enc = encodeURIComponent;
 
+// ── Wire normalization ───────────────────────────────────────────────
+// The server's `Offer.card` is the RAW `trade_card_to_dict` dict
+// (backend/server.py): players under `give` / `receive`, the opponent under
+// `target_user_id` / `target_username`, fairness under `fairness_score`
+// (0–1) and match strength under `mismatch_score`. The client `TradeCard`
+// type wants `give_players` / `receive_players` / `opponent_*` / `fairness` /
+// `match_score`. The deck already bridges exactly that dict with
+// `normalizeTradeCard`, so every fetcher below runs its offers through it
+// HERE, at the fetch boundary — screens then read a real TradeCard and never
+// see the legacy keys (TestFlight 1.17.2: empty chips + `undefined.map`
+// render crashes on roadmaps/priorities came from reading the raw dict).
+
+function normalizeOffer(raw: any): Offer {
+  const card = normalizeTradeCard(raw?.card);
+  const giveIds: string[] = Array.isArray(raw?.give_ids) ? raw.give_ids : [];
+  const receiveIds: string[] = Array.isArray(raw?.receive_ids) ? raw.receive_ids : [];
+  return {
+    ...(raw as Offer),
+    give_ids: giveIds,
+    receive_ids: receiveIds,
+    card: {
+      ...card,
+      // The deck's normalizer blanks ids it can't derive; the offer row
+      // itself carries them, so keep those so nothing keyed on the card
+      // breaks when a player list is missing.
+      trade_id: card.trade_id || String(raw?.offer_id ?? ''),
+      give_player_ids: card.give_players.length ? card.give_player_ids : giveIds,
+      receive_player_ids: card.receive_players.length ? card.receive_player_ids : receiveIds,
+      opponent_user_id: card.opponent_user_id || String(raw?.counterparty_user_id ?? ''),
+      opponent_username: card.opponent_username || String(raw?.counterparty_username ?? ''),
+    },
+  };
+}
+
+function normalizeRoadmap(raw: any): RoadmapView {
+  const offers: Record<string, Offer> = {};
+  const src = raw?.offers && typeof raw.offers === 'object' ? raw.offers : {};
+  for (const [id, o] of Object.entries(src)) offers[id] = normalizeOffer(o);
+  return { ...(raw as RoadmapView), offers };
+}
+
+function normalizeOverhaulView(raw: any): OverhaulView {
+  const roadmaps = Array.isArray(raw?.roadmaps) ? raw.roadmaps.map(normalizeRoadmap) : [];
+  return { ...(raw as OverhaulView), roadmaps };
+}
+
 export async function getActiveOverhaul(
   leagueId: string,
   signal?: AbortSignal,
 ): Promise<{ active: OverhaulView | null }> {
-  return apiRequest(`${BASE}?league_id=${enc(leagueId)}`, { signal });
+  const res: any = await apiRequest(`${BASE}?league_id=${enc(leagueId)}`, { signal });
+  return { ...res, active: res?.active ? normalizeOverhaulView(res.active) : null };
 }
 
 export async function getOverhaul(overhaulId: string, signal?: AbortSignal): Promise<OverhaulView> {
-  return apiRequest(`${BASE}/${enc(overhaulId)}`, { signal });
+  return normalizeOverhaulView(await apiRequest(`${BASE}/${enc(overhaulId)}`, { signal }));
 }
 
 export async function createOverhaul(body: {
   league_id: string;
   client_key: string;
 }): Promise<OverhaulView> {
-  return apiRequest(BASE, { method: 'POST', body });
+  return normalizeOverhaulView(await apiRequest(BASE, { method: 'POST', body }));
 }
 
 export async function updateOverhaulSettings(
   overhaulId: string,
   body: { revision: number; settings: Partial<OverhaulSettings> },
 ): Promise<OverhaulView> {
-  return apiRequest(`${BASE}/${enc(overhaulId)}/settings`, { method: 'PUT', body });
+  return normalizeOverhaulView(
+    await apiRequest(`${BASE}/${enc(overhaulId)}/settings`, { method: 'PUT', body }),
+  );
 }
 
 export async function generateOffers(
   overhaulId: string,
   body: { revision: number },
 ): Promise<{ generation: GenerationSummary; offers: Offer[] }> {
-  return apiRequest(`${BASE}/${enc(overhaulId)}/generate`, { method: 'POST', body });
+  const res: any = await apiRequest(`${BASE}/${enc(overhaulId)}/generate`, { method: 'POST', body });
+  return { ...res, offers: Array.isArray(res?.offers) ? res.offers.map(normalizeOffer) : [] };
 }
 
 export async function getOffers(
@@ -310,7 +361,8 @@ export async function getOffers(
   decision: OfferDecision | 'all' = 'undecided',
   signal?: AbortSignal,
 ): Promise<{ offers: Offer[]; progress: ReviewProgress }> {
-  return apiRequest(`${BASE}/${enc(overhaulId)}/offers?decision=${decision}`, { signal });
+  const res: any = await apiRequest(`${BASE}/${enc(overhaulId)}/offers?decision=${decision}`, { signal });
+  return { ...res, offers: Array.isArray(res?.offers) ? res.offers.map(normalizeOffer) : [] };
 }
 
 export async function postDecisions(
@@ -327,7 +379,8 @@ export async function assembleRoadmaps(
   overhaulId: string,
   body: { revision: number },
 ): Promise<{ roadmaps: RoadmapView[]; shortfall: { reason: ShortfallReason; detail?: string } | null }> {
-  return apiRequest(`${BASE}/${enc(overhaulId)}/assemble`, { method: 'POST', body });
+  const res: any = await apiRequest(`${BASE}/${enc(overhaulId)}/assemble`, { method: 'POST', body });
+  return { ...res, roadmaps: Array.isArray(res?.roadmaps) ? res.roadmaps.map(normalizeRoadmap) : [] };
 }
 
 export async function selectRoadmap(
@@ -335,10 +388,12 @@ export async function selectRoadmap(
   roadmapId: string,
   body: { version: number },
 ): Promise<OverhaulView> {
-  return apiRequest(`${BASE}/${enc(overhaulId)}/roadmaps/${enc(roadmapId)}/select`, {
-    method: 'PUT',
-    body,
-  });
+  return normalizeOverhaulView(
+    await apiRequest(`${BASE}/${enc(overhaulId)}/roadmaps/${enc(roadmapId)}/select`, {
+      method: 'PUT',
+      body,
+    }),
+  );
 }
 
 export async function savePriorities(
@@ -346,10 +401,12 @@ export async function savePriorities(
   roadmapId: string,
   body: { version: number; package_id: string; tiers: PriorityTier[] },
 ): Promise<RoadmapView> {
-  return apiRequest(`${BASE}/${enc(overhaulId)}/roadmaps/${enc(roadmapId)}/priorities`, {
-    method: 'PUT',
-    body,
-  });
+  return normalizeRoadmap(
+    await apiRequest(`${BASE}/${enc(overhaulId)}/roadmaps/${enc(roadmapId)}/priorities`, {
+      method: 'PUT',
+      body,
+    }),
+  );
 }
 
 export async function prepareSend(
@@ -372,7 +429,9 @@ export async function sendBatch(
 
 // Throttled server-side to one call per 15 s per overhaul: a second call inside the window is 429 `rate_limited`.
 export async function refreshOverhaul(overhaulId: string): Promise<OverhaulView> {
-  return apiRequest(`${BASE}/${enc(overhaulId)}/refresh`, { method: 'POST', body: {} });
+  return normalizeOverhaulView(
+    await apiRequest(`${BASE}/${enc(overhaulId)}/refresh`, { method: 'POST', body: {} }),
+  );
 }
 
 export async function assertAttemptStatus(

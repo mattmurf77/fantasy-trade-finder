@@ -57,13 +57,15 @@ const RACE_UNVERIFIED = ' Your platform’s handling of overlapping offers hasn�
 type Prepared = { view: PrepareView; idempotencyKey: string };
 
 function assetName(view: OverhaulView, id: string): string {
-  const a = view.eligible_assets.find((x) => x.id === id);
+  const a = (view.eligible_assets ?? []).find((x) => x.id === id);
   if (!a) return id;
   return a.kind === 'pick' ? a.label || a.name : a.name;
 }
 
+// Server data is guarded (`?? []`, `?.`) everywhere it is read in render: a
+// malformed card or package must degrade to '—', never throw mid-render.
 function receiveLine(offer: Offer | undefined): string {
-  return offer?.card.receive_players.map((p) => p.name).join(' + ') || '—';
+  return (offer?.card?.receive_players ?? []).map((p) => p?.name).filter(Boolean).join(' + ') || '—';
 }
 
 function errorCode(e: unknown): string | null {
@@ -99,7 +101,7 @@ export default function OverhaulSummaryScreen() {
   });
   const view = query.data;
   const roadmap = useMemo(
-    () => view?.roadmaps.find((r) => r.roadmap_id === roadmapId) ?? null,
+    () => view?.roadmaps?.find((r) => r.roadmap_id === roadmapId) ?? null,
     [view, roadmapId],
   );
 
@@ -107,9 +109,9 @@ export default function OverhaulSummaryScreen() {
   const batchOfferIds = useMemo<string[]>(() => {
     if (offerIds?.length) return offerIds;
     if (!roadmap) return [];
-    return roadmap.packages
+    return (roadmap.packages ?? [])
       .filter((p) => p.status === 'open')
-      .flatMap((p) => p.tiers.find((t) => t.tier === 1)?.offer_ids ?? []);
+      .flatMap((p) => (p.tiers ?? []).find((t) => t.tier === 1)?.offer_ids ?? []);
   }, [offerIds, roadmap]);
 
   const [prepared, setPrepared] = useState<Prepared | null>(null);
@@ -234,8 +236,8 @@ export default function OverhaulSummaryScreen() {
   const caps = pv?.capabilities ?? view.capabilities;
   const raceByPackage = new Map((pv?.races ?? []).map((r) => [r.package_id, r]));
   const batchSet = new Set(batchOfferIds);
-  const packagesInBatch = roadmap.packages.filter((p) =>
-    p.tiers.some((t) => t.offer_ids.some((id) => batchSet.has(id))),
+  const packagesInBatch = (roadmap.packages ?? []).filter((p) =>
+    (p.tiers ?? []).some((t) => (t.offer_ids ?? []).some((id) => batchSet.has(id))),
   );
   const recovery = view.recovery;
   const platform = caps.platform || view.platform;
@@ -278,7 +280,7 @@ export default function OverhaulSummaryScreen() {
           <View style={styles.inline}><ActivityIndicator color={chalk.dim} /><ChalkText variant="bodySm" style={styles.dim}>Checking these offers…</ChalkText></View>
         )}
 
-        {recovery.applicable && !recovery.resolved ? (
+        {recovery?.applicable && !recovery.resolved ? (
           <Card rail={flare.base} padding={space.md}>
             <ChalkText style={[type.label, styles.flare]}>PRIORITY 1: RECOVER YOUR FIRST</ChalkText>
             <ChalkText variant="bodySm">
@@ -287,17 +289,17 @@ export default function OverhaulSummaryScreen() {
           </Card>
         ) : null}
 
-        {receipt?.blockers.length ? (
+        {receipt?.blockers?.length ? (
           <Card rail={semantic.neg} padding={space.md}>
             <ChalkText style={[type.label, styles.neg]}>CAN’T SEND YET</ChalkText>
             {receipt.blockers.map((b, i) => <ReceiptLine key={`b${i}`} item={b} offers={roadmap.offers} platform={platform} />)}
           </Card>
         ) : null}
-        {receipt?.warnings.length ? (
+        {receipt?.warnings?.length ? (
           <Card rail={semantic.warn} padding={space.md}>
             <ChalkText style={[type.label, styles.warn]}>WORTH KNOWING</ChalkText>
             {receipt.warnings.map((w, i) => <ReceiptLine key={`w${i}`} item={w} offers={roadmap.offers} platform={platform} />)}
-            {receipt.unknowns.includes('capacity_unknown') ? (
+            {(receipt.unknowns ?? []).includes('capacity_unknown') ? (
               <ChalkText variant="bodySm" style={styles.dim}>Roster size limit unknown for this league — not checked.</ChalkText>
             ) : null}
           </Card>
@@ -311,8 +313,8 @@ export default function OverhaulSummaryScreen() {
 
         {packagesInBatch.map((pkg, i) => {
           const race = raceByPackage.get(pkg.package_id);
-          const inBatch = pkg.tiers.flatMap((t) =>
-            t.offer_ids.filter((id) => batchSet.has(id)).map((id) => ({ id, tier: t.tier })),
+          const inBatch = (pkg.tiers ?? []).flatMap((t) =>
+            (t.offer_ids ?? []).filter((id) => batchSet.has(id)).map((id) => ({ id, tier: t.tier })),
           );
           return (
             <Card key={pkg.package_id}>
@@ -326,19 +328,19 @@ export default function OverhaulSummaryScreen() {
               {race ? (
                 <View style={styles.race}>
                   <ChalkText variant="bodySm">
-                    {`These ${race.offer_ids.length} offers share the same outgoing assets and go out together — first come, first served; only one can complete.${raceSuffix}`}
+                    {`These ${(race.offer_ids ?? []).length} offers share the same outgoing assets and go out together — first come, first served; only one can complete.${raceSuffix}`}
                   </ChalkText>
                 </View>
               ) : null}
               {inBatch.map(({ id }) => {
-                const offer = roadmap.offers[id];
+                const offer = roadmap.offers?.[id];
                 return (
                   <View key={id} style={styles.offer}>
                     <ChalkText variant="title">{`Offer to ${offer?.counterparty_username ?? id}`}</ChalkText>
                     <View style={styles.sides}>
                       <View style={styles.side}>
                         <ChalkText variant="label" style={styles.dim}>YOU SEND</ChalkText>
-                        {pkg.give_ids.map((gid) => (
+                        {(pkg.give_ids ?? []).map((gid) => (
                           <ChalkText key={gid} variant="body">{assetName(view, gid)}</ChalkText>
                         ))}
                       </View>
@@ -409,7 +411,7 @@ function receiptMessage(item: ValidationItem, platform: string): string {
 }
 
 function ReceiptLine({ item, offers, platform }: { item: ValidationItem; offers: Record<string, Offer>; platform: string }) {
-  const who = item.offer_id ? offers[item.offer_id]?.counterparty_username : null;
+  const who = item.offer_id ? offers?.[item.offer_id]?.counterparty_username : null;
   const prefix = who ? `${who}: ` : item.package_id ? 'Package: ' : '';
   return <ChalkText variant="bodySm">{`${prefix}${receiptMessage(item, platform)}`}</ChalkText>;
 }

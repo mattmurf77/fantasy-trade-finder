@@ -13,7 +13,6 @@ import {
   assembleRoadmaps, generateOffers, getOffers, getOverhaul, postDecisions,
   type Offer, type OfferDecision, type ReviewProgress, type ShortfallReason,
 } from '../api/overhaul';
-import type { TradeCard as TradeCardData } from '../shared/types';
 import { SHORTFALL_COPY } from './OverhaulTargetsScreen';
 
 // Team overhaul step 4 (BUILD-CONTRACT §9 / D3, PRODUCT-SPEC R5) — like/pass
@@ -22,27 +21,10 @@ import { SHORTFALL_COPY } from './OverhaulTargetsScreen';
 // `/api/overhauls/{id}/decisions`: no deck swipe/decide helpers, no Elo or
 // taste learning of any kind (explicit policy — plan review is not taste).
 // "Build roadmaps" unlocks once every offer in the batch has a decision (D3).
+// `offer.card` arrives as a real TradeCard: api/overhaul.ts normalizes the
+// server's raw trade-card dict at the fetch boundary, so nothing is re-shaped here.
 //
 // Trades-stack screen → no local feedback FAB (RootNav's global mount, #188).
-
-/** The server's `card` is the public trade-card dict as the deck emits it.
- *  Fill the few fields the client normalizer would have defaulted so the
- *  shared TradeCard renders it without a second normalizer. */
-function toCardData(offer: Offer): TradeCardData {
-  const raw = (offer.card ?? {}) as Partial<TradeCardData> & { target_user_id?: string };
-  return {
-    ...(raw as TradeCardData),
-    trade_id: raw.trade_id ?? offer.offer_id,
-    give_player_ids: raw.give_player_ids ?? offer.give_ids,
-    receive_player_ids: raw.receive_player_ids ?? offer.receive_ids,
-    give_players: raw.give_players ?? [],
-    receive_players: raw.receive_players ?? [],
-    opponent_user_id: raw.opponent_user_id ?? raw.target_user_id ?? offer.counterparty_user_id,
-    opponent_username: raw.opponent_username ?? offer.counterparty_username,
-    match_score: raw.match_score ?? 0,
-    fairness: raw.fairness ?? 0,
-  };
-}
 
 function errorCopy(e: unknown, verb: string): string {
   if (e instanceof ApiError) {
@@ -193,11 +175,11 @@ export default function OverhaulReviewScreen({ navigation, route }: any) {
               </View>
             ) : null}
             <TradeCard
-              data={toCardData(top)}
+              data={top.card}
               variant="swipe"
               disposition={{ onLike: () => decide('like'), onPass: () => decide('pass'), disabled: !!busy }}
               hideLockButton
-              hideMatchStrength={!(top.card && top.card.match_score > 0)}
+              hideMatchStrength={!(top.card?.match_score > 0)}
               showSend={false}
             />
             <View style={styles.decideRow}>

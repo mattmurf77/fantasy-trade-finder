@@ -54,7 +54,7 @@ function asArray<T>(res: any): T[] {
 //     opponent_username, match_score, fairness, reasons? }
 // This adapter bridges the two so screen code never has to know about
 // the legacy field names.
-function normalizeTradeCard(raw: any): TradeCard {
+export function normalizeTradeCard(raw: any): TradeCard {
   const give: Player[]    = Array.isArray(raw?.give_players) ? raw.give_players
                           : Array.isArray(raw?.give)         ? raw.give
                           : [];

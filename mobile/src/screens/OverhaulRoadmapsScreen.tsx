@@ -38,27 +38,30 @@ import { SHORTFALL_COPY } from './OverhaulTargetsScreen';
 const RECOVERY_RIBBON = 'Priority 1: Recover your first';
 
 function nameOf(view: OverhaulView, id: string): string {
-  const a = view.eligible_assets.find((x) => x.id === id);
+  const a = (view.eligible_assets ?? []).find((x) => x.id === id);
   if (!a) return id;
   return a.kind === 'pick' ? a.label || a.name : a.name;
 }
 
+// Server data is guarded (`?? []`, `?.`) everywhere it is read in render: a
+// malformed card or package must degrade to '—', never throw mid-render.
 function receiveNames(offer: Offer | undefined): string {
   if (!offer) return '—';
-  return offer.card.receive_players.map((p) => p.name).join(' + ') || '—';
+  return (offer.card?.receive_players ?? []).map((p) => p?.name).filter(Boolean).join(' + ') || '—';
 }
 
 function tier1Offer(pkg: Package, rm: RoadmapView): Offer | undefined {
-  const first = pkg.tiers.find((t) => t.tier === 1) ?? pkg.tiers[0];
-  const id = first?.offer_ids[0];
-  return id ? rm.offers[id] : undefined;
+  const tiers = pkg.tiers ?? [];
+  const first = tiers.find((t) => t.tier === 1) ?? tiers[0];
+  const id = first?.offer_ids?.[0];
+  return id ? rm.offers?.[id] : undefined;
 }
 
 /** Move `chosen` into a tier of its own at rank 1; every other tier shifts
  *  down. Never merges two offers into one tier, so the D4 rule holds. */
 function promoteToTier1(tiers: PriorityTier[], chosen: string): PriorityTier[] {
-  const rest = tiers
-    .map((t) => t.offer_ids.filter((id) => id !== chosen))
+  const rest = (tiers ?? [])
+    .map((t) => (t.offer_ids ?? []).filter((id) => id !== chosen))
     .filter((ids) => ids.length > 0);
   return [[chosen], ...rest].map((offer_ids, i) => ({ tier: i + 1, offer_ids }));
 }
@@ -83,7 +86,7 @@ export default function OverhaulRoadmapsScreen() {
   const [toast, setToast] = useState<{ msg: string; tone: 'warn' | 'error' | 'success' } | null>(null);
 
   useEffect(() => {
-    if (view && expandedId == null && view.roadmaps.length) {
+    if (view && expandedId == null && view.roadmaps?.length) {
       setExpandedId(view.selected_roadmap_id ?? view.roadmaps[0].roadmap_id);
     }
   }, [view, expandedId]);
@@ -100,7 +103,7 @@ export default function OverhaulRoadmapsScreen() {
       track('overhaul_roadmap_selected', {
         overhaul_id: overhaulId,
         roadmap_id: rm.roadmap_id,
-        package_count: rm.packages.length,
+        package_count: (rm.packages ?? []).length,
       });
       navigation.navigate('OverhaulPriorities', {
         overhaulId,
@@ -127,7 +130,7 @@ export default function OverhaulRoadmapsScreen() {
   });
 
   const roadmaps = useMemo(
-    () => (view ? [...view.roadmaps].sort((a, b) => a.rank - b.rank) : []),
+    () => (view ? [...(view.roadmaps ?? [])].sort((a, b) => a.rank - b.rank) : []),
     [view],
   );
 
@@ -147,7 +150,7 @@ export default function OverhaulRoadmapsScreen() {
   }
 
   const recovery = view.recovery;
-  const showRecovery = recovery.applicable && !recovery.resolved;
+  const showRecovery = !!recovery && recovery.applicable && !recovery.resolved;
 
   return (
     <View style={styles.wrap}>
@@ -169,7 +172,7 @@ export default function OverhaulRoadmapsScreen() {
 
         {roadmaps.length === 0 ? (
           <Shortfall
-            reason={view.generation.shortfall_reason}
+            reason={view.generation?.shortfall_reason ?? null}
             onMoreIdeas={() => navigation.navigate('OverhaulReview', { overhaulId })}
             onChangePool={() => navigation.navigate('OverhaulAssets', { overhaulId })}
           />
@@ -192,14 +195,14 @@ export default function OverhaulRoadmapsScreen() {
                   <View style={styles.rowBetween}>
                     <TickLabel>{`Roadmap ${i + 1}`}</TickLabel>
                     <ChalkText variant="data" style={styles.dim}>
-                      {`${rm.packages.length} packages`}
+                      {`${(rm.packages ?? []).length} packages`}
                     </ChalkText>
                   </View>
 
-                  {rm.packages.map((pkg, pi) => {
+                  {(rm.packages ?? []).map((pkg, pi) => {
                     const first = tier1Offer(pkg, rm);
                     const isRecovery = pkg.reason === 'recover_own_first';
-                    const alternatives = pkg.tiers.flatMap((t) => t.offer_ids);
+                    const alternatives = (pkg.tiers ?? []).flatMap((t) => t.offer_ids ?? []);
                     const swapping = expanded && swapPackageId === pkg.package_id;
                     return (
                       <View key={pkg.package_id} style={styles.pkg}>
@@ -215,7 +218,7 @@ export default function OverhaulRoadmapsScreen() {
                             </ChalkText>
                           ) : null}
                           <ChalkText variant="title">
-                            {pkg.give_ids.map((id) => nameOf(view, id)).join(' + ')}
+                            {(pkg.give_ids ?? []).map((id) => nameOf(view, id)).join(' + ')}
                           </ChalkText>
                           <ChalkText variant="bodySm" style={styles.dim}>
                             {first
@@ -236,7 +239,7 @@ export default function OverhaulRoadmapsScreen() {
                               the first offer sent.
                             </ChalkText>
                             {alternatives.map((offerId) => {
-                              const offer = rm.offers[offerId];
+                              const offer = rm.offers?.[offerId];
                               const isFirst = first?.offer_id === offerId;
                               return (
                                 <View key={offerId} style={styles.altRow}>
@@ -271,11 +274,11 @@ export default function OverhaulRoadmapsScreen() {
                   {expanded ? (
                     <>
                       <ChalkText variant="bodySm" style={styles.dim}>
-                        {rm.summary.unused_eligible_ids.length
-                          ? `Not moving: ${rm.summary.unused_eligible_ids.map((id) => nameOf(view, id)).join(', ')}`
+                        {(rm.summary?.unused_eligible_ids ?? []).length
+                          ? `Not moving: ${(rm.summary?.unused_eligible_ids ?? []).map((id) => nameOf(view, id)).join(', ')}`
                           : 'Every asset in your pool is in play.'}
                       </ChalkText>
-                      {rm.compat.warnings.length ? (
+                      {(rm.compat?.warnings ?? []).length ? (
                         <ChalkText variant="bodySm" style={styles.warn}>
                           {`${rm.compat.warnings.length} warning${rm.compat.warnings.length === 1 ? '' : 's'} to review before sending`}
                         </ChalkText>
