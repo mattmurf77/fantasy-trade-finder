@@ -15,9 +15,16 @@
 //   2. No overhaul screen references FeedbackFAB. They are tab-stack screens,
 //      already covered by RootNav's single global mount — a local one is the
 //      #196/#197 double-FAB bug.
-//   3. The entry card renders in TradesScreen directly AFTER
-//      TeamReviewEntryCard (D9) and is gated on `useFlag('overhaul.enabled')`
-//      or an active overhaul — never unconditionally.
+//   3. The entry HERO (G-425, #425/#426) renders in TradesScreen exactly once,
+//      inside the main ScrollView, ABOVE the utility row / mode bar wrapper
+//      (`styles.modeBarWrap`) and above TeamReviewEntryCard — the slot the
+//      strip cohort's Draft cell used to hold — and is gated on
+//      `useFlag('overhaul.enabled')` or an active overhaul, never
+//      unconditionally. The Draft cell stays gone from TradeHomeUtilityRow
+//      (no `trades.home-utility.draft`, no onDraft prop or pass), while the
+//      control cohort's TradeFinderModeBar Draft chip is untouched. The hero's
+//      colour is one `HERO_TONE` constant filled with ice — no flare, no hex
+//      literal, `radii.` only, `minHeight: 64`.
 //   4. Preference isolation + no taste learning (PRODUCT-SPEC invariants 2, 3;
 //      BUILD-CONTRACT §7 decisions): no overhaul file touches
 //      saveLeaguePreferences, /api/league/preferences, /api/tiers/save, or
@@ -110,23 +117,33 @@ const overhaulFiles = { ...screens, OverhaulEntryCard: entry, 'api/overhaul': ap
   } else ok('2. no overhaul screen references FeedbackFAB');
 }
 
-// 3 — entry card placement + gate
+// 3 — hero placement, gate, Draft-cell removal, mode-bar chip kept, colour
 {
-  const tr = trades.indexOf('<TeamReviewEntryCard');
+  const UTILROW = path.join(SRC, 'components/TradeHomeUtilityRow.tsx');
+  const MODEBAR = path.join(SRC, 'components/TradeFinderModeBar.tsx');
+  const utilrow = strip(read(UTILROW));
+  const modebar = strip(read(MODEBAR));
+
+  // 3a — exactly one hero, inside the main scroll, above the wrapper and
+  // above Team review.
+  const mounts = count(trades, /<OverhaulEntryCard\b/g);
   const ov = trades.indexOf('<OverhaulEntryCard');
-  if (ov < 0) bad('3a. OverhaulEntryCard rendered in TradesScreen', 'no <OverhaulEntryCard in TradesScreen.tsx');
-  else if (tr < 0) bad('3a. TeamReviewEntryCard still rendered', 'no <TeamReviewEntryCard to anchor the overhaul card below');
-  else if (ov < tr) bad('3a. entry card directly after Team Review', '<OverhaulEntryCard renders BEFORE <TeamReviewEntryCard (D9 says directly below)');
-  else {
-    const between = trades.slice(tr, ov);
-    // Only the Team Review card's own JSX may sit between the two mounts.
-    if (/<[A-Z][A-Za-z]+/.test(between.replace(/<TeamReviewEntryCard/, ''))) {
-      bad('3a. entry card DIRECTLY after Team Review', 'another component renders between TeamReviewEntryCard and OverhaulEntryCard');
-    } else ok('3a. OverhaulEntryCard renders directly after TeamReviewEntryCard');
-  }
+  const tr = trades.indexOf('<TeamReviewEntryCard');
+  const wrap = trades.indexOf('styles.modeBarWrap');
+  const scroll = trades.indexOf('ref={mainScrollRef}');
+  if (mounts !== 1) bad('3a. exactly one <OverhaulEntryCard in TradesScreen', `found ${mounts} — two mounts is two heroes (the old under-Team-review card left in place), zero is no entry`);
+  else if (tr < 0) bad('3a. TeamReviewEntryCard still rendered', 'no <TeamReviewEntryCard in TradesScreen.tsx');
+  else if (wrap < 0) bad('3a. modeBarWrap still rendered', 'no styles.modeBarWrap in TradesScreen.tsx');
+  else if (scroll < 0) bad('3a. main ScrollView ref present', 'no ref={mainScrollRef} in TradesScreen.tsx');
+  else if (ov > tr) bad('3a. hero ABOVE Team review', '<OverhaulEntryCard renders after <TeamReviewEntryCard — the hero was put back under Team review (G-425 moved it up)');
+  else if (ov > wrap) bad('3a. hero ABOVE the utility row / mode bar wrapper', '<OverhaulEntryCard renders after the first styles.modeBarWrap — it must take the slot above the utility row');
+  else if (ov < scroll) bad('3a. hero INSIDE the main scroll', '<OverhaulEntryCard renders before ref={mainScrollRef} — it must be scroll content, not fixed chrome');
+  else ok('3a. one OverhaulEntryCard hero, inside the main scroll, above modeBarWrap and TeamReviewEntryCard');
+
+  // 3b — gated on the flag OR an active overhaul (unchanged).
   if (!/useFlag\('overhaul\.enabled'\)/.test(trades)) {
     bad('3b. entry gated on the flag', "TradesScreen has no useFlag('overhaul.enabled')");
-  } else {
+  } else if (ov >= 0) {
     // The mount must sit inside a conditional that names the flag value or
     // the active overhaul — find the nearest `{... ? (` before the mount.
     const before = trades.slice(Math.max(0, ov - 400), ov);
@@ -135,8 +152,49 @@ const overhaulFiles = { ...screens, OverhaulEntryCard: entry, 'api/overhaul': ap
     if (!gate) bad('3b. entry mount is conditional', 'no `{cond ? (` immediately before <OverhaulEntryCard');
     else if (!/overhaulOn|overhaul\.enabled/.test(cond) || !/activeOverhaul/.test(cond)) {
       bad('3b. entry gated on the flag OR an active overhaul', `gate is \`${cond.trim()}\` — must reference the flag and the active-overhaul probe`);
-    } else ok('3b. entry card gated on `overhaul.enabled` or an active overhaul');
+    } else ok('3b. entry hero gated on `overhaul.enabled` or an active overhaul');
   }
+
+  // 3c — the Draft cell is gone from the utility row, component and mount.
+  const rowHits = [];
+  if (utilrow.includes('trades.home-utility.draft')) rowHits.push('testID trades.home-utility.draft');
+  if (/\bonDraft\b/.test(utilrow)) rowHits.push('onDraft prop');
+  const rowMount = trades.indexOf('<TradeHomeUtilityRow');
+  if (rowMount < 0) bad('3c. TradeHomeUtilityRow still mounted', 'no <TradeHomeUtilityRow in TradesScreen.tsx');
+  else {
+    const rowEnd = trades.indexOf('/>', rowMount);
+    const slice = trades.slice(rowMount, rowEnd < 0 ? undefined : rowEnd);
+    if (/\bonDraft\b/.test(slice)) rowHits.push('onDraft pass at the <TradeHomeUtilityRow mount');
+  }
+  if (rowHits.length) {
+    bad('3c. Draft cell removed from TradeHomeUtilityRow', `${rowHits.join('; ')} — G-425 (#425) removed the Draft cell unconditionally; the hero above the row is the replacement`);
+  } else ok('3c. no Draft cell / onDraft in TradeHomeUtilityRow or its mount');
+
+  // 3d — the control cohort's mode-bar Draft chip is untouched.
+  const barMount = trades.indexOf('<TradeFinderModeBar');
+  const barEnd = barMount < 0 ? -1 : trades.indexOf('/>', barMount);
+  const barSlice = barMount < 0 ? '' : trades.slice(barMount, barEnd < 0 ? undefined : barEnd);
+  if (!/\bconst DRAFT_CHIP\b/.test(modebar)) {
+    bad('3d. TradeFinderModeBar still declares DRAFT_CHIP', 'DRAFT_CHIP missing from TradeFinderModeBar.tsx — G-425 must not reach into the control cohort\'s Draft chip (2026-08-06 permanent home)');
+  } else if (barMount < 0) bad('3d. TradeFinderModeBar still mounted', 'no <TradeFinderModeBar in TradesScreen.tsx');
+  else if (!/\bonDraft=/.test(barSlice)) {
+    bad('3d. <TradeFinderModeBar mount still passes onDraft', 'the mode-bar mount lost its onDraft pass — the control cohort\'s Draft chip would vanish');
+  } else ok('3d. mode-bar DRAFT_CHIP declared and its mount still passes onDraft');
+
+  // 3e — colour and shape: one HERO_TONE, ice fill, no flare, no hex, radii
+  // tokens only, minHeight 64.
+  const toneDecls = count(entry, /\bconst HERO_TONE\b/g);
+  const e = [];
+  if (toneDecls !== 1) e.push(`HERO_TONE declared ${toneDecls} times (need exactly 1)`);
+  if (!/const HERO_TONE\s*=\s*\{[^}]*\bfill:\s*ice\.base\b/.test(entry)) e.push('HERO_TONE.fill is not ice.base');
+  if (/\bflare\b/.test(entry)) e.push('imports or references `flare` (informational-only accent, never on an action)');
+  if (/#[0-9a-fA-F]{3,8}\b/.test(entry)) e.push('contains a hex colour literal');
+  const radii = entry.match(/borderRadius:\s*[^,\n]+/g) || [];
+  const badRadii = radii.filter((r) => !/borderRadius:\s*radii\./.test(r));
+  if (badRadii.length) e.push(`borderRadius not from radii.: ${badRadii.join(', ')}`);
+  if (!/\bminHeight:\s*64\b/.test(entry)) e.push('no `minHeight: 64` (the tile shrank below the utility cells it replaced)');
+  if (e.length) bad('3e. hero colour/shape contract', e.join('; '));
+  else ok('3e. one HERO_TONE with fill: ice.base, no flare, no hex literal, radii. only, minHeight 64');
 }
 
 // 4 — preference isolation, no taste learning
