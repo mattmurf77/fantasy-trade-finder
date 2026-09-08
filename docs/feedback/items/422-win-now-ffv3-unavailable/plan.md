@@ -11,3 +11,10 @@ Operator selection 2026-09-08: "spin up subagents to handle all of the bugs." Se
 File ownership is disjoint: G-428 owns `backend/server.py` pick paths + `backend/sleeper_write.py` + the relevant mobile copy in `SendInSleeperButton.tsx`; G-422 owns `backend/win_now_*.py` and `backend/outlook/`; G-423 owns `mobile/src/screens/TradesScreen.tsx`, `TeamReviewScreen.tsx`, `TeamReviewEntryCard.tsx` and related state. Backend groups finish before any mobile group touches shared files (none expected).
 
 Phases: 1 mini-PRD + scope per group (one investigating planner each) → 2 one build agent per group in the session worktree on a group branch → 3 two QA agents per group (guards, pytest/tsc, code-walk proof of the repro path) → 4 resolution loop → 5 operator go/no-go, merge, Render, EAS.
+
+## Added 2026-09-08 (operator: "spin up another subagent to start working on the polish items")
+
+| Group | Items | Canonical folder | Platforms | Path | Notes |
+|---|---|---|---|---|---|
+| G-425 | 425, 426 | `425-overhaul-tile-replaces-draft/` | mobile | polish | Overhaul entry replaces the Draft entry on the Acquire landing; make it prominent. Design-system tension: no red action accent exists (ice = actions, flare = highlights); build the hero tile in the sanctioned palette with the color as one token, and surface the "true red" question to the operator. Owns `TradesScreen.tsx` entry region, `OverhaulEntryCard.tsx`, `TradeFinderModeBar.tsx` (Draft chip) — disjoint from G-423 (which owns only the TradesScreen label alias at ~L9843 and the calculator/review files). |
+| G-427 | 427 | `427-first-round-picks-stud-tax-exempt/` | backend (affects deck, calculator, web via the shared evaluator) | polish (valuation) | First-round picks are not devalued by the stud adjustment; two firsts straight up for a player in the "2 firsts" ladder tier evaluates even; other rounds still taxed. Owns the stud-tax code in `backend/trade_service.py` (and `pick_values.py` if the rule lives there) + its tests; no schema/API/flag change. |
