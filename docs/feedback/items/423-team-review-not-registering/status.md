@@ -10,4 +10,4 @@
 - 2026-09-08: Phase 4 — round-1 resolution on `feat/fb423-outlook-row-and-marker`: `step` (and the beat selections) now reset during render when `leagueId` changes, so a TopBar league switch while parked on the plan beat no longer marks the new league done (A F-1 / B F-2); guard gained 1d/2b/5c/5d (A F-3 / B F-3); `mobile/src/state/README.md` store row + persistence key added (A F-4 / B F-4). Status: in_progress — awaiting QA round 2 / ship.
 - 2026-09-08: Phase 3 round 2 — QA-A PASS, QA-B PASS; ship-ready (branch feat/fb423-outlook-row-and-marker).
 - 2026-09-08: Phase 5 — merged into `feat/feedback-2026-09-08` (mobile 1.17.3); awaiting operator go.
-- 2026-09-08: **Shipped** — PR #292 → `1371d2e5`; Render live; iOS 1.17.3 (EAS `c0fe6e0d`) auto-submitting; item set `fixed`. Device checklist unrun.
+- 2026-09-08: **Shipped** — PR #292 → `1371d2e5`; Render live; iOS **1.17.3 (155)** uploaded (submission `2742bdd6`); item set `fixed`. Device checklist unrun.

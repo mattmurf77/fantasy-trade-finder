@@ -27,7 +27,7 @@ Release branch = session branch + five group branches merged (one docs-registry 
 - Version bump: mobile 1.17.2 → **1.17.3** (app.json, Info.plist, pbxproj).
 - Hosted CI on PR #292 head `8329d975`: all four jobs **success**. Squash-merged as `1371d2e5` (complete tree equality with the tested tip).
 - **Render live** for `1371d2e5` at 2026-09-09T00:03:58Z. Production smoke: root 200; flags correct; 0 error lines in 200 log lines; **#427 verified on the live calculator** — two mid firsts `give_value 4234.0` (face, no depth row) vs 4210.2 → `favors: even`, ratio 0.994, while two mid seconds still carry a −225.9 `package_depth` deduction and favor the player. That is runtime evidence, not a code-walk.
-- iOS **1.17.3**, EAS build `c0fe6e0d`, started from merged `main` with `--auto-submit`.
+- iOS **1.17.3 (155)**, EAS build `c0fe6e0d`, built from merged `main`; TestFlight submission `2742bdd6` **FINISHED** (upload accepted by App Store Connect; Apple processing and tester availability are not proven by that).
 - Feedback items 422–428 set `fixed` (open backlog 49 → 42).
 - **UNRUN:** consolidated operator checklist [testflight-checklist.md](../docs/feedback/items/422-win-now-ffv3-unavailable/testflight-checklist.md) on the 1.17.3 build — the only runtime evidence the mobile half gets.
 

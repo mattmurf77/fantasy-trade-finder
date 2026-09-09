@@ -10,4 +10,4 @@
 - 2026-09-08: Phase 4 — round-1 resolution (shared branch, see [423 status](../423-team-review-not-registering/status.md)): guard `check-outlook-row-source.js` now pins the #394 rule for this row — `inferred_outlook` anywhere in the fallback expression, or a disabled prefs query, goes RED (1d, 2b). No further code change for #424. Status: in_progress — awaiting QA round 2 / ship.
 - 2026-09-08: Phase 3 round 2 — QA-A PASS, QA-B PASS; ship-ready (branch feat/fb423-outlook-row-and-marker).
 - 2026-09-08: Phase 5 — merged into `feat/feedback-2026-09-08` (mobile 1.17.3); awaiting operator go.
-- 2026-09-08: **Shipped** — PR #292 → `1371d2e5`; Render live; iOS 1.17.3 (EAS `c0fe6e0d`) auto-submitting; item set `fixed`. Device checklist unrun.
+- 2026-09-08: **Shipped** — PR #292 → `1371d2e5`; Render live; iOS **1.17.3 (155)** uploaded (submission `2742bdd6`); item set `fixed`. Device checklist unrun.

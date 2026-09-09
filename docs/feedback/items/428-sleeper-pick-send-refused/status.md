@@ -11,4 +11,4 @@
 - 2026-09-08: Phase 4 — round-1 rulings applied (shape-blind exclusion, guard check 9 on the Alert argument, dead `season_window: null` / `?–?` branches removed, D-189 text amended); targeted suites green, guard RED→GREEN proven; full suite + QA round 2 pending.
 - 2026-09-08: Phase 3 round 2 — QA-A PASS, QA-B PASS; ship-ready (branch feat/fb428-sleeper-pick-tradability).
 - 2026-09-08: Phase 5 — merged into `feat/feedback-2026-09-08` (mobile 1.17.3); awaiting operator go.
-- 2026-09-08: **Shipped** — PR #292 → `1371d2e5`; Render live; iOS 1.17.3 (EAS `c0fe6e0d`) auto-submitting; item set `fixed`. Device checklist unrun.
+- 2026-09-08: **Shipped** — PR #292 → `1371d2e5`; Render live; iOS **1.17.3 (155)** uploaded (submission `2742bdd6`); item set `fixed`. Device checklist unrun.

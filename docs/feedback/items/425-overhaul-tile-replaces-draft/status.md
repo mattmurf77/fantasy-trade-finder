@@ -10,4 +10,4 @@
 - 2026-09-08: Phase 1 — planned: [prd.md](prd.md), [scope.md](scope.md), [investigation.md](investigation.md). Draft cell removed from `TradeHomeUtilityRow`; overhaul hero mounts above the utility row; `check-team-overhaul.js` §3 rewritten; 4 operator questions (red / control-cohort chip / pushed page / flag-off Draft).
 - 2026-09-08: Phase 2 build `9610e5ec`/`d80e9ee9`; Phase 3 QA-A PASS, QA-B PASS (0 findings); ship-ready (branch feat/fb425-overhaul-hero-replaces-draft).
 - 2026-09-08: Phase 5 — merged into `feat/feedback-2026-09-08` (mobile 1.17.3); awaiting operator go.
-- 2026-09-08: **Shipped** — PR #292 → `1371d2e5`; Render live; iOS 1.17.3 (EAS `c0fe6e0d`) auto-submitting; item set `fixed`. Device checklist unrun.
+- 2026-09-08: **Shipped** — PR #292 → `1371d2e5`; Render live; iOS **1.17.3 (155)** uploaded (submission `2742bdd6`); item set `fixed`. Device checklist unrun.
