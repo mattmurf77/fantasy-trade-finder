@@ -9,3 +9,4 @@
 - 2026-09-08: Phase 1 — planned (G-425, with #425): the utility-row Draft cell is the reported button; a full-width ice hero (`HERO_TONE`, one constant) takes its slot above the utility row; red needs a design-system addition → operator Q1 in [425 prd.md](../425-overhaul-tile-replaces-draft/prd.md).
 - 2026-09-08: Phase 2 build `9610e5ec`/`d80e9ee9`; Phase 3 QA-A PASS, QA-B PASS (0 findings); ship-ready (branch feat/fb425-overhaul-hero-replaces-draft).
 - 2026-09-08: Phase 5 — merged into `feat/feedback-2026-09-08` (mobile 1.17.3); awaiting operator go.
+- 2026-09-08: **Shipped** — PR #292 → `1371d2e5`; Render live; iOS 1.17.3 (EAS `c0fe6e0d`) auto-submitting; item set `fixed`. Device checklist unrun.

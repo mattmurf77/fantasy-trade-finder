@@ -15,12 +15,13 @@
 
 The owner-only activation (PR #287 `16bb6fd1`, LIVE 05:28 UTC, knobs flipped 05:29 UTC by the release session) crashed production on its first two searches: uncapped decks of 1,037 / 1,456 cards × ~21 KB evidence rows became a single ~28 MB `INSERT`, the 256 MB Postgres backend was OOM-killed twice, and exclusive mode failed the job (`owner_impression_unavailable`) → "Search failed" on every Find a Trade. Operator chose to keep owner-only live: budgets cut to 300 / 3,000 at 13:55 UTC (≈250 cards). Fix: `save_deck_impressions` pages at 100 rows per statement in one transaction (`DECK_IMPRESSION_INSERT_ROWS`), guarded by `test_deck_impressions_paging.py`. Shipped 2026-09-08 as [PR #289](https://github.com/mattmurf77/fantasy-trade-finder/pull/289) `609cb79e`, Render LIVE 02:41 UTC; both budgets restored to 4096 / 60000 at 02:41 UTC, so decks are uncapped again on the paged insert. First real uncapped search still to be confirmed in the logs. No mobile change: build 1.17.2 (150) already carries the owner contract. [Runbook row](../docs/runbook.md#common-failure-modes), [G-072](GOTCHAS.md).
 
-## 2026-09-08c — Feedback batch (#422–#428) built and QA-green; awaiting operator go
+## 2026-09-08c — Feedback batch (#422–#428) SHIPPED; backend live, iOS 1.17.3 building
 
 **What:** five groups on `feat/feedback-2026-09-08`: Win Now refuses kicker/IDP lineups early with a specific sentence (#422, `unsupported_roster_slots` unchanged); the Acquire landing's outlook row reads the saved preference and Team Review completion is recorded on reaching the plan beat, shown live (#423/#424, D-191); the Team overhaul hero replaces the utility row's Draft cell (#425/#426, D-192, ice pending a red token decision); first-round picks exempt from the stud tax with knob `stud_tax_exempt_first_round` (#427, D-190); Sleeper pick sends refuse spent/out-of-window classes with Sleeper's own message and the sync excludes completed-draft seasons (#428, D-189; Q-037 closed). Mobile 1.17.3.
 **Why:** operator triage 2026-09-08 ("handle all of the bugs", then "the polish items"); every item traced to a Render-log or public-Sleeper-API repro before planning.
 **Evidence:** [TEST_LEDGER](TEST_LEDGER.md) 2026-09-08 batch entry; ten QA reports in the item folders; two convergent non-PRD findings caught by the redundant QA pairs and resolved (G-423 league switch, G-428 startup drafts).
-**Not done:** not pushed/merged/deployed at write time; consolidated TestFlight checklist unrun.
+**Shipped 2026-09-08 on operator go:** PR #292 squash-merged as `1371d2e5`; Render live 00:03:58Z with a clean smoke (the first-round rule confirmed on the live calculator: 4234.0 vs 4210.2 → even; seconds still taxed). iOS 1.17.3 (EAS `c0fe6e0d`) building with auto-submit. Items 422–428 set `fixed`. Branches/worktrees cleaned after a [recovery capture](../docs/recovery/2026-09-08-feedback-batch-422-428.md) with ancestry + complete-tree + owned-file proofs.
+**Not done:** the operator's device checklist on 1.17.3; the hero stays ice pending a red design-system token.
 
 ## 2026-09-08b — Team overhaul: blank review chips and two crashes fixed (card shape)
 

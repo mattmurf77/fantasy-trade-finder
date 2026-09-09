@@ -25,7 +25,11 @@ Release branch = session branch + five group branches merged (one docs-registry 
 
 - Release tip `ecc1d8b7` gates: `npx tsc --noEmit` 0 errors; 99/99 `check-*.js`; testid-lint OK; web 190/190; full backend suite **`5942 passed, 1 skipped in 391.47s (0:06:31)`**, exit 0.
 - Version bump: mobile 1.17.2 → **1.17.3** (app.json, Info.plist, pbxproj).
-- **UNRUN:** consolidated operator checklist [testflight-checklist.md](../docs/feedback/items/422-win-now-ffv3-unavailable/testflight-checklist.md) on the 1.17.3 build.
+- Hosted CI on PR #292 head `8329d975`: all four jobs **success**. Squash-merged as `1371d2e5` (complete tree equality with the tested tip).
+- **Render live** for `1371d2e5` at 2026-09-09T00:03:58Z. Production smoke: root 200; flags correct; 0 error lines in 200 log lines; **#427 verified on the live calculator** — two mid firsts `give_value 4234.0` (face, no depth row) vs 4210.2 → `favors: even`, ratio 0.994, while two mid seconds still carry a −225.9 `package_depth` deduction and favor the player. That is runtime evidence, not a code-walk.
+- iOS **1.17.3**, EAS build `c0fe6e0d`, started from merged `main` with `--auto-submit`.
+- Feedback items 422–428 set `fixed` (open backlog 49 → 42).
+- **UNRUN:** consolidated operator checklist [testflight-checklist.md](../docs/feedback/items/422-win-now-ffv3-unavailable/testflight-checklist.md) on the 1.17.3 build — the only runtime evidence the mobile half gets.
 
 ## 2026-09-08 — Team overhaul: device-found card-shape bug (blank chips, two crashes) fixed
 

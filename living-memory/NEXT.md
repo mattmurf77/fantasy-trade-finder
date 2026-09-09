@@ -48,9 +48,9 @@
 
 ---
 
-## 2026-09-08 — Feedback batch #422–#428: ship on go, run the checklist on 1.17.3, then the four follow-up candidates
+## 2026-09-08 — Feedback batch #422–#428 SHIPPED: run the checklist on 1.17.3, then the follow-up candidates
 
-1. **Operator go → ship** `feat/feedback-2026-09-08` (PR, exact-head CI, squash-merge, EAS 1.17.3 auto-submit, items `fixed`) — *why now:* five groups are dual-QA green and merged.
+1. ~~Ship the batch~~ **DONE 2026-09-08**: `1371d2e5` on main, Render live, iOS 1.17.3 building, items `fixed`.
 2. **Run the [consolidated checklist](../docs/feedback/items/422-win-now-ffv3-unavailable/testflight-checklist.md)** on 1.17.3 — the batch's only runtime evidence.
 3. **Decide the hero colour:** true red needs a Chalkline token (ADR-004/005); today it ships in ice via one constant (D-192).
 4. Follow-up candidates surfaced by QA/planners, not built: Lakeview's Win Now refusal for `unknown_starter_availability` (three Questionable starters) and the `live_week_unsupported` window from week 1; DEF-slot wording in the Win Now sentence; crown credit when the other side is all firsts (D-190); search-job path stores only the refusal reason; first-year startup league has no linked example to verify D-189 live.

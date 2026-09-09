@@ -19,16 +19,16 @@ Phases: 1 mini-PRD + scope per group (one investigating planner each) → 2 one 
 | G-425 | 425, 426 | `425-overhaul-tile-replaces-draft/` | mobile | polish | Overhaul entry replaces the Draft entry on the Acquire landing; make it prominent. Design-system tension: no red action accent exists (ice = actions, flare = highlights); build the hero tile in the sanctioned palette with the color as one token, and surface the "true red" question to the operator. Owns `TradesScreen.tsx` entry region, `OverhaulEntryCard.tsx`, `TradeFinderModeBar.tsx` (Draft chip) — disjoint from G-423 (which owns only the TradesScreen label alias at ~L9843 and the calculator/review files). |
 | G-427 | 427 | `427-first-round-picks-stud-tax-exempt/` | backend (affects deck, calculator, web via the shared evaluator) | polish (valuation) | First-round picks are not devalued by the stud adjustment; two firsts straight up for a player in the "2 firsts" ladder tier evaluates even; other rounds still taxed. Owns the stud-tax code in `backend/trade_service.py` (and `pick_values.py` if the rule lives there) + its tests; no schema/API/flag change. |
 
-## Final status 2026-09-08 (pre-ship)
+## Final status 2026-09-08 (SHIPPED)
 
 | Item | Group | Status | Evidence |
 |---|---|---|---|
-| 422 | G-422 | QA-green, awaiting go | [prd](prd.md) · [qa A](qa-round-1-agent-A.md) · [qa B](qa-round-1-agent-B.md) |
-| 423 | G-423 | QA-green (2 rounds), awaiting go | [prd](../423-team-review-not-registering/prd.md) · [qa r2 A](../423-team-review-not-registering/qa-round-2-agent-A.md) · [qa r2 B](../423-team-review-not-registering/qa-round-2-agent-B.md) |
+| 422 | G-422 | QA-green, shipped | [prd](prd.md) · [qa A](qa-round-1-agent-A.md) · [qa B](qa-round-1-agent-B.md) |
+| 423 | G-423 | QA-green (2 rounds), shipped | [prd](../423-team-review-not-registering/prd.md) · [qa r2 A](../423-team-review-not-registering/qa-round-2-agent-A.md) · [qa r2 B](../423-team-review-not-registering/qa-round-2-agent-B.md) |
 | 424 | G-423 | satellite of 423 | — |
-| 425 | G-425 | QA-green, awaiting go | [prd](../425-overhaul-tile-replaces-draft/prd.md) · [qa A](../425-overhaul-tile-replaces-draft/qa-round-1-agent-A.md) · [qa B](../425-overhaul-tile-replaces-draft/qa-round-1-agent-B.md) |
+| 425 | G-425 | QA-green, shipped | [prd](../425-overhaul-tile-replaces-draft/prd.md) · [qa A](../425-overhaul-tile-replaces-draft/qa-round-1-agent-A.md) · [qa B](../425-overhaul-tile-replaces-draft/qa-round-1-agent-B.md) |
 | 426 | G-425 | satellite of 425 (red pending token decision) | — |
-| 427 | G-427 | QA-green, awaiting go | [prd](../427-first-round-picks-stud-tax-exempt/prd.md) · [qa A](../427-first-round-picks-stud-tax-exempt/qa-round-1-agent-A.md) · [qa B](../427-first-round-picks-stud-tax-exempt/qa-round-1-agent-B.md) |
-| 428 | G-428 | QA-green (2 rounds), awaiting go | [prd](../428-sleeper-pick-send-refused/prd.md) · [qa r2 A](../428-sleeper-pick-send-refused/qa-round-2-agent-A.md) · [qa r2 B](../428-sleeper-pick-send-refused/qa-round-2-agent-B.md) |
+| 427 | G-427 | QA-green, shipped | [prd](../427-first-round-picks-stud-tax-exempt/prd.md) · [qa A](../427-first-round-picks-stud-tax-exempt/qa-round-1-agent-A.md) · [qa B](../427-first-round-picks-stud-tax-exempt/qa-round-1-agent-B.md) |
+| 428 | G-428 | QA-green (2 rounds), shipped | [prd](../428-sleeper-pick-send-refused/prd.md) · [qa r2 A](../428-sleeper-pick-send-refused/qa-round-2-agent-A.md) · [qa r2 B](../428-sleeper-pick-send-refused/qa-round-2-agent-B.md) |
 
-Release branch `feat/feedback-2026-09-08`; mobile 1.17.3; decisions D-189–D-192; consolidated operator checklist [testflight-checklist.md](testflight-checklist.md).
+Shipped on operator go 2026-09-08: PR #292 squash-merged as `1371d2e5`, Render live 00:03:58Z, iOS 1.17.3 (EAS `c0fe6e0d`) auto-submitted, all seven items `fixed`. Decisions D-189–D-192; [recovery capture](../../recovery/2026-09-08-feedback-batch-422-428.md); consolidated operator checklist [testflight-checklist.md](testflight-checklist.md) **unrun**.
