@@ -66,6 +66,7 @@ import { registerScrollToTop } from '../navigation/scrollToTop';
 import OutlookSheet from '../components/OutlookSheet';
 import TradeFinderModeBar from '../components/TradeFinderModeBar';
 import OutlookBiasReceipt, {
+  OUTLOOK_DISPLAY_NAME,
   outlookReceiptCovers,
 } from '../components/OutlookBiasReceipt';
 import TradeDnaSheet, {
@@ -6757,6 +6758,29 @@ export default function TradesScreen({ navigation, route }: any) {
             <ChalkText variant="bodySm" style={{ color: ice.base }}>Win Now · season gains within your dynasty budget</ChalkText>
           </Pressable>
         ) : null}
+        {/* G-425 (#425/#426) — Team overhaul HERO. Full-width tile in the
+            slot the strip cohort's Draft cell used to hold: directly above
+            the utility row / mode bar, outside the measured `modeBarWrap`
+            (so the wrapper's onLayout y grows by the hero's height and the
+            Toast offset still clears both). Same gate, props and analytics
+            as the card it replaces (BUILD-CONTRACT §9): shown while
+            `overhaul.enabled` is on or a saved plan exists, independent of
+            `finderMode` — the flag-off classic home keeps its entry. */}
+        {(overhaulOn || !!activeOverhaul) && leagueId ? (
+          <OverhaulEntryCard
+            leagueId={leagueId}
+            active={activeOverhaul}
+            onStart={() => {
+              try {
+                track('overhaul_started', { league_id: leagueId, entry: 'trades_home_card' });
+              } catch { /* analytics must never block navigation */ }
+              navigation.navigate('OverhaulOutlook' as never);
+            }}
+            onResume={(overhaulId) => {
+              navigation.navigate('OverhaulPlan' as never, { overhaulId } as never);
+            }}
+          />
+        ) : null}
         {/* FB #156/#246 — the persistent mode chip strip. Since the
             guided-first landing (#246) this renders on the tab's landing
             itself (TradesHome mounts with mode:'guided') and is the
@@ -6794,11 +6818,10 @@ export default function TradesScreen({ navigation, route }: any) {
               <TradeHomeUtilityRow
                 onFreeAgents={() => navigation?.navigate?.('FreeAgents')}
                 onManualCalc={() => navigation?.navigate?.('TradeCalculator')}
-                onDraft={
-                  draftRoomOn
-                    ? () => navigation?.navigate?.('DraftRoom')
-                    : undefined
-                }
+                // G-425 (#425): no onDraft here any more — the Draft cell left
+                // this row for good (the overhaul hero above took its slot);
+                // the Draft Room keeps its seasonal tab, League tile and deep
+                // link. The mode bar's Draft chip below is a different control.
                 // Presentation v2 — passing the handler is what creates the
                 // control; flag off ⇒ omitted ⇒ this row is unchanged.
                 onTodaysTrade={
@@ -7051,24 +7074,6 @@ export default function TradesScreen({ navigation, route }: any) {
                 track('team_review_opened', { league_id: leagueId, source });
               } catch { /* analytics must never block navigation */ }
               navigation.navigate('TeamReview' as never);
-            }}
-          />
-        ) : null}
-
-        {/* Team overhaul entry — directly after Team Review, by contract (D9).
-            Shown while `overhaul.enabled` is on or a saved plan exists. */}
-        {(overhaulOn || !!activeOverhaul) && leagueId ? (
-          <OverhaulEntryCard
-            leagueId={leagueId}
-            active={activeOverhaul}
-            onStart={() => {
-              try {
-                track('overhaul_started', { league_id: leagueId, entry: 'trades_home_card' });
-              } catch { /* analytics must never block navigation */ }
-              navigation.navigate('OverhaulOutlook' as never);
-            }}
-            onResume={(overhaulId) => {
-              navigation.navigate('OverhaulPlan' as never, { overhaulId } as never);
             }}
           />
         ) : null}
@@ -9835,20 +9840,11 @@ function cap(s: string) {
 }
 
 // #376/#394 — display names for the minimized "Outlook & filters" row.
-// The four directional values use OutlookBiasReceipt's LEAN names (#253
-// canonical order) so the row and the receipt share one vocabulary; the
-// map is duplicated here because the receipt keeps LEAN private.
-// `not_sure` IS a declared value (TradeDnaSheet persists it when positions
-// are saved without an outlook pick) — it renders "Not sure", never the
-// cap() literal "Not_sure" and never "Not set". "Not set" is reserved for
-// null/absent, applied at the call site.
-const OUTLOOK_FALLBACK_LABEL: Record<string, string> = {
-  championship: 'All-in',
-  contender: 'Contending',
-  rebuilder: 'Rebuilding',
-  jets: 'Tanking',
-  not_sure: 'Not sure',
-};
+// #424 — aliased to OutlookBiasReceipt's exported table (it owns LEAN) so
+// this row and the merged calculator's `calc.outlook-fallback` twin can
+// never drift apart again. `not_sure` renders "Not sure"; "Not set" is
+// reserved for null/absent, applied at the call site.
+const OUTLOOK_FALLBACK_LABEL = OUTLOOK_DISPLAY_NAME;
 
 // ── Styles — Chalkline (docs/design/design-system.md) ───────────────
 const styles = StyleSheet.create({

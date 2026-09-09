@@ -11,6 +11,32 @@
 
 ---
 
+## 2026-09-08 — Feedback batch #422/#423/#424/#425/#426/#427/#428: five groups QA-green on `feat/feedback-2026-09-08`
+
+Release branch = session branch + five group branches merged (one docs-registry conflict, resolved by keeping both rows). PR #292; exact-head CI to be recorded before merge. Pipeline: one investigating planner per group → one build agent → two independent QA agents (round 2 where a confirmed finding existed). Evidence per group in `docs/feedback/items/<id>-*/` (build-report, qa-round-*).
+
+| Group | Build | QA | Full suite (at QA) | Guards |
+|---|---|---|---|---|
+| G-422 Win Now FFV3 refusal message | `e280ca73` | r1 A PASS / B PASS | 5872 / 1 skip (B); A's lone red was a load flake, file 34/34 alone | n/a (backend) |
+| G-423 outlook row + review completion | `4cca4020`, Phase 4 `cb893b09` | r1 A/B PASS (2 convergent minors) → r2 A/B PASS | 5867 / 1 skip (B r1; no backend files) | `check-outlook-row-source.js` 19 assertions, 11 sabotages RED |
+| G-425 overhaul hero replaces Draft cell | `9610e5ec`, `d80e9ee9` | r1 A PASS / B PASS (0 findings) | n/a (no backend files) | `check-team-overhaul.js` 29 assertions, 13–14 sabotages RED |
+| G-427 first-round picks exempt from stud tax | `9778c2a7` | r1 A PASS / B PASS (0 defects; numbers reproduced independently) | 5912 / 1 skip (both) | n/a; goldens pinned at 0 |
+| G-428 Sleeper pick tradability | `26ab3147`, Phase 4 `c4f8a6f7` | r1 A FAIL(adjudicated)/B PASS → r2 A/B PASS | 5892 / 1 skip (both) | `check-send-button-platform.js` check 9 RED with operand removed |
+
+- Release tip `ecc1d8b7` gates: `npx tsc --noEmit` 0 errors; 99/99 `check-*.js`; testid-lint OK; web 190/190; full backend suite **`5942 passed, 1 skipped in 391.47s (0:06:31)`**, exit 0.
+- Version bump: mobile 1.17.2 → **1.17.3** (app.json, Info.plist, pbxproj).
+- **UNRUN:** consolidated operator checklist [testflight-checklist.md](../docs/feedback/items/422-win-now-ffv3-unavailable/testflight-checklist.md) on the 1.17.3 build.
+
+## 2026-09-08 — Team overhaul: device-found card-shape bug (blank chips, two crashes) fixed
+
+Operator on build 153: review chips showed no players on either side; "Build roadmaps" and choosing a roadmap crashed the app. One root cause: the server's `Offer.card` is the raw `trade_card_to_dict` dict (`give`/`receive`/`target_user_id`/`fairness_score`/`mismatch_score`) while the screens read the client `TradeCard` shape; the review screen defaulted the arrays to empty, the other screens called `.map` on undefined. Fix (PR #291 → `167f93ff`): `api/overhaul.ts` normalizes every offer through the deck's exported `normalizeTradeCard` at the fetch boundary (all 10 fetchers); render guards in the five overhaul screens; `check-team-overhaul.js` at 26 assertions. Also aligned the `onboarding-v2`/`profiles-on` flag fixtures with the flag flip (main CI had been red from `d59a86d7`).
+- Mobile: tsc 0 errors; every `check-*.js`; testid-lint OK. Hosted CI on PR #291 head `64b0ff5f`: run 34197788940 all four jobs success. iOS **1.17.2 (154)**, EAS `5aeed6cc`, uploaded via auto-submit (submission `abf252bd` FINISHED).
+- Device retest on 154: **UNRUN** at write time.
+
+## 2026-09-08 — Team overhaul flag flipped ON; production verified
+
+`d59a86d7` sets `overhaul.enabled: true` in `config/features.json` and `backend/tests/fixtures/flags/release.json` (mirror test passed locally before push). Production `/api/feature-flags` returned `overhaul.enabled: True` ~125 s after the push. Hosted CI on `d59a86d7` **failed** on the two profile-fixture tests (fixed in PR #291, above). Builds on App Store Connect from the all-platform tree: 1.17.2 (152) and (153).
+
 ## 2026-09-07 — Owner-only outage diagnosis and paged impression insert
 
 **Production evidence (read-only, Render logs API):** web service at 06:13:23 and 06:13:51 UTC ran `roster=owner_v1 … arms={'owner_v1': (1037, 7852)}` and `(1456, 9347)`; both followed by `impression logging failed … SSL SYSCALL error: EOF detected` and `ValueError: owner_impression_unavailable`. Postgres `dpg-d7g36mdckfvc73a329k0-a` (basic_256mb) logged `terminated by signal 9: Killed` + `database system is in recovery mode` at 06:13:31 and 06:14:10. Deploy `dep-daf4ma15efls73aeq5j0` LIVE on `16bb6fd1`.
@@ -3995,6 +4021,7 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-09-08 — Feedback batch #422/#423/#424/#425/#426/#427/#428: five groups QA-green on `feat/feedback-2026-09-08`](#2026-09-08--feedback-batch-422423424425426427428-five-groups-qa-green-on-featfeedback-2026-09-08)
 - [2026-09-08 — Team overhaul: device-found card-shape bug (blank chips, two crashes) fixed](#2026-09-08--team-overhaul-device-found-card-shape-bug-blank-chips-two-crashes-fixed)
 - [2026-09-08 — Team overhaul flag flipped ON; production verified](#2026-09-08--team-overhaul-flag-flipped-on-production-verified)
 - [2026-09-07 — Team overhaul: sends on MFL and ESPN (owner D1 revision), branch evidence](#2026-09-07--team-overhaul-sends-on-mfl-and-espn-owner-d1-revision-branch-evidence)

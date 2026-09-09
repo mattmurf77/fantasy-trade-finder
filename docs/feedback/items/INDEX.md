@@ -287,6 +287,13 @@
 | 419 | rejected-interest-resurfacing | fixed | 2026-09-06 | PR #283 / Render `988fa2d6` live; iOS 1.17.1 (149) submission FINISHED; DB fixed readback verified. Apple availability/device checks unverified; all-45 audit remains read-only. |
 | 420 | win-now-loading | fixed | 2026-09-06 | PR #283; bounded native recovery in iOS 1.17.1 (149), submission FINISHED; DB fixed readback verified. Apple availability/device checks remain unverified/UNRUN. |
 | 421 | win-now-timeout-message | fixed | 2026-09-06 | Satellite of 420-win-now-loading; neutral timeout copy in submitted iOS 1.17.1 (149), DB fixed readback verified. Apple availability/device checks remain unverified/UNRUN. |
+| 422 | win-now-ffv3-unavailable | planned | 2026-09-08 | G-422 fast-track; season-projections returns a structured unavailable for FFV3; reason under investigation. |
+| 423 | team-review-not-registering | planned | 2026-09-08 | G-423 canonical (with 424); Lakeview review completed server-side, client marker/outlook row stale. |
+| 424 | outlook-shows-not-set | planned | 2026-09-08 | G-423 satellite of 423. |
+| 425 | overhaul-tile-replaces-draft | planned | 2026-09-08 | G-425 canonical (with 426): overhaul entry replaces the Draft entry on Acquire; prominent hero tile. |
+| 426 | overhaul-button-prominent | planned | 2026-09-08 | G-425 satellite of 425 ("big red button"; red vs Chalkline accent rule surfaced to operator). |
+| 427 | first-round-picks-stud-tax-exempt | planned | 2026-09-08 | G-427 polish: first-round picks exempt from the stud adjustment; two firsts for a "2 firsts" tier player evaluates even. |
+| 428 | sleeper-pick-send-refused | planned | 2026-09-08 | G-428 fast-track; Sleeper answered "These draft picks cannot be traded." on FFV3 2026-09-08 17:03Z. |
 | — | 2026-07-26-adjustments-breakdown | shipped | 2026-07-26 | n/a |
 | — | 2026-07-26-asset-trade-ideas | shipped | 2026-07-26 | teardown-remediation / `trade.asset_ideas` ON |
 | — | 2026-07-26-calc-eveners | shipped | 2026-07-26 | `eveners`/`adjustments`/`naive_totals` on `/api/trade/evaluate` — CHANGELOG 2026-07-26 |

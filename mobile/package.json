@@ -21,6 +21,7 @@
     "test:calc-send-placement": "node tests/check-calc-send-placement.js",
     "test:calc-tour": "node tests/check-calc-tour.js",
     "test:canvas-results": "node tests/check-canvas-results.js",
+    "test:outlook-row-source": "node tests/check-outlook-row-source.js",
     "test:results-push": "node tests/check-results-push.js",
     "test:owner-search-continuity": "node tests/check-owner-search-continuity.js",
     "test:owner-offer-signals": "node tests/check-owner-offer-signals.js",

@@ -553,3 +553,99 @@ def test_completed_job_rechecks_source_revision_not_effective_projection_rules(m
     source_league["source_scoring_settings"]["rec"] = 2
     changed = client.get("/api/win-now/jobs/completed").get_json()
     assert changed["reason"] == "league_inputs_changed"
+
+
+# --- FB-422: active K/IDP lineups are refused early, with a specific message --
+
+# The real FFV3 shape (Sleeper league 1312140920132497408, public API, 2026-09-08):
+# 36 roster_positions (15 active, 8 of them K/DL/LB/DB/IDP_FLEX) and 55 scoring keys.
+FFV3_ROSTER_POSITIONS = ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "K", "DL", "DL", "LB", "LB",
+                         "DB", "DB", "IDP_FLEX"] + ["BN"] * 21
+FFV3_SCORING = {
+    "blk_kick": 2.0, "def_st_ff": 1.0, "def_st_fum_rec": 1.0, "def_st_td": 6.0, "def_td": 6.0,
+    "ff": 1.0, "fgm_0_19": 3.0, "fgm_20_29": 3.0, "fgm_30_39": 3.0, "fgm_40_49": 4.0, "fgm_50p": 5.0,
+    "fgmiss": -1.0, "fum": 0.0, "fum_lost": -2.0, "fum_rec": 2.0, "fum_rec_td": 6.0,
+    "idp_blk_kick": 3.0, "idp_def_td": 6.0, "idp_ff": 2.0, "idp_fum_rec": 2.0, "idp_int": 4.0,
+    "idp_pass_def": 1.0, "idp_qb_hit": 0.0, "idp_sack": 3.0, "idp_safe": 2.0, "idp_tkl": 0.5,
+    "idp_tkl_ast": 0.0, "idp_tkl_loss": 1.0, "idp_tkl_solo": 0.0, "int": 2.0, "pass_2pt": 2.0,
+    "pass_int": -1.0, "pass_td": 4.0, "pass_yd": 0.04, "pts_allow_0": 10.0, "pts_allow_14_20": 1.0,
+    "pts_allow_1_6": 7.0, "pts_allow_21_27": 0.0, "pts_allow_28_34": -1.0, "pts_allow_35p": -4.0,
+    "pts_allow_7_13": 4.0, "rec": 0.5, "rec_2pt": 2.0, "rec_td": 6.0, "rec_yd": 0.1, "rush_2pt": 2.0,
+    "rush_td": 6.0, "rush_yd": 0.1, "sack": 1.0, "safe": 2.0, "st_ff": 1.0, "st_fum_rec": 1.0,
+    "st_td": 6.0, "xpm": 1.0, "xpmiss": -1.0}
+# Lakeview (1312076055586050048): 24 roster_positions, 10 active, all offense (incl. SUPER_FLEX).
+LAKEVIEW_ROSTER_POSITIONS = ["QB", "RB", "RB", "WR", "WR", "WR", "TE", "FLEX", "FLEX", "SUPER_FLEX"] + ["BN"] * 14
+
+
+def ffv3_source_fixture():
+    assert len(FFV3_ROSTER_POSITIONS) == 36 and len(FFV3_SCORING) == 55 and len(LAKEVIEW_ROSTER_POSITIONS) == 24
+    meta = {"season": "2026", "status": "in_season", "total_rosters": 12,
+            "roster_positions": list(FFV3_ROSTER_POSITIONS), "scoring_settings": dict(FFV3_SCORING),
+            "settings": {"playoff_week_start": 15, "playoff_teams": 6, "league_average_match": 0,
+                         "divisions": 0, "start_week": 1, "playoff_round_type": 0, "playoff_seed_type": 0,
+                         "best_ball": 0, "trade_deadline": 12, "trade_review_days": 0}}
+    rosters = [{"roster_id": rid, "owner_id": f"u{rid}", "players": [f"p{rid}", f"d{rid}"],
+                "starters": [f"p{rid}"], "reserve": [], "taxi": [],
+                "settings": {"wins": 0, "losses": 0, "ties": 0, "fpts": 0, "fpts_decimal": 0}}
+               for rid in range(1, 13)]
+    users = [{"user_id": f"u{rid}", "display_name": f"Manager {rid}"} for rid in range(1, 13)]
+    matchups = {week: [{"roster_id": rid, "matchup_id": (rid + 1) // 2, "points": 0} for rid in range(1, 13)]
+                for week in range(1, 15)}
+    calls = []
+    def fetch(url):
+        calls.append(url)
+        if "/projections/" in url:
+            return []
+        if "/matchups/" in url:
+            return deepcopy(matchups[int(url.rsplit("/", 1)[1])])
+        if url.endswith("/rosters"):
+            return deepcopy(rosters)
+        if url.endswith("/users"):
+            return deepcopy(users)
+        return deepcopy(meta)
+    actor = {"platform": "sleeper", "league_id": "1312140920132497408", "league_user_id": "u1",
+             "user_id": "account1", "scoring_format": "1qb_ppr", "players": {}, "market_values": {},
+             "personal_values": {}, "confidence": {}}
+    return actor, meta, fetch, calls
+
+
+def test_ffv3_active_kicker_idp_slots_refused_before_any_projection_fetch():
+    actor, _, fetch, calls = ffv3_source_fixture()
+    with pytest.raises(service.Unavailable) as info:
+        service.load_league(actor, fetch)
+    assert info.value.reason == "unsupported_roster_slots"
+    for fact in ("K", "DL", "LB", "DB", "IDP_FLEX", "8 of 15", "QB, RB, WR and TE"):
+        assert fact in info.value.message
+    # Refused from league metadata alone: no standings or projection work.
+    assert not any("/matchups/" in url or "/projections/" in url for url in calls)
+
+
+def test_ffv3_load_bundle_refusal_is_the_slot_reason_not_a_forecast_reason(monkeypatch):
+    monkeypatch.setattr("backend.outlook.bye_weeks.fetch_byes", lambda **_: {})
+    actor, _, fetch, calls = ffv3_source_fixture()
+    with pytest.raises(service.Unavailable) as info:
+        service.load_bundle(actor, fetch)
+    assert info.value.reason == "unsupported_roster_slots"
+    assert "IDP_FLEX" in info.value.message and "8 of 15" in info.value.message
+    assert [url for url in calls if "/projections/" in url] == []
+
+
+def test_unsupported_slots_message_names_distinct_slots_in_roster_order():
+    message = service.unsupported_slots_message(["QB", "K", "DL", "DL", "LB", "IDP_FLEX"])
+    assert message.startswith("Win Now can't model this league yet.")
+    assert "K, DL, LB, IDP_FLEX (5 of 6 starting slots)" in message
+    assert "season projections cover QB, RB, WR and TE only" in message
+    offense_only = service.unsupported_slots_message(
+        ["QB", "RB", "RB", "WR", "WR", "WR", "TE", "FLEX", "FLEX", "FLEX", "SUPER_FLEX", "REC_FLEX", "WRRB_FLEX"])
+    assert offense_only.startswith("Win Now can't model this league yet.")
+    assert "It starts 13 players and season projections support at most 12 starting slots." in offense_only
+    assert "IDP" not in offense_only
+
+
+def test_offense_only_lakeview_slots_pass_the_slot_gate():
+    actor, meta, fetch, _ = ffv3_source_fixture()
+    meta["roster_positions"] = list(LAKEVIEW_ROSTER_POSITIONS)
+    league, buyer, _ = service.load_league(actor, fetch)
+    assert league["roster_slots"] == LAKEVIEW_ROSTER_POSITIONS[:10]
+    assert len(league["roster_slots"]) == 10
+    assert buyer == 1

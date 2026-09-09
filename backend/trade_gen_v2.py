@@ -121,6 +121,7 @@ from .trade_service import (
     analyze_roster_strengths,
     elo_to_value,
     filler_ok,
+    first_round_pick_mask,
     infer_team_outlook,
     is_pick_asset,
     pick_swap_ok,
@@ -146,12 +147,22 @@ _ITER_BUDGET = 60_000
 # Value math — non-additive package valuation + directed gain
 # ---------------------------------------------------------------------------
 
-def consolidated_value(values: list[float]) -> float:
+def consolidated_value(values: list[float],
+                       exempt: list[bool] | None = None) -> float:
     """Non-additive package value (see module docstring for the curve).
 
     Single-asset sides are returned at raw value; multi-asset sides are
     discounted against their OWN best asset so low-value fillers contribute
     ≈ ``gen2_consol_floor`` of their raw value.
+
+    #427 — ``exempt`` (per-asset, same order as ``values``; built from ids by
+    `trade_service.first_round_pick_mask`): a flagged asset contributes its
+    FACE value; ``v_best`` is still the side's best over ALL values. None,
+    an all-False mask, or knob `stud_tax_exempt_first_round` ≤ 0 are
+    byte-identical to the pre-#427 curve. Same rule as `package_value_v2`,
+    applied here because gen-v2's ε gate and ±band price with THIS curve
+    while its served cards display `_consensus_packages` — the two must
+    not disagree about whether a first is a "quarter".
     """
     if not values:
         return 0.0
@@ -160,10 +171,22 @@ def consolidated_value(values: list[float]) -> float:
         return sum(values)
     gamma = _c("gen2_consol_gamma")
     floor = _c("gen2_consol_floor")
+    if exempt is not None and any(exempt) \
+            and _c("stud_tax_exempt_first_round") > 0:
+        return (sum(v for v, e in zip(values, exempt) if e)
+                + sum(v * (floor + (1.0 - floor) * (max(v, 0.0) / v_best) ** gamma)
+                      for v, e in zip(values, exempt) if not e))
     return sum(
         v * (floor + (1.0 - floor) * (max(v, 0.0) / v_best) ** gamma)
         for v in values
     )
+
+
+def _cval_side(ids: list[str], value_of) -> float:
+    """`consolidated_value` of one side, with the #427 first-round mask built
+    from its ids — the ONLY way gen-v2 prices a side from ids."""
+    return consolidated_value([value_of(p) for p in ids],
+                              exempt=first_round_pick_mask(ids))
 
 
 def side_gain(in_ids: list[str], out_ids: list[str], value_of) -> float:
@@ -174,8 +197,7 @@ def side_gain(in_ids: list[str], out_ids: list[str], value_of) -> float:
     team's ``side_gain ≥ gen2_epsilon`` and rank by the cycle's summed
     gains — identical semantics to the 2-team case below.
     """
-    return (consolidated_value([value_of(p) for p in in_ids])
-            - consolidated_value([value_of(p) for p in out_ids]))
+    return _cval_side(in_ids, value_of) - _cval_side(out_ids, value_of)
 
 
 # ---------------------------------------------------------------------------
@@ -616,8 +638,8 @@ def _pair_survivors(
         # with fairness_threshold=0.0: its built-in ratio gate is the
         # v2/v3 `_consensus_packages` notion, a different functional that
         # arm C has never gated on. The native band test binds instead.
-        _gc = consolidated_value([cval(p) for p in g])
-        _rc = consolidated_value([cval(p) for p in r])
+        _gc = _cval_side(g, cval)
+        _rc = _cval_side(r, cval)
         _hi = max(_gc, _rc)
         if _hi > 0 and min(_gc, _rc) / _hi < 1.0 - band:
             return False
@@ -699,8 +721,8 @@ def _pair_survivors(
 
                 # Gate c — consensus fairness band (defensibility, not
                 # acceptance): discounted consensus packages within ±band.
-                gc = consolidated_value([cval(p) for p in give_ids])
-                rc = consolidated_value([cval(p) for p in recv_ids])
+                gc = _cval_side(give_ids, cval)
+                rc = _cval_side(recv_ids, cval)
                 hi = max(gc, rc)
                 if hi > 0 and min(gc, rc) / hi < 1.0 - band:
                     report.band_rejects += 1
@@ -810,10 +832,8 @@ def _pair_survivors(
                             # quantities, kept for the candidate record.
                             user_gain = side_gain(s_recv, s_give, uval)
                             opp_gain = side_gain(s_give, s_recv, oval)
-                            gc = consolidated_value(
-                                [cval(p) for p in s_give])
-                            rc = consolidated_value(
-                                [cval(p) for p in s_recv])
+                            gc = _cval_side(s_give, cval)
+                            rc = _cval_side(s_recv, cval)
                             hi = max(gc, rc)
                             band_pos = 0.0 if hi <= 0 or band <= 0 \
                                 else (rc - gc) / (band * hi)
@@ -841,8 +861,7 @@ def _pair_survivors(
                     band_position=round(band_pos, 3),
                     accept_prior=round(accept_prior, 4),
                     score=round(score, 2),
-                    give_val_opp=round(
-                        consolidated_value([oval(p) for p in s_give]), 1),
+                    give_val_opp=round(_cval_side(s_give, oval), 1),
                 ))
 
     if ir_entrants:

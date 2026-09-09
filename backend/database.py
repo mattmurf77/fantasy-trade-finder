@@ -2817,6 +2817,7 @@ _MODEL_CONFIG_DEFAULTS = [
     ("package_discount_cap",     0.35,  "#214: cap on a side's total market-mode depth discount as a fraction of its naive sum"),
     ("package_bench_trade_wide", 1.0,   "2026-08-21 benchmark fix: >0 = depth-discount a multi-asset side that lacks the trade's best asset against the TRADE's best asset (v_max); <=0 = pre-fix own-max benchmark (arm A's pin)"),
     ("package_floor_cross",      0.40,  "2026-08-21 benchmark fix: contribution floor on the cross-benchmarked (stud-buying) side; inert while package_bench_trade_wide <= 0"),
+    ("stud_tax_exempt_first_round", 1.0, "#427: >0 = first-round picks (generic_pick_1_* and owned round-1 ids) count at FACE value inside a multi-asset side in every stud-tax mode (taxable subset keeps the depth curve + cap; crown credit unchanged); <=0 = pre-#427 math byte-identical (rollback lever, arm A's pin)"),
     ("fairness_floor_divergence", 0.55, "interview: consensus fairness gate for divergence cards = min(fairness_threshold, this) — extreme-case veto only"),
     # ── #189 — relaxed fallback for empty targeted sweeps ────────────────
     ("relaxed_fairness_threshold", 0.55, "#189: stage-1 fairness bar for the relaxed fallback pass on empty targeted jobs (never tightens below the caller's threshold)"),

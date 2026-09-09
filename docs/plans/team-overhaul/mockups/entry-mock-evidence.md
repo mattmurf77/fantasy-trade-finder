@@ -1,6 +1,6 @@
 # Team overhaul entry mock — proposal and evidence
 
-Created 2026-09-06. This is an additive entry-placement proposal for review, not an approved production change. The current local source and configuration ground the surrounding navigation; they do not verify the deployed build.
+Created 2026-09-06. This is an additive entry-placement proposal for review, not an approved production change. **Superseded 2026-09-08 by G-425 (#425/#426):** after seeing build 154 the operator moved the entry from "after Team review" to a full-width hero tile directly above the utility row, in the removed Draft cell's slot — see `docs/feedback/items/425-overhaul-tile-replaces-draft/prd.md`. The current local source and configuration ground the surrounding navigation; they do not verify the deployed build.
 
 ## Proposed placement and states
 

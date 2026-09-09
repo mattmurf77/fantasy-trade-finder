@@ -279,6 +279,36 @@ def test_propose_graphql_generic_error_raises_write():
     assert not isinstance(ei.value, SleeperAuthError)
 
 
+def test_graphql_error_detail_is_first_message():
+    """#428 — `detail` is Sleeper's own sentence (the first error's
+    `message`), not a JSON dump of the errors array: the fielded client
+    renders `detail` verbatim, and the 2026-09-08 report showed the user
+    `[{"message": "These draft picks cannot be traded.", "path": [...`."""
+    opener = _opener_returning({"errors": [
+        {"message": "These draft picks cannot be traded.", "path": ["propose_trade"],
+         "locations": [{"line": 2, "column": 3}]}]})
+    with pytest.raises(SleeperWriteError) as ei:
+        sw.propose_trade("tok", _REQ, _opener=opener)
+    assert ei.value.detail == "These draft picks cannot be traded."
+
+
+def test_graphql_error_auth_words_still_classified_from_full_dump():
+    """The auth-word scan keeps reading the WHOLE errors dump, so an auth
+    hint that lives outside the first `message` still classifies as auth;
+    and a message-less error keeps the JSON-dump fallback for `detail`."""
+    opener = _opener_returning({"errors": [
+        {"message": "request failed", "extensions": {"code": "UNAUTHENTICATED"}}]})
+    with pytest.raises(SleeperAuthError) as ei:
+        sw.propose_trade("tok", _REQ, _opener=opener)
+    assert ei.value.detail == "request failed"
+
+    opener = _opener_returning({"errors": [{"path": ["propose_trade"]}]})
+    with pytest.raises(SleeperWriteError) as ei:
+        sw.propose_trade("tok", _REQ, _opener=opener)
+    assert not isinstance(ei.value, SleeperAuthError)
+    assert ei.value.detail == json.dumps([{"path": ["propose_trade"]}])
+
+
 def test_propose_empty_token_raises_auth():
     with pytest.raises(SleeperAuthError):
         sw.propose_trade("", _REQ)

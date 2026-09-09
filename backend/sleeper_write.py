@@ -382,11 +382,20 @@ def _post_graphql(op: str, token: str, body: dict, *, _opener=None) -> dict:
         # GraphQL surfaces errors as HTTP 200 with an "errors" array.
         errors = parsed.get("errors") if isinstance(parsed, dict) else None
         if errors:
-            msg = json.dumps(errors)[:500]
-            low = msg.lower()
+            dump = json.dumps(errors)[:500]
+            # #428 — `detail` is Sleeper's own sentence (the first error's
+            # `message`, e.g. "These draft picks cannot be traded.") because
+            # the fielded client renders it verbatim; the JSON dump is the
+            # fallback when no error carries a message. The auth-word scan
+            # still reads the FULL dump so a hint outside `message` (an
+            # `extensions.code`, a `path`) keeps classifying as auth.
+            first = errors[0] if isinstance(errors, list) and errors else None
+            msg = (first.get("message") if isinstance(first, dict) else None)
+            detail = str(msg).strip()[:500] if msg else dump
+            low = dump.lower()
             if any(w in low for w in ("auth", "unauth", "token", "forbidden", "login")):
-                raise SleeperAuthError("Sleeper auth error", detail=msg)
-            raise SleeperWriteError("Sleeper GraphQL error", detail=msg)
+                raise SleeperAuthError("Sleeper auth error", detail=detail)
+            raise SleeperWriteError("Sleeper GraphQL error", detail=detail)
 
         _ob.ok(status=200, response_bytes=len(raw))
         node = ((parsed.get("data") or {}) if isinstance(parsed, dict) else {}).get(op) or {}

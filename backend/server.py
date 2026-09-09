@@ -1008,17 +1008,22 @@ def _evaluate_adjustments(give: list[str], recv: list[str],
     gvals = [seed_value(p) for p in give]
     rvals = [seed_value(p) for p in recv]
     v_max = max(gvals + rvals)
+    # #427: the same first-round mask _consensus_packages prices with, so a
+    # side of firsts shows no "Package depth" row (its depth delta is 0).
+    g_exempt = _trade_service_mod.first_round_pick_mask(give)
+    r_exempt = _trade_service_mod.first_round_pick_mask(recv)
 
     rows: dict[str, list[dict]] = {}
     naive_totals: dict[str, float] = {}
     # #214: other_values feeds the market-mode crown credit (both-sides
     # elite eligibility + naive-skew phase-out); heavy mode ignores it.
-    for side, vals, other, n_other in (("give", gvals, rvals, len(recv)),
-                                       ("receive", rvals, gvals, len(give))):
+    for side, vals, other, n_other, exempt in (
+            ("give", gvals, rvals, len(recv), g_exempt),
+            ("receive", rvals, gvals, len(give), r_exempt)):
         naive = round(sum(vals), 1)
-        base = pkg(vals, v_max)                      # depth weighting only
+        base = pkg(vals, v_max, exempt=exempt)       # depth weighting only
         full = pkg(vals, v_max, n_other=n_other,     # + crown premium, if any
-                   other_values=other)
+                   other_values=other, exempt=exempt)
         depth = round(base - naive, 1)
         crown = round(full - base, 1)
         side_rows = []
@@ -13268,6 +13273,22 @@ def _sync_mfl_owned_picks(league_id: str) -> int:
     return len(rows)
 
 
+def _sleeper_cached_draft_verdict(league_id: str):
+    """The #207 cached rookie-draft verdict off the leagues row as a
+    `DraftStatus`, or None when the league is unknown / the read fails.
+    #428 / D-189: the corroborating signal the pick paths consult ONLY when
+    the live `/drafts` read comes back empty — never a substitute for it."""
+    try:
+        ctx = get_league_draft_context(league_id)
+    except Exception:
+        log.warning("draft-context read failed for %s", league_id, exc_info=True)
+        return None
+    if not ctx or not ctx.get("status"):
+        return None
+    return _draft_status_mod.DraftStatus(ctx["status"],
+                                         ctx.get("confidence") or _draft_status_mod.LOW)
+
+
 def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
                               scoring_format: str, *,
                               rosters: list | None = None,
@@ -13286,9 +13307,10 @@ def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
 
     #228 — leagues whose CURRENT-season rookie draft is already complete
     must not carry that season's picks (they no longer exist as assets).
-    The drafts read is best-effort: a flake excludes nothing (today's
-    behavior); future seasons are always included. The replace-sync cleans
-    previously synced stale rows for the excluded season automatically.
+    The drafts read is best-effort: a flake excludes nothing — unless the
+    cached #207 verdict corroborates `drafted` (#428 / D-189, below); future
+    seasons are always included. The replace-sync cleans previously synced
+    stale rows for the excluded season automatically.
 
     `rosters` / `meta` let the session-init daemon hand over the v1 rosters
     and league-meta payloads it has ALREADY fetched (for the trade-block
@@ -13326,15 +13348,24 @@ def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
     except (TypeError, ValueError):
         _lsize = len(_prosters) or 12
     # #228 — current season's draft already held ⇒ exclude that season.
+    # #428 / D-189 — the live `/drafts` read is still authoritative whenever
+    # it answers. When it comes back EMPTY (flake or draft-less league) the
+    # cached #207 verdict is consulted: a positive `drafted` excludes the
+    # current season, so one flaked read can no longer re-populate a spent
+    # class for the whole league (the replace-sync made that league-wide).
+    # A flake with no corroboration keeps the D-089 fail-safe: exclude nothing.
     _drafts = _fetch_sleeper_drafts(league_id)
-    _exclude: set[int] = set()
-    for d in _drafts:
-        try:
-            if (isinstance(d, dict) and d.get("status") == "complete"
-                    and int(d.get("season") or 0) == _cur_season):
-                _exclude.add(_cur_season)
-        except (TypeError, ValueError):
-            continue
+    _exclude: set[int] = _draft_status_mod.completed_draft_seasons(_drafts, _cur_season)
+    if not _drafts:
+        _cached = _sleeper_cached_draft_verdict(league_id)
+        if _cached is not None and _cached.drafted:
+            _exclude.add(_cur_season)
+            log.info("  owned-pick sync for %s: drafts read empty — excluding "
+                     "%s on the cached %s/%s verdict (D-189)", league_id,
+                     _cur_season, _cached.status, _cached.confidence)
+    elif _exclude:
+        log.info("  owned-pick sync for %s: excluding %s — Sleeper reports the "
+                 "draft complete", league_id, sorted(_exclude))
     # D-090 — the SAME payload carries `draft_order`, so resolving the current
     # season's slot order costs zero additional upstream calls. Written even
     # when `picks.slot_labels` is off (it is inert data; only the label path is
@@ -18266,7 +18297,8 @@ def propose_trade_to_sleeper():
     maps to the deep-link fallback / reconnect prompt:
       404 feature_disabled | 403 verification_required | 409 sleeper_not_linked
       409 sleeper_expired | 503 sleeper_unconfigured | 502 sleeper_write_failed
-      422 sleeper_pick_unmapped | 422 sleeper_pick_not_owned | 400 bad_request
+      422 sleeper_pick_unmapped | 422 sleeper_pick_untradable (#428)
+      422 sleeper_pick_not_owned | 400 bad_request
     """
     if _TEST_MODE:
         # Fail closed: there is no legitimate automated send. Route-hit
@@ -18395,15 +18427,28 @@ def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_i
         # never follow the `picks.assign_tradeable` pricing flag.
         grid_rows = load_draft_picks(league_id, source=PICK_SOURCE_PLATFORM)
         traded = _fetch_sleeper_traded_picks(league_id)
-        encoded, unmapped, not_owned = _sleeper_encode_ftf_picks(
-            league_id, give_picks, recv_picks, my_roster_id, their_rid, grid_rows, traded)
-        # `detail` == `message` on both: fielded builds render `detail` in
+        # #428 — third ground truth: Sleeper's tradable window. A spent
+        # current-season pick keeps its grid row (one flaked drafts read
+        # re-populates it) AND its traded_picks holder, so only the live
+        # `/drafts` read (+ the D-189 cached fallback) can refuse it before
+        # Sleeper does. Two more reads, again only on a pick-bearing send.
+        window = _sleeper_pick_window_for_send(
+            league_id, _fetch_sleeper_league_meta(league_id), traded)
+        encoded, unmapped, untradable, not_owned = _sleeper_encode_ftf_picks(
+            league_id, give_picks, recv_picks, my_roster_id, their_rid, grid_rows, traded,
+            window=window)
+        # `detail` == `message` on all three: fielded builds render `detail` in
         # their catch-all, so a refusal without it reads "Please try again".
         if unmapped:
             _msg = ("Some draft picks in this trade couldn’t be matched to a pick in this "
                     "Sleeper league, so nothing was sent. Generic picks like “Early 1st” "
                     "can’t be sent — use a specific pick.")
             return {"error": "sleeper_pick_unmapped", "picks": unmapped,
+                    "message": _msg, "detail": _msg}, 422
+        if untradable:
+            _msg = _sleeper_untradable_copy(untradable, grid_rows, window)
+            return {"error": "sleeper_pick_untradable", "picks": untradable,
+                    "season_window": list(window),
                     "message": _msg, "detail": _msg}, 422
         if not_owned:
             _msg = ("Some draft picks in this trade have already changed hands, so nothing "
@@ -18434,10 +18479,15 @@ def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_i
         }, 409
     except _sleeper_write.SleeperWriteError as e:
         log.warning("sleeper propose write-failed [%s]: %s", e.kind, getattr(e, "detail", None))
+        # #428 — `detail` is Sleeper's own sentence since sleeper_write
+        # extracts the first GraphQL error `message`; `message` mirrors it so
+        # this body reads like the 422s (fielded builds render `detail`).
+        _detail = (str(getattr(e, "detail", "") or ""))[:200]
         return {
             "error": "sleeper_write_failed",
             "kind": e.kind,
-            "detail": (str(getattr(e, "detail", "") or ""))[:200],
+            "detail": _detail,
+            "message": _detail,
         }, 502
     # A real outbound Sleeper send happened — the gating guardrail counter.
     # Unreachable under FTF_TEST_MODE (fail-closed above); the import is lazy
@@ -30051,16 +30101,23 @@ def trades_validate():
     recv_picks = [p for p in receive if _is_ftf_pick_asset(league_id, p)]
     if give_picks or recv_picks:
         # Literal platform read, same reason as the propose route (#328 precedent).
-        _, unmapped, not_owned = _sleeper_encode_ftf_picks(
+        grid_rows = load_draft_picks(league_id, source=PICK_SOURCE_PLATFORM)
+        traded = _fetch_sleeper_traded_picks(league_id)
+        # #428 — the tradable window; `meta` is already in hand here, so this
+        # is one extra `/drafts` read, only on a pick-bearing validate.
+        window = _sleeper_pick_window_for_send(league_id, meta, traded)
+        _, unmapped, untradable, not_owned = _sleeper_encode_ftf_picks(
             league_id, give_picks, recv_picks, my_rid, their_rid,
-            load_draft_picks(league_id, source=PICK_SOURCE_PLATFORM),
-            _fetch_sleeper_traded_picks(league_id))
+            grid_rows, traded, window=window)
         if unmapped:
             n = len(unmapped)
             warnings.append({"code": "asset_unmapped", "severity": "blocking", "message": (
                 f"{n} draft pick{'s' if n != 1 else ''} in this trade can’t be sent to Sleeper "
                 "(generic picks like “Early 1st” name no real pick) — the send will be blocked "
                 f"rather than dropping {'them' if n != 1 else 'it'}.")})
+        if untradable:
+            warnings.append({"code": "pick_untradable", "severity": "blocking",
+                             "message": _sleeper_untradable_copy(untradable, grid_rows, window)})
         if not_owned:
             n = len(not_owned)
             warnings.append({"code": "pick_moved", "severity": "blocking", "message": (
@@ -30244,10 +30301,14 @@ def _mfl_encode_ftf_picks(row, league_id: str, pick_ids: list) -> tuple[dict, li
 # not a Sleeper roster id, and is not proof a Sleeper pick exists), and the
 # current holder is the live public `traded_picks` list overlaid on
 # "original roster holds by default". The give side must be held by the
-# proposer's roster, the receive side by the counterparty's. Anything that
-# can't be positively resolved — generic rungs included — hard-blocks the
-# send (422 sleeper_pick_unmapped / sleeper_pick_not_owned); the validate
-# route reports the same misses as blocking advisories. The encoding itself
+# proposer's roster, the receive side by the counterparty's. Since #428 a
+# THIRD truth sits between them: Sleeper's tradable window
+# (draft_status.sleeper_pick_window off the live `/drafts` read) — a spent
+# class keeps both its grid row and its traded_picks holder, so neither of
+# the first two can refuse it. Anything that can't be positively resolved —
+# generic rungs included — hard-blocks the send (422 sleeper_pick_unmapped /
+# sleeper_pick_untradable / sleeper_pick_not_owned); the validate route
+# reports the same misses as blocking advisories. The encoding itself
 # lives in sleeper_write.encode_draft_pick; NEVER a client-supplied string.
 
 def _sleeper_pick_holder_index(traded_picks: list) -> dict:
@@ -30270,13 +30331,21 @@ def _sleeper_pick_holder_index(traded_picks: list) -> dict:
 
 def _sleeper_encode_ftf_picks(league_id: str, give_picks: list, recv_picks: list,
                               my_rid: int, their_rid: int,
-                              grid_rows: list, traded_picks: list
-                              ) -> tuple[list, list, list]:
-    """FTF pick ids → Sleeper draft_picks strings, ground-truthed twice.
-    Returns (encoded, unmapped, not_owned). A pick lands in exactly one of the
-    three; `encoded` preserves give-then-receive order. The propose route
-    hard-blocks on either failure list (an offer must never silently lose an
-    asset); the validate route reports them as blocking advisories."""
+                              grid_rows: list, traded_picks: list,
+                              window: tuple[int, int] | None = None
+                              ) -> tuple[list, list, list, list]:
+    """FTF pick ids → Sleeper draft_picks strings, ground-truthed three ways.
+    Returns (encoded, unmapped, untradable, not_owned). A pick lands in
+    exactly one of the four; `encoded` preserves give-then-receive order. The
+    propose route hard-blocks on any failure list (an offer must never
+    silently lose an asset); the validate route reports them as blocking
+    advisories.
+
+    `window` (#428) is `draft_status.sleeper_pick_window(...)` — the classes
+    Sleeper will accept right now. Checked after the grid lookup (the row
+    proves the pick exists) and before the holder test (a spent pick's holder
+    is meaningless). None abstains: nothing is ever untradable on a window we
+    could not derive."""
     # One membership test covers every existence failure: generic rungs,
     # another league's id, a malformed id, a phantom / out-of-horizon /
     # completed-draft season, a round beyond draft_rounds — none has a row.
@@ -30284,6 +30353,7 @@ def _sleeper_encode_ftf_picks(league_id: str, give_picks: list, recv_picks: list
     index = _sleeper_pick_holder_index(traded_picks)
     encoded: list = []
     unmapped: list = []
+    untradable: list = []
     not_owned: list = []
     # Every roster-id COMPARISON is int vs int; `str` appears only inside the
     # holder-index key because the grid column is a String.
@@ -30298,10 +30368,17 @@ def _sleeper_encode_ftf_picks(league_id: str, give_picks: list, recv_picks: list
         try:
             season, rnd = int(row["season"]), int(row["round"])
             orig = str(row["original_roster_id"])
+        except (TypeError, ValueError, KeyError):
+            unmapped.append(pid)
+            continue
+        if not _draft_status_mod.sleeper_pick_tradable(season, window):
+            untradable.append(pid)
+            continue
+        try:
             holder = index.get((season, rnd, orig))
             if holder is None:
                 holder = int(orig)          # original roster holds by default
-        except (TypeError, ValueError, KeyError):
+        except (TypeError, ValueError):
             unmapped.append(pid)
             continue
         if holder != from_rid:
@@ -30312,7 +30389,43 @@ def _sleeper_encode_ftf_picks(league_id: str, give_picks: list, recv_picks: list
                 orig, season, rnd, from_rid, to_rid))
         except ValueError:
             unmapped.append(pid)
-    return encoded, unmapped, not_owned
+    return encoded, unmapped, untradable, not_owned
+
+
+def _sleeper_pick_window_for_send(league_id: str, meta, traded_picks: list
+                                  ) -> tuple[int, int] | None:
+    """#428 — the tradable window for a pick-bearing send/validate: one live
+    `/drafts` read (only ever called when the trade carries a pick), the
+    cached #207 verdict as the D-189 fallback when that read is empty, the
+    league's season from `meta`. None (abstain) when the season is unknown."""
+    season = (meta or {}).get("season") if isinstance(meta, dict) else None
+    drafts = _fetch_sleeper_drafts(league_id)
+    cached = _sleeper_cached_draft_verdict(league_id) if not drafts else None
+    return _draft_status_mod.sleeper_pick_window(
+        season, drafts, traded_picks, cached_verdict=cached)
+
+
+def _sleeper_untradable_copy(untradable: list, grid_rows: list,
+                             window: tuple[int, int]) -> str:
+    """The one sentence both routes show for a spent / out-of-window pick.
+    Count-aware like #413's copy; names the offending seasons and Sleeper's
+    current window so the user knows what to rebuild with. `window` is never
+    None here: `sleeper_pick_tradable` abstains on a None window, so
+    `untradable` is empty and neither route reaches this."""
+    grid = {str(r.get("pick_id")): r for r in (grid_rows or [])}
+    seasons: set[int] = set()
+    for pid in untradable:
+        try:
+            seasons.add(int(grid[str(pid)]["season"]))
+        except (TypeError, ValueError, KeyError):
+            continue
+    n = len(untradable)
+    ss = [str(s) for s in sorted(seasons)]
+    season_list = (" and ".join(ss) if len(ss) == 2 else ", ".join(ss)) or "Those"
+    first, last = window
+    return (f"{n} draft pick{'s' if n != 1 else ''} in this trade can’t be traded in "
+            f"Sleeper right now — {season_list} picks are no longer tradable (Sleeper is "
+            f"trading {first}–{last} picks). Rebuild the trade with one of those.")
 
 
 def _validate_mfl_trade(sess, user_id, row, league_id, their_user_id,

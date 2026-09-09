@@ -447,6 +447,60 @@ def test_cached_verdict_does_not_leak_into_the_sleeper_sync(
         db.set_league_draft_status(_LEAGUE, None, None)
 
 
+# ── #428 / D-189 — a flaked drafts read consults the cached #207 verdict ───
+# Narrows the D-089 "a flake excludes nothing" fail-safe with CORROBORATION:
+# when `/drafts` answers [] AND the leagues row already carries a positive
+# `drafted` verdict, the current season is excluded. A live `/drafts` answer
+# still wins outright (test_cached_verdict_does_not_leak_into_the_sleeper_sync
+# above is unchanged), and a flake with no verdict still shows the season.
+
+def _patch_sleeper_reads_for_sync(monkeypatch, drafts):
+    monkeypatch.setattr(srv, "_fetch_sleeper_traded_picks", lambda lid: [])
+    monkeypatch.setattr(
+        srv, "_fetch_league_rosters",
+        lambda lid: [{"roster_id": 1, "owner_id": "u1"},
+                     {"roster_id": 2, "owner_id": "u2"}])
+    monkeypatch.setattr(srv, "_fetch_sleeper_league_meta",
+                        lambda lid: {"season": "2026", "total_rosters": 2,
+                                     "settings": {"draft_rounds": 4}})
+    monkeypatch.setattr(srv, "_fetch_sleeper_drafts", lambda lid: drafts)
+
+
+def test_daemon_step_flaked_drafts_uses_cached_drafted_verdict(
+        _clean_league, monkeypatch):
+    """The #428 mechanism: one flaked `/drafts` read used to re-populate a
+    spent season for the whole league. With a cached `drafted` verdict the
+    sync now excludes it (RED before the fix: 2026 rows came back)."""
+    db.upsert_league(league_id=_LEAGUE, user_id="u1", name="Sleeper Test",
+                     season="2026", user_player_ids=[], opponent_rosters=[])
+    db.set_league_draft_status(_LEAGUE, "drafted", "high")
+    try:
+        _patch_sleeper_reads_for_sync(monkeypatch, drafts=[])
+        rows = srv._sync_sleeper_owned_picks(_LEAGUE, {}, "1qb_ppr")
+        assert rows is not None
+        assert all(r["season"] != 2026 for r in rows)
+        assert {r["season"] for r in rows} == {2027, 2028, 2029}
+    finally:
+        db.set_league_draft_status(_LEAGUE, None, None)
+
+
+def test_daemon_step_flaked_drafts_without_verdict_keeps_current_season(
+        _clean_league, monkeypatch):
+    """Pins the D-089 fail-safe: a flake with NO cached verdict (NULL,
+    `unknown`, or `not_drafted`) still shows the current season."""
+    db.upsert_league(league_id=_LEAGUE, user_id="u1", name="Sleeper Test",
+                     season="2026", user_player_ids=[], opponent_rosters=[])
+    try:
+        for status, conf in ((None, None), ("unknown", "low"),
+                             ("not_drafted", "high")):
+            db.set_league_draft_status(_LEAGUE, status, conf)
+            _patch_sleeper_reads_for_sync(monkeypatch, drafts=[])
+            rows = srv._sync_sleeper_owned_picks(_LEAGUE, {}, "1qb_ppr")
+            assert rows is not None and any(r["season"] == 2026 for r in rows), status
+    finally:
+        db.set_league_draft_status(_LEAGUE, None, None)
+
+
 # ── #200 — numeric platform ids must not hit the Sleeper grid sync ─────────
 # MFL native league ids are NUMERIC, so session-init's old
 # `str(league_id).isdigit()` gate misrouted them into the Sleeper pick sync:
