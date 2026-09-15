@@ -959,6 +959,17 @@ Index(
     deck_impressions_table.c.deck_job_id,
 )
 
+# Private debug evidence, content-addressed within one user/job. Core card
+# evidence and labels remain on deck_impressions; only debug snapshots expire.
+deck_diagnostic_snapshots_table = Table("deck_diagnostic_snapshots", metadata,
+    Column("snapshot_id", String, primary_key=True),
+    Column("user_id", String, nullable=False, index=True),
+    Column("deck_job_id", String, nullable=False, index=True),
+    Column("created_at", String, nullable=False, index=True),
+    Column("payload_json", Text, nullable=False),
+)
+
+
 # ── suggestion.telemetry — candidate-set reconstruction ─────────────────────
 # One row per completed generation job while the flag is on: the FULL action
 # set the serving policy chose from at ordering time — the post-gate,
@@ -6557,10 +6568,74 @@ def save_deck_impressions(rows: list[dict]) -> None:
     # (2026-09-07, docs/runbook.md § Common failure modes). Paging bounds the
     # statement size regardless of deck size; all-or-nothing semantics are
     # unchanged because every page shares the transaction.
+    from .deck_diagnostics import compact_rows
+    inline_bytes = 0
     with engine.begin() as conn:
         for start in range(0, len(rows), DECK_IMPRESSION_INSERT_ROWS):
-            conn.execute(insert(deck_impressions_table),
-                         rows[start:start + DECK_IMPRESSION_INSERT_ROWS])
+            # Decode only one page at a time on the small web instance. Hashes
+            # share immutable nodes across pages as well as within a page.
+            compacted, snapshots = compact_rows(rows[start:start + DECK_IMPRESSION_INSERT_ROWS])
+            _save_deck_diagnostic_snapshots(conn, snapshots)
+            conn.execute(insert(deck_impressions_table), compacted)
+            inline_bytes += sum(len((r.get("features_json") or "").encode()) for r in compacted)
+    log.info("deck storage: rows=%d inline_feature_bytes=%d", len(rows), inline_bytes)
+
+
+def _save_deck_diagnostic_snapshots(conn, snapshots):
+    # The same immutable node may occur in a retry or maintenance page.
+    if conn.dialect.name == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as upsert
+    else:
+        from sqlalchemy.dialects.sqlite import insert as upsert
+    for start in range(0, len(snapshots), DECK_IMPRESSION_INSERT_ROWS):
+        conn.execute(upsert(deck_diagnostic_snapshots_table).on_conflict_do_nothing(
+            index_elements=["snapshot_id"]),
+            snapshots[start:start + DECK_IMPRESSION_INSERT_ROWS])
+
+
+def load_deck_diagnostics(impression_id: str, user_id: str) -> dict | None:
+    """Owner-scoped diagnostic read; hot outcome/learning paths use compact features."""
+    from .deck_diagnostics import expand_features, is_reference, REFERENCE_KEY
+    i, d = deck_impressions_table, deck_diagnostic_snapshots_table
+    with engine.connect() as conn:
+        row = conn.execute(select(i.c.features_json, i.c.deck_job_id).where(
+            i.c.impression_id == impression_id, i.c.user_id == user_id)).first()
+        if row is None:
+            return None
+        features = json.loads(row.features_json or "{}")
+        def references(value):
+            if is_reference(value):
+                return {value[REFERENCE_KEY]}
+            if isinstance(value, dict):
+                return set().union(*(references(v) for v in value.values()))
+            if isinstance(value, list):
+                return set().union(*(references(v) for v in value))
+            return set()
+        snapshots, visited = {}, set()
+        pending = references(features)
+        while pending:
+            ids = sorted(pending)[:100]
+            visited.update(ids)
+            pending.difference_update(ids)
+            fetched = conn.execute(select(d.c.snapshot_id, d.c.payload_json).where(
+                d.c.user_id == user_id, d.c.deck_job_id == row.deck_job_id,
+                d.c.snapshot_id.in_(ids))).all()
+            for sid, payload in fetched:
+                snapshots[sid] = payload
+                pending.update(references(json.loads(payload)) - visited)
+    return expand_features(features, snapshots)
+
+
+def purge_deck_diagnostics(*, days: int = 14, batch_size: int = 500) -> int:
+    """Expire one bounded batch of debug nodes, never cards/valuations/outcomes."""
+    if days <= 0:
+        return 0
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    d = deck_diagnostic_snapshots_table
+    with engine.begin() as conn:
+        ids = select(d.c.snapshot_id).where(d.c.created_at < cutoff).order_by(
+            d.c.created_at, d.c.snapshot_id).limit(max(1, min(batch_size, 1000)))
+        return conn.execute(delete(d).where(d.c.snapshot_id.in_(ids))).rowcount or 0
 
 
 # ---------------------------------------------------------------------------

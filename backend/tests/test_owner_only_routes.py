@@ -82,7 +82,7 @@ def test_selected_exclusive_never_runs_controls_and_attributes_probability_one(e
     assert json.loads(run["arm_order"]) == ["owner_v1"]
     for row in rows(engine, db.deck_impressions_table):
         assert row["policy_version"] == server._OWNER_EXCLUSIVE_VERSION
-        assert json.loads(row["features_json"])["owner_experiment"]["exclusive"] is True
+        assert db.load_deck_diagnostics(row["impression_id"], row["user_id"])["owner_experiment"]["exclusive"] is True
     assert not any(k in json.dumps(response.json) for k in (
         "user_elo", "opponent_sources", "owner_evaluation", "manager_preferences"))
 

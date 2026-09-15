@@ -978,3 +978,55 @@ The security-data-hardening change prevents new bearer tokens entering analytics
 Analytics session IDs now use a domain-separated `analytics_v1:` SHA-256 representation (77 characters), distinct from authentication token hashes. Historical/raw and new/hashed identifiers do not correlate across the rollout boundary. The cleanup script prints counts only, never session tokens or database connection URLs.
 
 Deletion now covers credentials, account aliases, durable sessions, linked anonymous events and newer private tables. Export version 2 covers the expanded private scope and excludes credential material. Submitted feedback notes are removed; public league records, global aggregates, published ranking snapshots and other managers’ records can remain. `user_data_lifecycle` drains active account work and rejects queued stale work in the deployed single-worker process. Deletion times out without deleting if work cannot drain in 10 seconds; retry after the operation finishes. Do not increase the worker count or introduce external direct writers without distributed fencing (ADR-017). Historical poisoned imported membership rows are not repaired by server-authoritative session initialization and need an operator-reviewed resync.
+
+## Database storage incident and compaction (2026-09-15)
+
+The database was suspended at 98.3% of its 1 GB disk. The incident recovery
+expanded only storage to 5 GB and resumed it; compute stayed Basic 256 MB,
+autoscaling stayed off. Disk expansion is permanent. Recovery backup and PITR
+were verified before maintenance. See [scope/evidence](plans/db-storage-reduction/scope.md).
+
+New writes normalize the four large debug feature roots into
+`deck_diagnostic_snapshots`; they do not cap generated cards, sample impressions,
+change ranking, or remove valuations/outcomes. Inspect full diagnostics with
+`database.load_deck_diagnostics(impression_id, user_id)`; it fetches only nodes
+reachable from that owner's card. Missing/expired detail is explicitly marked.
+Account exports include the scoped nodes for offline reconstruction.
+
+Maintenance procedure:
+
+1. Confirm Render database identity, available status, actual capacity/free disk,
+   and recovery point. A full disk may require the minimal storage increase first.
+2. Take a private `pg_dump --format=custom --no-owner` backup using environment
+   credentials (never URLs in shell arguments), verify `pg_restore --list`, hash
+   it, and rehearse conversion against a private local restore. Backups contain
+   private user data: keep directories 0700/files 0600, outside version control.
+3. Deploy the new writer after CI. Configure `DATABASE_URL` securely in the
+   maintenance process; never call app init, seed scripts or tests on production.
+4. `python3 scripts/compact_deck_diagnostics.py --max-batches 1` is a read-only
+   dry run. Applying requires `--apply --backup-path <private-backup>
+   --backup-sha256 <verified-hash>`. Start with one batch, verify, then use up to
+   `--max-batches 2000`. Batches contain at most 100 rows. Resume using both
+   `--after-job` and `--after` from the last successful progress record. It creates
+   only the snapshot table if absent; no whole-app migration runs.
+5. Each batch locks selected rows, verifies exact JSON reconstruction, writes
+   snapshots and changes only features_json in one transaction. Optimistic
+   content checks guard the update too. Reruns are idempotent. Errors roll back
+   the batch and suppress SQL parameters/private payloads from console output.
+6. Verify row counts, full valuations/core-field hashes, and reconstructed
+   diagnostic samples. Measure BOTH relations and their indexes/TOAST. JSON
+   byte savings are not equivalent to physical savings. Monitor new writer logs
+   (`deck storage: rows=... inline_feature_bytes=...`) and cleanup failure logs.
+7. Ordinary VACUUM makes obsolete versions reusable; it need not shrink disk
+   files. Only after sufficient headroom, backup and verification, a separately
+   controlled VACUUM FULL can reclaim the rewritten impression relation. It
+   requires an exclusive lock and temporary disk space. Use a short lock_timeout,
+   a bounded statement_timeout, and one table at a time; never retry indefinitely
+   or run it reflexively on a full disk. Remeasure relation and Render disk bytes.
+
+Rollback: old application readers of core fields remain compatible, but old
+operator diagnostic queries require the new resolver. Before reverting storage
+code, reconstruct diagnostics from retained snapshot nodes (or the verified
+backup); pause expiry with FTF_DECK_DIAGNOSTIC_RETENTION_DAYS=0. Never wipe the
+snapshot table as a rollback. Expiry does not delete impressions, labels,
+valuations or receipts, and a paused policy cannot recover already-expired detail.

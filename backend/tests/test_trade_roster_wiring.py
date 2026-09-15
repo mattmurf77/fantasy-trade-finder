@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 
 import backend.server as server
+import backend.database as db
 from backend.trade_roster import Asset, Context, Rules, Team
 from backend.tests.test_trade_policy_wiring import run_job, JOB_ID
 
@@ -59,7 +60,7 @@ def test_roster_gate_runs_on_worker_and_stamps_frozen_shadow(enforce):
             if key == 'trade_roster_evaluation': return True
             return getattr(original, key)
     original = server.FLAGS
-    job, _, rows, _ = run_job(extra_patches=[
+    job, engine, rows, _ = run_job(extra_patches=[
         patch.object(server, 'FLAGS', FlagProxy()),
         patch.object(server, '_build_trade_roster_context', return_value=UnknownContext())])
     assert job['status'] == 'complete'
@@ -69,7 +70,8 @@ def test_roster_gate_runs_on_worker_and_stamps_frozen_shadow(enforce):
         assert not job['final_checks_pending']
     else:
         assert job['cards'] and rows
-        assert all(json.loads(r['features_json'])['roster_evaluation']['status'] == 'unknown' for r in rows)
+        with patch.object(db, 'engine', engine):
+            assert all(db.load_deck_diagnostics(r['impression_id'], r['user_id'])['roster_evaluation']['status'] == 'unknown' for r in rows)
 
 
 def test_final_roster_gate_rechecks_the_mutated_package_and_keeps_shadow_order():
