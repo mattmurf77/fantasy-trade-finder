@@ -20,6 +20,9 @@ Security remediation **shipped 2026-09-05** via PR #279: [deployment](security-d
 
 Owner interview implementation **first wave live; experimental policy on; iOS uploaded 2026-09-05**: [scope](owner-contracts/scope.md), [release](owner-contracts/release.md), [policy activation](owner-contracts/policy-activation.md). PR #281 merged; final CI green, Render live at `4026ebc8`. Owner separately authorized the personal-market switch; verified exactly one flag change, with all three generator arms and other settings preserved. iOS 1.17.0 (148) uploaded for TestFlight; Apple/tester confirmation, physical QA and unfinished engine/data work remain.
 
+Database storage incident **service recovered; storage fix validating 2026-09-15**:
+[status](db-storage-reduction/status.md), [scope](db-storage-reduction/scope.md).
+
 ## Status legend
 
 | Status | Means |

@@ -49,3 +49,10 @@ fixtures live in `backend/tests/fixtures/`.
 | `dp_values_history_capture.py` | Captures **dated** DynastyProcess value boards into `backend/tests/fixtures/dp-values-history/`. Module: `backend/dp_values_history.py` |
 
 These read public endpoints and write only local captures. Re-run only to refresh/extend fixtures.
+
+## Database storage maintenance
+
+`compact_deck_diagnostics.py` is read-only by default; `--apply` requires a
+verified backup path/checksum. It only normalizes existing impression debug
+features in bounded transactions. It is not a seeder and never initializes the
+application. See [runbook](../docs/runbook.md#database-storage-incident-and-compaction-2026-09-15).

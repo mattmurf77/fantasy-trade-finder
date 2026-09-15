@@ -274,7 +274,7 @@ def test_organic_owner_survives_legacy_personal_veto_and_context_is_captured_onc
     assert {r["model_arm"] for r in rows(engine, db.deck_impressions_table)} == {"owner_v1"}
     run_record = json.loads(rows(engine, db.bakeoff_runs_table)[0]["config_json"])["owner_request"]
     first_impression = rows(engine, db.deck_impressions_table)[0]
-    card_record = json.loads(first_impression["features_json"])["owner_request"]
+    card_record = db.load_deck_diagnostics(first_impression["impression_id"], first_impression["user_id"])["owner_request"]
     assert run_record["request_hash"] == card_record["request_hash"]
     assert run_record["captured_at"] == card_record["captured_at"]
     assert set(run_record["input"]["seed_elo"]) == set(SEED)

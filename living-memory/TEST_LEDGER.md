@@ -11,6 +11,22 @@
 
 ---
 
+## 2026-09-15 — Database storage incident / normalized diagnostics
+
+Service recovered after storage-only expansion 1→5 GB and resume; available,
+SQL read verified, actual disk 19.1%. Backup/archive listing + checksum verified,
+PITR available. No production data rewrite yet.
+
+Local backend: **5,950 passed / 1 skipped**, 376.61s, Python 3.14.4; focused
+codec/owner/roster regressions **83 passed**. Named sabotage disabling diagnostic
+normalization makes the payload-budget test RED; normal codec GREEN. Independent
+review: no blockers; cross-page dedup and selective resolver follow-ups covered.
+Full PostgreSQL backup rehearsal: all 67,159 core/feature hashes and 1,715 outcomes
+preserved; combined deck/snapshot physical allocation 41.8% smaller after local
+reclamation. PostgreSQL set-based 100-row update verified, exact reconstruction.
+Hosted Python 3.12 CI pending on final maintenance optimization; no code release
+claim yet. [Scope/status](../docs/plans/db-storage-reduction/status.md).
+
 ## 2026-09-08 — Feedback batch #422/#423/#424/#425/#426/#427/#428: five groups QA-green on `feat/feedback-2026-09-08`
 
 Release branch = session branch + five group branches merged (one docs-registry conflict, resolved by keeping both rows). PR #292; exact-head CI to be recorded before merge. Pipeline: one investigating planner per group → one build agent → two independent QA agents (round 2 where a confirmed finding existed). Evidence per group in `docs/feedback/items/<id>-*/` (build-report, qa-round-*).

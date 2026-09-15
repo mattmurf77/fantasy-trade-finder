@@ -408,3 +408,15 @@ Flag `overhaul.enabled`, contract [plans/team-overhaul/BUILD-CONTRACT.md](plans/
 `overhaul_service.py` (pure: pool enforcement, own-first recovery identity, subset enumeration, `package_hash`, bounded beam assembly over liked offers partitioned by exact give set, priorities and prepare-send validation, union capacity/legality classification, attempt state machine) → `overhaul_store.py` (SQLAlchemy Core over `overhauls`, `overhaul_offers`, `overhaul_roadmaps`, `overhaul_attempts`, `overhaul_reservations`; transactional reservation claim; compare-and-swap attempt transitions) → `overhaul_api.py` (`/api/overhauls/*`, session + verified gates, account/league scoping).
 
 Server-private helpers are injected, never imported: `_owner_generation_context` + `trade_gen_owner.generate_owner_trades` (candidates are generated per eligible-pool subset with `pinned_give_players=subset, exact_give=True, max_cards=3`; the plan outlook overrides the ctx dict only), `trade_card_to_dict` (public card JSON), `_build_trade_roster_context` + `trade_roster.evaluate` (final-union legality per counterparty; `legal_deficits:*`/`cuts_required` block, `backup_depth:*`/`deficits:*` are advisory at plan level — [ADR-020](adr/adr-020-overhaul-plan-roster-policy.md)), `_fetch_league_rosters`/`_roster_id_for_owner`/`load_draft_picks` (ownership snapshot and exact-pick identity), and `_sleeper_propose_core` — the body of `POST /api/trades/propose` extracted so the overhaul send loop reuses the identical provider path, error codes, `_record_trade_proposal` ledger write and gates. Generation is synchronous inside the request under a 20 s budget; prepare tokens and the refresh throttle are in-process (one gunicorn worker). No durable workers, no provider withdrawal, no MFL/ESPN sends in v1.
+
+### Shared deck diagnostics
+
+`database.save_deck_impressions` passes each bounded 100-row page through the
+pure `deck_diagnostics.compact_rows` codec, then atomically inserts private
+snapshot nodes and compact impression rows. Sharing is scoped to user/job;
+no cross-account blob ownership. The four large debugging feature subtrees use
+content-addressed references, while runtime learning/receipt fields and frozen
+valuations remain inline. Explicit owner-scoped diagnostic reads reconstruct
+snapshots; ordinary outcome/taste reads do not load unrelated debug context.
+The existing cleanup loop expires debug nodes only, with visible failure logs.
+See [data lifecycle](data-dictionary.md#deck-diagnostic-storage-2026-09-15).

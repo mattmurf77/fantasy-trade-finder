@@ -2732,6 +2732,17 @@ def _cleanup_loop() -> None:
         except Exception as e:
             log.warning("api-observability purge failed: %s", e)
 
+        # Debug evidence is separate from durable card/outcome/valuation rows.
+        # One bounded batch per tick; failures remain visible and retry next tick.
+        try:
+            from .database import purge_deck_diagnostics
+            days = int(os.environ.get("FTF_DECK_DIAGNOSTIC_RETENTION_DAYS", "14"))
+            purged = purge_deck_diagnostics(days=days)
+            if purged:
+                log.info("Purged %d expired deck diagnostic snapshots", purged)
+        except Exception:
+            log.exception("deck-diagnostic retention failed")
+
         # Trade jobs — three reasons to evict:
         #   (a) running jobs older than _JOB_HARD_TIMEOUT → mark as error so
         #       the frontend stops polling

@@ -1771,3 +1771,30 @@ One send attempt of one offer inside one batch. `attempt_id` unique; `batch_id`;
 ### `overhaul_reservations`
 
 One ACTIVE row per outgoing asset per seller per league while a send is live. `league_id`, `seller_user_id`, `asset_id`, `overhaul_id`, `package_id`, `batch_id`, `active` (1 while active, **NULL once released** so the unique constraint only binds active rows), `created_at`, `released_at`. Unique `(league_id, seller_user_id, asset_id, active)`. Claims are all-or-nothing inside one transaction; a conflict lists every reserved asset and writes nothing.
+
+## Deck diagnostic storage (2026-09-15)
+
+`deck_diagnostic_snapshots`: `snapshot_id` (SHA-256 primary key), `user_id`,
+`deck_job_id`, `created_at` (ISO UTC), `payload_json`. Each non-key column except
+payload is individually indexed; all columns are required. `metadata.create_all`
+adds this table on existing databases without an ALTER/backfill at startup.
+
+Only `features_json` keys `owner_request`, `owner_experiment`, `owner_generation`
+and `roster_evaluation` use `{"$deck_diagnostic_v1":"<snapshot_id>"}` references.
+The roots live separately; repeated dictionary/list subtrees of at least 1 KiB
+are shared within a single user/job. IDs hash the canonical original JSON and
+user/job scope. Snapshot and impression pages commit in one transaction. Legacy
+inline JSON remains readable. `database.load_deck_diagnostics(impression_id,
+user_id)` resolves exact frozen detail for its owner, with
+`diagnostic_status=expired_or_missing` when a referenced node has expired.
+No serving/evaluation path should treat that marker as a successful evaluation.
+
+Core numerical/taste features, `valuation_json`, assets, positions, propensities,
+all impressions and outcomes are unchanged. Generated/served records still do
+not establish an actual view; `deck_outcomes.action=viewed` remains explicit.
+Private account export includes snapshot rows; account deletion removes them
+alongside impressions. Diagnostics expire after 14 days by default; all nodes
+for a job share the original serve time. Retention deletes up to 500 nodes per
+five-minute cleanup tick. References persist as explicit evidence of expired
+detail. Full valuations and receipt/decision history do not expire under this
+policy. See the [incident scope](plans/db-storage-reduction/scope.md).

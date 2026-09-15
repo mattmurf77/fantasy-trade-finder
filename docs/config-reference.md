@@ -1598,3 +1598,13 @@ Known unused K/DEF coefficients are normalized only for absent slots; active K/D
 [Source restrictions](integrations/sleeper.md#weekly-season-projection-feed) · [build status and calibration limits](plans/win-now/BUILD.md)
 
 `FTF_BUILD_MODE=1` is set only for the build-time player-cache import in `build.sh`; it suppresses Win Now worker startup. Do not set it on the serving process.
+
+### Deck diagnostic retention
+
+`FTF_DECK_DIAGNOSTIC_RETENTION_DAYS` defaults to `14`; `0` disables expiry.
+It governs only `deck_diagnostic_snapshots`, using original serve time, and is
+read on every five-minute cleanup tick. Invalid values log a cleanup failure
+and retry next tick. Up to 500 nodes are removed per tick. Impression rows,
+outcomes, frozen valuations, assets and core learning features are retained.
+Setting `0` pauses future expiry; it does not recover already-expired data.
+There is no generation/card-limit or analytics sampling change.
