@@ -1,47 +1,30 @@
 # Database storage reduction — status
 
-2026-09-15: production service recovered; normalization and retention are live; historical compaction in progress.
+2026-09-15: released; full historical compaction and physical reclamation completed.
 
-- Verified database suspension and 98.3% disk usage. Expanded 1→5 GB, resumed;
-  Render available/read-only SQL passed, actual disk approximately 19.1%.
-  Basic 256 MB compute and disabled autoscaling preserved.
-- Private full custom-format backup verified with pg_restore listing and SHA256;
-  PITR also available. Backup and sensitive row hashes stay outside this repository.
-- Full-job real-data codec benchmark: 67.9–76.9% serialized feature reduction,
-  exact roundtrips. These are not physical storage savings; actual writer uses
-  bounded pages.
-- Full local PostgreSQL backup rehearsal: 67,159 impression rows and 1,715
-  outcomes preserved; every reconstructed feature SHA and every other core-field
-  MD5 matched. 45,733 rows normalized, 73,146 unique snapshot nodes. After local
-  reclamation: combined deck/snapshot relations 432,029,696 bytes versus
-  742,465,536 before (41.8% smaller); whole local DB 530,347,711 versus
-  840,472,255 bytes (36.9% smaller). Physical production results remain to measure.
-- Optimized maintenance to one bounded PostgreSQL UPDATE FROM VALUES per page,
-  avoiding one network round trip per row. Verified on 100 actual local restored
-  records with exact roundtrip; rehearsal transaction rolled back.
-- Local full backend run: 5,950 passed / 1 skipped (376.61s, Python 3.14.4).
-  Focused regression run: 83 passed (includes owner/roster consumers and codec).
-  Final cross-page/selective-reader changes will also run on Python 3.12 hosted CI.
-- Named sabotage `DIAGNOSTIC_KEYS=()` makes the storage-budget regression fail;
-  restoring the production codec passes. No source mutation retained.
-- Independent subagent review found no blocking data-loss, privacy, or atomicity
-  issue. Added cross-page coverage and changed resolver to fetch only reachable
-  nodes in bounded queries in response to review.
+- Database recovered from suspension / 98.3% disk use by expanding storage 1→5 GB
+  and resuming. Compute remains Basic 256 MB; disk autoscaling remains disabled.
+- Normalized diagnostics and 14-day debug-only retention are live through PR #293;
+  bounded multi-value snapshot inserts are live through PR #294 (`82c5f118`).
+- Both exact-head and post-merge CI runs passed. Latest exact-head backend result:
+  **5,953 passed / 1 skipped**; web, mobile and test-ID checks also green.
+- Verified private full backup and complete local PostgreSQL rehearsal before
+  production changes. All 67,159 rows scanned; 45,733 compacted; 73,146 shared nodes.
+- After full compaction, every original core-row hash and all 1,715 outcome hashes
+  matched; 100 recent and 100 normalized diagnostic samples reconstructed exactly.
+  The checksum-guarded operator batch also had all 100 records read back exactly.
+- Bounded VACUUM FULL of deck_impressions succeeded in 111.43 seconds. Database
+  allocation fell from 895,088,319 to 539,281,087 bytes (39.8% smaller).
+  Deck plus shared diagnostics fell from 787,722,240 to 431,964,160 bytes
+  (45.2% smaller). Core records, valuations and outcomes were retained.
+- Final post-reclamation preservation checks passed again. Render at 16:55 UTC:
+  available, 20.03% disk used, 45.76% RAM used, deployed commit verified LIVE,
+  root and feature-flags HTTP 200. Illustrative headroom: about 350,000 additional
+  stored records / 380 generation runs with a 20% reserve. Core records keep growing.
 
-Release: [PR #293](https://github.com/mattmurf77/fantasy-trade-finder/pull/293),
-merge `09fe46e144f70ed0c8cbbebfbdc75970b97cdd15`, verified LIVE on Render
-2026-09-15 15:54 UTC. Root and feature-flags HTTP 200; schema present.
-[Exact-head CI](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/34989930181)
-passed all four jobs; backend 5,952 passed / 1 skipped on Python 3.12.
-[Post-merge CI](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/34991453398)
-also passed.
+[Release evidence and capacity assumptions](release.md) · [Scope](scope.md)
 
-First production batch: 37 rows normalized, all 67,159 core-row hashes and 1,715
-outcomes preserved; 100 recent and 37 normalized diagnostic reconstructions match.
-Bulk compaction found psycopg2 ON CONFLICT executemany performs per-node network
-round trips. Follow-up uses explicit bounded multi-VALUES inserts (100 nodes /
-500 parameters per statement), preserving conflict handling and transaction scope.
-Ten focused tests passed; 100 restored PostgreSQL rows roundtripped exactly in a
-rolled-back transaction. Bulk maintenance resumed from its last committed cursor.
-Follow-up hosted CI, final production compaction, reclamation and metrics pending.
-Scope: [scope.md](scope.md).
+2026-09-16 prevention recheck: deployed writer/cleanup revision remains LIVE;
+14-day retention default active, zero expired nodes pending, health checks pass.
+No new records available for a post-cleanup write sample. No additional code
+release needed; final documentation publication authorized. See release evidence.

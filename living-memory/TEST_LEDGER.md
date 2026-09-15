@@ -11,26 +11,35 @@
 
 ---
 
+## 2026-09-16 — Storage prevention deployment recheck
+
+Read-only verification: `82c5f118` remains LIVE; root/feature-flags HTTP 200;
+no retention override (14-day default), zero expired snapshot nodes pending.
+No new recommendation rows since September 15 17:00 UTC to sample. Deployed
+write path compacts new rows atomically; cleanup thread invokes expiry. No code
+change required. Documentation-only publication authorized; diff checks passed.
+[Evidence](../docs/plans/db-storage-reduction/release.md).
+
 ## 2026-09-15 — Database storage incident / normalized diagnostics
 
-Service recovered after storage-only expansion 1→5 GB and resume; available,
-SQL read verified, actual disk 19.1%. Backup/archive listing + checksum verified,
-PITR available. Initial production compaction verified all 67,159 core hashes and
-1,715 outcomes, plus 100 recent / 37 normalized diagnostic reconstructions.
+Released PRs #293 and #294; exact latest deployed commit `82c5f118`. All four
+exact-head CI jobs and post-merge CI passed. Latest backend: **5,953 passed / 1
+skipped** on Python 3.12, 696.88s. Local diagnostics: 10 passed; named sabotage
+(disabling normalization) makes the payload-budget regression fail.
 
-Local backend: **5,950 passed / 1 skipped**, 376.61s, Python 3.14.4; focused
-codec/owner/roster regressions **83 passed**. Named sabotage disabling diagnostic
-normalization makes the payload-budget test RED; normal codec GREEN. Independent
-review: no blockers; cross-page dedup and selective resolver follow-ups covered.
-Full PostgreSQL backup rehearsal: all 67,159 core/feature hashes and 1,715 outcomes
-preserved; combined deck/snapshot physical allocation 41.8% smaller after local
-reclamation. PostgreSQL set-based 100-row update verified, exact reconstruction.
-Hosted Python 3.12 CI: **5,952 passed / 1 skipped**, all four jobs green on
-[run 34989930181](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/34989930181).
-PR #293 merged as `09fe46e1`; Render LIVE at 15:54 UTC, root / feature flags 200.
-Post-merge CI 34991453398 also green. Follow-up explicit multi-VALUES snapshot
-inserts: 10 focused tests passed; local PostgreSQL 100-row exact roundtrip with
-rollback passed. Full production maintenance and follow-up CI in progress. [Scope/status](../docs/plans/db-storage-reduction/status.md).
+Verified private full backup and PostgreSQL restore/rehearsal before production.
+All 67,159 records scanned, 45,733 compacted, 73,146 shared nodes. Complete core
+hashes and 1,715 outcomes preserved; 100 recent + 100 normalized diagnostic
+samples match. Operator SHA-256 guard independently reviewed; local 100-row
+roundtrip/rollback, Unicode parity and incorrect-hash rejection passed, then all
+100 first production-page records read back exactly.
+
+Bounded production VACUUM FULL succeeded in 111.43s. Whole database allocation
+895,088,319→539,281,087 bytes (39.8% smaller); combined recommendation/snapshot
+relations 787,722,240→431,964,160 bytes (45.2% smaller). Recovery increased disk
+1→5 GB; compute unchanged. Final health and capacity metrics are recorded in
+[release evidence](../docs/plans/db-storage-reduction/release.md).
+
 
 ## 2026-09-08 — Feedback batch #422/#423/#424/#425/#426/#427/#428: five groups QA-green on `feat/feedback-2026-09-08`
 
