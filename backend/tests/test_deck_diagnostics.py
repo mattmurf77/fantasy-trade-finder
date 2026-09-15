@@ -176,3 +176,20 @@ def test_postgres_maintenance_uses_one_bounded_update(monkeypatch):
     assert compact_batch(Connection(), rows())[0] == 12
     assert len(calls) == 1
     assert 'FROM (VALUES' in calls[0]
+
+
+def test_snapshot_insert_uses_bounded_multivalues():
+    """ON CONFLICT executemany otherwise makes one WAN round trip per node."""
+    from sqlalchemy.dialects import postgresql
+    statements = []
+    class Connection:
+        dialect = postgresql.dialect()
+        def execute(self, statement, *parameters):
+            assert not parameters, 'executemany reintroduces per-node round trips'
+            statements.append(statement.compile(dialect=self.dialect))
+    snapshots = [dict(snapshot_id=str(i), user_id='u', deck_job_id='j',
+                      created_at='2026-09-15T00:00:00+00:00', payload_json='{}')
+                 for i in range(215)]
+    db._save_deck_diagnostic_snapshots(Connection(), snapshots)
+    assert [len(s.params) for s in statements] == [500, 500, 75]
+    assert all('ON CONFLICT (snapshot_id) DO NOTHING' in str(s) for s in statements)

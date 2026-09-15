@@ -15,7 +15,8 @@
 
 Service recovered after storage-only expansion 1→5 GB and resume; available,
 SQL read verified, actual disk 19.1%. Backup/archive listing + checksum verified,
-PITR available. No production data rewrite yet.
+PITR available. Initial production compaction verified all 67,159 core hashes and
+1,715 outcomes, plus 100 recent / 37 normalized diagnostic reconstructions.
 
 Local backend: **5,950 passed / 1 skipped**, 376.61s, Python 3.14.4; focused
 codec/owner/roster regressions **83 passed**. Named sabotage disabling diagnostic
@@ -24,8 +25,12 @@ review: no blockers; cross-page dedup and selective resolver follow-ups covered.
 Full PostgreSQL backup rehearsal: all 67,159 core/feature hashes and 1,715 outcomes
 preserved; combined deck/snapshot physical allocation 41.8% smaller after local
 reclamation. PostgreSQL set-based 100-row update verified, exact reconstruction.
-Hosted Python 3.12 CI pending on final maintenance optimization; no code release
-claim yet. [Scope/status](../docs/plans/db-storage-reduction/status.md).
+Hosted Python 3.12 CI: **5,952 passed / 1 skipped**, all four jobs green on
+[run 34989930181](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/34989930181).
+PR #293 merged as `09fe46e1`; Render LIVE at 15:54 UTC, root / feature flags 200.
+Post-merge CI 34991453398 also green. Follow-up explicit multi-VALUES snapshot
+inserts: 10 focused tests passed; local PostgreSQL 100-row exact roundtrip with
+rollback passed. Full production maintenance and follow-up CI in progress. [Scope/status](../docs/plans/db-storage-reduction/status.md).
 
 ## 2026-09-08 — Feedback batch #422/#423/#424/#425/#426/#427/#428: five groups QA-green on `feat/feedback-2026-09-08`
 

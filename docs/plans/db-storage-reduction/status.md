@@ -1,6 +1,6 @@
 # Database storage reduction — status
 
-2026-09-15: production service recovered; code built, validation/release in progress.
+2026-09-15: production service recovered; normalization and retention are live; historical compaction in progress.
 
 - Verified database suspension and 98.3% disk usage. Expanded 1→5 GB, resumed;
   Render available/read-only SQL passed, actual disk approximately 19.1%.
@@ -28,6 +28,20 @@
   issue. Added cross-page coverage and changed resolver to fetch only reachable
   nodes in bounded queries in response to review.
 
-Release gates: current-SHA hosted CI,
-production deployment verification, bounded maintenance, physical reclamation
-and final metrics remain pending. Scope: [scope.md](scope.md).
+Release: [PR #293](https://github.com/mattmurf77/fantasy-trade-finder/pull/293),
+merge `09fe46e144f70ed0c8cbbebfbdc75970b97cdd15`, verified LIVE on Render
+2026-09-15 15:54 UTC. Root and feature-flags HTTP 200; schema present.
+[Exact-head CI](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/34989930181)
+passed all four jobs; backend 5,952 passed / 1 skipped on Python 3.12.
+[Post-merge CI](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/34991453398)
+also passed.
+
+First production batch: 37 rows normalized, all 67,159 core-row hashes and 1,715
+outcomes preserved; 100 recent and 37 normalized diagnostic reconstructions match.
+Bulk compaction found psycopg2 ON CONFLICT executemany performs per-node network
+round trips. Follow-up uses explicit bounded multi-VALUES inserts (100 nodes /
+500 parameters per statement), preserving conflict handling and transaction scope.
+Ten focused tests passed; 100 restored PostgreSQL rows roundtripped exactly in a
+rolled-back transaction. Bulk maintenance resumed from its last committed cursor.
+Follow-up hosted CI, final production compaction, reclamation and metrics pending.
+Scope: [scope.md](scope.md).
