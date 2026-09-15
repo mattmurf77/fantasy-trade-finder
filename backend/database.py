@@ -6588,9 +6588,11 @@ def _save_deck_diagnostic_snapshots(conn, snapshots):
     else:
         from sqlalchemy.dialects.sqlite import insert as upsert
     for start in range(0, len(snapshots), DECK_IMPRESSION_INSERT_ROWS):
-        conn.execute(upsert(deck_diagnostic_snapshots_table).on_conflict_do_nothing(
-            index_elements=["snapshot_id"]),
-            snapshots[start:start + DECK_IMPRESSION_INSERT_ROWS])
+        # Explicit VALUES avoids psycopg2 executemany's per-row round trips
+        # for ON CONFLICT inserts without RETURNING.
+        conn.execute(upsert(deck_diagnostic_snapshots_table).values(
+            snapshots[start:start + DECK_IMPRESSION_INSERT_ROWS]
+        ).on_conflict_do_nothing(index_elements=["snapshot_id"]))
 
 
 def load_deck_diagnostics(impression_id: str, user_id: str) -> dict | None:
