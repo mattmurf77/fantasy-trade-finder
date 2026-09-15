@@ -9,7 +9,16 @@
   PITR also available. Backup and sensitive row hashes stay outside this repository.
 - Full-job real-data codec benchmark: 67.9–76.9% serialized feature reduction,
   exact roundtrips. These are not physical storage savings; actual writer uses
-  bounded pages. Local full-backup PostgreSQL rehearsal in progress.
+  bounded pages.
+- Full local PostgreSQL backup rehearsal: 67,159 impression rows and 1,715
+  outcomes preserved; every reconstructed feature SHA and every other core-field
+  MD5 matched. 45,733 rows normalized, 73,146 unique snapshot nodes. After local
+  reclamation: combined deck/snapshot relations 432,029,696 bytes versus
+  742,465,536 before (41.8% smaller); whole local DB 530,347,711 versus
+  840,472,255 bytes (36.9% smaller). Physical production results remain to measure.
+- Optimized maintenance to one bounded PostgreSQL UPDATE FROM VALUES per page,
+  avoiding one network round trip per row. Verified on 100 actual local restored
+  records with exact roundtrip; rehearsal transaction rolled back.
 - Local full backend run: 5,950 passed / 1 skipped (376.61s, Python 3.14.4).
   Focused regression run: 83 passed (includes owner/roster consumers and codec).
   Final cross-page/selective-reader changes will also run on Python 3.12 hosted CI.
@@ -19,6 +28,6 @@
   issue. Added cross-page coverage and changed resolver to fetch only reachable
   nodes in bounded queries in response to review.
 
-Release gates: current-SHA hosted CI, local PostgreSQL full-data reconstruction,
+Release gates: current-SHA hosted CI,
 production deployment verification, bounded maintenance, physical reclamation
 and final metrics remain pending. Scope: [scope.md](scope.md).

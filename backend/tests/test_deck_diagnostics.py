@@ -159,3 +159,20 @@ def test_roundtrip_across_insert_pages_and_mixed_packing(engine):
         assert db.load_deck_diagnostics(old['impression_id'], 'u') == json.loads(old['features_json'])
     with engine.connect() as c:
         assert c.scalar(select(func.count()).select_from(db.deck_impressions_table)) == 215
+
+
+def test_postgres_maintenance_uses_one_bounded_update(monkeypatch):
+    from types import SimpleNamespace
+    from sqlalchemy.dialects import postgresql
+    from scripts.compact_deck_diagnostics import compact_batch
+    calls = []
+    class Connection:
+        dialect = postgresql.dialect()
+        def execute(self, statement):
+            sql = str(statement.compile(dialect=self.dialect))
+            calls.append(sql)
+            return SimpleNamespace(rowcount=12)
+    monkeypatch.setattr(db, '_save_deck_diagnostic_snapshots', lambda *args: None)
+    assert compact_batch(Connection(), rows())[0] == 12
+    assert len(calls) == 1
+    assert 'FROM (VALUES' in calls[0]

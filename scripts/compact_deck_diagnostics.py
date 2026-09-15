@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 def compact_batch(conn, rows):
-    from sqlalchemy import update
+    from sqlalchemy import update, values, column, String, Text
     from backend import database as db
     from backend.deck_diagnostics import compact_rows, expand_features
     compacted, snapshots = compact_rows(rows)
@@ -29,13 +29,26 @@ def compact_batch(conn, rows):
             raise ValueError('diagnostic roundtrip mismatch; batch not applied')
         changes.append((old, new))
     db._save_deck_diagnostic_snapshots(conn, snapshots)
-    for old, new in changes:
+    if changes and conn.dialect.name == 'postgresql':
+        # One bounded set-based UPDATE, not 100 WAN round trips per page.
+        incoming = values(column('iid', String), column('before', Text),
+                          column('after', Text), name='compacted').data([
+            (old['impression_id'], old['features_json'], new['features_json'])
+            for old, new in changes])
         result = conn.execute(update(db.deck_impressions_table).where(
-            db.deck_impressions_table.c.impression_id == old['impression_id'],
-            db.deck_impressions_table.c.features_json == old['features_json']).values(
-                features_json=new['features_json']))
-        if result.rowcount != 1:
+            db.deck_impressions_table.c.impression_id == incoming.c.iid,
+            db.deck_impressions_table.c.features_json == incoming.c.before).values(
+                features_json=incoming.c.after))
+        if result.rowcount != len(changes):
             raise ValueError('impression changed during maintenance; batch rolled back')
+    else:
+        for old, new in changes:
+            result = conn.execute(update(db.deck_impressions_table).where(
+                db.deck_impressions_table.c.impression_id == old['impression_id'],
+                db.deck_impressions_table.c.features_json == old['features_json']).values(
+                    features_json=new['features_json']))
+            if result.rowcount != 1:
+                raise ValueError('impression changed during maintenance; batch rolled back')
     return len(changes), len(snapshots)
 
 

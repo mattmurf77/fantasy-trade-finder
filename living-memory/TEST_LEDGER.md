@@ -21,7 +21,10 @@ Local backend: **5,950 passed / 1 skipped**, 376.61s, Python 3.14.4; focused
 codec/owner/roster regressions **83 passed**. Named sabotage disabling diagnostic
 normalization makes the payload-budget test RED; normal codec GREEN. Independent
 review: no blockers; cross-page dedup and selective resolver follow-ups covered.
-Hosted Python 3.12 CI and PostgreSQL backup rehearsal pending; no code release
+Full PostgreSQL backup rehearsal: all 67,159 core/feature hashes and 1,715 outcomes
+preserved; combined deck/snapshot physical allocation 41.8% smaller after local
+reclamation. PostgreSQL set-based 100-row update verified, exact reconstruction.
+Hosted Python 3.12 CI pending on final maintenance optimization; no code release
 claim yet. [Scope/status](../docs/plans/db-storage-reduction/status.md).
 
 ## 2026-09-08 — Feedback batch #422/#423/#424/#425/#426/#427/#428: five groups QA-green on `feat/feedback-2026-09-08`
