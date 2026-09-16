@@ -1,0 +1,86 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/css/tokens.css"><title>Fleeced — step illustration options</title><link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet"><style>
+*{box-sizing:border-box}body{margin:0;background:#0C0E11;color:#ECEFF4;font:14px/1.5 Archivo,sans-serif}main{max-width:1060px;margin:40px auto;padding:0 24px}h1,h2{font-family:'Barlow Condensed',sans-serif;text-transform:uppercase}h1{font-size:40px;margin:8px 0}h2{font-size:26px;margin:0 0 8px}p{color:#97A1AE}section{border-top:1px solid #59647A;padding:28px 0}.label,.number{font:500 11px/1.5 'IBM Plex Mono',monospace;color:#97A1AE}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:20px}.mini{border:1px solid #59647A;background:#13161B;border-radius:4px;padding:16px}.mini svg{display:block;width:100%;height:70px;fill:none;stroke:#97A1AE;stroke-width:1.5;margin:8px 0}.mini strong{display:block}.mini p{font-size:12px;margin:8px 0 0}.recommend{color:#56D9EC}a{color:#56D9EC}.strip .mini{border:0;border-right:1px solid #59647A;border-radius:0;background:transparent}.strip .mini:last-child{border:0}.strip{gap:0;border:1px solid #59647A;border-radius:4px}.b-demo{display:grid;grid-template-columns:1fr 1fr;gap:24px}.b-demo .grid{gap:8px}.b-demo .mini{padding:8px}.b-demo svg{height:40px}.b-demo .mini:nth-child(2){border-color:#56D9EC}.b-demo .mini p{display:none}.result{padding:20px;margin-top:20px;background:#13161B;border:1px solid #22C55E;border-radius:4px}.result strong{display:block;font-size:18px}.result p:last-child{color:#22C55E}@media(max-width:650px){.b-demo{grid-template-columns:1fr}.mini{padding:8px}.mini svg{height:40px}}
+/* Connected storyboard built from miniature Chalkline UI components. */
+.lp-storyboard { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; list-style: none; margin: 0; padding: 0; border: 1px solid var(--line-strong); border-radius: var(--r-md); background: var(--ink-1); }
+.lp-story-step { min-width: 0; padding: 12px; position: relative; }
+.lp-story-step + .lp-story-step { border-left: 1px solid var(--line-strong); }
+.lp-story-step + .lp-story-step::before { content: '→'; position: absolute; left: -8px; top: 15px; width: 16px; background: var(--ink-1); color: var(--chalk-dim); text-align: center; font-size: 12px; }
+.lp-story-heading { display: flex; gap: 8px; align-items: baseline; margin-bottom: 12px; }
+.lp-story-heading > span { font: 500 11px/1.4 var(--font-data); color: var(--chalk-dim); }
+.lp-story-heading h2 { font: 600 12px/1.4 var(--font-ui); margin: 0; }
+.lp-app-mini { height: 146px; background: var(--ink-0); border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; }
+.lp-mini-bar { display: flex; gap: 12px; align-items: center; padding: 6px 8px; height: 28px; border-bottom: 1px solid var(--line); color: var(--chalk-dim); font: 500 11px/1.4 var(--font-ui); white-space: nowrap; }
+.lp-mini-active { color: var(--ice); border-bottom: 2px solid var(--ice); }
+.lp-mini-player { display: grid; grid-template-columns: 1fr auto; margin: 6px; padding: 4px 6px; border: 1px solid var(--line); border-left: 3px solid var(--wr); border-radius: var(--r-sm); background: var(--ink-1); }
+.lp-mini-selected { border-top-color: var(--ice); border-right-color: var(--ice); border-bottom-color: var(--ice); }
+.lp-mini-name { font: 600 11px/1.4 var(--font-ui); }
+.lp-mini-rank { font: 500 11px/1.4 var(--font-data); color: var(--wr); }
+.lp-mini-meta { font: 400 11px/1.4 var(--font-ui); color: var(--chalk-dim); grid-column: 1 / -1; margin-top: 4px; }
+.lp-mini-meta b { font-weight: 400; color: var(--first-1); border: 1px solid var(--first-1); padding: 0 4px; margin-left: 4px; border-radius: var(--r-xs); }
+.lp-mini-compare { display: grid; grid-template-columns: 1fr auto auto; gap: 10px 6px; padding: 8px; align-items: center; font: 400 11px/1.4 var(--font-ui); }
+.lp-mini-compare > span { color: var(--chalk-dim); }
+.lp-mini-compare strong { font-weight: 600; }
+.lp-mini-compare b { font: 500 11px/1.4 var(--font-data); color: var(--chalk-dim); }
+.lp-mini-compare b.lp-mini-high { color: var(--flare); }
+.lp-mini-insight { margin: 4px 8px; color: var(--flare); font: 400 11px/1.4 var(--font-ui); }
+.lp-mini-trade { display: grid; grid-template-columns: 1fr 1fr; padding: 12px 8px; gap: 8px; }
+.lp-mini-trade > div + div { border-left: 1px solid var(--line); padding-left: 8px; }
+.lp-mini-trade span { display: block; color: var(--chalk-dim); font: 400 11px/1.4 var(--font-ui); }
+.lp-mini-trade strong { display: block; font: 600 11px/1.4 var(--font-ui); margin-top: 8px; border-left: 3px solid var(--wr); padding-left: 4px; }
+.lp-mini-result { display: flex; align-items: center; gap: 4px; border-top: 1px solid var(--line); margin: 0 8px; padding-top: 8px; color: var(--pos); font: 400 11px/1.4 var(--font-ui); }
+.lp-mini-result svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 1.75; fill: none; flex-shrink: 0; }
+.lp-story-step > p { font: 400 11px/1.5 var(--font-ui); color: var(--chalk-dim); margin: 8px 0 0; }
+@media (max-width: 960px) {
+  .lp-story-step { padding: 6px; }
+  .lp-story-heading { gap: 4px; margin-bottom: 6px; flex-wrap: wrap; }
+  .lp-story-heading h2 { font-size: 11px; }
+  .lp-app-mini { height: 62px; }
+  .lp-mini-bar, .lp-mini-meta, .lp-mini-secondary, .lp-mini-insight, .lp-mini-compare > span, .lp-mini-result, .lp-story-step > p { display: none; }
+  .lp-mini-player { padding: 4px; margin: 6px 3px; grid-template-columns: 1fr; }
+  .lp-mini-compare { padding: 6px 3px; gap: 8px 3px; grid-template-columns: 1fr auto; }
+  .lp-mini-compare > :nth-child(3n) { display: none; }
+  .lp-mini-trade { grid-template-columns: 1fr; padding: 4px; gap: 4px; }
+  .lp-mini-trade > div { display: flex; align-items: center; gap: 4px; }
+  .lp-mini-trade > div + div { border: 0; padding: 0; }
+  .lp-mini-trade span { font-size: 11px; }
+  .lp-mini-trade strong { margin: 0; padding-left: 3px; }
+  .lp-mini-trade span { display: none; }
+  .lp-mini-trade > div::before { content: '↑'; color: var(--chalk-dim); font-size: 11px; }
+  .lp-mini-trade > div + div::before { content: '↓'; color: var(--pos); }
+  .cb-left.auth-card .cb-sub { margin-bottom: 8px; }
+  .lp-connect { padding-top: 8px; }
+}
+
+.lp-storyboard{margin-top:20px}</style><main><div class="label">FLEECED / LANDING EXPLORATION</div><h1>Three ways to show the steps.</h1><p>Keep the story visual and the sign-in visible. These use the same Chalkline line illustrations.</p>
+<section><h2>A / Three static miniatures</h2><p>Each step explains itself at a glance. Simple, but each thumbnail has limited room for detail.</p><div class="grid"><div class="mini"><span class="number">01</span><svg viewBox="0 0 120 40" aria-hidden="true"><rect x="12" y="5" width="96" height="30" rx="3"/><path d="M22 14h5m8 0h40M22 25h5m8 0h28M88 28V12m-5 5 5-5 5 5"/></svg><strong>Your rankings</strong><p>Put your player opinions in order.</p></div><div class="mini"><span class="number">02</span><svg viewBox="0 0 120 40" aria-hidden="true"><rect x="5" y="5" width="40" height="30" rx="3"/><rect x="75" y="5" width="40" height="30" rx="3"/><path d="M14 14h20m-20 11h13m57-11h20m-20 11h13M48 12l24 16M48 28l24-16"/></svg><strong>Both boards</strong><p>Spot where you and a leaguemate disagree.</p></div><div class="mini"><span class="number">03</span><svg viewBox="0 0 120 40" aria-hidden="true"><rect x="12" y="5" width="96" height="30" rx="3"/><path d="M22 15h25m-5-4 5 4-5 4m36 7H53m5-4-5 4 5 4m28-7 4 4 8-9"/></svg><strong>Real offers</strong><p>Get a swap that improves both boards.</p></div></div></section>
+<section><h2>B / Click a step, see the story <span class="recommend">— Selected, refined on landing</span></h2><p>The refined landing uses one readable, app-style illustration above sign-in. Selecting a numbered step changes that illustration in place, including on phones.</p><div class="b-demo"><div class="grid"><div class="mini"><span class="number">01</span><svg viewBox="0 0 120 40" aria-hidden="true"><rect x="12" y="5" width="96" height="30" rx="3"/><path d="M22 14h5m8 0h40M22 25h5m8 0h28M88 28V12m-5 5 5-5 5 5"/></svg><strong>Your rankings</strong><p>Put your player opinions in order.</p></div><div class="mini"><span class="number">02</span><svg viewBox="0 0 120 40" aria-hidden="true"><rect x="5" y="5" width="40" height="30" rx="3"/><rect x="75" y="5" width="40" height="30" rx="3"/><path d="M14 14h20m-20 11h13m57-11h20m-20 11h13M48 12l24 16M48 28l24-16"/></svg><strong>Both boards</strong><p>Spot where you and a leaguemate disagree.</p></div><div class="mini"><span class="number">03</span><svg viewBox="0 0 120 40" aria-hidden="true"><rect x="12" y="5" width="96" height="30" rx="3"/><path d="M22 15h25m-5-4 5 4-5 4m36 7H53m5-4-5 4 5 4m28-7 4 4 8-9"/></svg><strong>Real offers</strong><p>Get a swap that improves both boards.</p></div></div><div class="result"><span class="label">02 / BOTH BOARDS</span><strong>You prefer Wilson.<br>They prefer Olave.</strong><p>Different rankings reveal a trade.</p><p>Both get the player they value more.</p></div></div><p><a href="/">Try the implemented clickable version →</a></p></section>
+<section><h2>C / Connected app storyboard</h2><p>Miniature Chalkline ranking and trade cards use the app’s actual palette: cyan selection, blue WR rails, teal pick tiers, pink ranking differences, and green mutual value. Illustrative values, not app screenshots.</p>        <ol class="lp-storyboard" aria-label="How Fleeced works — illustrative app views">
+          <li class="lp-story-step">
+            <div class="lp-story-heading"><span>01</span><h2>Your rankings</h2></div>
+            <div class="lp-app-mini">
+              <div class="lp-mini-bar"><span class="lp-mini-active">WR</span><span>RB</span><span>QB</span><span>TE</span></div>
+              <div class="lp-mini-player lp-mini-selected"><span class="lp-mini-name">G. Wilson</span><span class="lp-mini-rank">#8</span><span class="lp-mini-meta">WR <b>1st</b></span></div>
+              <div class="lp-mini-player lp-mini-secondary"><span class="lp-mini-name">C. Olave</span><span class="lp-mini-rank">#14</span><span class="lp-mini-meta">WR <b>1st</b></span></div>
+            </div>
+            <p>Make the board yours.</p>
+          </li>
+          <li class="lp-story-step">
+            <div class="lp-story-heading"><span>02</span><h2>Both boards</h2></div>
+            <div class="lp-app-mini">
+              <div class="lp-mini-bar">Personal rankings</div>
+              <div class="lp-mini-compare"><span>WR</span><span>You</span><span>Them</span><strong>Wilson</strong><b class="lp-mini-high">#8</b><b>#14</b><strong>Olave</strong><b>#14</b><b class="lp-mini-high">#8</b></div>
+              <div class="lp-mini-insight">Different favorites</div>
+            </div>
+            <p>Find where you disagree.</p>
+          </li>
+          <li class="lp-story-step">
+            <div class="lp-story-heading"><span>03</span><h2>Real offers</h2></div>
+            <div class="lp-app-mini">
+              <div class="lp-mini-bar">Trade found</div>
+              <div class="lp-mini-trade"><div><span>You send</span><strong>Olave</strong></div><div><span>You get</span><strong>Wilson</strong></div></div>
+              <div class="lp-mini-result"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg><span>Both gain value</span></div>
+            </div>
+            <p>Start with a mutual win.</p>
+          </li>
+        </ol>
+<p><a href="/">View this version on the landing page →</a></p></section></main></html>

@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/tokens.css">
-  <link rel="stylesheet" href="/css/styles.css">
+  <link rel="stylesheet" href="/css/styles.css?v=landing-release-20260916">
   <style>
     /* League-card rank chip (#14/#21 — flag league.power_rankings).
        Badge construction per docs/design/components.md: 1px border in
@@ -51,6 +51,7 @@
        LOGIN SCREEN — Concept B: Split Hero
   ════════════════════════════════════════════════════ -->
   <div class="auth-screen cb-page" id="auth-screen">
+    <header class="lp-header"><a class="lp-wordmark" href="/" aria-label="Fleeced home">FLEECED<span>.</span></a><a href="/faq.html">Questions? Read the FAQ <span aria-hidden="true">↗</span></a></header>
     <div class="cb-hero">
 
       <!-- Left: Value prop + connect -->
@@ -66,11 +67,41 @@
           <span class="hl">Trades That Actually Work</span>
         </h1>
 
-        <p class="cb-sub">
+        <p class="cb-sub lp-desktop-copy">
           Fleeced compares how you and your leaguemates value every player,
           then finds trades where both sides come out ahead. No more "Hey! What do you want for X player?"
         </p>
 
+        <p class="cb-sub lp-mobile-copy">Fleeced finds trades where both sides come out ahead.</p>
+
+        <div class="lp-step-picker" role="group" aria-label="Explore how Fleeced works">
+          <button type="button" data-landing-step="1" aria-pressed="false" aria-controls="landing-step-content"><span>01</span>Your rankings, in draft pick value</button>
+          <button type="button" data-landing-step="2" aria-pressed="true" aria-controls="landing-step-content"><span>02</span>We compare your board with leaguemates</button>
+          <button type="button" data-landing-step="3" aria-pressed="false" aria-controls="landing-step-content"><span>03</span>We match you leaguemates</button>
+        </div>
+        <p class="lp-format-note">Rank players by rookie draft pick value. Built for your dynasty league.</p>
+      </div>
+
+      <figure id="landing-step-visual" class="ranking-graphic lp-ui-graphic" aria-labelledby="ranking-graphic-title" aria-describedby="ranking-graphic-note">
+        <div id="landing-step-content" aria-live="polite" aria-atomic="true"><h2 id="ranking-graphic-title">We find the differences</h2><div class="lp-ui-body"><div class="lp-ui-comparison"><span>Player</span><span>You</span><span>Them</span><strong>Garrett Wilson <small>WR</small></strong><b class="lp-ui-prefer">#8</b><b>#14</b><strong>Chris Olave <small>WR</small></strong><b>#14</b><b class="lp-ui-prefer">#8</b></div></div><p class="lp-ui-note">You prefer Wilson. They prefer Olave.</p></div>
+        <figcaption id="ranking-graphic-note">Illustrative app views and rankings.</figcaption>
+      </figure>
+<template id="landing-step-template-1"><h2 id="ranking-graphic-title">Your rankings</h2><div class="lp-ui-body"><div class="lp-ui-top"><span class="lp-ui-selected">WR</span><span>RB</span><span>QB</span><span>TE</span><span class="lp-ui-end">Rookie pick value</span></div><div class="lp-ui-player lp-ui-chosen"><span class="lp-ui-position">WR</span><strong>Garrett Wilson</strong><span class="lp-ui-tier" title="First-round rookie draft pick value" aria-label="First-round rookie draft pick value">1st</span><b>#8</b></div><div class="lp-ui-player"><span class="lp-ui-position">WR</span><strong>Chris Olave</strong><span class="lp-ui-tier" title="First-round rookie draft pick value" aria-label="First-round rookie draft pick value">1st</span><b>#14</b></div></div><p class="lp-ui-note">Set player tiers by rookie draft pick value.</p></template>
+<template id="landing-step-template-2"><h2 id="ranking-graphic-title">We find the differences</h2><div class="lp-ui-body"><div class="lp-ui-comparison"><span>Player</span><span>You</span><span>Them</span><strong>Garrett Wilson <small>WR</small></strong><b class="lp-ui-prefer">#8</b><b>#14</b><strong>Chris Olave <small>WR</small></strong><b>#14</b><b class="lp-ui-prefer">#8</b></div></div><p class="lp-ui-note">You prefer Wilson. They prefer Olave.</p></template>
+<template id="landing-step-template-3"><h2 id="ranking-graphic-title">A trade with two winners.</h2><div class="lp-ui-body lp-ui-trade"><div><span>You get</span><strong>Garrett Wilson</strong><b>Your #14 → #8</b></div><div><span>They get</span><strong>Chris Olave</strong><b>Their #14 → #8</b></div></div><div class="lp-market-verdict"><div class="lp-market-head"><span>Market fairness <small>· example</small></span><strong>Even</strong></div><div class="lp-market-bar" role="img" aria-label="Illustrative market value: even. Scale from minus one first-round pick to plus one first-round pick, with second-round pick landmarks."><div class="lp-market-rail"></div><div class="lp-market-fill"></div><i class="lp-market-tick lp-market-minus"></i><i class="lp-market-tick lp-market-plus"></i><i class="lp-market-center"></i></div><div class="lp-market-scale" aria-hidden="true"><span>−1st</span><span>−2nd</span><span>Even</span><span>+2nd</span><span>+1st</span></div><div class="lp-market-ends"><span>They win</span><span>You win</span></div></div></template>
+
+
+
+
+    </div>
+
+    <section class="lp-connect" aria-labelledby="lp-connect-title">
+      <div class="lp-connect-intro">
+        <span class="rg-label">Bring your league</span>
+        <h2 id="lp-connect-title">Find your next trade.</h2>
+        <p>Choose your platform to get started.</p>
+        <a href="/ranking-method.html">How rankings work <span aria-hidden="true">→</span></a>
+      </div>
         <!-- Connect — platform chips + per-platform entry.
              Landing platform options (flag landing.platform_options): the web
              mirror of mobile SignInScreen's Sleeper · ESPN · MFL chip row and
@@ -79,7 +110,7 @@
              ESPN/MFL swap it for that platform's panel. The row stays hidden
              until _applyPlatformOptionsFlag() confirms the flag AND ≥2 live
              platforms — one chip is no choice. -->
-        <div class="cb-connect-wrap" style="margin-top: 18px;">
+        <div class="cb-connect-wrap">
 
           <div class="cb-platform-row hidden" id="platform-row" role="group" aria-label="League platform">
             <button type="button" class="cb-platform-chip on" id="platform-chip-sleeper" aria-pressed="true" onclick="selectEntryPlatform('sleeper')">Sleeper</button>
@@ -133,8 +164,12 @@
             <button class="cb-go-btn" id="auth-btn" onclick="handleLogin()">Verify &#8594;</button>
           </div>
           <div class="auth-error" id="auth-error" role="status" aria-live="polite"></div>
-          <p class="cb-auth-help">Use the Fleeced browser extension and <a href="https://sleeper.com/login" target="_blank" rel="noopener noreferrer">sign in to Sleeper</a> in another tab, then verify your username. <a href="https://github.com/mattmurf77/fantasy-trade-finder/releases/tag/extension-v0.1.1" target="_blank" rel="noopener noreferrer">Download and install the extension</a>.</p>
-          <p class="cb-auth-help">Your password stays with Sleeper. Fleeced stores its sign-in token encrypted to verify your account and send trades you approve. <a href="/privacy.html">Privacy</a></p>
+          <p class="cb-auth-help">Connect securely with the Fleeced browser extension.</p>
+          <details class="lp-login-help">
+            <summary>How Sleeper sign-in works</summary>
+            <p class="cb-auth-help"><a href="https://github.com/mattmurf77/fantasy-trade-finder/releases/tag/extension-v0.1.1" target="_blank" rel="noopener noreferrer">Install the extension</a>, then <a href="https://sleeper.com/login" target="_blank" rel="noopener noreferrer">sign in to Sleeper</a> in another tab and verify your username here.</p>
+            <p class="cb-auth-help">Your password stays with Sleeper. Fleeced stores its sign-in token encrypted to verify your account and send trades you approve. <a href="/privacy.html">Privacy</a></p>
+          </details>
 
           </div>
 
@@ -225,6 +260,12 @@
             <div class="cb-entry-list hidden" id="mfl-league-list"></div>
           </div>
 
+          <div class="cb-entry-panel hidden" id="entry-mobile" role="status">
+            <h3 class="lp-mobile-title" id="entry-mobile-title">Continue in the Fleeced app</h3>
+            <p class="cb-auth-help" id="entry-mobile-description"></p>
+            <a class="lp-mobile-link" href="/contact.html">Request TestFlight access <span aria-hidden="true">→</span></a>
+          </div>
+
           <!-- Shared team-claim step (both platforms): the preview's teams;
                picking one mints the session and runs the canonical import. -->
           <div class="cb-entry-panel hidden" id="entry-teams">
@@ -243,13 +284,6 @@
             </a>
           </div>
 
-          <div class="cb-taglines">
-            <span class="cb-tagline"><span class="cb-tagline-icon"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 17V9M10 17V3M17 17v-6"/></svg></span> Rank</span>
-            <span class="cb-tagline-sep"></span>
-            <span class="cb-tagline"><span class="cb-tagline-icon"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M8 12a4 4 0 010-6l2-2a4 4 0 016 6l-1 1M12 8a4 4 0 010 6l-2 2a4 4 0 01-6-6l1-1"/></svg></span> Match</span>
-            <span class="cb-tagline-sep"></span>
-            <span class="cb-tagline"><span class="cb-tagline-icon"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 7h11M11 3l4 4-4 4M17 13H6M9 17l-4-4 4-4"/></svg></span> Trade</span>
-          </div>
           <div class="legal-links-row">
             <a href="/faq.html" class="faq-link">FAQ</a>
             <a href="/contact.html" class="faq-link">Contact</a>
@@ -257,111 +291,6 @@
             <a href="/terms" class="faq-link">Terms</a>
           </div>
         </div>
-      </div>
-
-    </div>
-
-    <!-- ═══════════════════════════════════════════════════
-         P2-3 · Below-the-fold: what this is and how it works.
-         Landing was one viewport with no feature section at all.
-
-         No app-promotion CTA here on purpose: there is no TestFlight or
-         App Store link anywhere in this repo to point one at (see
-         docs/feedback/items/239-invite-universal-links/status.md), and a
-         dead "become a tester" button is worse than none. The moment a
-         link exists, this is where it goes — see plan.md P4-2.
-
-         Every claim below is behavior that actually ships. Do not add a
-         capability here before it is real on the client.
-    ════════════════════════════════════════════════════ -->
-    <section class="lp-below" aria-labelledby="lp-how-title">
-      <div class="lp-wrap">
-
-        <h2 class="lp-title" id="lp-how-title">How it works</h2>
-        <p class="lp-lede">
-          Most trade tools hand everyone the same number and call the argument settled.
-          This one starts from the fact that you and your leaguemate genuinely disagree —
-          and looks for the trades that disagreement makes possible.
-        </p>
-
-        <ol class="lp-steps">
-          <li class="lp-step">
-            <span class="lp-step-n" aria-hidden="true">1</span>
-            <h3 class="lp-step-t">Connect your league</h3>
-            <p class="lp-step-d">
-              Verify Sleeper with the browser extension, or connect ESPN and MyFantasyLeague in the Fleeced mobile app.
-              Your roster, your leaguemates&#8217; rosters, and your league&#8217;s scoring
-              settings come across as they are.
-            </p>
-          </li>
-          <li class="lp-step">
-            <span class="lp-step-n" aria-hidden="true">2</span>
-            <h3 class="lp-step-t">Build your board</h3>
-            <p class="lp-step-d">
-              Answer quick 3-player matchups and an Elo engine turns those comparisons into
-              real valuations. It starts from consensus values, so the board is useful before
-              you answer anything and becomes yours as you go. Prefer to skip the questions?
-              Drag a list, or set positional tiers instead.
-            </p>
-          </li>
-          <li class="lp-step">
-            <span class="lp-step-n" aria-hidden="true">3</span>
-            <h3 class="lp-step-t">Find trades that both sides want</h3>
-            <p class="lp-step-d">
-              Your board gets compared against each leaguemate&#8217;s, and you get packages
-              where <em>both</em> teams gain in their own values &mdash; not deals that are
-              only good if the other manager is asleep.
-            </p>
-          </li>
-          <li class="lp-step">
-            <span class="lp-step-n" aria-hidden="true">4</span>
-            <h3 class="lp-step-t">Send it for real</h3>
-            <p class="lp-step-d">
-              Propose the trade straight into your actual league without leaving the app.
-              No retyping it into Sleeper and hoping you got the pick years right.
-            </p>
-          </li>
-        </ol>
-
-        <h2 class="lp-title lp-title-sep">Why the number is yours</h2>
-        <div class="lp-points">
-          <div class="lp-point">
-            <h3 class="lp-point-t">Your rankings, not a market average</h3>
-            <p class="lp-point-d">
-              A consensus chart tells you what everyone already thinks. It cannot tell you
-              that you are high on a rookie and your leaguemate is not &mdash; which is the
-              only reason a trade ever happens.
-            </p>
-          </div>
-          <div class="lp-point">
-            <h3 class="lp-point-t">Both boards, every time</h3>
-            <p class="lp-point-d">
-              Every suggestion is scored twice: once in your values and once in theirs. A deal
-              that only wins on one board is not a trade, it is a pitch that gets declined.
-            </p>
-          </div>
-          <div class="lp-point">
-            <h3 class="lp-point-t">Picks priced like assets</h3>
-            <p class="lp-point-d">
-              Rookie picks carry real, tiered values that move with the round and the year,
-              so a package with a future second in it gets read honestly instead of rounded off.
-            </p>
-          </div>
-          <div class="lp-point">
-            <h3 class="lp-point-t">Built for dynasty</h3>
-            <p class="lp-point-d">
-              Superflex and TE-premium change what a quarterback is worth, so they change what
-              you get shown. Your league&#8217;s format is an input, not a footnote.
-            </p>
-          </div>
-        </div>
-
-        <p class="lp-foot">
-          Questions about how the values are built? <a href="/ranking-method.html">Read the method</a>,
-          or start with the <a href="/faq.html">FAQ</a>.
-        </p>
-
-      </div>
     </section>
 
   </div>
@@ -1336,7 +1265,8 @@
 
   <script src="/js/events.js"></script>
   <script src="/js/browser-auth.js"></script>
-  <script src="/js/app.js"></script>
+  <script src="/js/app.js?v=landing-release-20260916"></script>
   <script src="/js/win-now.js"></script>
+  <script src="/js/landing-steps.js?v=landing-release-20260916"></script>
 </body>
 </html>
