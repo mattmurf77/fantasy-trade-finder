@@ -299,7 +299,8 @@
       document.getElementById('auth-btn').disabled = false;
       document.getElementById('auth-btn').textContent = 'Verify with Sleeper →';
       entryReset();
-      setTimeout(() => document.getElementById('username-input').focus(), 100);
+      // Let visitors read the landing page before choosing a sign-in platform.
+      // Automatic focus opens the phone keyboard and scrolls past the value prop.
     }
 
     function hideAuthScreen() {
@@ -1044,11 +1045,10 @@
         _applyPlatformOptionsFlag();
       } catch (_) { /* flags may not have loaded yet */ }
     }
-    // Run now (in case flags already populated) and again after a beat
-    // (covers the async boot race).
+    // Apply on settlement even when the network takes longer than one second.
+    // Also apply now in case flags settled before this listener was installed.
+    document.addEventListener('ftf:flags-ready', _applyLandingFlags);
     _applyLandingFlags();
-    setTimeout(_applyLandingFlags, 250);
-    setTimeout(_applyLandingFlags, 1000);
 
 
     // ═══════════════════════════════════════════════════════════════
@@ -1249,10 +1249,8 @@
     }
 
     function selectEntryPlatform(p) {
-      if (p !== 'sleeper') {
-        document.getElementById('auth-error').textContent = 'For ESPN or MyFantasyLeague, verify and link your account in the Fleeced mobile app. Contact us for TestFlight access.';
-        return;
-      }
+      if (!['sleeper', 'espn', 'mfl'].includes(p)) return;
+      if (p !== 'sleeper' && (!window.FTF_FLAG('landing.platform_options') || !window.FTF_FLAG(`${p}.link`))) return;
       _entryPlatformSel = p;
       _entryPreview = null;
       for (const id of ['sleeper', 'espn', 'mfl']) {
@@ -1260,6 +1258,12 @@
         if (!chip) continue;
         chip.classList.toggle('on', id === p);
         chip.setAttribute('aria-pressed', id === p ? 'true' : 'false');
+      }
+      if (p !== 'sleeper') {
+        document.getElementById('entry-mobile-title').textContent = `Use ${_PLATFORM_LABEL[p]} with Fleeced`;
+        document.getElementById('entry-mobile-description').textContent = `Sign in and verify your ${_PLATFORM_LABEL[p]} account in the Fleeced mobile app. Browser sign-in is not available for this platform yet.`;
+        _entryShowStep('mobile');
+        return;
       }
       _entryShowStep(p);
       // Focus the panel's primary field. For ESPN under the sign-in-primary
@@ -1270,7 +1274,7 @@
       if (focusEl) setTimeout(() => focusEl.focus(), 50);
     }
     function _entryShowStep(step) {
-      for (const id of ['sleeper', 'espn', 'mfl', 'teams']) {
+      for (const id of ['sleeper', 'espn', 'mfl', 'teams', 'mobile']) {
         const el = document.getElementById(`entry-${id}`);
         if (el) el.classList.toggle('hidden', id !== step);
       }

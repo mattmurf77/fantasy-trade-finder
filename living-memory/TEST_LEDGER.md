@@ -1,3 +1,43 @@
+## 2026-09-15 — Comparison/matching labels (local)
+
+Updated comparison heading and step 03 to operator wording. Web structural and responsive checks passed. Not deployed.
+
+## 2026-09-15 — Equal landing tiles and ranking heading (local)
+
+Equal columns/wrapping labels and YOUR RANKINGS heading. 195/195 web checks, responsive step checks, and actual in-app visual verification passed. Not deployed.
+
+## 2026-09-15 — Production-style market bar and comparison copy (local)
+
+Ported current mobile TradeValueBar’s pick scale and Even geometry into the illustrative offer. Exact tile-02 copy: “We compare your board with leaguemates”. Versioned preview assets to avoid stale CSS. 195 web checks and responsive/keyboard checks pass; actual in-app browser inspected. No deployment.
+
+## 2026-09-15 — Ranking label and market-fairness illustration (local)
+
+Updated actual step 01 tile to operator wording; added separate illustrative market-fairness bar in Real offers. 195/195 web structural checks and keyboard/responsive step checks pass at 1366×768, 390×844, 320×640. No live market evaluation or deployment.
+
+## 2026-09-15 — Landing rookie pick value copy (local)
+
+Added explicit rookie draft pick value tier copy to step 01 and the landing note; expanded tier badge labels. Web structural and existing step/layout checks passed. No deployment.
+
+## 2026-09-14 — Compact option B (local)
+
+Shared app-style illustration replaces tiny storyboard panels. Native step buttons update in place above sign-in on desktop/mobile. 195/195 structural checks, syntax/whitespace, keyboard and layout tests, platform regressions pass. [Scope](../docs/plans/landing-ranking-graphic/scope.md). Not deployed.
+
+## 2026-09-14 — Selected storyboard C (local)
+
+Replaced clickable exploration with connected app-style miniatures using canonical tokens, player rails, tier badges and trade composition. Removed unused step JS/templates. Web 190/190 and diff checks; desktop/mobile visual/sign-in checks; platform regressions passed. [Scope](../docs/plans/landing-ranking-graphic/scope.md). No deployment.
+
+## 2026-09-14 — Illustrated landing steps (local)
+
+Explored three treatments and implemented clickable illustrated tiles with dedicated ranking/overlap/offer visuals. 195/195 web guards, JS syntax, diff checks pass. Browser: keyboard selection, exclusive state, unique heading, desktop layout stability, phone sign-in visibility, and platform regressions pass. [Scope and options](../docs/plans/landing-ranking-graphic/scope.md). Not deployed.
+
+## 2026-09-14 — Landing layout and platform discovery (local revision)
+
+190/190 web guards, JS syntax, diff check passed. Browser: delayed flag reveal (1800ms), ESPN/MFL mobile-verification panels, Sleeper return and flags-off fallback passed. Initial sign-in above fold at 1366×768, 390×844, 320×640. Existing verified-ownership restriction preserved; no real login tested. [Scope and evidence](../docs/plans/landing-ranking-graphic/scope.md).
+
+## 2026-09-14 — Landing ranking graphic (local)
+
+Added two illustrative ranking boards and a mutual-value trade receipt. Web structural checks: **190/190 passed**. Headless Chrome: 1440/390/320px, no document overflow; desktop and phone visual inspection. Static preview stubs API responses; no auth/runtime backend claims. No mobile changes, remote CI, merge, or deployment. [Scope/evidence](../docs/plans/landing-ranking-graphic/scope.md).
+
 # Test Ledger — Fantasy Trade Finder
 
 > **Purpose:** authoritative record of what's been tested, what shipped, what was measured, and on what version of the stack. Prevents "works on my machine / claimed earlier without evidence" failure modes.
