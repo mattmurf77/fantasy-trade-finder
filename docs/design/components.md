@@ -148,6 +148,8 @@ Three equal-width numbered native buttons with wrapping labels select one shared
 
 Platform choices respect existing feature flags and update when `ftf:flags-ready` fires, including slow responses. Sleeper uses extension verification. ESPN/MFL selections show an explicit mobile-verification panel and a contact link for TestFlight access, preserving the verified-ownership contract. Legacy browser credential/claim forms remain unreachable from those choices; they are not an available login path.
 
+The fixed web landing owns its scroll container. Root/body scrolling is locked only while `#auth-screen` is visible and restores automatically after its `.hidden` class is applied, preventing duplicate scrollbars from narrowing the phone layout.
+
 ## Screen coverage check
 
 Every screen listed in the audit maps to the above: Login (Auth), League select (LeagueRow), Method select (MethodTile), Rank/trio (PlayerCard, PositionTabs, UnlockBar), Trade Finder (TradeCard, FairnessMeter, CoverageBar, slider), Matches (TradeCard match variant, VerdictPanel = Toast+EmptyState patterns), Activity/Trends (ActivityRow, TrendBar = StrengthBar), Tiers (TierBin), Rookie board (sheet + FilterTabs), Outlook (sheet + MethodTile-style options), Notifications (NotificationRow), Settings/Profile (hairline key-value rows + forms), Player detail (PlayerCard header + ActivityRow history).

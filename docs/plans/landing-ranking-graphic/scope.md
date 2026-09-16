@@ -1,6 +1,6 @@
 # Landing ranking graphic — scope and evidence
 
-Date: 2026-09-14. Entry: direct operator request. Branch: `codex/landing-ranking-graphic`, based on fetched `origin/main` ca7e6b85. Current status (2026-09-16): release authorized; preparing current-main CI and Render deployment. Dated sections below preserve iteration history; the final release scope is compact option B with the September 15 copy and production-style bar.
+Date: 2026-09-14. Entry: direct operator request. Branch: `codex/landing-ranking-graphic`, based on fetched `origin/main` ca7e6b85. Current status (2026-09-16): initial release live at `3789bb36` through PR #295; a narrow embedded-browser scroll correction is in follow-up validation. Dated sections below preserve iteration history; the final release scope is compact option B with the September 15 copy and production-style bar.
 
 ## 1. Analytics scope
 WAIVED: static illustrative content adds no interaction or data collection. This rationale was surfaced before implementation. No new analytics needed.
@@ -88,3 +88,9 @@ Operator explicitly requested pushing the landing-page changes live. Release onl
 Independent review found no release-blocking issues: flag settlement event matches its dispatcher, ESPN/MFL verification restrictions remain intact, keyboard selection and production bar construction are consistent. Versioned the changed app script as well as landing styles/step script to prevent the stale-asset symptom observed during preview.
 
 Full current-head CI and observed Render/public-site delivery remain required before release is declared live. Release choreography, rollback and final evidence: [release record](../../business/ops/2026-09-16-landing-page.md).
+
+## Live release and scroll containment — 2026-09-16
+
+[Release record](../../business/ops/2026-09-16-landing-page.md) contains exact CI and Render evidence. Initial release verified live, including served asset equality and actual browser market bar/platform choices. In the embedded browser with persistent scrollbars, a 320×640 check then exposed duplicate root/overlay scrolling and sign-in below the fold in step 03.
+
+Lock root/body vertical overflow only while the fixed auth screen is visible; keep its own scrolling and restore document scrolling when `.hidden` is applied. Version stylesheet URL. Independent code review, 195/195 structural checks, and actual in-app browser keyboard/layout checks passed for all panels at 320×640, 390×844, 1366×768. Narrow step-03 sign-in bottom improves from y=679.46 to y=634.69. No analytics/API/schema/flags or authentication changes. Updated canonical Auth screen reference. Full CI and observed delivery remain required for the correction.

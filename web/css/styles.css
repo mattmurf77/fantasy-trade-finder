@@ -4982,6 +4982,10 @@
   .rg-receipts strong { font-size: 14px; }
 }
 
+/* The fixed landing owns scrolling; keep the covered app from adding a second
+   scrollbar and consuming the narrow viewport's content width. */
+html:has(#auth-screen:not(.hidden)), body:has(#auth-screen:not(.hidden)) { overflow-y: hidden; }
+
 /* Complete landing: explain the value before asking for a connection. */
 .lp-header { max-width: 1160px; margin: 0 auto; padding: 24px 0; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
 .lp-wordmark { font: 700 28px/1 var(--font-display); letter-spacing: .04em; color: var(--chalk); text-decoration: none; }

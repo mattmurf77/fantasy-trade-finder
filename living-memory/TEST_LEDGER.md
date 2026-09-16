@@ -1,3 +1,9 @@
+## 2026-09-16 — Landing release and narrow-browser scroll correction
+
+Initial landing release LIVE at `3789bb36` (PR #295); all four [CI jobs](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/35056911335) green, backend 5953 passed / 1 skipped. Render live 05:02:32 UTC; served HTML/CSS/app/step scripts match, flags 200, actual market bar/platform handoffs verified.
+
+Live 320px embedded-browser smoke exposed duplicate scrollbars. Follow-up scopes root scroll lock to visible auth. Independent review and 195/195 web checks pass. CUA keyboard/layout checks pass all three panels at 320×640, 390×844, 1366×768; narrow trade-panel sign-in bottom y=634.69. Correction CI/deployment pending; see [release record](../docs/business/ops/2026-09-16-landing-page.md). No production sign-in or account mutation.
+
 ## 2026-09-15 — Comparison/matching labels (local)
 
 Updated comparison heading and step 03 to operator wording. Web structural and responsive checks passed. Not deployed.
