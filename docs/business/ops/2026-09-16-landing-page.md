@@ -27,7 +27,15 @@ Previous main at release preparation: `82c5f118`. If static assets fail to load,
 
 ## Delivery status
 
-Authorized; CI and deployment verification pending. A successful push alone is not evidence of live delivery.
+Initial release LIVE: [PR #295](https://github.com/mattmurf77/fantasy-trade-finder/pull/295) merged as `3789bb3639691057f79bd0444b2e580982c634bb` at 05:00:42 UTC. [Current-head CI](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/35056911335) passed all four jobs on `9a91b7d1`; backend: **5953 passed, 1 skipped**.
+
+Render deployment `dep-dal24v15efls73fmir7g` became live at **05:02:32 UTC**. Public landing HTML, stylesheet, app script and step script returned 200 and matched the release byte-for-byte. Public flags returned 200 with all three platform-choice flags true. Live browser verification confirmed the production-style fairness bar, ESPN/MFL mobile handoffs, hidden legacy forms, and return to Sleeper. No credentials or authenticated account operations were exercised. Preflight confirmed existing CRON_SECRET is present without recording its value.
+
+### Narrow embedded-browser correction
+
+Live 320×640 verification exposed persistent root and overlay scrollbars, consuming 30px of content width and moving the trade-panel sign-in bottom to y=679.46. The fixed landing already owns scrolling. A scoped root/body lock now applies only while `#auth-screen` lacks `.hidden`; it releases automatically for the signed-in application. The landing retains `overflow:auto`. The changed stylesheet URL is versioned again.
+
+Independent review found no blocker. Actual in-app browser keyboard/layout checks passed for all panels at 320×640, 390×844 and 1366×768. At 320px, sign-in bottoms are y=586.30 / 573.01 / 634.69 for steps 1/2/3; at desktop all three are y=619.96. Web structure remains **195/195**. Correction CI and deployment are required before this follow-up is marked live. The correction PR's delivery entry records its final deployed commit and public checks.
 
 ## Decisions needed
 

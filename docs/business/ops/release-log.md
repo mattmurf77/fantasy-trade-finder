@@ -4,6 +4,7 @@ Release authorization and verified delivery are recorded separately. Engineering
 
 | Date | Release | Status | Record |
 |---|---|---|---|
+| 2026-09-16 | Web landing page | Initial release LIVE `3789bb36`; all four CI jobs green; public assets verified. Narrow embedded-browser scroll correction in follow-up validation. | [Release evidence and rollback](2026-09-16-landing-page.md) |
 | 2026-09-05 | Season projections + Win Now + championship experimental beta; iOS 1.17.0 (147) | Backend/web LIVE `c28ec6d8`; all three flags true; final CI green. iOS built/uploaded, Apple processing; tester availability and physical QA unverified. Calibration unproven. | [Release evidence and rollback](2026-09-05-win-now.md) |
 
 ## Decisions needed
