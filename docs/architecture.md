@@ -420,3 +420,22 @@ valuations remain inline. Explicit owner-scoped diagnostic reads reconstruct
 snapshots; ordinary outcome/taste reads do not load unrelated debug context.
 The existing cleanup loop expires debug nodes only, with visible failure logs.
 See [data lifecycle](data-dictionary.md#deck-diagnostic-storage-2026-09-15).
+
+### Shared recommendation significance
+
+`trade_significance.evaluate_significance` is a read-only leaf using raw ranking
+tiers and existing pick classification. It does not change fairness, scoring,
+rankings, arm selection, or package construction. `server` owns trusted request
+exceptions and a final post-mutation filter across owner and legacy arms,
+before evaluated publication and impression logging. The first implementation
+uses this final boundary rather than pruning generator pools: historical
+baseline identity and candidate enumeration remain unchanged.
+
+Numeric mode is independently off/shadow/enforce. Captured version/settings
+participate in cache safety; polling and the retained pending-card inventory
+cannot expose unfiltered old recommendations while enforcement is active.
+Exact selected assets and genuine incoming offers remain available; public card
+markers alone cannot assert an exemption. Private evidence uses existing
+impression features and generation-run diagnostics, not client events. See
+[scope](plans/trade-significance/scope.md). Default off is not deployment or
+activation evidence.

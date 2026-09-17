@@ -1,3 +1,9 @@
+## 2026-09-17 — Shared trade significance, local implementation
+
+Isolated branch `codex/trade-significance-20260917`, base `62ba9b3d`. Three subagents implemented rule/wiring/independent tests; parent reviewed and calibrated against frozen raw offer-time inputs. Stable full backend suite **6,058 passed / 1 skipped** (Python 3.12, isolated SQLite, 358.54s); expanded targeted 378 passed; web structural 195/195; mobile test-ID lint passed; diff check clean. Source-edit-during-run failures were superseded by the stable full rerun, not waived. See [implementation and evidence](../docs/plans/trade-significance/validation.md) and [calibration](../docs/plans/trade-significance/calibration.md).
+
+Default `significance_mode=0`; no arm changes, product feedback writes, push, deployment, or TestFlight build. Existing review decisions preserved. Hosted CI/mobile typecheck/structural suites and broader calibration release gates remain before activation; no device runtime claim.
+
 ## 2026-09-16 — Landing release and narrow-browser scroll correction
 
 Initial landing release LIVE at `3789bb36` (PR #295); all four [CI jobs](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/35056911335) green, backend 5953 passed / 1 skipped. Render live 05:02:32 UTC; served HTML/CSS/app/step scripts match, flags 200, actual market bar/platform handoffs verified.

@@ -258,6 +258,7 @@ from . import trade_policy as _trade_policy   # personal-market policy — the O
                                               # trade.personal_market_policy_v1
                                               # default false)
 from . import small_trade_presentment as _simple_presentment
+from . import trade_significance as _trade_significance
 from . import negmem as _negmem               # trade.negmem — negative-results memory (T1:
                                               # module import, attribute calls only)
 from .feature_flags import FLAGS, is_enabled, flags_dict, reload as reload_flags
@@ -3025,6 +3026,14 @@ def _trade_job_public_view(job: dict) -> dict:
         "cards":           job.get("cards") or [],
         "error":           job.get("error"),
     }
+    # A caller may keep polling an old job ID after a runtime rollout. Do
+    # not serve its pre-rule snapshot or re-label old impressions as newly
+    # evaluated. A fresh /generate request regenerates under the new policy.
+    significance_now = _capture_trade_significance()
+    if (significance_now[0] and
+            job.get("significance_capture") != significance_now):
+        out.update(cards=[], status="error", error="significance_policy_changed")
+        return out
     # F3 (deck.fatigue) — additive honoring note, set by the worker only
     # when the flag is on AND ≥1 candidate was decline-suppressed:
     # {count, latest_declined_at}. Absent otherwise, so flag-off payloads
@@ -3124,13 +3133,14 @@ def _load_trade_disposition_keys(user_id: str, league_id: str):
         amnesty_epoch=float(_deck_cfg("pass_cooldown_start_epoch", 0.0)))
 
 
-def _trade_safety_signature(owner_state: tuple[bool, ...] | None = None):
+def _trade_safety_signature(owner_state: tuple[bool, ...] | None = None,
+                            significance_capture=None):
     """Stamp captured owner permission; freshness checks read live defaults."""
     if owner_state is None:
         owner_include = _bakeoff.bakeoff_enabled() and "owner_v1" in _bakeoff.arm_roster(exclusive=False)
         owner_serve = owner_include and _bakeoff.serve_owner()
         owner_state = (owner_include, owner_serve, owner_serve and _bakeoff.owner_only())
-    return [key for key, enabled in (
+    signature = [key for key, enabled in (
         ("market", _trade_policy.policy_enabled()),
         ("market_shadow", _trade_policy.telemetry_enabled()),
         ("roster", getattr(FLAGS, "trade_roster_protection", False)),
@@ -3140,6 +3150,87 @@ def _trade_safety_signature(owner_state: tuple[bool, ...] | None = None):
         ("owner_serve", owner_state[1]),
         ("owner_only", len(owner_state) > 2 and owner_state[2]),
     ) if enabled]
+    significance = (significance_capture if significance_capture is not None
+                    else _capture_trade_significance())
+    if significance[0]:
+        signature.append("significance:" + json.dumps(significance))
+    return signature
+
+
+def _capture_trade_significance():
+    """Capture raw live knobs outside arm overlays, once per request."""
+    cfg = _trade_service_mod._cfg
+    mode = cfg.get("significance_mode", 0.0)
+    mode = int(mode) if type(mode) in (int, float) and mode in (0, 1, 2) else 0
+    tier = cfg.get("significance_player_min_tier", 2.0)
+    tiers = {1: "first_1", 2: "second", 3: "third", 4: "fourth"}
+    tier = tiers.get(tier, "second") if type(tier) in (int, float) else "second"
+    pick = cfg.get("significance_allow_first_round_pick", 1.0)
+    allow_pick = type(pick) in (int, float) and pick == 1
+    return (mode, _trade_significance.VERSION, tier, allow_pick)
+
+
+def _trade_significance_matches(job, captured=None):
+    captured = captured if captured is not None else _capture_trade_significance()
+    previous = job.get("significance_capture")
+    return (not captured[0] and not previous) or previous == captured
+
+
+def _significance_card_key(card):
+    """Object AND exact terms: a later package mutation loses its exemption."""
+    return (id(card), card.league_id, card.trade_id, card.target_user_id,
+            tuple(sorted(card.give_player_ids)), tuple(sorted(card.receive_player_ids)))
+
+
+def _significance_exemptions_for(trade_service):
+    exemptions = getattr(trade_service, "_significance_exemptions", None)
+    if exemptions is None:
+        exemptions = trade_service._significance_exemptions = {}
+    if exemptions:
+        live = {_significance_card_key(card)
+                for card in list(trade_service._trade_cards.values())}
+        for key in tuple(exemptions):
+            if key not in live:
+                exemptions.pop(key, None)
+    return exemptions
+
+
+def _evaluate_trade_significance(cards, *, capture, players, user_elo, seed_elo,
+                                  scoring_format, selected_give_ids=(),
+                                  selected_receive_ids=(), inbound_keys=(), user_sources=None):
+    """One arm-independent recommendation gate; no writes or public fields."""
+    if not capture[0]:
+        return cards, {}, {}
+    results, kept, reasons = {}, [], {}
+    for card in cards:
+        context = ("inbound" if _significance_card_key(card) in inbound_keys else
+                   "explicit_search" if selected_give_ids or selected_receive_ids else
+                   "discovery")
+        try:
+            result = _trade_significance.evaluate_significance(
+                card, players=players, user_elo=user_elo, seed_elo=seed_elo,
+                user_sources=user_sources,
+                scoring_format=scoring_format, context=context,
+                selected_give_ids=selected_give_ids,
+                selected_receive_ids=selected_receive_ids,
+                player_min_tier=capture[2], allow_first_round_pick=capture[3],
+                owned_pick_parser=_parse_owned_pick_id,
+                is_pick_asset=_trade_service_mod.is_pick_asset)
+            evidence = result.as_dict()
+        except Exception:
+            log.exception("trade significance evaluation unavailable")
+            evidence = {"version": capture[1], "eligible": False,
+                        "reason": "evaluation_unavailable"}
+        evidence["mode"] = "enforce" if capture[0] == 2 else "shadow"
+        results[id(card)] = evidence
+        if not evidence["eligible"]:
+            reason = evidence["reason"]
+            reasons[reason] = reasons.get(reason, 0) + 1
+        if capture[0] != 2 or evidence["eligible"]:
+            kept.append(card)
+    return kept, results, {"capture": capture, "evaluated": len(cards),
+                           "would_reject": sum(reasons.values()),
+                           "removed": len(cards) - len(kept), "reasons": reasons}
 
 
 def _capture_trade_presentation():
@@ -3623,6 +3714,7 @@ def _inject_likes_you_cards_impl(
     not_interested_ids: set | None = None,
     exclusion_keys: set | None = None,   # G6 R4 #336 — dedup only (Q-G6-1)
     avoid_positions: set | None = None,  # #360 — position twin of not_interested
+    significance_inbound_keys: set | None = None,
 ) -> list:
     """Tier 2 work item 2.3a — surface trades the counterparty already liked.
 
@@ -3821,6 +3913,8 @@ def _inject_likes_you_cards_impl(
 
         existing = existing_by_key.get(key)
         if existing is not None:
+            if significance_inbound_keys is not None:
+                significance_inbound_keys.add(_significance_card_key(existing))
             existing.likes_you       = True
             existing.composite_score = boost_score
             # Personal-market policy — this card was GENERATED organically
@@ -3863,6 +3957,8 @@ def _inject_likes_you_cards_impl(
             source_like_impression_id = like.get("impression_id"),
         )
         trade_service._trade_cards[card.trade_id] = card
+        if significance_inbound_keys is not None:
+            significance_inbound_keys.add(_significance_card_key(card))
         new_cards.append(card)
         injected += 1
 
@@ -3947,6 +4043,8 @@ def _inject_likes_you_cards_impl(
 
             existing = existing_by_key.get(key)
             if existing is not None:
+                if significance_inbound_keys is not None:
+                    significance_inbound_keys.add(_significance_card_key(existing))
                 existing.likes_you             = True
                 existing.composite_score       = boost_score
                 existing.standing_offer_reason = _reason
@@ -3981,6 +4079,8 @@ def _inject_likes_you_cards_impl(
                     standing_offer_reason = _reason,
                 )
                 trade_service._trade_cards[card.trade_id] = card
+                if significance_inbound_keys is not None:
+                    significance_inbound_keys.add(_significance_card_key(card))
                 new_cards.append(card)
                 injected    += 1
                 so_injected += 1
@@ -4726,6 +4826,7 @@ def _log_deck_signal_impressions(
     policy_variant: str | None = None,
     roster_results: dict | None = None,
     presentation: dict | None = None,  # captured records/version, NOT a telemetry enable gate
+    significance_results: dict | None = None,
 ) -> dict[int, str]:
     """Write one deck_impressions row per card (final served order) and
     return {id(card): impression_id} so the caller can stamp the ids into
@@ -4921,6 +5022,8 @@ def _log_deck_signal_impressions(
                 card, players_dict, seed_map or {})
         if roster_results is not None:
             features["roster_evaluation"] = roster_results.get(id(card))
+        if significance_results and id(card) in significance_results:
+            features["significance"] = significance_results[id(card)]
         if presentation is not None:
             features["presentation"] = {**presentation["records"][pos], "final_index": pos}
         # F7 (deck.exploration) — wildcard provenance, frozen at serve time.
@@ -6987,6 +7090,9 @@ def _capture_trade_execution(sess, user_id, league_id, scoring_format):
     # this small graph, not the ranking history, generator/client, or card store.
     league = copy.deepcopy(league)
     if trade_service is not None:
+        # Like the card store, provenance must be shared with /api/trades on
+        # the original session service. Never take it from serialized cards.
+        _significance_exemptions_for(trade_service)
         trade_service = copy.copy(trade_service)
         trade_service._players = dict(getattr(trade_service, "_players", {}))
         trade_service._leagues = dict(getattr(trade_service, "_leagues", {}))
@@ -7013,6 +7119,7 @@ def _run_trade_job(
     execution_context: _TradeExecutionContext | None = None,
     presentation_capture=None,
     presentation_exempt: bool = False,
+    significance_capture=None,
 ):
     """Daemon-thread entry point with context captured before thread start.
     Direct internal callers may omit context and capture at entry. All exceptions caught — a thread death
@@ -7028,6 +7135,8 @@ def _run_trade_job(
     would miss). None = not supplied (pregen from session_init, the
     replenishment cron) ⇒ the worker loads them itself, exactly as before."""
     try:
+        if significance_capture is None:
+            significance_capture = _capture_trade_significance()
         if presentation_capture is None:
             presentation_capture = _capture_trade_presentation()
             # Direct internal callers capture at entry. Missing off captures
@@ -7266,15 +7375,19 @@ def _run_trade_job(
         owner_on = _owner_enabled(league_id)
         owner_serve = owner_on and _bakeoff.serve_owner()
         owner_exclusive = owner_serve and _bakeoff.owner_only()
+        significance_inbound_keys = set()
         if owner_exclusive:
             # Return every eligible owner offer, not a counterfactual holdout.
             ghost_on = False
         with _trade_jobs_lock:
             j = _trade_jobs.get(job_id)
             if _job_live(j):
-                if market_live or roster_live or owner_on:
+                if market_live or roster_live or owner_on or significance_capture[0]:
                     j["final_checks_pending"] = True
-                safety_signature = _trade_safety_signature((owner_on, owner_serve, owner_exclusive))
+                if significance_capture[0]:
+                    j["significance_capture"] = significance_capture
+                safety_signature = _trade_safety_signature(
+                    (owner_on, owner_serve, owner_exclusive), significance_capture)
                 if safety_signature:
                     j["safety_policy"] = safety_signature
 
@@ -7599,6 +7712,7 @@ def _run_trade_job(
                     not_interested_ids = not_interested_ids or None,
                     exclusion_keys = exclusion_keys or None,   # G6 R4 #336
                     avoid_positions = set(avoid_positions) or None,   # #360
+                    significance_inbound_keys = significance_inbound_keys,
                 )
                 # trade.bakeoff §3.4 Channel 2 — the injector returns the deck
                 # RE-SORTED by composite_score, which would silently destroy
@@ -7979,7 +8093,7 @@ def _run_trade_job(
                 # snapshot the client reads must be correct on every flag
                 # combination, so this republish stands on its own. Same
                 # idiom as the F7/F9/breaker republishes above.
-                if not (market_live or roster_live or owner_serve) and [id(c) for c in final_cards] != _pre_policy_ids:
+                if not (market_live or roster_live or owner_serve or significance_capture[0]) and [id(c) for c in final_cards] != _pre_policy_ids:
                     snapshot = []
                     for c in _served_cards(final_cards, league_id, ghost_on):
                         d = trade_card_to_dict(c, players_dict)
@@ -7988,7 +8102,7 @@ def _run_trade_job(
                         snapshot.append(d)
                     with _trade_jobs_lock:
                         j = _trade_jobs.get(job_id)
-                        if _job_live(j):
+                        if _job_live(j) and not j.get("final_checks_pending"):
                             j["cards"] = snapshot
                 # Drain the likes-you injector's stale-mirror notes into the
                 # same ledger. A mirror that was never eligible, never
@@ -8031,6 +8145,42 @@ def _run_trade_job(
                         merged.append(replacement)
             final_cards = merged
 
+        # ALL served arms share this final significance contract. Runs after
+        # package mutations and owner/legacy policy gates; removed cards never
+        # become shown impressions. No quota and no insignificant backfill.
+        significance_candidates = final_cards
+        final_cards, significance_results, significance_diag = _evaluate_trade_significance(
+            final_cards, capture=significance_capture, players=players_dict,
+            user_elo=elo_map_rt, seed_elo=seed_map, scoring_format=active_format,
+            selected_give_ids=pinned_give or (), selected_receive_ids=pinned_receive or (),
+            inbound_keys=significance_inbound_keys,
+            user_sources=owner_context.get("user_sources") if owner_context else None)
+        if significance_diag and bakeoff_run is not None:
+            per_arm = {}
+            for card in significance_candidates:
+                credit = bakeoff_run.attribution_for(card)
+                arm = credit[0] if credit else "injected"
+                counts = per_arm.setdefault(arm, {"evaluated": 0, "would_reject": 0})
+                counts["evaluated"] += 1
+                counts["would_reject"] += int(not significance_results[id(card)]["eligible"])
+            significance_diag["per_arm_final_candidates"] = per_arm
+        # Server-private provenance supports the separate pending-card route.
+        # It is exact-package scoped; card JSON fields can never assert it.
+        exemptions = getattr(trade_service, "_significance_exemptions", {})
+        for card in final_cards:
+            key = _significance_card_key(card)
+            if key in significance_inbound_keys:
+                exemptions[key] = ("inbound", (), ())
+            elif (set(pinned_give or ()) & set(card.give_player_ids)
+                  or set(pinned_receive or ()) & set(card.receive_player_ids)):
+                exemptions[key] = ("explicit_search", tuple(pinned_give or ()),
+                                    tuple(pinned_receive or ()))
+        trade_service._significance_exemptions = exemptions
+        with _trade_jobs_lock:
+            j = _trade_jobs.get(job_id)
+            if j is not None and significance_diag:
+                j["significance"] = significance_diag
+
         # One bounded post-policy permutation, before the FIRST evaluated
         # publication. Every later boundary retains this order or removes
         # authoritative dispositions; none re-sorts an old snapshot.
@@ -8051,7 +8201,7 @@ def _run_trade_job(
 
         # Publish only evaluated cards, even with impression logging disabled
         # or an empty result. Later annotation layers do not alter packages.
-        if (market_live or roster_live or owner_on) and not owner_serve:
+        if (market_live or roster_live or owner_on or significance_capture[0]) and not owner_serve:
             snapshot = []
             for c in _served_cards(final_cards, league_id, ghost_on):
                 d = trade_card_to_dict(c, players_dict)
@@ -8171,6 +8321,16 @@ def _run_trade_job(
                 log.warning("ghost split failed (serving unfiltered): %s", gs_err)
                 served_final, ghost_cards = final_cards, []
 
+        if significance_diag:
+            significance_diag["final_served"] = len(served_final)
+            if bakeoff_run is not None:
+                served_counts = {}
+                for card in served_final:
+                    credit = bakeoff_run.attribution_for(card)
+                    arm = credit[0] if credit else "injected"
+                    served_counts[arm] = served_counts.get(arm, 0) + 1
+                significance_diag["final_served_per_arm"] = served_counts
+
         # Publish the filtered final list even with F1 disabled. Later F1
         # annotation adds impression IDs without altering package membership.
         if owner_serve:
@@ -8258,6 +8418,7 @@ def _run_trade_job(
                     policy_results  = policy_results, # personal-market policy
                     policy_variant  = policy_variant,
                     presentation    = presentation,
+                    significance_results = significance_results,
                     **telemetry_kw,
                 )
                 if owner_serve and any(not imp_by_card.get(id(c)) for c in served_final):
@@ -8295,19 +8456,29 @@ def _run_trade_job(
         # including a superseded one — this is a RUN ledger, and Phase 4's
         # whole job is measuring generation cost and empty-arm rates, which a
         # superseded run measures just as well. Never allowed to fail the job.
+        if significance_diag and (owner_impression_error or _job_superseded(job_id)):
+            significance_diag["final_served"] = 0
+            significance_diag["final_served_per_arm"] = {}
+            significance_diag["withheld"] = ("impression_unavailable" if owner_impression_error
+                                               else "superseded")
         if bakeoff_run is not None:
             try:
                 run_row = bakeoff_run.run_row(
                     job_id=job_id, user_id=g_user_id, league_id=league_id)
-                if owner_request_evidence is not None:
+                if owner_request_evidence is not None or significance_diag:
                     config_record = json.loads(run_row["config_json"])
-                    config_record["owner_request"] = owner_request_evidence
+                    if owner_request_evidence is not None:
+                        config_record["owner_request"] = owner_request_evidence
+                    if significance_diag:
+                        config_record["significance"] = significance_diag
                     run_row["config_json"] = json.dumps(config_record, default=str)
                 save_bakeoff_run(run_row)
             except Exception as bo_err:
                 log.warning("bake-off run logging failed (non-fatal): %s", bo_err)
         if owner_selected_run is not None:
             try:
+                if significance_diag:
+                    owner_selected_run["significance"] = significance_diag
                 _log_owner_selected_run(job_id, owner_context, owner_selected_run, len(served_final))
             except Exception as owner_log_err:
                 log.warning("owner selected run logging failed: %s", owner_log_err)
@@ -8448,6 +8619,7 @@ def _kickoff_trade_job(
     """
     if presentation_capture is None:
         presentation_capture = _capture_trade_presentation()
+    significance_capture = _capture_trade_significance()
     _job_write_lease = _user_data_lifecycle.capture(
         user_id, started=g.get("_user_data_started") if has_request_context() else None)
 
@@ -8500,6 +8672,9 @@ def _kickoff_trade_job(
     }
     if source:
         job["source"] = source
+    if significance_capture[0]:
+        job["significance_capture"] = significance_capture
+        job["final_checks_pending"] = True
     if presentation_exempt:
         job["presentation_exempt"] = True
     with _trade_jobs_lock:
@@ -8523,7 +8698,8 @@ def _kickoff_trade_job(
                        prefs_preload=prefs_preload,
                        execution_context=execution_context,
                        presentation_capture=presentation_capture,
-                       presentation_exempt=presentation_exempt)
+                       presentation_exempt=presentation_exempt,
+                       significance_capture=significance_capture)
         return job_id
 
     threading.Thread(
@@ -8535,7 +8711,8 @@ def _kickoff_trade_job(
                 "prefs_preload": prefs_preload,
                 "execution_context": execution_context,
                 "presentation_capture": presentation_capture,
-                "presentation_exempt": presentation_exempt},
+                "presentation_exempt": presentation_exempt,
+                "significance_capture": significance_capture},
         daemon=True,
     ).start()
     return job_id
@@ -13801,7 +13978,8 @@ def generate_trades():
             # (e.g. an override released by a newer vote) could be invisible.
             # Supersede the running job and fall through to spawn a fresh one.
             elif (existing.get("status") == "running"
-                  and _trade_presentation_matches(existing, presentation_capture)):
+                  and _trade_presentation_matches(existing, presentation_capture)
+                  and _trade_significance_matches(existing)):
                 if not (force_fresh and _force_supersede_enabled()):
                     reuse_snapshot = copy.deepcopy(existing)
                 else:
@@ -13812,6 +13990,10 @@ def generate_trades():
             # Otherwise: stale or errored → drop the index entry and fall
             # through to spawn a new job.
             if reuse_snapshot is None:
+                if (existing.get("status") == "running"
+                        and not _trade_significance_matches(existing)):
+                    existing["superseded"] = True
+                    existing["superseded_at"] = time.monotonic()
                 _trade_jobs_by_key.pop(key, None)
 
     if reuse_snapshot is not None:
@@ -14308,6 +14490,7 @@ def _owner_selected_assignment(context, surface, *, serve, exclusive=False):
     canonical = copy.deepcopy(inputs)
     canonical["config"] = {k: v for k, v in canonical["config"].items()
                            if not k.startswith("bakeoff_include_") and not k.startswith("bakeoff_serve_")
+                           and not k.startswith("significance_")
                            and k != "bakeoff_owner_only"}
     for key in ("user_roster", "pinned_give_players", "pinned_receive_players", "acquire_positions",
                 "trade_away_positions", "avoid_positions", "swap_positions"):
@@ -14353,7 +14536,8 @@ def _log_owner_selected_run(run_id, context, run, served_count):
         "total_ms": run["total_ms"],
         "arms_json": json.dumps(arms),
         "groups_json": "{}", "agreement_json": "{}",
-        "config_json": json.dumps(assignment, default=str),
+        "config_json": json.dumps({**assignment,
+            **({"significance": run["significance"]} if run.get("significance") else {})}, default=str),
         "created_at": datetime.now(timezone.utc).isoformat()})
 
 
@@ -14365,6 +14549,7 @@ def _owner_selected_ideas(*, context, surface, legacy, trade_service, sess, serv
     relabels a legacy result as owner or provides an exclusive fallback.
     """
     from .trade_gen_owner import generate_owner_trades
+    significance_capture = _capture_trade_significance()
     started = time.monotonic()
     assignment = _owner_selected_assignment(context, surface, serve=serve, exclusive=exclusive)
     legacy_result = {} if assignment.get("exclusive") else legacy()
@@ -14430,23 +14615,39 @@ def _owner_selected_ideas(*, context, surface, legacy, trade_service, sess, serv
         cards = [c for c in cards if id(c) in safe_ids]
     if arm == "owner_v1":
         cards = _project_trade_dispositions(cards, context["user_id"], context["league"].league_id)
+    cards, significance_results, significance_diag = _evaluate_trade_significance(
+        cards, capture=significance_capture, players=context["players"],
+        user_elo=context["user_elo"], seed_elo=context["seed_elo"],
+        scoring_format=context["scoring_format"],
+        selected_give_ids=context.get("pinned_give_players") or (),
+        selected_receive_ids=context.get("pinned_receive_players") or (),
+        user_sources=context.get("user_sources"))
     retained = {id(c) for c in cards}
     run_id = uuid.uuid4().hex
     for card in cards:
         card.owner_route_experiment = assignment
         card.preserve_server_order = assignment["serve_enabled"]
         trade_service._trade_cards[card.trade_id] = card
+        give_pins = tuple(context.get("pinned_give_players") or ())
+        receive_pins = tuple(context.get("pinned_receive_players") or ())
+        if (set(give_pins) & set(card.give_player_ids)
+                or set(receive_pins) & set(card.receive_player_ids)):
+            exemptions = getattr(trade_service, "_significance_exemptions", {})
+            exemptions[_significance_card_key(card)] = ("explicit_search", give_pins, receive_pins)
+            trade_service._significance_exemptions = exemptions
     # No impression ID may be invented on failure. Old clients can still
     # display packages; a new client's joined trial needs these actual rows.
     impressions = _log_deck_signal_impressions(
         user_id=context["user_id"], league_id=context["league"].league_id,
         job_id=run_id, cards=cards, players_dict=context["players"], capture=None,
-        scoring_format=context["scoring_format"], source=surface, seed_map=context["seed_elo"])
+        scoring_format=context["scoring_format"], source=surface, seed_map=context["seed_elo"],
+        significance_results=significance_results)
     if serve and any(not impressions.get(id(card)) for card in cards):
         raise ValueError("owner_impression_incomplete")
     _log_owner_selected_run(run_id, context, dict(assignment=assignment,
         owner_cards=len(owner_cards), control_cards=sum(map(len, legacy_groups.values())),
-        error=error, report=report, total_ms=int((time.monotonic() - started) * 1000)), len(cards))
+        error=error, report=report, total_ms=int((time.monotonic() - started) * 1000),
+        significance=significance_diag), len(cards))
     output = {k: [] for k in ("upgrade", "lateral", "downgrade")}
     if surface == "fair_packages":
         output = {"ideas": []}
@@ -14772,6 +14973,36 @@ def get_trades():
             [card for card in cards if card.league_id == lid], g_user_id, lid))
     cards = [card for card in cards if id(card) in allowed]
     players_dict = {p.id: p for p in g_players}
+    capture = _capture_trade_significance()
+    if capture[0]:
+        # This route also exposes generator candidates retained in the service,
+        # not just the worker's final deck. Re-evaluate under current settings.
+        service = sess["service"]
+        personal = {rp.player.id: rp.elo for rp in service.get_rankings(position=None).rankings}
+        pool = {**getattr(trade_service, "_players", {}), **players_dict}
+        seeds = dict(service._seed or {})
+        confidence = _ranking_confidence(service)
+        placed = confidence.get("_placed") or set()
+        counts = confidence.get("comparison_counts") or {}
+        sources = {pid: ("explicit" if pid in placed else "votes" if counts.get(pid, 0) > 0
+                         else "legacy" if value != seeds.get(pid) else "consensus")
+                   for pid, value in personal.items()}
+        for lid in {card.league_id for card in cards}:
+            pick_assets = _owned_pick_assets(lid, _active_format(sess))
+            seeds.update(_pick_asset_elos(pick_assets))
+            pool.update({p.id: p for assets in pick_assets.values() for p in assets})
+        exemptions = _significance_exemptions_for(trade_service)
+        significant = []
+        for card in cards:
+            key = _significance_card_key(card)
+            context, give, receive = exemptions.get(key, ("discovery", (), ()))
+            kept, _, _ = _evaluate_trade_significance(
+                [card], capture=capture, players=pool, user_elo=personal, seed_elo=seeds,
+                user_sources=sources,
+                scoring_format=_active_format(sess), selected_give_ids=give,
+                selected_receive_ids=receive, inbound_keys={key} if context == "inbound" else ())
+            significant.extend(kept)
+        cards = significant
     return jsonify([trade_card_to_dict(c, players_dict) for c in cards])
 
 
@@ -21845,7 +22076,7 @@ def session_init():
         with _trade_jobs_lock:
             existing_id = _trade_jobs_by_key.get(pregen_key)
             existing    = _trade_jobs.get(existing_id) if existing_id else None
-            should_kickoff = (existing is None) or not _trade_presentation_matches(existing, presentation_capture) or (
+            should_kickoff = (existing is None) or not _trade_presentation_matches(existing, presentation_capture) or not _trade_significance_matches(existing) or (
                 existing.get("status") == "complete"
                 and (time.monotonic() - (existing.get("finished_at") or 0)) > _PREGEN_TTL_SECONDS
             )
@@ -22661,6 +22892,7 @@ def _replenish_deck_for(user_id: str, league_id: str) -> tuple[int, int] | None:
         if (job and job.get("status") == "complete"
                 and not job.get("is_pinned")
                 and _trade_presentation_matches(job, presentation_capture)
+                and _trade_significance_matches(job)
                 and (time.monotonic() - (job.get("finished_at") or 0))
                     <= _PREGEN_TTL_SECONDS):
             cards = list(job.get("cards") or [])   # cached deck still fresh

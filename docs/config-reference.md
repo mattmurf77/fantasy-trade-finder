@@ -1608,3 +1608,30 @@ and retry next tick. Up to 500 nodes are removed per tick. Impression rows,
 outcomes, frozen valuations, assets and core learning features are retained.
 Setting `0` pauses future expiry; it does not recover already-expired data.
 There is no generation/card-limit or analytics sampling change.
+
+### Shared recommendation significance (default off)
+
+Independent of arm selection and fairness. The final generated recommendation
+must contain an individually meaningful player on the viewer's raw personal
+board OR raw consensus board, or a qualifying actual first-round pick. Cheap
+pieces cannot be summed into a centerpiece. Tier boundaries come from existing
+format/position tier configuration, not adjusted package prices.
+
+| Model-config key | Default | Meaning |
+|---|---:|---|
+| `significance_mode` | 0 | 0 off; 1 shadow (evidence only); 2 enforce. Roll back independently of arm flags. |
+| `significance_player_min_tier` | 2 | Draft-round label: 1 = `first_1`, 2 = `second`, 3 = `third`, 4 = `fourth`; not an index into all eight tiers. Proposed calibration setting is 2. |
+| `significance_allow_first_round_pick` | 1 | A validated first-round pick can independently qualify. A second-round pick alone cannot, regardless of numeric value. |
+
+Defaults register in `model_config` and `trade_service`, not historical arm
+profiles. Mode, resolved threshold, pick setting and rule version participate in
+recommendation cache compatibility. Workers freeze settings for a job; changed
+settings require a compatible newly generated deck. No returned-offer cap or
+low-quality backfill is introduced.
+
+Explicit asset searches retaining a selection and trusted incoming offers are
+exempt; outlook, position preferences and partner-only targeting are not.
+Manual trade evaluation and the separate filler rules are unchanged. Enabling
+this setting does not enable an inactive arm. See [scope and release gates](plans/trade-significance/scope.md)
+and [calibration](plans/trade-significance/calibration.md). This document does
+not establish live activation.

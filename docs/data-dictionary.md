@@ -378,6 +378,23 @@ Indexes: `ix_trade_impressions_user_league` on `(user_id, league_id)` — traini
 
 ## `deck_impressions`
 
+### Recommendation significance evidence
+
+When significance mode is enabled, evaluated served rows may carry
+`features_json.significance`: version, mode, eligible, reason, context,
+thresholds, and qualifying centerpiece (asset ID, side, player/pick kind, and
+viewer-personal/consensus source). This is private diagnostics, never public
+opponent rankings. Shadow rows can record eligible=false while still served;
+enforcement rejects do not get served-impression rows.
+
+Organic `bakeoff_runs.config_json.significance` records captured settings,
+evaluated/would-reject/removed counts and reasons, with per-arm final candidate
+counts when attribution is available. These are post-generation,
+post-existing-policy candidates, not the full enumeration pool; historical
+generated/drafted counts retain their existing meanings. No new columns,
+tables, event names or migrations. Existing diagnostic storage/retention rules
+apply. See [scope](plans/trade-significance/scope.md).
+
 ### Owner-v1 snapshot namespace
 
 The owner-construction trial uses existing columns/JSON; there is no new table
