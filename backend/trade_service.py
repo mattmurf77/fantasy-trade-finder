@@ -1178,6 +1178,13 @@ _DEFAULT_CFG: dict[str, float] = {
     "owner_pair_budget":         4096.0,
     "owner_total_budget":        60000.0,
 
+    # Shared final recommendation significance, outside all arm profiles.
+    # 0 off, 1 shadow, 2 enforce. Tier number is a draft-round equivalent,
+    # NOT an ordinal index into the tier ladder. Ships dark for calibration.
+    "significance_mode":                    0.0,
+    "significance_player_min_tier":         2.0,
+    "significance_allow_first_round_pick":  1.0,
+
     # ------------------------------------------------------------------
     # Counterparty breaker — 25 evaluation-layer knobs
     # (docs/plans/counterparty-breaker/LLD.md §4). Consumed ONLY by

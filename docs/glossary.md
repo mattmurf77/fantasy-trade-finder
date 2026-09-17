@@ -2,6 +2,12 @@
 
 Domain terms used throughout the codebase. Add a term when new jargon appears.
 
+**Recommendation significance** — Whether an unsolicited trade contains an
+individually meaningful player or qualifying draft pick, independent of whether
+the exchange is fair. Shared across generator arms; cheap assets cannot be
+summed to qualify. Explicit asset searches and genuine incoming offers are
+exceptions. See [configuration](config-reference.md#shared-recommendation-significance-default-off).
+
 ---
 
 **Elo** — Rating system from chess. Each player has a numeric rating; comparing two players updates both based on actual vs. expected outcome. Used to rank fantasy players within a single user's preferences.

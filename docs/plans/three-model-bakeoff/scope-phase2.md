@@ -10,6 +10,17 @@
 
 ## 0. What this phase is
 
+### 2026-09-17 significance inventory decision
+
+`significance_mode`, `significance_player_min_tier`, and
+`significance_allow_first_round_pick` are EXCLUDED from `MODEL_A_PROFILE`.
+Server captures them outside arm overrides and applies the rule at the final
+recommendation boundary after generation. No baseline generator reads them;
+pinning them would not preserve a historical generation behavior and would
+undermine the approved all-arm serving contract. Default mode is off. Extend
+the inventory acknowledgement only; do not re-capture the baseline golden or
+change its profile. See [shared-rule scope](../trade-significance/scope.md).
+
 Arm A of the bake-off is **not a code branch**. The 2026-08-16 G6 presentment
 wave (`20b40db`) and the 2026-08-18 engine-quality wave (`60cbe11`) modified
 the trade engine **in place**, so "the original engine" survives only as a set

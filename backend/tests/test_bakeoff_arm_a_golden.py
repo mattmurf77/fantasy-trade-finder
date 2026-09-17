@@ -533,6 +533,7 @@ _PINNED_KNOBS = frozenset("""
 simple_player_presentment
 bakeoff_include_owner bakeoff_serve_owner bakeoff_owner_only
 owner_pool_size owner_pair_budget owner_total_budget
+significance_mode significance_player_min_tier significance_allow_first_round_pick
 age_pref_mult_u23 age_pref_mult_30plus age_pref_boost_cap
 aggression_weight asset_floor_abs asset_ideas_group_cap
 bakeoff_deck_limit bakeoff_serve_interleaved bakeoff_group_size

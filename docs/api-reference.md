@@ -249,6 +249,16 @@ Account-auth plan P2 + P2.6 account-first (docs/plans/account-auth-plan-2026-07-
 
 ### Owner construction trial additions
 
+Generated recommendation significance is independently controlled by numeric
+`significance_mode` (default off). When enforced it filters low-impact discovery
+packages across all arms, without capping result counts. Explicit asset searches
+retaining a selection, manual evaluation, and trusted incoming offers are
+outside the discovery cutoff. Partner or position filters alone are not an
+exception. Private evidence is not added to public card JSON. A job made under
+incompatible significance settings cannot continue serving its old snapshot;
+generate a fresh deck after a policy-change error. No new route or client flag.
+See [configuration](config-reference.md#shared-recommendation-significance-default-off).
+
 When `trade.bakeoff` and `bakeoff_include_owner` are enabled outside demo,
 `POST /api/trades/generate` (organic and pinned/partner-targeted),
 `POST /api/trades/fair-packages`, and `POST /api/trades/asset-ideas` can execute

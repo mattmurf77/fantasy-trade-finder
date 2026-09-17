@@ -2966,6 +2966,9 @@ _MODEL_CONFIG_DEFAULTS = [
     ("owner_pool_size",            16.0, "owner_v1 bounded candidate pool per team; computational limit, not a value gate"),
     ("owner_pair_budget",        4096.0, "owner_v1 maximum candidate evaluations per opponent"),
     ("owner_total_budget",      60000.0, "owner_v1 maximum candidate evaluations per generation"),
+    ("significance_mode", 0.0, "shared recommendation significance: 0 off, 1 shadow, 2 enforce; all arms, no offer cap"),
+    ("significance_player_min_tier", 2.0, "significance player centerpiece minimum draft-round-equivalent tier: 1 first, 2 second, 3 third, 4 fourth"),
+    ("significance_allow_first_round_pick", 1.0, "significance: 1 permits a known, valued first-round pick centerpiece; 0 requires a qualifying player"),
 
     # ── Receipts — OFFLINE grading knobs (docs/plans/receipts/LLD.md §1) ──
     # Consumed ONLY by backend/receipts_service.py, which runs after the
