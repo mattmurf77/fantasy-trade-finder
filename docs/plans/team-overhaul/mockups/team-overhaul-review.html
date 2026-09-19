@@ -1,0 +1,880 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Fleeced — Team overhaul working session</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{color-scheme:dark;--ink-0:#0C0E11;--ink-1:#13161B;--ink-2:#1A1E25;--ink-3:#232833;--line:#262C35;--line-strong:#59647A;--chalk:#ECEFF4;--chalk-dim:#97A1AE;--chalk-faint:#626C79;--ice:#56D9EC;--ice-press:#3FC2D6;--on-ice:#071013;--flare:#F0508C;--pos:#22C55E;--neg:#EF4444;--warn:#F59E0B;--qb:#F97316;--rb:#22C55E;--wr:#3B82F6;--te:#A855F7}
+*{box-sizing:border-box}body{margin:0;background:var(--ink-0);color:var(--chalk);font:14px/1.55 Archivo,Arial,sans-serif}button,input,textarea,select{font:inherit}button,a,input,textarea,select{-webkit-tap-highlight-color:transparent}button{cursor:pointer}button:disabled{opacity:.48;cursor:not-allowed}button,input,select,textarea{color:var(--chalk)}button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid var(--ice);outline-offset:3px}a{color:var(--ice)}button{min-height:44px;border-radius:4px;border:1px solid var(--line-strong);background:var(--ink-1);padding:10px 14px}button:hover{background:var(--ink-3)}h1,h2,h3,p{margin-top:0}h1,h2,h3{line-height:1.12}h1{font:700 clamp(30px,3vw,42px)/1.1 'Barlow Condensed',Arial,sans-serif;letter-spacing:.025em;margin-bottom:10px}h2{font:600 26px/1.12 'Barlow Condensed',Arial,sans-serif;letter-spacing:.02em}h3{font-size:16px;line-height:1.4}p{margin-bottom:12px}textarea{width:100%;resize:vertical;min-height:112px;padding:12px;background:var(--ink-2);border:1px solid var(--line-strong);border-radius:4px;font-size:16px;line-height:1.55}textarea::placeholder{color:var(--chalk-dim)}select{max-width:100%;padding:10px 12px;min-height:44px;background:var(--ink-2);border:1px solid var(--line-strong);border-radius:4px}input{accent-color:var(--ice)}.primary{background:var(--ice);color:var(--on-ice);font-weight:700;border-color:var(--ice)}.primary:hover{background:var(--ice-press)}.secondary{background:var(--ink-2)}.ghost{background:transparent;color:var(--ice);border-color:var(--line-strong)}.muted{color:var(--chalk-dim)}.mono{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}.eyebrow{font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--chalk-dim)}.row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.stack{display:flex;flex-direction:column;gap:12px}.divider{height:1px;background:var(--line);margin:20px 0}.chip,.pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line-strong);padding:4px 8px;font-size:11px;font-weight:600;border-radius:4px}.pill{border-radius:999px}.notice{padding:12px 14px;background:var(--ink-2);border-left:3px solid var(--ice);font-size:13px}.warning{padding:12px 14px;background:var(--ink-2);border-left:3px solid var(--warn);font-size:13px}.panel{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:16px}
+.review-header{max-width:1600px;margin:auto;padding:30px 36px 26px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:flex-end;gap:24px}.wordmark{font:700 20px 'Barlow Condensed',Arial,sans-serif;letter-spacing:.09em;display:flex;align-items:center;gap:10px;margin-bottom:20px}.wordmark:before{content:'';width:5px;height:18px;background:var(--ice)}.review-header p{color:var(--chalk-dim);max-width:690px;margin-bottom:0}.header-actions{display:flex;gap:8px;flex-wrap:wrap}.workspace{max-width:1600px;margin:auto;display:grid;grid-template-columns:206px minmax(0,1fr);gap:32px;padding:28px 36px 60px}.review-nav{align-self:start;position:sticky;top:20px}.nav-list{display:flex;flex-direction:column;gap:4px;margin:12px 0 24px}.nav-step{width:100%;border-color:transparent;display:grid;grid-template-columns:24px 1fr auto;gap:8px;align-items:center;text-align:left;color:var(--chalk-dim);padding:11px 10px;background:transparent}.nav-step.active{background:var(--ink-2);color:var(--chalk);border-left:3px solid var(--ice);padding-left:8px}.nav-number{font:12px 'IBM Plex Mono',monospace;color:var(--chalk-dim)}.nav-name{font-size:13px}.nav-count{font:11px 'IBM Plex Mono',monospace;color:var(--chalk-dim)}.saved-status{font-size:12px;color:var(--chalk-dim);padding:16px 0;border-top:1px solid var(--line)}.saved-status strong{display:block;color:var(--chalk);font-weight:500;margin-bottom:6px}.review-main{min-width:0}.page-bar{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:24px}.page-bar h2{margin:5px 0}.page-description{font-size:13px;color:var(--chalk-dim);margin:0}.step-progress{white-space:nowrap;color:var(--chalk-dim);font:12px 'IBM Plex Mono',monospace;padding-top:6px}.review-columns{display:grid;grid-template-columns:minmax(300px,416px) minmax(320px,1fr);gap:28px;align-items:start}.mock-column{min-width:0}.mock-caption{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--chalk-dim);font-size:11px;margin-bottom:10px}.phone-frame{border:1px solid var(--line-strong);background:var(--ink-0);border-radius:8px;overflow:hidden}.phone-top{border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:15px 18px;font-size:11px;color:var(--chalk-dim)}.phone-brand{font:700 17px 'Barlow Condensed',Arial,sans-serif;letter-spacing:.08em;color:var(--chalk)}#mock-screen{padding:22px 18px 24px;min-height:520px;overflow-wrap:anywhere}#mock-screen .mock-title{font:700 32px/1.03 'Barlow Condensed',Arial,sans-serif;text-transform:uppercase;letter-spacing:.02em;margin:8px 0 12px}#mock-screen .mock-subtitle{color:var(--chalk-dim);font-size:13px;line-height:1.5}#mock-screen .asset-row{display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid var(--line)}#mock-screen .asset-meta{font-size:11px;color:var(--chalk-dim)}#mock-screen .position-tag{font:500 11px 'IBM Plex Mono',monospace}.mock-footnote{color:var(--chalk-dim);font-size:12px;line-height:1.5;margin:12px 0 0}.review-pagination{display:flex;justify-content:space-between;gap:10px;margin-top:16px}.review-pagination button{font-size:12px}
+.decisions-column{min-width:0}.decision-intro{margin:0 0 16px;font-size:13px;color:var(--chalk-dim)}.question-card{padding:20px;background:var(--ink-1);border:1px solid var(--line);border-radius:8px;margin-bottom:16px}.question-top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.question-number{font:12px 'IBM Plex Mono',monospace;color:var(--ice)}.answer-state{color:var(--chalk-dim);font-size:11px}.answer-state.has-answer{color:var(--pos)}.question-card h3{font-size:17px;line-height:1.45;margin:0 0 10px}.question-context{font-size:13px;color:var(--chalk-dim);margin-bottom:12px}.recommendation{font-size:12px;color:var(--chalk-dim);padding-left:12px;border-left:2px solid var(--line-strong);margin:12px 0 18px}.recommendation strong{color:var(--chalk);font-weight:500}.response-options{border:0;margin:0 0 16px;padding:0;display:flex;flex-direction:column;gap:8px}.response-option{display:flex;align-items:flex-start;gap:10px;padding:11px 12px;border:1px solid var(--line-strong);border-radius:4px;cursor:pointer;min-height:44px;font-size:13px;line-height:1.45}.response-option:has(input:checked){border-color:var(--ice);background:var(--ink-2)}.response-option input{flex:none;margin:3px 0 0;width:16px;height:16px}.field-label{display:block;color:var(--chalk-dim);font-size:12px;margin-bottom:7px}.voice-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px}.record-button{display:flex;align-items:center;gap:8px;font-size:12px}.record-dot{width:8px;height:8px;border:1px solid currentColor;border-radius:999px;display:inline-block}.recording .record-dot{background:var(--neg);border-color:var(--neg)}.recording{border-color:var(--neg)}.record-status{font-size:12px;color:var(--chalk-dim);flex:1;min-width:110px}.voice-transcript{margin-top:14px}.voice-transcript textarea{min-height:80px;font-size:14px}.interim{font-size:12px;color:var(--chalk-dim);font-style:italic;margin:6px 0}.clip-item{padding:12px 0;border-top:1px solid var(--line);margin-top:12px}.clip-item audio{width:100%;height:36px;margin-top:8px}.clip-item .row{font-size:11px;color:var(--chalk-dim)}.clip-item a{font-size:12px}.clip-delete{min-height:32px;font-size:11px;padding:4px 8px}.voice-settings{padding:14px;background:var(--ink-2);border:1px solid var(--line);border-radius:4px;margin-bottom:20px}.voice-settings label{display:flex;gap:10px;align-items:center;font-size:13px;min-height:32px}.voice-settings input{width:16px;height:16px}.voice-settings p{font-size:12px;color:var(--chalk-dim);margin:8px 0 0}.section-notes{margin-top:24px}.all-questions-list{padding:0;list-style:none}.all-questions-list li{padding:14px 0;border-bottom:1px solid var(--line);display:flex;align-items:start;gap:16px;justify-content:space-between}.all-questions-list button{text-align:left;border:0;background:transparent;padding:0;min-height:44px;flex:1}.all-questions-list small{display:block;color:var(--chalk-dim);margin-top:3px}.export-area{max-width:880px}.export-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:20px 0}.export-grid .panel h3{margin-bottom:8px}.export-grid button{margin-top:8px}.export-grid p{font-size:13px;color:var(--chalk-dim)}.export-preview{width:100%;min-height:360px;font:12px/1.6 'IBM Plex Mono',monospace}.global-message{margin-bottom:16px;padding:10px 14px;border-left:3px solid var(--warn);background:var(--ink-2);font-size:13px}.global-message:empty{display:none}.recording-dock{position:sticky;top:0;background:var(--ink-2);border-bottom:1px solid var(--neg);padding:10px 24px;z-index:10;display:flex;justify-content:center;align-items:center;gap:18px;font-size:13px}.recording-dock[hidden]{display:none}.recording-dock button{min-height:36px;padding:6px 12px}.screen-reader{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.question-card legend{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}.locked-summary{margin:24px 0;padding:16px;border:1px solid var(--line);border-radius:4px}.locked-summary summary{cursor:pointer;color:var(--chalk-dim);font-size:13px}.locked-summary ul{padding-left:20px;font-size:13px;color:var(--chalk-dim)}.record-all{margin-top:14px}.footer-note{font-size:12px;color:var(--chalk-dim);margin-top:24px}.summary-answer{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--chalk-dim);font-size:13px}.recording-count{color:var(--flare)}
+@media(min-width:1450px){.review-columns{grid-template-columns:416px minmax(390px,1fr);gap:40px}.workspace{gap:44px}.question-card{padding:24px}}
+@media(max-width:1150px){.workspace{grid-template-columns:168px minmax(0,1fr);padding:24px;gap:22px}.review-header{padding:24px}.review-columns{gap:20px;grid-template-columns:minmax(290px,.9fr) minmax(290px,1fr)}.nav-name{font-size:12px}.question-card{padding:16px}}
+@media(max-width:960px){.workspace{display:block}.review-nav{position:static}.nav-list{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-top:8px}.nav-step{grid-template-columns:18px 1fr}.nav-count{display:none}.saved-status{display:flex;justify-content:space-between;gap:12px;padding:10px 0;font-size:11px}.saved-status strong{display:inline}.review-nav>.eyebrow{display:none}.review-header{align-items:flex-start}.header-actions{max-width:220px}.page-bar{margin-top:20px}.review-columns{grid-template-columns:minmax(280px,390px) minmax(280px,1fr)}}
+@media(max-width:720px){.review-header{display:block;padding:22px 18px}.wordmark{margin-bottom:16px}.header-actions{margin-top:20px;max-width:none}.workspace{padding:18px}.review-columns{display:block}.mock-column{max-width:430px;margin:0 auto 28px}.nav-list{grid-template-columns:repeat(3,1fr)}.nav-name{font-size:11px}.nav-step{padding:9px 6px;gap:5px}.nav-step.active{padding-left:4px}.decisions-column{width:100%}.export-grid{grid-template-columns:1fr}.page-bar h2{font-size:24px}.question-card{padding:18px}.review-pagination{margin-bottom:26px}.recording-dock{padding:8px 12px;justify-content:space-between}.saved-status{flex-wrap:wrap;gap:4px}.phone-frame{width:100%}#mock-screen{padding:20px 16px}.header-actions button{flex:1}.review-header p{font-size:13px}}
+.eyebrow{font-family:Archivo,Arial,sans-serif}.clip-item .row>span{overflow-wrap:anywhere;min-width:0;max-width:100%}.saved-status strong{margin-right:6px}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<div id="recording-dock" class="recording-dock" hidden><span id="dock-label">Recording</span><button type="button" id="dock-stop">Stop recording</button></div>
+<header class="review-header">
+ <div><div class="wordmark">FLEECED <span class="eyebrow">PRODUCT WORKING SESSION · 06 SEP 2026</span></div><h1>TEAM OVERHAUL, FROM INTENT TO OFFERS.</h1><p>Explore the first mocks, answer the decisions beside each screen, and bring your responses back to chat. These are proposed behaviors using sample trades.</p></div>
+ <div class="header-actions"><button type="button" id="view-responses" class="secondary">Review responses</button><button type="button" id="copy-header" class="primary">Copy responses</button></div>
+</header>
+<div class="workspace">
+ <aside class="review-nav" aria-label="Review screens"><div class="eyebrow">THE EXPERIENCE</div><nav id="navigation" class="nav-list"></nav><div class="saved-status"><div><strong id="completion-count">0 decisions answered</strong><span id="save-status" aria-live="polite">Saved in this browser</span></div><span id="audio-count">0 recordings</span></div></aside>
+ <main class="review-main"><div id="global-message" class="global-message" role="status"></div><div id="page-content"></div></main>
+</div>
+<div id="announcer" class="screen-reader" aria-live="polite"></div>
+<script>
+window.OverhaulQuestions = [
+  {
+    id: 'launch_scope',
+    page: 'outlook',
+    title: 'First release',
+    question: 'Which app and league platforms should the first release cover?',
+    context: 'Offer sending and response tracking may need different flows for each league platform.',
+    recommendation: 'Recommendation: start with iOS and Sleeper, then expand once the full execution flow is proven.',
+    options: ['iOS and Sleeper first', 'iOS and all currently connected league platforms', 'iOS and web, across currently connected league platforms']
+  },
+  {
+    id: 'preference_scope',
+    page: 'outlook',
+    title: 'Roadmap settings',
+    question: 'Should the outlook and position choices made here also change the user’s regular trade-finder settings?',
+    context: 'The existing guided Team Review saves these choices for the whole league. A saved roadmap could instead keep its own choices.',
+    recommendation: 'Recommendation: keep choices with this roadmap and offer an explicit option to apply them to the regular finder.',
+    options: ['Roadmap only, with an option to apply to the finder', 'Always update the regular finder too', 'Roadmap only, with no shared-settings action']
+  },
+  {
+    id: 'selected_pool',
+    page: 'assets',
+    title: 'Available or must move?',
+    question: 'Does selecting an asset make it available for the overhaul, or mean every complete roadmap should move it?',
+    context: 'More Offers currently adds other roster assets as sweeteners. This flow needs a clear boundary around the user’s selected pool.',
+    recommendation: 'Recommendation: selected assets are eligible, unused assets are shown clearly, and unselected assets are protected unless the user adds them to the pool.',
+    options: ['Eligible pool; some selected assets may remain', 'Every selected asset must be included', 'Let users mark individual selected assets as “must move”']
+  },
+  {
+    id: 'pick_budget',
+    page: 'assets',
+    title: 'All-in pick budget',
+    question: 'How far into the future should we recommend spending draft picks when the user pushes all in?',
+    context: 'Users can still change individual selections. This decides the initial recommendation and whether we should offer a spending limit.',
+    recommendation: 'Recommendation: initially recommend picks from the next two drafts, with a visible control to include later years or protect first-round picks.',
+    options: ['Next two drafts by default, with an editable limit', 'All owned future picks are eligible recommendations', 'Ask the user for a draft-year and first-round-pick budget first']
+  },
+  {
+    id: 'recover_first',
+    page: 'assets',
+    title: 'Recovering their own first',
+    question: 'If a rebuilding user does not own their next-season first, must they recover it before other sell-offs can be sent?',
+    context: 'The warning and priority to trade for that exact pick are already part of the feature. The open decision is whether recovery blocks the rest of the plan.',
+    recommendation: 'Recommendation: make recovery the first execution step; let the user explicitly continue without it after reviewing the consequence.',
+    options: ['Recover it first, with an explicit override to continue', 'Prioritize recovery but send other sell-offs alongside it', 'Require recovery before any other sell-offs, with no override']
+  },
+  {
+    id: 'draft_order_rules',
+    page: 'assets',
+    title: 'When draft position improves',
+    question: 'How should the rebuild flow handle leagues whose draft-order rules are unknown or do not reward a weaker roster?',
+    context: 'Owning the first-round pick is only one condition. Standings, maximum potential points, lotteries, or custom rules can change whether reducing production helps.',
+    recommendation: 'Recommendation: explain a draft-position benefit only when confirmed league rules support it; otherwise show the uncertainty without promising that benefit.',
+    options: ['Tailor the guidance to confirmed rules; show uncertainty otherwise', 'Ask users to confirm draft-order rules before building the plan', 'Omit draft-position guidance until that league’s rules are supported']
+  },
+  {
+    id: 'rebuild_returns',
+    page: 'assets',
+    title: 'The rebuild’s return',
+    question: 'Within “blow it up,” how should we balance draft picks against younger players in the returns?',
+    context: 'Pick-only returns are allowed. Young productive players can retain future value while doing less to reduce current production.',
+    recommendation: 'Recommendation: offer a simple picks-first versus young-core preference, with picks-first as the initial recommendation.',
+    options: ['Let users choose picks-first or a young core', 'Always favor picks, using young players when the deal is stronger', 'Optimize future value without a separate picks-versus-players preference']
+  },
+  {
+    id: 'position_constraints',
+    page: 'positions',
+    title: 'Preferences or requirements?',
+    question: 'When users select positions to acquire, should those be strict requirements or preferences for the overall roadmap?',
+    context: 'A strong multi-trade plan could include a useful deal at another position. The existing finder treats chosen positions as candidate filters.',
+    recommendation: 'Recommendation: treat them as preferences across the full roadmap, with an optional “required” setting for a position the user must address.',
+    options: ['Plan-level preferences, with an optional required setting', 'Strict: every proposed trade must include a selected return position', 'Soft preferences only; no strict setting']
+  },
+  {
+    id: 'review_completion',
+    page: 'review',
+    title: 'Finishing the trade review',
+    question: 'Should users finish a fixed deck of trade chips before seeing roadmaps, or be able to finish early once enough compatible trades are liked?',
+    context: 'The normal flow still ends with liking or disliking the generated chips. This decides the deck’s size and whether an early exit is available.',
+    recommendation: 'Recommendation: start with a manageable deck of about 20–30 ideas, allow “Build my roadmaps” when enough compatible likes exist, and offer more ideas when needed.',
+    options: ['A bounded deck, with early completion when enough compatible likes exist', 'Require all chips in a fixed deck to be reviewed', 'Generate small batches; users decide when to build roadmaps']
+  },
+  {
+    id: 'asset_grouping',
+    page: 'roadmaps',
+    title: 'What changes between roadmaps?',
+    question: 'Should alternative roadmaps keep the same groups of sell assets, or may they regroup those assets into different trades?',
+    context: 'For example, one roadmap could sell A + B together, while another sells A and B separately. Backups within a chosen group would still share that group’s outgoing assets.',
+    recommendation: 'Recommendation: allow regrouping between alternative roadmaps, then keep the chosen roadmap’s groups stable while ranking and sending their backups.',
+    options: ['Allow regrouping between roadmaps; keep groups stable during execution', 'Use identical sell-asset groups in every roadmap', 'Let users choose or edit the sell-asset groups before generating ideas']
+  },
+  {
+    id: 'quality_vs_count',
+    page: 'roadmaps',
+    title: 'When there are too few compatible likes',
+    question: 'If the liked trades cannot make four or five strong, compatible trades, what should the roadmap page do?',
+    context: 'Four or five trades and four or five alternative roadmaps remain the target. A small pool or overlapping likes may produce fewer useful combinations.',
+    recommendation: 'Recommendation: show the best smaller plan with an explicit shortfall, plus a focused way to review more ideas for the uncovered assets.',
+    options: ['Show a smaller plan and offer focused additional ideas', 'Return to the trade review until at least four compatible trades are liked', 'Let the user expand the asset pool before generating any roadmap']
+  },
+  {
+    id: 'same_counterparty',
+    page: 'roadmaps',
+    title: 'Several trades with one manager',
+    question: 'Can one roadmap send multiple trades to the same opposing team when their assets do not overlap?',
+    context: 'The combined effect still needs to make sense for both rosters. Several individually appealing trades may compete for the same manager’s needs or roster space.',
+    recommendation: 'Recommendation: prefer one active trade per opposing team, while allowing multiple only after checking their combined fit and making that repetition visible.',
+    options: ['Prefer one per team; allow validated exceptions', 'Strictly one active trade per opposing team', 'Allow multiple whenever the outgoing and incoming assets are distinct']
+  },
+  {
+    id: 'fallback_execution',
+    page: 'priorities',
+    title: 'Sending the next priority',
+    question: 'After an offer is declined, should the next ranked offer be sent automatically or wait for the user to send it?',
+    context: 'Equal-priority offers already go out together with the first-come, first-served warning. This question concerns moving from one priority level to the next.',
+    recommendation: 'Recommendation: start with a “Send next offer” action after refreshing availability; add automatic progression only as an explicit user choice.',
+    options: ['User reviews and sends the next offer', 'User can enable automatic progression for each asset group', 'Always send the next valid priority automatically after a decline']
+  },
+  {
+    id: 'pending_offers',
+    page: 'priorities',
+    title: 'Offers with no response',
+    question: 'How should an unanswered offer affect the next priority for the same sell assets?',
+    context: 'A pending offer can remain open for days. Sending a later priority while it remains active would turn the group into a concurrent race.',
+    recommendation: 'Recommendation: keep the next priority on hold, surface the offer’s age, and let the user choose whether to wait or withdraw and move on.',
+    options: ['Hold and let the user choose when to withdraw and advance', 'Use a user-selected timeout, then ask before advancing', 'Allow an explicit timeout that withdraws and advances automatically where supported']
+  },
+  {
+    id: 'combined_roster',
+    page: 'summary',
+    title: 'A plan that works together',
+    question: 'Should every trade in a roadmap be executable in any acceptance order, or may the plan include steps that depend on an earlier move?',
+    context: 'Unique sell assets prevent double-selling, but combined trades can still create roster-limit or lineup problems. Tied alternatives remain explicitly competing offers.',
+    recommendation: 'Recommendation: make the initial batch independently executable in any order, validate the combined roster, and show any required roster moves before sending.',
+    options: ['Require order-independent execution for the initial batch', 'Allow dependent steps, clearly separated into later batches', 'Offer both an independent batch and a staged plan as distinct choices']
+  },
+  {
+    id: 'counteroffers',
+    page: 'tracking',
+    title: 'When an offer is countered',
+    question: 'How should a counteroffer become part of the active roadmap?',
+    context: 'A counter can add or remove sell assets, which may conflict with another planned trade. Platform support determines whether it can be imported automatically.',
+    recommendation: 'Recommendation: show the counter for review and recheck it against the remaining roadmap before the user accepts or promotes it.',
+    options: ['Review the counter in the roadmap and revalidate affected groups', 'Handle counters on the league platform and record the outcome here', 'Treat the counter as a new idea to like and rank among backups']
+  },
+  {
+    id: 'roadmap_refresh',
+    page: 'tracking',
+    title: 'Keeping an active roadmap current',
+    question: 'When an accepted trade or another roster change invalidates part of the roadmap, how much should we rebuild?',
+    context: 'Completed trades should stay visible. The remaining plan may need fresh offers, and some platforms may require users to confirm status changes.',
+    recommendation: 'Recommendation: preserve completed and pending work, flag stale offers, and refresh only affected groups with a visible review of any changes.',
+    options: ['Refresh affected groups while preserving the rest', 'Regenerate the whole unexecuted portion after user confirmation', 'Keep the plan unchanged until the user explicitly requests a rebuild']
+  },
+  {
+    id: 'resume_entry',
+    page: 'tracking',
+    title: 'Returning to the plan',
+    question: 'Where should users reopen an active roadmap, and should they be able to save multiple alternatives for the same team?',
+    context: 'The package page must remain available as responses arrive. A single active roadmap is simpler; saved alternatives make it easier to compare or change direction.',
+    recommendation: 'Recommendation: show an active-roadmap card on the Trades page and keep saved alternatives in a Roadmaps view, with only one executing roadmap per league.',
+    options: ['Trades card plus saved alternatives; one executing roadmap per league', 'A single active roadmap reopened from the Trades page', 'A dedicated Roadmaps view with multiple independently active plans']
+  }
+];
+
+// Explicit owner decisions received in this task after the initial review.
+const overhaulOwnerDecisions = {
+  preference_scope: 'Keep roadmap settings separate from the regular trade finder.',
+  selected_pool: 'Selected assets are available to trade; every selected asset does not have to be moved.',
+  pick_budget: 'The user decides the all-in draft-pick budget.',
+  recover_first: 'Include an offer for the user’s exact next-season first and highlight it as Priority 1 across the overhaul. The user decides whether to execute it first; other offers are not blocked.',
+  rebuild_returns: 'Let the user decide the balance between draft picks and younger players.',
+  position_constraints: 'Treat selected positions as preferences.',
+  asset_grouping: 'Alternative roadmaps may group outgoing assets differently.',
+  quality_vs_count: 'Generate more offers for review and prompt the user to reconsider the available asset pool.',
+  fallback_execution: 'Wait for the user before sending the next offer so they can negotiate. Optional automatic progression is a possible later enhancement.'
+};
+window.OverhaulQuestions.forEach(question => {
+  if (overhaulOwnerDecisions[question.id]) question.ownerDecision = overhaulOwnerDecisions[question.id];
+});
+
+</script>
+<script>
+(function () {
+  'use strict';
+  const roster = [
+    { id: 'allen', name: 'Josh Allen', position: 'QB', rebuild: 'A possible long-term anchor', allin: 'Keep your starting production' },
+    { id: 'maye', name: 'Drake Maye', position: 'QB', rebuild: 'A possible foundation piece', allin: 'Explore moving depth for immediate help' },
+    { id: 'henry', name: 'Derrick Henry', position: 'RB', rebuild: 'Turn current production into future assets', allin: 'Keep your starting production' },
+    { id: 'cook', name: 'James Cook', position: 'RB', rebuild: 'Explore a productive-player return', allin: 'Keep your starting production' },
+    { id: 'benson', name: 'Trey Benson', position: 'RB', rebuild: 'A possible development piece', allin: 'Explore moving future upside for help now' },
+    { id: 'jefferson', name: 'Justin Jefferson', position: 'WR', rebuild: 'A possible long-term anchor', allin: 'Keep your starting production' },
+    { id: 'evans', name: 'Mike Evans', position: 'WR', rebuild: 'Turn current production into future assets', allin: 'Keep your starting production' },
+    { id: 'odunze', name: 'Rome Odunze', position: 'WR', rebuild: 'A possible foundation piece', allin: 'Explore moving future upside for help now' },
+    { id: 'kittle', name: 'George Kittle', position: 'TE', rebuild: 'Turn current production into future assets', allin: 'Keep your starting production' },
+    { id: 'kraft', name: 'Tucker Kraft', position: 'TE', rebuild: 'A possible development piece', allin: 'Explore moving depth for immediate help' },
+    { id: 'own-2027-1', name: '2027 1st', position: 'PICK', origin: 'Your original pick' },
+    { id: 'acquired-2027-1', name: '2027 1st', position: 'PICK', origin: 'Acquired · East End' },
+    { id: '2027-2', name: '2027 2nd', position: 'PICK', origin: 'Your original pick' },
+    { id: '2028-1', name: '2028 1st', position: 'PICK', origin: 'Your original pick' },
+    { id: '2028-3', name: '2028 3rd', position: 'PICK', origin: 'Your original pick' }
+  ];
+  const rebuildIds = ['henry', 'cook', 'evans', 'kittle'];
+  const allinIds = ['maye', 'benson', 'odunze', 'kraft', 'own-2027-1', 'acquired-2027-1', '2027-2', '2028-1', '2028-3'];
+  const styles = `<style>
+    #mock-screen [data-use-targets]{min-height:44px}
+    #mock-screen .setup-choice{display:block;width:100%;text-align:left;background:#13161B;border:1px solid #59647A;border-radius:8px;color:#ECEFF4;padding:20px 16px;min-height:116px;cursor:pointer}
+    #mock-screen .setup-choice+.setup-choice{margin-top:12px}
+    #mock-screen .setup-choice[aria-pressed="true"]{border-color:#56D9EC;background:#1A1E25}
+    #mock-screen .setup-choice-head{display:flex;justify-content:space-between;gap:12px;align-items:center;font:600 24px/28px 'Barlow Condensed',sans-serif;letter-spacing:.03em;text-transform:uppercase}
+    #mock-screen .setup-choice p{font:400 13px/19px 'Archivo',sans-serif;color:#97A1AE;margin:10px 0 0}
+    #mock-screen .setup-choice small{display:block;margin-top:12px;color:#97A1AE;font:500 11px/16px 'IBM Plex Mono',monospace}
+    #mock-screen .setup-tick{display:inline-grid;flex-shrink:0;width:22px;height:22px;place-items:center;border:1px solid #59647A;border-radius:2px}
+    #mock-screen [aria-pressed="true"] .setup-tick{background:#56D9EC;border-color:#56D9EC;color:#071013}
+    #mock-screen .setup-tick svg{display:block;width:16px;height:16px}
+    #mock-screen .setup-section{margin:24px 0 12px;display:flex;align-items:center;gap:8px;font:600 11px/16px 'Archivo',sans-serif;letter-spacing:.08em;text-transform:uppercase}
+    #mock-screen .setup-section::before{content:'';width:3px;height:14px;background:#56D9EC}
+    #mock-screen .setup-section .mono{margin-left:auto;color:#97A1AE}
+    #mock-screen .setup-roster-row{width:100%;min-height:72px;display:flex;align-items:center;text-align:left;gap:12px;padding:12px;background:#13161B;border:1px solid #59647A;border-radius:4px;color:#ECEFF4;margin-bottom:8px;cursor:pointer}
+    #mock-screen .setup-roster-row[aria-pressed="true"]{border-color:#56D9EC;background:#1A1E25}
+    #mock-screen .setup-asset-copy{min-width:0;flex:1}
+    #mock-screen .setup-asset-name{display:block;font:600 14px/20px 'Archivo',sans-serif}
+    #mock-screen .setup-asset-reason{display:block;font:400 12px/18px 'Archivo',sans-serif;color:#97A1AE;margin-top:3px}
+    #mock-screen .setup-recommended{display:block;color:#F0508C;font:600 11px/16px 'Archivo',sans-serif;letter-spacing:.04em;margin-top:3px}
+    #mock-screen .setup-position{padding:3px 5px;border:1px solid currentColor;border-radius:2px;font:600 11px/14px 'Archivo',sans-serif;min-width:30px;text-align:center;flex-shrink:0}
+    #mock-screen .setup-position-QB{color:#F97316}#mock-screen .setup-position-RB{color:#22C55E}#mock-screen .setup-position-WR{color:#3B82F6}#mock-screen .setup-position-TE{color:#A855F7}#mock-screen .setup-position-PICK{color:#97A1AE}
+    #mock-screen .setup-footer{display:grid;gap:8px;margin-top:24px;padding-top:16px;border-top:1px solid #262C35}
+    #mock-screen .setup-footer button{width:100%;min-height:44px}
+    #mock-screen .setup-pool-receipt{border:1px solid #262C35;border-radius:8px;background:#1A1E25;padding:16px;margin-top:16px}
+    #mock-screen .setup-pool-receipt strong{font:600 22px/26px 'IBM Plex Mono',monospace}
+    #mock-screen .setup-pool-receipt p{margin:8px 0 0;color:#97A1AE;font-size:13px;line-height:19px}
+    #mock-screen .setup-warning{border:1px solid #F59E0B;border-left-width:3px;border-radius:4px;background:#1A1E25;padding:12px;margin:16px 0}
+    #mock-screen .setup-warning strong{font-size:14px;line-height:20px;color:#ECEFF4}
+    #mock-screen .setup-warning p{font-size:13px;line-height:19px;color:#97A1AE;margin:8px 0 0}
+    #mock-screen .setup-warning .setup-warning-label{font:600 11px/16px 'Archivo',sans-serif;color:#F59E0B;letter-spacing:.06em;display:block;margin-bottom:6px}
+    #mock-screen .setup-honesty{font:400 12px/18px 'Archivo',sans-serif;color:#97A1AE;margin:12px 0}
+    #mock-screen .setup-inline-actions{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+    #mock-screen .setup-inline-actions button{min-height:44px;flex:1;font-size:12px}
+    #mock-screen .setup-target-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+    #mock-screen .setup-target{padding:12px;border:1px solid #59647A;border-radius:4px;background:#13161B;color:#ECEFF4;min-height:84px;text-align:left;cursor:pointer}
+    #mock-screen .setup-target[aria-pressed="true"]{border-color:#56D9EC;background:#1A1E25}
+    #mock-screen .setup-target-head{display:flex;align-items:center;justify-content:space-between;gap:8px;font:600 16px/20px 'Archivo',sans-serif}
+    #mock-screen .setup-target small{display:block;margin-top:10px;font:400 12px/18px 'Archivo',sans-serif;color:#97A1AE}
+    #mock-screen .setup-target .setup-tick{width:18px;height:18px}
+    #mock-screen .setup-priority-note{border-top:1px solid #262C35;margin-top:16px;padding-top:16px;font:400 13px/19px 'Archivo',sans-serif;color:#97A1AE}
+    #mock-screen .setup-step-list{list-style:none;margin:16px 0 0;padding:0;display:grid;gap:12px}
+    #mock-screen .setup-step-list li{display:flex;gap:12px;align-items:baseline;font-size:13px;color:#97A1AE;line-height:19px}
+    #mock-screen .setup-step-list .mono{color:#ECEFF4;min-width:24px}
+    #mock-screen .setup-own-note{font-size:13px;line-height:19px;border-left:3px solid #59647A;padding-left:12px;margin:16px 0;color:#97A1AE}
+    #mock-screen .setup-zero{font-size:13px;color:#F59E0B;line-height:19px}
+    #mock-screen .setup-choice:focus-visible,#mock-screen .setup-roster-row:focus-visible,#mock-screen .setup-target:focus-visible{outline:2px solid #56D9EC;outline-offset:2px}
+  </style>`;
+  const check = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10l4 4 8-8" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="square"/></svg>';
+  function tick(selected) { return '<span class="setup-tick" aria-hidden="true">' + (selected ? check : '') + '</span>'; }
+  function defaults(state) {
+    if (!['rebuild', 'allin'].includes(state.outlook)) state.outlook = 'rebuild';
+    if (typeof state.ownsFirst !== 'boolean') state.ownsFirst = false;
+    if (!Array.isArray(state.selectedAssets)) state.selectedAssets = recommended(state);
+    if (!Array.isArray(state.positions)) state.positions = [];
+  }
+  function recommended(state) {
+    return (state.outlook === 'rebuild' ? rebuildIds : allinIds).filter(id => id !== 'own-2027-1' || state.ownsFirst);
+  }
+  function isAllIn(state) { return state.outlook === 'allin'; }
+  function ownershipNotice(state) {
+    if (isAllIn(state)) return '';
+    if (state.ownsFirst) return '<div class="setup-own-note"><strong>You own your 2027 1st.</strong><br>Moving productive players can improve your own draft position if your league’s draft-order rules reward lower roster production or results. Your league rules still apply; a pick position is not guaranteed.</div>';
+    return '<div class="setup-warning"><span class="setup-warning-label">YOUR 2027 1ST IS ELSEWHERE</span><strong>A reset could improve someone else’s pick.</strong><p>Northside holds your original 2027 1st. Reducing production would not improve a pick you currently own.</p><p><strong>Priority 1: Recover your first.</strong> Your roadmap will highlight an offer for that exact pick. You choose when to send it and can send other offers first.</p></div>';
+  }
+  function outlook(state) {
+    return `<div class="eyebrow">TEAM OVERHAUL · 01</div><h2 class="mock-title">WHAT ARE YOU TRYING TO DO?</h2><p class="mock-subtitle">Choose a direction for a major roster reset.</p>
+      <button type="button" class="setup-choice" data-outlook="allin" aria-pressed="${isAllIn(state)}"><span class="setup-choice-head">Push all in ${tick(isAllIn(state))}</span><p>Turn picks and future upside into a stronger team for this season.</p><small>Shop future assets · Add current production</small></button>
+      <button type="button" class="setup-choice" data-outlook="rebuild" aria-pressed="${!isAllIn(state)}"><span class="setup-choice-head">Blow it up ${tick(!isAllIn(state))}</span><p>Move production for younger building blocks and draft capital.</p><small>Shop productive players · Build future value</small></button>
+      <div class="panel" style="margin-top:24px"><div class="eyebrow">HOW YOUR PLAN COMES TOGETHER</div><ol class="setup-step-list"><li><span class="mono">01</span>Choose the assets you’re open to moving.</li><li><span class="mono">02</span>Like or pass on trade ideas.</li><li><span class="mono">03</span>Choose a plan with 4–5 independent trades.</li><li><span class="mono">04</span>Rank alternatives and track your offers.</li></ol></div>
+      <div class="setup-footer"><button type="button" class="primary" data-navigate="assets">Choose my trade pool</button></div>`;
+  }
+  function assetRow(asset, state) {
+    const selected = state.selectedAssets.includes(asset.id);
+    const suggested = recommended(state).includes(asset.id);
+    const reason = asset.position === 'PICK' ? asset.origin : asset[state.outlook];
+    return `<button type="button" class="setup-roster-row" data-asset="${asset.id}" aria-pressed="${selected}" aria-label="${selected ? 'Remove' : 'Add'} ${asset.name}${asset.origin ? ', ' + asset.origin : ''} ${selected ? 'from' : 'to'} trade pool"><span class="setup-position setup-position-${asset.position}">${asset.position}</span><span class="setup-asset-copy"><span class="setup-asset-name">${asset.name}</span><span class="setup-asset-reason">${reason}</span>${suggested ? '<span class="setup-recommended">Suggested to shop</span>' : ''}</span>${tick(selected)}</button>`;
+  }
+  function assets(state) {
+    const visible = roster.filter(asset => asset.id !== 'own-2027-1' || state.ownsFirst);
+    return `<div class="eyebrow">TEAM OVERHAUL · 02</div><h2 class="mock-title">BUILD YOUR TRADE POOL</h2><p class="mock-subtitle">${isAllIn(state) ? 'We’ve suggested future assets to shop for production now.' : 'We’ve suggested productive players to turn into future assets.'} Add or remove any asset.</p>
+      <div class="setup-pool-receipt"><strong>${state.selectedAssets.length}</strong> <span>assets available to trade</span><p>Selected assets are available to use. Your final plan may use only part of this pool.</p></div>
+      ${ownershipNotice(state)}
+      <div class="setup-inline-actions"><button type="button" class="secondary" data-restore-pool>Restore suggestions</button><button type="button" class="ghost" data-clear-pool>Clear selection</button></div>
+      ${['QB', 'RB', 'WR', 'TE', 'PICK'].map(position => { const rows = visible.filter(a => a.position === position); return `<div class="setup-section">${position === 'PICK' ? 'Draft picks' : position}<span class="mono">${rows.length}</span></div>${rows.map(a => assetRow(a, state)).join('')}`; }).join('')}
+      ${isAllIn(state) ? '<p class="setup-honesty">A trade can send picks only. Every pick is tracked by original owner, year and round so it cannot be spent twice.</p>' : '<p class="setup-honesty">A trade can return picks only. Picks in your pool are available as optional sweeteners.</p>'}
+      ${!state.selectedAssets.length ? '<p class="setup-zero" role="status">Choose at least one asset to continue. A small pool may support fewer than 4–5 independent trades.</p>' : ''}
+      <div class="setup-footer"><button type="button" class="primary" data-navigate="positions"${!state.selectedAssets.length ? ' disabled' : ''}>Continue</button><button type="button" class="ghost" data-navigate="outlook">Back to outlook</button></div>`;
+  }
+  function positions(state) {
+    const allin = isAllIn(state);
+    const options = [{ id: 'QB', label: 'Quarterback', hint: allin ? 'Starting production' : 'Future building blocks' }, { id: 'RB', label: 'Running back', hint: allin ? 'Suggested · example need' : 'Future building blocks' }, { id: 'WR', label: 'Wide receiver', hint: allin ? 'Suggested · example need' : 'Suggested · youth' }, { id: 'TE', label: 'Tight end', hint: allin ? 'Starting production' : 'Future building blocks' }];
+    if (!allin) options.push({ id: 'PICKS', label: 'Draft picks', hint: 'Suggested · future capital' });
+    return `<div class="eyebrow">TEAM OVERHAUL · 03</div><h2 class="mock-title">WHAT DO YOU WANT BACK?</h2><p class="mock-subtitle">Optional. Choose where to focus your returns, or leave it open.</p>
+      <div class="panel"><div class="eyebrow">SUGGESTED DIRECTION</div><p style="margin:12px 0 0">${allin ? 'Look for production at RB and WR.' : 'Look for young building blocks and draft capital.'}</p><p class="setup-honesty">${allin ? 'These example needs illustrate how roster analysis could guide the plan.' : 'Rebuilding applies a future-value preference across positions. Draft picks are a return type, alongside the position choices.'}</p><button type="button" class="secondary" data-use-targets>Use suggestions</button></div>
+      <div class="setup-target-grid">${options.map(option => `<button type="button" class="setup-target" data-position="${option.id}" aria-pressed="${state.positions.includes(option.id)}"><span class="setup-target-head">${option.id}${tick(state.positions.includes(option.id))}</span><small>${option.label}<br>${option.hint}</small></button>`).join('')}</div>
+      <div class="setup-priority-note">${state.positions.length ? '<strong>Focus: ' + state.positions.map(p => p === 'PICKS' ? 'draft picks' : p).join(', ') + '.</strong> These preferences guide the overall roadmap. Strong offers at other positions can still appear.' : '<strong>No position preference.</strong> We’ll use your outlook and team needs to suggest returns.'}</div>
+      ${!allin && !state.ownsFirst ? '<div class="setup-own-note"><strong>First priority: your 2027 1st.</strong><br>We’ll look for a recovery offer with Northside, even if you leave draft picks unselected here.</div>' : ''}
+      <div class="setup-footer"><button type="button" class="primary" data-navigate="review">Continue</button><button type="button" class="ghost" data-clear-targets>Clear preferences</button><button type="button" class="ghost" data-navigate="assets">Back to trade pool</button></div>`;
+  }
+  function render(page, state) {
+    defaults(state);
+    return styles + (page === 'outlook' ? outlook(state) : page === 'assets' ? assets(state) : positions(state));
+  }
+  function bind(root, state, update) {
+    defaults(state);
+    root.querySelectorAll('[data-outlook]').forEach(el => el.addEventListener('click', () => {
+      if (state.outlook === el.dataset.outlook) return;
+      state.outlook = el.dataset.outlook;
+      state.selectedAssets = recommended(state);
+      state.positions = [];
+      update();
+    }));
+    root.querySelectorAll('[data-asset]').forEach(el => el.addEventListener('click', () => {
+      const id = el.dataset.asset;
+      state.selectedAssets = state.selectedAssets.includes(id) ? state.selectedAssets.filter(asset => asset !== id) : state.selectedAssets.concat(id);
+      update();
+    }));
+    root.querySelector('[data-restore-pool]')?.addEventListener('click', () => { state.selectedAssets = recommended(state); update(); });
+    root.querySelector('[data-clear-pool]')?.addEventListener('click', () => { state.selectedAssets = []; update(); });
+    root.querySelectorAll('[data-position]').forEach(el => el.addEventListener('click', () => {
+      const id = el.dataset.position;
+      state.positions = state.positions.includes(id) ? state.positions.filter(position => position !== id) : state.positions.concat(id);
+      update();
+    }));
+    root.querySelector('[data-use-targets]')?.addEventListener('click', () => { state.positions = isAllIn(state) ? ['RB', 'WR'] : ['WR', 'PICKS']; update(); });
+    root.querySelector('[data-clear-targets]')?.addEventListener('click', () => { state.positions = []; update(); });
+  }
+  window.OverhaulSetup = { render, bind };
+})();
+
+</script>
+<script>
+(function () {
+  'use strict';
+  const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const assetNames = {evans:'Mike Evans',henry:'Derrick Henry',kittle:'George Kittle',cook:'James Cook',maye:'Drake Maye',benson:'Trey Benson',odunze:'Rome Odunze',kraft:'Tucker Kraft','own-2027-1':'Your 2027 1st','acquired-2027-1':'Acquired 2027 1st','2027-2':'Your 2027 2nd','2028-1':'Your 2028 1st','2028-3':'Your 2028 3rd'};
+  const style = `<style>
+  #mock-screen .ex-trade{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0}
+  #mock-screen .ex-trade>div+div{border-left:1px solid #262C35;padding-left:12px}
+  #mock-screen .ex-trade strong{display:block;font-size:14px;line-height:1.5;margin:8px 0;overflow-wrap:anywhere}
+  #mock-screen .ex-small{font-size:12px;color:#97A1AE;line-height:1.5}
+  #mock-screen .ex-count{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
+  #mock-screen .ex-statline{display:flex;gap:16px;flex-wrap:wrap;border-top:1px solid #262C35;padding-top:12px;margin-top:12px;font-size:12px;color:#97A1AE}
+  #mock-screen .ex-group{border:1px solid #262C35;border-radius:8px;padding:16px;background:#13161B;margin-bottom:12px}
+  #mock-screen .ex-group.active{border-color:#56D9EC}
+  #mock-screen .ex-group h4{font-family:'Archivo',sans-serif;font-size:14px;margin:6px 0 10px}
+  #mock-screen .ex-alt{padding:12px 0;border-top:1px solid #262C35;display:flex;gap:12px;align-items:center}
+  #mock-screen .ex-alt .ex-altbody{flex:1;min-width:0}
+  #mock-screen .ex-priority-progress{display:flex;justify-content:space-between;gap:12px;align-items:center;margin:16px 0 8px}
+  #mock-screen .ex-priority-progress strong{font-size:12px;font-weight:600}
+  #mock-screen .ex-package-assets{padding:12px 0 16px;border-bottom:1px solid #262C35;margin-bottom:16px}
+  #mock-screen .ex-package-assets h3{font:600 22px/26px 'Barlow Condensed',sans-serif;letter-spacing:.03em;text-transform:uppercase;margin:6px 0 0}
+  #mock-screen .ex-tier{border:1px dashed #59647A;border-radius:8px;background:#0C0E11;margin-bottom:12px;overflow:hidden}
+  #mock-screen .ex-tier.ex-drop-active{border-color:#56D9EC;border-style:solid;background:#1A1E25}
+  #mock-screen .ex-tier-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 12px 8px}
+  #mock-screen .ex-tier-label{display:flex;align-items:center;gap:8px;font:600 11px/14px 'Archivo',sans-serif;letter-spacing:.08em;text-transform:uppercase;margin:0}
+  #mock-screen .ex-tier-label:before{content:'';width:3px;height:12px;background:#97A1AE;flex:none}
+  #mock-screen .ex-tier:first-child .ex-tier-label:before{background:#F0508C}
+  #mock-screen .ex-tier-body{padding:0 8px 8px;min-height:52px;display:grid;gap:8px}
+  #mock-screen .ex-tier-empty{padding:12px 4px;font-size:12px;line-height:18px;color:#97A1AE;margin:0}
+  #mock-screen .ex-priority-card{background:#13161B;border:1px solid #262C35;border-radius:4px;padding:8px}
+  #mock-screen .ex-priority-card.ex-dragging{border-color:#56D9EC;opacity:.45}
+  #mock-screen .ex-priority-main{display:flex;gap:8px;align-items:center}
+  #mock-screen .ex-priority-body{flex:1;min-width:0}
+  #mock-screen .ex-priority-body strong{display:block;font-size:13px;line-height:18px;margin:0 0 4px}
+  #mock-screen .ex-priority-body .ex-recovery{margin-top:8px;line-height:16px}
+  #mock-screen .ex-drag-handle{width:44px;min-width:44px;min-height:44px;padding:0;display:grid;place-items:center;align-self:stretch;background:transparent;border:1px solid #59647A;border-radius:4px;color:#97A1AE;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none}
+  #mock-screen .ex-drag-handle:active{cursor:grabbing;color:#56D9EC;border-color:#56D9EC}
+  #mock-screen .ex-drag-handle svg{width:20px;height:20px;pointer-events:none}
+  #mock-screen .ex-move-toggle{min-height:44px;min-width:44px;padding:8px;color:#56D9EC;font-size:12px;background:transparent;border:0}
+  #mock-screen .ex-move-options{display:flex;flex-wrap:wrap;gap:8px;padding-top:12px;border-top:1px solid #262C35;margin-top:8px}
+  #mock-screen .ex-move-options p{width:100%;margin:0}
+  #mock-screen .ex-move-options button{flex:1;min-width:52px;min-height:44px;padding:8px;font-size:12px}
+  #mock-screen .ex-move-options button[aria-pressed=true]{border-color:#56D9EC;color:#56D9EC}
+  #mock-screen .ex-priority-footer{border-top:1px solid #262C35;padding-top:16px;margin-top:20px;display:flex;gap:8px}
+  #mock-screen .ex-priority-footer button{flex:1;min-height:44px}
+  #mock-screen .ex-drag-preview{position:fixed;z-index:50;pointer-events:none;background:#1A1E25;border:1px solid #56D9EC;border-radius:4px;padding:12px;width:240px;max-width:calc(100vw - 32px);font:600 13px/18px 'Archivo',sans-serif;color:#ECEFF4}
+  #mock-screen .ex-drag-preview small{display:block;font-size:12px;font-weight:400;color:#97A1AE;margin-top:4px}
+  #mock-screen .ex-priority-help{font-size:11px;color:#97A1AE;line-height:17px;margin:8px 0 16px}
+  #mock-screen .ex-priority-live{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+  #mock-screen .ex-drag-handle:focus-visible,#mock-screen .ex-move-toggle:focus-visible,#mock-screen .ex-move-options button:focus-visible{outline:2px solid #56D9EC;outline-offset:2px}
+  #mock-screen .ex-label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#97A1AE;font-weight:600}
+  #mock-screen .ex-plans{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}
+  #mock-screen .ex-plans button{min-width:44px;min-height:44px}
+  #mock-screen .ex-plans button[aria-pressed=true]{border-color:#56D9EC;color:#56D9EC;background:#1A1E25}
+  #mock-screen .ex-meter{height:4px;background:#232833;margin:12px 0 20px}
+  #mock-screen .ex-meter span{display:block;height:4px;background:#56D9EC}
+  #mock-screen .ex-status{font-size:11px;text-transform:uppercase;letter-spacing:.05em;border:1px solid #59647A;padding:4px 6px;border-radius:2px;display:inline-block}
+  #mock-screen .ex-status.accepted{border-color:#22C55E;color:#22C55E}
+  #mock-screen .ex-status.declined{border-color:#EF4444;color:#EF4444}
+  #mock-screen .ex-status.pending{border-color:#F59E0B;color:#F59E0B}
+  #mock-screen .ex-buttons{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+  #mock-screen .ex-buttons>*{flex:1;min-height:44px}
+  #mock-screen .ex-like{border-color:#22C55E;color:#22C55E}
+  #mock-screen .ex-pass{border-color:#EF4444;color:#EF4444}
+  #mock-screen .ex-log{padding-left:20px;color:#97A1AE;font-size:12px;line-height:1.6}
+  #mock-screen .ex-intro{margin-bottom:16px}
+  #mock-screen .ex-alert{border-left:3px solid #F59E0B;padding:12px;background:#1A1E25;font-size:12px;line-height:1.6;margin:12px 0;color:#ECEFF4}
+  #mock-screen .ex-note{border-left:3px solid #59647A;padding:12px;background:#1A1E25;font-size:12px;line-height:1.6;margin:12px 0;color:#97A1AE}
+  #mock-screen .ex-recovery{color:#F0508C;font-size:11px;text-transform:uppercase;letter-spacing:.07em;font-weight:600}
+  #mock-screen .ex-message{color:#56D9EC;font-size:12px;line-height:1.5;margin:8px 0}
+  </style>`;
+
+  function allIn(state) { return ['allin','all-in','push','contend','win-now','all_in'].includes(state.outlook); }
+  function selected(state) { return (state.selectedAssets || []).map(a => typeof a === 'string' ? a : a.id); }
+  function context(state) {
+    const key = allIn(state) ? 'allin' : 'rebuild';
+    state.execution = state.execution || {};
+    if (!state.execution[key]) state.execution[key] = {decisions:{},cursor:0,plan:0,priorityGroupIndex:0,choices:{},ranks:{},sent:{},events:[],message:''};
+    return state.execution[key];
+  }
+  function dataset(state) {
+    const outgoing = selected(state);
+    const picks = outgoing.filter(id => id.includes('2027') || id.includes('2028'));
+    const specs = allIn(state) ? [
+      {id:'picks',name:'Draft capital',pos:'PICKS',ids:picks,teams:['Northside','Harbor','Summit','Metro'],returns:[['Saquon Barkley'],['Christian McCaffrey'],['Josh Jacobs'],['Kyren Williams']]},
+      {id:'youth',name:'Quarterback package',pos:'QB / RB',ids:['maye','benson'],teams:['Capital','Parkside','Lakeside','Eastview'],returns:[['Dak Prescott'],['Baker Mayfield'],['Jared Goff'],['Matthew Stafford']]},
+      {id:'odunze',name:'Receiver upgrade',pos:'WR',ids:['odunze'],teams:['Northside','Harbor','Summit','Metro'],returns:[['A.J. Brown'],['Davante Adams'],['Tyreek Hill'],['Terry McLaurin']]},
+      {id:'kraft',name:'Tight end upgrade',pos:'TE',ids:['kraft'],teams:['Capital','Parkside','Lakeside','Eastview'],returns:[['Travis Kelce'],['Mark Andrews'],['T.J. Hockenson'],['Dallas Goedert']]}
+    ] : [
+      {id:'evans',name:'Evans sell group',pos:'WR',ids:['evans'],teams:['Northside','Harbor','Summit','Metro'],returns:[[state.ownsFirst ? 'Northside 2027 1st' : 'Your 2027 1st'],['Harbor 2027 1st'],['Summit 2027 1st'],['Metro 2027 1st']]},
+      {id:'henry',name:'Henry sell group',pos:'RB',ids:['henry'],teams:['Capital','Parkside','Lakeside','Eastview'],returns:[['Capital 2027 2nd','Capital 2028 2nd'],['Parkside 2027 2nd','Parkside 2028 2nd'],['Lakeside 2027 2nd','Lakeside 2028 2nd'],['Eastview 2027 2nd','Eastview 2028 2nd']]},
+      {id:'kittle',name:'Kittle sell group',pos:'TE',ids:['kittle'],teams:['Northside','Harbor','Summit','Metro'],returns:[['Northside 2028 1st'],['Harbor 2028 1st'],['Summit 2028 1st'],['Metro 2028 1st']]},
+      {id:'cook',name:'Cook sell group',pos:'RB',ids:['cook'],teams:['Capital','Parkside','Lakeside','Eastview'],returns:[['Luther Burden III','Capital 2029 1st'],['Emeka Egbuka','Parkside 2029 1st'],['Xavier Worthy','Lakeside 2029 1st'],['Jayden Higgins','Eastview 2029 1st']]}
+    ];
+    return specs.map(s => {
+      const ids = s.ids.filter(id => outgoing.includes(id));
+      return {...s,ids,give:ids.map(id => assetNames[id] || id),offers:s.returns.map((get,i)=>({id:`${s.id}-${i}`,group:s.id,get,team:s.teams[i],index:i,recovery:!allIn(state)&&!state.ownsFirst&&s.id==='evans'&&i===0}))};
+    }).filter(g => g.ids.length);
+  }
+  const flat = groups => groups.flatMap(g => g.offers.map(o => ({...o,give:g.give,groupName:g.name})));
+  const likes = (g,c) => g.offers.filter(o => c.decisions[o.id] === 'like');
+  function ready(groups,c) { return groups.length >= 4 && flat(groups).every(o=>c.decisions[o.id]) && groups.every(g=>likes(g,c).length); }
+  function plans(groups,c,state) {
+    if (!ready(groups,c)) return [];
+    const plans = [];
+    for (let i=0;i<4;i++) {
+      const p={};
+      groups.forEach((g,j) => {
+        const opts=likes(g,c),recover=opts.find(o=>o.recovery);
+        p[g.id]=(recover || opts[(i+j)%opts.length]).id;
+      });
+      if (!plans.some(q=>JSON.stringify(q)===JSON.stringify(p))) plans.push(p);
+    }
+    return plans;
+  }
+  function applyPlan(groups,c,plan) {
+    c.choices={...plan}; c.ranks={}; c.priorityGroupIndex=0; c.priorityMoveOffer='';
+    groups.forEach(g=>{
+      const ordered=likes(g,c).slice().sort((a,b)=>(a.id===plan[g.id]?-1:b.id===plan[g.id]?1:a.index-b.index));
+      ordered.forEach((o,i)=>c.ranks[o.id]=i+1);
+    });
+  }
+  function ensurePlan(groups,c,state) {
+    const list=plans(groups,c,state);
+    if (list.length && groups.some(g=>!likes(g,c).some(o=>o.id===c.choices[g.id]))) { c.plan=Math.min(c.plan||0,list.length-1);applyPlan(groups,c,list[c.plan]); }
+    return list;
+  }
+  function rank(o,c) { return Number(c.ranks[o.id] || o.index+1); }
+  function wave(g,c) {
+    const options=likes(g,c);
+    if(options.some(o=>c.sent[o.id]==='accepted'||c.sent[o.id]==='pending')) return [];
+    const available=options.filter(o=>!c.sent[o.id]);
+    if(!available.length) return [];
+    const n=Math.min(...available.map(o=>rank(o,c)));
+    return available.filter(o=>rank(o,c)===n);
+  }
+  function firstWave(groups,c) { return groups.flatMap(g=>wave(g,c).map(o=>({...o,give:g.give,groupName:g.name}))); }
+  function heading(title,sub) { return `<div class="ex-intro"><div class="eyebrow">OVERHAUL LAB · FICTIONAL LEAGUE</div><h2 class="mock-title">${title}</h2><p class="mock-subtitle">${sub}</p></div>`; }
+  function exchange(give,get) { return `<div class="ex-trade"><div><span class="ex-label">You send</span>${give.map(n=>`<strong>${esc(n)}</strong>`).join('')}</div><div><span class="ex-label">You receive</span>${get.map(n=>`<strong>${esc(n)}</strong>`).join('')}</div></div>`; }
+  function demoNote() { return '<p class="ex-small">Illustrative offers only. League rosters, pick ownership, trade values and outcomes are fictional.</p>'; }
+  function missing(groups,c) {
+    const total=flat(groups).length,reviewed=flat(groups).filter(o=>c.decisions[o.id]).length;
+    const absent=groups.filter(g=>!likes(g,c).length);
+    return `<div class="panel"><div class="eyebrow">YOUR LIKES BUILD THE ROADMAP</div><h3 class="mock-title">${groups.length<4?'More sell groups needed':reviewed<total?'Finish your trade chips':'More liked offers needed'}</h3><p class="mock-subtitle">${groups.length<4?`This sample pool supports ${groups.length} of 4 separate sell groups. Return to the pool and use the recommended assets to explore the complete demo.`:reviewed<total?`${reviewed} of ${total} chips reviewed. Like or pass on every chip before we combine the liked trades.`:`You need a liked offer for ${absent.map(g=>g.give.join(' + ')).join(', ')}. We won’t fill the gap with passed offers.`}</p><div class="ex-buttons"><button class="secondary" data-navigate="assets">Edit asset pool</button><button class="primary" data-navigate="review">Review chips</button></div></div>${groups.length>=4?'<div class="ex-note"><div class="eyebrow">REVIEW DOCUMENT SHORTCUT</div><p class="ex-small">Marks all sample chips liked so you can inspect the later-page mocks directly.</p><button class="secondary" data-ex-sample="true">Preview with sample likes</button></div>':''}`;
+  }
+  function recoveryNote(state,groups,c) {
+    if(allIn(state)||state.ownsFirst) return '';
+    const own=flat(groups).find(o=>o.recovery);
+    if(own && c.sent[own.id]==='accepted') return '<div class="ex-note">Your 2027 1st was recovered in this simulation.</div>';
+    const liked=own && c.decisions[own.id]==='like';
+    return `<div class="ex-alert"><div class="ex-recovery">Overall execution priority 1</div><strong>Recover your own 2027 1st.</strong><br>Your pick is with Northside. ${liked?'The Northside trade returns that exact pick. We recommend executing it first; you can still send other offers first.':'Review the Northside recovery offer. Moving production will not improve a pick you own until you recover it. You can still choose to send other offers first.'}</div>`;
+  }
+  function renderReview(state,groups,c) {
+    const offers=flat(groups),count=offers.filter(o=>c.decisions[o.id]).length;
+    if(!offers.length) return heading('Review the possibilities','Start with a sell pool to see trade ideas.')+missing(groups,c);
+    const cursor=Math.min(c.cursor||0,offers.length-1),o=offers[cursor],decision=c.decisions[o.id];
+    return heading('Find the moves you like','Each chip is one offer. Only your likes can become part of a roadmap.')+`<div class="row"><span class="ex-small">${count} of ${offers.length} reviewed</span><span class="ex-small"><span class="ex-count">${offers.filter(x=>c.decisions[x.id]==='like').length}</span> liked</span></div><div class="ex-meter"><span style="width:${count/offers.length*100}%"></span></div>
+      <article class="panel"><div class="row"><span class="eyebrow">${esc(o.groupName)}</span><span class="ex-count">${cursor+1} / ${offers.length}</span></div><h3>${esc(o.team)}</h3>${o.recovery?'<div class="ex-recovery">Overall execution priority 1 · recover your own 2027 1st</div>':''}${exchange(o.give,o.get)}<div class="ex-note">${allIn(state)?'Illustrates turning future value into a starting-lineup upgrade.':'Illustrates moving production into draft capital and younger assets.'} No trade valuation is calculated in this mock.</div><div class="ex-buttons"><button class="secondary ex-pass" data-ex-decision="pass" data-offer="${o.id}">${decision==='pass'?'Passed':'Pass'}</button><button class="secondary ex-like" data-ex-decision="like" data-offer="${o.id}">${decision==='like'?'Liked':'Like'}</button></div></article>
+      <div class="ex-buttons"><button class="ghost" data-ex-cursor="${Math.max(0,cursor-1)}" ${cursor===0?'disabled':''}>Previous chip</button><button class="ghost" data-ex-cursor="${Math.min(offers.length-1,cursor+1)}" ${cursor===offers.length-1?'disabled':''}>Next chip</button></div>
+      ${count===offers.length?(ready(groups,c)?'<div class="ex-note">Review complete. Your liked offers cover all 4 sell groups.</div><button class="primary" data-navigate="roadmaps">Build my roadmaps</button>':missing(groups,c)):''}
+      <div class="divider"></div><button class="secondary" data-ex-sample="true">Use sample likes for all ${offers.length} chips</button><p class="ex-small">Demo shortcut: marks every sample chip liked so you can explore four roadmaps and fallback priorities.</p>${demoNote()}`;
+  }
+  function renderRoadmaps(state,groups,c) {
+    const list=ensurePlan(groups,c,state);
+    let out=heading('Your overhaul roadmaps','A roadmap combines 4 sell groups. Each group has its own outgoing assets and liked alternatives.');
+    if(!list.length) return out+missing(groups,c);
+    const locked=Object.keys(c.sent).length>0;
+    out+=recoveryNote(state,groups,c)+`<div class="ex-plans" aria-label="Alternative roadmaps">${list.map((p,i)=>`<button class="secondary" data-ex-plan="${i}" aria-pressed="${c.plan===i}" ${locked?'disabled':''}>${i+1}</button>`).join('')}</div><div class="row"><span class="eyebrow">ROADMAP ${Number(c.plan||0)+1} OF ${list.length}</span><span class="pill">4 distinct sell groups</span></div><p class="ex-small">${list.length<4?'Your likes currently support fewer than four distinct combinations.':'Choose a numbered roadmap to compare alternatives.'} ${locked?'Simulation started: this roadmap is locked until you reset.':''}</p>`;
+    groups.forEach((g,i)=>{
+      const chosen=g.offers.find(o=>o.id===c.choices[g.id])||likes(g,c)[0];
+      out+=`<article class="ex-group"><div class="row"><span class="eyebrow">SELL GROUP ${i+1} · ${g.pos}</span><button class="ghost" data-ex-swap="${g.id}" ${locked||likes(g,c).length<2?'disabled':''}>Swap offer</button></div><h4>${esc(g.give.join(' + '))}</h4><p class="ex-small">To ${esc(chosen.team)} · receive</p><strong>${esc(chosen.get.join(' + '))}</strong>${chosen.recovery?'<p class="ex-recovery">Overall execution priority 1 · recover your own first</p>':''}<div class="ex-statline"><span>${likes(g,c).length} liked alternatives</span><span>No outgoing overlap with other groups</span></div></article>`;
+    });
+    return out+`<div class="ex-note">All 4 selected offers use separate outgoing and incoming assets. Equal-priority alternatives within one group can intentionally compete for that group’s assets.</div><button class="primary" data-ex-priority-start="true">Set offer priorities</button>${demoNote()}`;
+  }
+  function renderPriorities(state,groups,c) {
+    const list=ensurePlan(groups,c,state);
+    let out=heading('Set offer priorities','One package at a time. Drag its liked offers into priority tiers, just like your tiers board.');
+    if(!list.length) return out+missing(groups,c);
+    const locked=Object.keys(c.sent).length>0;
+    const i=Math.max(0,Math.min(Number(c.priorityGroupIndex)||0,groups.length-1)),g=groups[i];
+    c.priorityGroupIndex=i;
+    const opts=likes(g,c).slice().sort((a,b)=>rank(a,c)-rank(b,c)||a.index-b.index),minimum=Math.min(...opts.map(o=>rank(o,c))),tied=opts.filter(o=>rank(o,c)===minimum).length;
+    out+=`<div class="ex-priority-progress" data-ex-package-progress><strong>Package <span class="ex-count">${i+1}</span> of <span class="ex-count">${groups.length}</span></strong><span class="ex-small">${opts.length} liked offers</span></div><div class="ex-meter"><span style="width:${(i+1)/groups.length*100}%"></span></div><div class="ex-package-assets"><span class="ex-label">This package sends</span><h3 tabindex="-1" data-ex-priority-heading>${esc(g.give.join(' + '))}</h3></div>`;
+    if(g.offers.some(o=>o.recovery)) out+=recoveryNote(state,groups,c);
+    out+=`<p class="ex-small">Same tier = send together. Later tiers are backups you can send after responses, with time to negotiate.</p><p class="ex-priority-help" id="ex-priority-help">${locked?'Priorities are locked while this simulation is in progress. Reset the simulation to edit.':'Drag using the handle, or tap Move to choose a tier. Keyboard: focus a handle and use the up/down arrow keys.'}</p><div class="ex-priority-live" aria-live="polite" aria-atomic="true" data-ex-drag-status></div><div data-ex-priority-board="${g.id}">`;
+    [1,2,3,4].forEach(n=>{
+      const tierOffers=opts.filter(o=>rank(o,c)===n);
+      out+=`<section class="ex-tier" data-ex-priority-tier="${n}" role="group" aria-label="Priority ${n}"><div class="ex-tier-head"><h4 class="ex-tier-label">Priority <span class="ex-count">${n}</span></h4><span class="ex-small">${n===minimum?'Send first':'Backup'} · <span class="ex-count">${tierOffers.length}</span></span></div><div class="ex-tier-body">`;
+      out+=tierOffers.map(o=>`<article class="ex-priority-card" data-ex-priority-offer="${o.id}"><div class="ex-priority-main"><button type="button" class="ex-drag-handle" data-ex-drag-offer="${o.id}" aria-label="Move ${esc(o.team)} offer, priority ${n}" aria-describedby="ex-priority-help" ${locked?'disabled':''}><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="M6 4h2m4 0h2M6 10h2m4 0h2M6 16h2m4 0h2"/></svg></button><div class="ex-priority-body"><strong>${esc(o.team)}</strong><div class="ex-small">Get ${esc(o.get.join(' + '))}</div>${o.recovery?'<div class="ex-recovery">Overall priority 1 · recover your first</div>':''}</div><button type="button" class="ex-move-toggle" data-ex-move-picker="${o.id}" aria-label="Choose a priority for ${esc(o.team)} offer" aria-expanded="${c.priorityMoveOffer===o.id}" ${locked?'disabled':''}>Move</button></div>${c.priorityMoveOffer===o.id?`<div class="ex-move-options"><p class="ex-small">Move ${esc(o.team)} to:</p>${[1,2,3,4].map(to=>`<button type="button" class="secondary" data-ex-move-rank="${to}" data-offer="${o.id}" aria-label="Move ${esc(o.team)} to priority ${to}" aria-pressed="${n===to}" ${locked?'disabled':''}>P<span class="ex-count">${to}</span></button>`).join('')}</div>`:''}</article>`).join('');
+      if(!tierOffers.length)out+=`<p class="ex-tier-empty">${locked?'No offers at this priority.':'Drop an offer here'}</p>`;
+      out+='</div></section>';
+    });
+    out+='</div>';
+    if(tied>1) out+=`<div class="ex-alert"><strong>${tied} offers will send together.</strong> First come, first served: these offers use the same assets, so only one can be accepted.</div>`;
+    return out+`<div class="ex-priority-footer"><button type="button" class="secondary" data-ex-package-back="true">Back</button><button type="button" class="primary" data-ex-package-next="true">${i===groups.length-1?'Review send summary':'Continue'}</button></div><p class="ex-small">${i===groups.length-1?'Next: review the first offers across all packages.':`Next: ${esc(groups[i+1].give.join(' + '))}`}</p>${demoNote()}`;
+  }
+  function renderSummary(state,groups,c) {
+    const list=ensurePlan(groups,c,state);
+    let out=heading('Ready to put it in motion','Review exactly which offers would go out now. This is a local simulation.');
+    if(!list.length) return out+missing(groups,c);
+    const offers=firstWave(groups,c),activeGroups=new Set(offers.map(o=>o.group)).size,ties=groups.filter(g=>wave(g,c).length>1),started=Object.keys(c.sent).length>0;
+    out+=`<div class="panel"><div class="eyebrow">CURRENT SEND BATCH</div><h3 class="mock-title"><span class="ex-count">${offers.length}</span> ${offers.length===1?'offer':'offers'} · <span class="ex-count">${activeGroups}</span> ${activeGroups===1?'sell group':'sell groups'}</h3><p class="mock-subtitle">At most one accepted trade per sell group. ${activeGroups} ${activeGroups===1?'trade in this batch can succeed':'trades in this batch can all succeed'} without reusing assets.</p></div>`+recoveryNote(state,groups,c);
+    if(ties.length) out+=`<div class="ex-alert"><strong>First come, first served.</strong> ${ties.map(g=>`${wave(g,c).length} offers for ${esc(g.give.join(' + '))}`).join('; ')} are being sent at the same time. Those offers reuse the same outgoing assets. Only the first accepted offer can complete; its alternatives must become unavailable.</div>`;
+    offers.forEach(o=>{out+=`<article class="ex-group"><div class="row"><span class="eyebrow">${esc(o.groupName)}</span><span class="ex-count">PRIORITY ${rank(o,c)}</span></div><h4>Offer to ${esc(o.team)}</h4>${o.recovery?'<div class="ex-recovery">Overall execution priority 1 · recover your own 2027 1st</div>':''}${exchange(o.give,o.get)}</article>`;});
+    if(!offers.length) out+=`<div class="ex-note">${started?'Your current offers are pending or complete. Open the tracker to simulate responses and review the next available offers.':'No eligible offers in this batch.'}</div>`;
+    out+=`<div class="ex-note">After a decline, return to this roadmap to review the next priority. This mock requires a manual send for the next batch. Provider cancellation and response syncing remain design decisions.</div><div class="ex-buttons">${offers.length?'<button class="primary" data-ex-send="all">Simulate send all</button>':''}<button class="secondary" data-navigate="tracking">Open saved roadmap</button></div>${demoNote()}`;
+    return out;
+  }
+  function renderTracking(state,groups,c) {
+    const list=ensurePlan(groups,c,state);
+    let out=heading('Your roadmap, in progress','Come back as offers receive responses. Review alternatives for any sell group that is still open.');
+    if(!list.length) return out+missing(groups,c);
+    const accepted=groups.filter(g=>g.offers.some(o=>c.sent[o.id]==='accepted')).length,pending=Object.values(c.sent).filter(s=>s==='pending').length;
+    out+=`<div class="panel"><div class="row"><span class="eyebrow">LOCAL SIMULATION</span><span class="ex-count">${accepted} / 4 complete</span></div><div class="ex-meter"><span style="width:${accepted/4*100}%"></span></div><p class="ex-small">${pending} offers awaiting a simulated response. Changes stay in this review document on this browser.</p></div>`+recoveryNote(state,groups,c);
+    groups.forEach((g,i)=>{
+      const acceptedOffer=g.offers.find(o=>c.sent[o.id]==='accepted'),pendingOffers=g.offers.filter(o=>c.sent[o.id]==='pending'),next=wave(g,c),history=likes(g,c).filter(o=>c.sent[o.id] && c.sent[o.id]!=='unavailable');
+      out+=`<article class="ex-group"><div class="row"><span class="eyebrow">SELL GROUP ${i+1}</span><span class="ex-status ${acceptedOffer?'accepted':pendingOffers.length?'pending':''}">${acceptedOffer?'Complete':pendingOffers.length?'Awaiting responses':'Ready'}</span></div><h4>${esc(g.give.join(' + '))}</h4>`;
+      if(acceptedOffer) out+=`<div class="ex-note">Accepted by ${esc(acceptedOffer.team)}. Received ${esc(acceptedOffer.get.join(' + '))}. These outgoing assets are locked; every overlapping alternative is unavailable in this simulation.</div>`;
+      history.forEach(o=>{
+        out+=`<div class="ex-alt"><div class="ex-altbody"><strong>${esc(o.team)}</strong><div class="ex-small">${esc(o.get.join(' + '))}</div><span class="ex-status ${c.sent[o.id]}">${esc(c.sent[o.id])}</span>${c.sent[o.id]==='pending'?`<div class="ex-buttons"><button class="secondary" data-ex-response="accepted" data-offer="${o.id}">Accept</button><button class="secondary" data-ex-response="declined" data-offer="${o.id}">Decline</button></div>`:''}</div></div>`;
+      });
+      if(next.length) out+=`<div class="ex-note"><strong>Next: priority ${rank(next[0],c)}</strong><br>${next.map(o=>`${esc(o.team)} → ${esc(o.get.join(' + '))}`).join('<br>')}${next.length>1?'<br>Equal priority: first come, first served.':''}</div><button class="secondary" data-ex-send="${g.id}">Simulate ${history.length?'next':'first'} ${next.length===1?'offer':`${next.length} offers`}</button>`;
+      if(!next.length&&!pendingOffers.length&&!acceptedOffer) out+='<div class="ex-note">All liked alternatives were declined. More ideas are needed for these assets.</div>';
+      if(pendingOffers.length) out+=`<p class="ex-small">${likes(g,c).filter(o=>!c.sent[o.id]).length} alternatives waiting. Resolve the active offers before sending the next rank.</p>`;
+      out+='</article>';
+    });
+    if(c.events.length) out+=`<details><summary>Simulation activity (${c.events.length})</summary><ol class="ex-log">${c.events.slice().reverse().map(e=>`<li>${esc(e)}</li>`).join('')}</ol></details>`;
+    return out+`<div class="ex-buttons"><button class="secondary" data-navigate="summary">Review next batch</button><button class="ghost" data-ex-reset="true">Reset simulation</button></div>${demoNote()}`;
+  }
+  function render(page,state) {
+    const c=context(state),groups=dataset(state);
+    const fn={review:renderReview,roadmaps:renderRoadmaps,priorities:renderPriorities,summary:renderSummary,tracking:renderTracking}[page];
+    return fn?style+(c.message?`<div class="ex-message" role="status">${esc(c.message)}</div>`:'')+fn(state,groups,c):'';
+  }
+  function movePriority(offerId,nextRank,c,groups) {
+    if(Object.keys(c.sent).length)return false;
+    const g=groups.find(g=>likes(g,c).some(o=>o.id===offerId));
+    if(!g||!Number.isInteger(nextRank)||nextRank<1||nextRank>4)return false;
+    const o=g.offers.find(o=>o.id===offerId);
+    c.ranks[o.id]=nextRank;c.priorityMoveOffer='';
+    const sorted=likes(g,c).slice().sort((a,b)=>rank(a,c)-rank(b,c)||a.index-b.index);
+    c.choices[g.id]=sorted[0].id;
+    c.message=`${o.team} moved to priority ${nextRank}. Offers in the same tier send together.`;
+    return true;
+  }
+  function bindPriorityBoard(root,state,update) {
+    const doc=root.ownerDocument,view=doc.defaultView;
+    const focusOffer=id=>root.querySelector(`[data-ex-drag-offer="${id}"]`)?.focus({preventScroll:true});
+    root.querySelectorAll('[data-ex-move-picker]').forEach(el=>el.addEventListener('click',()=>{
+      const c=context(state);if(Object.keys(c.sent).length)return;
+      c.priorityMoveOffer=c.priorityMoveOffer===el.dataset.exMovePicker?'':el.dataset.exMovePicker;c.message='';
+      update();
+      if(c.priorityMoveOffer)root.querySelector(`[data-offer="${c.priorityMoveOffer}"][data-ex-move-rank]`)?.focus({preventScroll:true});
+      else focusOffer(el.dataset.exMovePicker);
+    }));
+    root.querySelectorAll('[data-ex-move-rank]').forEach(el=>el.addEventListener('click',()=>{
+      const id=el.dataset.offer;
+      if(movePriority(id,Number(el.dataset.exMoveRank),context(state),dataset(state))){update();focusOffer(id);}
+    }));
+    root.querySelectorAll('[data-ex-drag-offer]').forEach(handle=>{
+      handle.addEventListener('keydown',event=>{
+        if(event.key!=='ArrowUp'&&event.key!=='ArrowDown')return;
+        event.preventDefault();
+        const c=context(state),groups=dataset(state),id=handle.dataset.exDragOffer;
+        const offer=flat(groups).find(o=>o.id===id);if(!offer)return;
+        const nextRank=Math.max(1,Math.min(4,rank(offer,c)+(event.key==='ArrowUp'?-1:1)));
+        if(movePriority(id,nextRank,c,groups)){update();focusOffer(id);}
+      });
+      handle.addEventListener('pointerdown',event=>{
+        if(handle.disabled||event.isPrimary===false||(event.pointerType==='mouse'&&event.button!==0)||Object.keys(context(state).sent).length)return;
+        event.preventDefault();
+        const id=handle.dataset.exDragOffer,offer=flat(dataset(state)).find(o=>o.id===id);
+        if(!offer)return;
+        const card=handle.closest('[data-ex-priority-offer]'),ghost=doc.createElement('div'),live=root.querySelector('[data-ex-drag-status]');
+        const pointerId=event.pointerId;
+        let x=event.clientX,y=event.clientY,target=null,frame=0,finished=false;
+        ghost.className='ex-drag-preview';ghost.setAttribute('aria-hidden','true');
+        ghost.innerHTML=`${esc(offer.team)}<small>Get ${esc(offer.get.join(' + '))}</small>`;
+        root.appendChild(ghost);card.classList.add('ex-dragging');
+        const position=()=>{
+          ghost.style.left=`${Math.max(8,Math.min(x+16,view.innerWidth-ghost.offsetWidth-8))}px`;
+          ghost.style.top=`${Math.max(8,Math.min(y+16,view.innerHeight-ghost.offsetHeight-8))}px`;
+          const hit=doc.elementFromPoint(x,y)?.closest('[data-ex-priority-tier]');
+          const next=hit&&root.contains(hit)?hit:null;
+          if(next!==target){
+            target?.classList.remove('ex-drop-active');target=next;target?.classList.add('ex-drop-active');
+            if(live)live.textContent=target?`Drop ${offer.team} into priority ${target.dataset.exPriorityTier}.`:'Move over a priority tier to drop.';
+          }
+        };
+        const cleanup=()=>{
+          if(finished)return;finished=true;
+          view.cancelAnimationFrame(frame);ghost.remove();card.classList.remove('ex-dragging');target?.classList.remove('ex-drop-active');
+          doc.removeEventListener('pointermove',onMove);doc.removeEventListener('pointerup',onUp);doc.removeEventListener('pointercancel',onCancel);doc.removeEventListener('keydown',onKey);
+          handle.removeEventListener('lostpointercapture',onCancel);
+          if(handle.hasPointerCapture?.(pointerId))handle.releasePointerCapture(pointerId);
+        };
+        const onMove=e=>{if(e.pointerId!==pointerId)return;e.preventDefault();x=e.clientX;y=e.clientY;position();};
+        const onUp=e=>{
+          if(e.pointerId!==pointerId)return;
+          x=e.clientX;y=e.clientY;position();const nextRank=target?Number(target.dataset.exPriorityTier):null;cleanup();
+          if(nextRank&&movePriority(id,nextRank,context(state),dataset(state))){update();focusOffer(id);}
+          else if(live)live.textContent='Move cancelled. Offer priority is unchanged.';
+        };
+        const onCancel=e=>{if(e.pointerId!=null&&e.pointerId!==pointerId)return;cleanup();if(live)live.textContent='Move cancelled. Offer priority is unchanged.';};
+        const onKey=e=>{if(e.key==='Escape'){e.preventDefault();onCancel(e);}};
+        const scroll=()=>{
+          if(finished)return;
+          if(!handle.isConnected){cleanup();return;}
+          const step=y<64?-12:y>view.innerHeight-64?12:0;
+          if(step){view.scrollBy(0,step);position();}
+          frame=view.requestAnimationFrame(scroll);
+        };
+        doc.addEventListener('pointermove',onMove,{passive:false});doc.addEventListener('pointerup',onUp);doc.addEventListener('pointercancel',onCancel);doc.addEventListener('keydown',onKey);
+        handle.addEventListener('lostpointercapture',onCancel);
+        handle.setPointerCapture?.(pointerId);position();frame=view.requestAnimationFrame(scroll);
+        if(live)live.textContent=`Moving ${offer.team}. Drop into a priority tier, or press Escape to cancel.`;
+      });
+    });
+  }
+  function bind(root,state,update) {
+    const listen=(selector,event,fn)=>root.querySelectorAll(selector).forEach(el=>el.addEventListener(event,()=>{fn(el,context(state),dataset(state));update();}));
+    listen('[data-ex-decision]','click',(el,c,groups)=>{
+      if(Object.keys(c.sent).length) {c.message='Reset the simulation before changing the reviewed offer pool.';return;}
+      c.decisions[el.dataset.offer]=el.dataset.exDecision;c.choices={};c.ranks={};c.message='';
+      const offers=flat(groups),next=offers.findIndex((o,i)=>i>c.cursor&&!c.decisions[o.id]);
+      if(next>=0)c.cursor=next;
+      else { const unresolved=offers.findIndex(o=>!c.decisions[o.id]);if(unresolved>=0)c.cursor=unresolved; }
+    });
+    listen('[data-ex-cursor]','click',(el,c)=>{c.cursor=Number(el.dataset.exCursor);c.message='';});
+    listen('[data-ex-sample]','click',(el,c,groups)=>{
+      if(Object.keys(c.sent).length){c.message='Reset the simulation before changing the reviewed offer pool.';return;}
+      flat(groups).forEach(o=>c.decisions[o.id]='like');c.choices={};c.ranks={};c.message='Demo shortcut applied: every sample chip is now liked. You can still pass on any chip.';
+    });
+    listen('[data-ex-plan]','click',(el,c,groups)=>{if(Object.keys(c.sent).length)return;const list=plans(groups,c,state);c.plan=Number(el.dataset.exPlan);if(list[c.plan])applyPlan(groups,c,list[c.plan]);c.message='';});
+    listen('[data-ex-swap]','click',(el,c,groups)=>{
+      if(Object.keys(c.sent).length)return;
+      const g=groups.find(g=>g.id===el.dataset.exSwap),opts=likes(g,c),i=opts.findIndex(o=>o.id===c.choices[g.id]),next=opts[(i+1)%opts.length];
+      c.choices[g.id]=next.id;const ordered=[next,...opts.filter(o=>o.id!==next.id)];ordered.forEach((o,j)=>c.ranks[o.id]=j+1);c.message=`Swapped the ${g.give.join(' + ')} group to ${next.team}. Its alternatives remain liked.`;
+    });
+    listen('[data-ex-priority-start]','click',(el,c)=>{c.priorityGroupIndex=0;c.priorityMoveOffer='';c.message='';state.page='priorities';});
+    root.querySelectorAll('[data-ex-package-next],[data-ex-package-back]').forEach(el=>el.addEventListener('click',()=>{
+      const c=context(state),groups=dataset(state),i=Number(c.priorityGroupIndex)||0;
+      c.message='';c.priorityMoveOffer='';
+      if(el.hasAttribute('data-ex-package-back')){
+        if(i>0)c.priorityGroupIndex=i-1;else state.page='roadmaps';
+      }else if(i<groups.length-1)c.priorityGroupIndex=i+1;
+      else state.page='summary';
+      update();
+      const title=root.querySelector('[data-ex-priority-heading]');
+      if(title){title.focus({preventScroll:true});root.scrollIntoView({block:'start',behavior:'auto'});}
+    }));
+    bindPriorityBoard(root,state,update);
+    listen('[data-ex-send]','click',(el,c,groups)=>{
+      ensurePlan(groups,c,state);if(!ready(groups,c))return;
+      const scope=el.dataset.exSend==='all'?groups:groups.filter(g=>g.id===el.dataset.exSend),offers=firstWave(scope,c);
+      offers.forEach(o=>{c.sent[o.id]='pending';c.events.push(`Simulated offer to ${o.team}: ${o.give.join(' + ')} for ${o.get.join(' + ')}.`);});
+      c.message=offers.length?`${offers.length} offers marked pending locally. No real offers were sent.`:'No new offers are available to send.';
+      if(offers.length)state.page='tracking';
+    });
+    listen('[data-ex-response]','click',(el,c,groups)=>{
+      const g=groups.find(g=>g.offers.some(o=>o.id===el.dataset.offer)),o=g.offers.find(o=>o.id===el.dataset.offer);
+      if(c.sent[o.id]!=='pending')return;
+      c.sent[o.id]=el.dataset.exResponse;
+      c.events.push(`${o.team} ${el.dataset.exResponse} the simulated offer for ${g.give.join(' + ')}.`);
+      if(el.dataset.exResponse==='accepted') {
+        g.offers.filter(x=>x.id!==o.id).forEach(x=>{c.sent[x.id]='unavailable';});
+        c.message='Accepted in the simulation. Overlapping alternatives are unavailable and this sell group is complete.';
+      } else c.message='Declined in the simulation. Review the next priority once all active offers in this group are resolved.';
+    });
+    listen('[data-ex-reset]','click',(el,c)=>{c.sent={};c.events=[];c.message='Simulation reset. Your likes and priorities are preserved.';});
+  }
+  window.OverhaulExecution={render,bind,reset(state){delete state.execution;},inspect(state){const c=context(state),groups=dataset(state);return {groups,plans:plans(groups,c,state),wave:firstWave(groups,c),ready:ready(groups,c),context:c};}};
+})();
+
+</script>
+<script>
+(() => {
+'use strict';
+const KEY='fleeced-overhaul-review-v1';
+const pages=[
+ {id:'outlook',name:'Choose outlook',description:'Two clear directions. Decide where this plan lives.'},
+ {id:'assets',name:'Select assets',description:'Choose the trade pool and inspect the missing-first warning.'},
+ {id:'positions',name:'Set targets',description:'Optional positions and the type of return worth pursuing.'},
+ {id:'review',name:'Review trade chips',description:'Like or pass on individual ideas before assembling a roadmap.'},
+ {id:'roadmaps',name:'Compare roadmaps',description:'Four alternative plans, each made from distinct outgoing asset groups.'},
+ {id:'priorities',name:'Rank alternatives',description:'Set the order of offers for one group. Equal ranks mean simultaneous offers.'},
+ {id:'summary',name:'Confirm offers',description:'See exactly what would be sent, including first come, first served groups.'},
+ {id:'tracking',name:'Track & continue',description:'Return as offers resolve, then choose the next move.'},
+ {id:'responses',name:'Your responses',description:'Everything you decided, plus your notes and recordings.'}
+];
+const qs=window.OverhaulQuestions;
+const esc=(s)=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let state={page:'outlook',answers:{},general:'',liveTranscript:false,mock:{outlook:'rebuild',ownsFirst:false,selectedAssets:['henry','cook','evans','kittle'],positions:[]}};
+let storageOkay=true;
+try{const saved=JSON.parse(localStorage.getItem(KEY)||'null');if(saved&&saved.answers&&saved.mock){state={...state,...saved};if(!pages.some(p=>p.id===state.page))state.page='outlook';}}catch(e){storageOkay=false;}
+let clips=[],db=null,active=null,pendingMic=false,pendingAudioSave=false,saveTimer=null;
+let volatileAudio=false;
+const answer=(id)=>state.answers[id]||(state.answers[id]={choice:'',notes:'',transcript:''});
+const answered=(id)=>{const a=answer(id);return Boolean(qs.find(q=>q.id===id)?.ownerDecision||a.choice||a.notes.trim()||a.transcript.trim()||clips.some(c=>c.questionId===id));};
+const prettyId=(id)=>id==='general'?'GENERAL':`Q${String(qs.findIndex(q=>q.id===id)+1).padStart(2,'0')}`;
+const say=(message)=>{document.getElementById('announcer').textContent=message;};
+const message=(value)=>{document.getElementById('global-message').textContent=value;};
+function save(){try{localStorage.setItem(KEY,JSON.stringify(state));storageOkay=true;}catch(e){storageOkay=false;}updateProgress();}
+function updateProgress(){
+ const total=qs.filter(q=>answered(q.id)).length;
+ document.getElementById('completion-count').textContent=`${total} of ${qs.length} decisions answered`;
+ document.getElementById('save-status').textContent=storageOkay?'Notes saved in this browser':'Storage unavailable — download a backup';
+ document.getElementById('audio-count').textContent=`${clips.length} recording${clips.length===1?'':'s'}${volatileAudio?' · download to keep':''}`;
+ document.querySelectorAll('[data-answer-state]').forEach(el=>{const yes=answered(el.dataset.answerState);el.textContent=qs.find(q=>q.id===el.dataset.answerState)?.ownerDecision?'Confirmed in chat':yes?'Response captured':'Awaiting your take';el.classList.toggle('has-answer',yes);});
+ document.querySelectorAll('[data-nav-count]').forEach(el=>{const list=qs.filter(q=>q.page===el.dataset.navCount);el.textContent=`${list.filter(q=>answered(q.id)).length}/${list.length}`;});
+ const preview=document.getElementById('export-preview');if(preview)preview.value=buildText();
+}
+function navigate(id){if(active||pendingMic||pendingAudioSave){message('Stop recording and let the clip finish saving before changing screens.');return false;}state.page=id;save();render();window.scrollTo({top:0,behavior:'instant'});const heading=document.querySelector('.page-bar h2');if(heading){heading.setAttribute('tabindex','-1');heading.focus({preventScroll:true});}return true;}
+function renderNav(){document.getElementById('navigation').innerHTML=pages.map((p,i)=>`<button type="button" class="nav-step ${state.page===p.id?'active':''}" data-page="${p.id}" ${state.page===p.id?'aria-current="step"':''}><span class="nav-number">${String(i+1).padStart(2,'0')}</span><span class="nav-name">${p.name}</span><span class="nav-count" data-nav-count="${p.id}"></span></button>`).join('');document.querySelectorAll('[data-page]').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.page)));}
+function voiceControls(id){return `<div class="voice-toolbar"><button type="button" class="record-button" data-record="${id}"><span class="record-dot" aria-hidden="true"></span>Record response</button><span class="record-status" id="record-status-${id}" role="status">Audio saved with this ${id==='general'?'review':'question'}.</span></div><div class="voice-transcript" id="transcript-wrap-${id}" ${answer(id).transcript?'':'hidden'}><label class="field-label" for="transcript-${id}">Voice transcript · edit anything it misheard</label><textarea id="transcript-${id}" data-transcript="${id}">${esc(answer(id).transcript)}</textarea><div class="interim" id="interim-${id}"></div></div><div id="clips-${id}"></div>`;}
+function questionHTML(q){const a=answer(q.id);return `<article class="question-card" id="question-${q.id}"><div class="question-top"><span class="question-number">${esc(prettyId(q.id))} · ${esc(q.title)}</span><span class="answer-state" data-answer-state="${q.id}"></span></div><h3>${esc(q.question)}</h3><p class="question-context">${esc(q.context)}</p>${q.ownerDecision?`<p class="notice"><strong>Confirmed in chat:</strong> ${esc(q.ownerDecision)}</p>`:''}${q.ownerDecision?'':`<p class="recommendation"><strong>Proposed starting point:</strong> ${esc(q.recommendation.replace(/^Recommendation:\s*/,''))}</p>`}<fieldset class="response-options"><legend>${esc(q.question)}</legend>${q.options.map((opt,i)=>`<label class="response-option"><input type="radio" name="choice-${q.id}" value="${esc(opt)}" data-choice="${q.id}" ${a.choice===opt?'checked':''}><span>${esc(opt)}</span></label>`).join('')}<label class="response-option"><input type="radio" name="choice-${q.id}" value="Custom — see notes" data-choice="${q.id}" ${a.choice==='Custom — see notes'?'checked':''}><span>My own approach — see my notes</span></label></fieldset><label class="field-label" for="notes-${q.id}">Your answer, changes, or notes</label><textarea id="notes-${q.id}" data-notes="${q.id}" placeholder="Tell me what you would change…">${esc(a.notes)}</textarea>${voiceControls(q.id)}</article>`;}
+function voiceSettings(){const supported=Boolean(window.SpeechRecognition||window.webkitSpeechRecognition);return `<div class="voice-settings"><label><input id="live-transcript" type="checkbox" ${state.liveTranscript?'checked':''} ${supported?'':'disabled'}>Add a live transcript while recording</label><p>${supported?'Optional: your browser’s speech service may process your voice online. Audio is also saved here. Review the transcript before copying.':'Live transcription is unavailable in this browser. Record audio and download it to attach in chat, or use your device’s dictation in a notes field.'} <a href="https://developer.mozilla.org/en-US/docs/Web/API/SpeechRecognition" target="_blank" rel="noreferrer">Browser support</a></p></div>`;}
+function render(){
+ renderNav();const page=pages.find(p=>p.id===state.page);const i=pages.indexOf(page);const content=document.getElementById('page-content');
+ if(page.id==='responses'){content.innerHTML=exportHTML();bindResponses();renderClips('general');updateProgress();return;}
+ content.innerHTML=`<div class="page-bar"><div><div class="eyebrow">REVIEW THE PROPOSAL</div><h2>${esc(page.name.toUpperCase())}</h2><p class="page-description">${esc(page.description)}</p></div><span class="step-progress">${String(i+1).padStart(2,'0')} / 08</span></div><div class="review-columns"><section class="mock-column" aria-label="Interactive page mock"><div class="mock-caption"><span>FLEECED · INITIAL MOBILE MOCK</span><span class="mono">${state.mock.outlook==='rebuild'?'BLOW IT UP':'PUSH ALL IN'}</span></div><div class="phone-frame"><div class="phone-top"><span class="phone-brand">FLEECED</span><span>Dynasty League · Sample</span></div><div id="mock-screen"></div></div><p class="mock-footnote">Interactive sample. Player groupings, returns and statuses are illustrative. No offers leave this review.</p><div class="review-pagination"><button type="button" data-prev ${i===0?'disabled':''}>Previous screen</button><button type="button" data-next>Next screen</button></div><details class="locked-summary"><summary>What your initial brief already establishes</summary><ul><li>Only Push all in or Blow it up.</li><li>Full roster by position, with suggested assets and optional target positions.</li><li>4–5 independently executable trades as the ideal payoff, drawn from liked chips.</li><li>4–5 alternative roadmaps, with ranked fallback offers for each sell group.</li><li>Tied priorities send competing offers together, with an explicit first come, first served note.</li><li>A saved place to return as trades get responses.</li></ul></details></section><section class="decisions-column" aria-label="Clarifying questions"><p class="decision-intro">Decisions you confirmed in chat are marked below. Add changes or details, or answer any remaining question.</p>${voiceSettings()}${qs.filter(q=>q.page===page.id).map(questionHTML).join('')}</section></div>`;
+ renderMock();bindQuestions();
+ content.querySelector('[data-prev]').addEventListener('click',()=>navigate(pages[Math.max(0,i-1)].id));
+ content.querySelector('[data-next]').addEventListener('click',()=>navigate(pages[i+1].id));
+ qs.filter(q=>q.page===page.id).forEach(q=>renderClips(q.id));updateProgress();
+}
+let lastSetup=JSON.stringify([state.mock.outlook,state.mock.ownsFirst,state.mock.selectedAssets]);
+function renderMock(){
+ const root=document.getElementById('mock-screen');if(!root)return;
+ const module=['outlook','assets','positions'].includes(state.page)?window.OverhaulSetup:window.OverhaulExecution;
+ root.innerHTML=module.render(state.page,state.mock);
+ module.bind(root,state.mock,()=>{const requested=state.mock.page;delete state.mock.page;const now=JSON.stringify([state.mock.outlook,state.mock.ownsFirst,state.mock.selectedAssets]);if(now!==lastSetup){delete state.mock.execution;lastSetup=now;}save();renderMock();const cap=document.querySelector('.mock-caption .mono');if(cap)cap.textContent=state.mock.outlook==='rebuild'?'BLOW IT UP':'PUSH ALL IN';if(requested&&pages.some(p=>p.id===requested)&&requested!==state.page)navigate(requested);});
+ root.querySelectorAll('[data-navigate]').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.navigate)));
+ save();
+}
+function bindQuestions(){
+ document.querySelectorAll('[data-choice]').forEach(el=>el.addEventListener('change',()=>{answer(el.dataset.choice).choice=el.value;save();}));
+ document.querySelectorAll('[data-notes]').forEach(el=>el.addEventListener('input',()=>{answer(el.dataset.notes).notes=el.value;save();}));
+ document.querySelectorAll('[data-transcript]').forEach(el=>el.addEventListener('input',()=>{answer(el.dataset.transcript).transcript=el.value;save();}));
+ document.querySelectorAll('[data-record]').forEach(el=>el.addEventListener('click',()=>active&&active.questionId===el.dataset.record?stopRecording():startRecording(el.dataset.record)));
+ const toggle=document.getElementById('live-transcript');if(toggle)toggle.addEventListener('change',()=>{state.liveTranscript=toggle.checked;save();});
+}
+async function openDB(){try{db=await new Promise((resolve,reject)=>{const req=indexedDB.open('fleeced-overhaul-audio-v1',1);req.onupgradeneeded=()=>req.result.createObjectStore('clips',{keyPath:'id'});req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});const records=await new Promise((resolve,reject)=>{const req=db.transaction('clips','readonly').objectStore('clips').getAll();req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});clips=records.map(c=>({...c,url:URL.createObjectURL(c.blob)}));}catch(e){volatileAudio=true;}}
+async function putClip(clip){if(!db){volatileAudio=true;return;}try{await new Promise((resolve,reject)=>{const tx=db.transaction('clips','readwrite');const {url,...record}=clip;tx.objectStore('clips').put(record);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});}catch(e){volatileAudio=true;message('This recording is available now, but browser storage is full or unavailable. Download the response bundle before closing.');}}
+async function deleteClip(id){const clip=clips.find(c=>c.id===id);if(!clip)return;try{if(db)await new Promise((resolve,reject)=>{const tx=db.transaction('clips','readwrite');tx.objectStore('clips').delete(id);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});URL.revokeObjectURL(clip.url);clips=clips.filter(c=>c.id!==id);renderClips(clip.questionId);updateProgress();}catch(e){message('Could not remove this saved recording. Try again.');}}
+function renderClips(id){const el=document.getElementById(`clips-${id}`);if(!el)return;el.innerHTML=clips.filter(c=>c.questionId===id).map(c=>`<div class="clip-item"><div class="row"><span>${esc(c.filename)} · ${Math.round(c.duration)}s</span><button type="button" class="clip-delete" data-delete-clip="${c.id}" aria-label="Remove ${esc(c.filename)}">Remove</button></div><audio controls preload="metadata" src="${c.url}" aria-label="Recording for ${esc(prettyId(id))}"></audio><a href="${c.url}" download="${esc(c.filename)}">Download audio</a></div>`).join('');el.querySelectorAll('[data-delete-clip]').forEach(b=>b.addEventListener('click',()=>deleteClip(b.dataset.deleteClip)));}
+function status(id,value){const el=document.getElementById(`record-status-${id}`);if(el)el.textContent=value;}
+function updateRecordingUI(){const dock=document.getElementById('recording-dock');dock.hidden=!active;document.querySelectorAll('[data-record]').forEach(b=>{const same=active?.questionId===b.dataset.record;b.disabled=pendingMic||pendingAudioSave||Boolean(active&&!same);b.classList.toggle('recording',same);b.innerHTML=`<span class="record-dot" aria-hidden="true"></span>${same?'Stop recording':'Record response'}`;});const live=document.getElementById('live-transcript');if(live&&active)live.disabled=true;if(live&&!active)live.disabled=!(window.SpeechRecognition||window.webkitSpeechRecognition);}
+function appendTranscript(id,text){if(!text.trim())return;const a=answer(id);a.transcript+=(a.transcript?' ':'')+text.trim();const field=document.getElementById(`transcript-${id}`);if(field)field.value=a.transcript;const wrapper=document.getElementById(`transcript-wrap-${id}`);if(wrapper)wrapper.hidden=false;save();}
+function startRecognition(session){
+ const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;if(!Recognition||!state.liveTranscript)return;
+ const recognition=new Recognition();session.recognition=recognition;session.recognitionDone=new Promise(resolve=>{session.resolveRecognition=resolve;});recognition.lang='en-US';recognition.continuous=true;recognition.interimResults=true;let restart=true;
+ recognition.onresult=(event)=>{let interim='';for(let i=event.resultIndex;i<event.results.length;i++){const result=event.results[i];if(result.isFinal)appendTranscript(session.questionId,result[0].transcript);else interim+=result[0].transcript;}const el=document.getElementById(`interim-${session.questionId}`);if(el)el.textContent=interim;};
+ recognition.onerror=(event)=>{if(['not-allowed','service-not-allowed','network','language-not-supported','audio-capture'].includes(event.error)){restart=false;session.transcriptionUnavailable=true;status(session.questionId,'Audio is recording. Live transcript is unavailable; download the clip to share it.');}};
+ recognition.onend=()=>{if(active===session&&!session.stopping&&restart){try{recognition.start();}catch(e){restart=false;session.resolveRecognition();}}else session.resolveRecognition();};
+ try{document.getElementById(`transcript-wrap-${session.questionId}`).hidden=false;recognition.start();}catch(e){session.transcriptionUnavailable=true;session.resolveRecognition();status(session.questionId,'Audio is recording. Live transcript could not start.');}
+}
+async function startRecording(id){
+ if(active||pendingMic||pendingAudioSave){message('Finish the current recording first.');return;}
+ if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder){status(id,'Recording is unavailable here. Open this review at localhost in your browser, or use device dictation in the notes field.');return;}
+ pendingMic=true;status(id,'Waiting for microphone access…');updateRecordingUI();let stream;
+ try{
+  stream=await navigator.mediaDevices.getUserMedia({audio:true});
+  const mime=['audio/webm;codecs=opus','audio/mp4','audio/ogg;codecs=opus'].find(t=>MediaRecorder.isTypeSupported(t));
+  const recorder=new MediaRecorder(stream,mime?{mimeType:mime}:undefined);
+  const session={questionId:id,recorder,stream,chunks:[],started:Date.now(),stopping:false};active=session;
+  recorder.ondataavailable=e=>{if(e.data.size)session.chunks.push(e.data);};
+  recorder.onerror=()=>{status(id,'Recording encountered an error. Any captured audio will be retained.');stopRecording();};
+  recorder.onstop=async()=>{
+   pendingAudioSave=true;session.stopping=true;active=null;clearInterval(saveTimer);session.stream.getTracks().forEach(t=>t.stop());try{session.recognition?.stop();}catch(e){}
+   status(id,'Saving audio and finishing the transcript…');updateRecordingUI();const blob=new Blob(session.chunks,{type:recorder.mimeType||mime||'audio/webm'});const duration=(Date.now()-session.started)/1000;
+   let transcriptTimedOut=false;
+   if(session.recognitionDone){let timer;await Promise.race([session.recognitionDone,new Promise(resolve=>{timer=setTimeout(()=>{transcriptTimedOut=true;resolve();},2500);})]);clearTimeout(timer);if(transcriptTimedOut){session.recognition.onresult=null;try{session.recognition.abort();}catch(e){}}}
+   if(blob.size){const timestamp=new Date().toISOString().replace(/[:.]/g,'-');const ext=blob.type.includes('mp4')?'m4a':blob.type.includes('ogg')?'ogg':'webm';const clip={id:`${id}-${timestamp}`,questionId:id,blob,duration,createdAt:new Date().toISOString(),filename:`${id}-${timestamp}.${ext}`,url:URL.createObjectURL(blob)};clips.push(clip);await putClip(clip);renderClips(id);status(id,volatileAudio?'Recorded. Download this audio to keep it.':'Recorded and saved in this browser.');}
+   else status(id,'No audio was captured. Check your microphone and try again.');
+   if(transcriptTimedOut)status(id,'Audio saved. Transcription stopped before finishing; check the recording for missing words.');
+   const interim=document.getElementById(`interim-${id}`);if(interim)interim.textContent='';pendingAudioSave=false;updateRecordingUI();save();say('Recording stopped.');
+  };
+  recorder.start(1000);pendingMic=false;message('');status(id,'Recording audio…');updateRecordingUI();
+  const tick=()=>{const seconds=Math.floor((Date.now()-session.started)/1000);document.getElementById('dock-label').textContent=`Recording ${prettyId(id)} · ${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`;};tick();saveTimer=setInterval(tick,1000);startRecognition(session);
+ }catch(e){stream?.getTracks().forEach(t=>t.stop());active=null;pendingMic=false;updateRecordingUI();status(id,e.name==='NotAllowedError'?'Microphone access was denied. Allow it in your browser, then try again.':'Could not access the microphone. Check that a microphone is connected and try again.');}
+}
+function stopRecording(){if(!active)return;active.stopping=true;try{active.recognition?.stop();}catch(e){}if(active.recorder.state!=='inactive')active.recorder.stop();}
+function buildText(){
+ const lines=['# Fleeced — Team overhaul review','',`Exported: ${new Date().toLocaleString()}`,`Answered: ${qs.filter(q=>answered(q.id)).length} of ${qs.length}`,'','These are my responses to initial proposals, not approval to send real trades.'];
+ for(const p of pages.filter(p=>p.id!=='responses')){lines.push('',`## ${p.name}`);for(const q of qs.filter(q=>q.page===p.id)){const a=answer(q.id);lines.push('',`### ${prettyId(q.id)}. ${q.question}`);if(q.ownerDecision)lines.push(`Confirmed owner decision: ${q.ownerDecision}`);lines.push(`Additional response: ${a.choice||'(no option selected)'}`);if(a.notes.trim())lines.push(`Notes: ${a.notes.trim()}`);if(a.transcript.trim())lines.push(`Voice transcript (browser-generated, editable): ${a.transcript.trim()}`);for(const c of clips.filter(c=>c.questionId===q.id))lines.push(`Audio attachment: ${c.filename} (${Math.round(c.duration)} seconds; included in downloaded bundle, not in clipboard text)`);if(!answered(q.id))lines.push('Unanswered.');}}
+ const general=answer('general');lines.push('','## General notes',general.notes.trim()||'(none)');if(general.transcript.trim())lines.push(`Voice transcript: ${general.transcript.trim()}`);clips.filter(c=>c.questionId==='general').forEach(c=>lines.push(`Audio attachment: ${c.filename}`));
+ lines.push('','## Next-up idea already saved','First come, first served: like trade chips for one sell asset, then send all offers simultaneously, one liked offer per opposing team.');
+ if(clips.length)lines.push('','Audio files are not copied to the clipboard. Attach the downloaded recordings or response bundle in chat when a transcript is missing or needs checking.');
+ return lines.join('\n');
+}
+async function copyResponses(){if(active||pendingMic||pendingAudioSave){message('Stop recording before copying so the final clip and transcript can be included.');return;}const text=buildText();try{if(!navigator.clipboard?.writeText)throw Error('clipboard unavailable');await navigator.clipboard.writeText(text);message(`Copied ${qs.filter(q=>answered(q.id)).length} responses with typed notes and transcripts.${clips.length?' Download the bundle to attach the audio files too.':''}`);say('Responses copied. Paste them into chat.');}catch(e){if(!navigate('responses'))return;const field=document.getElementById('export-preview');if(field){field.focus();field.select();message('Clipboard access is unavailable. The full response text is selected below; press Command-C or Control-C.');}}}
+function exportHTML(){const total=qs.filter(q=>answered(q.id)).length;return `<section class="export-area"><div class="page-bar"><div><div class="eyebrow">BRING IT BACK TO CHAT</div><h2>YOUR RESPONSES</h2><p class="page-description">${total} of ${qs.length} answered · ${clips.length} audio recording${clips.length===1?'':'s'}</p></div></div><div class="export-grid"><div class="panel"><h3>Paste your answers</h3><p>Copies every question, your selections, typed notes, and available voice transcripts. Unanswered decisions stay visible.</p><button type="button" id="copy-export" class="primary">Copy all responses</button></div><div class="panel"><h3>Keep the audio too</h3><p>One ZIP with responses, editable response data, and every recording. Audio cannot be pasted as text; attach these files in chat.</p><button type="button" id="download-bundle" class="secondary">Download response bundle</button></div></div><div class="question-card"><h3>Anything else?</h3><p class="question-context">Record one longer response here if you prefer to talk through several screens at once. Mention the question numbers as you go.</p>${voiceSettings()}<label class="field-label" for="general-notes">General notes</label><textarea id="general-notes" data-notes="general" placeholder="Other ideas, priorities, or changes…">${esc(answer('general').notes)}</textarea>${voiceControls('general')}</div><details class="panel" open><summary>All ${qs.length} questions</summary><ol class="all-questions-list">${qs.map(q=>`<li><button type="button" data-jump="${q.page}" data-jump-question="${q.id}"><span class="question-number">${prettyId(q.id)}</span> ${esc(q.question)}<small>${esc(pages.find(p=>p.id===q.page).name)}</small></button><span class="answer-state ${answered(q.id)?'has-answer':''}">${answered(q.id)?'Captured':'Open'}</span></li>`).join('')}</ol></details><div class="section-notes"><label class="field-label" for="export-preview">Text that will be copied</label><textarea id="export-preview" class="export-preview" readonly>${esc(buildText())}</textarea></div><p class="footer-note">Notes and audio stay in this browser profile unless you export them. Optional live transcription uses your browser’s speech service. Storage is tied to this exact browser and address, so download a bundle before moving devices or clearing browser data.</p></section>`;}
+function bindResponses(){bindQuestions();document.getElementById('copy-export').addEventListener('click',copyResponses);document.getElementById('download-bundle').addEventListener('click',downloadBundle);document.querySelectorAll('[data-jump]').forEach(b=>b.addEventListener('click',()=>{navigate(b.dataset.jump);document.getElementById(`question-${b.dataset.jumpQuestion}`)?.scrollIntoView({behavior:'smooth',block:'start'});}));document.querySelectorAll('[data-notes],[data-transcript]').forEach(el=>el.addEventListener('input',()=>{document.getElementById('export-preview').value=buildText();}));}
+// Uncompressed ZIP writer: no libraries, uploads, or network calls are needed for export.
+const crcTable=Uint32Array.from({length:256},(_,n)=>{let c=n;for(let k=0;k<8;k++)c=c&1?0xedb88320^(c>>>1):c>>>1;return c>>>0;});
+function crc32(bytes){let c=0xffffffff;for(const b of bytes)c=crcTable[(c^b)&255]^(c>>>8);return(c^0xffffffff)>>>0;}
+async function zipFiles(files){const encoder=new TextEncoder(),parts=[],directory=[];let offset=0;for(const file of files){const name=encoder.encode(file.name),bytes=new Uint8Array(await file.blob.arrayBuffer()),crc=crc32(bytes);const head=new Uint8Array(30+name.length),v=new DataView(head.buffer);v.setUint32(0,0x04034b50,true);v.setUint16(4,20,true);v.setUint16(6,0x0800,true);v.setUint32(14,crc,true);v.setUint32(18,bytes.length,true);v.setUint32(22,bytes.length,true);v.setUint16(26,name.length,true);head.set(name,30);parts.push(head,bytes);const central=new Uint8Array(46+name.length),d=new DataView(central.buffer);d.setUint32(0,0x02014b50,true);d.setUint16(4,20,true);d.setUint16(6,20,true);d.setUint16(8,0x0800,true);d.setUint32(16,crc,true);d.setUint32(20,bytes.length,true);d.setUint32(24,bytes.length,true);d.setUint16(28,name.length,true);d.setUint32(42,offset,true);central.set(name,46);directory.push(central);offset+=head.length+bytes.length;}const directorySize=directory.reduce((n,p)=>n+p.length,0),end=new Uint8Array(22),e=new DataView(end.buffer);e.setUint32(0,0x06054b50,true);e.setUint16(8,files.length,true);e.setUint16(10,files.length,true);e.setUint32(12,directorySize,true);e.setUint32(16,offset,true);return new Blob([...parts,...directory,end],{type:'application/zip'});}
+async function downloadBundle(){if(active||pendingMic||pendingAudioSave){message('Stop recording before downloading the bundle.');return;}try{const files=[{name:'responses.md',blob:new Blob([buildText()],{type:'text/markdown'})},{name:'response-data.json',blob:new Blob([JSON.stringify({version:1,exportedAt:new Date().toISOString(),state,questions:qs,recordings:clips.map(({blob,url,...c})=>c)},null,2)],{type:'application/json'})},...clips.map(c=>({name:`audio/${c.filename}`,blob:c.blob}))];const blob=await zipFiles(files);const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='fleeced-overhaul-responses.zip';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);message('Response bundle prepared with your notes, transcripts, and audio files.');}catch(e){message('Could not create the bundle. Copy your responses and download the individual recordings instead.');}}
+document.getElementById('view-responses').addEventListener('click',()=>navigate('responses'));
+document.getElementById('copy-header').addEventListener('click',copyResponses);
+document.getElementById('dock-stop').addEventListener('click',stopRecording);
+window.addEventListener('beforeunload',e=>{if(active||pendingMic||pendingAudioSave||volatileAudio&&clips.length){e.preventDefault();e.returnValue='';}});
+openDB().finally(()=>{render();if(!storageOkay)message('Browser storage is unavailable. You can still answer questions; download a bundle to keep your responses.');});
+})();
+
+</script>
+</body>
+</html>

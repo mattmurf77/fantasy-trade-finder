@@ -6,7 +6,7 @@ Status records describe the last documented disposition; they are not a fresh pr
 
 Use the [active index](README.md) for normal work. This catalog also includes inactive and archived history.
 
-111 entries. Counts and rows come from the same status records.
+117 entries. Counts and rows come from the same status records.
 
 | Initiative / item | Status | Updated | Summary |
 |---|---|---|---|
@@ -46,6 +46,7 @@ Use the [active index](README.md) for normal work. This catalog also includes in
 | [consensus-balance-claim](consensus-balance-claim/status.md) | needs-review | — | consensus balance claim |
 | [consensus-fit-sort-key](consensus-fit-sort-key/status.md) | built-unmerged | 2026-09-02 | consensus fit sort key |
 | [counterparty-breaker](counterparty-breaker/status.md) | active | 2026-08-21 | counterparty breaker |
+| [db-storage-reduction](db-storage-reduction/status.md) | shipped | 2026-09-15 | Storage recovery, diagnostic normalization and historical compaction released |
 | [deck-give-headliner-cap](deck-give-headliner-cap/status.md) | needs-review | — | deck give headliner cap |
 | [deck-outcome-validation](deck-outcome-validation/status.md) | needs-review | — | deck outcome validation |
 | [decline-reason-capture](decline-reason-capture/status.md) | planned | 2026-08-17 | decline reason capture |
@@ -67,6 +68,7 @@ Use the [active index](README.md) for normal work. This catalog also includes in
 | [full-sweep](full-sweep/status.md) | active | 2026-08-22 | full sweep |
 | [guided-onboarding-v2](guided-onboarding-v2/status.md) | needs-review | — | guided onboarding v2 |
 | [knockout-refine](knockout-refine/status.md) | active | 2026-08-23 | knockout refine |
+| [landing-ranking-graphic](landing-ranking-graphic/status.md) | partly-shipped | 2026-09-16 | Initial landing verified live; scroll correction merged, delivery confirmation outstanding |
 | [league-pick-value-alignment](league-pick-value-alignment/status.md) | needs-review | — | league pick value alignment |
 | [likes-you-quality-gates](likes-you-quality-gates/status.md) | needs-review | — | likes you quality gates |
 | [loop-hld.md](loop-hld.md) | needs-review | — | High-Level Design — FTF Self-Training Loops (Plan 1) |
@@ -82,11 +84,13 @@ Use the [active index](README.md) for normal work. This catalog also includes in
 | [onboarding-conversion](onboarding-conversion/status.md) | built-dark | 2026-08-11 | onboarding conversion |
 | [onboarding-tour-merge](onboarding-tour-merge/status.md) | planned | 2026-08-23 | onboarding tour merge |
 | [open-access-phase-a-gates.md](open-access-phase-a-gates.md) | needs-review | — | Open-access onboarding — Phase A pre-flip gates |
-| [owner-contracts](owner-contracts/status.md) | partly-shipped | 2026-09-05 | Owner contracts: PR #281 merged, backend and experimental policy live; iOS uploaded, native validation pending |
+| [owner-contracts](owner-contracts/status.md) | partly-shipped | 2026-09-07 | Initial owner contract slice live; follow-on generator rollout is owner-only; native checklist remains open |
+| [owner-engine-challenger](owner-engine-challenger/status.md) | shipped | 2026-09-07 | Owner-led generator released; the original comparison trial was superseded by owner-only serving |
+| [owner-only-uncapped](owner-only-uncapped/status.md) | shipped | 2026-09-08 | Owner-only serving live; impression paging shipped and search budgets restored |
 | [package-benchmark-sweetener](package-benchmark-sweetener/status.md) | built-unmerged | 2026-08-21 | Package benchmark sweetener |
 | [pass-cooldown](pass-cooldown/status.md) | needs-review | — | pass cooldown |
 | [pending-trades-inbox-plan-2026-08-12.md](pending-trades-inbox-plan-2026-08-12.md) | planned | — | Pending Trades Inbox — Plan (2026-08-12) |
-| [personal-market-policy](personal-market-policy/status.md) | built-dark | 2026-09-04 | personal market policy |
+| [personal-market-policy](personal-market-policy/status.md) | shipped | 2026-09-05 | Experimental personal-market policy activated; owner-only generation is a later rollout |
 | [pick-badge-scale](pick-badge-scale/status.md) | needs-review | — | pick badge scale |
 | [pick-slot-labels](pick-slot-labels/status.md) | needs-review | — | pick slot labels |
 | [pick-year-decay](pick-year-decay/status.md) | needs-review | — | pick year decay |
@@ -110,7 +114,8 @@ Use the [active index](README.md) for normal work. This catalog also includes in
 | [slot-pricing-unconditional](slot-pricing-unconditional/status.md) | needs-review | — | slot pricing unconditional |
 | [small-trade-packages](small-trade-packages/status.md) | shipped | 2026-09-06 | Bounded small-player-package presentation is live with simple_player_presentment=1 |
 | [sweetener-relative-band](sweetener-relative-band/status.md) | built-unmerged | 2026-09-02 | sweetener relative band |
-| [three-model-bakeoff](three-model-bakeoff/status.md) | partly-shipped | 2026-08-18 | three model bakeoff |
+| [team-overhaul](team-overhaul/status.md) | partly-shipped | 2026-09-08 | Team overhaul enabled; all-platform sends and device-crash fixes released; latest checklist pending |
+| [three-model-bakeoff](three-model-bakeoff/status.md) | superseded | 2026-09-07 | Historical control comparison superseded by owner-only serving; profiles and evidence retained |
 | [tiktok-discovery](tiktok-discovery/status.md) | partly-shipped | — | tiktok discovery |
 | [trade-engine-accuracy](trade-engine-accuracy/status.md) | needs-review | — | trade engine accuracy |
 | [trade-engine-balance](trade-engine-balance/status.md) | needs-review | 2026-09-06 | Reconcile remaining owner trade-engine questions |
@@ -118,6 +123,7 @@ Use the [active index](README.md) for normal work. This catalog also includes in
 | [trade-model-activation](trade-model-activation/status.md) | in-progress | — | Trade model collection rollout and enforcement gates |
 | [trade-presentation-v2](trade-presentation-v2/status.md) | needs-review | — | trade presentation v2 |
 | [trade-relevance-engine](trade-relevance-engine/status.md) | active | 2026-08-14 | trade relevance engine |
+| [trade-significance](trade-significance/status.md) | built-dark | 2026-09-17 | Shared significance gate merged as PR #297; default off, activation unverified |
 | [trios-tier-calibration-plan-2026-07-08.md](trios-tier-calibration-plan-2026-07-08.md) | partly-shipped | 2026-07-10 | Trios → Tier Calibration — Plan (2026-07-08, rev. 2 after pressure test) |
 | [web-parity](web-parity/status.md) | built-unmerged | 2026-09-02 | web parity |
 | [win-now](win-now/status.md) | partly-shipped | 2026-09-05 | win now |
@@ -132,8 +138,8 @@ Use the [active index](README.md) for normal work. This catalog also includes in
 | built-unmerged | 7 |
 | in-progress | 3 |
 | needs-review | 37 |
-| partly-shipped | 8 |
+| partly-shipped | 9 |
 | planned | 8 |
 | reference | 13 |
-| shipped | 15 |
-| superseded | 7 |
+| shipped | 19 |
+| superseded | 8 |

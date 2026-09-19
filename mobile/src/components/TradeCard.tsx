@@ -11,7 +11,7 @@ import {
   type AccessibilityActionEvent,
 } from 'react-native';
 import { ink, chalk, flare, ice, semantic, space, radii, type, fonts } from '../theme/chalkline';
-import { TickLabel, Button, Icon, Badge } from './chalkline';
+import { TickLabel, Button, Icon, Badge, Text as ChalklineText } from './chalkline';
 import PlayerCard from './PlayerCard';
 import StrengthBar from './StrengthBar';
 import TradeValueBar from './TradeValueBar';
@@ -628,6 +628,11 @@ function TradeCardComp({
           <Text style={type.bodySm}>{fitLine}</Text>
         </View>
       )}
+      {!data.edited && data.selection_coverage === 'partial' && data.selection_notice ? (
+        <ChalklineText style={[type.bodySm, { color: chalk.dim }]}>
+          {data.selection_notice}
+        </ChalklineText>
+      ) : null}
 
       {/* Counterparty breaker — "their likely hesitation" (flag
           trade.breaker_narrative; the server serializes `breaker` only for

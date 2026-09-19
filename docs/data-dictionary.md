@@ -8,6 +8,7 @@ Source of truth: `backend/database.py`. Keep this file in sync when adding/chang
 ## Table of Contents
 
 - [Win Now evidence tables](#win-now-evidence-tables)
+- [Team overhaul tables](#team-overhaul-tables) — `overhauls`, `overhaul_offers`, `overhaul_roadmaps`, `overhaul_attempts`, `overhaul_reservations`
 
 **Core / Users / Auth**
 
@@ -377,6 +378,81 @@ Indexes: `ix_trade_impressions_user_league` on `(user_id, league_id)` — traini
 
 ## `deck_impressions`
 
+### Recommendation significance evidence
+
+When significance mode is enabled, evaluated served rows may carry
+`features_json.significance`: version, mode, eligible, reason, context,
+thresholds, and qualifying centerpiece (asset ID, side, player/pick kind, and
+viewer-personal/consensus source). This is private diagnostics, never public
+opponent rankings. Shadow rows can record eligible=false while still served;
+enforcement rejects do not get served-impression rows.
+
+Organic `bakeoff_runs.config_json.significance` records captured settings,
+evaluated/would-reject/removed counts and reasons, with per-arm final candidate
+counts when attribution is available. These are post-generation,
+post-existing-policy candidates, not the full enumeration pool; historical
+generated/drafted counts retain their existing meanings. No new columns,
+tables, event names or migrations. Existing diagnostic storage/retention rules
+apply. See [scope](plans/trade-significance/scope.md).
+
+### Owner-v1 snapshot namespace
+
+The owner-construction trial uses existing columns/JSON; there is no new table
+or column. When owner generation is included, real served-card impressions are
+also written for selected routes and organic jobs even if the legacy F1 write
+switch is off. Client view emitters still require `deck.signal_v2`; generated
+or served rows alone are **not** views.
+
+For `policy_variant="owner_v1"`, `valuation_json` has
+`generator="owner_v1"`, `generator_version="owner-v1"`, `schema_version=1`.
+This is an **owner-specific schema**, not the historical personal-market
+valuation-v1 shape. Consumers must dispatch on the generator/policy discriminator,
+never on the schema integer alone. It freezes exact selections/coverage,
+market give/receive/ratio and applied limits, both managers' personal package
+values/provenance, declared versus inferred outlook, usable-roster components,
+lineup source and provisional utility coefficients. It binds the actual package;
+post-construction mutation invalidates eligibility. Raw values remain private.
+
+`features_json.owner_experiment` records selected surface, version
+`owner-selected-v1`, stable request hash, assignment unit/probability,
+captured time and package-scoped inputs; `served_market` freezes the control's
+displayed totals too. Organic owner rows use `owner_request` (team-draft unit,
+no invented equal-arm probability). `owner_generation` contains budget, pool,
+shape, rejection and shortage diagnostics. The exact owner fairness floor is
+recorded without applying the legacy divergence/relaxation discount.
+
+The once-per-run selected `bakeoff_runs.config_json` contains the full captured
+input ledger; organic runs store it under `config_json.owner_request`. Each
+joins the package-scoped impression record by request hash and capture time,
+including board/pool values, lineup context, rosters and preferences. Capture
+timestamps are not market source timestamps:
+unavailable market-as-of is labelled unavailable. `model_arm` additionally
+accepts `owner_v1`, `legacy_fair`, `legacy_asset_ideas`, `legacy_targeted`;
+historical attribution remains unchanged. Real group occurrences can have
+separate impressions for the same package. Use manager-specific later outcome
+timestamps to distinguish their views/actions from offer creation.
+
+Existing `propensity` is an ordering multiplier, **not** selected assignment
+probability; the latter lives in explicit experiment JSON. Selected repeated
+identical requests share assignment and are not independent trials.
+
+Owner-exclusive mode (`bakeoff_owner_only` with owner include/serve) records a
+distinct policy version `owner-only-v1` and assignment probability 1; there is no
+concurrently generated legacy control. Analyze this configuration window
+separately from the historical 50/50 selected experiment. Stored historical
+rows are not rewritten. Organic diagnostics/configuration capture the exclusive
+roster and bypassed output quotas; owner organic impressions also use
+`policy_version="owner-only-v1"` with unit `owner_only`. Computational budgets
+remain recorded; generator/version remains `owner_v1` / `owner-v1`.
+
+Serving trial snapshots are withheld until all returned cards have real IDs;
+failure/incomplete persistence produces a named unavailable job rather than
+exposing an unmeasured owner draft. Run-ledger writes remain best-effort and are
+not proof of exposure. The separate client `deck.signal_v2` flag must be enabled
+for the trial readout's viewed denominator.
+
+### Legacy F1 columns
+
 TikTok-discovery **F1 signal spine** (flag `deck.signal_v2`, `docs/plans/tiktok-discovery/prds/F1-signal-foundation.md`). One row per card in the **final served deck order**, written once per completed generation job by `server._log_deck_signal_impressions` (→ `save_deck_impressions`), **only when the flag is on**. Additive: `trade_impressions` keeps writing unchanged. Demo league excluded. The row's `impression_id` is returned per card in `/api/trades/generate` + `/status` snapshots and echoed back by flag-on clients so `deck_outcomes` rows join to it.
 
 | Column | Type | Notes |
@@ -651,6 +727,13 @@ Indexes: `ix_suggestion_trade_links_league` on `league_id`; unique `uq_suggestio
 ---
 
 ## `bakeoff_runs`
+
+Owner-trial addition: organic `arms_json.owner_v1.diagnostics` records the
+independent construction report; an included-only arm is shadow supply, not
+exposure. Selected routes also write a run row with two named arms, served arm,
+both generation counts, owner error/report, exact served count and full frozen
+assignment/input `config_json`. An empty treatment has a run row even with zero
+impressions. See [owner snapshot namespace](#owner-v1-snapshot-namespace).
 
 **trade.bakeoff** three-model bake-off run ledger (`docs/plans/three-model-bakeoff/PLAN.md` §5, scope block `scope-phase3.md`) — **one row per organic trade job while the flag is on**, the per-JOB half of the record; the per-CARD half rides `deck_impressions.model_arm` / `.arm_rank`. Written best-effort by `server._run_trade_job` (→ `save_bakeoff_run`) after the deck is assembled; a failure here never fails the job. Written for **every** run including a superseded one — this is a RUN ledger, and the empty-arm/cost questions it answers are just as valid for a deck nobody saw.
 
@@ -1683,3 +1766,54 @@ Additive schema for the experimental beta; the release configuration enables all
 Forecast payloads retain original source capture/publication times, provenance and quality; whole batches prevent joins across publication revisions. Projection payloads retain league facts plus the simulation baseline. Job input JSON freezes the requesting actor’s valuation inputs and parameters and must be treated as private. Pricing/ranking revision hashes and package-level evidence are retained; other managers’ complete boards are not persisted. Job result and scenario payloads retain immutable before/after evidence and metadata; `asset_key` groups repeated exchanges without rewriting prior scenario evidence. Enforced lifecycle is queued → running → complete/failed; queued work resumes from durable input. Unexpired running jobs are never requeued during overlapping deploys; a crashed running search expires before retry. Account lifecycle admissions drain active searches before deleting all user-owned rows.
 
 Serving expiry does not delete history. Worker housekeeping removes jobs after 7 days, scenarios/decisions after 180 days and forecast/projection snapshots after 400 days. Account export/deletion includes all three user-owned tables. Short account-row-guarded writes prevent queued or calculator work from recreating evidence after account deletion; no simulation holds that lock. References are application-enforced strings, not new SQL foreign-key constraints. Access checks live in the new authenticated routes. See [API contract](api-reference.md#season-projections-and-win-now).
+
+## Team overhaul tables
+
+Five additive tables for the durable multi-trade plan ([BUILD-CONTRACT §4](plans/team-overhaul/BUILD-CONTRACT.md)). Defined in `backend/database.py`; persistence in `backend/overhaul_store.py`. JSON columns hold `json.dumps` text; timestamps are ISO-8601 UTC via `_now()`. No `_migrate_db` rows (new tables are created by `create_all`). References are application-enforced strings.
+
+### `overhauls`
+
+One row per planning session. `overhaul_id` (`ovh_` + 12 hex) unique. Columns: `account_user_id` (= `sess.user_id`), `league_user_id` (= `_league_user_id(sess)`, the roster identity), `league_id`, `platform`, `scoring_format`, `status` (`setup|reviewing|assembled|executing|complete|archived`), `revision` (bumps on every settings PUT), `client_key` (create idempotency within account + league — **added beyond the contract's column list** because the contract requires create idempotency and nothing else could hold the key), `settings_json` (OverhaulSettings §5.1), `snapshot_json` (§5.2, refreshed on generate / prepare-send / refresh; also carries `my_roster_id` and `rosters` per user), `recovery_json` (RecoveryRequirement §5.3), `generation_json` (last run summary incl. `exhausted_subsets`), `selected_roadmap_id`, `created_at`, `updated_at`. Indexes `(account_user_id, league_id)`, `(league_id, status)`.
+
+### `overhaul_offers`
+
+One generated exchange with one counterparty. `offer_id` (`ovh_` + 12 hex) unique; `overhaul_id`; `revision` it was generated under; `package_hash` = sha1 of `platform|league|seller|counterparty|sorted give|sorted receive`; `counterparty_user_id`, `counterparty_username`; `give_ids_json`, `receive_ids_json` (mixed player + FTF pick ids); `card_json` (the public `trade_card_to_dict` payload plus `offer_id`); **`evidence_json` — PRIVATE**: `OwnerDecisionContext.as_dict()` and never returned to any client; `is_recovery` (1 when the receive side targets the user's own next-season first); `decision` (`like|pass|undecided`), `decided_at`, `decision_client_key` (decisions idempotency — **added beyond the contract's column list** for the same reason as `client_key`); `availability` (`fresh|stale`); `created_at`. **Unique `(overhaul_id, package_hash)`** — regeneration cannot resurrect a passed exact offer.
+
+### `overhaul_roadmaps`
+
+Immutable rows; a priorities write inserts a new `version` and flips the previous row's `is_current` to 0. `roadmap_id` (`rm_` + 12 hex), `overhaul_id`, `version`, `revision`, `packages_json` (Package[] §5.5 — `status` stored as `open`, recomputed at read time from attempts), `compat_json` (ValidationReceipt §5.6), `summary_json` (`outgoing_ids, incoming_ids, counterparties, unused_eligible_ids, score, diversity_key` + `rank`, `recovery_resolved`), `is_current`, `created_at`. Unique `(roadmap_id, version)`.
+
+### `overhaul_attempts`
+
+One send attempt of one offer inside one batch. `attempt_id` unique; `batch_id`; `overhaul_id`; `roadmap_id`, `roadmap_version`; `package_id`, `tier`, `offer_id`; `idempotency_key` (batch-level client key); `request_hash` (sha1 of the exact offer set + roadmap version); `state` (cross-client enum, see [cross-client-invariants](cross-client-invariants.md#team-overhaul-enums)); `state_source` (`server|provider|ownership_refresh|user_reported`); `provider_transaction_id` (NULL on MFL, which returns none); `provider_status` (nullable, added 2026-09-07 for all-platform sends — the provider's own status word from `mfl_status` / `espn_status`, NULL on Sleeper); `proposal_event_id` (the id handed to the platform's propose core — `_sleeper_propose_core` / `_mfl_propose_core` / `_espn_propose_core` — and therefore `trade_proposals`); `error_json` (`{code, message}`, the core's structured error on `send_failed`); `created_at`, `updated_at`, `observed_at`. Unique `(batch_id, offer_id)`; index `(overhaul_id, state)`. Transitions are compare-and-swap on `state` and terminal states never regress.
+
+### `overhaul_reservations`
+
+One ACTIVE row per outgoing asset per seller per league while a send is live. `league_id`, `seller_user_id`, `asset_id`, `overhaul_id`, `package_id`, `batch_id`, `active` (1 while active, **NULL once released** so the unique constraint only binds active rows), `created_at`, `released_at`. Unique `(league_id, seller_user_id, asset_id, active)`. Claims are all-or-nothing inside one transaction; a conflict lists every reserved asset and writes nothing.
+
+## Deck diagnostic storage (2026-09-15)
+
+`deck_diagnostic_snapshots`: `snapshot_id` (SHA-256 primary key), `user_id`,
+`deck_job_id`, `created_at` (ISO UTC), `payload_json`. Each non-key column except
+payload is individually indexed; all columns are required. `metadata.create_all`
+adds this table on existing databases without an ALTER/backfill at startup.
+
+Only `features_json` keys `owner_request`, `owner_experiment`, `owner_generation`
+and `roster_evaluation` use `{"$deck_diagnostic_v1":"<snapshot_id>"}` references.
+The roots live separately; repeated dictionary/list subtrees of at least 1 KiB
+are shared within a single user/job. IDs hash the canonical original JSON and
+user/job scope. Snapshot and impression pages commit in one transaction. Legacy
+inline JSON remains readable. `database.load_deck_diagnostics(impression_id,
+user_id)` resolves exact frozen detail for its owner, with
+`diagnostic_status=expired_or_missing` when a referenced node has expired.
+No serving/evaluation path should treat that marker as a successful evaluation.
+
+Core numerical/taste features, `valuation_json`, assets, positions, propensities,
+all impressions and outcomes are unchanged. Generated/served records still do
+not establish an actual view; `deck_outcomes.action=viewed` remains explicit.
+Private account export includes snapshot rows; account deletion removes them
+alongside impressions. Diagnostics expire after 14 days by default; all nodes
+for a job share the original serve time. Retention deletes up to 500 nodes per
+five-minute cleanup tick. References persist as explicit evidence of expired
+detail. Full valuations and receipt/decision history do not expire under this
+policy. See the [incident scope](plans/db-storage-reduction/scope.md).

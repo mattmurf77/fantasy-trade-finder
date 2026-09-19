@@ -223,11 +223,11 @@ console.log('check-canvas-results:');
   assert(/\{`\$\{deckIdx \+ 1\} \/ \$\{sortedDeck\.length\}`\}/.test(trades),
     '3f. the `N / X` TickLabel reads the same list the pager steps',
     'a counter on a different list lies after a pass decrements X');
-  // The per-fronted-card analytics emitters are suppressed while browsing —
-  // otherwise every page step fires a "viewed" row.
+  // Legacy fronted-card analytics remain suppressed while browsing. The
+  // owner trial's separately guarded measured exposure is not a page event.
   const viewedGuards = count(tradesCode, /if \(browseLive\) return;/g);
   assert(viewedGuards === 2,
-    '3g. trade_card_viewed AND deck_card_viewed are suppressed under a live session',
+    '3g. legacy fronted-card viewed emitters stay suppressed under a live session',
     `expected the 2 emitter guards, found ${viewedGuards}`);
 }
 
@@ -461,8 +461,11 @@ console.log('check-canvas-results:');
     'announcing the seed would record every idea as "edited" the moment it fronts');
   assert(!/useFlag\(\s*['"]calc\.canvas_results['"]\s*\)/.test(calc),
     '6b. the component reads NO flag for it — a host prop, like hideFormatChips (T-3 precedent)');
-  assert(!/onSidesChange/.test(stripComments(featured)),
-    '6c. FeaturedTradeWindow does not pass it — the #287 host is byte-identical');
+  // Owner trial attribution stops tracking the original impression after an
+  // edit. This callback must not adopt the browse-session reset behavior.
+  assert(/onSidesChange=\{\(\) => setEdited\(true\)\}/.test(stripComments(featured))
+    && !/handleBrowseSidesChange|endBrowseSession/.test(stripComments(featured)),
+    '6c. Featured side edits only end original-offer attribution; no browse reset');
   assert(/onSidesChange\?: \(give: string\[\], receive: string\[\]\) => void;/.test(canvas)
     && /onSidesChange=\{\(give, receive\) => \{\s*latestGiveRef.current = give;\s*onSidesChange\?\.\(give, receive\);\s*\}\}/.test(canvasCode),
     '6d. TradeBuildCanvas observes SEND for scope continuity, then forwards both unchanged sides');

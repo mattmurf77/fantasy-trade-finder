@@ -3,9 +3,9 @@
 ```project-status
 {
   "status": "shipped",
-  "updated": "2026-09-02",
-  "summary": "FB-413 — Send in Sleeper fails on trades with draft picks",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-09-02 — **canonical** of the 2026-09-02 weekly run — Send in Sleeper has no draft-pick split/encode; batch `plan.md` + `investigation.md` here. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+  "updated": "2026-09-03",
+  "summary": "FB-413 draft-pick encoding shipped in PR #270; later tradability defect is #428",
+  "evidence": "Incoming main corrected the folder header on September 8: fixed and shipped September 3 via PR #270, D-176, mobile v1.16.15; production feedback status fixed. This supersedes the old generated index date of September 2. Preserve the original build/QA phase log and device-check limitations. The later spent/out-of-window pick refusal is a separate fix in ../428-sleeper-pick-send-refused/status.md, shipped with PR #292."
 }
 ```
 
@@ -15,7 +15,7 @@ The material below is retained evidence. Its former status wording does not over
 
 # FB-413 — Send in Sleeper fails on trades with draft picks
 
-**Status:** in_progress · Phase 3 complete 2026-09-02 — dual-QA PASS, awaiting the operator ship go (branch `feat/fb413-sleeper-send-draft-picks` @ `d49611be`, local, unpushed) — ready for build
+**Status:** fixed · shipped 2026-09-03 via PR #270 (D-176, v1.16.15); prod status `fixed`. (Folder header corrected 2026-09-08 — it had been left at in_progress.)
 - **Reporter:** mattmurf77, 2026-08-30T15:38Z, app v1.16.12 (build 140), screen `TradesHome`
 - **Report:** *"Send in sleeper isn't correctly identifying draft picks and causing trades with draft picks to fail"*
 - **Group:** G-413 (canonical) — batch plan [plan.md](plan.md); trace [investigation.md](investigation.md)

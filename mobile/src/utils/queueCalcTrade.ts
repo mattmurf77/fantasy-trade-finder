@@ -1,5 +1,5 @@
 import { track } from '../api/events';
-import { queueTradeForOpponent, type CalcQueueReason } from '../api/trades';
+import { queueTradeForOpponent, type CalcQueueReason, type SwipeSignal } from '../api/trades';
 import { haptics } from './haptics';
 
 // ── The ✓ cell's queue call (D-152), owned in ONE place (D-158, Wave B0) ──
@@ -64,6 +64,7 @@ export async function queueCalcTrade(args: {
   /** Analytics screen label — the only thing that differs between the two
    *  hosts of the canvas. */
   screen: string;
+  signal?: SwipeSignal;
 }): Promise<{ queued: boolean; alreadyQueued?: boolean; toast: QueueToast }> {
   let res: Awaited<ReturnType<typeof queueTradeForOpponent>> | null = null;
   try {
@@ -72,6 +73,7 @@ export async function queueCalcTrade(args: {
       opponentUserId: args.opponent.userId,
       giveIds: args.giveIds,
       receiveIds: args.receiveIds,
+      ...(args.signal ? { signal: args.signal } : {}),
     });
   } catch {
     res = null;

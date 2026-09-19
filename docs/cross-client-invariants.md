@@ -564,6 +564,30 @@ Canonical set: `championship`, `contender`, `rebuilder`, `jets`, `not_sure`.
 
 ---
 
+## Owner trial metadata and ordering
+
+Owner trial metadata is additive to the existing card/idea shapes:
+`model_arm`, `generator_version`, `impression_id`,
+`preserve_server_order: true`, `selection_coverage` (`full`/`partial`),
+`selection_notice`, and a nonnegative integer `recommendation_rank`.
+Normalizers must whitelist these public fields, not forward raw server objects
+or private owner evidence. Preserve them through `ideaToCard`.
+
+`preserve_server_order` applies to the **whole serving trial**, including
+controls: client fairness-off sorting and session reranking may not compare
+different models' local scores. Owner featured ideas use the server's global
+recommendation rank, not the largest signed market gain. Legacy ordering stays
+unchanged absent the marker. More Offers carries the current fairness threshold
+in navigation, both requests and both cache keys; old callers default to 0.50.
+
+Selected views require active screen, foreground app and at least 500 ms of
+continuous visible exposure. Exact package/impression identity binds dwell and
+responses; an edited calculator package cannot borrow the original impression.
+Delayed Shop passes retain the tapped card's signal through the Undo interval.
+Updates must keep `server.py`, mobile API/shared types, `ideaToCard`, selected
+exposure helpers, Shop/Featured and TradesScreen consistent. Executable guards:
+`check-owner-offer-signals.js` and `check-owner-trial-order.js`.
+
 ## Trade-card lane enum (phase 2, 2026-07-17)
 
 Canonical set: `window`, `value` — the optional `lane` field on trade cards (flag `trade.lanes`; absent when the user has no declared/seeded window). `window` = the trade moves roster composition toward the user's contend/rebuild window; `value` = pure value play. Classified by `trade_service.classify_lane`; also logged in swipe `user_events` props for A/B joins.
@@ -845,7 +869,7 @@ Tracking plan v2 ([spec](business/analytics/2026-07-17-tracking-plan-v2.md) §S2
 
 **Canonical send names + the `surface` enum.** The reserved names are `sleeper_send_attempted` / `sleeper_send_failed` / `sleeper_send_succeeded` — **not** `send_in_sleeper_*`. `analytics_queries` reserved this exact trio in 2026-07-17 and `FUNNEL_STAGES` stage 8 + `FEATURE_VERTICALS["send_in_sleeper"]` already reference the succeeded name, so the reserved spelling lights those up without a query edit. Every one of them carries `surface` ∈ **`deck` | `match` | `awaiting` | `calculator`** — the four `SendInSleeperButton` mounts. Canonical definition: `SendSurface` / `SEND_SURFACES` in `mobile/src/utils/tradeText.ts`; mirrored in `CLIENT_EVENT_PROPS`. **`awaiting` is the Matches non-match send row — it is NOT `suggested`.** Adding a mount means adding a value in both places.
 
-**`sleeper_send_failed.error_code` is a closed 17-value enum** (14 server codes of `POST /api/trades/propose` ∪ three client-only values; #413 added the two `sleeper_pick_*` codes on 2026-09-02, 15 → 17): `test_mode_propose_disabled` · `feature_disabled` · `no_user` · `verification_required` · `bad_request` · `sleeper_not_linked` · `sleeper_unconfigured` · `sleeper_expired` · `roster_not_found` · `opponent_roster_not_found` · `sleeper_rejected` · `sleeper_write_failed` · `sleeper_pick_unmapped` · `sleeper_pick_not_owned` · `network` · `timeout` · `unknown`. The client reads `body.error` verbatim, so a new server code is a taxonomy change: update this list, `backend/analytics_taxonomy.py`'s `sleeper_send_failed` comment, `SendInSleeperButton.tsx`'s comment and the P0-7 addendum together. **`POST /api/trades/validate` warning `code` vocabulary** (both platforms share the field): `league_archived` · `player_moved` · `roster_limit` · `roster_not_found` · `asset_unmapped` · `pick_moved` — `asset_unmapped` / `pick_moved` reach the Sleeper branch since #413 (they were MFL-only before); `severity` ∈ `blocking` | `warning`.
+**`sleeper_send_failed.error_code` is a closed 18-value enum** (15 server codes of `POST /api/trades/propose` ∪ three client-only values; #413 added the two `sleeper_pick_*` codes on 2026-09-02, 15 → 17; #428 added `sleeper_pick_untradable` on 2026-09-08, 17 → 18): `test_mode_propose_disabled` · `feature_disabled` · `no_user` · `verification_required` · `bad_request` · `sleeper_not_linked` · `sleeper_unconfigured` · `sleeper_expired` · `roster_not_found` · `opponent_roster_not_found` · `sleeper_rejected` · `sleeper_write_failed` · `sleeper_pick_unmapped` · `sleeper_pick_untradable` · `sleeper_pick_not_owned` · `network` · `timeout` · `unknown`. The client reads `body.error` verbatim, so a new server code is a taxonomy change: update this list, `backend/analytics_taxonomy.py`'s `sleeper_send_failed` comment, `SendInSleeperButton.tsx`'s comment and the P0-7 addendum together. **`POST /api/trades/validate` warning `code` vocabulary** (both platforms share the field): `league_archived` · `player_moved` · `roster_limit` · `roster_not_found` · `asset_unmapped` · `pick_untradable` · `pick_moved` — `asset_unmapped` / `pick_moved` reach the Sleeper branch since #413 (they were MFL-only before); `pick_untradable` (#428, Sleeper-only) is the advisory mirror of 422 `sleeper_pick_untradable`; `severity` ∈ `blocking` | `warning`.
 
 **`celebration_shown`, never `celebration_fired`.** The registered name has always been `celebration_shown`; the client emitted `celebration_fired` and every one of those events was dropped. Fixed 2026-08-11 by **renaming the client**, deliberately **without an alias** — an alias would make the taxonomy the place typos go to live.
 
@@ -1228,3 +1252,22 @@ Experimental beta; the release configuration enables `outlook.season_projections
 - Win Now likes/passes use the separate scenario decision endpoint/table. They do not reach legacy swipe/queue/Elo learning and do not constitute the partner's action or a real league proposal.
 
 Locations: `backend/win_now_api.py`, `win_now_service.py`, `win_now_optimizer.py`, `season_simulator.py`; `mobile/src/shared/types.ts`, `utils/winNow.ts`, `screens/WinNowScreen.tsx`; `web/js/win-now.js`. [Build and outstanding calibration](plans/win-now/BUILD.md).
+
+## Team overhaul enums
+
+Shared by `backend/overhaul_service.py` and `mobile/src/api/overhaul.ts` (the one TypeScript definition; screens import from it). Contract: [plans/team-overhaul/BUILD-CONTRACT.md](plans/team-overhaul/BUILD-CONTRACT.md) §1, §5–§7.
+
+- **Outlook** — `push_all_in` | `blow_it_up`. The evaluator adapter maps these to the engine's utility names `championship` / `jets`; that mapping lives server-side only and is applied to the generation context dict, never written to league preferences.
+- **Overhaul status** — `setup` → `reviewing` → `assembled` → `executing` → `complete`; `archived` is terminal.
+- **Decision** — `like` | `pass` | `undecided`. Overhaul decisions never reach the swipe / Elo learning path.
+- **Availability** — `fresh` | `stale`.
+- **Attempt state** — `queued`, `sending`, `proposed`, `send_failed`, `outcome_unknown`, `accepted`, `declined`, `expired`, `withdrawn`, `invalidated`, `resolved_elsewhere`, `stale`. **Live** = `queued | sending | proposed | outcome_unknown`. User-assertable (`/attempts/{id}/status`) = `declined | withdrawn | expired`, only from `proposed | outcome_unknown`. Terminal states never regress (compare-and-swap in `overhaul_store.transition_attempt`). Refresh sweeps stuck live states after `LIVE_STUCK_AFTER_S` (300 s): `sending → outcome_unknown`, `queued → stale`, both `state_source: server` with `error.code: worker_lost`. `accepted` is ownership-derived only; an un-arrived receive side made solely of picks never terminalizes an attempt unless a live traded-picks read confirms it.
+- **Attempt state source** — `server` | `provider` | `ownership_refresh` | `user_reported`.
+- **Package status** (derived at read time) — `open` | `pending` (a live attempt exists) | `complete` (an accepted attempt) | `blocked` (no fresh liked alternative left). Package `reason` — `outlook_move` | `recover_own_first`; `advisory_rank` is 1 only for `recover_own_first`.
+- **Recovery state** — `owned` | `missing_with_known_holder` | `unknown` | `unsupported` | `not_yet_available`. An empty pick table is `unknown`, never missing. `draft_order_rule` is `unknown` unless the league payload carries a rule.
+- **Shortfall reason** — `insufficient_likes`, `overlapping_sells`, `competing_incoming`, `no_return_supply`, `recovery_unresolved`, `roster_limitation`, `stale_ownership`, `budget_restriction`, `search_exhausted`.
+- **Validation codes** (`ValidationReceipt.blockers[].code` / `warnings[].code`) — blockers: `give_overlap`, `receive_overlap`, `asset_not_owned`, `counterparty_asset_not_owned`, `pool_violation`, `capacity_exceeded`, `lineup_illegal`, `offer_stale`, `offer_not_liked`, `tier_duplicate_counterparty`, `asset_reserved`, `reconnect_required` (send platform, `auth_state != linked`; names the platform), `pick_unsupported_on_platform` (ESPN: a selected offer holds a pick on either side; carries `package_id` + `offer_id`); warnings: `recovery_unresolved`, `depth_reduced`. `unknowns[]` carries `capacity_unknown`, `counterparty_roster_unknown` and the `trade_roster` unknown strings verbatim.
+- **Capabilities.auth_state** — `linked` | `unlinked` | `expired` | `unverified` | `n/a` (a platform with no send path, e.g. Fleaflicker). Mirrors the platform's link-status GET: Sleeper (stored token, expiry), MFL (stored cookie row **or** the session-only cookie; MFL never reports `expired`), ESPN (both cookie halves + `verified_at`; `expires_hint_at` in the past → `expired`). `can_propose` = `linked` + that platform's send flag on (`trade.send_in_sleeper` / `trade.send_in_mfl` / `espn.send`). `can_propose_picks` — `true` on Sleeper and MFL, `false` on ESPN. `can_read_terminal_status` and `can_withdraw` are always `false`; `supports_conflicting_offer_race` is `supported` on Sleeper (owner-confirmed 2026-09-07) and `unverified` on MFL/ESPN.
+- **Handoff mode** — `send` (Sleeper, MFL, ESPN — every platform in `overhaul_service.SEND_FLAGS`) | `copy` (any other platform, with `text`).
+- **AttemptView.provider_status** — the provider's own status word on a `proposed` attempt (`mfl_status` / `espn_status`), `null` on Sleeper; `provider_transaction_id` is `null` on MFL, which returns none.
+- **Id prefixes** — `ovh_` (overhaul **and** offer), `rm_` (roadmap), `pk_` (package), `bt_` (batch), `at_` (attempt); all 12 hex.

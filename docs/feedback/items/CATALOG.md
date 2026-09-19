@@ -6,7 +6,7 @@ Status records describe the last documented disposition; they are not a fresh pr
 
 Use the [active index](INDEX.md) for normal work. This catalog also includes inactive and archived history.
 
-208 entries. Counts and rows come from the same status records.
+215 entries. Counts and rows come from the same status records.
 
 | Initiative / item | Status | Updated | Summary |
 |---|---|---|---|
@@ -208,13 +208,20 @@ Use the [active index](INDEX.md) for normal work. This catalog also includes ina
 | [410-found-trade-decline-position](410-found-trade-decline-position/status.md) | shipped | 2026-08-30 | FB-410 — decline position on found trades |
 | [411-player-name-truncation](411-player-name-truncation/status.md) | shipped | 2026-08-30 | FB-411 — player name truncation |
 | [412-more-offers-placement](412-more-offers-placement/status.md) | shipped | 2026-08-30 | FB-412 — "More offers" location |
-| [413-sleeper-send-draft-picks](413-sleeper-send-draft-picks/status.md) | shipped | 2026-09-02 | FB-413 — Send in Sleeper fails on trades with draft picks |
+| [413-sleeper-send-draft-picks](413-sleeper-send-draft-picks/status.md) | shipped | 2026-09-03 | FB-413 draft-pick encoding shipped in PR #270; later tradability defect is #428 |
 | [414-lopsided-one-for-one](414-lopsided-one-for-one/status.md) | shipped | 2026-09-02 | FB-414 — lopsided 1-for-1 served (London for Lamb straight up) |
 | [415-queue-loss-refusal-no-advance](415-queue-loss-refusal-no-advance/status.md) | shipped | 2026-09-02 | FB-415 — "this trade would be a loss for Bcork", then no advance |
 | [416-liked-card-stays-no-swipe](416-liked-card-stays-no-swipe/status.md) | shipped | 2026-09-02 | FB-416 — liked card doesn't disappear; swipe is gone |
 | [419-rejected-interest-resurfacing](419-rejected-interest-resurfacing/status.md) | partly-shipped | 2026-09-06 | #419 rejected-interest fix: backend live; iOS 1.17.1 (149) uploaded, native validation pending |
 | [420-win-now-loading](420-win-now-loading/status.md) | in-progress | 2026-09-06 | #420/#421 Win Now recovery: merged and iOS 1.17.1 (149) uploaded; native delivery validation pending |
 | [421-win-now-timeout-message](421-win-now-timeout-message/status.md) | in-progress | 2026-09-06 | #421 neutral Win Now timeout copy: merged and iOS uploaded; native validation pending; canonical #420 |
+| [422-win-now-ffv3-unavailable](422-win-now-ffv3-unavailable/status.md) | shipped | 2026-09-08 | FB-422 — Win Now explains unsupported FFV3 roster slots |
+| [423-team-review-not-registering](423-team-review-not-registering/status.md) | shipped | 2026-09-08 | FB-423 — Team Review completion registers on the plan beat; canonical for #423/#424 |
+| [424-outlook-shows-not-set](424-outlook-shows-not-set/status.md) | shipped | 2026-09-08 | FB-424 — Saved outlook displays on Acquire; canonical implementation is #423 |
+| [425-overhaul-tile-replaces-draft](425-overhaul-tile-replaces-draft/status.md) | shipped | 2026-09-08 | FB-425 — Team overhaul hero replaces Draft entry; canonical for #425/#426 |
+| [426-overhaul-button-prominent](426-overhaul-button-prominent/status.md) | shipped | 2026-09-08 | FB-426 — Prominent Team overhaul entry; canonical implementation is #425 |
+| [427-first-round-picks-stud-tax-exempt](427-first-round-picks-stud-tax-exempt/status.md) | shipped | 2026-09-08 | FB-427 — First-round picks exempt from stud tax; other assets retain their adjustment |
+| [428-sleeper-pick-send-refused](428-sleeper-pick-send-refused/status.md) | shipped | 2026-09-08 | FB-428 — Sleeper refuses spent/out-of-window pick classes before provider sends |
 | [78-calc-suggestions](78-calc-suggestions/status.md) | shipped | 2026-07-17 | #78 — Calculator suggestions disagree with the evaluator |
 | [api-observability](api-observability/status.md) | shipped | 2026-08-09 | API observability — status |
 | [espn-webview-escape](espn-webview-escape/status.md) | shipped | 2026-08-09 | espn-webview-escape — status |
@@ -230,4 +237,4 @@ Use the [active index](INDEX.md) for normal work. This catalog also includes ina
 | partly-shipped | 1 |
 | planned | 12 |
 | reference | 1 |
-| shipped | 145 |
+| shipped | 152 |

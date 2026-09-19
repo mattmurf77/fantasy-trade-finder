@@ -1,3 +1,59 @@
+## 2026-09-17 — Shared trade significance, local implementation
+
+Isolated branch `codex/trade-significance-20260917`, base `62ba9b3d`. Three subagents implemented rule/wiring/independent tests; parent reviewed and calibrated against frozen raw offer-time inputs. Stable full backend suite **6,058 passed / 1 skipped** (Python 3.12, isolated SQLite, 358.54s); expanded targeted 378 passed; web structural 195/195; mobile test-ID lint passed; diff check clean. Source-edit-during-run failures were superseded by the stable full rerun, not waived. See [implementation and evidence](../docs/plans/trade-significance/validation.md) and [calibration](../docs/plans/trade-significance/calibration.md).
+
+Default `significance_mode=0`; no arm changes, product feedback writes, push, deployment, or TestFlight build. Existing review decisions preserved. Hosted CI/mobile typecheck/structural suites and broader calibration release gates remain before activation; no device runtime claim.
+
+## 2026-09-19 — Organization reconciliation before publication
+
+Reconciled the prepared organization branch with current main `b33b4da9` in an independent clone. Both project validators, 29 hygiene tests, 15 affected backend tests, test-ID lint and 195 web checks pass. Independent review confirms latest-main model logic and effective feature/tier configuration are preserved; only the retained mock-draft calibration document path changes. Private local drafts/interview and existing nested worktrees are untouched. These are local checks; exact-head hosted CI and publication results are separate. [Scope and rollback](../docs/recovery/2026-09-19-organization-publication.md).
+
+## 2026-09-16 — Landing release and narrow-browser scroll correction
+
+Initial landing release LIVE at `3789bb36` (PR #295); all four [CI jobs](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/35056911335) green, backend 5953 passed / 1 skipped. Render live 05:02:32 UTC; served HTML/CSS/app/step scripts match, flags 200, actual market bar/platform handoffs verified.
+
+Live 320px embedded-browser smoke exposed duplicate scrollbars. Follow-up scopes root scroll lock to visible auth. Independent review and 195/195 web checks pass. CUA keyboard/layout checks pass all three panels at 320×640, 390×844, 1366×768; narrow trade-panel sign-in bottom y=634.69. Correction CI/deployment pending; see [release record](../docs/business/ops/2026-09-16-landing-page.md). No production sign-in or account mutation.
+
+## 2026-09-15 — Comparison/matching labels (local)
+
+Updated comparison heading and step 03 to operator wording. Web structural and responsive checks passed. Not deployed.
+
+## 2026-09-15 — Equal landing tiles and ranking heading (local)
+
+Equal columns/wrapping labels and YOUR RANKINGS heading. 195/195 web checks, responsive step checks, and actual in-app visual verification passed. Not deployed.
+
+## 2026-09-15 — Production-style market bar and comparison copy (local)
+
+Ported current mobile TradeValueBar’s pick scale and Even geometry into the illustrative offer. Exact tile-02 copy: “We compare your board with leaguemates”. Versioned preview assets to avoid stale CSS. 195 web checks and responsive/keyboard checks pass; actual in-app browser inspected. No deployment.
+
+## 2026-09-15 — Ranking label and market-fairness illustration (local)
+
+Updated actual step 01 tile to operator wording; added separate illustrative market-fairness bar in Real offers. 195/195 web structural checks and keyboard/responsive step checks pass at 1366×768, 390×844, 320×640. No live market evaluation or deployment.
+
+## 2026-09-15 — Landing rookie pick value copy (local)
+
+Added explicit rookie draft pick value tier copy to step 01 and the landing note; expanded tier badge labels. Web structural and existing step/layout checks passed. No deployment.
+
+## 2026-09-14 — Compact option B (local)
+
+Shared app-style illustration replaces tiny storyboard panels. Native step buttons update in place above sign-in on desktop/mobile. 195/195 structural checks, syntax/whitespace, keyboard and layout tests, platform regressions pass. [Scope](../docs/plans/landing-ranking-graphic/scope.md). Not deployed.
+
+## 2026-09-14 — Selected storyboard C (local)
+
+Replaced clickable exploration with connected app-style miniatures using canonical tokens, player rails, tier badges and trade composition. Removed unused step JS/templates. Web 190/190 and diff checks; desktop/mobile visual/sign-in checks; platform regressions passed. [Scope](../docs/plans/landing-ranking-graphic/scope.md). No deployment.
+
+## 2026-09-14 — Illustrated landing steps (local)
+
+Explored three treatments and implemented clickable illustrated tiles with dedicated ranking/overlap/offer visuals. 195/195 web guards, JS syntax, diff checks pass. Browser: keyboard selection, exclusive state, unique heading, desktop layout stability, phone sign-in visibility, and platform regressions pass. [Scope and options](../docs/plans/landing-ranking-graphic/scope.md). Not deployed.
+
+## 2026-09-14 — Landing layout and platform discovery (local revision)
+
+190/190 web guards, JS syntax, diff check passed. Browser: delayed flag reveal (1800ms), ESPN/MFL mobile-verification panels, Sleeper return and flags-off fallback passed. Initial sign-in above fold at 1366×768, 390×844, 320×640. Existing verified-ownership restriction preserved; no real login tested. [Scope and evidence](../docs/plans/landing-ranking-graphic/scope.md).
+
+## 2026-09-14 — Landing ranking graphic (local)
+
+Added two illustrative ranking boards and a mutual-value trade receipt. Web structural checks: **190/190 passed**. Headless Chrome: 1440/390/320px, no document overflow; desktop and phone visual inspection. Static preview stubs API responses; no auth/runtime backend claims. No mobile changes, remote CI, merge, or deployment. [Scope/evidence](../docs/plans/landing-ranking-graphic/scope.md).
+
 # Test Ledger — Fantasy Trade Finder
 
 > **Purpose:** authoritative record of what's been tested, what shipped, what was measured, and on what version of the stack. Prevents "works on my machine / claimed earlier without evidence" failure modes.
@@ -10,6 +66,169 @@
 > Companion files: [`MISTAKES.md`](MISTAKES.md), [`DECISIONS.md`](DECISIONS.md), [`Test_League_Trade_Matches.xlsx`](../Test_League_Trade_Matches.xlsx) (sample data), [`trade_output.json`](../trade_output.json).
 
 ---
+
+## 2026-09-16 — Storage prevention deployment recheck
+
+Read-only verification: `82c5f118` remains LIVE; root/feature-flags HTTP 200;
+no retention override (14-day default), zero expired snapshot nodes pending.
+No new recommendation rows since September 15 17:00 UTC to sample. Deployed
+write path compacts new rows atomically; cleanup thread invokes expiry. No code
+change required. Documentation-only publication authorized; diff checks passed.
+[Evidence](../docs/plans/db-storage-reduction/release.md).
+
+## 2026-09-15 — Database storage incident / normalized diagnostics
+
+Released PRs #293 and #294; exact latest deployed commit `82c5f118`. All four
+exact-head CI jobs and post-merge CI passed. Latest backend: **5,953 passed / 1
+skipped** on Python 3.12, 696.88s. Local diagnostics: 10 passed; named sabotage
+(disabling normalization) makes the payload-budget regression fail.
+
+Verified private full backup and PostgreSQL restore/rehearsal before production.
+All 67,159 records scanned, 45,733 compacted, 73,146 shared nodes. Complete core
+hashes and 1,715 outcomes preserved; 100 recent + 100 normalized diagnostic
+samples match. Operator SHA-256 guard independently reviewed; local 100-row
+roundtrip/rollback, Unicode parity and incorrect-hash rejection passed, then all
+100 first production-page records read back exactly.
+
+Bounded production VACUUM FULL succeeded in 111.43s. Whole database allocation
+895,088,319→539,281,087 bytes (39.8% smaller); combined recommendation/snapshot
+relations 787,722,240→431,964,160 bytes (45.2% smaller). Recovery increased disk
+1→5 GB; compute unchanged. Final health and capacity metrics are recorded in
+[release evidence](../docs/plans/db-storage-reduction/release.md).
+
+
+## 2026-09-08 — Feedback batch #422/#423/#424/#425/#426/#427/#428: five groups QA-green on `feat/feedback-2026-09-08`
+
+Release branch = session branch + five group branches merged (one docs-registry conflict, resolved by keeping both rows). PR #292; exact-head CI to be recorded before merge. Pipeline: one investigating planner per group → one build agent → two independent QA agents (round 2 where a confirmed finding existed). Evidence per group in `docs/feedback/items/<id>-*/` (build-report, qa-round-*).
+
+| Group | Build | QA | Full suite (at QA) | Guards |
+|---|---|---|---|---|
+| G-422 Win Now FFV3 refusal message | `e280ca73` | r1 A PASS / B PASS | 5872 / 1 skip (B); A's lone red was a load flake, file 34/34 alone | n/a (backend) |
+| G-423 outlook row + review completion | `4cca4020`, Phase 4 `cb893b09` | r1 A/B PASS (2 convergent minors) → r2 A/B PASS | 5867 / 1 skip (B r1; no backend files) | `check-outlook-row-source.js` 19 assertions, 11 sabotages RED |
+| G-425 overhaul hero replaces Draft cell | `9610e5ec`, `d80e9ee9` | r1 A PASS / B PASS (0 findings) | n/a (no backend files) | `check-team-overhaul.js` 29 assertions, 13–14 sabotages RED |
+| G-427 first-round picks exempt from stud tax | `9778c2a7` | r1 A PASS / B PASS (0 defects; numbers reproduced independently) | 5912 / 1 skip (both) | n/a; goldens pinned at 0 |
+| G-428 Sleeper pick tradability | `26ab3147`, Phase 4 `c4f8a6f7` | r1 A FAIL(adjudicated)/B PASS → r2 A/B PASS | 5892 / 1 skip (both) | `check-send-button-platform.js` check 9 RED with operand removed |
+
+- Release tip `ecc1d8b7` gates: `npx tsc --noEmit` 0 errors; 99/99 `check-*.js`; testid-lint OK; web 190/190; full backend suite **`5942 passed, 1 skipped in 391.47s (0:06:31)`**, exit 0.
+- Version bump: mobile 1.17.2 → **1.17.3** (app.json, Info.plist, pbxproj).
+- Hosted CI on PR #292 head `8329d975`: all four jobs **success**. Squash-merged as `1371d2e5` (complete tree equality with the tested tip).
+- **Render live** for `1371d2e5` at 2026-09-09T00:03:58Z. Production smoke: root 200; flags correct; 0 error lines in 200 log lines; **#427 verified on the live calculator** — two mid firsts `give_value 4234.0` (face, no depth row) vs 4210.2 → `favors: even`, ratio 0.994, while two mid seconds still carry a −225.9 `package_depth` deduction and favor the player. That is runtime evidence, not a code-walk.
+- iOS **1.17.3 (155)**, EAS build `c0fe6e0d`, built from merged `main`; TestFlight submission `2742bdd6` **FINISHED** (upload accepted by App Store Connect; Apple processing and tester availability are not proven by that).
+- Feedback items 422–428 set `fixed` (open backlog 49 → 42).
+- **UNRUN:** consolidated operator checklist [testflight-checklist.md](../docs/feedback/items/422-win-now-ffv3-unavailable/testflight-checklist.md) on the 1.17.3 build — the only runtime evidence the mobile half gets.
+
+## 2026-09-08 — Team overhaul: device-found card-shape bug (blank chips, two crashes) fixed
+
+Operator on build 153: review chips showed no players on either side; "Build roadmaps" and choosing a roadmap crashed the app. One root cause: the server's `Offer.card` is the raw `trade_card_to_dict` dict (`give`/`receive`/`target_user_id`/`fairness_score`/`mismatch_score`) while the screens read the client `TradeCard` shape; the review screen defaulted the arrays to empty, the other screens called `.map` on undefined. Fix (PR #291 → `167f93ff`): `api/overhaul.ts` normalizes every offer through the deck's exported `normalizeTradeCard` at the fetch boundary (all 10 fetchers); render guards in the five overhaul screens; `check-team-overhaul.js` at 26 assertions. Also aligned the `onboarding-v2`/`profiles-on` flag fixtures with the flag flip (main CI had been red from `d59a86d7`).
+- Mobile: tsc 0 errors; every `check-*.js`; testid-lint OK. Hosted CI on PR #291 head `64b0ff5f`: run 34197788940 all four jobs success. iOS **1.17.2 (154)**, EAS `5aeed6cc`, uploaded via auto-submit (submission `abf252bd` FINISHED).
+- Device retest on 154: **UNRUN** at write time.
+
+## 2026-09-08 — Team overhaul flag flipped ON; production verified
+
+`d59a86d7` sets `overhaul.enabled: true` in `config/features.json` and `backend/tests/fixtures/flags/release.json` (mirror test passed locally before push). Production `/api/feature-flags` returned `overhaul.enabled: True` ~125 s after the push. Hosted CI on `d59a86d7` **failed** on the two profile-fixture tests (fixed in PR #291, above). Builds on App Store Connect from the all-platform tree: 1.17.2 (152) and (153).
+
+## 2026-09-07 — Owner-only outage diagnosis and paged impression insert
+
+**Production evidence (read-only, Render logs API):** web service at 06:13:23 and 06:13:51 UTC ran `roster=owner_v1 … arms={'owner_v1': (1037, 7852)}` and `(1456, 9347)`; both followed by `impression logging failed … SSL SYSCALL error: EOF detected` and `ValueError: owner_impression_unavailable`. Postgres `dpg-d7g36mdckfvc73a329k0-a` (basic_256mb) logged `terminated by signal 9: Killed` + `database system is in recovery mode` at 06:13:31 and 06:14:10. Deploy `dep-daf4ma15efls73aeq5j0` LIVE on `16bb6fd1`.
+**Local reproduction (synthetic 12-team, 28 assets/team, default budgets):** 1,351 cards / 45,056 evaluations / 20.7 s; per-row payload `valuation_json` 4,127 B + `owner_generation` 5,066 B + `config` block 8,904 B ≈ 21 KB → ≈28.5 MB for one deck. Under 300 / 3,000 budgets: 251 cards / 0.5 s / ≈5.3 MB.
+**Mitigation applied 13:55:22 UTC** via `scripts/set_knob.py` (source `owner-only-oom-mitigation-20260907`): `owner_pair_budget` 4096→300, `owner_total_budget` 60000→3000. **Exercised by three real searches** (Render logs, same league): 15:20:20 UTC 128 cards / 1,457 ms; 18:13:55 UTC 92 cards / 1,216 ms; 2026-09-08 01:35:40 UTC 107 cards / 844 ms — zero `impression logging failed`, zero Postgres `signal 9` in the window. Find a Trade was healthy again from the first mitigated search.
+**Fix:** `save_deck_impressions` paged at `DECK_IMPRESSION_INSERT_ROWS` = 100. Focused run `test_deck_impressions_paging.py` + `test_decline_reasons.py` + `test_bakeoff_serving.py` + `test_owner_only_routes.py` + `test_owner_bakeoff.py`: **211 passed in 7.22 s**. Full backend suite on the fix commit: **5,813 passed / 1 skipped in 371.84 s** (local, Python 3.12).
+**Ship (2026-09-08):** [PR #289](https://github.com/mattmurf77/fantasy-trade-finder/pull/289) head `9d1a5823`, hosted CI run 34180007795 all four jobs green; squash-merged `609cb79e` (tree `27eafa76` equals the tested head). Render deploy `dep-dafnasjm8hqs73e6tbdg` LIVE at **02:41:08 UTC**. Budgets restored at 02:41:49/50 UTC via `scripts/set_knob.py` (source `owner-only-oom-recovery-20260908`): `owner_pair_budget` 300→4096, `owner_total_budget` 3000→60000. `FTF_SKIP_SIM_GATE=1` on push per D-056 (evidence: this entry). **UNRUN:** a real uncapped Find a Trade on the paged insert — confirm a `bake-off run … roster=owner_v1` line with no `impression logging failed` after it. [Recovery record](../docs/recovery/2026-09-08-owner-only-impression-paging.md). Gates: not express — scope is a one-function reliability fix with no schema/API/flag change; evidence is this ledger + guardrail test; docs updated (runbook, G-072).
+
+## 2026-09-07 — Team overhaul: sends on MFL and ESPN (owner D1 revision), branch evidence
+
+Branch `claude/overhaul-all-platform-sends` from `origin/main` `6f115d1b`. Owner revised D1: "MFL and ESPN trade sending has been validated. It should work for all." Backend: `/api/trades/propose-mfl` and `/api/trades/propose-espn` bodies extracted verbatim into `_mfl_propose_core` / `_espn_propose_core` (routes are thin wrappers; codes/statuses/messages unchanged); overhaul `capabilities.can_propose` per platform behind `trade.send_in_sleeper` / `trade.send_in_mfl` / `espn.send`, `can_propose_picks` false on ESPN with `pick_unsupported_on_platform` blockers, `reconnect_required` when unlinked, fresh MFL/ESPN roster reads for refresh with a `roster_source` guard that never terminalizes attempts from session-stale data; additive `overhaul_attempts.provider_status`. Mobile: platform-aware summary/assets copy; guard `check-team-overhaul.js` now 21 assertions.
+
+- Backend targeted: overhaul + pick-assignment guard **90 passed**; `-k "propose or mfl or espn or sleeper_write or flags_mirror"` **508 passed** (mfl/espn subset 446 before and after the extraction). **Full suite on `5894ae34`: 5863 passed / 1 skipped in 454.49s, exit 0.**
+- Hosted CI on PR #290: [run 34178143105](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/34178143105) all four jobs **success**. Squash-merged as `8cacc1f2` (tree identical to the branch tip). iOS **1.17.2 (152)**, EAS build `032d7ed2`, FINISHED from the identical tree. **Upload record, corrected:** the classifier-refused submit command never ran, but a shell-quoting slip in a bookkeeping command spawned `eas submit` for 152; the local CLI was killed within a second, yet the server-side job had already been scheduled and **FINISHED** (submission `fa223fc8`, 02:04 UTC) — so 152 IS on App Store Connect. The two later explicit submits (`f2719564`, `09df1cfd`) then failed with Apple's "build number 152 already used". A fresh build with auto-submit, **1.17.2 (153)** EAS `b3267ae7` from the same tree (`8cacc1f2`), uploaded via submission `4be1ea1e` (FINISHED 02:23 UTC). Both 152 and 153 are the all-platform build; test on 153.
+- Mobile: `npx tsc --noEmit` 0 errors; every `check-*.js` passes; testid-lint OK. Web 190/190.
+- UNRUN: device checklist on a build containing this branch (the next TestFlight upload); `supports_conflicting_offer_race` is `supported` for Sleeper by owner statement, `unverified` for MFL/ESPN.
+
+## 2026-09-07 — Team overhaul v1 build (branch, flag off): full backend suite green
+
+Branch `claude/team-overhaul-scoping-ea1c72` (from `origin/main` `0e3d6b70`), head `d23a3b81` + this write-back. Not merged, not deployed, no EAS build. Scope: [scope.md](../docs/plans/team-overhaul/scope.md), full gates, no express.
+
+- **Backend, full suite** on `d23a3b81`: `python3 -m pytest backend/tests -q` → **5810 passed / 1 skipped in 1238.52s**, exit 0 (local, Python 3.14; CI runs 3.12). Includes the three new files `test_overhaul_service.py` / `test_overhaul_store.py` / `test_overhaul_api.py` (**45 passed**) and the existing `/api/trades/propose` tests, which prove the `_sleeper_propose_core` extraction preserved route behavior (108 propose/send/flags-mirror tests). One sanctioned-name entry in `test_pick_assignment.py` moved with the extraction.
+- **Independent backend review** (read-only agent, code-walk + probes) found 1 high (refresh read pick ownership from the stale DB table → false `resolved_elsewhere`), 4 medium (zombie live attempts after a crash, exhausted subsets persisting across settings changes, send not gated on `can_propose`, tie partners double-counted in the D6 union check) and 8 low. All fixed with RED→GREEN regression tests (9 RED → 45 GREEN).
+- **Mobile:** `npx tsc --noEmit` 0 errors; every `mobile/tests/check-*.js` passes incl. new `check-team-overhaul.js` (18 assertions, sabotage-proven ×7); `bash mobile/scripts/testid-lint.sh` OK.
+- **Web:** `python3 qa/web/check_web_structure.py` → 190/190.
+- **Code-walk proof:** pool enforcement `overhaul_service.filter_cards` (post-filter independent of the generator) + prepare-time `pool_violation`/`asset_not_owned` blockers; reservations claimed in one transaction before any provider call (`overhaul_store.claim_reservations`, `overhaul_api.overhaul_send_route`); attempt CAS transitions refuse regressions (`overhaul_store`, `overhaul_service._ATTEMPT_TRANSITIONS`); decisions never touch swipe/Elo (`overhaul_decisions_route` → `store.set_decision` only).
+- **Hosted CI on the PR merge ref** (`c190f52a` merged with `origin/main` `16bb6fd1`): [run 34090353672](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/34090353672) — backend-tests, mobile-typecheck, web-structure, maestro-testid-lint all **success**. Targeted backend rerun on the merged tree: 81 + 142 passed.
+- **iOS build:** EAS production build `2e13ce3d` → **1.17.2 (151)** FINISHED from the merged tree; submission `695bcad3` uploaded to App Store Connect 2026-09-07 (Apple processing pending). Flag `overhaul.enabled` is false in the build.
+- **Merged and deployed:** PR #288 squash-merged as `a8ef182e` (tree identical to the branch tip `4203d059`). Hosted CI on `main`: [run 34131511501](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/34131511501) all four jobs **success** (docs follow-up `3e45941e` also green). Render deploy verified: production `GET /api/feature-flags` lists `overhaul.enabled: false`. Recovery: [2026-09-07-team-overhaul-release](../docs/recovery/2026-09-07-team-overhaul-release.md).
+- **UNRUN:** the 10-item physical-device checklist in [QA.md](../docs/plans/team-overhaul/QA.md) — build 151 now contains this branch; run it there. `supports_conflicting_offer_race` stays `unverified` until step 8 runs against Sleeper.
+
+## 2026-09-06 — Owner-only uncapped discovery, implementation checkpoint
+
+Operator explicitly requests owner generation on, all other generated arms off,
+and no returned-offer quotas. Fresh `0e3d6b70` isolated Fleeced-derived source;
+the dirty canonical organization and historical checkouts are preserved.
+Parent mobile TypeScript, all97 guard scripts, testID lint and web190 passed
+on unchanged client/web source; lockfile-pinned isolated install801packages.
+Parent core/runner/acceptance **102passed5.52s**, including dense synthetic
+12-team stress:45056evaluated/6622emitted4.594s; computationalbudgetsunchanged.
+Server focused321passed6.93s. First broad run interrupted after1503pass/1fail
+for missing serving-knob inventory registration; no golden drift. Explicit
+exclusion added, all12arm-A tests passed; fresh full frozen-source run started.
+Final frozen parent fullbackend **5809passed/1skip369.10s**, exit0; final97mobile
+guards passed again. Independent253passed8.73s plus173consumer retention probe,
+both original real-worker races RED/GREEN, and actual selected routes0.03–1.54s.
+Parent approved complete diff and bounded performance evidence. Hosted CI,
+merge/deployment and activation are still separate gates. Production
+GET-only preflight at2026-09-07 01:23UTC still shows owner include1/serve0,
+deck60/group0 and prior controls; no activation is established here. Scope
+distinguishes uncapped output from unchanged computational search budgets.
+[Scope and evidence](../docs/plans/owner-only-uncapped/verification.md).
+
+Local release commit824884ff prepared; public GitHub push rejected before
+execution by publication safeguard. No retry via another route, PR, deployment
+or activation. Destination-specific disclosure approval requested; source and
+all local evidence retained. On September 7, following public destination and
+shadow-status disclosure, owner explicitly requested “Push it live.” Fresh main
+fetch remains0e3d6b70 and GET-only05:06UTC preflight is healthy; source unchanged.
+Publication now authorized; exact-head hosted CI/deployment/activation remain
+pending. [Release gate](../docs/plans/owner-only-uncapped/release.md).
+
+Release-day independent focused rerun2026-09-07 05:07:20UTC: five owner suites,
+**164passed49.37s**, no failures/skips, unchanged824884ff runtime. Fresh isolated
+SQLite and pinned local DP fixtures; hot-off/ghost/cache/64-card coverage passes.
+Dense synthetic generation28.55s under high host load, no production SLA claim.
+
+
+## 2026-09-06 — Owner construction challenger, implementation checkpoints
+
+New isolated `codex/owner-engine-challenger-20260906` from `4c343a48` introduces
+an actual separate `owner_v1` constructor and selected-route attribution;
+existing control goldens/profiles are retained. Owner clarification is joint
+personal rankings + outlook + needs before market-priced terms. This is **not
+a deployment or activation**. Parent and Astra Ultra builders/reviewer are
+validating final integration. Checkpoints: parent 102 control/runner tests and
+74 core/acceptance/runner tests passed; web190 and all97 mobile guard scripts
+passed at the pre-final-canvas checkpoint. Broad backend **5734 passed / 1 skip /
+9 failed (644.46s)**, not green: concurrent source edits invalidated eight
+inspect-based function slices; one new pick-reader inventory requires an
+explicit sanctioned-site update. Fresh frozen-source full rerun is required.
+No production credentials/data used. Final frozen backend rerun: **5754 passed /
+1 skipped in420.01s**, exit0; parent focused rerun235passed, builder matrix369passed.
+Independent final mobile review caught original-impression credit on an edited
+classic-deck action; actual-function RED/GREEN repair and independent re-review
+now pass. Final parent TypeScript/all97guards/testID, web190 and native1.17.2
+plist/project checks pass (offer signals26, trial order13). Parent final diff
+review is complete. Nothing pushed, deployed or activated at this local
+checkpoint. [Exact evidence and remaining gates](../docs/plans/owner-engine-challenger/verification.md).
+
+Published13b94161 passed all four [hosted CI jobs](https://github.com/mattmurf77/fantasy-trade-finder/actions/runs/34058864206),
+backend5754passed/1skip708.27s. A final rollout review then found a hot-flip
+race between captured worker permission and the runner's later global read,
+plus the same-state cache signature seam. Eight new runner cases RED then
+21runner checks GREEN; worker forwarding test RED before repair. This makes
+13b94161 a superseded checkpoint, not release approval. No merge/build/activation
+occurred; repaired-source full checks and CI remain required.
+Final bounded rollout repair: builder192checks passed6.55s, independent120
+passed2.80s, parentrunner21passed andweb190green. Worker forwarding,
+captured-shadow cache and demo compatibility all have RED/GREEN proofs; parent
+approved the final diff. Fresh full backend and mobile checks running on frozen
+source; no production write or release yet.
 
 ## 2026-09-06 — Feedback release CI, merge and delivery
 
@@ -3896,6 +4115,11 @@ deliberately decoupled for that reason.
 - **Follow-up owed:** the 11 smoke flows are now the gate's own blocking dependency — until they exist, every tier-1/2 push needs this same override. Build them or re-tier the gate.
 
 ## Table of Contents
+- [2026-09-08 — Feedback batch #422/#423/#424/#425/#426/#427/#428: five groups QA-green on `feat/feedback-2026-09-08`](#2026-09-08--feedback-batch-422423424425426427428-five-groups-qa-green-on-featfeedback-2026-09-08)
+- [2026-09-08 — Team overhaul: device-found card-shape bug (blank chips, two crashes) fixed](#2026-09-08--team-overhaul-device-found-card-shape-bug-blank-chips-two-crashes-fixed)
+- [2026-09-08 — Team overhaul flag flipped ON; production verified](#2026-09-08--team-overhaul-flag-flipped-on-production-verified)
+- [2026-09-07 — Team overhaul: sends on MFL and ESPN (owner D1 revision), branch evidence](#2026-09-07--team-overhaul-sends-on-mfl-and-espn-owner-d1-revision-branch-evidence)
+- [2026-09-07 — Team overhaul v1 build (branch, flag off): full backend suite green](#2026-09-07--team-overhaul-v1-build-branch-flag-off-full-backend-suite-green)
 
 - [2026-09-06 — Feedback release CI, merge and delivery](#2026-09-06--feedback-release-ci-merge-and-delivery)
 - [2026-09-06 — Feedback 419–421 implementation checkpoints, not release evidence](#2026-09-06--feedback-419421-implementation-checkpoints-not-release-evidence)

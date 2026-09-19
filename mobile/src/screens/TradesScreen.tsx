@@ -66,6 +66,7 @@ import { registerScrollToTop } from '../navigation/scrollToTop';
 import OutlookSheet from '../components/OutlookSheet';
 import TradeFinderModeBar from '../components/TradeFinderModeBar';
 import OutlookBiasReceipt, {
+  OUTLOOK_DISPLAY_NAME,
   outlookReceiptCovers,
 } from '../components/OutlookBiasReceipt';
 import TradeDnaSheet, {
@@ -106,6 +107,8 @@ import { ideaToCard } from '../utils/ideaToCard';
 import { anchorSummary, forkCanvasSearch } from '../utils/canvasSearch';
 import { modelSelectionParams, type SearchSelection } from '../utils/tradeSearchRequest';
 import { queueCalcTrade } from '../utils/queueCalcTrade';
+import { isExactOfferPackage, signalForExactTrialPackage } from '../utils/offerExposure';
+import { useSelectedOfferSignals } from '../hooks/useSelectedOfferSignals';
 import {
   postDeclineReason,
   type Layer1Code,
@@ -141,6 +144,8 @@ import { resolveShareUrl } from '../utils/shareLinks';
 import { useInterruptSlot, useMutedDuringTour } from '../state/useInterruptCoordinator';
 import InviteLeaguematesBanner from '../components/InviteLeaguematesBanner';
 import TeamReviewEntryCard from '../components/TeamReviewEntryCard';
+import OverhaulEntryCard from '../components/OverhaulEntryCard';
+import { getActiveOverhaul } from '../api/overhaul';
 import FormatGate, { formatLabel } from '../components/FormatGate';
 import ProvenanceChip from '../components/ProvenanceChip';
 import SkeletonTradeCard from '../components/SkeletonTradeCard';
@@ -755,6 +760,15 @@ export default function TradesScreen({ navigation, route }: any) {
   const standingOfferReady = standingOffersOn && likesYouOn && picksInPoolOn;
   // #357/#358/#359 — Team Review entry (dark until the operator flips it).
   const teamReviewOn = useFlag('trades.team_review');
+  // Team overhaul entry (BUILD-CONTRACT §9 / D9). The active-overhaul probe
+  // runs only while the flag is on: flag off ⇒ no request and no card.
+  const overhaulOn = useFlag('overhaul.enabled');
+  const activeOverhaulQ = useQuery({
+    queryKey: ['overhaul', leagueId],
+    queryFn: () => getActiveOverhaul(leagueId!),
+    enabled: !!leagueId && overhaulOn,
+  });
+  const activeOverhaul = activeOverhaulQ.data?.active ?? null;
   // #269 — specific-team targeting + league picker move into the full
   // sheet; the mode-bar's Team and Player chips go away.
   const sheetTargetingOn = useFlag('trades.sheet_targeting');
@@ -1710,6 +1724,7 @@ export default function TradesScreen({ navigation, route }: any) {
       assetName: asset.name,
       leagueId,
       source: 'more_offers',
+      fairnessThreshold: effectiveFairness,
       asset,
     });
     track(
@@ -1862,6 +1877,13 @@ export default function TradesScreen({ navigation, route }: any) {
     if (!g) return null;
     const all = [...g.upgrade, ...g.lateral, ...g.downgrade];
     if (all.length === 0) return null;
+    const ownerIdeas = all.filter((i) => i.model_arm === 'owner_v1');
+    if (ownerIdeas.length > 0) {
+      // Groups are navigation categories, not a new market-gain ranking.
+      // The owner model already combined personal intent, outlook and needs.
+      return ownerIdeas.reduce((best, i) =>
+        (i.recommendation_rank ?? Infinity) < (best.recommendation_rank ?? Infinity) ? i : best);
+    }
     return all.reduce((best, i) => (i.difference > best.difference ? i : best));
   }, [assetIdeasQuery.data]);
   const featuredShown = featuredIdea ?? bestIdea;
@@ -1963,7 +1985,8 @@ export default function TradesScreen({ navigation, route }: any) {
 
   function makePassAttempt(card: TradeCard, rawId: string): LocalPassAttempt {
     return { context: captureTradeAction(card, rawId),
-      card: { ...card, give_player_ids: [...card.give_player_ids], receive_player_ids: [...card.receive_player_ids] },
+      card: { ...card, impression_id: actionImpressionId(card),
+        give_player_ids: [...card.give_player_ids], receive_player_ids: [...card.receive_player_ids] },
       state: { swipe: 'pending', reasonsPending: 0, reasonPassed: false }, requests: [] };
   }
 
@@ -2584,8 +2607,31 @@ export default function TradesScreen({ navigation, route }: any) {
     return Math.max(0, Math.min(DWELL_CAP_MS, end - d.startedAt - d.pausedTotal));
   }
 
+  // Exact action identity is independent of visibility. A reason sheet may
+  // pause the clock while still acting on the original package; an edited
+  // package must not inherit that original impression anywhere in its writes.
+  function actionImpressionId(card: TradeCard | undefined): string | undefined {
+    if (!card?.impression_id) return undefined;
+    if (card.preserve_server_order !== true && rawTopCard?.preserve_server_order !== true) {
+      return card.impression_id; // Legacy attribution remains unchanged.
+    }
+    if (!(browseLive ? trialCanvasExact : trialDeckExact)) return undefined;
+    if (card.impression_id !== rawTopCard?.impression_id || !isExactOfferPackage(rawTopCard, {
+      leagueId: card.league_id, opponentUserId: card.opponent_user_id,
+      giveIds: card.give_player_ids, receiveIds: card.receive_player_ids,
+    })) return undefined;
+    return card.impression_id;
+  }
+
   function signalForCard(card: TradeCard | undefined): SwipeSignal | undefined {
     if (!signalV2On || !card?.impression_id) return undefined;
+    if (!actionImpressionId(card)) return undefined;
+    if (card.preserve_server_order === true) {
+      const measured = measuredTrialSignalFor(card);
+      return measured ? { ...measured,
+        detail_expanded: engagementRef.current.detailExpanded,
+        calc_opened: engagementRef.current.calcOpened } : undefined;
+    }
     return {
       impression_id: card.impression_id,
       dwell_ms: currentDwellMs(),
@@ -2728,7 +2774,7 @@ export default function TradesScreen({ navigation, route }: any) {
     if (!ahead) return;
     adaptationMomentShownThisSession = true;
     const variant =
-      rerankOn && fairnessOn && !laneFilter
+      rerankOn && fairnessOn && !laneFilter && !deck.some((c) => c.preserve_server_order === true)
         ? ('rerank' as const)
         : ('descriptive' as const);
     setAdaptationMoment({ ...signal, variant });
@@ -2788,6 +2834,7 @@ export default function TradesScreen({ navigation, route }: any) {
     disposition: RerankDisposition,
     dwellMs: number,
   ) {
+    if (card.preserve_server_order === true) return;
     if (lastRerankedRef.current === rawId) return; // one reorder/disposition
     lastRerankedRef.current = rawId;
     const events = rerankEventsRef.current;
@@ -3434,6 +3481,10 @@ export default function TradesScreen({ navigation, route }: any) {
       giveIds: args.giveIds,
       receiveIds: args.receiveIds,
       screen: 'Trades',
+      signal: browseLive ? signalForExactTrialPackage(rawTopCard, {
+        leagueId, opponentUserId: args.opponent.userId,
+        giveIds: args.giveIds, receiveIds: args.receiveIds,
+      }, signalForCard) : undefined,
     });
     setToast(t);
     // G22 — a real first queue on the deck-retired landing is this page's
@@ -4027,6 +4078,9 @@ export default function TradesScreen({ navigation, route }: any) {
     // the host for the one render the hygiene effect needs to kill it, and
     // freezing that render too is harmless.)
     if (canvasResultsOn && browseSession) return pool;
+    // Trial scores are model-local, not comparable across arms. Keep the
+    // server's attributed order even when the fairness preference is off.
+    if (deck.some((c) => c.preserve_server_order === true)) return pool;
     if (fairnessOn) return pool;
     const pinned = pool.filter((c) => c.likesYou);
     const rest = pool
@@ -4063,6 +4117,7 @@ export default function TradesScreen({ navigation, route }: any) {
   // carries the MODIFIED package into every payload.
   const rawTopCard = sortedDeck[deckIdx];
   const topCard = rawTopCard ? edits[rawTopCard.trade_id] ?? rawTopCard : undefined;
+  const measuredTrial = rawTopCard?.preserve_server_order === true;
 
   // #357 — lineup movement + playoff-odds shift for the FRONTED card only
   // (operator, 2026-08-19: "compute on the fronted card only"). The with-trade
@@ -4246,6 +4301,9 @@ export default function TradesScreen({ navigation, route }: any) {
       viewedTimerRef.current = null;
     }
     if (!topImpressionId || !topTradeId) return;
+    // Captured trial cards use actual measured visibility below, including
+    // the canvas. Never also count the legacy front-of-deck timer.
+    if (measuredTrial) return;
     // #402 canvas-results — same suppression as trade_card_viewed above: the
     // dwell reset above stays (pass classification reads it), but the
     // impression-joined viewed event must not fire per PAGED idea.
@@ -4269,7 +4327,7 @@ export default function TradesScreen({ navigation, route }: any) {
     };
     // deckIdx intentionally omitted (see the effect above).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signalV2On, rerankOn, topTradeId, topImpressionId]);
+  }, [signalV2On, rerankOn, topTradeId, topImpressionId, measuredTrial]);
 
   // ── Decline reasons (flag `feedback.decline_reasons`): per-fronted-card
   // reset. Stamps the render clock for SPEC §6's `ms_since_render` and drops
@@ -5539,7 +5597,7 @@ export default function TradesScreen({ navigation, route }: any) {
         // The SERVE, not the card: a re-fronted card is a fresh predicament
         // on the same trade_id. Literal 'none' (reasonEventProps()'s
         // convention) so a missing serve is not a stripped prop.
-        impression_id: rawTopCard?.impression_id ?? 'none',
+        impression_id: actionImpressionId(topCard) ?? 'none',
         blocked_n: st.n,
         ms_since_render: Math.max(0, Date.now() - cardRenderedAtRef.current),
       },
@@ -5838,7 +5896,8 @@ export default function TradesScreen({ navigation, route }: any) {
   // emitter, never inferred — the NULL-platform incident is why.
   function reasonEventProps() {
     return {
-      impression_id: rawTopCard?.impression_id ?? 'none',
+      impression_id: (reasonPassAttemptRef.current
+        ? reasonPassAttemptRef.current.card.impression_id : actionImpressionId(topCard)) ?? 'none',
       trade_id: rawTopCard?.trade_id ?? topCard?.trade_id ?? '',
       ms_since_render: Math.max(0, Date.now() - cardRenderedAtRef.current),
       platform:
@@ -5849,7 +5908,9 @@ export default function TradesScreen({ navigation, route }: any) {
   function reasonWriteTarget() {
     const acted = reasonPassAttemptRef.current?.card ?? topCard;
     return {
-      impressionId: acted?.impression_id,
+      // A held reason keeps its already-validated capture; never resurrect an
+      // edited attempt's stripped impression from whatever is fronted later.
+      impressionId: reasonPassAttemptRef.current ? acted?.impression_id : actionImpressionId(acted),
       tradeId: acted?.trade_id ?? '',
       leagueId: acted?.league_id || undefined,
       givePlayerIds: acted?.give_player_ids,
@@ -6069,6 +6130,28 @@ export default function TradesScreen({ navigation, route }: any) {
   // Non-canvas hosts (team/player modes, the pushed instance, flag-off) are
   // false on both conjuncts and render the classic deck byte-identically.
   const landingDeckRetired = canvasResultsLive || resultsPushLive;
+
+  // One measured offer surface per trial card. The canvas can be a builder,
+  // an edited package or a seeded recommendation; only the last counts as
+  // the original offer. Existing non-trial browse/paging remains silent.
+  const trialCanvasRef = useRef<View>(null);
+  const browseEditedPackage = rawTopCard ? browseSession?.edits[rawTopCard.trade_id] : undefined;
+  const trialCanvasExact = browseLive && !!canvasPrefill &&
+    browseSeededIdRef.current === rawTopCard?.trade_id && isExactOfferPackage(rawTopCard, {
+    leagueId: leagueId ?? '', opponentUserId: canvasPrefill.opponentId ?? '',
+    giveIds: browseEditedPackage?.give ?? canvasPrefill.give,
+    receiveIds: browseEditedPackage?.receive ?? canvasPrefill.receive,
+  });
+  const trialDeckExact = !!topCard && isExactOfferPackage(rawTopCard, {
+    leagueId: topCard.league_id, opponentUserId: topCard.opponent_user_id,
+    giveIds: topCard.give_player_ids, receiveIds: topCard.receive_player_ids,
+  });
+  const trialDeckVisible = !landingDeckRetired &&
+    !(singlePinFeatured && !singlePinDeckActive) && !quicksetPromptShown &&
+    !(adaptationMoment && !mutedForTour) && trialDeckExact;
+  const measuredTrialSignalFor = useSelectedOfferSignals(rawTopCard ?? null, 'Trades', deckIdx,
+    browseLive ? trialCanvasRef : deckWrapRef,
+    measuredTrial && (browseLive ? trialCanvasExact && !browseReasonOpen : trialDeckVisible));
 
   // #402 — the model path's zero-results copy, shared between the flag-off
   // toast (generateMutation.onSuccess) and the browse results area's card —
@@ -6383,7 +6466,7 @@ export default function TradesScreen({ navigation, route }: any) {
     track('trade_flagged', { trade_id: topCard.trade_id }, 'Trades');
     flagMutation.mutate({
       card: topCard,
-      impressionId: signalV2On ? rawTopCard?.impression_id : undefined,
+      impressionId: signalV2On ? actionImpressionId(topCard) : undefined,
     });
     // F4 (deck.session_rerank): a bad-trade flag is the explicit "not
     // interested" — advance('pass') reads this ref for the −2 reward. The
@@ -6675,6 +6758,29 @@ export default function TradesScreen({ navigation, route }: any) {
             <ChalkText variant="bodySm" style={{ color: ice.base }}>Win Now · season gains within your dynasty budget</ChalkText>
           </Pressable>
         ) : null}
+        {/* G-425 (#425/#426) — Team overhaul HERO. Full-width tile in the
+            slot the strip cohort's Draft cell used to hold: directly above
+            the utility row / mode bar, outside the measured `modeBarWrap`
+            (so the wrapper's onLayout y grows by the hero's height and the
+            Toast offset still clears both). Same gate, props and analytics
+            as the card it replaces (BUILD-CONTRACT §9): shown while
+            `overhaul.enabled` is on or a saved plan exists, independent of
+            `finderMode` — the flag-off classic home keeps its entry. */}
+        {(overhaulOn || !!activeOverhaul) && leagueId ? (
+          <OverhaulEntryCard
+            leagueId={leagueId}
+            active={activeOverhaul}
+            onStart={() => {
+              try {
+                track('overhaul_started', { league_id: leagueId, entry: 'trades_home_card' });
+              } catch { /* analytics must never block navigation */ }
+              navigation.navigate('OverhaulOutlook' as never);
+            }}
+            onResume={(overhaulId) => {
+              navigation.navigate('OverhaulPlan' as never, { overhaulId } as never);
+            }}
+          />
+        ) : null}
         {/* FB #156/#246 — the persistent mode chip strip. Since the
             guided-first landing (#246) this renders on the tab's landing
             itself (TradesHome mounts with mode:'guided') and is the
@@ -6712,11 +6818,10 @@ export default function TradesScreen({ navigation, route }: any) {
               <TradeHomeUtilityRow
                 onFreeAgents={() => navigation?.navigate?.('FreeAgents')}
                 onManualCalc={() => navigation?.navigate?.('TradeCalculator')}
-                onDraft={
-                  draftRoomOn
-                    ? () => navigation?.navigate?.('DraftRoom')
-                    : undefined
-                }
+                // G-425 (#425): no onDraft here any more — the Draft cell left
+                // this row for good (the overhaul hero above took its slot);
+                // the Draft Room keeps its seasonal tab, League tile and deep
+                // link. The mode bar's Draft chip below is a different control.
                 // Presentation v2 — passing the handler is what creates the
                 // control; flag off ⇒ omitted ⇒ this row is unchanged.
                 onTodaysTrade={
@@ -7900,6 +8005,7 @@ export default function TradesScreen({ navigation, route }: any) {
                 </Text>
               </View>
             ) : null}
+            <View ref={trialCanvasRef} collapsable={false}>
             <TradeBuildCanvas
               leagueId={leagueId!}
               userId={userId}
@@ -7980,6 +8086,7 @@ export default function TradesScreen({ navigation, route }: any) {
               // idea's key. False everywhere else — byte-identical.
               partnerLocked={browseLive}
             />
+            </View>
           </View>
         ) : null}
 
@@ -8664,7 +8771,7 @@ export default function TradesScreen({ navigation, route }: any) {
                   receivePlayerNames={topCard.receive_players.map((p) => p.name)}
                   opponentUsername={topCard.opponent_username}
                   surface="deck"
-                  impressionId={signalV2On ? rawTopCard?.impression_id : undefined}
+                  impressionId={signalV2On ? actionImpressionId(topCard) : undefined}
                   onSent={
                     // F10 — deck-done summary "proposed" tally.
                     replenishmentOn
@@ -9733,20 +9840,11 @@ function cap(s: string) {
 }
 
 // #376/#394 — display names for the minimized "Outlook & filters" row.
-// The four directional values use OutlookBiasReceipt's LEAN names (#253
-// canonical order) so the row and the receipt share one vocabulary; the
-// map is duplicated here because the receipt keeps LEAN private.
-// `not_sure` IS a declared value (TradeDnaSheet persists it when positions
-// are saved without an outlook pick) — it renders "Not sure", never the
-// cap() literal "Not_sure" and never "Not set". "Not set" is reserved for
-// null/absent, applied at the call site.
-const OUTLOOK_FALLBACK_LABEL: Record<string, string> = {
-  championship: 'All-in',
-  contender: 'Contending',
-  rebuilder: 'Rebuilding',
-  jets: 'Tanking',
-  not_sure: 'Not sure',
-};
+// #424 — aliased to OutlookBiasReceipt's exported table (it owns LEAN) so
+// this row and the merged calculator's `calc.outlook-fallback` twin can
+// never drift apart again. `not_sure` renders "Not sure"; "Not set" is
+// reserved for null/absent, applied at the call site.
+const OUTLOOK_FALLBACK_LABEL = OUTLOOK_DISPLAY_NAME;
 
 // ── Styles — Chalkline (docs/design/design-system.md) ───────────────
 const styles = StyleSheet.create({

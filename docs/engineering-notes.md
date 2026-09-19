@@ -23,6 +23,10 @@ These records preserve detailed implementation reasoning and unresolved limits. 
 | Contract | Owner/evidence |
 |---|---|
 | Policy evaluation, generator arms, proposal/match attribution, two-user exposure | [Personal-market policy](plans/personal-market-policy/status.md), [two-user funnel](plans/personal-market-policy/two-user-funnel.md), [owner-contract review](plans/owner-contracts/review.md) |
+| Owner-driven construction and exclusive serving; captured inputs, attribution and bounded search | [Architecture](architecture.md#owner-driven-construction-challenger), [ADR-019](adr/adr-019-owner-construction-before-market-terms.md), [owner-only scope](plans/owner-only-uncapped/scope.md), [dated paging/release evidence](recovery/2026-09-08-owner-only-impression-paging.md) |
+| Team overhaul eligible pools, compatible packages, reservations, manual fallback and platform capabilities | [Build contract](plans/team-overhaul/BUILD-CONTRACT.md), [later owner decisions](plans/team-overhaul/owner-decisions.md), [API](api-reference.md), [release record](recovery/2026-09-07-team-overhaul-release.md), [entry revision](feedback/items/425-overhaul-tile-replaces-draft/prd.md) |
+| Shared significance filtering, trusted exceptions, cache safety and calibration | [Architecture](architecture.md#shared-recommendation-significance), [scope](plans/trade-significance/scope.md), [validation and release gates](plans/trade-significance/validation.md) |
+| Bounded diagnostic storage, owner-scoped reconstruction and debug-only expiry | [ADR-021](adr/adr-021-bounded-deck-diagnostics.md), [data lifecycle](data-dictionary.md#deck-diagnostic-storage-2026-09-15), [storage recovery/recheck](plans/db-storage-reduction/release.md) |
 | Final-roster evaluation and forecast/provenance enforcement | [Roster evaluation](plans/post-trade-roster-evaluation/validation.md), [model activation](plans/trade-model-activation/validation.md) |
 | Request-scoped scoring and captured job ownership | [Budget scalability implementation](plans/budget-scalability/implementation.md) |
 | Account deletion, queued writes and worker fencing | [ADR-017](adr/adr-017-account-deletion-work-leases.md), [security release](plans/archive/2026/security-data-hardening/deployment.md) |
@@ -34,6 +38,10 @@ These records preserve detailed implementation reasoning and unresolved limits. 
 | Bounded preference for smaller eligible player packages | [Small-package contract](plans/small-trade-packages/prd.md), [architecture](architecture.md) |
 | Settings route/query ownership | [Settings IA](plans/settings-ia-hub/plan.md) |
 | Synthesized cards, generation/presentment gates, bake-off attribution, pricing waterfalls, board assertions, mock-draft ownership and picker contracts | [Shared invariants](cross-client-invariants.md), applicable [feedback item](feedback/items/INDEX.md), and preserved LLD sections below |
+
+Construction, policy evaluation, significance filtering and diagnostics have different owners. Owner-only serving selects which generated arm executes; significance does not select arms or change rankings, and a default-off setting is not proof of a deployed mode. Diagnostic expiry removes debug detail, not core recommendations, frozen valuations or outcomes.
+
+For Team overhaul, use the build contract together with later owner decisions and platform API contracts. The original discovery mocks and initial Sleeper-only design predate the all-platform send revision and replacement entry tile. Likewise, an initial owner-only release plan predates its activation and paging incident. Read dates and follow the later evidence; neither an old plan nor a checked-in flag proves current production state.
 
 ## Preserved observations and decisions
 

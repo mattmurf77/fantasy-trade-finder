@@ -570,6 +570,11 @@ FLAG_KEYS: tuple[str, ...] = (
     # #357/#358/#359 — the six-beat Team Review flow (client surface in the
     # Trades tab, hence the `trades.*` namespace; `trade.*` is the engine).
     "trades.team_review",
+    # Team overhaul (docs/plans/team-overhaul/BUILD-CONTRACT.md §2). Gates the
+    # mobile entry card and POST /api/overhauls, /generate, /assemble, /send.
+    # GET routes, /decisions, /priorities, /prepare-send, /refresh and
+    # /attempts/{id}/status stay reachable so live sends survive a rollback.
+    "overhaul.enabled",
     # #365 — the net first-round-pick term inside `infer_team_outlook`
     # ("number of 1sts owned vs traded away"). NAMED `trade.*` ON PURPOSE:
     # this one lives in the ENGINE's classifier, whose verdict feeds

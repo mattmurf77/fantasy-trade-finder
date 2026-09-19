@@ -685,9 +685,11 @@ def _surplus(recv_ids: list[str], give_ids: list[str], value_of) -> float:
     gvals = [value_of(p) for p in give_ids]
     v_max = max(rvals + gvals)
     recvd = ts.package_value_v2(rvals, v_max, n_other=len(give_ids),
-                                other_values=gvals)
+                                other_values=gvals,
+                                exempt=ts.first_round_pick_mask(recv_ids))
     sent  = ts.package_value_v2(gvals, v_max, n_other=len(recv_ids),
-                                other_values=rvals)
+                                other_values=rvals,
+                                exempt=ts.first_round_pick_mask(give_ids))
     extra = len(recv_ids) - len(give_ids)      # raw id counts, picks included —
     if extra > 0:                              # identical to live A3
         recvd -= ts._c("waiver_slot_cost") * extra

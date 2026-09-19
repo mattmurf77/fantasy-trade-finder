@@ -3,7 +3,7 @@ import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View
 import { useQuery } from '@tanstack/react-query';
 
 import { getLeagueRosters, myOwnerId } from '../api/sleeper';
-import { getLeagueCoverage, getLeaguePicks, getPowerRankings } from '../api/league';
+import { getLeagueCoverage, getLeaguePicks, getLeaguePreferences, getPowerRankings } from '../api/league';
 import {
   evaluateTradeInLeague,
   evaluateTradesInLeague,
@@ -27,7 +27,7 @@ import EvenerRows from './EvenerRows';
 import AdjustmentsDisclosure from './AdjustmentsDisclosure';
 import TierBadge from './TierBadge';
 import SendInSleeperButton from './SendInSleeperButton';
-import OutlookBiasReceipt from './OutlookBiasReceipt';
+import OutlookBiasReceipt, { outlookDisplayName } from './OutlookBiasReceipt';
 import TradeDnaSheet from './TradeDnaSheet';
 import LeagueSwitcherSheet from './LeagueSwitcherSheet';
 import ShareTradeImage, { type ShareAsset } from './ShareTradeImage';
@@ -428,6 +428,24 @@ export default function InLeagueCalculator({
     queryKey: ['league-coverage', leagueId],
     queryFn: () => getLeagueCoverage(leagueId),
     staleTime: 5 * 60_000,
+  });
+  // #424 — the merged outlook fallback row's data source. Same
+  // ['league-prefs', leagueId] key every preference writer invalidates
+  // (TradeDnaSheet, TradesScreen, TradeFinderHubScreen, TeamReviewScreen's
+  // savePrefs) and the same read shape as OutlookBiasReceipt, so the row can
+  // never disagree with the receipt or the sheet about what is saved. The
+  // fallback shipped (#384 W5) as a literal "Outlook · Not set" with no
+  // preferences read at all, which was honest only while the receipt covered
+  // every declared value — with `trade.outlook_direction` off it covers none,
+  // so a saved "Rebuilding" read "Not set" on every merged landing. Gated on
+  // `merged`: only the merged layout renders the row, and the stacked page
+  // stays request-identical with the flag off.
+  const prefsQ = useQuery({
+    queryKey: ['league-prefs', leagueId],
+    queryFn: () => getLeaguePreferences(leagueId),
+    enabled: merged && !!leagueId,
+    staleTime: 5 * 60_000,
+    placeholderData: (prev) => prev,
   });
   // #158 — owned draft picks for this league (per-owner, engine-scale values).
   // Empty when the picks.owned_sync flag is off (no rows synced); ESPN leagues
@@ -923,12 +941,15 @@ export default function InLeagueCalculator({
               onHiddenChange={setOutlookHidden}
             />
             {outlookHidden ? (
-              // The receipt's own row, minus the claim it cannot make. Same
-              // Change control, same sheet — the page always has an outlook
-              // section and always a way into the editor.
+              // The receipt's own row, minus the LEAN claim it cannot make.
+              // Same Change control, same sheet — the page always has an
+              // outlook section and always a way into the editor. #424: the
+              // name is the DECLARED team_outlook's (All-in / Contending /
+              // Rebuilding / Tanking / Not sure); "Not set" only when nothing
+              // is declared — an inference is not "set" (#394 ruling).
               <View testID="calc.outlook-fallback" style={styles.outlookFallback}>
                 <Text style={styles.outlookFallbackText} numberOfLines={1}>
-                  Outlook · Not set
+                  {`Outlook · ${outlookDisplayName(prefsQ.data?.team_outlook) ?? 'Not set'}`}
                 </Text>
                 <Pressable
                   testID="calc.outlook-fallback.change"

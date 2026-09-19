@@ -5,6 +5,13 @@ Tokens: [`design-system.md`](design-system.md). Live examples: [`web/style-guide
 
 Every component below maps to an existing class/component (web class · mobile component noted). New UI composes these; don't invent parallel variants.
 
+Owner trial partial-selection caption (2026-09-06): `TradeCard`,
+`FeaturedTradeWindow` and `ShopOffersBody` reuse Chalkline `Text`, `type.bodySm`
+and `chalk.dim` for a brief server-provided notice when only part of the requested
+selection could be included. No new badge, palette or layout family. Suppress
+the original-package caption after editing. Exact asset columns remain the
+authoritative terms; this adds no counterparty tier/value disclosure.
+
 ---
 
 ## Buttons
@@ -50,6 +57,7 @@ Radius `--r-xs`, `label` type (11px Archivo 600 caps), 2px 6px padding. Construc
 | **LeagueRow** | List row, not card: 1px hairline separator, league name `title`, meta `body-sm` chalk-dim, chevron. Hover `--ink-3` | `.league-item`, `.league-card` (mobile `LeaguePill` was retired by #223 — the TopNav league affordance replaced it) |
 | **MethodTile** | Card + icon (Chalkline set, 20px, chalk-dim) + `heading` title + `body-sm` desc. "NEW" = ice-border badge. "Recommended" (#119, one method max — the lowest-effort flow): flare `label` text tag beside the title (informational highlight, ADR-005) + ice border/icon on the card itself; same treatment on the Rank action-sheet row. **#232 consolidation (mocks `rank-method-consolidation-v2/-v3`):** both chooser surfaces (RankHome + RankMenu sheet) render THREE primary tiles from the shared model (`mobile/src/navigation/rankChooserModel.ts`) with an outcome `label` role tag (FASTEST / MOST PRECISE / MOST CONTROL) above the title — Quick set (recommended, + a hairline-topped "Then, if you want: Quick rank…" subrow) · Head-to-heads · Tiers board — and a collapsed "More ways to rank" disclosure (Pick Anchors · Overall ranks · Trends). The chooser heading row carries the flag-gated import entry: a quiet text link right of "Build your board" — 13px `ui-semi` chalk-dim "Have rankings already?" with an ice underline + 14px ice `upload` glyph (arrow UP out of the tray); baseline-aligned, wraps intact + right-aligned when the row can't fit both | `.rm-tile`, `.rm-badge` · `RankHomeScreen`, `RankMenu` |
 | **ModeLauncherCard** (#156 Trade-Finding Hub, `TradeFinderHubScreen`) | Horizontal MethodTile variant, the RankHome card-launcher pattern applied to the Trades home: 40px `--ink-2` icon well (ice glyph) + (title `title` + optional flare "recommended" tag) over `body-sm` desc + right chevron. Four cards — Guided / Team / Player / Calculator. Sits under the **Trade DNA** panel (hairline `--ink-1` card: `label` header + "Edit prefs" ice link, outlook/untouchables KVs, and Chasing/Shopping position-chip rows where `position_needs`/`position_surplus` render as dashed `--line-strong` recommendation chips with a flare "need"/"deep" tag) | `mobile/src/screens/TradeFinderHubScreen.tsx` |
+| **Hero entry tile** (G-425 #425/#426, 2026-09-08) | The ONE big action on a landing: a full-width tile whose whole surface is the button. Ice fill (`--ice`, pressed `--ice-press`, all text `--on-ice`) — ice is the only sanctioned bold action colour; flare is informational-only and `--neg` is Pass/error, so there is no red variant (a hero/alarm token would need a design-system + ADR-005 amendment). `heading` title (Barlow Condensed caps, the largest type allowed on a control) over one `body-sm` line, trailing Archivo 700 `Start overhaul ›` / `Resume ›`; `minHeight` 64, padding `md`/`lg`, radius `--r-md`, no border, no shadow. One per screen; counts against the ≤3 ice ration. First instance: `OverhaulEntryCard` on the Acquire landing, above the utility row (`HERO_TONE` constant, pinned by `check-team-overhaul.js` §3e) | `mobile/src/components/OverhaulEntryCard.tsx` |
 
 ## Navigation
 
@@ -134,7 +142,13 @@ Popup (320px): same tokens, `--ink-0` base; `FTF` wordmark short form. **Connect
 
 ## Auth screen (anti-template layout)
 
-Left-aligned, not centered-hero: ice tick + `display` headline ("Rank your league. Find the trades both sides want.") · username input + Primary button in one row (desktop) · `body-sm` chalk-dim link row (smart-start URL, demo mode). No three-item icon/tagline row, no equation headline. Mascot may sit right of the fold on desktop.
+Web landing uses the operator-selected “Your Rankings + Their Rankings = Trades That Actually Work” headline, a concise three-step explanation, and a static two-board ranking illustration. Desktop places the explanation and illustration above a platform connection section. On screens at 960px and below, the compact explanation precedes sign-in and the larger illustration follows it. Default sign-in fits tested 1366×768, 390×844 and 320×640 viewports. Sleeper setup details expand on demand; page entry does not autofocus the username.
+
+Three equal-width numbered native buttons with wrapping labels select one shared compact app-style illustration. Step 01 reads “Your rankings, in draft pick value”; step 02 reads “We compare your board with leaguemates”; step 03 reads “We match you leaguemates”. The comparison illustration is titled “WE FIND THE DIFFERENCES”. The Real offers view pairs personal ranking gains with a separate market-value bar mirroring the production mobile TradeValueBar: a 14px diverging rail, centered cyan Even marker, second-round landmarks at 21.5%/78.5%, and −1st/−2nd/Even/+2nd/+1st scale. This uses an illustrative even-market state, not a fabricated percentage or live evaluation. Views: a personal ranking board titled “YOUR RANKINGS” with rookie draft pick value tiers (01), a two-manager comparison (02, default), or a mutual-value offer (03). Preserve the actual Chalkline palette, WR rails, tier badges, selected borders and readable names. Use exclusive `aria-pressed` states, visible keyboard focus, and a polite live region. Selection never scrolls or moves focus; no automatic cycling or requests. The illustration precedes sign-in on desktop and phones. Phone copy and spacing condense to fit the initial illustration and sign-in in tested 320×640 and 390×844 viewports. These are illustrative views, not screenshots or live recommendations.
+
+Platform choices respect existing feature flags and update when `ftf:flags-ready` fires, including slow responses. Sleeper uses extension verification. ESPN/MFL selections show an explicit mobile-verification panel and a contact link for TestFlight access, preserving the verified-ownership contract. Legacy browser credential/claim forms remain unreachable from those choices; they are not an available login path.
+
+The fixed web landing owns its scroll container. Root/body scrolling is locked only while `#auth-screen` is visible and restores automatically after its `.hidden` class is applied, preventing duplicate scrollbars from narrowing the phone layout.
 
 ## Screen coverage check
 

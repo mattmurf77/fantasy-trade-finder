@@ -5,6 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import ChalkText from './chalkline/Text';
 import { AnalystAvatar } from './analyst';
 import { ink, chalk, ice, space, radii, type, fonts } from '../theme/chalkline';
+import { useTeamReviewCompletion } from '../state/teamReviewCompletion';
 
 // #357/#358/#359 — the Team Review entry on TradesHome.
 //
@@ -28,7 +29,11 @@ const KEY = 'ftf_team_review_collapsed';
 // Folding them into one flag would make a completed review indistinguishable
 // from a dismissed one, and the row copy below needs to tell them apart. Both
 // render the same minimized row; only the label differs.
-const DONE_KEY = 'ftf_team_review_completed';
+//
+// #423 — completion lives in `state/teamReviewCompletion.ts` (same device key,
+// same sparse map), NOT in a mount-time read here: TradesHome stays mounted
+// beneath the pushed review, so a once-per-mount read could never show "done"
+// until relaunch. The card subscribes to the store instead.
 
 type LeagueFlags = Record<string, true>;
 
@@ -41,20 +46,14 @@ const readMap = async (key: string): Promise<LeagueFlags> => {
   }
 };
 
-/** Record that this league's review was run to the end. Called from the
- *  `plan` beat's finish action, so the entry is minimized next time
- *  TradesHome renders. Fire-and-forget: a storage failure costs the
+/** Record that this league's review was gone through. Called when the
+ *  review reaches the `plan` beat and again from its finish action (the
+ *  store's `mark` is idempotent), so the entry is minimized the moment
+ *  TradesHome is visible again — the store updates synchronously and
+ *  mirrors to disk fire-and-forget: a storage failure costs the next-launch
  *  minimization, never the navigation. */
-export async function markTeamReviewCompleted(leagueId: string): Promise<void> {
-  if (!leagueId) return;
-  try {
-    const map = await readMap(DONE_KEY);
-    if (map[leagueId]) return;
-    map[leagueId] = true;
-    await AsyncStorage.setItem(DONE_KEY, JSON.stringify(map));
-  } catch {
-    /* quota or serialization failure is not fatal */
-  }
+export function markTeamReviewCompleted(leagueId: string): void {
+  useTeamReviewCompletion.getState().mark(leagueId);
 }
 
 export default function TeamReviewEntryCard({
@@ -64,20 +63,21 @@ export default function TeamReviewEntryCard({
   leagueId: string;
   onOpen: (source: 'trades_home_card' | 'collapsed_row') => void;
 }) {
+  // "Not now" — this card's own deferral, still read once per mount.
   const [collapsed, setCollapsed] = useState<boolean | null>(null);
-  const [completed, setCompleted] = useState(false);
+  // Completion — live from the store, so a review finished while this card sat
+  // mounted beneath it minimizes the entry on the way back (#423).
+  const hydrated = useTeamReviewCompletion((s) => s.hydrated);
+  const completed = useTeamReviewCompletion((s) => !!s.byLeague[leagueId]);
+
+  useEffect(() => {
+    void useTeamReviewCompletion.getState().hydrate();
+  }, []);
 
   useEffect(() => {
     let dead = false;
-    Promise.all([readMap(KEY), readMap(DONE_KEY)])
-      .then(([collapsedMap, doneMap]) => {
-        if (dead) return;
-        const isDone = !!doneMap[leagueId];
-        setCompleted(isDone);
-        // A completed review minimizes by default; an explicit "Not now" still
-        // minimizes on its own. Either one is enough.
-        setCollapsed(!!collapsedMap[leagueId] || isDone);
-      })
+    readMap(KEY)
+      .then((collapsedMap) => { if (!dead) setCollapsed(!!collapsedMap[leagueId]); })
       .catch(() => { if (!dead) setCollapsed(false); });
     return () => { dead = true; };
   }, [leagueId]);
@@ -93,9 +93,12 @@ export default function TeamReviewEntryCard({
       .catch(() => { /* fire-and-forget; a quota failure is not fatal */ });
   };
 
-  if (collapsed === null) return null;   // pre-hydration: render nothing, never a flash
+  // Pre-hydration (either source): render nothing, never a flash.
+  if (collapsed === null || !hydrated) return null;
 
-  if (collapsed) {
+  // A completed review minimizes by default; an explicit "Not now" still
+  // minimizes on its own. Either one is enough.
+  if (collapsed || completed) {
     return (
       <Pressable
         testID="team-review.entry-row"

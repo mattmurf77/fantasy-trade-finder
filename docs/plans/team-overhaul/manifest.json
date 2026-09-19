@@ -1,0 +1,161 @@
+{
+  "date": "2026-09-06",
+  "scope": "Engineering handoff and illustrative mockups; no production implementation",
+  "files": [
+    {
+      "path": "ENGINEERING-SPEC.md",
+      "bytes": 40338,
+      "sha256": "6955ca5d471189f60aa578b8823c28e7f039f666dd82a98397e5ac32fab78622"
+    },
+    {
+      "path": "HANDOFF-MESSAGE.md",
+      "bytes": 1082,
+      "sha256": "2fec081d97000bc48e08d34fbc27a1a74740290ae456780941a5fa72425bc08f"
+    },
+    {
+      "path": "PRODUCT-SPEC.md",
+      "bytes": 28839,
+      "sha256": "786341961fb77abdb6faec4bd63a4b0b50603961e1863aefe414fbc94c2e456d"
+    },
+    {
+      "path": "QA.md",
+      "bytes": 8181,
+      "sha256": "a3cb3093146684847f9c5e8aee8000f84090c8bcc13d9827213778d95888b98b"
+    },
+    {
+      "path": "README.md",
+      "bytes": 4884,
+      "sha256": "e94222508111cf0855aa5e96ceed56dc5e6660e4b614ac45cdb3eb58e8eca23c"
+    },
+    {
+      "path": "mockups/entry-capture.cjs",
+      "bytes": 2170,
+      "sha256": "3f03bd3e048641acb4c473818db51a7dcd75dbd5ddfcd4c8c1574481e7325854"
+    },
+    {
+      "path": "mockups/entry-mock-evidence.md",
+      "bytes": 4507,
+      "sha256": "49e05d318c44e2a6de4b4de4c61cc7c6977318d5039ee2eee144017dd20d3c7d"
+    },
+    {
+      "path": "mockups/entry-mock.html",
+      "bytes": 658092,
+      "sha256": "c98b4c157ea22d87e57c9b641d6b40489aa598558f7a5051db692dea9dcaeba7"
+    },
+    {
+      "path": "mockups/index.html",
+      "bytes": 6397,
+      "sha256": "77ae11bb36e9a8384dfbc65bb6cecc4514571c7a1bc17cd8031062f553dfea92"
+    },
+    {
+      "path": "mockups/screenshots/01-outlook.png",
+      "bytes": 141271,
+      "sha256": "94e548d9d75ff989076b06125e6cfca4ed3bbd8533f64da6cd83c69972975012"
+    },
+    {
+      "path": "mockups/screenshots/02-assets.png",
+      "bytes": 333853,
+      "sha256": "230d26428760aa03cc937d34b9554aac0bdcef4a170a68f26ec710cacbb10d3e"
+    },
+    {
+      "path": "mockups/screenshots/03-positions.png",
+      "bytes": 173920,
+      "sha256": "f7fde1816226de79d5278062fb02090f207483dc1428230525a1ba26662dd2c5"
+    },
+    {
+      "path": "mockups/screenshots/04-review.png",
+      "bytes": 151116,
+      "sha256": "394d882c07499e5843f21166319c9977a0d7cf082db0e2c18dbc5bbd73750ace"
+    },
+    {
+      "path": "mockups/screenshots/05-roadmaps.png",
+      "bytes": 290599,
+      "sha256": "079b601ef1ea218a4ba6ca97485b0918501e359ba6d0e9f33463e49393e89ff7"
+    },
+    {
+      "path": "mockups/screenshots/06-priorities.png",
+      "bytes": 247808,
+      "sha256": "56bf04917bad9b9d5242b9298bd209a0d312270b5398e5da5f8175b4806bdb5b"
+    },
+    {
+      "path": "mockups/screenshots/07-priorities.png",
+      "bytes": 201186,
+      "sha256": "f7db7df3890fb439103d0bcf7b52245a88a5704e333293a3c170223a6cc3208c"
+    },
+    {
+      "path": "mockups/screenshots/08-summary.png",
+      "bytes": 328651,
+      "sha256": "769312a89e37b11a297caebef18beeec17de1b5c4e7b97988b3f8d7ed2fb84bc"
+    },
+    {
+      "path": "mockups/screenshots/09-tracking.png",
+      "bytes": 277897,
+      "sha256": "591ed8167e121ada5a8a014fc908b45858024ddd7695f768a1e4711ecefe1b3c"
+    },
+    {
+      "path": "mockups/screenshots/entry-launch.png",
+      "bytes": 149919,
+      "sha256": "fe95b603c93585ed66036ce8771a08c7114258a97d28df46396812687466d37e"
+    },
+    {
+      "path": "mockups/screenshots/entry-resume.png",
+      "bytes": 155493,
+      "sha256": "daef7764c0927e0ef676d2bf31969bcfa9c6dbf244b69a07c2839f4a1b6a0d8b"
+    },
+    {
+      "path": "mockups/source/build-review.py",
+      "bytes": 505,
+      "sha256": "175fbf02106682e9fbc09529acb9f60e25e0333ceefda20a4ad2227a25aa8afe"
+    },
+    {
+      "path": "mockups/source/execution-mocks.js",
+      "bytes": 39547,
+      "sha256": "fc58eb90dfc485a7804fdee8aa7cfa424a64b832717fbaa644225acb3e57e3df"
+    },
+    {
+      "path": "mockups/source/questions.js",
+      "bytes": 14665,
+      "sha256": "89d969e9ff51f614443508e0a8daca14adce0cd4169688d242a328d63d8ba9c1"
+    },
+    {
+      "path": "mockups/source/review-app.js",
+      "bytes": 28391,
+      "sha256": "f4d1155fd344208fc603693dd2c2da24e1574c14e381a3c0677b62be3a5ab5da"
+    },
+    {
+      "path": "mockups/source/review-shell.html",
+      "bytes": 14405,
+      "sha256": "5b97c70b6b40fbd8fded5db18b379673a905016cf8bcbedfe1521f3d5ce61d21"
+    },
+    {
+      "path": "mockups/source/setup-mocks.js",
+      "bytes": 17923,
+      "sha256": "5bf5877b038f6e4c09a90f93dba0ce66221b76b5716a7eb087bd2e1d073df52c"
+    },
+    {
+      "path": "mockups/team-overhaul-review.html",
+      "bytes": 114994,
+      "sha256": "b67394411cb48241d65e4bb542e9d6741288851ca8b56012a68a6f4a8f54cd90"
+    },
+    {
+      "path": "owner-decisions.md",
+      "bytes": 2722,
+      "sha256": "88469da180b78add4cc344d889777888b0f50d86395fede1486ff6c220857870"
+    },
+    {
+      "path": "plan.md",
+      "bytes": 6465,
+      "sha256": "87bbac0ef7ed317df969c80c53727b20d4e2ac092dcdf6694d69dfba4dc5cdc6"
+    },
+    {
+      "path": "scope.md",
+      "bytes": 5020,
+      "sha256": "3c17a679ad09a655306ee6cb5a94c14461f98eea801a1ce025f73f3d00f089cc"
+    },
+    {
+      "path": "status.md",
+      "bytes": 557,
+      "sha256": "e5b8d4bbd3a2ff67cf4eabb25f456da626ad9ba2ddf3326e48c28c8bad10d04f"
+    }
+  ]
+}

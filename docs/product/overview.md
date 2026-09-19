@@ -15,6 +15,14 @@ The user-facing name is **Fleeced: Dynasty Trade Finder** (D-057). The mascot is
 
 Sleeper, ESPN, and MyFantasyLeague integrations support league workflows. Available reads/writes differ by platform and feature flag; consult [integrations](../integrations/README.md), [API reference](../api-reference.md), and [configuration](../../config/features.json) for exact capabilities. Account/identity and multiuser data exist; old “Sleeper-only, personal-use-only, no accounts” snapshots are historical.
 
+## Trade workflows
+
+- **Owner-driven discovery:** personal rankings, outlook and roster needs inform asset selection before market pricing sets terms. Owner-only serving and the separate personal-market evaluator have distinct contracts; [ADR-019](../adr/adr-019-owner-construction-before-market-terms.md) and the [engineering map](../engineering-notes.md) route implementation and dated release evidence. Uncapped returned offers do not imply exhaustive search.
+- **Team overhaul:** an eligible asset pool supports alternative roadmaps of compatible packages, user-ranked offers and resumable execution. [Build contract](../plans/team-overhaul/BUILD-CONTRACT.md) and [later owner decisions](../plans/team-overhaul/owner-decisions.md) describe the implemented scope; platform send capabilities remain explicit. The earlier discovery mockups are historical design evidence.
+- **Recommendation significance:** a shared rule evaluates raw tiers and pick classes at the final recommendation boundary, independently of generator choice and fairness. Its [scope and calibration](../plans/trade-significance/scope.md) define exceptions and activation gates; implementation alone does not prove it is enabled.
+
+Debug diagnostics are separately retained from durable recommendation and outcome records. [Data lifecycle](../data-dictionary.md#deck-diagnostic-storage-2026-09-15) governs diagnostic expiry and private reconstruction; it does not authorize deletion of core product history.
+
 ## Sources of truth
 
 - **Implementation:** code/configuration, [architecture](../architecture.md), [schema](../data-dictionary.md), [API](../api-reference.md), and [shared invariants](../cross-client-invariants.md). Python/Flask with SQLAlchemy Core; SQLite locally and Postgres in production. Dependency manifests define installed versions.

@@ -1,11 +1,11 @@
 # HANDOFF
 
-## Current State — 2026-09-06
+## Current State — 2026-09-19
 
-**Where I stopped:** current work belongs in the sibling `Fleeced` workspace. Organization commit `52630df3` consolidates knowledge and preserves local recovery. The publication branch integrates newer main `4c343a48`; see the [organization record](../docs/recovery/2026-09-06-project-organization.md) and [GitHub main history](https://github.com/mattmurf77/fantasy-trade-finder/commits/main) for publication evidence.
+**Where I stopped:** organization work from `801e00ea` is being reconciled with main `b33b4da9` in an isolated publication branch. Publication is pending at this snapshot; verify current Git/PR/CI state before claiming it merged. [Organization record](../docs/recovery/2026-09-06-project-organization.md).
 
-**In flight:** the separate feedback release merged as `988fa2d6`; its [release record](../docs/feedback/items/419-rejected-interest-resurfacing/release.md) verifies Render LIVE and iOS 1.17.1 (149) upload. Apple tester availability and the 23 device steps remain unverified/UNRUN. Organization requires no new mobile build or flag changes.
+**In flight:** main includes owner-only generation, Team overhaul, bounded diagnostics and the default-off significance rule; use the [engineering map](../docs/engineering-notes.md). Dated evidence records [feedback release/build 155](../docs/recovery/2026-09-08-feedback-batch-422-428.md) and [database recovery/recheck through September 16](../docs/plans/db-storage-reduction/release.md). These records do not establish today's production settings or tester availability.
 
-**Blocked on:** no local organization blocker. Hosted CI and merge results must be checked for the exact published source. Private artifacts and original dirty work remain preserved.
+**Blocked on:** the [feedback device checklist](../docs/feedback/items/422-win-now-ffv3-unavailable/testflight-checklist.md) and [overhaul acceptance](../docs/plans/team-overhaul/QA.md) need recorded outcomes. [Significance calibration and activation gates](../docs/plans/trade-significance/validation.md) remain separate from source integration. No runtime changes are requested by this organization publication.
 
-**Don't repeat:** retain the clean structure and latest application changes together. Do not apply old source mirrors, revive retired simulator tools, repeat superseded release claims or rebuild/re-submit build149. Existing nested worktrees remain outside this task.
+**Don't repeat:** preserve the dirty working checkout, local verbatim interview, scratch databases and excluded nested worktrees. Do not publish raw interviews without a specific request, reapply old source snapshots, revive simulator tooling, or rebuild old binaries from dated handoffs. Do not infer flag changes from plans; uncapped returned offers still have computational budgets. Follow [NEXT](NEXT.md) for preserved follow-ups.

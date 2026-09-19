@@ -83,6 +83,10 @@ def _reset_cfg(**cfg):
     # at the pin the pre-fix own-max package math is byte-identical (proven
     # by test_package_benchmark.py).
     ts._cfg["package_bench_trade_wide"] = 0.0
+    # #427 first-round exemption (2026-09-08) likewise post-dates the capture
+    # and the fixture has PICK assets on both sides; at ≤ 0 the mask is
+    # ignored byte-for-byte (test_first_round_pick_exempt.py).
+    ts._cfg["stud_tax_exempt_first_round"] = 0.0
     ts._cfg.update(cfg)
 
 

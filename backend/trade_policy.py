@@ -274,22 +274,27 @@ def confidence_band(trade_confidence: float) -> str:
 # ---------------------------------------------------------------------------
 
 def _package_pair(give_values: Sequence[float],
-                  recv_values: Sequence[float]) -> tuple[float, float]:
+                  recv_values: Sequence[float],
+                  give_exempt: Sequence[bool] | None = None,
+                  recv_exempt: Sequence[bool] | None = None) -> tuple[float, float]:
     """(give_package, receive_package) in ONE value space, using the trade-wide
     reference asset — the same `package_value_v2` convention every generator
     and the manual calculator use.  Never a plain sum: package discounts,
     crown/stud treatment and the diminishing-returns curve all live in there,
     and the brief is explicit that the policy gate must not implement a second
-    simplified sum."""
+    simplified sum. `give_exempt` / `recv_exempt` are the #427 first-round
+    masks (`trade_service.first_round_pick_mask` over each side's ids)."""
     from .trade_service import package_value_v2
     if not give_values or not recv_values:
         return (0.0, 0.0)
     v_max = max(list(give_values) + list(recv_values))
     return (
         package_value_v2(list(give_values), v_max,
-                         n_other=len(recv_values), other_values=list(recv_values)),
+                         n_other=len(recv_values), other_values=list(recv_values),
+                         exempt=list(give_exempt) if give_exempt else None),
         package_value_v2(list(recv_values), v_max,
-                         n_other=len(give_values), other_values=list(give_values)),
+                         n_other=len(give_values), other_values=list(give_values),
+                         exempt=list(recv_exempt) if recv_exempt else None),
     )
 
 
@@ -707,14 +712,17 @@ def _board_valuation(give_ids, receive_ids, eff_value, raw_value,
     the card's give side — so the two dicts are directly comparable and the
     reversal test can assert magnitude equality field by field.
     """
+    from .trade_service import first_round_pick_mask
+    g_exempt = first_round_pick_mask(give_ids)      # #427
+    r_exempt = first_round_pick_mask(receive_ids)
     g_eff = [float(eff_value(p)) for p in give_ids]
     r_eff = [float(eff_value(p)) for p in receive_ids]
-    g_pkg, r_pkg = _package_pair(g_eff, r_eff)
+    g_pkg, r_pkg = _package_pair(g_eff, r_eff, g_exempt, r_exempt)
 
     if raw_value is not None:
         g_raw_vals = [float(raw_value(p)) for p in give_ids]
         r_raw_vals = [float(raw_value(p)) for p in receive_ids]
-        g_raw, r_raw = _package_pair(g_raw_vals, r_raw_vals)
+        g_raw, r_raw = _package_pair(g_raw_vals, r_raw_vals, g_exempt, r_exempt)
     else:
         g_raw, r_raw = None, None
 

@@ -6,7 +6,7 @@ Cross-screen stores and coordination. What each module does and why is in [CLAUD
 
 | Shape | Files | When to use it |
 |---|---|---|
-| **zustand store** (12) | `useSession`, `useFeatureFlags`, `useOnboardingState`, `useNotifications`, `useFeedback`, `useFinderTargets`, `useTradeQueue`, `useGuide`, `usePushPriming`, `useInterruptCoordinator`, `rookieScope`, `premiumImport` | State several screens read, and non-React modules need to reach imperatively |
+| **zustand store** (13) | `useSession`, `useFeatureFlags`, `useOnboardingState`, `useNotifications`, `useFeedback`, `useFinderTargets`, `useTradeQueue`, `useGuide`, `usePushPriming`, `useInterruptCoordinator`, `rookieScope`, `premiumImport`, `teamReviewCompletion` | State several screens read, and non-React modules need to reach imperatively |
 | **module bus** (3) | `onboardingBus`, `espnConnectBus`, `rankImportBus` | A one-shot handoff between two surfaces on opposite sides of a `Modal` or navigation boundary, where neither params nor focus work |
 | **plain hook + AsyncStorage** (2) | `outlookStrip`, `quicksetProgress` | Per-user/per-league persisted UI memory with no cross-screen reader |
 
@@ -42,6 +42,7 @@ ordering guarantee.
 | `useTradeQueue` | `ftf_trade_queue_<user_id>` |
 | `outlookStrip` | `ftf_outlook_strip_<user_id>` (value = the league ids whose strip is EXPANDED; collapsing deletes the entry) |
 | `premiumImport` | `ftf.premium_import.v1` — device-local "imported N weeks ago" stamps; schema-free by design, so losing it degrades to "no prior import", never to a wrong board |
+| `teamReviewCompletion` | `ftf_team_review_completed` — device-local `{[leagueId]: true}` for leagues whose Team Review reached the `plan` beat (#423). **Not user-scoped**, on purpose: it reuses the key and sparse map `TeamReviewEntryCard` wrote before the store existed, so a device that completed a review under the old code hydrates as done with no migration |
 | `useWhatsNew` (in `../hooks/`) | `ftf_whats_new_seen_version` |
 | Session token / last username / device id | expo-secure-store, via `../api/client.ts` |
 | Query cache | AsyncStorage via `PersistQueryClientProvider`, allow-list `PERSIST_KEYS` in `App.tsx`, 30min `maxAge` |

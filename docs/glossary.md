@@ -2,6 +2,12 @@
 
 Domain terms used throughout the codebase. Add a term when new jargon appears.
 
+**Recommendation significance** — Whether an unsolicited trade contains an
+individually meaningful player or qualifying draft pick, independent of whether
+the exchange is fair. Shared across generator arms; cheap assets cannot be
+summed to qualify. Explicit asset searches and genuine incoming offers are
+exceptions. See [configuration](config-reference.md#shared-recommendation-significance-default-off).
+
 ---
 
 **Elo** — Rating system from chess. Each player has a numeric rating; comparing two players updates both based on actual vs. expected outcome. Used to rank fantasy players within a single user's preferences.
@@ -113,7 +119,7 @@ The two *deck-swipe* K's above (like/pass) are additionally scaled by **fit-cong
 
 **Package weights / diminishing returns** — Multi-player trade sides apply diminishing weights so "5 bench guys for an elite WR" doesn't look equal. From `model_config`: `package_weight_1..5 = 1.00, 0.75, 0.55, 0.40, 0.28`.
 
-**Stud tax** — Operator/tester shorthand (#214/#252) for the engine's combined consolidation adjustments: the **crown/consolidation premium** added to a stud side plus the **package-depth discount** shaving a multi-piece side — together they price "four quarters ≠ a dollar". The 2026-08 #214 retune found the pre-existing tax 35–68pp heavier than the 7-calculator market consensus and reshaped it (phase-out at high naive skew, per-elite-piece credit on either side, own-best-asset depth benchmark with a capped total — the `*_market` keys in [config-reference](config-reference.md)). User-tunable via **`stud_tax_mode`** (#215): `market` (retuned default) / `heavy` (the legacy math) / `off` — see [cross-client-invariants](cross-client-invariants.md) § Stud-tax mode strings.
+**Stud tax** — Operator/tester shorthand (#214/#252) for the engine's combined consolidation adjustments: the **crown/consolidation premium** added to a stud side plus the **package-depth discount** shaving a multi-piece side — together they price "four quarters ≠ a dollar". The 2026-08 #214 retune found the pre-existing tax 35–68pp heavier than the 7-calculator market consensus and reshaped it (phase-out at high naive skew, per-elite-piece credit on either side, own-best-asset depth benchmark with a capped total — the `*_market` keys in [config-reference](config-reference.md)). User-tunable via **`stud_tax_mode`** (#215): `market` (retuned default) / `heavy` (the legacy math) / `off` — see [cross-client-invariants](cross-client-invariants.md) § Stud-tax mode strings. **First-round picks are exempt from the depth discount** (#427, 2026-09-08): a first is the currency of dynasty, never a "quarter", so it always counts at face value inside a package while 2nd+ round picks and players stay taxed; the crown credit/premium is unaffected (knob `stud_tax_exempt_first_round`, [config-reference](config-reference.md)).
 
 **Positional preferences** — The user's `acquire_positions` (**Chasing**), `trade_away_positions` (**Shopping**) and, since #360/#361, `avoid_positions` (**Avoiding**) for a league. The first two are a **hard filter on candidate packages** (a card must receive an acquire position / give a trade-away position when set) in both engine paths; the old soft multipliers (`pos_acquire_bonus` etc.) are deleted from code though their `model_config` keys remain. **Avoiding is a materially different mechanism with a stronger guarantee**: a **receive-pool exclusion at source**, not a package gate — assets at an avoided position never enter the pool, so no enumerated package can contain one, and the #189 relaxed pass (which re-runs generation with the same kwargs and widens only the fairness band and surplus floor) is structurally incapable of relaxing it. Chasing ⊕ Avoiding are mutually exclusive; **Shopping + Avoiding are co-selectable and are the modal case** ("I'm selling my QB and I don't want another one back") — they gate disjoint sides of the same trade and cannot contradict. One further deliberate asymmetry: Avoiding resolves pick-ness through the canonical `is_pick_asset` *before* reading `position`, so it is stricter and more correct than the neighbouring `_positions_ok`, which reads raw `position` and would treat a generic 4th-round rung as a QB. See [cross-client-invariants](cross-client-invariants.md) § Mirror locations.
 
@@ -505,3 +511,19 @@ A unique allocation of currently available players meeting the existing dynasty 
 
 - **Normalized whole-team benefit:** weighted change in complete optimal-lineup point production and complete dynasty asset value, each scaled by the larger before/after total. A value proxy never becomes projected points; missing components retain uncertainty.
 - **Weaker-manager benefit:** the smaller of the two managers' normalized gains. Used before total benefit and simplicity so one large gain cannot conceal the other manager's loss. Meaningful benefit is a policy threshold, not acceptance likelihood.
+
+## Team overhaul
+
+**Overhaul** — The durable planning session for a substantial roster change (one `overhauls` row): an outlook (`push_all_in` | `blow_it_up`), a user-approved eligible pool, reviewed offers, assembled roadmaps and the send attempts made from them. One active overhaul per (account, league). Flag `overhaul.enabled`.
+
+**Eligible pool** — The asset ids (players + owned FTF picks) the user permits to leave. Every generated or sent offer's give set is a subset of it — enforced by a post-filter independent of the generator (E01), so a sweetener can never be added silently. Unused pool assets are allowed and reported (`unused_eligible_ids`).
+
+**Package** — Inside one roadmap, a fixed outgoing asset set plus its liked alternative offers (all sharing that exact give set). Product copy "Package N of M". One accepted offer consumes the package's assets and invalidates its other alternatives.
+
+**Tier** (overhaul) — Integer priority rank ≥ 1 inside a package. Offers in the same tier are sent together and race on a first-come, first-served basis for the same outgoing assets; at most one offer per counterparty per tier (D4). Distinct from player **tiers** on the ranking board.
+
+**Roadmap** — One alternative full plan: 4–5 give-disjoint, receive-disjoint packages built only from liked, fresh, in-pool offers; ≤5 materially distinct roadmaps (by `diversity_key`, the sorted tuple of package give sets) are offered. Immutable versions — a priorities write creates `version+1`.
+
+**Attempt** — One send of one offer inside one batch (`overhaul_attempts`), with a cross-client state enum (`queued … stale`), a state source (server / provider / ownership refresh / user-reported) and, for Sleeper, the `provider_transaction_id`. Accepted is derived from ownership change on refresh, never asserted by the client.
+
+**Recovery (Priority 1: Recover your first)** — For `blow_it_up`, the exact-identity requirement to own the user's **own original** next-season (league season + 1) first-round pick; when a league-mate holds it, a targeted search against that holder produces `is_recovery` offers. Advisory: it never blocks other sends.

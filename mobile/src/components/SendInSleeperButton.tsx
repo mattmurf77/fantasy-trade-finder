@@ -249,8 +249,9 @@ export default function SendInSleeperButton({
       // place that sees network errors, timeouts, and the pre-identity
       // refusals (feature_disabled / no_user / test_mode_propose_disabled)
       // the server cannot attribute to a user — and the only place that
-      // knows `surface`. Closed enum: 14 server codes ∪ network | timeout
-      // | unknown = 17 values, forever.
+      // knows `surface`. Closed enum: 15 server codes ∪ network | timeout
+      // | unknown = 18 values, forever (17 → 18 on 2026-09-08, #428
+      // sleeper_pick_untradable).
       track('sleeper_send_failed', {
         surface,
         error_code: err instanceof ApiError
@@ -312,6 +313,17 @@ export default function SendInSleeperButton({
         Alert.alert(
           'Couldn’t send',
           `${n || 'Some'} draft pick${n === 1 ? '' : 's'} in this trade couldn’t be matched to a pick in this Sleeper league, so nothing was sent. Generic picks like “Early 1st” can’t be sent — use a specific pick.`,
+        );
+      } else if (code === 'sleeper_pick_untradable') {
+        // #428 — the pick's class is outside Sleeper's tradable window (its
+        // rookie draft already ran). The server sentence in `detail` carries
+        // the offending seasons and the window Sleeper is trading, so it is
+        // rendered as-is; the count-aware fallback covers a detail-less body.
+        const n = Array.isArray(body?.picks) ? body.picks.length : 0;
+        Alert.alert(
+          'Couldn’t send',
+          detail
+            || `${n || 'Some'} draft pick${n === 1 ? '' : 's'} in this trade can’t be traded in Sleeper right now, so nothing was sent. Rebuild the trade with a pick from an upcoming draft.`,
         );
       } else if (code === 'sleeper_pick_not_owned') {
         // #413 — live traded_picks says the offering team no longer holds it.

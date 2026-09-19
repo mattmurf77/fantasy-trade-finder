@@ -10,6 +10,17 @@
 
 ## 0. What this phase is
 
+### 2026-09-17 significance inventory decision
+
+`significance_mode`, `significance_player_min_tier`, and
+`significance_allow_first_round_pick` are EXCLUDED from `MODEL_A_PROFILE`.
+Server captures them outside arm overrides and applies the rule at the final
+recommendation boundary after generation. No baseline generator reads them;
+pinning them would not preserve a historical generation behavior and would
+undermine the approved all-arm serving contract. Default mode is off. Extend
+the inventory acknowledgement only; do not re-capture the baseline golden or
+change its profile. See [shared-rule scope](../trade-significance/scope.md).
+
 Arm A of the bake-off is **not a code branch**. The 2026-08-16 G6 presentment
 wave (`20b40db`) and the 2026-08-18 engine-quality wave (`60cbe11`) modified
 the trade engine **in place**, so "the original engine" survives only as a set
@@ -93,6 +104,7 @@ exclusion be justified):
 | `gen2_*` (all) | pre-dates / arm C | `trade_gen_v2` is **arm C**. Arm A must not touch its knobs. |
 | `bakeoff_serve_interleaved` | Phase 3, 2026-08-18 | **Not generation logic — it is the bake-off's own orchestration.** Read only by `bakeoff_runner._cfg`, never by any generator: it selects Phase-4 dark validation vs Phase-5 interleaved serving, which is a decision about the merged deck, made after all three arms have already run. Setting it per-arm would be meaningless. |
 | `bakeoff_deck_limit` | Phase 3, 2026-08-18 | Same — a cap on the INTERLEAVED deck, applied by the team-draft merge after generation. No arm can see it. |
+| `bakeoff_owner_only` | Owner-only rollout, 2026-09-06 | **Orchestration and serving, not historical arm-A generation.** Selects exclusive owner execution and bypasses returned-offer quotas; it does not enter either historical profile or change arm-A math. Excluded from `MODEL_A_PROFILE`, inventoried in `_PINNED_KNOBS`; existing golden output remains unchanged. See [scope](../owner-only-uncapped/scope.md). |
 | `user_elo_shrink`, `consensus_both_ways`, `consensus_fairness_floor` | D-095, landability challenger (arm D), 2026-08-19 | **Their defaults ARE the pre-wave engine — pinning a kill value would CHANGE arm A, not preserve it.** This is the one exclusion on this page that runs the opposite way to all the others. Every other row is "a knob post-dating the reference SHA, disabled so arm A behaves as it did"; these three are knobs whose *live default* is the pre-wave behaviour and whose *non-default* value is a proposal about the future. `user_elo_shrink` = 1.0 is the confidence blend the engine has always done; `consensus_both_ways` = 0.0 is the `rv >= gv` sign test it has always applied; `consensus_fairness_floor` = 0.0 is "use whatever threshold the caller passed". Setting any of them to the challenger value in `MODEL_A_PROFILE` would make arm A skip shrinkage and emit both directions of an even trade — behaviour the pre-G6 engine never had, silently rewriting the baseline that every bake-off comparison is measured against. They belong to `bakeoff_profiles.MODEL_CHALLENGER_PROFILE` and nowhere else ([landability-challenger PRD](../landability-challenger/PRD.md) N1, A2). All three are pinned in `_PINNED_KNOBS` as usual, so the inventory guard still fires if a fourth appears. |
 | `bakeoff_include_challenger`, `bakeoff_include_gen_v2` | D-095, 2026-08-19 | Same class as `bakeoff_include_baseline` below — **arm roster, not generation.** Read only by `bakeoff_runner.arm_roster()`, before any arm runs; an arm cannot observe which other arms are on the roster. |
 | `bakeoff_group_size`, `bakeoff_group_value_slots`, `bakeoff_fill_policy`, `bakeoff_lane_reallocate`, `bakeoff_include_baseline` | composition, 2026-08-18 / D-086 2026-08-19 | Same class — **deck composition, not generation.** All five are read only by `bakeoff_runner`, after every arm has finished producing its ranked list, and they decide how those lists are narrowed, quota'd and merged. An arm cannot observe them, so a per-arm value would be meaningless. `bakeoff_lane_reallocate` in particular only ever moves a SLOT between lanes inside one already-generated group; it cannot change, add or remove a card any arm proposed. |
@@ -121,6 +133,7 @@ exclusion be justified):
 | `package_bench_trade_wide` | benchmark fix, 2026-08-21 | **Generation logic post-dating the reference SHA → INCLUDED in `MODEL_A_PROFILE` at its kill value 0.0.** The pre-wave engine benchmarked package depth against each side's own best asset; at ≤ 0 that math is byte-identical (proven by `test_package_benchmark.py::test_kill_value_is_byte_identical_to_pre_fix_math`), so the golden did NOT need re-capturing — verified 10/10 green with the pin. |
 | `package_floor_cross` | benchmark fix, 2026-08-21 | **Inert companion.** `_package_value_market` never reads it while `package_bench_trade_wide` ≤ 0 (arm A's pin) — same rule as `max_overpay_min_value`. Pinning it would imply it matters to arm A. |
 | `sweetener_gap_threshold` | gap auto-sweetener, 2026-08-21 | **Generation logic post-dating the reference SHA → INCLUDED in `MODEL_A_PROFILE` at its kill value 0.0.** At ≤ 0 the gap-sweetener pass is skipped entirely and every generator is byte-identical to its pre-sweetener self; the pre-wave engine had no sweetener. |
+| `stud_tax_exempt_first_round` | #427 first-round stud-tax exemption, 2026-09-08 | **Generation logic post-dating the reference SHA → INCLUDED in `MODEL_A_PROFILE` at its kill value 0.0.** Every generation gate that holds a first in a multi-asset side prices it through `package_value_v2` / `consolidated_value`, both of which now read this knob; at ≤ 0 the exempt mask is ignored and the math is byte-identical to the pre-#427 engine (proven by `test_first_round_pick_exempt.py::test_j_knob_off_mask_is_ignored_byte_for_byte` across all three modes), so the golden did NOT need re-capturing. Same disposition as `package_bench_trade_wide`. |
 
 > **2026-08-21 — the 25 `breaker_*` keys.** The counterparty breaker
 > ([LLD](../counterparty-breaker/LLD.md) §4) adds an **evaluation layer**, not a

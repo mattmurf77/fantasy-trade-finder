@@ -220,6 +220,11 @@ _SEVEN_READ_SITES = frozenset({
     # its seven neighbours use it. It is also the only site of the eight that
     # is reached ONLY behind a feature flag (`trade.outlook_net_firsts`, off).
     "_first_round_ledgers",
+    # ADR-019 owner construction: selected-route final roster protection
+    # needs the same complete pick holdings as the organic worker. This is
+    # an explicitly reviewed reader, not a new ownership writer. The shared
+    # helper preserves platform-only when asserted trading is disabled.
+    "_owner_selected_ideas",
 })
 
 #: The assignment surface's own reads. These name a LITERAL provenance
@@ -260,7 +265,10 @@ _SANCTIONED_SOURCE_CALLERS = frozenset({
     # `draft_picks` encoding, and a user-asserted row's `original_roster_id`
     # is an opaque slot label that cannot be encoded into a Sleeper roster id.
     # These reads must never follow `picks.assign_tradeable`.
-    "propose_trade_to_sleeper",  # server.py  — POST /api/trades/propose pick encode
+    # 2026-09-07 (team overhaul): the route body was extracted verbatim into
+    # `_sleeper_propose_core` so the overhaul send loop reuses it; the read
+    # moved with it — same call, same literal, one enclosing function.
+    "_sleeper_propose_core",     # server.py  — POST /api/trades/propose pick encode (extracted core)
     "trades_validate",           # server.py  — POST /api/trades/validate pick advisories
 })
 

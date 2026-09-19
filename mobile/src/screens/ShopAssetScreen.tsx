@@ -39,7 +39,7 @@ import { ink, space } from '../theme/chalkline';
 // mount covers tab screens only), `aboveTabBar={false}` because no tab bar
 // renders underneath. The body component mounts none — one FAB, ever.
 export default function ShopAssetScreen({ route }: any) {
-  const { leagueId, asset } = route.params ?? {};
+  const { leagueId, asset, fairnessThreshold } = route.params ?? {};
   const [toast, setToast] = useState<ShopToast | null>(null);
 
   return (
@@ -61,6 +61,7 @@ export default function ShopAssetScreen({ route }: any) {
           <ShopOffersBody
             leagueId={leagueId}
             asset={asset}
+            fairnessThreshold={fairnessThreshold}
             onToast={(t) => setToast(t)}
             // QA B-4 — retract-by-reference: clear the toast slot only if
             // it still holds the exact descriptor the body issued; a newer

@@ -1,11 +1,12 @@
-import React from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
-import { ink, ice, space, radii, type } from '../theme/chalkline';
-import { Icon, TickLabel } from './chalkline';
+import { ink, ice, chalk, space, radii, type } from '../theme/chalkline';
+import { Icon, TickLabel, Text as ChalklineText } from './chalkline';
 import TradeCardComp from './TradeCard';
 import InLeagueCalculator from './InLeagueCalculator';
 import type { AssetIdea } from '../api/trades';
 import { assetIdeaKey, ideaToCard } from '../utils/ideaToCard';
+import { useSelectedOfferSignals } from '../hooks/useSelectedOfferSignals';
 
 // #384 W6-B — `assetIdeaKey` and `ideaToCard` moved to `utils/ideaToCard.ts`
 // (pure, zero runtime imports) so the fair-package deck can build cards without
@@ -53,8 +54,13 @@ export default function FeaturedTradeWindow({
   onEditInCalculator,
   calc,
 }: Props) {
+  const measuredRef = useRef<View>(null);
+  const card = useMemo(() => ideaToCard(idea, leagueId), [idea, leagueId]);
+  const [edited, setEdited] = useState(false);
+  useEffect(() => setEdited(false), [idea]);
+  useSelectedOfferSignals(card, 'Trades', 0, measuredRef, !edited);
   return (
-    <View testID="featured-trade.window" style={styles.wrap}>
+    <View ref={measuredRef} collapsable={false} testID="featured-trade.window" style={styles.wrap}>
       {/* Variant A — back chip on its own slim row ABOVE the header; the
           row exists only while there is history. */}
       {onBack ? (
@@ -75,6 +81,11 @@ export default function FeaturedTradeWindow({
         </View>
       ) : null}
       <TickLabel>Featured trade</TickLabel>
+      {calc && !edited && idea.selection_coverage === 'partial' && idea.selection_notice ? (
+        <ChalklineText style={[type.bodySm, { color: chalk.dim }]}>
+          {idea.selection_notice}
+        </ChalklineText>
+      ) : null}
       {calc ? (
         // #287 — remount per idea (same TradeBuildCanvas prefill
         // technique): InLeagueCalculator "owns all state after mount", so
@@ -86,10 +97,11 @@ export default function FeaturedTradeWindow({
           initialOpponentId={idea.counterparty_user_id}
           initialGiveIds={idea.give_player_ids}
           initialReceiveIds={idea.receive_player_ids}
+          onSidesChange={() => setEdited(true)}
         />
       ) : (
         <TradeCardComp
-          data={ideaToCard(idea, leagueId)}
+          data={card}
           hideMatchStrength
           onEditInCalculator={onEditInCalculator}
         />

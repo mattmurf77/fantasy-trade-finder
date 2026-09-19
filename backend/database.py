@@ -114,6 +114,108 @@ win_now_decisions_table = Table("win_now_decisions", metadata,
 )
 
 # ---------------------------------------------------------------------------
+# Team overhaul (docs/plans/team-overhaul/BUILD-CONTRACT.md §4). Five tables,
+# persistence in backend/overhaul_store.py. JSON columns hold json.dumps;
+# timestamps are ISO-8601 UTC via _now(). New tables need no _migrate_db rows.
+# ---------------------------------------------------------------------------
+overhauls_table = Table("overhauls", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("overhaul_id", String, nullable=False, unique=True),   # 'ovh_' + 12 hex
+    Column("account_user_id", String, nullable=False),            # sess['user_id']
+    Column("league_user_id", String, nullable=False),             # _league_user_id(sess)
+    Column("league_id", String, nullable=False),
+    Column("platform", String, nullable=False),
+    Column("scoring_format", String, nullable=False),
+    Column("status", String, nullable=False),   # setup|reviewing|assembled|executing|complete|archived
+    Column("revision", Integer, nullable=False, default=1),
+    Column("client_key", String),               # create idempotency within (account, league)
+    Column("settings_json", Text, nullable=False),
+    Column("snapshot_json", Text),
+    Column("recovery_json", Text),
+    Column("generation_json", Text),
+    Column("selected_roadmap_id", String),
+    Column("created_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+    Index("ix_overhauls_account_league", "account_user_id", "league_id"),
+    Index("ix_overhauls_league_status", "league_id", "status"),
+)
+overhaul_offers_table = Table("overhaul_offers", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("offer_id", String, nullable=False, unique=True),       # 'ovh_' + 12 hex
+    Column("overhaul_id", String, nullable=False),
+    Column("revision", Integer, nullable=False),
+    Column("package_hash", String, nullable=False),
+    Column("counterparty_user_id", String, nullable=False),
+    Column("counterparty_username", String),
+    Column("give_ids_json", Text, nullable=False),
+    Column("receive_ids_json", Text, nullable=False),
+    Column("card_json", Text, nullable=False),                    # public TradeCard dict (+ offer_id)
+    Column("evidence_json", Text),                                # PRIVATE — never on the wire
+    Column("is_recovery", Integer, nullable=False, default=0),
+    Column("decision", String, nullable=False, default="undecided"),
+    Column("decided_at", String),
+    Column("decision_client_key", String),                        # decisions idempotency
+    Column("availability", String, nullable=False, default="fresh"),   # fresh|stale
+    Column("created_at", String, nullable=False),
+    UniqueConstraint("overhaul_id", "package_hash", name="uq_overhaul_offer_hash"),
+    Index("ix_overhaul_offers_overhaul", "overhaul_id"),
+)
+overhaul_roadmaps_table = Table("overhaul_roadmaps", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("roadmap_id", String, nullable=False),                  # 'rm_' + 12 hex
+    Column("overhaul_id", String, nullable=False),
+    Column("version", Integer, nullable=False),                    # immutable rows; new row per priorities write
+    Column("revision", Integer, nullable=False),
+    Column("packages_json", Text, nullable=False),
+    Column("compat_json", Text, nullable=False),
+    Column("summary_json", Text, nullable=False),
+    Column("is_current", Integer, nullable=False, default=1),
+    Column("created_at", String, nullable=False),
+    UniqueConstraint("roadmap_id", "version", name="uq_overhaul_roadmap_version"),
+    Index("ix_overhaul_roadmaps_overhaul", "overhaul_id"),
+)
+overhaul_attempts_table = Table("overhaul_attempts", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("attempt_id", String, nullable=False, unique=True),
+    Column("batch_id", String, nullable=False),
+    Column("overhaul_id", String, nullable=False),
+    Column("roadmap_id", String, nullable=False),
+    Column("roadmap_version", Integer, nullable=False),
+    Column("package_id", String, nullable=False),
+    Column("tier", Integer, nullable=False),
+    Column("offer_id", String, nullable=False),
+    Column("idempotency_key", String, nullable=False),
+    Column("request_hash", String, nullable=False),
+    Column("state", String, nullable=False),
+    Column("state_source", String, nullable=False),  # server|provider|ownership_refresh|user_reported
+    Column("provider_transaction_id", String),
+    Column("provider_status", String),      # provider's own status word (MFL/ESPN); NULL for Sleeper
+    Column("proposal_event_id", String),
+    Column("error_json", Text),
+    Column("created_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+    Column("observed_at", String),
+    UniqueConstraint("batch_id", "offer_id", name="uq_overhaul_attempt_batch_offer"),
+    Index("ix_overhaul_attempts_overhaul_state", "overhaul_id", "state"),
+)
+overhaul_reservations_table = Table("overhaul_reservations", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("league_id", String, nullable=False),
+    Column("seller_user_id", String, nullable=False),
+    Column("asset_id", String, nullable=False),
+    Column("overhaul_id", String, nullable=False),
+    Column("package_id", String, nullable=False),
+    Column("batch_id", String, nullable=False),
+    # 1 while active; released rows store NULL so the unique constraint only
+    # ever binds one ACTIVE reservation per asset (NULLs are distinct).
+    Column("active", Integer),
+    Column("created_at", String, nullable=False),
+    Column("released_at", String),
+    UniqueConstraint("league_id", "seller_user_id", "asset_id", "active",
+                     name="uq_overhaul_reservation_active"),
+)
+
+# ---------------------------------------------------------------------------
 # Analytics platform engines & PRAGMAs (docs/plans/analytics-platform/lld.md §3.3)
 # ---------------------------------------------------------------------------
 # Three engines, one DB:
@@ -856,6 +958,17 @@ Index(
     "ix_deck_impressions_job",
     deck_impressions_table.c.deck_job_id,
 )
+
+# Private debug evidence, content-addressed within one user/job. Core card
+# evidence and labels remain on deck_impressions; only debug snapshots expire.
+deck_diagnostic_snapshots_table = Table("deck_diagnostic_snapshots", metadata,
+    Column("snapshot_id", String, primary_key=True),
+    Column("user_id", String, nullable=False, index=True),
+    Column("deck_job_id", String, nullable=False, index=True),
+    Column("created_at", String, nullable=False, index=True),
+    Column("payload_json", Text, nullable=False),
+)
+
 
 # ── suggestion.telemetry — candidate-set reconstruction ─────────────────────
 # One row per completed generation job while the flag is on: the FULL action
@@ -2715,6 +2828,7 @@ _MODEL_CONFIG_DEFAULTS = [
     ("package_discount_cap",     0.35,  "#214: cap on a side's total market-mode depth discount as a fraction of its naive sum"),
     ("package_bench_trade_wide", 1.0,   "2026-08-21 benchmark fix: >0 = depth-discount a multi-asset side that lacks the trade's best asset against the TRADE's best asset (v_max); <=0 = pre-fix own-max benchmark (arm A's pin)"),
     ("package_floor_cross",      0.40,  "2026-08-21 benchmark fix: contribution floor on the cross-benchmarked (stud-buying) side; inert while package_bench_trade_wide <= 0"),
+    ("stud_tax_exempt_first_round", 1.0, "#427: >0 = first-round picks (generic_pick_1_* and owned round-1 ids) count at FACE value inside a multi-asset side in every stud-tax mode (taxable subset keeps the depth curve + cap; crown credit unchanged); <=0 = pre-#427 math byte-identical (rollback lever, arm A's pin)"),
     ("fairness_floor_divergence", 0.55, "interview: consensus fairness gate for divergence cards = min(fairness_threshold, this) — extreme-case veto only"),
     # ── #189 — relaxed fallback for empty targeted sweeps ────────────────
     ("relaxed_fairness_threshold", 0.55, "#189: stage-1 fairness bar for the relaxed fallback pass on empty targeted jobs (never tightens below the caller's threshold)"),
@@ -2846,6 +2960,15 @@ _MODEL_CONFIG_DEFAULTS = [
     ("ghost_holdout_one_in",        0.0, "suggestion telemetry: withhold ~1-in-N organic deck cards as ghosts; <=0 disables ghosting. DEFAULT 0 per the operator ruling 2026-08-21 (ghosts ruled out entirely)"),
     ("bakeoff_include_fit",         0.0, "bake-off roster bit: 1 = arm fit generates + logs; 0 = not rostered (default)"),
     ("bakeoff_serve_fit",           0.0, "bake-off serve bit: 1 = fit cards join the served draft; 0 = dark (generate + log only)"),
+    ("bakeoff_include_owner",       0.0, "owner_v1 generator: 1 = generate and log; 0 = disabled (default); existing arms unchanged"),
+    ("bakeoff_serve_owner",         0.0, "owner_v1 exposure: 1 = join organic draft and selected-search experiment; 0 = no treatment exposure"),
+    ("bakeoff_owner_only",          0.0, "owner_v1 exclusive: 1 = only owner generation/serving with no returned-offer quotas; requires include+serve; 0 = comparison path"),
+    ("owner_pool_size",            16.0, "owner_v1 bounded candidate pool per team; computational limit, not a value gate"),
+    ("owner_pair_budget",        4096.0, "owner_v1 maximum candidate evaluations per opponent"),
+    ("owner_total_budget",      60000.0, "owner_v1 maximum candidate evaluations per generation"),
+    ("significance_mode", 0.0, "shared recommendation significance: 0 off, 1 shadow, 2 enforce; all arms, no offer cap"),
+    ("significance_player_min_tier", 2.0, "significance player centerpiece minimum draft-round-equivalent tier: 1 first, 2 second, 3 third, 4 fourth"),
+    ("significance_allow_first_round_pick", 1.0, "significance: 1 permits a known, valued first-round pick centerpiece; 0 requires a qualifying player"),
 
     # ── Receipts — OFFLINE grading knobs (docs/plans/receipts/LLD.md §1) ──
     # Consumed ONLY by backend/receipts_service.py, which runs after the
@@ -3179,6 +3302,9 @@ def _migrate_db() -> None:
         ("trade_matches",      "second_like_at",            "VARCHAR"),
         ("trade_matches",      "match_latency_seconds",     "FLOAT"),
         ("trade_matches",      "match_valuation_json",      "TEXT"),
+        # ── team overhaul, all-platform sends (2026-09-07): MFL/ESPN cores
+        # report a status word without a transaction id.
+        ("overhaul_attempts",  "provider_status",           "VARCHAR"),
     ]
     # Each ALTER TABLE gets its own transaction so a "column already exists"
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
@@ -6421,6 +6547,12 @@ def log_deck_replenish(user_id: str, league_id: str, iso_week: str,
         ))
 
 
+#: Rows per INSERT statement in `save_deck_impressions`. At the observed
+#: ~21 KB per owner-only row this caps a statement near 2 MB; the pre-page
+#: behaviour (one statement per 1,000 rows) reached ~28 MB and crashed prod.
+DECK_IMPRESSION_INSERT_ROWS = 100
+
+
 def save_deck_impressions(rows: list[dict]) -> None:
     """F1 (deck.signal_v2) — batch-insert pre-built deck_impressions rows.
 
@@ -6432,8 +6564,83 @@ def save_deck_impressions(rows: list[dict]) -> None:
     """
     if not rows:
         return
+    # One transaction, MANY statements. SQLAlchemy's insertmanyvalues renders
+    # up to 1,000 rows into a single INSERT ... VALUES statement, and an
+    # owner-only deck of ~1,400 cards at ~21 KB/row (frozen evidence JSON)
+    # produced a ~28 MB statement that OOM-killed the 256 MB Postgres backend
+    # (2026-09-07, docs/runbook.md § Common failure modes). Paging bounds the
+    # statement size regardless of deck size; all-or-nothing semantics are
+    # unchanged because every page shares the transaction.
+    from .deck_diagnostics import compact_rows
+    inline_bytes = 0
     with engine.begin() as conn:
-        conn.execute(insert(deck_impressions_table), rows)
+        for start in range(0, len(rows), DECK_IMPRESSION_INSERT_ROWS):
+            # Decode only one page at a time on the small web instance. Hashes
+            # share immutable nodes across pages as well as within a page.
+            compacted, snapshots = compact_rows(rows[start:start + DECK_IMPRESSION_INSERT_ROWS])
+            _save_deck_diagnostic_snapshots(conn, snapshots)
+            conn.execute(insert(deck_impressions_table), compacted)
+            inline_bytes += sum(len((r.get("features_json") or "").encode()) for r in compacted)
+    log.info("deck storage: rows=%d inline_feature_bytes=%d", len(rows), inline_bytes)
+
+
+def _save_deck_diagnostic_snapshots(conn, snapshots):
+    # The same immutable node may occur in a retry or maintenance page.
+    if conn.dialect.name == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as upsert
+    else:
+        from sqlalchemy.dialects.sqlite import insert as upsert
+    for start in range(0, len(snapshots), DECK_IMPRESSION_INSERT_ROWS):
+        # Explicit VALUES avoids psycopg2 executemany's per-row round trips
+        # for ON CONFLICT inserts without RETURNING.
+        conn.execute(upsert(deck_diagnostic_snapshots_table).values(
+            snapshots[start:start + DECK_IMPRESSION_INSERT_ROWS]
+        ).on_conflict_do_nothing(index_elements=["snapshot_id"]))
+
+
+def load_deck_diagnostics(impression_id: str, user_id: str) -> dict | None:
+    """Owner-scoped diagnostic read; hot outcome/learning paths use compact features."""
+    from .deck_diagnostics import expand_features, is_reference, REFERENCE_KEY
+    i, d = deck_impressions_table, deck_diagnostic_snapshots_table
+    with engine.connect() as conn:
+        row = conn.execute(select(i.c.features_json, i.c.deck_job_id).where(
+            i.c.impression_id == impression_id, i.c.user_id == user_id)).first()
+        if row is None:
+            return None
+        features = json.loads(row.features_json or "{}")
+        def references(value):
+            if is_reference(value):
+                return {value[REFERENCE_KEY]}
+            if isinstance(value, dict):
+                return set().union(*(references(v) for v in value.values()))
+            if isinstance(value, list):
+                return set().union(*(references(v) for v in value))
+            return set()
+        snapshots, visited = {}, set()
+        pending = references(features)
+        while pending:
+            ids = sorted(pending)[:100]
+            visited.update(ids)
+            pending.difference_update(ids)
+            fetched = conn.execute(select(d.c.snapshot_id, d.c.payload_json).where(
+                d.c.user_id == user_id, d.c.deck_job_id == row.deck_job_id,
+                d.c.snapshot_id.in_(ids))).all()
+            for sid, payload in fetched:
+                snapshots[sid] = payload
+                pending.update(references(json.loads(payload)) - visited)
+    return expand_features(features, snapshots)
+
+
+def purge_deck_diagnostics(*, days: int = 14, batch_size: int = 500) -> int:
+    """Expire one bounded batch of debug nodes, never cards/valuations/outcomes."""
+    if days <= 0:
+        return 0
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    d = deck_diagnostic_snapshots_table
+    with engine.begin() as conn:
+        ids = select(d.c.snapshot_id).where(d.c.created_at < cutoff).order_by(
+            d.c.created_at, d.c.snapshot_id).limit(max(1, min(batch_size, 1000)))
+        return conn.execute(delete(d).where(d.c.snapshot_id.in_(ids))).rowcount or 0
 
 
 # ---------------------------------------------------------------------------

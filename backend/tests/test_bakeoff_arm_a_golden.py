@@ -527,8 +527,13 @@ def test_r4_bypass_is_thread_local():
 # simple_player_presentment is explicitly post-generator, outside arm overlays;
 # its default-off presentation policy never enters MODEL_A_PROFILE or goldens.
 # Contract: docs/plans/small-trade-packages/prd.md §4.
+# Owner include/serve/exclusive switches are runner-only: no historical generator reads
+# them. Listing the new keys is an inventory disposition, not a golden recapture.
 _PINNED_KNOBS = frozenset("""
 simple_player_presentment
+bakeoff_include_owner bakeoff_serve_owner bakeoff_owner_only
+owner_pool_size owner_pair_budget owner_total_budget
+significance_mode significance_player_min_tier significance_allow_first_round_pick
 age_pref_mult_u23 age_pref_mult_30plus age_pref_boost_cap
 aggression_weight asset_floor_abs asset_ideas_group_cap
 bakeoff_deck_limit bakeoff_serve_interleaved bakeoff_group_size
@@ -598,7 +603,7 @@ outlook_alpha_not_sure outlook_alpha_rebuilder outlook_dir_age_gap_mult
 outlook_dir_age_tolerance outlook_dir_boost outlook_dir_contend_weight
 outlook_dir_penalty outlook_dir_rescue_frac package_adj_gamma
 package_adj_gamma_market package_bench_trade_wide package_discount_cap
-package_floor_cross package_floor_market
+package_floor_cross package_floor_market stud_tax_exempt_first_round
 package_weight_1 package_weight_2 package_weight_3 package_weight_4
 package_weight_5 pass_cooldown_days pass_cooldown_start_epoch penalty_heavy
 penalty_mod penalty_soft pick_gap_frac pick_gap_min_value pick_pair_strip_frac

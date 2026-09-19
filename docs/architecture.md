@@ -4,6 +4,56 @@ High-level data flow and component boundaries. Update when modules are added, re
 
 Owner-contract amendment (2026-09-05, D-185): ranking replay derives fixed feedback tier bounds after deliberate ranking actions; trade/disposition signals cannot cross the public tier boundary. Existing per-row member-ranking provenance flows through `load_member_rankings` → `LeagueMember.confidence_sources` → dark policy evaluation. No new service or database column. Legacy live generator method weighting is preserved pending an arm-safe experiment; see [implementation scope](plans/owner-contracts/scope.md).
 
+## Owner-driven construction challenger
+
+`backend/trade_gen_owner.py` is a separate, bounded constructor (`owner_v1`),
+not a reranker of legacy survivors. Personal rankings **plus outlook and needs**
+jointly select both teams' candidate assets before pool truncation; shared
+market package pricing sets feasible terms. Organic structures are 1×1, 1×2
+and 2×1 assets. Larger packages require explicit multi-asset selection.
+
+`server._owner_generation_context` captures raw per-entry ranking provenance,
+preferences, rosters, available lineup settings and configuration before arm
+execution. It clones members instead of mutating the controls' inputs. The same
+constructor serves organic bakeoff, pinned/partner-targeted jobs, fair packages
+and asset ideas (including More Offers and league buy/sell entrances).
+Declared outlook wins; absent personal entries use consensus. Utility can admit
+an outlook/usable-roster benefit despite a bounded dynasty-value loss. This
+usable-roster model is a market-value proxy, not a points forecast.
+
+Frozen owner evidence binds the exact package and market totals. Final serving
+revalidates it and retains actual roster/ownership/disposition protections,
+without reapplying the legacy personal-gain veto. The existing three controls
+keep their generators/profiles. New include/serve knobs default off; organic
+serving uses the existing draft, selected serving uses a recorded stable
+request-input assignment against a named legacy control. Mobile retains server
+trial order and joins genuine visible selected-card views and exact-package
+responses to stored impressions. Private counterparty values never enter the
+public response.
+
+The operator's subsequent owner-only request is implemented by
+`bakeoff_owner_only`, effective with owner include and serve enabled. It removes
+all other generated arms from execution and serving, including selected-route
+legacy control work; dark/interleaved configuration cannot silently substitute
+current. Selected exposure has probability 1 with separate exclusive policy
+attribution. The mode is captured with serving permission and cache identity.
+Exclusive output bypasses deck/group quotas and retains distinct companion
+packages sharing headliners. Computational search budgets, exact-duplicate
+suppression and all safety/selection/small-shape constraints remain. Genuine
+incoming-interest cards retain their separate provenance.
+
+The worker's captured owner-serving decision is passed into the bakeoff runner,
+not reread after generation. That same capture labels the job's owner safety
+signature: a hot switch cannot turn a shadow-start job into a serving trial or
+make its cached control deck appear to have been generated under the live arm.
+
+Contracts: [API](api-reference.md#owner-construction-trial-additions),
+[snapshots](data-dictionary.md#owner-v1-snapshot-namespace),
+[configuration](config-reference.md),
+[ADR-019](adr/adr-019-owner-construction-before-market-terms.md).
+Activation, device verification and statistical conclusions remain separate
+from implementation; see the [trial protocol](plans/owner-engine-challenger/trial-protocol.md).
+
 ## Data flow
 
 ```mermaid
@@ -350,3 +400,42 @@ Account deletion and final Win Now persistence share a short account row lock (S
 Offline validation is separate from serving: `season_history.py` extracts prior-season outcomes through bounded public Sleeper reads; `season_calibration.py` joins externally supplied archived predictions and independently referenced forecast cutoffs. It reports conditional reliability and error by model and forecast origin, never tunes the production model or activates flags. [Historical validation](plans/win-now/HISTORICAL-VALIDATION.md) records actual collection coverage and input-provenance limits.
 
 The offline evaluator also has an explicitly selected revised-input diagnostic mode. `run_season_historical_diagnostic.py` supplies honestly dated current captures of historical weekly projections, reconstructs completed-week standings/rosters, and records scoring/coverage approximations. This mode uses the player simulator for exploratory measurements without weakening the default archived-input checks or any serving behavior. [Measured scope](plans/win-now/EXPLORATORY-RESULTS.md).
+
+## Team overhaul
+
+Flag `overhaul.enabled`, contract [plans/team-overhaul/BUILD-CONTRACT.md](plans/team-overhaul/BUILD-CONTRACT.md). Three modules, wired from `server.py` right after Win Now with the same `install(app, *, …)` seam:
+
+`overhaul_service.py` (pure: pool enforcement, own-first recovery identity, subset enumeration, `package_hash`, bounded beam assembly over liked offers partitioned by exact give set, priorities and prepare-send validation, union capacity/legality classification, attempt state machine) → `overhaul_store.py` (SQLAlchemy Core over `overhauls`, `overhaul_offers`, `overhaul_roadmaps`, `overhaul_attempts`, `overhaul_reservations`; transactional reservation claim; compare-and-swap attempt transitions) → `overhaul_api.py` (`/api/overhauls/*`, session + verified gates, account/league scoping).
+
+Server-private helpers are injected, never imported: `_owner_generation_context` + `trade_gen_owner.generate_owner_trades` (candidates are generated per eligible-pool subset with `pinned_give_players=subset, exact_give=True, max_cards=3`; the plan outlook overrides the ctx dict only), `trade_card_to_dict` (public card JSON), `_build_trade_roster_context` + `trade_roster.evaluate` (final-union legality per counterparty; `legal_deficits:*`/`cuts_required` block, `backup_depth:*`/`deficits:*` are advisory at plan level — [ADR-020](adr/adr-020-overhaul-plan-roster-policy.md)), `_fetch_league_rosters`/`_roster_id_for_owner`/`load_draft_picks` (ownership snapshot and exact-pick identity), and `_sleeper_propose_core`, `_mfl_propose_core`, `_espn_propose_core` — extracted provider-send paths so the overhaul loop reuses each provider's validation, ledger writes and gates. Generation is synchronous inside the request under a 20 s budget; prepare tokens and the refresh throttle are in-process (one gunicorn worker). There are no durable workers or provider withdrawal. Following the [September 7 owner revision](plans/team-overhaul/owner-decisions.md#2026-09-07--owner-confirmations-of-the-nine-open-choices), v1 supports Sleeper, MFL and ESPN through their existing send flags; ESPN remains players-only. Provider support does not imply a fresh live-configuration check.
+
+## Shared deck diagnostics
+
+`database.save_deck_impressions` passes each bounded 100-row page through the
+pure `deck_diagnostics.compact_rows` codec, then atomically inserts private
+snapshot nodes and compact impression rows. Sharing is scoped to user/job;
+no cross-account blob ownership. The four large debugging feature subtrees use
+content-addressed references, while runtime learning/receipt fields and frozen
+valuations remain inline. Explicit owner-scoped diagnostic reads reconstruct
+snapshots; ordinary outcome/taste reads do not load unrelated debug context.
+The existing cleanup loop expires debug nodes only, with visible failure logs.
+See [data lifecycle](data-dictionary.md#deck-diagnostic-storage-2026-09-15).
+
+## Shared recommendation significance
+
+`trade_significance.evaluate_significance` is a read-only leaf using raw ranking
+tiers and existing pick classification. It does not change fairness, scoring,
+rankings, arm selection, or package construction. `server` owns trusted request
+exceptions and a final post-mutation filter across owner and legacy arms,
+before evaluated publication and impression logging. The first implementation
+uses this final boundary rather than pruning generator pools: historical
+baseline identity and candidate enumeration remain unchanged.
+
+Numeric mode is independently off/shadow/enforce. Captured version/settings
+participate in cache safety; polling and the retained pending-card inventory
+cannot expose unfiltered old recommendations while enforcement is active.
+Exact selected assets and genuine incoming offers remain available; public card
+markers alone cannot assert an exemption. Private evidence uses existing
+impression features and generation-run diagnostics, not client events. See
+[scope](plans/trade-significance/scope.md). Default off is not deployment or
+activation evidence.

@@ -21,6 +21,7 @@ from . import win_now_store as store
 from .feature_flags import is_enabled
 from .sleeper_roster import owns_roster
 from .season_forecasts import normalize_scoring_for_slots
+from .season_simulator import SLOT_POSITIONS
 
 log = logging.getLogger(__name__)
 MODEL_VERSION = "win-now-season-v1-beta"
@@ -36,6 +37,28 @@ class Unavailable(ValueError):
         self.reason = reason
         self.message = message or reason.replace("_", " ").capitalize()
         super().__init__(reason)
+
+
+def unsupported_slots_message(slots):
+    """Say which active slots the season model cannot fill, in roster order.
+
+    Kicker/DEF/IDP lineups and lineups over 12 starters are refused by design
+    (season_simulator.SLOT_POSITIONS); the message names the slots so the
+    user sees a permanent format limit rather than a transient failure.
+    """
+    unsupported = []
+    for slot in slots:
+        if slot not in SLOT_POSITIONS and slot not in unsupported:
+            unsupported.append(slot)
+    lead = "Win Now can't model this league yet."
+    if unsupported:
+        count = sum(slot not in SLOT_POSITIONS for slot in slots)
+        return (f"{lead} Its starting lineup uses {', '.join(unsupported)} "
+                f"({count} of {len(slots)} starting slots), and season projections cover "
+                "QB, RB, WR and TE only. Kicker and IDP projections are not supported, "
+                "so standings and trade search stay off for this league.")
+    return (f"{lead} It starts {len(slots)} players and season projections support "
+            "at most 12 starting slots.")
 
 
 def now_utc():
@@ -110,6 +133,11 @@ def load_league(actor, fetch):
         raise Unavailable("league_membership_unavailable")
     if not meta.get("scoring_settings"):
         raise Unavailable("missing_scoring_settings")
+    # Format refusal comes from league metadata alone, before any standings or
+    # projection fetch, so unsupported lineups answer fast and stably (#422).
+    slots = [s for s in meta.get("roster_positions") or [] if s not in ("BN", "IR", "TAXI", "RESERVE")]
+    if len(slots) > 12 or any(s not in SLOT_POSITIONS for s in slots):
+        raise Unavailable("unsupported_roster_slots", unsupported_slots_message(slots))
     decisions = 2 if settings.get("league_average_match") else 1
     completed_set = set()
     for r in rosters:
@@ -162,7 +190,6 @@ def load_league(actor, fetch):
         if any(len(pair) != 2 for pair in grouped.values()):
             raise Unavailable("schedule_format_unsupported")
         schedule[week] = list(grouped.values())
-    slots = [s for s in meta.get("roster_positions") or [] if s not in ("BN", "IR", "TAXI", "RESERVE")]
     deadline = int(settings.get("trade_deadline") or 0)
     league = {"league_id": league_id, "season": str(meta["season"]), "teams": teams,
               "roster_slots": slots, "scoring_settings": normalize_scoring_for_slots(meta["scoring_settings"], slots),

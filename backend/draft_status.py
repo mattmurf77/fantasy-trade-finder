@@ -152,6 +152,87 @@ class DraftStatus:
         return self.status == DRAFTED
 
 
+# ── Sleeper pick tradability (#428 / D-189) ────────────────────────────────
+# Sleeper refuses a pick whose class has already been drafted ("These draft
+# picks cannot be traded.") even though `traded_picks` keeps listing the
+# spent season — FFV3 on 2026-09-08 still carried 34 season-2026 rows 13 days
+# after its 2026 rookie draft. So neither of #413's ground truths (grid row
+# exists, live holder matches) can tell a spent pick from a live one; the ONE
+# signal is the `/drafts` read, and this is the one predicate every consumer
+# of it shares: the owned-pick sync (which decides what the grid carries) and
+# the propose + validate routes (which decide what may be sent).
+
+def completed_draft_seasons(drafts, current_season) -> set[int]:
+    """Seasons whose draft Sleeper reports `complete`, at or after
+    `current_season`. Shape-blind on purpose (G-428 QA round 1): a completed
+    startup draft consumes that season's class exactly as a rookie draft
+    does — Sleeper refuses the season's picks either way — so the shape
+    discriminator that #207's *verdict* needs has no place here, and the
+    #228 sync this replaces never discriminated either.
+    Malformed entries are skipped; `drafts` None/[] ⇒ empty set."""
+    try:
+        current_season = int(current_season)
+    except (TypeError, ValueError):
+        return set()
+    out: set[int] = set()
+    for d in drafts or ():
+        if not isinstance(d, dict) or d.get("status") != "complete":
+            continue
+        try:
+            season = int(d.get("season") or 0)
+        except (TypeError, ValueError):
+            continue
+        if season >= current_season:
+            out.add(season)
+    return out
+
+
+def sleeper_pick_window(current_season, drafts, traded_picks=(),
+                        cached_verdict: "DraftStatus | None" = None
+                        ) -> tuple[int, int] | None:
+    """The `[first, last]` classes Sleeper will accept in a trade right now.
+
+    * `drafts`         — the live `/drafts` list; authoritative whenever it
+      answers (any non-empty list, even one with no completed draft).
+    * `cached_verdict` — the #207 `leagues.draft_status` verdict. **D-189:**
+      consulted ONLY when `drafts` is empty (a flake and a draft-less league
+      are indistinguishable there): a positive `drafted` excludes the current
+      season; anything else keeps the D-089 fail-safe (exclude nothing).
+    * `traded_picks`   — observed seasons widen the window forward through
+      `pick_horizon`; a spent season can never re-enter because the anchor
+      has already walked past it.
+
+    Returns None only when `current_season` is unknown — callers abstain
+    (`sleeper_pick_tradable` treats None as "tradable"), never block.
+    """
+    try:
+        current_season = int(current_season)
+    except (TypeError, ValueError):
+        return None
+    exclude = completed_draft_seasons(drafts, current_season)
+    if not drafts and cached_verdict is not None and cached_verdict.drafted:
+        exclude.add(current_season)
+    observed = []
+    for tp in traded_picks or ():
+        if isinstance(tp, dict):
+            observed.append(tp.get("season"))
+    return pick_horizon(current_season, exclude, observed_seasons=observed)
+
+
+def sleeper_pick_tradable(season, window: tuple[int, int] | None) -> bool:
+    """True unless `window` is known and `season` falls outside it. A None
+    window or an unparseable season abstains (the grid lookup that preceded
+    this already proved the row exists)."""
+    if window is None:
+        return True
+    try:
+        season = int(season)
+    except (TypeError, ValueError):
+        return True
+    first, last = window
+    return first <= season <= last
+
+
 def current_year_picks_visible(status: DraftStatus | None) -> bool:
     """THE fail-safe. Current-season picks stay visible unless we positively
     know the rookie draft happened. `None`/`unknown`/low-confidence all show.

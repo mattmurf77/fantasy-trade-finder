@@ -38,6 +38,30 @@ const LEAN: Record<string, { lean: string; name: string }> = {
   jets: { lean: 'max youth + picks', name: 'Tanking' },
 };
 
+// #394 / #424 — THE display-name table for a DECLARED outlook, exported so
+// every minimized "Outlook · <name>" row (TradesScreen's fallback row, the
+// merged calculator's `calc.outlook-fallback` twin) reads one vocabulary.
+// The four directional names come from LEAN above; `not_sure` IS a declared
+// value (TradeDnaSheet persists it when positions are saved without an
+// outlook pick) and renders "Not sure" — never "Not set". "Not set" is
+// reserved for null/absent and is applied at the call site, which is why
+// `outlookDisplayName` returns null rather than a string for that case.
+// #424 was this table hand-copied into one surface and missing from another.
+export const OUTLOOK_DISPLAY_NAME: Readonly<Record<string, string>> = {
+  championship: LEAN.championship.name,
+  contender: LEAN.contender.name,
+  rebuilder: LEAN.rebuilder.name,
+  jets: LEAN.jets.name,
+  not_sure: 'Not sure',
+};
+
+/** Display name for a declared `team_outlook`; null when nothing is declared
+ *  (or the value is unknown to this table), so the caller's `?? 'Not set'`
+ *  is the ONLY place that string can come from. */
+export function outlookDisplayName(value: string | null | undefined): string | null {
+  return value ? OUTLOOK_DISPLAY_NAME[value] ?? null : null;
+}
+
 // #254 — the receipt is THE outlook surface on the deck, but it can
 // legitimately render nothing (flag off, or the resolved outlook isn't
 // directional). TradesScreen suppresses its own duplicate outlook row

@@ -9,12 +9,16 @@ import { haptics } from '../utils/haptics';
 // BASE-1/A1/B1 frames + docs/feedback/items/270-inline-trades-home/status.md).
 //
 // Replaces TradeFinderModeBar's row on the guided landing ONLY while a
-// `trades_home_inline` variant is assigned: bigger (28pt, up from 22pt)
-// Draft/Free-agents icon buttons plus a Manual-calc button that carries no
-// league or player reference (#272, verbatim: "remove any league or player
-// references for 'Manual' calc"). `onDraft` omitted ⇒ two buttons, mirroring
-// TradeFinderModeBar's own `onDraft?` convention (flag `draft.room` gates the
-// chip's existence upstream, not this component).
+// `trades_home_inline` variant is assigned: a bigger (28pt, up from 22pt)
+// Free-agents icon button plus a Manual-calc button that carries no league or
+// player reference (#272, verbatim: "remove any league or player references
+// for 'Manual' calc"). The Draft cell that used to LEAD this row was removed
+// by G-425 (#425, "the overhaul tile should replace the draft button") — the
+// Team overhaul hero now sits directly above this row, and the Draft Room
+// keeps its seasonal bottom tab, League-tab tile and deep link. The removal is
+// unconditional: no Draft handler prop exists here, whatever `draft.room` says.
+// (TradeFinderModeBar, the control cohort's row, still carries its own Draft
+// chip — that is a different control and was deliberately left alone.)
 //
 // Free Agents borrows the shared `search` glyph (nearest semantic fit — "find
 // available players"); no dedicated free-agents icon exists in the shared
@@ -22,12 +26,12 @@ import { haptics } from '../utils/haptics';
 // glyph InLeagueCalculator already renders between its two sides.
 
 interface Props {
-  onDraft?: () => void;
   onFreeAgents: () => void;
   onManualCalc: () => void;
   /** Presentation v2 (flag `trades.presentation_v2`) — opens the `TodaysTrade`
-   *  surface. Same optional-prop convention as `onDraft`: omitting it renders
-   *  today's two/three buttons exactly, so a flag-off build is byte-identical.
+   *  surface. Optional-prop convention (TradeFinderModeBar's optional-
+   *  handler pattern): omitting it renders today's two buttons exactly, so
+   *  a flag-off build is byte-identical.
    *  This row REPLACES TradeFinderModeBar for users in the
    *  `trades_home_inline` experiment, so the entry point has to exist here
    *  too — otherwise those users could never reach the surface under test. */
@@ -42,7 +46,6 @@ interface Props {
 }
 
 export default function TradeHomeUtilityRow({
-  onDraft,
   onFreeAgents,
   onManualCalc,
   onTodaysTrade,
@@ -69,21 +72,6 @@ export default function TradeHomeUtilityRow({
               button opens the endorsed trade, so it is the honest fit. */}
           <Icon name="trade" size={28} color={chalk.dim} />
           <Text style={styles.lbl}>Today</Text>
-        </Pressable>
-      ) : null}
-      {onDraft ? (
-        <Pressable
-          testID="trades.home-utility.draft"
-          accessibilityRole="button"
-          accessibilityLabel="Draft"
-          onPress={() => {
-            haptics.selection();
-            onDraft();
-          }}
-          style={({ pressed }) => [styles.btn, pressed && styles.btnPressed]}
-        >
-          <Icon name="flag" size={28} color={chalk.dim} />
-          <Text style={styles.lbl}>Draft</Text>
         </Pressable>
       ) : null}
       <Pressable

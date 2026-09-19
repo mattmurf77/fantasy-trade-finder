@@ -229,6 +229,9 @@ from .database import (
     save_bad_trade_flag, list_bad_trade_flags,
     # "Send in Sleeper" — encrypted Sleeper write-token storage (flagged beta)
     upsert_sleeper_credential, get_sleeper_credential, delete_sleeper_credential,
+    # Team overhaul all-platform sends (2026-09-07): link-state reads for
+    # overhaul_api.auth_state, mirroring GET /api/mfl/auth-link and /api/espn/link
+    get_mfl_credential, get_espn_credential,
     # Persistent sessions (teardown 06-03, flag auth.persistent_sessions)
     persist_session, load_persisted_session, touch_persisted_session,
     delete_persisted_session, delete_persisted_sessions_for_user,
@@ -255,6 +258,7 @@ from . import trade_policy as _trade_policy   # personal-market policy — the O
                                               # trade.personal_market_policy_v1
                                               # default false)
 from . import small_trade_presentment as _simple_presentment
+from . import trade_significance as _trade_significance
 from . import negmem as _negmem               # trade.negmem — negative-results memory (T1:
                                               # module import, attribute calls only)
 from .feature_flags import FLAGS, is_enabled, flags_dict, reload as reload_flags
@@ -1005,17 +1009,22 @@ def _evaluate_adjustments(give: list[str], recv: list[str],
     gvals = [seed_value(p) for p in give]
     rvals = [seed_value(p) for p in recv]
     v_max = max(gvals + rvals)
+    # #427: the same first-round mask _consensus_packages prices with, so a
+    # side of firsts shows no "Package depth" row (its depth delta is 0).
+    g_exempt = _trade_service_mod.first_round_pick_mask(give)
+    r_exempt = _trade_service_mod.first_round_pick_mask(recv)
 
     rows: dict[str, list[dict]] = {}
     naive_totals: dict[str, float] = {}
     # #214: other_values feeds the market-mode crown credit (both-sides
     # elite eligibility + naive-skew phase-out); heavy mode ignores it.
-    for side, vals, other, n_other in (("give", gvals, rvals, len(recv)),
-                                       ("receive", rvals, gvals, len(give))):
+    for side, vals, other, n_other, exempt in (
+            ("give", gvals, rvals, len(recv), g_exempt),
+            ("receive", rvals, gvals, len(give), r_exempt)):
         naive = round(sum(vals), 1)
-        base = pkg(vals, v_max)                      # depth weighting only
+        base = pkg(vals, v_max, exempt=exempt)       # depth weighting only
         full = pkg(vals, v_max, n_other=n_other,     # + crown premium, if any
-                   other_values=other)
+                   other_values=other, exempt=exempt)
         depth = round(base - naive, 1)
         crown = round(full - base, 1)
         side_rows = []
@@ -2724,6 +2733,17 @@ def _cleanup_loop() -> None:
         except Exception as e:
             log.warning("api-observability purge failed: %s", e)
 
+        # Debug evidence is separate from durable card/outcome/valuation rows.
+        # One bounded batch per tick; failures remain visible and retry next tick.
+        try:
+            from .database import purge_deck_diagnostics
+            days = int(os.environ.get("FTF_DECK_DIAGNOSTIC_RETENTION_DAYS", "14"))
+            purged = purge_deck_diagnostics(days=days)
+            if purged:
+                log.info("Purged %d expired deck diagnostic snapshots", purged)
+        except Exception:
+            log.exception("deck-diagnostic retention failed")
+
         # Trade jobs — three reasons to evict:
         #   (a) running jobs older than _JOB_HARD_TIMEOUT → mark as error so
         #       the frontend stops polling
@@ -3006,6 +3026,14 @@ def _trade_job_public_view(job: dict) -> dict:
         "cards":           job.get("cards") or [],
         "error":           job.get("error"),
     }
+    # A caller may keep polling an old job ID after a runtime rollout. Do
+    # not serve its pre-rule snapshot or re-label old impressions as newly
+    # evaluated. A fresh /generate request regenerates under the new policy.
+    significance_now = _capture_trade_significance()
+    if (significance_now[0] and
+            job.get("significance_capture") != significance_now):
+        out.update(cards=[], status="error", error="significance_policy_changed")
+        return out
     # F3 (deck.fatigue) — additive honoring note, set by the worker only
     # when the flag is on AND ≥1 candidate was decline-suppressed:
     # {count, latest_declined_at}. Absent otherwise, so flag-off payloads
@@ -3105,15 +3133,104 @@ def _load_trade_disposition_keys(user_id: str, league_id: str):
         amnesty_epoch=float(_deck_cfg("pass_cooldown_start_epoch", 0.0)))
 
 
-def _trade_safety_signature():
-    """Changing a safety switch invalidates completed cached decks."""
-    return [key for key, enabled in (
+def _trade_safety_signature(owner_state: tuple[bool, ...] | None = None,
+                            significance_capture=None):
+    """Stamp captured owner permission; freshness checks read live defaults."""
+    if owner_state is None:
+        owner_include = _bakeoff.bakeoff_enabled() and "owner_v1" in _bakeoff.arm_roster(exclusive=False)
+        owner_serve = owner_include and _bakeoff.serve_owner()
+        owner_state = (owner_include, owner_serve, owner_serve and _bakeoff.owner_only())
+    signature = [key for key, enabled in (
         ("market", _trade_policy.policy_enabled()),
         ("market_shadow", _trade_policy.telemetry_enabled()),
         ("roster", getattr(FLAGS, "trade_roster_protection", False)),
         ("roster_shadow", getattr(FLAGS, "trade_roster_evaluation", False)),
         ("mutual_benefit", getattr(FLAGS, "trade_mutual_benefit_v1", False)),
+        ("owner_include", owner_state[0]),
+        ("owner_serve", owner_state[1]),
+        ("owner_only", len(owner_state) > 2 and owner_state[2]),
     ) if enabled]
+    significance = (significance_capture if significance_capture is not None
+                    else _capture_trade_significance())
+    if significance[0]:
+        signature.append("significance:" + json.dumps(significance))
+    return signature
+
+
+def _capture_trade_significance():
+    """Capture raw live knobs outside arm overlays, once per request."""
+    cfg = _trade_service_mod._cfg
+    mode = cfg.get("significance_mode", 0.0)
+    mode = int(mode) if type(mode) in (int, float) and mode in (0, 1, 2) else 0
+    tier = cfg.get("significance_player_min_tier", 2.0)
+    tiers = {1: "first_1", 2: "second", 3: "third", 4: "fourth"}
+    tier = tiers.get(tier, "second") if type(tier) in (int, float) else "second"
+    pick = cfg.get("significance_allow_first_round_pick", 1.0)
+    allow_pick = type(pick) in (int, float) and pick == 1
+    return (mode, _trade_significance.VERSION, tier, allow_pick)
+
+
+def _trade_significance_matches(job, captured=None):
+    captured = captured if captured is not None else _capture_trade_significance()
+    previous = job.get("significance_capture")
+    return (not captured[0] and not previous) or previous == captured
+
+
+def _significance_card_key(card):
+    """Object AND exact terms: a later package mutation loses its exemption."""
+    return (id(card), card.league_id, card.trade_id, card.target_user_id,
+            tuple(sorted(card.give_player_ids)), tuple(sorted(card.receive_player_ids)))
+
+
+def _significance_exemptions_for(trade_service):
+    exemptions = getattr(trade_service, "_significance_exemptions", None)
+    if exemptions is None:
+        exemptions = trade_service._significance_exemptions = {}
+    if exemptions:
+        live = {_significance_card_key(card)
+                for card in list(trade_service._trade_cards.values())}
+        for key in tuple(exemptions):
+            if key not in live:
+                exemptions.pop(key, None)
+    return exemptions
+
+
+def _evaluate_trade_significance(cards, *, capture, players, user_elo, seed_elo,
+                                  scoring_format, selected_give_ids=(),
+                                  selected_receive_ids=(), inbound_keys=(), user_sources=None):
+    """One arm-independent recommendation gate; no writes or public fields."""
+    if not capture[0]:
+        return cards, {}, {}
+    results, kept, reasons = {}, [], {}
+    for card in cards:
+        context = ("inbound" if _significance_card_key(card) in inbound_keys else
+                   "explicit_search" if selected_give_ids or selected_receive_ids else
+                   "discovery")
+        try:
+            result = _trade_significance.evaluate_significance(
+                card, players=players, user_elo=user_elo, seed_elo=seed_elo,
+                user_sources=user_sources,
+                scoring_format=scoring_format, context=context,
+                selected_give_ids=selected_give_ids,
+                selected_receive_ids=selected_receive_ids,
+                player_min_tier=capture[2], allow_first_round_pick=capture[3],
+                owned_pick_parser=_parse_owned_pick_id,
+                is_pick_asset=_trade_service_mod.is_pick_asset)
+            evidence = result.as_dict()
+        except Exception:
+            log.exception("trade significance evaluation unavailable")
+            evidence = {"version": capture[1], "eligible": False,
+                        "reason": "evaluation_unavailable"}
+        evidence["mode"] = "enforce" if capture[0] == 2 else "shadow"
+        results[id(card)] = evidence
+        if not evidence["eligible"]:
+            reason = evidence["reason"]
+            reasons[reason] = reasons.get(reason, 0) + 1
+        if capture[0] != 2 or evidence["eligible"]:
+            kept.append(card)
+    return kept, results, {"capture": capture, "evaluated": len(cards),
+                           "would_reject": sum(reasons.values()),
+                           "removed": len(cards) - len(kept), "reasons": reasons}
 
 
 def _capture_trade_presentation():
@@ -3140,7 +3257,12 @@ def _trade_job_is_fresh(job: dict, fairness_threshold: float, outlook_value,
             job, presentation_capture if presentation_capture is not None
             else _capture_trade_presentation()):
         return False
-    if job.get("safety_policy", []) != _trade_safety_signature():
+    # Demo jobs never enter the owner experiment, even when it is globally on.
+    job_key = job.get("key") or ()
+    expected_safety = (_trade_safety_signature((False, False))
+                       if len(job_key) > 1 and job_key[1] == "league_demo"
+                       else _trade_safety_signature())
+    if job.get("safety_policy", []) != expected_safety:
         return False
     if job.get("is_pinned"):
         return False
@@ -3592,6 +3714,7 @@ def _inject_likes_you_cards_impl(
     not_interested_ids: set | None = None,
     exclusion_keys: set | None = None,   # G6 R4 #336 — dedup only (Q-G6-1)
     avoid_positions: set | None = None,  # #360 — position twin of not_interested
+    significance_inbound_keys: set | None = None,
 ) -> list:
     """Tier 2 work item 2.3a — surface trades the counterparty already liked.
 
@@ -3790,6 +3913,8 @@ def _inject_likes_you_cards_impl(
 
         existing = existing_by_key.get(key)
         if existing is not None:
+            if significance_inbound_keys is not None:
+                significance_inbound_keys.add(_significance_card_key(existing))
             existing.likes_you       = True
             existing.composite_score = boost_score
             # Personal-market policy — this card was GENERATED organically
@@ -3832,6 +3957,8 @@ def _inject_likes_you_cards_impl(
             source_like_impression_id = like.get("impression_id"),
         )
         trade_service._trade_cards[card.trade_id] = card
+        if significance_inbound_keys is not None:
+            significance_inbound_keys.add(_significance_card_key(card))
         new_cards.append(card)
         injected += 1
 
@@ -3916,6 +4043,8 @@ def _inject_likes_you_cards_impl(
 
             existing = existing_by_key.get(key)
             if existing is not None:
+                if significance_inbound_keys is not None:
+                    significance_inbound_keys.add(_significance_card_key(existing))
                 existing.likes_you             = True
                 existing.composite_score       = boost_score
                 existing.standing_offer_reason = _reason
@@ -3950,6 +4079,8 @@ def _inject_likes_you_cards_impl(
                     standing_offer_reason = _reason,
                 )
                 trade_service._trade_cards[card.trade_id] = card
+                if significance_inbound_keys is not None:
+                    significance_inbound_keys.add(_significance_card_key(card))
                 new_cards.append(card)
                 injected    += 1
                 so_injected += 1
@@ -4695,6 +4826,7 @@ def _log_deck_signal_impressions(
     policy_variant: str | None = None,
     roster_results: dict | None = None,
     presentation: dict | None = None,  # captured records/version, NOT a telemetry enable gate
+    significance_results: dict | None = None,
 ) -> dict[int, str]:
     """Write one deck_impressions row per card (final served order) and
     return {id(card): impression_id} so the caller can stamp the ids into
@@ -4719,6 +4851,9 @@ def _log_deck_signal_impressions(
 
     prop_by_card  = (capture or {}).get("propensity") or {}
     final_by_card = (capture or {}).get("final_key") or {}
+    owner_rows = any(getattr(c, "owner_evaluation", None) is not None or
+                     getattr(c, "owner_route_experiment", None) is not None
+                     for c in [*cards, *(c for _, c in ghost_cards)])
 
     # suggestion.telemetry — candidate-set persistence, one row per job.
     telemetry_on = policy_version is not None
@@ -4887,6 +5022,8 @@ def _log_deck_signal_impressions(
                 card, players_dict, seed_map or {})
         if roster_results is not None:
             features["roster_evaluation"] = roster_results.get(id(card))
+        if significance_results and id(card) in significance_results:
+            features["significance"] = significance_results[id(card)]
         if presentation is not None:
             features["presentation"] = {**presentation["records"][pos], "final_index": pos}
         # F7 (deck.exploration) — wildcard provenance, frozen at serve time.
@@ -5058,6 +5195,44 @@ def _log_deck_signal_impressions(
             # mirror and a card shown because of the first manager's action.
             row["source_like_impression_id"] = getattr(
                 card, "source_like_impression_id", None)
+        if owner_rows:
+            # Uniform keys protect mixed control/owner executemany batches.
+            row.setdefault("model_arm", None)
+            row.setdefault("arm_rank", None)
+            row.setdefault("policy_variant", None)
+            row.setdefault("valuation_json", None)
+            row.setdefault("trade_concept_id", None)
+            row.setdefault("source_like_impression_id", None)
+            row.setdefault("assets_json", json.dumps({"give": give, "receive": recv}))
+            row.setdefault("fairness_threshold", None)
+            route = getattr(card, "owner_route_experiment", None)
+            evidence = getattr(card, "owner_evaluation", None)
+            if route is not None:
+                features["owner_experiment"] = _owner_request_snapshot(route, card)
+                features["served_market"] = {"give": getattr(card, "give_value", None),
+                    "receive": getattr(card, "receive_value", None), "ratio": card.fairness_score}
+                row["model_arm"] = route["model_arm"]
+                row["arm_rank"] = pos
+                # Existing propensity is an ORDERING multiplier, not a trial
+                # probability. The request's 0.5 lives in explicit JSON.
+                row["policy_version"] = route["version"]
+                row["fairness_threshold"] = route["input"]["fairness_threshold"]
+            if evidence is not None:
+                if not evidence.matches(card):
+                    raise ValueError("owner evidence does not match final package")
+                request_evidence = getattr(card, "owner_request_evidence", None)
+                features["owner_request"] = (_owner_request_snapshot(request_evidence, card)
+                                             if request_evidence is not None else None)
+                if request_evidence is not None and request_evidence.get("exclusive"):
+                    row["policy_version"] = request_evidence["version"]
+                features["owner_generation"] = getattr(card, "owner_generation_diagnostics", None)
+                row["valuation_json"] = json.dumps(evidence.as_dict())
+                row["policy_variant"] = "owner_v1"
+                row["fairness_threshold"] = evidence.effective_floor
+                row["trade_concept_id"] = _trade_policy.trade_concept_id(
+                    league_id=league_id, viewer_user_id=user_id, partner_user_id=target,
+                    viewer_gives=give, viewer_receives=recv)
+            row["features_json"] = json.dumps(features, default=str)
         rows.append(row)
     save_deck_impressions(rows)
     return imp_by_card
@@ -5201,7 +5376,7 @@ def _owned_impression_id(raw, acting_user_id, *, league_id=None, expected_trade_
     """
     if not raw or not isinstance(raw, str) or not acting_user_id:
         return None
-    if not _trade_policy.telemetry_enabled():
+    if not (_trade_policy.telemetry_enabled() or _owner_enabled(league_id)):
         return None
     try:
         imp = load_deck_impression(raw[:64])
@@ -6915,6 +7090,9 @@ def _capture_trade_execution(sess, user_id, league_id, scoring_format):
     # this small graph, not the ranking history, generator/client, or card store.
     league = copy.deepcopy(league)
     if trade_service is not None:
+        # Like the card store, provenance must be shared with /api/trades on
+        # the original session service. Never take it from serialized cards.
+        _significance_exemptions_for(trade_service)
         trade_service = copy.copy(trade_service)
         trade_service._players = dict(getattr(trade_service, "_players", {}))
         trade_service._leagues = dict(getattr(trade_service, "_leagues", {}))
@@ -6941,6 +7119,7 @@ def _run_trade_job(
     execution_context: _TradeExecutionContext | None = None,
     presentation_capture=None,
     presentation_exempt: bool = False,
+    significance_capture=None,
 ):
     """Daemon-thread entry point with context captured before thread start.
     Direct internal callers may omit context and capture at entry. All exceptions caught — a thread death
@@ -6956,6 +7135,8 @@ def _run_trade_job(
     would miss). None = not supplied (pregen from session_init, the
     replenishment cron) ⇒ the worker loads them itself, exactly as before."""
     try:
+        if significance_capture is None:
+            significance_capture = _capture_trade_significance()
         if presentation_capture is None:
             presentation_capture = _capture_trade_presentation()
             # Direct internal callers capture at entry. Missing off captures
@@ -6993,6 +7174,7 @@ def _run_trade_job(
         # Inject real leaguemate ELOs (same logic as /api/trades/generate)
         real_count = 0
         real_user_ids: set = set()
+        real_rankings = {}
         try:
             real_rankings = load_member_rankings(
                 league_id=league_id, exclude_user_id=g_user_id,
@@ -7056,6 +7238,7 @@ def _run_trade_job(
         acquire_positions    = []
         trade_away_positions = []
         avoid_positions      = []          # #360
+        prefs = None
         try:
             prefs = (prefs_preload.get("prefs") if prefs_preload is not None
                      else load_league_preference(user_id=g_user_id,
@@ -7127,6 +7310,7 @@ def _run_trade_job(
         # from roster shape.
         opponent_outlooks: dict[str, str] = {}
         opponent_pick_shares: dict[str, float] = {}
+        _opp_prefs = None
         if FLAGS.trade_outlook_infer:
             try:
                 # ONE `IN (...)` select for every opponent instead of a
@@ -7188,12 +7372,22 @@ def _run_trade_job(
         market_live = (_trade_policy.policy_enabled() or mutual_live) and league_id != "league_demo"
         roster_live = (getattr(FLAGS, "trade_roster_protection", False) or mutual_live) and league_id != "league_demo"
         roster_shadow = getattr(FLAGS, "trade_roster_evaluation", False) and league_id != "league_demo"
+        owner_on = _owner_enabled(league_id)
+        owner_serve = owner_on and _bakeoff.serve_owner()
+        owner_exclusive = owner_serve and _bakeoff.owner_only()
+        significance_inbound_keys = set()
+        if owner_exclusive:
+            # Return every eligible owner offer, not a counterfactual holdout.
+            ghost_on = False
         with _trade_jobs_lock:
             j = _trade_jobs.get(job_id)
             if _job_live(j):
-                if market_live or roster_live:
+                if market_live or roster_live or owner_on or significance_capture[0]:
                     j["final_checks_pending"] = True
-                safety_signature = _trade_safety_signature()
+                if significance_capture[0]:
+                    j["significance_capture"] = significance_capture
+                safety_signature = _trade_safety_signature(
+                    (owner_on, owner_serve, owner_exclusive), significance_capture)
                 if safety_signature:
                     j["safety_policy"] = safety_signature
 
@@ -7256,9 +7450,13 @@ def _run_trade_job(
         bakeoff_run = None
         bakeoff_on = _bakeoff.bakeoff_active(
             league_id, pinned_give, pinned_receive, opponent_user_id)
+        if owner_exclusive and not pinned_give and not pinned_receive and not opponent_user_id:
+            # A live master-switch reload cannot reroute this captured
+            # exclusive organic request into a legacy generator.
+            bakeoff_on = True
         bakeoff_fixed_order = _bakeoff.bypass_rerankers(
-            league_id, pinned_give, pinned_receive, opponent_user_id)
-        presentation_grouped = _bakeoff.group_size() > 0 if bakeoff_on else False
+            league_id, pinned_give, pinned_receive, opponent_user_id) or owner_serve
+        presentation_grouped = _bakeoff.group_size() > 0 if bakeoff_on and not owner_exclusive else False
 
         explore_active = (
             _deck_exploration_enabled() and league_id != "league_demo"
@@ -7354,6 +7552,41 @@ def _run_trade_job(
         # negmem_strength.
         if nm_map is not None:
             _generate_kwargs["negmem"] = nm_map
+        owner_context = None
+        owner_request_evidence = None
+        owner_selected_run = None
+        if owner_on:
+            try:
+                owner_context = _owner_generation_context(
+                    sess=sess, service=service, league=g_league, players=players_dict,
+                    seed_map=seed_map, user_elo=elo_map_rt, user_roster=g_user_roster,
+                    scoring_format=active_format, fairness_threshold=fairness_threshold,
+                    captured_rankings=real_rankings, captured_preferences=_opp_prefs,
+                    viewer_preferences={**(prefs or {}), "team_outlook": explicit_outlook,
+                        "inferred_outlook": outlook_value if explicit_outlook is None else None,
+                        "acquire_positions": acquire_positions, "trade_away_positions": trade_away_positions,
+                        "untouchables": list(untouchable_ids), "targets": list(target_ids),
+                        "not_interested": list(not_interested_ids), "avoid_positions": avoid_positions},
+                    pinned_give_players=pinned_give, pinned_receive_players=pinned_receive,
+                    opponent_user_id=opponent_user_id, trade_intent=trade_intent)
+                owner_request_evidence = _owner_selected_assignment(
+                    owner_context, "organic", serve=owner_exclusive, exclusive=owner_exclusive)
+                owner_request_evidence.update(model_arm="owner_v1",
+                    unit="owner_only" if owner_exclusive else "team_draft",
+                    assignment_probability=1.0 if owner_exclusive else None)
+            except Exception:
+                log.exception("owner context capture unavailable")
+        def _gen_owner(**_overrides):
+            from .trade_gen_owner import generate_owner_trades
+            if owner_context is None:
+                raise ValueError("owner_context_unavailable")
+            cards, report = generate_owner_trades(**owner_context)
+            diagnostics = report.diagnostics()
+            for card in cards:
+                card.owner_request_evidence = owner_request_evidence
+                card.owner_generation_diagnostics = diagnostics
+                trade_service._trade_cards[card.trade_id] = card
+            return cards, report
         if bakeoff_on:
             # Three generations, SEQUENTIAL on this thread (PLAN.md §3.1 —
             # the config seam is thread-local). Arm A rides
@@ -7368,6 +7601,9 @@ def _run_trade_job(
                     trade_service, {**_generate_kwargs, **ov}),
                 gen_fit   = lambda **ov: _bakeoff.gen_fit_cards(
                     trade_service, {**_generate_kwargs, **ov}),
+                gen_owner = _gen_owner,
+                owner_serving = owner_serve,
+                owner_exclusive = owner_exclusive,
                 league_id = league_id,
                 # Recorded, not inferred: both arrive per-request from the
                 # client and were persisted nowhere else. The trade settings
@@ -7377,8 +7613,38 @@ def _run_trade_job(
                 trade_intent       = trade_intent,
             )
             final_cards = bakeoff_run.served_deck()
+        elif owner_on and (pinned_give or pinned_receive or opponent_user_id):
+            started = time.monotonic()
+            owner_error = None
+            try:
+                proposed, owner_report = _gen_owner()
+            except Exception:
+                log.exception("owner targeted generation unavailable")
+                proposed, owner_report, owner_error = [], None, "generation_unavailable"
+            legacy_cards = [] if owner_exclusive else trade_service.generate_trades(**_generate_kwargs)
+            if owner_context is None and owner_serve:
+                # Do not expose a legacy fallback as treatment when capture
+                # itself failed. The whole job is unavailable, not a trial.
+                raise ValueError("owner targeted context unavailable")
+            if owner_context is None:
+                final_cards = legacy_cards
+            else:
+                assignment = _owner_selected_assignment(owner_context, "targeted_deck",
+                                                       serve=owner_serve, exclusive=owner_exclusive)
+                assignment["captured_at"] = owner_request_evidence["captured_at"]
+                final_cards = proposed if assignment["model_arm"] == "owner_v1" else legacy_cards
+                for card in final_cards:
+                    card.owner_route_experiment = assignment
+                    trade_service._trade_cards[card.trade_id] = card
+                owner_selected_run = dict(assignment=assignment, owner_cards=len(proposed),
+                    control_cards=len(legacy_cards), report=owner_report, error=owner_error,
+                    total_ms=int((time.monotonic() - started) * 1000))
         else:
             final_cards = trade_service.generate_trades(**_generate_kwargs)
+
+        if owner_serve:
+            for card in final_cards:
+                card.preserve_server_order = True
 
         # M3 (R-11) — diagnostic fit stamp on EVERY bake-off card of EVERY
         # arm, so the readout can bucket-match arm B against fit. Post-
@@ -7446,6 +7712,7 @@ def _run_trade_job(
                     not_interested_ids = not_interested_ids or None,
                     exclusion_keys = exclusion_keys or None,   # G6 R4 #336
                     avoid_positions = set(avoid_positions) or None,   # #360
+                    significance_inbound_keys = significance_inbound_keys,
                 )
                 # trade.bakeoff §3.4 Channel 2 — the injector returns the deck
                 # RE-SORTED by composite_score, which would silently destroy
@@ -7727,6 +7994,15 @@ def _run_trade_job(
             except Exception as br_err:
                 log.warning("board-refresh header failed (non-fatal): %s", br_err)
 
+        # Owner candidates retain their draft positions, but are not re-gated
+        # or re-sorted under the superseded personal/needs policy. Revalidate
+        # the exact package after all earlier mutation layers; legacy cards
+        # continue through their unchanged gates below.
+        pre_owner_policy = list(final_cards)
+        owner_cards = [c for c in final_cards if getattr(c, "owner_evaluation", None) is not None]
+        if owner_cards:
+            owner_cards = _owner_cards_valid(owner_cards, owner_context) if owner_context else []
+            final_cards = [c for c in final_cards if getattr(c, "owner_evaluation", None) is None]
         roster_results = None
         if roster_live or roster_shadow:
             try:
@@ -7738,6 +8014,12 @@ def _run_trade_job(
                 roster_candidates = final_cards
                 final_cards, roster_results, roster_diag = _evaluate_deck_rosters(
                     final_cards, roster_ctx, enforce=roster_live, require_mutual=mutual_live)
+                if owner_cards:
+                    # Structural roster protection is retained. Its legacy
+                    # mutual-utility veto/order is not the owner's evaluator.
+                    owner_cards, owner_roster_results, _ = _evaluate_deck_rosters(
+                        owner_cards, roster_ctx, enforce=roster_live, require_mutual=False)
+                    roster_results.update(owner_roster_results)
                 try:
                     _log_roster_rejections(roster_candidates, roster_results,
                         job_id=job_id, user_id=g_user_id, league_id=league_id,
@@ -7749,6 +8031,7 @@ def _run_trade_job(
                 roster_diag = {"error": "evaluation_unavailable", "enforced": roster_live}
                 if roster_live:
                     final_cards = []
+                    owner_cards = []
             with _trade_jobs_lock:
                 j = _trade_jobs.get(job_id)
                 if j is not None:
@@ -7810,7 +8093,7 @@ def _run_trade_job(
                 # snapshot the client reads must be correct on every flag
                 # combination, so this republish stands on its own. Same
                 # idiom as the F7/F9/breaker republishes above.
-                if not (market_live or roster_live) and [id(c) for c in final_cards] != _pre_policy_ids:
+                if not (market_live or roster_live or owner_serve or significance_capture[0]) and [id(c) for c in final_cards] != _pre_policy_ids:
                     snapshot = []
                     for c in _served_cards(final_cards, league_id, ghost_on):
                         d = trade_card_to_dict(c, players_dict)
@@ -7819,7 +8102,7 @@ def _run_trade_job(
                         snapshot.append(d)
                     with _trade_jobs_lock:
                         j = _trade_jobs.get(job_id)
-                        if _job_live(j):
+                        if _job_live(j) and not j.get("final_checks_pending"):
                             j["cards"] = snapshot
                 # Drain the likes-you injector's stale-mirror notes into the
                 # same ledger. A mirror that was never eligible, never
@@ -7845,6 +8128,59 @@ def _run_trade_job(
                     if j is not None:
                         j["policy_error"] = "evaluation_unavailable"
 
+        if owner_context is not None:
+            # Keep surviving legacy order inside legacy slots and owner order
+            # inside owner slots. A rejected card leaves a hole, not a new
+            # arm credit. No final legacy surplus gate can remove owner cards.
+            legacy_iter = iter(final_cards)
+            owner_ids = {id(c) for c in owner_cards}
+            merged = []
+            for original in pre_owner_policy:
+                if getattr(original, "owner_evaluation", None) is not None:
+                    if id(original) in owner_ids:
+                        merged.append(original)
+                else:
+                    replacement = next(legacy_iter, None)
+                    if replacement is not None:
+                        merged.append(replacement)
+            final_cards = merged
+
+        # ALL served arms share this final significance contract. Runs after
+        # package mutations and owner/legacy policy gates; removed cards never
+        # become shown impressions. No quota and no insignificant backfill.
+        significance_candidates = final_cards
+        final_cards, significance_results, significance_diag = _evaluate_trade_significance(
+            final_cards, capture=significance_capture, players=players_dict,
+            user_elo=elo_map_rt, seed_elo=seed_map, scoring_format=active_format,
+            selected_give_ids=pinned_give or (), selected_receive_ids=pinned_receive or (),
+            inbound_keys=significance_inbound_keys,
+            user_sources=owner_context.get("user_sources") if owner_context else None)
+        if significance_diag and bakeoff_run is not None:
+            per_arm = {}
+            for card in significance_candidates:
+                credit = bakeoff_run.attribution_for(card)
+                arm = credit[0] if credit else "injected"
+                counts = per_arm.setdefault(arm, {"evaluated": 0, "would_reject": 0})
+                counts["evaluated"] += 1
+                counts["would_reject"] += int(not significance_results[id(card)]["eligible"])
+            significance_diag["per_arm_final_candidates"] = per_arm
+        # Server-private provenance supports the separate pending-card route.
+        # It is exact-package scoped; card JSON fields can never assert it.
+        exemptions = getattr(trade_service, "_significance_exemptions", {})
+        for card in final_cards:
+            key = _significance_card_key(card)
+            if key in significance_inbound_keys:
+                exemptions[key] = ("inbound", (), ())
+            elif (set(pinned_give or ()) & set(card.give_player_ids)
+                  or set(pinned_receive or ()) & set(card.receive_player_ids)):
+                exemptions[key] = ("explicit_search", tuple(pinned_give or ()),
+                                    tuple(pinned_receive or ()))
+        trade_service._significance_exemptions = exemptions
+        with _trade_jobs_lock:
+            j = _trade_jobs.get(job_id)
+            if j is not None and significance_diag:
+                j["significance"] = significance_diag
+
         # One bounded post-policy permutation, before the FIRST evaluated
         # publication. Every later boundary retains this order or removes
         # authoritative dispositions; none re-sorts an old snapshot.
@@ -7865,7 +8201,7 @@ def _run_trade_job(
 
         # Publish only evaluated cards, even with impression logging disabled
         # or an empty result. Later annotation layers do not alter packages.
-        if market_live or roster_live:
+        if (market_live or roster_live or owner_on or significance_capture[0]) and not owner_serve:
             snapshot = []
             for c in _served_cards(final_cards, league_id, ghost_on):
                 d = trade_card_to_dict(c, players_dict)
@@ -7936,7 +8272,7 @@ def _run_trade_job(
                         snapshot.append(d)
                     with _trade_jobs_lock:
                         j = _trade_jobs.get(job_id)
-                        if _job_live(j):
+                        if _job_live(j) and not owner_serve:
                             j["cards"] = snapshot
             except Exception as bk_err:
                 log.warning("breaker stamp failed (non-fatal): %s", bk_err)
@@ -7985,8 +8321,21 @@ def _run_trade_job(
                 log.warning("ghost split failed (serving unfiltered): %s", gs_err)
                 served_final, ghost_cards = final_cards, []
 
+        if significance_diag:
+            significance_diag["final_served"] = len(served_final)
+            if bakeoff_run is not None:
+                served_counts = {}
+                for card in served_final:
+                    credit = bakeoff_run.attribution_for(card)
+                    arm = credit[0] if credit else "injected"
+                    served_counts[arm] = served_counts.get(arm, 0) + 1
+                significance_diag["final_served_per_arm"] = served_counts
+
         # Publish the filtered final list even with F1 disabled. Later F1
         # annotation adds impression IDs without altering package membership.
+        if owner_serve:
+            for card in served_final:
+                card.preserve_server_order = True
         snapshot = []
         for card in served_final:
             row = trade_card_to_dict(card, players_dict)
@@ -7995,7 +8344,7 @@ def _run_trade_job(
             snapshot.append(row)
         with _trade_jobs_lock:
             job = _trade_jobs.get(job_id)
-            if _job_live(job):
+            if _job_live(job) and not owner_serve:
                 job["cards"] = snapshot
 
         # G6 R-9 — per-rule kill counters + tripwire, on the POST-GHOST
@@ -8041,8 +8390,9 @@ def _run_trade_job(
         # is about to finish, but nobody will ever see these cards, so logging
         # impressions for them would poison the deck-signal corpus with rows
         # that had zero chance of a view. Skip the whole block.
+        owner_impression_error = False
         try:
-            if (league_id != "league_demo" and _deck_signal_v2_enabled()
+            if (league_id != "league_demo" and (_deck_signal_v2_enabled() or owner_on)
                     and not _job_superseded(job_id)):
                 telemetry_kw: dict = {}
                 if _suggestion_telemetry_enabled():
@@ -8068,9 +8418,12 @@ def _run_trade_job(
                     policy_results  = policy_results, # personal-market policy
                     policy_variant  = policy_variant,
                     presentation    = presentation,
+                    significance_results = significance_results,
                     **telemetry_kw,
                 )
-                if imp_by_card:
+                if owner_serve and any(not imp_by_card.get(id(c)) for c in served_final):
+                    raise ValueError("owner_impression_incomplete")
+                if imp_by_card or owner_serve:
                     snapshot = []
                     for c in served_final:
                         d = trade_card_to_dict(c, players_dict)
@@ -8084,8 +8437,18 @@ def _run_trade_job(
                         j = _trade_jobs.get(job_id)
                         if _job_live(j):
                             j["cards"] = snapshot
+                            if owner_serve:
+                                j["final_checks_pending"] = False
         except Exception as sig_err:
-            log.warning("deck signal-v2 impression logging failed (non-fatal): %s", sig_err)
+            log.warning("deck signal-v2 impression logging failed%s: %s",
+                        " (trial withheld)" if owner_serve else " (non-fatal)", sig_err)
+            if owner_serve:
+                owner_impression_error = True
+                with _trade_jobs_lock:
+                    j = _trade_jobs.get(job_id)
+                    if _job_live(j):
+                        j["cards"] = []
+                        j["final_checks_pending"] = False
 
         # trade.bakeoff — ONE bakeoff_runs row per bake-off job: arm order,
         # per-arm card counts / generation ms / empty + forfeit counts, and
@@ -8093,12 +8456,35 @@ def _run_trade_job(
         # including a superseded one — this is a RUN ledger, and Phase 4's
         # whole job is measuring generation cost and empty-arm rates, which a
         # superseded run measures just as well. Never allowed to fail the job.
+        if significance_diag and (owner_impression_error or _job_superseded(job_id)):
+            significance_diag["final_served"] = 0
+            significance_diag["final_served_per_arm"] = {}
+            significance_diag["withheld"] = ("impression_unavailable" if owner_impression_error
+                                               else "superseded")
         if bakeoff_run is not None:
             try:
-                save_bakeoff_run(bakeoff_run.run_row(
-                    job_id=job_id, user_id=g_user_id, league_id=league_id))
+                run_row = bakeoff_run.run_row(
+                    job_id=job_id, user_id=g_user_id, league_id=league_id)
+                if owner_request_evidence is not None or significance_diag:
+                    config_record = json.loads(run_row["config_json"])
+                    if owner_request_evidence is not None:
+                        config_record["owner_request"] = owner_request_evidence
+                    if significance_diag:
+                        config_record["significance"] = significance_diag
+                    run_row["config_json"] = json.dumps(config_record, default=str)
+                save_bakeoff_run(run_row)
             except Exception as bo_err:
                 log.warning("bake-off run logging failed (non-fatal): %s", bo_err)
+        if owner_selected_run is not None:
+            try:
+                if significance_diag:
+                    owner_selected_run["significance"] = significance_diag
+                _log_owner_selected_run(job_id, owner_context, owner_selected_run, len(served_final))
+            except Exception as owner_log_err:
+                log.warning("owner selected run logging failed: %s", owner_log_err)
+
+        if owner_impression_error:
+            raise ValueError("owner_impression_unavailable")
 
         # Mark complete. Final card snapshot was already published by the
         # last on_opponent_done invocation (or the likes-you republish above).
@@ -8233,6 +8619,7 @@ def _kickoff_trade_job(
     """
     if presentation_capture is None:
         presentation_capture = _capture_trade_presentation()
+    significance_capture = _capture_trade_significance()
     _job_write_lease = _user_data_lifecycle.capture(
         user_id, started=g.get("_user_data_started") if has_request_context() else None)
 
@@ -8285,6 +8672,9 @@ def _kickoff_trade_job(
     }
     if source:
         job["source"] = source
+    if significance_capture[0]:
+        job["significance_capture"] = significance_capture
+        job["final_checks_pending"] = True
     if presentation_exempt:
         job["presentation_exempt"] = True
     with _trade_jobs_lock:
@@ -8308,7 +8698,8 @@ def _kickoff_trade_job(
                        prefs_preload=prefs_preload,
                        execution_context=execution_context,
                        presentation_capture=presentation_capture,
-                       presentation_exempt=presentation_exempt)
+                       presentation_exempt=presentation_exempt,
+                       significance_capture=significance_capture)
         return job_id
 
     threading.Thread(
@@ -8320,7 +8711,8 @@ def _kickoff_trade_job(
                 "prefs_preload": prefs_preload,
                 "execution_context": execution_context,
                 "presentation_capture": presentation_capture,
-                "presentation_exempt": presentation_exempt},
+                "presentation_exempt": presentation_exempt,
+                "significance_capture": significance_capture},
         daemon=True,
     ).start()
     return job_id
@@ -13069,6 +13461,22 @@ def _sync_mfl_owned_picks(league_id: str) -> int:
     return len(rows)
 
 
+def _sleeper_cached_draft_verdict(league_id: str):
+    """The #207 cached rookie-draft verdict off the leagues row as a
+    `DraftStatus`, or None when the league is unknown / the read fails.
+    #428 / D-189: the corroborating signal the pick paths consult ONLY when
+    the live `/drafts` read comes back empty — never a substitute for it."""
+    try:
+        ctx = get_league_draft_context(league_id)
+    except Exception:
+        log.warning("draft-context read failed for %s", league_id, exc_info=True)
+        return None
+    if not ctx or not ctx.get("status"):
+        return None
+    return _draft_status_mod.DraftStatus(ctx["status"],
+                                         ctx.get("confidence") or _draft_status_mod.LOW)
+
+
 def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
                               scoring_format: str, *,
                               rosters: list | None = None,
@@ -13087,9 +13495,10 @@ def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
 
     #228 — leagues whose CURRENT-season rookie draft is already complete
     must not carry that season's picks (they no longer exist as assets).
-    The drafts read is best-effort: a flake excludes nothing (today's
-    behavior); future seasons are always included. The replace-sync cleans
-    previously synced stale rows for the excluded season automatically.
+    The drafts read is best-effort: a flake excludes nothing — unless the
+    cached #207 verdict corroborates `drafted` (#428 / D-189, below); future
+    seasons are always included. The replace-sync cleans previously synced
+    stale rows for the excluded season automatically.
 
     `rosters` / `meta` let the session-init daemon hand over the v1 rosters
     and league-meta payloads it has ALREADY fetched (for the trade-block
@@ -13127,15 +13536,24 @@ def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
     except (TypeError, ValueError):
         _lsize = len(_prosters) or 12
     # #228 — current season's draft already held ⇒ exclude that season.
+    # #428 / D-189 — the live `/drafts` read is still authoritative whenever
+    # it answers. When it comes back EMPTY (flake or draft-less league) the
+    # cached #207 verdict is consulted: a positive `drafted` excludes the
+    # current season, so one flaked read can no longer re-populate a spent
+    # class for the whole league (the replace-sync made that league-wide).
+    # A flake with no corroboration keeps the D-089 fail-safe: exclude nothing.
     _drafts = _fetch_sleeper_drafts(league_id)
-    _exclude: set[int] = set()
-    for d in _drafts:
-        try:
-            if (isinstance(d, dict) and d.get("status") == "complete"
-                    and int(d.get("season") or 0) == _cur_season):
-                _exclude.add(_cur_season)
-        except (TypeError, ValueError):
-            continue
+    _exclude: set[int] = _draft_status_mod.completed_draft_seasons(_drafts, _cur_season)
+    if not _drafts:
+        _cached = _sleeper_cached_draft_verdict(league_id)
+        if _cached is not None and _cached.drafted:
+            _exclude.add(_cur_season)
+            log.info("  owned-pick sync for %s: drafts read empty — excluding "
+                     "%s on the cached %s/%s verdict (D-189)", league_id,
+                     _cur_season, _cached.status, _cached.confidence)
+    elif _exclude:
+        log.info("  owned-pick sync for %s: excluding %s — Sleeper reports the "
+                 "draft complete", league_id, sorted(_exclude))
     # D-090 — the SAME payload carries `draft_order`, so resolving the current
     # season's slot order costs zero additional upstream calls. Written even
     # when `picks.slot_labels` is off (it is inert data; only the label path is
@@ -13230,6 +13648,14 @@ def trade_card_to_dict(card, players: dict) -> dict:
         "decision":          card.decision,
         "expires_at":        card.expires_at,
     }
+    evidence = getattr(card, "owner_evaluation", None)
+    if getattr(card, "preserve_server_order", False):
+        out["preserve_server_order"] = True
+    if evidence is not None:
+        # Only public identity. The two private boards stay in impressions.
+        out["model_arm"] = "owner_v1"
+        out["generator_version"] = evidence.as_dict()["generator_version"]
+        out.update(_owner_public_selection(evidence))
     # Pick-denominated value verdict (feedback #157 value-bar) — the same
     # {give_value, receive_value, favors, gap} shape POST /api/trade/evaluate
     # returns, built here from the card's own consensus package values via the
@@ -13552,7 +13978,8 @@ def generate_trades():
             # (e.g. an override released by a newer vote) could be invisible.
             # Supersede the running job and fall through to spawn a fresh one.
             elif (existing.get("status") == "running"
-                  and _trade_presentation_matches(existing, presentation_capture)):
+                  and _trade_presentation_matches(existing, presentation_capture)
+                  and _trade_significance_matches(existing)):
                 if not (force_fresh and _force_supersede_enabled()):
                     reuse_snapshot = copy.deepcopy(existing)
                 else:
@@ -13563,6 +13990,10 @@ def generate_trades():
             # Otherwise: stale or errored → drop the index entry and fall
             # through to spawn a new job.
             if reuse_snapshot is None:
+                if (existing.get("status") == "running"
+                        and not _trade_significance_matches(existing)):
+                    existing["superseded"] = True
+                    existing["superseded_at"] = time.monotonic()
                 _trade_jobs_by_key.pop(key, None)
 
     if reuse_snapshot is not None:
@@ -13812,23 +14243,47 @@ def asset_trade_ideas():
     if asset_id not in players_dict:
         return jsonify({"error": "unknown_asset"}), 404
 
-    groups = trade_service.generate_asset_ideas(
-        user_id            = g_user_id,
-        user_roster        = user_roster,
-        league_id          = league_id,
-        seed_elo           = seed_map,
-        asset_id           = asset_id,
-        direction          = direction,
-        fairness_threshold = fairness_threshold,
-        raw_user_elo       = raw_user_elo,
-        untouchable_ids    = untouchable_ids or None,
-        not_interested_ids = not_interested_ids or None,
-        avoid_positions    = avoid_positions or None,      # #360
-        swap_positions     = swap_positions,               # #403 W2 / rev-3 §2
-        lateral_scope      = lateral_scope,                # #402 rev-3 §3
-        scoring_format     = fmt,                          # tier bucketing
-        opponent_user_id   = opponent_user_id,
-    )
+    def _legacy_ideas():
+        return trade_service.generate_asset_ideas(
+            user_id            = g_user_id,
+            user_roster        = user_roster,
+            league_id          = league_id,
+            seed_elo           = seed_map,
+            asset_id           = asset_id,
+            direction          = direction,
+            fairness_threshold = fairness_threshold,
+            raw_user_elo       = raw_user_elo,
+            untouchable_ids    = untouchable_ids or None,
+            not_interested_ids = not_interested_ids or None,
+            avoid_positions    = avoid_positions or None,      # #360
+            swap_positions     = swap_positions,               # #403 W2 / rev-3 §2
+            lateral_scope      = lateral_scope,                # #402 rev-3 §3
+            scoring_format     = fmt,                          # tier bucketing
+            opponent_user_id   = opponent_user_id,
+        )
+
+    if _owner_enabled(league_id):
+        serve_owner = _bakeoff.serve_owner()
+        owner_exclusive = serve_owner and _bakeoff.owner_only()
+        try:
+            context = _owner_generation_context(
+                sess=sess, service=service, league=g_league, players=players_dict,
+                seed_map=seed_map, user_elo=raw_user_elo, user_roster=user_roster,
+                scoring_format=fmt, fairness_threshold=fairness_threshold,
+                pinned_give_players=[asset_id] if direction == "give" else [],
+                pinned_receive_players=[asset_id] if direction == "receive" else [],
+                opponent_user_id=opponent_user_id, swap_positions=swap_positions,
+                lateral_scope=lateral_scope)
+            groups = _owner_selected_ideas(context=context, surface="asset_ideas", serve=serve_owner,
+                                          exclusive=owner_exclusive,
+                                          legacy=_legacy_ideas, trade_service=trade_service, sess=sess)
+        except Exception:
+            log.exception("asset-ideas owner experiment unavailable")
+            if serve_owner:
+                return jsonify({"error": "owner_experiment_unavailable"}), 503
+            groups = _legacy_ideas()
+    else:
+        groups = _legacy_ideas()
 
     def _idea_row(idea: dict) -> dict:
         out = dict(idea)
@@ -13873,6 +14328,347 @@ def asset_trade_ideas():
 # synchronous fairness sweep around the canvas's give side — no job, no
 # divergence, no streaming, no lanes. Find a Trade with an EMPTY canvas is
 # unchanged and still runs the model deck (the #330 hand-off auto-run).
+
+_OWNER_SELECTED_VERSION = "owner-selected-v1"
+_OWNER_EXCLUSIVE_VERSION = "owner-only-v1"
+
+
+def _owner_enabled(league_id):
+    return (league_id != "league_demo" and _bakeoff.bakeoff_enabled()
+            and "owner_v1" in _bakeoff.arm_roster(exclusive=False))
+
+
+def _owner_generation_context(*, sess, service, league, players, seed_map,
+                              user_elo, user_roster, scoring_format,
+                              fairness_threshold, captured_rankings=None,
+                              captured_preferences=None, viewer_preferences=None, **selection):
+    """One captured raw-input adapter for organic AND selected entrances.
+
+    Clone members: refreshing real boards here must not change a control's
+    inputs. Seeded/simulated opponents never become observed personal data.
+    Source tags describe actions; their counts never discount willingness.
+    """
+    user_id = sess["user_id"]
+    owner_league = copy.deepcopy(league)
+    members = [m.user_id for m in owner_league.members if m.user_id != user_id]
+    rankings = (captured_rankings if captured_rankings is not None else
+                load_member_rankings(league.league_id, exclude_user_id=user_id,
+                                     scoring_format=scoring_format))
+    opponent_sources = {}
+    for member in owner_league.members:
+        if member.user_id == user_id:
+            continue
+        row = rankings.get(member.user_id) or {}
+        member.elo_ratings = dict(row.get("elo_ratings") or {})
+        member.has_rankings = bool(member.elo_ratings)
+        source_rows = row.get("confidence_sources") or {}
+        opponent_sources[member.user_id] = {
+            pid: source_rows.get(pid, "legacy") for pid in member.elo_ratings}
+        member.board_updated_at = row.get("board_updated_at")
+    preferences = (captured_preferences if captured_preferences is not None else
+                   load_league_preferences_bulk([user_id, *members], league.league_id))
+    meta_hit = _FA_LEAGUE_META_CACHE.get(league.league_id)
+    meta = (meta_hit[1] or {}) if meta_hit else {}
+    roster_slots = meta.get("roster_positions") or []
+    manager_preferences = {}
+    for uid in [user_id, *members]:
+        prefs = dict(viewer_preferences if uid == user_id and viewer_preferences is not None
+                     else preferences.get(uid) or {})
+        if FLAGS.trade_preference_lists and not (uid == user_id and viewer_preferences is not None):
+            prefs.update(load_asset_preferences(user_id=uid, league_id=league.league_id))
+        prefs["starter_slots"] = [s for s in roster_slots if s not in ("BN", "IR", "TAXI")]
+        prefs["lineup_source"] = "observed" if roster_slots else "estimated"
+        prefs["roster_capacity"] = sum(s not in ("IR", "TAXI") for s in roster_slots) if roster_slots else None
+        manager_preferences[uid] = prefs
+    own = manager_preferences[user_id]
+    conf = _ranking_confidence(service)
+    placed = conf.get("_placed") or set()
+    counts = conf.get("comparison_counts") or {}
+    sources = {pid: ("explicit" if pid in placed else
+                     "votes" if counts.get(pid, 0) > 0 else
+                     "legacy" if user_elo.get(pid) != seed_map.get(pid) else "consensus")
+               for pid in user_elo}
+    # Imported/copy overrides are explicit actions even without comparisons.
+    for pid in getattr(service, "_elo_overrides", {}) or {}:
+        if pid in placed:
+            sources[pid] = "explicit"
+    return dict(
+        players=dict(players), league=owner_league, user_id=user_id,
+        user_roster=list(user_roster), user_elo=dict(user_elo), seed_elo=dict(seed_map),
+        scoring_format=scoring_format, fairness_threshold=fairness_threshold,
+        outlook=own.get("team_outlook"),
+        inferred_outlooks={uid: p["inferred_outlook"] for uid, p in manager_preferences.items()
+                           if p.get("inferred_outlook") is not None},
+        opponent_outlooks={u: p["team_outlook"] for u, p in manager_preferences.items()
+                           if u != user_id and p.get("team_outlook")},
+        user_sources=sources, opponent_sources=opponent_sources,
+        manager_preferences=manager_preferences,
+        acquire_positions=own.get("acquire_positions") or [],
+        trade_away_positions=own.get("trade_away_positions") or [],
+        avoid_positions=(own.get("avoid_positions") or []) if FLAGS.trade_avoid_positions else [],
+        past_decision_keys=_load_trade_disposition_keys(user_id, league.league_id)[0],
+        exclusion_keys=(_load_presentment_exclusions(user_id, league.league_id)
+                        if FLAGS.trade_presentment_rules else set()),
+        config=dict(_trade_service_mod._cfg), **selection)
+
+
+def _owner_cards_valid(cards, context):
+    """Fail closed on mutation; recheck owner eligibility against frozen input.
+
+    Do not run the superseded legacy personal-gain or shape classifiers on an
+    owner decision. The owner's own evaluator uses the captured raw inputs.
+    Full provider-aware roster legality remains a separate downstream gate.
+    """
+    from .trade_gen_owner import evaluate_owner_trades
+    matched = [card for card in cards if getattr(card, "owner_evaluation", None) is not None
+               and card.owner_evaluation.matches(card)]
+    finals = evaluate_owner_trades(matched, **context) if matched else []
+    if len(finals) != len(matched):
+        raise ValueError("owner final evaluation occurrence count mismatch")
+    accepted = []
+    for card, final in zip(matched, finals):
+        if final.eligible and final.matches(card):
+            card.owner_evaluation = final
+            accepted.append(card)
+    return accepted
+
+
+def _owner_canonical(value):
+    """Stable set encoding across Python processes; no repr(frozenset)."""
+    if isinstance(value, dict):
+        return {str(k): _owner_canonical(v) for k, v in sorted(value.items(), key=lambda kv: str(kv[0]))}
+    if isinstance(value, (set, frozenset)):
+        return sorted((_owner_canonical(v) for v in value), key=lambda v: json.dumps(v, sort_keys=True))
+    if isinstance(value, (list, tuple)):
+        return [_owner_canonical(v) for v in value]
+    return value
+
+
+def _owner_public_selection(evidence):
+    selection = evidence.as_dict().get("selection") or {}
+    partial = selection.get("coverage") == "partial"
+    return {"selection_coverage": "partial" if partial else "full",
+            **({"selection_notice": "Includes part of your selection; review the assets before continuing."}
+               if partial else {})}
+
+
+def _owner_request_snapshot(assignment, card):
+    """Keep the exact offer's values, not thousands of unrelated board rows.
+
+    The request hash joins the once-per-run full frozen input ledger.
+    """
+    # Project before copying: a long deck must not clone every manager's
+    # unrelated boards once per card. The returned snapshot remains detached.
+    inputs = dict(assignment["input"])
+    assets = set(card.give_player_ids + card.receive_player_ids)
+    for key in ("user_elo", "seed_elo", "user_sources", "players"):
+        inputs[key] = {pid: value for pid, value in inputs.get(key, {}).items() if pid in assets}
+    inputs["members"] = [{**m, "elo": {pid: value for pid, value in m["elo"].items() if pid in assets}}
+                         for m in inputs["members"] if m["id"] == card.target_user_id]
+    inputs["opponent_sources"] = {card.target_user_id: {
+        pid: source for pid, source in inputs.get("opponent_sources", {}).get(card.target_user_id, {}).items()
+        if pid in assets}}
+    inputs["manager_preferences"] = {uid: prefs for uid, prefs in inputs.get("manager_preferences", {}).items()
+                                      if uid in {inputs["user_id"], card.target_user_id}}
+    return copy.deepcopy({**assignment, "input": inputs})
+
+
+def _owner_selected_assignment(context, surface, *, serve, exclusive=False):
+    """Stable request/input assignment, not a client-selected model or user trial.
+
+    Do not hash capture time: identical repeated requests stay in the same arm.
+    A genuinely changed board/market/outlook/roster is a new comparison unit.
+    """
+    inputs = _owner_canonical({k: v for k, v in context.items() if k not in {"players", "league"}})
+    inputs["members"] = [{"id": m.user_id, "roster": list(m.roster),
+                          "elo": m.elo_ratings,
+                          "board_updated_at": getattr(m, "board_updated_at", None)}
+                         for m in context["league"].members]
+    inputs["players"] = {pid: {"position": p.position, "age": p.age,
+                               "team": p.team, "injury_status": getattr(p, "injury_status", None)}
+                          for pid, p in context["players"].items()}
+    canonical = copy.deepcopy(inputs)
+    canonical["config"] = {k: v for k, v in canonical["config"].items()
+                           if not k.startswith("bakeoff_include_") and not k.startswith("bakeoff_serve_")
+                           and not k.startswith("significance_")
+                           and k != "bakeoff_owner_only"}
+    for key in ("user_roster", "pinned_give_players", "pinned_receive_players", "acquire_positions",
+                "trade_away_positions", "avoid_positions", "swap_positions"):
+        if canonical.get(key) is not None:
+            canonical[key] = sorted(canonical[key])
+    canonical["members"] = sorted(canonical["members"], key=lambda m: m["id"])
+    for member in canonical["members"]:
+        member["roster"] = sorted(member["roster"])
+        member.pop("board_updated_at", None)
+    for prefs in canonical["manager_preferences"].values():
+        for key in ("untouchables", "targets", "not_interested", "acquire_positions",
+                    "trade_away_positions", "avoid_positions"):
+            if isinstance(prefs.get(key), list):
+                prefs[key] = sorted(prefs[key])
+    exclusive = bool(serve and exclusive)
+    version = _OWNER_EXCLUSIVE_VERSION if exclusive else _OWNER_SELECTED_VERSION
+    digest = hashlib.sha256(json.dumps(
+        [version, surface, canonical], sort_keys=True,
+        separators=(",", ":"), default=str).encode()).hexdigest()
+    control = {"fair_packages": "legacy_fair", "asset_ideas": "legacy_asset_ideas"}.get(surface, "legacy_targeted")
+    treatment = exclusive or (serve and int(digest[:16], 16) % 2 == 1)
+    return {"version": version, "surface": surface,
+            "request_hash": digest, "unit": "request_inputs",
+            "model_arm": "owner_v1" if treatment else control,
+            "assignment_probability": 0.5 if serve and not exclusive else 1.0,
+            **({"exclusive": True} if exclusive else {}),
+            "serve_enabled": serve, "input": inputs,
+            "captured_at": datetime.now(timezone.utc).isoformat(), "market_as_of": "unavailable"}
+
+
+def _log_owner_selected_run(run_id, context, run, served_count):
+    assignment = run["assignment"]
+    control = {"fair_packages": "legacy_fair", "asset_ideas": "legacy_asset_ideas"}.get(
+        assignment["surface"], "legacy_targeted")
+    arms = {"owner_v1": {"cards": run["owner_cards"], "error": run["error"],
+                         "diagnostics": run["report"].as_dict() if run["report"] else {}}}
+    if not assignment.get("exclusive"):
+        arms = {control: {"cards": run["control_cards"]}, **arms}
+    save_bakeoff_run({"run_id": run_id, "deck_job_id": run_id,
+        "user_id": context["user_id"], "league_id": context["league"].league_id,
+        "arm_order": json.dumps(list(arms)),
+        "served_arm": assignment["model_arm"], "deck_size": served_count,
+        "total_ms": run["total_ms"],
+        "arms_json": json.dumps(arms),
+        "groups_json": "{}", "agreement_json": "{}",
+        "config_json": json.dumps({**assignment,
+            **({"significance": run["significance"]} if run.get("significance") else {})}, default=str),
+        "created_at": datetime.now(timezone.utc).isoformat()})
+
+
+def _owner_selected_ideas(*, context, surface, legacy, trade_service, sess, serve, exclusive=False):
+    """Serve one recorded arm; exclusive requests never generate controls.
+
+    The legacy callable is unchanged and receives no owner-only arguments.
+    Comparison mode logs both counts; include-only is shadow. Failure never
+    relabels a legacy result as owner or provides an exclusive fallback.
+    """
+    from .trade_gen_owner import generate_owner_trades
+    significance_capture = _capture_trade_significance()
+    started = time.monotonic()
+    assignment = _owner_selected_assignment(context, surface, serve=serve, exclusive=exclusive)
+    legacy_result = {} if assignment.get("exclusive") else legacy()
+    legacy_groups = (legacy_result if surface == "asset_ideas" else
+                     {"ideas": legacy_result.get("ideas") or []})
+    owner_cards, report, error = [], None, None
+    try:
+        owner_cards, report = generate_owner_trades(**context)
+        owner_cards = _owner_cards_valid(owner_cards, context)
+    except Exception:
+        log.exception("owner selected generation unavailable")
+        error = "generation_unavailable"
+    arm = assignment["model_arm"]
+    selected = {}
+    if arm == "owner_v1":
+        diagnostics = report.diagnostics() if report else {}
+        for rank, card in enumerate(owner_cards):
+            keys = getattr(card, "owner_groups", (card.owner_group,)) if surface == "asset_ideas" else ("ideas",)
+            idea = {
+                "counterparty_user_id": card.target_user_id,
+                "counterparty_username": card.target_username,
+                "give_player_ids": list(card.give_player_ids),
+                "receive_player_ids": list(card.receive_player_ids),
+                "give_value": getattr(card, "give_value", 0.0),
+                "receive_value": getattr(card, "receive_value", 0.0),
+                "difference": getattr(card, "receive_value", 0.0) - getattr(card, "give_value", 0.0),
+                "fairness": card.fairness_score, "trade_id": card.trade_id,
+                "recommendation_rank": rank,
+                **_owner_public_selection(card.owner_evaluation),
+            }
+            for key in keys:
+                # Each visible group occurrence owns its own real impression.
+                occurrence = copy.deepcopy(card)
+                occurrence.owner_generation_diagnostics = diagnostics
+                occurrence.owner_surface_group = key
+                selected.setdefault(key, []).append((occurrence, dict(idea)))
+    else:
+        for key, ideas in legacy_groups.items():
+            for idea in ideas:
+                card = _trade_service_mod.TradeCard(
+                    trade_id=_fair_package_trade_id(context["user_id"], context["league"].league_id,
+                        idea["counterparty_user_id"], idea["give_player_ids"], idea["receive_player_ids"]),
+                    league_id=context["league"].league_id, proposing_user_id=context["user_id"],
+                    target_user_id=idea["counterparty_user_id"],
+                    target_username=idea.get("counterparty_username", ""),
+                    give_player_ids=list(idea["give_player_ids"]),
+                    receive_player_ids=list(idea["receive_player_ids"]),
+                    mismatch_score=0, fairness_score=idea.get("fairness", 0),
+                    composite_score=0, basis="consensus")
+                card.give_value, card.receive_value = idea["give_value"], idea["receive_value"]
+                selected.setdefault(key, []).append((card, dict(idea)))
+    cards = [c for rows in selected.values() for c, _ in rows]
+    if arm == "owner_v1" and (getattr(FLAGS, "trade_roster_protection", False)
+                              or getattr(FLAGS, "trade_mutual_benefit_v1", False)):
+        roster_context = _build_trade_roster_context(
+            sess=sess, league=context["league"], players=context["players"],
+            seed_map=context["seed_elo"], scoring_format=context["scoring_format"],
+            outlook=context["outlook"], opponent_outlooks=context["opponent_outlooks"],
+            picks=load_draft_picks(league_id=context["league"].league_id, source=_pick_read_source()),
+            explicit_outlook=context["outlook"])
+        safe, _, _ = _evaluate_deck_rosters(cards, roster_context, enforce=True, require_mutual=False)
+        safe_ids = {id(c) for c in safe}
+        cards = [c for c in cards if id(c) in safe_ids]
+    if arm == "owner_v1":
+        cards = _project_trade_dispositions(cards, context["user_id"], context["league"].league_id)
+    cards, significance_results, significance_diag = _evaluate_trade_significance(
+        cards, capture=significance_capture, players=context["players"],
+        user_elo=context["user_elo"], seed_elo=context["seed_elo"],
+        scoring_format=context["scoring_format"],
+        selected_give_ids=context.get("pinned_give_players") or (),
+        selected_receive_ids=context.get("pinned_receive_players") or (),
+        user_sources=context.get("user_sources"))
+    retained = {id(c) for c in cards}
+    run_id = uuid.uuid4().hex
+    for card in cards:
+        card.owner_route_experiment = assignment
+        card.preserve_server_order = assignment["serve_enabled"]
+        trade_service._trade_cards[card.trade_id] = card
+        give_pins = tuple(context.get("pinned_give_players") or ())
+        receive_pins = tuple(context.get("pinned_receive_players") or ())
+        if (set(give_pins) & set(card.give_player_ids)
+                or set(receive_pins) & set(card.receive_player_ids)):
+            exemptions = getattr(trade_service, "_significance_exemptions", {})
+            exemptions[_significance_card_key(card)] = ("explicit_search", give_pins, receive_pins)
+            trade_service._significance_exemptions = exemptions
+    # No impression ID may be invented on failure. Old clients can still
+    # display packages; a new client's joined trial needs these actual rows.
+    impressions = _log_deck_signal_impressions(
+        user_id=context["user_id"], league_id=context["league"].league_id,
+        job_id=run_id, cards=cards, players_dict=context["players"], capture=None,
+        scoring_format=context["scoring_format"], source=surface, seed_map=context["seed_elo"],
+        significance_results=significance_results)
+    if serve and any(not impressions.get(id(card)) for card in cards):
+        raise ValueError("owner_impression_incomplete")
+    _log_owner_selected_run(run_id, context, dict(assignment=assignment,
+        owner_cards=len(owner_cards), control_cards=sum(map(len, legacy_groups.values())),
+        error=error, report=report, total_ms=int((time.monotonic() - started) * 1000),
+        significance=significance_diag), len(cards))
+    output = {k: [] for k in ("upgrade", "lateral", "downgrade")}
+    if surface == "fair_packages":
+        output = {"ideas": []}
+    for key, rows in selected.items():
+        for card, row in rows:
+            if id(card) not in retained:
+                continue
+            row.update(trade_id=card.trade_id, model_arm=arm,
+                       generator_version=_OWNER_SELECTED_VERSION if arm != "owner_v1" else
+                       card.owner_evaluation.as_dict()["generator_version"])
+            if id(card) in impressions:
+                row["impression_id"] = impressions[id(card)]
+            if assignment["serve_enabled"]:
+                row["preserve_server_order"] = True
+            output.setdefault(key, []).append(row)
+    if surface == "fair_packages":
+        output["relaxed"] = legacy_result.get("relaxed", False) if arm != "owner_v1" else False
+        if not output["ideas"]:
+            output["reason"] = error or ("no_owner_package" if arm == "owner_v1" else legacy_result.get("reason", "no_package"))
+    return output
+
 
 def _fair_package_trade_id(user_id: str, league_id: str, opponent_user_id: str,
                            give_ids: list, recv_ids: list) -> str:
@@ -14019,19 +14815,41 @@ def fair_packages():
             log.warning("fair-packages: owned-pick injection failed (continuing): %s",
                         pick_err)
 
-    result = trade_service.generate_fair_packages(
-        user_id            = g_user_id,
-        user_roster        = user_roster,
-        league_id          = league_id,
-        seed_elo           = seed_map,
-        give_player_ids    = give_ids,
-        receive_player_ids = recv_ids,
-        fairness_threshold = fairness_threshold,
-        raw_user_elo       = raw_user_elo,
-        untouchable_ids    = untouchable_ids or None,
-        not_interested_ids = not_interested_ids or None,
-        opponent_user_id   = opponent_user_id,
-    )
+    def _legacy_packages():
+        return trade_service.generate_fair_packages(
+            user_id            = g_user_id,
+            user_roster        = user_roster,
+            league_id          = league_id,
+            seed_elo           = seed_map,
+            give_player_ids    = give_ids,
+            receive_player_ids = recv_ids,
+            fairness_threshold = fairness_threshold,
+            raw_user_elo       = raw_user_elo,
+            untouchable_ids    = untouchable_ids or None,
+            not_interested_ids = not_interested_ids or None,
+            opponent_user_id   = opponent_user_id,
+        )
+
+    if _owner_enabled(league_id):
+        serve_owner = _bakeoff.serve_owner()
+        owner_exclusive = serve_owner and _bakeoff.owner_only()
+        try:
+            context = _owner_generation_context(
+                sess=sess, service=service, league=g_league, players=players_dict,
+                seed_map=seed_map, user_elo=raw_user_elo, user_roster=user_roster,
+                scoring_format=fmt, fairness_threshold=fairness_threshold,
+                pinned_give_players=give_ids, pinned_receive_players=recv_ids,
+                exact_give=True, opponent_user_id=opponent_user_id)
+            result = _owner_selected_ideas(context=context, surface="fair_packages", serve=serve_owner,
+                                          exclusive=owner_exclusive,
+                                          legacy=_legacy_packages, trade_service=trade_service, sess=sess)
+        except Exception:
+            log.exception("fair-packages owner experiment unavailable")
+            if serve_owner:
+                return jsonify({"error": "owner_experiment_unavailable"}), 503
+            result = _legacy_packages()
+    else:
+        result = _legacy_packages()
 
     def _idea_row(idea: dict) -> dict:
         out = dict(idea)
@@ -14049,7 +14867,7 @@ def fair_packages():
         out["favors"]   = verdict["favors"]
         out["gap"]      = verdict["gap"]
         out["basis"]    = "consensus"
-        out["trade_id"] = _fair_package_trade_id(
+        out["trade_id"] = idea.get("trade_id") or _fair_package_trade_id(
             g_user_id, league_id, idea["counterparty_user_id"],
             idea["give_player_ids"], idea["receive_player_ids"])
         return out
@@ -14155,6 +14973,36 @@ def get_trades():
             [card for card in cards if card.league_id == lid], g_user_id, lid))
     cards = [card for card in cards if id(card) in allowed]
     players_dict = {p.id: p for p in g_players}
+    capture = _capture_trade_significance()
+    if capture[0]:
+        # This route also exposes generator candidates retained in the service,
+        # not just the worker's final deck. Re-evaluate under current settings.
+        service = sess["service"]
+        personal = {rp.player.id: rp.elo for rp in service.get_rankings(position=None).rankings}
+        pool = {**getattr(trade_service, "_players", {}), **players_dict}
+        seeds = dict(service._seed or {})
+        confidence = _ranking_confidence(service)
+        placed = confidence.get("_placed") or set()
+        counts = confidence.get("comparison_counts") or {}
+        sources = {pid: ("explicit" if pid in placed else "votes" if counts.get(pid, 0) > 0
+                         else "legacy" if value != seeds.get(pid) else "consensus")
+                   for pid, value in personal.items()}
+        for lid in {card.league_id for card in cards}:
+            pick_assets = _owned_pick_assets(lid, _active_format(sess))
+            seeds.update(_pick_asset_elos(pick_assets))
+            pool.update({p.id: p for assets in pick_assets.values() for p in assets})
+        exemptions = _significance_exemptions_for(trade_service)
+        significant = []
+        for card in cards:
+            key = _significance_card_key(card)
+            context, give, receive = exemptions.get(key, ("discovery", (), ()))
+            kept, _, _ = _evaluate_trade_significance(
+                [card], capture=capture, players=pool, user_elo=personal, seed_elo=seeds,
+                user_sources=sources,
+                scoring_format=_active_format(sess), selected_give_ids=give,
+                selected_receive_ids=receive, inbound_keys={key} if context == "inbound" else ())
+            significant.extend(kept)
+        cards = significant
     return jsonify([trade_card_to_dict(c, players_dict) for c in cards])
 
 
@@ -14755,6 +15603,9 @@ def queue_trade_for_opponent():
 
     trade_id = _calc_queue_trade_id(g_user_id, league_id, opponent_user_id,
                                     give_ids, recv_ids)
+    queue_impression = _owned_impression_id(
+        body.get("impression_id"), g_user_id, league_id=league_id,
+        expected_trade_hash=_deck_trade_hash(give_ids, recv_ids, opponent_user_id))
 
     # Idempotency probe — BEFORE any signal or write. See the docstring.
     try:
@@ -14784,6 +15635,10 @@ def queue_trade_for_opponent():
     if card is None:
         return jsonify({"error": "bad_request"}), 400
     card = trade_service.record_decision(trade_id=trade_id, decision="like")
+    if queue_impression is not None:
+        _save_deck_outcome_safe(queue_impression, "like", acting_user_id=g_user_id,
+            dwell_ms=body.get("dwell_ms"), detail_expanded=body.get("detail_expanded"),
+            calc_opened=body.get("calc_opened"))
 
     # D-060 fit-congruence + the bake-off Elo freeze, computed exactly as
     # swipe_trade does. A queued card carries no `lane_shift` (there was no
@@ -14809,6 +15664,11 @@ def queue_trade_for_opponent():
             receive_player_ids = card.receive_player_ids,
             decision           = "like",
             queue_target_user_id = opponent.user_id,
+            **({"impression_id": queue_impression,
+                "trade_concept_id": _trade_policy.trade_concept_id(
+                    league_id=league_id, viewer_user_id=g_user_id,
+                    partner_user_id=opponent.user_id, viewer_gives=give_ids,
+                    viewer_receives=recv_ids)} if queue_impression is not None else {}),
         )
         if wrote_decision:
             save_trade_swipes(
@@ -14833,6 +15693,7 @@ def queue_trade_for_opponent():
                 # calculator, no client declaration needed. Keeps
                 # props.source one closed enum across both emitters.
                 "source":   "calculator",
+                **({"impression_id": queue_impression} if queue_impression is not None else {}),
             },
             **(getattr(g, "device_info", {}) or {}),
         )
@@ -17678,7 +18539,8 @@ def propose_trade_to_sleeper():
     maps to the deep-link fallback / reconnect prompt:
       404 feature_disabled | 403 verification_required | 409 sleeper_not_linked
       409 sleeper_expired | 503 sleeper_unconfigured | 502 sleeper_write_failed
-      422 sleeper_pick_unmapped | 422 sleeper_pick_not_owned | 400 bad_request
+      422 sleeper_pick_unmapped | 422 sleeper_pick_untradable (#428)
+      422 sleeper_pick_not_owned | 400 bad_request
     """
     if _TEST_MODE:
         # Fail closed: there is no legitimate automated send. Route-hit
@@ -17720,16 +18582,55 @@ def propose_trade_to_sleeper():
                 "receive_player_ids; the server encodes them.")
         return jsonify({"error": "bad_request", "message": _msg, "detail": _msg}), 400
 
+    # Request-local ledger id; a fresh client retry creates a fresh id.
+    # This does not provide cross-request provider-send idempotency.
+    payload, status = _sleeper_propose_core(
+        sess, league_id=league_id, their_user_id=their_user_id, give_ids=give, receive_ids=receive,
+        proposal_event_id=uuid.uuid4().hex,
+        source=(body.get("source") if body.get("source") in
+                ("deck", "match", "calculator") else "deck"),
+        impression_id=body.get("impression_id"), their_roster_id=their_roster_id_in)
+    return jsonify(payload), status
+
+
+def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
+                          proposal_event_id, source, impression_id=None,
+                          their_roster_id=None) -> tuple[dict, int]:
+    """The body of POST /api/trades/propose, callable without a request body.
+
+    Returns `(payload, http_status)` with the route's exact error codes. The
+    fail-closed test-mode check, the `trade.send_in_sleeper` flag and the
+    verified-session gate live HERE so every caller — the route and the
+    team-overhaul send loop (backend/overhaul_api.py) — inherits them. The
+    route wrapper repeats its own prefix checks first so its ordering is
+    byte-identical; on that path these re-checks are no-ops.
+    """
+    if _TEST_MODE:
+        return {"error": "test_mode_propose_disabled"}, 599
+    if not is_enabled("trade.send_in_sleeper"):
+        return {"error": "feature_disabled"}, 404
+    user_id = sess.get("user_id")
+    if not user_id:
+        return {"error": "no_user"}, 401
+    if not sess.get("verified"):
+        return {"error": "verification_required"}, 403
+    league_id = str(league_id or "").strip()
+    their_roster_id_in = their_roster_id
+    give = [str(p) for p in (give_ids or [])]
+    receive = [str(p) for p in (receive_ids or [])]
+    if not league_id.isdigit() or (their_user_id is None and their_roster_id_in is None):
+        return {"error": "bad_request"}, 400
+
     cred = get_sleeper_credential(user_id)
     if not cred:
-        return jsonify({"error": "sleeper_not_linked"}), 409
+        return {"error": "sleeper_not_linked"}, 409
     try:
         token = _sleeper_write.decrypt_token(cred["token_encrypted"])
     except _sleeper_write.SleeperWriteError:
-        return jsonify({"error": "sleeper_unconfigured"}), 503
+        return {"error": "sleeper_unconfigured"}, 503
     if _sleeper_write.is_expired(token):
         delete_sleeper_credential(user_id)
-        return jsonify({"error": "sleeper_expired"}), 409
+        return {"error": "sleeper_expired"}, 409
 
     # Resolve BOTH rosters server-authoritatively from one public rosters fetch:
     # mine from the linked Sleeper account, the counterparty's from their user_id
@@ -17737,16 +18638,16 @@ def propose_trade_to_sleeper():
     rosters = _fetch_league_rosters(league_id)
     my_roster_id = _roster_id_for_owner(rosters, cred.get("sleeper_user_id"))
     if my_roster_id is None:
-        return jsonify({"error": "roster_not_found"}), 400
+        return {"error": "roster_not_found"}, 400
     if their_roster_id_in is not None:
         try:
             their_rid = int(their_roster_id_in)
         except (TypeError, ValueError):
-            return jsonify({"error": "bad_request"}), 400
+            return {"error": "bad_request"}, 400
     else:
         their_rid = _roster_id_for_owner(rosters, their_user_id)
         if their_rid is None:
-            return jsonify({"error": "opponent_roster_not_found"}), 400
+            return {"error": "opponent_roster_not_found"}, 400
 
     # #413 — FTF's trade surfaces carry picks in the SAME arrays as players.
     # Split them out and encode owned picks server-side: existence is the
@@ -17768,30 +18669,41 @@ def propose_trade_to_sleeper():
         # never follow the `picks.assign_tradeable` pricing flag.
         grid_rows = load_draft_picks(league_id, source=PICK_SOURCE_PLATFORM)
         traded = _fetch_sleeper_traded_picks(league_id)
-        encoded, unmapped, not_owned = _sleeper_encode_ftf_picks(
-            league_id, give_picks, recv_picks, my_roster_id, their_rid, grid_rows, traded)
-        # `detail` == `message` on both: fielded builds render `detail` in
+        # #428 — third ground truth: Sleeper's tradable window. A spent
+        # current-season pick keeps its grid row (one flaked drafts read
+        # re-populates it) AND its traded_picks holder, so only the live
+        # `/drafts` read (+ the D-189 cached fallback) can refuse it before
+        # Sleeper does. Two more reads, again only on a pick-bearing send.
+        window = _sleeper_pick_window_for_send(
+            league_id, _fetch_sleeper_league_meta(league_id), traded)
+        encoded, unmapped, untradable, not_owned = _sleeper_encode_ftf_picks(
+            league_id, give_picks, recv_picks, my_roster_id, their_rid, grid_rows, traded,
+            window=window)
+        # `detail` == `message` on all three: fielded builds render `detail` in
         # their catch-all, so a refusal without it reads "Please try again".
         if unmapped:
             _msg = ("Some draft picks in this trade couldn’t be matched to a pick in this "
                     "Sleeper league, so nothing was sent. Generic picks like “Early 1st” "
                     "can’t be sent — use a specific pick.")
-            return jsonify({"error": "sleeper_pick_unmapped", "picks": unmapped,
-                            "message": _msg, "detail": _msg}), 422
+            return {"error": "sleeper_pick_unmapped", "picks": unmapped,
+                    "message": _msg, "detail": _msg}, 422
+        if untradable:
+            _msg = _sleeper_untradable_copy(untradable, grid_rows, window)
+            return {"error": "sleeper_pick_untradable", "picks": untradable,
+                    "season_window": list(window),
+                    "message": _msg, "detail": _msg}, 422
         if not_owned:
             _msg = ("Some draft picks in this trade have already changed hands, so nothing "
                     "was sent. Rebuild the trade and try again.")
-            return jsonify({"error": "sleeper_pick_not_owned", "picks": not_owned,
-                            "message": _msg, "detail": _msg}), 422
+            return {"error": "sleeper_pick_not_owned", "picks": not_owned,
+                    "message": _msg, "detail": _msg}, 422
 
     req = _sleeper_write.ProposeTradeRequest(
         league_id=league_id, my_roster_id=my_roster_id, their_roster_id=their_rid,
         give_player_ids=give_players, receive_player_ids=recv_players,
         draft_picks=encoded or None,
     )
-    # Request-local ledger id; a fresh client retry creates a fresh id.
-    # This does not provide cross-request provider-send idempotency.
-    _proposal_event_id = uuid.uuid4().hex
+    _proposal_event_id = proposal_event_id
     try:
         result = _sleeper_write.propose_trade(token, req)
     except _sleeper_write.SleeperAuthError as e:
@@ -17803,17 +18715,22 @@ def propose_trade_to_sleeper():
         # reconnecting) plus a short detail so we can see WHY Sleeper says no.
         log.warning("sleeper propose auth-rejected: %s", getattr(e, "detail", None))
         delete_sleeper_credential(user_id)
-        return jsonify({
+        return {
             "error": "sleeper_rejected",
             "detail": (str(getattr(e, "detail", "") or ""))[:200],
-        }), 409
+        }, 409
     except _sleeper_write.SleeperWriteError as e:
         log.warning("sleeper propose write-failed [%s]: %s", e.kind, getattr(e, "detail", None))
-        return jsonify({
+        # #428 — `detail` is Sleeper's own sentence since sleeper_write
+        # extracts the first GraphQL error `message`; `message` mirrors it so
+        # this body reads like the 422s (fielded builds render `detail`).
+        _detail = (str(getattr(e, "detail", "") or ""))[:200]
+        return {
             "error": "sleeper_write_failed",
             "kind": e.kind,
-            "detail": (str(getattr(e, "detail", "") or ""))[:200],
-        }), 502
+            "detail": _detail,
+            "message": _detail,
+        }, 502
     # A real outbound Sleeper send happened — the gating guardrail counter.
     # Unreachable under FTF_TEST_MODE (fail-closed above); the import is lazy
     # so normal operation never touches test_support.
@@ -17823,7 +18740,7 @@ def propose_trade_to_sleeper():
     # F1 (deck.signal_v2) — proposal-sent outcome when the deck card that
     # sourced this send carried an impression_id. Additive/optional; only
     # reached on a successful Sleeper propose.
-    _save_deck_outcome_safe(body.get("impression_id"), "propose",
+    _save_deck_outcome_safe(impression_id, "propose",
                             acting_user_id=user_id)
     # P0-7 — the send actually landed in Sleeper. This is the ONLY place
     # in the product that knows that, which is why the success leg is
@@ -17836,7 +18753,7 @@ def propose_trade_to_sleeper():
     _record_send_success(
         user_id, league_id, give_players, recv_players, encoded,
         result.get("transaction_id"),
-        bool(body.get("impression_id")),
+        bool(impression_id),
     )
     # ── Personal-market policy: durable proposal record ───────────────
     # Only reached on a CONFIRMED provider success — every failure branch
@@ -17848,16 +18765,15 @@ def propose_trade_to_sleeper():
         sess=sess, provider="sleeper", user_id=user_id,
         league_id=league_id, target_user_id=their_user_id or their_rid,
         give_asset_ids=give, receive_asset_ids=receive,
-        impression_id=_owned_impression_id(body.get("impression_id"), user_id, league_id=league_id),
+        impression_id=_owned_impression_id(impression_id, user_id, league_id=league_id),
         proposal_event_id=_proposal_event_id,
         provider_transaction_id=result.get("transaction_id"),
-        source=(body.get("source") if body.get("source") in
-                ("deck", "match", "calculator") else "deck"),
+        source=source,
     )
-    return jsonify({
+    return {
         "status": result.get("status") or "proposed",
         "transaction_id": result.get("transaction_id"),
-    })
+    }, 200
 
 
 @app.route("/api/account/reset-rankings", methods=["POST"])
@@ -21160,7 +22076,7 @@ def session_init():
         with _trade_jobs_lock:
             existing_id = _trade_jobs_by_key.get(pregen_key)
             existing    = _trade_jobs.get(existing_id) if existing_id else None
-            should_kickoff = (existing is None) or not _trade_presentation_matches(existing, presentation_capture) or (
+            should_kickoff = (existing is None) or not _trade_presentation_matches(existing, presentation_capture) or not _trade_significance_matches(existing) or (
                 existing.get("status") == "complete"
                 and (time.monotonic() - (existing.get("finished_at") or 0)) > _PREGEN_TTL_SECONDS
             )
@@ -21976,6 +22892,7 @@ def _replenish_deck_for(user_id: str, league_id: str) -> tuple[int, int] | None:
         if (job and job.get("status") == "complete"
                 and not job.get("is_pinned")
                 and _trade_presentation_matches(job, presentation_capture)
+                and _trade_significance_matches(job)
                 and (time.monotonic() - (job.get("finished_at") or 0))
                     <= _PREGEN_TTL_SECONDS):
             cards = list(job.get("cards") or [])   # cached deck still fresh
@@ -25783,28 +26700,35 @@ def _espn_member_id(league_id: str, team) -> str:
     return f"espn:{league_id}.t{team.team_id}"
 
 
-def _espn_error_response(e):
-    """Map an EspnError to a (json, status) response."""
+def _espn_error_payload(e) -> tuple[dict, int]:
+    """Map an EspnError to a (payload, status) pair — the jsonify-free form
+    the propose cores return."""
     kind = getattr(e, "kind", "http")
     if kind == "auth":
-        return jsonify({
+        return {
             "error": "espn_auth_required",
             "message": "ESPN wouldn't share this league — it's private or the "
                        "saved cookies expired. Paste fresh espn_s2 + SWID "
                        "cookies to continue.",
-        }), 403
+        }, 403
     if kind == "not_found":
-        return jsonify({
+        return {
             "error": "espn_league_not_found",
             "message": "ESPN has no league with that ID for that season. "
                        "ESPN purges old leagues — check the ID and season.",
-        }), 404
+        }, 404
     if kind == "input":
-        return jsonify({"error": "espn_bad_league_id",
-                        "message": "ESPN league IDs are numeric."}), 400
+        return {"error": "espn_bad_league_id",
+                "message": "ESPN league IDs are numeric."}, 400
     log.warning("espn fetch failed [%s]: %s", kind, e)
-    return jsonify({"error": "espn_unavailable",
-                    "message": "Couldn't reach ESPN — try again shortly."}), 502
+    return {"error": "espn_unavailable",
+            "message": "Couldn't reach ESPN — try again shortly."}, 502
+
+
+def _espn_error_response(e):
+    """Map an EspnError to a (json, status) response."""
+    payload, status = _espn_error_payload(e)
+    return jsonify(payload), status
 
 
 def _espn_import_payload(league_id: str, season: int, espn_s2: str | None,
@@ -28670,23 +29594,30 @@ def _platform_report_json(report: dict) -> dict:
     }
 
 
-def _platform_error_response(e, platform: str):
-    """Map an MflError/FleaflickerError to a (json, status) response."""
+def _platform_error_payload(e, platform: str) -> tuple[dict, int]:
+    """Map an MflError/FleaflickerError to a (payload, status) pair — the
+    jsonify-free form the propose cores return."""
     kind = getattr(e, "kind", "http")
     label = "MFL" if platform == "mfl" else "Fleaflicker"
     if kind == "auth":
-        return jsonify({"error": f"{platform}_auth_required",
-                        "message": f"{label} wouldn't share this league — it's "
-                                   "private or the credentials expired."}), 403
+        return {"error": f"{platform}_auth_required",
+                "message": f"{label} wouldn't share this league — it's "
+                           "private or the credentials expired."}, 403
     if kind == "not_found":
-        return jsonify({"error": f"{platform}_league_not_found",
-                        "message": f"{label} has no league with that ID."}), 404
+        return {"error": f"{platform}_league_not_found",
+                "message": f"{label} has no league with that ID."}, 404
     if kind == "input":
-        return jsonify({"error": f"{platform}_bad_league_id",
-                        "message": f"{label} league IDs are numeric."}), 400
+        return {"error": f"{platform}_bad_league_id",
+                "message": f"{label} league IDs are numeric."}, 400
     log.warning("%s fetch failed [%s]: %s", platform, kind, e)
-    return jsonify({"error": f"{platform}_unavailable",
-                    "message": f"Couldn't reach {label} — try again shortly."}), 502
+    return {"error": f"{platform}_unavailable",
+            "message": f"Couldn't reach {label} — try again shortly."}, 502
+
+
+def _platform_error_response(e, platform: str):
+    """Map an MflError/FleaflickerError to a (json, status) response."""
+    payload, status = _platform_error_payload(e, platform)
+    return jsonify(payload), status
 
 
 # ── MFL ─────────────────────────────────────────────────────────────────────
@@ -29413,16 +30344,23 @@ def trades_validate():
     recv_picks = [p for p in receive if _is_ftf_pick_asset(league_id, p)]
     if give_picks or recv_picks:
         # Literal platform read, same reason as the propose route (#328 precedent).
-        _, unmapped, not_owned = _sleeper_encode_ftf_picks(
+        grid_rows = load_draft_picks(league_id, source=PICK_SOURCE_PLATFORM)
+        traded = _fetch_sleeper_traded_picks(league_id)
+        # #428 — the tradable window; `meta` is already in hand here, so this
+        # is one extra `/drafts` read, only on a pick-bearing validate.
+        window = _sleeper_pick_window_for_send(league_id, meta, traded)
+        _, unmapped, untradable, not_owned = _sleeper_encode_ftf_picks(
             league_id, give_picks, recv_picks, my_rid, their_rid,
-            load_draft_picks(league_id, source=PICK_SOURCE_PLATFORM),
-            _fetch_sleeper_traded_picks(league_id))
+            grid_rows, traded, window=window)
         if unmapped:
             n = len(unmapped)
             warnings.append({"code": "asset_unmapped", "severity": "blocking", "message": (
                 f"{n} draft pick{'s' if n != 1 else ''} in this trade can’t be sent to Sleeper "
                 "(generic picks like “Early 1st” name no real pick) — the send will be blocked "
                 f"rather than dropping {'them' if n != 1 else 'it'}.")})
+        if untradable:
+            warnings.append({"code": "pick_untradable", "severity": "blocking",
+                             "message": _sleeper_untradable_copy(untradable, grid_rows, window)})
         if not_owned:
             n = len(not_owned)
             warnings.append({"code": "pick_moved", "severity": "blocking", "message": (
@@ -29606,10 +30544,14 @@ def _mfl_encode_ftf_picks(row, league_id: str, pick_ids: list) -> tuple[dict, li
 # not a Sleeper roster id, and is not proof a Sleeper pick exists), and the
 # current holder is the live public `traded_picks` list overlaid on
 # "original roster holds by default". The give side must be held by the
-# proposer's roster, the receive side by the counterparty's. Anything that
-# can't be positively resolved — generic rungs included — hard-blocks the
-# send (422 sleeper_pick_unmapped / sleeper_pick_not_owned); the validate
-# route reports the same misses as blocking advisories. The encoding itself
+# proposer's roster, the receive side by the counterparty's. Since #428 a
+# THIRD truth sits between them: Sleeper's tradable window
+# (draft_status.sleeper_pick_window off the live `/drafts` read) — a spent
+# class keeps both its grid row and its traded_picks holder, so neither of
+# the first two can refuse it. Anything that can't be positively resolved —
+# generic rungs included — hard-blocks the send (422 sleeper_pick_unmapped /
+# sleeper_pick_untradable / sleeper_pick_not_owned); the validate route
+# reports the same misses as blocking advisories. The encoding itself
 # lives in sleeper_write.encode_draft_pick; NEVER a client-supplied string.
 
 def _sleeper_pick_holder_index(traded_picks: list) -> dict:
@@ -29632,13 +30574,21 @@ def _sleeper_pick_holder_index(traded_picks: list) -> dict:
 
 def _sleeper_encode_ftf_picks(league_id: str, give_picks: list, recv_picks: list,
                               my_rid: int, their_rid: int,
-                              grid_rows: list, traded_picks: list
-                              ) -> tuple[list, list, list]:
-    """FTF pick ids → Sleeper draft_picks strings, ground-truthed twice.
-    Returns (encoded, unmapped, not_owned). A pick lands in exactly one of the
-    three; `encoded` preserves give-then-receive order. The propose route
-    hard-blocks on either failure list (an offer must never silently lose an
-    asset); the validate route reports them as blocking advisories."""
+                              grid_rows: list, traded_picks: list,
+                              window: tuple[int, int] | None = None
+                              ) -> tuple[list, list, list, list]:
+    """FTF pick ids → Sleeper draft_picks strings, ground-truthed three ways.
+    Returns (encoded, unmapped, untradable, not_owned). A pick lands in
+    exactly one of the four; `encoded` preserves give-then-receive order. The
+    propose route hard-blocks on any failure list (an offer must never
+    silently lose an asset); the validate route reports them as blocking
+    advisories.
+
+    `window` (#428) is `draft_status.sleeper_pick_window(...)` — the classes
+    Sleeper will accept right now. Checked after the grid lookup (the row
+    proves the pick exists) and before the holder test (a spent pick's holder
+    is meaningless). None abstains: nothing is ever untradable on a window we
+    could not derive."""
     # One membership test covers every existence failure: generic rungs,
     # another league's id, a malformed id, a phantom / out-of-horizon /
     # completed-draft season, a round beyond draft_rounds — none has a row.
@@ -29646,6 +30596,7 @@ def _sleeper_encode_ftf_picks(league_id: str, give_picks: list, recv_picks: list
     index = _sleeper_pick_holder_index(traded_picks)
     encoded: list = []
     unmapped: list = []
+    untradable: list = []
     not_owned: list = []
     # Every roster-id COMPARISON is int vs int; `str` appears only inside the
     # holder-index key because the grid column is a String.
@@ -29660,10 +30611,17 @@ def _sleeper_encode_ftf_picks(league_id: str, give_picks: list, recv_picks: list
         try:
             season, rnd = int(row["season"]), int(row["round"])
             orig = str(row["original_roster_id"])
+        except (TypeError, ValueError, KeyError):
+            unmapped.append(pid)
+            continue
+        if not _draft_status_mod.sleeper_pick_tradable(season, window):
+            untradable.append(pid)
+            continue
+        try:
             holder = index.get((season, rnd, orig))
             if holder is None:
                 holder = int(orig)          # original roster holds by default
-        except (TypeError, ValueError, KeyError):
+        except (TypeError, ValueError):
             unmapped.append(pid)
             continue
         if holder != from_rid:
@@ -29674,7 +30632,43 @@ def _sleeper_encode_ftf_picks(league_id: str, give_picks: list, recv_picks: list
                 orig, season, rnd, from_rid, to_rid))
         except ValueError:
             unmapped.append(pid)
-    return encoded, unmapped, not_owned
+    return encoded, unmapped, untradable, not_owned
+
+
+def _sleeper_pick_window_for_send(league_id: str, meta, traded_picks: list
+                                  ) -> tuple[int, int] | None:
+    """#428 — the tradable window for a pick-bearing send/validate: one live
+    `/drafts` read (only ever called when the trade carries a pick), the
+    cached #207 verdict as the D-189 fallback when that read is empty, the
+    league's season from `meta`. None (abstain) when the season is unknown."""
+    season = (meta or {}).get("season") if isinstance(meta, dict) else None
+    drafts = _fetch_sleeper_drafts(league_id)
+    cached = _sleeper_cached_draft_verdict(league_id) if not drafts else None
+    return _draft_status_mod.sleeper_pick_window(
+        season, drafts, traded_picks, cached_verdict=cached)
+
+
+def _sleeper_untradable_copy(untradable: list, grid_rows: list,
+                             window: tuple[int, int]) -> str:
+    """The one sentence both routes show for a spent / out-of-window pick.
+    Count-aware like #413's copy; names the offending seasons and Sleeper's
+    current window so the user knows what to rebuild with. `window` is never
+    None here: `sleeper_pick_tradable` abstains on a None window, so
+    `untradable` is empty and neither route reaches this."""
+    grid = {str(r.get("pick_id")): r for r in (grid_rows or [])}
+    seasons: set[int] = set()
+    for pid in untradable:
+        try:
+            seasons.add(int(grid[str(pid)]["season"]))
+        except (TypeError, ValueError, KeyError):
+            continue
+    n = len(untradable)
+    ss = [str(s) for s in sorted(seasons)]
+    season_list = (" and ".join(ss) if len(ss) == 2 else ", ".join(ss)) or "Those"
+    first, last = window
+    return (f"{n} draft pick{'s' if n != 1 else ''} in this trade can’t be traded in "
+            f"Sleeper right now — {season_list} picks are no longer tradable (Sleeper is "
+            f"trading {first}–{last} picks). Rebuild the trade with one of those.")
 
 
 def _validate_mfl_trade(sess, user_id, row, league_id, their_user_id,
@@ -29840,65 +30834,108 @@ def propose_trade_to_mfl():
                     "reason=hard_route", user_id, request.method, request.path)
         return jsonify({"error": "verification_required"}), 403
 
+    body = request.get_json(force=True) or {}
+    # Request-local ledger id; a fresh client retry creates a fresh id.
+    # This does not provide cross-request provider-send idempotency.
+    payload, status = _mfl_propose_core(
+        sess, league_id=str(body.get("league_id") or "").strip(),
+        their_user_id=body.get("their_user_id"),
+        give_ids=[str(p) for p in (body.get("give_player_ids") or [])],
+        receive_ids=[str(p) for p in (body.get("receive_player_ids") or [])],
+        proposal_event_id=uuid.uuid4().hex,
+        source=(body.get("source") if body.get("source") in
+                ("deck", "match", "calculator") else "deck"),
+        impression_id=body.get("impression_id"),
+        their_franchise_id=body.get("their_franchise_id"),
+        give_pick_assets=[str(p) for p in (body.get("give_pick_assets") or [])],
+        receive_pick_assets=[str(p) for p in (body.get("receive_pick_assets") or [])],
+        comments=body.get("comments"), expires=body.get("expires"))
+    return jsonify(payload), status
+
+
+def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
+                      proposal_event_id, source, impression_id=None,
+                      their_franchise_id=None, give_pick_assets=None,
+                      receive_pick_assets=None, comments=None,
+                      expires=None) -> tuple[dict, int]:
+    """The body of POST /api/trades/propose-mfl, callable without a request body.
+
+    Returns `(payload, http_status)` with the route's exact error codes. The
+    fail-closed test-mode check, the `trade.send_in_mfl` flag and the
+    verified-session gate live HERE so every caller — the route and the
+    team-overhaul send loop (backend/overhaul_api.py) — inherits them. The
+    route wrapper repeats its own prefix checks first so its ordering is
+    byte-identical; on that path these re-checks are no-ops. Extracted
+    2026-09-07 exactly the way `_sleeper_propose_core` was.
+    """
+    if _TEST_MODE:
+        return {"error": "test_mode_propose_disabled"}, 599
+    if not is_enabled("trade.send_in_mfl"):
+        return {"error": "feature_disabled"}, 404
+    user_id = sess.get("user_id")
+    if not user_id:
+        return {"error": "no_user"}, 401
+    if not sess.get("verified"):
+        return {"error": "verification_required"}, 403
+
     from . import mfl_service as _mfl
     from . import mfl_write as _mfl_write
     from .database import get_platform_league, delete_mfl_credential
 
-    body = request.get_json(force=True) or {}
-    league_id = str(body.get("league_id") or "").strip()
-    their_member_id = body.get("their_user_id")
-    their_franchise_in = body.get("their_franchise_id")
-    give = [str(p) for p in (body.get("give_player_ids") or [])]
-    receive = [str(p) for p in (body.get("receive_player_ids") or [])]
-    give_picks = [str(p) for p in (body.get("give_pick_assets") or [])]
-    receive_picks = [str(p) for p in (body.get("receive_pick_assets") or [])]
+    league_id = str(league_id or "").strip()
+    their_member_id = their_user_id
+    their_franchise_in = their_franchise_id
+    give = [str(p) for p in (give_ids or [])]
+    receive = [str(p) for p in (receive_ids or [])]
+    give_picks = [str(p) for p in (give_pick_assets or [])]
+    receive_picks = [str(p) for p in (receive_pick_assets or [])]
     if not league_id.isdigit() or \
             (their_member_id is None and their_franchise_in is None):
-        return jsonify({"error": "bad_request"}), 400
+        return {"error": "bad_request"}, 400
     if not (give or receive or give_picks or receive_picks):
-        return jsonify({"error": "bad_request"}), 400
+        return {"error": "bad_request"}, 400
     for p in give_picks + receive_picks:
         if not _mfl_write.is_pick_asset_id(p):
-            return jsonify({"error": "bad_request",
-                            "message": f"bad pick asset encoding: {p}"}), 400
+            return {"error": "bad_request",
+                            "message": f"bad pick asset encoding: {p}"}, 400
 
     # Server-authoritative platform + franchise resolution from the leagues
     # row — the client never asserts its own franchise id.
     row = get_platform_league(league_id, "mfl")
     if not row:
-        return jsonify({"error": "mfl_not_linked",
-                        "message": "Link this MFL league first."}), 404
+        return {"error": "mfl_not_linked",
+                        "message": "Link this MFL league first."}, 404
     if str(row.get("user_id") or "") != str(user_id):
         # One linker per platform-league row; only the linker has a franchise
         # binding, so nobody else can send from it.
-        return jsonify({"error": "mfl_not_linked",
+        return {"error": "mfl_not_linked",
                         "message": "This MFL league isn't linked to your "
-                                   "account."}), 404
+                                   "account."}, 404
     my_fid = str(row.get("platform_my_team") or "").strip()
     if not my_fid:
-        return jsonify({"error": "mfl_franchise_unknown",
+        return {"error": "mfl_franchise_unknown",
                         "message": "Couldn't determine your franchise — "
-                                   "re-link this league."}), 409
+                                   "re-link this league."}, 409
 
     their_fid = (str(their_franchise_in).strip() if their_franchise_in is not None
                  else _mfl_franchise_from_member_id(league_id, their_member_id))
     if not their_fid or not str(their_fid).isdigit():
-        return jsonify({"error": "bad_request",
+        return {"error": "bad_request",
                         "message": "Couldn't resolve the counterparty "
-                                   "franchise."}), 400
+                                   "franchise."}, 400
     try:
         if (_mfl_write.normalize_franchise_id(their_fid)
                 == _mfl_write.normalize_franchise_id(my_fid)):
-            return jsonify({"error": "bad_request",
+            return {"error": "bad_request",
                             "message": "You can't send a trade to your own "
-                                       "franchise."}), 400
+                                       "franchise."}, 400
     except _mfl_write.MflWriteError:
-        return jsonify({"error": "bad_request"}), 400
+        return {"error": "bad_request"}, 400
 
     cookie = _mfl_cookie_for(sess, user_id)
     if not cookie:
-        return jsonify({"error": "mfl_not_connected",
-                        "message": "Sign in with MFL first."}), 409
+        return {"error": "mfl_not_connected",
+                        "message": "Sign in with MFL first."}, 409
 
     # FTF's trade surfaces carry picks in the same arrays as players — split
     # them out so each class maps through its own ground truth.
@@ -29919,10 +30956,10 @@ def propose_trade_to_mfl():
     unmapped = ([p for p in give_players + recv_players if p not in inverse]
                 + pick_unmapped)
     if unmapped:
-        return jsonify({"error": "mfl_asset_unmapped",
+        return {"error": "mfl_asset_unmapped",
                         "unmapped": unmapped,
                         "message": "Some assets couldn't be matched to MFL "
-                                   "asset ids, so nothing was sent."}), 422
+                                   "asset ids, so nothing was sent."}, 422
 
     year = int(row.get("platform_season") or _MFL_DEFAULT_YEAR)
     host = row.get("platform_host")
@@ -29930,9 +30967,8 @@ def propose_trade_to_mfl():
         if not host:
             host = _mfl.resolve_host(league_id, year)
     except _mfl.MflError as e:
-        return _platform_error_response(e, "mfl")
+        return _platform_error_payload(e, "mfl")
 
-    expires = body.get("expires")
     req = _mfl_write.ProposeTradeRequest(
         league_id=league_id,
         offered_to=their_fid,
@@ -29942,12 +30978,12 @@ def propose_trade_to_mfl():
         will_receive=([inverse[p] for p in recv_players]
                       + [pick_encoded[p] for p in recv_ftf_picks]
                       + receive_picks),
-        comments=(str(body.get("comments") or "").strip() or None),
+        comments=(str(comments or "").strip() or None),
         expires=int(expires) if expires is not None else None,
     )
     # Request-local ledger id; a fresh client retry creates a fresh id.
     # This does not provide cross-request provider-send idempotency.
-    _proposal_event_id = uuid.uuid4().hex
+    _proposal_event_id = proposal_event_id
     try:
         result = _mfl_write.propose_trade(cookie, host, year, req)
     except _mfl_write.MflWriteAuthError as e:
@@ -29959,23 +30995,23 @@ def propose_trade_to_mfl():
         except Exception:
             log.exception("mfl propose: credential delete failed")
         sess.pop("mfl_cookie", None)
-        return jsonify({
+        return {
             "error": "mfl_auth_expired",
             "message": "Your MFL sign-in expired — sign in again.",
             "detail": (str(getattr(e, "detail", "") or ""))[:200],
-        }), 409
+        }, 409
     except _mfl_write.MflWriteError as e:
         log.warning("mfl propose write-failed [%s]: %s", e.kind,
                     getattr(e, "detail", None))
-        return jsonify({
+        return {
             "error": "mfl_write_failed",
             "kind": e.kind,
             "detail": (str(getattr(e, "detail", "") or ""))[:200],
-        }), 502
+        }, 502
 
     # F1 (deck.signal_v2) — same proposal-sent outcome hook as the Sleeper
     # route; additive/optional, only reached on a successful MFL import.
-    _save_deck_outcome_safe(body.get("impression_id"), "propose",
+    _save_deck_outcome_safe(impression_id, "propose",
                             acting_user_id=user_id)
     # trade_sent (server-fired, taxonomy 2026-08-11) — confirmed-success
     # only; every failure branch (incl. the mfl_asset_unmapped hard block)
@@ -30004,16 +31040,15 @@ def propose_trade_to_mfl():
         sess=sess, provider="mfl", user_id=user_id,
         league_id=league_id, target_user_id=their_member_id or their_fid,
         give_asset_ids=give + give_picks, receive_asset_ids=receive + receive_picks,
-        impression_id=_owned_impression_id(body.get("impression_id"), user_id, league_id=league_id),
+        impression_id=_owned_impression_id(impression_id, user_id, league_id=league_id),
         proposal_event_id=_proposal_event_id,
         provider_transaction_id=None,
-        source=(body.get("source") if body.get("source") in
-                ("deck", "match", "calculator") else "deck"),
+        source=source,
     )
     log.info("mfl propose: user=%s league=%s offered_to=f%s assets=%d/%d",
              user_id, league_id, their_fid,
              len(give) + len(give_picks), len(receive) + len(receive_picks))
-    return jsonify({"status": "proposed", "mfl_status": result.get("status")})
+    return {"status": "proposed", "mfl_status": result.get("status")}, 200
 
 
 @app.route("/api/trades/respond-mfl", methods=["POST"])
@@ -30310,54 +31345,94 @@ def propose_trade_to_espn():
                     "reason=hard_route", user_id, request.method, request.path)
         return jsonify({"error": "verification_required"}), 403
 
+    body = request.get_json(force=True) or {}
+    # Request-local ledger id; a fresh client retry creates a fresh id.
+    # This does not provide cross-request provider-send idempotency.
+    payload, status = _espn_propose_core(
+        sess, league_id=str(body.get("league_id") or "").strip(),
+        their_user_id=body.get("their_user_id"),
+        give_ids=[str(p) for p in (body.get("give_player_ids") or [])],
+        receive_ids=[str(p) for p in (body.get("receive_player_ids") or [])],
+        proposal_event_id=uuid.uuid4().hex,
+        source=(body.get("source") if body.get("source") in
+                ("deck", "match", "calculator") else "deck"),
+        impression_id=body.get("impression_id"),
+        their_team_id=body.get("their_team_id"), comments=body.get("comments"))
+    return jsonify(payload), status
+
+
+def _espn_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
+                       proposal_event_id, source, impression_id=None,
+                       their_team_id=None, comments=None) -> tuple[dict, int]:
+    """The body of POST /api/trades/propose-espn, callable without a request body.
+
+    Returns `(payload, http_status)` with the route's exact error codes. The
+    fail-closed test-mode check, the `espn.send` flag and the verified-session
+    gate live HERE so every caller — the route and the team-overhaul send
+    loop (backend/overhaul_api.py) — inherits them. The route wrapper repeats
+    its own prefix checks first so its ordering is byte-identical; on that
+    path these re-checks are no-ops. Extracted 2026-09-07 exactly the way
+    `_sleeper_propose_core` was. Picks still hard-block here (422
+    `espn_pick_unsupported`); the overhaul refuses them earlier, at
+    prepare-send, so nothing is half-sent.
+    """
+    if _TEST_MODE:
+        return {"error": "test_mode_propose_disabled"}, 599
+    if not is_enabled("espn.send"):
+        return {"error": "feature_disabled"}, 404
+    user_id = sess.get("user_id")
+    if not user_id:
+        return {"error": "no_user"}, 401
+    if not sess.get("verified"):
+        return {"error": "verification_required"}, 403
+
     from . import espn_service as _espn
     from . import espn_write as _espn_write
     from .database import (get_espn_league, get_espn_credential,
                            delete_espn_credential)
 
-    body = request.get_json(force=True) or {}
-    league_id = str(body.get("league_id") or "").strip()
-    their_member_id = body.get("their_user_id")
-    their_team_in = body.get("their_team_id")
-    give = [str(p) for p in (body.get("give_player_ids") or [])]
-    receive = [str(p) for p in (body.get("receive_player_ids") or [])]
+    league_id = str(league_id or "").strip()
+    their_member_id = their_user_id
+    their_team_in = their_team_id
+    give = [str(p) for p in (give_ids or [])]
+    receive = [str(p) for p in (receive_ids or [])]
     if not league_id.isdigit() or \
             (their_member_id is None and their_team_in is None):
-        return jsonify({"error": "bad_request"}), 400
+        return {"error": "bad_request"}, 400
     if not (give or receive):
-        return jsonify({"error": "bad_request"}), 400
+        return {"error": "bad_request"}, 400
 
     # Server-authoritative platform + team resolution from the leagues row —
     # the client never asserts its own team id.
     row = get_espn_league(league_id)
     if not row:
-        return jsonify({"error": "espn_not_linked",
-                        "message": "Link this ESPN league first."}), 404
+        return {"error": "espn_not_linked",
+                        "message": "Link this ESPN league first."}, 404
     if str(row.get("user_id") or "") != str(user_id):
         # One linker per ESPN league row; only the linker has a team binding,
         # so nobody else can send from it.
-        return jsonify({"error": "espn_not_linked",
+        return {"error": "espn_not_linked",
                         "message": "This ESPN league isn't linked to your "
-                                   "account."}), 404
+                                   "account."}, 404
     my_team_id = row.get("espn_my_team_id")
     if my_team_id is None:
-        return jsonify({"error": "espn_team_unknown",
+        return {"error": "espn_team_unknown",
                         "message": "Couldn't determine your team — re-link "
-                                   "this league."}), 409
+                                   "this league."}, 409
 
     # A write ALWAYS needs the cookie pair, even for a public-league link.
     cred = get_espn_credential(user_id)
     swid = (cred or {}).get("swid")
     if not cred or not swid:
-        return jsonify({"error": "espn_not_connected",
-                        "message": "Connect your ESPN account first."}), 409
+        return {"error": "espn_not_connected",
+                        "message": "Connect your ESPN account first."}, 409
     try:
         espn_s2 = _sleeper_write.decrypt_token(cred["espn_s2_encrypted"])
     except Exception:
         log.warning("espn propose: stored cookie undecryptable for %s", user_id)
-        return jsonify({"error": "espn_not_connected",
+        return {"error": "espn_not_connected",
                         "message": "Your saved ESPN sign-in couldn't be read "
-                                   "— connect ESPN again."}), 409
+                                   "— connect ESPN again."}, 409
 
     # PICKS HARD-BLOCK (players only). This is PERMANENT, not a TODO.
     #
@@ -30375,10 +31450,10 @@ def propose_trade_to_espn():
     # never silently dropped.
     picks = [p for p in give + receive if _is_ftf_pick_asset(league_id, p)]
     if picks:
-        return jsonify({"error": "espn_pick_unsupported",
+        return {"error": "espn_pick_unsupported",
                         "picks": picks,
                         "message": "Draft picks can't be sent to ESPN yet, "
-                                   "so nothing was sent."}), 422
+                                   "so nothing was sent."}, 422
 
     # Player mapping — HARD BLOCK on any miss. An offer must never silently
     # drop an asset: a partially-mapped trade is a DIFFERENT trade, so the
@@ -30386,10 +31461,10 @@ def propose_trade_to_espn():
     inverse = _sleeper_to_espn_map()
     unmapped = [p for p in give + receive if p not in inverse]
     if unmapped:
-        return jsonify({"error": "espn_asset_unmapped",
+        return {"error": "espn_asset_unmapped",
                         "unmapped": unmapped,
                         "message": "Some assets couldn't be matched to ESPN "
-                                   "player ids, so nothing was sent."}), 422
+                                   "player ids, so nothing was sent."}, 422
 
     # Pre-flight league read (the same authenticated read the importer uses):
     # resolves the counterparty's teamId against LIVE team data, yields the
@@ -30406,38 +31481,38 @@ def propose_trade_to_espn():
             delete_espn_credential(user_id)
         except Exception:
             log.exception("espn propose: credential delete failed")
-        return jsonify({
+        return {
             "error": "espn_auth_expired",
             "message": "Your ESPN sign-in expired — connect ESPN again.",
-        }), 409
+        }, 409
     except _espn.EspnError as e:
-        return _espn_error_response(e)
+        return _espn_error_payload(e)
     league = _espn.parse_league(raw)
     teams = league["teams"]
     if not any(t.team_id == int(my_team_id) for t in teams):
-        return jsonify({"error": "espn_team_unknown",
+        return {"error": "espn_team_unknown",
                         "message": "Your team is no longer in this ESPN "
-                                   "league — re-link it."}), 409
+                                   "league — re-link it."}, 409
 
     if their_team_in is not None:
         try:
             their_team_id = int(their_team_in)
         except (TypeError, ValueError):
-            return jsonify({"error": "bad_request"}), 400
+            return {"error": "bad_request"}, 400
         if not any(t.team_id == their_team_id for t in teams):
-            return jsonify({"error": "bad_request",
-                            "message": "That team isn't in this league."}), 400
+            return {"error": "bad_request",
+                            "message": "That team isn't in this league."}, 400
     else:
         their_team_id = _espn_team_id_from_member_id(league_id,
                                                      their_member_id, teams)
         if their_team_id is None:
-            return jsonify({"error": "bad_request",
+            return {"error": "bad_request",
                             "message": "Couldn't resolve the counterparty "
-                                       "team."}), 400
+                                       "team."}, 400
     if int(their_team_id) == int(my_team_id):
-        return jsonify({"error": "bad_request",
+        return {"error": "bad_request",
                         "message": "You can't send a trade to your own "
-                                   "team."}), 400
+                                   "team."}, 400
 
     req = _espn_write.EspnTradeProposalRequest(
         league_id=league_id,
@@ -30449,11 +31524,11 @@ def propose_trade_to_espn():
         receive_espn_player_ids=[int(inverse[p]) for p in receive],
         scoring_period_id=_espn_write.current_scoring_period(raw),
         lineup_slots=_espn_write.extract_lineup_slots(raw),
-        comment=(str(body.get("comments") or "").strip()),
+        comment=(str(comments or "").strip()),
     )
     # Request-local ledger id; a fresh client retry creates a fresh id.
     # This does not provide cross-request provider-send idempotency.
-    _proposal_event_id = uuid.uuid4().hex
+    _proposal_event_id = proposal_event_id
     try:
         result = _espn_write.propose_trade(espn_s2, swid, req)
     except _espn_write.EspnWriteAuthError as e:
@@ -30465,23 +31540,23 @@ def propose_trade_to_espn():
             delete_espn_credential(user_id)
         except Exception:
             log.exception("espn propose: credential delete failed")
-        return jsonify({
+        return {
             "error": "espn_auth_expired",
             "message": "ESPN rejected the sign-in — connect ESPN again.",
             "detail": (str(getattr(e, "detail", "") or ""))[:200],
-        }), 409
+        }, 409
     except _espn_write.EspnWriteError as e:
         log.warning("espn propose write-failed [%s]: %s", e.kind,
                     getattr(e, "detail", None))
-        return jsonify({
+        return {
             "error": "espn_write_failed",
             "kind": e.kind,
             "detail": (str(getattr(e, "detail", "") or ""))[:200],
-        }), 502
+        }, 502
 
     # F1 (deck.signal_v2) — same proposal-sent outcome hook as the Sleeper/MFL
     # routes; additive/optional, only reached on a successful ESPN write.
-    _save_deck_outcome_safe(body.get("impression_id"), "propose",
+    _save_deck_outcome_safe(impression_id, "propose",
                             acting_user_id=user_id)
     # trade_sent (server-fired, taxonomy 2026-08-11, rescoped to non-Sleeper
     # platforms only) — confirmed-success ONLY; every failure branch (incl.
@@ -30510,17 +31585,16 @@ def propose_trade_to_espn():
         sess=sess, provider="espn", user_id=user_id,
         league_id=league_id, target_user_id=their_member_id or their_team_id,
         give_asset_ids=give, receive_asset_ids=receive,
-        impression_id=_owned_impression_id(body.get("impression_id"), user_id, league_id=league_id),
+        impression_id=_owned_impression_id(impression_id, user_id, league_id=league_id),
         proposal_event_id=_proposal_event_id,
         provider_transaction_id=result.get("transaction_id"),
-        source=(body.get("source") if body.get("source") in
-                ("deck", "match", "calculator") else "deck"),
+        source=source,
     )
     log.info("espn propose: user=%s league=%s to_team=%s assets=%d/%d",
              user_id, league_id, their_team_id, len(give), len(receive))
-    return jsonify({"status": "proposed",
-                    "transaction_id": result.get("transaction_id"),
-                    "espn_status": result.get("status")})
+    return {"status": "proposed",
+            "transaction_id": result.get("transaction_id"),
+            "espn_status": result.get("status")}, 200
 
 
 # ── Fleaflicker ──────────────────────────────────────────────────────────────
@@ -30741,6 +31815,87 @@ _install_win_now(app, require_session=_require_initialized_session,
                  pool_provider=_get_universal_pool, fetch_json=_sleeper_get)
 from . import win_now_service as _win_now_service
 _win_now_service.start_worker_on_startup(_sleeper_get)
+
+# Team overhaul (docs/plans/team-overhaul/BUILD-CONTRACT.md §3) — same seam
+# as Win Now: routes live in overhaul_api, server-private helpers are injected.
+def _overhaul_platform_rosters(sess, league_id: str, platform: str):
+    """Fresh rosters for a linked MFL / ESPN league, in the Sleeper-style
+    `[{roster_id, owner_id, players}]` shape `_fetch_league_rosters` returns,
+    or None when no fresh read is possible (the overhaul snapshot then falls
+    back to the session, stamps `roster_source: session`, and refresh refuses
+    to terminalize an attempt on it).
+
+    Runs the SAME fetch + crosswalk the import wrote `league_members` with
+    (`_mfl_import_league_authed` / `_espn_import_payload`) so a fresh read and
+    the session agree on player identity — an id-only read would report a
+    name-matched player as "gone". Persists nothing. Member ids follow the
+    import: the linker's own team is `user_id`, every other team the synthetic
+    `mfl:{L}.f{FID}` / `espn:{SWID}` id. Credentials never leave this function.
+    """
+    user_id = str(sess.get("user_id") or "")
+    if not user_id or not str(league_id).isdigit():
+        return None
+    try:
+        if platform == "mfl":
+            from . import mfl_service as _mfl
+            from .database import get_platform_league
+            row = get_platform_league(league_id, "mfl")
+            if not row or str(row.get("user_id") or "") != user_id:
+                return None
+            my_fid = str(row.get("platform_my_team") or "").strip()
+            year = int(row.get("platform_season") or _MFL_DEFAULT_YEAR)
+            host = row.get("platform_host") or _mfl.resolve_host(league_id, year)
+            raw = _mfl.fetch_league_bundle(league_id, year, host,
+                                           cookie=_mfl_cookie_for(sess, user_id))
+            parsed = _mfl.parse_bundle(raw)
+            rosters = _mfl.map_franchises(parsed, _shared_crosswalk())["rosters"]
+            return [{"roster_id": fr["franchise_id"],
+                     "owner_id": (user_id if fr["franchise_id"] == my_fid
+                                  else _mfl_member_id(league_id, fr["franchise_id"])),
+                     "players": list(rosters.get(fr["franchise_id"], []))}
+                    for fr in parsed["franchises"]]
+        if platform == "espn":
+            from .database import get_espn_league, get_espn_credential
+            row = get_espn_league(league_id)
+            if not row or str(row.get("user_id") or "") != user_id:
+                return None
+            my_team_id = row.get("espn_my_team_id")
+            cred = get_espn_credential(user_id) or {}
+            espn_s2 = swid = None
+            if cred.get("swid") and cred.get("espn_s2_encrypted"):
+                espn_s2 = _sleeper_write.decrypt_token(cred["espn_s2_encrypted"])
+                swid = cred["swid"]
+            season = int(row.get("espn_season") or _ESPN_DEFAULT_SEASON)
+            league, mapped = _espn_import_payload(league_id, season, espn_s2, swid)
+            return [{"roster_id": t.team_id,
+                     "owner_id": (user_id if t.team_id == my_team_id
+                                  else _espn_member_id(league_id, t)),
+                     "players": list(mapped["rosters"].get(t.team_id, []))}
+                    for t in league["teams"]]
+    except Exception as exc:
+        log.warning("overhaul: fresh %s roster read failed for league %s: %s",
+                    platform, league_id, exc)
+    return None
+
+
+from .overhaul_api import install as _install_overhaul
+from .trade_gen_owner import generate_owner_trades as _overhaul_generate
+_install_overhaul(app, require_session=_require_initialized_session,
+                  read_denial=_verified_read_denial, write_denial=_verified_write_denial,
+                  active_format=_active_format, league_user_id=_league_user_id,
+                  owner_generation_context=_owner_generation_context, generate=_overhaul_generate,
+                  roster_context=_build_trade_roster_context, sleeper_propose=_sleeper_propose_core,
+                  mfl_propose=_mfl_propose_core, espn_propose=_espn_propose_core,
+                  mfl_credential=get_mfl_credential, espn_credential=get_espn_credential,
+                  platform_rosters=_overhaul_platform_rosters,
+                  fetch_rosters=_fetch_league_rosters, roster_id_for_owner=_roster_id_for_owner,
+                  load_picks=load_draft_picks, pick_source_platform=PICK_SOURCE_PLATFORM,
+                  draft_context=get_league_draft_context, card_to_dict=trade_card_to_dict,
+                  is_pick_asset=_is_ftf_pick_asset, owned_picks_available=_owned_picks_available,
+                  inject_owned_picks=_inject_owned_picks, pick_label=_owned_pick_label,
+                  slot_order=_league_slot_order, priced_pick_value=_priced_pick_value,
+                  elo_to_value=_trade_service_mod.elo_to_value, sleeper_credential=get_sleeper_credential,
+                  sleeper_write=_sleeper_write, record_event=record_event, fetch_json=_sleeper_get)
 
 
 if __name__ == "__main__":

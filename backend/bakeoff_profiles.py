@@ -99,6 +99,15 @@ MODEL_A_PROFILE: dict[str, float] = {
     # is deliberately absent — _package_value_market never reads it while
     # the benchmark knob is ≤ 0 (same rule as `max_overpay_min_value`).
     "package_bench_trade_wide":  0.0,   # own-max benchmark (pre-fix math)
+    # #427 first-round stud-tax exemption — 2026-09-08. Post-dates the
+    # reference SHA and re-prices every multi-asset side holding a first
+    # inside generation (the consensus/v3/fit/gen-v2 gates all price
+    # through `package_value_v2` / `consolidated_value`), so arm A pins it
+    # at its kill value: at ≤ 0 the exempt mask is ignored and every path
+    # is byte-identical to the pre-#427 math (test_first_round_pick_exempt
+    # .py::test_j_knob_off_mask_is_ignored_byte_for_byte), so the golden
+    # stands un-recaptured. Same disposition as `package_bench_trade_wide`.
+    "stud_tax_exempt_first_round": 0.0,  # firsts taxed (pre-#427 math)
     # Same wave: the gap auto-sweetener post-dates the reference SHA; at
     # ≤ 0 every generator skips the pass entirely (byte-identical), and
     # the pre-wave engine had no sweetener.

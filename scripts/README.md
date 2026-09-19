@@ -77,3 +77,10 @@ refresh datasets, not as routine product checks.
 | `run_season_historical_diagnostic.py` | Opt-in revised-input player simulator diagnostic; [results](../docs/plans/win-now/EXPLORATORY-RESULTS.md) |
 | `outlook_pick_capital_capture.py` | Traded picks and trade transactions into outlook fixtures |
 | `dp_values_history_capture.py` | Dated DynastyProcess value boards into history fixtures |
+
+## Database storage maintenance
+
+`compact_deck_diagnostics.py` is read-only by default; `--apply` requires a
+verified backup path/checksum. It only normalizes existing impression debug
+features in bounded transactions. It is not a seeder and never initializes the
+application. See [runbook](../docs/runbook.md#database-storage-incident-and-compaction-2026-09-15).

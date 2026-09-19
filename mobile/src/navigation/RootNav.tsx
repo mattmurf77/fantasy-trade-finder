@@ -162,6 +162,7 @@ type AuthStack = {
     leagueId: string;
     source: 'more_offers';
     asset: Player;
+    fairnessThreshold?: number;
   };
   // rookie-draft M4 (flag `draft.room`) — read-only Draft Room, entered
   // from the League tab's Explore tile and (placement wave) the Acquire

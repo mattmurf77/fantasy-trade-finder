@@ -3,8 +3,8 @@
 ```project-status
 {
   "status": "partly-shipped",
-  "updated": "2026-09-05",
-  "summary": "Owner contracts: PR #281 merged, backend and experimental policy live; iOS uploaded, native validation pending",
-  "evidence": "release.md: PR #281 merged; backend live at 4026ebc8 following the 09:51:59 UTC release. policy-activation.md records separately authorized experimental personal-market policy enabled by the 16:01:20 UTC redeploy, preserving all three trading arms and other settings. iOS 1.17.0 (148) uploaded; Apple tester availability and physical-device QA remain unverified. Existing policy/other-surface differences and outstanding owner questions remain in review.md; activation does not complete the broader owner handoff."
+  "updated": "2026-09-07",
+  "summary": "Initial owner contract slice live; follow-on generator rollout is owner-only; native checklist remains open",
+  "evidence": "release.md and policy-activation.md verify PR #281 / 4026ebc8 backend delivery and separate September 5 personal-market activation; iOS 1.17.0 (148) upload was recorded, without a completed physical checklist. Subsequent PR #285 owner-led construction and PR #287 owner-only serving replace the earlier three-arm comparison for fresh discovery; see ../owner-engine-challenger/status.md and ../owner-only-uncapped/status.md. Retain the initial release evidence as dated history. This does not close all owner interview requirements, outstanding review.md work or native verification."
 }
 ```

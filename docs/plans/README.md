@@ -8,7 +8,7 @@ Start here for current work and unresolved status reviews. Use the [full catalog
 
 `needs-review` preserves an uncertain or conflicting legacy claim; it does not mean the feature is unbuilt.
 
-73 entries. Counts and rows come from the same status records.
+74 entries. Counts and rows come from the same status records.
 
 | Initiative / item | Status | Updated | Summary |
 |---|---|---|---|
@@ -42,6 +42,7 @@ Start here for current work and unresolved status reviews. Use the [full catalog
 | [full-sweep](full-sweep/status.md) | active | 2026-08-22 | full sweep |
 | [guided-onboarding-v2](guided-onboarding-v2/status.md) | needs-review | — | guided onboarding v2 |
 | [knockout-refine](knockout-refine/status.md) | active | 2026-08-23 | knockout refine |
+| [landing-ranking-graphic](landing-ranking-graphic/status.md) | partly-shipped | 2026-09-16 | Initial landing verified live; scroll correction merged, delivery confirmation outstanding |
 | [league-pick-value-alignment](league-pick-value-alignment/status.md) | needs-review | — | league pick value alignment |
 | [likes-you-quality-gates](likes-you-quality-gates/status.md) | needs-review | — | likes you quality gates |
 | [loop-hld.md](loop-hld.md) | needs-review | — | High-Level Design — FTF Self-Training Loops (Plan 1) |
@@ -55,11 +56,10 @@ Start here for current work and unresolved status reviews. Use the [full catalog
 | [onboarding-conversion](onboarding-conversion/status.md) | built-dark | 2026-08-11 | onboarding conversion |
 | [onboarding-tour-merge](onboarding-tour-merge/status.md) | planned | 2026-08-23 | onboarding tour merge |
 | [open-access-phase-a-gates.md](open-access-phase-a-gates.md) | needs-review | — | Open-access onboarding — Phase A pre-flip gates |
-| [owner-contracts](owner-contracts/status.md) | partly-shipped | 2026-09-05 | Owner contracts: PR #281 merged, backend and experimental policy live; iOS uploaded, native validation pending |
+| [owner-contracts](owner-contracts/status.md) | partly-shipped | 2026-09-07 | Initial owner contract slice live; follow-on generator rollout is owner-only; native checklist remains open |
 | [package-benchmark-sweetener](package-benchmark-sweetener/status.md) | built-unmerged | 2026-08-21 | Package benchmark sweetener |
 | [pass-cooldown](pass-cooldown/status.md) | needs-review | — | pass cooldown |
 | [pending-trades-inbox-plan-2026-08-12.md](pending-trades-inbox-plan-2026-08-12.md) | planned | — | Pending Trades Inbox — Plan (2026-08-12) |
-| [personal-market-policy](personal-market-policy/status.md) | built-dark | 2026-09-04 | personal market policy |
 | [pick-badge-scale](pick-badge-scale/status.md) | needs-review | — | pick badge scale |
 | [pick-slot-labels](pick-slot-labels/status.md) | needs-review | — | pick slot labels |
 | [pick-year-decay](pick-year-decay/status.md) | needs-review | — | pick year decay |
@@ -75,13 +75,14 @@ Start here for current work and unresolved status reviews. Use the [full catalog
 | [sleeper-co-owner-rosters](sleeper-co-owner-rosters/status.md) | needs-review | — | sleeper co owner rosters |
 | [slot-pricing-unconditional](slot-pricing-unconditional/status.md) | needs-review | — | slot pricing unconditional |
 | [sweetener-relative-band](sweetener-relative-band/status.md) | built-unmerged | 2026-09-02 | sweetener relative band |
-| [three-model-bakeoff](three-model-bakeoff/status.md) | partly-shipped | 2026-08-18 | three model bakeoff |
+| [team-overhaul](team-overhaul/status.md) | partly-shipped | 2026-09-08 | Team overhaul enabled; all-platform sends and device-crash fixes released; latest checklist pending |
 | [tiktok-discovery](tiktok-discovery/status.md) | partly-shipped | — | tiktok discovery |
 | [trade-engine-accuracy](trade-engine-accuracy/status.md) | needs-review | — | trade engine accuracy |
 | [trade-engine-balance](trade-engine-balance/status.md) | needs-review | 2026-09-06 | Reconcile remaining owner trade-engine questions |
 | [trade-model-activation](trade-model-activation/status.md) | in-progress | — | Trade model collection rollout and enforcement gates |
 | [trade-presentation-v2](trade-presentation-v2/status.md) | needs-review | — | trade presentation v2 |
 | [trade-relevance-engine](trade-relevance-engine/status.md) | active | 2026-08-14 | trade relevance engine |
+| [trade-significance](trade-significance/status.md) | built-dark | 2026-09-17 | Shared significance gate merged as PR #297; default off, activation unverified |
 | [trios-tier-calibration-plan-2026-07-08.md](trios-tier-calibration-plan-2026-07-08.md) | partly-shipped | 2026-07-10 | Trios → Tier Calibration — Plan (2026-07-08, rev. 2 after pressure test) |
 | [web-parity](web-parity/status.md) | built-unmerged | 2026-09-02 | web parity |
 | [win-now](win-now/status.md) | partly-shipped | 2026-09-05 | win now |
@@ -95,5 +96,5 @@ Start here for current work and unresolved status reviews. Use the [full catalog
 | built-unmerged | 7 |
 | in-progress | 3 |
 | needs-review | 36 |
-| partly-shipped | 8 |
+| partly-shipped | 9 |
 | planned | 8 |
