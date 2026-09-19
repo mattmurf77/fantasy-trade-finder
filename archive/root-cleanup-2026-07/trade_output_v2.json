@@ -1,0 +1,1432 @@
+[
+  {
+    "opponent": "pprendergast",
+    "give": [
+      {
+        "name": "Chimere Dike",
+        "pos": "WR",
+        "team": "TEN",
+        "ktc": 223,
+        "pid": "12540"
+      }
+    ],
+    "give_pkg_ktc": 223.0,
+    "receive": [
+      {
+        "name": "Adonai Mitchell",
+        "pos": "WR",
+        "team": "NYJ",
+        "ktc": 262,
+        "pid": "11625"
+      }
+    ],
+    "recv_pkg_ktc": 262.0,
+    "value_pct": 85.1,
+    "mismatch": 148.4,
+    "composite": 0.646
+  },
+  {
+    "opponent": "DrByron34",
+    "give": [
+      {
+        "name": "Trevor Etienne",
+        "pos": "RB",
+        "team": "CAR",
+        "ktc": 10,
+        "pid": "12531"
+      }
+    ],
+    "give_pkg_ktc": 10.0,
+    "receive": [
+      {
+        "name": "Savion Williams",
+        "pos": "WR",
+        "team": "GB",
+        "ktc": 12,
+        "pid": "12482"
+      }
+    ],
+    "recv_pkg_ktc": 12.0,
+    "value_pct": 83.3,
+    "mismatch": 145.1,
+    "composite": 0.639
+  },
+  {
+    "opponent": "SwaggyJ0",
+    "give": [
+      {
+        "name": "Dalton Kincaid",
+        "pos": "TE",
+        "team": "BUF",
+        "ktc": 2407,
+        "pid": "10236"
+      }
+    ],
+    "give_pkg_ktc": 2407.0,
+    "receive": [
+      {
+        "name": "Michael Pittman",
+        "pos": "WR",
+        "team": "PIT",
+        "ktc": 2263,
+        "pid": "6819"
+      }
+    ],
+    "recv_pkg_ktc": 2263.0,
+    "value_pct": 94.0,
+    "mismatch": 145.9,
+    "composite": 0.639
+  },
+  {
+    "opponent": "SwaggyJ0",
+    "give": [
+      {
+        "name": "Jaxson Dart",
+        "pos": "QB",
+        "team": "NYG",
+        "ktc": 2222,
+        "pid": "12508"
+      }
+    ],
+    "give_pkg_ktc": 2222.0,
+    "receive": [
+      {
+        "name": "Michael Pittman",
+        "pos": "WR",
+        "team": "PIT",
+        "ktc": 2263,
+        "pid": "6819"
+      }
+    ],
+    "recv_pkg_ktc": 2263.0,
+    "value_pct": 98.2,
+    "mismatch": 145.2,
+    "composite": 0.638
+  },
+  {
+    "opponent": "DrByron34",
+    "give": [
+      {
+        "name": "Xavier Legette",
+        "pos": "WR",
+        "team": "CAR",
+        "ktc": 68,
+        "pid": "11626"
+      }
+    ],
+    "give_pkg_ktc": 68.0,
+    "receive": [
+      {
+        "name": "Ben Sinnott",
+        "pos": "TE",
+        "team": "WAS",
+        "ktc": 73,
+        "pid": "11596"
+      }
+    ],
+    "recv_pkg_ktc": 73.0,
+    "value_pct": 93.2,
+    "mismatch": 143.6,
+    "composite": 0.635
+  },
+  {
+    "opponent": "DrByron34",
+    "give": [
+      {
+        "name": "Dalton Kincaid",
+        "pos": "TE",
+        "team": "BUF",
+        "ktc": 2407,
+        "pid": "10236"
+      }
+    ],
+    "give_pkg_ktc": 2407.0,
+    "receive": [
+      {
+        "name": "Christian Watson",
+        "pos": "WR",
+        "team": "GB",
+        "ktc": 1980,
+        "pid": "8167"
+      }
+    ],
+    "recv_pkg_ktc": 1980.0,
+    "value_pct": 82.3,
+    "mismatch": 142.7,
+    "composite": 0.627
+  },
+  {
+    "opponent": "SwaggyJ0",
+    "give": [
+      {
+        "name": "Isaac TeSlaa",
+        "pos": "WR",
+        "team": "DET",
+        "ktc": 143,
+        "pid": "12535"
+      }
+    ],
+    "give_pkg_ktc": 143.0,
+    "receive": [
+      {
+        "name": "Darnell Mooney",
+        "pos": "WR",
+        "team": "NYG",
+        "ktc": 137,
+        "pid": "7090"
+      }
+    ],
+    "recv_pkg_ktc": 137.0,
+    "value_pct": 95.8,
+    "mismatch": 138.5,
+    "composite": 0.623
+  },
+  {
+    "opponent": "SwaggyJ0",
+    "give": [
+      {
+        "name": "Quentin Johnston",
+        "pos": "WR",
+        "team": "LAC",
+        "ktc": 1018,
+        "pid": "9754"
+      }
+    ],
+    "give_pkg_ktc": 1018.0,
+    "receive": [
+      {
+        "name": "Zach Charbonnet",
+        "pos": "RB",
+        "team": "SEA",
+        "ktc": 840,
+        "pid": "9753"
+      }
+    ],
+    "recv_pkg_ktc": 840.0,
+    "value_pct": 82.5,
+    "mismatch": 139.2,
+    "composite": 0.622
+  },
+  {
+    "opponent": "KevinLake",
+    "give": [
+      {
+        "name": "Quentin Johnston",
+        "pos": "WR",
+        "team": "LAC",
+        "ktc": 1018,
+        "pid": "9754"
+      }
+    ],
+    "give_pkg_ktc": 1018.0,
+    "receive": [
+      {
+        "name": "Jaylen Warren",
+        "pos": "RB",
+        "team": "PIT",
+        "ktc": 968,
+        "pid": "8228"
+      }
+    ],
+    "recv_pkg_ktc": 968.0,
+    "value_pct": 95.1,
+    "mismatch": 136.5,
+    "composite": 0.618
+  },
+  {
+    "opponent": "KevinLake",
+    "give": [
+      {
+        "name": "Jayden Higgins",
+        "pos": "WR",
+        "team": "HOU",
+        "ktc": 1237,
+        "pid": "12484"
+      }
+    ],
+    "give_pkg_ktc": 1237.0,
+    "receive": [
+      {
+        "name": "Jaylen Warren",
+        "pos": "RB",
+        "team": "PIT",
+        "ktc": 968,
+        "pid": "8228"
+      }
+    ],
+    "recv_pkg_ktc": 968.0,
+    "value_pct": 78.3,
+    "mismatch": 136.9,
+    "composite": 0.616
+  },
+  {
+    "opponent": "KevinLake",
+    "give": [
+      {
+        "name": "Tre' Harris",
+        "pos": "WR",
+        "team": "LAC",
+        "ktc": 395,
+        "pid": "12509"
+      }
+    ],
+    "give_pkg_ktc": 395.0,
+    "receive": [
+      {
+        "name": "Juwan Johnson",
+        "pos": "TE",
+        "team": "NO",
+        "ktc": 353,
+        "pid": "7002"
+      }
+    ],
+    "recv_pkg_ktc": 353.0,
+    "value_pct": 89.4,
+    "mismatch": 135.1,
+    "composite": 0.615
+  },
+  {
+    "opponent": "SwaggyJ0",
+    "give": [
+      {
+        "name": "Tre' Harris",
+        "pos": "WR",
+        "team": "LAC",
+        "ktc": 395,
+        "pid": "12509"
+      }
+    ],
+    "give_pkg_ktc": 395.0,
+    "receive": [
+      {
+        "name": "Anthony Richardson",
+        "pos": "QB",
+        "team": "IND",
+        "ktc": 422,
+        "pid": "9229"
+      }
+    ],
+    "recv_pkg_ktc": 422.0,
+    "value_pct": 93.6,
+    "mismatch": 134.1,
+    "composite": 0.613
+  },
+  {
+    "opponent": "gildalbora",
+    "give": [
+      {
+        "name": "Drake Maye",
+        "pos": "QB",
+        "team": "NE",
+        "ktc": 5273,
+        "pid": "11564"
+      }
+    ],
+    "give_pkg_ktc": 5273.0,
+    "receive": [
+      {
+        "name": "Tee Higgins",
+        "pos": "WR",
+        "team": "CIN",
+        "ktc": 4025,
+        "pid": "6801"
+      }
+    ],
+    "recv_pkg_ktc": 4025.0,
+    "value_pct": 76.3,
+    "mismatch": 139.8,
+    "composite": 0.611
+  },
+  {
+    "opponent": "gildalbora",
+    "give": [
+      {
+        "name": "Jameson Williams",
+        "pos": "WR",
+        "team": "DET",
+        "ktc": 3895,
+        "pid": "8148"
+      }
+    ],
+    "give_pkg_ktc": 3895.0,
+    "receive": [
+      {
+        "name": "Tee Higgins",
+        "pos": "WR",
+        "team": "CIN",
+        "ktc": 4025,
+        "pid": "6801"
+      }
+    ],
+    "recv_pkg_ktc": 4025.0,
+    "value_pct": 96.8,
+    "mismatch": 132.9,
+    "composite": 0.609
+  },
+  {
+    "opponent": "bobphil22",
+    "give": [
+      {
+        "name": "Kyle Williams",
+        "pos": "WR",
+        "team": "NE",
+        "ktc": 173,
+        "pid": "12547"
+      }
+    ],
+    "give_pkg_ktc": 173.0,
+    "receive": [
+      {
+        "name": "Rachaad White",
+        "pos": "RB",
+        "team": "WAS",
+        "ktc": 130,
+        "pid": "8136"
+      }
+    ],
+    "recv_pkg_ktc": 130.0,
+    "value_pct": 75.1,
+    "mismatch": 129.6,
+    "composite": 0.602
+  },
+  {
+    "opponent": "johnphillips3289",
+    "give": [
+      {
+        "name": "Ray Davis",
+        "pos": "RB",
+        "team": "BUF",
+        "ktc": 55,
+        "pid": "11575"
+      }
+    ],
+    "give_pkg_ktc": 55.0,
+    "receive": [
+      {
+        "name": "Keenan Allen",
+        "pos": "WR",
+        "team": "FA",
+        "ktc": 63,
+        "pid": "1479"
+      }
+    ],
+    "recv_pkg_ktc": 63.0,
+    "value_pct": 87.3,
+    "mismatch": 129.5,
+    "composite": 0.602
+  },
+  {
+    "opponent": "DrByron34",
+    "give": [
+      {
+        "name": "Ray Davis",
+        "pos": "RB",
+        "team": "BUF",
+        "ktc": 55,
+        "pid": "11575"
+      }
+    ],
+    "give_pkg_ktc": 55.0,
+    "receive": [
+      {
+        "name": "Ben Sinnott",
+        "pos": "TE",
+        "team": "WAS",
+        "ktc": 73,
+        "pid": "11596"
+      }
+    ],
+    "recv_pkg_ktc": 73.0,
+    "value_pct": 75.3,
+    "mismatch": 128.9,
+    "composite": 0.6
+  },
+  {
+    "opponent": "sauter",
+    "give": [
+      {
+        "name": "Jameson Williams",
+        "pos": "WR",
+        "team": "DET",
+        "ktc": 3895,
+        "pid": "8148"
+      }
+    ],
+    "give_pkg_ktc": 3895.0,
+    "receive": [
+      {
+        "name": "Joe Burrow",
+        "pos": "QB",
+        "team": "CIN",
+        "ktc": 3978,
+        "pid": "6770"
+      }
+    ],
+    "recv_pkg_ktc": 3978.0,
+    "value_pct": 97.9,
+    "mismatch": 127.9,
+    "composite": 0.598
+  },
+  {
+    "opponent": "johnphillips3289",
+    "give": [
+      {
+        "name": "DeMario Douglas",
+        "pos": "WR",
+        "team": "NE",
+        "ktc": 48,
+        "pid": "9501"
+      }
+    ],
+    "give_pkg_ktc": 48.0,
+    "receive": [
+      {
+        "name": "Keenan Allen",
+        "pos": "WR",
+        "team": "FA",
+        "ktc": 63,
+        "pid": "1479"
+      }
+    ],
+    "recv_pkg_ktc": 63.0,
+    "value_pct": 76.2,
+    "mismatch": 125.4,
+    "composite": 0.592
+  },
+  {
+    "opponent": "mlakejr",
+    "give": [
+      {
+        "name": "Will Shipley",
+        "pos": "RB",
+        "team": "PHI",
+        "ktc": 533,
+        "pid": "11577"
+      }
+    ],
+    "give_pkg_ktc": 533.0,
+    "receive": [
+      {
+        "name": "Jonathon Brooks",
+        "pos": "RB",
+        "team": "CAR",
+        "ktc": 438,
+        "pid": "11583"
+      }
+    ],
+    "recv_pkg_ktc": 438.0,
+    "value_pct": 82.2,
+    "mismatch": 123.6,
+    "composite": 0.587
+  },
+  {
+    "opponent": "pmquinn24",
+    "give": [
+      {
+        "name": "Tyjae Spears",
+        "pos": "RB",
+        "team": "TEN",
+        "ktc": 217,
+        "pid": "9508"
+      }
+    ],
+    "give_pkg_ktc": 217.0,
+    "receive": [
+      {
+        "name": "Dalton Schultz",
+        "pos": "TE",
+        "team": "HOU",
+        "ktc": 193,
+        "pid": "5001"
+      }
+    ],
+    "recv_pkg_ktc": 193.0,
+    "value_pct": 88.9,
+    "mismatch": 121.4,
+    "composite": 0.583
+  },
+  {
+    "opponent": "mlakejr",
+    "give": [
+      {
+        "name": "Trevor Etienne",
+        "pos": "RB",
+        "team": "CAR",
+        "ktc": 10,
+        "pid": "12531"
+      }
+    ],
+    "give_pkg_ktc": 10.0,
+    "receive": [
+      {
+        "name": "Will Howard",
+        "pos": "QB",
+        "team": "PIT",
+        "ktc": 13,
+        "pid": "12511"
+      }
+    ],
+    "recv_pkg_ktc": 13.0,
+    "value_pct": 76.9,
+    "mismatch": 120.5,
+    "composite": 0.581
+  },
+  {
+    "opponent": "bobphil22",
+    "give": [
+      {
+        "name": "Jordan Watkins",
+        "pos": "WR",
+        "team": "SF",
+        "ktc": 3,
+        "pid": "12634"
+      }
+    ],
+    "give_pkg_ktc": 3.0,
+    "receive": [
+      {
+        "name": "Cade Stover",
+        "pos": "TE",
+        "team": "HOU",
+        "ktc": 3,
+        "pid": "11599"
+      }
+    ],
+    "recv_pkg_ktc": 3.0,
+    "value_pct": 100.0,
+    "mismatch": 116.8,
+    "composite": 0.572
+  },
+  {
+    "opponent": "pprendergast",
+    "give": [
+      {
+        "name": "Tyjae Spears",
+        "pos": "RB",
+        "team": "TEN",
+        "ktc": 217,
+        "pid": "9508"
+      }
+    ],
+    "give_pkg_ktc": 217.0,
+    "receive": [
+      {
+        "name": "Adonai Mitchell",
+        "pos": "WR",
+        "team": "NYJ",
+        "ktc": 262,
+        "pid": "11625"
+      }
+    ],
+    "recv_pkg_ktc": 262.0,
+    "value_pct": 82.8,
+    "mismatch": 116.6,
+    "composite": 0.571
+  },
+  {
+    "opponent": "bmcaloon",
+    "give": [
+      {
+        "name": "Drake Maye",
+        "pos": "QB",
+        "team": "NE",
+        "ktc": 5273,
+        "pid": "11564"
+      }
+    ],
+    "give_pkg_ktc": 5273.0,
+    "receive": [
+      {
+        "name": "Brian Thomas",
+        "pos": "WR",
+        "team": "JAX",
+        "ktc": 5000,
+        "pid": "11631"
+      }
+    ],
+    "recv_pkg_ktc": 5000.0,
+    "value_pct": 94.8,
+    "mismatch": 117.8,
+    "composite": 0.571
+  },
+  {
+    "opponent": "sauter",
+    "give": [
+      {
+        "name": "Drake Maye",
+        "pos": "QB",
+        "team": "NE",
+        "ktc": 5273,
+        "pid": "11564"
+      }
+    ],
+    "give_pkg_ktc": 5273.0,
+    "receive": [
+      {
+        "name": "Joe Burrow",
+        "pos": "QB",
+        "team": "CIN",
+        "ktc": 3978,
+        "pid": "6770"
+      }
+    ],
+    "recv_pkg_ktc": 3978.0,
+    "value_pct": 75.4,
+    "mismatch": 119.9,
+    "composite": 0.565
+  },
+  {
+    "opponent": "gildalbora",
+    "give": [
+      {
+        "name": "Marvin Harrison",
+        "pos": "WR",
+        "team": "ARI",
+        "ktc": 5000,
+        "pid": "11628"
+      }
+    ],
+    "give_pkg_ktc": 5000.0,
+    "receive": [
+      {
+        "name": "Tee Higgins",
+        "pos": "WR",
+        "team": "CIN",
+        "ktc": 4025,
+        "pid": "6801"
+      }
+    ],
+    "recv_pkg_ktc": 4025.0,
+    "value_pct": 80.5,
+    "mismatch": 117.8,
+    "composite": 0.563
+  },
+  {
+    "opponent": "bmcaloon",
+    "give": [
+      {
+        "name": "Drake Maye",
+        "pos": "QB",
+        "team": "NE",
+        "ktc": 5273,
+        "pid": "11564"
+      }
+    ],
+    "give_pkg_ktc": 5273.0,
+    "receive": [
+      {
+        "name": "DeVonta Smith",
+        "pos": "WR",
+        "team": "PHI",
+        "ktc": 4548,
+        "pid": "7525"
+      }
+    ],
+    "recv_pkg_ktc": 4548.0,
+    "value_pct": 86.3,
+    "mismatch": 115.1,
+    "composite": 0.56
+  },
+  {
+    "opponent": "bobphil22",
+    "give": [
+      {
+        "name": "Jaleel McLaughlin",
+        "pos": "RB",
+        "team": "DEN",
+        "ktc": 8,
+        "pid": "11439"
+      }
+    ],
+    "give_pkg_ktc": 8.0,
+    "receive": [
+      {
+        "name": "Kenny Pickett",
+        "pos": "QB",
+        "team": "CAR",
+        "ktc": 7,
+        "pid": "8160"
+      }
+    ],
+    "recv_pkg_ktc": 7.0,
+    "value_pct": 87.5,
+    "mismatch": 110.8,
+    "composite": 0.559
+  },
+  {
+    "opponent": "bobphil22",
+    "give": [
+      {
+        "name": "Trevor Etienne",
+        "pos": "RB",
+        "team": "CAR",
+        "ktc": 10,
+        "pid": "12531"
+      }
+    ],
+    "give_pkg_ktc": 10.0,
+    "receive": [
+      {
+        "name": "Tahj Brooks",
+        "pos": "RB",
+        "team": "CIN",
+        "ktc": 10,
+        "pid": "12543"
+      }
+    ],
+    "recv_pkg_ktc": 10.0,
+    "value_pct": 100.0,
+    "mismatch": 110.1,
+    "composite": 0.557
+  },
+  {
+    "opponent": "pprendergast",
+    "give": [
+      {
+        "name": "Michael Penix",
+        "pos": "QB",
+        "team": "ATL",
+        "ktc": 267,
+        "pid": "11559"
+      }
+    ],
+    "give_pkg_ktc": 267.0,
+    "receive": [
+      {
+        "name": "Adonai Mitchell",
+        "pos": "WR",
+        "team": "NYJ",
+        "ktc": 262,
+        "pid": "11625"
+      }
+    ],
+    "recv_pkg_ktc": 262.0,
+    "value_pct": 98.1,
+    "mismatch": 109.7,
+    "composite": 0.556
+  },
+  {
+    "opponent": "DrByron34",
+    "give": [
+      {
+        "name": "Drake Maye",
+        "pos": "QB",
+        "team": "NE",
+        "ktc": 5273,
+        "pid": "11564"
+      }
+    ],
+    "give_pkg_ktc": 5273.0,
+    "receive": [
+      {
+        "name": "Ladd McConkey",
+        "pos": "WR",
+        "team": "LAC",
+        "ktc": 5298,
+        "pid": "11635"
+      }
+    ],
+    "recv_pkg_ktc": 5298.0,
+    "value_pct": 99.5,
+    "mismatch": 109.1,
+    "composite": 0.554
+  },
+  {
+    "opponent": "bmcaloon",
+    "give": [
+      {
+        "name": "Ray Davis",
+        "pos": "RB",
+        "team": "BUF",
+        "ktc": 55,
+        "pid": "11575"
+      }
+    ],
+    "give_pkg_ktc": 55.0,
+    "receive": [
+      {
+        "name": "Geno Smith",
+        "pos": "QB",
+        "team": "NYJ",
+        "ktc": 42,
+        "pid": "1373"
+      }
+    ],
+    "recv_pkg_ktc": 42.0,
+    "value_pct": 76.4,
+    "mismatch": 108.4,
+    "composite": 0.553
+  },
+  {
+    "opponent": "bobphil22",
+    "give": [
+      {
+        "name": "Tre' Harris",
+        "pos": "WR",
+        "team": "LAC",
+        "ktc": 395,
+        "pid": "12509"
+      }
+    ],
+    "give_pkg_ktc": 395.0,
+    "receive": [
+      {
+        "name": "Jalen McMillan",
+        "pos": "WR",
+        "team": "TB",
+        "ktc": 342,
+        "pid": "11618"
+      }
+    ],
+    "recv_pkg_ktc": 342.0,
+    "value_pct": 86.6,
+    "mismatch": 108.0,
+    "composite": 0.551
+  },
+  {
+    "opponent": "pprendergast",
+    "give": [
+      {
+        "name": "Kyle Williams",
+        "pos": "WR",
+        "team": "NE",
+        "ktc": 173,
+        "pid": "12547"
+      }
+    ],
+    "give_pkg_ktc": 173.0,
+    "receive": [
+      {
+        "name": "Keon Coleman",
+        "pos": "WR",
+        "team": "BUF",
+        "ktc": 158,
+        "pid": "11637"
+      }
+    ],
+    "recv_pkg_ktc": 158.0,
+    "value_pct": 91.3,
+    "mismatch": 104.2,
+    "composite": 0.543
+  },
+  {
+    "opponent": "sauter",
+    "give": [
+      {
+        "name": "Jameson Williams",
+        "pos": "WR",
+        "team": "DET",
+        "ktc": 3895,
+        "pid": "8148"
+      }
+    ],
+    "give_pkg_ktc": 3895.0,
+    "receive": [
+      {
+        "name": "Bucky Irving",
+        "pos": "RB",
+        "team": "TB",
+        "ktc": 4298,
+        "pid": "11584"
+      }
+    ],
+    "recv_pkg_ktc": 4298.0,
+    "value_pct": 90.6,
+    "mismatch": 104.7,
+    "composite": 0.539
+  },
+  {
+    "opponent": "KevinLake",
+    "give": [
+      {
+        "name": "Malik Davis",
+        "pos": "RB",
+        "team": "DAL",
+        "ktc": 15,
+        "pid": "8800"
+      }
+    ],
+    "give_pkg_ktc": 15.0,
+    "receive": [
+      {
+        "name": "Devin Singletary",
+        "pos": "RB",
+        "team": "NYG",
+        "ktc": 15,
+        "pid": "6130"
+      }
+    ],
+    "recv_pkg_ktc": 15.0,
+    "value_pct": 100.0,
+    "mismatch": 101.2,
+    "composite": 0.536
+  },
+  {
+    "opponent": "johnphillips3289",
+    "give": [
+      {
+        "name": "Michael Penix",
+        "pos": "QB",
+        "team": "ATL",
+        "ktc": 267,
+        "pid": "11559"
+      }
+    ],
+    "give_pkg_ktc": 267.0,
+    "receive": [
+      {
+        "name": "Matthew Stafford",
+        "pos": "QB",
+        "team": "LAR",
+        "ktc": 330,
+        "pid": "421"
+      }
+    ],
+    "recv_pkg_ktc": 330.0,
+    "value_pct": 80.9,
+    "mismatch": 101.3,
+    "composite": 0.535
+  },
+  {
+    "opponent": "gildalbora",
+    "give": [
+      {
+        "name": "DeMario Douglas",
+        "pos": "WR",
+        "team": "NE",
+        "ktc": 48,
+        "pid": "9501"
+      }
+    ],
+    "give_pkg_ktc": 48.0,
+    "receive": [
+      {
+        "name": "Joe Mixon",
+        "pos": "RB",
+        "team": "FA",
+        "ktc": 38,
+        "pid": "4018"
+      }
+    ],
+    "recv_pkg_ktc": 38.0,
+    "value_pct": 79.2,
+    "mismatch": 100.5,
+    "composite": 0.534
+  },
+  {
+    "opponent": "sauter",
+    "give": [
+      {
+        "name": "Justin Jefferson",
+        "pos": "WR",
+        "team": "MIN",
+        "ktc": 9270,
+        "pid": "6794"
+      }
+    ],
+    "give_pkg_ktc": 9270.0,
+    "receive": [
+      {
+        "name": "Puka Nacua",
+        "pos": "WR",
+        "team": "LAR",
+        "ktc": 9183,
+        "pid": "9493"
+      }
+    ],
+    "recv_pkg_ktc": 9183.0,
+    "value_pct": 99.1,
+    "mismatch": 99.3,
+    "composite": 0.531
+  },
+  {
+    "opponent": "pmquinn24",
+    "give": [
+      {
+        "name": "Kyle Williams",
+        "pos": "WR",
+        "team": "NE",
+        "ktc": 173,
+        "pid": "12547"
+      }
+    ],
+    "give_pkg_ktc": 173.0,
+    "receive": [
+      {
+        "name": "Dalton Schultz",
+        "pos": "TE",
+        "team": "HOU",
+        "ktc": 193,
+        "pid": "5001"
+      }
+    ],
+    "recv_pkg_ktc": 193.0,
+    "value_pct": 89.6,
+    "mismatch": 98.9,
+    "composite": 0.53
+  },
+  {
+    "opponent": "gildalbora",
+    "give": [
+      {
+        "name": "Xavier Legette",
+        "pos": "WR",
+        "team": "CAR",
+        "ktc": 68,
+        "pid": "11626"
+      }
+    ],
+    "give_pkg_ktc": 68.0,
+    "receive": [
+      {
+        "name": "Christian Kirk",
+        "pos": "WR",
+        "team": "SF",
+        "ktc": 77,
+        "pid": "4950"
+      }
+    ],
+    "recv_pkg_ktc": 77.0,
+    "value_pct": 88.3,
+    "mismatch": 98.2,
+    "composite": 0.529
+  },
+  {
+    "opponent": "sauter",
+    "give": [
+      {
+        "name": "Jameson Williams",
+        "pos": "WR",
+        "team": "DET",
+        "ktc": 3895,
+        "pid": "8148"
+      }
+    ],
+    "give_pkg_ktc": 3895.0,
+    "receive": [
+      {
+        "name": "Kyren Williams",
+        "pos": "RB",
+        "team": "LAR",
+        "ktc": 3043,
+        "pid": "8150"
+      }
+    ],
+    "recv_pkg_ktc": 3043.0,
+    "value_pct": 78.1,
+    "mismatch": 102.3,
+    "composite": 0.528
+  },
+  {
+    "opponent": "pprendergast",
+    "give": [
+      {
+        "name": "Darnell Washington",
+        "pos": "TE",
+        "team": "PIT",
+        "ktc": 23,
+        "pid": "9479"
+      }
+    ],
+    "give_pkg_ktc": 23.0,
+    "receive": [
+      {
+        "name": "Jaylin Lane",
+        "pos": "WR",
+        "team": "WAS",
+        "ktc": 18,
+        "pid": "12641"
+      }
+    ],
+    "recv_pkg_ktc": 18.0,
+    "value_pct": 78.3,
+    "mismatch": 94.9,
+    "composite": 0.521
+  },
+  {
+    "opponent": "pmquinn24",
+    "give": [
+      {
+        "name": "Dalton Kincaid",
+        "pos": "TE",
+        "team": "BUF",
+        "ktc": 2407,
+        "pid": "10236"
+      }
+    ],
+    "give_pkg_ktc": 2407.0,
+    "receive": [
+      {
+        "name": "Cam Skattebo",
+        "pos": "RB",
+        "team": "NYG",
+        "ktc": 2163,
+        "pid": "12481"
+      }
+    ],
+    "recv_pkg_ktc": 2163.0,
+    "value_pct": 89.9,
+    "mismatch": 95.2,
+    "composite": 0.519
+  },
+  {
+    "opponent": "pmquinn24",
+    "give": [
+      {
+        "name": "Jaxson Dart",
+        "pos": "QB",
+        "team": "NYG",
+        "ktc": 2222,
+        "pid": "12508"
+      }
+    ],
+    "give_pkg_ktc": 2222.0,
+    "receive": [
+      {
+        "name": "Cam Skattebo",
+        "pos": "RB",
+        "team": "NYG",
+        "ktc": 2163,
+        "pid": "12481"
+      }
+    ],
+    "recv_pkg_ktc": 2163.0,
+    "value_pct": 97.3,
+    "mismatch": 90.2,
+    "composite": 0.51
+  },
+  {
+    "opponent": "KevinLake",
+    "give": [
+      {
+        "name": "J.K. Dobbins",
+        "pos": "RB",
+        "team": "DEN",
+        "ktc": 213,
+        "pid": "6806"
+      }
+    ],
+    "give_pkg_ktc": 213.0,
+    "receive": [
+      {
+        "name": "Hunter Henry",
+        "pos": "TE",
+        "team": "NE",
+        "ktc": 248,
+        "pid": "3214"
+      }
+    ],
+    "recv_pkg_ktc": 248.0,
+    "value_pct": 85.9,
+    "mismatch": 90.4,
+    "composite": 0.51
+  },
+  {
+    "opponent": "pmquinn24",
+    "give": [
+      {
+        "name": "Jayden Higgins",
+        "pos": "WR",
+        "team": "HOU",
+        "ktc": 1237,
+        "pid": "12484"
+      }
+    ],
+    "give_pkg_ktc": 1237.0,
+    "receive": [
+      {
+        "name": "George Kittle",
+        "pos": "TE",
+        "team": "SF",
+        "ktc": 940,
+        "pid": "4217"
+      }
+    ],
+    "recv_pkg_ktc": 940.0,
+    "value_pct": 76.0,
+    "mismatch": 90.4,
+    "composite": 0.507
+  },
+  {
+    "opponent": "bmcaloon",
+    "give": [
+      {
+        "name": "Drake Maye",
+        "pos": "QB",
+        "team": "NE",
+        "ktc": 5273,
+        "pid": "11564"
+      }
+    ],
+    "give_pkg_ktc": 5273.0,
+    "receive": [
+      {
+        "name": "Brock Bowers",
+        "pos": "TE",
+        "team": "LV",
+        "ktc": 5502,
+        "pid": "11604"
+      }
+    ],
+    "recv_pkg_ktc": 5502.0,
+    "value_pct": 95.8,
+    "mismatch": 89.2,
+    "composite": 0.505
+  },
+  {
+    "opponent": "mlakejr",
+    "give": [
+      {
+        "name": "Justin Jefferson",
+        "pos": "WR",
+        "team": "MIN",
+        "ktc": 9270,
+        "pid": "6794"
+      }
+    ],
+    "give_pkg_ktc": 9270.0,
+    "receive": [
+      {
+        "name": "Malik Nabers",
+        "pos": "WR",
+        "team": "NYG",
+        "ktc": 8167,
+        "pid": "11632"
+      }
+    ],
+    "recv_pkg_ktc": 8167.0,
+    "value_pct": 88.1,
+    "mismatch": 87.3,
+    "composite": 0.492
+  },
+  {
+    "opponent": "mlakejr",
+    "give": [
+      {
+        "name": "Jayden Higgins",
+        "pos": "WR",
+        "team": "HOU",
+        "ktc": 1237,
+        "pid": "12484"
+      }
+    ],
+    "give_pkg_ktc": 1237.0,
+    "receive": [
+      {
+        "name": "Alec Pierce",
+        "pos": "WR",
+        "team": "IND",
+        "ktc": 1042,
+        "pid": "8142"
+      }
+    ],
+    "recv_pkg_ktc": 1042.0,
+    "value_pct": 84.2,
+    "mismatch": 83.4,
+    "composite": 0.492
+  },
+  {
+    "opponent": "mlakejr",
+    "give": [
+      {
+        "name": "Max Brosmer",
+        "pos": "QB",
+        "team": "MIN",
+        "ktc": 3,
+        "pid": "12775"
+      }
+    ],
+    "give_pkg_ktc": 3.0,
+    "receive": [
+      {
+        "name": "Jermaine Burton",
+        "pos": "WR",
+        "team": "FA",
+        "ktc": 3,
+        "pid": "11640"
+      }
+    ],
+    "recv_pkg_ktc": 3.0,
+    "value_pct": 100.0,
+    "mismatch": 81.4,
+    "composite": 0.49
+  },
+  {
+    "opponent": "bmcaloon",
+    "give": [
+      {
+        "name": "Dalton Kincaid",
+        "pos": "TE",
+        "team": "BUF",
+        "ktc": 2407,
+        "pid": "10236"
+      }
+    ],
+    "give_pkg_ktc": 2407.0,
+    "receive": [
+      {
+        "name": "Josh Jacobs",
+        "pos": "RB",
+        "team": "GB",
+        "ktc": 2648,
+        "pid": "5850"
+      }
+    ],
+    "recv_pkg_ktc": 2648.0,
+    "value_pct": 90.9,
+    "mismatch": 81.4,
+    "composite": 0.487
+  },
+  {
+    "opponent": "johnphillips3289",
+    "give": [
+      {
+        "name": "DeMario Douglas",
+        "pos": "WR",
+        "team": "NE",
+        "ktc": 48,
+        "pid": "9501"
+      }
+    ],
+    "give_pkg_ktc": 48.0,
+    "receive": [
+      {
+        "name": "Aaron Rodgers",
+        "pos": "QB",
+        "team": "FA",
+        "ktc": 38,
+        "pid": "96"
+      }
+    ],
+    "recv_pkg_ktc": 38.0,
+    "value_pct": 79.2,
+    "mismatch": 77.0,
+    "composite": 0.48
+  },
+  {
+    "opponent": "johnphillips3289",
+    "give": [
+      {
+        "name": "Xavier Legette",
+        "pos": "WR",
+        "team": "CAR",
+        "ktc": 68,
+        "pid": "11626"
+      }
+    ],
+    "give_pkg_ktc": 68.0,
+    "receive": [
+      {
+        "name": "Keenan Allen",
+        "pos": "WR",
+        "team": "FA",
+        "ktc": 63,
+        "pid": "1479"
+      }
+    ],
+    "recv_pkg_ktc": 63.0,
+    "value_pct": 92.6,
+    "mismatch": 70.4,
+    "composite": 0.464
+  }
+]

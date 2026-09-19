@@ -255,7 +255,7 @@ gating.
    sorted by number.
 9. Delete matrix: `delete_user_data` removes entitlement rows; wall drops the entry.
 
-**Maestro (`archive/retired-tooling/mobile/maestro/`):**
+**Maestro (`mobile/.maestro/`):**
 - `NN-founder-offer.yaml`: flag on + seeded config → offer sheet shows price and
   live remaining; flag off → no offer anywhere. (Real StoreKit purchase is not
   Maestro-testable; drive the UI against a seeded backend, sandbox-purchase manually

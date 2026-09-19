@@ -1,18 +1,3 @@
-# Status — 246-guided-first-landing
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-05",
-  "summary": "#246 — Guided-first Acquire landing (V1)",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-05 — guided chip strip + `TradeDnaSheet.tsx` `69a8ff8` — CHANGELOG 2026-08-05. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #246 — Guided-first Acquire landing (V1)
 
 **Status:** built, tsc-clean, committed on the worktree branch (2026-08-05).
@@ -65,7 +50,7 @@ Per the operator override: **no tail section** — the Free agents chip in the s
 - `navigate('TradesHome')` × 5 call sites — all land on the deck (list above).
 - `navigate('TradeDeck', …)` — only the unrouted hub navigates there in-app; the route stays registered for the `app/trades/finder` deep link.
 - `editDna` param — only ever set by the receipt (now callback-based); the param is still honored on TradesHome for stored routes.
-- `trades.finder-mode.hub` — retired with the chevron; no Maestro flow in `archive/retired-tooling/mobile/maestro/` references it (checked).
+- `trades.finder-mode.hub` — retired with the chevron; no Maestro flow in `mobile/.maestro/` references it (checked).
 - Docs: `mobile/src/navigation/CLAUDE.md` (TradesHome semantics — the significant change), `mobile/src/screens/CLAUDE.md`, `mobile/src/components/CLAUDE.md` (+ #246 testID tranche), `docs/glossary.md` (Acquire tab entry).
 
 ## Verification

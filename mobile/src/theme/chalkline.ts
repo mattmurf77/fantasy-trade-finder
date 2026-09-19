@@ -18,7 +18,7 @@ import { colors } from './colors';
 
 // Palette v2 ("ice/flare", ADR-005): graphite ink + ice-cyan primary +
 // flare-pink secondary. Replaced v1's turf ink + volt lime after operator
-// color review (archive/design-explorations/color-lab-2.html, option B1).
+// color review (web/color-lab-2.html, option B1).
 export const ink = {
   ink0: '#0C0E11', // screen background
   ink1: '#13161B', // cards, panels

@@ -1,18 +1,3 @@
-# Status — 164-trends-empty
-
-```project-status
-{
-  "status": "in-progress",
-  "updated": "2026-07-25",
-  "summary": "#164 — Trends screen empty despite rankings",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: in-progress ~2026-07-25 — teardown-remediation. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #164 — Trends screen empty despite rankings
 
 **Status:** Built (this worktree, branch `teardown-remediation`).

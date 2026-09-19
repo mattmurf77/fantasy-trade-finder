@@ -42,7 +42,7 @@ import { posColor, type Position } from '../theme/colors';
 import type { CalcPlayer, CalcPos } from '../data/calcTypes';
 import type { ScoringFormat, StarterImpactSlot, StarterSlotPlayer, Tier } from '../shared/types';
 
-// In-league calculator (Mode B, docs/plans/archive/2026/manual-trade-calculator-plan.md).
+// In-league calculator (Mode B, docs/plans/manual-trade-calculator-plan.md).
 // The FTF differentiator applied to a hand-built trade: pick a real opponent,
 // assemble a trade from BOTH rosters, and evaluate it by BOTH owners' real
 // rankings (POST /api/trade/evaluate with league_id + opponent_user_id). It's

@@ -6,7 +6,7 @@ by **both owners' ranking sets** (mock Elo boards standing in for real FTF ranki
 
 Deliberately excluded (mocked instead): Sleeper login, league sync, the ranking/Elo
 builder, and the trade *finder*. See `APP_PLAN.md` for scope and mechanics, and
-`../../docs/plans/archive/2026/manual-trade-calculator-plan.md` for the plan for the real,
+`../../docs/plans/manual-trade-calculator-plan.md` for the plan for the real,
 server-authoritative version of this feature.
 
 ## Run it

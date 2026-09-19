@@ -1,13 +1,5 @@
 # Release and activation record
 
-## Latest recorded outcome — reconciled 2026-09-19
-
-The dated [change history](../../../living-memory/CHANGELOG.md) and [test ledger](../../../living-memory/TEST_LEDGER.md) record PR #287 (`16bb6fd1`) deployed on September 7 at 05:28 UTC, with owner-only activation at 05:29 UTC. The later [paging-fix recovery record](../../recovery/2026-09-08-owner-only-impression-paging.md) records PR #289 (`609cb79e`); G-072 in [gotchas](../../../living-memory/GOTCHAS.md) records the outage and restoration. Those later records supersede the initial preflight state below.
-
-This documentation reconciliation does not perform a new production readback, activation, mobile upload or device check. Current model/configuration behavior must be checked against source and dated operational evidence. Other model implementations remain available for an explicit rollback.
-
-## Initial release preparation — historical
-
 **Status:** publication and activation explicitly authorized; release in progress.
 No new deployment or activation yet. Reviewed implementation commit: `824884ff`.
 

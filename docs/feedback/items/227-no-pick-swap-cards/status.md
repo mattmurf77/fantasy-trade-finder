@@ -1,18 +1,3 @@
-# Status — 227-no-pick-swap-cards
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-01",
-  "summary": "#227 — \"1:1 trades for draft picks should never be a suggestion\" — status",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-01 — `pick_swap_ok` gate `2b8ecca` — CHANGELOG 2026-08-01. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #227 — "1:1 trades for draft picks should never be a suggestion" — status
 
 **Status: fixed (backend — shared generation gate)** · 2026-08-01 · branch

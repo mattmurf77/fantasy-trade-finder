@@ -25,4 +25,4 @@ The module retains per-identity generations in memory for the worker lifetime so
 
 ## Evidence
 
-`test_user_data_lifecycle.py` exercises simultaneous work, draining, timeout recovery, stale identity resolution, HTTP writes and queued generation. The security PostgreSQL harness runs these and the transaction/session-deletion regressions against isolated synthetic schemas. See the [combined review](../plans/archive/2026/security-data-hardening/review.md).
+`test_user_data_lifecycle.py` exercises simultaneous work, draining, timeout recovery, stale identity resolution, HTTP writes and queued generation. The security PostgreSQL harness runs these and the transaction/session-deletion regressions against isolated synthetic schemas. See the [combined review](../plans/security-data-hardening/review.md).

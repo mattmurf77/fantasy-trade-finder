@@ -1,18 +1,3 @@
-# Status — 213-find-a-trade-entry
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-01",
-  "summary": "FB-213 — \"Find a trade\" should be present on any create-a-trade feature",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-01 — `572f5aa` — CHANGELOG 2026-08-01 (#210/#213/#217/#226). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # FB-213 — "Find a trade" should be present on any create-a-trade feature
 
 - **Type:** bug (severity per operator) · **Status:** fixed 2026-08-01

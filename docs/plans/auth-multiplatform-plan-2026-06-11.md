@@ -1,15 +1,6 @@
-```project-status
-{
-  "status": "partly-shipped",
-  "updated": "",
-  "summary": "Auth + Multi-Platform Plan (2026-06-11, rev. 2026-06-23)",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: partly-shipped partly — Part C (Sleeper write) shipped as `trade.send_in_sleeper`. Other parts folded into the ESPN/MFL plans.. Prior row preserved at ../reviews/2026/2026-09-06-project-status-migration/plans-index.md."
-}
-```
-
 # Auth + Multi-Platform Plan (2026-06-11, rev. 2026-06-23)
 
-*Strategic + technical plan for two investments the operator has prioritized: (A) third-party identity/authentication and (B) multi-platform league support (ESPN, then MFL). Grounded in branch `trade-engine-v2` as of 2026-06-13. This is a planning doc — no code changes. Companion reading: [competitor-feature-backlog-2026-06-11.md](competitor-feature-backlog-2026-06-11.md), [competitor-teardown-web-tools.md](../research/competitors/competitor-teardown-web-tools.md), [../architecture.md](../architecture.md), [../data-dictionary.md](../data-dictionary.md).*
+*Strategic + technical plan for two investments the operator has prioritized: (A) third-party identity/authentication and (B) multi-platform league support (ESPN, then MFL). Grounded in branch `trade-engine-v2` as of 2026-06-13. This is a planning doc — no code changes. Companion reading: [competitor-feature-backlog-2026-06-11.md](competitor-feature-backlog-2026-06-11.md), [competitor-teardown-web-tools.md](../competitor-teardown-web-tools.md), [../architecture.md](../architecture.md), [../data-dictionary.md](../data-dictionary.md).*
 
 > **Rev. 2026-06-23 (operator direction change).** Two scope changes from review: (1) providers are now **Apple, Google, Discord, and X (Twitter)** — not Apple+Google only; (2) the onboarding model is **inverted from auth-first to Sleeper-first**: users still start the experience with Sleeper exactly as today, and are *prompted to save their account* via a provider at three moments — after Sleeper login, after finishing the minimum tier ranks for any position, and upon opening the Trade feature. Auth never blocks the core loop. See "Sleeper-first progressive auth (the three prompts)" and the revised Phase 1. Line-number citations are from the 2026-06-13 grounding and have drifted slightly; anchors re-verified 2026-06-23 where noted.
 >

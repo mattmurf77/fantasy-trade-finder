@@ -168,8 +168,8 @@ Each of these is a decision, not an oversight. Do not "fix" them without reading
 | Question | Document |
 |---|---|
 | How do matchmaking services actually work? | [`docs/research/matchmaking/`](../../research/matchmaking/) (README indexes 11 memos) |
-| Is a player mis-valued? Is the ladder age-broken? | [`docs/reviews/2026/2026-08-18-valuation-age-audit.md`](../../reviews/2026/2026-08-18-valuation-age-audit.md) |
-| When did trade quality degrade, and why? | [`docs/reviews/2026/2026-08-18-trade-logic-archaeology.md`](../../reviews/2026/2026-08-18-trade-logic-archaeology.md) |
+| Is a player mis-valued? Is the ladder age-broken? | [`docs/reviews/2026-08-18-valuation-age-audit.md`](../../reviews/2026-08-18-valuation-age-audit.md) |
+| When did trade quality degrade, and why? | [`docs/reviews/2026-08-18-trade-logic-archaeology.md`](../../reviews/2026-08-18-trade-logic-archaeology.md) |
 | What do real leagues actually trade? | [`docs/business/analytics/2026-08-16-organic-trade-corpus.md`](../../business/analytics/2026-08-16-organic-trade-corpus.md) — 529 trades, 22 league-seasons |
 | The bake-off design | [`docs/plans/three-model-bakeoff/PLAN.md`](../three-model-bakeoff/PLAN.md) + scope-phase0/2/3/tier-bounded/composition |
 | Decline-reason spec | [`docs/plans/decline-reason-capture/SPEC.md`](../decline-reason-capture/SPEC.md) |

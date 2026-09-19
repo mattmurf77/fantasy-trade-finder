@@ -28,7 +28,7 @@
   - `test_current_year_rungs_badge_their_own_round` — a current-year pick of round R must badge exactly where `GENERIC_PICK_SEEDS[(R, "Mid")]` sits, asserted through the route for all four rounds, plus the underlying identity `value_to_elo(pick_pool_value(R, 0)) == GENERIC_PICK_SEEDS[(R, "Mid")]`. This is what `tier_config.json`'s `_calibration` already *defines* to be true. **No wrong inverse can satisfy it for all four rounds** — which is exactly the failure mode of the literal-Elo pins it supplements, since those had been written by reading the buggy output back.
   - `test_deep_far_out_pick_tiers_null_rather_than_flattering_it` — a 2029 4th prices below the `waivers` floor and must carry `null`, not a fabricated `third`.
   - Sabotage `S1b` ("wrong INVERSE") is documented in the file header alongside the pre-existing `S1`/`S2` traps.
-- [x] **Code-walk proof:** `docs/reviews/2026/2026-08-19-pick-badge-scale.md` § "The actual defect" and § "Why 1383.5, exactly" — the full file:line-cited trace (`backend/database.py:1040` for the column's scale, `backend/pick_values.py:264-266` for how `pool_value` is produced, `backend/server.py` `_pick_tier` for the conversion, `backend/tier_config.json` `_calibration` for why the seeds are on the band scale), with the arithmetic reproducing 1383.5 end to end and the single-crossing-point proof that `seed_elo_for_value` is not the inverse of `elo_to_value`.
+- [x] **Code-walk proof:** `docs/reviews/2026-08-19-pick-badge-scale.md` § "The actual defect" and § "Why 1383.5, exactly" — the full file:line-cited trace (`backend/database.py:1040` for the column's scale, `backend/pick_values.py:264-266` for how `pool_value` is produced, `backend/server.py` `_pick_tier` for the conversion, `backend/tier_config.json` `_calibration` for why the seeds are on the band scale), with the arithmetic reproducing 1383.5 end to end and the single-crossing-point proof that `seed_elo_for_value` is not the inverse of `elo_to_value`.
 - [x] **Manual TestFlight checklist** — runtime proof genuinely matters here: tier colours on a real board, and one case where a badge disappears rather than changing. See below.
 - **`testID`s added/renamed:** none. `mobile/scripts/testid-lint.sh` → **OK**.
 
@@ -54,10 +54,10 @@ Run against a Sleeper or MFL league with synced picks (ESPN leagues carry none u
 | `living-memory/HLD.md` | **n/a** | no new module, client or flow |
 | `docs/cross-client-invariants.md` | **updated** | new subsection under the banding rule: the two value↔Elo maps, which inverts which, the single crossing point at Elo 1548.0, and the current-year-rung invariant to test against. This is the doc that should have prevented the defect |
 | `docs/glossary.md` | **n/a** | no new domain term (`pool_value`, seed Elo and tier band are all already defined) |
-| ADR or `DECISIONS.md` entry | **updated** | [D-088](../../../living-memory/DECISIONS.md). Not a formal ADR — it corrects an arithmetic error rather than choosing an architecture |
+| ADR or `DECISIONS.md` entry | **updated** | [D-088](../../living-memory/DECISIONS.md). Not a formal ADR — it corrects an arithmetic error rather than choosing an architecture |
 | `docs/data-dictionary.md` | **n/a** | no column added, removed or redefined |
 | `docs/config-reference.md` | **n/a** | no env var, flag or `model_config` key |
-| `living-memory/GOTCHAS.md` | **updated** | [G-052](../../../living-memory/GOTCHAS.md) — the wrong-inverse trap, its single crossing point, and the property-vs-literal testing lesson |
+| `living-memory/GOTCHAS.md` | **updated** | [G-052](../../living-memory/GOTCHAS.md) — the wrong-inverse trap, its single crossing point, and the property-vs-literal testing lesson |
 | `living-memory/OPEN_QUESTIONS.md` | **updated** | Q-019 closed with its answer; the surviving seed-map half re-logged as Q-021, sized as an every-player-board change |
 | `backend/pick_values.py` module note | **updated** | the D-084 note that pointed at Q-019 now carries a warning not to reach for it to explain a wrong badge, the re-derived compression figure (54.9 Elo over ranks 200–300), and the current-year-rung invariant |
 

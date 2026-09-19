@@ -1,18 +1,3 @@
-# Status — db-storage-reduction
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-09-15",
-  "summary": "Storage recovery, diagnostic normalization and historical compaction released",
-  "evidence": "release.md and the retained September 15 status notes document PR #293 plus bounded writes in PR #294 (82c5f118), exact-head/post-merge CI, verified production backup and rehearsal, all 67,159 rows scanned, 45,733 compacted, matching core/outcome hashes, and completed physical reclamation. Render was available at 16:55 UTC with 20.03% disk used. Disk is 5 GB; compute remains Basic 256 MB. Capacity estimates are storage planning, not supported concurrency or user-count guarantees."
-}
-```
-
-## Historical phase and release notes
-
-The current disposition is the status record above. Earlier planned/build wording below is retained as dated history.
-
 # Database storage reduction — status
 
 2026-09-15: released; full historical compaction and physical reclamation completed.

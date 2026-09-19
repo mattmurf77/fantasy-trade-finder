@@ -41,7 +41,7 @@ and nobody sends them:
 
 | Evidence | Number | Source |
 |---|---|---|
-| 1-for-1 cards existing in only one direction | **96.3%** | arm-B audit, [docs/reviews/2026/2026-08-19-armb-audit-consolidated.md](../../../reviews/2026/2026-08-19-armb-audit-consolidated.md) |
+| 1-for-1 cards existing in only one direction | **96.3%** | arm-B audit, [docs/reviews/2026-08-19-armb-audit-consolidated.md](../../../reviews/2026-08-19-armb-audit-consolidated.md) |
 | Served cards that never consult a partner board | 84.5% | arm-B audit |
 | Consensus-path cards where the viewer receives more than they give | 86.3% | arm-B audit |
 | Real trades ever sent through the app (`deck_outcomes.action='propose'`) | **0, all-time** | trade-engine-accuracy PLAN §G1 |

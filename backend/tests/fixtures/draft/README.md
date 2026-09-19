@@ -1,7 +1,7 @@
 # Draft fixture corpora (rookie-draft M1)
 
 Recorded cassettes that let M3–M5 exercise every draft state offline.
-Spec: `docs/plans/archive/2026/rookie-draft/plan.md` §M1, `docs/plans/archive/2026/rookie-draft/lld.md` §4.1.
+Spec: `docs/plans/rookie-draft/plan.md` §M1, `docs/plans/rookie-draft/lld.md` §4.1.
 Harness: `backend/tests/support/draft_replay.py`. Tests: `backend/tests/test_draft_replay.py`.
 
 ## Inventory

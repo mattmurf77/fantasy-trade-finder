@@ -1,18 +1,3 @@
-# Status — 146-send-gate-espn
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-07-18",
-  "summary": "#146 — Send-in-Sleeper button showing on ESPN league",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-18 — FB-146 Send-in-Sleeper ESPN gate — CHANGELOG 2026-07-18, v1.9.0. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #146 — Send-in-Sleeper button showing on ESPN league
 
 **Status:** built (branch `trade-engine-v2`), pending QA

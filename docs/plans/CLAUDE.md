@@ -1,55 +1,59 @@
-# Initiative documents
+# `docs/plans/` — Notes for Claude
 
-Start with the generated [active index](README.md). Use the [full catalog](CATALOG.md)
-only for duplicate checks or historical research. A plan records intent; shipped code,
-API/schema references, and release evidence establish actual behavior.
+Working docs for multi-step initiatives. **Nothing here is evidence that something shipped.**
+A plan for a feature that went live in June and a plan abandoned in June look identical on
+disk — the status column in [README.md](README.md) is the only discriminator. Read it before
+you act on any doc in this tree, and don't infer "current" from a recent file date.
 
-## One status source
+## Before you read a plan
 
-Every initiative folder has `status.md` with one `project-status` JSON block.
-A flat Markdown plan carries the block in the document itself. Copy the format from
-[`../templates/status.md`](../templates/status.md). Historical prose below the block
-is evidence, not a second live status. Never edit an index row manually.
+1. **[README.md](README.md)** — the index, with a status per folder and per flat plan.
+2. If it says **shipped**, the doc describes intent, not the implementation; the code and
+   [`../api-reference.md`](../api-reference.md) / [`../data-dictionary.md`](../data-dictionary.md)
+   are truth.
+3. If it says **superseded** or **abandoned**, read it for reasoning only.
+4. Check the flag in `config/features.json` before believing any "ships ON" claim in a doc.
 
-After adding an initiative or updating its status:
+## Before you write one
 
-```sh
-python3 scripts/project_hygiene.py --write
-python3 scripts/project_hygiene.py --check
-```
+- **Feature scope first.** Any change touching user-visible behavior, data collection, schema,
+  or API copies [`../templates/feature-scope.md`](../templates/feature-scope.md) into the
+  feature's home as `scope.md`. This is the root `CLAUDE.md` §Conventions feature gate, not a
+  local preference.
+- **Flat vs folder.** One session, one author → flat `<slug>.md`. Multi-session, multi-agent, or
+  iterative → `<slug>/` folder.
+- **Add the README row in the same session** you create the folder.
+- **Match the neighbours.** No single layout is enforced. The current shape is `plan.md` +
+  `scope.md` + `prd.md` + `hld.md`/`lld.md` + `reconciliation-log.md`, with `build-*.md` per
+  build wave and `research/` for sourced evidence. Batch folders suffix per item
+  (`prd-p0-1.md`, `LLD-p1-3.md`).
 
-The generator includes new and untracked folders/files, initializes missing records
-as `needs-review`, and produces both indexes from those records. It never infers
-release state from a flag name, document title, file date, or a legacy "built" claim.
-Unknown dates stay blank. Check the evidence before resolving a migrated status.
-The previous manual index is preserved in
-[`../reviews/2026/2026-09-06-project-status-migration/`](../reviews/2026/2026-09-06-project-status-migration/).
+## Where things aren't
 
-## New work
+- **Per-feedback-item fixes** → [`../feedback/items/<id>-<slug>/`](../feedback/items/), never here.
+  Batches before item #64 are the exception and stay in `feedback-batch-2..4/` as history.
+- **Strategy** (market sizing, pricing, positioning, audits) → [`../business/`](../business/).
+  A plan here is the build-side counterpart, not the strategy.
+- **What actually changed** → [`../../living-memory/CHANGELOG.md`](../../living-memory/CHANGELOG.md).
+- **Point-in-time audits** → [`../reviews/`](../reviews/).
 
-- Prefer one initiative folder with `status.md`, `scope.md`, `plan.md` or `prd.md`,
-  and supporting evidence only when needed. Do not create HLD/LLD variants by default.
-- For user-visible, schema, API, or data-collection changes, complete
-  [`../templates/feature-scope.md`](../templates/feature-scope.md) before building.
-- Per-feedback-item fixes belong in [`../feedback/items/`](../feedback/items/).
-  Pre-#64 feedback batches remain here as historical groups.
-- Strategy belongs in `docs/business/`; point-in-time reviews in `docs/reviews/`;
-  product contracts and runtime reference details belong in their canonical docs.
-- `_templates/` and `docs/agent-collab-protocol.md` describe a retired round protocol.
-  Do not initiate new work through that protocol.
+## The round-based protocol is legacy
 
-## Closing and archiving
+[`_templates/`](_templates/) and [`../agent-collab-protocol.md`](../agent-collab-protocol.md)
+describe a `status.md` / `conversation.md` / `round-NN-task.md` / `round-NN-findings.md`
+handoff loop. Only `perf-optimization/` ever completed it. `feedback-backend-sync/` and
+`mobile-feature-parity/` still say "round 01 not yet seeded" from 2026-06-07. Work since
+2026-07 uses dual-agent PRD/HLD/LLD + `reconciliation-log.md` instead. Don't seed a new
+round-protocol thread unless you intend to run it.
 
-Record the actual outcome and evidence in `status.md`, promote lasting decisions and
-reference changes, and update session memory. A shipped claim requires release/merge
-evidence and must preserve remaining platform or QA limitations in the evidence text.
+**Correction to earlier versions of this file:** those files are **tracked in git**. They were
+documented as gitignored agent scratch; `.gitignore` has no rule for them and never did, and
+`perf-optimization/`, `feedback-backend-sync/`, `mobile-feature-parity/` and `feedback-batch-2/`
+all have theirs committed. Treat anything you write in a plan folder as public and permanent.
 
-Verified inactive initiatives may move to `archive/<year>/<slug>/` (flat plans to
-`archive/<year>/<slug>.md`). Preserve the status source and reasoning trail, update
-relative and inbound links, and regenerate both indexes. Archive status is independent
-of release status: abandoned work was not shipped. Do not bulk-archive plans whose
-current disposition is uncertain, or delete unmerged implementation evidence.
+## Closing a thread
 
-Archived homes appear only in the full catalog. `shipped`, `deferred`, `superseded`,
-`abandoned`, `declined`, and `reference` records are also excluded from normal active
-retrieval. `needs-review` remains visible until evidence resolves the uncertainty.
+Flip its status row in [README.md](README.md), promote durable changes per the trigger table in
+[`../CLAUDE.md`](../CLAUDE.md) (ADRs, data-dictionary, api-reference, glossary, runbook,
+cross-client-invariants), and write the dated entry in `living-memory/CHANGELOG.md`. **Folders
+are never deleted or archived** — they're the reasoning trail.

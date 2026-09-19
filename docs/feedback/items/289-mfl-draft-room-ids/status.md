@@ -1,18 +1,3 @@
-# Status — 289-mfl-draft-room-ids
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-10",
-  "summary": "Status — FB-289: MFL Draft Room renders raw IDs instead of names (G1, backend)",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-10 — PR #103 → `6c304c7`, v1.12.0 b98 — G1 of the #289–#294 batch. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # Status — FB-289: MFL Draft Room renders raw IDs instead of names (G1, backend)
 
 - **Phase:** 2 (build) — **complete**, awaiting batch QA + orchestrator merge
@@ -388,6 +373,6 @@ pointed at a backend carrying this fix.
       "names are fixed" without the numbers.**
 
 **Sim gate** — Tier **3**: run
-`archive/retired-tooling/mobile/maestro/flows/rookie/d1-draft-room-complete.yaml` and
+`mobile/.maestro/flows/rookie/d1-draft-room-complete.yaml` and
 `d2-draft-room-order-not-set.yaml` (Sleeper corpus, no-regression), log in
 `TEST_LEDGER.md`, write `qa/sim-runs/last-sim-run.json`.

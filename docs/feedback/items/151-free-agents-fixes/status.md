@@ -1,18 +1,3 @@
-# Status — 151-free-agents-fixes
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-07-25",
-  "summary": "#151 — Free agents: rostered players in the list + broken back button — status",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-25 — free-agents union + 503 `rosters_unavailable` — CHANGELOG 2026-07-25; regression class in DECISIONS. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #151 — Free agents: rostered players in the list + broken back button — status
 
 **State:** fixed (2026-07-25, worktree branch off `teardown-remediation`).

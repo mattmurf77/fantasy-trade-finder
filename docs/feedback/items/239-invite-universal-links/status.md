@@ -1,18 +1,3 @@
-# Status — 239-invite-universal-links
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-02",
-  "summary": "#239 — Invite links open the app when installed (iOS Universal Links)",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-02 — associated-domains entitlement `c0e99ba` — CHANGELOG 2026-08-02. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #239 — Invite links open the app when installed (iOS Universal Links)
 
 **Severity:** polish · **Reporter:** mattmurf77 · **Status:** built, pending merge + deploy + iOS build

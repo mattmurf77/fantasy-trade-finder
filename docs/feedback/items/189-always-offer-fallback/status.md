@@ -1,18 +1,3 @@
-# Status — 189-always-offer-fallback
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-07-25",
-  "summary": "#189 — Acquire/trade-away should always present offers — status",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-25 — two-stage relaxed fallback for zero-card jobs — CHANGELOG 2026-07-25. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #189 — Acquire/trade-away should always present offers — status
 
 **Status: built (backend field shipped; client labeling belongs to the client owner)** · 2026-07-25 · branch `teardown-remediation` worktree

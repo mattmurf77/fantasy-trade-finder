@@ -1,18 +1,3 @@
-# Status — 384-calc-finder-merge
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-22",
-  "summary": "Status — #384 Manual calculator becomes the merged trade surface",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-22 — **SHIPPED** PR #172 `80dee42`, flags LIT for all users, app 1.16.0 (EAS). merge Find a Trade into the manual calculator; canonical for #310/#379/#380, touches #333. W0–W5 built behind `calc.merged_layout` (**false**), not merged, not pushed; TestFlight checklist UNRUN. W5 fixed the e2e review's 5 P0 + most P1: the four action beats now advance, the tour reaches the deck (park + hand-off, `popTo`), the ✕-overlay no longer strands the card, overlay scope is calculator-origin, first-visit receipt + cap reset, league-keyed remount, 13 analytics names registered, `scope.md` written, guards hardened (15 sabotages red). **Operator rulings 2026-08-22:** §6b → own tab for now (D-151, Q-028 closed); ✓ like/queue contract approved and in build (W6-A). **Still open:** receive-side `pinned_receive_mode:'all'` vs give-side-only (Q-029 second half), rollout shape. Flip also needs `onboarding.guide_v2` (off today) or there is no tour. **The report the 2000-char cap ate** (D-149/G-055). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # Status — #384 Manual calculator becomes the merged trade surface
 
 **Status:** **SHIPPED 2026-08-22 — PR [#172](https://github.com/mattmurf77/fantasy-trade-finder/pull/172) squash `80dee42`, `calc.merged_layout` + `onboarding.guide_v2` LIT for all users by operator decision (no TestFlight pass first); app 1.16.0 via EAS.** Prior state: — waves W0–W5 on `claude/manual-calculator-e2e-review-39a467`, `calc.merged_layout` **false**, not merged, not pushed. TestFlight checklist rewritten against current behaviour and **still UNRUN**. The [E2E review](review-2026-08-22-e2e.md)'s 5 P0 and most P1s are fixed — see the W5 section at the bottom for what was fixed, what is still open, and the **five flag prerequisites**. **Do not flip without reading those prerequisites: `onboarding.guide_v2` is `false` today, and flipping `calc.merged_layout` alone ships the merged layout with no tour.** Scope block (retrospective, gate 1 was skipped): [`scope.md`](scope.md).
@@ -22,7 +7,7 @@ The material below is retained evidence. Its former status wording does not over
 **Filed severity:** `bug` — **it is a feature/IA spec**; treat as such.
 
 > **This report is the one the 2000-char cap ate.** Written 03:04Z, delivered 04:26Z after the
-> cap raise ([D-149](../../../../living-memory/DECISIONS.md), [G-055](../../../../living-memory/GOTCHAS.md)).
+> cap raise ([D-149](../../../living-memory/DECISIONS.md), [G-055](../../../living-memory/GOTCHAS.md)).
 > 2,803 characters — it would have been lost permanently under the old limit.
 
 ---
@@ -134,7 +119,7 @@ W0–W4 record is what it was, including where it was wrong.
 |---|---|---|
 | `fcf3413` | W5-B — analytics | **#12 (analytics half).** 13 client event names registered in `analytics_taxonomy.py` with exact prop allowlists; six classified NON_INTENT in the same commit (INTENT is derived by subtraction). Before this the registry was default-deny behind a 200 and every `calc_tour_*` envelope was counted-and-dropped. `beats_shown` now snapshots before `endTour` resets the counter. Addendum: `docs/business/analytics/2026-08-22-384-calc-finder-addendum.md` |
 | `9dcd003` | W5-D — the deck side | **#1** the ✕-overlay stays up through layer 2 (only the two advancing callbacks close it) and a backdrop dismiss after a banked tile commits the deferred advance — the P0 dead-end. **#7** `reasonsAsOverlay` is a host-set PROP gated on the flag **AND** `deckOrigin === 'calculator'`, cleared three ways. **#3 (b)** `FinderHandoff` gains `origin`/`includePlayers`/a nullable opponent and the #330 choke point regenerates on a calculator arrival even with no partner. **#9** Back-to-calculator via the #190 prefill shape; unpin-retry for any pin count and it regenerates; both exhausted branches carry both exits. **#3 (c)** the three deck guide targets registered |
-| `a52c91e` | W5-T — the tour | **#2** n10/n16/n17/n18 advance on the real action. **#3 (a/b)** `popTo`, not `navigate` — routers 7.5.3 pushed a *second* `TradesHome` ([G-056](../../../../living-memory/GOTCHAS.md)); the runner PARKS after n18 and resumes when the deck says a card exists, 30 s bounded. **#8** first-visit `calc_tour_completed` receipt gates the auto-start; "Show me around" resets the per-beat caps and dismisses a stale bubble; a run-ahead Find a Trade jumps to the deck half; `endTour` takes down its own bubble. **#4 (partly)** n11 opens the DNA sheet through an opener ref, and an honest outlook **fallback row** stands in when `trade.outlook_direction` is dark. **#11 (partly)** format chips + conversion note restored in the merged header. **#10** league-keyed remount. **#14/#15/#17/#19/#24** hasLeague gate, the #213 link steps aside, n23/n23b by platform, n19's "Clear became the ✕", n14 after n16, the stale demo-league copy |
+| `a52c91e` | W5-T — the tour | **#2** n10/n16/n17/n18 advance on the real action. **#3 (a/b)** `popTo`, not `navigate` — routers 7.5.3 pushed a *second* `TradesHome` ([G-056](../../../living-memory/GOTCHAS.md)); the runner PARKS after n18 and resumes when the deck says a card exists, 30 s bounded. **#8** first-visit `calc_tour_completed` receipt gates the auto-start; "Show me around" resets the per-beat caps and dismisses a stale bubble; a run-ahead Find a Trade jumps to the deck half; `endTour` takes down its own bubble. **#4 (partly)** n11 opens the DNA sheet through an opener ref, and an honest outlook **fallback row** stands in when `trade.outlook_direction` is dark. **#11 (partly)** format chips + conversion note restored in the merged header. **#10** league-keyed remount. **#14/#15/#17/#19/#24** hasLeague gate, the #213 link steps aside, n23/n23b by platform, n19's "Clear became the ✕", n14 after n16, the stale demo-league copy |
 
 **This session (evidence + paper trail, no product code).** Review **#13**: fifteen named sabotages
 re-run against the current files — all fifteen red, each against a specific assertion (flag read
@@ -183,7 +168,7 @@ pytest 4128 passed / 1 skipped.
    operator wrote it: the shipped decks keep their inline tiles, and the overlay appears only on a
    deck the calculator handed off to. Recorded because the review listed it as open; reversing it to
    "all decks" would need an explicit call.
-4. ~~**§6b — two tabs (built) vs "replaces the manual calc tab" (ruled).** Unanswered since the plan.~~ **RULED 2026-08-22: own tab for now** — [D-151](../../../../living-memory/DECISIONS.md), Q-028 closed. The built two-tab form stands.
+4. ~~**§6b — two tabs (built) vs "replaces the manual calc tab" (ruled).** Unanswered since the plan.~~ **RULED 2026-08-22: own tab for now** — [D-151](../../../living-memory/DECISIONS.md), Q-028 closed. The built two-tab form stands.
    The `Real values` tab *is* #310's league-free calculator, and the tour's opening beat n10 exists
    to carry the user from it to `In league`; collapsing to one page re-answers #310 and needs a new
    opening beat. **Q-028**.
@@ -249,7 +234,7 @@ arrays non-empty.
   and the answer is a product answer
 - `reason` ∈ `likes_you_off` · `not_league_member` · `assets_not_on_roster` ·
   `opponent_untouchable` · `opponent_not_interested` · `fails_fairness_floor` — closed and
-  cross-client ([invariants](../../../cross-client-invariants.md#trade-queue-refusal-reasons-post-apitradesqueue))
+  cross-client ([invariants](../../cross-client-invariants.md#trade-queue-refusal-reasons-post-apitradesqueue))
 - `400` `missing_field` · `league_mismatch` (another league's members, rosters and seed board are
   not on this session, so the predicate is unanswerable rather than refusable)
 - **Idempotency key:** `calcq_<sha1(user|league|opponent|sorted give|sorted receive)[:16]>`. Asset

@@ -16,7 +16,7 @@ files. Seeded from history before this skill existed:
 - 2026-07-12 [qa] Most Maestro flows still match visible text, not testID —
   copy changes break flows. When a flow flakes after a UI tweak, fix the
   matcher, don't loosen it; prefer adding testIDs (registry in
-  docs/plans/archive/2026/mobile-testing/lld.md).
+  docs/plans/mobile-testing/lld.md).
 - 2026-07-12 [qa] Maestro needs JAVA_HOME exported and a booted simulator
   with the app installed via `npx expo run:ios` (first build ~10 min).
 - 2026-07-12 [ship] EAS `production` profile auto-increments build number;

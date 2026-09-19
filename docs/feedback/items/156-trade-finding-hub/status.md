@@ -1,18 +1,3 @@
-# Status — 156-trade-finding-hub
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-07-25",
-  "summary": "#156 — Trade-Finding Hub · status",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-25 — teardown-remediation. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #156 — Trade-Finding Hub · status
 
 **State:** FINISHED + **flag flipped ON** (2026-07-25, operator-approved).

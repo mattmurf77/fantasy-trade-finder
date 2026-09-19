@@ -1,5 +1,5 @@
 """Tests for trade-engine Tier 2 work items 2.1 + 2.2
-(docs/plans/archive/2026/trade-engine-tier2-models.md).
+(docs/plans/trade-engine-tier2-models.md).
 
 Covers:
   - replacement_levels(): next-best-at-position-outside-starters, superflex

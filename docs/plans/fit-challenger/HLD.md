@@ -4,7 +4,7 @@
 **Status:** architecture layer between [PLAN-v2.md](PLAN-v2.md) (authoritative; §1 rulings
 R-1..R-12 binding) and the file/function-level LLD that follows. Product spec:
 [PRD.md](PRD.md) (§3 knockouts operator-CLOSED). Concerns C1–C7 and traps T1–T4:
-[../../reviews/2026/2026-08-20-fit-challenger-review.md](../../reviews/2026/2026-08-20-fit-challenger-review.md).
+[../../reviews/2026-08-20-fit-challenger-review.md](../../reviews/2026-08-20-fit-challenger-review.md).
 **Rule of citation:** every integration claim below names a real symbol with file:line
 against this checkout. Where code contradicts the plan, the contradiction is recorded in
 §10 (Findings for the LLD), never silently adapted around.

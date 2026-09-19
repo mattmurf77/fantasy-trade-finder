@@ -39,7 +39,7 @@ Three of the plan's structural arguments I independently confirmed and adopted w
    row via `pricedRowAncestor`; the section-level `subset === 'all' &&` gate sits above them.
    R8's "run it unmodified; if it fails the implementation is wrong" is exactly right.
 3. **Zero existing Maestro coverage of the chart.** Confirmed: only `league-summary.league-home`
-   is referenced anywhere in `archive/retired-tooling/mobile/maestro/`, by three rookie flows.
+   is referenced anywhere in `mobile/.maestro/`, by three rookie flows.
 
 I also adopt D1 (identical in all three subsets) and D2's core (arithmetic + default membership)
 and reject the same alternatives for the same reasons. Proportional allocation in particular is
@@ -575,7 +575,7 @@ same `Starters · RB + Picks` expectation and needs the same fix.)
 §7.4 T3: *"the pill exposes `accessibilityState={{selected}}` (`:1221`) but **Maestro cannot read
 it**, so the screenshot is the artifact."* That claim is asserted without evidence. Maestro's
 element matchers do accept selection-state attributes in recent versions; I could not settle it
-from the repo — `grep -rn "selected:" archive/retired-tooling/mobile/maestro/` returns **nothing**, so there is no local
+from the repo — `grep -rn "selected:" mobile/.maestro/` returns **nothing**, so there is no local
 precedent either way.
 
 This matters because T3 is the **only** test of the R-6 state machine, and a screenshot is an
@@ -791,7 +791,7 @@ because an implementer working from a wrong range edits the wrong comment.
 
 **5. O-10 could not be closed here, and I said so rather than guessing.** `maestro --version` in
 this worktree fails with *"Unable to locate a Java Runtime"*; no Maestro version is pinned
-anywhere in the repo; `grep -rn "selected:" archive/retired-tooling/mobile/maestro/` returns nothing. So T3's spec now
+anywhere in the repo; `grep -rn "selected:" mobile/.maestro/` returns nothing. So T3's spec now
 carries an explicit two-branch instruction plus a requirement to record the version checked in
 the flow header — converting an unverified claim into a bounded task instead of laundering it
 into a second unverified claim.

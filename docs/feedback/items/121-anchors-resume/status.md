@@ -1,18 +1,3 @@
-# Status — 121-anchors-resume
-
-```project-status
-{
-  "status": "in-progress",
-  "updated": "2026-07-12",
-  "summary": "#121 Anchors resume failure — status",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: in-progress 2026-07-12 — trade-engine-v2. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #121 Anchors resume failure — status
 
 **Covered feedback IDs:** #121, #125 (bugs, duplicate root cause), #128 (bug), #133 (polish)
@@ -93,7 +78,7 @@ untouched, `getAnchorPool` already sends `X-Scoring-Format` (#112).
 ## Verification
 
 - `cd mobile && npx tsc --noEmit` — clean.
-- Release sim build via `archive/retired-tooling/mobile/scripts/sim-build.sh` (localhost API base),
+- Release sim build via `mobile/scripts/sim-build.sh` (localhost API base),
   fixture backend `standard` profile (qa_standard / QA Standard League)
   seeded via `backend/tests/fixtures/seed_ui_test_db.py`, driven on the
   FTF-iOS18 simulator with Maestro.

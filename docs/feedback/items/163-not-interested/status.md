@@ -1,18 +1,3 @@
-# Status — 163-not-interested
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-07-25",
-  "summary": "#163 — \"Not interested in this player\" flag — status",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-25 — `not_interested` receive-side exclusion — CHANGELOG 2026-07-25. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #163 — "Not interested in this player" flag — status
 
 **Status: built (backend + client plumbing; menu mount by screen owners)** · 2026-07-25 · branch `teardown-remediation` worktree

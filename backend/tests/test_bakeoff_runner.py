@@ -444,7 +444,7 @@ def test_restore_order_keeps_drops_dropped():
 
 # ---------------------------------------------------------------------------
 # fairness_threshold + config capture
-# (docs/reviews/2026/2026-08-18-trade-logic-archaeology.md — persisted nowhere
+# (docs/reviews/2026-08-18-trade-logic-archaeology.md — persisted nowhere
 #  before this, so an arm comparison across client settings compared arms AND
 #  thresholds at once)
 # ---------------------------------------------------------------------------

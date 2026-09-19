@@ -1,18 +1,3 @@
-# Status — 185-pick-values-in-suggestions
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-07-25",
-  "summary": "#185 — Pick values missing in suggestions — status",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-25 — `_inject_owned_picks` primes Elo `1200 + 6*pick_value` `68920c3` — CHANGELOG 2026-07-25. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #185 — Pick values missing in suggestions — status
 
 **Status: fixed** · 2026-07-25 · branch `teardown-remediation` worktree

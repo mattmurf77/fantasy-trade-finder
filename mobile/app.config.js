@@ -1,5 +1,5 @@
 // Build-time env contract for the UI-test harness
-// (docs/plans/archive/2026/mobile-testing/lld.md §2.4, prd.md R-01).
+// (docs/plans/mobile-testing/lld.md §2.4, prd.md R-01).
 //
 // Layers over app.json (passed in as `config`). With NO env set this must be
 // byte-identical in effect to app.json alone — shipping builds are untouched.

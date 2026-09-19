@@ -1,18 +1,3 @@
-# Status — 415-queue-loss-refusal-no-advance
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-09-02",
-  "summary": "FB-415 — \"this trade would be a loss for Bcork\", then no advance",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-09-02 — verify-closed — refusal half = D-170 (server, live 2026-08-31T21:29Z), advance half = D-171 v1.16.14 build 143; proof = finder-results-push scope §7 step 5. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # FB-415 — "this trade would be a loss for Bcork", then no advance
 
 **Status:** fixed (verify on v1.16.14) · 2026-09-02 triage · closed by work shipped outside this pipeline

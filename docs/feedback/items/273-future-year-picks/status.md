@@ -1,18 +1,3 @@
-# Status — 273-future-year-picks
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-09",
-  "summary": "#273/#274/#275 — PickAssignmentScreen: future-year order fiction, sheet height, close-on-select",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-09 — n/a — covers #273/#274/#275 (wave 3). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #273/#274/#275 — PickAssignmentScreen: future-year order fiction, sheet height, close-on-select
 
 **Covered feedback IDs:** #273 (bug), #274 (polish), #275 (polish) —

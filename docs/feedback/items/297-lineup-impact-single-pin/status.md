@@ -1,18 +1,3 @@
-# Status — 297-lineup-impact-single-pin
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-12",
-  "summary": "Status — #297 lineup-impact honest copy · #298 single-pin trade recovery",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-12 — PR #108 → `f8acd71` — covers #297/#298. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # Status — #297 lineup-impact honest copy · #298 single-pin trade recovery
 
 > Build agent status for feedback **#297** and **#298** (group owned by the lowest ID).
@@ -105,7 +90,7 @@ no blur, ≥11px, `chalk.faint` tick (neutral — not a new accent).
 
 ### New file
 
-`archive/retired-tooling/mobile/maestro/flows/smoke/12-trades-single-pin.yaml` — see §4.
+`mobile/.maestro/flows/smoke/12-trades-single-pin.yaml` — see §4.
 
 ---
 
@@ -294,7 +279,7 @@ green**, because it was still looking at the legacy arm's copy. Same failure mod
 prior batch's three tests that passed on the defect they were meant to catch. Reasoning
 about a sabotage is not running one.
 
-### 4b. `archive/retired-tooling/mobile/maestro/flows/smoke/12-trades-single-pin.yaml` — behavioural, **NOT executed**
+### 4b. `mobile/.maestro/flows/smoke/12-trades-single-pin.yaml` — behavioural, **NOT executed**
 
 **Honest caveat: I did not run this flow, and I did not run it against a sabotaged
 build.** Running Maestro was explicitly forbidden for this agent (parallel agents
@@ -526,7 +511,7 @@ Run on the `standard` profile with the `release` flag fixture unless noted.
 8. **Accessibility** — VoiceOver on the pinned deck card: the like/pass custom actions must
    be present (they ride inside the restored wrapper). And on the calculator: the new
    unavailable row must read as **one** sentence, not two nodes.
-9. **Capture** — `archive/retired-tooling/mobile/scripts/screen-capture.sh --screen trades --state single-pin`.
+9. **Capture** — `mobile/scripts/screen-capture.sh --screen trades --state single-pin`.
    There is currently **no** single-pin capture in `screens/manifest.json`, so every
    "current" frame for these two items is a reconstruction rather than a traced screenshot.
 

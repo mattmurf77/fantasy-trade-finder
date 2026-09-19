@@ -1,5 +1,5 @@
 // espnConnectBus — module-level mailbox for the ESPN Connect WebView handoff
-// (Phase 1b, docs/plans/archive/2026/espn-connect-webview/scope.md).
+// (Phase 1b, docs/plans/espn-connect-webview/scope.md).
 //
 // EspnLinkSheet is a RN <Modal>. A native-stack push (EspnConnectScreen with
 // its WebView) lands on the navigator BEHIND that Modal, so the sheet hides

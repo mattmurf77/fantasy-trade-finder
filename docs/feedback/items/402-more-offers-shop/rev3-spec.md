@@ -119,7 +119,7 @@ CONFIRMED (shop-only parameter). Item 1 (merge/Wave B) remains parked; the
 operator asked for confirmation that `calc.inline_home` reuses the manual
 calc UI — verified: `TradeBuildCanvas.tsx:4` imports and mounts the SAME
 `InLeagueCalculator`, per D-158's functionality-by-construction rule, and
-the parity audit is `docs/reviews/2026/2026-08-27-calc-vs-guided-finder-audit.md`.
+the parity audit is `docs/reviews/2026-08-27-calc-vs-guided-finder-audit.md`.
 
 ## 5. Sequencing
 

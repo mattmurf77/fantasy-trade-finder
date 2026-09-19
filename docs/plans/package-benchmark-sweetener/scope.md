@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-21
 **Entry point:** direct ask — operator approved 2026-08-21 ("I'm aligned. Let's fix that")
-off the evidence memo [docs/reviews/2026/2026-08-21-market-curve-comparison.md](../../reviews/2026/2026-08-21-market-curve-comparison.md) §3b.
+off the evidence memo [docs/reviews/2026-08-21-market-curve-comparison.md](../../reviews/2026-08-21-market-curve-comparison.md) §3b.
 **Builder:** isolated worktree agent, branch `fix/package-benchmark-sweetener`.
 **Merge posture:** built now, **MERGE HELD** for the operator's Monday window
 boundary (change-control rule, trade-engine-accuracy PLAN Phase 0.4). Nothing

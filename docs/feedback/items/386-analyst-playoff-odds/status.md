@@ -1,18 +1,3 @@
-# Status — 386-analyst-playoff-odds
-
-```project-status
-{
-  "status": "planned",
-  "updated": "2026-08-24",
-  "summary": "FB-386 + FB-391 — analyst pop-up / playoff odds broken (Group D canonical)",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: planned 2026-08-24 — **canonical** G-D of the 2026-08-24 wave (#386/#391) — analyst pop-up broken when playoff odds expanded on LeagueRankings. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # FB-386 + FB-391 — analyst pop-up / playoff odds broken (Group D canonical)
 - **Status:** built 2026-08-24 — awaiting QA + operator TestFlight checklist ([prd.md](prd.md) §5c)
 - **Covered:** #386 (bug), #391 (context: analyst box positions correctly when playoff projection is minimized)

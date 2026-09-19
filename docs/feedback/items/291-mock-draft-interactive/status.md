@@ -1,18 +1,3 @@
-# Status — 291-mock-draft-interactive
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-10",
-  "summary": "FB-291 — \"The mock draft should be interactive\"",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-10 — PR #103 — G2, canonical `290-mock-draft-engine/`. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # FB-291 — "The mock draft should be interactive"
 
 - **Type:** bug (reproduction unverified) · **Status:** planned 2026-08-10

@@ -1,7 +1,7 @@
 # Feature Scope — Consensus card must not claim "balanced" below the app's own bar
 
 **Date:** 2026-08-19
-**Entry point:** direct ask, from the arm-B engine audit's *Bugs neither review found* table, row 2 — [docs/reviews/2026/2026-08-19-armb-audit-consolidated.md](../../reviews/2026/2026-08-19-armb-audit-consolidated.md) (on branch `docs/armb-audit-consolidated`, tip `950fc97`)
+**Entry point:** direct ask, from the arm-B engine audit's *Bugs neither review found* table, row 2 — [docs/reviews/2026-08-19-armb-audit-consolidated.md](../../reviews/2026-08-19-armb-audit-consolidated.md) (on branch `docs/armb-audit-consolidated`, tip `950fc97`)
 **Builder:** client-side session, branch `fix/balanced-claim-fairness-gate` off `origin/main` `50e0451`
 **Operator sign-off on waivers:** not needed (no waivers — every section below is answered)
 

@@ -101,7 +101,7 @@ touches. Say the word and it becomes its own item. It is NOT in G3.*
 
 ## 3. Test scope (mobile test platform)
 
-- [x] **New flows** (`archive/retired-tooling/mobile/maestro/flows/league/` — new directory; G2 keeps its flows in
+- [x] **New flows** (`mobile/.maestro/flows/league/` — new directory; G2 keeps its flows in
       `flows/draft/` so the directory creation is not a shared edit):
   - `01-picks-in-subsets.yaml` — Picks pill + legend present in All/Starters/Bench (T1);
     drill-in `league-summary.roster-picks` visible in Starters and Bench (T2). → R-1, R-4, R-7

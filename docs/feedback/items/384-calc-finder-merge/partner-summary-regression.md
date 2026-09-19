@@ -1,7 +1,7 @@
 # #384 regression — the partner team-shape summary, restored to the merged layout
 
 **Date:** 2026-08-27
-**Entry point:** direct ask, off the [2026-08-27 calc-vs-guided-finder parity audit](../../../reviews/2026/2026-08-27-calc-vs-guided-finder-audit.md) — §3 "The five `partial` rows", row 24
+**Entry point:** direct ask, off the [2026-08-27 calc-vs-guided-finder parity audit](../../../reviews/2026-08-27-calc-vs-guided-finder-audit.md) — §3 "The five `partial` rows", row 24
 **Builder:** claude/calc-merged-partner-summary
 **Operator sign-off on waivers:** not needed (no waivers)
 

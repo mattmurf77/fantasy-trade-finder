@@ -1,6 +1,6 @@
 """Offline calibration check for the trade-engine v2 ``elo_to_value`` curve.
 
-Tier 1, Change 1 (docs/plans/archive/2026/trade-engine-tier1-fixes.md): the new
+Tier 1, Change 1 (docs/plans/trade-engine-tier1-fixes.md): the new
 Elo→value transform must agree with the existing ``dynasty_value``
 (search_rank → KTC-style exponential) curve, so the fairness gate behaves
 identically on 1-for-1 trades. Concretely: Spearman rank correlation of

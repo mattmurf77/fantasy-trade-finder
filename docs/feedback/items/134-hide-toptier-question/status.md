@@ -1,18 +1,3 @@
-# Status — 134-hide-toptier-question
-
-```project-status
-{
-  "status": "in-progress",
-  "updated": "2026-07-12",
-  "summary": "#134 — Remove the top-tier asset question (Anchors) — status",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: in-progress 2026-07-12 — trade-engine-v2. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #134 — Remove the top-tier asset question (Anchors) — status
 
 **State:** built (2026-07-12, branch `trade-engine-v2`). Awaiting QA/ship.

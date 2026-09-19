@@ -1,12 +1,3 @@
-```project-status
-{
-  "status": "reference",
-  "updated": "",
-  "summary": "Sleeper Write API — Capture Runbook (Spikes C1–C4)",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: reference  — Human-run capture runbook for Sleeper's undocumented login/trade endpoints. Prior row preserved at ../reviews/2026/2026-09-06-project-status-migration/plans-index.md."
-}
-```
-
 # Sleeper Write API — Capture Runbook (Spikes C1–C4)
 
 *Companion to [auth-multiplatform-plan-2026-06-11.md](auth-multiplatform-plan-2026-06-11.md) Part C. Goal: capture the real, current shape of Sleeper's undocumented **login→token** flow and **trade-create** call so FTF can build in-app "Send in Sleeper" **against captured traffic, not a guess.** Everything in Part C is gated on C1+C2. Created 2026-07-02.*

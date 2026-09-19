@@ -1,6 +1,6 @@
 # Teardown Remediation — QA Tracker
 
-QA status for the 30 flag-gated features (+ unflagged items) built on branch `teardown-remediation`. Companion to [`../docs/plans/archive/2026/competitor-feature-waves.md`](../docs/plans/archive/2026/competitor-feature-waves.md) (catalog) and [`accessibility-release-checklist.md`](accessibility-release-checklist.md).
+QA status for the 30 flag-gated features (+ unflagged items) built on branch `teardown-remediation`. Companion to [`../FEATURES.md`](../FEATURES.md) (catalog) and [`accessibility-release-checklist.md`](accessibility-release-checklist.md).
 
 **Static gates (whole wave):** ✅ backend pytest 967 · ✅ mobile `tsc --noEmit` · ✅ `npm run test:contrast` · ✅ features.json valid. Static gates prove *nothing breaks*; they do **not** exercise mobile runtime interaction — that's the Device column below.
 

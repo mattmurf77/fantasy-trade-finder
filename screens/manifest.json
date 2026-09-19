@@ -14,7 +14,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/anchors/error.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/anchors.yaml",
+          "flow": "mobile/.maestro/capture/anchors.yaml",
           "injections": [
             "fail_next",
             "latency"
@@ -27,7 +27,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/anchors/loading.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/anchors.yaml",
+          "flow": "mobile/.maestro/capture/anchors.yaml",
           "injections": [
             "fail_next",
             "latency"
@@ -40,7 +40,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/anchors/question.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/anchors.yaml",
+          "flow": "mobile/.maestro/capture/anchors.yaml",
           "injections": [
             "fail_next",
             "latency"
@@ -63,7 +63,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/calc/demo-verdict.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/calc.yaml",
+          "flow": "mobile/.maestro/capture/calc.yaml",
           "injections": [],
           "profile": "standard",
           "state": "demo-verdict"
@@ -73,7 +73,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/calc/league-mode.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/calc.yaml",
+          "flow": "mobile/.maestro/capture/calc.yaml",
           "injections": [],
           "profile": "standard",
           "state": "league-mode"
@@ -83,7 +83,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/calc/live-populated.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/calc.yaml",
+          "flow": "mobile/.maestro/capture/calc.yaml",
           "injections": [],
           "profile": "standard",
           "state": "live-populated"
@@ -93,7 +93,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/calc/one-sided-read.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/calc.yaml",
+          "flow": "mobile/.maestro/capture/calc.yaml",
           "injections": [],
           "profile": "standard",
           "state": "one-sided-read"
@@ -103,7 +103,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/calc/picker-open.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/calc.yaml",
+          "flow": "mobile/.maestro/capture/calc.yaml",
           "injections": [],
           "profile": "standard",
           "state": "picker-open"
@@ -113,7 +113,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/calc/verdict--live.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/calc.yaml",
+          "flow": "mobile/.maestro/capture/calc.yaml",
           "injections": [],
           "profile": "standard",
           "state": "verdict--live"
@@ -136,7 +136,7 @@
           "captured_at": "2026-08-11T00:11:47+00:00",
           "file": "mobile/draft-room/error--generic.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/draft-room@draft.yaml",
+          "flow": "mobile/.maestro/capture/draft-room@draft.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -149,7 +149,7 @@
           "captured_at": "2026-08-11T00:11:47+00:00",
           "file": "mobile/draft-room/loading.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/draft-room@draft.yaml",
+          "flow": "mobile/.maestro/capture/draft-room@draft.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -162,7 +162,7 @@
           "captured_at": "2026-08-11T00:11:47+00:00",
           "file": "mobile/draft-room/populated.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/draft-room@draft.yaml",
+          "flow": "mobile/.maestro/capture/draft-room@draft.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -175,7 +175,7 @@
           "captured_at": "2026-08-11T00:11:47+00:00",
           "file": "mobile/draft-room/undrafted--my-board.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/draft-room@draft.yaml",
+          "flow": "mobile/.maestro/capture/draft-room@draft.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -198,7 +198,7 @@
           "captured_at": "2026-08-10T23:30:44+00:00",
           "file": "mobile/feedback-inbox/empty.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/feedback-inbox.yaml",
+          "flow": "mobile/.maestro/capture/feedback-inbox.yaml",
           "injections": [],
           "profile": "standard",
           "state": "empty"
@@ -208,7 +208,7 @@
           "captured_at": "2026-08-10T23:30:44+00:00",
           "file": "mobile/feedback-inbox/populated.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/feedback-inbox.yaml",
+          "flow": "mobile/.maestro/capture/feedback-inbox.yaml",
           "injections": [],
           "profile": "standard",
           "state": "populated"
@@ -229,7 +229,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/free-agents/error--rosters-unavailable.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/free-agents.yaml",
+          "flow": "mobile/.maestro/capture/free-agents.yaml",
           "injections": [
             "fail_next"
           ],
@@ -241,7 +241,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/free-agents/populated.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/free-agents.yaml",
+          "flow": "mobile/.maestro/capture/free-agents.yaml",
           "injections": [
             "fail_next"
           ],
@@ -263,7 +263,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/league/coverage--single-format.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/league@single-format.yaml",
+          "flow": "mobile/.maestro/capture/league@single-format.yaml",
           "injections": [],
           "profile": "single-format",
           "state": "coverage--single-format"
@@ -273,7 +273,7 @@
           "captured_at": "2026-08-10T21:47:02+00:00",
           "file": "mobile/league/draft-picks-row.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/league@espn.yaml",
+          "flow": "mobile/.maestro/capture/league@espn.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -286,7 +286,7 @@
           "captured_at": "2026-08-10T21:47:02+00:00",
           "file": "mobile/league/espn-auth-expired.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/league@espn.yaml",
+          "flow": "mobile/.maestro/capture/league@espn.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -299,7 +299,7 @@
           "captured_at": "2026-08-10T21:47:02+00:00",
           "file": "mobile/league/espn-badge.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/league@espn.yaml",
+          "flow": "mobile/.maestro/capture/league@espn.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -312,7 +312,7 @@
           "captured_at": "2026-08-10T21:47:02+00:00",
           "file": "mobile/league/espn-resyncing.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/league@espn.yaml",
+          "flow": "mobile/.maestro/capture/league@espn.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -325,7 +325,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/league/first-paint-pending.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/league.yaml",
+          "flow": "mobile/.maestro/capture/league.yaml",
           "injections": [
             "latency"
           ],
@@ -337,7 +337,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/league/hero--second-league.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/league@two-leagues.yaml",
+          "flow": "mobile/.maestro/capture/league@two-leagues.yaml",
           "injections": [],
           "profile": "two-leagues",
           "state": "hero--second-league"
@@ -347,7 +347,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/league/populated.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/league.yaml",
+          "flow": "mobile/.maestro/capture/league.yaml",
           "injections": [
             "latency"
           ],
@@ -359,7 +359,7 @@
           "captured_at": "2026-08-10T16:51:55+00:00",
           "file": "mobile/league/progress-module.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/league@near-unlock.yaml",
+          "flow": "mobile/.maestro/capture/league@near-unlock.yaml",
           "injections": [],
           "profile": "near-unlock",
           "state": "progress-module"
@@ -369,7 +369,7 @@
           "captured_at": "2026-08-10T22:48:52+00:00",
           "file": "mobile/league/progress-ring--4-4-locked.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/league@quickset-done.yaml",
+          "flow": "mobile/.maestro/capture/league@quickset-done.yaml",
           "injections": [],
           "profile": "quickset-done",
           "state": "progress-ring--4-4-locked"
@@ -379,7 +379,7 @@
           "captured_at": "2026-08-10T16:51:55+00:00",
           "file": "mobile/league/works-now.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/league@near-unlock.yaml",
+          "flow": "mobile/.maestro/capture/league@near-unlock.yaml",
           "injections": [],
           "profile": "near-unlock",
           "state": "works-now"
@@ -398,7 +398,7 @@
           "captured_at": "2026-08-11T00:29:20+00:00",
           "file": "mobile/league-summary/basis--personal.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/league-summary.yaml",
+          "flow": "mobile/.maestro/capture/league-summary.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -411,7 +411,7 @@
           "captured_at": "2026-08-11T00:29:20+00:00",
           "file": "mobile/league-summary/error.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/league-summary.yaml",
+          "flow": "mobile/.maestro/capture/league-summary.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -424,7 +424,7 @@
           "captured_at": "2026-08-11T00:29:20+00:00",
           "file": "mobile/league-summary/loading.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/league-summary.yaml",
+          "flow": "mobile/.maestro/capture/league-summary.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -437,7 +437,7 @@
           "captured_at": "2026-08-11T00:29:20+00:00",
           "file": "mobile/league-summary/populated.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/league-summary.yaml",
+          "flow": "mobile/.maestro/capture/league-summary.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -450,7 +450,7 @@
           "captured_at": "2026-08-11T00:34:02+00:00",
           "file": "mobile/league-summary/populated--single-format.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/league-summary@single-format.yaml",
+          "flow": "mobile/.maestro/capture/league-summary@single-format.yaml",
           "injections": [],
           "profile": "single-format",
           "state": "populated--single-format"
@@ -468,7 +468,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/leagues/empty.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/leagues@fresh.yaml",
+          "flow": "mobile/.maestro/capture/leagues@fresh.yaml",
           "injections": [],
           "profile": "fresh",
           "state": "empty"
@@ -478,7 +478,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/leagues/populated--two.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/leagues@two-leagues.yaml",
+          "flow": "mobile/.maestro/capture/leagues@two-leagues.yaml",
           "injections": [],
           "profile": "two-leagues",
           "state": "populated--two"
@@ -496,7 +496,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/manual-ranks/error.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/manual-ranks.yaml",
+          "flow": "mobile/.maestro/capture/manual-ranks.yaml",
           "injections": [
             "fail_next"
           ],
@@ -508,7 +508,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/manual-ranks/populated.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/manual-ranks.yaml",
+          "flow": "mobile/.maestro/capture/manual-ranks.yaml",
           "injections": [
             "fail_next"
           ],
@@ -520,7 +520,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/manual-ranks/populated--unranked-order.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/manual-ranks@fresh.yaml",
+          "flow": "mobile/.maestro/capture/manual-ranks@fresh.yaml",
           "injections": [],
           "profile": "fresh",
           "state": "populated--unranked-order"
@@ -540,7 +540,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/matches/empty--mutual.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/matches@fresh.yaml",
+          "flow": "mobile/.maestro/capture/matches@fresh.yaml",
           "injections": [],
           "profile": "fresh",
           "state": "empty--mutual"
@@ -550,7 +550,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/matches/error.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/matches.yaml",
+          "flow": "mobile/.maestro/capture/matches.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -563,7 +563,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/matches/populated--all-filter.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/matches@two-leagues.yaml",
+          "flow": "mobile/.maestro/capture/matches@two-leagues.yaml",
           "injections": [],
           "profile": "two-leagues",
           "state": "populated--all-filter"
@@ -573,7 +573,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/matches/populated--awaiting.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/matches.yaml",
+          "flow": "mobile/.maestro/capture/matches.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -586,7 +586,7 @@
           "captured_at": "2026-08-10T22:37:09+00:00",
           "file": "mobile/matches/populated--espn-awaiting.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/matches@espn.yaml",
+          "flow": "mobile/.maestro/capture/matches@espn.yaml",
           "injections": [],
           "profile": "espn",
           "state": "populated--espn-awaiting"
@@ -596,7 +596,7 @@
           "captured_at": "2026-08-10T22:37:09+00:00",
           "file": "mobile/matches/populated--espn-mutual.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/matches@espn.yaml",
+          "flow": "mobile/.maestro/capture/matches@espn.yaml",
           "injections": [],
           "profile": "espn",
           "state": "populated--espn-mutual"
@@ -606,7 +606,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/matches/populated--mutual.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/matches.yaml",
+          "flow": "mobile/.maestro/capture/matches.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -619,7 +619,7 @@
           "captured_at": "2026-08-10T15:08:00+00:00",
           "file": "mobile/matches/progress-module.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/matches@near-unlock.yaml",
+          "flow": "mobile/.maestro/capture/matches@near-unlock.yaml",
           "injections": [],
           "profile": "near-unlock",
           "state": "progress-module"
@@ -629,7 +629,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/matches/skeleton.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/matches.yaml",
+          "flow": "mobile/.maestro/capture/matches.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -652,7 +652,7 @@
           "captured_at": "2026-08-11T00:19:18+00:00",
           "file": "mobile/mock-draft/active--on-the-clock.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/mock-draft@draft-pre.yaml",
+          "flow": "mobile/.maestro/capture/mock-draft@draft-pre.yaml",
           "injections": [],
           "profile": "draft-pre",
           "state": "active--on-the-clock"
@@ -662,7 +662,7 @@
           "captured_at": "2026-08-11T00:19:18+00:00",
           "file": "mobile/mock-draft/empty--no-active-mock.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/mock-draft@draft.yaml",
+          "flow": "mobile/.maestro/capture/mock-draft@draft.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -675,7 +675,7 @@
           "captured_at": "2026-08-10T22:02:53+00:00",
           "file": "mobile/mock-draft/entry--card.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/mock-draft@draft-pre.yaml",
+          "flow": "mobile/.maestro/capture/mock-draft@draft-pre.yaml",
           "injections": [],
           "profile": "draft-pre",
           "state": "entry--card"
@@ -685,7 +685,7 @@
           "captured_at": "2026-08-11T00:19:18+00:00",
           "file": "mobile/mock-draft/error--generic.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/mock-draft@draft.yaml",
+          "flow": "mobile/.maestro/capture/mock-draft@draft.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -698,7 +698,7 @@
           "captured_at": "2026-08-11T00:19:18+00:00",
           "file": "mobile/mock-draft/loading.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/mock-draft@draft.yaml",
+          "flow": "mobile/.maestro/capture/mock-draft@draft.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -711,7 +711,7 @@
           "captured_at": "2026-08-11T00:19:18+00:00",
           "file": "mobile/mock-draft/row-selected--confirm-bar.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/mock-draft@draft-pre.yaml",
+          "flow": "mobile/.maestro/capture/mock-draft@draft-pre.yaml",
           "injections": [],
           "profile": "draft-pre",
           "state": "row-selected--confirm-bar"
@@ -721,7 +721,7 @@
           "captured_at": "2026-08-11T00:19:18+00:00",
           "file": "mobile/mock-draft/setup-sheet.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/mock-draft@draft-pre.yaml",
+          "flow": "mobile/.maestro/capture/mock-draft@draft-pre.yaml",
           "injections": [],
           "profile": "draft-pre",
           "state": "setup-sheet"
@@ -909,7 +909,7 @@
           "captured_at": "2026-08-10T21:47:02+00:00",
           "file": "mobile/pick-assignment/error--generic.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/pick-assignment@espn.yaml",
+          "flow": "mobile/.maestro/capture/pick-assignment@espn.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -922,7 +922,7 @@
           "captured_at": "2026-08-10T21:47:02+00:00",
           "file": "mobile/pick-assignment/grid--populated.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/pick-assignment@espn.yaml",
+          "flow": "mobile/.maestro/capture/pick-assignment@espn.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -935,7 +935,7 @@
           "captured_at": "2026-08-10T21:47:02+00:00",
           "file": "mobile/pick-assignment/loading.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/pick-assignment@espn.yaml",
+          "flow": "mobile/.maestro/capture/pick-assignment@espn.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -948,7 +948,7 @@
           "captured_at": "2026-08-10T21:47:02+00:00",
           "file": "mobile/pick-assignment/owner-sheet.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/pick-assignment@espn.yaml",
+          "flow": "mobile/.maestro/capture/pick-assignment@espn.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -961,7 +961,7 @@
           "captured_at": "2026-08-10T21:47:02+00:00",
           "file": "mobile/pick-assignment/season-tab--future.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/pick-assignment@espn.yaml",
+          "flow": "mobile/.maestro/capture/pick-assignment@espn.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -974,7 +974,7 @@
           "captured_at": "2026-08-10T21:47:02+00:00",
           "file": "mobile/pick-assignment/setup--edit-order.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/pick-assignment@espn.yaml",
+          "flow": "mobile/.maestro/capture/pick-assignment@espn.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -997,7 +997,7 @@
           "captured_at": "2026-08-10T22:56:34+00:00",
           "file": "mobile/portfolio/gate--single-league.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/portfolio.yaml",
+          "flow": "mobile/.maestro/capture/portfolio.yaml",
           "injections": [],
           "profile": "standard",
           "state": "gate--single-league"
@@ -1007,7 +1007,7 @@
           "captured_at": "2026-08-10T23:05:27+00:00",
           "file": "mobile/portfolio/populated.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/portfolio@two-leagues.yaml",
+          "flow": "mobile/.maestro/capture/portfolio@two-leagues.yaml",
           "injections": [],
           "profile": "two-leagues",
           "state": "populated"
@@ -1025,7 +1025,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/profile/flag-off.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/profile.yaml",
+          "flow": "mobile/.maestro/capture/profile.yaml",
           "injections": [],
           "profile": "standard",
           "state": "flag-off"
@@ -1035,7 +1035,7 @@
           "captured_at": "2026-08-10T23:25:56+00:00",
           "file": "mobile/profile/populated.png",
           "flags": "profiles-on",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/profile@quickset-done.yaml",
+          "flow": "mobile/.maestro/capture/profile@quickset-done.yaml",
           "injections": [],
           "profile": "quickset-done",
           "state": "populated"
@@ -1045,7 +1045,7 @@
           "captured_at": "2026-08-10T23:25:56+00:00",
           "file": "mobile/profile/populated--hero.png",
           "flags": "profiles-on",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/profile@quickset-done.yaml",
+          "flow": "mobile/.maestro/capture/profile@quickset-done.yaml",
           "injections": [],
           "profile": "quickset-done",
           "state": "populated--hero"
@@ -1063,7 +1063,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/quick-rank/step--clicked.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/quick-rank.yaml",
+          "flow": "mobile/.maestro/capture/quick-rank.yaml",
           "injections": [],
           "profile": "standard",
           "state": "step--clicked"
@@ -1073,7 +1073,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/quick-rank/step-populated.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/quick-rank.yaml",
+          "flow": "mobile/.maestro/capture/quick-rank.yaml",
           "injections": [],
           "profile": "standard",
           "state": "step-populated"
@@ -1091,7 +1091,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/quick-set/step-populated--seeded.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/quick-set.yaml",
+          "flow": "mobile/.maestro/capture/quick-set.yaml",
           "injections": [],
           "profile": "standard",
           "state": "step-populated--seeded"
@@ -1111,7 +1111,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/rank-home/populated.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/rank-home.yaml",
+          "flow": "mobile/.maestro/capture/rank-home.yaml",
           "injections": [],
           "profile": "standard",
           "state": "populated"
@@ -1121,7 +1121,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/rank-home/populated--more-expanded.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/rank-home.yaml",
+          "flow": "mobile/.maestro/capture/rank-home.yaml",
           "injections": [],
           "profile": "standard",
           "state": "populated--more-expanded"
@@ -1140,7 +1140,7 @@
           "captured_at": "2026-08-11T00:22:32+00:00",
           "file": "mobile/record-picks/error--generic.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/record-picks@espn.yaml",
+          "flow": "mobile/.maestro/capture/record-picks@espn.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -1153,7 +1153,7 @@
           "captured_at": "2026-08-11T00:22:32+00:00",
           "file": "mobile/record-picks/loading.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/record-picks@espn.yaml",
+          "flow": "mobile/.maestro/capture/record-picks@espn.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -1166,7 +1166,7 @@
           "captured_at": "2026-08-11T00:22:32+00:00",
           "file": "mobile/record-picks/populated.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/record-picks@espn.yaml",
+          "flow": "mobile/.maestro/capture/record-picks@espn.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -1179,7 +1179,7 @@
           "captured_at": "2026-08-11T00:22:32+00:00",
           "file": "mobile/record-picks/team-picker-expanded.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/record-picks@espn.yaml",
+          "flow": "mobile/.maestro/capture/record-picks@espn.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -1202,7 +1202,7 @@
           "captured_at": "2026-08-11T00:05:14+00:00",
           "file": "mobile/rookie-ranks/error.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/rookie-ranks@draft.yaml",
+          "flow": "mobile/.maestro/capture/rookie-ranks@draft.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -1215,7 +1215,7 @@
           "captured_at": "2026-08-11T00:05:14+00:00",
           "file": "mobile/rookie-ranks/filter--rb.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/rookie-ranks@draft.yaml",
+          "flow": "mobile/.maestro/capture/rookie-ranks@draft.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -1228,7 +1228,7 @@
           "captured_at": "2026-08-11T00:05:14+00:00",
           "file": "mobile/rookie-ranks/loading.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/rookie-ranks@draft.yaml",
+          "flow": "mobile/.maestro/capture/rookie-ranks@draft.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -1241,7 +1241,7 @@
           "captured_at": "2026-08-11T00:05:14+00:00",
           "file": "mobile/rookie-ranks/populated--from-draft-room.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/rookie-ranks@draft.yaml",
+          "flow": "mobile/.maestro/capture/rookie-ranks@draft.yaml",
           "injections": [
             "latency",
             "fail_next"
@@ -1264,7 +1264,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/settings/account-section.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/settings.yaml",
+          "flow": "mobile/.maestro/capture/settings.yaml",
           "injections": [
             "latency"
           ],
@@ -1276,7 +1276,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/settings/league-rows.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/settings@two-leagues.yaml",
+          "flow": "mobile/.maestro/capture/settings@two-leagues.yaml",
           "injections": [],
           "profile": "two-leagues",
           "state": "league-rows"
@@ -1286,7 +1286,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/settings/loading.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/settings.yaml",
+          "flow": "mobile/.maestro/capture/settings.yaml",
           "injections": [
             "latency"
           ],
@@ -1298,7 +1298,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/settings/populated.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/settings.yaml",
+          "flow": "mobile/.maestro/capture/settings.yaml",
           "injections": [
             "latency"
           ],
@@ -1318,7 +1318,7 @@
           "captured_at": "2026-08-10T21:47:02+00:00",
           "file": "mobile/sheets-espn-link/error--espn-auth-required.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/sheets/sheets-espn-link@espn.yaml",
+          "flow": "mobile/.maestro/capture/sheets/sheets-espn-link@espn.yaml",
           "injections": [
             "fail_next"
           ],
@@ -1330,7 +1330,7 @@
           "captured_at": "2026-08-10T21:47:02+00:00",
           "file": "mobile/sheets-espn-link/error--needs-league-id.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/sheets/sheets-espn-link@espn.yaml",
+          "flow": "mobile/.maestro/capture/sheets/sheets-espn-link@espn.yaml",
           "injections": [
             "fail_next"
           ],
@@ -1342,7 +1342,7 @@
           "captured_at": "2026-08-10T21:47:02+00:00",
           "file": "mobile/sheets-espn-link/input.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/sheets/sheets-espn-link@espn.yaml",
+          "flow": "mobile/.maestro/capture/sheets/sheets-espn-link@espn.yaml",
           "injections": [
             "fail_next"
           ],
@@ -1354,7 +1354,7 @@
           "captured_at": "2026-08-10T21:47:02+00:00",
           "file": "mobile/sheets-espn-link/input--private-expanded.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/sheets/sheets-espn-link@espn.yaml",
+          "flow": "mobile/.maestro/capture/sheets/sheets-espn-link@espn.yaml",
           "injections": [
             "fail_next"
           ],
@@ -1376,7 +1376,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/sheets-feedback/open.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/sheets/sheets-feedback.yaml",
+          "flow": "mobile/.maestro/capture/sheets/sheets-feedback.yaml",
           "injections": [],
           "profile": "standard",
           "state": "open"
@@ -1396,7 +1396,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/sheets-league-switcher/open.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/sheets/sheets-league-switcher.yaml",
+          "flow": "mobile/.maestro/capture/sheets/sheets-league-switcher.yaml",
           "injections": [],
           "profile": "standard",
           "state": "open"
@@ -1415,7 +1415,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/sheets-rank-menu/collapsed.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/sheets/sheets-rank-menu.yaml",
+          "flow": "mobile/.maestro/capture/sheets/sheets-rank-menu.yaml",
           "injections": [],
           "profile": "standard",
           "state": "collapsed"
@@ -1425,7 +1425,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/sheets-rank-menu/more-expanded.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/sheets/sheets-rank-menu.yaml",
+          "flow": "mobile/.maestro/capture/sheets/sheets-rank-menu.yaml",
           "injections": [],
           "profile": "standard",
           "state": "more-expanded"
@@ -1444,7 +1444,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/sheets-trade-dna/fine-tuning.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/sheets/sheets-trade-dna.yaml",
+          "flow": "mobile/.maestro/capture/sheets/sheets-trade-dna.yaml",
           "injections": [],
           "profile": "standard",
           "state": "fine-tuning"
@@ -1454,7 +1454,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/sheets-trade-dna/open.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/sheets/sheets-trade-dna.yaml",
+          "flow": "mobile/.maestro/capture/sheets/sheets-trade-dna.yaml",
           "injections": [],
           "profile": "standard",
           "state": "open"
@@ -1474,7 +1474,7 @@
           "captured_at": "2026-08-10T23:34:30+00:00",
           "file": "mobile/signin/busy.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/signin.yaml",
+          "flow": "mobile/.maestro/capture/signin.yaml",
           "injections": [
             "fail_next",
             "latency"
@@ -1487,7 +1487,7 @@
           "captured_at": "2026-08-10T23:34:30+00:00",
           "file": "mobile/signin/error.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/signin.yaml",
+          "flow": "mobile/.maestro/capture/signin.yaml",
           "injections": [
             "fail_next",
             "latency"
@@ -1500,7 +1500,7 @@
           "captured_at": "2026-08-10T23:34:30+00:00",
           "file": "mobile/signin/hint-prefill.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/signin.yaml",
+          "flow": "mobile/.maestro/capture/signin.yaml",
           "injections": [
             "fail_next",
             "latency"
@@ -1513,7 +1513,7 @@
           "captured_at": "2026-08-10T23:34:30+00:00",
           "file": "mobile/signin/idle.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/signin.yaml",
+          "flow": "mobile/.maestro/capture/signin.yaml",
           "injections": [
             "fail_next",
             "latency"
@@ -1534,7 +1534,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/tiers/error.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/tiers.yaml",
+          "flow": "mobile/.maestro/capture/tiers.yaml",
           "injections": [
             "fail_next",
             "latency"
@@ -1547,7 +1547,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/tiers/loading.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/tiers.yaml",
+          "flow": "mobile/.maestro/capture/tiers.yaml",
           "injections": [
             "fail_next",
             "latency"
@@ -1560,7 +1560,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/tiers/populated.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/tiers.yaml",
+          "flow": "mobile/.maestro/capture/tiers.yaml",
           "injections": [
             "fail_next",
             "latency"
@@ -1573,7 +1573,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/tiers/populated--all-tab.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/tiers.yaml",
+          "flow": "mobile/.maestro/capture/tiers.yaml",
           "injections": [
             "fail_next",
             "latency"
@@ -1586,7 +1586,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/tiers/populated--unassigned-pool.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/tiers@fresh.yaml",
+          "flow": "mobile/.maestro/capture/tiers@fresh.yaml",
           "injections": [],
           "profile": "fresh",
           "state": "populated--unassigned-pool"
@@ -1596,7 +1596,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/tiers/search-highlight.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/tiers.yaml",
+          "flow": "mobile/.maestro/capture/tiers.yaml",
           "injections": [
             "fail_next",
             "latency"
@@ -1609,7 +1609,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/tiers/sticky-header.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/tiers.yaml",
+          "flow": "mobile/.maestro/capture/tiers.yaml",
           "injections": [
             "fail_next",
             "latency"
@@ -1632,7 +1632,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/topbar/league-switcher.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/topbar@two-leagues.yaml",
+          "flow": "mobile/.maestro/capture/topbar@two-leagues.yaml",
           "injections": [],
           "profile": "two-leagues",
           "state": "league-switcher"
@@ -1651,7 +1651,7 @@
           "captured_at": "2026-08-10T23:42:47+00:00",
           "file": "mobile/trades/empty.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/trades.yaml",
+          "flow": "mobile/.maestro/capture/trades.yaml",
           "injections": [
             "fail_next",
             "latency"
@@ -1664,7 +1664,7 @@
           "captured_at": "2026-08-10T23:42:47+00:00",
           "file": "mobile/trades/empty--cold.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/trades@fresh.yaml",
+          "flow": "mobile/.maestro/capture/trades@fresh.yaml",
           "injections": [
             "latency"
           ],
@@ -1676,7 +1676,7 @@
           "captured_at": "2026-08-10T23:42:47+00:00",
           "file": "mobile/trades/error.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/trades.yaml",
+          "flow": "mobile/.maestro/capture/trades.yaml",
           "injections": [
             "fail_next",
             "latency"
@@ -1689,7 +1689,7 @@
           "captured_at": "2026-08-10T23:42:47+00:00",
           "file": "mobile/trades/format-gate.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/trades@single-format.yaml",
+          "flow": "mobile/.maestro/capture/trades@single-format.yaml",
           "injections": [],
           "profile": "single-format",
           "state": "format-gate"
@@ -1699,7 +1699,7 @@
           "captured_at": "2026-08-10T23:42:47+00:00",
           "file": "mobile/trades/generating.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/trades@fresh.yaml",
+          "flow": "mobile/.maestro/capture/trades@fresh.yaml",
           "injections": [
             "latency"
           ],
@@ -1711,7 +1711,7 @@
           "captured_at": "2026-08-10T23:42:47+00:00",
           "file": "mobile/trades/loading.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/trades.yaml",
+          "flow": "mobile/.maestro/capture/trades.yaml",
           "injections": [
             "fail_next",
             "latency"
@@ -1724,7 +1724,7 @@
           "captured_at": "2026-08-10T23:42:47+00:00",
           "file": "mobile/trades/populated.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/trades.yaml",
+          "flow": "mobile/.maestro/capture/trades.yaml",
           "injections": [
             "fail_next",
             "latency"
@@ -1748,7 +1748,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trends/empty--no-history.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/trends@fresh.yaml",
+          "flow": "mobile/.maestro/capture/trends@fresh.yaml",
           "injections": [],
           "profile": "fresh",
           "state": "empty--no-history"
@@ -1758,7 +1758,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trends/error.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/trends.yaml",
+          "flow": "mobile/.maestro/capture/trends.yaml",
           "injections": [
             "fail_next",
             "latency"
@@ -1771,7 +1771,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trends/loading.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/trends.yaml",
+          "flow": "mobile/.maestro/capture/trends.yaml",
           "injections": [
             "fail_next",
             "latency"
@@ -1784,7 +1784,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trends/populated.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/trends.yaml",
+          "flow": "mobile/.maestro/capture/trends.yaml",
           "injections": [
             "fail_next",
             "latency"
@@ -1807,7 +1807,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trios/all-ranked.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/trios@fresh.yaml",
+          "flow": "mobile/.maestro/capture/trios@fresh.yaml",
           "injections": [
             "latency"
           ],
@@ -1819,7 +1819,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trios/loading.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/trios@fresh.yaml",
+          "flow": "mobile/.maestro/capture/trios@fresh.yaml",
           "injections": [
             "latency"
           ],
@@ -1831,7 +1831,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trios/partial-selection.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/trios@fresh.yaml",
+          "flow": "mobile/.maestro/capture/trios@fresh.yaml",
           "injections": [
             "latency"
           ],
@@ -1843,7 +1843,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trios/populated.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/trios@fresh.yaml",
+          "flow": "mobile/.maestro/capture/trios@fresh.yaml",
           "injections": [
             "latency"
           ],
@@ -1855,7 +1855,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trios/populated--unlocked.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/trios.yaml",
+          "flow": "mobile/.maestro/capture/trios.yaml",
           "injections": [],
           "profile": "standard",
           "state": "populated--unlocked"
@@ -1865,7 +1865,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trios/progress-locked.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/trios@fresh.yaml",
+          "flow": "mobile/.maestro/capture/trios@fresh.yaml",
           "injections": [
             "latency"
           ],
@@ -1877,7 +1877,7 @@
           "captured_at": "2026-08-10T15:08:00+00:00",
           "file": "mobile/trios/progress-near-threshold.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/trios@near-unlock.yaml",
+          "flow": "mobile/.maestro/capture/trios@near-unlock.yaml",
           "injections": [],
           "profile": "near-unlock",
           "state": "progress-near-threshold"
@@ -1887,7 +1887,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trios/scope-rookie--empty.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/trios.yaml",
+          "flow": "mobile/.maestro/capture/trios.yaml",
           "injections": [],
           "profile": "standard",
           "state": "scope-rookie--empty"
@@ -1897,7 +1897,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trios/speed-mode-on.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/trios.yaml",
+          "flow": "mobile/.maestro/capture/trios.yaml",
           "injections": [],
           "profile": "standard",
           "state": "speed-mode-on"
@@ -1907,7 +1907,7 @@
           "captured_at": "2026-08-10T15:03:04+00:00",
           "file": "mobile/trios/unlock-banner.png",
           "flags": "release",
-          "flow": "archive/retired-tooling/mobile/maestro/capture/trios.yaml",
+          "flow": "mobile/.maestro/capture/trios.yaml",
           "injections": [],
           "profile": "standard",
           "state": "unlock-banner"

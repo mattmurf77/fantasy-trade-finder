@@ -1,12 +1,3 @@
-```project-status
-{
-  "status": "needs-review",
-  "updated": "",
-  "summary": "LLD: Device-Held Platform Credentials — Release 1 (Sleeper)",
-  "evidence": "Disposition remains absent, unclear, or internally qualified; preserve existing claims until reconciled. No explicit current status found in the prior index or the document set; see retained sources."
-}
-```
-
 # LLD: Device-Held Platform Credentials — Release 1 (Sleeper)
 
 > **Status:** dual-agent candidate v1, entering cross-review.
@@ -1127,7 +1118,7 @@ Real threads against the real engine — a mocked DB proves nothing about a uniq
 
 ### 6.4 Rails — a gate on the first transport merge, not a follow-up
 
-`archive/retired-tooling/mobile/scripts/sim-run.sh:178` exits 4 on `vcr_misses`, `sleeper_live_egress_attempts`, `completed_proposes`. **The latter two go vacuous the moment the server stops being the sender** (`backend/test_support.py:80,82`) — they will keep reporting green for the wrong reason. In the **same PR** that lands the transport:
+`mobile/scripts/sim-run.sh:178` exits 4 on `vcr_misses`, `sleeper_live_egress_attempts`, `completed_proposes`. **The latter two go vacuous the moment the server stops being the sender** (`backend/test_support.py:80,82`) — they will keep reporting green for the wrong reason. In the **same PR** that lands the transport:
 
 | Counter | Gate |
 |---|---|
@@ -1140,7 +1131,7 @@ Real threads against the real engine — a mocked DB proves nothing about a uniq
 
 ### 6.5 Maestro
 
-Per the feature gates, `archive/retired-tooling/mobile/maestro/flows/trade-send/sleeper-device-transport.yaml`, sibling to `mfl-send-gating.yaml`. `testID`s must pass `mobile/scripts/testid-lint.sh`; authoring follows the 23 laws in `archive/retired-tooling/mobile/maestro/README.md`.
+Per the feature gates, `mobile/.maestro/flows/trade-send/sleeper-device-transport.yaml`, sibling to `mfl-send-gating.yaml`. `testID`s must pass `mobile/scripts/testid-lint.sh`; authoring follows the 23 laws in `mobile/.maestro/README.md`.
 
 **Scoped to what is observable under `_TEST_MODE`, which is less than it looks.** An earlier draft specified "flag on ⇒ lease requested, guard passes, outcome reported" — unachievable: §4.1 step 1 fails `/lease` closed with `599` under `_TEST_MODE`, and §6.4 gates the run on `leases_issued_under_test == 0` ("any lease is a defect"). That flow either cannot pass or trips the rails gate it runs beside. The flow therefore covers:
 

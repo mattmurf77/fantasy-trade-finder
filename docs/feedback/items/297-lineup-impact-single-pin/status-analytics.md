@@ -58,7 +58,7 @@ No other branch's block was reordered or reformatted. `SERVER_FIRED_EVENTS`,
 **Edit 2** — add a new bullet block after the P0-remediation block
 (currently ends line ~358):
 
-> - **Feedback #297/#299/#302 batch (2026-08-11 — [addendum](analytics.md)); mobile only:**
+> - **Feedback #297/#299/#302 batch (2026-08-11 — [addendum](feedback/items/297-lineup-impact-single-pin/analytics.md)); mobile only:**
 >   - Calculator: `lineup_impact_unavailable` — the honest-empty "Starting lineup" row impression. `platform` is the **LEAGUE** platform (`sleeper` | `espn` | `mfl` | `fleaflicker` | `unknown`), read from the session league cache. **Never inferred from the league id's shape: ESPN and MFL league ids CAN be numeric** (MFL `990062846` is live in this project's DB), so an `isdigit()` read labels them `sleeper`. `_sleeper_lineup_slots`' docstring implies otherwise and is wrong — those leagues fail at the meta-fetch gate, not the digit gate.
 >   - League drill-in: `league_team_closed` — the EXIT half. The ENTER half is **`league_team_opened` (P0-7, above), reused unchanged**; there is deliberately **no** `league_team_focused` / `league_team_unfocused` pair, because two events for one interaction on this screen is the two-sources-of-truth bug #208/#248/#293 are a catalog of. `via` is a closed 5-value enum, one per exit control: **`header_back` | `in_card_link` | `hardware_back` | `tab_retap` | `refocus`**. Adding an exit control means adding a value here **and** a `closeTeam('<via>')` call — the screen's single choke point, pinned by `mobile/tests/check-analytics-297-302.js`. A `league_team_opened` with no matching close is "abandoned by navigating away", measured by absence on purpose.
 

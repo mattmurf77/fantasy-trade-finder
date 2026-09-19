@@ -38,7 +38,7 @@ import PlatformLinkSheet from '../components/PlatformLinkSheet';
 
 // Maestro seam (hld.md §5). `null` in every production bundle: testLaunchArg
 // returns null unless the build-time `extra.testMode` constant is true, which
-// only archive/retired-tooling/mobile/scripts/sim-build.sh produces. Read once at module load — the
+// only mobile/scripts/sim-build.sh produces. Read once at module load — the
 // argument domain is volatile and cannot be set at runtime.
 const TEST_APPLE_SUB = testLaunchArg('FTFTestAppleSub');
 

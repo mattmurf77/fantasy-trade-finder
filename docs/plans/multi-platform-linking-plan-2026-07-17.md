@@ -1,15 +1,6 @@
-```project-status
-{
-  "status": "reference",
-  "updated": "",
-  "summary": "Multi-Platform League Linking — MFL / Fleaflicker / Yahoo / FFPC (2026-07-17)",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: reference  — MFL/Fleaflicker/Yahoo/FFPC linking decision doc. MFL shipped (`mfl.link` ON); `fleaflicker.link` is still `false`. Prior row preserved at ../reviews/2026/2026-09-06-project-status-migration/plans-index.md."
-}
-```
-
 # Multi-Platform League Linking — MFL / Fleaflicker / Yahoo / FFPC (2026-07-17)
 
-*Decision doc for adding league-linking beyond Sleeper + ESPN. Research only — no app code changed. Follows the format and quality bar of [espn-league-linking-plan-2026-07-11.md](archive/2026/espn-league-linking-plan-2026-07-11.md): facts with citations, measured crosswalk coverage, live endpoint probes, phased conditional-GO. The integration pattern being extended is `backend/espn_service.py` (fetch → parse → crosswalk to Sleeper `player_id`s → `league_members` with synthetic counterparty ids → `leagues.platform` column), which shipped Phase 1 on 2026-07-12.*
+*Decision doc for adding league-linking beyond Sleeper + ESPN. Research only — no app code changed. Follows the format and quality bar of [espn-league-linking-plan-2026-07-11.md](espn-league-linking-plan-2026-07-11.md): facts with citations, measured crosswalk coverage, live endpoint probes, phased conditional-GO. The integration pattern being extended is `backend/espn_service.py` (fetch → parse → crosswalk to Sleeper `player_id`s → `league_members` with synthetic counterparty ids → `leagues.platform` column), which shipped Phase 1 on 2026-07-12.*
 
 **Recommendation up front (full rationale §7):**
 

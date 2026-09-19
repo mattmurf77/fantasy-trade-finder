@@ -61,7 +61,7 @@ map that keeps the parallel build lanes disjoint.
 3. **G1 QA path — use the Dependables MFL league (62846).** Supersedes the
    proposed "no Maestro coverage possible" waiver. The mobile QA harness has no
    MFL seam (zero MFL refs in `test_users.py` / `qa/`; it is Sleeper-fixture
-   driven), so no `archive/retired-tooling/mobile/maestro/` flow is authored for #289 — but the
+   driven), so no `mobile/.maestro/` flow is authored for #289 — but the
    acceptance surface is now a **live verification against the real league where
    the bug was observed**, which is stronger evidence than a fixture flow. The
    PRD carries an executable live-QA procedure with per-requirement pass

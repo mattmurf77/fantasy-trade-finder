@@ -8,7 +8,7 @@
 > **What that means in practice:**
 > - Every PNG here is a true capture of the app **as of 2026-08-11** — still exact ground truth for that build, still far better than a redrawn approximation.
 > - Any screen changed after 2026-08-11 is **not** reflected here, and there is no process to make it so. Check `git log` on the screen's source before trusting a capture as current.
-> - **Do not request or attempt a capture run.** `archive/retired-tooling/mobile/scripts/screen-capture.sh` and `screen-freshness.sh` still exist and still work; running them is out of policy. Say the library is frozen instead.
+> - **Do not request or attempt a capture run.** `mobile/scripts/screen-capture.sh` and `screen-freshness.sh` still exist and still work; running them is out of policy. Say the library is frozen instead.
 > - Never hand-edit PNGs or `manifest.json` to fake freshness.
 
 ## Layout
@@ -98,8 +98,8 @@ PNGs, no LFS, no build step.
 
 ## Tooling (present, out of policy to run)
 
-`archive/retired-tooling/mobile/scripts/screen-capture.sh` (writer) and `archive/retired-tooling/mobile/scripts/screen-freshness.sh`
+`mobile/scripts/screen-capture.sh` (writer) and `mobile/scripts/screen-freshness.sh`
 (compares each screen's source hash vs the manifest) are still in the tree and still
-functional. They are kept the way `archive/retired-tooling/mobile/maestro/` flows are kept — as a record of how
+functional. They are kept the way `mobile/.maestro/` flows are kept — as a record of how
 the library was built, not as a live workflow. Reviving either is an operator decision that
 would have to reverse D-056.

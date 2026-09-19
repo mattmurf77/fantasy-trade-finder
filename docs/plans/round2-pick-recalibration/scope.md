@@ -5,8 +5,8 @@
 **Builder:** session `feat/round2-pick-recalibration`
 **Operator sign-off on waivers:** the operator directed the change with the bright line stated; §1 is waived on the reasoning below, §3 carries a TestFlight checklist rather than a waiver.
 
-**Source of truth for the measurement:** [docs/reviews/2026/2026-08-19-ktc-pick-value-comparison.md](../../reviews/2026/2026-08-19-ktc-pick-value-comparison.md) (carried on this branch — it is not on `main`).
-**Companion:** [docs/reviews/2026/2026-08-19-pick-year-valuation.md](../../reviews/2026/2026-08-19-pick-year-valuation.md) (D-079, the *year* axis).
+**Source of truth for the measurement:** [docs/reviews/2026-08-19-ktc-pick-value-comparison.md](../../reviews/2026-08-19-ktc-pick-value-comparison.md) (carried on this branch — it is not on `main`).
+**Companion:** [docs/reviews/2026-08-19-pick-year-valuation.md](../../reviews/2026-08-19-pick-year-valuation.md) (D-079, the *year* axis).
 
 ---
 

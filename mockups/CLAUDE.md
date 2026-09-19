@@ -73,7 +73,7 @@ uses exactly `../../screens/mobile/…`. A top-level `mockups/x.html` uses `../s
 one level deeper (`mockups/<project>/sub/x.html`) needs `../../../`. Count the depth; a
 broken `<img>` silently degrades the mockup back into a from-memory drawing.
 
-~~Missing capture, or stale? Request `archive/retired-tooling/mobile/scripts/screen-capture.sh --screen <x>`
+~~Missing capture, or stale? Request `mobile/scripts/screen-capture.sh --screen <x>`
 before designing.~~ **No longer available** — see the freeze section above. Say so in the
 deliverable and fall back to a labelled reconstruction.
 See [`screens/CLAUDE.md`](../screens/CLAUDE.md).

@@ -1,18 +1,3 @@
-# Status — 162-ranking-nav-loop
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-07-25",
-  "summary": "FB-162 + FB-165 — stuck in a ranking loop (nav topology)",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-25 — `RankHomeScreen.choose` replace→navigate `fbb6f3e` — CHANGELOG 2026-07-25. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # FB-162 + FB-165 — stuck in a ranking loop (nav topology)
 
 - **Covers:** feedback #162 and #165 (same bug, filed twice)
