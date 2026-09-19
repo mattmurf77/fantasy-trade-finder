@@ -71,9 +71,9 @@ TEST_LEDGER note replaces it. Operator-declared only, never agent-selected.
 | Doc | Updated? | Section / reason n/a |
 |---|---|---|
 | `docs/api-reference.md` (any route added/renamed/removed/contract-changed) | | |
-| `docs/engineering-notes.md` (schema/route/invariant *conventions* shifted) | | |
+| `living-memory/LLD.md` (schema/route/invariant *conventions* shifted) | | |
 | `docs/architecture.md` (module wiring / data flow changed) | | |
-| `docs/architecture.md` (architecture genuinely shifted: new module, client, major flow) | | |
+| `living-memory/HLD.md` (architecture genuinely shifted: new module, client, major flow) | | |
 | `docs/cross-client-invariants.md` (shared constants/enums/colors) | | |
 | `docs/glossary.md` (new domain term) | | |
 | ADR or `DECISIONS.md` entry (non-obvious choice made) | | |

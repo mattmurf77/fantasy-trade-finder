@@ -1,11 +1,34 @@
-# HANDOFF
+# HANDOFF — Fantasy Trade Finder
 
-## Current State — 2026-09-19
+> **Purpose:** current release state and remaining follow-up.
+>
+> **Read at:** session start. **Write at:** session end.
+>
+> Companion files: [TEST_LEDGER.md](TEST_LEDGER.md), [NEXT.md](NEXT.md).
 
-**Where I stopped:** organization work from `801e00ea` is being reconciled with main `b33b4da9` in an isolated publication branch. Publication is pending at this snapshot; verify current Git/PR/CI state before claiming it merged. [Organization record](../docs/recovery/2026-09-06-project-organization.md).
+## Current State — 2026-09-08 (evening)
 
-**In flight:** main includes owner-only generation, Team overhaul, bounded diagnostics and the default-off significance rule; use the [engineering map](../docs/engineering-notes.md). Dated evidence records [feedback release/build 155](../docs/recovery/2026-09-08-feedback-batch-422-428.md) and [database recovery/recheck through September 16](../docs/plans/db-storage-reduction/release.md). These records do not establish today's production settings or tester availability.
+**Where I stopped:** feedback batch #422–#428 **shipped**. PR #292 → `1371d2e5` on `main`; Render **live** 2026-09-09T00:03:58Z with a clean production smoke (the #427 first-round rule verified on the live calculator). iOS **1.17.3 (155)** (EAS `c0fe6e0d`) built from merged main and uploaded (submission `2742bdd6` FINISHED). All seven items `fixed` (open backlog 49 → 42). Branches and the five build worktrees removed after a [recovery capture](../docs/recovery/2026-09-08-feedback-batch-422-428.md). Team overhaul itself remains live (`8cacc1f2`, flag ON).
 
-**Blocked on:** the [feedback device checklist](../docs/feedback/items/422-win-now-ffv3-unavailable/testflight-checklist.md) and [overhaul acceptance](../docs/plans/team-overhaul/QA.md) need recorded outcomes. [Significance calibration and activation gates](../docs/plans/trade-significance/validation.md) remain separate from source integration. No runtime changes are requested by this organization publication.
+**In flight:** Apple processing of 1.17.3 (155); nothing else.
 
-**Don't repeat:** preserve the dirty working checkout, local verbatim interview, scratch databases and excluded nested worktrees. Do not publish raw interviews without a specific request, reapply old source snapshots, revive simulator tooling, or rebuild old binaries from dated handoffs. Do not infer flag changes from plans; uncapped returned offers still have computational budgets. Follow [NEXT](NEXT.md) for preserved follow-ups.
+**Blocked on (operator):** run the [consolidated 37-step checklist](../docs/feedback/items/422-win-now-ffv3-unavailable/testflight-checklist.md) on 1.17.3 and log the outcome in TEST_LEDGER — it is the mobile half's only runtime evidence. Separately: decide whether the overhaul hero gets a true red (needs a Chalkline token; it ships in ice via one constant, D-192).
+
+**Don't repeat:** the ledger anchor lesson — a `str.replace` whose anchor is missing silently writes nothing; two 2026-09-08 entries were lost that way and restored from a later read. Assert every living-memory anchor. Concurrent full suites on this laptop take 20–30 min and get backgrounded past the 600 s cap; read the output file rather than waiting. Other sessions' worktrees under `.claude/worktrees/` are not ours to clean.
+
+## Table of Contents
+
+- [Current State — 2026-09-08](#current-state--2026-09-08)
+- [Handoff Template](#handoff-template)
+
+## Handoff Template
+
+Replace the four current-state buckets; link durable evidence instead of accumulating history.
+
+**Where I stopped:** …
+
+**In flight:** …
+
+**Blocked on:** …
+
+**Don't repeat:** …

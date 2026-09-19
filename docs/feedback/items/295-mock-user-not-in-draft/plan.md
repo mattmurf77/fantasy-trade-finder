@@ -378,7 +378,7 @@ one.
 | **Backend (tests)** | `backend/tests/test_mock_draft.py` | §8 — including **replacing** the `session` fixture's league shape |
 | **Mobile** | `mobile/src/api/mockDraft.ts` (reason union), `mobile/src/screens/MockDraftScreen.tsx` (`emptyCopy` arm), `mobile/src/screens/DraftRoomScreen.tsx` (`mockBlock` arm + testID) | copy for the new refusal only — **no behavior change**, and it is optional-by-D10 |
 | **Docs** | `docs/api-reference.md` (§ Mock draft: capability-probe ladder now four rungs; **and the stale "the CPU-bot mock is CUT" status blockquote at `:426`, which has been false since `6caca35`**), `living-memory/DECISIONS.md` (new D-0NN), `living-memory/GOTCHAS.md` (new G-0NN: "`league.members` never contains the caller"), `docs/feedback/items/295-mock-user-not-in-draft/` | |
-| **Maestro** | `backend/tests/fixtures/profiles/standard.json` (+ ffv3 league entry), `archive/retired-tooling/mobile/maestro/flows/rookie/d3-mock-draft-loop.yaml` | clear the blocking precondition so the flow can run at all; extend d3 to assert the user is on the clock |
+| **Maestro** | `backend/tests/fixtures/profiles/standard.json` (+ ffv3 league entry), `mobile/.maestro/flows/rookie/d3-mock-draft-loop.yaml` | clear the blocking precondition so the flow can run at all; extend d3 to assert the user is on the clock |
 | **Untouched** | `backend/draft_board_service.py`, every client session-init builder, `web/` | the Draft Room is not defective; the clients' contract is correct |
 
 No schema change. No new route. One new value on an already-open enum.

@@ -1,18 +1,3 @@
-# Status — 137-quickset-format-search
-
-```project-status
-{
-  "status": "in-progress",
-  "updated": "2026-07-17",
-  "summary": "#137 + #138 — Quick set: SF/PPR format toggle + search bar",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: in-progress 2026-07-17 — trade-engine-v2. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #137 + #138 — Quick set: SF/PPR format toggle + search bar
 
 **Status: built, typecheck clean — simulator verification DEFERRED to the batch QA round (orchestrator directive 2026-07-17: fleet-wide sim/harness contention).**

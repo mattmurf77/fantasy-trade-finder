@@ -1,18 +1,3 @@
-# Status — 142-league-summary
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-07-17",
-  "summary": "#142 + #144 — League summary (power rankings) — status",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-17 — FB-142/144 league power rankings + roster tap-through — CHANGELOG 2026-07-17. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #142 + #144 — League summary (power rankings) — status
 
 Owner items (mattmurf77, League):

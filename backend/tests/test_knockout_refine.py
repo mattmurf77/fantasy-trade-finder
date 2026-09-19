@@ -1,7 +1,7 @@
 """Knockout refine — R5 two-sided, R1 in the card's currency, R2 quality-aware.
 
 Spec: docs/plans/knockout-refine/plan.md §2-§3 (verdict + evidence:
-docs/reviews/2026/2026-08-22-knockout-rules-judged.html §03). Three knobs, all
+docs/reviews/2026-08-22-knockout-rules-judged.html §03). Three knobs, all
 LIT by default, each with a 0 that restores the predicate byte-identically:
 
     need_gate_dual_rescue    C1 — R5 any-asset + dual-need rescue

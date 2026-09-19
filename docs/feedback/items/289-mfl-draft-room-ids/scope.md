@@ -70,12 +70,12 @@ agents never self-select express (CLAUDE.md §Conventions).
 
 - [ ] **New flow:** none.
 - [ ] **Extended flow:** none.
-- [x] **WAIVED — no `archive/retired-tooling/mobile/maestro/` flow is authored, because MFL is not
+- [x] **WAIVED — no `mobile/.maestro/` flow is authored, because MFL is not
   seedable in the mobile QA harness AND because a stronger substitute exists.**
 
   *Mechanical reason (why one cannot be written):* the harness is
   Sleeper-fixture-driven via `FTF_SLEEPER_FIXTURES_DIR`. `backend/test_users.py`,
-  `backend/test_support.py`, `qa/` and every `archive/retired-tooling/mobile/maestro/*.yaml` contain
+  `backend/test_support.py`, `qa/` and every `mobile/.maestro/*.yaml` contain
   **zero** MFL references (the only `mfl` hits under `.maestro/` are unrelated
   screenshot filenames). MFL's only test seam is the
   `server._mfl_draft_opener()` monkeypatch, reachable from pytest and not from
@@ -109,7 +109,7 @@ agents never self-select express (CLAUDE.md §Conventions).
 - **`testID`s added/renamed:** **none.** No mobile file changes, so
   `mobile/scripts/testid-lint.sh` has nothing new to check (it must still pass).
 - **Smoke-suite impact:** the route this change touches (`GET /api/draft/board`)
-  is crossed by `archive/retired-tooling/mobile/maestro/flows/rookie/d1-draft-room-complete.yaml` and
+  is crossed by `mobile/.maestro/flows/rookie/d1-draft-room-complete.yaml` and
   `d2-draft-room-order-not-set.yaml`. Both drive the **Sleeper** Lakeview corpus
   as `qa_standard`; the Sleeper render path is provably unchanged
   (`test_m5_10`), so both must stay green — they are the Tier 3 subset in §5.
@@ -214,8 +214,8 @@ count from `prd.md` §9).
   mobile does not consume; taking it here would mean shipping a
   mobile-user-visible change with zero device verification. **Tier 3 confirmed —
   the Planner's reading is correct.**
-  Flows to run: `archive/retired-tooling/mobile/maestro/flows/rookie/d1-draft-room-complete.yaml` and
-  `archive/retired-tooling/mobile/maestro/flows/rookie/d2-draft-room-order-not-set.yaml`.
+  Flows to run: `mobile/.maestro/flows/rookie/d1-draft-room-complete.yaml` and
+  `mobile/.maestro/flows/rookie/d2-draft-room-order-not-set.yaml`.
 - **Evidence:** `living-memory/TEST_LEDGER.md` entry (flows, pass/fail, sim
   device, SHA) **plus** `qa/sim-runs/last-sim-run.json`
   (`{"tier": 3, "flows": ["rookie/d1", "rookie/d2"], …}`), **plus** — specific to

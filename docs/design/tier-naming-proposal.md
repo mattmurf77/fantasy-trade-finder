@@ -12,7 +12,7 @@ The 8-tier ladder (feedback #117/#118) currently labels tiers with pure pick mat
 
 ## 1. The inspiration: TI-CALC's scheme, verbatim
 
-Source: https://fantasy-trade-calculator.vercel.app (live site is JS-rendered; names extracted from source at https://github.com/onrits/fantasy-trade-calculator). Author: the operator's friend, who is winding the app down to help FTF — see the full teardown at [`docs/research/competitors/competitor-teardown-ti-calc.md`](../research/competitors/competitor-teardown-ti-calc.md). His tier tables are duplicated across files and have drifted, so there are actually **three** naming variants in his codebase:
+Source: https://fantasy-trade-calculator.vercel.app (live site is JS-rendered; names extracted from source at https://github.com/onrits/fantasy-trade-calculator). Author: the operator's friend, who is winding the app down to help FTF — see the full teardown at [`docs/competitor-teardown-ti-calc.md`](../competitor-teardown-ti-calc.md). His tier tables are duplicated across files and have drifted, so there are actually **three** naming variants in his codebase:
 
 **Variant 1 — the tier headers on the drag-drop rankings board (`components/EditableRankings.js`, `tierNames`). This is the canonical inspiration — name + pick anchor + tier number fused into one header string:**
 

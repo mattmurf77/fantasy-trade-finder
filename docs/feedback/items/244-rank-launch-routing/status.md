@@ -1,18 +1,3 @@
-# Status — 244-rank-launch-routing
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-05",
-  "summary": "#244 — Rank-tab launch routing by quick-tiers completion",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-05 — completion-aware Rank landing `deaa6b2` — CHANGELOG 2026-08-05. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #244 — Rank-tab launch routing by quick-tiers completion
 
 **Status:** built 2026-08-05 · branch `teardown-remediation` · mobile-only (no backend change)

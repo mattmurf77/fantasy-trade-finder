@@ -1,18 +1,3 @@
-# Status — 169-outlook-league-summary
-
-```project-status
-{
-  "status": "built-dark",
-  "updated": "2026-07-23",
-  "summary": "#169 — League Summary redesign (bar chart + position filter + drill-in)",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: built-dark 2026-07-23 — teardown-remediation / `outlook.odds` flag. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #169 — League Summary redesign (bar chart + position filter + drill-in)
 
 > **2026-08-11 update:** the operator's frame decisions

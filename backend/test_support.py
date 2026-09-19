@@ -6,9 +6,9 @@ test mode cannot start without FTF_SLEEPER_FIXTURES_DIR and
 FTF_PLAYERS_CACHE_FILE — a test-mode backend that can reach live Sleeper or
 clobber the real players cache is a rails hole). Every line here is dead in
 normal operation; backend/tests/test_test_support.py asserts that (guardrail
-G5 in docs/plans/archive/2026/mobile-testing/prd.md).
+G5 in docs/plans/mobile-testing/prd.md).
 
-Endpoints (docs/plans/archive/2026/mobile-testing/lld.md §4.3c):
+Endpoints (docs/plans/mobile-testing/lld.md §4.3c):
     POST /__test__/fail_next {path, status, count=1, body=null}
         Response override for the next `count` requests whose path matches
         the glob `path`. `status` may be ANY code including 2xx (precondition

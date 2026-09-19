@@ -53,7 +53,7 @@ captures, in any pipeline. Every skill that still instructed otherwise was rewri
 | `feedback/references/ship-phase.md` | corrected — it was **not** clean: it required fresh `qa/sim-runs/last-sim-run.json` evidence and claimed `githooks/pre-push` enforces it. That hook is now a deliberate no-op. The `maestro-testid-lint` CI reference stays (D-056 keeps it) |
 | `eng-mobile` | "verify on the simulator" → guards + code-walk proof + TestFlight checklist; test-hooks and handoff bullets repointed at `mobile/tests/` |
 | `eng-qa` | the mobile E2E lane is now the `check-*.js` guard set; runtime evidence is the operator's TestFlight pass. Frontmatter trigger phrase still reads "Maestro flow" |
-| `pm-pfo`, `pm-technical` | `archive/retired-tooling/mobile/maestro/flows/` no longer cited as live coverage; test-plan seeds are guards + code-walk + checklist, not flow sketches |
+| `pm-pfo`, `pm-technical` | `mobile/.maestro/flows/` no longer cited as live coverage; test-plan seeds are guards + code-walk + checklist, not flow sketches |
 | `feedback/lessons.md`, `feedback/references/plan-phase.md`, `feedback/references/build-phase.md` | already D-056-correct — verified, left untouched. **But:** those rewrites exist only as *uncommitted* edits in the operator's main checkout; a fresh clone of `origin/main` still shows the pre-D-056 text |
 
 If any skill still tells you to run Maestro or take a simulator capture, **D-056 wins**.

@@ -30,7 +30,7 @@ a flat rank ladder (1750 → 1250), which compresses the whole board into
 and the measurement reads zero everywhere regardless of the engine. Here the
 seeds come from the pool's own DynastyProcess values rescaled so the #1 asset
 lands on FTF's real top-asset price (~7737, the served Nacua number in
-docs/reviews/2026/2026-08-21-market-curve-comparison.md), which reproduces the
+docs/reviews/2026-08-21-market-curve-comparison.md), which reproduces the
 production value CURVE, not just its ordering.
 
 Fixture-only and DB-free: _cfg is pinned to the code defaults (_DEFAULT_CFG),
@@ -96,7 +96,7 @@ def build_league(*, teams, roster_size, fmt_key, scoring_format, tag):
     players, seed_elo = {}, {}
     # Value scale: the pool's DP values rescaled so the #1 asset lands on
     # FTF's own top-asset value (~7737 = the served Nacua price, memo
-    # docs/reviews/2026/2026-08-21-market-curve-comparison.md).  A flat
+    # docs/reviews/2026-08-21-market-curve-comparison.md).  A flat
     # rank-ladder (the fit W0's 1750->1250) compresses the whole board into
     # 286..3490 value units, where a 1539 gap is arithmetically almost
     # unreachable — it cannot measure this branch at all.

@@ -135,8 +135,8 @@ own README — read them before touching the data:
 |---|---|---|
 | `draft/` | 9 corpora (Sleeper cassettes + MFL `draftResults.json`), each with a `manifest.json` stating provenance | `test_draft_replay`, `test_draft_board`, `support/draft_replay.py` |
 | `sleeper/co-owned-league/` | `rosters.json` + `users.json` for a real league where the operator co-owns roster 3 | `test_co_owner_rosters` |
-| `profiles/` (10) | UI-test world definitions (`standard`, `fresh`, `draft`, `draft-pre`, `espn`, `near-unlock`, `quickset-done`, …) — schema in `docs/plans/archive/2026/mobile-testing/lld.md` §3.1 | `seed_ui_test_db.py`, `test_seed_ui_test_db` |
-| `flags/` (6) | Flag sets for seeding. `release.json` is a **generated mirror of `config/features.json`** — `test_seed_ui_test_db.test_release_flags_mirror_features_json` fails the build on drift; `all-on.json` deliberately omits uncalibrated flags | `seed_ui_test_db.py`, `archive/retired-tooling/mobile/scripts/screen-capture.sh`, several route tests |
+| `profiles/` (10) | UI-test world definitions (`standard`, `fresh`, `draft`, `draft-pre`, `espn`, `near-unlock`, `quickset-done`, …) — schema in `docs/plans/mobile-testing/lld.md` §3.1 | `seed_ui_test_db.py`, `test_seed_ui_test_db` |
+| `flags/` (6) | Flag sets for seeding. `release.json` is a **generated mirror of `config/features.json`** — `test_seed_ui_test_db.test_release_flags_mirror_features_json` fails the build on drift; `all-on.json` deliberately omits uncalibrated flags | `seed_ui_test_db.py`, `mobile/scripts/screen-capture.sh`, several route tests |
 | `dp-values-history/` (24 CSVs + `index.json`) | Dated DynastyProcess boards, 2022–2025, each the nearest commit at-or-before its key date | `backend/dp_values_history.py` (**production**), outlook backtests |
 | `outlook-calibration/` (10) | Per-league season snapshots for the #169 odds calibration | `test_outlook_calibration`, `test_outlook_playoff_seed_type` |
 | `outlook-hypotheses/` (12) | Backtest record sets (IDP pricing, preseason source) | `test_outlook_idp_pricing`, `test_outlook_preseason_source` |

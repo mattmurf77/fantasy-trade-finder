@@ -1,18 +1,3 @@
-# Status — 330-offer-prefill
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-16",
-  "summary": "FB-330 — group canonical folder",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-16 — wave `20b40db` — G4 **canonical**. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # FB-330 — group canonical folder
 
 - **Status:** built 2026-08-16 · **Phase:** 2 (build) — awaiting merge + operator TestFlight checklist

@@ -7,9 +7,9 @@ draft's position is that the measurement the operator needs **does not exist unt
 served**, so serving is the first deliverable, not the last gate.
 **Inputs (all read):** [PRD.md](PRD.md) (operator-ruled; §3 knockouts CLOSED),
 [PLAN.md](PLAN.md), [scope.md](scope.md),
-[../../reviews/2026/2026-08-20-fit-challenger-review.md](../../reviews/2026/2026-08-20-fit-challenger-review.md) (C1–C7, T1–T4),
+[../../reviews/2026-08-20-fit-challenger-review.md](../../reviews/2026-08-20-fit-challenger-review.md) (C1–C7, T1–T4),
 [../trade-engine-accuracy/PLAN.md](../trade-engine-accuracy/PLAN.md) (Phase 0–3 + appendix prod numbers),
-[../../reviews/2026/2026-08-19-armb-audit-consolidated.md](../../reviews/2026/2026-08-19-armb-audit-consolidated.md),
+[../../reviews/2026-08-19-armb-audit-consolidated.md](../../reviews/2026-08-19-armb-audit-consolidated.md),
 `backend/bakeoff_runner.py` (docstring, `serve_interleaved()`, `arm_roster()`, `group_size()`, `deck_limit()`),
 [../matchmaking-engine/HANDOVER.md](../matchmaking-engine/HANDOVER.md) §6, root `CLAUDE.md`.
 

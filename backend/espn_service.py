@@ -7,7 +7,7 @@ crosswalk that maps ESPN rosters into the app's Sleeper `player_id` space.
 
 Status: **Phase 1 wired** — `server.py`'s `/api/espn/*` routes import this
 module, gated by the `espn.link` feature flag (default OFF). See
-docs/plans/archive/2026/espn-league-linking-plan-2026-07-11.md for the phased plan.
+docs/plans/espn-league-linking-plan-2026-07-11.md for the phased plan.
 
 Design notes
 ------------
@@ -445,7 +445,7 @@ class EspnTeam:
     # ── Standings (ADDITIVE, all default None) ──────────────────────────
     # Read from the SAME `view=mTeam` response the roster import already
     # fetches — live-verified 2026-08-08 against league 11896 that mTeam
-    # alone carries all three (docs/plans/archive/2026/draft-extensions/
+    # alone carries all three (docs/plans/draft-extensions/
     # espn-auto-draft-order-feasibility.md §6b). No extra `view=` token, no
     # extra request, and every pre-existing caller that ignores these
     # fields sees an unchanged object.
@@ -566,7 +566,7 @@ def derive_espn_draft_order(teams, playoff_team_count) -> list[int] | None:
 
     ── Why `rankCalculatedFinal` is used for ONE group only ────────────────
 
-    Operator decision, 2026-08-08 (`docs/plans/archive/2026/draft-extensions/plan.md`;
+    Operator decision, 2026-08-08 (`docs/plans/draft-extensions/plan.md`;
     evidence in `espn-auto-draft-order-feasibility.md` §6c–d): the live probe
     of league 11896 confirmed `rankCalculatedFinal` is EXACTLY the
     post-playoff finish for the six playoff teams, but for the eight

@@ -1,6 +1,6 @@
 """draft-extensions W3 M-A — ESPN pick assignment: store, seeder, routes.
 
-Plan `docs/plans/archive/2026/draft-extensions/plan.md` §6 (REVISED) + the operator-decision
+Plan `docs/plans/draft-extensions/plan.md` §6 (REVISED) + the operator-decision
 block; LLD §2.4 / §3.1 / §4.3; ADR-010.
 
 This wave REVERSES a documented invariant — `draft_picks.platform` used to say

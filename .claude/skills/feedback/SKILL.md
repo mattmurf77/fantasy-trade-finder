@@ -39,9 +39,8 @@ skill's files too — the skill is expected to improve itself each run.
    `... list --json`. The table clips at ~110 chars and the actionable spec
    is often in the tail (exact tier lists, repro steps).
 3. Check for duplicates: `... list --all` shows closed items too, and prior
-   work is indexed in `docs/feedback/items/CATALOG.md` (includes resolved
-   items) and `docs/plans/CATALOG.md` (includes archived batches). Use the
-   active indexes only for current work. A dup of *shipped* work → propose
+   work is recorded in `docs/feedback/items/` and (historically)
+   `docs/plans/feedback-batch-*/plan.md`. A dup of *shipped* work → propose
    `declined` (or "verify on current build, then `fixed`"). A dup of an
    *open* item → fold into the canonical item's group; both get status
    updates together from here on.
@@ -65,7 +64,7 @@ skill's files too — the skill is expected to improve itself each run.
    paths goes in the **lowest selected item's** folder — mirror the format of
    `docs/plans/feedback-batch-4/plan.md` (historical format reference) — and
    every other item's `status.md` links to it. Scratch/temp work goes in
-   gitignored `_local/feedback/<id>/`, never in docs. Then append Phase 0
+   gitignored `feedback-workspace/<id>/`, never in docs. Then append Phase 0
    lessons before entering Phase 1.
 
 ## Work-type paths
@@ -81,7 +80,7 @@ out of heavy groups:
 | **Feature** | New capability, new endpoint, or schema change | Full: HLD delta + LLD delta + PRD + scope block | backend → then mobile+web in parallel | 2 QA agents, full test plan + TestFlight checklist |
 
 Every path fills the **scope block** (`docs/templates/feature-scope.md` → the
-group's `scope.md`) per `docs/agent-workflow.md` §Scope, evidence, documentation: analytics events
+group's `scope.md`) per CLAUDE.md §Conventions "Feature gates": analytics events
 specced or explicitly waived (silence is not a waiver — waivers surface to the
 operator at the Phase 0/1 boundary), schema/flags, the **evidence scope** (§3:
 structural guard / unit tests / code-walk proof / TestFlight checklist — **not**
@@ -142,7 +141,7 @@ phase**, not all upfront:
   mini-round first.
 - **Phase 5 — Ship** → `references/ship-phase.md`
   Orchestrator final pass (diff review, `tsc`, pytest, CI green on the branch,
-  docs-sync per `docs/agent-workflow.md` §Canonical update targets, scope-block docs table
+  docs-sync per CLAUDE.md's table incl. HLD/LLD, scope-block docs table
   verified, TEST_LEDGER evidence recorded), then **explicit operator go/no-go
   with a ship summary**, then: merge → push (Render auto-deploys;
   `githooks/pre-push` is a deliberate no-op since D-056 — CI is the gate) →

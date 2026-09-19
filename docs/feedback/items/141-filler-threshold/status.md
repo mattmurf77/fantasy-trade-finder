@@ -1,18 +1,3 @@
-# Status — 141-filler-threshold
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-07-17",
-  "summary": "#141 — Junk-filler threshold on suggested trades",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-17 — trade-engine-v2. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #141 — Junk-filler threshold on suggested trades
 
 **Owner report (mattmurf77, TradesHome):** suggestions pad both sides with

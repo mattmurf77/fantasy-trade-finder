@@ -1,18 +1,3 @@
-# Status — 357-team-review
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-19",
-  "summary": "Status — Team Review (#357 / #358 / #359)",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-19 — **canonical** for #357/#358/#359 — SHIPPED PRs #142/#143, `outlook.odds` lit (D-094), EAS build 121; DB status set `fixed` 2026-08-24. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # Status — Team Review (#357 / #358 / #359)
 
 **Status:** `planned` (Team Review) + **`shipped-pending-merge`** (the `outlook.odds` flip). Doc set complete; Team Review build not started. Operator override 2026-08-19 lit `outlook.odds` and ratified the PPG cut.

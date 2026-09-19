@@ -81,7 +81,7 @@ D-056 replaced the runtime lane with two things, both of which are now expected 
 | Path | Frozen at | What it was |
 |---|---|---|
 | `qa/sim-runs/` (gitignored, per-machine) | last run **2026-08-15**, `last-sim-run.json` sha `44c8bbf`, tier 2, result `fail` | Pre-ship simulator-gate evidence. Kept as a record; the gate it fed is retired |
-| [`archive/retired-tooling/mobile/maestro/`](../mobile/.maestro/README.md) | — | Flow definitions. **Kept, never run** — they document intended behavior, per D-056 |
+| [`mobile/.maestro/`](../mobile/.maestro/README.md) | — | Flow definitions. **Kept, never run** — they document intended behavior, per D-056 |
 | [`screens/`](../screens/CLAUDE.md) | 2026-08-11 | The screen-capture library, frozen because captures stopped |
 
 `githooks/pre-push` still exists and still checks for the artifact; the standing answer
@@ -130,7 +130,7 @@ lives in `qa/sec/`, not a `qa/int/` directory.
 - [teardown-remediation-qa.md](teardown-remediation-qa.md) — device-QA tracker for the
   30 flag-gated features (+ unflagged fixes) from the app-teardown wave (branch
   `teardown-remediation`). Per-feature verify steps, cross-feature interaction watch-list,
-  and an issue log. Catalog: [`../docs/plans/archive/2026/competitor-feature-waves.md`](../docs/plans/archive/2026/competitor-feature-waves.md).
+  and an issue log. Catalog: [`../FEATURES.md`](../FEATURES.md).
 
 ## Test ID convention
 

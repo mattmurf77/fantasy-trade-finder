@@ -29,7 +29,7 @@
 
 All are plain GET requests with `User-Agent: FantasyTradeFinder/1.0`, `timeout=10`–`30`s. The UA is not optional on `raw.githubusercontent.com` — a bare `curl` gets a redirect stub instead of the file.
 
-**`values.csv` is display-only — not consumed by the trade engine.** As of this writing it prices individual draft slots on the Draft Room board's `order[].slot_value` (behind flag `picks.slot_values`) and nowhere else. `pick_values.GENERIC_PICK_SEEDS`, the tier ladder, the tier bands, and the trade engine all use FTF's own hand-tuned pick seeds, not DynastyProcess's slot curve — DP's current-year curve is steeper than FTF's shipped ladder, so adopting it in the engine would be a repricing decision, not a data plumb. `docs/plans/archive/2026/rookie-draft/plan.md` §0.5 records this boundary (bound KD-9) and an operator decision (O2) that **reverses** it for a future wave (M6b): market slot values are slated to enter the engine behind a #214-style user toggle in a dedicated calibration pass — but not from this code path today. Do not read "display-only" as "permanent"; read it as "not yet, and not here."
+**`values.csv` is display-only — not consumed by the trade engine.** As of this writing it prices individual draft slots on the Draft Room board's `order[].slot_value` (behind flag `picks.slot_values`) and nowhere else. `pick_values.GENERIC_PICK_SEEDS`, the tier ladder, the tier bands, and the trade engine all use FTF's own hand-tuned pick seeds, not DynastyProcess's slot curve — DP's current-year curve is steeper than FTF's shipped ladder, so adopting it in the engine would be a repricing decision, not a data plumb. `docs/plans/rookie-draft/plan.md` §0.5 records this boundary (bound KD-9) and an operator decision (O2) that **reverses** it for a future wave (M6b): market slot values are slated to enter the engine behind a #214-style user toggle in a dedicated calibration pass — but not from this code path today. Do not read "display-only" as "permanent"; read it as "not yet, and not here."
 
 ## Fetch triggers, cadence, and caching
 
@@ -149,4 +149,4 @@ See `docs/config-reference.md` for the full env var table.
 - `backend/server.py` — `_load_dp_maps`, `_ensure_universal_pools`, `_build_universal_pools_locked`, `_DP_FETCH_RETRY_SECONDS`
 - `docs/architecture.md` — data-flow diagram (External → `DP[DynastyProcess CSV]`)
 - `docs/runbook.md` — "Consensus QB values" and "consensus seed blend" troubleshooting entries
-- `docs/plans/archive/2026/rookie-draft/plan.md` §0.5 — the `values.csv` display-only bound (KD-9) and its reversal (O2)
+- `docs/plans/rookie-draft/plan.md` §0.5 — the `values.csv` display-only bound (KD-9) and its reversal (O2)

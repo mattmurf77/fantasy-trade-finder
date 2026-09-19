@@ -1,18 +1,3 @@
-# Status — 413-sleeper-send-draft-picks
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-09-03",
-  "summary": "FB-413 draft-pick encoding shipped in PR #270; later tradability defect is #428",
-  "evidence": "Incoming main corrected the folder header on September 8: fixed and shipped September 3 via PR #270, D-176, mobile v1.16.15; production feedback status fixed. This supersedes the old generated index date of September 2. Preserve the original build/QA phase log and device-check limitations. The later spent/out-of-window pick refusal is a separate fix in ../428-sleeper-pick-send-refused/status.md, shipped with PR #292."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # FB-413 — Send in Sleeper fails on trades with draft picks
 
 **Status:** fixed · shipped 2026-09-03 via PR #270 (D-176, v1.16.15); prod status `fixed`. (Folder header corrected 2026-09-08 — it had been left at in_progress.)

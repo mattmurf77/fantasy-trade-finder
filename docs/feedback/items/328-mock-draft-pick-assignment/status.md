@@ -1,18 +1,3 @@
-# Status — 328-mock-draft-pick-assignment
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-16",
-  "summary": "FB-328 — group canonical folder",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-16 — wave `20b40db` — G3 **canonical**. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # FB-328 — group canonical folder
 
 - **Status:** built 2026-08-16 · **Phase:** 2 (build complete on `feat/fb328-picks`; awaiting group merge + operator TestFlight checklist prd §6.3)

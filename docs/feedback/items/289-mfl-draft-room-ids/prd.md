@@ -715,10 +715,10 @@ file changes; this is a guard, not a target. Note: this worktree has real
 
 ### Maestro
 
-**No new or extended `archive/retired-tooling/mobile/maestro/` flow is authored.** The mobile QA
+**No new or extended `mobile/.maestro/` flow is authored.** The mobile QA
 harness is Sleeper-fixture-driven (`FTF_SLEEPER_FIXTURES_DIR`) and has no MFL
 seam: `backend/test_users.py`, `backend/test_support.py`, `qa/` and
-`archive/retired-tooling/mobile/maestro/*.yaml` contain zero MFL references (the only `mfl` hits under
+`mobile/.maestro/*.yaml` contain zero MFL references (the only `mfl` hits under
 `.maestro/` are unrelated screenshot filenames). MFL's only test seam is the
 `server._mfl_draft_opener()` monkeypatch, which pytest uses and Maestro cannot
 reach. An MFL Maestro flow is therefore not authorable without first building
@@ -731,7 +731,7 @@ harness support — out of scope for this item, named as a backlog item in
 2. **A live-league verification against the operator's Dependables MFL league
    (62846)** — the real league where #289 was observed. Full procedure in §9.
 3. The two existing Draft Room flows as no-regression checks:
-   `archive/retired-tooling/mobile/maestro/flows/rookie/d1-draft-room-complete.yaml` and
+   `mobile/.maestro/flows/rookie/d1-draft-room-complete.yaml` and
    `d2-draft-room-order-not-set.yaml` (Sleeper corpus, harness user
    `qa_standard`) — the sim-gate Tier 3 subset.
 
@@ -861,7 +861,7 @@ EOF
 ### Sim gate
 
 Tier **3** (backend route consumed by mobile) — run
-`archive/retired-tooling/mobile/maestro/flows/rookie/d1-draft-room-complete.yaml` and
+`mobile/.maestro/flows/rookie/d1-draft-room-complete.yaml` and
 `d2-draft-room-order-not-set.yaml`, log in `TEST_LEDGER.md`, write
 `qa/sim-runs/last-sim-run.json`. See `scope.md` §5 for the matrix reading.
 

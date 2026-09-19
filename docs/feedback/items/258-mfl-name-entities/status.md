@@ -1,18 +1,3 @@
-# Status — 258-mfl-name-entities
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-08",
-  "summary": "#258 — MFL team names show HTML entities (reopened as #282: markup, not entities)",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-08 — backfill `_backfill_mfl_name_entities()`; merge `b682ee2` → `8c3c742`, build 91. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #258 — MFL team names show HTML entities (reopened as #282: markup, not entities)
 
 **Covered feedback IDs:** #258 (2026-08-06), #282 (2026-08-09, reopens #258)

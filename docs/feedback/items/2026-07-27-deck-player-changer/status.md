@@ -1,18 +1,3 @@
-# Status — 2026-07-27-deck-player-changer
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-07-27",
-  "summary": "Deck player-changer — counter-suggestions as swap suggestions on find-a-trade cards",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-27 — deck player-changer `ec25407` — CHANGELOG 2026-07-27. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # Deck player-changer — counter-suggestions as swap suggestions on find-a-trade cards
 
 - **Source:** operator decision in `docs/business/product/2026-07-26-dynastydealer-dtf-teardowns.md`: counter suggestions "loved; shipped as calculator eveners … ALSO to serve as the 'player changer' on find-a-trade deck cards → follow-up after the asset-ideas build lands." Reuses the calc-eveners backend (`docs/feedback/items/2026-07-26-calc-eveners/status.md`).

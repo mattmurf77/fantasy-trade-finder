@@ -21,7 +21,7 @@
 - **Flag gating is self-contained where the render is conditional** — e.g. `MemberEnteredMarker` checks its own flag *and* `source === 'user'`, so callers render it unconditionally. Never wrap it in a caller-side ternary.
 - **Sheets are `Modal`-based** and follow the Chalkline sheet construction (ink-2 surface, hairline border, sheet shadow, line-strong grabber, solid scrim). iOS will not stack sibling `Modal`s — a sheet needing a second layer nests it inside the same `Modal`.
 - **Sheets and modals do NOT mount `FeedbackFAB`** (root `mobile/CLAUDE.md` exception). Screens with a pinned bottom bar call `setPinnedBottomBarHeight`, exported from `FeedbackFAB`.
-- **testIDs** follow the grammar in [docs/plans/archive/2026/mobile-testing/lld.md](../../../docs/plans/archive/2026/mobile-testing/lld.md) Appendix A and are checked by `mobile/scripts/testid-lint.sh`, which is still enforced in CI after the Maestro retirement (D-056). Template-literal ids need an entry in `mobile/scripts/testid-lint-allow.txt`.
+- **testIDs** follow the grammar in [docs/plans/mobile-testing/lld.md](../../../docs/plans/mobile-testing/lld.md) Appendix A and are checked by `mobile/scripts/testid-lint.sh`, which is still enforced in CI after the Maestro retirement (D-056). Template-literal ids need an entry in `mobile/scripts/testid-lint-allow.txt`.
 
 ## Adding a component
 

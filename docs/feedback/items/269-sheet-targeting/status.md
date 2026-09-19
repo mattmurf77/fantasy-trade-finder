@@ -1,18 +1,3 @@
-# Status — 269-sheet-targeting
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-09",
-  "summary": "#269 — Move team targeting + a league picker into the edit sheet; drop the Team/Player tabs",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-09 — `trades.sheet_targeting` flag ON — covers #269/#276 (wave 3). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #269 — Move team targeting + a league picker into the edit sheet; drop the Team/Player tabs
 
 **Status: BUILT — flag `trades.sheet_targeting`, ships ON.** — 2026-08-09

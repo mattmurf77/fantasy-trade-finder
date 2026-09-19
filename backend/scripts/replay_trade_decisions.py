@@ -1,6 +1,6 @@
 """Offline replay of historical trade decisions — legacy vs trade-engine v2.
 
-Tier 1 "Testing / Offline replay" (docs/plans/archive/2026/trade-engine-tier1-fixes.md):
+Tier 1 "Testing / Offline replay" (docs/plans/trade-engine-tier1-fixes.md):
 load historical ``trade_decisions`` (likes/passes) and ``trade_matches``,
 regenerate decks for each (user, league) with the legacy engine and with
 the v2 engine (``trade_engine_v2`` flag toggled in-process), and compare:

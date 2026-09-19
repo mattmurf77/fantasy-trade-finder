@@ -1,12 +1,3 @@
-```project-status
-{
-  "status": "needs-review",
-  "updated": "",
-  "summary": "Analytics spec — device-held platform credentials (closes OI-20)",
-  "evidence": "Disposition remains absent, unclear, or internally qualified; preserve existing claims until reconciled. No explicit current status found in the prior index or the document set; see retained sources."
-}
-```
-
 # Analytics spec — device-held platform credentials (closes OI-20)
 
 > **Why this exists:** the [LLD](device-side-platform-auth-lld-2026-08-13.md) §7.6 requires lease/outcome events "registered in `backend/analytics_taxonomy.py` **before first emission**" and then names **no event, no property, and no platform dimension** — the exact omission the NULL-`platform` incident is cited as precedent for. OI-20.

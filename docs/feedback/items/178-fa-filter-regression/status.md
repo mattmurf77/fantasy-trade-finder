@@ -1,18 +1,3 @@
-# Status — 178-fa-filter-regression
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-07-25",
-  "summary": "#178 — Free agents STILL not filtering out owned players — status",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-25 — `owner_id:null` orphan-roster fix — DECISIONS regression-class entry. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #178 — Free agents STILL not filtering out owned players — status
 
 **State:** fixed (2026-07-25, worktree branch off `teardown-remediation`).

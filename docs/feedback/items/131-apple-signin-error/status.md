@@ -1,18 +1,3 @@
-# Status — 131-apple-signin-error
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-07-12",
-  "summary": "#131 — Apple sign-in entitlement — status",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-12 — FB-131 applesignin entitlement `2b5e07a` — CHANGELOG 2026-07-12, v1.7.1–v1.7.3. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #131 — Apple sign-in entitlement — status
 
 ## Build phase (mobile BUILD agent, 2026-07-12)
@@ -28,7 +13,7 @@ Implemented per `prd.md` (post-round-3, Planner-approved). No PRD deviations.
 | `mobile/ios/DTFDynastyTradeFinder/DTFDynastyTradeFinder.entitlements` | R-1 | Added `com.apple.developer.applesignin` = `[Default]` — exactly the 4 pinned lines; `aps-environment` byte-untouched |
 | `mobile/src/components/TopBar.tsx` | R-3 | One added prop line: `testID="topbar.settings"` on the Settings gear Pressable (the tap target itself) |
 | `mobile/src/components/CLAUDE.md` | R-3 | Registered `signin.apple-btn`, `settings.link-apple-btn`, `topbar.settings` (new "Apple entitlement tranche" block); smoke-flow range note 01–10 → 01–11 |
-| `archive/retired-tooling/mobile/maestro/flows/smoke/11-apple-entitlement.yaml` | R-5 | New flow, byte-per the PRD: Part 1 regression sensor with the SETTLE probe (`optional: true` `extendedWaitUntil`, 3 s window) + DO-NOT-REMOVE comment; Part 2 reachability-only; version-pin header (expo-apple-authentication@8.0.8) |
+| `mobile/.maestro/flows/smoke/11-apple-entitlement.yaml` | R-5 | New flow, byte-per the PRD: Part 1 regression sensor with the SETTLE probe (`optional: true` `extendedWaitUntil`, 3 s window) + DO-NOT-REMOVE comment; Part 2 reachability-only; version-pin header (expo-apple-authentication@8.0.8) |
 | `docs/runbook.md` | R-7 | Appended "Bare workflow: `app.json` iOS config is silently ignored (feedback #131)" entry incl. the pinned-failure-copy line |
 
 Not touched (by design): `SignInScreen.tsx`, `SettingsScreen.tsx`, backend, `app.json` (R-2 zero app-logic; R-6 version bump is orchestrator-owned).

@@ -1,5 +1,5 @@
 // Mock draft — the four `/api/mock-draft` routes (draft-extensions W2,
-// plan docs/plans/archive/2026/rookie-draft/mock-draft-plan.md §5). Flag `draft.mock`.
+// plan docs/plans/rookie-draft/mock-draft-plan.md §5). Flag `draft.mock`.
 //
 // The FTF-native simulation of a league's rookie draft: the user picks for
 // their own team, computer drafters pick for everyone else. NOTHING here

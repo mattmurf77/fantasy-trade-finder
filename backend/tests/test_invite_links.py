@@ -1,6 +1,6 @@
 """P0-3 — the invite JOIN deep link, server half (mobile UX audit 2026-08-09).
 
-Spec: docs/plans/archive/2026/audit-p0-remediation/lld-p0-3.md §1.5 (T-1…T-13).
+Spec: docs/plans/audit-p0-remediation/lld-p0-3.md §1.5 (T-1…T-13).
 Branch: p0-remediation-2026-08-10.
 
 The finding: an invite link dropped the recipient on a generic landing with no

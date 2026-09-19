@@ -15,7 +15,7 @@ Contract under test, in `server._run_trade_job`:
     real pre-bake-off `origin/main` output. It has since been RE-CAPTURED
     from this repo's own code twice, both on 2026-08-21: (1) the
     operator-approved package-benchmark fix (`package_bench_trade_wide`,
-    docs/reviews/2026/2026-08-21-market-curve-comparison.md §3b) deliberately
+    docs/reviews/2026-08-21-market-curve-comparison.md §3b) deliberately
     moved generation for every arm, so the flag-off deck moved with it
     (2 cards → 1 on this fixture — the receive side of the dropped
     1-for-2 now prices out of band); (2) the gap auto-sweetener stamps a
@@ -458,7 +458,7 @@ def test_every_swipe_k_multiplier_runs_through_the_elo_freeze():
 
 
 # ---------------------------------------------------------------------------
-# fairness_threshold capture (docs/reviews/2026/2026-08-18-trade-logic-archaeology.md)
+# fairness_threshold capture (docs/reviews/2026-08-18-trade-logic-archaeology.md)
 # ---------------------------------------------------------------------------
 
 def test_served_cards_record_the_threshold_they_were_generated_under():

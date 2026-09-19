@@ -1,18 +1,3 @@
-# Status — 416-liked-card-stays-no-swipe
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-09-02",
-  "summary": "FB-416 — liked card doesn't disappear; swipe is gone",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-09-02 — verify-closed — D-171 v1.16.14 restores the classic swipe deck; proof = scope §7 steps 1/5/6. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # FB-416 — liked card doesn't disappear; swipe is gone
 
 **Status:** fixed (verify on v1.16.14) · 2026-09-02 triage · closed by work shipped outside this pipeline

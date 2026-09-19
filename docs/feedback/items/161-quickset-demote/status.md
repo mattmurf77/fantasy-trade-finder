@@ -1,18 +1,3 @@
-# Status — 161-quickset-demote
-
-```project-status
-{
-  "status": "in-progress",
-  "updated": "2026-07-25",
-  "summary": "FB-161 — unselected players drop on Quick Set save",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: in-progress 2026-07-25 — teardown-remediation (worktree). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # FB-161 — unselected players drop on Quick Set save
 
 > **SUPERSEDED 2026-08-24 by #381/#346 (D-160):** the demote rule below is

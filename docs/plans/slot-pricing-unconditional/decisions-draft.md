@@ -24,7 +24,7 @@ the **end**. `CHANGELOG.md` takes a new dated H2 at the **top**.
 ```markdown
 ## D-144 — Draft Picks Price at Their Own Draft Slot; the Per-User Mode, Its Route and Its Flag Are Retired
 
-**Date:** 2026-08-21 ([scope](scope.md)); closes [Q-023](OPEN_QUESTIONS.md) in full, rules and defers [Q-026](OPEN_QUESTIONS.md)
+**Date:** 2026-08-21 ([scope](../docs/plans/slot-pricing-unconditional/scope.md)); closes [Q-023](OPEN_QUESTIONS.md) in full, rules and defers [Q-026](OPEN_QUESTIONS.md)
 
 **Operator ruling.** *"Market slots should be default and not an opt-in or even an option to flip. Aligned that future picks stay default for now."* Clarified the same day: "market slots" means **each pick holding *real value rather than generic*** — true per-slot pricing, not merely a market-flavoured round curve.
 

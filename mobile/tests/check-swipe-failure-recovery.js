@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Swipe-failure recovery structural test.
-// Ticket: docs/reviews/2026/2026-08-18-bug-sweep/ticket.md § B4
+// Ticket: docs/reviews/2026-08-18-bug-sweep/ticket.md § B4
 //
 // WHY THIS EXISTS. A pass that failed server-side rewound the deck to
 // re-front the card but never cleared the double-fire guard

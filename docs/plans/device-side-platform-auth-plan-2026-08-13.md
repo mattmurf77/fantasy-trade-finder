@@ -1,12 +1,3 @@
-```project-status
-{
-  "status": "needs-review",
-  "updated": "",
-  "summary": "Plan: Device-Held Platform Credentials — Release 1 (Sleeper)",
-  "evidence": "Disposition remains absent, unclear, or internally qualified; preserve existing claims until reconciled. No explicit current status found in the prior index or the document set; see retained sources."
-}
-```
-
 # Plan: Device-Held Platform Credentials — Release 1 (Sleeper)
 
 > **Status:** dual-agent candidate v1, entering cross-review.

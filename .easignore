@@ -19,12 +19,3 @@
 /mockups/
 /screens/
 mobile/ios/build/
-
-# Local recovery and private research are never application inputs.
-/_local/
-/.git/
-
-# Local credentials and databases are not build inputs.
-/secrets.local.env*
-/.env*
-/data/

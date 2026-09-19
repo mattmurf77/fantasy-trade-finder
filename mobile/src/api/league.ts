@@ -943,7 +943,7 @@ export async function getFreeAgents(
  *  ONE call site by design (SignInScreen) — see lld-p0-3 §2.0. A second call
  *  site on a screen that can run with an UNSEEDED league id books a
  *  `vcr_misses` increment under the hermetic harness and fails the whole sim
- *  run (`archive/retired-tooling/mobile/scripts/sim-run.sh`), so this is a rail, not a style note. */
+ *  run (`mobile/scripts/sim-run.sh`), so this is a rail, not a style note. */
 export interface InviteMeta {
   league_id: string;
   league_name: string | null;

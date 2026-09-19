@@ -56,7 +56,7 @@
 
 ## 3. Test scope (mobile test platform)
 
-- [x] **New flow:** `archive/retired-tooling/mobile/maestro/flows/trade-send/mfl-send-gating.yaml` — authored
+- [x] **New flow:** `mobile/.maestro/flows/trade-send/mfl-send-gating.yaml` — authored
   (id-selectors only, no sleeps/coordinates/text-taps). Covers: MFL league shows
   "Send in MFL" (flag on) and does NOT show "Send in Sleeper"; Sleeper league still
   shows "Send in Sleeper".

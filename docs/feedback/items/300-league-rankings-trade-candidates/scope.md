@@ -145,7 +145,7 @@ is built on branch `analytics-300` — tracking plan in [`analytics.md`](analyti
   no user-visible mobile surface; it adds one additive JSON key. **NOT waived for
   the feature** — the divider, the band labels, the stacked drill-in and the
   Offer/Target handoff are all user-visible mobile changes and **require** a
-  new/extended flow in `archive/retired-tooling/mobile/maestro/` per CLAUDE.md gate 2. That flow is the
+  new/extended flow in `mobile/.maestro/` per CLAUDE.md gate 2. That flow is the
   mobile agent's deliverable; this scope block records it as owed, not as waived.
 - **`testID`s added/renamed:** none on this branch (backend). Mobile's are
   subject to `mobile/scripts/testid-lint.sh` in CI.

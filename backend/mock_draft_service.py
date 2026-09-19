@@ -1,7 +1,7 @@
 """FTF-native mock draft — engine + calibration (draft-extensions W2a).
 
-Spec: ``docs/plans/archive/2026/draft-extensions/plan.md`` §5 · ``lld.md`` §2.3/§3.3/§4.2 ·
-``docs/plans/archive/2026/rookie-draft/mock-draft-plan.md`` §4-9 (adopted), with the plan's
+Spec: ``docs/plans/draft-extensions/plan.md`` §5 · ``lld.md`` §2.3/§3.3/§4.2 ·
+``docs/plans/rookie-draft/mock-draft-plan.md`` §4-9 (adopted), with the plan's
 three binding amendments.
 
 A flat module beside ``draft_board_service.py`` (KD-1): pure logic with every
@@ -242,7 +242,7 @@ DEFAULT_ROUNDS = 4
 # ---------------------------------------------------------------------------
 # THE CALIBRATION GATE (I-10)
 # ---------------------------------------------------------------------------
-# `docs/plans/archive/2026/draft-extensions/mock-calibration-2026-08d.md` is a GATE, not a
+# `docs/plans/draft-extensions/mock-calibration-2026-08d.md` is a GATE, not a
 # report (plan §5, lld §4.2.3).
 #
 # W2a: the specified single-parameter model — argmin over
@@ -328,7 +328,7 @@ DEFAULT_ROUNDS = 4
 # still records the statistical verdict independently — see its docstring.
 # Revert by setting this back to False; nothing else needs to change.
 CPU_MODEL_VALIDATED = True
-CALIBRATION_ARTIFACT = "docs/plans/archive/2026/draft-extensions/mock-calibration-2026-08d.md"
+CALIBRATION_ARTIFACT = "docs/plans/draft-extensions/mock-calibration-2026-08d.md"
 
 
 class MockDraftError(Exception):

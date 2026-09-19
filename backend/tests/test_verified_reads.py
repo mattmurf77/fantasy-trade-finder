@@ -1,6 +1,6 @@
 """Account-auth P2.5 — READ privacy for board content.
 
-Extends P1's write gate to reads (docs/plans/archive/2026/account-auth-plan-2026-07-11.md
+Extends P1's write gate to reads (docs/plans/account-auth-plan-2026-07-11.md
 §"P2.5"): "ranks hidden behind an account" means an attacker with just a
 username must not be able to VIEW the victim's board once the real owner
 has verified. Rule under test (@_gate_unverified_read):

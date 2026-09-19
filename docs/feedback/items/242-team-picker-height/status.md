@@ -1,18 +1,3 @@
-# Status — 242-team-picker-height
-
-```project-status
-{
-  "status": "in-progress",
-  "updated": "2026-08-02",
-  "summary": "#242 — \"Pick a manager\" sheet too short for a 12-team league",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: in-progress 2026-08-02 — teardown-remediation (pending merge). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #242 — "Pick a manager" sheet too short for a 12-team league
 
 **Status: fixed (worktree branch `teardown-remediation`, pending merge) — 2026-08-02**

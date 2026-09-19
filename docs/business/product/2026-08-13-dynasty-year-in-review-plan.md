@@ -383,7 +383,7 @@ recap.** It is cheap insurance on a year of data, with three consumers.
 The operator's ruling, in substance: *"I just didn't want the share-rankings literal feature
 yet — it's not an issue to show it on recaps or even on the League Home page."*
 
-**This narrows how [`D-P1-12`](../../plans/archive/2026/audit-p1-remediation/DECISIONS-p1.md#d-p1-12--rankingtier-board-sharing-is-not-a-product-surface)
+**This narrows how [`D-P1-12`](../../plans/audit-p1-remediation/DECISIONS-p1.md#d-p1-12--rankingtier-board-sharing-is-not-a-product-surface)
 should be read**, and the distinction is worth stating precisely because this plan is not the
 last thing that will run into it:
 

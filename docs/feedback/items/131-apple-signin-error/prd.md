@@ -79,7 +79,7 @@ Both Apple buttons ALREADY have testIDs — do not add more:
 One genuinely missing id: the Settings gear in
 `mobile/src/components/TopBar.tsx` (Pressable at ~line 70, currently only
 `accessibilityLabel="Settings"`). Maestro conventions
-(`docs/plans/archive/2026/mobile-testing/lld.md` §4.4 rule 1) ban tapping by text, so add:
+(`docs/plans/mobile-testing/lld.md` §4.4 rule 1) ban tapping by text, so add:
 
 ```tsx
 testID="topbar.settings"
@@ -137,8 +137,8 @@ strings above.
 
 ### R-5 — Maestro regression flow
 
-New file `archive/retired-tooling/mobile/maestro/flows/smoke/11-apple-entitlement.yaml` (next free
-smoke number; conventions per `docs/plans/archive/2026/mobile-testing/lld.md` §4.4 —
+New file `mobile/.maestro/flows/smoke/11-apple-entitlement.yaml` (next free
+smoke number; conventions per `docs/plans/mobile-testing/lld.md` §4.4 —
 header block, id-selectors for taps, text-matching only for load-bearing
 copy asserts, `clearState`+`clearKeychain` first, `extendedWaitUntil` at
 async boundaries, ends in `takeScreenshot`). `auth.accounts` is already true
@@ -354,7 +354,7 @@ TestFlight" (testers on 40/41 will still see the error).
 2. R-8 codesign output shows `com.apple.developer.applesignin` = `[Default]`
    in the shipped artifact.
 3. New Maestro flow green; existing smoke suite
-   (`archive/retired-tooling/mobile/maestro/flows/smoke/01`–`10`) green — entitlement edit broke
+   (`mobile/.maestro/flows/smoke/01`–`10`) green — entitlement edit broke
    nothing else.
 4. R-9 both operator checks pass on device.
 5. Docs (runbook + testID registry) updated; version carriers consistent.

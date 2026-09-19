@@ -1,18 +1,3 @@
-# Status — 374-partners-copy-and-finder-conditions
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-20",
-  "summary": "Status — #374 partners copy + #376 finder conditions",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-20 — #374 + first #376 fix — `fix/finder-conditions-and-partners-copy` merged (ancestry-verified 2026-08-24); DB status `fixed` 2026-08-24. #376 re-reported → see `376-finder-filters-regression/`. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # Status — #374 partners copy + #376 finder conditions
 
 **Status:** `built` — on `fix/finder-conditions-and-partners-copy`, awaiting merge + a client release.

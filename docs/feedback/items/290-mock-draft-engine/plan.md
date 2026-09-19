@@ -540,7 +540,7 @@ iterate against, which is #292's whole point.
 | R5 | **`check-mock-mode-marker.js`** | Structural AST test over both screens. `MockDraftScreen` must keep **exactly one top-level `return`**, exactly one **unconditional** `<MockRail>` before and outside the ScrollView, and six literal testID substrings (`mock-draft.empty-text`, `.error-text`, `.empty.`, `.on-the-clock`, `.confirm`, `.recap`); no rendered string may contain "never drafts". `DraftRoomScreen` must keep `const mockMode = mockOn &&`, `useFlag('draft.mock')`, exactly one `DraftModeToggle`, and a ternary whose condition text is **exactly** `mockMode`. | Highest-probability breakage for #291/#292. Adding a "Start another" action to the recap must not add an early return. **Not in CI** — only `testid-lint` runs there (`.github/workflows/ci.yml:38-42`). Run `npm run test:mock-mode-marker` in `mobile/` manually, every commit. |
 | R6 | **Determinism** | Truncating candidates changes RNG consumption, so old `rng_seed`s replay differently. | Not a test break (§4.3.2) and not an INV-10 break. `_pick_rng` must stay a pure function of `(rng_seed, pick_no)` (`:820-823`). One PRD line noting pre-existing rows replay differently. |
 | R7 | **Flags are ON — this ships lit** | `draft.mock`/`draft.room`/`draft.tab` are all `true` (`config/features.json:149,157,169`). There is no dark landing here. | Every change is immediately user-visible on merge. Treat the Maestro gate as load-bearing, not ceremonial. |
-| R8 | **No Maestro mock flow exists** | Grep of `archive/retired-tooling/mobile/maestro` finds three draft flows (`d1-draft-room-complete`, `d2-draft-room-order-not-set`, `r5-flag-off-no-entry`) and **zero** mock flows. Touching either screen is a Tier-1 change → 11 smoke flows **plus the feature's own flow** (`docs/runbook.md:93-98`). | We author the first mock flow. See §9 — and note the hermetic-seeding blocker. |
+| R8 | **No Maestro mock flow exists** | Grep of `mobile/.maestro` finds three draft flows (`d1-draft-room-complete`, `d2-draft-room-order-not-set`, `r5-flag-off-no-entry`) and **zero** mock flows. Touching either screen is a Tier-1 change → 11 smoke flows **plus the feature's own flow** (`docs/runbook.md:93-98`). | We author the first mock flow. See §9 — and note the hermetic-seeding blocker. |
 | R9 | **Hermetic mock seeding does not exist** | `seed_ui_test_db.py` never writes `mock_drafts`; `test_support.py` has no mock surface; `lakeview-complete` is blocked by `board.state === 'complete'` and `ffv3-predraft` has `draft_order: null`. | Either drive the mock through the UI in the flow, or add a seed-profile knob writing a `mock_drafts` row via `mds.dumps` — `GET /api/mock-draft` then answers from DB + process pool alone (`server.py:11683-11698`). Scope this in the PRD; it is real work. |
 | R10 | **Stale docs contradict the code** | `config/features.json:145` still says `draft.mock` "stays OFF" and that create returns `cpu_model_unvalidated`; `docs/config-reference.md:565` still asserts `CPU_MODEL_VALIDATED is False`. Both are wrong since `6caca35`. | Correct both as part of this work — a future agent reading them will make a wrong call. |
 | R11 | **#277's TierBadge vs #291's affordance** | Both want the row's trailing slot (`DraftRoomScreen.tsx:1325-1340`). | Do not silently evict the tier label; resolve in design review against `docs/design/components.md`. |
@@ -560,7 +560,7 @@ iterate against, which is #292's whole point.
 | `mobile/src/components/draft/MockEntryPanel.tsx` | #292 | Error-branch retry, block precedence. |
 | `mobile/src/components/draft/MockSetupSheet.tsx` | #292 | Only if the busy-stranding path (`:182`) is in scope. |
 | `docs/feedback/items/290-mock-draft-engine/**` | all | This plan, PRD, HLD/LLD deltas, status, QA. |
-| `archive/retired-tooling/mobile/maestro/flows/rookie/<new mock flow>.yaml` | all | New file. |
+| `mobile/.maestro/flows/rookie/<new mock flow>.yaml` | all | New file. |
 
 **Claimed by G2 — SHARED, needs orchestrator arbitration:**
 
@@ -662,7 +662,7 @@ whether the fix is copy/priority (dead-end 1) or state handling (2 and 3).
 
 ### 9.3 Maestro
 
-**New flow** (first mock flow in the repo), under `archive/retired-tooling/mobile/maestro/flows/rookie/`, tagged
+**New flow** (first mock flow in the repo), under `mobile/.maestro/flows/rookie/`, tagged
 `[rookie, draft-room, mock]`:
 
 1. Draft Room → `DraftModeToggle` → Mock → `mock-entry.card` visible with `mock-entry.start`
@@ -676,7 +676,7 @@ whether the fix is copy/priority (dead-end 1) or state handling (2 and 3).
 
 Constraints (`mobile/scripts/testid-lint.sh`): `id:` selectors only, **no `- sleep`**, no
 coordinate taps or `point:`. Run with `--flags` pinning `draft.mock`/`draft.room` on
-(`archive/retired-tooling/mobile/scripts/sim-run.sh:5`).
+(`mobile/scripts/sim-run.sh:5`).
 
 **Blocker to scope in the PRD (R9):** no seed profile puts a user in a mock. Either the flow
 creates one live (slow, but the create is hermetic under `FTF_TEST_MODE` against the ffv3

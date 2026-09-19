@@ -1,7 +1,7 @@
 # Knockout refine — R5 two-sided, R1 in the right currency, R2 quality-aware, 3-for-1 unlock
 
 > **Status:** active. Branch `claude/knockout-refine-0823` from `origin/main` @ `c321958`.
-> Verdict + evidence: [`docs/reviews/2026/2026-08-22-knockout-rules-judged.html`](../../reviews/2026/2026-08-22-knockout-rules-judged.html). Operator aligned on items 1–4 (2026-08-23) and clarified the shape-rule intent: it was meant to stop sending 2 same-position starters with none returning — a job **R2 actually owns** (signed per-position net, #341). That clarification is a design input here: R2 stays and gets quality-aware; the shape rule becomes a knob.
+> Verdict + evidence: [`docs/reviews/2026-08-22-knockout-rules-judged.html`](../../reviews/2026-08-22-knockout-rules-judged.html). Operator aligned on items 1–4 (2026-08-23) and clarified the shape-rule intent: it was meant to stop sending 2 same-position starters with none returning — a job **R2 actually owns** (signed per-position net, #341). That clarification is a design input here: R2 stays and gets quality-aware; the shape rule becomes a knob.
 
 ## 1. What ships in code vs what flips in prod
 

@@ -1,6 +1,6 @@
 """P0-5 — the unified harness seam, server half (mobile UX audit 2026-08-09).
 
-Spec: docs/plans/archive/2026/audit-p0-remediation/hld.md §5.3 + lld-p0-5.md §10 (T-1…T-4).
+Spec: docs/plans/audit-p0-remediation/hld.md §5.3 + lld-p0-5.md §10 (T-1…T-4).
 Branch: p0-remediation-2026-08-10.
 
 `_test_mode_identity()` lets a Maestro run mint a REAL account-only session

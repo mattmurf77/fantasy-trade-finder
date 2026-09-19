@@ -1,7 +1,7 @@
 """draft-extensions W2 — FTF-native mock draft engine + the calibration GATE.
 
-Spec: ``docs/plans/archive/2026/draft-extensions/plan.md`` §5 · ``lld.md`` §2.3/§3.3/§4.2/§7 ·
-``docs/plans/archive/2026/rookie-draft/mock-draft-plan.md`` §4-9.
+Spec: ``docs/plans/draft-extensions/plan.md`` §5 · ``lld.md`` §2.3/§3.3/§4.2/§7 ·
+``docs/plans/rookie-draft/mock-draft-plan.md`` §4-9.
 
   T-W2-01  flag off => every mock route 404s; no other route moves
   T-W2-02  snake vs linear turn order; the ownership overlay, incl. back-to-back

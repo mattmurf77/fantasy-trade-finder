@@ -1,18 +1,3 @@
-# Status — 140-chip-team-age
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-07-17",
-  "summary": "#140 — Team + age on Quick set / Quick rank chips — status",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-17 — FB-140 Waivers→FA label `8a00d0e` — CHANGELOG 2026-07-17, v1.8.1. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #140 — Team + age on Quick set / Quick rank chips — status
 
 **Status: built (2026-07-17), pending release.**

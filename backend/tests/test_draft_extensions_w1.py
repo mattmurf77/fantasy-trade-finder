@@ -1,6 +1,6 @@
 """draft-extensions W1 — draft-room per-player actions + instrumentation.
 
-Plan `docs/plans/archive/2026/draft-extensions/plan.md` §4, LLD §2.1/§2.2/§4.1.
+Plan `docs/plans/draft-extensions/plan.md` §4, LLD §2.1/§2.2/§4.1.
 
 W1's whole safety story is one sentence: **the anchor lane only.** The Draft
 Room's new row actions may reach `POST /api/anchor/save` and nothing else.

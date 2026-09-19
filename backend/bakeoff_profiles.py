@@ -91,7 +91,7 @@ MODEL_A_PROFILE: dict[str, float] = {
     # already inert on every arm — see the D-085 note in living-memory.)
     "placement_tier_clamp":      0.0,   # D-085 off
     # Package-math wave — 2026-08-21 (operator-approved fix, evidence
-    # docs/reviews/2026/2026-08-21-market-curve-comparison.md §3b). Post-dates
+    # docs/reviews/2026-08-21-market-curve-comparison.md §3b). Post-dates
     # the reference SHA and changes generation, so arm A pins it at its
     # kill value; the pre-wave own-max package math is byte-identical at
     # this setting, so the golden stands un-recaptured (verified: 10/10

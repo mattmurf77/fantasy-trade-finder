@@ -1,18 +1,3 @@
-# Status — 179-fa-add-button
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-07-25",
-  "summary": "#179 — Add button on free agents — status",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-25 — teardown-remediation (worktree). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #179 — Add button on free agents — status
 
 **State:** shipped v1 (2026-07-25, worktree branch off `teardown-remediation`).

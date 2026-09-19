@@ -276,7 +276,7 @@ def test_both_managers_boards_are_shrunk_by_the_identical_rule():
     """Brief test 7. THE asymmetry this whole change exists to remove:
     before it, the requesting user's board was shrunk toward consensus by
     how well-sampled it was while a league-mate's published board was used
-    raw (docs/reviews/2026/2026-08-19-armb-audit-claims-3-4.md §3)."""
+    raw (docs/reviews/2026-08-19-armb-audit-claims-3-4.md §3)."""
     seed = {"x": 1500.0}
     viewer_board = {"x": 1900.0}
     partner_board = {"x": 1900.0}

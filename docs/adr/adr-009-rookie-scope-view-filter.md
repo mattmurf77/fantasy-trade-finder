@@ -2,7 +2,7 @@
 
 **Status:** Accepted (shipping dark behind `ranks.rookie_subset`)
 **Date:** 2026-08-06
-**Initiative:** Rookie rankings + live draft support, milestone M2 (docs/plans/archive/2026/rookie-draft/ — plan.md FINAL/dual-agent converged, hld.md, lld.md §4.2/§4.3). Records the two decisions in that milestone that are not self-evident from the code.
+**Initiative:** Rookie rankings + live draft support, milestone M2 (docs/plans/rookie-draft/ — plan.md FINAL/dual-agent converged, hld.md, lld.md §4.2/§4.3). Records the two decisions in that milestone that are not self-evident from the code.
 
 ---
 

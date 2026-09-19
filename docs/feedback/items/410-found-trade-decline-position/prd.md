@@ -894,7 +894,7 @@ index** table at `:438`. Text to add, exactly:
 ```markdown
 ## D-169 — The Merged Canvas Action Row's Middle Cell Becomes a Bare ✕ During a Browse Session; D-157's Misread Is Resolved by Making the Control Mean What Users Already Read It As
 
-**Date:** 2026-08-30 (operator ruling, verbatim: *"It does mean pass / Keep the x button."*) · **Amends:** [D-157](DECISIONS.md) and `docs/feedback/items/402-more-offers-shop/canvas-results-spec.md` §4 · **Trigger:** feedback #410 · **Spec:** [docs/feedback/items/410-found-trade-decline-position/prd.md](prd.md)
+**Date:** 2026-08-30 (operator ruling, verbatim: *"It does mean pass / Keep the x button."*) · **Amends:** [D-157](DECISIONS.md) and `docs/feedback/items/402-more-offers-shop/canvas-results-spec.md` §4 · **Trigger:** feedback #410 · **Spec:** [docs/feedback/items/410-found-trade-decline-position/prd.md](../docs/feedback/items/410-found-trade-decline-position/prd.md)
 
 **Context:** [D-157](DECISIONS.md) (2026-08-23) replaced a bare ✕ in this exact cell with the word "Clear" after tester Segrave (build 128) read the glyph as the deck's pass control and silently wiped the canvas he had just built. The #402 canvas-results operator session then wrote the placement into the spec as a contract clause: *"A ✕ control on the browsed idea (placement: with the pager, never inside the action row's 50/30/20 cells — that row's proportions are D-157 and unchanged)."* Feedback #410 asks for precisely the placement that clause forbids and precisely the glyph D-157 removed. The operator was shown both artifacts and ruled for the report.
 

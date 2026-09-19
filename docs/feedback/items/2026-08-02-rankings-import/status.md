@@ -1,18 +1,3 @@
-# Status — 2026-08-02-rankings-import
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-02",
-  "summary": "Rankings import v1 (paste-first) — status",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-02 — `ranks.import` flag ON; `backend/rankings_import.py` `2e4ca17` — CHANGELOG 2026-08-02. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # Rankings import v1 (paste-first) — status
 
 **Implemented 2026-08-02** (branch `teardown-remediation`, isolated
