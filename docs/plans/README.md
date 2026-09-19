@@ -8,7 +8,7 @@ Start here for current work and unresolved status reviews. Use the [full catalog
 
 `needs-review` preserves an uncertain or conflicting legacy claim; it does not mean the feature is unbuilt.
 
-74 entries. Counts and rows come from the same status records.
+75 entries. Counts and rows come from the same status records.
 
 | Initiative / item | Status | Updated | Summary |
 |---|---|---|---|
@@ -82,6 +82,7 @@ Start here for current work and unresolved status reviews. Use the [full catalog
 | [trade-model-activation](trade-model-activation/status.md) | in-progress | — | Trade model collection rollout and enforcement gates |
 | [trade-presentation-v2](trade-presentation-v2/status.md) | needs-review | — | trade presentation v2 |
 | [trade-relevance-engine](trade-relevance-engine/status.md) | active | 2026-08-14 | trade relevance engine |
+| [trade-search-latency](trade-search-latency/status.md) | in-progress | 2026-09-19 | Production latency isolated; behavior-preserving CPU optimizations under verification |
 | [trade-significance](trade-significance/status.md) | built-dark | 2026-09-17 | Shared significance gate merged as PR #297; default off, activation unverified |
 | [trios-tier-calibration-plan-2026-07-08.md](trios-tier-calibration-plan-2026-07-08.md) | partly-shipped | 2026-07-10 | Trios → Tier Calibration — Plan (2026-07-08, rev. 2 after pressure test) |
 | [web-parity](web-parity/status.md) | built-unmerged | 2026-09-02 | web parity |
@@ -94,7 +95,7 @@ Start here for current work and unresolved status reviews. Use the [full catalog
 | active | 7 |
 | built-dark | 4 |
 | built-unmerged | 7 |
-| in-progress | 3 |
+| in-progress | 4 |
 | needs-review | 36 |
 | partly-shipped | 9 |
 | planned | 8 |

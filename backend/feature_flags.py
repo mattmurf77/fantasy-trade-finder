@@ -1184,6 +1184,10 @@ def _key_to_attr(key: str) -> str:
     return key.replace(".", "_").replace("-", "_")
 
 
+# Cache names, never flag values: reloads must remain visible to every read.
+_ATTR_TO_KEY = {_key_to_attr(key): key for key in reversed(DEFAULT_FLAGS)}
+
+
 # ---------------------------------------------------------------------------
 # Config loading
 # ---------------------------------------------------------------------------
@@ -1269,7 +1273,10 @@ def reload() -> dict[str, bool]:
 
 def is_enabled(key: str) -> bool:
     """Return True if `key` is enabled. Unknown keys return False."""
-    return bool(flags_dict().get(key, False))
+    current = _flags_cache
+    if current is None:
+        current = flags_dict()
+    return bool(current.get(key, False))
 
 
 # ---------------------------------------------------------------------------
@@ -1300,6 +1307,9 @@ class _FlagsProxy:
     agents stashing `FLAGS.whatever` at module-import time.
     """
     def __getattr__(self, name: str) -> bool:
+        key = _ATTR_TO_KEY.get(name)
+        if key is not None and key in DEFAULT_FLAGS:
+            return is_enabled(key)
         for key in DEFAULT_FLAGS:
             if _key_to_attr(key) == name:
                 return is_enabled(key)

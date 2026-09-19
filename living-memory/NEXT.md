@@ -2,7 +2,7 @@
 
 ## Priority Queue
 
-1. Verify organization publication on its exact PR/CI head; preserve current main and unrelated local work.
+1. Review/release [trade latency optimizations](../docs/plans/trade-search-latency/README.md) with exact-head CI; measure full-route/device latency against the three-second target. Preserve current main and unrelated local work.
 2. Record [feedback device checks](../docs/feedback/items/422-win-now-ffv3-unavailable/testflight-checklist.md) and [overhaul acceptance](../docs/plans/team-overhaul/QA.md); reconcile tester availability and the hero-color decision.
 3. Reconcile [significance calibration/release gates](../docs/plans/trade-significance/validation.md) before any activation; code presence does not establish a live mode.
 4. Follow [database capacity/retention evidence](../docs/plans/db-storage-reduction/release.md); verify fresh measurements before further storage work.

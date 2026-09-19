@@ -33,19 +33,31 @@ def compact_rows(rows):
     """
     counts = Counter()
     parsed = []
+    identities = {}
+    scope_prefixes = {}
 
     def identity(scope, value):
+        key = (scope, id(value))
+        if key in identities:
+            return identities[key]
         raw = dumps(value)
-        digest = hashlib.sha256((dumps(scope) + '\n' + raw).encode()).hexdigest()
-        return digest, raw
+        if scope not in scope_prefixes:
+            scope_prefixes[scope] = dumps(scope) + '\n'
+        digest = hashlib.sha256((scope_prefixes[scope] + raw).encode()).hexdigest()
+        identities[key] = (digest, len(raw))
+        return identities[key]
 
     def count(scope, value):
         if not isinstance(value, (dict, list)) or is_reference(value):
             return
-        digest, raw = identity(scope, value)
-        if len(raw) < MIN_SHARED_BYTES:
+        digest, size = identity(scope, value)
+        if size < MIN_SHARED_BYTES:
             return
         counts[digest] += 1
+        # A repeated parent is stored once. Walking its identical descendants
+        # again cannot save any additional copies of that parent's payload.
+        if counts[digest] > 1:
+            return
         for child in (value.values() if isinstance(value, dict) else value):
             count(scope, child)
 
@@ -65,11 +77,11 @@ def compact_rows(rows):
     def pack(scope, created_at, value, root=False):
         if is_reference(value) or not isinstance(value, (dict, list)):
             return value
-        digest, raw = identity(scope, value)
+        digest, size = identity(scope, value)
         shared = counts[digest] > 1
         if (root or shared) and digest in snapshots:
             return {REFERENCE_KEY: digest}
-        if len(raw) < MIN_SHARED_BYTES and not root:
+        if size < MIN_SHARED_BYTES and not root:
             return value
         packed = ({k: pack(scope, created_at, v) for k, v in value.items()}
                   if isinstance(value, dict)
