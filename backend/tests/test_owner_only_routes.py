@@ -323,6 +323,8 @@ def test_request_projection_matches_prior_json_and_is_detached(exclusive):
     before = copy.deepcopy(assignment)
     actual = server._owner_request_snapshot(assignment, card)
     assert actual == old_request_projection(assignment, card)
+    serialized = json.dumps(server._owner_request_snapshot(assignment, card, detach=False))
+    assert json.loads(serialized) == json.loads(json.dumps(actual))
     actual["input"]["players"]["a1"]["position"] = "CHANGED"
     actual["input"]["members"][0]["roster"].clear()
     actual["input"]["config"].clear()

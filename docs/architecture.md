@@ -418,6 +418,11 @@ no cross-account blob ownership. The four large debugging feature subtrees use
 content-addressed references, while runtime learning/receipt fields and frozen
 valuations remain inline. Explicit owner-scoped diagnostic reads reconstruct
 snapshots; ordinary outcome/taste reads do not load unrelated debug context.
+Compaction caches subtree identities within each page and traverses identical
+parents once. Hashes remain based on complete original JSON, so older and newer
+packed representations expand to the same evidence. Impression assembly can
+serialize a read-only projection of captured owner inputs directly; callers
+requesting a detached snapshot still receive a deep copy.
 The existing cleanup loop expires debug nodes only, with visible failure logs.
 See [data lifecycle](data-dictionary.md#deck-diagnostic-storage-2026-09-15).
 
@@ -439,3 +444,13 @@ markers alone cannot assert an exemption. Private evidence uses existing
 impression features and generation-run diagnostics, not client events. See
 [scope](plans/trade-significance/scope.md). Default off is not deployment or
 activation evidence.
+
+## Trade search hot-path preparation
+
+Feature-flag attribute names resolve through a precomputed key map; values still
+come from the live flag cache on every access, including after reload. Single
+flag reads do not copy the full registry. Owner searches prepare player positions,
+availability/age-adjusted lineup assets and personal tier lookups within the
+request only. Fresh searches and final evaluation build fresh contexts, preserving
+ranking/roster changes and the existing full candidate budgets and safety gates.
+See [latency investigation](plans/trade-search-latency/README.md).

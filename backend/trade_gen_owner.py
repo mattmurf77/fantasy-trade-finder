@@ -115,6 +115,8 @@ class _Search:
         from . import trade_service as ts
         self.ts = ts
         self.players, self.league, self.user_id = players, league, user_id
+        self._positions = {}
+        self._tiers = {}
         self.fmt = scoring_format
         self.config = {key: ts._c(key) for key in ts._DEFAULT_CFG}
         self.config.update(_LIMITS)
@@ -135,6 +137,14 @@ class _Search:
                     value = cval(pid)
                     if _finite(value) and value > 0:
                         self.market[pid] = value
+        from .trade_roster import Asset, UNAVAILABLE
+        self._lineup_assets = {}
+        for pid, value in self.market.items():
+            player, pos = players[pid], self._position(pid)
+            status = str(getattr(player, "injury_status", "") or "").upper()
+            if pos in _POSITIONS and status not in UNAVAILABLE:
+                self._lineup_assets[pid] = Asset(pid, frozenset([pos]),
+                    value * ts.age_now_mult(pos, getattr(player, "age", None)))
         self.give_pins = _ids(pinned_give_players)
         self.recv_pins = _ids(pinned_receive_players)
         self.exact_give = bool(exact_give)
@@ -224,23 +234,19 @@ class _Search:
         return team
 
     def _position(self, pid):
-        player = self.players.get(pid)
-        return "PICK" if self.ts.is_pick_asset(player) else getattr(player, "position", None)
+        if pid not in self._positions:
+            player = self.players.get(pid)
+            self._positions[pid] = ("PICK" if self.ts.is_pick_asset(player)
+                                    else getattr(player, "position", None))
+        return self._positions[pid]
 
     def _lineup(self, roster, team):
         # A transparent market-based usable-depth proxy, NOT fantasy points.
         # Only the best N and ONE 15%-weighted backup at each position count;
         # arbitrary bench churn cannot earn a need benefit.
-        from .trade_roster import Asset, ELIGIBILITY, UNAVAILABLE, assign
-        usable = []
-        for pid in roster:
-            pos = self._position(pid)
-            if pos in _POSITIONS and pid in self.market and pid not in team["inactive"]:
-                player = self.players[pid]
-                status = str(getattr(player, "injury_status", "") or "").upper()
-                if status not in UNAVAILABLE:
-                    usable.append(Asset(pid, frozenset([pos]), self.market[pid]
-                        * self.ts.age_now_mult(pos, getattr(player, "age", None))))
+        from .trade_roster import ELIGIBILITY, assign
+        usable = [self._lineup_assets[pid] for pid in roster
+                  if pid in self._lineup_assets and pid not in team["inactive"]]
         assignment = {pid for pid in assign(team["slots"], usable) if pid}
         result = {pos: 0.0 for pos in _POSITIONS}
         bench = defaultdict(list)
@@ -306,9 +312,11 @@ class _Search:
         from .ranking_service import ORDERED_TIERS, RankingService
         board = self.teams[self.user_id]["values"]
         def tier(pid):
-            elo = self.teams[self.user_id]["tier_elos"][pid]
-            name = RankingService.tier_for_elo(elo, self._position(pid), self.fmt)
-            return ORDERED_TIERS.index(name) if name in ORDERED_TIERS else len(ORDERED_TIERS)
+            if pid not in self._tiers:
+                elo = self.teams[self.user_id]["tier_elos"][pid]
+                name = RankingService.tier_for_elo(elo, self._position(pid), self.fmt)
+                self._tiers[pid] = ORDERED_TIERS.index(name) if name in ORDERED_TIERS else len(ORDERED_TIERS)
+            return self._tiers[pid]
         g = min(give, key=lambda pid: (tier(pid), -board[pid], pid))
         r = min(receive, key=lambda pid: (tier(pid), -board[pid], pid))
         gt, rt = tier(g), tier(r)

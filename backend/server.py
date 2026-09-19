@@ -5208,7 +5208,7 @@ def _log_deck_signal_impressions(
             route = getattr(card, "owner_route_experiment", None)
             evidence = getattr(card, "owner_evaluation", None)
             if route is not None:
-                features["owner_experiment"] = _owner_request_snapshot(route, card)
+                features["owner_experiment"] = _owner_request_snapshot(route, card, detach=False)
                 features["served_market"] = {"give": getattr(card, "give_value", None),
                     "receive": getattr(card, "receive_value", None), "ratio": card.fairness_score}
                 row["model_arm"] = route["model_arm"]
@@ -5221,7 +5221,7 @@ def _log_deck_signal_impressions(
                 if not evidence.matches(card):
                     raise ValueError("owner evidence does not match final package")
                 request_evidence = getattr(card, "owner_request_evidence", None)
-                features["owner_request"] = (_owner_request_snapshot(request_evidence, card)
+                features["owner_request"] = (_owner_request_snapshot(request_evidence, card, detach=False)
                                              if request_evidence is not None else None)
                 if request_evidence is not None and request_evidence.get("exclusive"):
                     row["policy_version"] = request_evidence["version"]
@@ -14452,7 +14452,7 @@ def _owner_public_selection(evidence):
                if partial else {})}
 
 
-def _owner_request_snapshot(assignment, card):
+def _owner_request_snapshot(assignment, card, *, detach=True):
     """Keep the exact offer's values, not thousands of unrelated board rows.
 
     The request hash joins the once-per-run full frozen input ledger.
@@ -14470,7 +14470,10 @@ def _owner_request_snapshot(assignment, card):
         if pid in assets}}
     inputs["manager_preferences"] = {uid: prefs for uid, prefs in inputs.get("manager_preferences", {}).items()
                                       if uid in {inputs["user_id"], card.target_user_id}}
-    return copy.deepcopy({**assignment, "input": inputs})
+    snapshot = {**assignment, "input": inputs}
+    # Impression assembly serializes this frozen request immediately without
+    # mutating it. Other consumers retain the detached-copy contract.
+    return copy.deepcopy(snapshot) if detach else snapshot
 
 
 def _owner_selected_assignment(context, surface, *, serve, exclusive=False):

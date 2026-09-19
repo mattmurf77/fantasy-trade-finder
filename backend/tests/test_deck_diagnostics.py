@@ -193,3 +193,22 @@ def test_snapshot_insert_uses_bounded_multivalues():
     db._save_deck_diagnostic_snapshots(Connection(), snapshots)
     assert [len(s.params) for s in statements] == [500, 500, 75]
     assert all('ON CONFLICT (snapshot_id) DO NOTHING' in str(s) for s in statements)
+
+
+def test_repeated_parent_is_not_walked_again(monkeypatch):
+    from backend import deck_diagnostics as codec
+    shared = {'level': {'large': {'payload': 'x' * 2048}}}
+    original = rows(40)
+    for row in original:
+        row['features_json'] = json.dumps({'owner_generation': shared})
+    real_dumps, visits = codec.dumps, []
+    def counted(value):
+        if isinstance(value, dict) and 'payload' in value:
+            visits.append(value)
+        return real_dumps(value)
+    monkeypatch.setattr(codec, 'dumps', counted)
+    compact, snapshots = codec.compact_rows(original)
+    mapping = {s['snapshot_id']: s['payload_json'] for s in snapshots}
+    assert all(codec.expand_features(json.loads(row['features_json']), mapping)
+               == {'owner_generation': shared} for row in compact)
+    assert len(visits) <= 2  # independent of the forty identical parent occurrences
