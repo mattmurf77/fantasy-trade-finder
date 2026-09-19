@@ -1,18 +1,3 @@
-# Status — 228-post-draft-pick-hiding
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-01",
-  "summary": "#228 — Hide a season's picks once that rookie draft has occurred — status",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-01 — pick-integrity batch `2b8ecca` — CHANGELOG 2026-08-01. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #228 — Hide a season's picks once that rookie draft has occurred — status
 
 **Status: built (backend — Sleeper sync exclusion; MFL degrades,

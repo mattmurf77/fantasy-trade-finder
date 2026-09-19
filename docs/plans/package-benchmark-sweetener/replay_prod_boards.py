@@ -10,7 +10,7 @@ audit's probe scripts; the extraction recipe is in TEST_LEDGER 2026-08-21b.
 Set DATABASE_URL to one shared throwaway SQLite file for BOTH runs, so neither
 tree can read a different local experiments/model_config table.
 
-Recipe follows docs/reviews/2026/2026-08-19-armb-audit-claims-3-4.md §7:
+Recipe follows docs/reviews/2026-08-19-armb-audit-claims-3-4.md §7:
 pool+seed from player_value_history; each member's board rebuilt by the REAL
 RankingService.replay_from_db over their real swipe_decisions, with
 users.tier_overrides restored as _elo_overrides; confidence = comparison_counts(),

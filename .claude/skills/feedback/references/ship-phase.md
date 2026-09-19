@@ -21,13 +21,12 @@ Runs once per batch, after every group is QA-green.
   TestFlight checklist is attached to the ship summary. There is no sim gate and no
   `qa/sim-runs/last-sim-run.json` — `githooks/pre-push` is a deliberate no-op; CI is
   the gate. Code changed after the last QA round → back to Phase 3, not around it.
-- **Docs sync** per `docs/agent-workflow.md` §Canonical update targets: routes → `docs/api-reference.md`,
+- **Docs sync** per the CLAUDE.md table: routes → `docs/api-reference.md`,
   schema → `docs/data-dictionary.md`, config/flags → `docs/config-reference.md`,
   shared enums/colors → `docs/cross-client-invariants.md`, new terms →
   `docs/glossary.md`, notable decisions → `docs/adr/`. Convention shifts →
-  `docs/engineering-notes.md` or `docs/coding-guidelines.md`; architecture
-  shifts → `docs/architecture.md`. Static living-memory HLD/LLD pointers
-  are not update targets. Verify against each group's `scope.md` docs table —
+  `living-memory/LLD.md`; architecture shifts → `docs/architecture.md` +
+  `living-memory/HLD.md`. Verify against each group's `scope.md` docs table —
   every row must read "updated" or "n/a because"; fill gaps.
 - Version bump: `mobile/app.config.js` `version` (semver: features → minor,
   fix/polish-only batch → patch), matching the `mobile: bump version to X`

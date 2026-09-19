@@ -1,17 +1,6 @@
 # FB-419 — rejected interest resurfacing
 
-```project-status
-{
-  "status": "partly-shipped",
-  "updated": "2026-09-06",
-  "summary": "#419 rejected-interest fix: backend live; iOS 1.17.1 (149) uploaded, native validation pending",
-  "evidence": "release.md: PR #283 merged as 988fa2d6 after exact-source CI (5,645 backend passes / one skip); Render live at 2026-09-06T17:21:19.905609Z. iOS build/submission FINISHED; feedback DB record read back fixed at 17:41:48 UTC. Apple tester availability remains unverified and the physical TestFlight checklist is UNRUN. Database fixed means the fix is in the next update, not that testers installed it."
-}
-```
-
-## Release notes
-
-**Feedback DB status:** fixed · 2026-09-06 · PR #283 / `988fa2d6`
+**Status:** fixed · 2026-09-06 · PR #283 / `988fa2d6`
 
 G419: prevent an exact rejected offer from resurfacing as current counterparty interest. Independent planner approved `481b1809`; root reviewed and integrated backend `e02d074e` and mobile `396d92fc`/evidence `6838fe0f`. Initial focused root checks passed (401 backend, 28 mobile cases), followed by all 95 combined mobile guards, TypeScript and testID lint. PR #283 passed all four CI jobs on `d97459dc` (5,645 backend passed / one skip) and merged as `988fa2d6`; Render is live on that source. iOS 1.17.1 (149) build and submission are FINISHED. The selected DB record was read back `fixed` at 2026-09-06T17:41:48.077159+00:00. Apple processing/tester availability and the physical TestFlight checklist remain unverified/UNRUN. [Release evidence](release.md), [batch plan](plan.md), [backend evidence](build-evidence.md), [mobile evidence](mobile-build-evidence.md), [research-only all-45 audit](open-backlog-audit.md).
 

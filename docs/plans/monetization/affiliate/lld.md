@@ -22,8 +22,8 @@ Foundation primitives: [../00-platform-foundation.md](../00-platform-foundation.
 | `mobile/src/components/OffersLinkRow.tsx` (NEW) + `SettingsScreen.tsx` | iOS neutral site link-out to the hub (§6) |
 | `scripts/affiliate_reconcile.py` | NEW — monthly reconciliation + link check (§7) |
 | `backend/tests/test_affiliates.py` | NEW (§8) |
-| `archive/retired-tooling/mobile/maestro/07-affiliate-card-outbound.yaml` | NEW (§8) |
-| `archive/retired-tooling/mobile/maestro/08-offers-link-outbound.yaml` | NEW (§8) |
+| `mobile/.maestro/07-affiliate-card-outbound.yaml` | NEW (§8) |
+| `mobile/.maestro/08-offers-link-outbound.yaml` | NEW (§8) |
 
 ## 1. `config/affiliates.json` — schema + full example
 
@@ -399,13 +399,13 @@ and a temp registry file:
 7. Reconcile: import joins subid + idempotent re-import; report totals; orphan
    detection both directions.
 
-**Maestro (`archive/retired-tooling/mobile/maestro/07-affiliate-card-outbound.yaml`)**: with flag on
+**Maestro (`mobile/.maestro/07-affiliate-card-outbound.yaml`)**: with flag on
 and a stubbed placement — card visible with disclosure text; tap CTA →
 **app backgrounds / Safari opens (assert no in-app webview screen appears and
 app state is unchanged on return)**; with flag off — card absent. (Maestro
 can't inspect Safari; the assertion is outbound-only behavior, per PRD FR-2.)
 
-**Maestro (`archive/retired-tooling/mobile/maestro/08-offers-link-outbound.yaml`)**: with flag on and
+**Maestro (`mobile/.maestro/08-offers-link-outbound.yaml`)**: with flag on and
 `site_link.enabled` — Settings shows the "Offers & bonuses" row; assert the row
 text contains **no `$` and no partner display name** (neutrality invariant);
 tap → app backgrounds / Safari opens; with `show:false` stub — row absent.

@@ -1,18 +1,3 @@
-# Status — 257-edit-full-sheet
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-08",
-  "summary": "#257 — Consolidate the Trades controls section into the edit sheet (full sheet)",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-08 — `trades.edit_full_sheet` flag ON (2026-08-08 wave). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #257 — Consolidate the Trades controls section into the edit sheet (full sheet)
 
 **Status: BUILT — flag `trades.edit_full_sheet`, ships ON.** — 2026-08-08

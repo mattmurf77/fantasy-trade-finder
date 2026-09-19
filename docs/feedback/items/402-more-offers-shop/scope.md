@@ -169,7 +169,7 @@ named substitute:
 > `empty--cold`, `error`, `format-gate`, `generating`, `loading`, `populated`
 > (`screens/manifest.json:1652-1725`). **There is no single-pin capture and no
 > asset-ideas capture at all**, and the surface has changed since the freeze
-> (#240, #287, #317, #384). `archive/retired-tooling/mobile/scripts/screen-freshness.sh` cannot flag a
+> (#240, #287, #317, #384). `mobile/scripts/screen-freshness.sh` cannot flag a
 > capture that does not exist, and no re-capture can be requested because the
 > harness that made them is retired.
 >
@@ -198,7 +198,7 @@ assertion to write.
 `shop.empty`. None renamed, none removed.
 
 **Honest note on `testid-lint`:** `mobile/scripts/testid-lint.sh` cross-checks
-**flow → source** only, and `archive/retired-tooling/mobile/maestro/` is frozen under D-056. It will
+**flow → source** only, and `mobile/.maestro/` is frozen under D-056. It will
 pass these trivially. It stays in CI as a ship gate, but it is **not** evidence
 for #403 — `check-shop-deck.js` is.
 

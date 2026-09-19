@@ -281,13 +281,13 @@
           <code>league-summary</code>: <code>loading</code>, <code>error</code>, <code>populated</code>,
           <code>basis--personal</code>, <code>populated--single-format</code>. There is no
           <code>drill-in</code> / focused state, and the capture flow
-          (<code>archive/retired-tooling/mobile/maestro/capture/league-summary.yaml</code>) never taps a bar. The drill-in is
+          (<code>mobile/.maestro/capture/league-summary.yaml</code>) never taps a bar. The drill-in is
           not a WebView, so by <code>screens/CLAUDE.md</code> this is a
           <strong>coverage gap worth requesting, not a policy exclusion</strong>.</p>
         <p>Consequence for this page, stated plainly: the "Current" frame below is a
           <strong>token-exact reconstruction from source</strong> (every dimension cited to
           <code>file:line</code> above), <em>not</em> a capture. Before this ships, request:
-          <code>archive/retired-tooling/mobile/scripts/screen-capture.sh --screen league-summary --state drill-in</code>
+          <code>mobile/scripts/screen-capture.sh --screen league-summary --state drill-in</code>
           — which needs a new flow state added to the capture yaml first. The same capture unblocks
           the #302 page in this lab.</p>
       </div>

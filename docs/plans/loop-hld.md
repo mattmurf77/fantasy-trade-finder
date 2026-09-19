@@ -1,12 +1,3 @@
-```project-status
-{
-  "status": "needs-review",
-  "updated": "",
-  "summary": "High-Level Design — FTF Self-Training Loops (Plan 1)",
-  "evidence": "Disposition remains absent, unclear, or internally qualified; preserve existing claims until reconciled. Last documented index disposition: needs-review  — **Status unclear.** The five FTF self-training loops (2026-07-03). No flag or changelog entry names them; the spec source is outside the repo. Verify before treating any of it as built.. Prior row preserved at ../reviews/2026/2026-09-06-project-status-migration/plans-index.md."
-}
-```
-
 # High-Level Design — FTF Self-Training Loops (Plan 1)
 
 > **Purpose:** the architectural bird's-eye view of the five FTF self-training loops — what each loop is, what's in scope, how it composes with the existing backend, and the trade-offs taken. Read before any change that touches loop telemetry, rollups, experiments, or guardrails.

@@ -1,7 +1,7 @@
 # Feature Scope — Personal rankings with market-fairness guardrails (`personal_market_v1`)
 
 **Date:** 2026-09-04
-**Entry point:** direct ask — `docs/plans/trade-engine-balance/history/engineering-brief.md` (2026-09-04)
+**Entry point:** direct ask — `TRADE_ENGINE_BALANCE_ENGINEERING_BRIEF.md` (2026-09-04)
 **Builder:** Claude Code session `claude/fleeced-trade-engine-balance-c0c75d`
 **Operator sign-off on waivers:** not needed (no waivers — every section answered)
 

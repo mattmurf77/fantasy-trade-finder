@@ -2,7 +2,7 @@
 seed_ui_test_db.py — fixture seeder for the FTF mobile UI-testing harness.
 ===========================================================================
 
-Implements C1 of docs/plans/archive/2026/mobile-testing/lld.md (§2.5 CLI contract, §3.1
+Implements C1 of docs/plans/mobile-testing/lld.md (§2.5 CLI contract, §3.1
 profile schema) and prd.md R-06/R-07.
 
 One generator, four outputs: the same in-memory synthetic-league world
@@ -50,7 +50,7 @@ never raw SQL — so schema migrations carry the seeder (LLD §6).
 Platforms and drafts
 --------------------
 A profile league may declare `platform: "espn"` and/or a `draft` block
-(sign-off ruling C, docs/plans/archive/2026/mobile-testing/capture-matrix-signoff.md).
+(sign-off ruling C, docs/plans/mobile-testing/capture-matrix-signoff.md).
 
 * A `draft` block (Sleeper only) generates a whole synthetic rookie draft —
   the `drafts` list, the detail object, the pick list and both traded-pick
@@ -1850,7 +1850,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="seed_ui_test_db.py",
         description="Seed a UI-test fixture profile (DB + Sleeper cassettes + "
-                    "players cache + manifest). LLD: docs/plans/archive/2026/mobile-testing/lld.md §2.5",
+                    "players cache + manifest). LLD: docs/plans/mobile-testing/lld.md §2.5",
     )
     parser.add_argument("--profile", help="profile name (see --list) or a .json path")
     parser.add_argument("--out-dir", default=DEFAULT_OUT_DIR,

@@ -1,18 +1,3 @@
-# Status — 158-picks-ownership
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "",
-  "summary": "#158 — Draft picks in the calculator & suggestions — status",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped undated (PRD); cross-refs 2026-07 to -08 — `picks.owned_sync` flag. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #158 — Draft picks in the calculator & suggestions — status
 
 **Status:** shipped · date not recorded in this folder · `picks.owned_sync` flag

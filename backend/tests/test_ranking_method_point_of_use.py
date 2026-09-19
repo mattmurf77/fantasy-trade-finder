@@ -1,6 +1,6 @@
 """P0-1 — `ranking_method` written at the point of USE (mobile UX audit 2026-08-09).
 
-Spec: docs/plans/archive/2026/audit-p0-remediation/lld-p0-1.md §7 (T-1…T-24b, T-H1…T-H6).
+Spec: docs/plans/audit-p0-remediation/lld-p0-1.md §7 (T-1…T-24b, T-H1…T-H6).
 
 The finding: a user who completed a Quick Set board read 4/4 on the ring and
 `unlocked:false` from `/api/rankings/progress`, because `ranking_method` stayed

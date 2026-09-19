@@ -122,7 +122,7 @@ YEAR_DISCOUNT = 0.85   # 15 % off per year out
 
 # ── D-079 — per-round year decay (model_config `pick_year_decay_r{1..4}`) ──
 #
-# THE DEFECT THIS FIXES (docs/reviews/2026/2026-08-19-pick-year-valuation.md):
+# THE DEFECT THIS FIXES (docs/reviews/2026-08-19-pick-year-valuation.md):
 # one uniform 0.85/yr priced a 2029 1st at 61.4 % of a 2026 1st (2117.0 →
 # 1300.1). That is low enough that the deck served "give Davante Adams,
 # receive a 2029 1st" as near-parity (impression c67c2fd1e97cb6bf, prod
@@ -302,11 +302,11 @@ def pick_pool_value(round_: int, years_out: int,
 # `hld.md` KD-9 and `lld.md` §4.7 record engine adoption of DynastyProcess
 # slot values as **rejected** ("display-only"). Both predate the
 # **Operator decisions — 2026-08-06** block at the bottom of
-# `docs/plans/archive/2026/rookie-draft/plan.md`. Decision **O2 REVERSED them** (engine
+# `docs/plans/rookie-draft/plan.md`. Decision **O2 REVERSED them** (engine
 # adoption, behind a toggle); the 2026-08-21 ruling went further and made it
 # unconditional. Where those documents and the operator rulings disagree, the
 # rulings win. The same conflict is called out in `backend/data_loader.py`'s
-# M6 section header and in `docs/plans/archive/2026/rookie-draft/build-m6b.md`.
+# M6 section header and in `docs/plans/rookie-draft/build-m6b.md`.
 #
 # WHAT THIS DOES NOT TOUCH — deliberately, and this is load-bearing:
 #

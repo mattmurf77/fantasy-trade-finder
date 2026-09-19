@@ -1,18 +1,3 @@
-# Status — 124-format-aware-copy
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-07-17",
-  "summary": "#124 + #139 — Value-aware cross-format copy",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-17 — FB-124/139 cross-format tier copy — CHANGELOG 2026-07-17. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #124 + #139 — Value-aware cross-format copy
 
 **Status:** built + tested, 2026-07-17 (branch `trade-engine-v2`)

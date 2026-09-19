@@ -1,18 +1,3 @@
-# Status — 397-swipe-tour-placement
-
-```project-status
-{
-  "status": "planned",
-  "updated": "2026-08-24",
-  "summary": "FB-397 + FB-398 — swipe tour step placement (Group B canonical)",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: planned 2026-08-24 — **canonical** G-B of the 2026-08-24 wave (#397/#398) — swipe tour beat moves above the trade chip strip (#398 supersedes #397). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # FB-397 + FB-398 — swipe tour step placement (Group B canonical)
 - **Status:** built 2026-08-24 — awaiting QA/merge; operator TestFlight checklist pending (prd.md §6c)
 - **Covered:** #397 (superseded), #398 (operative: top of screen, above the trade chip section)

@@ -43,12 +43,12 @@
 
 ## 3. Test scope (mobile test platform)
 
-- [x] **Extended flow:** `archive/retired-tooling/mobile/maestro/flows/smoke/06-trades-deck.yaml` —
+- [x] **Extended flow:** `mobile/.maestro/flows/smoke/06-trades-deck.yaml` —
   **positional** delta (a plain `visible:` assert would pass identically
   before/after — law 2): assert both buttons at `visibilityPercentage: 100`
   with **no scroll step** (fails on the old below-deck layout), keep the
   like-tap, add a pass-tap on the next card (LLD §3.2)
-- [x] **Extended flow (capture):** `archive/retired-tooling/mobile/maestro/capture/onboarding-tour@fresh.yaml`
+- [x] **Extended flow (capture):** `mobile/.maestro/capture/onboarding-tour@fresh.yaml`
   — its three disposition-tap blocks anchor on `scrollUntilVisible … DOWN`
   derived from the old row position; re-derive all three on-sim (LLD §3.2)
 - [x] **WAIVED (frame E only) because:** `outlook.odds` is dark and has no

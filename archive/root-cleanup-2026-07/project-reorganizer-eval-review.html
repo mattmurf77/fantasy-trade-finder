@@ -1,0 +1,1325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eval Review</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600&family=Lora:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" integrity="sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT" crossorigin="anonymous"></script>
+  <style>
+    :root {
+      --bg: #faf9f5;
+      --surface: #ffffff;
+      --border: #e8e6dc;
+      --text: #141413;
+      --text-muted: #b0aea5;
+      --accent: #d97757;
+      --accent-hover: #c4613f;
+      --green: #788c5d;
+      --green-bg: #eef2e8;
+      --red: #c44;
+      --red-bg: #fceaea;
+      --header-bg: #141413;
+      --header-text: #faf9f5;
+      --radius: 6px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Lora', Georgia, serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ---- Header ---- */
+    .header {
+      background: var(--header-bg);
+      color: var(--header-text);
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .header h1 {
+      font-family: 'Poppins', sans-serif;
+      font-size: 1.25rem;
+      font-weight: 600;
+    }
+    .header .instructions {
+      font-size: 0.8rem;
+      opacity: 0.7;
+      margin-top: 0.25rem;
+    }
+    .header .progress {
+      font-size: 0.875rem;
+      opacity: 0.8;
+      text-align: right;
+    }
+
+    /* ---- Main content ---- */
+    .main {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1.5rem 2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    /* ---- Sections ---- */
+    .section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      flex-shrink: 0;
+    }
+    .section-header {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.75rem 1rem;
+      font-size: 0.75rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+    }
+    .section-body {
+      padding: 1rem;
+    }
+
+    /* ---- Config badge ---- */
+    .config-badge {
+      display: inline-block;
+      padding: 0.2rem 0.625rem;
+      border-radius: 9999px;
+      font-family: 'Poppins', sans-serif;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      margin-left: 0.75rem;
+      vertical-align: middle;
+    }
+    .config-badge.config-primary {
+      background: rgba(33, 150, 243, 0.12);
+      color: #1976d2;
+    }
+    .config-badge.config-baseline {
+      background: rgba(255, 193, 7, 0.15);
+      color: #f57f17;
+    }
+
+    /* ---- Prompt ---- */
+    .prompt-text {
+      white-space: pre-wrap;
+      font-size: 0.9375rem;
+      line-height: 1.6;
+    }
+
+    /* ---- Outputs ---- */
+    .output-file {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .output-file + .output-file {
+      margin-top: 1rem;
+    }
+    .output-file-header {
+      padding: 0.5rem 0.75rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .output-file-header .dl-btn {
+      font-size: 0.7rem;
+      color: var(--accent);
+      text-decoration: none;
+      cursor: pointer;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-weight: 500;
+      opacity: 0.8;
+    }
+    .output-file-header .dl-btn:hover {
+      opacity: 1;
+      text-decoration: underline;
+    }
+    .output-file-content {
+      padding: 0.75rem;
+      overflow-x: auto;
+    }
+    .output-file-content pre {
+      font-size: 0.8125rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+    }
+    .output-file-content img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 4px;
+    }
+    .output-file-content iframe {
+      width: 100%;
+      height: 600px;
+      border: none;
+    }
+    .output-file-content table {
+      border-collapse: collapse;
+      font-size: 0.8125rem;
+      width: 100%;
+    }
+    .output-file-content table td,
+    .output-file-content table th {
+      border: 1px solid var(--border);
+      padding: 0.375rem 0.5rem;
+      text-align: left;
+    }
+    .output-file-content table th {
+      background: var(--bg);
+      font-weight: 600;
+    }
+    .output-file-content .download-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.875rem;
+      cursor: pointer;
+    }
+    .output-file-content .download-link:hover {
+      background: var(--border);
+    }
+    .empty-state {
+      color: var(--text-muted);
+      font-style: italic;
+      padding: 2rem;
+      text-align: center;
+    }
+
+    /* ---- Feedback ---- */
+    .prev-feedback {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.625rem 0.75rem;
+      margin-top: 0.75rem;
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+    .prev-feedback-label {
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 0.25rem;
+      color: var(--text-muted);
+    }
+    .feedback-textarea {
+      width: 100%;
+      min-height: 100px;
+      padding: 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 0.9375rem;
+      line-height: 1.5;
+      resize: vertical;
+      color: var(--text);
+    }
+    .feedback-textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+    .feedback-status {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.5rem;
+      min-height: 1.1em;
+    }
+
+    /* ---- Grades (collapsible) ---- */
+    .grades-toggle {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      user-select: none;
+    }
+    .grades-toggle:hover {
+      color: var(--accent);
+    }
+    .grades-toggle .arrow {
+      margin-right: 0.5rem;
+      transition: transform 0.15s;
+      font-size: 0.75rem;
+    }
+    .grades-toggle .arrow.open {
+      transform: rotate(90deg);
+    }
+    .grades-content {
+      display: none;
+      margin-top: 0.75rem;
+    }
+    .grades-content.open {
+      display: block;
+    }
+    .grades-summary {
+      font-size: 0.875rem;
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .grade-badge {
+      display: inline-block;
+      padding: 0.125rem 0.5rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .grade-pass { background: var(--green-bg); color: var(--green); }
+    .grade-fail { background: var(--red-bg); color: var(--red); }
+    .assertion-list {
+      list-style: none;
+    }
+    .assertion-item {
+      padding: 0.625rem 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.8125rem;
+    }
+    .assertion-item:last-child { border-bottom: none; }
+    .assertion-status {
+      font-weight: 600;
+      margin-right: 0.5rem;
+    }
+    .assertion-status.pass { color: var(--green); }
+    .assertion-status.fail { color: var(--red); }
+    .assertion-evidence {
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      margin-top: 0.25rem;
+      padding-left: 1.5rem;
+    }
+
+    /* ---- View tabs ---- */
+    .view-tabs {
+      display: flex;
+      gap: 0;
+      padding: 0 2rem;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .view-tab {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.625rem 1.25rem;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      background: none;
+      color: var(--text-muted);
+      border-bottom: 2px solid transparent;
+      transition: all 0.15s;
+    }
+    .view-tab:hover { color: var(--text); }
+    .view-tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+    .view-panel { display: none; }
+    .view-panel.active { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+
+    /* ---- Benchmark view ---- */
+    .benchmark-view {
+      padding: 1.5rem 2rem;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .benchmark-table {
+      border-collapse: collapse;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 0.8125rem;
+      width: 100%;
+      margin-bottom: 1.5rem;
+    }
+    .benchmark-table th, .benchmark-table td {
+      padding: 0.625rem 0.75rem;
+      text-align: left;
+      border: 1px solid var(--border);
+    }
+    .benchmark-table th {
+      font-family: 'Poppins', sans-serif;
+      background: var(--header-bg);
+      color: var(--header-text);
+      font-weight: 500;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .benchmark-table tr:hover { background: var(--bg); }
+    .benchmark-table tr.benchmark-row-with { background: rgba(33, 150, 243, 0.06); }
+    .benchmark-table tr.benchmark-row-without { background: rgba(255, 193, 7, 0.06); }
+    .benchmark-table tr.benchmark-row-with:hover { background: rgba(33, 150, 243, 0.12); }
+    .benchmark-table tr.benchmark-row-without:hover { background: rgba(255, 193, 7, 0.12); }
+    .benchmark-table tr.benchmark-row-avg { font-weight: 600; border-top: 2px solid var(--border); }
+    .benchmark-table tr.benchmark-row-avg.benchmark-row-with { background: rgba(33, 150, 243, 0.12); }
+    .benchmark-table tr.benchmark-row-avg.benchmark-row-without { background: rgba(255, 193, 7, 0.12); }
+    .benchmark-delta-positive { color: var(--green); font-weight: 600; }
+    .benchmark-delta-negative { color: var(--red); font-weight: 600; }
+    .benchmark-notes {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem;
+    }
+    .benchmark-notes h3 {
+      font-family: 'Poppins', sans-serif;
+      font-size: 0.875rem;
+      margin-bottom: 0.75rem;
+    }
+    .benchmark-notes ul {
+      list-style: disc;
+      padding-left: 1.25rem;
+    }
+    .benchmark-notes li {
+      font-size: 0.8125rem;
+      line-height: 1.6;
+      margin-bottom: 0.375rem;
+    }
+    .benchmark-empty {
+      color: var(--text-muted);
+      font-style: italic;
+      text-align: center;
+      padding: 3rem;
+    }
+
+    /* ---- Navigation ---- */
+    .nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 2rem;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+    .nav-btn {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.5rem 1.25rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--text);
+      transition: all 0.15s;
+    }
+    .nav-btn:hover:not(:disabled) {
+      background: var(--bg);
+      border-color: var(--text-muted);
+    }
+    .nav-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .done-btn {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.5rem 1.5rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+    .done-btn:hover {
+      background: var(--bg);
+      border-color: var(--text-muted);
+    }
+    .done-btn.ready {
+      border: none;
+      background: var(--accent);
+      color: white;
+      font-weight: 600;
+    }
+    .done-btn.ready:hover {
+      background: var(--accent-hover);
+    }
+    /* ---- Done overlay ---- */
+    .done-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 100;
+      justify-content: center;
+      align-items: center;
+    }
+    .done-overlay.visible {
+      display: flex;
+    }
+    .done-card {
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 2rem 3rem;
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      max-width: 500px;
+    }
+    .done-card h2 {
+      font-size: 1.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .done-card p {
+      color: var(--text-muted);
+      margin-bottom: 1.5rem;
+      line-height: 1.5;
+    }
+    .done-card .btn-row {
+      display: flex;
+      gap: 0.5rem;
+      justify-content: center;
+    }
+    .done-card button {
+      padding: 0.5rem 1.25rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      cursor: pointer;
+      font-size: 0.875rem;
+    }
+    .done-card button:hover {
+      background: var(--bg);
+    }
+    /* ---- Toast ---- */
+    .toast {
+      position: fixed;
+      bottom: 5rem;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--header-bg);
+      color: var(--header-text);
+      padding: 0.625rem 1.25rem;
+      border-radius: var(--radius);
+      font-size: 0.875rem;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+      z-index: 200;
+    }
+    .toast.visible {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="app" style="height:100vh; display:flex; flex-direction:column;">
+    <div class="header">
+      <div>
+        <h1>Eval Review: <span id="skill-name"></span></h1>
+        <div class="instructions">Review each output and leave feedback below. Navigate with arrow keys or buttons. When done, copy feedback and paste into Claude Code.</div>
+      </div>
+      <div class="progress" id="progress"></div>
+    </div>
+
+    <!-- View tabs (only shown when benchmark data exists) -->
+    <div class="view-tabs" id="view-tabs" style="display:none;">
+      <button class="view-tab active" onclick="switchView('outputs')">Outputs</button>
+      <button class="view-tab" onclick="switchView('benchmark')">Benchmark</button>
+    </div>
+
+    <!-- Outputs panel (qualitative review) -->
+    <div class="view-panel active" id="panel-outputs">
+    <div class="main">
+      <!-- Prompt -->
+      <div class="section">
+        <div class="section-header">Prompt <span class="config-badge" id="config-badge" style="display:none;"></span></div>
+        <div class="section-body">
+          <div class="prompt-text" id="prompt-text"></div>
+        </div>
+      </div>
+
+      <!-- Outputs -->
+      <div class="section">
+        <div class="section-header">Output</div>
+        <div class="section-body" id="outputs-body">
+          <div class="empty-state">No output files found</div>
+        </div>
+      </div>
+
+      <!-- Previous Output (collapsible) -->
+      <div class="section" id="prev-outputs-section" style="display:none;">
+        <div class="section-header">
+          <div class="grades-toggle" onclick="togglePrevOutputs()">
+            <span class="arrow" id="prev-outputs-arrow">&#9654;</span>
+            Previous Output
+          </div>
+        </div>
+        <div class="grades-content" id="prev-outputs-content"></div>
+      </div>
+
+      <!-- Grades (collapsible) -->
+      <div class="section" id="grades-section" style="display:none;">
+        <div class="section-header">
+          <div class="grades-toggle" onclick="toggleGrades()">
+            <span class="arrow" id="grades-arrow">&#9654;</span>
+            Formal Grades
+          </div>
+        </div>
+        <div class="grades-content" id="grades-content"></div>
+      </div>
+
+      <!-- Feedback -->
+      <div class="section">
+        <div class="section-header">Your Feedback</div>
+        <div class="section-body">
+          <textarea
+            class="feedback-textarea"
+            id="feedback"
+            placeholder="What do you think of this output? Any issues, suggestions, or things that look great?"
+          ></textarea>
+          <div class="feedback-status" id="feedback-status"></div>
+          <div class="prev-feedback" id="prev-feedback" style="display:none;">
+            <div class="prev-feedback-label">Previous feedback</div>
+            <div id="prev-feedback-text"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="nav" id="outputs-nav">
+      <button class="nav-btn" id="prev-btn" onclick="navigate(-1)">&#8592; Previous</button>
+      <button class="done-btn" id="done-btn" onclick="showDoneDialog()">Submit All Reviews</button>
+      <button class="nav-btn" id="next-btn" onclick="navigate(1)">Next &#8594;</button>
+    </div>
+    </div><!-- end panel-outputs -->
+
+    <!-- Benchmark panel (quantitative stats) -->
+    <div class="view-panel" id="panel-benchmark">
+      <div class="benchmark-view" id="benchmark-content">
+        <div class="benchmark-empty">No benchmark data available. Run a benchmark to see quantitative results here.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Done overlay -->
+  <div class="done-overlay" id="done-overlay">
+    <div class="done-card">
+      <h2>Review Complete</h2>
+      <p>Your feedback has been saved. Go back to your Claude Code session and tell Claude you're done reviewing.</p>
+      <div class="btn-row">
+        <button onclick="closeDoneDialog()">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // ---- Embedded data (injected by generate_review.py) ----
+    const EMBEDDED_DATA = {"skill_name": "project-reorganizer", "runs": [{"id": "flat-flask-api-with_skill", "prompt": "Hey, I have this Flask task manager app and all the files are just sitting in the root folder \u2014 app.py, db.py, auth.py, seed script, the HTML, a notes doc, and the sqlite db. Can you reorganize it so backend code, frontend stuff, data files, and docs are separated properly?", "eval_id": 1, "outputs": [{"name": "reorganization_report.md", "type": "text", "content": "# Flask Task Manager - Reorganization Report\n\n## Executive Summary\n\nSuccessfully reorganized a flat Flask application with all source files in the root directory into a properly structured, conventional Python project layout. The reorganization followed a rigorous two-table methodology to ensure all file references and imports were updated correctly.\n\n## Project Overview\n\n**Original State:** 11 files scattered in the root directory\n**Reorganized State:** Files organized into 5 functional directories with updated imports\n**Status:** Complete and verified\n\n## Reorganization Methodology\n\nThis reorganization followed the **project-reorganizer skill** methodology, a careful six-phase process:\n\n1. **Phase 1: Scan and Understand** - Cataloged all files and cross-references\n2. **Phase 2: Propose Target Structure** - Designed conventional directory layout\n3. **Phase 3: Build Cross-Reference Tables** - Mapped every reference update needed\n4. **Phase 4: Execute File Moves** - Created new structure and moved files\n5. **Phase 5: Update Code References** - Updated all imports and path literals\n6. **Phase 6: Verify** - Syntax checks, import verification, path resolution testing\n\n## New Directory Structure\n\n```\nflat-flask-api/\n\u251c\u2500\u2500 backend/                   # Backend Python source code\n\u2502   \u251c\u2500\u2500 __init__.py           # Package initializer (new)\n\u2502   \u251c\u2500\u2500 app.py                # Flask app and routes (moved, updated)\n\u2502   \u251c\u2500\u2500 auth.py               # Authentication module (moved)\n\u2502   \u2514\u2500\u2500 db.py                 # Database layer (moved, updated)\n\u251c\u2500\u2500 frontend/                  # Frontend code\n\u2502   \u251c\u2500\u2500 index.html            # Main template (moved)\n\u2502   \u2514\u2500\u2500 static/               # Static assets (CSS, JS, images)\n\u251c\u2500\u2500 data/                      # Data and artifacts\n\u2502   \u2514\u2500\u2500 tasks.db              # SQLite database (moved)\n\u251c\u2500\u2500 scripts/                   # Utility and initialization scripts\n\u2502   \u251c\u2500\u2500 seed.py               # Database seeding script (moved, updated)\n\u2502   \u2514\u2500\u2500 seed_data.py          # Seed data helper (moved, updated)\n\u251c\u2500\u2500 docs/                      # Documentation\n\u2502   \u2514\u2500\u2500 notes.md              # Project notes (moved)\n\u251c\u2500\u2500 requirements.txt           # Python dependencies (retained at root)\n\u2514\u2500\u2500 run.py                     # Entry point script (new)\n```\n\n## Files Moved\n\n| Source \u2192 Destination | Category | Status |\n|---------------------|----------|--------|\n| app.py \u2192 backend/ | Backend | \u2713 Moved + Updated |\n| db.py \u2192 backend/ | Backend | \u2713 Moved + Updated |\n| auth.py \u2192 backend/ | Backend | \u2713 Moved |\n| seed.py \u2192 scripts/ | Scripts | \u2713 Moved + Updated |\n| seed_data.py \u2192 scripts/ | Scripts | \u2713 Moved + Updated |\n| index.html \u2192 frontend/ | Frontend | \u2713 Moved |\n| tasks.db \u2192 data/ | Data | \u2713 Moved |\n| notes.md \u2192 docs/ | Docs | \u2713 Moved |\n| public/* \u2192 frontend/static/ | Frontend | \u2713 Moved |\n\n## Code Updates Applied\n\n### 1. backend/app.py\n- Changed: `from db import get_db` \u2192 `from .db import get_db`\n- Changed: `from auth import login_required` \u2192 `from .auth import login_required`\n- Added: `from pathlib import Path` for path resolution\n- Updated: Flask initialization with absolute paths to static and template folders\n  ```python\n  # Before:\n  app = Flask(__name__, static_folder=\"static\", template_folder=\".\")\n  \n  # After:\n  PROJECT_ROOT = Path(__file__).parent.parent\n  app = Flask(\n      __name__,\n      static_folder=str(PROJECT_ROOT / \"frontend\" / \"static\"),\n      template_folder=str(PROJECT_ROOT / \"frontend\")\n  )\n  ```\n\n### 2. backend/db.py\n- Added: `from pathlib import Path`\n- Updated: Database path to resolve from data/ directory\n  ```python\n  # Before:\n  DATABASE = \"tasks.db\"\n  \n  # After:\n  PROJECT_ROOT = Path(__file__).parent.parent\n  DATABASE = str(PROJECT_ROOT / \"data\" / \"tasks.db\")\n  ```\n\n### 3. scripts/seed.py\n- Changed: `from db import ...` \u2192 `from backend.db import ...`\n- Changed: `from auth import ...` \u2192 `from backend.auth import ...`\n- Added: sys.path manipulation for script execution\n  ```python\n  sys.path.insert(0, str(Path(__file__).parent.parent))\n  ```\n\n### 4. scripts/seed_data.py\n- Changed: `from db import ...` \u2192 `from backend.db import ...`\n- Added: sys.path manipulation for script execution\n\n### 5. New Files Created\n\n**backend/__init__.py** - Package initializer (empty, enables imports)\n\n**run.py** - Root-level entry point\n```python\n#\\!/usr/bin/env python3\n\"\"\"Project entry point for running the Flask application.\"\"\"\nfrom backend.app import app\n\nif __name__ == \"__main__\":\n    app.run(debug=True)\n```\n\n## Cross-Reference Mapping\n\n### Table 1 - Original References (7 total)\n| Source | Reference | Target |\n|--------|-----------|--------|\n| app.py:2 | `from db import get_db` | db.py |\n| app.py:3 | `from auth import login_required` | auth.py |\n| app.py:5 | `static_folder=\"static\"` | static/ folder |\n| app.py:5 | `template_folder=\".\"` | Current folder |\n| db.py:6 | `DATABASE = \"tasks.db\"` | tasks.db |\n| seed.py:1 | `from db import ...` | db.py |\n| seed.py:2 | `from auth import ...` | auth.py |\n\n### Table 2 - Updated References (7 total)\nAll 7 original references were successfully updated, with no mismatches. Additionally:\n- 1 missed reference in seed_data.py was discovered and fixed during post-move sweep\n- 2 new files created (backend/__init__.py, run.py)\n\n## Verification Results\n\n### \u2713 Syntax Check\nAll Python files parse correctly without syntax errors:\n- backend/__init__.py \u2713\n- backend/app.py \u2713\n- backend/auth.py \u2713\n- backend/db.py \u2713\n- scripts/seed.py \u2713\n- scripts/seed_data.py \u2713\n- run.py \u2713\n\n### \u2713 Import Verification\nAll critical imports resolve correctly:\n- `from backend.db import get_db, init_db` \u2713\n- `from backend.auth import login_required, hash_password, check_password` \u2713\n- `from backend.app import app` \u2713\n\nNote: Flask module import skipped (not installed in verification environment, but import path is structurally correct)\n\n### \u2713 Path Verification\nAll file paths resolve correctly:\n- Database path: `data/tasks.db` \u2713 (exists)\n- Template folder: `frontend/` \u2713 (exists)\n- Static folder: `frontend/static/` \u2713 (exists)\n- Script imports: Successfully resolve backend modules \u2713\n\n### \u2713 Post-Move Sweep\nGrep sweep for stale references found and fixed:\n- seed_data.py: Had bare import `from db import ...` \u2192 Updated to `from backend.db import ...`\n- No other stale bare imports detected\n\n## Key Improvements\n\n1. **Clear Separation of Concerns**\n   - Backend logic isolated in `backend/` package\n   - Frontend assets organized in `frontend/`\n   - Configuration and dependencies at project root\n   - Documentation centralized in `docs/`\n\n2. **Conventional Python Structure**\n   - Follows standard Flask project layout conventions\n   - Enables proper package management and imports\n   - Supports future scaling (adding more modules to backend)\n\n3. **Robust Path Resolution**\n   - All file paths use `pathlib.Path` for cross-platform compatibility\n   - Paths resolve relative to file location, not current working directory\n   - Database and static/template folders work regardless of where script runs\n\n4. **Script Execution**\n   - Scripts in `scripts/` can import backend modules via sys.path manipulation\n   - Entry point at project root (run.py) maintains backward compatibility\n\n5. **No Breaking Changes**\n   - All functionality preserved\n   - Routes and database queries unchanged\n   - Template rendering still works\n\n## Recommendations for Next Steps\n\n1. **Add .gitignore** to exclude:\n   ```\n   __pycache__/\n   *.pyc\n   *.db\n   venv/\n   .env\n   ```\n\n2. **Update documentation** to reflect new structure in README\n\n3. **Create virtual environment setup instructions**\n\n4. **Consider adding:**\n   - Unit tests in a `tests/` directory\n   - Flask blueprints for larger route groups\n   - Configuration module for environment variables\n\n## Summary\n\nThe Flask task manager application has been successfully reorganized from a flat structure into a professional, conventional Python project layout. All 10+ file references and imports have been carefully updated and verified. The project is ready for development with a clear separation between backend logic, frontend templates, configuration, data, and documentation.\n\n**Total Files Reorganized:** 9\n**References Updated:** 8\n**New Files Created:** 2\n**Verification Status:** PASSED (All syntax, imports, and paths verified)\n"}, {"name": "requirements.txt", "type": "text", "content": "Flask==2.3.0\nWerkzeug==2.3.0\n"}, {"name": "run.py", "type": "text", "content": "#\\!/usr/bin/env python3\n\"\"\"Project entry point for running the Flask application.\"\"\"\nfrom backend.app import app\n\nif __name__ == \"__main__\":\n    app.run(debug=True)\n"}], "grading": {"expectations": [{"text": "Source files moved out of root into subdirectories", "passed": true, "evidence": "Top-level source files (non-entry): none (good)"}, {"text": "Backend/source code grouped in a dedicated directory", "passed": true, "evidence": "Found backend dirs: ['backend']"}, {"text": "Data files separated from source code", "passed": true, "evidence": "Data files: ['data/tasks.db']"}, {"text": "Documentation moved to docs/ directory", "passed": true, "evidence": "Docs: ['docs/notes.md']"}, {"text": "Utility scripts moved to scripts/ directory", "passed": true, "evidence": "Scripts: ['scripts/seed.py', 'scripts/seed_data.py']"}, {"text": "Import/require paths updated to reflect new structure", "passed": true, "evidence": "Found relative/package import in run.py"}, {"text": "Cross-reference tables produced in report", "passed": true, "evidence": "Tables found in reorganization_report.md"}, {"text": "All Python files have valid syntax", "passed": true, "evidence": "Checked 7 files"}, {"text": "Root entry point script exists", "passed": true, "evidence": "Entry points: ['run.py']"}]}}, {"id": "flat-flask-api-without_skill", "prompt": "Hey, I have this Flask task manager app and all the files are just sitting in the root folder \u2014 app.py, db.py, auth.py, seed script, the HTML, a notes doc, and the sqlite db. Can you reorganize it so backend code, frontend stuff, data files, and docs are separated properly?", "eval_id": 1, "outputs": [{"name": "README.md", "type": "text", "content": "# Task Manager Flask App\n\nReorganized project structure with separated concerns.\n\n## Directory Structure\n\n```\n.\n\u251c\u2500\u2500 backend/          # Flask application and business logic\n\u2502   \u251c\u2500\u2500 app.py        # Main Flask application\n\u2502   \u251c\u2500\u2500 db.py         # Database initialization and utilities\n\u2502   \u251c\u2500\u2500 auth.py       # Authentication decorators and utilities\n\u2502   \u2514\u2500\u2500 seed.py       # Database seeding script\n\u251c\u2500\u2500 frontend/         # User interface files\n\u2502   \u251c\u2500\u2500 templates/    # HTML templates\n\u2502   \u2502   \u2514\u2500\u2500 index.html\n\u2502   \u2514\u2500\u2500 static/       # CSS, JavaScript, and static assets\n\u2502       \u2514\u2500\u2500 app.js\n\u251c\u2500\u2500 data/             # Data files and database\n\u2502   \u2514\u2500\u2500 tasks.db      # SQLite database file\n\u251c\u2500\u2500 docs/             # Documentation and notes\n\u2502   \u2514\u2500\u2500 NOTES.md      # Project notes\n\u2514\u2500\u2500 README.md         # This file\n```\n\n## Running the Application\n\n1. Install dependencies: `pip install flask`\n2. Run the Flask app: `python backend/app.py`\n3. Seed the database: `python backend/seed.py`\n4. Visit `http://localhost:5000/`\n\n## Key Improvements\n\n- **Backend**: Centralized Python application logic\n- **Frontend**: Organized HTML templates and static assets\n- **Data**: Isolated database and configuration files\n- **Docs**: Centralized documentation\n"}, {"name": "reorganization_report.md", "type": "text", "content": "# Flask Task Manager - Project Reorganization Summary\n\n## Task Completed Successfully\n\nThe Flask task manager application has been reorganized from a flat directory structure into a professional, maintainable layout with clear separation of concerns.\n\n## Original Structure (Flat)\nAll files were mixed together in the root directory:\n- `app.py`, `db.py`, `auth.py` (backend logic)\n- `seed.py` (utilities)\n- `templates/`, `static/` (frontend files)\n- `tasks.db` (database)\n- `NOTES.md` (documentation)\n\n## New Organized Structure\n\n```\nflat-flask-api-reorganized/\n\u251c\u2500\u2500 backend/                          # Python Flask application logic\n\u2502   \u251c\u2500\u2500 app.py                       # Main Flask app and routes\n\u2502   \u251c\u2500\u2500 db.py                        # Database utilities\n\u2502   \u251c\u2500\u2500 auth.py                      # Authentication helpers\n\u2502   \u2514\u2500\u2500 seed.py                      # Database seeding script\n\u2502\n\u251c\u2500\u2500 frontend/                         # User interface files\n\u2502   \u251c\u2500\u2500 templates/                   # HTML templates\n\u2502   \u2502   \u2514\u2500\u2500 index.html\n\u2502   \u2514\u2500\u2500 static/                      # CSS, JavaScript, assets\n\u2502       \u2514\u2500\u2500 app.js\n\u2502\n\u251c\u2500\u2500 data/                             # Database and data files\n\u2502   \u2514\u2500\u2500 tasks.db                     # SQLite database\n\u2502\n\u251c\u2500\u2500 docs/                             # Documentation\n\u2502   \u2514\u2500\u2500 NOTES.md                     # Project notes\n\u2502\n\u251c\u2500\u2500 README.md                         # Project overview and setup guide\n\u2514\u2500\u2500 reorganization_report.md         # Detailed reorganization report\n```\n\n## Key Benefits\n\n1. **Maintainability**: Each component is isolated and easy to find\n2. **Scalability**: Clear structure supports project growth\n3. **Team Collaboration**: Frontend and backend can be developed independently\n4. **Professional Standards**: Follows Flask and Python best practices\n5. **Deployment Ready**: Clear separation between code, assets, and data\n6. **Documentation**: Comprehensive README and reports for new developers\n\n## Directory Purpose Guide\n\n| Directory | Purpose | Contains |\n|-----------|---------|----------|\n| `backend/` | All server-side code | Flask app, database logic, authentication |\n| `frontend/` | All UI code and assets | HTML templates and static files (CSS/JS) |\n| `data/` | Database and data files | SQLite database (can be gitignored) |\n| `docs/` | Project documentation | Notes, guides, and reference materials |\n\n## Recommendations for Next Steps\n\n1. **Version Control**: Add `.gitignore` to exclude `data/` and Python artifacts\n2. **Dependencies**: Create `requirements.txt` for Python packages\n3. **Configuration**: Add `backend/config.py` for environment settings\n4. **Testing**: Create `tests/` directory for unit tests\n5. **Imports**: Update import paths if running Flask from root directory\n\n## Files Included\n\n- `/backend/` - All Python application files\n- `/frontend/` - HTML and JavaScript UI files\n- `/data/` - SQLite database file\n- `/docs/` - Project documentation\n- `/README.md` - Comprehensive setup and overview guide\n- `/reorganization_report.md` - Detailed technical report of changes\n\nAll files are ready to use and follow industry best practices for Flask application structure.\n"}], "grading": {"expectations": [{"text": "Source files moved out of root into subdirectories", "passed": true, "evidence": "Top-level source files (non-entry): none (good)"}, {"text": "Backend/source code grouped in a dedicated directory", "passed": true, "evidence": "Found backend dirs: ['backend']"}, {"text": "Data files separated from source code", "passed": true, "evidence": "Data files: ['data/tasks.db']"}, {"text": "Documentation moved to docs/ directory", "passed": true, "evidence": "Docs: ['docs/NOTES.md']"}, {"text": "Utility scripts moved to scripts/ directory", "passed": false, "evidence": "Scripts: []"}, {"text": "Import/require paths updated to reflect new structure", "passed": false, "evidence": "No updated imports found"}, {"text": "All Python files have valid syntax", "passed": true, "evidence": "Checked 4 files"}, {"text": "Root entry point script exists", "passed": true, "evidence": "Entry points: ['frontend/static/app.js']"}]}}, {"id": "flat-express-api-with_skill", "prompt": "This Express.js inventory API has everything flat \u2014 server.js, database.js, middleware.js, utils.js, a seed script, static HTML, and some design docs. Please restructure it into a proper layout with source code separated from scripts, docs, and data files.", "eval_id": 2, "outputs": [{"name": "reorganization_report.md", "type": "text", "content": "# Express Inventory API - Project Reorganization Report\n\n## Summary\nSuccessfully reorganized a flat Express.js inventory API project from a single-directory structure into a clean, conventional multi-directory layout following industry best practices.\n\n## Project Structure\n\n### Before\n```\nflat-express-api/\n\u251c\u2500\u2500 server.js\n\u251c\u2500\u2500 database.js\n\u251c\u2500\u2500 middleware.js\n\u251c\u2500\u2500 utils.js\n\u251c\u2500\u2500 seed.js\n\u251c\u2500\u2500 static/\n\u2502   \u2514\u2500\u2500 index.html\n\u251c\u2500\u2500 package.json\n\u251c\u2500\u2500 data.sqlite\n\u2514\u2500\u2500 API_DESIGN.md\n```\n\n### After\n```\nflat-express-api/\n\u251c\u2500\u2500 src/\n\u2502   \u251c\u2500\u2500 server.js          (Express app entry point)\n\u2502   \u251c\u2500\u2500 database.js        (SQLite initialization and queries)\n\u2502   \u251c\u2500\u2500 middleware.js      (Authentication middleware)\n\u2502   \u2514\u2500\u2500 utils.js           (Logger utility)\n\u251c\u2500\u2500 public/\n\u2502   \u2514\u2500\u2500 index.html         (Client-facing UI)\n\u251c\u2500\u2500 scripts/\n\u2502   \u2514\u2500\u2500 seed.js            (Database seeding script)\n\u251c\u2500\u2500 data/\n\u2502   \u2514\u2500\u2500 data.sqlite        (SQLite database file)\n\u251c\u2500\u2500 docs/\n\u2502   \u2514\u2500\u2500 API_DESIGN.md      (API specification)\n\u251c\u2500\u2500 index.js               (Root entry point)\n\u2514\u2500\u2500 package.json           (Unchanged)\n```\n\n## Changes Made\n\n### Phase 1: Inventory & Analysis\nScanned all 9 files and identified:\n- 4 backend source files (server.js, database.js, middleware.js, utils.js)\n- 1 frontend source file (static/index.html)\n- 1 seed/script file (seed.js)\n- 1 config file (package.json)\n- 1 data artifact (data.sqlite)\n- 1 documentation file (API_DESIGN.md)\n\n### Phase 2: Target Structure\nProposed a conventional Express.js structure following ecosystem standards:\n- **src/**: Application code and logic\n- **public/**: Static assets (renamed from `static/`)\n- **scripts/**: Development utilities (seed, etc.)\n- **data/**: Data artifacts and databases\n- **docs/**: Documentation (non-README)\n- **Root**: Entry point (index.js) and package.json\n\n### Phase 3 & 4: Cross-Reference Mapping & Execution\n\n**Created 2 cross-reference tables mapping 11 existing references + 1 new file:**\n\n| Type | Count | Updated |\n|------|-------|---------|\n| require() statements | 6 | \u2713 All updated |\n| Path literals | 5 | \u2713 All updated |\n| package.json entries | 2 | \u2713 Updated |\n| New entry point | 1 | \u2713 Created |\n\n**Specific updates:**\n1. **src/server.js** - Updated static path from `./static` to `../public`\n2. **src/server.js** - Updated HTML file path from `./static/index.html` to `../public/index.html`\n3. **src/database.js** - Updated DB path from `./data.sqlite` to `../data/data.sqlite`\n4. **scripts/seed.js** - Updated require from `./database` to `../src/database`\n5. **package.json** - Updated main entry from `server.js` to `index.js`\n6. **package.json** - Updated start script from `node server.js` to `node index.js`\n7. **package.json** - Updated seed script from `node seed.js` to `node scripts/seed.js`\n8. **index.js** - Created new root entry point with `require('./src/server')`\n\n### Phase 5: Verification\n\n**All verification checks passed:**\n\n\u2713 **Syntax validation** - All JavaScript files are syntactically valid\n\u2713 **Import verification** - All 6 require() statements point to correct modules\n\u2713 **Path verification** - All path.join() constructs resolve correctly\n\u2713 **Configuration verification** - package.json properly updated for new structure\n\u2713 **File placement** - All 10 files in correct directories\n\u2713 **No references missed** - Comprehensive sweep found no stale references\n\n## Architectural Benefits\n\n1. **Separation of Concerns**: Source code isolated from config, data, and docs\n2. **Scalability**: Structure allows easy addition of routes, models, services\n3. **Industry Standard**: Follows Express.js and Node.js community conventions\n4. **Maintainability**: Clear folder organization makes finding code easier\n5. **Developer Experience**: New developers can quickly understand project layout\n6. **Build-Ready**: Structure compatible with common build tools and deployment pipelines\n\n## Entry Point Pattern\n\nThe project uses a common root entry point pattern:\n- **index.js** (root) \u2192 loads and starts the app\n- **src/server.js** (internal) \u2192 Express app definition\n- All src/ files use relative imports (src/ is a co-location package)\n\nThis pattern allows:\n- npm start from project root\n- src/ files to use relative imports safely\n- Easy swapping of alternative entry points for testing/CI\n\n## Files Not Modified\n\n- **public/index.html** - No changes needed (uses absolute API paths)\n- **src/middleware.js** - No path references (only module imports)\n- **src/utils.js** - No path references (only exports)\n- **docs/API_DESIGN.md** - No path references\n\n## Backward Compatibility\n\nThe reorganization is **NOT backward compatible** with the old flat structure:\n- Old commands `npm start` and `node seed.js` will no longer work\n- Must use `npm start` (which calls `node index.js`) going forward\n- Seed script now invoked as `npm run seed` or `node scripts/seed.js`\n\n## Summary Statistics\n\n- **Files moved**: 9\n- **Directories created**: 5\n- **Files created**: 1 (index.js)\n- **Cross-references updated**: 12\n- **Verification checks passed**: 5/5\n\n## Conclusion\n\nThe project reorganization is complete and verified. All cross-references have been updated, and the project now follows Express.js structural best practices. The code is ready for development, testing, and deployment.\n"}], "grading": {"expectations": [{"text": "Source files moved out of root into subdirectories", "passed": true, "evidence": "Top-level source files (non-entry): none (good)"}, {"text": "Backend/source code grouped in a dedicated directory", "passed": false, "evidence": "No backend directory found"}, {"text": "Data files separated from source code", "passed": false, "evidence": "Data files: []"}, {"text": "Documentation moved to docs/ directory", "passed": false, "evidence": "Docs: []"}, {"text": "Utility scripts moved to scripts/ directory", "passed": false, "evidence": "Scripts: []"}, {"text": "Import/require paths updated to reflect new structure", "passed": true, "evidence": "Found updated require path in flat-express-api/scripts/seed.js"}, {"text": "Cross-reference tables produced in report", "passed": true, "evidence": "Tables found in reorganization_report.md"}, {"text": "Root entry point script exists", "passed": true, "evidence": "Entry points: ['flat-express-api/index.js']"}]}}, {"id": "flat-express-api-without_skill", "prompt": "This Express.js inventory API has everything flat \u2014 server.js, database.js, middleware.js, utils.js, a seed script, static HTML, and some design docs. Please restructure it into a proper layout with source code separated from scripts, docs, and data files.", "eval_id": 2, "outputs": [{"name": "reorganization_report.md", "type": "text", "content": "# Project Reorganization Report: Express.js Inventory API\n\n## Overview\nSuccessfully reorganized a flat Express.js inventory API project into a proper modular structure with separated concerns for source code, scripts, documentation, and data files.\n\n## Original Structure (Flat)\n```\nflat-express-api/\n\u251c\u2500\u2500 server.js              (main application file)\n\u251c\u2500\u2500 database.js            (database logic)\n\u251c\u2500\u2500 middleware.js          (authentication middleware)\n\u251c\u2500\u2500 utils.js               (logger utilities)\n\u251c\u2500\u2500 seed.js                (database seeding script)\n\u251c\u2500\u2500 package.json\n\u251c\u2500\u2500 API_DESIGN.md          (API documentation)\n\u251c\u2500\u2500 data.sqlite            (SQLite database file)\n\u2514\u2500\u2500 static/\n    \u2514\u2500\u2500 index.html         (frontend HTML)\n```\n\n## New Structure (Organized)\n```\nflat-express-api/\n\u251c\u2500\u2500 src/                   (all source code)\n\u2502   \u251c\u2500\u2500 server.js          (application entry point - moved from root)\n\u2502   \u251c\u2500\u2500 models/\n\u2502   \u2502   \u2514\u2500\u2500 database.js    (database module - moved from root)\n\u2502   \u251c\u2500\u2500 middleware/\n\u2502   \u2502   \u2514\u2500\u2500 middleware.js  (auth middleware - moved from root)\n\u2502   \u251c\u2500\u2500 utils/\n\u2502   \u2502   \u2514\u2500\u2500 utils.js       (logger utilities - moved from root)\n\u2502   \u251c\u2500\u2500 config/            (config files - ready for future use)\n\u2502   \u2514\u2500\u2500 routes/            (route handlers - ready for future use)\n\u251c\u2500\u2500 scripts/               (utility scripts)\n\u2502   \u2514\u2500\u2500 seed.js            (database seeding - moved from root, paths updated)\n\u251c\u2500\u2500 docs/                  (documentation)\n\u2502   \u2514\u2500\u2500 API_DESIGN.md      (API specification - moved from root)\n\u251c\u2500\u2500 data/                  (database files)\n\u2502   \u2514\u2500\u2500 data.sqlite        (SQLite database - moved from root)\n\u251c\u2500\u2500 public/                (static assets)\n\u2502   \u2514\u2500\u2500 index.html         (frontend HTML - moved from static/)\n\u251c\u2500\u2500 package.json           (updated entry points)\n\u251c\u2500\u2500 .gitignore             (new - excludes node_modules, .db files, logs)\n\u2514\u2500\u2500 node_modules/          (npm dependencies)\n```\n\n## Changes Made\n\n### 1. Directory Structure Created\n- `src/` - Contains all application source code\n- `src/models/` - Data models and database logic\n- `src/middleware/` - Middleware functions\n- `src/utils/` - Utility functions and helpers\n- `src/config/` - Configuration (prepared for future use)\n- `src/routes/` - Route definitions (prepared for future use)\n- `scripts/` - Standalone scripts (seed, migrations, etc.)\n- `docs/` - Project documentation\n- `data/` - Data files (databases, backups, etc.)\n- `public/` - Static assets (renamed from `static/`)\n\n### 2. File Movements\n| Original Location | New Location | Notes |\n|------------------|-------------|-------|\n| `server.js` | `src/server.js` | Main application file |\n| `database.js` | `src/models/database.js` | Data access layer |\n| `middleware.js` | `src/middleware/middleware.js` | Authentication middleware |\n| `utils.js` | `src/utils/utils.js` | Utility functions |\n| `seed.js` | `scripts/seed.js` | Database seeding script |\n| `static/index.html` | `public/index.html` | Static frontend |\n| `API_DESIGN.md` | `docs/API_DESIGN.md` | API documentation |\n| `data.sqlite` | `data/data.sqlite` | SQLite database |\n\n### 3. Path Updates\nUpdated all require paths to reflect the new directory structure:\n\n**src/server.js**\n- `require('./database')` \u2192 `require('./models/database')`\n- `require('./middleware')` \u2192 `require('./middleware/middleware')`\n- `require('./utils')` \u2192 `require('./utils/utils')`\n- `path.join(__dirname, 'static')` \u2192 `path.join(__dirname, '../public')`\n\n**src/middleware/middleware.js**\n- `require('./utils')` \u2192 `require('../utils/utils')`\n\n**src/models/database.js**\n- `path.join(__dirname, 'data.sqlite')` \u2192 `path.join(__dirname, '../../data/data.sqlite')`\n\n**scripts/seed.js**\n- `require('./database')` \u2192 `require('../src/models/database')`\n\n### 4. package.json Updates\n**Before:**\n```json\n{\n  \"main\": \"server.js\",\n  \"scripts\": { \n    \"start\": \"node server.js\", \n    \"seed\": \"node seed.js\" \n  }\n}\n```\n\n**After:**\n```json\n{\n  \"main\": \"src/server.js\",\n  \"scripts\": { \n    \"start\": \"node src/server.js\", \n    \"seed\": \"node scripts/seed.js\" \n  }\n}\n```\n\n### 5. Additional Files Created\n- `.gitignore` - Excludes node_modules/, *.sqlite, *.db, .env, .DS_Store, *.log\n\n## Benefits of This Structure\n\n1. **Clear Separation of Concerns**\n   - Source code in `/src`\n   - Scripts in `/scripts`\n   - Documentation in `/docs`\n   - Data files in `/data`\n   - Static assets in `/public`\n\n2. **Scalability**\n   - Easy to add more models in `src/models/`\n   - Ready to expand routes in `src/routes/`\n   - Configuration layer prepared in `src/config/`\n\n3. **Maintainability**\n   - Logical grouping makes code easier to navigate\n   - New developers can understand structure quickly\n   - Following industry best practices\n\n4. **Professional Standards**\n   - Matches Node.js/Express project conventions\n   - Aligns with MVC-like architecture\n   - Easier to implement CI/CD pipelines\n\n## Verification\nAll require paths have been updated to ensure the project runs correctly from the new structure. The application will:\n- Load the server from `src/server.js`\n- Access the database from `data/data.sqlite`\n- Serve static files from `public/`\n- Execute seed script with correct imports\n\n## Next Steps (Optional)\n1. Create `src/routes/items.js` for API route definitions\n2. Create `src/config/database.js` for database configuration\n3. Create `docs/README.md` with setup and usage instructions\n4. Add environment configuration in `.env` file\n5. Implement route handlers in `src/routes/`\n"}], "grading": {"expectations": [{"text": "Source files moved out of root into subdirectories", "passed": true, "evidence": "Top-level source files (non-entry): none (good)"}, {"text": "Backend/source code grouped in a dedicated directory", "passed": false, "evidence": "No backend directory found"}, {"text": "Data files separated from source code", "passed": false, "evidence": "Data files: []"}, {"text": "Documentation moved to docs/ directory", "passed": false, "evidence": "Docs: []"}, {"text": "Utility scripts moved to scripts/ directory", "passed": false, "evidence": "Scripts: []"}, {"text": "Import/require paths updated to reflect new structure", "passed": true, "evidence": "Found updated require path in flat-express-api/scripts/seed.js"}, {"text": "Root entry point script exists", "passed": false, "evidence": "No entry point found"}]}}, {"id": "mixed-python-project-with_skill", "prompt": "I've got a Python project that's a mix of a FastAPI web service and some data science scripts (training, analysis) all in the same folder alongside a PRD, experiment log, and model artifacts. Can you organize it so the web app code is separate from the ML scripts and the reference docs?", "eval_id": 3, "outputs": [{"name": "reorganization_report.md", "type": "text", "content": "# Project Reorganization Report\n\n## Executive Summary\n\nSuccessfully reorganized a mixed Python project containing FastAPI web service code and data science scripts into a clean, conventional structure. The reorganized project separates backend code, ML scripts, static assets, documentation, and data artifacts into dedicated directories.\n\n**Status:** Complete and Verified\n\n**Original Location:** `mixed-python-project/`  \n**Reorganized Location:** `mixed-python-project-reorganized/`\n\n---\n\n## Phase 1: File Categorization\n\nThe original project contained 11 files in a flat structure, categorized as follows:\n\n| Category | Files | Count |\n|----------|-------|-------|\n| **Backend source** | api.py, model.py, data_processor.py | 3 |\n| **Scripts/tooling** | train_model.py, analyze_results.py | 2 |\n| **Frontend assets** | web/index.html | 1 |\n| **Configuration** | requirements.txt | 1 |\n| **Documentation** | PRD.md, EXPERIMENT_LOG.md | 2 |\n| **Data/artifacts** | results.csv, trained_model.pkl | 2 |\n\n---\n\n## Phase 2: Target Structure\n\nThe reorganized project follows Python project conventions with clear separation of concerns:\n\n```\nmixed-python-project-reorganized/\n\u251c\u2500\u2500 backend/                          # FastAPI application package\n\u2502   \u251c\u2500\u2500 __init__.py                  # Package initialization\n\u2502   \u251c\u2500\u2500 api.py                       # FastAPI app with routes\n\u2502   \u251c\u2500\u2500 model.py                     # Model loading and inference\n\u2502   \u2514\u2500\u2500 data_processor.py            # Input validation and cleaning\n\u251c\u2500\u2500 scripts/                          # Offline scripts and utilities\n\u2502   \u251c\u2500\u2500 train_model.py               # Model training script\n\u2502   \u2514\u2500\u2500 analyze_results.py           # Analysis script\n\u251c\u2500\u2500 web/                              # Static frontend assets\n\u2502   \u2514\u2500\u2500 index.html                   # HTML UI\n\u251c\u2500\u2500 data/                             # Data and model artifacts\n\u2502   \u251c\u2500\u2500 results.csv                  # Prediction results\n\u2502   \u2514\u2500\u2500 trained_model.pkl            # Serialized model (not included)\n\u251c\u2500\u2500 docs/                             # Documentation and reference\n\u2502   \u251c\u2500\u2500 PRD.md                       # Product requirements\n\u2502   \u2514\u2500\u2500 EXPERIMENT_LOG.md            # Experiment tracking\n\u251c\u2500\u2500 .gitignore                        # Git exclusions\n\u251c\u2500\u2500 requirements.txt                  # Python dependencies\n\u251c\u2500\u2500 run.py                            # Application entry point\n\u2514\u2500\u2500 reorganization_report.md          # This file\n```\n\n---\n\n## Phase 3: Cross-Reference Analysis\n\n### Table 1: Original References\n\nIdentified all locations where files are referenced:\n\n| # | Source File | Line | Reference | Target | Type |\n|---|---|---|---|---|---|\n| 1 | api.py | 5 | `from model import load_model, predict` | model.py | import |\n| 2 | api.py | 6 | `from data_processor import clean_input, validate_schema` | data_processor.py | import |\n| 3 | api.py | 9 | `app.mount(\"/static\", StaticFiles(directory=\"web\"), ...)` | web/ | path literal |\n| 4 | api.py | 11 | `os.path.join(os.path.dirname(__file__), \"trained_model.pkl\")` | trained_model.pkl | path literal |\n| 5 | train_model.py | 3 | `from data_processor import clean_input` | data_processor.py | import |\n| 6 | train_model.py | 9 | `open(\"trained_model.pkl\", \"wb\")` | trained_model.pkl | path literal |\n| 7 | analyze_results.py | 2 | `from data_processor import validate_schema` | data_processor.py | import |\n\n### Table 2: Updated References\n\nAfter reorganization, all references were updated:\n\n| # | File | Line | Original | Updated | Rationale |\n|---|---|---|---|---|---|\n| 1 | backend/api.py | 6 | `from model import ...` | `from .model import ...` | Relative import within package |\n| 2 | backend/api.py | 7 | `from data_processor import ...` | `from .data_processor import ...` | Relative import within package |\n| 3 | backend/api.py | 13 | `app.mount(..., directory=\"web\", ...)` | `app.mount(..., directory=str(STATIC_DIR), ...)` where `STATIC_DIR = PROJECT_ROOT / \"web\"` | Path resolution from project root |\n| 4 | backend/api.py | 14 | `os.path.join(os.path.dirname(__file__), \"trained_model.pkl\")` | `MODEL_PATH = PROJECT_ROOT / \"data\" / \"trained_model.pkl\"` | Pathlib-based resolution from project root |\n| 5 | scripts/train_model.py | 9 | `from data_processor import clean_input` | `from backend.data_processor import clean_input` (with sys.path setup) | Absolute import with parent path setup |\n| 6 | scripts/train_model.py | 19 | `open(\"trained_model.pkl\", \"wb\")` | `model_path = data_dir / \"trained_model.pkl\"` where `data_dir = Path(__file__).parent.parent / \"data\"` | Pathlib-based path from script location |\n| 7 | scripts/analyze_results.py | 8 | `from data_processor import validate_schema` | `from backend.data_processor import validate_schema` (with sys.path setup) | Absolute import with parent path setup |\n| 8 | scripts/analyze_results.py | 12 | N/A | `results_path = Path(__file__).parent.parent / \"data\" / \"results.csv\"` | New path reference for data file |\n\n**Cross-Comparison Result:** All 7 original references mapped to 8 updated references (1 new file path added). No mismatches detected.\n\n---\n\n## Phase 4: File Moves Executed\n\nAll files successfully moved to new locations:\n\n### Backend Package (`backend/`)\n- \u2713 `__init__.py` \u2014 Created (new)\n- \u2713 `api.py` \u2014 Moved from root\n- \u2713 `model.py` \u2014 Moved from root\n- \u2713 `data_processor.py` \u2014 Moved from root\n\n### Scripts (`scripts/`)\n- \u2713 `train_model.py` \u2014 Moved from root\n- \u2713 `analyze_results.py` \u2014 Moved from root\n\n### Web Assets (`web/`)\n- \u2713 `index.html` \u2014 Moved from web/\n\n### Documentation (`docs/`)\n- \u2713 `PRD.md` \u2014 Moved from root\n- \u2713 `EXPERIMENT_LOG.md` \u2014 Moved from root\n\n### Data (`data/`)\n- \u2713 `results.csv` \u2014 Moved from root\n- \u2713 `trained_model.pkl` \u2014 Moved from root (binary, handled separately)\n\n### Root Configuration\n- \u2713 `requirements.txt` \u2014 Copied (unchanged)\n- \u2713 `run.py` \u2014 Created (entry point)\n- \u2713 `.gitignore` \u2014 Created (new)\n- \u2713 `reorganization_report.md` \u2014 Created (this file)\n\n---\n\n## Phase 5: Reference Updates\n\nAll cross-references were updated to work with the new structure:\n\n### api.py \u2192 backend/api.py\n**Key changes:**\n- Converted imports to relative: `from model` \u2192 `from .model`\n- Added pathlib imports for platform-independent path handling\n- Computed `PROJECT_ROOT` dynamically using `Path(__file__).parent.parent`\n- Updated static file directory: `STATIC_DIR = PROJECT_ROOT / \"web\"`\n- Updated model path: `MODEL_PATH = PROJECT_ROOT / \"data\" / \"trained_model.pkl\"`\n\n**Result:** Api.py can now be run from anywhere; paths resolve correctly.\n\n### train_model.py \u2192 scripts/train_model.py\n**Key changes:**\n- Added `sys.path.insert(0, ...)` to allow importing from backend\n- Changed import to absolute: `from backend.data_processor import clean_input`\n- Computed data directory dynamically: `data_dir = Path(__file__).parent.parent / \"data\"`\n- Model save path now resolves to `data/trained_model.pkl`\n\n**Result:** Script can be run with `python scripts/train_model.py` from project root.\n\n### analyze_results.py \u2192 scripts/analyze_results.py\n**Key changes:**\n- Added `sys.path.insert(0, ...)` to allow importing from backend\n- Changed import to absolute: `from backend.data_processor import validate_schema`\n- Computed results path dynamically: `results_path = Path(__file__).parent.parent / \"data\" / \"results.csv\"`\n\n**Result:** Script can be run with `python scripts/analyze_results.py` from project root.\n\n### run.py (NEW)\n**Purpose:** Application entry point at project root\n\n**Implementation:**\n- Imports FastAPI app: `from backend.api import app`\n- Launches uvicorn: `uvicorn.run(app, host=\"0.0.0.0\", port=8000)`\n\n**Usage:** `python run.py` from project root.\n\n---\n\n## Phase 6: Verification\n\n### Syntax Verification\nAll Python files verified for syntax correctness:\n- \u2713 `backend/__init__.py` \u2014 Valid\n- \u2713 `backend/api.py` \u2014 Valid (35 lines, imports correct)\n- \u2713 `backend/model.py` \u2014 Valid (16 lines, no syntax errors)\n- \u2713 `backend/data_processor.py` \u2014 Valid (19 lines, no syntax errors)\n- \u2713 `scripts/train_model.py` \u2014 Valid (27 lines, path construction correct)\n- \u2713 `scripts/analyze_results.py` \u2014 Valid (19 lines, path construction correct)\n- \u2713 `run.py` \u2014 Valid (13 lines, entry point correct)\n\n### Import Verification\nAll imports verified:\n- \u2713 `backend/api.py`: Relative imports to sibling modules in same package\n- \u2713 `scripts/train_model.py`: Absolute import with parent path setup\n- \u2713 `scripts/analyze_results.py`: Absolute import with parent path setup\n- \u2713 `run.py`: Import from backend package at root level\n\n### Path Verification\nAll file path references verified:\n- \u2713 Static files: `web/index.html` accessible from `PROJECT_ROOT / \"web\"`\n- \u2713 Model artifact: `data/trained_model.pkl` resolved dynamically in api.py\n- \u2713 Results data: `data/results.csv` resolved dynamically in analyze_results.py\n- \u2713 Config: `requirements.txt` at project root\n\n### Structure Verification\nDirectory tree matches proposed structure:\n```\n\u2713 backend/ \u2014 Application code\n\u2713 scripts/ \u2014 Utility scripts\n\u2713 web/ \u2014 Frontend assets\n\u2713 data/ \u2014 Artifacts and data\n\u2713 docs/ \u2014 Documentation\n\u2713 Root-level files \u2014 Config and entry points\n```\n\n---\n\n## Key Improvements\n\n### 1. **Clear Separation of Concerns**\n- Web service code (`backend/`) isolated from training/analysis scripts (`scripts/`)\n- Static assets (`web/`) and data (`data/`) clearly organized\n- Documentation (`docs/`) separate from code\n\n### 2. **Proper Python Package Structure**\n- Backend is now a proper package with `__init__.py`\n- Imports use relative paths within the package\n- Entry point at project root avoids import issues\n\n### 3. **Platform-Independent Path Handling**\n- Uses `pathlib.Path` instead of `os.path.join()`\n- Paths work correctly on Windows, macOS, and Linux\n- Dynamic path resolution works from any working directory\n\n### 4. **Maintainability**\n- Scripts have clear sys.path setup for importing shared modules\n- All references are unambiguous (no magic relative paths)\n- `.gitignore` prevents accidental commits of artifacts\n- Entry point (`run.py`) makes deployment easier\n\n### 5. **Scalability**\n- Structure supports adding more scripts without breaking imports\n- Backend package can be extended with subdirectories (e.g., `backend/routes/`, `backend/services/`)\n- Data directory provides space for train/test/validation splits\n\n---\n\n## Running the Reorganized Project\n\n### Start the API Server\n```bash\n# From project root\npython run.py\n\n# Or directly with uvicorn\nuvicorn backend.api:app --reload --host 0.0.0.0 --port 8000\n```\n\n### Train a New Model\n```bash\npython scripts/train_model.py\n```\n\n### Analyze Results\n```bash\npython scripts/analyze_results.py\n```\n\n### Install Dependencies\n```bash\npip install -r requirements.txt\n```\n\n---\n\n## Rollback Information\n\nIf reverting to the original structure is needed, refer to the original files:\n- Original project: `mixed-python-project/`\n- Reorganized project: `mixed-python-project-reorganized/`\n\nAll original files remain unchanged in the source directory.\n\n---\n\n## Summary\n\nThe project has been successfully reorganized following the two-table methodology outlined in the project-reorganizer skill. All cross-references have been updated, verified for syntax correctness, and tested for import resolution. The new structure is maintainable, scalable, and follows Python best practices.\n\n**Files Modified:** 7  \n**Files Created:** 5 (including .gitignore and entry point)  \n**Total Files in Reorganized Project:** 16  \n**Status:** \u2713 Ready for use\n"}, {"name": "requirements.txt", "type": "text", "content": "fastapi>=0.100.0\nuvicorn>=0.23.0\nscikit-learn>=1.3.0\n"}, {"name": "run.py", "type": "text", "content": "#!/usr/bin/env python3\n\"\"\"Entry point for the FastAPI prediction service.\n\nRun with: python run.py\nOr with uvicorn directly: uvicorn backend.api:app --reload\n\"\"\"\nimport uvicorn\nfrom backend.api import app\n\nif __name__ == \"__main__\":\n    # Start FastAPI server\n    uvicorn.run(app, host=\"0.0.0.0\", port=8000)\n"}], "grading": {"expectations": [{"text": "Source files moved out of root into subdirectories", "passed": true, "evidence": "Top-level source files (non-entry): none (good)"}, {"text": "Backend/source code grouped in a dedicated directory", "passed": true, "evidence": "Found backend dirs: ['backend']"}, {"text": "Data files separated from source code", "passed": true, "evidence": "Data files: ['data/.gitkeep', 'data/results.csv']"}, {"text": "Documentation moved to docs/ directory", "passed": true, "evidence": "Docs: ['docs/PRD.md', 'docs/EXPERIMENT_LOG.md']"}, {"text": "Utility scripts moved to scripts/ directory", "passed": true, "evidence": "Scripts: ['scripts/analyze_results.py', 'scripts/train_model.py']"}, {"text": "Import/require paths updated to reflect new structure", "passed": true, "evidence": "Found relative/package import in run.py"}, {"text": "Cross-reference tables produced in report", "passed": true, "evidence": "Tables found in reorganization_report.md"}, {"text": "All Python files have valid syntax", "passed": true, "evidence": "Checked 7 files"}, {"text": "Root entry point script exists", "passed": true, "evidence": "Entry points: ['run.py']"}]}}, {"id": "mixed-python-project-without_skill", "prompt": "I've got a Python project that's a mix of a FastAPI web service and some data science scripts (training, analysis) all in the same folder alongside a PRD, experiment log, and model artifacts. Can you organize it so the web app code is separate from the ML scripts and the reference docs?", "eval_id": 3, "outputs": [{"name": "TRANSFORMATION_SUMMARY.txt", "type": "text", "content": "PROJECT REORGANIZATION - SUMMARY\n================================\n\nORIGINAL PROJECT (FLAT STRUCTURE)\n---------------------------------\nmixed-python-project/\n\u251c\u2500\u2500 api.py\n\u251c\u2500\u2500 model.py\n\u251c\u2500\u2500 data_processor.py\n\u251c\u2500\u2500 train_model.py\n\u251c\u2500\u2500 analyze_results.py\n\u251c\u2500\u2500 web/index.html\n\u251c\u2500\u2500 requirements.txt\n\u251c\u2500\u2500 PRD.md\n\u251c\u2500\u2500 EXPERIMENT_LOG.md\n\u251c\u2500\u2500 trained_model.pkl\n\u2514\u2500\u2500 results.csv\n\nREORGANIZED PROJECT (ORGANIZED STRUCTURE)\n------------------------------------------\nmixed-python-project/\n\u251c\u2500\u2500 README.md (project overview)\n\u251c\u2500\u2500 web_app/ (PRODUCTION API)\n\u2502   \u251c\u2500\u2500 api.py\n\u2502   \u251c\u2500\u2500 model.py\n\u2502   \u251c\u2500\u2500 data_processor.py\n\u2502   \u251c\u2500\u2500 index.html\n\u2502   \u251c\u2500\u2500 requirements.txt\n\u2502   \u2514\u2500\u2500 README.md\n\u251c\u2500\u2500 ml_pipeline/ (DEVELOPMENT/TRAINING)\n\u2502   \u251c\u2500\u2500 train_model.py\n\u2502   \u251c\u2500\u2500 analyze_results.py\n\u2502   \u2514\u2500\u2500 README.md\n\u251c\u2500\u2500 models/ (ARTIFACTS)\n\u2502   \u251c\u2500\u2500 trained_model.pkl\n\u2502   \u2514\u2500\u2500 README.md\n\u251c\u2500\u2500 data/ (OUTPUTS)\n\u2502   \u251c\u2500\u2500 results.csv\n\u2502   \u2514\u2500\u2500 README.md\n\u2514\u2500\u2500 docs/ (DOCUMENTATION)\n    \u251c\u2500\u2500 PRD.md\n    \u251c\u2500\u2500 EXPERIMENT_LOG.md\n    \u2514\u2500\u2500 README.md\n\nKEY IMPROVEMENTS\n================\n1. Clear separation: Web app code vs ML pipeline scripts vs docs\n2. Production-ready: web_app/ folder is self-contained and deployable\n3. Better documentation: Each folder has a README explaining its purpose\n4. Easier maintenance: Changes to training don't affect API code\n5. Scalable structure: Ready for tests, configs, and additional components\n6. Developer-friendly: New contributors can quickly understand the layout\n\nFILES ORGANIZED\n===============\nWeb App (Production):\n  - api.py \u2192 web_app/api.py\n  - model.py \u2192 web_app/model.py\n  - data_processor.py \u2192 web_app/data_processor.py (shared utility)\n  - index.html \u2192 web_app/index.html\n  - requirements.txt \u2192 web_app/requirements.txt\n\nML Pipeline (Development):\n  - train_model.py \u2192 ml_pipeline/train_model.py\n  - analyze_results.py \u2192 ml_pipeline/analyze_results.py\n\nReference Docs:\n  - PRD.md \u2192 docs/PRD.md\n  - EXPERIMENT_LOG.md \u2192 docs/EXPERIMENT_LOG.md\n\nArtifacts:\n  - trained_model.pkl \u2192 models/trained_model.pkl\n\nOutputs:\n  - results.csv \u2192 data/results.csv\n\nDOCUMENTATION CREATED\n======================\n1. ROOT README.md - Project overview, architecture, getting started guide\n2. web_app/README.md - How to run the API, endpoints, dependencies\n3. ml_pipeline/README.md - How to train models and run analysis\n4. models/README.md - Model artifact management guidelines\n5. data/README.md - Data file information\n6. docs/README.md - Documentation index\n\nQUICK START AFTER REORGANIZATION\n==================================\nTo run the API:\n  $ cd web_app\n  $ pip install -r requirements.txt\n  $ uvicorn api:app --reload\n\nTo train a model:\n  $ cd ml_pipeline\n  $ python train_model.py\n\nTo analyze results:\n  $ cd ml_pipeline\n  $ python analyze_results.py\n\nDEPLOYMENT\n==========\n1. Copy web_app/ folder to production\n2. Install dependencies: pip install -r web_app/requirements.txt\n3. Copy models/trained_model.pkl to the same location\n4. Run: uvicorn api:app\n\nOUTPUT LOCATION\n===============\n/Users/teresadickens/Documents/Claude/Projects/Fantasy Trade Finder/project-reorganizer-workspace/iteration-1/mixed-python-project/without_skill/outputs/mixed-python-project/\n\nFULL REPORT\n===========\nSee reorganization_report.md for detailed analysis and recommendations.\n"}, {"name": "reorganization_report.md", "type": "text", "content": "# Project Reorganization Report\n\n## Executive Summary\n\nSuccessfully reorganized a mixed Python project containing FastAPI web service code, data science/ML scripts, and reference documentation into a clean, separated structure with clear concerns and maintainability improvements.\n\n**Status**: Complete\n**Output Location**: `/Users/teresadickens/Documents/Claude/Projects/Fantasy Trade Finder/project-reorganizer-workspace/iteration-1/mixed-python-project/without_skill/outputs/mixed-python-project/`\n\n---\n\n## Original Structure\n\nThe original project was a flat structure with all files mixed together:\n\n```\nmixed-python-project/\n\u251c\u2500\u2500 api.py                   # FastAPI web service\n\u251c\u2500\u2500 model.py                 # Model loading/inference\n\u251c\u2500\u2500 data_processor.py        # Input validation (shared utility)\n\u251c\u2500\u2500 train_model.py           # ML training script\n\u251c\u2500\u2500 analyze_results.py       # ML analysis script\n\u251c\u2500\u2500 web/\n\u2502   \u2514\u2500\u2500 index.html          # Static HTML\n\u251c\u2500\u2500 requirements.txt         # Dependencies\n\u251c\u2500\u2500 PRD.md                  # Product requirements doc\n\u251c\u2500\u2500 EXPERIMENT_LOG.md       # Experiment notes\n\u251c\u2500\u2500 trained_model.pkl       # Model artifact\n\u2514\u2500\u2500 results.csv             # Analysis output\n```\n\n**Problems with original structure:**\n- Web app and ML pipeline code mixed together\n- No clear separation between production and development code\n- Documentation and artifacts scattered among code files\n- Difficult to understand project boundaries and responsibilities\n- Hard to version and deploy different components independently\n\n---\n\n## New Structure\n\nThe project is now organized into 5 logical folders, each with a clear purpose:\n\n```\nmixed-python-project/\n\u251c\u2500\u2500 README.md                              # Main project documentation\n\u2502\n\u251c\u2500\u2500 web_app/                              # FastAPI service (PRODUCTION)\n\u2502   \u251c\u2500\u2500 api.py                            # Main API with endpoints\n\u2502   \u251c\u2500\u2500 model.py                          # Model loading & inference\n\u2502   \u251c\u2500\u2500 data_processor.py                 # Input validation utility\n\u2502   \u251c\u2500\u2500 index.html                        # Static HTML frontend\n\u2502   \u251c\u2500\u2500 requirements.txt                  # Python dependencies\n\u2502   \u2514\u2500\u2500 README.md                         # Web app specific docs\n\u2502\n\u251c\u2500\u2500 ml_pipeline/                          # Training & analysis (DEVELOPMENT/OFFLINE)\n\u2502   \u251c\u2500\u2500 train_model.py                    # Training script\n\u2502   \u251c\u2500\u2500 analyze_results.py                # Analysis script\n\u2502   \u2514\u2500\u2500 README.md                         # ML pipeline docs\n\u2502\n\u251c\u2500\u2500 models/                               # Artifacts (DEPLOYMENT)\n\u2502   \u251c\u2500\u2500 trained_model.pkl                 # Serialized model\n\u2502   \u2514\u2500\u2500 README.md                         # Model usage guide\n\u2502\n\u251c\u2500\u2500 data/                                 # Outputs (EPHEMERAL)\n\u2502   \u251c\u2500\u2500 results.csv                       # Analysis results\n\u2502   \u2514\u2500\u2500 README.md                         # Data guide\n\u2502\n\u2514\u2500\u2500 docs/                                 # Reference (STATIC)\n    \u251c\u2500\u2500 PRD.md                            # Product requirements\n    \u251c\u2500\u2500 EXPERIMENT_LOG.md                 # Experiment history\n    \u2514\u2500\u2500 README.md                         # Documentation index\n```\n\n---\n\n## Reorganization Details\n\n### 1. Web App Folder (`web_app/`)\n**Purpose**: Production FastAPI service code\n\n**Files moved**:\n- `api.py` - Main FastAPI application\n- `model.py` - Model loading and inference logic\n- `data_processor.py` - Shared utility for input validation\n- `requirements.txt` - Dependencies for the web app\n- `web/index.html` \u2192 `index.html` - Static frontend\n\n**Rationale**:\n- Contains all code needed to run the production API\n- Clearly identifies what to deploy\n- Separated from ML pipeline development code\n\n### 2. ML Pipeline Folder (`ml_pipeline/`)\n**Purpose**: Data science scripts (training, analysis)\n\n**Files moved**:\n- `train_model.py` - Training script (runs offline)\n- `analyze_results.py` - Analysis script for model evaluation\n\n**Rationale**:\n- These run offline/during development, not in production\n- Separate from the API service\n- Can be run independently or scheduled as jobs\n\n### 3. Models Folder (`models/`)\n**Purpose**: Model artifacts and weights\n\n**Files moved**:\n- `trained_model.pkl` - Serialized trained model\n\n**Rationale**:\n- Clearly separates artifacts from code\n- Easier to version and manage model releases\n- API loads model from here at startup\n\n### 4. Data Folder (`data/`)\n**Purpose**: Data files and experiment outputs\n\n**Files moved**:\n- `results.csv` - Prediction results and metrics\n\n**Rationale**:\n- Separates ephemeral outputs from code\n- Easy to regenerate or version\n- Can be managed separately from code repos\n\n### 5. Docs Folder (`docs/`)\n**Purpose**: Reference documentation\n\n**Files moved**:\n- `PRD.md` - Product requirements document\n- `EXPERIMENT_LOG.md` - Experiment notes and history\n\n**Rationale**:\n- All documentation in one place\n- Clear separation from code\n- Easy to find and reference\n\n---\n\n## Documentation Added\n\nCreated README.md files for each folder and the project root:\n\n1. **Root README.md** - Project overview, structure explanation, getting started guide\n2. **web_app/README.md** - How to run the API, endpoints, notes\n3. **ml_pipeline/README.md** - How to train models and run analysis\n4. **models/README.md** - Model artifact management\n5. **data/README.md** - Data file information\n6. **docs/README.md** - Documentation index\n\nThese provide clear guidance for developers on:\n- What each folder contains\n- How to run components\n- What dependencies are needed\n- Key architectural decisions\n\n---\n\n## Key Improvements\n\n### 1. Clear Separation of Concerns\n- Production code (web app) separate from development code (ML pipeline)\n- Easy to understand what gets deployed vs. what's for development\n\n### 2. Better Discoverability\n- New developers can quickly understand project layout\n- Each folder has its own README explaining its purpose\n- Clear entry points (api.py for web, train_model.py for training)\n\n### 3. Easier Deployment\n- `web_app/` contains everything needed to deploy the API\n- Dependencies clearly listed in `web_app/requirements.txt`\n- Models versioned separately in `models/`\n\n### 4. Improved Maintenance\n- Changes to training don't affect API code\n- Model updates don't require touching API code\n- Documentation organized and easy to find\n\n### 5. Shared Code Handling\n- `data_processor.py` remains in `web_app/` (used by API)\n- ML pipeline scripts can import it since they're in same project\n- Consistent validation logic between training and serving\n\n### 6. Scalability Ready\n- Structure supports future additions:\n  - Tests can go in each folder\n  - CI/CD pipelines can work with individual components\n  - Microservices easy to extract if needed\n\n---\n\n## File Migration Summary\n\n| Original File | New Location | Purpose |\n|---|---|---|\n| api.py | web_app/api.py | FastAPI main app |\n| model.py | web_app/model.py | Model loading/inference |\n| data_processor.py | web_app/data_processor.py | Input validation utility |\n| requirements.txt | web_app/requirements.txt | Web app dependencies |\n| web/index.html | web_app/index.html | Static frontend |\n| train_model.py | ml_pipeline/train_model.py | Training script |\n| analyze_results.py | ml_pipeline/analyze_results.py | Analysis script |\n| trained_model.pkl | models/trained_model.pkl | Model artifact |\n| results.csv | data/results.csv | Analysis output |\n| PRD.md | docs/PRD.md | Product requirements |\n| EXPERIMENT_LOG.md | docs/EXPERIMENT_LOG.md | Experiment history |\n\n---\n\n## Usage After Reorganization\n\n### Running the Web API\n```bash\ncd web_app\npip install -r requirements.txt\nuvicorn api:app --reload\n```\n\n### Training a Model\n```bash\ncd ml_pipeline\npython train_model.py\n```\n\n### Running Analysis\n```bash\ncd ml_pipeline\npython analyze_results.py\n```\n\n### Deploying\n1. Copy `web_app/` folder to production environment\n2. Install dependencies: `pip install -r web_app/requirements.txt`\n3. Copy `models/trained_model.pkl` to the same location\n4. Run: `uvicorn api:app`\n\n---\n\n## Architecture Notes\n\n### Production Flow\n1. API server starts (`web_app/api.py`)\n2. Model is loaded from `models/trained_model.pkl` at startup\n3. Incoming requests are validated via `data_processor.py`\n4. Predictions are made via `model.py`\n5. Results returned to client\n\n### Development Flow\n1. Train models via `ml_pipeline/train_model.py`\n2. Models saved to `models/trained_model.pkl`\n3. Analyze predictions via `ml_pipeline/analyze_results.py`\n4. Results saved to `data/results.csv`\n5. Document findings in `docs/EXPERIMENT_LOG.md`\n\n### Code Reuse\n- `data_processor.py` is shared between web app and training\n- Both use the same validation logic (ensures consistency)\n- Located in `web_app/` since that's primary consumer\n\n---\n\n## Next Steps (Recommendations)\n\n1. **Add Tests**: Create `tests/` folder with separate test modules for each component\n2. **Add Config**: Create `config/` folder for environment-specific settings\n3. **Add Logging**: Implement structured logging across all modules\n4. **CI/CD**: Set up pipelines to test and deploy `web_app/` automatically\n5. **Version Control**: Use git tags for model versions (track in `models/`)\n6. **API Documentation**: Expand `web_app/README.md` with API schema details\n\n---\n\n## Verification Checklist\n\n- [x] All Python code files in appropriate folders\n- [x] Requirements.txt in web_app folder\n- [x] Model artifacts in models folder\n- [x] Documentation in docs folder\n- [x] Data files in data folder\n- [x] README files created for each folder\n- [x] Main project README created\n- [x] File structure is intuitive and maintainable\n- [x] Original functionality preserved\n- [x] Clear separation of web app and ML pipeline\n\n---\n\n## Conclusion\n\nThe mixed Python project has been successfully reorganized from a flat structure to a well-organized, modular structure with clear separation of concerns. This improves:\n- Onboarding time for new developers\n- Maintainability and extensibility\n- Deployment and version control\n- Code reusability and consistency\n\nThe reorganized project is ready for scaling and future enhancements.\n"}], "grading": {"expectations": [{"text": "Source files moved out of root into subdirectories", "passed": true, "evidence": "Top-level source files (non-entry): none (good)"}, {"text": "Backend/source code grouped in a dedicated directory", "passed": false, "evidence": "No backend directory found"}, {"text": "Data files separated from source code", "passed": false, "evidence": "Data files: []"}, {"text": "Documentation moved to docs/ directory", "passed": false, "evidence": "Docs: []"}, {"text": "Utility scripts moved to scripts/ directory", "passed": false, "evidence": "Scripts: []"}, {"text": "Import/require paths updated to reflect new structure", "passed": false, "evidence": "No updated imports found"}, {"text": "All Python files have valid syntax", "passed": true, "evidence": "Checked 5 files"}, {"text": "Root entry point script exists", "passed": false, "evidence": "No entry point found"}]}}], "previous_feedback": {}, "previous_outputs": {}, "benchmark": {"metadata": {"skill_name": "project-reorganizer", "skill_path": "project-reorganizer/SKILL.md", "executor_model": "claude-sonnet-4-6", "analyzer_model": "claude-sonnet-4-6", "timestamp": "2026-04-12T00:00:00Z", "evals_run": [1, 2, 3], "runs_per_configuration": 1}, "runs": [{"eval_id": 1, "configuration": "with_skill", "run_number": 1, "result": {"pass_rate": 1.0, "passed": 9, "failed": 0, "total": 9, "time_seconds": 426.0, "tokens": 49814, "tool_calls": 0, "errors": 0}, "expectations": [{"text": "Source files moved out of root into subdirectories", "passed": true, "evidence": "Top-level source files (non-entry): none (good)"}, {"text": "Backend/source code grouped in a dedicated directory", "passed": true, "evidence": "Found backend dirs: ['backend']"}, {"text": "Data files separated from source code", "passed": true, "evidence": "Data files: ['data/tasks.db']"}, {"text": "Documentation moved to docs/ directory", "passed": true, "evidence": "Docs: ['docs/notes.md']"}, {"text": "Utility scripts moved to scripts/ directory", "passed": true, "evidence": "Scripts: ['scripts/seed.py', 'scripts/seed_data.py']"}, {"text": "Import/require paths updated to reflect new structure", "passed": true, "evidence": "Found relative/package import in run.py"}, {"text": "Cross-reference tables produced in report", "passed": true, "evidence": "Tables found in reorganization_report.md"}, {"text": "All Python files have valid syntax", "passed": true, "evidence": "Checked 7 files"}, {"text": "Root entry point script exists", "passed": true, "evidence": "Entry points: ['run.py']"}], "notes": []}, {"eval_id": 1, "configuration": "without_skill", "run_number": 1, "result": {"pass_rate": 0.75, "passed": 6, "failed": 2, "total": 8, "time_seconds": 184.1, "tokens": 32672, "tool_calls": 0, "errors": 0}, "expectations": [{"text": "Source files moved out of root into subdirectories", "passed": true, "evidence": "Top-level source files (non-entry): none (good)"}, {"text": "Backend/source code grouped in a dedicated directory", "passed": true, "evidence": "Found backend dirs: ['backend']"}, {"text": "Data files separated from source code", "passed": true, "evidence": "Data files: ['data/tasks.db']"}, {"text": "Documentation moved to docs/ directory", "passed": true, "evidence": "Docs: ['docs/NOTES.md']"}, {"text": "Utility scripts moved to scripts/ directory", "passed": false, "evidence": "Scripts: []"}, {"text": "Import/require paths updated to reflect new structure", "passed": false, "evidence": "No updated imports found"}, {"text": "All Python files have valid syntax", "passed": true, "evidence": "Checked 4 files"}, {"text": "Root entry point script exists", "passed": true, "evidence": "Entry points: ['frontend/static/app.js']"}], "notes": []}, {"eval_id": 2, "configuration": "with_skill", "run_number": 1, "result": {"pass_rate": 0.5, "passed": 4, "failed": 4, "total": 8, "time_seconds": 219.4, "tokens": 48803, "tool_calls": 0, "errors": 0}, "expectations": [{"text": "Source files moved out of root into subdirectories", "passed": true, "evidence": "Top-level source files (non-entry): none (good)"}, {"text": "Backend/source code grouped in a dedicated directory", "passed": false, "evidence": "No backend directory found"}, {"text": "Data files separated from source code", "passed": false, "evidence": "Data files: []"}, {"text": "Documentation moved to docs/ directory", "passed": false, "evidence": "Docs: []"}, {"text": "Utility scripts moved to scripts/ directory", "passed": false, "evidence": "Scripts: []"}, {"text": "Import/require paths updated to reflect new structure", "passed": true, "evidence": "Found updated require path in flat-express-api/scripts/seed.js"}, {"text": "Cross-reference tables produced in report", "passed": true, "evidence": "Tables found in reorganization_report.md"}, {"text": "Root entry point script exists", "passed": true, "evidence": "Entry points: ['flat-express-api/index.js']"}], "notes": ["Express output was nested in a subdirectory, causing path-based assertions to fail. Actual reorganization quality may be better than score reflects."]}, {"eval_id": 2, "configuration": "without_skill", "run_number": 1, "result": {"pass_rate": 0.2857, "passed": 2, "failed": 5, "total": 7, "time_seconds": 249.1, "tokens": 44949, "tool_calls": 0, "errors": 0}, "expectations": [{"text": "Source files moved out of root into subdirectories", "passed": true, "evidence": "Top-level source files (non-entry): none (good)"}, {"text": "Backend/source code grouped in a dedicated directory", "passed": false, "evidence": "No backend directory found"}, {"text": "Data files separated from source code", "passed": false, "evidence": "Data files: []"}, {"text": "Documentation moved to docs/ directory", "passed": false, "evidence": "Docs: []"}, {"text": "Utility scripts moved to scripts/ directory", "passed": false, "evidence": "Scripts: []"}, {"text": "Import/require paths updated to reflect new structure", "passed": true, "evidence": "Found updated require path in flat-express-api/scripts/seed.js"}, {"text": "Root entry point script exists", "passed": false, "evidence": "No entry point found"}], "notes": []}, {"eval_id": 3, "configuration": "with_skill", "run_number": 1, "result": {"pass_rate": 1.0, "passed": 9, "failed": 0, "total": 9, "time_seconds": 211.5, "tokens": 44123, "tool_calls": 0, "errors": 0}, "expectations": [{"text": "Source files moved out of root into subdirectories", "passed": true, "evidence": "Top-level source files (non-entry): none (good)"}, {"text": "Backend/source code grouped in a dedicated directory", "passed": true, "evidence": "Found backend dirs: ['backend']"}, {"text": "Data files separated from source code", "passed": true, "evidence": "Data files: ['data/.gitkeep', 'data/results.csv']"}, {"text": "Documentation moved to docs/ directory", "passed": true, "evidence": "Docs: ['docs/PRD.md', 'docs/EXPERIMENT_LOG.md']"}, {"text": "Utility scripts moved to scripts/ directory", "passed": true, "evidence": "Scripts: ['scripts/analyze_results.py', 'scripts/train_model.py']"}, {"text": "Import/require paths updated to reflect new structure", "passed": true, "evidence": "Found relative/package import in run.py"}, {"text": "Cross-reference tables produced in report", "passed": true, "evidence": "Tables found in reorganization_report.md"}, {"text": "All Python files have valid syntax", "passed": true, "evidence": "Checked 7 files"}, {"text": "Root entry point script exists", "passed": true, "evidence": "Entry points: ['run.py']"}], "notes": []}, {"eval_id": 3, "configuration": "without_skill", "run_number": 1, "result": {"pass_rate": 0.25, "passed": 2, "failed": 6, "total": 8, "time_seconds": 241.2, "tokens": 43509, "tool_calls": 0, "errors": 0}, "expectations": [{"text": "Source files moved out of root into subdirectories", "passed": true, "evidence": "Top-level source files (non-entry): none (good)"}, {"text": "Backend/source code grouped in a dedicated directory", "passed": false, "evidence": "No backend directory found"}, {"text": "Data files separated from source code", "passed": false, "evidence": "Data files: []"}, {"text": "Documentation moved to docs/ directory", "passed": false, "evidence": "Docs: []"}, {"text": "Utility scripts moved to scripts/ directory", "passed": false, "evidence": "Scripts: []"}, {"text": "Import/require paths updated to reflect new structure", "passed": false, "evidence": "No updated imports found"}, {"text": "All Python files have valid syntax", "passed": true, "evidence": "Checked 5 files"}, {"text": "Root entry point script exists", "passed": false, "evidence": "No entry point found"}], "notes": []}], "run_summary": {"with_skill": {"pass_rate": {"mean": 0.8333, "stddev": 0.2887, "min": 0.5, "max": 1.0}, "time_seconds": {"mean": 285.6, "stddev": 119.3, "min": 211.5, "max": 426.0}, "tokens": {"mean": 47580, "stddev": 3051, "min": 44123, "max": 49814}}, "without_skill": {"pass_rate": {"mean": 0.4286, "stddev": 0.2654, "min": 0.25, "max": 0.75}, "time_seconds": {"mean": 224.8, "stddev": 35.5, "min": 184.1, "max": 249.1}, "tokens": {"mean": 40377, "stddev": 6703, "min": 32672, "max": 44949}}, "delta": {"pass_rate": "+0.40", "time_seconds": "+60.8", "tokens": "+7203"}}, "notes": ["Express.js eval (eval 2) with_skill scored lower than expected due to output nesting in a subdirectory \u2014 actual reorganization quality was likely better than the 4/8 score suggests.", "Python evals (Flask, FastAPI+ML) showed perfect scores with skill vs ~25-75% without.", "Skill adds ~60s average time and ~7K tokens overhead but dramatically improves correctness."]}};
+
+    // ---- State ----
+    let feedbackMap = {};  // run_id -> feedback text
+    let currentIndex = 0;
+    let visitedRuns = new Set();
+
+    // ---- Init ----
+    async function init() {
+      // Load saved feedback from server — but only if this isn't a fresh
+      // iteration (indicated by previous_feedback being present). When
+      // previous feedback exists, the feedback.json on disk is stale from
+      // the prior iteration and should not pre-fill the textareas.
+      const hasPrevious = Object.keys(EMBEDDED_DATA.previous_feedback || {}).length > 0
+        || Object.keys(EMBEDDED_DATA.previous_outputs || {}).length > 0;
+      if (!hasPrevious) {
+        try {
+          const resp = await fetch("/api/feedback");
+          const data = await resp.json();
+          if (data.reviews) {
+            for (const r of data.reviews) feedbackMap[r.run_id] = r.feedback;
+          }
+        } catch { /* first run, no feedback yet */ }
+      }
+
+      document.getElementById("skill-name").textContent = EMBEDDED_DATA.skill_name;
+      showRun(0);
+
+      // Wire up feedback auto-save
+      const textarea = document.getElementById("feedback");
+      let saveTimeout = null;
+      textarea.addEventListener("input", () => {
+        clearTimeout(saveTimeout);
+        document.getElementById("feedback-status").textContent = "";
+        saveTimeout = setTimeout(() => saveCurrentFeedback(), 800);
+      });
+    }
+
+    // ---- Navigation ----
+    function navigate(delta) {
+      const newIndex = currentIndex + delta;
+      if (newIndex >= 0 && newIndex < EMBEDDED_DATA.runs.length) {
+        saveCurrentFeedback();
+        showRun(newIndex);
+      }
+    }
+
+    function updateNavButtons() {
+      document.getElementById("prev-btn").disabled = currentIndex === 0;
+      document.getElementById("next-btn").disabled =
+        currentIndex === EMBEDDED_DATA.runs.length - 1;
+    }
+
+    // ---- Show a run ----
+    function showRun(index) {
+      currentIndex = index;
+      const run = EMBEDDED_DATA.runs[index];
+
+      // Progress
+      document.getElementById("progress").textContent =
+        `${index + 1} of ${EMBEDDED_DATA.runs.length}`;
+
+      // Prompt
+      document.getElementById("prompt-text").textContent = run.prompt;
+
+      // Config badge
+      const badge = document.getElementById("config-badge");
+      const configMatch = run.id.match(/(with_skill|without_skill|new_skill|old_skill)/);
+      if (configMatch) {
+        const config = configMatch[1];
+        const isBaseline = config === "without_skill" || config === "old_skill";
+        badge.textContent = config.replace(/_/g, " ");
+        badge.className = "config-badge " + (isBaseline ? "config-baseline" : "config-primary");
+        badge.style.display = "inline-block";
+      } else {
+        badge.style.display = "none";
+      }
+
+      // Outputs
+      renderOutputs(run);
+
+      // Previous outputs
+      renderPrevOutputs(run);
+
+      // Grades
+      renderGrades(run);
+
+      // Previous feedback
+      const prevFb = (EMBEDDED_DATA.previous_feedback || {})[run.id];
+      const prevEl = document.getElementById("prev-feedback");
+      if (prevFb) {
+        document.getElementById("prev-feedback-text").textContent = prevFb;
+        prevEl.style.display = "block";
+      } else {
+        prevEl.style.display = "none";
+      }
+
+      // Feedback
+      document.getElementById("feedback").value = feedbackMap[run.id] || "";
+      document.getElementById("feedback-status").textContent = "";
+
+      updateNavButtons();
+
+      // Track visited runs and promote done button when all visited
+      visitedRuns.add(index);
+      const doneBtn = document.getElementById("done-btn");
+      if (visitedRuns.size >= EMBEDDED_DATA.runs.length) {
+        doneBtn.classList.add("ready");
+      }
+
+      // Scroll main content to top
+      document.querySelector(".main").scrollTop = 0;
+    }
+
+    // ---- Render outputs ----
+    function renderOutputs(run) {
+      const container = document.getElementById("outputs-body");
+      container.innerHTML = "";
+
+      const outputs = run.outputs || [];
+      if (outputs.length === 0) {
+        container.innerHTML = '<div class="empty-state">No output files</div>';
+        return;
+      }
+
+      for (const file of outputs) {
+        const fileDiv = document.createElement("div");
+        fileDiv.className = "output-file";
+
+        // Always show file header with download link
+        const header = document.createElement("div");
+        header.className = "output-file-header";
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = file.name;
+        header.appendChild(nameSpan);
+        const dlBtn = document.createElement("a");
+        dlBtn.className = "dl-btn";
+        dlBtn.textContent = "Download";
+        dlBtn.download = file.name;
+        dlBtn.href = getDownloadUri(file);
+        header.appendChild(dlBtn);
+        fileDiv.appendChild(header);
+
+        const content = document.createElement("div");
+        content.className = "output-file-content";
+
+        if (file.type === "text") {
+          const pre = document.createElement("pre");
+          pre.textContent = file.content;
+          content.appendChild(pre);
+        } else if (file.type === "image") {
+          const img = document.createElement("img");
+          img.src = file.data_uri;
+          img.alt = file.name;
+          content.appendChild(img);
+        } else if (file.type === "pdf") {
+          const iframe = document.createElement("iframe");
+          iframe.src = file.data_uri;
+          content.appendChild(iframe);
+        } else if (file.type === "xlsx") {
+          renderXlsx(content, file.data_b64);
+        } else if (file.type === "binary") {
+          const a = document.createElement("a");
+          a.className = "download-link";
+          a.href = file.data_uri;
+          a.download = file.name;
+          a.textContent = "Download " + file.name;
+          content.appendChild(a);
+        } else if (file.type === "error") {
+          const pre = document.createElement("pre");
+          pre.textContent = file.content;
+          pre.style.color = "var(--red)";
+          content.appendChild(pre);
+        }
+
+        fileDiv.appendChild(content);
+        container.appendChild(fileDiv);
+      }
+    }
+
+    // ---- XLSX rendering via SheetJS ----
+    function renderXlsx(container, b64Data) {
+      try {
+        const raw = Uint8Array.from(atob(b64Data), c => c.charCodeAt(0));
+        const wb = XLSX.read(raw, { type: "array" });
+
+        for (let i = 0; i < wb.SheetNames.length; i++) {
+          const sheetName = wb.SheetNames[i];
+          const ws = wb.Sheets[sheetName];
+
+          if (wb.SheetNames.length > 1) {
+            const sheetLabel = document.createElement("div");
+            sheetLabel.style.cssText =
+              "font-weight:600; font-size:0.8rem; color:#b0aea5; margin-top:0.5rem; margin-bottom:0.25rem;";
+            sheetLabel.textContent = "Sheet: " + sheetName;
+            container.appendChild(sheetLabel);
+          }
+
+          const htmlStr = XLSX.utils.sheet_to_html(ws, { editable: false });
+          const wrapper = document.createElement("div");
+          wrapper.innerHTML = htmlStr;
+          container.appendChild(wrapper);
+        }
+      } catch (err) {
+        container.textContent = "Error rendering spreadsheet: " + err.message;
+      }
+    }
+
+    // ---- Grades ----
+    function renderGrades(run) {
+      const section = document.getElementById("grades-section");
+      const content = document.getElementById("grades-content");
+
+      if (!run.grading) {
+        section.style.display = "none";
+        return;
+      }
+
+      const grading = run.grading;
+      section.style.display = "block";
+      // Reset to collapsed
+      content.classList.remove("open");
+      document.getElementById("grades-arrow").classList.remove("open");
+
+      const summary = grading.summary || {};
+      const expectations = grading.expectations || [];
+
+      let html = '<div style="padding: 1rem;">';
+
+      // Summary line
+      const passRate = summary.pass_rate != null
+        ? Math.round(summary.pass_rate * 100) + "%"
+        : "?";
+      const badgeClass = summary.pass_rate >= 0.8 ? "grade-pass" : summary.pass_rate >= 0.5 ? "" : "grade-fail";
+      html += '<div class="grades-summary">';
+      html += '<span class="grade-badge ' + badgeClass + '">' + passRate + '</span>';
+      html += '<span>' + (summary.passed || 0) + ' passed, ' + (summary.failed || 0) + ' failed of ' + (summary.total || 0) + '</span>';
+      html += '</div>';
+
+      // Assertions list
+      html += '<ul class="assertion-list">';
+      for (const exp of expectations) {
+        const statusClass = exp.passed ? "pass" : "fail";
+        const statusIcon = exp.passed ? "\u2713" : "\u2717";
+        html += '<li class="assertion-item">';
+        html += '<span class="assertion-status ' + statusClass + '">' + statusIcon + '</span>';
+        html += '<span>' + escapeHtml(exp.text) + '</span>';
+        if (exp.evidence) {
+          html += '<div class="assertion-evidence">' + escapeHtml(exp.evidence) + '</div>';
+        }
+        html += '</li>';
+      }
+      html += '</ul>';
+
+      html += '</div>';
+      content.innerHTML = html;
+    }
+
+    function toggleGrades() {
+      const content = document.getElementById("grades-content");
+      const arrow = document.getElementById("grades-arrow");
+      content.classList.toggle("open");
+      arrow.classList.toggle("open");
+    }
+
+    // ---- Previous outputs (collapsible) ----
+    function renderPrevOutputs(run) {
+      const section = document.getElementById("prev-outputs-section");
+      const content = document.getElementById("prev-outputs-content");
+      const prevOutputs = (EMBEDDED_DATA.previous_outputs || {})[run.id];
+
+      if (!prevOutputs || prevOutputs.length === 0) {
+        section.style.display = "none";
+        return;
+      }
+
+      section.style.display = "block";
+      // Reset to collapsed
+      content.classList.remove("open");
+      document.getElementById("prev-outputs-arrow").classList.remove("open");
+
+      // Render the files into the content area
+      content.innerHTML = "";
+      const wrapper = document.createElement("div");
+      wrapper.style.padding = "1rem";
+
+      for (const file of prevOutputs) {
+        const fileDiv = document.createElement("div");
+        fileDiv.className = "output-file";
+
+        const header = document.createElement("div");
+        header.className = "output-file-header";
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = file.name;
+        header.appendChild(nameSpan);
+        const dlBtn = document.createElement("a");
+        dlBtn.className = "dl-btn";
+        dlBtn.textContent = "Download";
+        dlBtn.download = file.name;
+        dlBtn.href = getDownloadUri(file);
+        header.appendChild(dlBtn);
+        fileDiv.appendChild(header);
+
+        const fc = document.createElement("div");
+        fc.className = "output-file-content";
+
+        if (file.type === "text") {
+          const pre = document.createElement("pre");
+          pre.textContent = file.content;
+          fc.appendChild(pre);
+        } else if (file.type === "image") {
+          const img = document.createElement("img");
+          img.src = file.data_uri;
+          img.alt = file.name;
+          fc.appendChild(img);
+        } else if (file.type === "pdf") {
+          const iframe = document.createElement("iframe");
+          iframe.src = file.data_uri;
+          fc.appendChild(iframe);
+        } else if (file.type === "xlsx") {
+          renderXlsx(fc, file.data_b64);
+        } else if (file.type === "binary") {
+          const a = document.createElement("a");
+          a.className = "download-link";
+          a.href = file.data_uri;
+          a.download = file.name;
+          a.textContent = "Download " + file.name;
+          fc.appendChild(a);
+        }
+
+        fileDiv.appendChild(fc);
+        wrapper.appendChild(fileDiv);
+      }
+
+      content.appendChild(wrapper);
+    }
+
+    function togglePrevOutputs() {
+      const content = document.getElementById("prev-outputs-content");
+      const arrow = document.getElementById("prev-outputs-arrow");
+      content.classList.toggle("open");
+      arrow.classList.toggle("open");
+    }
+
+    // ---- Feedback (saved to server -> feedback.json) ----
+    function saveCurrentFeedback() {
+      const run = EMBEDDED_DATA.runs[currentIndex];
+      const text = document.getElementById("feedback").value;
+
+      if (text.trim() === "") {
+        delete feedbackMap[run.id];
+      } else {
+        feedbackMap[run.id] = text;
+      }
+
+      // Build reviews array from map
+      const reviews = [];
+      for (const [run_id, feedback] of Object.entries(feedbackMap)) {
+        if (feedback.trim()) {
+          reviews.push({ run_id, feedback, timestamp: new Date().toISOString() });
+        }
+      }
+
+      fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviews, status: "in_progress" }),
+      }).then(() => {
+        document.getElementById("feedback-status").textContent = "Saved";
+      }).catch(() => {
+        // Static mode or server unavailable — no-op on auto-save,
+        // feedback will be downloaded on final submit
+        document.getElementById("feedback-status").textContent = "Will download on submit";
+      });
+    }
+
+    // ---- Done ----
+    function showDoneDialog() {
+      // Save current textarea to feedbackMap (but don't POST yet)
+      const run = EMBEDDED_DATA.runs[currentIndex];
+      const text = document.getElementById("feedback").value;
+      if (text.trim() === "") {
+        delete feedbackMap[run.id];
+      } else {
+        feedbackMap[run.id] = text;
+      }
+
+      // POST once with status: complete — include ALL runs so the model
+      // can distinguish "no feedback" (looks good) from "not reviewed"
+      const reviews = [];
+      const ts = new Date().toISOString();
+      for (const r of EMBEDDED_DATA.runs) {
+        reviews.push({ run_id: r.id, feedback: feedbackMap[r.id] || "", timestamp: ts });
+      }
+      const payload = JSON.stringify({ reviews, status: "complete" }, null, 2);
+      fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+      }).then(() => {
+        document.getElementById("done-overlay").classList.add("visible");
+      }).catch(() => {
+        // Server not available (static mode) — download as file
+        const blob = new Blob([payload], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "feedback.json";
+        a.click();
+        URL.revokeObjectURL(url);
+        document.getElementById("done-overlay").classList.add("visible");
+      });
+    }
+
+    function closeDoneDialog() {
+      // Reset status back to in_progress
+      saveCurrentFeedback();
+      document.getElementById("done-overlay").classList.remove("visible");
+    }
+
+    // ---- Toast ----
+    function showToast(message) {
+      const toast = document.getElementById("toast");
+      toast.textContent = message;
+      toast.classList.add("visible");
+      setTimeout(() => toast.classList.remove("visible"), 2000);
+    }
+
+    // ---- Keyboard nav ----
+    document.addEventListener("keydown", (e) => {
+      // Don't capture when typing in textarea
+      if (e.target.tagName === "TEXTAREA") return;
+
+      if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+        e.preventDefault();
+        navigate(-1);
+      } else if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+        e.preventDefault();
+        navigate(1);
+      }
+    });
+
+    // ---- Util ----
+    function getDownloadUri(file) {
+      if (file.data_uri) return file.data_uri;
+      if (file.data_b64) return "data:application/octet-stream;base64," + file.data_b64;
+      if (file.type === "text") return "data:text/plain;charset=utf-8," + encodeURIComponent(file.content);
+      return "#";
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement("div");
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // ---- View switching ----
+    function switchView(view) {
+      document.querySelectorAll(".view-tab").forEach(t => t.classList.remove("active"));
+      document.querySelectorAll(".view-panel").forEach(p => p.classList.remove("active"));
+      document.querySelector(`[onclick="switchView('${view}')"]`).classList.add("active");
+      document.getElementById("panel-" + view).classList.add("active");
+    }
+
+    // ---- Benchmark rendering ----
+    function renderBenchmark() {
+      const data = EMBEDDED_DATA.benchmark;
+      if (!data) return;
+
+      // Show the tabs
+      document.getElementById("view-tabs").style.display = "flex";
+
+      const container = document.getElementById("benchmark-content");
+      const summary = data.run_summary || {};
+      const metadata = data.metadata || {};
+      const notes = data.notes || [];
+
+      let html = "";
+
+      // Header
+      html += "<h2 style='font-family: Poppins, sans-serif; margin-bottom: 0.5rem;'>Benchmark Results</h2>";
+      html += "<p style='color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1.25rem;'>";
+      if (metadata.skill_name) html += "<strong>" + escapeHtml(metadata.skill_name) + "</strong> &mdash; ";
+      if (metadata.timestamp) html += metadata.timestamp + " &mdash; ";
+      if (metadata.evals_run) html += "Evals: " + metadata.evals_run.join(", ") + " &mdash; ";
+      html += (metadata.runs_per_configuration || "?") + " runs per configuration";
+      html += "</p>";
+
+      // Summary table
+      html += '<table class="benchmark-table">';
+
+      function fmtStat(stat, pct) {
+        if (!stat) return "—";
+        const suffix = pct ? "%" : "";
+        const m = pct ? (stat.mean * 100).toFixed(0) : stat.mean.toFixed(1);
+        const s = pct ? (stat.stddev * 100).toFixed(0) : stat.stddev.toFixed(1);
+        return m + suffix + " ± " + s + suffix;
+      }
+
+      function deltaClass(val) {
+        if (!val) return "";
+        const n = parseFloat(val);
+        if (n > 0) return "benchmark-delta-positive";
+        if (n < 0) return "benchmark-delta-negative";
+        return "";
+      }
+
+      // Discover config names dynamically (everything except "delta")
+      const configs = Object.keys(summary).filter(k => k !== "delta");
+      const configA = configs[0] || "config_a";
+      const configB = configs[1] || "config_b";
+      const labelA = configA.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      const labelB = configB.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      const a = summary[configA] || {};
+      const b = summary[configB] || {};
+      const delta = summary.delta || {};
+
+      html += "<thead><tr><th>Metric</th><th>" + escapeHtml(labelA) + "</th><th>" + escapeHtml(labelB) + "</th><th>Delta</th></tr></thead>";
+      html += "<tbody>";
+
+      html += "<tr><td><strong>Pass Rate</strong></td>";
+      html += "<td>" + fmtStat(a.pass_rate, true) + "</td>";
+      html += "<td>" + fmtStat(b.pass_rate, true) + "</td>";
+      html += '<td class="' + deltaClass(delta.pass_rate) + '">' + (delta.pass_rate || "—") + "</td></tr>";
+
+      // Time (only show row if data exists)
+      if (a.time_seconds || b.time_seconds) {
+        html += "<tr><td><strong>Time (s)</strong></td>";
+        html += "<td>" + fmtStat(a.time_seconds, false) + "</td>";
+        html += "<td>" + fmtStat(b.time_seconds, false) + "</td>";
+        html += '<td class="' + deltaClass(delta.time_seconds) + '">' + (delta.time_seconds ? delta.time_seconds + "s" : "—") + "</td></tr>";
+      }
+
+      // Tokens (only show row if data exists)
+      if (a.tokens || b.tokens) {
+        html += "<tr><td><strong>Tokens</strong></td>";
+        html += "<td>" + fmtStat(a.tokens, false) + "</td>";
+        html += "<td>" + fmtStat(b.tokens, false) + "</td>";
+        html += '<td class="' + deltaClass(delta.tokens) + '">' + (delta.tokens || "—") + "</td></tr>";
+      }
+
+      html += "</tbody></table>";
+
+      // Per-eval breakdown (if runs data available)
+      const runs = data.runs || [];
+      if (runs.length > 0) {
+        const evalIds = [...new Set(runs.map(r => r.eval_id))].sort((a, b) => a - b);
+
+        html += "<h3 style='font-family: Poppins, sans-serif; margin-bottom: 0.75rem;'>Per-Eval Breakdown</h3>";
+
+        const hasTime = runs.some(r => r.result && r.result.time_seconds != null);
+        const hasErrors = runs.some(r => r.result && r.result.errors > 0);
+
+        for (const evalId of evalIds) {
+          const evalRuns = runs.filter(r => r.eval_id === evalId);
+          const evalName = evalRuns[0] && evalRuns[0].eval_name ? evalRuns[0].eval_name : "Eval " + evalId;
+
+          html += "<h4 style='font-family: Poppins, sans-serif; margin: 1rem 0 0.5rem; color: var(--text);'>" + escapeHtml(evalName) + "</h4>";
+          html += '<table class="benchmark-table">';
+          html += "<thead><tr><th>Config</th><th>Run</th><th>Pass Rate</th>";
+          if (hasTime) html += "<th>Time (s)</th>";
+          if (hasErrors) html += "<th>Crashes During Execution</th>";
+          html += "</tr></thead>";
+          html += "<tbody>";
+
+          // Group by config and render with average rows
+          const configGroups = [...new Set(evalRuns.map(r => r.configuration))];
+          for (let ci = 0; ci < configGroups.length; ci++) {
+            const config = configGroups[ci];
+            const configRuns = evalRuns.filter(r => r.configuration === config);
+            if (configRuns.length === 0) continue;
+
+            const rowClass = ci === 0 ? "benchmark-row-with" : "benchmark-row-without";
+            const configLabel = config.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+
+            for (const run of configRuns) {
+              const r = run.result || {};
+              const prClass = r.pass_rate >= 0.8 ? "benchmark-delta-positive" : r.pass_rate < 0.5 ? "benchmark-delta-negative" : "";
+              html += '<tr class="' + rowClass + '">';
+              html += "<td>" + configLabel + "</td>";
+              html += "<td>" + run.run_number + "</td>";
+              html += '<td class="' + prClass + '">' + ((r.pass_rate || 0) * 100).toFixed(0) + "% (" + (r.passed || 0) + "/" + (r.total || 0) + ")</td>";
+              if (hasTime) html += "<td>" + (r.time_seconds != null ? r.time_seconds.toFixed(1) : "—") + "</td>";
+              if (hasErrors) html += "<td>" + (r.errors || 0) + "</td>";
+              html += "</tr>";
+            }
+
+            // Average row
+            const rates = configRuns.map(r => (r.result || {}).pass_rate || 0);
+            const avgRate = rates.reduce((a, b) => a + b, 0) / rates.length;
+            const avgPrClass = avgRate >= 0.8 ? "benchmark-delta-positive" : avgRate < 0.5 ? "benchmark-delta-negative" : "";
+            html += '<tr class="benchmark-row-avg ' + rowClass + '">';
+            html += "<td>" + configLabel + "</td>";
+            html += "<td>Avg</td>";
+            html += '<td class="' + avgPrClass + '">' + (avgRate * 100).toFixed(0) + "%</td>";
+            if (hasTime) {
+              const times = configRuns.map(r => (r.result || {}).time_seconds).filter(t => t != null);
+              html += "<td>" + (times.length ? (times.reduce((a, b) => a + b, 0) / times.length).toFixed(1) : "—") + "</td>";
+            }
+            if (hasErrors) html += "<td></td>";
+            html += "</tr>";
+          }
+          html += "</tbody></table>";
+
+          // Per-assertion detail for this eval
+          const runsWithExpectations = {};
+          for (const config of configGroups) {
+            runsWithExpectations[config] = evalRuns.filter(r => r.configuration === config && r.expectations && r.expectations.length > 0);
+          }
+          const hasAnyExpectations = Object.values(runsWithExpectations).some(runs => runs.length > 0);
+          if (hasAnyExpectations) {
+            // Collect all unique assertion texts across all configs
+            const allAssertions = [];
+            const seen = new Set();
+            for (const config of configGroups) {
+              for (const run of runsWithExpectations[config]) {
+                for (const exp of (run.expectations || [])) {
+                  if (!seen.has(exp.text)) {
+                    seen.add(exp.text);
+                    allAssertions.push(exp.text);
+                  }
+                }
+              }
+            }
+
+            html += '<table class="benchmark-table" style="margin-top: 0.5rem;">';
+            html += "<thead><tr><th>Assertion</th>";
+            for (const config of configGroups) {
+              const label = config.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+              html += "<th>" + escapeHtml(label) + "</th>";
+            }
+            html += "</tr></thead><tbody>";
+
+            for (const assertionText of allAssertions) {
+              html += "<tr><td>" + escapeHtml(assertionText) + "</td>";
+
+              for (const config of configGroups) {
+                html += "<td>";
+                for (const run of runsWithExpectations[config]) {
+                  const exp = (run.expectations || []).find(e => e.text === assertionText);
+                  if (exp) {
+                    const cls = exp.passed ? "benchmark-delta-positive" : "benchmark-delta-negative";
+                    const icon = exp.passed ? "\u2713" : "\u2717";
+                    html += '<span class="' + cls + '" title="Run ' + run.run_number + ': ' + escapeHtml(exp.evidence || "") + '">' + icon + "</span> ";
+                  } else {
+                    html += "— ";
+                  }
+                }
+                html += "</td>";
+              }
+              html += "</tr>";
+            }
+            html += "</tbody></table>";
+          }
+        }
+      }
+
+      // Notes
+      if (notes.length > 0) {
+        html += '<div class="benchmark-notes">';
+        html += "<h3>Analysis Notes</h3>";
+        html += "<ul>";
+        for (const note of notes) {
+          html += "<li>" + escapeHtml(note) + "</li>";
+        }
+        html += "</ul></div>";
+      }
+
+      container.innerHTML = html;
+    }
+
+    // ---- Start ----
+    init();
+    renderBenchmark();
+  </script>
+</body>
+</html>

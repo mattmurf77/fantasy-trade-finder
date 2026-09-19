@@ -1,18 +1,3 @@
-# Status — 194-pick-tag-and-remove-asset
-
-```project-status
-{
-  "status": "in-progress",
-  "updated": "2026-07-27",
-  "summary": "#194 — Remove the \"rookie\" tag from draft picks + remove an asset from a suggested trade",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: in-progress 2026-07-27 — teardown-remediation (worktree). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #194 — Remove the "rookie" tag from draft picks + remove an asset from a suggested trade
 
 - **Source:** operator feedback #194 (verbatim): "Remove the 'rookie' tag from draft picks. Add the ability to remove an asset from a suggested trade."

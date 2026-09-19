@@ -1,12 +1,3 @@
-```project-status
-{
-  "status": "reference",
-  "updated": "",
-  "summary": "Market-Data Readiness — audit + minimal plumbing (2026-07-26)",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: reference  — Market-driven rankings + risers/fallers audit (2026-07-26). Prior row preserved at ../reviews/2026/2026-09-06-project-status-migration/plans-index.md."
-}
-```
-
 # Market-Data Readiness — audit + minimal plumbing (2026-07-26)
 
 **Operator directive (verbatim):** "I like the risers and fallers cards and the

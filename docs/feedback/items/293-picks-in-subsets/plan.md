@@ -400,7 +400,7 @@ lint complains.
 | Platform | Touched | Why |
 |---|---|---|
 | **Mobile** (`mobile/src/screens/LeagueSummaryScreen.tsx`) | **Yes** | The entire defect and the entire fix |
-| **Mobile Maestro** (`archive/retired-tooling/mobile/maestro/flows/…`) | **Yes** | Feature-gate 2 — new flow (§8) |
+| **Mobile Maestro** (`mobile/.maestro/flows/…`) | **Yes** | Feature-gate 2 — new flow (§8) |
 | **Backend** (`backend/`) | **No** | §4 proves the payload is complete. Also: G1 and G2 own backend files; staying out is both correct and collision-free |
 | **Web** (`web/league-rankings.html`) | **No** | §1.5 — no subset control, no position filter, picks already unconditional |
 | **Extension** | **No** | Does not consume `/api/league/power-rankings` |
@@ -421,12 +421,12 @@ G3 stays a polish-path, mobile-only change.**
 | R4 | **Starters + Bench no longer partition All** (picks counted twice across the two views) | **Accepted, intrinsic to the ruling.** Never surfaced as a sum on screen. | Must be written in the PRD and in the header comment; D5.1 copy stops claiming "only" |
 | R5 | **A position filter now reads as "position + picks"** — a team with heavy draft capital can outrank a better RB room in the RB view | **Accepted; this IS the ruling.** Mitigated by three visible signals: the colored Picks base segment, the lit Picks pill, and the #243 caption text | D2's one-tap opt-out preserves the position-pure view |
 | R6 | **11px type floor** (`design-system.md:107`) | **None.** D5 adds no new style; both reused styles are 13px | Restate in the PRD's docs table |
-| R7 | **A Maestro flow asserts "Picks only in All"** | **None found.** `grep -rn "league-summary" archive/retired-tooling/mobile/maestro/` returns only `league-summary.league-home` (3 rookie flows). `flows/smoke/09-league.yaml` taps `tab.league` then waits on `league.hero` (a `LeagueScreen` testID, `LeagueScreen.tsx:417`) and never touches the chart. **No existing flow can break, and the rankings chart currently has zero Maestro coverage** | Fix the gap with T1–T4 (§8) |
+| R7 | **A Maestro flow asserts "Picks only in All"** | **None found.** `grep -rn "league-summary" mobile/.maestro/` returns only `league-summary.league-home` (3 rookie flows). `flows/smoke/09-league.yaml` taps `tab.league` then waits on `league.hero` (a `LeagueScreen` testID, `LeagueScreen.tsx:417`) and never touches the chart. **No existing flow can break, and the rankings chart currently has zero Maestro coverage** | Fix the gap with T1–T4 (§8) |
 | R8 | `mobile/tests/check-member-entered-marker.js` (surface 5/5, `:240-244`) | **Low.** It asserts the marker is unconditional *inside the priced row* and imported from the shared module — the section-level gate is outside its scope, and broadening it only makes the marker render more | Run `node mobile/tests/check-member-entered-marker.js` **unmodified**; if it fails, the implementation is wrong, not the test |
 | R9 | **#279/#285 label vs. the now-picks-inclusive number** | **Low, by leaving the gate alone.** `total_value_label` stays confined to All + no filter, where `active === total_value` and the label reconciles | Explicit "do not widen the label gate" line in the PRD; T6 |
 | R10 | **`hasPicks === false` leagues** (ESPN without `picks.assign_tradeable`, demo) | **None.** `hasPicks` (`:369`) short-circuits the pill, the legend, the auto-add and (via `items.length`) the drill group. Zero-value segments are already skipped at `:1344` | T7 asserts no Picks pill appears in a demo league |
 | R11 | **`positions_value` vs `coreTotal` drift** — All-unfiltered returns the server's `total_value` (which counts out-of-core "Other" players, all currently valued 0) while Starters/Bench resum `coreTotal` | **Pre-existing**, unchanged by this work. Out-of-pool rows are priced 0 (api-reference.md:350) and IDP/DST rows are omitted from `roster` (#183) | Note only; do not "fix" it here (principle 3) |
-| R12 | **testID lint** | Only if the Author adds a testID. Any new one must exist in `mobile/src` and pass `mobile/scripts/testid-lint.sh`; registry conventions in `docs/plans/archive/2026/mobile-testing/lld.md` §2.6/§4.4 | Prefer reusing existing IDs (§8) — the flows below need **no new testID** |
+| R12 | **testID lint** | Only if the Author adds a testID. Any new one must exist in `mobile/src` and pass `mobile/scripts/testid-lint.sh`; registry conventions in `docs/plans/mobile-testing/lld.md` §2.6/§4.4 | Prefer reusing existing IDs (§8) — the flows below need **no new testID** |
 
 ---
 
@@ -437,8 +437,8 @@ G3 stays a polish-path, mobile-only change.**
 | Path | Kind |
 |---|---|
 | `mobile/src/screens/LeagueSummaryScreen.tsx` | code (sole code file) |
-| `archive/retired-tooling/mobile/maestro/flows/league/lr1-picks-in-subsets.yaml` | new test flow |
-| `archive/retired-tooling/mobile/maestro/flows/league/lr2-picks-in-position-filter.yaml` | new test flow |
+| `mobile/.maestro/flows/league/lr1-picks-in-subsets.yaml` | new test flow |
+| `mobile/.maestro/flows/league/lr2-picks-in-position-filter.yaml` | new test flow |
 | `docs/feedback/items/293-picks-in-subsets/` (`plan.md`, `prd.md`, `status.md`, screenshots) | docs |
 | `docs/feedback/items/INDEX.md` | docs — **shared-append risk, see below** |
 | `living-memory/CHANGELOG.md`, `living-memory/TEST_LEDGER.md` | docs — **shared-append risk, see below** |
@@ -458,7 +458,7 @@ rather than at merge:
   write. Either the orchestrator serializes those writes at ship time, or each
   group appends a single self-contained block and conflicts are resolved by
   keeping both. G3 will write one block per file.
-- **`archive/retired-tooling/mobile/maestro/flows/league/`** does not exist yet. If G2 also creates flows,
+- **`mobile/.maestro/flows/league/`** does not exist yet. If G2 also creates flows,
   keep them in separate subdirectories (`flows/draft/` vs `flows/league/`) so the
   directory creation is not a shared edit.
 
@@ -484,7 +484,7 @@ flows are required, not optional.
 
 Conventions: **id selectors only**, no fixed `sleep`, no coordinate taps, no
 text-selector taps (`mobile/scripts/testid-lint.sh:16-23`); registry + rules in
-`docs/plans/archive/2026/mobile-testing/lld.md` §2.6 / §4.4. Seed against the hermetic
+`docs/plans/mobile-testing/lld.md` §2.6 / §4.4. Seed against the hermetic
 `qa_standard` profile used by `flows/smoke/09-league.yaml`, extended so the seeded
 league carries owned picks (a league with `hasPicks === false` cannot exercise any
 of this — **confirm the seed has pick rows before writing the flows; if it does

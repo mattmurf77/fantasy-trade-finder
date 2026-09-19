@@ -1,18 +1,3 @@
-# Status — 193-chasing-shopping-conflict
-
-```project-status
-{
-  "status": "in-progress",
-  "updated": "2026-07-27",
-  "summary": "FB-193 — \"Listed as both chasing and shopping QB\" — status",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: in-progress 2026-07-27 — teardown-remediation. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # FB-193 — "Listed as both chasing and shopping QB" — status
 
 **Fixed 2026-07-27** (branch `teardown-remediation`).

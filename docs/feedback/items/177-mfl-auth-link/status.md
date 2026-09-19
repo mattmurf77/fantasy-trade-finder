@@ -1,18 +1,3 @@
-# Status — 177-mfl-auth-link
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-07-25",
-  "summary": "#177 — MFL authenticated linking + import-all-leagues",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-25 — `mfl.auth_link` flag ON in features.json; `POST /api/mfl/auth-link` `03e3e38` — CHANGELOG 2026-07-25. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #177 — MFL authenticated linking + import-all-leagues
 
 **Status:** Built, dark behind `mfl.auth_link` (default OFF). 2026-07-25.

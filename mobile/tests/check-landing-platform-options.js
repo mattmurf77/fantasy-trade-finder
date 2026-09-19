@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Landing platform options (flag `landing.platform_options`) — structural
-// guard. docs/plans/archive/2026/landing-platform-options/scope.md §3.
+// guard. docs/plans/landing-platform-options/scope.md §3.
 //
 // The entry page offers Sleeper · ESPN · MFL as supported platforms. The
 // claims below are about code SHAPE, and each one protects a specific

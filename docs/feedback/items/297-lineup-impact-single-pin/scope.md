@@ -133,7 +133,7 @@ thing #297's fix creates, and only the client can witness it.
 
 ## 3. Test scope (mobile test platform)
 
-- [x] **New flow:** `archive/retired-tooling/mobile/maestro/flows/smoke/12-trades-single-pin.yaml` — signs in,
+- [x] **New flow:** `mobile/.maestro/flows/smoke/12-trades-single-pin.yaml` — signs in,
       enters `finderMode === 'player'` by launch argument (the board is player-mode only,
       and the mode-bar chips that reached it are hidden under `trades.sheet_targeting`),
       pins exactly one asset, then asserts all three things #298 says went missing:
@@ -161,7 +161,7 @@ thing #297's fix creates, and only the client can witness it.
 - **Capture delta:** `trades` — and note the gap the lab called out: `screens/manifest.json`
   lists seven `trades` states and **none of them is single-pin**, so there is no "before"
   frame for either item. Request
-  `archive/retired-tooling/mobile/scripts/screen-capture.sh --screen trades --state single-pin` at ship.
+  `mobile/scripts/screen-capture.sh --screen trades --state single-pin` at ship.
 - **Smoke-suite impact:** `05-trades-render.yaml` and `06-trades-deck.yaml` cross this
   surface. Both operate with **zero pins**, where `singlePin` is `null` and every branch
   this change adds is inert — `singlePinFeatured` is false, so the CTA, the progress

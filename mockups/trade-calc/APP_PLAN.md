@@ -1,7 +1,7 @@
 # DTF Trade Calculator — Mockup Plan (2026-07-02)
 
 *Condensed plan doc for the standalone iPhone mockup. The real feature's plan lives at
-[docs/plans/archive/2026/manual-trade-calculator-plan.md](../../docs/plans/archive/2026/manual-trade-calculator-plan.md).*
+[docs/plans/manual-trade-calculator-plan.md](../../docs/plans/manual-trade-calculator-plan.md).*
 
 ## Vision & premise
 

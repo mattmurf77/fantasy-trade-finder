@@ -38,17 +38,17 @@
 
 ## 3. Test scope (mobile test platform)
 
-- [x] **New flow:** `archive/retired-tooling/mobile/maestro/flows/trades-banner-region.yaml` — #315
+- [x] **New flow:** `mobile/.maestro/flows/trades-banner-region.yaml` — #315
   end-to-end (declare outlook + chasing WR through the full sheet → receipt
   renders WITH the `details` row). Runs under `release` — the plan's
   `release-inline-strip.json` fixture is unrepresentable on this harness
   (experiment overlay, not a `FLAG_KEYS` flag; defect reported), so the flow
   does not assert the strip's presence.
-- [x] **Extended flow:** `archive/retired-tooling/mobile/maestro/flows/smoke/12-trades-single-pin.yaml`
+- [x] **Extended flow:** `mobile/.maestro/flows/smoke/12-trades-single-pin.yaml`
   — bounded pass loop to deck-done → `trades.deck-summary` +
   `".*Fresh ideas land.*"` (#316) → tile tap → summary notVisible +
   `featured-trade.window` visible (#317).
-- [x] **Repointed flow:** `archive/retired-tooling/mobile/maestro/flows/p0-6-espn-copy-trade.yaml`
+- [x] **Repointed flow:** `mobile/.maestro/flows/p0-6-espn-copy-trade.yaml`
   — was stale-on-arrival (asserted the pre-#309 string under a fixture where
   the fallback is unreachable); now runs under `release-espn-send-off` and
   asserts `".*Sending isn.t available.*"`.

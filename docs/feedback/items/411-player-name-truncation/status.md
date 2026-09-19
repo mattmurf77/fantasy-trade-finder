@@ -1,18 +1,3 @@
-# Status — 411-player-name-truncation
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-30",
-  "summary": "FB-411 — player name truncation",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-30 — satellite — chip to meta line, name 13/18 (QA-B F-1 disclosure, checklist step 11b ruling). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # FB-411 — player name truncation
 
 **Status:** planned · 2026-08-30 · `claude/fb-410-412-trade-card-polish`

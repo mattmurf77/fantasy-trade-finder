@@ -86,7 +86,7 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     "draft_room_row_menu_opened", "draft_room_action_taken",
     "draft_room_coverage_nudge_shown", "draft_room_rank_rookies_tapped",
     # ESPN Connect WebView cookie capture (Phase 1b, flag
-    # `espn.webview_capture`; scope docs/plans/archive/2026/espn-connect-webview/scope.md).
+    # `espn.webview_capture`; scope docs/plans/espn-connect-webview/scope.md).
     # Client-only intent/exposure signals for the in-app ESPN login →
     # native-cookie-store capture flow. `espn_connect_captured` /
     # `_abandoned` carry `saw_otp` so we can measure how often the Disney SSO
@@ -102,7 +102,7 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # migration's re-sign-in wave has a signal.
     "espn_connect_store_rejected",
     # ── P0 remediation batch, 2026-08-11 ────────────────────────────────
-    # Plans: docs/plans/archive/2026/audit-p0-remediation/{hld,lld-p0-7,plan-p0-7}.md.
+    # Plans: docs/plans/audit-p0-remediation/{hld,lld-p0-7,plan-p0-7}.md.
     # Tracking-plan addendum (the precondition this module's docstring
     # demands): docs/business/analytics/2026-08-11-p0-7-addendum.md.
     #
@@ -217,7 +217,7 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     "league_pos_candidates_viewed",
     "league_candidate_pinned",
     # ── P1 remediation, commit T1 — 2026-08-11 ──────────────────────────
-    # Plans: docs/plans/archive/2026/audit-p1-remediation/{HLD-p1.md §A.2, LLD-p1-1-2.md
+    # Plans: docs/plans/audit-p1-remediation/{HLD-p1.md §A.2, LLD-p1-1-2.md
     # §10, LLD-p1-5.md §8}. Binding operator decisions: DECISIONS-p1.md.
     #
     # T1 is deliberately a REGISTRATION-ONLY commit and it lands BEFORE any
@@ -472,7 +472,7 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # ── Deck double-fire guards, 2026-08-18 ─────────────────────────────
     # Tracking-plan addendum (the precondition this module's docstring
     # demands): docs/business/analytics/2026-08-18-swipe-guard-blocked.md.
-    # Origin: docs/reviews/2026/2026-08-18-bug-sweep/ticket.md §B4; D-068 is the
+    # Origin: docs/reviews/2026-08-18-bug-sweep/ticket.md §B4; D-068 is the
     # decision that DEFERRED this event, and G-049 the gotcha it leaves open.
     #
     # `advance()` in TradesScreen.tsx has two early-return double-fire

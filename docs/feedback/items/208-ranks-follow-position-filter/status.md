@@ -1,18 +1,3 @@
-# Status — 208-ranks-follow-position-filter
-
-```project-status
-{
-  "status": "in-progress",
-  "updated": "2026-08-08",
-  "summary": "#208 — Ranks follow the position filter — status",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: in-progress 2026-08-08 — worktree-agent-ac81596c5b45c68c9. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #208 — Ranks follow the position filter — status
 
 **Status:** BUILT (2026-08-08) — worktree branch `worktree-agent-ac81596c5b45c68c9`

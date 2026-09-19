@@ -1,6 +1,6 @@
 """Rookie-draft M2 — the rookie-scope seam (backend half).
 
-Test matrix T-M2-01..13 from docs/plans/archive/2026/rookie-draft/lld.md §7.
+Test matrix T-M2-01..13 from docs/plans/rookie-draft/lld.md §7.
 
 The architecture under test (plan D2/D3/D4, lld §4.2/§4.3):
 

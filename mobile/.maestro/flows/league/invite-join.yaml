@@ -1,0 +1,156 @@
+appId: com.fantasytradefinder.app
+# tc: TC-P03-01
+# profile: standard
+# flags: release
+# source: mobile/src/screens/LeagueJoinScreen.tsx,
+#         mobile/src/screens/LeaguePickerScreen.tsx (auto-pin effect),
+#         mobile/src/screens/SignInScreen.tsx (invited banner),
+#         mobile/src/state/useSession.ts (ftf_invite_intent),
+#         docs/plans/audit-p0-remediation/lld-p0-3.md §4
+#
+# AUDIT P0-3 (mobile UX audit 2026-08-09) — the invite loop converted zero.
+# Mobile emitted `/?league=<id>&ref=<u>`, a BARE-PATH url, and utils/deepLinks
+# short-circuited on `if (!path) return;` before anything read `?league=`. The
+# league was dropped on the floor on every invite ever sent. Three blocks here
+# cover the three states an invitee can arrive in.
+#
+# ENTRY IS LAUNCH ARGUMENTS, NEVER openLink (law 17 — openLink raises an
+# undismissable SpringBoard confirm on iOS 18). Params are a QUERY STRING, not
+# JSON (testRouteEntry.ts: the argument-domain plist parser eats a leading `{`).
+#
+# THE SEEDED LEAGUE ID 990000000000000001 IN BLOCK 3 IS LOAD-BEARING, not
+# incidental. The signed-out banner is the ONE screen that calls
+# fetchInviteMeta; the server resolves it through _fetch_sleeper_league_meta →
+# _sleeper_get, and the harness serves
+# sleeper/standard/league/990000000000000001.json — a cassette HIT. Any other
+# id is a `vcr_misses` increment, and sim-run.sh FAILS the whole run on
+# vcr_misses > 0. Block 2 deliberately uses an UNSEEDED id, which is safe only
+# because neither LeagueJoinScreen nor LeaguePickerScreen may ever call
+# fetchInviteMeta (lld-p0-3 §2.0). A reviewer who later adds a meta fetch to
+# either screen breaks this flow's RAILS AUDIT, not its assertions — which is
+# the hard failure to anticipate.
+#
+# BLOCK 3 DEPENDS ON COMMIT 6 — SIGNED_OUT_ENTRY_ROUTES = {'LeagueJoin'} in
+# testRouteEntry.ts plus applyTestRouteEntry(ref, {authed}) in RootNav. P0-3
+# consumes that seam; it does not build it.
+#
+# NOT COVERED HERE, and each for a reason recorded in lld-p0-3 §4: a real
+# universal-link tap (no simulator seam for AASA at all), the legacy
+# `/?league=&ref=` link tap (same), the web 302 fallback (browser, not this
+# harness), case D (account-only + invited — needs P0-5's FTFTestAppleSub seam
+# in the same launch), the 14-day TTL, and the demo-session no-op. All are
+# manual passes in plan-p0-3.md.
+#
+# NO INJECTIONS (fail_next / latency) — every state asserted here is the
+# fixture's own resting answer, so nothing armed can leak into a later block.
+tags: [league]
+---
+# ── Block 1 — authed member → the invited league is pinned ───────────────
+# Law 6: clearState: true for the FIRST launch only. The relaunches below are
+# warm on purpose — the persisted session AND the persisted invite intent are
+# exactly what this flow is about.
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "signin.username-input"
+    timeout: 15000
+# Retry-hardened sign-in preamble. LAW 10 — assert the typed username before
+# Continue: a raced inputText that lands half a name submits a partial
+# username and books a real vcr miss. `eraseText` first makes the retry
+# idempotent. LAW 1 — full-match regex, so wrap in `.*`.
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: "signin.username-input"
+      - eraseText
+      - inputText: "qa_standard"
+      - assertVisible:
+          text: ".*qa_standard.*"
+      - tapOn:
+          id: "signin.continue-btn"
+      - extendedWaitUntil:
+          visible:
+            id: "leagues.row.990000000000000001"
+          timeout: 30000
+- tapOn:
+    id: "leagues.row.990000000000000001"
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+
+# Now the invite itself, on a warm relaunch through the harness route entry.
+- launchApp:
+    clearState: false
+    stopApp: true
+    arguments:
+      FTFTestRoute: LeagueJoin
+      FTFTestRouteParams: "leagueId=990000000000000001&ref=qa_inviter"
+# LAW 5 — LeagueJoinScreen renders an ActivityIndicator, so this is an
+# extendedWaitUntil on the id and never a waitForAnimationToEnd.
+- extendedWaitUntil:
+    visible:
+      id: "leaguejoin.root"
+    timeout: 10000
+# The interstitial decides and replaces; the picker's auto-pin effect calls
+# pickLeague({auto:true}) and lands in the tabs.
+- extendedWaitUntil:
+    visible:
+      id: "tab.trades"
+    timeout: 30000
+# LAW 8 — the tab tap comes only after the run settled on a surface-owned
+# control above, or #244 launch routing steals it back.
+- tapOn:
+    id: "tab.league"
+- assertVisible:
+    text: ".*QA Standard League.*"
+- takeScreenshot: p0-3-invite-pinned
+
+# ── Block 2 — authed non-member → the honest notice, no silent pin ───────
+# 990000000000000099 is NOT in the seeded list. No fetchInviteMeta call is
+# reachable in this block; that is what keeps vcr_misses at 0 for an unseeded
+# id (see the header).
+- launchApp:
+    clearState: false
+    stopApp: true
+    arguments:
+      FTFTestRoute: LeagueJoin
+      FTFTestRouteParams: "leagueId=990000000000000099&ref=qa_inviter"
+- extendedWaitUntil:
+    visible:
+      id: "leaguepicker.invite-notice"
+    timeout: 15000
+# The real list is still usable underneath — never a dead end.
+- assertVisible:
+    id: "leagues.row.990000000000000001"
+# And nothing was silently pinned.
+- assertNotVisible:
+    id: "tab.trades"
+- takeScreenshot: p0-3-invite-not-member
+
+# ── Block 3 — signed out → the inviter is named ──────────────────────────
+# The acceptance criterion's own wording. clearState + clearKeychain, so this
+# is a genuinely session-less arrival routed through commit 6's
+# SIGNED_OUT_ENTRY_ROUTES allowlist. The seeded id is required — this is the
+# one screen that calls fetchInviteMeta.
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    stopApp: true
+    arguments:
+      FTFTestRoute: LeagueJoin
+      FTFTestRouteParams: "leagueId=990000000000000001&ref=qa_inviter"
+- extendedWaitUntil:
+    visible:
+      id: "signin.invited-banner"
+    timeout: 15000
+# LAW 1 — full-match regex. The name half of the copy is an upgrade served by
+# /api/league/invite-meta; the inviter half is the acceptance criterion and
+# needs no endpoint at all, so THIS is what the assertion pins.
+- assertVisible:
+    text: ".*qa_inviter invited you to.*"
+- takeScreenshot: p0-3-invite-signed-out

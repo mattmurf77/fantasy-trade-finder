@@ -1,18 +1,3 @@
-# Status — 364-team-review-fixes
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-20",
-  "summary": "Team Review defects #364/#367/#368; related follow-up scope #370/#371 remains in historical notes",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-20 — PR #152 `bc43b6f`, Render live, EAS build 124; IDP disclaimer names the unpriced slots. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # Status — Team Review defect batch (#364 / #367 / #368)
 
 **Status:** `shipped-pending-verification` — PR #152 merged `bc43b6f`, Render live, EAS build 124 submitted to TestFlight. **The 13-step checklist is still UNRUN.**

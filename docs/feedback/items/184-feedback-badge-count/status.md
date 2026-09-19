@@ -1,18 +1,3 @@
-# Status — 184-feedback-badge-count
-
-```project-status
-{
-  "status": "in-progress",
-  "updated": "2026-07-25",
-  "summary": "#184 — Feedback badge counts closed items",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: in-progress 2026-07-25 — n/a. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #184 — Feedback badge counts closed items
 
 **Status:** fixed (client-side), 2026-07-25

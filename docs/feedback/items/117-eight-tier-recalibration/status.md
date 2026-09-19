@@ -1,18 +1,3 @@
-# Status — 117-eight-tier-recalibration
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-07-12",
-  "summary": "Status — #117 (Tiers) + #118 (QuickSetTiers)",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-12 — FB-117/118 affine value recalibration `2e9d542` — CHANGELOG 2026-07-12. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # Status — #117 (Tiers) + #118 (QuickSetTiers)
 
 **2026-07-12 — built, verified, unshipped (working tree on `trade-engine-v2`).**

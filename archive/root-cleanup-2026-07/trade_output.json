@@ -1,0 +1,772 @@
+[
+  {
+    "opponent": "DrByron34",
+    "give": [
+      "Xavier Legette (WR, CAR) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "Elijah Arroyo (TE, SEA) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 156.3,
+    "composite": 0.663
+  },
+  {
+    "opponent": "bobphil22",
+    "give": [
+      "Rasheen Ali (RB, BAL) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "Cade Stover (TE, HOU) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 155.2,
+    "composite": 0.662
+  },
+  {
+    "opponent": "sauter",
+    "give": [
+      "Drake Maye (QB, NE) KTC:9751"
+    ],
+    "give_pkg_ktc": 9751.1,
+    "receive": [
+      "Trey McBride (TE, ARI) KTC:7971"
+    ],
+    "recv_pkg_ktc": 7970.8,
+    "value_pct": 81.7,
+    "mismatch": 154.4,
+    "composite": 0.657
+  },
+  {
+    "opponent": "bobphil22",
+    "give": [
+      "Will Shipley (RB, PHI) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "Cade Stover (TE, HOU) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 152.1,
+    "composite": 0.647
+  },
+  {
+    "opponent": "pmquinn24",
+    "give": [
+      "Brady Cook (QB, NYJ) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "Isaiah Bond (WR, CLE) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 146.9,
+    "composite": 0.643
+  },
+  {
+    "opponent": "pmquinn24",
+    "give": [
+      "Marvin Harrison (WR, ARI) KTC:3559"
+    ],
+    "give_pkg_ktc": 3558.7,
+    "receive": [
+      "Deebo Samuel (WR, None) KTC:3743"
+    ],
+    "recv_pkg_ktc": 3742.6,
+    "value_pct": 95.1,
+    "mismatch": 145.5,
+    "composite": 0.64
+  },
+  {
+    "opponent": "pprendergast",
+    "give": [
+      "George Holani (RB, SEA) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "Jordan James (RB, SF) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 144.5,
+    "composite": 0.637
+  },
+  {
+    "opponent": "johnphillips3289",
+    "give": [
+      "Will Shipley (RB, PHI) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "Malik Washington (WR, MIA) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 146.9,
+    "composite": 0.636
+  },
+  {
+    "opponent": "pmquinn24",
+    "give": [
+      "George Holani (RB, SEA) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "Isaiah Bond (WR, CLE) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 143.9,
+    "composite": 0.635
+  },
+  {
+    "opponent": "pmquinn24",
+    "give": [
+      "Marvin Harrison (WR, ARI) KTC:3559"
+    ],
+    "give_pkg_ktc": 3558.7,
+    "receive": [
+      "Brian Robinson (RB, ATL) KTC:3696"
+    ],
+    "recv_pkg_ktc": 3695.8,
+    "value_pct": 96.3,
+    "mismatch": 143.7,
+    "composite": 0.635
+  },
+  {
+    "opponent": "DrByron34",
+    "give": [
+      "Max Brosmer (QB, MIN) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "Elijah Arroyo (TE, SEA) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 144.1,
+    "composite": 0.634
+  },
+  {
+    "opponent": "bobphil22",
+    "give": [
+      "Rasheen Ali (RB, BAL) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "Tahj Brooks (RB, CIN) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 142.6,
+    "composite": 0.633
+  },
+  {
+    "opponent": "sauter",
+    "give": [
+      "Drake Maye (QB, NE) KTC:9751"
+    ],
+    "give_pkg_ktc": 9751.1,
+    "receive": [
+      "De'Von Achane (RB, MIA) KTC:8928"
+    ],
+    "recv_pkg_ktc": 8927.9,
+    "value_pct": 91.6,
+    "mismatch": 147.7,
+    "composite": 0.632
+  },
+  {
+    "opponent": "pprendergast",
+    "give": [
+      "George Holani (RB, SEA) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "Tez Johnson (WR, TB) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 140.9,
+    "composite": 0.628
+  },
+  {
+    "opponent": "sauter",
+    "give": [
+      "Drake Maye (QB, NE) KTC:9751"
+    ],
+    "give_pkg_ktc": 9751.1,
+    "receive": [
+      "Bucky Irving (RB, TB) KTC:7675"
+    ],
+    "recv_pkg_ktc": 7675.1,
+    "value_pct": 78.7,
+    "mismatch": 142.8,
+    "composite": 0.622
+  },
+  {
+    "opponent": "johnphillips3289",
+    "give": [
+      "Quentin Johnston (WR, LAC) KTC:2532"
+    ],
+    "give_pkg_ktc": 2532.4,
+    "receive": [
+      "Tyler Allgeier (RB, ARI) KTC:3300"
+    ],
+    "recv_pkg_ktc": 3299.5,
+    "value_pct": 76.8,
+    "mismatch": 141.1,
+    "composite": 0.62
+  },
+  {
+    "opponent": "DrByron34",
+    "give": [
+      "Xavier Legette (WR, CAR) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "Ja'Tavion Sanders (TE, CAR) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 137.1,
+    "composite": 0.619
+  },
+  {
+    "opponent": "DrByron34",
+    "give": [
+      "Xavier Legette (WR, CAR) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "Marquise Brown (WR, PHI) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 136.3,
+    "composite": 0.618
+  },
+  {
+    "opponent": "bobphil22",
+    "give": [
+      "Will Shipley (RB, PHI) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "Tahj Brooks (RB, CIN) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 139.6,
+    "composite": 0.618
+  },
+  {
+    "opponent": "sauter",
+    "give": [
+      "Tyjae Spears (RB, TEN) KTC:2177"
+    ],
+    "give_pkg_ktc": 2177.1,
+    "receive": [
+      "Kimani Vidal (RB, LAC) KTC:1714"
+    ],
+    "recv_pkg_ktc": 1713.6,
+    "value_pct": 78.7,
+    "mismatch": 136.7,
+    "composite": 0.617
+  },
+  {
+    "opponent": "DrByron34",
+    "give": [
+      "Trevor Etienne (RB, CAR) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "Elijah Arroyo (TE, SEA) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 134.5,
+    "composite": 0.612
+  },
+  {
+    "opponent": "gildalbora",
+    "give": [
+      "Jack Bech (WR, LV) KTC:737"
+    ],
+    "give_pkg_ktc": 736.7,
+    "receive": [
+      "Joe Mixon (RB, None) KTC:700"
+    ],
+    "recv_pkg_ktc": 700.5,
+    "value_pct": 95.1,
+    "mismatch": 132.7,
+    "composite": 0.609
+  },
+  {
+    "opponent": "bobphil22",
+    "give": [
+      "Xavier Legette (WR, CAR) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "Cade Stover (TE, HOU) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 132.9,
+    "composite": 0.609
+  },
+  {
+    "opponent": "pprendergast",
+    "give": [
+      "Marvin Harrison (WR, ARI) KTC:3559"
+    ],
+    "give_pkg_ktc": 3558.7,
+    "receive": [
+      "Oronde Gadsden (TE, LAC) KTC:3559"
+    ],
+    "recv_pkg_ktc": 3558.7,
+    "value_pct": 100.0,
+    "mismatch": 149.6,
+    "composite": 0.606
+  },
+  {
+    "opponent": "bmcaloon",
+    "give": [
+      "J.K. Dobbins (RB, DEN) KTC:3936"
+    ],
+    "give_pkg_ktc": 3936.1,
+    "receive": [
+      "Tony Pollard (RB, TEN) KTC:4579"
+    ],
+    "recv_pkg_ktc": 4578.6,
+    "value_pct": 86.0,
+    "mismatch": 131.6,
+    "composite": 0.606
+  },
+  {
+    "opponent": "johnphillips3289",
+    "give": [
+      "Isaac TeSlaa (WR, DET) KTC:997"
+    ],
+    "give_pkg_ktc": 996.8,
+    "receive": [
+      "Elic Ayomanor (WR, TEN) KTC:984"
+    ],
+    "recv_pkg_ktc": 984.3,
+    "value_pct": 98.7,
+    "mismatch": 131.6,
+    "composite": 0.605
+  },
+  {
+    "opponent": "mlakejr",
+    "give": [
+      "Will Shipley (RB, PHI) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "MarShawn Lloyd (RB, GB) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 132.9,
+    "composite": 0.603
+  },
+  {
+    "opponent": "pmquinn24",
+    "give": [
+      "DeMario Douglas (WR, NE) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "Isaiah Bond (WR, CLE) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 129.3,
+    "composite": 0.601
+  },
+  {
+    "opponent": "pprendergast",
+    "give": [
+      "Brady Cook (QB, NYJ) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "Jordan James (RB, SF) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 128.3,
+    "composite": 0.599
+  },
+  {
+    "opponent": "mlakejr",
+    "give": [
+      "Xavier Legette (WR, CAR) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "MarShawn Lloyd (RB, GB) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 128.0,
+    "composite": 0.598
+  },
+  {
+    "opponent": "gildalbora",
+    "give": [
+      "Jameson Williams (WR, DET) KTC:5259"
+    ],
+    "give_pkg_ktc": 5259.2,
+    "receive": [
+      "David Montgomery (RB, HOU) KTC:5531"
+    ],
+    "recv_pkg_ktc": 5531.1,
+    "value_pct": 95.1,
+    "mismatch": 145.5,
+    "composite": 0.596
+  },
+  {
+    "opponent": "bmcaloon",
+    "give": [
+      "DeMario Douglas (WR, NE) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "Luke McCaffrey (WR, WAS) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 125.2,
+    "composite": 0.592
+  },
+  {
+    "opponent": "pprendergast",
+    "give": [
+      "Brady Cook (QB, NYJ) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "Tez Johnson (WR, TB) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 124.7,
+    "composite": 0.59
+  },
+  {
+    "opponent": "johnphillips3289",
+    "give": [
+      "Isaac TeSlaa (WR, DET) KTC:997"
+    ],
+    "give_pkg_ktc": 996.8,
+    "receive": [
+      "Jalen Nailor (WR, LV) KTC:846"
+    ],
+    "recv_pkg_ktc": 846.2,
+    "value_pct": 84.9,
+    "mismatch": 123.9,
+    "composite": 0.587
+  },
+  {
+    "opponent": "SwaggyJ0",
+    "give": [
+      "Isaac TeSlaa (WR, DET) KTC:997"
+    ],
+    "give_pkg_ktc": 996.8,
+    "receive": [
+      "Kaleb Johnson (RB, PIT) KTC:1145"
+    ],
+    "recv_pkg_ktc": 1145.0,
+    "value_pct": 87.1,
+    "mismatch": 122.7,
+    "composite": 0.586
+  },
+  {
+    "opponent": "johnphillips3289",
+    "give": [
+      "Rasheen Ali (RB, BAL) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "Malik Washington (WR, MIA) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 121.4,
+    "composite": 0.582
+  },
+  {
+    "opponent": "KevinLake",
+    "give": [
+      "Malik Davis (RB, DAL) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "DJ Giddens (RB, IND) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 123.2,
+    "composite": 0.58
+  },
+  {
+    "opponent": "mlakejr",
+    "give": [
+      "George Holani (RB, SEA) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "MarShawn Lloyd (RB, GB) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 119.7,
+    "composite": 0.579
+  },
+  {
+    "opponent": "sauter",
+    "give": [
+      "Dalton Kincaid (TE, BUF) KTC:3650"
+    ],
+    "give_pkg_ktc": 3649.5,
+    "receive": [
+      "Jakobi Meyers (WR, JAX) KTC:3838"
+    ],
+    "recv_pkg_ktc": 3838.1,
+    "value_pct": 95.1,
+    "mismatch": 124.8,
+    "composite": 0.576
+  },
+  {
+    "opponent": "bmcaloon",
+    "give": [
+      "DeMario Douglas (WR, NE) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "Mike Gesicki (TE, CIN) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 117.4,
+    "composite": 0.574
+  },
+  {
+    "opponent": "bmcaloon",
+    "give": [
+      "Max Brosmer (QB, MIN) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "Luke McCaffrey (WR, WAS) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 116.8,
+    "composite": 0.572
+  },
+  {
+    "opponent": "bmcaloon",
+    "give": [
+      "DeMario Douglas (WR, NE) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "Isaiah Davis (RB, NYJ) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 116.2,
+    "composite": 0.571
+  },
+  {
+    "opponent": "KevinLake",
+    "give": [
+      "Darnell Washington (TE, PIT) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "DJ Giddens (RB, IND) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 119.2,
+    "composite": 0.571
+  },
+  {
+    "opponent": "SwaggyJ0",
+    "give": [
+      "Tyjae Spears (RB, TEN) KTC:2177"
+    ],
+    "give_pkg_ktc": 2177.1,
+    "receive": [
+      "Tyrone Tracy (RB, NYG) KTC:2532"
+    ],
+    "recv_pkg_ktc": 2532.4,
+    "value_pct": 86.0,
+    "mismatch": 116.5,
+    "composite": 0.569
+  },
+  {
+    "opponent": "gildalbora",
+    "give": [
+      "Michael Penix (QB, ATL) KTC:825"
+    ],
+    "give_pkg_ktc": 825.1,
+    "receive": [
+      "Joe Mixon (RB, None) KTC:700"
+    ],
+    "recv_pkg_ktc": 700.5,
+    "value_pct": 84.9,
+    "mismatch": 116.3,
+    "composite": 0.568
+  },
+  {
+    "opponent": "mlakejr",
+    "give": [
+      "Rasheen Ali (RB, BAL) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "MarShawn Lloyd (RB, GB) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 114.5,
+    "composite": 0.567
+  },
+  {
+    "opponent": "SwaggyJ0",
+    "give": [
+      "Tyjae Spears (RB, TEN) KTC:2177"
+    ],
+    "give_pkg_ktc": 2177.1,
+    "receive": [
+      "Isaiah Likely (TE, NYG) KTC:2438"
+    ],
+    "recv_pkg_ktc": 2438.5,
+    "value_pct": 89.3,
+    "mismatch": 115.0,
+    "composite": 0.566
+  },
+  {
+    "opponent": "mlakejr",
+    "give": [
+      "Will Shipley (RB, PHI) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "John Metchie (WR, CAR) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 117.3,
+    "composite": 0.566
+  },
+  {
+    "opponent": "gildalbora",
+    "give": [
+      "Malik Davis (RB, DAL) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "Drew Lock (QB, SEA) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 113.6,
+    "composite": 0.565
+  },
+  {
+    "opponent": "SwaggyJ0",
+    "give": [
+      "Tyjae Spears (RB, TEN) KTC:2177"
+    ],
+    "give_pkg_ktc": 2177.1,
+    "receive": [
+      "Zach Charbonnet (RB, SEA) KTC:2836"
+    ],
+    "recv_pkg_ktc": 2836.5,
+    "value_pct": 76.8,
+    "mismatch": 110.5,
+    "composite": 0.549
+  },
+  {
+    "opponent": "SwaggyJ0",
+    "give": [
+      "Isaac TeSlaa (WR, DET) KTC:997"
+    ],
+    "give_pkg_ktc": 996.8,
+    "receive": [
+      "Marvin Mims (WR, DEN) KTC:901"
+    ],
+    "recv_pkg_ktc": 901.2,
+    "value_pct": 90.4,
+    "mismatch": 105.3,
+    "composite": 0.545
+  },
+  {
+    "opponent": "KevinLake",
+    "give": [
+      "Brady Cook (QB, NYJ) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "DJ Giddens (RB, IND) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 107.2,
+    "composite": 0.542
+  },
+  {
+    "opponent": "gildalbora",
+    "give": [
+      "Malik Davis (RB, DAL) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "Isaac Guerendo (RB, SF) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 101.4,
+    "composite": 0.536
+  },
+  {
+    "opponent": "KevinLake",
+    "give": [
+      "Trevor Etienne (RB, CAR) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "DJ Giddens (RB, IND) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 102.1,
+    "composite": 0.53
+  },
+  {
+    "opponent": "KevinLake",
+    "give": [
+      "Malik Davis (RB, DAL) KTC:0"
+    ],
+    "give_pkg_ktc": 0.0,
+    "receive": [
+      "Zonovan Knight (RB, ARI) KTC:0"
+    ],
+    "recv_pkg_ktc": 0.0,
+    "value_pct": 100.0,
+    "mismatch": 98.1,
+    "composite": 0.529
+  }
+]

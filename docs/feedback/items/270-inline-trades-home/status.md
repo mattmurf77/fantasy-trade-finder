@@ -1,18 +1,3 @@
-# Status — 270-inline-trades-home
-
-```project-status
-{
-  "status": "built-dark",
-  "updated": "2026-08-09",
-  "summary": "#270 / #272 / #279 — Inline Trades Home mockup lab",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: built-dark 2026-08-09 — worktree-agent-acc329e0f3f9a3cd5, experiment `trades_home_inline` (strip + canvas variants, covers #270/#272). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #270 / #272 / #279 — Inline Trades Home mockup lab
 
 **Status: built-dark — 2026-08-09.** Branch `worktree-agent-acc329e0f3f9a3cd5`

@@ -5,7 +5,7 @@
 Captured 2026-08-02. FTF numbers pulled via `POST /api/trade/evaluate` (Mode A —
 public, consensus, no league context), run in-process through the Flask test
 client against the local dev DB (`data/trade_finder.db`), never production.
-Script: `docs/feedback/items/214-stud-tax/evidence/scripts/run_matrix.py` (gitignored scratch); raw
+Script: `feedback-workspace/214/run_matrix.py` (gitignored scratch); raw
 response JSON: `feedback-workspace/214/ftf_results.json`. No backend code was
 modified.
 

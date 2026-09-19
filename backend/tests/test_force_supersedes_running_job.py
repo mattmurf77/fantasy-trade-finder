@@ -1,6 +1,6 @@
 """`force: true` must supersede an already-RUNNING deck job.
 
-docs/reviews/2026/2026-08-18-bug-sweep — `/api/trades/generate` gated the cache-hit
+docs/reviews/2026-08-18-bug-sweep — `/api/trades/generate` gated the cache-hit
 branch on `force` but not the in-flight branch, so a forced regeneration that
 arrived while a job was running returned that job verbatim (same job_id, same
 minted trade_ids) and the regeneration never happened. It bit the Quick Set →

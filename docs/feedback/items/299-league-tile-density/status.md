@@ -1,18 +1,3 @@
-# Status — 299-league-tile-density
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-12",
-  "summary": "Status — #299 (32pt League roster tiles) + #302 (drill-in back affordance)",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-12 — PR #108 → `f8acd71` — covers #299/#302. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # Status — #299 (32pt League roster tiles) + #302 (drill-in back affordance)
 
 **Date:** 2026-08-11 · **Branch:** `feedback-build-league-299-302` · **Base:** `origin/main` @ `ab9368f`
@@ -67,7 +52,7 @@ The material below is retained evidence. Its former status wording does not over
 ### New files
 
 - `mobile/tests/check-league-drill-in.js` — 30 structural assertions (§6).
-- `archive/retired-tooling/mobile/maestro/flows/league/05-drill-in-back-affordance.yaml` — the Maestro delta.
+- `mobile/.maestro/flows/league/05-drill-in-back-affordance.yaml` — the Maestro delta.
 
 ### `mobile/src/navigation/TabNav.tsx` — **not modified**
 
@@ -342,7 +327,7 @@ Not applied by this agent — shared docs are orchestrator-owned. Verbatim text 
 
 ### 7.6 `living-memory/TEST_LEDGER.md`
 
-> **2026-08-11 — #299 + #302 (League drill-in), static gate only.** `npx tsc --noEmit` exit 0; `mobile/scripts/testid-lint.sh` → `testid-lint OK`; new `mobile/tests/check-league-drill-in.js` 30/30 PASS, **all 30 falsified against deliberate sabotages (30/30 detected, 1 false-pass found and fixed in `ba30464`)**. New flow `archive/retired-tooling/mobile/maestro/flows/league/05-drill-in-back-affordance.yaml` **authored but NOT run** — the batch ran static-only to avoid parallel agents contending for one simulator. **Tier-1 simulator gate is still owed** (full smoke + the feature flow + `league-summary` captures) and this must not merge to `main` without it.
+> **2026-08-11 — #299 + #302 (League drill-in), static gate only.** `npx tsc --noEmit` exit 0; `mobile/scripts/testid-lint.sh` → `testid-lint OK`; new `mobile/tests/check-league-drill-in.js` 30/30 PASS, **all 30 falsified against deliberate sabotages (30/30 detected, 1 false-pass found and fixed in `ba30464`)**. New flow `mobile/.maestro/flows/league/05-drill-in-back-affordance.yaml` **authored but NOT run** — the batch ran static-only to avoid parallel agents contending for one simulator. **Tier-1 simulator gate is still owed** (full smoke + the feature flow + `league-summary` captures) and this must not merge to `main` without it.
 
 ### 7.7 `docs/api-reference.md`, `docs/cross-client-invariants.md`, `docs/architecture.md`, `living-memory/HLD.md`, `docs/glossary.md`
 
@@ -383,7 +368,7 @@ Static analysis cannot settle any of the following. All of it belongs to the bat
 - [ ] Run `flows/league/05-drill-in-back-affordance.yaml` itself.
 
 **Screen library**
-- [ ] Capture the missing `league-summary` **`drill-in`** state (needs a new state in `archive/retired-tooling/mobile/maestro/capture/league-summary.yaml` first). Every "current" frame for #299/#302 is a reconstruction until this exists — and #300 needs it too.
+- [ ] Capture the missing `league-summary` **`drill-in`** state (needs a new state in `mobile/.maestro/capture/league-summary.yaml` first). Every "current" frame for #299/#302 is a reconstruction until this exists — and #300 needs it too.
 
 ---
 

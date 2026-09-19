@@ -1,18 +1,3 @@
-# Status — 207-rookie-draft-detection
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-05",
-  "summary": "#207 — Draft-aware current-year pick labels in rank sets — status",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-05 — `picks.rank_year_labels` flag ON; docs residual recovered per 2026-08-08 branch triage. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #207 — Draft-aware current-year pick labels in rank sets — status
 
 **Status: built (backend, flag `picks.rank_year_labels` ON; zero mobile

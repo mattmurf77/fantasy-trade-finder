@@ -1,12 +1,3 @@
-```project-status
-{
-  "status": "planned",
-  "updated": "",
-  "summary": "Pending Trades Inbox — Plan (2026-08-12)",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: **not built** **not built** — Cross-platform pending-offer inbox (Sleeper/ESPN/MFL) as a third Matches tab. No flag exists.. Prior row preserved at ../reviews/2026/2026-09-06-project-status-migration/plans-index.md."
-}
-```
-
 # Pending Trades Inbox — Plan (2026-08-12)
 
 > Cross-platform pending-trade inbox: pull open offers from **Sleeper, ESPN, and MFL**, let the user **Accept / Decline** what they received and **Revoke** what they sent, surfaced as a third tab on Matches.

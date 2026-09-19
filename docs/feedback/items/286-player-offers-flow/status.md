@@ -1,18 +1,3 @@
-# Status — 286-player-offers-flow
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-09",
-  "summary": "#286 — Balanced upgrade/lateral/downgrade alternates; player-offers flow becomes an editable calc",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-09 — `trades.player_offers_calc` flag ON — CHANGELOG 2026-08-09 (#286/#287/#288). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #286 — Balanced upgrade/lateral/downgrade alternates; player-offers flow becomes an editable calc
 
 **Status:** in-progress · 2026-08-09 · branch `worktree-agent-a481844ff0482699e` · flag `trades.player_offers_calc`

@@ -1,8 +1,8 @@
 """draft-extensions W3 M-D — live offline pick recording.
 
-Plan `docs/plans/archive/2026/draft-extensions/plan.md` §6.5 M-D + the operator's task
+Plan `docs/plans/draft-extensions/plan.md` §6.5 M-D + the operator's task
 brief (2026-08-08, "Build W3 milestone M-D"); LLD §2.6/§3.2/§4.6; the
-delivered M-A/M-C contracts in `docs/plans/archive/2026/draft-extensions/build-w3-ma-mb.md`
+delivered M-A/M-C contracts in `docs/plans/draft-extensions/build-w3-ma-mb.md`
 / `build-w3-mc.md`.
 
 M-A/M-B/M-C shipped ownership assignment; the only thing missing was

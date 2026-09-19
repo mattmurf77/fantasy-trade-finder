@@ -1,18 +1,3 @@
-# Status — 303-calc-send-placement
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-16",
-  "summary": "#303 · #306 · #320 — calculator group (2026-08-16 wave, G1)",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-16 — wave `20b40db`, v1.13.5 b114 — G1 **canonical** (#303/#306/#320). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #303 · #306 · #320 — calculator group (2026-08-16 wave, G1)
 
 **Status:** built · 2026-08-16 · branch `feat/fb303-calc` (worktree `fb303-calc`,

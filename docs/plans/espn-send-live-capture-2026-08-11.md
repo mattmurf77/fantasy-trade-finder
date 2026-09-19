@@ -1,12 +1,3 @@
-```project-status
-{
-  "status": "reference",
-  "updated": "",
-  "summary": "ESPN Send — Live Capture Results (2026-08-11)",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: reference  — Live ESPN trade-write probes that reversed the standing NO-GO. Prior row preserved at ../reviews/2026/2026-09-06-project-status-migration/plans-index.md."
-}
-```
-
 # ESPN Send — Live Capture Results (2026-08-11)
 
 > Probe #1 from [`espn-send-spike-verification-2026-08-11.md`](espn-send-spike-verification-2026-08-11.md), executed against a **real** ESPN dynasty league. Resolves the spike's load-bearing unknown. Companion: [`send-in-espn-research-2026-08-11.md`](send-in-espn-research-2026-08-11.md), decision [`D-026`](../../living-memory/DECISIONS.md).

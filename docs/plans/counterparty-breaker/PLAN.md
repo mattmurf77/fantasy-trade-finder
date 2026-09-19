@@ -29,7 +29,7 @@ sessions — one taxonomy, non-overlapping tables, agreed seams.
 The engine argues exactly one side. The arm-B audit measured it: **96.3% of 1-for-1 cards exist in
 only one direction**, 84.5% of served cards never consult a partner board, and on the consensus
 path the viewer receives more than they give on 86.3% of cards
-([docs/reviews/2026/2026-08-19-armb-audit-consolidated.md](../../reviews/2026/2026-08-19-armb-audit-consolidated.md)).
+([docs/reviews/2026-08-19-armb-audit-consolidated.md](../../reviews/2026-08-19-armb-audit-consolidated.md)).
 Meanwhile `deck_outcomes.action = 'propose'` has fired **zero times ever** — no suggested trade has
 been sent through the app ([trade-engine-accuracy/PLAN.md](../trade-engine-accuracy/PLAN.md) §G1).
 
@@ -263,7 +263,7 @@ design or measurement may create or consume ghost impressions.
   **Pending ship the breaker build must absorb (2026-08-21, operator-approved, branch
   `fix/package-benchmark-sweetener`, merge held for the Monday window boundary):** (a) the
   package depth discount re-benchmarks to the TRADE'S best asset (the "4-mids-for-a-stud
-  scored fair" defect — `docs/reviews/2026/2026-08-21-market-curve-comparison.md`) — the breaker's
+  scored fair" defect — `docs/reviews/2026-08-21-market-curve-comparison.md`) — the breaker's
   `value_giving` math reads package-adjusted values, so its severities inherit this semantics
   change; calibration windows censor at that ship, and the LLD's severity formulas must be
   read as post-fix semantics; (b) a generation-time **auto-sweetener** adds an equalizer asset

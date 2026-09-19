@@ -1,15 +1,11 @@
 #!/usr/bin/env bash
 # testid-lint.sh — flow ↔ source cross-check + banned-pattern lint.
-# docs/plans/archive/2026/mobile-testing/lld.md §2.6
-# Exit: 0 ok · 1 flows reference IDs missing from mobile/src · 2 banned patterns / missing required archive
+# docs/plans/mobile-testing/lld.md §2.6
+# Exit: 0 ok · 1 flows reference IDs missing from mobile/src · 2 banned patterns
 set -uo pipefail
 MOBILE="$(cd "$(dirname "$0")/.." && pwd)"
-FLOWS="$MOBILE/../archive/retired-tooling/mobile/maestro"
-[[ -d "$FLOWS" ]] || { echo "testid-lint: required historical flow archive missing: $FLOWS" >&2; exit 2; }
-if ! find "$FLOWS" -name '*.yaml' -type f -print -quit | grep -q .; then
-  echo "testid-lint: required historical flow archive contains no YAML: $FLOWS" >&2
-  exit 2
-fi
+FLOWS="$MOBILE/.maestro"
+[[ -d "$FLOWS" ]] || { echo "testid-lint: no flows yet ($FLOWS absent) — OK"; exit 0; }
 
 status=0
 

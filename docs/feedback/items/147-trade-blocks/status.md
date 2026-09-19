@@ -1,18 +1,3 @@
-# Status — 147-trade-blocks
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-07-17",
-  "summary": "#147 — Import trade blocks from Sleeper as a trade-engine data point",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-17/18 — trade-engine-v2. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #147 — Import trade blocks from Sleeper as a trade-engine data point
 
 **Owner report:** "Import trade blocks from Sleeper as another data point for

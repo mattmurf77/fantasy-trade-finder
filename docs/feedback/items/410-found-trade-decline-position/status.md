@@ -1,18 +1,3 @@
-# Status — 410-found-trade-decline-position
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-30",
-  "summary": "FB-410 — decline position on found trades",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-30 — **canonical** of the 2026-08-30b batch (#409–#412) — D-169 bare-✕ decline cell; PR #254, v1.16.13 build 142; 14-step TestFlight checklist owed. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # FB-410 — decline position on found trades
 
 **Status:** planned · 2026-08-30 · `claude/fb-410-412-trade-card-polish`

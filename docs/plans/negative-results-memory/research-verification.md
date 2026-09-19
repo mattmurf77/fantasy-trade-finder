@@ -417,7 +417,7 @@ The engine already models every league-mate, installed or not:
 | Pass-reason "Neither" share, first burst | 47% | database.py:898-900 |
 | Comparisons with both sides pinned | 67.8% of 4,013 | DECISIONS D-069 Context |
 | G6 presentment kill rate | 18.4% | DECISIONS D-067 Consequences |
-| Contaminated window | 2026-08-16 → 08-19 (42.4% of one audit's 8,617 rows) | D-091; docs/reviews/2026/2026-08-19-armb-audit-claim-7.md:303 |
+| Contaminated window | 2026-08-16 → 08-19 (42.4% of one audit's 8,617 rows) | D-091; docs/reviews/2026-08-19-armb-audit-claim-7.md:303 |
 
 Implication: per-(partner × shape × reason) cells will be nearly all empty at today's volume —
 empirical-Bayes shrinkage toward pooled priors (exactly the gen_v2 form) is not optional.

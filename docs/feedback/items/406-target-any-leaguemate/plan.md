@@ -35,4 +35,4 @@ file ownership must be checked for overlap before parallel build (if both need
 
 Both merged in PR [#250](https://github.com/mattmurf77/fantasy-trade-finder/pull/250) → `main` @ `287aed09`; EAS build **140** (v1.16.12) submitted to TestFlight — build 139 errored on an EAS-side archive-upload failure and was retried. Statuses `fixed`.
 Status corrections applied this run: #402/#403 → `fixed` (shipped 1.16.9–1.16.11, never flipped).
-Evidence: [TEST_LEDGER 2026-08-30](../../../../living-memory/TEST_LEDGER.md) · QA reports in both item folders.
+Evidence: [TEST_LEDGER 2026-08-30](../../../living-memory/TEST_LEDGER.md) · QA reports in both item folders.

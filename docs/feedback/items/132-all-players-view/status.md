@@ -1,18 +1,3 @@
-# Status — 132-all-players-view
-
-```project-status
-{
-  "status": "in-progress",
-  "updated": "2026-07-17",
-  "summary": "#132 — Tiers \"All players\" view + cross-position trios (and the #62 verdict)",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: in-progress 2026-07-17 — trade-engine-v2. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #132 — Tiers "All players" view + cross-position trios (and the #62 verdict)
 
 **Covered feedback IDs:** #132 (feature), #62 (deferred swipe-gesture verdict — recorded here per the batch grouping).
@@ -127,7 +112,7 @@ revisit only if the drag library is ever replaced.
 - `mobile/src/utils/tierBands.ts` — additive `autoBucketMixed`.
 - `mobile/src/screens/TiersScreen.tsx` — All tab + routing (list/view
   regions only; copy-from-format region untouched).
-- `archive/retired-tooling/mobile/maestro/flows/tiers-all-board.yaml` — new feature flow.
+- `mobile/.maestro/flows/tiers-all-board.yaml` — new feature flow.
 - Docs: `docs/config-reference.md` (knob), `docs/glossary.md`
   (cross-position trio / All board), `mobile/src/components/CLAUDE.md`
   (testID registry: `tiers.pos-tab.all`).
@@ -158,7 +143,7 @@ Done this session:
 
 ### Manual checks for the batch QA round (must-run)
 
-A ready-made flow exists: `archive/retired-tooling/mobile/maestro/flows/tiers-all-board.yaml`
+A ready-made flow exists: `mobile/.maestro/flows/tiers-all-board.yaml`
 (standard profile; drag via the 06-flow slow-swipe technique).
 
 1. **All view render** — Tiers → tap `tiers.pos-tab.all`: merged board

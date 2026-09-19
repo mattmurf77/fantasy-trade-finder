@@ -1,18 +1,3 @@
-# Status — 428-sleeper-pick-send-refused
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-09-08",
-  "summary": "FB-428 — Sleeper refuses spent/out-of-window pick classes before provider sends",
-  "evidence": "The latest phase-log entry explicitly records shipment, superseding the earlier planned header. PR #292 / 1371d2e5 merged; ../../../recovery/2026-09-08-feedback-batch-422-428.md verifies Render LIVE at September 9 00:03:58 UTC (September 8 local), production smoke and preserved release tree. iOS 1.17.3 (155) uploaded through submission 2742bdd6; feedback DB set fixed. The physical-device checklist remains unrun; uploaded is not a claim of tester installation. G-428; D-189 and round-2 reviews preserve shape-blind completed-draft exclusion and bounded tradability validation. This follows the distinct PR #270 encoding fix in #413; no startup-league live capture is claimed."
-}
-```
-
-## Historical phase and release notes
-
-The current disposition is the status record above. Earlier planned/build wording below is retained as dated history.
-
 # FB-428 — Sleeper refuses draft-pick sends
 
 - **Status:** planned 2026-09-08 (operator selection; fast-track bug path)

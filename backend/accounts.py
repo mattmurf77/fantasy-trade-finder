@@ -1,7 +1,7 @@
 """
 accounts.py — identity-provider anchors + account lifecycle (account-auth P2).
 
-Implements the identity layer from docs/plans/archive/2026/account-auth-plan-2026-07-11.md
+Implements the identity layer from docs/plans/account-auth-plan-2026-07-11.md
 §3-P2 on top of the app's working key (`sleeper_user_id`):
 
   * Apple / Google identity-token verification against the provider JWKS

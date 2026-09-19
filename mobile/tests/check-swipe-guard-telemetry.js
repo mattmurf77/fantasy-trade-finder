@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // `swipe_guard_blocked` structural test.
 // Tracking plan: docs/business/analytics/2026-08-18-swipe-guard-blocked.md
-// Origin: docs/reviews/2026/2026-08-18-bug-sweep/ticket.md §B4 · D-068 · G-049
+// Origin: docs/reviews/2026-08-18-bug-sweep/ticket.md §B4 · D-068 · G-049
 //
 // WHY THIS EXISTS. On 2026-08-18 a poisoned double-fire guard trapped a user
 // on one trade card: every ✕/✓/swipe hit a bare `return` in `advance()`. It

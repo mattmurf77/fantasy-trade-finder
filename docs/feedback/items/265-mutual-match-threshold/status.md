@@ -1,18 +1,3 @@
-# Status — 265-mutual-match-threshold
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-08",
-  "summary": "#265 — Mutual-match member threshold off by one on League home",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-08 — `leagueUnlocks.ts` threshold=1 — CHANGELOG + TEST_LEDGER 2026-08-08 wave. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #265 — Mutual-match member threshold off by one on League home
 
 **Status:** built · 2026-08-08 · branch `worktree-agent-a5c5a806d0d32845e`

@@ -1,18 +1,3 @@
-# Status — 359-team-review-link
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-19",
-  "summary": "Status — #359 (\"wtf do I do next with this team\")",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-19 — canonical `357-team-review/`. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # Status — #359 ("wtf do I do next with this team")
 
 **Status:** `planned` — planned as part of the Team Review group.

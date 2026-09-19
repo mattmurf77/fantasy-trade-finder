@@ -1,4 +1,4 @@
-"""Manual Trade Calculator endpoints (docs/plans/archive/2026/manual-trade-calculator-plan.md).
+"""Manual Trade Calculator endpoints (docs/plans/manual-trade-calculator-plan.md).
 
 Pins the open consensus seam: POST /api/trade/evaluate and
 GET /api/trade/values run over an injected universal pool, reuse the

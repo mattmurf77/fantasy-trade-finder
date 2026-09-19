@@ -25,8 +25,8 @@
 
 ## 3. Test scope (mobile test platform)
 
-- [x] **New flow:** `archive/retired-tooling/mobile/maestro/flows/matches-awaiting-dismiss.yaml` (tags `[matches, dismiss]`) — M-2 500-injection rollback assert (ordered first: `standard` seeds one awaiting row), M-1 happy dismiss + undo toast, M-3 empty state. **Depends on `wave-backend`'s route — authored + lint-clean, first run at the wave's pre-ship sim gate.**
-- [x] **Extended flow:** `archive/retired-tooling/mobile/maestro/capture/matches.yaml` — mutual expand → `Dynasty value swing` assert → `matches__value-expanded`; open-in-calc → `calc.find-a-trade`; awaiting expand assert + capture; launch-2 evaluate 500 injection → `Could not value this trade.` → `matches__value-error`.
+- [x] **New flow:** `mobile/.maestro/flows/matches-awaiting-dismiss.yaml` (tags `[matches, dismiss]`) — M-2 500-injection rollback assert (ordered first: `standard` seeds one awaiting row), M-1 happy dismiss + undo toast, M-3 empty state. **Depends on `wave-backend`'s route — authored + lint-clean, first run at the wave's pre-ship sim gate.**
+- [x] **Extended flow:** `mobile/.maestro/capture/matches.yaml` — mutual expand → `Dynasty value swing` assert → `matches__value-expanded`; open-in-calc → `calc.find-a-trade`; awaiting expand assert + capture; launch-2 evaluate 500 injection → `Could not value this trade.` → `matches__value-error`.
 - `testID`s added: `matches.value-details`, `matches.open-in-calc`, `matches.awaiting-dismiss`, `matches.league-chip.all` / `matches.league-chip.<league_id>` (frozen #307 grammar; template-literal → `scripts/testid-lint-allow.txt` entry). `testid-lint.sh` passes (output in the status file).
 - **Capture delta:** `matches` (new value-expanded / awaiting-value-expanded / value-error variants) — rerun `screen-capture.sh --screen matches` at ship.
 - Smoke-suite impact: `08-matches.yaml` crosses this surface — no id it references changed; collapsed-by-default disclosure keeps the populated screen's existing anchors valid. To re-verify at the sim gate.
@@ -43,7 +43,7 @@
 | `living-memory/HLD.md` | n/a | no architecture shift. |
 | `docs/cross-client-invariants.md` | n/a | bar semantics unchanged; no new enum/threshold; web parity is a separate item if the operator wants it. |
 | `docs/glossary.md` | n/a | no new term ("Dynasty value swing" already defined). |
-| `docs/plans/archive/2026/mobile-testing/lld.md` Appendix A (Matches row) | **proposed text in the status file** — shared doc, deliberately not edited on this branch to avoid cross-wave merge conflicts; orchestrator applies at merge. | adds `matches.value-details` `matches.open-in-calc` `matches.awaiting-dismiss` `matches.league-chip.<league_id\|all>`. |
+| `docs/plans/mobile-testing/lld.md` Appendix A (Matches row) | **proposed text in the status file** — shared doc, deliberately not edited on this branch to avoid cross-wave merge conflicts; orchestrator applies at merge. | adds `matches.value-details` `matches.open-in-calc` `matches.awaiting-dismiss` `matches.league-chip.<league_id\|all>`. |
 | `mobile/src/components/CLAUDE.md` / `mobile/src/screens/CLAUDE.md` | **proposed text in the status file** — same shared-doc reasoning. | `MatchValueSection` row; `TradeCard` footer amendment; `MatchesScreen` amendment. |
 | ADR / `DECISIONS.md` | n/a | C-7 rationale recorded here + status file; the wave-level ship session logs living-memory (per the wave protocol). |
 

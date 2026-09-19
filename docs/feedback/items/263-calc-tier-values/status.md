@@ -1,18 +1,3 @@
-# Status — 263-calc-tier-values
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-08",
-  "summary": "#263 — Trade calculator: pick-tier labels instead of raw values",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-08 — n/a — additive `tier` on `/api/trade/values`; later superseded by #303/D-065. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # #263 — Trade calculator: pick-tier labels instead of raw values
 
 > Status doc for the operator polish request: "Update the value next to all

@@ -1,18 +1,3 @@
-# Status — api-observability
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-08-09",
-  "summary": "API observability — status",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-09 — `obs.api_events` flag ON — operator-directed program, no feedback id. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # API observability — status
 
 > Operator-directed program (no feedback item number): "Any external API call

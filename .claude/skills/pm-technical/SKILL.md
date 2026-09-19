@@ -27,7 +27,7 @@ recommend priority; Matt decides.
    on/off, `docs/architecture.md` and `docs/api-reference.md` for what exists,
    `mobile/tests/README.md` for existing automated coverage (the `check-*.js` structural
    guards — [D-056](../../../living-memory/DECISIONS.md) retired Maestro, so
-   `archive/retired-tooling/mobile/maestro/` is history, not coverage), `docs/glossary.md` for terms.
+   `mobile/.maestro/` is history, not coverage), `docs/glossary.md` for terms.
 
 ## What you own
 

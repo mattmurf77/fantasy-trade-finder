@@ -4,7 +4,7 @@
 **Binding order (later wins):** [PRD.md](PRD.md) → [PLAN-v2.md](PLAN-v2.md) (R-1..R-12) →
 [HLD.md](HLD.md) (F-1..F-9) → [LLD.md](LLD.md) (§8 rulings R-a..R-j; the closest binding
 layer — build to it, this file only indexes it). Review C1–C7/T1–T4:
-[../../reviews/2026/2026-08-20-fit-challenger-review.md](../../reviews/2026/2026-08-20-fit-challenger-review.md).
+[../../reviews/2026-08-20-fit-challenger-review.md](../../reviews/2026-08-20-fit-challenger-review.md).
 Full gates, no express (PLAN-v2 §6). Scope blocks: [scope.md](scope.md) + the two owed skeletons (LLD §7).
 
 ## 1. What ships, one paragraph

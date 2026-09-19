@@ -1,7 +1,7 @@
 """Board-override pins — F1 (comparison exclusion) + F2 (unpin on newer vote).
 
 Phase 0 of docs/plans/three-model-bakeoff/PLAN.md, fixing the defect diagnosed
-in docs/reviews/2026/2026-08-18-valuation-age-audit.md §3.4 / §5.1:
+in docs/reviews/2026-08-18-valuation-age-audit.md §3.4 / §5.1:
 
   * `_compute_elo` seeds an override-pinned player from the override and skips
     every rating update, so their Elo cannot move from voting.

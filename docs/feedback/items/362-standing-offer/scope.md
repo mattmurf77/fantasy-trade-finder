@@ -128,7 +128,7 @@ convention the `:449-487` banner block follows.
 ## 3. Evidence scope
 
 **D-056 posture: NO Maestro, NO simulator, NO `screens/` captures.** Existing
-`archive/retired-tooling/mobile/maestro/` flows are historical artifacts; none is authored or run for this item.
+`mobile/.maestro/` flows are historical artifacts; none is authored or run for this item.
 `screens/` stays frozen at 2026-08-11.
 
 - [x] **Structural guard:** `mobile/tests/check-standing-offer-362.js` — dependency-free

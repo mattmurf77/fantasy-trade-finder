@@ -1,18 +1,3 @@
-# Status — 2026-07-26-asset-trade-ideas
-
-```project-status
-{
-  "status": "shipped",
-  "updated": "2026-07-26",
-  "summary": "Asset-centric Upgrade / Lateral / Downgrade ideas — status",
-  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-26 — teardown-remediation / `trade.asset_ideas` ON. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
-}
-```
-
-## Historical notes
-
-The material below is retained evidence. Its former status wording does not override the record above.
-
 # Asset-centric Upgrade / Lateral / Downgrade ideas — status
 
 **Status: built (backend engine + route + mobile grouped panel)** · 2026-07-26 · branch `teardown-remediation` worktree · flag `trade.asset_ideas` (default **ON**)
