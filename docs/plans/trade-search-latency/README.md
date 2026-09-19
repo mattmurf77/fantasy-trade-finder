@@ -56,7 +56,14 @@ Profiled component times on the same machine:
 | Compact diagnostics | 5.20 s | 1.92 s |
 | Total measured CPU stages | 23.55 s | 9.97 s |
 
-Profiler overhead is included. Database writes, complete final-policy/annotation work, transport and mobile rendering are excluded. Separately, fixed-hash-seed baseline/current runs produced identical SHA-256 digests for all ordered owner decisions and all original expanded feature payloads. The 48.18 MB pre-compaction payload is unchanged; packing representation can differ while decoding identically.
+A final unprofiled sequential comparison (fixed `PYTHONHASHSEED=0`, after the
+full suite finished) measured generation **5.291→3.523s**, owner revalidation
+**0.929→0.714s**, row assembly **1.343→0.817s**, and compaction
+**3.609→1.628s**: **11.172→6.682s combined, about 40% less elapsed time**.
+Both decision and expanded-evidence digests matched. These are local component
+timings, not a full request benchmark or a production/device promise.
+
+Profiler overhead is included in the preceding table. Database writes, complete final-policy/annotation work, transport and mobile rendering are excluded. Separately, fixed-hash-seed baseline/current runs produced identical SHA-256 digests for all ordered owner decisions and all original expanded feature payloads. The 48.18 MB pre-compaction payload is unchanged; packing representation can differ while decoding identically.
 
 Focused owner generation/route suites: 111 passed before the added projection assertion; the owner-only suite then passed all 28 tests with that assertion. New latency and diagnostic suites: 15 passed. Full backend suite: **6,068 passed / 1 skipped in 353.53 seconds** (Python 3.14). Web structure and session-memory checks passed. Device and production-after-change latency are unexecuted.
 
