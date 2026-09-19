@@ -1,3 +1,18 @@
+# Status — 217-quickset-back-btn
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-01",
+  "summary": "FB-217 — Quick Set's back button is redundant with \"More ways to rank\"",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-01 — `572f5aa` — CHANGELOG 2026-08-01. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # FB-217 — Quick Set's back button is redundant with "More ways to rank"
 
 - **Type:** bug · **Status:** fixed 2026-08-01 (branch

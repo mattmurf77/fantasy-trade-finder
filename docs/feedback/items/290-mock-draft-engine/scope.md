@@ -133,11 +133,11 @@ specced.
 **(a) `config/features.json:155`** — the `_comment_draft_extensions` string. Two
 false claims. Replace:
 
-> `draft.mock gates the four /api/mock-draft routes and the mobile mock surface; effective gating is draft.room AND draft.mock, and it is independent of draft.live_poll (the mock never polls), draft.mfl and picks.slot_values.` ~~`It stays OFF beyond the usual lands-dark convention: W2's calibration gate FAILED (docs/plans/draft-extensions/mock-calibration-2026-08.md), so the plan's W2 abort criterion cut the CPU-bot mock. With the flag ON the create route answers the typed-empty {empty:true, reason:'cpu_model_unvalidated'} instead of serving bots whose noise model failed hold-out validation.`~~
+> `draft.mock gates the four /api/mock-draft routes and the mobile mock surface; effective gating is draft.room AND draft.mock, and it is independent of draft.live_poll (the mock never polls), draft.mfl and picks.slot_values.` ~~`It stays OFF beyond the usual lands-dark convention: W2's calibration gate FAILED (docs/plans/archive/2026/draft-extensions/mock-calibration-2026-08.md), so the plan's W2 abort criterion cut the CPU-bot mock. With the flag ON the create route answers the typed-empty {empty:true, reason:'cpu_model_unvalidated'} instead of serving bots whose noise model failed hold-out validation.`~~
 
 with:
 
-> `draft.mock gates the four /api/mock-draft routes and the mobile mock surface; effective gating is draft.room AND draft.mock, and it is independent of draft.live_poll (the mock never polls), draft.mfl and picks.slot_values. IT IS ON. It shipped ON on 2026-08-08 (6caca35) by explicit operator override, NOT by the calibration gate passing: mock_draft_service.CPU_MODEL_VALIDATED was flipped True after the operator specified CPU reach behaviour directly as a product rule (W2e round-tiered caps, R1 3/3 - R2 5/2 - R3+ 15/5) and declined further validation. The statistical verdict in docs/plans/draft-extensions/mock-calibration-2026-08d.md is STILL FAILED and test_w2_16_calibration_gate pins that independently, so the two facts stay visible together. Turning this flag off is the kill switch for the CPU-bot mock.`
+> `draft.mock gates the four /api/mock-draft routes and the mobile mock surface; effective gating is draft.room AND draft.mock, and it is independent of draft.live_poll (the mock never polls), draft.mfl and picks.slot_values. IT IS ON. It shipped ON on 2026-08-08 (6caca35) by explicit operator override, NOT by the calibration gate passing: mock_draft_service.CPU_MODEL_VALIDATED was flipped True after the operator specified CPU reach behaviour directly as a product rule (W2e round-tiered caps, R1 3/3 - R2 5/2 - R3+ 15/5) and declined further validation. The statistical verdict in docs/plans/archive/2026/draft-extensions/mock-calibration-2026-08d.md is STILL FAILED and test_w2_16_calibration_gate pins that independently, so the two facts stay visible together. Turning this flag off is the kill switch for the CPU-bot mock.`
 
 **(b) `docs/config-reference.md:309`** — the `draft.mock` flag row. Its default
 column reads `false` and its body asserts the flag "stays OFF" and
@@ -170,7 +170,7 @@ locations total**, not the plan's two.
 
 ## 3. Test scope (mobile test platform)
 
-- [x] **New flow:** `mobile/.maestro/flows/rookie/d3-mock-draft-loop.yaml` —
+- [x] **New flow:** `archive/retired-tooling/mobile/maestro/flows/rookie/d3-mock-draft-loop.yaml` —
   the repo's **first** mock flow. Covers: entering Mock mode; creating a mock;
   **#291's acceptance** (`assertVisible: "Tap to draft"` on the board *before* any
   row tap); making a user pick through the confirm bar; reaching the recap; and
@@ -199,7 +199,7 @@ locations total**, not the plan's two.
      T-290-01…T-290-11, eleven backend tests, two of them failing-first.
   3. **D-16.** *Reason:* the harness is Sleeper-fixture-driven and has **zero**
      MFL references in `backend/test_users.py`, `backend/test_support.py`, `qa/`
-     or `mobile/.maestro/*.yaml`; MFL's only test seam is a pytest monkeypatch
+     or `archive/retired-tooling/mobile/maestro/*.yaml`; MFL's only test seam is a pytest monkeypatch
      Maestro cannot reach. Substituted coverage: T-290-12 / T-290-13, plus a
      recorded observation of the **Mock Draft** screen's owner names during G1's
      live-league QA pass on Dependables (62846) — same session, one extra
@@ -248,7 +248,7 @@ locations total**, not the plan's two.
 | `living-memory/HLD.md` | **n/a** | No new module, no new client, no new major flow. This is a change to a model's internals inside an existing module; the convention half lands in `LLD.md`. |
 | `docs/cross-client-invariants.md` | **YES, one sentence** | The closing note under § Tier colors already quarantines three engine-internal lookalikes (`web/css`'s 4-level set, `tier_depth`, `tier_mult_*`) as **NOT** the tier enum. A run is a fourth and gets a clause: *"Likewise `mock_draft_service`'s gap-derived **run** — a locally-significant value drop used to bound a CPU drafter's reach — is an engine-internal cluster, not a tier: it is computed per pick, never persisted, never sent to a client, and carries no key, colour or label."* Orchestrator-owned. |
 | `docs/glossary.md` | **YES, one new term + two corrections** | **New — "Run (draft)":** *"A gap-derived cluster of adjacent players on the mock draft's consensus board (`mock_draft_service.run_offset`, draft-extensions W2f). A boundary is cut where a value drop is at least 2.5× the median gap in a 9-gap local window — adaptive rather than a fixed Elo threshold, because the value curve flattens in the tail. On the 2026 board this yields a median run of 5 players with no size clamp. A CPU drafter may not reach past its run's boundary in rounds 1-2 and may cross exactly one from round 3, composed with the W2e round cap through `min()` so the operator's policy is only ever tightened. **Not a tier band** — engine-internal, per-pick, never persisted or sent to a client."* **Corrections:** `:30` (Mock draft) and `:42` (Calibration gate) both still say `CPU_MODEL_VALIDATED` is `False` / the CPU half is "cut" — stale since `6caca35`. Orchestrator-owned. |
-| ADR / `DECISIONS.md` | **DECISIONS.md entry, no ADR** | *Judgement, stated so it can be challenged.* An ADR is for a non-obvious **architectural** choice; this is a bounded change to one model's internals inside an existing module, with no new module, boundary, storage or contract — the same class as W2b's mixture re-spec and W2e's reach policy, **neither of which took an ADR** (both are recorded in `docs/plans/draft-extensions/`). What *is* worth a durable record is the reusable decision: **an engine-internal cluster must never be expressed through the cross-client tier enum**, which is the second time that call has been made (#279 was the first). One `DECISIONS.md` entry (next id = `max + 1`, grep first), cross-linking [`hld-delta.md` §3](./hld-delta.md#3-new-engine-notion-the-run). If the operator or the reviewing Planner wants an ADR instead, it is cheap to add and the argument is already written. |
+| ADR / `DECISIONS.md` | **DECISIONS.md entry, no ADR** | *Judgement, stated so it can be challenged.* An ADR is for a non-obvious **architectural** choice; this is a bounded change to one model's internals inside an existing module, with no new module, boundary, storage or contract — the same class as W2b's mixture re-spec and W2e's reach policy, **neither of which took an ADR** (both are recorded in `docs/plans/archive/2026/draft-extensions/`). What *is* worth a durable record is the reusable decision: **an engine-internal cluster must never be expressed through the cross-client tier enum**, which is the second time that call has been made (#279 was the first). One `DECISIONS.md` entry (next id = `max + 1`, grep first), cross-linking [`hld-delta.md` §3](./hld-delta.md#3-new-engine-notion-the-run). If the operator or the reviewing Planner wants an ADR instead, it is cheap to add and the argument is already written. |
 
 ---
 

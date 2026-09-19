@@ -1,3 +1,18 @@
+# Status — 267-pick-grid-live-totals
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-08",
+  "summary": "#268/#267 — PickAssignmentScreen: saves 405ing + stale derived counts",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-08 — n/a — covers #268/#267 (2026-08-08 wave). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #268/#267 — PickAssignmentScreen: saves 405ing + stale derived counts
 
 **Covered feedback IDs:** #268, #267 (multi-ID fix, filed under the lower id

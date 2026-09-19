@@ -86,7 +86,7 @@ codifying them is a P1-2 deliverable once a harness exists to hold them.
 |---|---|
 | `web/CLAUDE.md` | **updated** — added `contact.html` + `404.html`; corrected 4 rows that overstated what ships (`ranking-method`, `player`, `profile`, `league-rankings` were all listed as plain "yes") |
 | `docs/api-reference.md` | **updated** — 404 content-type contract |
-| `docs/reviews/2026-08-19-web-parity-audit.md` | the evidence base |
+| `docs/reviews/2026/2026-08-19-web-parity-audit.md` | the evidence base |
 | `docs/plans/README.md` | row added |
 | `docs/data-dictionary.md` | n/a — no schema change |
 | `docs/config-reference.md` | n/a — no flag or env change |

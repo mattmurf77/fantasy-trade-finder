@@ -20,7 +20,7 @@ Today `package_adj_gamma`'s discount benchmarks each package piece against the w
 With the shapes fixed, re-fit `crown_rate` (start ~0.08/elite piece) and gamma so the matrix replay lands within **±15pp of the competitor median on ≥4/6 trades** — the acceptance gate. Constants live in `model_config` per docs/config-reference.md conventions; no hardcoding.
 
 ## Validation gate (before any ship)
-1. Replay T1–T6 (both formats) via the feedback-workspace/214/run_matrix.py harness; acceptance as above, with T1 specifically required to move to "package favored" in SF (market: +56.6%).
+1. Replay T1–T6 (both formats) via the docs/feedback/items/214-stud-tax/evidence/scripts/run_matrix.py harness; acceptance as above, with T1 specifically required to move to "package favored" in SF (market: +56.6%).
 2. Full backend test suite green; engine tests that pin current adjustment values updated deliberately, not loosened.
 3. Deck sanity replay: generate decks for the operator's league before/after and diff — the change must not flood decks with stud-for-package offers (the fairness gates still bind).
 

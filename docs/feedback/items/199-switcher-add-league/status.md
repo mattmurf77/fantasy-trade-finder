@@ -1,3 +1,18 @@
+# Status — 199-switcher-add-league
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-07-27",
+  "summary": "#199 — Add-a-league option in the league switcher (polish)",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-27 — `6f2ac95` — CHANGELOG 2026-07-27 (#196/#199/#201). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #199 — Add-a-league option in the league switcher (polish)
 
 **Status:** fixed (2026-07-27, branch `teardown-remediation`, worktree agent batch).

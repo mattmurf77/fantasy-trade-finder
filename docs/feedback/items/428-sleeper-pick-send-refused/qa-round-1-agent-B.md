@@ -116,7 +116,7 @@ Non-findings worth recording (checked, no defect): the `season_window` `None` br
 
 ## TestFlight checklist (operator-run) — FFV3 (Sleeper `1312140920132497408`, 2026 draft complete 2026-08-26), build 1.17.2 (154) or later, after the Render deploy of `26ab3147`
 
-Pre-flight (not TestFlight): 
+Pre-flight (not TestFlight):
 0. Read-only prod: `SELECT season, COUNT(*) FROM draft_picks WHERE league_id='1312140920132497408' GROUP BY season;` — record the result in TEST_LEDGER. 2026 rows present ⇒ root cause confirmed. (BLOCKED for QA agents: no prod access.)
 
 1. **Force-quit and reopen Fleeced → land on Trades home with FFV3 selected** (this runs `session/init`, whose daemon pass runs the owned-pick sync). Render log for that init should show either `owned-pick sync for 1312140920132497408: excluding [2026] — Sleeper reports the draft complete` or, if `/drafts` flaked, `… drafts read empty — excluding 2026 on the cached drafted/… verdict (D-189)`. Expect one of the two lines; a sync with neither line and 144 picks means both signals were absent — re-open once more.

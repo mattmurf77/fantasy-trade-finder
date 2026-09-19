@@ -15,7 +15,7 @@
 4. **✓ and ✕ on the pushed deck behave exactly like the classic deck:** ✓ records the like via the existing swipe path and advances with the success toast; ✕ runs the existing decline-reasons capture and advances. The user stays in the deck until backing out; end-of-deck shows the classic exits/tally including "Back to calculator" (which pops to the landing).
 5. **Ship LIT for all users in the same build.** The operator **explicitly overrode the dark-flag recommendation** (ruling 5b): `calc.results_push` exists as a kill switch but ships default TRUE.
 
-This change also closes gap-analysis items **C1, C4, C10** ([2026-08-31 gap analysis](../../reviews/2026-08-31-find-a-trade-gap-analysis.md)): restoring `TradeCard` as the results surface restores the likes-you "They're interested" pill (C1 — the P0), the `trade_card_viewed` session-definition analytics (C4), and the end-of-deck tally + "See liked" exits (C10).
+This change also closes gap-analysis items **C1, C4, C10** ([2026-08-31 gap analysis](../../reviews/2026/2026-08-31-find-a-trade-gap-analysis.md)): restoring `TradeCard` as the results surface restores the likes-you "They're interested" pill (C1 — the P0), the `trade_card_viewed` session-definition analytics (C4), and the end-of-deck tally + "See liked" exits (C10).
 
 ## 1. Analytics scope
 

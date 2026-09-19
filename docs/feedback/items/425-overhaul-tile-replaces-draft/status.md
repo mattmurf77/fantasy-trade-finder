@@ -1,4 +1,19 @@
-# FB- — 
+# Status — 425-overhaul-tile-replaces-draft
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-09-08",
+  "summary": "FB-425 — Team overhaul hero replaces Draft entry; canonical for #425/#426",
+  "evidence": "The latest phase-log entry explicitly records shipment, superseding the earlier planned header. PR #292 / 1371d2e5 merged; ../../../recovery/2026-09-08-feedback-batch-422-428.md verifies Render LIVE at September 9 00:03:58 UTC (September 8 local), production smoke and preserved release tree. iOS 1.17.3 (155) uploaded through submission 2742bdd6; feedback DB set fixed. The physical-device checklist remains unrun; uploaded is not a claim of tester installation. G-425 canonical for #426. The hero remains ice; a red design-system token is a separate unresolved decision. See prd.md, reconciliation-log.md and build-report.md."
+}
+```
+
+## Historical phase and release notes
+
+The current disposition is the status record above. Earlier planned/build wording below is retained as dated history.
+
+# FB- —
 
 - **Status:** planned 2026-09-08 (operator selection; polish path)
 - **Group:**  — batch plan [422-win-now-ffv3-unavailable/plan.md](../422-win-now-ffv3-unavailable/plan.md)

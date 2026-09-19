@@ -1,3 +1,18 @@
+# Status — 127-player-position-dup
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-07-12",
+  "summary": "#127 — Kenneth Walker listed as a WR (duplicate, wrong position) — status",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-12 — FB-127 position-strict DP↔Sleeper join `2b5e07a` — CHANGELOG 2026-07-12. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #127 — Kenneth Walker listed as a WR (duplicate, wrong position) — status
 
 **State:** built + regression-tested (2026-07-12, branch `trade-engine-v2`). Awaiting QA/ship.

@@ -16,7 +16,7 @@ Pick sends (#413): every `_sleeper_get` stub here is a single `return_value`
 `server._fetch_sleeper_traded_picks` (the holder overlay) DIRECTLY, and the
 route must reach neither on a pick-free send (T-10 pins that).
 
-Account-auth P1 contract (docs/plans/account-auth-plan-2026-07-11.md):
+Account-auth P1 contract (docs/plans/archive/2026/account-auth-plan-2026-07-11.md):
 POST /api/sleeper/link requires the token claim to match the session user
 (so USER == SLEEPER_UID here) and marks the session verified on oracle
 success; POST /api/trades/propose is hard-gated on that verified state.

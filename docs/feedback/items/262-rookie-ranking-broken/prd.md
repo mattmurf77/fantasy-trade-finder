@@ -134,7 +134,7 @@ coverage.
 
 ## 6. Maestro regression flow (for the batch QA round)
 
-`mobile/.maestro/rookie-ranks-reorder.yaml` — runtime verification is owned by
+`archive/retired-tooling/mobile/maestro/rookie-ranks-reorder.yaml` — runtime verification is owned by
 the batch QA round, not by this agent.
 
 ```yaml

@@ -1,3 +1,18 @@
+# Status — 145-ktc-blend
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-07-18",
+  "summary": "#145 — Blend KeepTradeCut into the baseline consensus — status",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-18 — FB-145 KTC blend `ktc_blend_weight=0.5` — CHANGELOG 2026-07-18, v1.9.0. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #145 — Blend KeepTradeCut into the baseline consensus — status
 
 **State:** built + tested (2026-07-17, branch `trade-engine-v2`). Source-layer

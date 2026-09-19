@@ -1,7 +1,7 @@
 # Feature Scope — Phase 0: unblock the ranking boards (override pins + forced regeneration)
 
 **Date:** 2026-08-18
-**Entry point:** [PLAN.md](PLAN.md) Phase 0, driven by [docs/reviews/2026-08-18-valuation-age-audit.md](../../reviews/2026-08-18-valuation-age-audit.md) §8 F1/F2. Fix 3 folded in mid-flow by operator decision (see §7).
+**Entry point:** [PLAN.md](PLAN.md) Phase 0, driven by [docs/reviews/2026/2026-08-18-valuation-age-audit.md](../../reviews/2026/2026-08-18-valuation-age-audit.md) §8 F1/F2. Fix 3 folded in mid-flow by operator decision (see §7).
 **Builder:** backend build agent, branch `feat/unpin-overrides`
 **Operator sign-off on waivers:** the Maestro/capture waivers in §3 are the standing D-056 posture, not per-feature waivers. The one item needing a genuine decision — whether to backfill timestamps onto the 2,735 legacy pins — is **left unexecuted** in §6.
 

@@ -1,333 +1,84 @@
-# Feedback items — index
+# Feedback items — active index
 
-> One row per `docs/feedback/items/<id>-<slug>/` folder, derived from the
-> first ~15 lines of that folder's `status.md` (or its other files when
-> `status.md` is missing). This is the fast duplicate-check surface for the
-> `/feedback` pipeline and anyone triaging a new report.
->
-> **Phase-0 duplicate checks read THIS FILE only — never glob the item
-> folders.** Reading 100+ folders to check for a prior fix costs 8–110k
-> tokens; this table costs a few hundred.
->
-> **Regeneration rule:** any session that changes an item's status (ships it,
-> merges it, flips its flag, backfills its `status.md`, adds a new item
-> folder) updates that row in the same session. This file is allowed to lag
-> by a session, never by a quarter.
->
-> **Status values:** `shipped` (live, no caveat) · `built-dark` (built,
-> behind a default-off flag or an allowlisted experiment) · `planned` (spec
-> written, build not started) · `in-progress` (built/fixed but not confirmed
-> merged/shipped — worktree branch, "pending merge", "awaiting QA", etc.) ·
-> `mockup-only` (design only, no code) · `research-only` (investigation/
-> interview only) · `open` (spec/PRD only, not built) · `declined` (operator
-> passed) · `unknown` (no readable evidence).
->
-> `planned` is carried here to match the `status.md` enum in
-> [README.md](README.md) § Status line format, which added it 2026-08-18. No
-> row currently uses it — every item whose `status.md` says `planned` turned
-> out to have shipped — but the vocabularies must not drift apart again.
->
-> **Legacy audit, 2026-08-18.** Every pre-existing row was re-checked against
-> `living-memory/CHANGELOG.md` (+ `archive/CHANGELOG-*.md`), `TEST_LEDGER.md`,
-> `DECISIONS.md`, `docs/recovery/*.md`, and `config/features.json`. **67 rows
-> were corrected**, nearly all `in-progress` → `shipped`: they were written
-> pre-merge, cited a worktree branch, and were never revisited after the work
-> landed. A row's `where` cell now names the evidence that settled it (commit,
-> PR, flag, or dated CHANGELOG entry), so any status here can be re-audited
-> without reopening the item folder.
->
-> **What `in-progress` means in the 36 rows that kept it.** These are
-> individually-built items from the `teardown-remediation` era (2026-07-12 →
-> 2026-08-08) whose `status.md` says "built" on a worktree branch and which no
-> CHANGELOG entry, TEST_LEDGER row, recovery ledger, or feature flag names.
-> The [2026-08-08 branch triage](../../reviews/2026-08-08-branch-triage.md)
-> content-verified that era's branches broadly — 44 of 50 DELETE, i.e. content
-> already on `main`, with only three RECOVER items — so these are *probably*
-> shipped too. But that is a branch-level inference, not a per-item record, and
-> the specific `worktree-agent-*` branches they cite appear in no recovery
-> ledger. Read `in-progress` as **"built; merge unconfirmed for this item,"**
-> never "abandoned" — and don't upgrade one to `shipped` without finding the
-> evidence this audit could not.
->
-> **Backfilled 2026-08-18** — the 2026-08-09→2026-08-18 gap named in
-> [README.md](README.md) § Known drift is closed. 41 rows added (#211 through
-> #341, plus the two named programs); the table is now 1:1 with the folder
-> listing. Rows for #289 onward were derived from `status.md` **plus**
-> corroborating merge evidence in `living-memory/CHANGELOG.md`,
-> `living-memory/TEST_LEDGER.md`, `docs/recovery/*-sweep.md`, and
-> `config/features.json` — several per-item `status.md` files still read
-> "built"/"planned" because they were written pre-merge and never revisited.
-> **Where they disagree, the row follows the merge evidence, not the folder.**
->
-> **Caveat — the 2026-08-16 wave (#303 #304 #321–#341).** Those 17 rows read
-> `shipped` on the strength of the `2026-08-16` CHANGELOG entry (merge
-> `20b40db`, 17 items / 7 groups) and the `2026-08-17` TEST_LEDGER entry
-> (v1.13.5 build 114, gates green, deploy verified by content). Their own
-> `status.md` files still say `built`/`planned 2026-08-16` and are **stale**.
-> The wave's branch/worktree ledger, `docs/recovery/2026-08-16-feedback-wave-sweep.md`,
-> was written on the wave's own branch and **is not present on `main`** — so
-> the ship record here is the two living-memory files, not that ledger. Owed
-> at ship and still open per the CHANGELOG: per-group operator TestFlight
-> checklists, the prod-DB deck-eval replay for G6's bands, and #339's
-> `pick_gap_frac` tuning.
->
-> **Seven folders have no `status.md`** — #295, #300, #307, #309, #311, #313,
-> #318 carry date- or role-suffixed variants instead (`status-backend-*.md`,
-> `status-mobile-*.md`, `status-2026-08-13.md`). Their rows were derived from
-> those files. This is a real deviation from the README's "Expected contents",
-> not corruption, and **not** a reason to skip them when regenerating: read the
-> suffixed files. Nothing here renames or creates item files.
->
-> **Group/wave shape.** Where a row belongs to a wave group, the `where` cell
-> names the group and marks the **canonical** folder (the lowest id, holding
-> the full doc set); satellite rows point at it. See
-> [README.md](README.md) § Wave/group folders.
+<!-- Generated by scripts/project_hygiene.py. Edit each linked status source, then run --write. -->
 
-## Table
+Status records describe the last documented disposition; they are not a fresh production audit.
 
-| id | slug | status | date | where |
-|---|---|---|---|---|
-| 78 | calc-suggestions | shipped | 2026-07-17 | FB-78/87/88 calculator suggestions server-confirmed — CHANGELOG 2026-07-17, v1.8.0 |
-| 117 | eight-tier-recalibration | shipped | 2026-07-12 | FB-117/118 affine value recalibration `2e9d542` — CHANGELOG 2026-07-12 |
-| 121 | anchors-resume | in-progress | 2026-07-12 | trade-engine-v2 |
-| 122 | quickset-default | shipped | 2026-07-18 | FB-122 Quick Set as default method — CHANGELOG 2026-07-18, v1.9.0 `71e1a61` |
-| 124 | format-aware-copy | shipped | 2026-07-17 | FB-124/139 cross-format tier copy — CHANGELOG 2026-07-17 |
-| 126 | verify-persistence | shipped | 2026-07-12 | FB-126 Keychain JWT + silent replay `2b5e07a` — CHANGELOG 2026-07-12 |
-| 127 | player-position-dup | shipped | 2026-07-12 | FB-127 position-strict DP↔Sleeper join `2b5e07a` — CHANGELOG 2026-07-12 |
-| 129 | espn-sheet-keyboard | unknown | — | n/a |
-| 130 | settings-nav-espn-cta | shipped | 2026-07-12 | contract live on `main`; explicitly preserved by #266's fix — CHANGELOG 2026-08-08 |
-| 131 | apple-signin-error | shipped | 2026-07-12 | FB-131 applesignin entitlement `2b5e07a` — CHANGELOG 2026-07-12, v1.7.1–v1.7.3 |
-| 132 | all-players-view | in-progress | 2026-07-17 | trade-engine-v2 |
-| 134 | hide-toptier-question | in-progress | 2026-07-12 | trade-engine-v2 |
-| 135 | tiers-header | in-progress | 2026-07-12 | trade-engine-v2 |
-| 136 | quick-rank | in-progress | 2026-07-12 | trade-engine-v2 |
-| 137 | quickset-format-search | in-progress | 2026-07-17 | trade-engine-v2 |
-| 140 | chip-team-age | shipped | 2026-07-17 | FB-140 Waivers→FA label `8a00d0e` — CHANGELOG 2026-07-17, v1.8.1 |
-| 141 | filler-threshold | shipped | 2026-07-17 | trade-engine-v2 |
-| 142 | league-summary | shipped | 2026-07-17 | FB-142/144 league power rankings + roster tap-through — CHANGELOG 2026-07-17 |
-| 143 | fa-finder | shipped | 2026-07-17 | FB-143 `backend/free_agent_service.py` — CHANGELOG 2026-07-17 |
-| 145 | ktc-blend | shipped | 2026-07-18 | FB-145 KTC blend `ktc_blend_weight=0.5` — CHANGELOG 2026-07-18, v1.9.0 |
-| 146 | send-gate-espn | shipped | 2026-07-18 | FB-146 Send-in-Sleeper ESPN gate — CHANGELOG 2026-07-18, v1.9.0 |
-| 147 | trade-blocks | shipped | 2026-07-17/18 | trade-engine-v2 |
-| 148 | tep-te-copy | shipped | 2026-07-18 | FB-148 `tep_te_uplift=1.18` — CHANGELOG 2026-07-18, v1.9.0 |
-| 149 | espn-trade-away | shipped | 2026-07-25 | platform-routing proxy fix `52be577` (#149/#150) — CHANGELOG 2026-07-25 |
-| 150 | replace-player | shipped | 2026-07-25 | platform-routing proxy fix `52be577` (#149/#150) — CHANGELOG 2026-07-25 |
-| 151 | free-agents-fixes | shipped | 2026-07-25 | free-agents union + 503 `rosters_unavailable` — CHANGELOG 2026-07-25; regression class in DECISIONS |
-| 152 | streak-increment | in-progress | 2026-07-25 | teardown-remediation (worktree) |
-| 153 | otb-badge | in-progress | 2026-07-25 | worktree-agent-ae33eec5a00d24264 |
-| 155 | multi-format-rank-sets | declined | 2026-08-08 | operator passed — CHANGELOG 2026-08-08 "Closed: … #155 (declined)" |
-| 156 | trade-finding-hub | shipped | 2026-07-25 | teardown-remediation |
-| 157 | calc-value-clarity | in-progress | ~2026-07-25 | n/a |
-| 158 | picks-ownership | shipped | undated (PRD); cross-refs 2026-07 to -08 | `picks.owned_sync` flag |
-| 159 | empty-tier-cta | in-progress | 2026-07-27 | teardown-remediation |
-| 160 | tweener-spots | declined | 2026-08-08 | operator passed → `docs/feedback/backlog.md` — CHANGELOG 2026-08-08 |
-| 161 | quickset-demote | in-progress | 2026-07-25 | teardown-remediation (worktree) |
-| 162 | ranking-nav-loop | shipped | 2026-07-25 | `RankHomeScreen.choose` replace→navigate `fbb6f3e` — CHANGELOG 2026-07-25 |
-| 163 | not-interested | shipped | 2026-07-25 | `not_interested` receive-side exclusion — CHANGELOG 2026-07-25 |
-| 164 | trends-empty | in-progress | ~2026-07-25 | teardown-remediation |
-| 166 | league-format-default | in-progress | 2026-07-25 | teardown-remediation (worktree) |
-| 168 | looking-for-intents | shipped | 2026-08-08 | closed done — CHANGELOG 2026-08-08; PRD objection reconciled by #172 |
-| 169 | outlook-league-summary | built-dark | 2026-07-23 | teardown-remediation / `outlook.odds` flag |
-| 169 | position-impact | shipped | 2026-08-09 | `trade.position_impact` flag ON — graduated from mockup to build in the 2026-08-09 design-decision batch. **ID COLLISION with the row above**; see `docs/feedback/items/169-position-impact/status.md` — verify the real feedback-table ID before treating either as canonical |
-| 172 | trade-intents | shipped | 2026-08-08 | `trades.intent_modes` flag ON in features.json — CHANGELOG 2026-08-08 wave |
-| 173 | untouchables-discoverability | shipped | 2026-07-25 | teardown-remediation (#156 batch) |
-| 174 | package-constraint | shipped | 2026-07-25 | teardown-remediation (#156 batch) |
-| 175 | outlook-directional-suggestions | shipped | 2026-07-25 | `trade.outlook_direction` flag ON in features.json; `outlook_direction_mult` live per DECISIONS |
-| 177 | mfl-auth-link | shipped | 2026-07-25 | `mfl.auth_link` flag ON in features.json; `POST /api/mfl/auth-link` `03e3e38` — CHANGELOG 2026-07-25 |
-| 178 | fa-filter-regression | shipped | 2026-07-25 | `owner_id:null` orphan-roster fix — DECISIONS regression-class entry |
-| 179 | fa-add-button | shipped | 2026-07-25 | teardown-remediation (worktree) |
-| 180 | trade-send-validation | shipped | 2026-07-25 | `trade.send_in_sleeper` flag |
-| 181 | league-rankings-primary | in-progress | 2026-07-25 | teardown-remediation (worktree) |
-| 182 | fa-from-trades | shipped | 2026-07-25 | teardown-remediation (worktree) |
-| 183 | hide-idp | in-progress | 2026-07-25 | teardown-remediation (worktree) |
-| 184 | feedback-badge-count | in-progress | 2026-07-25 | n/a |
-| 185 | pick-values-in-suggestions | shipped | 2026-07-25 | `_inject_owned_picks` primes Elo `1200 + 6*pick_value` `68920c3` — CHANGELOG 2026-07-25 |
-| 186 | see-other-side | shipped | 2026-07-25 | teardown-remediation (#156 batch) |
-| 187 | avatar-dismiss | in-progress | ~2026-07-25 | teardown-remediation |
-| 188 | feedback-fab-rule | in-progress | ~2026-07-25 | teardown-remediation |
-| 189 | always-offer-fallback | shipped | 2026-07-25 | two-stage relaxed fallback for zero-card jobs — CHANGELOG 2026-07-25 |
-| 190 | edit-in-calculator | shipped | 2026-07-25 | teardown-remediation (#156 batch) |
-| 191 | partner-rank-sync | shipped | 2026-07-25 | `rankings.cross_format_derive` (ships true) |
-| 192 | ranked-badges | in-progress | 2026-07-25 | teardown-remediation (worktree) |
-| 193 | chasing-shopping-conflict | in-progress | 2026-07-27 | teardown-remediation |
-| 194 | pick-tag-and-remove-asset | in-progress | 2026-07-27 | teardown-remediation (worktree) |
-| 195 | bar-stack-order | in-progress | 2026-07-27 | teardown-remediation |
-| 196 | double-fab | shipped | 2026-07-27 | `6f2ac95` — CHANGELOG 2026-07-27 |
-| 198 | upgrade-semantics | shipped | 2026-07-27 | `0106aba` — CHANGELOG 2026-07-27 (#198/#200) |
-| 199 | switcher-add-league | shipped | 2026-07-27 | `6f2ac95` — CHANGELOG 2026-07-27 (#196/#199/#201) |
-| 200 | summary-picks-missing | shipped | 2026-07-27 | `0106aba` — CHANGELOG 2026-07-27 (#198/#200) |
-| 201 | mfl-format-detection | shipped | 2026-07-27 | `mfl_service.detect_scoring_format` `6f2ac95` — CHANGELOG 2026-07-27 |
-| 202 | calc-prefill-focus | in-progress | 2026-07-27 | teardown-remediation (worktree) |
-| 203 | picker-suggestions | in-progress | 2026-07-27 | teardown-remediation (worktree) |
-| 204 | calc-value-bar | in-progress | 2026-07-27 | teardown-remediation (worktree) |
-| 205 | design-tenets | research-only | 2026-07-28 | n/a |
-| 207 | rookie-draft-detection | shipped | 2026-08-05 | `picks.rank_year_labels` flag ON; docs residual recovered per 2026-08-08 branch triage |
-| 208 | ranks-follow-position-filter | in-progress | 2026-08-08 | worktree-agent-ac81596c5b45c68c9 |
-| 210 | mfl-name-entities | shipped | 2026-08-01 | `_clean_text` html-unescape `572f5aa` — CHANGELOG 2026-08-01 |
-| 211 | player-first-trades | mockup-only | 2026-08-08 | branch worktree-agent-aba27261d3ac0e30a — design lab `mockups/polish-lab-2026-08/trades-player-first.html`, no code |
-| 212 | trade-dna-redesign | shipped | 2026-08-02 | teardown-remediation |
-| 213 | find-a-trade-entry | shipped | 2026-08-01 | `572f5aa` — CHANGELOG 2026-08-01 (#210/#213/#217/#226) |
-| 214 | stud-tax | shipped | 2026-08-05 | #214/#215 stud-tax retune `6577668` — CHANGELOG 2026-08-05 |
-| 216 | featured-trade-window | shipped | 2026-08-02 | #216/#209 featured-trade window `ba78631` — CHANGELOG 2026-08-02 |
-| 217 | quickset-back-btn | shipped | 2026-08-01 | `572f5aa` — CHANGELOG 2026-08-01 |
-| 218 | hub-fit-to-screen | in-progress | 2026-08-01 | teardown-remediation (worktree, pending merge) |
-| 220 | picks-chart-again | shipped | 2026-08-01 | pick-integrity batch `2b8ecca` — CHANGELOG 2026-08-01 |
-| 222 | picks-in-fa | shipped | 2026-08-01 | pick-integrity batch `2b8ecca` — CHANGELOG 2026-08-01 |
-| 223 | header-league-switcher | shipped | 2026-08-01 | teardown-remediation (worktree) |
-| 225 | notifications-dechalk | shipped | ~2026-08-01 | teardown-remediation (worktree) |
-| 226 | otb-overlap-give-side | shipped | 2026-08-01 | `PlayerCard.badgeSlot` `572f5aa` — CHANGELOG 2026-08-01 |
-| 227 | no-pick-swap-cards | shipped | 2026-08-01 | `pick_swap_ok` gate `2b8ecca` — CHANGELOG 2026-08-01 |
-| 228 | post-draft-pick-hiding | shipped | 2026-08-01 | pick-integrity batch `2b8ecca` — CHANGELOG 2026-08-01 |
-| 229 | empty-states-progress | shipped | 2026-08-02 | #229/#230/#234 `4ac6673`, ships unflagged — CHANGELOG 2026-08-02 |
-| 232 | rank-chooser-consolidation | shipped | 2026-08-02 | #232/#233 `2e4ca17` — CHANGELOG 2026-08-02 |
-| 236 | dna-autosave | shipped | 2026-08-02 | teardown-remediation (worktree) |
-| 237 | mirrored-filters | in-progress | 2026-08-02 | n/a |
-| 238 | lineup-impact | shipped | 2026-08-03 | `optimal_starter_slots()` `c5f6f9c` — CHANGELOG 2026-08-03 |
-| 239 | invite-universal-links | shipped | 2026-08-02 | associated-domains entitlement `c0e99ba` — CHANGELOG 2026-08-02 |
-| 240 | idea-row-overlap | in-progress | 2026-08-02 | teardown-remediation (pending merge) |
-| 241 | duplicate-card | shipped | 2026-08-02 | never-two-cards invariant live on `main` and explicitly preserved by #317 — CHANGELOG 2026-08-14 |
-| 242 | team-picker-height | in-progress | 2026-08-02 | teardown-remediation (pending merge) |
-| 243 | scroll-audit | shipped | 2026-08-03 | vertical-density campaign `4795a21`… — CHANGELOG 2026-08-03; status→shipped confirmed in a later entry |
-| 244 | rank-launch-routing | shipped | 2026-08-05 | completion-aware Rank landing `deaa6b2` — CHANGELOG 2026-08-05 |
-| 245 | acquire-tab | shipped | 2026-08-05 | Trades→Acquire `31c7731` + sweep `c795971` — CHANGELOG 2026-08-05 |
-| 246 | guided-first-landing | shipped | 2026-08-05 | guided chip strip + `TradeDnaSheet.tsx` `69a8ff8` — CHANGELOG 2026-08-05 |
-| 247 | format-tile | in-progress | 2026-08-05 | teardown-remediation |
-| 248 | combined-bars | shipped | 2026-08-05 | ghost ticks + delta chips `2e3f61f` — CHANGELOG 2026-08-05 |
-| 249 | matches-lock | in-progress | 2026-08-05 | teardown-remediation |
-| 250 | team-targeting | shipped | 2026-08-05 | `opponent_user_id` on asset-ideas `7d259d4` — CHANGELOG 2026-08-05 |
-| 251 | evener-placement | in-progress | 2026-08-05 | teardown-remediation |
-| 253 | outlook-cleanup | in-progress | ~2026-08-05 | agent/253-outlook-cleanup (off teardown-remediation) |
-| 257 | edit-full-sheet | shipped | 2026-08-08 | `trades.edit_full_sheet` flag ON (2026-08-08 wave) |
-| 258 | mfl-name-entities | shipped | 2026-08-08 | backfill `_backfill_mfl_name_entities()`; merge `b682ee2` → `8c3c742`, build 91 |
-| 260 | league-summary-key | shipped | 2026-08-08 | n/a — express legend fix (2026-08-08 wave) |
-| 261 | risers-exclude-picks | in-progress | 2026-08-08 | worktree agent-a795927256b2f29e7 |
-| 262 | rookie-ranking-broken | shipped | 2026-08-08 | n/a — fixed upstream by commit `be56567` |
-| 263 | calc-tier-values | shipped | 2026-08-08 | n/a — additive `tier` on `/api/trade/values`; later superseded by #303/D-065 |
-| 264 | manual-calc-trade-options | in-progress | 2026-08-08 | teardown-remediation (worktree) |
-| 265 | mutual-match-threshold | shipped | 2026-08-08 | `leagueUnlocks.ts` threshold=1 — CHANGELOG + TEST_LEDGER 2026-08-08 wave |
-| 266 | espn-link-buttons | shipped | 2026-08-08 | transitionEnd deferral; merge `b682ee2` → `8c3c742`, build 91 |
-| 267 | pick-grid-live-totals | shipped | 2026-08-08 | n/a — covers #268/#267 (2026-08-08 wave) |
-| 269 | sheet-targeting | shipped | 2026-08-09 | `trades.sheet_targeting` flag ON — covers #269/#276 (wave 3) |
-| 270 | inline-trades-home | built-dark | 2026-08-09 | worktree-agent-acc329e0f3f9a3cd5, experiment `trades_home_inline` (strip + canvas variants, covers #270/#272) |
-| 273 | future-year-picks | shipped | 2026-08-09 | n/a — covers #273/#274/#275 (wave 3) |
-| 277 | tier-labels-appwide | shipped | 2026-08-09 | #277/#278/#280/#281 fable deep pass, 28 files — CHANGELOG 2026-08-09 wave 3 |
-| 279 | aggregate-tier-labels | shipped | 2026-08-16 | experiment GRADUATED to all users (D-064) in the 2026-08-16 wave; no longer in features.json |
-| 285 | pick-sums | shipped | 2026-08-09 | aggregate "≈X firsts" on players-only value — CHANGELOG 2026-08-09 |
-| 286 | player-offers-flow | shipped | 2026-08-09 | `trades.player_offers_calc` flag ON — CHANGELOG 2026-08-09 (#286/#287/#288) |
-| 289 | mfl-draft-room-ids | shipped | 2026-08-10 | PR #103 → `6c304c7`, v1.12.0 b98 — G1 of the #289–#294 batch |
-| 290 | mock-draft-engine | shipped | 2026-08-10 | PR #103 → `6c304c7` — G2 **canonical** (#290/#291/#292) |
-| 291 | mock-draft-interactive | shipped | 2026-08-10 | PR #103 — G2, canonical `290-mock-draft-engine/` |
-| 292 | second-mock-draft | shipped | 2026-08-10 | PR #103 — G2, canonical `290-mock-draft-engine/` |
-| 293 | picks-in-subsets | shipped | 2026-08-10 | PR #103 / `league.picks_always_counted` ON — G3 **canonical** (#293/#294) |
-| 294 | picks-position-filters | shipped | 2026-08-10 | PR #103 — G3, canonical `293-picks-in-subsets/` |
-| 295 | mock-user-not-in-draft | shipped | 2026-08-13 | PR #114 → `e71a654`, v1.13.3 b110 — covers #295/#296/#305 |
-| 297 | lineup-impact-single-pin | shipped | 2026-08-12 | PR #108 → `f8acd71` — covers #297/#298 |
-| 299 | league-tile-density | shipped | 2026-08-12 | PR #108 → `f8acd71` — covers #299/#302 |
-| 300 | league-rankings-trade-candidates | shipped | 2026-08-12 | PR #112 → `5139b45`, v1.13.1 b106, both flags ON |
-| 303 | calc-send-placement | shipped | 2026-08-16 | wave `20b40db`, v1.13.5 b114 — G1 **canonical** (#303/#306/#320) |
-| 304 | positional-need-filter | shipped | 2026-08-16 | wave `20b40db` / `trade.presentment_rules` ON — G6 **canonical** (#304 #336 #339 #340 #341) |
-| 307 | matches-link-routing | shipped | 2026-08-14 | PR #117 → `7057d86`, v1.13.4 b111 — covers #307/#308 |
-| 309 | send-copy-stale | shipped | 2026-08-14 | PR #117 → `7057d86` — covers #309/#312/#314(partial)/#315/#316/#317 |
-| 311 | lineup-values-nonsleeper | shipped | 2026-08-14 | PR #117 → `7057d86`, v1.13.4 b111 |
-| 313 | 1qb-qb-cap | shipped | 2026-08-15 | PR #128 → `34ebd84` (branch `build-313`); prod tier read verified |
-| 318 | awaiting-dismiss | shipped | 2026-08-14 | PR #117 → `7057d86` — backend + mobile halves, with #319 |
-| 321 | espn-token-bleed | shipped | 2026-08-16 | wave `20b40db`, v1.13.5 b114 — G5 **canonical** |
-| 322 | mock-draft-room-ui | shipped | 2026-08-16 | wave `20b40db` — G2 **canonical** (#322–#327) |
-| 323 | mock-draft-pick-labels | shipped | 2026-08-16 | wave `20b40db` — G2, canonical `322-mock-draft-room-ui/` |
-| 324 | mock-draft-picks-wrap | shipped | 2026-08-16 | wave `20b40db` — G2, canonical `322-mock-draft-room-ui/` |
-| 325 | mock-draft-ticker-height | shipped | 2026-08-16 | wave `20b40db` — G2, canonical `322-mock-draft-room-ui/` |
-| 326 | mock-draft-team-sheet | shipped | 2026-08-16 | wave `20b40db` — G2, canonical `322-mock-draft-room-ui/` |
-| 327 | mock-draft-pool-search | shipped | 2026-08-16 | wave `20b40db` — G2, canonical `322-mock-draft-room-ui/` |
-| 328 | mock-draft-pick-assignment | shipped | 2026-08-16 | wave `20b40db` — G3 **canonical** |
-| 330 | offer-prefill | shipped | 2026-08-16 | wave `20b40db` — G4 **canonical** |
-| 334 | matches-dismiss-latency | shipped | 2026-08-16 | wave `20b40db` — G9 **canonical** (#334 #335) |
-| 335 | matches-filter-counts | shipped | 2026-08-16 | wave `20b40db` — G9, canonical `334-matches-dismiss-latency/` |
-| 336 | exclude-actioned-trades | shipped | 2026-08-16 | wave `20b40db` — G6, canonical `304-positional-need-filter/` |
-| 339 | pick-not-the-gap | shipped | 2026-08-16 | wave `20b40db` — G6, canonical `304-positional-need-filter/`; `pick_gap_frac` band still untuned |
-| 340 | max-overpay-cap | shipped | 2026-08-16 | wave `20b40db` — G6, canonical `304-positional-need-filter/` |
-| 341 | package-position-cap | shipped | 2026-08-16 | wave `20b40db` — G6, canonical `304-positional-need-filter/` |
-| 346 | quickset-tier-drop | planned | 2026-08-24 | **canonical** G-F of the 2026-08-24 wave (#346/#381) — QuickSet unselected players drop to FA; batch `plan.md` lives here (lowest selected id) |
-| 355 | phantom-pick-years | shipped | 2026-08-19 | fix merged `eafd3f8` (real draft-pick horizon derivation); DB status set `fixed` 2026-08-24 |
-| 357 | team-review | shipped | 2026-08-19 | **canonical** for #357/#358/#359 — SHIPPED PRs #142/#143, `outlook.odds` lit (D-094), EAS build 121; DB status set `fixed` 2026-08-24 |
-| 358 | team-review-link | shipped | 2026-08-19 | canonical `357-team-review/` |
-| 359 | team-review-link | shipped | 2026-08-19 | canonical `357-team-review/` |
-| 364 | team-review-fixes | shipped | 2026-08-20 | PR #152 `bc43b6f`, Render live, EAS build 124; IDP disclaimer names the unpriced slots |
-| 365 | team-review-window-signals | built-dark | 2026-08-20 | closed in code (builds 124/125) behind `trade.outlook_net_firsts` (dark); DB status `in_progress` 2026-08-24 |
-| 366 | team-review-tier-ladder | shipped | 2026-08-20 | closed in code; `trade.position_tiers` + `trade.rb_handcuff` LIT (checklist unrun); DB status `fixed` 2026-08-24 |
-| 367 | consensus-gap-direction | shipped | 2026-08-20 | canonical `364-team-review-fixes/`; sell direction fixed UPSTREAM (D-100), PR #152 — toggle half still planned §4 |
-| 368 | team-review-partners | shipped | 2026-08-20 | canonical `364-team-review-fixes/`; route dropped the pick capital it computed, PR #152 |
-| 369 | team-review-plan-beat | shipped | 2026-08-20 | closed in code (builds 124/125); checklist unrun; DB status `in_progress` 2026-08-24 pending graduation read |
-| 370 | deck-repeat-liked-trades | planned | 2026-08-20 | `364-team-review-fixes/plan-remaining.md` §6 — TradesHome deck, NOT Team Review; needs a repro; #350 is the same complaint class |
-| 371 | outlook-as-window-driver | built-dark | 2026-08-20 | closed in code behind `trades.window_from_odds` (dark); DB status `in_progress` 2026-08-24 |
-| 372 | window-composite | built-dark | 2026-08-20 | composite re-weighting MERGED (`bbc2e4b`) behind `trade.outlook_composite` (dark); DB status `in_progress` 2026-08-24 |
-| 374 | partners-copy-and-finder-conditions | shipped | 2026-08-20 | #374 + first #376 fix — `fix/finder-conditions-and-partners-copy` merged (ancestry-verified 2026-08-24); DB status `fixed` 2026-08-24. #376 re-reported → see `376-finder-filters-regression/` |
-| 376 | finder-filters-regression | planned | 2026-08-24 | **canonical** G-A of the 2026-08-24 wave (#376/#379/#394, +#333 verify) — outlook & prefs entry missing again on 1.16.2 post-#384 rebuild; operator: "most critical bug" |
-| 379 | finder-filters-placement | planned | 2026-08-24 | G-A satellite, canonical `376-finder-filters-regression/` |
-| 381 | quickset-downgrade-fa | planned | 2026-08-24 | G-F satellite (detailed repro), canonical `346-quickset-tier-drop/` |
-| 384 | calc-finder-merge | shipped | 2026-08-22 | **SHIPPED** PR #172 `80dee42`, flags LIT for all users, app 1.16.0 (EAS). merge Find a Trade into the manual calculator; canonical for #310/#379/#380, touches #333. W0–W5 built behind `calc.merged_layout` (**false**), not merged, not pushed; TestFlight checklist UNRUN. W5 fixed the e2e review's 5 P0 + most P1: the four action beats now advance, the tour reaches the deck (park + hand-off, `popTo`), the ✕-overlay no longer strands the card, overlay scope is calculator-origin, first-visit receipt + cap reset, league-keyed remount, 13 analytics names registered, `scope.md` written, guards hardened (15 sabotages red). **Operator rulings 2026-08-22:** §6b → own tab for now (D-151, Q-028 closed); ✓ like/queue contract approved and in build (W6-A). **Still open:** receive-side `pinned_receive_mode:'all'` vs give-side-only (Q-029 second half), rollout shape. Flip also needs `onboarding.guide_v2` (off today) or there is no tour. **The report the 2000-char cap ate** (D-149/G-055) |
-| 386 | analyst-playoff-odds | planned | 2026-08-24 | **canonical** G-D of the 2026-08-24 wave (#386/#391) — analyst pop-up broken when playoff odds expanded on LeagueRankings |
-| 391 | analyst-box-minimized | planned | 2026-08-24 | G-D satellite (minimized-state observation), canonical `386-analyst-playoff-odds/` |
-| 394 | outlook-prefs-missing | planned | 2026-08-24 | G-A satellite (the "most critical bug" report), canonical `376-finder-filters-regression/` |
-| 395 | lineup-impact-superflex | planned | 2026-08-24 | **canonical** G-C of the 2026-08-24 wave (#395/#396) — SF slot attribution + flex slot labels in starting-lineup impact |
-| 396 | flex-slot-label | planned | 2026-08-24 | G-C satellite, canonical `395-lineup-impact-superflex/` |
-| 397 | swipe-tour-placement | planned | 2026-08-24 | **canonical** G-B of the 2026-08-24 wave (#397/#398) — swipe tour beat moves above the trade chip strip (#398 supersedes #397) |
-| 398 | swipe-tour-top | planned | 2026-08-24 | G-B satellite (the operative placement ask), canonical `397-swipe-tour-placement/` |
-| 402 | more-offers-shop | shipped | 2026-08-28 | #402/#403 "shop a player" — CHANGELOG 2026-08-28, v1.16.9 build 135, `trade.shop_asset` lit; folder holds the whole canvas-results arc (rulings ×6, rev-3 spec) |
-| 403 | shop-a-player-README.md | shipped | 2026-08-28 | satellite of `402-more-offers-shop/` (README pointer only) |
-| 406 | target-any-leaguemate | shipped | 2026-08-30 | **canonical** of the 2026-08-30 batch (#406/#407) — "Any league mate" targeting, D-168; PR #250, v1.16.12 build 140 |
-| 407 | finder-forced-team | shipped | 2026-08-30 | fast-track bug, fix `8f722676` (auto-defaulted partner no longer scopes Find a Trade); PR #250 |
-| 409 | like-not-league-member | shipped | 2026-08-30 | ✓ queue 100% refusal since 2026-08-22 (G-063 caller exclusion); backend PR #254, superseded by D-170 (2026-08-31) which removed the validation gate entirely |
-| 410 | found-trade-decline-position | shipped | 2026-08-30 | **canonical** of the 2026-08-30b batch (#409–#412) — D-169 bare-✕ decline cell; PR #254, v1.16.13 build 142; 14-step TestFlight checklist owed |
-| 411 | player-name-truncation | shipped | 2026-08-30 | satellite — chip to meta line, name 13/18 (QA-B F-1 disclosure, checklist step 11b ruling) |
-| 412 | more-offers-placement | shipped | 2026-08-30 | satellite — More offers under the give Add |
-| 413 | sleeper-send-draft-picks | shipped | 2026-09-02 | **canonical** of the 2026-09-02 weekly run — Send in Sleeper has no draft-pick split/encode; batch `plan.md` + `investigation.md` here |
-| 414 | lopsided-one-for-one | shipped | 2026-09-02 | shipped by the OTHER session as D-175 (`sweetener_gap_frac` band + `sweetener_best_effort`, PR #268, live 750/0.12/1); this folder's parallel D-173 build is superseded, kept as history; G-8 avoid follow-up in NEXT |
-| 415 | queue-loss-refusal-no-advance | shipped | 2026-09-02 | verify-closed — refusal half = D-170 (server, live 2026-08-31T21:29Z), advance half = D-171 v1.16.14 build 143; proof = finder-results-push scope §7 step 5 |
-| 416 | liked-card-stays-no-swipe | shipped | 2026-09-02 | verify-closed — D-171 v1.16.14 restores the classic swipe deck; proof = scope §7 steps 1/5/6 |
-| 419 | rejected-interest-resurfacing | fixed | 2026-09-06 | PR #283 / Render `988fa2d6` live; iOS 1.17.1 (149) submission FINISHED; DB fixed readback verified. Apple availability/device checks unverified; all-45 audit remains read-only. |
-| 420 | win-now-loading | fixed | 2026-09-06 | PR #283; bounded native recovery in iOS 1.17.1 (149), submission FINISHED; DB fixed readback verified. Apple availability/device checks remain unverified/UNRUN. |
-| 421 | win-now-timeout-message | fixed | 2026-09-06 | Satellite of 420-win-now-loading; neutral timeout copy in submitted iOS 1.17.1 (149), DB fixed readback verified. Apple availability/device checks remain unverified/UNRUN. |
-| 422 | win-now-ffv3-unavailable | planned | 2026-09-08 | G-422 fast-track; season-projections returns a structured unavailable for FFV3; reason under investigation. |
-| 423 | team-review-not-registering | planned | 2026-09-08 | G-423 canonical (with 424); Lakeview review completed server-side, client marker/outlook row stale. |
-| 424 | outlook-shows-not-set | planned | 2026-09-08 | G-423 satellite of 423. |
-| 425 | overhaul-tile-replaces-draft | planned | 2026-09-08 | G-425 canonical (with 426): overhaul entry replaces the Draft entry on Acquire; prominent hero tile. |
-| 426 | overhaul-button-prominent | planned | 2026-09-08 | G-425 satellite of 425 ("big red button"; red vs Chalkline accent rule surfaced to operator). |
-| 427 | first-round-picks-stud-tax-exempt | planned | 2026-09-08 | G-427 polish: first-round picks exempt from the stud adjustment; two firsts for a "2 firsts" tier player evaluates even. |
-| 428 | sleeper-pick-send-refused | planned | 2026-09-08 | G-428 fast-track; Sleeper answered "These draft picks cannot be traded." on FFV3 2026-09-08 17:03Z. |
-| — | 2026-07-26-adjustments-breakdown | shipped | 2026-07-26 | n/a |
-| — | 2026-07-26-asset-trade-ideas | shipped | 2026-07-26 | teardown-remediation / `trade.asset_ideas` ON |
-| — | 2026-07-26-calc-eveners | shipped | 2026-07-26 | `eveners`/`adjustments`/`naive_totals` on `/api/trade/evaluate` — CHANGELOG 2026-07-26 |
-| — | 2026-07-27-calc-polish | shipped | 2026-07-27 | calculator trio `fbd5561` — CHANGELOG 2026-07-27 |
-| — | 2026-07-27-deck-player-changer | shipped | 2026-07-27 | deck player-changer `ec25407` — CHANGELOG 2026-07-27 |
-| — | 2026-08-02-rankings-import | shipped | 2026-08-02 | `ranks.import` flag ON; `backend/rankings_import.py` `2e4ca17` — CHANGELOG 2026-08-02 |
-| — | api-observability | shipped | 2026-08-09 | `obs.api_events` flag ON — operator-directed program, no feedback id |
-| — | espn-webview-escape | shipped | 2026-08-09 | build 95 — operator-directed program, no feedback id; device walkthrough was owed at ship |
+Start here for current work and unresolved status reviews. Use the [full catalog](CATALOG.md) for duplicate checks and history, and [README.md](README.md) for the workflow.
 
-## Status distribution (167 rows, regenerated 2026-08-18)
+`needs-review` preserves an uncertain or conflicting legacy claim; it does not mean the feature is unbuilt.
+
+60 entries. Counts and rows come from the same status records.
+
+| Initiative / item | Status | Updated | Summary |
+|---|---|---|---|
+| [121-anchors-resume](121-anchors-resume/status.md) | in-progress | 2026-07-12 | #121 Anchors resume failure — status |
+| [129-espn-sheet-keyboard](129-espn-sheet-keyboard/status.md) | needs-review | — | #129 — ESPN sheet keyboard behavior — status |
+| [132-all-players-view](132-all-players-view/status.md) | in-progress | 2026-07-17 | #132 — Tiers "All players" view + cross-position trios (and the #62 verdict) |
+| [134-hide-toptier-question](134-hide-toptier-question/status.md) | in-progress | 2026-07-12 | #134 — Remove the top-tier asset question (Anchors) — status |
+| [135-tiers-header](135-tiers-header/status.md) | in-progress | 2026-07-12 | #135 — Tiers screen header wraps two lines — status |
+| [136-quick-rank](136-quick-rank/status.md) | in-progress | 2026-07-12 | #136 — Quick Rank (rank players within a tier) — status |
+| [137-quickset-format-search](137-quickset-format-search/status.md) | in-progress | 2026-07-17 | #137 + #138 — Quick set: SF/PPR format toggle + search bar |
+| [152-streak-increment](152-streak-increment/status.md) | in-progress | 2026-07-25 | #152 — Streak always stays at 1 — status |
+| [153-otb-badge](153-otb-badge/status.md) | in-progress | 2026-07-25 | Status — #153 "On the Block" badge overlaps position tags → "OTB" |
+| [157-calc-value-clarity](157-calc-value-clarity/status.md) | in-progress | 2026-07-25 | #157 — Calculator value clarity (Value Bar trade verdict) |
+| [159-empty-tier-cta](159-empty-tier-cta/status.md) | in-progress | 2026-07-27 | FB-159 — Quick Set empty-tier CTA — status |
+| [161-quickset-demote](161-quickset-demote/status.md) | in-progress | 2026-07-25 | FB-161 — unselected players drop on Quick Set save |
+| [164-trends-empty](164-trends-empty/status.md) | in-progress | 2026-07-25 | #164 — Trends screen empty despite rankings |
+| [166-league-format-default](166-league-format-default/status.md) | in-progress | 2026-07-25 | FB-166 + FB-167 — ranking format should default to league settings |
+| [169-outlook-league-summary](169-outlook-league-summary/status.md) | built-dark | 2026-07-23 | #169 — League Summary redesign (bar chart + position filter + drill-in) |
+| [181-league-rankings-primary](181-league-rankings-primary/status.md) | in-progress | 2026-07-25 | #181 — League rankings becomes the League tab's primary page — status |
+| [183-hide-idp](183-hide-idp/status.md) | in-progress | 2026-07-25 | #183 — Hide IDP/unknown players showing as "Other" — status |
+| [184-feedback-badge-count](184-feedback-badge-count/status.md) | in-progress | 2026-07-25 | #184 — Feedback badge counts closed items |
+| [187-avatar-dismiss](187-avatar-dismiss/status.md) | in-progress | 2026-07-25 | #187 — Users can dismiss/disable The Analyst avatar |
+| [188-feedback-fab-rule](188-feedback-fab-rule/status.md) | in-progress | 2026-07-25 | #188 — Feedback button on all new pages + standing CLAUDE.md rule |
+| [192-ranked-badges](192-ranked-badges/status.md) | in-progress | 2026-07-25 | FB-192 — replace the misleading pink ranked-dots with R/NR badges |
+| [193-chasing-shopping-conflict](193-chasing-shopping-conflict/status.md) | in-progress | 2026-07-27 | FB-193 — "Listed as both chasing and shopping QB" — status |
+| [194-pick-tag-and-remove-asset](194-pick-tag-and-remove-asset/status.md) | in-progress | 2026-07-27 | #194 — Remove the "rookie" tag from draft picks + remove an asset from a suggested trade |
+| [195-bar-stack-order](195-bar-stack-order/status.md) | in-progress | 2026-07-27 | FB-195 — League bar stack top-down QB→RB→WR→TE — status |
+| [202-calc-prefill-focus](202-calc-prefill-focus/status.md) | in-progress | 2026-07-27 | #202 — Prefill arrival is disorienting (scoped fix) |
+| [203-picker-suggestions](203-picker-suggestions/status.md) | in-progress | 2026-07-27 | #203 — Add-player suggestions in the picker (v1) |
+| [204-calc-value-bar](204-calc-value-bar/status.md) | in-progress | 2026-07-27 | #204 — Value bar missing from the In-league trade calculator (BUG) |
+| [208-ranks-follow-position-filter](208-ranks-follow-position-filter/status.md) | in-progress | 2026-08-08 | #208 — Ranks follow the position filter — status |
+| [211-player-first-trades](211-player-first-trades/status.md) | planned | 2026-08-08 | #211 — Player-first trades mockup lab · status |
+| [218-hub-fit-to-screen](218-hub-fit-to-screen/status.md) | in-progress | 2026-08-01 | #218/#219 — Trade-Finding Hub fits above the fold |
+| [237-mirrored-filters](237-mirrored-filters/status.md) | in-progress | 2026-08-02 | #237 — Mirrored filters: roster section matches the league-summary bar chart |
+| [240-idea-row-overlap](240-idea-row-overlap/status.md) | in-progress | 2026-08-02 | #240 — More-trades idea rows blocking player names |
+| [242-team-picker-height](242-team-picker-height/status.md) | in-progress | 2026-08-02 | #242 — "Pick a manager" sheet too short for a 12-team league |
+| [247-format-tile](247-format-tile/status.md) | in-progress | 2026-08-05 | #247 — Header format tile |
+| [249-matches-lock](249-matches-lock/status.md) | in-progress | 2026-08-05 | #249 — Remove the lock button from the Matches screen |
+| [251-evener-placement](251-evener-placement/status.md) | in-progress | 2026-08-05 | #251 — "Recommended to even it" placement |
+| [253-outlook-cleanup](253-outlook-cleanup/status.md) | in-progress | 2026-08-05 | #253/#254/#255/#256/#259 — status |
+| [261-risers-exclude-picks](261-risers-exclude-picks/status.md) | in-progress | 2026-08-08 | #261 — Exclude draft picks from Risers / Fallers |
+| [264-manual-calc-trade-options](264-manual-calc-trade-options/status.md) | in-progress | 2026-08-08 | #264 — Manual calc trade options |
+| [270-inline-trades-home](270-inline-trades-home/status.md) | built-dark | 2026-08-09 | #270 / #272 / #279 — Inline Trades Home mockup lab |
+| [331-player-cards-stats](331-player-cards-stats/status.md) | needs-review | — | 331 player cards stats |
+| [346-quickset-tier-drop](346-quickset-tier-drop/status.md) | planned | 2026-08-24 | FB-346 + FB-381 — QuickSet tier drop (Group F canonical) |
+| [358-team-analysis](358-team-analysis/status.md) | needs-review | — | 358 team analysis |
+| [360-avoiding-positions](360-avoiding-positions/status.md) | needs-review | — | 360 avoiding positions |
+| [362-standing-offer](362-standing-offer/status.md) | needs-review | — | 362 standing offer |
+| [365-window-signals](365-window-signals/status.md) | built-dark | 2026-08-20 | Team Review window signals (#365) |
+| [372-window-composite](372-window-composite/status.md) | built-dark | 2026-08-20 | 372 window composite |
+| [376-finder-filters-regression](376-finder-filters-regression/status.md) | planned | 2026-08-24 | FB-376 + FB-379 + FB-394 — finder filters / outlook & prefs regression (Group A canonical) |
+| [379-finder-filters-placement](379-finder-filters-placement/status.md) | planned | 2026-08-24 | FB-379 |
+| [381-quickset-downgrade-fa](381-quickset-downgrade-fa/status.md) | planned | 2026-08-24 | FB-381 |
+| [386-analyst-playoff-odds](386-analyst-playoff-odds/status.md) | planned | 2026-08-24 | FB-386 + FB-391 — analyst pop-up / playoff odds broken (Group D canonical) |
+| [391-analyst-box-minimized](391-analyst-box-minimized/status.md) | planned | 2026-08-24 | FB-391 |
+| [394-outlook-prefs-missing](394-outlook-prefs-missing/status.md) | planned | 2026-08-24 | FB-394 |
+| [395-lineup-impact-superflex](395-lineup-impact-superflex/status.md) | planned | 2026-08-24 | FB-395 + FB-396 — starting-lineup impact: superflex + flex labels (Group C canonical) |
+| [396-flex-slot-label](396-flex-slot-label/status.md) | planned | 2026-08-24 | FB-396 |
+| [397-swipe-tour-placement](397-swipe-tour-placement/status.md) | planned | 2026-08-24 | FB-397 + FB-398 — swipe tour step placement (Group B canonical) |
+| [398-swipe-tour-top](398-swipe-tour-top/status.md) | planned | 2026-08-24 | FB-398 |
+| [419-rejected-interest-resurfacing](419-rejected-interest-resurfacing/status.md) | partly-shipped | 2026-09-06 | #419 rejected-interest fix: backend live; iOS 1.17.1 (149) uploaded, native validation pending |
+| [420-win-now-loading](420-win-now-loading/status.md) | in-progress | 2026-09-06 | #420/#421 Win Now recovery: merged and iOS 1.17.1 (149) uploaded; native delivery validation pending |
+| [421-win-now-timeout-message](421-win-now-timeout-message/status.md) | in-progress | 2026-09-06 | #421 neutral Win Now timeout copy: merged and iOS uploaded; native validation pending; canonical #420 |
+
+## Status counts
 
 | Status | Count |
 |---|---|
-| shipped | 124 |
-| built-dark | 2 |
-| planned | 0 |
-| in-progress | 36 |
-| mockup-only | 1 |
-| research-only | 1 |
-| open | 0 |
-| declined | 2 |
-| unknown | 1 |
-
-167 rows against 167 folders — 1:1, verified 2026-08-18. **2026-08-24:** 13
-rows added (the 11 folders of the 2026-08-24 wave, plus backfilled rows for
-`355-phantom-pick-years/` and `374-partners-copy-and-finder-conditions/`,
-which had folders but no row) → 180 rows / 180 folders; the distribution
-table below predates this and is not regenerated. Two rows share id **#169** (a real id collision, flagged inline);
-the eight `—` rows are the six date-keyed operator asks plus the two named
-programs, per [README.md](README.md) § Naming.
-
-**The two `built-dark` rows are the only genuinely dark work left:** #169
-`outlook-league-summary` (`outlook.odds: false` in `config/features.json`, so
-`GET /api/league/outlook` is never called) and #270 `inline-trades-home`
-(experiment `trades_home_inline`, overlay-only flags that never enter
-features.json, tester-allowlist targeting). The single `unknown` is #129
-`espn-sheet-keyboard`, which has no readable evidence in any source.
+| built-dark | 4 |
+| in-progress | 38 |
+| needs-review | 5 |
+| partly-shipped | 1 |
+| planned | 12 |

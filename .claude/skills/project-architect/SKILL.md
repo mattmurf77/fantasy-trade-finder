@@ -5,7 +5,7 @@ description: >
   folder (data dictionary, API reference, architecture diagram, glossary,
   cross-client invariants, config reference, runbook, coding guidelines, ADR
   index) plus per-folder `CLAUDE.md` + `README.md` files, wired into a root
-  `CLAUDE.md` so every session loads the maintenance contract. Use this skill
+  provider adapter that links the shared maintenance contract. Use this skill
   when the user asks to "generate project docs", "create a data dictionary",
   "document this codebase", "build a docs folder", "set up reference docs",
   "architect the documentation", "scaffold CLAUDE.md files", or "update the
@@ -22,6 +22,11 @@ You are building or maintaining a project's structured reference layer. The
 goal is a small set of high-leverage docs that any reader (human or future
 Claude session) can use to answer 80% of "where does X live / what does Y
 mean / what must stay in sync" questions without grepping.
+
+In this repository, preserve `AGENTS.md` as the shared operating contract and
+root `CLAUDE.md` as its thin adapter. Update canonical references through
+`docs/agent-workflow.md`; never rebuild stack/count snapshots or static
+`living-memory/HLD.md` / `LLD.md` copies in an agent entry point.
 
 ## Mode selection
 
@@ -57,8 +62,8 @@ must be accurate or the doc is worse than no doc.
 
 ## Phase 1 — Generate (Bootstrap mode)
 
-Create these files. Each links to the next; the root CLAUDE.md ties them
-together.
+Create the needed reference files and link them from the documentation index.
+The shared agent contract links that index without copying its contents.
 
 ### `docs/data-dictionary.md`
 - Source of truth: `<schema file>`.
@@ -116,11 +121,12 @@ together.
 - CLAUDE.md: the **update-trigger table** — for each doc, what diff in code
   should prompt an update.
 
-### Root `CLAUDE.md`
-- Reference the coding guidelines first (priority).
-- Project orientation: stack, entry points, conventions.
-- Embed the update-trigger table from `docs/CLAUDE.md` (or link to it) so the
-  maintenance contract loads every session.
+### Root agent entry points
+- Keep shared operating rules in `AGENTS.md`; root `CLAUDE.md` is a short
+  provider adapter linking it. Preserve an existing common contract.
+- Put product orientation and commands in README/product docs. Link the
+  maintenance workflow rather than copying its tables into every entry point.
+- Never regenerate archived static-memory files as current reference docs.
 
 ## Phase 2 — Refresh mode
 
@@ -164,8 +170,8 @@ Skip auto-generated, vendored, or throwaway dirs.
 - **Cite source of truth.** Every doc names the file it derives from.
 - **No duplication.** If the same fact lives in two places, one must point
   to the other.
-- **Update triggers are the product.** The maintenance contract in root
-  CLAUDE.md is what keeps these docs alive. Don't ship docs without it.
+- **Update triggers are the product.** Keep one linked maintenance contract
+  in the shared workflow; provider entry points refer to it without duplication.
 - **Surgical edits.** When refreshing, never touch a section that didn't
   change. Per `references/karpathy-guidelines.md` — every changed line
   traces to the diff.

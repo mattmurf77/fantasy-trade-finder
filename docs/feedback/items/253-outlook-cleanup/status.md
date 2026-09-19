@@ -1,3 +1,18 @@
+# Status — 253-outlook-cleanup
+
+```project-status
+{
+  "status": "in-progress",
+  "updated": "2026-08-05",
+  "summary": "#253/#254/#255/#256/#259 — status",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: in-progress ~2026-08-05 — agent/253-outlook-cleanup (off teardown-remediation). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #253/#254/#255/#256/#259 — status
 
 **State:** BUILT, static verification only. Worktree branch
@@ -126,7 +141,7 @@ No backend change, no schema change, no new route, no flag change.
   - `Team-fit moves` present in the mobile pill + `web/index.html`;
     `TEAM-FIT MOVE` in `web/js/app.js`.
   - all six `#259` testIDs present.
-- `mobile/.maestro` contains **no** flow referencing "Window moves" or the
+- `archive/retired-tooling/mobile/maestro` contains **no** flow referencing "Window moves" or the
   controls-card "Outlook" copy, so no existing flow is broken by these changes.
 
 ## QA checklist for the runtime round

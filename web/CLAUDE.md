@@ -8,7 +8,7 @@ Flask backend (`run.py`), so a page is live the moment the file exists.
 
 | File | Shipped? | What it is |
 |---|---|---|
-| `index.html` | yes | Single-page app entry — Dynasty Rankings. Only page that links out to `faq`, `league-rankings`, `positional-tiers`. Landing offers **Sleeper · ESPN · MFL** entry (flag `landing.platform_options`, 2026-09-03 — [scope §V3](../docs/plans/landing-platform-options/scope.md)); entry users (`entry:` ids) read leagues from `/api/{espn,mfl}/leagues`, never the Sleeper proxies |
+| `index.html` | yes | Single-page app entry — Dynasty Rankings. Only page that links out to `faq`, `league-rankings`, `positional-tiers`. Landing offers **Sleeper · ESPN · MFL** entry (flag `landing.platform_options`, 2026-09-03 — [scope §V3](../docs/plans/archive/2026/landing-platform-options/scope.md)); entry users (`entry:` ids) read leagues from `/api/{espn,mfl}/leagues`, never the Sleeper proxies |
 | `league-rankings.html` | yes | Per-league ranking view. Dark — `league.power_rankings` is false, so the route 401s and the nav link is hidden |
 | `positional-tiers.html` | yes | Positional tier boards |
 | `player.html` | yes | Player profile. Dark — `players.profile_pages` is false, so it renders a sign-in prompt and fires no requests |
@@ -21,7 +21,6 @@ Flask backend (`run.py`), so a page is live the moment the file exists.
 | `privacy.html` / `terms.html` | yes | Legal pages (App Store / Play listing links point here) |
 | `style-guide.html` | reference | **Chalkline design-system reference — check it before styling anything.** 404s in deployed envs since 2026-08-19 (`_PROD_BLOCKED_STATIC` in `backend/server.py`); available in local dev. ⚠️ its `--line-strong` is the stale `#3D4654`, not the corrected `#59647A` — see plan item P1-1 |
 | `admin/analytics.html` | operator-only | Analytics dashboard; not linked from any public page |
-| `color-lab.html`, `color-lab-2.html` | no (404 in prod) | Frozen palette-exploration scratch from the Chalkline brand pass. Historical — do not treat as current tokens |
 
 ## Tokens live in ONE file
 
@@ -43,6 +42,10 @@ well under a second. Wired as the `web-structure` job in `.github/workflows/ci.y
 
 Exceptions are explicit: `qa:allow-emoji` on a line (and the line after it) opts out
 of the emoji check — `git grep qa:allow-emoji` lists every one.
+
+Frozen palette comparisons live outside the delivery root in
+[`archive/design-explorations/`](../archive/design-explorations/README.md).
+They are historical evidence, not current tokens.
 
 ## Shared code
 

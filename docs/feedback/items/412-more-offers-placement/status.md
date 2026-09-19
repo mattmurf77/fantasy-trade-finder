@@ -1,3 +1,18 @@
+# Status — 412-more-offers-placement
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-30",
+  "summary": "FB-412 — \"More offers\" location",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-30 — satellite — More offers under the give Add. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # FB-412 — "More offers" location
 
 **Status:** planned · 2026-08-30 · `claude/fb-410-412-trade-card-polish`

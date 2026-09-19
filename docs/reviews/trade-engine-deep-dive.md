@@ -7,9 +7,9 @@
 > **Update (2026-06-09, third pass):** §3 has now been verified and superseded by [`trade-engine-external-research.md`](trade-engine-external-research.md), which carries live sources and a list of amendments (A1–A10) to the tier plans — including a data-volume reality check that defers the Tier 2 learned acceptance model.
 
 **Implementation plans** (derived from §4 below):
-- Tier 1 — Fix the current engine: [`docs/plans/trade-engine-tier1-fixes.md`](../plans/trade-engine-tier1-fixes.md)
-- Tier 2 — Model upgrades: [`docs/plans/trade-engine-tier2-models.md`](../plans/trade-engine-tier2-models.md)
-- Tier 3 — Rebuild the generator: [`docs/plans/trade-engine-tier3-rebuild.md`](../plans/trade-engine-tier3-rebuild.md)
+- Tier 1 — Fix the current engine: [`docs/plans/archive/2026/trade-engine-tier1-fixes.md`](../plans/archive/2026/trade-engine-tier1-fixes.md)
+- Tier 2 — Model upgrades: [`docs/plans/archive/2026/trade-engine-tier2-models.md`](../plans/archive/2026/trade-engine-tier2-models.md)
+- Tier 3 — Rebuild the generator: [`docs/plans/archive/2026/trade-engine-tier3-rebuild.md`](../plans/archive/2026/trade-engine-tier3-rebuild.md)
 
 ---
 

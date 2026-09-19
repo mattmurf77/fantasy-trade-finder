@@ -154,7 +154,7 @@ if (e instanceof ApiError && e.isVerificationRequired) {
 | `mobile/src/components/EspnLinkSheet.tsx` | error mapping in two catches (R-7) |
 | Settings disconnect call site of `unlinkSleeper()` | `clearPersistedSleeperToken()` (R-5) |
 | `backend/tests/test_verified_sessions.py` | sequence regression pins (§4) — **no backend app code** |
-| Docs: `docs/plans/account-auth-plan-2026-07-11.md` status appendix; `mobile/src/components/CLAUDE.md` registry (banner copy note); `docs/runbook.md` only if an operational note is warranted | XS |
+| Docs: `docs/plans/archive/2026/account-auth-plan-2026-07-11.md` status appendix; `mobile/src/components/CLAUDE.md` registry (banner copy note); `docs/runbook.md` only if an operational note is warranted | XS |
 | Privacy (round-3 N-6, no gate): flag device-side storage of the Sleeper credential to whoever owns the privacy disclosure docs — the server-side storage disclosure likely already covers it | — |
 
 ## 3. Success criteria & guardrails

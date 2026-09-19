@@ -145,7 +145,7 @@ open question for the Author, default skip (simplicity-first).
   unknown reason" or similar); QA should pin the exact string from the
   operator's device before asserting on it (open question 2). A native
   Apple sheet appearing (which Maestro can't drive further) counts as PASS.
-- Existing smoke suite (`mobile/.maestro/flows/smoke/01-signin.yaml` etc.)
+- Existing smoke suite (`archive/retired-tooling/mobile/maestro/flows/smoke/01-signin.yaml` etc.)
   as regression that the entitlement edit broke nothing else.
 
 **What Maestro CANNOT do:** complete the Apple sheet (requires a real
@@ -168,7 +168,7 @@ render path simply succeeds.
 |---|---|---|
 | `mobile/ios/DTFDynastyTradeFinder/DTFDynastyTradeFinder.entitlements` | eng-mobile (build agent) | add `com.apple.developer.applesignin` = `[Default]` — the fix |
 | `mobile/app.json` + `mobile/ios/DTFDynastyTradeFinder/Info.plist` | eng-mobile | version bump 1.7.3 only (both files carry the version) |
-| `mobile/.maestro/flows/smoke/01-signin.yaml` (or new flow) | eng-qa | additive assertions per verification plan |
+| `archive/retired-tooling/mobile/maestro/flows/smoke/01-signin.yaml` (or new flow) | eng-qa | additive assertions per verification plan |
 | `mobile/src/screens/SettingsScreen.tsx` | eng-qa (additive testID only, if needed) | testID on the Apple link button; NO logic changes — respect the P2.7 account-state matrix |
 | `mobile/src/screens/SignInScreen.tsx` | (only if Author opts into friendlier copy — see OQ1) | additive catch-branch copy; otherwise untouched |
 | `docs/runbook.md` | planner/build agent | record the bare-workflow gotcha: config plugins / `usesAppleSignIn` are no-ops; native `ios/` files are the source of truth for entitlements/Info.plist |

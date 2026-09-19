@@ -1,3 +1,18 @@
+# Status — 2026-07-26-calc-eveners
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-07-26",
+  "summary": "Calculator eveners — \"Recommended to even it\" (DynastyGM teardown parity)",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-26 — `eveners`/`adjustments`/`naive_totals` on `/api/trade/evaluate` — CHANGELOG 2026-07-26. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # Calculator eveners — "Recommended to even it" (DynastyGM teardown parity)
 
 - **Source:** `docs/business/product/2026-07-26-dynastygm-app-teardown.md` — Trades tab / Team Calc: "RECOMMENDED" evener rows with + buttons when a trade is uneven (gap 7 in the FTF-vs-DynastyGM list). Operator-approved replication for FTF's calculator.

@@ -1,3 +1,18 @@
+# Status — 223-header-league-switcher
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-01",
+  "summary": "FB-223 — League switcher in the global header (covers FB-224)",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-01 — teardown-remediation (worktree). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # FB-223 — League switcher in the global header (covers FB-224)
 
 - **Type:** UX restructure · **Status:** built 2026-08-01 (branch

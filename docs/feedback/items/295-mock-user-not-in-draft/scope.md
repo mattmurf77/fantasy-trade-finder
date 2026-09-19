@@ -116,7 +116,7 @@ redeploy and no effect on the real Draft Room. That is the named lever.
 ## 3. Test scope (mobile test platform)
 
 - [ ] New flow
-- [x] **Extended flow:** `mobile/.maestro/flows/rookie/d3-mock-draft-loop.yaml`
+- [x] **Extended flow:** `archive/retired-tooling/mobile/maestro/flows/rookie/d3-mock-draft-loop.yaml`
   — add **T-295-12**: immediately after `mock-draft.on-the-clock` becomes
   visible in lap 1 and **before** any `scrollUntilVisible`/`tapOn` of an
   undrafted row, `assertVisible` the on-the-clock card naming the user's own

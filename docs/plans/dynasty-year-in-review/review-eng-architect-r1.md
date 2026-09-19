@@ -81,7 +81,7 @@ wrapped with `try/except` + `log.warning("… failed (continuing): %s", e)` — 
 (`server.py:15286-15296`), owned-pick sync (`:15300-15343`), trade capture (`:15355-15367`) —
 inside an outer daemon-level `except` that `log.exception`s rather than dying silently
 (`server.py:15370-15372`, docstring at `:15059-15065` citing
-`docs/reviews/2026-05-22-silent-bugs.md`). Match it exactly.
+`docs/reviews/2026/2026-05-22-silent-bugs.md`). Match it exactly.
 
 **The rule:** the snapshot write must happen in its **own transaction, after the membership
 transaction commits** — never inside it. `replace_espn_league_members` does its `delete` +
@@ -350,7 +350,7 @@ a hash + conditional insert is negligible. Adding a *fetch* to that daemon is no
 
 The operator's standing view is that feature flags gating server routes are not usable rollback
 levers. **That is correct and it does not apply here.** Read what D-P1-07 actually says
-(`docs/plans/audit-p1-remediation/DECISIONS-p1.md:139-145`): `growth.share_landing` gates
+(`docs/plans/archive/2026/audit-p1-remediation/DECISIONS-p1.md:139-145`): `growth.share_landing` gates
 *server routes* that **already-shared external links point at**, so flipping it off *"would
 break every link already shared, including ones sitting in other people's message threads. The
 flag is therefore not a usable rollback lever."* The disqualifying property is **external
@@ -591,5 +591,5 @@ For whoever builds this (`pm-technical` writes the PRD; `eng-backend` builds):
 | `living-memory/HLD.md` / `LLD.md` | Append-only league state is a convention shift |
 | `living-memory/DECISIONS.md` | The A2 inversion (on-sync primary, cron backstop) if adopted — it is a deviation from the plan's reading of YR-1 and needs the operator's eye |
 | `docs/cross-client-invariants.md` | **n/a** — server-only, no client contract moves |
-| `mobile/.maestro/` | **n/a** — no user-visible mobile change in P0 |
+| `archive/retired-tooling/mobile/maestro/` | **n/a** — no user-visible mobile change in P0 |
 | `docs/templates/feature-scope.md` | Required: this is schema + data collection, explicitly **not** express-lane eligible (root `CLAUDE.md` bright line). The plan says so at §11 and is right |

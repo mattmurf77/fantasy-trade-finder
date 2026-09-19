@@ -1,3 +1,18 @@
+# Status — 169-position-impact
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-09",
+  "summary": "#169 — Position-specific trade impact framing mockup lab",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-09 — `trade.position_impact` flag ON — graduated from mockup to build in the 2026-08-09 design-decision batch. **ID COLLISION with the row above**; see `docs/feedback/items/169-position-impact/status.md` — verify the real feedback-table ID before treating either as canonical. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #169 — Position-specific trade impact framing mockup lab
 
 **Status:** built · 2026-08-09 · branch `worktree-agent-a16b8c9e20f110454` — mockup-only pass (below) superseded by an operator build decision; live behind flag `trade.position_impact` (ON in `config/features.json`).

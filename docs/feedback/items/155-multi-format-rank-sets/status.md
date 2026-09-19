@@ -1,3 +1,18 @@
+# Status — 155-multi-format-rank-sets
+
+```project-status
+{
+  "status": "declined",
+  "updated": "2026-08-08",
+  "summary": "#155 — Multi-format rank sets — status",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: declined 2026-08-08 — operator passed — CHANGELOG 2026-08-08 \"Closed: … #155 (declined)\". Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #155 — Multi-format rank sets — status
 
 **Status:** open · date not recorded in source docs · n/a

@@ -110,8 +110,8 @@ Clear, the ✓, the mode tab). **W6-A fixed n15**: the ✓ now has a mechanism a
 
 ## 3. Evidence scope
 
-**Maestro delta: n/a — retired per [D-056](../../../living-memory/DECISIONS.md) (2026-08-15).** No
-flow was authored, extended or run, and `mobile/.maestro/` was not touched. The template's Maestro
+**Maestro delta: n/a — retired per [D-056](../../../../living-memory/DECISIONS.md) (2026-08-15).** No
+flow was authored, extended or run, and `archive/retired-tooling/mobile/maestro/` was not touched. The template's Maestro
 row is a dead section.
 
 **Structural guards** — five new, all sabotage-verified (`mobile/tests/`):
@@ -179,7 +179,7 @@ mobile/scripts/testid-lint.sh` passes.
 | `living-memory/HLD.md` (architecture genuinely shifted) | **n/a** | no new client, no new service, no new major flow at the system level. The calculator→deck hand-off reuses `useFinderTargets`, which already existed |
 | `docs/cross-client-invariants.md` (shared constants/enums/colors) | **updated (W6-A); n/a for W6-B** | W0–W5's enums (`calc_tour_started.source`, `calc_tour_ended.reason`, `deckOrigin`, `FinderHandoff.origin`) are mobile-only and stay unlisted. **W6-A's `reason` enum is not**: `POST /api/trades/queue` refuses with one of six codes and the client switches on every one, so a seventh added server-side would fall through to a generic line. New section **Trade-queue refusal reasons**, with the three locations that change together (server tuple, `CalcQueueReason`, `queueRefusalLine`). `calc_trade_queued` also joins the client-event contract section. **W6-B adds NO row**, deliberately: `POST /api/trades/fair-packages`'s `reason` values are diagnostic and **no client branches on them** — the deck simply renders empty. Registering an enum nothing reads is the same noise `calc_include_players_toggled` was deleted for. A client that starts switching on it must add the row first, and the api-reference row says so |
 | `docs/glossary.md` (new domain term) | **updated** | "Demo league" (calculator) retired; **Real values**, **In league**, **Show me around**, **Tour hold** added. Canvas is defined under Real values / In league. **W6-A adds "Queue (a trade)"** — the ✓ cell's verb, and the one word that could be mistaken for `useTradeQueue`, the unrelated web-style list of Sleeper propose URLs |
-| ADR or `DECISIONS.md` entry | **updated** | [D-150](../../../living-memory/DECISIONS.md) carries the feature's decisions; amended 2026-08-22 (W5) for the unwired ✓ cell and the calculator-origin overlay scope |
+| ADR or `DECISIONS.md` entry | **updated** | [D-150](../../../../living-memory/DECISIONS.md) carries the feature's decisions; amended 2026-08-22 (W5) for the unwired ✓ cell and the calculator-origin overlay scope |
 
 Also updated in the same pass, outside the template's rows:
 `docs/feedback/items/INDEX.md` (row 384 → `built-dark`), this folder's `status.md`,
@@ -191,7 +191,7 @@ carried a false "no payload or analytics event changes in either state" claim),
 
 ## 5. Ship gate declaration
 
-**Simulator-gate tier: n/a — retired per [D-056](../../../living-memory/DECISIONS.md)
+**Simulator-gate tier: n/a — retired per [D-056](../../../../living-memory/DECISIONS.md)
 (2026-08-15).** There is no tier to declare and no `qa/sim-runs/last-sim-run.json` to write. The
 template's tier matrix and `docs/runbook.md` § Pre-ship simulator gate are dead sections.
 
@@ -221,8 +221,8 @@ self-select.
    The third option the build found is what shipped — the predicate that decides the mirror is a
    pure function of state the request already holds, so it is evaluated UP FRONT and the refusal
    is named rather than silent. Contract, both 200 shapes and the reason enum:
-   [`api-reference.md`](../../api-reference.md); enum:
-   [`cross-client-invariants.md`](../../cross-client-invariants.md#trade-queue-refusal-reasons-post-apitradesqueue).
+   [`api-reference.md`](../../../api-reference.md); enum:
+   [`cross-client-invariants.md`](../../../cross-client-invariants.md#trade-queue-refusal-reasons-post-apitradesqueue).
 2. ~~**Receive-side "must include" is any-one, not all.**~~ **RETIRED BY W6-B, 2026-08-22 ([D-153]) — the concept no
    longer exists.** This row asked for `pinned_receive_mode:'all'` because ruling 2 said an Include-players ON search *must*
    include the canvas. The operator then dropped the toggle entirely ("C works") and re-specified the request as a

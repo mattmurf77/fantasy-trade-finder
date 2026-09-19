@@ -1,3 +1,18 @@
+# Status — 205-design-tenets
+
+```project-status
+{
+  "status": "reference",
+  "updated": "2026-07-28",
+  "summary": "#205 — Design tenets interview — status",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: research-only 2026-07-28 — n/a. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #205 — Design tenets interview — status
 
 **Status:** research-only · 2026-07-28 · n/a

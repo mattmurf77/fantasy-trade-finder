@@ -1,4 +1,4 @@
-"""UI-test harness seams (docs/plans/mobile-testing/lld.md §4.3, prd.md R-05/R-10/R-11/R-12).
+"""UI-test harness seams (docs/plans/archive/2026/mobile-testing/lld.md §4.3, prd.md R-05/R-10/R-11/R-12).
 
 Two layers of tests:
 

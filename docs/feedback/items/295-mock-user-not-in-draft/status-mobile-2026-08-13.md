@@ -79,12 +79,12 @@
 - `mobile/tests/check-mock-user-not-in-draft.js` (new, T-295-10, 18 asserts)
 - `mobile/tests/check-mock-draft-modes.js` (new, 78 asserts); both in
   `package.json` as `test:mock-user-not-in-draft` / `test:mock-draft-modes`
-- `mobile/.maestro/flows/rookie/d3-mock-draft-loop.yaml` — retargeted to
+- `archive/retired-tooling/mobile/maestro/flows/rookie/d3-mock-draft-loop.yaml` — retargeted to
   `qa_draft`/`990000000000000001` (dead ffv3 PRECONDITION deleted —
   repaired, not worked around), law-10 typed-username retry preamble,
   RUN-9 three-variant entry normalisation, and the #295 acceptance:
   `.*You’re on the clock.*` (curly source byte) before any row tap, both laps
-- `mobile/.maestro/flows/rookie/d4-mock-manual-mode.yaml` (new, tc
+- `archive/retired-tooling/mobile/maestro/flows/rookie/d4-mock-manual-mode.yaml` (new, tc
   T-305-M2) — manual toggle → `mock-draft.clock.picking-for` at pick 1 →
   one confirmed pick → `.*pick 2 of 12.*` + `picking-for` again →
   End-mock teardown (multi-line Alert text exemption) → `mock-entry.start`

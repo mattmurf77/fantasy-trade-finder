@@ -1,3 +1,12 @@
+```project-status
+{
+  "status": "active",
+  "updated": "",
+  "summary": "HLD Decisions — Device-Held Platform Credentials (2026-08-13)",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: **active** **active** — The HLD decision set for the above. Binding on `connected-rankings/`, which conforms rather than re-litigates.. Prior row preserved at ../reviews/2026/2026-09-06-project-status-migration/plans-index.md."
+}
+```
+
 # HLD Decisions — Device-Held Platform Credentials (2026-08-13)
 
 > Resolutions from the dual-agent HLD review (2 rounds). Supersedes the earlier

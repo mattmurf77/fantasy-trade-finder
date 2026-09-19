@@ -264,7 +264,7 @@ and re-open W2b; that rejection is endorsed.
 | `mobile/src/screens/DraftRoomScreen.tsx` (mock entry wiring) | Complete-state button priority; `postRefusal` clearing; `retry` wiring | #292 |
 | `mobile/src/screens/MockDraftScreen.tsx` | `actionLabel` gating; section-header copy; on-the-clock hint; header action in the complete state | #291, #292 |
 | `mobile/src/components/draft/MockEntryPanel.tsx` | `retry` control in the `errorText` branch | #292 |
-| `mobile/.maestro/flows/rookie/d3-mock-draft-loop.yaml` | New — the repo's first mock flow | all |
+| `archive/retired-tooling/mobile/maestro/flows/rookie/d3-mock-draft-loop.yaml` | New — the repo's first mock flow | all |
 | `backend/tests/test_mock_draft.py` | Additions; one helper corrected | all |
 
 **Not touched, and named so:** `backend/draft_board_service.py` and

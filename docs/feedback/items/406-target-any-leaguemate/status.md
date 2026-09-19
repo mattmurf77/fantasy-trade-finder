@@ -1,3 +1,18 @@
+# Status — 406-target-any-leaguemate
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-30",
+  "summary": "FB-406",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-30 — **canonical** of the 2026-08-30 batch (#406/#407) — \"Any league mate\" targeting, D-168; PR #250, v1.16.12 build 140. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # FB-406
 - **Status:** built 2026-08-30 — uncommitted in the build worktree, awaiting orchestrator review; TestFlight checklist (prd.md §E-4) pending operator
 - **Build report (2026-08-30, mobile build agent):** all 10 requirements (R-1…R-10) built at base `001ec915`; diff = `mobile/src/components/InLeagueCalculator.tsx` (+133/−30 — Anyone row, `partnerAny`/`partnerChosen` state, guarded default effect, honest dropdown/receive labels, scope-truth note on the exact gate-complement predicate, gated `ev` derivation closing the stale-verdict leak, receive-add redirect + hint, `seededPrefill` prop + negated initializers), `mobile/src/screens/TradesScreen.tsx` (+1 — the R-10 `seeded: true` marker on the seeding write, `:5817`), `mobile/src/components/TradeBuildCanvas.tsx` (+7 — `CanvasPrefill.seeded?` + `seededPrefill` pass-through only), `mobile/tests/check-calc-merged-behavior.js` (the declared 20a re-spec only), NEW `mobile/tests/check-any-partner.js` (15 assertions incl. A-11b) + `npm run test:any-partner`, `mobile/src/components/CLAUDE.md` (InLeagueCalculator + TradeBuildCanvas rows), `docs/design/components.md` (FB-406 constructions section), `living-memory/DECISIONS.md` D-168, and [code-walk.md](code-walk.md) (13 hops, file:line at the built state). **Evidence:** `npx tsc --noEmit` clean; all 88 `mobile/tests/check-*.js` suites green (87 existing + the new one); `testid-lint` OK; **21 sabotage red→green cycles** — S-1…S-15 per the PRD table plus variants S-5b (drop `!opponent`), S-11v (mirror write from the default effect), S-14v (tap site marked seeded), and the two-sided 20a re-proof (seed negation dropped → 20a red; declaration reordered → 20a red) — every cycle red on its named assertion, restored green (restores via backup copy, not `git checkout --`, since the build itself was uncommitted). Zero backend diff (`git diff backend/` empty); `pytest backend/tests` untouched by this change. **For the orchestrator at ship:** TEST_LEDGER entry (suite run + sabotage log + pending E-4) and the FB-407 follow-up-closed note in `../407-finder-forced-team/status.md` were outside this agent's owned paths — both still need writing.

@@ -1,6 +1,6 @@
 // espnCookies.ts — extract ESPN's espn_s2 + SWID from the NATIVE cookie store.
 //
-// ESPN Connect WebView (Phase 1b, docs/plans/espn-connect-webview/scope.md).
+// ESPN Connect WebView (Phase 1b, docs/plans/archive/2026/espn-connect-webview/scope.md).
 // espn_s2 is issued HttpOnly, so the WebView's `document.cookie` cannot see
 // it — injected JS is a dead end. The cookies live in the native cookie
 // store (WKHTTPCookieStore on iOS, shared with the WebView because the screen

@@ -1,3 +1,18 @@
+# Status — 285-pick-sums
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-09",
+  "summary": "#285 — Draft picks summed into the aggregate pick-equivalent label",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-09 — aggregate \"≈X firsts\" on players-only value — CHANGELOG 2026-08-09. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #285 — Draft picks summed into the aggregate pick-equivalent label
 
 **Status:** in-progress · 2026-08-09 · branch `worktree-agent-a18d2616a61a99ae1`

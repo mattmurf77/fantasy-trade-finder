@@ -1,3 +1,12 @@
+```project-status
+{
+  "status": "reference",
+  "updated": "",
+  "summary": "Competitor-Informed Feature Backlog — 2026-06-11",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: reference  — The 92-item ranked backlog that [competitor-top20/](competitor-top20/) drills into. Prior row preserved at ../reviews/2026/2026-09-06-project-status-migration/plans-index.md."
+}
+```
+
 # Competitor-Informed Feature Backlog — 2026-06-11
 
 **Inputs:** teardowns of DynastyGM [GM], DynastyDealer [DDr], Dynasty Daddy [DD], FantasyCalc [FC], DynastyTradeCalculator [DTC], FPTrack [FPT], Dynasty Dealmaker [DM] (docs/competitor-teardown-*.md), operator ideas [OP] (docs/plans/competitor-inspired-features-2026-06-10.md), and internal hooks [FTF] (trade-engine-v2 watch items, dark flags).

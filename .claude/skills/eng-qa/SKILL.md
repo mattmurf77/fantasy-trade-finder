@@ -27,7 +27,7 @@ code fixes go to the owning eng-* skill with a minimal repro.
      and authoring rules in `mobile/tests/README.md`). CI's `mobile-typecheck` job globs
      the directory, so every guard runs on every push. **There is no mobile E2E lane** —
      [D-056](../../../living-memory/DECISIONS.md) (2026-08-15, Active) retired Maestro
-     and the simulator entirely. The flows under `mobile/.maestro/` are historical
+     and the simulator entirely. The flows under `archive/retired-tooling/mobile/maestro/` are historical
      artifacts: kept, never run.
    - Web: no automated suite — smoke checks are manual page loads against
      `python run.py`.

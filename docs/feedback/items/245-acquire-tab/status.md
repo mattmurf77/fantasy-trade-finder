@@ -1,3 +1,18 @@
+# Status — 245-acquire-tab
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-05",
+  "summary": "#245 — Acquire tab: rename + Trade / Free Agency sections on the hub",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-05 — Trades→Acquire `31c7731` + sweep `c795971` — CHANGELOG 2026-08-05. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #245 — Acquire tab: rename + Trade / Free Agency sections on the hub
 
 **Status:** built, tsc-clean, committed on the worktree branch (2026-08-05).

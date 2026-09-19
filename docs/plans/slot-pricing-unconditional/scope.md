@@ -116,7 +116,7 @@ A 1.01 is **5.9×** a 1.12. Superflex is dearer again — a 1.01 is 6181.1. Roun
 
 - `pick_pricing_mode_changed` **is no longer emitted** — its only emitter was the Settings control, which is deleted. It **stays registered** in `backend/analytics_taxonomy.py` (`ALLOWED_CLIENT_EVENTS` + the props map) and in `analytics_queries.NON_INTENT_EVENTS`, so historical rows stay queryable and a de-registration does not turn old data into "unknown event" noise. Registering-but-not-emitting is the same posture the taxonomy already takes for Phase-2 names.
 - No new events. The change is a server-side pricing constant with no new user decision to instrument — there is now nothing for the user to *choose*, which is the whole point of the ruling.
-- Existing coverage that answers "did this help?": deck/card events already carry pick composition, and `docs/plans/rookie-draft/build-m6b.md` §4.2 measured the deck churn this repricing causes (154/257 cards in 1QB). Re-running that harness post-merge is the honest read, not a new event.
+- Existing coverage that answers "did this help?": deck/card events already carry pick composition, and `docs/plans/archive/2026/rookie-draft/build-m6b.md` §4.2 measured the deck churn this repricing causes (154/257 cards in 1QB). Re-running that harness post-merge is the honest read, not a new event.
 
 ---
 
@@ -263,7 +263,7 @@ Rounds are clamped in exactly one place — `market_pick_pool_value` clamps to D
 
 ### 7.1 End-to-end proof on a real served card
 
-Card from `docs/reviews/2026-08-19-knockout-waterfall/knockout-survivors.csv:13` — arm B, divergence, `mattmurf77 → jonbonjourvi`:
+Card from `docs/reviews/2026/2026-08-19-knockout-waterfall/knockout-survivors.csv:13` — arm B, divergence, `mattmurf77 → jonbonjourvi`:
 
 ```
 give     Drake Maye + Davante Adams        cons_give = 3862.3   (players, untouched)

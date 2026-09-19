@@ -2,7 +2,7 @@
 
 > **Status:** proposed, not started. No code written.
 > **Entry point:** direct ask (2026-08-19) — "audit the website + what's needed to bring it to par."
-> **Evidence base:** [`docs/reviews/2026-08-19-web-parity-audit.md`](../../reviews/2026-08-19-web-parity-audit.md)
+> **Evidence base:** [`docs/reviews/2026/2026-08-19-web-parity-audit.md`](../../reviews/2026/2026-08-19-web-parity-audit.md)
 > — four parallel auditors; live browse against prod, source claims verified against `origin/main`.
 
 ---

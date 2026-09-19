@@ -1,3 +1,18 @@
+# Status — 304-positional-need-filter
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-16",
+  "summary": "FB-304 — group canonical folder",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-16 — wave `20b40db` / `trade.presentment_rules` ON — G6 **canonical** (#304 #336 #339 #340 #341). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # FB-304 — group canonical folder
 
 - **Status:** built 2026-08-16 (branch `feat/fb304-presentment`, awaiting merge + operator TestFlight checklist) · **Phase:** 2 (build)

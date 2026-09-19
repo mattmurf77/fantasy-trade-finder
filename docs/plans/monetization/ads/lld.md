@@ -153,7 +153,7 @@ gate the *copy*, not the grant capability).
 - Referral ad-free arm writes correct row (`source='promo_referral'`, +30d).
 - Flags OFF → status route reports disabled; house-ads route returns `[]`.
 
-**Maestro (`mobile/.maestro/`, new flows; register in its README):**
+**Maestro (`archive/retired-tooling/mobile/maestro/`, new flows; register in its README):**
 - `07-ads-free-user.yaml`: flags ON + free session → `ad-banner` testID visible
   on Trends and Tiers; NOT visible on Calculator/Rank screens (assert absent).
 - `08-ads-pro-suppressed.yaml`: grant Pro (admin bulk-grant in test setup) →
@@ -181,4 +181,4 @@ shows a house card, zero layout shift beyond reserved min-height.
 - [ ] `docs/runbook.md` — kill-switch procedure + retention-guard check
 - [ ] ADR — "ads suppression = separate `ad_free` entitlement, no-request
       client contract" (HLD §3–4 rationale)
-- [ ] `mobile/.maestro/README.md` — new flows
+- [ ] `archive/retired-tooling/mobile/maestro/README.md` — new flows

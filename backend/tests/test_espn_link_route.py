@@ -1,5 +1,5 @@
 """End-to-end tests for the ESPN league-linking routes (Phase 1, flag
-`espn.link` — docs/plans/espn-league-linking-plan-2026-07-11.md):
+`espn.link` — docs/plans/archive/2026/espn-league-linking-plan-2026-07-11.md):
 
   POST /api/espn/link     — preview (choose team) + import (persist)
   GET  /api/espn/leagues  — linked leagues w/ membership snapshot

@@ -1,6 +1,6 @@
 """Account-auth P1 — verified sessions via Sleeper-JWT proof.
 
-Covers (docs/plans/account-auth-plan-2026-07-11.md §2c/§2d/§3-P1):
+Covers (docs/plans/archive/2026/account-auth-plan-2026-07-11.md §2c/§2d/§3-P1):
 
   1. The oracle probe (`sleeper_write.verify_token_live`) — success /
      token-rejected / transport-failure classification, offline via _opener.

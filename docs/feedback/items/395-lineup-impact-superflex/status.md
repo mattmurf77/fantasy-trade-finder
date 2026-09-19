@@ -1,3 +1,18 @@
+# Status — 395-lineup-impact-superflex
+
+```project-status
+{
+  "status": "planned",
+  "updated": "2026-08-24",
+  "summary": "FB-395 + FB-396 — starting-lineup impact: superflex + flex labels (Group C canonical)",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: planned 2026-08-24 — **canonical** G-C of the 2026-08-24 wave (#395/#396) — SF slot attribution + flex slot labels in starting-lineup impact. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # FB-395 + FB-396 — starting-lineup impact: superflex + flex labels (Group C canonical)
 - **Status:** backend built 2026-08-24 (branch `feat/fb395-lineup-impact-backend`) — mobile half (R-6) separate agent; integration runs the full sweep + living-memory
 - **Covered:** #395 (SF slot attribution), #396 (flex slot labeled "WR3")

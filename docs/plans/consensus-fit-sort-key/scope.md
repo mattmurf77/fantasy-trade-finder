@@ -1,7 +1,7 @@
 # Feature Scope — Consensus roster-fit sort key (`consensus_fit_weight`)
 
 **Date:** 2026-09-02
-**Entry point:** direct ask (lead-verified premise 2026-09-01; R7 of [docs/reviews/2026-08-22-trade-model-restrictiveness.html](../../reviews/2026-08-22-trade-model-restrictiveness.html) in its sort-key form — the pool-prune form was rejected at 5.5× cost / stuffed packages)
+**Entry point:** direct ask (lead-verified premise 2026-09-01; R7 of [docs/reviews/2026/2026-08-22-trade-model-restrictiveness.html](../../reviews/2026/2026-08-22-trade-model-restrictiveness.html) in its sort-key form — the pool-prune form was rejected at 5.5× cost / stuffed packages)
 **Builder:** agent worktree `claude/consensus-fit-sort-key` (build + prove); the lead ships
 **Operator sign-off on waivers:** needed — §1(c) and §3 (structural guard, TestFlight) are waived below with reasons; surfaced to the lead in the final report
 
@@ -52,7 +52,7 @@
 | `docs/architecture.md` (module wiring / data flow changed) | n/a | a sort key inside one function; no module, import or data-flow edge changes (`replacement_levels` / `marginal_value` are module-local helpers the optimizer already uses) |
 | `living-memory/HLD.md` (architecture genuinely shifted) | n/a | as above |
 | `docs/cross-client-invariants.md` (shared constants/enums/colors) | n/a | no client-visible constant, enum or wire key |
-| `docs/glossary.md` (new domain term) | n/a | "fit asymmetry" / "marginal value" already exist in the Tier-2 vocabulary (`docs/plans/trade-engine-tier2-models.md`); no new term |
+| `docs/glossary.md` (new domain term) | n/a | "fit asymmetry" / "marginal value" already exist in the Tier-2 vocabulary (`docs/plans/archive/2026/trade-engine-tier2-models.md`); no new term |
 | ADR or `DECISIONS.md` entry (non-obvious choice made) | **for the lead** | two non-obvious choices to record when shipping: (1) fit as a **sort-key blend**, not a prune or a gate — the pool-prune prototype was rejected (5.5× cost, stuffed packages) and a gate would move the fairness floor; (2) arm A **pins** the identity rather than excluding it (C4 rule over D-095 rule, because the live row will move) |
 | `docs/plans/three-model-bakeoff/scope-phase2.md` | **updated** | knob disposition row |
 | `docs/plans/README.md` | **updated** | thread-folder row |

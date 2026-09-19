@@ -5,7 +5,7 @@
 **Builder:** background session, branch `feat/pick-year-decay`
 **Operator sign-off on waivers:** **needed — see §6.** Two waivers below (analytics, structural guard) plus one substantive divergence from external market data that the operator should see before this merges.
 
-Full analysis: [docs/reviews/2026-08-19-pick-year-valuation.md](../../reviews/2026-08-19-pick-year-valuation.md)
+Full analysis: [docs/reviews/2026/2026-08-19-pick-year-valuation.md](../../reviews/2026/2026-08-19-pick-year-valuation.md)
 
 ---
 
@@ -35,7 +35,7 @@ The per-year value discount on a draft pick becomes a function of the pick's **r
   - Before: Adams 1138.8 vs `pick_pool_value(1, 3)` = 1300.1 → gap **161.3**, ratio **0.124** → both floors missed → **served** (which is what prod did).
   - After: Adams 1138.8 vs 2117.0 → gap **978.2**, ratio **0.462** → both floors cleared → **killed**.
   - Pinned as a boolean assertion, not a numeric one, in `test_adams_no_longer_clears_the_overpay_gate_against_a_2029_first`.
-- **Manual TestFlight checklist** (the only runtime evidence mobile now gets) — see [the review doc's Evidence section](../../reviews/2026-08-19-pick-year-valuation.md#evidence) for the numbered five-step version. Summary: no mid-tier veteran offered straight up for a far-out 1st; no 1st-on-both-sides-different-years card in ~30 swipes; a 2029 1st badges `first_1` and matches the 2026 1st's value; calculator says a 2029 1st ↔ 2026 1st is exactly even; a 2029 **2nd** still visibly worth less than a 2026 2nd.
+- **Manual TestFlight checklist** (the only runtime evidence mobile now gets) — see [the review doc's Evidence section](../../reviews/2026/2026-08-19-pick-year-valuation.md#evidence) for the numbered five-step version. Summary: no mid-tier veteran offered straight up for a far-out 1st; no 1st-on-both-sides-different-years card in ~30 swipes; a 2029 1st badges `first_1` and matches the 2026 1st's value; calculator says a 2029 1st ↔ 2026 1st is exactly even; a 2029 **2nd** still visibly worth less than a 2026 2nd.
 - **`testID`s added/renamed:** none (no client change).
 
 ## 4. Docs scope (MANDATORY — HLD / LLD / API)
@@ -63,4 +63,4 @@ The per-year value discount on a draft pick becomes a function of the pick's **r
 
 1. **Analytics waived** (§1) — existing `deck_impressions` fields already answer the follow-up question.
 2. **Structural guard waived** (§3) — no mobile code change; no client hard-codes a discount.
-3. **⚠️ The round-1 flat rule contradicts every external source I could read.** This is not a waiver, it is a divergence, and it is the one thing worth a second look before merge. DynastyProcess publishes an explicit rule (80 % of current-year value, applied flat to every round); FantasyCalc's 2027→2029 CAGR for firsts is 0.80; KeepTradeCut's is 0.83; DynastyCalc's is 0.93. **Three of the four discount firsts *harder* than later rounds** — the opposite of the "firsts flat, later rounds decay" model. The operator's direction was explicit and is implemented as given, and it does cleanly close both reported symptoms (a flat rate is the *only* rate that makes first-for-first year arbitrage structurally impossible). But we are now deliberately pricing firsts above market. Logged as Q-018, revertible with one config write. Numbers and sources in the review doc's [calibration section](../../reviews/2026-08-19-pick-year-valuation.md#external-calibration--and-where-it-disagrees-with-us).
+3. **⚠️ The round-1 flat rule contradicts every external source I could read.** This is not a waiver, it is a divergence, and it is the one thing worth a second look before merge. DynastyProcess publishes an explicit rule (80 % of current-year value, applied flat to every round); FantasyCalc's 2027→2029 CAGR for firsts is 0.80; KeepTradeCut's is 0.83; DynastyCalc's is 0.93. **Three of the four discount firsts *harder* than later rounds** — the opposite of the "firsts flat, later rounds decay" model. The operator's direction was explicit and is implemented as given, and it does cleanly close both reported symptoms (a flat rate is the *only* rate that makes first-for-first year arbitrage structurally impossible). But we are now deliberately pricing firsts above market. Logged as Q-018, revertible with one config write. Numbers and sources in the review doc's [calibration section](../../reviews/2026/2026-08-19-pick-year-valuation.md#external-calibration--and-where-it-disagrees-with-us).

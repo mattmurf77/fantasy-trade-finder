@@ -1,3 +1,18 @@
+# Status — 293-picks-in-subsets
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-10",
+  "summary": "Status — #293 / #294 · G3 mobile build",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-10 — PR #103 / `league.picks_always_counted` ON — G3 **canonical** (#293/#294). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # Status — #293 / #294 · G3 mobile build
 
 - **Date:** 2026-08-10 · **Lane:** G3 (mobile build agent)
@@ -54,13 +69,13 @@ orchestrator to reach into G3's owned path.
 | `mobile/scripts/testid-lint-allow.txt` | The five `league-summary.*` globs from PRD §7.1, with the constructing file noted per the file's own convention |
 | `mobile/tests/check-picks-subset-invariance.js` | **New** — T-S1, the 16-assertion structural check |
 | `mobile/package.json` | One script: `test:picks-subset-invariance` |
-| `mobile/.maestro/flows/league/01…04.yaml` | **New directory**, four flows (T1–T7) |
+| `archive/retired-tooling/mobile/maestro/flows/league/01…04.yaml` | **New directory**, four flows (T1–T7) |
 | `docs/feedback/items/293-picks-in-subsets/status.md` | This file |
 
 **Not touched, deliberately:** `config/features.json`, `docs/config-reference.md`,
 `docs/cross-client-invariants.md`, `docs/api-reference.md`, `living-memory/*`,
 `mobile/src/*/CLAUDE.md` (orchestrator-owned); `qa/**` and
-`mobile/scripts/sim-run.sh` (separate harness lane); every G1/G2 path.
+`archive/retired-tooling/mobile/scripts/sim-run.sh` (separate harness lane); every G1/G2 path.
 
 ---
 

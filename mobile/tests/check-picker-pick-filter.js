@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// B3 (docs/reviews/2026-08-18-bug-sweep/ticket.md) — the picker's PICK
+// B3 (docs/reviews/2026/2026-08-18-bug-sweep/ticket.md) — the picker's PICK
 // filter painted a BLANK SHEET.
 //
 // WHY THIS EXISTS. `build_universal_pool` stamps the 12 generic rungs with

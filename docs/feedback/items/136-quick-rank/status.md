@@ -1,3 +1,18 @@
+# Status — 136-quick-rank
+
+```project-status
+{
+  "status": "in-progress",
+  "updated": "2026-07-12",
+  "summary": "#136 — Quick Rank (rank players within a tier) — status",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: in-progress 2026-07-12 — trade-engine-v2. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #136 — Quick Rank (rank players within a tier) — status
 
 **State:** built + backend contract pinned by test (2026-07-12, branch

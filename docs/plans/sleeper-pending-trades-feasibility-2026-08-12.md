@@ -1,3 +1,12 @@
+```project-status
+{
+  "status": "reference",
+  "updated": "",
+  "summary": "Sleeper Pending Trades — Feasibility Memo (2026-08-12)",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: reference  — Sleeper pending-offer feasibility — the memo feature #11 was gated on. Prior row preserved at ../reviews/2026/2026-09-06-project-status-migration/plans-index.md."
+}
+```
+
 # Sleeper Pending Trades — Feasibility Memo (2026-08-12)
 
 > **This is the "#83 feasibility memo"** that [`competitor-top20/11-received-offer-analyzer.md`](competitor-top20/11-received-offer-analyzer.md) has been gated on since 2026-06-11, and the answer to the C2 deliverable left blank in [`sleeper-write-capture-runbook.md`](sleeper-write-capture-runbook.md). Also answers the open question in [`auth-multiplatform-plan-2026-06-11.md:298`](auth-multiplatform-plan-2026-06-11.md).

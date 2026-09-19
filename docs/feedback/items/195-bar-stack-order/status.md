@@ -1,3 +1,18 @@
+# Status — 195-bar-stack-order
+
+```project-status
+{
+  "status": "in-progress",
+  "updated": "2026-07-27",
+  "summary": "FB-195 — League bar stack top-down QB→RB→WR→TE — status",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: in-progress 2026-07-27 — teardown-remediation. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # FB-195 — League bar stack top-down QB→RB→WR→TE — status
 
 **Fixed 2026-07-27** (branch `teardown-remediation`). LeagueSummaryScreen's

@@ -1,6 +1,6 @@
 """Consensus roster-fit SORT KEY — `consensus_fit_weight`
 (docs/plans/consensus-fit-sort-key/scope.md; R7 of
-docs/reviews/2026-08-22-trade-model-restrictiveness.html).
+docs/reviews/2026/2026-08-22-trade-model-restrictiveness.html).
 
 `_generate_consensus_for_pair` serves 84.5% of production cards and emits the
 first `max_cards` combos that clear its gates IN POOL ORDER — so the pool sort

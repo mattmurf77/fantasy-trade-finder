@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Regression test for the P0-6 send-platform resolution and copy-trade text
-// (docs/plans/audit-p0-remediation/lld-p0-6.md §7).
+// (docs/plans/archive/2026/audit-p0-remediation/lld-p0-6.md §7).
 //
 // This is the COMPENSATING COVERAGE for the MFL/Fleaflicker simulator waiver:
 // neither platform has a harness profile, and after the P0-6 refactor the

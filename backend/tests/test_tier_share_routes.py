@@ -1,6 +1,6 @@
 """Tier-board share routes are closed by default — flag `growth.tier_board_share`.
 
-Operator decision D-P1-12 (docs/plans/audit-p1-remediation/DECISIONS-p1.md):
+Operator decision D-P1-12 (docs/plans/archive/2026/audit-p1-remediation/DECISIONS-p1.md):
 sharing of rankings / tier boards is not a product surface and must not be
 live in any form.
 

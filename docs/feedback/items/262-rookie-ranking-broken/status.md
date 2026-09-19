@@ -1,3 +1,18 @@
+# Status — 262-rookie-ranking-broken
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-08",
+  "summary": "FB-262 — status",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-08 — n/a — fixed upstream by commit `be56567`. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # FB-262 — status
 
 - **Item:** #262 (bug) — "Can't actually rank rookies from the page"
@@ -33,7 +48,7 @@ the rookies"** row — promised an action it could not perform.
 
 The operator already fixed this on 2026-08-06 in `be56567` ("draft: editable
 rookie ranks + seasonal Draft tab as a simple flag"), recorded in
-`docs/plans/draft-extensions/build-tab-and-rookie-edit.md` §"Change 1". That
+`docs/plans/archive/2026/draft-extensions/build-tab-and-rookie-edit.md` §"Change 1". That
 commit is on this branch; build 82 was cut before it. So on current
 `teardown-remediation` the page **can** rank rookies.
 

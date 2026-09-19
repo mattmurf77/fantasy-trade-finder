@@ -2,7 +2,7 @@
 
 Goal: a PRD (plus HLD/LLD deltas on the Feature path) precise enough that two
 build agents working blind on different platforms produce compatible code.
-The doc suite in `docs/plans/mobile-testing/` is the quality bar and format
+The doc suite in `docs/plans/archive/2026/mobile-testing/` is the quality bar and format
 precedent (it came out of the same dual-agent process).
 
 ## Outputs (in `docs/feedback/items/<id>-<slug>/`, the group's lowest feedback ID; other items in the group get a `status.md` linking here)
@@ -12,7 +12,7 @@ precedent (it came out of the same dual-agent process).
 | Feature | `hld-delta.md` | What changes in the architecture: components touched, data flow, decisions + alternatives rejected. Written as a **delta against `docs/architecture.md`**, not a rewrite. |
 | Feature | `lld-delta.md` | Exact interfaces: endpoint signatures (method, path, request/response JSON with field types and error shapes), DB schema changes, client state changes, function-level touch points with file paths. |
 | All | `prd.md` | Requirements (numbered R-1…), success criteria, out-of-scope, guardrails, **and the test plan** (below). |
-| All | `scope.md` | Copy of `docs/templates/feature-scope.md`, filled: analytics events (specced / covered / **written** waiver — silence is not a waiver), schema+flags, the §3 evidence scope (structural `mobile/tests/check-*.js` guards, unit tests, code-walk proof, TestFlight checklist — **not** a Maestro delta, retired by D-056), the row-by-row docs table (api-reference / LLD / architecture / HLD / invariants / glossary / ADR), and the §5 ship-gate declaration (CI green + TEST_LEDGER entry — there is no sim-gate tier). Waivers surface to the operator before build. Per CLAUDE.md §Conventions "Feature gates". |
+| All | `scope.md` | Copy of `docs/templates/feature-scope.md`, filled: analytics events (specced / covered / **written** waiver — silence is not a waiver), schema+flags, the §3 evidence scope (structural `mobile/tests/check-*.js` guards, unit tests, code-walk proof, TestFlight checklist — **not** a Maestro delta, retired by D-056), the row-by-row docs table (API / schema / architecture / config / invariants / glossary / ADR; static HLD/LLD memory pointers are not update targets), and the §5 ship-gate declaration (CI green + TEST_LEDGER entry — there is no sim-gate tier). Waivers surface to the operator before build. Per `docs/agent-workflow.md` §Scope, evidence, documentation. |
 | All | `reconciliation-log.md` | Each review round: objections raised, resolution, anything orchestrator-arbitrated. |
 
 ### PRD test plan requirements
@@ -38,7 +38,7 @@ flow authoring, no sim runs, in any pipeline.)**
   `screens/mobile/<screen>/` captures as explicit PRD inputs — they are the exact
   ground truth for "current". Every mockup round starts from them, never from
   memory or from reading source alone (`screens/CLAUDE.md`, `mockups/CLAUDE.md`).
-  If `mobile/scripts/screen-freshness.sh` flags one stale, request the re-capture
+  If `archive/retired-tooling/mobile/scripts/screen-freshness.sh` flags one stale, request the re-capture
   before the design round, not after. The scope block's **capture delta** row (§3)
   then names which screens get re-captured at ship.
 

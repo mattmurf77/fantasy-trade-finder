@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Copy drafts — Decline Reason Capture</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --line-strong:#59647A;
+  --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+  --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --rb:#22C55E; --wr:#3B82F6;
+  --r-xs:2px; --r-sm:4px; --r-md:8px; --r-pill:999px;
+  --shadow-sheet:0 12px 32px rgba(0,0,0,0.55);
+  --f-display:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090C;color:var(--chalk);font:400 14px/21px var(--f-ui);padding:28px 16px 90px}
+a{color:var(--ice);text-decoration:none} a:hover{text-decoration:underline}
+.wrap{max-width:1500px;margin:0 auto}
+.pagehead{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:8px}
+h1.display{font:700 28px/30px var(--f-display);text-transform:uppercase;letter-spacing:.02em}
+.crumb{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim)}
+.spacer{flex:1}
+.lede{font:400 14px/21px var(--f-ui);color:var(--chalk-dim);max-width:86ch;margin-bottom:22px}
+.label{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim)}
+.tick-label{display:flex;align-items:center;gap:8px}
+.tick-label::before{content:"";width:3px;height:14px;background:var(--ice);flex:none}
+.body-sm{font:400 13px/18px var(--f-ui)}
+.dim{color:var(--chalk-dim)}.faint{color:var(--chalk-faint)}
+.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+code{font:500 12px/16px var(--f-mono);color:var(--chalk)}
+h2.sec{font:600 22px/26px var(--f-display);text-transform:uppercase;letter-spacing:.03em;margin:36px 0 4px}
+
+.scroller{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r-md);margin-top:12px}
+table.copy{width:100%;min-width:1180px;border-collapse:collapse;background:var(--ink1)}
+table.copy th{text-align:left;font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim);padding:11px 13px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);background:var(--ink2);vertical-align:bottom}
+table.copy th small{display:block;font:400 11px/15px var(--f-ui);text-transform:none;letter-spacing:0;color:var(--chalk-faint);margin-top:4px}
+table.copy th:last-child{border-right:0}
+table.copy td{padding:11px 13px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);font:400 13px/18px var(--f-ui);vertical-align:top}
+table.copy td:last-child{border-right:0}
+table.copy tr:last-child td{border-bottom:0}
+table.copy td.codecell{background:var(--ink2)}
+table.copy td.codecell .cname{font:600 13px/18px var(--f-ui)}
+table.copy td.codecell code{display:block;margin-top:3px}
+.miss{color:var(--flare);font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.06em}
+.amb{color:var(--warn);font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.06em}
+.note{display:block;margin-top:4px;color:var(--chalk-faint);font:400 12px/16px var(--f-ui)}
+.pick{border-left:3px solid var(--ice)}
+
+/* rendered-in-situ frames */
+.rowframes{display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start;justify-content:center;margin-top:14px}
+.mini{width:352px}
+.mini-cap{margin-bottom:9px;min-height:66px}
+.mini-cap .label{color:var(--chalk)}
+.mini-cap p{font:400 13px/18px var(--f-ui);color:var(--chalk-dim);margin-top:3px}
+.minicard{background:var(--ink1);border:1px solid var(--line);border-radius:var(--r-md);padding:13px}
+.minicard .t{font:600 15px/21px var(--f-ui)}
+.minicard .s{font:400 13px/18px var(--f-ui);color:var(--chalk-dim);margin-bottom:10px}
+.trow{display:flex;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);align-items:center}
+.trow:last-of-type{border-bottom:0}
+.trail{width:3px;height:20px;flex:none}
+.tname{font:600 13px/17px var(--f-ui)}
+.tdir{margin-left:auto;font:600 11px/14px var(--f-ui);letter-spacing:.06em;color:var(--chalk-faint);text-transform:uppercase}
+.disp-row{display:flex;gap:9px;margin-top:11px}
+.disp-btn{flex:1;height:44px;border-radius:var(--r-sm);border:1px solid var(--line-strong);display:flex;align-items:center;justify-content:center}
+.disp-btn.pass{border-color:var(--neg);color:var(--neg)}
+.disp-btn.like{border-color:var(--pos);color:var(--pos)}
+.why-cap{margin:11px 0 7px}
+.why-chips{display:flex;gap:7px}
+.wchip{flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;text-align:center;padding:0 6px;border:1px solid var(--line-strong);border-radius:var(--r-sm);background:var(--ink0);color:var(--chalk-dim);font:400 13px/16px var(--f-ui)}
+.fitnote{margin-top:10px;padding-top:9px;border-top:1px solid var(--line);display:flex;align-items:center;gap:7px}
+.fitnote .k{font:500 11px/14px var(--f-mono);color:var(--chalk-faint)}
+.fitnote .ok{color:var(--pos)}.fitnote .bad{color:var(--warn)}
+
+.caption{margin-top:26px;background:var(--ink1);border:1px solid var(--line);border-left:3px solid var(--flare);border-radius:var(--r-md);padding:12px 15px}
+.caption .label{color:var(--flare);margin-bottom:4px}
+.caption p{font:400 13px/19px var(--f-ui);color:var(--chalk-dim)}
+.caption p + p{margin-top:8px}
+.recbox{margin-top:20px;background:var(--ink1);border:1px solid var(--line);border-left:3px solid var(--ice);border-radius:var(--r-md);padding:14px 16px}
+.recbox .label{color:var(--ice);margin-bottom:5px}
+.recbox p{font:400 14px/21px var(--f-ui);color:var(--chalk-dim)}
+.recbox p + p{margin-top:9px}
+.recbox strong{color:var(--chalk)}
+ul.tight{margin:8px 0 0 0;list-style:none}
+ul.tight li{display:flex;gap:9px;padding:4px 0;font:400 13px/19px var(--f-ui);color:var(--chalk-dim)}
+ul.tight li::before{content:"";width:5px;height:5px;background:var(--ice);margin-top:7px;flex:none}
+.pagelinks{display:flex;justify-content:space-between;margin-top:34px;padding-top:16px;border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="pagehead">
+  <a class="crumb" href="index.html">&larr; Index</a>
+  <h1 class="display">Copy drafts</h1>
+  <div class="spacer"></div>
+  <a class="crumb" href="05-sampled-quick-question.html">&lsaquo; Prev</a>
+  <a class="crumb" href="index.html">Index</a>
+</div>
+<p class="lede">Same taxonomy, four voices. The wording is not decoration here: every one of these options is a sentence about a person the user will see at a draft party, and the difference between &ldquo;Bad value for my trade partner&rdquo; and &ldquo;I&rsquo;d be robbing him&rdquo; is the difference between filing a complaint about a leaguemate and admitting something about yourself. The operator&rsquo;s original draft is column&nbsp;1, compared honestly &mdash; including the rows it has no way to express.</p>
+
+<div class="scroller">
+<table class="copy">
+  <tr>
+    <th style="width:15%">Code</th>
+    <th style="width:20%">1 &middot; Operator&rsquo;s draft<small>The first-pass list, as written</small></th>
+    <th style="width:22%" class="pick">2 &middot; Plain-spoken<small>How a person would say it out loud</small></th>
+    <th style="width:20%">3 &middot; Concise-neutral<small>Shortest, most clinical, no character</small></th>
+    <th style="width:23%">4 &middot; Fantasy-native<small>League-chat register</small></th>
+  </tr>
+
+  <tr>
+    <td class="codecell"><span class="cname">Liked it</span><code>&mdash; (not a decline)</code></td>
+    <td>Yes | N/A (not presented)<span class="note">Correct instinct: nothing is asked on the check. Keep it.</span></td>
+    <td class="pick">&mdash; nothing asked &mdash;</td>
+    <td>&mdash; nothing asked &mdash;</td>
+    <td>&mdash; nothing asked &mdash;</td>
+  </tr>
+
+  <tr>
+    <td class="codecell"><span class="cname">Price against me</span><code>value_low</code></td>
+    <td>No | Bad Value for me</td>
+    <td class="pick">Not enough coming back</td>
+    <td>Value too low</td>
+    <td>They&rsquo;re overasking</td>
+  </tr>
+
+  <tr>
+    <td class="codecell"><span class="cname">Price in my favour</span><code>value_overpay_them</code></td>
+    <td>No | Bad value for my trade partner<span class="note">The one genuinely novel option in the draft &mdash; and the one worded most like a complaint about someone else.</span></td>
+    <td class="pick">Too good &mdash; I&rsquo;d be robbing them</td>
+    <td>Unfair to partner</td>
+    <td>I&rsquo;d be fleecing them</td>
+  </tr>
+
+  <tr>
+    <td class="codecell"><span class="cname">Don&rsquo;t want what&rsquo;s coming</span><code>blocker_incoming</code></td>
+    <td><span class="miss">No equivalent</span><span class="note">A price-only list cannot say &ldquo;the money&rsquo;s fine, I don&rsquo;t want him.&rdquo;</span></td>
+    <td class="pick">Don&rsquo;t want Cook</td>
+    <td>Reject incoming asset</td>
+    <td>Not a Cook guy</td>
+  </tr>
+
+  <tr>
+    <td class="codecell"><span class="cname">Won&rsquo;t give up what&rsquo;s going</span><code>blocker_outgoing</code></td>
+    <td><span class="miss">No equivalent</span><span class="note">The most actionable answer available, and there is no slot for it.</span></td>
+    <td class="pick">Not moving Smith</td>
+    <td>Outgoing asset protected</td>
+    <td>Smith&rsquo;s untouchable</td>
+  </tr>
+
+  <tr>
+    <td class="codecell"><span class="cname">Right price, wrong shape</span><code>fit</code></td>
+    <td>No | Ok Value <span class="amb">&nbsp;ambiguous</span><br>No | Good Value <span class="amb">&nbsp;ambiguous</span><span class="note">Two rows that both mean &ldquo;the price isn&rsquo;t the problem&rdquo; without saying what is. They collapse to one code and route nowhere.</span></td>
+    <td class="pick">Doesn&rsquo;t fit my roster</td>
+    <td>Roster fit mismatch</td>
+    <td>Wrong shape for my build</td>
+  </tr>
+
+  <tr>
+    <td class="codecell"><span class="cname">Wrong manager</span><code>partner</code></td>
+    <td><span class="miss">No equivalent</span></td>
+    <td class="pick">Not Brett right now</td>
+    <td>Partner suppressed</td>
+    <td>Not dealing with Brett</td>
+  </tr>
+
+  <tr>
+    <td class="codecell"><span class="cname">Wrong moment</span><code>timing</code></td>
+    <td><span class="miss">No equivalent</span></td>
+    <td class="pick">Not right now</td>
+    <td>Defer</td>
+    <td>Not this week</td>
+  </tr>
+
+  <tr>
+    <td class="codecell"><span class="cname">No reason given</span><code>unknown</code></td>
+    <td><span class="miss">No skip path</span><span class="note">Every listed option is a &ldquo;No | &hellip;&rdquo;, so the draft has no way to record a plain pass &mdash; which will be the majority outcome.</span></td>
+    <td class="pick">Skip<span class="note">&hellip; or simply the x, which needs no label at all.</span></td>
+    <td>Skip</td>
+    <td>Skip</td>
+  </tr>
+
+  <tr>
+    <td class="codecell"><span class="cname">Prompt / heading</span><code>&mdash;</code></td>
+    <td><em>none drafted</em></td>
+    <td class="pick">One quick thing &mdash; passed already, it&rsquo;s saved.</td>
+    <td>Reason for declining (optional)</td>
+    <td>What killed it?</td>
+  </tr>
+
+  <tr>
+    <td class="codecell"><span class="cname">Privacy line</span><code>&mdash;</code></td>
+    <td><em>none drafted</em></td>
+    <td class="pick">Brett never sees any of this.</td>
+    <td>Not shared with other managers.</td>
+    <td>Stays between us.</td>
+  </tr>
+
+  <tr>
+    <td class="codecell"><span class="cname">Outcome receipt</span><code>&mdash;</code></td>
+    <td><em>none drafted</em></td>
+    <td class="pick">Same players &mdash; we&rsquo;ll ask Brett for more.</td>
+    <td>Package will be rebalanced.</td>
+    <td>We&rsquo;ll go back and ask for more.</td>
+  </tr>
+</table>
+</div>
+
+<h2 class="sec">The same row, rendered</h2>
+<p class="lede" style="margin-bottom:0">Three chips have to fit one 390&#8209;pt row. Length is a design constraint, not a preference &mdash; here is what each voice actually does to the layout.</p>
+
+<div class="rowframes">
+
+  <div class="mini">
+    <div class="mini-cap">
+      <div class="label">1 &middot; Operator&rsquo;s draft, rendered</div>
+      <p>Rendered as faithfully as possible. Three of the four options are about the <em>price</em>, so the row cannot express a player objection at all.</p>
+    </div>
+    <div class="minicard">
+      <div class="t">Trade with Brett</div>
+      <div class="s">Balanced by consensus value</div>
+      <div class="trow"><span class="trail" style="background:var(--wr)"></span><span class="tname">DeVonta Smith</span><span class="tdir">send</span></div>
+      <div class="trow"><span class="trail" style="background:var(--rb)"></span><span class="tname">James Cook</span><span class="tdir">get</span></div>
+      <div class="disp-row">
+        <div class="disp-btn pass"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg></div>
+        <div class="disp-btn like"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><polyline points="4 11 8 15 16 5"/></svg></div>
+      </div>
+      <div class="why-cap"><span class="label">No, because</span></div>
+      <div class="why-chips">
+        <div class="wchip">Bad Value for me</div>
+        <div class="wchip">Ok Value</div>
+        <div class="wchip">Good Value</div>
+      </div>
+      <div class="why-chips" style="margin-top:7px">
+        <div class="wchip">Bad value for my trade partner</div>
+      </div>
+      <div class="fitnote">
+        <span class="k bad">4 options, all one axis</span>
+        <span class="k" style="margin-left:auto">wraps to 2 rows</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="mini">
+    <div class="mini-cap">
+      <div class="label">2 &middot; Plain-spoken</div>
+      <p>Reads as something a person would say. Slightly long, but every chip is a complete thought and no chip judges anyone.</p>
+    </div>
+    <div class="minicard">
+      <div class="t">Trade with Brett</div>
+      <div class="s">Balanced by consensus value</div>
+      <div class="trow"><span class="trail" style="background:var(--wr)"></span><span class="tname">DeVonta Smith</span><span class="tdir">send</span></div>
+      <div class="trow"><span class="trail" style="background:var(--rb)"></span><span class="tname">James Cook</span><span class="tdir">get</span></div>
+      <div class="disp-row">
+        <div class="disp-btn pass"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg></div>
+        <div class="disp-btn like"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><polyline points="4 11 8 15 16 5"/></svg></div>
+      </div>
+      <div class="why-cap"><span class="label">Or pass because</span></div>
+      <div class="why-chips">
+        <div class="wchip">Not enough back</div>
+        <div class="wchip">Wrong players</div>
+        <div class="wchip">Not right now</div>
+      </div>
+      <div class="fitnote">
+        <span class="k ok">3 chips, both axes</span>
+        <span class="k" style="margin-left:auto">fits one row</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="mini">
+    <div class="mini-cap">
+      <div class="label">3 &middot; Concise-neutral</div>
+      <p>Fits easily &mdash; and reads like a support form. &ldquo;Defer&rdquo; and &ldquo;Value too low&rdquo; are the words of a system talking to itself.</p>
+    </div>
+    <div class="minicard">
+      <div class="t">Trade with Brett</div>
+      <div class="s">Balanced by consensus value</div>
+      <div class="trow"><span class="trail" style="background:var(--wr)"></span><span class="tname">DeVonta Smith</span><span class="tdir">send</span></div>
+      <div class="trow"><span class="trail" style="background:var(--rb)"></span><span class="tname">James Cook</span><span class="tdir">get</span></div>
+      <div class="disp-row">
+        <div class="disp-btn pass"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg></div>
+        <div class="disp-btn like"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><polyline points="4 11 8 15 16 5"/></svg></div>
+      </div>
+      <div class="why-cap"><span class="label">Reason (optional)</span></div>
+      <div class="why-chips">
+        <div class="wchip">Value low</div>
+        <div class="wchip">Asset</div>
+        <div class="wchip">Defer</div>
+      </div>
+      <div class="fitnote">
+        <span class="k ok">shortest</span>
+        <span class="k" style="margin-left:auto">reads as a form</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="mini">
+    <div class="mini-cap">
+      <div class="label">4 &middot; Fantasy-native</div>
+      <p>Most in-voice for the audience, and the riskiest: &ldquo;overasking&rdquo; and &ldquo;fleecing&rdquo; are verdicts on a leaguemate, and this is the one place we promised not to make verdicts.</p>
+    </div>
+    <div class="minicard">
+      <div class="t">Trade with Brett</div>
+      <div class="s">Balanced by consensus value</div>
+      <div class="trow"><span class="trail" style="background:var(--wr)"></span><span class="tname">DeVonta Smith</span><span class="tdir">send</span></div>
+      <div class="trow"><span class="trail" style="background:var(--rb)"></span><span class="tname">James Cook</span><span class="tdir">get</span></div>
+      <div class="disp-row">
+        <div class="disp-btn pass"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg></div>
+        <div class="disp-btn like"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><polyline points="4 11 8 15 16 5"/></svg></div>
+      </div>
+      <div class="why-cap"><span class="label">What killed it?</span></div>
+      <div class="why-chips">
+        <div class="wchip">Overasking</div>
+        <div class="wchip">Not my guys</div>
+        <div class="wchip">Not this week</div>
+      </div>
+      <div class="fitnote">
+        <span class="k ok">fits, punchy</span>
+        <span class="k bad" style="margin-left:auto">judges Brett</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<h2 class="sec">Reading notes</h2>
+<div class="caption">
+  <div class="label">What the wording does to the answer</div>
+  <p><strong>Second-person blame changes the distribution, not just the tone.</strong> &ldquo;They&rsquo;re overasking&rdquo; and &ldquo;Bad value for my trade partner&rdquo; both ask the user to render a verdict on a named person they will see again. Round&#8209;2&rsquo;s central finding about closed leagues is that these are <em>repeated relationships</em> &mdash; the reason LinkedIn hides declines is not squeamishness, it is that the two parties keep meeting. We are not showing Brett the answer, but the user does not fully believe that, and an option that reads as an accusation will be under-selected relative to one that reads as a preference. First-person framing (&ldquo;Not enough coming back&rdquo;, &ldquo;Not moving Smith&rdquo;) sidesteps it entirely.</p>
+  <p><strong>&ldquo;Ok Value&rdquo; and &ldquo;Good Value&rdquo; are not reasons.</strong> They describe the trade, not the objection. A user who taps &ldquo;Good Value&rdquo; has told us the price is fine and told us nothing about what to change &mdash; and since &ldquo;the price is fine&rdquo; is precisely the case where the engine most needs to know <em>what else</em> is wrong, those two rows spend the two most valuable slots on the least actionable answers.</p>
+  <p><strong>Length is a taxonomy constraint.</strong> Three chips must fit one row at 390&nbsp;pt, and the type floor is 11&nbsp;px with no exceptions. That caps a chip at roughly 16&ndash;18 characters before it wraps &mdash; which is why the shipping recommendation forks &ldquo;Wrong players&rdquo; into named assets on a second tap rather than trying to fit &ldquo;Don&rsquo;t want James Cook&rdquo; into a third of a row.</p>
+  <p><strong>Do not promise learning.</strong> &ldquo;This trains the engine&rdquo; over-claims: reasons route the next draft, they do not update player values, because stated reasons are confabulated (de Corte et&nbsp;al., <em>Health Economics</em> 2021 &mdash; people genuinely do not know why they chose what they chose). The receipt should describe the concrete next step (&ldquo;we&rsquo;ll ask Brett for more&rdquo;), which is both true and more reassuring than a claim about a model.</p>
+</div>
+
+<div class="recbox">
+  <div class="label">Recommended copy</div>
+  <p><strong>Column 2 (plain-spoken) for the options, column 4&rsquo;s brevity for the heading.</strong> Plain-spoken is the only voice that is simultaneously first-person, non-accusatory and unambiguous, and it is the only one whose chips survive being read by someone who is mildly annoyed and about to leave the screen. Concise-neutral is a support form; fantasy-native is fun but makes the user say something about a leaguemate.</p>
+  <p>Concretely, for the recommended one-tap row:</p>
+  <ul class="tight">
+    <li>Row caption: <strong>&ldquo;Or pass because&rdquo;</strong> &mdash; frames the chips as alternative pass buttons, not a survey.</li>
+    <li>Chips: <strong>Not enough back</strong> &middot; <strong>Wrong players</strong> &middot; <strong>Not right now</strong>.</li>
+    <li>Fork heading: <strong>&ldquo;Which one?&rdquo;</strong> with the two real names and <strong>&ldquo;Neither &mdash; wrong shape&rdquo;</strong>.</li>
+    <li>Overflow: <strong>&ldquo;Not Brett right now&rdquo;</strong> and <strong>&ldquo;Too good &mdash; I&rsquo;d be robbing him&rdquo;</strong>.</li>
+    <li>Receipt: <strong>&ldquo;Same players &mdash; we&rsquo;ll ask Brett for more.&rdquo;</strong> Never &ldquo;thanks, this trains the engine.&rdquo;</li>
+    <li>Privacy: <strong>&ldquo;Brett never sees any of this.&rdquo;</strong> Say it once, on first exposure only &mdash; repeating it every pass makes the pass feel consequential, which is the opposite of the goal.</li>
+  </ul>
+</div>
+
+<div class="pagelinks">
+  <a class="crumb" href="05-sampled-quick-question.html">&larr; E &middot; Sampled quick question</a>
+  <a class="crumb" href="index.html">Index &rsaquo;</a>
+</div>
+
+</div>
+</body>
+</html>

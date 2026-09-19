@@ -9,7 +9,7 @@ and the results index: [`README.md`](README.md).
 > `mobile/tests/check-*.js` + unit tests; behavior that used to get a sim capture gets a
 > written file:line code-walk proof; runtime proof is a manual TestFlight checklist for
 > the operator. `testid-lint` stays in CI. **Never generate `qa/sim-runs/last-sim-run.json`**
-> — the standing pre-push posture is `FTF_SKIP_SIM_GATE=1`.
+> — the retired pre-push simulator hook is a no-op.
 
 ## What's tracked here (real code/docs, not scratch)
 
@@ -30,8 +30,7 @@ and the results index: [`README.md`](README.md).
 - `**/scratch*/` — throwaway harness DBs, server logs, run JSON. Never commit a DB copy.
 - `lib/__pycache__/`.
 
-The root `CLAUDE.md` still lists the sim gate as a required pre-ship artifact (feature-gate
-item 4). **That text is stale** — D-056 supersedes it.
+Current evidence requirements are in `docs/agent-workflow.md`; archived simulator plans are historical.
 
 ## Rules
 

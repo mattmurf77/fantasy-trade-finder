@@ -1,3 +1,18 @@
+# Status — 241-duplicate-card
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-02",
+  "summary": "#241 — Second trade card under the single-pin idea list",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-02 — never-two-cards invariant live on `main` and explicitly preserved by #317 — CHANGELOG 2026-08-14. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #241 — Second trade card under the single-pin idea list
 
 **Status: fixed (worktree branch `teardown-remediation`, pending merge) — 2026-08-02**

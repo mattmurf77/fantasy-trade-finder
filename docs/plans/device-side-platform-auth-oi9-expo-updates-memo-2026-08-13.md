@@ -1,3 +1,12 @@
+```project-status
+{
+  "status": "needs-review",
+  "updated": "",
+  "summary": "OI-9 — Should `expo-updates` come before the device-credentials programme?",
+  "evidence": "Disposition remains absent, unclear, or internally qualified; preserve existing claims until reconciled. No explicit current status found in the prior index or the document set; see retained sources."
+}
+```
+
 # OI-9 — Should `expo-updates` come before the device-credentials programme?
 
 > **Gate:** C — blocks S3. **Date:** 2026-08-13. **Owner of the question:** operator (Plan §1).

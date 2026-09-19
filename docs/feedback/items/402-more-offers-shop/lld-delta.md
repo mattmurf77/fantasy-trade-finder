@@ -891,7 +891,7 @@ Grammar: domain ids, never list indexes (`utils/ideaToCard.ts:23-27`).
 | `shop.empty` | the honest empty state |
 
 `mobile/scripts/testid-lint.sh` cross-checks **flow → source** only, and
-`mobile/.maestro/` is frozen under D-056 — so it will pass these trivially.
+`archive/retired-tooling/mobile/maestro/` is frozen under D-056 — so it will pass these trivially.
 It is a ship gate, not evidence for #403; the real pin is
 `check-shop-deck.js`.
 

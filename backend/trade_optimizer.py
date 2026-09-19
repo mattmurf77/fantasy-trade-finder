@@ -1,6 +1,6 @@
 """Trade engine v3 — exact per-pair package optimizer + 3-team cycles.
 
-Tier 3 rebuild (docs/plans/trade-engine-tier3-rebuild.md), work items
+Tier 3 rebuild (docs/plans/archive/2026/trade-engine-tier3-rebuild.md), work items
 3.1 (exact package construction), 3.2 (lineup-feasibility hard constraint),
 3.3 (3-team cycle trades) and 3.4 (sweeteners). Work item 3.5 (fitted
 consensus values) is out of scope here.

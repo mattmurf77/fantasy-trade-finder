@@ -2,9 +2,9 @@
 
 ```project-status
 {
-  "status": "live for TestFlight: flag ON (d59a86d7), all-platform sends merged, iOS 153 uploaded; 153 device pass found blank chips + two crashes (card shape) — fixed in 167f93ff, iOS 154 uploaded; device checklist unrun",
+  "status": "partly-shipped",
   "updated": "2026-09-08",
-  "summary": "v1 built on branch claude/team-overhaul-scoping-ea1c72 behind overhaul.enabled=false: backend (5 tables, 14 routes, solver, Sleeper send via extracted propose core, ownership-derived refresh) + iOS flow (Acquire entry card, 8 Trades-stack screens) + structural guard. PR #288 squash-merged as a8ef182e (tree identical); Render deploys main; iOS 1.17.2 (151) uploaded to App Store Connect. Flag off pending D1/D9 confirmation and the device checklist.",
-  "evidence": "BUILD-CONTRACT.md is the binding v1 contract; D-188 records the nine adopted defaults (not owner-approved). Backend: 45 overhaul tests + existing propose tests green; independent review findings 1-12 fixed with regression tests; full-suite result in living-memory/TEST_LEDGER.md. Mobile: tsc clean, all check-*.js guards incl. check-team-overhaul.js (18 assertions) pass, testid-lint OK. QA.md device checklist UNRUN. Owner must confirm D1 (Sleeper-only sends) and D9 (Acquire placement) before the flag flips."
+  "summary": "Team overhaul enabled; all-platform sends and device-crash fixes released; latest checklist pending",
+  "evidence": "Current main packet only: BUILD-CONTRACT.md, scope.md, QA.md and ../../recovery/2026-09-07-team-overhaul-release.md. PR #288 / a8ef182e released v1; PR #290 / 8cacc1f2 added Sleeper/MFL/ESPN sends; d59a86d7 enabled overhaul and production flag readback confirmed it. Build 153 device testing found blank chips and two crashes; PR #291 / 167f93ff fixed the card shape, with iOS 154 uploaded. The subsequent #425/#426 entry changes shipped in PR #292 / 1371d2e5 and uploaded iOS 1.17.3 (155), per ../../feedback/items/425-overhaul-tile-replaces-draft/status.md. Latest physical checklist remains unrun; no post-fix device pass is claimed. Earlier flag-off/Sleeper-only descriptions are historical, not current release gates."
 }
 ```

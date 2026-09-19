@@ -686,7 +686,7 @@ Their table, plus my additions (marked †):
 | † `backend/database.py:1060-1066` + `docs/data-dictionary.md:727` | `user_events` taxonomy comment, when the recap events register |
 | † `docs/runbook.md` | Roster-snapshot monitoring, mirroring the value-snapshot paragraph at `:295` |
 | `docs/cross-client-invariants.md` | **n/a** — server-only in P0 |
-| `mobile/.maestro/` | **n/a** in P0; **required** at P3 |
+| `archive/retired-tooling/mobile/maestro/` | **n/a** in P0; **required** at P3 |
 | `docs/templates/feature-scope.md` | Required — schema + data collection, explicitly not express-lane eligible |
 
 ---

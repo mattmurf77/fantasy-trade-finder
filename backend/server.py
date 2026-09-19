@@ -474,7 +474,7 @@ log.info("✅ Model config loaded from DB")
 
 CACHE_DIR          = pathlib.Path(__file__).parent.parent / "data"
 # FTF_PLAYERS_CACHE_FILE: UI-test harness redirect. The default path is shared
-# with real dev usage, so test runs must never write it (docs/plans/mobile-testing/prd.md R-06).
+# with real dev usage, so test runs must never write it (docs/plans/archive/2026/mobile-testing/prd.md R-06).
 _players_cache_override = os.environ.get("FTF_PLAYERS_CACHE_FILE")
 PLAYERS_CACHE_FILE = (pathlib.Path(_players_cache_override) if _players_cache_override
                       else CACHE_DIR / ".sleeper_players_cache.json")
@@ -533,7 +533,7 @@ def _make_ssl_context() -> ssl.SSLContext:
 _SSL_CTX = _make_ssl_context()
 
 # ---------------------------------------------------------------------------
-# UI-test harness seams (docs/plans/mobile-testing/lld.md §4.3). Every branch
+# UI-test harness seams (docs/plans/archive/2026/mobile-testing/lld.md §4.3). Every branch
 # below is dead unless the FTF_* env vars are set; backend/tests/
 # test_test_support.py asserts inertness (guardrail G5).
 # ---------------------------------------------------------------------------
@@ -2587,7 +2587,7 @@ def _league_user_id(sess: dict) -> str:
 
 # ---------------------------------------------------------------------------
 # Verified-session write gate — account-auth plan P1
-# (docs/plans/account-auth-plan-2026-07-11.md §3-P1)
+# (docs/plans/archive/2026/account-auth-plan-2026-07-11.md §3-P1)
 #
 # A session becomes VERIFIED when the mobile app captures a Sleeper JWT
 # whose user_id claim matches the session's user_id AND the token is proven
@@ -2980,7 +2980,7 @@ def _force_supersede_enabled() -> bool:
     killed via `PUT /api/admin/config` without a deploy. 0 restores the
     pre-2026-08-18 behaviour exactly: a forced request while a job is in
     flight silently returns that job, and the forced regeneration never
-    happens (docs/reviews/2026-08-18-bug-sweep/ticket.md).
+    happens (docs/reviews/2026/2026-08-18-bug-sweep/ticket.md).
     """
     try:
         return float(get_config().get("force_supersedes_running", 1.0)) == 1.0
@@ -6272,7 +6272,7 @@ def _ranking_confidence(service, *, source: str = "votes") -> dict:
     league-mate's board can be confidence-shrunk by the same rule the
     requesting user's already was. Without this the engine trusted a
     stranger's raw board more than the owner's own — the asymmetry measured
-    in docs/reviews/2026-08-19-armb-audit-claims-3-4.md §3.
+    in docs/reviews/2026/2026-08-19-armb-audit-claims-3-4.md §3.
 
     Provenance is decided PER PLAYER, not per snapshot, because a tier save
     publishes the whole board while only some of it was actually placed:
@@ -11971,7 +11971,7 @@ def get_player_route(player_id):
 
 
 # ---------------------------------------------------------------------------
-# Manual Trade Calculator (docs/plans/manual-trade-calculator-plan.md)
+# Manual Trade Calculator (docs/plans/archive/2026/manual-trade-calculator-plan.md)
 # Open, consensus-basis endpoints — no session, no league. Values come from
 # the same universal pool + elo_to_value transform the finder trades on, and
 # fairness reuses trade_optimizer._fairness_v3, so the calculator's numbers
@@ -16293,7 +16293,7 @@ def _fetch_sleeper_drafts(league_id: str) -> list[dict]:
 
 # LLD-vs-operator-decisions conflicts hit by M5 (the lld predates the
 # 2026-08-06 operator block; both are also recorded in
-# docs/plans/rookie-draft/build-m5.md §6, which is the fuller writeup):
+# docs/plans/archive/2026/rookie-draft/build-m5.md §6, which is the fuller writeup):
 #
 #   C-1  The ≤3-upstream-fetches-per-rolling-60s-per-draft budget in
 #        draft_board_service is a PER-PROCESS guarantee, and plan §6 warns:
@@ -17185,7 +17185,7 @@ def draft_board_route():
     correctly reports `state:"live"` here, but MFL's mid-draft update
     latency is UNVERIFIED (plan §M5): nobody has measured how long after a
     pick MFL's export reflects it. Until the timed probe in
-    docs/plans/rookie-draft/build-m5.md passes, MFL ships upcoming + manual
+    docs/plans/archive/2026/rookie-draft/build-m5.md passes, MFL ships upcoming + manual
     refresh — which is what `draft.live_poll` (a SEPARATE flag, also OFF)
     already enforces, since it is the only recurring fetch in the system.
     Flipping `draft.mfl` on does NOT start any poll.
@@ -17342,7 +17342,7 @@ def draft_board_route():
 #     the new state rides the existing typed-empty contract (plan D10).
 #
 # W2d closed three contract gaps the mock-placement design found. Contract in
-# `docs/plans/draft-extensions/build-w2d.md` §3:
+# `docs/plans/archive/2026/draft-extensions/build-w2d.md` §3:
 #
 #   * G1 — the create route dropped `order`, `order_source`, `ownership` and
 #     `personas`, all four of which the engine has always accepted. Every mock
@@ -17915,7 +17915,7 @@ def mock_draft_route():
             # without this read costing a platform call. `type`/`order_source`
             # are deliberately absent here: resolving them needs the board, and
             # the client already holds it (`GET /api/draft/board` now carries
-            # `type`) — see docs/plans/draft-extensions/build-w2d.md §3.
+            # `type`) — see docs/plans/archive/2026/draft-extensions/build-w2d.md §3.
             return jsonify(mds.empty_payload(
                 mds.REASON_NO_ACTIVE_MOCK, _mock_capability(sess, league_id, season)))
         state = mds.loads(row)
@@ -26014,7 +26014,7 @@ def delete_test_user_route(user_id: str):
 
 
 # ─── Account auth — Apple/Google identity anchors + in-app deletion ────────
-# Account-auth plan P2 (docs/plans/account-auth-plan-2026-07-11.md §3-P2).
+# Account-auth plan P2 (docs/plans/archive/2026/account-auth-plan-2026-07-11.md §3-P2).
 # Thin wrappers over backend/accounts.py. The sign-in surface is gated on
 # the `auth.accounts` flag (ships dark); DELETE /api/account is deliberately
 # ungated — App Store Guideline 5.1.1(v) requires in-app account deletion.
@@ -26668,7 +26668,7 @@ def session_signout():
 # ---------------------------------------------------------------------------
 # ESPN league linking — Phase 1 read-only import (#101 / feedback #115)
 # Flag: `espn.link` (default OFF — every route 404s dark).
-# Plan: docs/plans/espn-league-linking-plan-2026-07-11.md
+# Plan: docs/plans/archive/2026/espn-league-linking-plan-2026-07-11.md
 #
 # Flow: POST /api/espn/link without team_id → preview (teams + crosswalk
 # match report, nothing persisted) → the user picks their team → POST again

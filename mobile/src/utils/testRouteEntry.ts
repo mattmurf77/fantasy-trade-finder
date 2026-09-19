@@ -37,7 +37,7 @@ import Constants from 'expo-constants';
 //
 //     testMode: process.env.FTF_ENV === "test"
 //
-// The ONLY producer of `FTF_ENV=test` is mobile/scripts/sim-build.sh (the
+// The ONLY producer of `FTF_ENV=test` is archive/retired-tooling/mobile/scripts/sim-build.sh (the
 // simulator/capture build). mobile/eas.json declares no `env` block on any
 // profile, so every TestFlight / App Store bundle is built with FTF_ENV
 // unset and carries `testMode: false`. There is no runtime path that can

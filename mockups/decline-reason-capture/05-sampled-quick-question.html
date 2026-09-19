@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>E · Sampled quick question — Decline Reason Capture</title>
+<style>
+:root{
+  --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+  --line:#262C35; --line-strong:#59647A;
+  --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+  --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013;
+  --flare:#F0508C; --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+  --rb:#22C55E; --wr:#3B82F6;
+  --tier-second:#38bdf8; --tier-third:#f472b6;
+  --r-xs:2px; --r-sm:4px; --r-md:8px; --r-pill:999px;
+  --shadow-sheet:0 12px 32px rgba(0,0,0,0.55);
+  --f-display:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --f-ui:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090C;color:var(--chalk);font:400 14px/21px var(--f-ui);padding:28px 16px 90px}
+a{color:var(--ice);text-decoration:none} a:hover{text-decoration:underline}
+.wrap{max-width:1300px;margin:0 auto}
+.pagehead{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:8px}
+h1.display{font:700 28px/30px var(--f-display);text-transform:uppercase;letter-spacing:.02em}
+.crumb{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim)}
+.spacer{flex:1}
+.lede{font:400 14px/21px var(--f-ui);color:var(--chalk-dim);max-width:82ch;margin-bottom:22px}
+.label{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim)}
+.tick-label{display:flex;align-items:center;gap:8px}
+.tick-label::before{content:"";width:3px;height:14px;background:var(--ice);flex:none}
+.title{font:600 16px/22px var(--f-ui)}
+.body-sm{font:400 13px/18px var(--f-ui)}
+.dim{color:var(--chalk-dim)}.faint{color:var(--chalk-faint)}
+.ic{stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:square}
+code{font:500 12px/16px var(--f-mono);color:var(--chalk)}
+
+.rowframes{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start;justify-content:center}
+.frame{width:390px}
+.frame-cap{margin-bottom:9px;min-height:78px}
+.frame-cap .label{color:var(--chalk)}
+.frame-cap p{font:400 13px/18px var(--f-ui);color:var(--chalk-dim);margin-top:3px}
+.phone{position:relative;width:390px;background:var(--ink0);border:1px solid var(--line-strong);border-radius:var(--r-md);overflow:hidden}
+.appbar{height:52px;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid var(--line);gap:10px}
+.lg-cluster{display:flex;align-items:center;gap:9px;flex:1;min-width:0}
+.lg-tick{width:3px;height:22px;background:var(--ice);flex:none}
+.lg-micro{font:600 11px/12px var(--f-ui);letter-spacing:.08em;color:var(--chalk-faint);text-transform:uppercase}
+.lg-name{font:600 15px/18px var(--f-ui);display:flex;align-items:center;gap:5px;white-space:nowrap}
+.icon-btn{width:32px;height:32px;border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;color:var(--chalk-dim);flex:none}
+.screen{padding:14px 14px 20px;min-height:600px;display:flex;flex-direction:column;gap:12px}
+
+.card{background:var(--ink1);border:1px solid var(--line);border-radius:var(--r-md);padding:14px}
+.trade-cols{display:grid;grid-template-columns:1fr 1px 1fr;gap:0 12px;margin-top:10px}
+.divider{background:var(--line)}
+.asset{display:flex;gap:8px;padding:7px 0;border-bottom:1px solid var(--line);align-items:flex-start}
+.asset:last-child{border-bottom:0}
+.rail{width:3px;align-self:stretch;flex:none}
+.rail.rb{background:var(--rb)}.rail.wr{background:var(--wr)}
+.rail.p2{background:var(--tier-second)}.rail.p3{background:var(--tier-third)}
+.a-body{min-width:0;flex:1}
+.a-name{font:600 13px/17px var(--f-ui)}
+.a-meta{font:600 11px/14px var(--f-ui);color:var(--chalk-dim);letter-spacing:.03em}
+.a-meta .prb{color:var(--rb)}.a-meta .pwr{color:var(--wr)}
+.a-val{font:500 11px/17px var(--f-mono);color:var(--chalk-dim);font-variant-numeric:tabular-nums}
+.swing{border-top:1px solid var(--line);margin-top:11px;padding-top:9px;display:flex;align-items:center;gap:8px}
+.swing .v{font:600 13px/18px var(--f-ui);color:var(--pos)}
+.swing .m{font:500 11px/14px var(--f-mono);color:var(--chalk-dim);margin-left:auto}
+.disp-row{display:flex;gap:10px;margin-top:12px}
+.disp-btn{flex:1;height:44px;border-radius:var(--r-sm);border:1px solid var(--line-strong);display:flex;align-items:center;justify-content:center;background:transparent}
+.disp-btn.pass{border-color:var(--neg);color:var(--neg)}
+.disp-btn.like{border-color:var(--pos);color:var(--pos)}
+
+/* toast slot — plain and upgraded */
+.toast{position:absolute;left:14px;right:14px;bottom:16px;background:var(--ink2);border:1px solid var(--line);border-left:3px solid var(--pos);border-radius:var(--r-sm);box-shadow:var(--shadow-sheet);padding:11px 12px;display:flex;align-items:center;gap:10px}
+.toast .t{font:400 14px/20px var(--f-ui)}
+.toast .undo{margin-left:auto;color:var(--ice);font:600 13px var(--f-ui)}
+.qtoast{position:absolute;left:14px;right:14px;bottom:16px;background:var(--ink2);border:1px solid var(--line);border-left:3px solid var(--ice);border-radius:var(--r-sm);box-shadow:var(--shadow-sheet);padding:12px}
+.qtop{display:flex;align-items:center;gap:9px}
+.qtop .t{font:400 14px/20px var(--f-ui)}
+.qtop .t b{font-weight:600}
+.qtop .x{margin-left:auto;width:32px;height:32px;border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;color:var(--chalk-dim);flex:none}
+.qsub{font:400 13px/18px var(--f-ui);color:var(--chalk-dim);margin-top:3px}
+.qchips{display:flex;gap:7px;margin-top:11px}
+.qchip{flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;text-align:center;padding:0 7px;border:1px solid var(--line-strong);border-radius:var(--r-sm);background:var(--ink1);color:var(--chalk);font:400 13px/17px var(--f-ui)}
+.qchip.sel{border-color:var(--ice);background:var(--ink3);font-weight:600}
+.qfoot{display:flex;align-items:center;margin-top:10px;padding-top:9px;border-top:1px solid var(--line)}
+.qfoot .undo{color:var(--ice);font:600 13px var(--f-ui)}
+.qfoot .meta{margin-left:auto;font:500 11px/14px var(--f-mono);color:var(--chalk-faint)}
+
+/* pass counter rail illustrating the sample */
+.counter{display:flex;align-items:center;gap:7px;padding:9px 11px;background:var(--ink1);border:1px solid var(--line);border-radius:var(--r-sm)}
+.counter .pip{width:18px;height:6px;background:var(--ink3);flex:none}
+.counter .pip.done{background:var(--line-strong)}
+.counter .pip.hit{background:var(--ice)}
+.counter .cl{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim);margin-right:2px}
+.counter .cn{margin-left:auto;font:500 11px/14px var(--f-mono);color:var(--chalk-faint)}
+
+.evalstrip{margin:26px 0 0;border:1px solid var(--line);border-radius:var(--r-md);background:var(--ink1);display:grid;grid-template-columns:repeat(5,1fr)}
+.evalstrip > div{padding:12px 14px;border-right:1px solid var(--line)}
+.evalstrip > div:last-child{border-right:0}
+.evalstrip .k{font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim);margin-bottom:5px}
+.evalstrip .v{font:400 13px/18px var(--f-ui)}
+.risk-lo{color:var(--pos)}.risk-md{color:var(--warn)}.risk-hi{color:var(--neg)}
+@media (max-width:900px){.evalstrip{grid-template-columns:1fr 1fr}.evalstrip > div{border-right:0;border-bottom:1px solid var(--line)}}
+
+table.map{width:100%;border-collapse:collapse;margin-top:12px;background:var(--ink1);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden}
+table.map th{text-align:left;font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim);padding:10px 12px;border-bottom:1px solid var(--line);background:var(--ink2)}
+table.map td{padding:10px 12px;border-bottom:1px solid var(--line);font:400 13px/18px var(--f-ui);vertical-align:top}
+table.map tr:last-child td{border-bottom:0}
+.act{display:inline-block;padding:2px 6px;border:1px solid var(--line-strong);border-radius:var(--r-xs);font:600 11px/14px var(--f-ui);text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}
+.act.revise{border-color:var(--ice);color:var(--ice)}
+.act.assets{border-color:var(--warn);color:var(--warn)}
+.act.party{border-color:var(--flare);color:var(--flare)}
+.act.suppress{border-color:var(--line-strong);color:var(--chalk-dim)}
+.act.none{border-color:var(--line);color:var(--chalk-faint)}
+.warnbox{margin-top:12px;background:var(--ink1);border:1px solid var(--line);border-left:3px solid var(--warn);border-radius:var(--r-md);padding:12px 15px}
+.warnbox .label{color:var(--warn);margin-bottom:4px}
+.warnbox p{font:400 13px/19px var(--f-ui);color:var(--chalk-dim)}
+
+.caption{margin-top:26px;background:var(--ink1);border:1px solid var(--line);border-left:3px solid var(--flare);border-radius:var(--r-md);padding:12px 15px}
+.caption .label{color:var(--flare);margin-bottom:4px}
+.caption p{font:400 13px/19px var(--f-ui);color:var(--chalk-dim)}
+.caption p + p{margin-top:8px}
+h2.sec{font:600 22px/26px var(--f-display);text-transform:uppercase;letter-spacing:.03em;margin:34px 0 4px}
+.pagelinks{display:flex;justify-content:space-between;margin-top:34px;padding-top:16px;border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="pagehead">
+  <a class="crumb" href="index.html">&larr; Index</a>
+  <h1 class="display">E &middot; Sampled quick question</h1>
+  <div class="spacer"></div>
+  <a class="crumb" href="04-inline-chips.html">&lsaquo; Prev</a>
+  <a class="crumb" href="06-copy-drafts.html">Next &rsaquo;</a>
+</div>
+<p class="lede">Ask rarely, and ask inside furniture that is already on screen. Most passes get exactly today&rsquo;s <strong>&ldquo;Passed &middot; Undo&rdquo;</strong> toast &mdash; the shipped 5&#8209;second one. Occasionally that same toast grows one line and three chips. Nothing new appears, nothing new blocks; the surface the user already learned to ignore is the surface that asks. The design bet: we do not need a reason on every pass, we need <em>enough</em> reasons to route revisions &mdash; and a question that fires once per session is a question people actually answer.</p>
+
+<div class="rowframes">
+
+  <!-- STATE 1 not sampled -->
+  <div class="frame">
+    <div class="frame-cap">
+      <div class="label">State 1 &middot; Not sampled (the common case)</div>
+      <p>Passes 1&ndash;4 of the session: literally unchanged from today. Same toast, same 5&nbsp;s hold, same Undo. Four passes in five look like this.</p>
+    </div>
+    <div class="phone">
+      <div class="appbar">
+        <div class="lg-cluster"><span class="lg-tick"></span><div>
+          <div class="lg-micro">League</div>
+          <div class="lg-name">Gridiron Syndicate <svg class="ic" width="14" height="14" viewBox="0 0 20 20"><polyline points="6 8 10 12 14 8"/></svg></div>
+        </div></div>
+        <div class="icon-btn"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><path d="M10 3.5c-2.6 0-4.2 1.9-4.2 4.5v3.2L4 14h12l-1.8-2.8V8c0-2.6-1.6-4.5-4.2-4.5z"/><path d="M8.5 16.5c.3.9 2.7.9 3 0"/></svg></div>
+      </div>
+      <div class="screen">
+        <div class="tick-label label" style="color:var(--chalk)">Trades</div>
+        <div class="counter">
+          <span class="cl">Session passes</span>
+          <span class="pip done"></span><span class="pip done"></span><span class="pip"></span><span class="pip"></span><span class="pip"></span>
+          <span class="cn">2 / 5</span>
+        </div>
+        <div class="card">
+          <div class="title">Trade with Priya</div>
+          <div class="body-sm dim">She&rsquo;s deep at WR &mdash; a natural seller</div>
+          <div class="trade-cols">
+            <div>
+              <div class="tick-label label" style="margin-bottom:2px">You send</div>
+              <div class="asset"><span class="rail rb"></span><div class="a-body"><div class="a-name">Rachaad White</div><div class="a-meta"><span class="prb">RB</span> &middot; TB &middot; 26</div></div><span class="a-val">1,880</span></div>
+            </div>
+            <div class="divider"></div>
+            <div>
+              <div class="tick-label label" style="margin-bottom:2px">You get</div>
+              <div class="asset"><span class="rail wr"></span><div class="a-body"><div class="a-name">Jayden Reed</div><div class="a-meta"><span class="pwr">WR</span> &middot; GB &middot; 25</div></div><span class="a-val">2,010</span></div>
+            </div>
+          </div>
+          <div class="swing"><span class="label">Swing</span><span class="v">Even</span><span class="m">130 apart</span></div>
+          <div class="disp-row">
+            <div class="disp-btn pass"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg></div>
+            <div class="disp-btn like"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><polyline points="4 11 8 15 16 5"/></svg></div>
+          </div>
+        </div>
+      </div>
+      <div class="toast">
+        <svg class="ic" width="18" height="18" viewBox="0 0 20 20" style="color:var(--pos);flex:none"><polyline points="4 11 8 15 16 5"/></svg>
+        <span class="t">Passed</span>
+        <span class="undo">Undo</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- STATE 2 sampled -->
+  <div class="frame">
+    <div class="frame-cap">
+      <div class="label">State 2 &middot; Sampled &mdash; the toast grows</div>
+      <p>The same toast, one line and three chips taller, ice rail instead of green. Hold extends to ~8&nbsp;s. Still non-modal &mdash; the card under it is live, and the toast auto-dismisses on its own.</p>
+    </div>
+    <div class="phone">
+      <div class="appbar">
+        <div class="lg-cluster"><span class="lg-tick"></span><div>
+          <div class="lg-micro">League</div>
+          <div class="lg-name">Gridiron Syndicate <svg class="ic" width="14" height="14" viewBox="0 0 20 20"><polyline points="6 8 10 12 14 8"/></svg></div>
+        </div></div>
+        <div class="icon-btn"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><path d="M10 3.5c-2.6 0-4.2 1.9-4.2 4.5v3.2L4 14h12l-1.8-2.8V8c0-2.6-1.6-4.5-4.2-4.5z"/><path d="M8.5 16.5c.3.9 2.7.9 3 0"/></svg></div>
+      </div>
+      <div class="screen">
+        <div class="tick-label label" style="color:var(--chalk)">Trades</div>
+        <div class="counter">
+          <span class="cl">Session passes</span>
+          <span class="pip done"></span><span class="pip done"></span><span class="pip done"></span><span class="pip done"></span><span class="pip hit"></span>
+          <span class="cn">5 / 5</span>
+        </div>
+        <div class="card">
+          <div class="title">Trade with Marcus</div>
+          <div class="body-sm dim">He needs a TE &mdash; you&rsquo;re two deep</div>
+          <div class="trade-cols">
+            <div>
+              <div class="tick-label label" style="margin-bottom:2px">You send</div>
+              <div class="asset"><span class="rail p2"></span><div class="a-body"><div class="a-name">2027 2nd (own)</div><div class="a-meta">Pick &middot; 2nd</div></div><span class="a-val">610</span></div>
+            </div>
+            <div class="divider"></div>
+            <div>
+              <div class="tick-label label" style="margin-bottom:2px">You get</div>
+              <div class="asset"><span class="rail p3"></span><div class="a-body"><div class="a-name">2027 3rd (LAR)</div><div class="a-meta">Pick &middot; 3rd</div></div><span class="a-val">395</span></div>
+            </div>
+          </div>
+          <div class="swing"><span class="label">Swing</span><span class="v">Even</span><span class="m">215 apart</span></div>
+          <div class="disp-row">
+            <div class="disp-btn pass"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg></div>
+            <div class="disp-btn like"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><polyline points="4 11 8 15 16 5"/></svg></div>
+          </div>
+        </div>
+      </div>
+      <div class="qtoast">
+        <div class="qtop">
+          <svg class="ic" width="18" height="18" viewBox="0 0 20 20" style="color:var(--pos);flex:none"><polyline points="4 11 8 15 16 5"/></svg>
+          <span class="t"><b>Passed on Brett.</b> Quick one?</span>
+          <span class="x"><svg class="ic" width="16" height="16" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg></span>
+        </div>
+        <div class="qsub">Was it the price, or the players?</div>
+        <div class="qchips">
+          <div class="qchip">The price</div>
+          <div class="qchip">The players</div>
+          <div class="qchip">Just not now</div>
+        </div>
+        <div class="qfoot">
+          <span class="undo">Undo pass</span>
+          <span class="meta">asked once a session</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STATE 3 answered -->
+  <div class="frame">
+    <div class="frame-cap">
+      <div class="label">State 3 &middot; Answered &rarr; one fork, then gone</div>
+      <p>&ldquo;The players&rdquo; forks once into the named assets &mdash; the only fork worth paying for. &ldquo;The price&rdquo; and &ldquo;Just not now&rdquo; are terminal and close immediately.</p>
+    </div>
+    <div class="phone">
+      <div class="appbar">
+        <div class="lg-cluster"><span class="lg-tick"></span><div>
+          <div class="lg-micro">League</div>
+          <div class="lg-name">Gridiron Syndicate <svg class="ic" width="14" height="14" viewBox="0 0 20 20"><polyline points="6 8 10 12 14 8"/></svg></div>
+        </div></div>
+        <div class="icon-btn"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><path d="M10 3.5c-2.6 0-4.2 1.9-4.2 4.5v3.2L4 14h12l-1.8-2.8V8c0-2.6-1.6-4.5-4.2-4.5z"/><path d="M8.5 16.5c.3.9 2.7.9 3 0"/></svg></div>
+      </div>
+      <div class="screen">
+        <div class="tick-label label" style="color:var(--chalk)">Trades</div>
+        <div class="card">
+          <div class="title">Trade with Marcus</div>
+          <div class="body-sm dim">He needs a TE &mdash; you&rsquo;re two deep</div>
+          <div class="trade-cols">
+            <div>
+              <div class="tick-label label" style="margin-bottom:2px">You send</div>
+              <div class="asset"><span class="rail p2"></span><div class="a-body"><div class="a-name">2027 2nd (own)</div><div class="a-meta">Pick &middot; 2nd</div></div><span class="a-val">610</span></div>
+            </div>
+            <div class="divider"></div>
+            <div>
+              <div class="tick-label label" style="margin-bottom:2px">You get</div>
+              <div class="asset"><span class="rail p3"></span><div class="a-body"><div class="a-name">2027 3rd (LAR)</div><div class="a-meta">Pick &middot; 3rd</div></div><span class="a-val">395</span></div>
+            </div>
+          </div>
+          <div class="swing"><span class="label">Swing</span><span class="v">Even</span><span class="m">215 apart</span></div>
+          <div class="disp-row">
+            <div class="disp-btn pass"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg></div>
+            <div class="disp-btn like"><svg class="ic" width="20" height="20" viewBox="0 0 20 20"><polyline points="4 11 8 15 16 5"/></svg></div>
+          </div>
+        </div>
+      </div>
+      <div class="qtoast">
+        <div class="qtop">
+          <svg class="ic" width="18" height="18" viewBox="0 0 20 20" style="color:var(--ice);flex:none"><path d="M4 10h12M12 6l4 4-4 4"/></svg>
+          <span class="t"><b>Which one?</b></span>
+          <span class="x"><svg class="ic" width="16" height="16" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg></span>
+        </div>
+        <div class="qchips" style="margin-top:11px">
+          <div class="qchip sel">Cook</div>
+          <div class="qchip">Smith</div>
+          <div class="qchip">Neither</div>
+        </div>
+        <div class="qfoot">
+          <span class="undo" style="color:var(--chalk-dim)">Cook off your board for now</span>
+          <span class="meta">closing&hellip;</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<h2 class="sec">Sampling policy &mdash; which passes get asked</h2>
+<table class="map">
+  <tr><th style="width:26%">Rule</th><th style="width:20%">Value</th><th>Why</th></tr>
+  <tr><td>Cadence</td><td><code>1 per session</code>, min 4 passes between prompts</td><td>Round&#8209;2 &sect;1.3&rsquo;s frequency cliff is about pushes, but the same shape applies in-app: perceived over-asking is what makes people mute a surface. One ask per session is under any plausible cliff.</td></tr>
+  <tr><td>Eligibility floor</td><td>card must be <code>viewed</code>, dwell &ge; 1.5&nbsp;s</td><td>Only a demonstrably-examined card produces a meaningful reason. This is the same gate that makes the dismissal a strong negative in the first place.</td></tr>
+  <tr><td>Selection</td><td><strong>uniform random</strong> among eligible passes</td><td>Load-bearing. See the warning below.</td></tr>
+  <tr><td>Cooldown after ignore</td><td>skip the next 2 sessions</td><td>Two ignores in a row is an answer. Back off rather than repeat.</td></tr>
+  <tr><td>Hard stop</td><td>never during onboarding or first session</td><td>The first deck is where the pass habit is formed; do not put anything in front of it.</td></tr>
+  <tr><td>Kill switch</td><td>one flag, default OFF</td><td>The prompt must be removable without a build.</td></tr>
+</table>
+
+<div class="warnbox">
+  <div class="label">The trap this design must not fall into</div>
+  <p><strong>Do not sample on card properties.</strong> It is tempting to ask only on lopsided cards, or only on high-confidence cards, because those feel &ldquo;informative&rdquo; &mdash; and it would silently bias the reason distribution toward whatever the selector keyed on, producing a taxonomy histogram that describes our sampler rather than our users. If any non-uniform rule is ever used, log the selection propensity alongside the answer so the bias is correctable rather than baked in. This is the same discipline round&#8209;2 &sect;1.2 demands of every logged suggestion (log the propensity, the candidate set, the policy version) &mdash; and it is impossible to add retroactively.</p>
+</div>
+
+<h2 class="sec">Reason &rarr; engine action (this approach&rsquo;s subset)</h2>
+<table class="map">
+  <tr><th style="width:30%">Answer</th><th style="width:22%">Code</th><th style="width:26%">Engine action</th><th>Taps</th></tr>
+  <tr><td>The price</td><td><code>value_low</code></td><td><span class="act revise">Revise package</span></td><td>1 (after the pass)</td></tr>
+  <tr><td>The players &rarr; Cook</td><td><code>blocker_incoming</code></td><td><span class="act assets">Change assets</span></td><td>2</td></tr>
+  <tr><td>The players &rarr; Smith</td><td><code>blocker_outgoing</code></td><td><span class="act assets">Change assets</span></td><td>2</td></tr>
+  <tr><td>The players &rarr; Neither</td><td><code>fit</code></td><td><span class="act suppress">Suppress archetype</span></td><td>2</td></tr>
+  <tr><td>Just not now</td><td><code>timing</code></td><td><span class="act none">No action + cooldown</span></td><td>1</td></tr>
+  <tr><td>Ignored / auto-dismissed / not sampled</td><td><code>unknown</code></td><td><span class="act none">No action</span></td><td>0</td></tr>
+</table>
+<p class="body-sm dim" style="margin-top:10px"><code>partner</code> and <code>value_overpay_them</code> are unreachable here &mdash; three slots and one fork is the whole budget. That is a real cost: <code>value_overpay_them</code> is the only code that can tell us our valuation is wrong in the user&rsquo;s favour, and this approach never collects it.</p>
+
+<div class="evalstrip">
+  <div><div class="k">Taps to pass</div><div class="v"><strong>1</strong>, always. Reason is <strong>+1</strong> or <strong>+2</strong>, on ~1 pass in 5&ndash;10.</div></div>
+  <div><div class="k">Friction risk</div><div class="v risk-lo"><strong>Lowest by volume.</strong> ~80&ndash;90% of passes are byte-identical to today; the rest use furniture that already auto-dismisses.</div></div>
+  <div><div class="k">Signal richness</div><div class="v risk-md"><strong>Low.</strong> Five codes, no partner axis, and only a sampled fraction of passes labelled at all.</div></div>
+  <div><div class="k">Ignore path</div><div class="v">Do nothing &mdash; it dismisses itself. Explicit x also present. Two ignores triggers a two-session back-off.</div></div>
+  <div><div class="k">Engine actions reachable</div><div class="v">Four of five &mdash; no <span class="act party">Change counterparty</span>.</div></div>
+</div>
+
+<div class="caption">
+  <div class="label">Rationale</div>
+  <p>This is the shape you ship if the priority is &ldquo;change nothing about the pass.&rdquo; It respects round&#8209;2&rsquo;s rule that declining stay effortless and invisible more literally than any other approach here, because on most passes there is nothing to respect &mdash; the interaction is unchanged. And it puts the ask inside the one component that is already designed to be ignorable: a toast that leaves on its own.</p>
+  <p>The reason sampling is defensible rather than lazy is that reasons <em>route</em>, they do not train values (round&nbsp;3, following de Corte et&nbsp;al. 2021 on confabulated self-report). Routing does not need per-pass coverage &mdash; it needs enough labelled declines to know which revision policy to reach for, and a distribution stable enough to tell &ldquo;mostly price&rdquo; leagues from &ldquo;mostly blockers&rdquo; leagues. At FTF&rsquo;s N that is a much smaller number than &ldquo;every pass.&rdquo;</p>
+  <p><strong>The honest weakness:</strong> per-card routing mostly evaporates. If we only labelled one pass in eight, then seven declines out of eight still route as <code>unknown</code>, and the revision loop &mdash; which is the entire reason to collect this &mdash; fires on a minority of cards. A sampled prompt is a good instrument for <em>measuring the taxonomy</em>; it is a poor instrument for <em>driving the next suggestion</em>. If the goal is the second thing, sample to learn the distribution, then move to a one-tap always-on shape.</p>
+</div>
+
+<div class="pagelinks">
+  <a class="crumb" href="04-inline-chips.html">&larr; D &middot; Inline chips</a>
+  <a class="crumb" href="06-copy-drafts.html">Copy drafts &rsaquo;</a>
+</div>
+
+</div>
+</body>
+</html>

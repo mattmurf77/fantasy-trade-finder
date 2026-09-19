@@ -1,6 +1,6 @@
 """FB-47 finder targeting (flag trade.finder_targeting).
 
-Covers (docs/plans/trade-finder-targeting.md Phase A):
+Covers (docs/plans/archive/2026/trade-finder-targeting.md Phase A):
   1. partner_fit_score math — loaded roster attracts acquires, repels sells
   2. pinned_receive_players reachability through the v2 pair generator
   3. pinned_receive_players reachability through the v3 optimizer

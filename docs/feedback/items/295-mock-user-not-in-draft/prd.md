@@ -560,7 +560,7 @@ Exact replacement for the whole blockquote:
 > 2026-08-08 (`6caca35`), when the operator specified CPU reach behaviour
 > directly as a product rule (W2e round-tiered caps) and declined further
 > validation. The recorded statistical verdict in
-> [mock-calibration-2026-08d.md](plans/draft-extensions/mock-calibration-2026-08d.md)
+> [mock-calibration-2026-08d.md](../../../plans/archive/2026/draft-extensions/mock-calibration-2026-08d.md)
 > is **still FAILED** — three of six bars (all three paired-mean; all three KS
 > pass) — and `test_w2_16_calibration_gate` asserts that verdict independently,
 > so a change that makes the model pass turns the suite red and forces a

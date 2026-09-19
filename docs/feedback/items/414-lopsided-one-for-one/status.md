@@ -1,3 +1,18 @@
+# Status — 414-lopsided-one-for-one
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-09-02",
+  "summary": "FB-414 — lopsided 1-for-1 served (London for Lamb straight up)",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-09-02 — shipped by the OTHER session as D-175 (`sweetener_gap_frac` band + `sweetener_best_effort`, PR #268, live 750/0.12/1); this folder's parallel D-173 build is superseded, kept as history; G-8 avoid follow-up in NEXT. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # FB-414 — lopsided 1-for-1 served (London for Lamb straight up)
 
 **Status:** SUPERSEDED 2026-09-02 by [D-175](../../../../living-memory/DECISIONS.md) (PR #268, live at 750 / 0.12 / 1) — this folder's D-173 (unshipped parallel build; see D-175) build (`feat/fb414-lopsided-one-for-one` @ `8c165533`, dual-QA green) was built in parallel on a stale base and is NOT shipped; kept as history. Its one finding main still lacks (G-8: the gap pass's receive-side equalizer never re-checks #360 avoid on v3/v2) is queued in NEXT.

@@ -1,3 +1,18 @@
+# Status — 204-calc-value-bar
+
+```project-status
+{
+  "status": "in-progress",
+  "updated": "2026-07-27",
+  "summary": "#204 — Value bar missing from the In-league trade calculator (BUG)",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: in-progress 2026-07-27 — teardown-remediation (worktree). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #204 — Value bar missing from the In-league trade calculator (BUG)
 
 **Operator:** "The value bar is missing from the trade calculator. This should

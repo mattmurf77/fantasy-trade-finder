@@ -1,3 +1,18 @@
+# Status — 243-scroll-audit
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-03",
+  "summary": "#243 — Scroll audit — status",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-03 — vertical-density campaign `4795a21`… — CHANGELOG 2026-08-03; status→shipped confirmed in a later entry. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #243 — Scroll audit — status
 
 **Status:** shipped · verified on `origin/main` 2026-08-11 (was: in-progress

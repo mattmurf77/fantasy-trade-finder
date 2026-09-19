@@ -1,3 +1,18 @@
+# Status — 210-mfl-name-entities
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-01",
+  "summary": "FB-210 — Éire Rebels team name renders with HTML-entity garbage (MFL)",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-01 — `_clean_text` html-unescape `572f5aa` — CHANGELOG 2026-08-01. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # FB-210 — Éire Rebels team name renders with HTML-entity garbage (MFL)
 
 - **Type:** bug · **Status:** fixed 2026-08-01 (branch `teardown-remediation` worktree)

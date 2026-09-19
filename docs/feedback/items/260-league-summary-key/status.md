@@ -1,3 +1,18 @@
+# Status — 260-league-summary-key
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-08",
+  "summary": "#260 — League summary key: explain the \"^3\" numbers — status",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-08 — n/a — express legend fix (2026-08-08 wave). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #260 — League summary key: explain the "^3" numbers — status
 
 Operator polish item: "Need something in the key to explain the numbers on the league summary (the ^3)."

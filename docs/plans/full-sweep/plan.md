@@ -1,7 +1,7 @@
 # Full sweep — score every leaguemate, rank globally
 
 > **Status:** active, not built. Branch `claude/full-sweep-0822-a1c3` from `origin/main` @ `b6e906a`.
-> Companion: [`scope.md`](scope.md). Origin: [`docs/reviews/2026-08-22-trade-model-second-read.html`](../../reviews/2026-08-22-trade-model-second-read.html) (on branch `claude/trade-model-restrictiveness-7f3975` until that review PR merges) §03 (the blind spot) and the operator's 2026-08-22 ruling that rotating the sweep is not the fix — generating everything and ranking globally is.
+> Companion: [`scope.md`](scope.md). Origin: [`docs/reviews/2026/2026-08-22-trade-model-second-read.html`](../../reviews/2026/2026-08-22-trade-model-second-read.html) (on branch `claude/trade-model-restrictiveness-7f3975` until that review PR merges) §03 (the blind spot) and the operator's 2026-08-22 ruling that rotating the sweep is not the fix — generating everything and ranking globally is.
 
 ---
 

@@ -517,7 +517,7 @@ def test_r4_bypass_is_thread_local():
 #: actually needs: the golden only catches a new knob if that knob happens to
 #: move THIS fixture, whereas this catches it the moment it is declared.
 #: `age_pref_mult_u23` / `age_pref_mult_30plus` (2026-08-29, age-preference
-#: consensus multiplier — docs/plans/age-pref-value/scope.md): generation
+#: consensus multiplier — docs/plans/archive/2026/age-pref-value/scope.md): generation
 #: logic post-dating the reference SHA, so both are PINNED at the identity
 #: value 1.0 in MODEL_A_PROFILE — `age_pref_value` short-circuits at exactly
 #: 1.0, the consensus accessors are byte-identical, and the golden stands

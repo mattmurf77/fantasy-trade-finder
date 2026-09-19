@@ -1,3 +1,18 @@
+# Status — 150-replace-player
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-07-25",
+  "summary": "Status — #150 Replace-player (swap) button not working",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-07-25 — platform-routing proxy fix `52be577` (#149/#150) — CHANGELOG 2026-07-25. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # Status — #150 Replace-player (swap) button not working
 
 **2026-07-25 — fixed on worktree branch `worktree-agent-ae33eec5a00d24264` (worktree agent).**

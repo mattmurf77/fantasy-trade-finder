@@ -1,3 +1,12 @@
+```project-status
+{
+  "status": "needs-review",
+  "updated": "",
+  "summary": "OI-12 — Runtime primitives on Hermes: `TextDecoder`, base64, and (unexpectedly) `URL`",
+  "evidence": "Disposition remains absent, unclear, or internally qualified; preserve existing claims until reconciled. No explicit current status found in the prior index or the document set; see retained sources."
+}
+```
+
 # OI-12 — Runtime primitives on Hermes: `TextDecoder`, base64, and (unexpectedly) `URL`
 
 > **Gate:** C — blocks S3. **Date:** 2026-08-13.

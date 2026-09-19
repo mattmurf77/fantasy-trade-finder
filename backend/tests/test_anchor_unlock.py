@@ -1,6 +1,6 @@
 """P1-7 — every ranking method can unlock, and none unlocks for free.
 
-Spec: docs/plans/audit-p1-remediation/LLD-p1-7.md §5/§9, operator decision
+Spec: docs/plans/archive/2026/audit-p1-remediation/LLD-p1-7.md §5/§9, operator decision
 D-P1-10 ("every ranking method must be able to unlock; no method may be a
 dead end").
 

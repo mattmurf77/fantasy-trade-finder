@@ -1,3 +1,18 @@
+# Status — 346-quickset-tier-drop
+
+```project-status
+{
+  "status": "planned",
+  "updated": "2026-08-24",
+  "summary": "FB-346 + FB-381 — QuickSet tier drop (Group F canonical)",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: planned 2026-08-24 — **canonical** G-F of the 2026-08-24 wave (#346/#381) — QuickSet unselected players drop to FA; batch `plan.md` lives here (lowest selected id). Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # FB-346 + FB-381 — QuickSet tier drop (Group F canonical)
 - **Status:** planned 2026-08-24 — PRD ready
 - **Covered:** #346 (jonbonjourvi, 1.13.4), #381 (mattmurf77, 1.15.0 — detailed repro)

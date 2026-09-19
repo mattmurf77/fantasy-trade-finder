@@ -1,3 +1,18 @@
+# Status — 238-lineup-impact
+
+```project-status
+{
+  "status": "shipped",
+  "updated": "2026-08-03",
+  "summary": "#238 — Lineup before/after table in the In-league calculator verdict (V2)",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: shipped 2026-08-03 — `optimal_starter_slots()` `c5f6f9c` — CHANGELOG 2026-08-03. Prior row preserved at ../../../reviews/2026/2026-09-06-project-status-migration/feedback-index.md."
+}
+```
+
+## Historical notes
+
+The material below is retained evidence. Its former status wording does not override the record above.
+
 # #238 — Lineup before/after table in the In-league calculator verdict (V2)
 
 **Status:** BUILT (2026-08-03) — branch `teardown-remediation` worktree, calculator only; deck/featured cards are explicitly phase 2.

@@ -10,10 +10,14 @@ Its *data* was already `X-Cron-Secret`-gated — the block removes a public page
 shell, not an access control — and the operator reaches it by running the
 server locally, which is the `_IS_PROD_ENV is False` path asserted below.
 """
+from pathlib import Path
+
 import pytest
 
 import backend.server as server
 
+
+ARCHIVED = ["/color-lab.html", "/color-lab-2.html"]
 
 BLOCKED = [
     "/style-guide.html",
@@ -36,12 +40,23 @@ def test_blocked_in_prod(client, path, monkeypatch):
     assert client.get(path).status_code == 404
 
 
-@pytest.mark.parametrize("path", BLOCKED)
+@pytest.mark.parametrize("path", [path for path in BLOCKED if path not in ARCHIVED])
 def test_served_in_dev(client, path, monkeypatch):
     """The same paths stay reachable locally — that is how the operator gets in."""
     monkeypatch.setattr(server, "_IS_PROD_ENV", False)
     assert client.get(path).status_code == 200
 
+
+
+@pytest.mark.parametrize("path", ARCHIVED)
+def test_historical_color_labs_are_archived_outside_static_delivery(client, path, monkeypatch):
+    """Palette evidence stays on disk, while neither dev nor prod serves the old URL."""
+    root = Path(__file__).resolve().parents[2]
+    assert (root / "archive/design-explorations" / path.lstrip("/")).is_file()
+    for is_prod in (False, True):
+        monkeypatch.setattr(server, "_IS_PROD_ENV", is_prod)
+        assert client.get(path).status_code == 404
+        assert client.get("/archive/design-explorations" + path).status_code == 404
 
 def test_block_list_is_exactly_these(monkeypatch):
     """A page added to web/ is public unless it is named here on purpose."""

@@ -1,6 +1,6 @@
 """2026-08-21 cross-package benchmark fix — the Nacua regression + shape pins.
 
-Evidence base: docs/reviews/2026-08-21-market-curve-comparison.md §3b. The
+Evidence base: docs/reviews/2026/2026-08-21-market-curve-comparison.md §3b. The
 served defect: `_package_value_market` benchmarked every piece of a package
 against the package's OWN best asset (floor 0.70 / γ 0.5, discount capped at
 35%), so four similar mid-tier players took a ~5% haircut while buying a

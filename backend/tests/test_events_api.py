@@ -716,7 +716,7 @@ def test_feedback_300_mints_no_duplicate_of_a_shipped_league_event():
                    "league_candidate_viewed", "league_band_shown"):
         assert minted not in t.ALLOWED_CLIENT_EVENTS
 # --- P1 remediation, commit T1 (2026-08-11) -------------------------------
-# Plans: docs/plans/audit-p1-remediation/{HLD-p1.md §A.2, LLD-p1-1-2.md §10,
+# Plans: docs/plans/archive/2026/audit-p1-remediation/{HLD-p1.md §A.2, LLD-p1-1-2.md §10,
 # LLD-p1-5.md §8}; operator decisions DECISIONS-p1.md (AN-4, PR-9, D-P1-12).
 #
 # T1 registers names BEFORE their emitters ship. NAME survival and PROP

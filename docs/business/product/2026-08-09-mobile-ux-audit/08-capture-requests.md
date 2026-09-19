@@ -10,7 +10,7 @@
 
 ## 1. The block your sign-off already authorised but that never landed
 
-Ruling C in [`capture-matrix-signoff.md`](../../../plans/mobile-testing/capture-matrix-signoff.md) authorised two new fixture profiles (`draft`, `espn`) plus three `/__test__` pins, noting that without them *"five screens — draft-room, mock-draft, pick-assignment, record-picks, and LeagueScreen's ESPN branch — get zero coverage,"* and called it **"a P3 backend workstream with its own agent."**
+Ruling C in [`capture-matrix-signoff.md`](../../../plans/archive/2026/mobile-testing/capture-matrix-signoff.md) authorised two new fixture profiles (`draft`, `espn`) plus three `/__test__` pins, noting that without them *"five screens — draft-room, mock-draft, pick-assignment, record-picks, and LeagueScreen's ESPN branch — get zero coverage,"* and called it **"a P3 backend workstream with its own agent."**
 
 The fixture profiles were built (`c2ba9a1 screens P3-D: draft + espn fixture profiles, determinism pins, flag fixtures`). The captures never landed. Verified 2026-08-10: no PNG matching these names exists anywhere on disk or on any git ref.
 

@@ -15,7 +15,7 @@
 // semantics: per-item uuid idempotency key, backoff, foreground flush,
 // {accepted, deduped, rejected} server reconciliation. This module copies
 // that contract field-for-field (see the table in
-// docs/plans/draft-extensions/lld.md §4.6.1); the shared PURE pieces
+// docs/plans/archive/2026/draft-extensions/lld.md §4.6.1); the shared PURE pieces
 // (uuidv4, the backoff ladder, the disposition parser) live in `_queue.ts`
 // so the two queues cannot silently drift.
 //

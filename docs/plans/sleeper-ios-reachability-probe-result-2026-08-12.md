@@ -1,3 +1,12 @@
+```project-status
+{
+  "status": "reference",
+  "updated": "",
+  "summary": "Sleeper iOS Reachability — Probe Result (2026-08-12)",
+  "evidence": "Carried forward as the last documented disposition, not a fresh production audit. Prior index merge corrections take precedence over older pre-merge notes. Last documented index disposition: reference  — On-device Sleeper reachability probe, PASS 4/4. Prior row preserved at ../reviews/2026/2026-09-06-project-status-migration/plans-index.md."
+}
+```
+
 # Sleeper iOS Reachability — Probe Result (2026-08-12)
 
 > Answers the blocking unknown in [ADR-011](../adr/adr-011-device-side-platform-auth.md) / [device-side-platform-auth-hld-2026-08-12.md](device-side-platform-auth-hld-2026-08-12.md): **does Sleeper's Cloudflare edge accept a request originating inside an iOS app at all?**

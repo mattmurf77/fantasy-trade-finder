@@ -851,7 +851,7 @@ Add `league-summary.team.*` only if a flow references a list row. Do not add a b
 `league-summary.*` — that would blanket-exempt the four static ids the lint currently checks.
 
 No new testID is created. Flow conventions per `mobile/scripts/testid-lint.sh:16-23` and
-`docs/plans/mobile-testing/lld.md` §2.6/§4.4: **id selectors only**, no fixed `sleep`, no
+`docs/plans/archive/2026/mobile-testing/lld.md` §2.6/§4.4: **id selectors only**, no fixed `sleep`, no
 coordinate taps, no text-selector taps. Use `extendedWaitUntil` with a timeout, matching
 `flows/smoke/09-league.yaml`.
 
@@ -996,7 +996,7 @@ is a worthwhile but separate change — out of scope here.
 
 ### 7.4 Maestro flows
 
-New directory `mobile/.maestro/flows/league/` (does not exist yet; G2 should keep its flows in
+New directory `archive/retired-tooling/mobile/maestro/flows/league/` (does not exist yet; G2 should keep its flows in
 `flows/draft/` so the directory creation is not a shared edit). Numbered per the sibling
 convention in `flows/smoke/` and `flows/rookie/`; header comments carry `tc:`, `profile:`,
 `flags:`, `tags:` exactly as `flows/smoke/09-league.yaml` does.
@@ -1044,8 +1044,8 @@ now, tagged `tags: [league, picks]`, and skipped in the gate run until the seed 
 The previous draft asserted that *"Maestro cannot read `accessibilityState={{selected}}`"*
 (`:1221`) and fell back to screenshots. **That claim was unverified, and I could not settle it
 here:** `maestro --version` in this worktree fails with *"Unable to locate a Java Runtime"*, no
-Maestro version is pinned anywhere in the repo (`docs/plans/mobile-testing/lld.md` names the
-binary but not a version), and `grep -rn "selected:" mobile/.maestro/` returns **nothing**, so
+Maestro version is pinned anywhere in the repo (`docs/plans/archive/2026/mobile-testing/lld.md` names the
+binary but not a version), and `grep -rn "selected:" archive/retired-tooling/mobile/maestro/` returns **nothing**, so
 there is no local precedent either way.
 
 This matters because **T3 is the only test of the R-6 state machine**, and a screenshot is an
@@ -1078,7 +1078,7 @@ Either way the fallback signal stands: the visible Picks base segment corroborat
 
 | Context | Flag OFF | Flag ON |
 |---|---|---|
-| **Maestro / `sim-run.sh`** | nothing to do — `release.json` carries `false` (R-13 touch 3), the profile does not override it, so the hermetic default is OFF | `sim-run.sh … --flags '<json>'` → exported as `FTF_FLAGS` (`mobile/scripts/sim-run.sh:55`) |
+| **Maestro / `sim-run.sh`** | nothing to do — `release.json` carries `false` (R-13 touch 3), the profile does not override it, so the hermetic default is OFF | `sim-run.sh … --flags '<json>'` → exported as `FTF_FLAGS` (`archive/retired-tooling/mobile/scripts/sim-run.sh:55`) |
 | **T-S1 structural check** | n/a — reads source, both branches asserted | n/a |
 | **Manual (T-S5, T-S6, T-S6b)** | dev backend with the shipped `config/features.json` | flip the key to `true` in `config/features.json` locally, **or** set `FTF_FLAGS` |
 | **Production graduation** | — | operator flips `config/features.json` **plus** `LAUNCHED_FLAG_DEFAULTS` in the same change (R-0.3) |
@@ -1095,7 +1095,7 @@ Precedence is `DEFAULT_FLAGS` → `config/features.json` → `FTF_FLAGS` env
 >
 > **This test plan therefore assumes that a flag-ON Maestro run will be verifiably flag-ON once
 > that fix lands.** Until it does, the repo has no way to run a flag-ON tier and know that it
-> did. **Do not edit `qa/` or `mobile/scripts/sim-run.sh` as part of G3** — the two traps below
+> did. **Do not edit `qa/` or `archive/retired-tooling/mobile/scripts/sim-run.sh` as part of G3** — the two traps below
 > are documented here so the person running the gate can work around them by hand, not so a
 > build agent fixes them. If the harness fix has not landed by the G3 gate run, the fallback is
 > scope.md §5's requirement to paste `report-dir/flags.json` into the TEST_LEDGER entry as
@@ -1233,7 +1233,7 @@ recommended).
   change).
 - **Any second flag, or gating anything beyond R-1…R-8 on this one.** R-0.2 forbids partial
   gating; it equally forbids scope creep through the flag.
-- **Any change to `mobile/scripts/sim-run.sh` or `qa/`.** Three defects are documented in §7.6
+- **Any change to `archive/retired-tooling/mobile/scripts/sim-run.sh` or `qa/`.** Three defects are documented in §7.6
   (`--flags` replaces rather than merges; `--flags @file` unimplemented and fails open; the
   handshake never asserts the `PINNED` flag map). All three are pre-existing and all three are
   being fixed by the **orchestrator in a separate lane** — G3 documents them so the gate can be

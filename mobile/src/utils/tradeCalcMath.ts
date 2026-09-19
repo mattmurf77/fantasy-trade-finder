@@ -5,7 +5,7 @@
 // down on their own board.
 //
 // Swap path: replaced by `/api/trade/evaluate` when the server-authoritative
-// version ships (docs/plans/manual-trade-calculator-plan.md).
+// version ships (docs/plans/archive/2026/manual-trade-calculator-plan.md).
 
 import { CalcPlayer } from '../data/calcTypes';
 

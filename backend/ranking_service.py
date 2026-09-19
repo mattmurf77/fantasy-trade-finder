@@ -100,7 +100,7 @@ _DEFAULT_CFG: dict[str, float] = {
     # lever for the one part of this feature that touches ranking math. Read
     # ONLY on the reasoned-pass path; /api/trades/swipe never consults it.
     "pass_reason_elo_suppression": 1.0,
-    # ── Board-override pins (docs/reviews/2026-08-18-valuation-age-audit.md) ──
+    # ── Board-override pins (docs/reviews/2026/2026-08-18-valuation-age-audit.md) ──
     # A tier/reorder save writes an Elo OVERRIDE that pins a player: _compute_elo
     # seeds them from the override and skips every rating update. Two knobs undo
     # the two ways that pin used to work against the user. Both at 0.0 restores

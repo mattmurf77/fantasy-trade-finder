@@ -1,5 +1,5 @@
 """Tests for POST /api/entry/platform — sessionless ESPN/MFL entry
-(landing platform options v2, D-164; docs/plans/landing-platform-options/).
+(landing platform options v2, D-164; docs/plans/archive/2026/landing-platform-options/).
 
 The route is the platform twin of /api/extension/auth's claim-a-username
 door: preview a league with no session, then mint a session for a

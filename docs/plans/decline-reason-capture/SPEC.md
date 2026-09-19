@@ -155,5 +155,5 @@ config-reference, glossary), and evidence logged in `living-memory/TEST_LEDGER.m
 were struck on 2026-08-19. Evidence is now: the `mobile/tests/check-decline-reasons.js`
 structural suite, `backend/tests/test_decline_reasons.py`, a file:line code-walk proof,
 and a manual TestFlight checklist for the operator. The two flows under
-`mobile/.maestro/flows/decline-reasons-*.yaml` are kept as historical artifacts and are
+`archive/retired-tooling/mobile/maestro/flows/decline-reasons-*.yaml` are kept as historical artifacts and are
 never run.)*

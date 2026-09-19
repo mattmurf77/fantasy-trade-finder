@@ -1,3 +1,12 @@
+```project-status
+{
+  "status": "needs-review",
+  "updated": "",
+  "summary": "PRD — FTF Self-Training Loops (Plan 1: 1A–1E)",
+  "evidence": "Disposition remains absent, unclear, or internally qualified; preserve existing claims until reconciled. Last documented index disposition: needs-review  — **Status unclear.** The five FTF self-training loops (2026-07-03). No flag or changelog entry names them; the spec source is outside the repo. Verify before treating any of it as built.. Prior row preserved at ../reviews/2026/2026-09-06-project-status-migration/plans-index.md."
+}
+```
+
 # PRD — FTF Self-Training Loops (Plan 1: 1A–1E)
 
 > **Purpose:** build-ready functional + technical specification for the five FTF self-training loops. Companion to [`loop-hld.md`](loop-hld.md) (architecture/why) and [`loop-lld.md`](loop-lld.md) (schemas/signatures — normative for all interfaces; this doc references rather than restates them). Covers every requirement, test, and work unit needed for the build to be complete.
