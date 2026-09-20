@@ -454,3 +454,7 @@ availability/age-adjusted lineup assets and personal tier lookups within the
 request only. Fresh searches and final evaluation build fresh contexts, preserving
 ranking/roster changes and the existing full candidate budgets and safety gates.
 See [latency investigation](plans/trade-search-latency/README.md).
+
+### App-open trade preparation
+
+Native cold launch and foreground resume initialize the restored league without blocking the initial screen. `api/auth.sessionInit` reads the shared saved fairness preference and sends `trade_fairness_threshold`. The server starts its existing background trade worker immediately after authoritative league/session assembly; installed clients that omit the field use 0.5, matching the native default. Startup retries failed jobs, preserves active searches and matching fresh work, and replaces completed jobs with mismatched fairness/shape settings. Preparation is independent of onboarding flags; native startup sends no duplicate generate request. Find a Trade adopts matching running/completed jobs; different fairness or shape must not inherit an incompatible running warm-up. Existing targeted searches and forced ranking/preference refreshes retain their regeneration paths. Full owner safety and durable evidence gates remain before cards appear. Warm-up does not guarantee three-second generation or preserve decks across backend restarts.

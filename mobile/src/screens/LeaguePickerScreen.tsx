@@ -23,7 +23,6 @@ import { getPlatformLeagues, LinkPlatform } from '../api/platformLink';
 import {
   type LinkSleeperResponse,
 } from '../api/auth';
-import { maybePregenTrades } from '../api/tradePregen';
 import { track } from '../api/events';
 import { ApiError } from '../api/client';
 import EspnLinkSheet from '../components/EspnLinkSheet';
@@ -445,7 +444,6 @@ export default function LeaguePickerScreen({
       await setLeague({ league_id: lg.league_id, league_name: lg.name }, context.assertCurrent);
       context.assertCurrent();
       onLeaguePicked();
-      maybePregenTrades(lg.league_id);
     } catch (e: any) {
       if (e?.name === 'AbortError') return;
       try { guard(e); } catch { return; }

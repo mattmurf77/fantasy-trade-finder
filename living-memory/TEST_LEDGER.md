@@ -4370,3 +4370,7 @@ Rules of evidence for this ledger:
 - **Distinguish smoke from regression.** Smoke = "it ran"; regression = "the output matches a saved baseline."
 - **When manual: name the path.** Click sequence in mobile? Curl call in web? Specifics make it reproducible.
 - **When fixing a bug: capture the failing input.** Add to verification artifacts.
+
+## 2026-09-20 — App-open trade preparation
+
+116 focused backend tests passed; 39 executable native session/lifecycle checks passed, including persisted startup fairness transport. Shared fairness, ownership guards, TypeScript and web 195/195 passed. Release/full-suite evidence: [app-open status](../docs/plans/app-open-trades/status.md). Device cold-open/foreground/league-switch checklist remains unrun. No three-second latency claim.

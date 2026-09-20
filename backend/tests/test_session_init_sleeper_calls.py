@@ -179,12 +179,13 @@ def harness(monkeypatch):
         engine.dispose()
 
 
-def _init(client, league_id):
+def _init(client, league_id, **extra):
     return client.post(
         "/api/session/init",
         content_type="application/json",
         headers={"X-Session-Token": "budget-verified-token"},
         data=json.dumps({
+            **extra,
             "user_id": USER_ID,
             "league_id": league_id,
             "league_name": "Bush League",

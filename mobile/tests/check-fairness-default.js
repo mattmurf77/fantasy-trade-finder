@@ -10,7 +10,7 @@
 //      balanced-only without touching a line of visible UI. Explicit choices
 //      must survive: 'on' stays on, 'off' stays off, and NOTHING rewrites the
 //      stored key.
-//   2. THE TWO READ SITES AGREEING. `maybePregenTrades` (session init) and
+//   2. THE TWO READ SITES AGREEING. `sessionInit` (startup warm-up) and
 //      TradesScreen's own generate both send `fairness_threshold`, and the
 //      server's `_trade_job_is_fresh` keys the job cache on that value. If
 //      they disagree, the pregen warms a slot the screen never reads and the
@@ -64,39 +64,9 @@ function load(rel, requireShim) {
   return moduleShim.exports;
 }
 
-// ── Load the real tradePregen module ─────────────────────────────────────
-// The AsyncStorage shim records every key touched, which is how "we never
-// write the pref back" below is proven rather than asserted.
-const storage = { data: new Map(), writes: [] };
-const AsyncStorageStub = {
-  getItem: async (k) => (storage.data.has(k) ? storage.data.get(k) : null),
-  setItem: async (k, v) => {
-    storage.writes.push([k, v]);
-    storage.data.set(k, v);
-  },
-  removeItem: async (k) => {
-    storage.writes.push([k, null]);
-    storage.data.delete(k);
-  },
-};
-const generateCalls = [];
-const pregen = load('src/api/tradePregen.ts', (name) => {
-  if (name === '@react-native-async-storage/async-storage') {
-    return { __esModule: true, default: AsyncStorageStub };
-  }
-  if (name === '../state/useFeatureFlags') return { onboardingEnabled: () => true };
-  if (name === './trades') {
-    return {
-      generateTrades: async (body) => {
-        generateCalls.push(body);
-        return {};
-      },
-    };
-  }
-  throw new Error(
-    `tradePregen.ts gained an unexpected runtime import ("${name}") — extend ` +
-      'the shim deliberately, do not let it pass silently.',
-  );
+// Execute the shared pure helpers. Network and storage belong to session init.
+const pregen = load('src/api/tradePregen.ts', name => {
+  throw new Error(`Unexpected shared fairness import: ${name}`);
 });
 
 const {
@@ -105,7 +75,6 @@ const {
   FAIRNESS_OFF_THRESHOLD,
   fairnessOnFromPref,
   fairnessThresholdFor,
-  maybePregenTrades,
 } = pregen;
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -143,42 +112,7 @@ assert(
 // 2. The pregen read site, end to end
 // ═══════════════════════════════════════════════════════════════════════
 
-async function pregenThresholdFor(stored, leagueId) {
-  storage.data.clear();
-  storage.writes.length = 0;
-  generateCalls.length = 0;
-  if (stored !== null) storage.data.set(FAIRNESS_PREF_KEY, stored);
-  maybePregenTrades(leagueId);
-  // maybePregenTrades is fire-and-forget; let its async IIFE settle.
-  for (let i = 0; i < 10; i += 1) await Promise.resolve();
-  await new Promise((r) => setTimeout(r, 0));
-  return generateCalls[0];
-}
-
 (async () => {
-  const unset = await pregenThresholdFor(null, 'L-unset');
-  assert(
-    unset && unset.fairness_threshold === FAIRNESS_OFF_THRESHOLD,
-    'pregen: unset preference kicks the job at 0.5',
-    `sent ${unset && unset.fairness_threshold}`,
-  );
-  assert(
-    storage.writes.length === 0,
-    'pregen: reading the preference never writes it back',
-    `writes: ${JSON.stringify(storage.writes)}`,
-  );
-
-  const on = await pregenThresholdFor('on', 'L-on');
-  assert(
-    on && on.fairness_threshold === FAIRNESS_ON_THRESHOLD,
-    "pregen: explicit 'on' kicks the job at 0.75",
-  );
-  const off = await pregenThresholdFor('off', 'L-off');
-  assert(
-    off && off.fairness_threshold === FAIRNESS_OFF_THRESHOLD,
-    "pregen: explicit 'off' kicks the job at 0.5",
-  );
-
   // ═════════════════════════════════════════════════════════════════════
   // 3. The screen read site derives from the SAME helper
   // ═════════════════════════════════════════════════════════════════════
@@ -216,6 +150,11 @@ async function pregenThresholdFor(stored, leagueId) {
     "TradesScreen: the toggle persists the explicit 'on'/'off' strings",
   );
 
+  const auth = fs.readFileSync(path.join(ROOT, 'src/api/auth.ts'), 'utf8');
+  assert(auth.includes('trade_fairness_threshold: fairnessThresholdFor(fairnessOnFromPref(fairnessPref))'),
+    'session init passes the shared persisted fairness to server warm-up');
+  assert(auth.includes("api.post<SessionInitResponse>('/api/session/init', initBody"),
+    'the enriched startup payload reaches the server');
   console.log('');
   if (failures) {
     console.error(`${failures} check(s) failed.`);

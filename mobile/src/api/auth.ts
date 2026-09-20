@@ -1,3 +1,5 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { FAIRNESS_PREF_KEY, fairnessOnFromPref, fairnessThresholdFor } from './tradePregen';
 import { api, apiRequest, ApiError, getSessionToken, requestAborted, setSessionToken } from './client';
 import { getDeviceId } from './events';
 import { getPersistedSleeperToken, maybeReplaySleeperVerification } from './sendInSleeper';
@@ -209,6 +211,7 @@ export interface SessionInitBody {
   }>;
   invited_by?: string | null;
   active_format?: '1qb_ppr' | 'sf_tep';
+  trade_fairness_threshold?: number;
   /**
    * The caller's LEAGUE identity — the `owner_id` of the roster they own or
    * CO-own. Equals `user_id` for a sole owner, which is every league that
@@ -265,7 +268,14 @@ export async function sessionInit(body: SessionInitBody, control: SessionInitCon
   control.assertCurrent();
   await requireSameSession(sessionToken);
   control.assertCurrent();
-  const res = await control.submit(() => api.post<SessionInitResponse>('/api/session/init', body,
+  // Start the server warm-up with the same preference Find a Trade uses.
+  // Storage failure falls back to the app default without blocking startup.
+  let fairnessPref: string | null = null;
+  try { fairnessPref = await AsyncStorage.getItem(FAIRNESS_PREF_KEY); } catch { /* default OFF */ }
+  control.assertCurrent();
+  const initBody = { ...body,
+    trade_fairness_threshold: fairnessThresholdFor(fairnessOnFromPref(fairnessPref)) };
+  const res = await control.submit(() => api.post<SessionInitResponse>('/api/session/init', initBody,
     {skipAuth: true, headers: {'X-Session-Token': sessionToken}, signal: control.signal,
       deadlineAt: control.deadlineAt, beforeDispatch: () => { control.assertCurrent(); control.onDispatch(); }}));
   await requireSameSession(sessionToken);
