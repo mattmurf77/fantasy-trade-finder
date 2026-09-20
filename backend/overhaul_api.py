@@ -18,6 +18,8 @@ terminalizes an attempt from it.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import time
 import uuid
@@ -73,7 +75,7 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
             is_pick_asset, owned_picks_available, inject_owned_picks, pick_label, slot_order,
             priced_pick_value, elo_to_value, sleeper_credential, sleeper_write, record_event,
             fetch_json=None, mfl_propose=None, espn_propose=None, mfl_credential=None,
-            espn_credential=None, platform_rosters=None):
+            espn_credential=None, platform_rosters=None, generation_identity=None):
 
     # ── plumbing ────────────────────────────────────────────────────────
     def guarded(fn):
@@ -382,6 +384,35 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
         return {"decided": sum(1 for o in fresh if o["decision"] != "undecided"), "total": len(fresh),
                 "liked": sum(1 for o in fresh if o["decision"] == "like")}
 
+    def current_identity():
+        return dict(generation_identity()) if generation_identity is not None else None
+
+    def same_model(card, identity):
+        # Historical rows predate explicit card attribution and are owner-v1.
+        return identity is None or (
+            card.get("model_arm", "owner_v1") == identity["model_arm"]
+            and card.get("generator_version", "owner-v1") == identity["generator_version"])
+
+    def visible_offers(row, identity=None):
+        identity = current_identity() if identity is None else identity
+        offers = store.list_offers(row["overhaul_id"])
+        # GETs do not rewrite history. Decided offers retain their exact terms
+        # and status across a model switch; only undecided inventory expires.
+        return [dict(o, availability="stale")
+                if o["decision"] == "undecided" and not same_model(o["card"], identity)
+                else o for o in offers]
+
+    def canonical_package(row, give, receive, partner):
+        return service.package_hash(platform=row["platform"], league_id=row["league_id"],
+                                    seller_user_id=row["account_user_id"],
+                                    counterparty_user_id=partner, give_ids=give, receive_ids=receive)
+
+    def offer_cache_hash(canonical, identity, epoch):
+        if not epoch:
+            return canonical  # Preserve old flag-off cache behavior.
+        return hashlib.sha256(json.dumps(
+            [canonical, identity, epoch], sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
     def roadmap_view(rm, offers_by_id, attempts):
         packages = []
         for pkg in rm["packages"]:
@@ -441,13 +472,16 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
 
     def generation_view(row):
         gen = row.get("generation")
-        if not gen:
+        identity = current_identity()
+        previous_identity = (gen or {}).get("generation_identity") or {
+            "model_arm": "owner_v1", "generator_version": "owner-v1"}
+        if not gen or (identity is not None and previous_identity != identity):
             return {"state": "idle", "revision": row["revision"], "new_offers": 0, "total_offers": 0,
                     "pool_rejections": 0, "shortfall_reason": None, "budget_exhausted": False}
         return gen
 
     def overhaul_view(sess, row):
-        offers = store.list_offers(row["overhaul_id"])
+        offers = visible_offers(row)
         by_id = {o["offer_id"]: o for o in offers}
         attempts = store.list_attempts(row["overhaul_id"])
         roadmaps = store.current_roadmaps(row["overhaul_id"])
@@ -536,6 +570,11 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
             if row.get("generation"):
                 # A new outlook / pool is a new search: nothing is exhausted yet.
                 fields["generation"] = dict(row["generation"], exhausted_subsets=[])
+                identity = current_identity()
+                if identity is not None and identity["model_arm"] == "owner_v2_bilateral":
+                    # New settings require a new valuation occurrence, even
+                    # when the next model proposes identical exact terms.
+                    fields["generation"]["generation_cache_epoch"] = uuid.uuid4().hex
         recovery = compute_recovery(sess, settings, row.get("snapshot") or {}, pick_rows(row["league_id"]))
         store.update_overhaul(row["overhaul_id"], settings=settings, recovery=recovery, revision=row["revision"] + 1,
                               **fields)
@@ -562,10 +601,23 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
         league_id = row["league_id"]
         user_id = str(sess["user_id"])
         prev = row.get("generation") or {}
-        exhausted = [tuple(s) for s in prev.get("exhausted_subsets") or []]
+        identity = current_identity()
+        previous_identity = prev.get("generation_identity") or {
+            "model_arm": "owner_v1", "generator_version": "owner-v1"}
+        model_changed = identity is not None and identity != previous_identity
+        epoch = prev.get("generation_cache_epoch")
+        if model_changed:
+            # A new occurrence must never freshen a different model's saved
+            # valuation proof. Keep those rows, start a new cache namespace.
+            store.mark_undecided_stale(row["overhaul_id"])
+            epoch = uuid.uuid4().hex
+        exhausted = [] if model_changed else [tuple(s) for s in prev.get("exhausted_subsets") or []]
         gen = {"state": "completed", "revision": row["revision"], "new_offers": 0, "total_offers": 0,
                "pool_rejections": 0, "exhausted_subsets": [list(s) for s in exhausted],
                "shortfall_reason": None, "budget_exhausted": False}
+        if identity is not None:
+            gen["generation_identity"] = identity
+            gen["generation_cache_epoch"] = epoch
         if not pool:
             gen["shortfall_reason"] = "stale_ownership" if settings.get("eligible_asset_ids") else "budget_restriction"
             gen["total_offers"] = len(store.list_offers(row["overhaul_id"]))
@@ -573,6 +625,12 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
             return jsonify({"generation": gen, "offers": []})
         inputs = generation_inputs(sess)
         ctx = build_context(sess, inputs, settings)
+        if identity is not None:
+            if current_identity() != identity:
+                raise _Conflict("generation_changed", "Model changed while capturing context; retry generation.")
+            # Capture once even if the selector reloads during this request.
+            ctx["config"] = dict(ctx.get("config") or {}, owner_bilateral_enabled=float(
+                identity["model_arm"] == "owner_v2_bilateral"))
         pick_fn = is_pick(league_id)
         pick_meta = {str(r.get("pick_id")): {"round": r.get("round"), "season": r.get("season")} for r in rows}
         values = {a: float(elo_to_value(inputs["seed_map"].get(a, 1500.0))) for a in pool}
@@ -581,6 +639,9 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
                                             exhausted=exhausted)
         by_hash = {o["package_hash"]: o for o in store.list_offers(row["overhaul_id"])}
         known = set(by_hash)
+        decided_packages = {canonical_package(row, o["give_ids"], o["receive_ids"],
+                                              o["counterparty_user_id"])
+                            for o in by_hash.values() if o["decision"] != "undecided"}
         deadline = time.monotonic() + service.OVERHAUL_GENERATION_BUDGET_S
         players_dict = inputs["players"]
         new_offers = 0
@@ -596,9 +657,15 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
                 kept.sort(key=lambda c: (service.average_age(c.receive_player_ids, players_dict) is None,
                                          service.average_age(c.receive_player_ids, players_dict) or 0.0))
             for card in kept:
-                h = service.package_hash(platform=row["platform"], league_id=league_id, seller_user_id=user_id,
-                                         counterparty_user_id=card.target_user_id,
-                                         give_ids=card.give_player_ids, receive_ids=card.receive_player_ids)
+                canonical = canonical_package(row, card.give_player_ids, card.receive_player_ids,
+                                              card.target_user_id)
+                if canonical in decided_packages:
+                    continue
+                public_card = card_to_dict(card, players_dict)
+                if not same_model(public_card, identity):
+                    gen["pool_rejections"] += 1
+                    continue
+                h = offer_cache_hash(canonical, identity, epoch)
                 if h in known:
                     prior = by_hash.pop(h, None)
                     if prior and prior["decision"] == "undecided" and prior["availability"] == "stale":
@@ -607,12 +674,15 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
                         new_offers += 1
                     continue
                 evidence = getattr(card, "owner_evaluation", None)
+                private_evidence = evidence.as_dict() if evidence is not None else None
+                if identity is not None:
+                    private_evidence = dict(private_evidence or {}, canonical_package_hash=canonical,
+                                            generation_identity=identity)
                 inserted = store.insert_offer(
                     overhaul_id=row["overhaul_id"], revision=row["revision"], package_hash=h,
                     counterparty_user_id=card.target_user_id, counterparty_username=card.target_username,
                     give_ids=card.give_player_ids, receive_ids=card.receive_player_ids,
-                    card=card_to_dict(card, players_dict),
-                    evidence=evidence.as_dict() if evidence is not None else None, is_recovery=is_recovery)
+                    card=public_card, evidence=private_evidence, is_recovery=is_recovery)
                 known.add(h)
                 if inserted is not None:
                     new_offers += 1
@@ -640,7 +710,9 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
             for subset in subsets[:6]:
                 normalize(run(subset, opponent_user_id=recovery["holder_user_id"],
                               pinned_receive_players=[recovery["pick_id"]]), is_recovery=True)
-        offers = store.list_offers(row["overhaul_id"])
+        if identity is not None and current_identity() != identity:
+            raise _Conflict("generation_changed", "Model changed during generation; retry generation.")
+        offers = visible_offers(row, identity)
         gen.update(new_offers=new_offers, total_offers=len(offers), exhausted_subsets=[list(s) for s in exhausted])
         if new_offers == 0:
             gen["shortfall_reason"] = ("budget_restriction" if gen["budget_exhausted"]
@@ -665,7 +737,7 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
         which = request.args.get("decision") or "undecided"
         if which not in ("undecided", "like", "pass", "all"):
             raise service.ValidationError("bad_request", "invalid decision filter")
-        offers = store.list_offers(row["overhaul_id"])
+        offers = visible_offers(row)
         if which == "undecided":
             picked = [o for o in offers if o["decision"] == "undecided" and o["availability"] == "fresh"]
         elif which == "all":
@@ -686,7 +758,7 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
         decisions = data.get("decisions")
         if not isinstance(decisions, list):
             raise service.ValidationError("bad_request", "decisions must be a list")
-        by_id = {o["offer_id"]: o for o in store.list_offers(row["overhaul_id"])}
+        by_id = {o["offer_id"]: o for o in visible_offers(row)}
         for item in decisions:
             if not isinstance(item, dict):
                 raise service.ValidationError("bad_request", "invalid decision")
@@ -696,9 +768,11 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
                 raise service.ValidationError("bad_request", "invalid decision")
             if offer["decision_client_key"] == key and offer["decision"] == decision:
                 continue  # idempotent replay
+            if offer["decision"] == "undecided" and offer["availability"] != "fresh":
+                raise _Conflict("stale_offer", "Regenerate offers before deciding on this package.")
             # Plan review is not taste learning: no swipe / Elo path here.
             store.set_decision(offer["offer_id"], decision, key)
-        return jsonify({"progress": progress(store.list_offers(row["overhaul_id"]))})
+        return jsonify({"progress": progress(visible_offers(row))})
 
     @app.route("/api/overhauls/<overhaul_id>/assemble", methods=["POST"])
     @guarded

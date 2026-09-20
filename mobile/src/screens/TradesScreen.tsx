@@ -1877,7 +1877,8 @@ export default function TradesScreen({ navigation, route }: any) {
     if (!g) return null;
     const all = [...g.upgrade, ...g.lateral, ...g.downgrade];
     if (all.length === 0) return null;
-    const ownerIdeas = all.filter((i) => i.model_arm === 'owner_v1');
+    const ownerIdeas = all.filter((i) =>
+      i.model_arm === 'owner_v1' || i.model_arm === 'owner_v2_bilateral');
     if (ownerIdeas.length > 0) {
       // Groups are navigation categories, not a new market-gain ranking.
       // The owner model already combined personal intent, outlook and needs.

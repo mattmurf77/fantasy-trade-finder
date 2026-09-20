@@ -33,6 +33,8 @@ Don't bother for routine code changes, bug fixes, or anything self-evident from 
 
 ## Index
 
+- [ADR-022 Preference-led bilateral package construction](adr-022-preference-led-bilateral.md)
+
 - [ADR-021 Bounded shared deck diagnostics](adr-021-bounded-deck-diagnostics.md)
 
 - [ADR-020 Overhaul plans classify depth/backup roster blockers as advisory; the global engine rule is untouched](adr-020-overhaul-plan-roster-policy.md)

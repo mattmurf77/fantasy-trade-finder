@@ -334,15 +334,19 @@ class _Search:
         out["exact_give"] = self.exact_give
         return out
 
+    def _decision(self, card, data, reason, eligible=False):
+        """Freeze one exact result; alternate policies may enrich before freezing."""
+        data.update(eligible=eligible, reason=reason)
+        return OwnerDecisionContext(eligible, reason, self.league.league_id, self.user_id,
+            card.target_user_id, tuple(card.give_player_ids), tuple(card.receive_player_ids), _dump(data))
+
     def evaluate(self, card, *, partial=False):
         give, receive = tuple(card.give_player_ids), tuple(card.receive_player_ids)
         target = card.target_user_id
         data = {"schema_version": SCHEMA_VERSION, "generator": ARM, "generator_version": VERSION,
                 "selection": self._selection(give, receive)}
         def finish(reason, eligible=False):
-            data.update(eligible=eligible, reason=reason)
-            return OwnerDecisionContext(eligible, reason, self.league.league_id, self.user_id,
-                target, give, receive, _dump(data))
+            return self._decision(card, data, reason, eligible)
         if not self.valid_floor:
             return finish("invalid_fairness")
         if (card.league_id != self.league.league_id or card.proposing_user_id != self.user_id

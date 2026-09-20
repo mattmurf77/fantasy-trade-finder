@@ -55,7 +55,11 @@ const desired = { id: 'desired', model_arm: 'owner_v1', recommendation_rank: 0, 
 const lessSuitable = { id: 'gain', model_arm: 'owner_v1', recommendation_rank: 1, difference: 999 };
 assert.strictEqual(bestIdea({ data: { groups: { upgrade: [lessSuitable], lateral: [desired], downgrade: [] } } }), desired,
   'featured treatment respects joint suitability order, not largest market gain');
+const bilateralDesired = { ...desired, model_arm: 'owner_v2_bilateral' };
+const bilateralGain = { ...lessSuitable, model_arm: 'owner_v2_bilateral' };
+assert.strictEqual(bestIdea({ data: { groups: { upgrade: [bilateralGain], lateral: [bilateralDesired], downgrade: [] } } }), bilateralDesired,
+  'bilateral model preserves weakest-side suitability order across featured groups');
 const oldA = { id: 'oldA', difference: 1 }, oldB = { id: 'oldB', difference: 2 };
 assert.strictEqual(bestIdea({ data: { groups: { upgrade: [oldA], lateral: [oldB], downgrade: [] } } }), oldB,
   'legacy featured selection is unchanged');
-console.log('Owner trial order: 13 executable checks passed.');
+console.log('Owner trial order: 14 executable checks passed.');

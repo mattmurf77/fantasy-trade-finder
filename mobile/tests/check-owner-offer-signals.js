@@ -107,6 +107,19 @@ const card = { trade_id: 'offer', impression_id: 'i1', league_id: 'L',
     assert.equal(mapped.preserve_server_order, true);
     assert.equal(mapped.selection_coverage, 'partial'); assert.equal(mapped.recommendation_rank, 0);
   });
+  check('bilateral model keeps actual provenance and no private support fields', () => {
+    const next = { ...raw, model_arm: 'owner_v2_bilateral', generator_version: 'owner-v2-bilateral',
+      bilateral: { counterparty_personal: 'private' }, owner_evaluation: { private: true } };
+    const idea = mapping.ideaToCard(api.normalizers.normalizeAssetIdea(next), 'L');
+    const deck = api.normalizers.normalizeTradeCard(next);
+    for (const mapped of [idea, deck]) {
+      assert.equal(mapped.model_arm, next.model_arm);
+      assert.equal(mapped.generator_version, next.generator_version);
+      assert.equal(mapped.preserve_server_order, true);
+      assert.equal(mapped.bilateral, undefined);
+      assert.equal(mapped.owner_evaluation, undefined);
+    }
+  });
   check('selection metadata and global recommendation rank reject malformed values', () => {
     for (const normalize of Object.values(api.normalizers)) {
       const mapped = normalize({ ...raw, selection_coverage: 'anything', selection_notice: false,

@@ -1,5 +1,15 @@
 # Decisions — Fantasy Trade Finder
 
+## D-193 — Preference-led bilateral support replaces viewer-first owner ordering
+
+2026-09-20. Owner authorized implementation and a live replacement trial. Personal
+rankings, outlook and needs construct targets together; existing market values price
+terms. Optimize the weaker manager's interpretable support, not the viewer's largest
+gain. Scores are provisional policy, not learned acceptance probabilities. Keep numeric
+Tradesourced blends separate until validated. Single selector supports rollback and
+preserves historical evidence. [ADR-022](../docs/adr/adr-022-preference-led-bilateral.md),
+[release evidence](../docs/plans/owner-v2-bilateral/release.md).
+
 > **Purpose:** day-to-day Architecture Decision Record (ADR) log. Each significant choice with: context → decision → alternatives → consequences. Formal ADRs (one-decision-per-file with author, date, and full context) live in [`../docs/adr/`](../docs/adr/); this file is the terser, cumulative version. Reference ADRs explicitly when applicable.
 >
 > The index is at the bottom of this file; newest content stays at the top.

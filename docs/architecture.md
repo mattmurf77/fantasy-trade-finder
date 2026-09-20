@@ -1,5 +1,33 @@
 # Architecture
 
+## Preference-led bilateral construction
+
+`trade_gen_bilateral.py` constructs matched focal asset pairs from personal board
+direction, declared intentions, outlook and usable roster needs, then explores
+minimal market-priced consideration. It reuses `trade_gen_owner` authority,
+package pricing and immutable proof contracts, not the old generator's survivors.
+Organic shapes are 1x1, 2x1 and 1x2; explicit selections can request larger shapes.
+Returned inventory is not capped. Computational pool/pair/request budgets remain.
+
+Each exact package receives two separate, private suitability scores. Ordering
+maximizes the weaker side, then total support and preference fulfillment. Bounded
+diversity breaks comparable-quality choices without deleting otherwise eligible
+offers. Significance and legality remain shared downstream gates. Scores and
+uncertainty ranges are heuristic support, **not calibrated acceptance probabilities**.
+Missing counterpart rankings remain unknown; consensus prices and roster context
+can establish plausibility but never an asserted personal preference.
+
+The captured `owner_bilateral_enabled` selector flows through organic, selected,
+canvas/More Offers, buy/sell and overhaul generation, final evaluation, cache identity
+and actual-arm impression attribution. It replaces `owner_v1` when enabled; an empty
+new-model result is not silently backfilled with that prior model in owner-only mode.
+Existing decisions and match terms stay attached to their original occurrence.
+Overhaul's explicit young-player preference and multi-offer roadmap assembly retain
+their separate age/fairness ordering; bilateral ordering here describes generated
+individual offers, not a redesigned roadmap optimizer.
+See [ADR-022](adr/adr-022-preference-led-bilateral.md) and
+[configuration](config-reference.md#bilateral-owner-selector).
+
 High-level data flow and component boundaries. Update when modules are added, removed, or significantly re-wired.
 
 Owner-contract amendment (2026-09-05, D-185): ranking replay derives fixed feedback tier bounds after deliberate ranking actions; trade/disposition signals cannot cross the public tier boundary. Existing per-row member-ranking provenance flows through `load_member_rankings` → `LeagueMember.confidence_sources` → dark policy evaluation. No new service or database column. Legacy live generator method weighting is preserved pending an arm-safe experiment; see [implementation scope](plans/owner-contracts/scope.md).

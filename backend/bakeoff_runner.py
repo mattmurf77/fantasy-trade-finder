@@ -130,6 +130,8 @@ ARM_FIT = "fit"
 # Owner-interview construction is a separate generator, never a relabelled
 # landability challenger. Its include/serve bits default off independently.
 ARM_OWNER = "owner_v1"
+ARM_OWNER_BILATERAL = "owner_v2_bilateral"
+OWNER_ARMS = (ARM_OWNER, ARM_OWNER_BILATERAL)
 
 #: Every arm that EXISTS. Not every arm that runs — see `arm_roster()`, which
 #: is what the fan-out and the draft actually iterate. Order here is the
@@ -145,7 +147,7 @@ ARMS: tuple[str, ...] = (ARM_BASELINE, ARM_CURRENT, ARM_GEN_V2)
 #: Every arm the runner knows about, in canonical listing order. This is what
 #: `arm_roster()` filters; `ARMS` is a historical fixture, not a superset.
 ALL_ARMS: tuple[str, ...] = (ARM_BASELINE, ARM_CURRENT, ARM_CHALLENGER,
-                             ARM_GEN_V2, ARM_FIT, ARM_OWNER)
+                             ARM_GEN_V2, ARM_FIT, ARM_OWNER, ARM_OWNER_BILATERAL)
 
 #: Arms that run the v1/v3 engine and therefore produce BOTH bases —
 #: `divergence` for opponents with real rankings, `consensus` for the
@@ -203,7 +205,7 @@ INTENT_MODES: frozenset[str] = frozenset(
 #: fallback and what the progress bar tracks — and fit, like arms A/C/D,
 #: runs with progress streaming suppressed.
 GENERATION_ORDER: tuple[str, ...] = (ARM_CURRENT, ARM_CHALLENGER,
-                                     ARM_BASELINE, ARM_GEN_V2, ARM_FIT, ARM_OWNER)
+                                     ARM_BASELINE, ARM_GEN_V2, ARM_FIT, ARM_OWNER, ARM_OWNER_BILATERAL)
 
 #: The single arm served in Phase-4 dark validation.
 DARK_SERVED_ARM = ARM_CURRENT
@@ -274,6 +276,37 @@ def owner_only() -> bool:
     return _cfg("bakeoff_owner_only", 0.0) >= 1.0
 
 
+def owner_arm(config=None) -> str:
+    """One hot-reload selector; captured config pins the entire request."""
+    value = (_cfg("owner_bilateral_enabled", 0.0) if config is None
+             else config.get("owner_bilateral_enabled", 0.0))
+    return ARM_OWNER_BILATERAL if value == 1.0 else ARM_OWNER
+
+
+def owner_generator(config=None):
+    if owner_arm(config) == ARM_OWNER_BILATERAL:
+        from .trade_gen_bilateral import generate_bilateral_trades
+        return generate_bilateral_trades
+    from .trade_gen_owner import generate_owner_trades
+    return generate_owner_trades
+
+
+def owner_version(config=None) -> str:
+    if owner_arm(config) == ARM_OWNER_BILATERAL:
+        from .trade_gen_bilateral import BILATERAL_GENERATOR_VERSION
+        return BILATERAL_GENERATOR_VERSION
+    from .trade_gen_owner import VERSION
+    return VERSION
+
+
+def owner_evaluator(config=None):
+    if owner_arm(config) == ARM_OWNER_BILATERAL:
+        from .trade_gen_bilateral import evaluate_bilateral_trades
+        return evaluate_bilateral_trades
+    from .trade_gen_owner import evaluate_owner_trades
+    return evaluate_owner_trades
+
+
 def deck_limit() -> int | None:
     """`bakeoff_deck_limit` — max cards in the served bake-off deck. Default
     30: three groups of ten. 0 = uncapped, which together with
@@ -309,6 +342,7 @@ def arm_roster(*, exclusive: bool | None = None) -> tuple[str, ...]:
     enabled owner-only mode has no hidden controls or legacy fallback.
     An explicit override lets a worker preserve its captured mode.
     """
+    selected_owner = owner_arm()
     included = {
         ARM_CURRENT:    True,                       # never optional
         ARM_CHALLENGER: _cfg("bakeoff_include_challenger", 1.0) >= 1.0,
@@ -317,11 +351,12 @@ def arm_roster(*, exclusive: bool | None = None) -> tuple[str, ...]:
         # Fit challenger (LLD §2.1) — default OFF the roster; rostering is a
         # W3 operator decision, and serving is a SECOND bit (`serve_fit()`).
         ARM_FIT:        _cfg("bakeoff_include_fit", 0.0) >= 1.0,
-        ARM_OWNER:      _cfg("bakeoff_include_owner", 0.0) >= 1.0,
+        ARM_OWNER:      selected_owner == ARM_OWNER and _cfg("bakeoff_include_owner", 0.0) >= 1.0,
+        ARM_OWNER_BILATERAL: selected_owner == ARM_OWNER_BILATERAL and _cfg("bakeoff_include_owner", 0.0) >= 1.0,
     }
     if exclusive is None:
-        exclusive = included[ARM_OWNER] and owner_only() and serve_owner()
-    return (ARM_OWNER,) if exclusive else tuple(a for a in ALL_ARMS if included[a])
+        exclusive = included[selected_owner] and owner_only() and serve_owner()
+    return (selected_owner,) if exclusive else tuple(a for a in ALL_ARMS if included[a])
 
 
 def group_size() -> int:
@@ -1522,6 +1557,8 @@ def run_bakeoff(
     interleave: bool | None = None,
     owner_serving: bool | None = None,
     owner_exclusive: bool | None = None,
+    owner_model: str | None = None,
+    owner_config: dict | None = None,
     limit: int | None = None,
     roster: tuple[str, ...] | list[str] | None = None,
 ) -> BakeoffRun:
@@ -1545,6 +1582,10 @@ def run_bakeoff(
     if roster is None:
         roster = arm_roster(exclusive=False)
     roster = tuple(roster)
+    owner_model = owner_model or next((a for a in roster if a in OWNER_ARMS), owner_arm())
+    if owner_model not in OWNER_ARMS:
+        raise ValueError("unknown owner model")
+    roster = tuple(owner_model if a in OWNER_ARMS else a for a in roster)
     if interleave is None:
         interleave = serve_interleaved()
     # The worker binds its captured permission so drafting, ordering and
@@ -1552,11 +1593,11 @@ def run_bakeoff(
     if owner_serving is None:
         owner_serving = serve_owner()
     if owner_exclusive is None:
-        owner_exclusive = ARM_OWNER in roster and owner_serving and owner_only()
+        owner_exclusive = owner_model in roster and owner_serving and owner_only()
     if owner_exclusive:
         # A captured permission is authoritative even if include/serve knobs
         # change during this job. Do not execute any hidden control arm.
-        roster = (ARM_OWNER,)
+        roster = (owner_model,)
     if limit is None:
         limit = deck_limit()
     intent = effective_trade_intent(trade_intent)
@@ -1605,10 +1646,11 @@ def run_bakeoff(
                     raise RuntimeError(  # recorded arm error, never a job failure
                         "arm fit rostered but no gen_fit callable bound")
                 cards = list(gen_fit(**quiet) or [])
-            elif arm == ARM_OWNER:
-                cfg_seen = snapshot_config()
+            elif arm in OWNER_ARMS:
+                cfg_seen = dict(owner_config) if owner_config is not None else snapshot_config()
+                cfg_seen["owner_bilateral_enabled"] = float(arm == ARM_OWNER_BILATERAL)
                 if gen_owner is None:
-                    raise RuntimeError("arm owner_v1 rostered but no gen_owner callable bound")
+                    raise RuntimeError(f"arm {arm} rostered but no gen_owner callable bound")
                 owner_cards, owner_report = gen_owner(**quiet)
                 cards = list(owner_cards or [])
                 owner_diag = dict(owner_report.diagnostics())
@@ -1626,7 +1668,7 @@ def run_bakeoff(
             diag = last_gen_v2_diagnostics()
         elif arm == ARM_FIT:
             diag = last_fit_diagnostics()
-        elif arm == ARM_OWNER:
+        elif arm in OWNER_ARMS:
             diag = owner_diag
         else:
             diag = {}
@@ -1650,11 +1692,11 @@ def run_bakeoff(
     # serving effect, since fit is absent from every participant order).
     serving_roster = tuple(a for a in roster
                            if (a != ARM_FIT or serve_fit())
-                           and (a != ARM_OWNER or owner_serving))
+                           and (a not in OWNER_ARMS or owner_serving))
     if owner_exclusive:
         # Enumeration remains bounded in the generator. Returned eligible
         # offers have no group, lane or deck-size quota in exclusive mode.
-        groups, group_order = {}, [ARM_OWNER]
+        groups, group_order = {}, [owner_model]
         draft = team_draft(arm_lists, group_order, limit=None)
     else:
         groups, group_order, draft = compose_deck(
@@ -1675,7 +1717,7 @@ def run_bakeoff(
         arm_order=group_order,
         arms=arms,
         draft=draft,
-        served_arm=ARM_OWNER if owner_exclusive else None if interleave else DARK_SERVED_ARM,
+        served_arm=owner_model if owner_exclusive else None if interleave else DARK_SERVED_ARM,
         total_ms=int((time.monotonic() - t_all) * 1000),
         groups=groups,
     )
