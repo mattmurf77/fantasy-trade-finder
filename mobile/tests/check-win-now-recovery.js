@@ -65,7 +65,7 @@ function transport() {
 }
 const response = (status, body) => ({status, ok: status >= 200 && status < 300, text: async () => JSON.stringify(body)});
 function sessionHarness() {
-  const h = transport(), seeds = [], pregen = [], invalidations = [], storage = new Map();
+  const h = transport(), seeds = [], invalidations = [], storage = new Map();
   const user = {user_id: 'synthetic-user', username: 'Tester', display_name: 'Tester', avatar_id: null};
   const league = {league_id: 'synthetic-a', league_name: 'Test A'};
   const providers = {
@@ -88,7 +88,14 @@ function sessionHarness() {
   };
   const espn = load('src/api/espn.ts', platformRequire, h.time);
   const platformLink = load('src/api/platformLink.ts', platformRequire, h.time);
+  const fairness = load('src/api/tradePregen.ts', name => {
+    if (name === '@react-native-async-storage/async-storage') return {default: {getItem: async key => storage.get(key)}};
+    if (name === './trades') return {generateTrades: async () => ({})};
+    throw Error(`unexpected fairness import ${name}`);
+  }, h.time);
   const auth = load('src/api/auth.ts', name => {
+    if (name === '@react-native-async-storage/async-storage') return {default: {getItem: async key => storage.get(key)}};
+    if (name === './tradePregen') return fairness;
     if (name === './client') return h.client;
     if (name === './events') return {getDeviceId: async () => 'synthetic-device'};
     if (name === './sendInSleeper') return {maybeReplaySleeperVerification: (...args) => providers.proof(...args)};
@@ -111,7 +118,6 @@ function sessionHarness() {
     zustand: {create},
     '@react-native-async-storage/async-storage': {default: {setItem: async (key, value) => storage.set(key, value), removeItem: async key => storage.delete(key), getItem: async key => storage.get(key)}},
     '../api/client': h.client, '../api/auth': auth, '../api/winNow': winNow,
-    '../api/tradePregen': {maybePregenTrades: id => pregen.push(id)},
     '../api/league': {connectLeague: (...args) => providers.connect(...args)},
     '../api/sleeper': sleeper, '../api/purchases': {initPurchases: async () => {}},
     '../observability/sentry': {setUser: () => {}},
@@ -124,7 +130,7 @@ function sessionHarness() {
   }, h.time);
   state.useSession.setState({user, league, hasToken: true, isDemo: false});
   h.setResponder(url => response(200, url.endsWith('/api/session/init') ? {ok: true, token: 'synthetic-token-a'} : {status: 'available', teams: [], assets: []}));
-  return {...h, state, auth, winNow, user, league, seeds, pregen, providers, storage, invalidations};
+  return {...h, state, auth, winNow, user, league, seeds, providers, storage, invalidations};
 }
 const initRequests = h => h.requests.filter(r => r.url.endsWith('/api/session/init'));
 const projectionRequests = h => h.requests.filter(r => r.url.includes('/api/league/season-projections'));
@@ -169,7 +175,7 @@ function picker(h) {
     setSelectingId: value => { ui.selecting = value; }, setError: value => { ui.error = value; },
     advanceGuideIfActive: () => {}, track: () => {}, ApiError: h.client.ApiError,
     setLeague: (...args) => h.state.useSession.getState().setLeague(...args),
-    onLeaguePicked: () => { ui.navigated++; }, maybePregenTrades: () => {},
+    onLeaguePicked: () => { ui.navigated++; },
   }, h.time);
   return {ui, invoke};
 }
@@ -179,6 +185,15 @@ async function check(name, fn) {
   catch (error) { failures++; console.error(`FAIL ${name}: ${error.message}`); }
 }
 async function main() {
+  await check('startup warm-up sends persisted fairness on every real session-init path', async () => {
+    for (const [stored, expected] of [[null, .5], ['off', .5], ['on', .75]]) {
+      const h = sessionHarness();
+      if (stored !== null) h.storage.set('ftf:trades:fairness_on', stored);
+      await h.state.useSession.getState().revalidateSession();
+      assert.equal(initRequests(h).length, 1);
+      assert.equal(JSON.parse(initRequests(h)[0].opts.body).trade_fairness_threshold, expected);
+    }
+  });
   await check('T7 real projection GET accepts measured 15.2-second HTTP completion', async () => {
     const h = transport();
     h.setResponder(() => new Promise(resolve => h.time.setTimeout(() => resolve(response(200, {status: 'unavailable', reason: 'test_source'})), 15_200)));

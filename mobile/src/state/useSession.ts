@@ -17,7 +17,6 @@ import type { LeagueLite } from '../api/auth';
 import { getSeasonProjections } from '../api/winNow';
 import { createLeagueSessionLifecycle, LEAGUE_ATTEMPT_MS } from './leagueSession';
 import type { InitCause, LeagueContext } from './leagueSession';
-import { maybePregenTrades } from '../api/tradePregen';
 import { connectLeague as apiConnectLeague } from '../api/league';
 import { getLeagues } from '../api/sleeper';
 import { initPurchases } from '../api/purchases';
@@ -369,10 +368,8 @@ export const useSession = create<SessionState>((set, get) => ({
         name:      league.league_name,
       }, {maxAgeMs: REVALIDATE_MIN_INTERVAL_MS});
       context.assertCurrent();
-      // Onboarding item 4 (hazard H3): the silent re-init is the returning-
-      // user auto path — pregen the trade deck now so Trades opens warm.
-      // Flag-gated + per-launch-deduped inside; fire-and-forget.
-      maybePregenTrades(league.league_id);
+      // Session init already starts the server warm-up with our persisted
+      // search preference; no second generate POST or onboarding gate.
     } catch {
       // Offline or backend down — keep current state. The cached token may
       // still be valid; never sign the user out from a failed revalidate.

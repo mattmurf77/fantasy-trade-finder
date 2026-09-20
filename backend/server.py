@@ -13964,9 +13964,8 @@ def generate_trades():
             if not force_fresh and _trade_job_is_fresh(existing, fairness_threshold, outlook_value, trade_intent,
                                                       presentation_capture=presentation_capture):
                 reuse_snapshot = copy.deepcopy(existing)
-            # In-flight: share the current job. Note: if the request used
-            # different fairness/outlook, the snapshot will reflect the
-            # original params — the frontend can re-tap once status flips.
+            # Share in-flight work only for matching fairness and shape.
+            # A warm-up must never answer a differently configured search.
             #
             # ...unless the caller asked to FORCE. The cache-hit branch above
             # honours `force`, this one used to ignore it, so a forced
@@ -13978,6 +13977,8 @@ def generate_trades():
             # (e.g. an override released by a newer vote) could be invisible.
             # Supersede the running job and fall through to spawn a fresh one.
             elif (existing.get("status") == "running"
+                  and abs((existing.get("fairness_threshold") or 0) - fairness_threshold) <= 0.01
+                  and (existing.get("trade_intent") or None) == trade_intent
                   and _trade_presentation_matches(existing, presentation_capture)
                   and _trade_significance_matches(existing)):
                 if not (force_fresh and _force_supersede_enabled()):
@@ -13991,7 +13992,9 @@ def generate_trades():
             # through to spawn a new job.
             if reuse_snapshot is None:
                 if (existing.get("status") == "running"
-                        and not _trade_significance_matches(existing)):
+                        and (not _trade_significance_matches(existing)
+                             or abs((existing.get("fairness_threshold") or 0) - fairness_threshold) > 0.01
+                             or (existing.get("trade_intent") or None) != trade_intent)):
                     existing["superseded"] = True
                     existing["superseded_at"] = time.monotonic()
                 _trade_jobs_by_key.pop(key, None)
@@ -22074,15 +22077,33 @@ def session_init():
         # `active_format`, `token`, and `members` are all in local scope at
         # this point (set above). Don't re-read from the session dict —
         # we already have the right values.
+        # Installed clients omit this field; match Find a Trade's wide-net
+        # default. New clients send the persisted toggle before warm-up starts.
+        pregen_fairness = body.get("trade_fairness_threshold", 0.5)
+        if (isinstance(pregen_fairness, bool)
+                or not isinstance(pregen_fairness, (int, float))
+                or not 0.5 <= pregen_fairness <= 1.0):
+            pregen_fairness = 0.5
         pregen_key = _trade_job_key(user_id, league_id, active_format)
         presentation_capture = _capture_trade_presentation()
         with _trade_jobs_lock:
             existing_id = _trade_jobs_by_key.get(pregen_key)
             existing    = _trade_jobs.get(existing_id) if existing_id else None
-            should_kickoff = (existing is None) or not _trade_presentation_matches(existing, presentation_capture) or not _trade_significance_matches(existing) or (
-                existing.get("status") == "complete"
-                and (time.monotonic() - (existing.get("finished_at") or 0)) > _PREGEN_TTL_SECONDS
+            should_kickoff = (
+                existing is None
+                or existing.get("status") not in ("running", "complete")
+                or not _trade_presentation_matches(existing, presentation_capture)
+                or not _trade_significance_matches(existing)
+                # Foreground warm-up must not replace an active user search.
+                # Explicit generate requests handle parameter mismatches.
+                or (existing.get("status") == "complete" and (
+                    abs((existing.get("fairness_threshold") or 0.5) - pregen_fairness) > 0.01
+                    or bool(existing.get("trade_intent"))
+                    or (time.monotonic() - (existing.get("finished_at") or 0)) > _PREGEN_TTL_SECONDS))
             )
+            if should_kickoff and existing and existing.get("status") == "running":
+                existing["superseded"] = True
+                existing["superseded_at"] = time.monotonic()
         if should_kickoff:
             opp_total = sum(1 for m in members if m.user_id != user_id and m.elo_ratings)
             _kickoff_trade_job(
@@ -22090,7 +22111,7 @@ def session_init():
                 user_id            = user_id,
                 league_id          = league_id,
                 scoring_format     = active_format,
-                fairness_threshold = 0.75,
+                fairness_threshold = pregen_fairness,
                 pinned_give        = None,
                 opponents_total    = opp_total,
                 session_context    = session_payload,

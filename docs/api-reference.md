@@ -78,7 +78,7 @@ pre-generation eligibility, cache TTLs and polling contracts are unchanged.
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/session/init` | Initialize an existing verified session. Requires matching `user_id` and `league_id`; profile, roster, opponents and co-owner identity are resolved server-side. 401 `session_expired`, 403 `verification_required` / `identity_mismatch` / `league_membership_required`, 503 `league_data_unavailable`. No tokenless bootstrap or identity reassignment. |
+| POST | `/api/session/init` | Initialize an existing verified session. Optional `trade_fairness_threshold` (0.5–1.0; omitted/invalid → 0.5) starts background trade preparation with the native search preference. Requires matching `user_id` and `league_id`; profile, roster, opponents and co-owner identity are resolved server-side. 401 `session_expired`, 403 `verification_required` / `identity_mismatch` / `league_membership_required`, 503 `league_data_unavailable`. No tokenless bootstrap or identity reassignment. |
 | GET | `/api/session/ping` | Liveness / session check |
 | POST/GET | `/api/session/demo` | Demo session bootstrap |
 | POST | `/api/session/signout` | **Teardown 06-03 (W2C), unflagged.** Evict the calling `X-Session-Token` server-side → `{ok: true, evicted: bool}`. Idempotent, never errors (missing/stale token → `evicted: false`) — clients call it best-effort during sign-out so the token doesn't stay live until idle eviction. Also deletes the token's durable `sessions` row (W3B; unconditional, so rows from a flag-on period can't outlive a sign-out) |

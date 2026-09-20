@@ -66,6 +66,8 @@ async function staleAuthResponseTest(method) {
   const changes=[];
   class ApiError extends Error { constructor(status,body,message) {super(message);this.status=status;this.body=body;} }
   const auth=load('src/api/auth.ts', {
+    '@react-native-async-storage/async-storage': {default: {getItem: async () => null}},
+    './tradePregen': {fairnessOnFromPref: () => false, fairnessThresholdFor: () => .5},
     './client': {ApiError, getSessionToken:async()=>currentToken,
       setSessionToken:async token=>{changes.push(token);currentToken=token;},
       api:{post:()=>new Promise(resolve=>{resolveResponse=resolve;})}},
