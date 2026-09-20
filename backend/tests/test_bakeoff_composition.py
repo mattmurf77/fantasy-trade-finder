@@ -154,7 +154,7 @@ def test_the_challenger_is_never_spelled_baseline():
     # Superset adds separately attributed generators; ARMS stays the pinned
     # historical fixture. This is an enum inventory, not a control recapture.
     assert bo.ALL_ARMS == ("baseline", "current", "challenger", "gen_v2",
-                           "fit", "owner_v1")
+                           "fit", "owner_v1", "owner_v2_bilateral")
     # …and it generates after `current` (which dark mode serves) but before
     # the historical reconstruction.
     order = list(bo.GENERATION_ORDER)

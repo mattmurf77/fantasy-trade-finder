@@ -81,7 +81,17 @@ Port conflicts: macOS AirPlay Receiver uses :5000. Free it: `lsof -ti:5000 | xar
 
 ## Deploy (Render)
 
-`render.yaml` drives the deploy. Push to GitHub `main` and Render auto-builds.
+Inspect the service's current deployment settings before releasing. On 2026-09-20,
+service `srv-d7g37ftckfvc73a32gvg` reported `autoDeploy: no`: merging/pushing `main`
+alone did **not** deploy it. After exact-head CI, explicitly deploy the tested merge
+commit through Render, and verify its commit SHA/status and application health.
+Do not change automatic-deployment settings as part of a feature release.
+
+Owner-model rollout: read all relevant admin config, deploy with
+`owner_bilateral_enabled=0`, then set only that key to 1 using `scripts/set_knob.py`
+and read it back. Preserve owner-exclusive serving and existing zero output caps.
+Set 0 for rollback. Inspect actual-arm attribution from fresh generation separately
+from historical decisions/inbound offers, which must retain original terms.
 
 - **Backend:** Python service runs `run.py`.
 - **DB:** Postgres via injected `DATABASE_URL`.

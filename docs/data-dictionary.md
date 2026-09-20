@@ -4,6 +4,23 @@
 
 Source of truth: `backend/database.py`. Keep this file in sync when adding/changing tables or columns. DB: SQLite at `data/trade_finder.db` (overridable via `DATABASE_URL`). All tables defined as SQLAlchemy Core (`metadata`).
 
+## Bilateral evidence (existing JSON columns)
+
+No table/column migration is added for `owner_v2_bilateral`. Existing private
+`deck_impressions.valuation_json` stores immutable exact-package evidence with
+generator/version, captured market values/source hashes, per-asset personal-source
+coverage, both owners' intent and suitability components, weaker-side/total support,
+and policy coefficients. Unknown/partial personal evidence is explicit. Numerical
+support and ranges are heuristic, not acceptance probabilities or confidence intervals.
+`model_arm` and `policy_variant` identify the actual generator; a later selector
+change must not reattribute a prior disposition, match, or valuation snapshot.
+
+Overhaul generation JSON records `generation_identity` and a model-transition cache
+epoch. Version-scoped offer hashes allow new valuation occurrences without rewriting
+old proofs; a separate canonical package hash in private evidence preserves exact
+package identity. Prior decided packages remain suppressed across epochs. No public
+counterparty board disclosure or client analytics event is added.
+
 
 ## Table of Contents
 
@@ -951,7 +968,7 @@ Dynasty pick assets across upcoming seasons. `pick_id = "{league}_{season}_{roun
 
 When the result *can* contain user rows and `include_contested` is False, **contested** and **orphaned** slots are dropped by a **row filter**. Nulling `pool_value` instead is forbidden: `server._power_picks_by_owner` re-derives a price from a NULL `pool_value`, so nulling would silently re-price the very row the rule withholds.
 
-There are exactly **seven** read sites (`_roster_eveners`, `_user_pick_share`, `_run_trade_job`, `_trade_evaluate_impl`, `get_league_picks`, `_owned_pick_assets`, `_power_picks_by_owner`) and an AST test in `backend/tests/test_pick_assignment.py` enumerates them. An **eighth** — or one of the seven dropping its opt-in — **fails the test**; that is deliberate, not an obstacle to route around.
+The original seven engine read sites were `_roster_eveners`, `_user_pick_share`, `_run_trade_job` (now its `_job_draft_picks` memo), `_trade_evaluate_impl`, `get_league_picks`, `_owned_pick_assets`, and `_power_picks_by_owner`. The explicitly sanctioned shared-helper readers also include `_first_round_ledgers`, `_owner_selected_ideas`, and `_owner_generation_context`. The latter captures original-owner next-draft protection and expired-asset evidence only for the bilateral owner model; it uses `_pick_read_source()` and retains the loader's contested/orphaned row filter. It neither asserts ownership nor widens the enabled pick universe. `backend/tests/test_pick_assignment.py` enumerates the exact reader set and verifies the helper expression; an unreviewed reader or a removed opt-in fails that guard. Bilateral route tests also verify platform-only behavior with asserted trading off and disputed-row exclusion with it on.
 
 **W3 M-C (2026-08-08, flag `picks.assign_tradeable`)** opted all seven in together. Each now passes `source=server._pick_read_source()`, which is `'platform'` with the flag off (the shipped default, so the paragraph above still describes the shipped state) and `'any'` with it on. A read site passing a **literal** `PICK_SOURCE_ANY` would ignore the kill switch and is failed by its own AST test. Only the assignment surface (`seed_pick_grid`, `_assignment_slots`, `_assignment_grid`, `pick_assignment_put_route`) may name a literal provenance. `database.has_assigned_picks(league_id)` is the memoised "does this league hold any asserted row" probe behind M-C's engine guard and `picks_supported`; it is invalidated by the same hook as the contested cache and **fails closed**.
 

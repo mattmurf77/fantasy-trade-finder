@@ -2,6 +2,12 @@
 
 Things that **must** stay in sync across backend, web, mobile, and the extension. Drift here = clients disagree silently. Update *all* listed locations together.
 
+Owner generation identities are `owner_v1` and `owner_v2_bilateral`. Native
+`TradesScreen` must honor server recommendation rank for both when selecting the
+featured idea; do not substitute largest market gain. Wire normalizers retain
+`model_arm`, `generator_version` and ordering fields, never private counterparty
+boards or suitability evidence. New-arm native compatibility begins with 1.17.4.
+
 ---
 
 ## Tier keys, labels & color tokens

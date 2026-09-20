@@ -1,3 +1,14 @@
+## 2026-09-20 — Bilateral owner replacement, validation in progress
+
+Isolated `codex/owner-v2-bilateral` from fresh `659a6332`. Parent verified **93 new
+core/route/overhaul tests passed**; independent agent checks and two detected sabotage
+controls recorded separately. Native TypeScript, all structural suites, test-ID lint,
+and 195/195 web checks passed. Old owner immutable snapshot parity preserved.
+Parent fixed-seed frozen-input replay confirms different packages/order but does not
+establish acceptance lift. Full-suite/hosted-CI/release gates remain in progress;
+no deployment inferred. [Release evidence](../docs/plans/owner-v2-bilateral/release.md),
+[independent validation](../docs/plans/owner-v2-bilateral/validation.md).
+
 ## 2026-09-19 — Find a Trade latency investigation and local optimization
 
 Isolated `codex/trade-search-latency` from freshly fetched `6ff61e44`. Read-only production evidence: interactive completed jobs median 43.06s (18 jobs), maximum 75.44s; today's affected jobs 43.79/47.99s. Local changes remove repeated flag scans/map copies, owner player/tier preparation, request deep copies and diagnostic subtree work. Full backend **6,068 passed / 1 skipped** (Python 3.14, 353.53s); focused owner suites 111 passed; new latency/diagnostic suites 15 passed; web 195/195, project/session checks and diff checks passed. Projection assertion rerun: 28 owner-only tests passed. Fixed-seed reconstructed search matches ordered decision and expanded feature SHA-256 digests across base/current. Final unprofiled component comparison 11.172→6.682s (~40% faster), profiled CPU stages 23.55→9.97s; excludes database/full route/device costs. No production release, budget/flag change or three-second qualification. [Evidence, limitations and device checklist](../docs/plans/trade-search-latency/README.md).

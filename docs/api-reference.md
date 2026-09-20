@@ -4,6 +4,19 @@
 
 The Flask app lives in `backend/server.py`; domain route modules such as `backend/win_now_api.py` register on that app. Same-origin from web; mobile + extension hit the deployed host. Keep this file in sync when adding/renaming/removing routes.
 
+### Bilateral owner identity
+
+Trade-card/selected-idea `model_arm` also admits `owner_v2_bilateral`, with
+`generator_version: owner-v2-bilateral-1`. Preserve server recommendation order for
+both owner models. There is no public probability, counterparty ranking/tier, or
+private support-component payload. Existing one-click disposition and impression
+IDs retain their contracts. Polling a pre-switch job can return empty cards with
+`status: error, error: owner_model_changed`; start a fresh search. Overhaul reads
+mark prior-model undecided inventory stale while preserving decided history and
+original terms. New model generation does not reset package-level prior decisions.
+Overhaul returns `409 generation_changed` if the selector changes during capture or
+generation, and `409 stale_offer` if a client newly decides an old stale undecided ID.
+
 Auth: an opaque bearer token sent as the **`X-Session-Token` header**. Username discovery tokens require ownership verification before private data access; `/api/session/init` initializes an existing verified session.
 There is no cookie and no Flask session — earlier versions of this line said "session cookie",
 which was never true. Web stores the token in `localStorage`, mobile in `expo-secure-store`.

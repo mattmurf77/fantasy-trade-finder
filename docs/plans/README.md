@@ -16,6 +16,10 @@ cited below, [`living-memory/DECISIONS.md`](../../living-memory/DECISIONS.md).
 Per-feedback-item fixes do **not** live here — they live in [`../feedback/items/`](../feedback/items/).
 
 Trade-model activation follow-up: [scope](trade-model-activation/scope.md), [validation](trade-model-activation/validation.md). Items 2/3 built; collection rollout under validation; strict enforcement remains dark.
+
+Preference-led bilateral owner replacement **implemented, release gates in progress**:
+[scope](owner-v2-bilateral/scope.md), [release evidence](owner-v2-bilateral/release.md),
+[decision](../adr/adr-022-preference-led-bilateral.md). No live status inferred from code.
 Security remediation **shipped 2026-09-05** via PR #279: [deployment](security-data-hardening/deployment.md), [scope](security-data-hardening/scope.md). Integrated CI: 5,001 backend passes / 1 skip; PostgreSQL: 57 passes. Render live; iOS 1.16.16 (145) submitted; extension 0.1.1 published. Physical-device QA and historical production cleanup remain outstanding.
 
 Owner interview implementation **first wave live; experimental policy on; iOS uploaded 2026-09-05**: [scope](owner-contracts/scope.md), [release](owner-contracts/release.md), [policy activation](owner-contracts/policy-activation.md). PR #281 merged; final CI green, Render live at `4026ebc8`. Owner separately authorized the personal-market switch; verified exactly one flag change, with all three generator arms and other settings preserved. iOS 1.17.0 (148) uploaded for TestFlight; Apple/tester confirmation, physical QA and unfinished engine/data work remain.

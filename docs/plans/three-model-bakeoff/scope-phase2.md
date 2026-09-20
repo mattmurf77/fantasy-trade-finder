@@ -1,5 +1,10 @@
 # Feature Scope — Three-model bake-off, Phase 2: pin arm A
 
+2026-09-20 inventory amendment: `owner_bilateral_enabled` is excluded from
+`MODEL_A_PROFILE` and `MODEL_CHALLENGER_PROFILE`. It selects which independent
+owner constructor runs outside legacy arms; pinning it cannot affect either
+legacy arm's output. Added to the knob inventory guard without golden recapture.
+
 **Date:** 2026-08-18
 **Entry point:** [docs/plans/three-model-bakeoff/PLAN.md](PLAN.md) §7 Phase 2 (direct ask)
 **Builder:** backend build agent, branch `feat/bakeoff-arm-a`

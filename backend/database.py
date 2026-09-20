@@ -2963,6 +2963,7 @@ _MODEL_CONFIG_DEFAULTS = [
     ("bakeoff_include_owner",       0.0, "owner_v1 generator: 1 = generate and log; 0 = disabled (default); existing arms unchanged"),
     ("bakeoff_serve_owner",         0.0, "owner_v1 exposure: 1 = join organic draft and selected-search experiment; 0 = no treatment exposure"),
     ("bakeoff_owner_only",          0.0, "owner_v1 exclusive: 1 = only owner generation/serving with no returned-offer quotas; requires include+serve; 0 = comparison path"),
+    ("owner_bilateral_enabled",     0.0, "Owner generator selector: 1 replaces owner_v1 with owner_v2_bilateral on every owner entrance; 0 restores owner_v1; include/serve/exclusive settings stay unchanged"),
     ("owner_pool_size",            16.0, "owner_v1 bounded candidate pool per team; computational limit, not a value gate"),
     ("owner_pair_budget",        4096.0, "owner_v1 maximum candidate evaluations per opponent"),
     ("owner_total_budget",      60000.0, "owner_v1 maximum candidate evaluations per generation"),

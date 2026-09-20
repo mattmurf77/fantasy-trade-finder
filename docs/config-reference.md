@@ -4,6 +4,25 @@
 
 Environment variables, feature flags, and `model_config` keys. Keep in sync when adding any of the three (see [docs/CLAUDE.md](CLAUDE.md)).
 
+## Bilateral owner selector
+
+`owner_bilateral_enabled` is a numeric `model_config` selector, default **0** in
+both DB seeds and `trade_service._DEFAULT_CFG`. Exactly **1** selects
+`owner_v2_bilateral` / `owner-v2-bilateral-1`; 0 selects the prior `owner_v1`.
+It replaces the owner arm rather than adding another draft participant. Existing
+owner include/serve/only controls still apply; it does not enable other arms,
+change market-source weights, or impose an output-card limit.
+The dispatch-only selector is excluded from `MODEL_A_PROFILE` and
+`MODEL_CHALLENGER_PROFILE`; it cannot change either legacy arm's generator.
+
+Use the audited `scripts/set_knob.py owner_bilateral_enabled 1 --base <production-url>`
+workflow, then read `/api/admin/config` back. Set 0 for deploy-free rollback.
+Captured request identity, job safety signatures and overhaul inventory distinguish
+models; stale undecided inventory is not newly served. Existing decisions, matches,
+inbound offers and their original valuation evidence are retained. A device already
+displaying a card is not remotely erased. Mobile 1.17.4 recognizes the new owner arm
+in its featured-offer ordering. See [release evidence](plans/owner-v2-bilateral/release.md).
+
 
 ## Table of Contents
 

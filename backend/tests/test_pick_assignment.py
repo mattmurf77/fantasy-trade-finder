@@ -225,6 +225,11 @@ _SEVEN_READ_SITES = frozenset({
     # an explicitly reviewed reader, not a new ownership writer. The shared
     # helper preserves platform-only when asserted trading is disabled.
     "_owner_selected_ideas",
+    # Bilateral owner capture needs original-owner next-draft protection and
+    # expired-asset evidence from the same permitted holdings as generation.
+    # It uses _pick_read_source(), retaining contested/orphaned filtering;
+    # this is provenance capture, never an ownership assertion or writer.
+    "_owner_generation_context",
 })
 
 #: The assignment surface's own reads. These name a LITERAL provenance
