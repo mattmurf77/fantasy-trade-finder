@@ -1,0 +1,236 @@
+{
+  "environment": {
+    "python": "3.14.4",
+    "platform": "macOS-26.5.1-arm64-arm-64bit-Mach-O",
+    "machine": "arm64",
+    "logical_cpus": 8,
+    "hash_seed": "0",
+    "samples_per_variant": 2,
+    "process_peak_rss_bytes": 415219712
+  },
+  "measurements": [
+    {
+      "variant": "baseline",
+      "rows": 2354,
+      "page_size": 100,
+      "freeze_seconds": 0.3706872500188183,
+      "compact_seconds": 1.7348622909921687,
+      "total_seconds": 2.105549541010987,
+      "compacted_sha256": "e5c3a2038a6894e496fc5ac3fec2a689ab3a816b9d43962d5338db13c76728b8",
+      "snapshot_writes_sha256": "a12d121cff407930d788298c85257cc94e020dcdc1d14480dc5639b9e09cd6f2",
+      "snapshot_write_rows": 2450,
+      "unique_snapshots": 2358,
+      "inline_bytes": 4039199,
+      "unique_snapshot_bytes": 7013287,
+      "expanded_parity": true
+    },
+    {
+      "variant": "structured_before_freeze",
+      "rows": 2354,
+      "page_size": 100,
+      "freeze_seconds": 6.660120561718941e-07,
+      "compact_seconds": 0.7938779160031117,
+      "total_seconds": 0.7938785820151679,
+      "compacted_sha256": "e5c3a2038a6894e496fc5ac3fec2a689ab3a816b9d43962d5338db13c76728b8",
+      "snapshot_writes_sha256": "a12d121cff407930d788298c85257cc94e020dcdc1d14480dc5639b9e09cd6f2",
+      "snapshot_write_rows": 2450,
+      "unique_snapshots": 2358,
+      "inline_bytes": 4039199,
+      "unique_snapshot_bytes": 7013287,
+      "expanded_parity": true
+    },
+    {
+      "variant": "structured_before_freeze",
+      "rows": 2354,
+      "page_size": 100,
+      "freeze_seconds": 2.500019036233425e-07,
+      "compact_seconds": 0.7738476250087842,
+      "total_seconds": 0.7738478750106879,
+      "compacted_sha256": "e5c3a2038a6894e496fc5ac3fec2a689ab3a816b9d43962d5338db13c76728b8",
+      "snapshot_writes_sha256": "a12d121cff407930d788298c85257cc94e020dcdc1d14480dc5639b9e09cd6f2",
+      "snapshot_write_rows": 2450,
+      "unique_snapshots": 2358,
+      "inline_bytes": 4039199,
+      "unique_snapshot_bytes": 7013287,
+      "expanded_parity": true
+    },
+    {
+      "variant": "baseline",
+      "rows": 2354,
+      "page_size": 100,
+      "freeze_seconds": 0.3721203340101056,
+      "compact_seconds": 1.7734029589919373,
+      "total_seconds": 2.145523293002043,
+      "compacted_sha256": "e5c3a2038a6894e496fc5ac3fec2a689ab3a816b9d43962d5338db13c76728b8",
+      "snapshot_writes_sha256": "a12d121cff407930d788298c85257cc94e020dcdc1d14480dc5639b9e09cd6f2",
+      "snapshot_write_rows": 2450,
+      "unique_snapshots": 2358,
+      "inline_bytes": 4039199,
+      "unique_snapshot_bytes": 7013287,
+      "expanded_parity": true
+    }
+  ],
+  "limitations": [
+    "Local frozen input; not production, route, network or client latency",
+    "Candidate proof hashing adds equal measurement work to both compute variants",
+    "Structured storage experiment assumes source immutable sharing; no DB timing"
+  ],
+  "profiled": {
+    "variant": "baseline",
+    "rows": 2354,
+    "page_size": 100,
+    "freeze_seconds": 0.3680900420004036,
+    "compact_seconds": 2.100800915999571,
+    "total_seconds": 2.4688909579999745,
+    "compacted_sha256": "e5c3a2038a6894e496fc5ac3fec2a689ab3a816b9d43962d5338db13c76728b8",
+    "snapshot_writes_sha256": "a12d121cff407930d788298c85257cc94e020dcdc1d14480dc5639b9e09cd6f2",
+    "snapshot_write_rows": 2450,
+    "unique_snapshots": 2358,
+    "inline_bytes": 4039199,
+    "unique_snapshot_bytes": 7013287,
+    "expanded_parity": true,
+    "profile": [
+      {
+        "function": "deck_diagnostics.py:26:compact_rows",
+        "primitive_calls": 24,
+        "calls": 24,
+        "self_seconds": 0.068682529,
+        "cumulative_seconds": 2.09064096
+      },
+      {
+        "function": "__init__.py:185:dumps",
+        "primitive_calls": 61010,
+        "calls": 61010,
+        "self_seconds": 0.052905458,
+        "cumulative_seconds": 1.613069168
+      },
+      {
+        "function": "encoder.py:185:encode",
+        "primitive_calls": 61010,
+        "calls": 61010,
+        "self_seconds": 0.043592286,
+        "cumulative_seconds": 1.5507682230000002
+      },
+      {
+        "function": "encoder.py:207:iterencode",
+        "primitive_calls": 61010,
+        "calls": 61010,
+        "self_seconds": 1.4900109730000002,
+        "cumulative_seconds": 1.4900109730000002
+      },
+      {
+        "function": "deck_diagnostics.py:50:count",
+        "primitive_calls": 9416,
+        "calls": 100734,
+        "self_seconds": 0.060183311,
+        "cumulative_seconds": 1.409513931
+      },
+      {
+        "function": "deck_diagnostics.py:39:identity",
+        "primitive_calls": 107656,
+        "calls": 107656,
+        "self_seconds": 0.088891963,
+        "cumulative_seconds": 1.327760241
+      },
+      {
+        "function": "deck_diagnostics.py:17:dumps",
+        "primitive_calls": 58656,
+        "calls": 58656,
+        "self_seconds": 0.017929739,
+        "cumulative_seconds": 1.26505479
+      },
+      {
+        "function": "__init__.py:304:loads",
+        "primitive_calls": 2354,
+        "calls": 2354,
+        "self_seconds": 0.0018287280000000002,
+        "cumulative_seconds": 0.32641854600000003
+      },
+      {
+        "function": "decoder.py:340:decode",
+        "primitive_calls": 2354,
+        "calls": 2354,
+        "self_seconds": 0.002981313,
+        "cumulative_seconds": 0.32408246700000004
+      },
+      {
+        "function": "decoder.py:351:raw_decode",
+        "primitive_calls": 2354,
+        "calls": 2354,
+        "self_seconds": 0.31875985,
+        "cumulative_seconds": 0.31875985
+      },
+      {
+        "function": "deck_diagnostics.py:77:pack",
+        "primitive_calls": 7062,
+        "calls": 98380,
+        "self_seconds": 0.07320354700000001,
+        "cumulative_seconds": 0.228237915
+      },
+      {
+        "function": "deck_diagnostics.py:21:is_reference",
+        "primitive_calls": 159270,
+        "calls": 159270,
+        "self_seconds": 0.070652384,
+        "cumulative_seconds": 0.081616981
+      },
+      {
+        "function": "~:0:<built-in method _hashlib.openssl_sha256>",
+        "primitive_calls": 53828,
+        "calls": 53828,
+        "self_seconds": 0.056517668,
+        "cumulative_seconds": 0.056517668
+      },
+      {
+        "function": "~:0:<built-in method builtins.isinstance>",
+        "primitive_calls": 506586,
+        "calls": 506586,
+        "self_seconds": 0.040374173,
+        "cumulative_seconds": 0.040374173
+      },
+      {
+        "function": "~:0:<method 'hexdigest' of '_hashlib.HASH' objects>",
+        "primitive_calls": 53828,
+        "calls": 53828,
+        "self_seconds": 0.018755789000000002,
+        "cumulative_seconds": 0.018755789000000002
+      },
+      {
+        "function": "encoder.py:105:__init__",
+        "primitive_calls": 61010,
+        "calls": 61010,
+        "self_seconds": 0.009395487000000001,
+        "cumulative_seconds": 0.009395487000000001
+      },
+      {
+        "function": "~:0:<method 'encode' of 'str' objects>",
+        "primitive_calls": 53828,
+        "calls": 53828,
+        "self_seconds": 0.009302641,
+        "cumulative_seconds": 0.009302641
+      },
+      {
+        "function": "~:0:<built-in method builtins.id>",
+        "primitive_calls": 107656,
+        "calls": 107656,
+        "self_seconds": 0.008555353,
+        "cumulative_seconds": 0.008555353
+      },
+      {
+        "function": "~:0:<method 'join' of 'str' objects>",
+        "primitive_calls": 61010,
+        "calls": 61010,
+        "self_seconds": 0.006654653000000001,
+        "cumulative_seconds": 0.006654653000000001
+      },
+      {
+        "function": "~:0:<built-in method builtins.len>",
+        "primitive_calls": 56183,
+        "calls": 56183,
+        "self_seconds": 0.005441671,
+        "cumulative_seconds": 0.005441671
+      }
+    ]
+  },
+  "all_parity_checks_passed": true
+}

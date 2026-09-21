@@ -1,3 +1,7 @@
+## 2026-09-21 — First-action latency research, initial wave complete
+
+Three Astra Ultra workstreams plus parent review on isolated `codex/trade-latency-research-plan`, base `4913ad0c`. Parent ran **31 research tests passed in 2.12s**, isolated SQLite with socket connections blocked. Three reconstructed full-worker runs measured 13.015–13.200s; this is not production/device latency. Exact price memoization rejected (parity but no improvement); structured evidence experiment 2.126→0.784s is an upper-bound representation experiment, not integrated savings. Fresh read-only production: seven completed workers, median 61.094s. Application code/settings/data unchanged. Full application CI, pinned-runtime staging, physical TestFlight and load/three-second qualification unexecuted. [Results and limits](../docs/plans/trade-search-latency/execution-20260921/README.md).
+
 ## 2026-09-20 — Bilateral owner replacement, validation in progress
 
 Isolated `codex/owner-v2-bilateral` from fresh `659a6332`. Parent verified **93 new

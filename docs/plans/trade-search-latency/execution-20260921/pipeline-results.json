@@ -1,0 +1,39 @@
+{
+  "kind": "reconstructed_offline_worker_not_production",
+  "baseline_commit": "4913ad0c68af5e75f864c46cff692ca5f9bf842b",
+  "snapshot_sha256": "a82fe15c0717db3e73c6d0a5d8853c5f716ff716f8b0fb6967719966aeee5582",
+  "config_sha256": "4b9612166d204e1be4f50d48f261f0e6c62b42f007825be450a4c29e0a2ec03c",
+  "worker_source_sha256": "737e5c08a546e4cebab0b733e7299f8a4b1381b0856d0b4c7b8f4cea12d16f86",
+  "fixture_captured_at": "2026-09-19T16:43:46.299183+00:00",
+  "configuration_checked_at": "2026-09-20T23:02:24.366773+00:00",
+  "runtime": {"python": "3.14.4", "repository_python": "3.12.3", "system": "Darwin", "machine": "arm64", "hash_seed": "0", "random_seed": 0},
+  "fixture": {"players": 580, "members": 13, "viewer_roster": 31, "platform": "unknown", "constructor_cards": 2843, "post_significance_cards": 2354, "published_cards": 2354, "durable_impressions": 2354},
+  "runs": [
+    {"private_run_name": "latency-pipeline-20260921-run2", "exports_retained": true, "worker_wall_ms": 13014.920, "worker_cpu_ms": 12839.549, "first_durable_cards_ms": 13006.346, "public_snapshot_projection_ms": 34.015, "public_json_serialization_ms": 25.879, "public_json_utf8_bytes": 3218422, "peak_process_rss_bytes": 595738624},
+    {"private_run_name": "latency-pipeline-20260921-run3", "exports_retained": false, "worker_wall_ms": 13063.305, "worker_cpu_ms": 12887.551, "first_durable_cards_ms": 13054.689, "public_snapshot_projection_ms": 33.782, "public_json_serialization_ms": 25.960, "public_json_utf8_bytes": 3218422, "peak_process_rss_bytes": 410304512},
+    {"private_run_name": "latency-pipeline-20260921-public", "exports_retained": true, "worker_wall_ms": 13200.326, "worker_cpu_ms": 13001.582, "first_durable_cards_ms": 13191.721, "public_snapshot_projection_ms": 35.658, "public_json_serialization_ms": 26.333, "public_json_utf8_bytes": 3218422, "peak_process_rss_bytes": 548782080}
+  ],
+  "median_stage_timings_ms": [
+    {"stage": "entry", "wall": 0.029, "cpu": 0.030},
+    {"stage": "prepare_inputs", "wall": 4.146, "cpu": 4.127},
+    {"stage": "capture_owner_context", "wall": 3.297, "cpu": 3.296},
+    {"stage": "construct", "wall": 5910.343, "cpu": 5846.351},
+    {"stage": "post_construction", "wall": 522.869, "cpu": 516.182},
+    {"stage": "owner_revalidation", "wall": 2144.195, "cpu": 2125.904},
+    {"stage": "roster_checks", "wall": 162.511, "cpu": 160.107},
+    {"stage": "market_checks", "wall": 2.574, "cpu": 2.529},
+    {"stage": "significance", "wall": 52.444, "cpu": 52.034},
+    {"stage": "presentation", "wall": 0.037, "cpu": 0.036},
+    {"stage": "breaker", "wall": 0.017, "cpu": 0.018},
+    {"stage": "dispositions", "wall": 3.724, "cpu": 3.629},
+    {"stage": "snapshot_and_legacy_impressions", "wall": 389.266, "cpu": 385.849},
+    {"stage": "durable_evidence_and_publish", "wall": 3858.487, "cpu": 3780.177},
+    {"stage": "run_ledger", "wall": 3.043, "cpu": 2.952},
+    {"stage": "completion_and_analytics", "wall": 5.507, "cpu": 5.441}
+  ],
+  "run2_sql": {"worker_select_statements": 18, "worker_insert_statements": 75, "worker_update_statements": 1, "evidence_insert_statements": 72, "evidence_sql_execute_wall_ms": 90.352, "serve_projection_select_statements": 1},
+  "evidence_failure": {"worker_wall_ms": 11120.686, "worker_cpu_ms": 10933.053, "status": "error", "error": "owner_impression_unavailable", "cards": 0, "impressions": 0, "first_cards_ms": null, "first_durable_cards_ms": null},
+  "checks": {"harness_and_cache_tests_passed": 7, "baseline_duplicate_cold_requests_reproduced": true, "baseline_stale_running_outlook_reuse_reproduced": true, "baseline_rank_change_missing_completed_fence_reproduced": true},
+  "unmet_gates": ["95_percent_tap_to_tile_accounting", "production_sized_runtime_and_resources", "full_provider_history_pick_ledger_fixture", "30_runs_per_benchmark_cell", "multi_league_matrix", "concurrency_saturation_curve", "process_crash_and_transaction_retry_matrix", "three_second_first_action_goal"],
+  "limitations": ["Reconstructed frozen worker with patched context adapter and board getter; not full route replay", "Missing provider identity/settings, current availability, raw rankings, live history and full draft-pick ledger", "SQLite and local Python 3.14.4 differ from production and repository-pinned Python 3.12.3", "No client request, queue, transfer, parse or render spans", "Stage medians do not sum exactly to median total", "Private export retention increases memory; use non-export run for indicative process footprint", "SQL execution time omits commit, connection acquisition and Python assembly; these are included in worker stages"]
+}
