@@ -6557,11 +6557,13 @@ DECK_IMPRESSION_INSERT_ROWS = 100
 def save_deck_impressions(rows: list[dict]) -> None:
     """F1 (deck.signal_v2) — batch-insert pre-built deck_impressions rows.
 
-    Row assembly (features_json freezing, propensity capture, trade hashing)
+    Row assembly (features, propensity capture, trade hashing)
     lives in server._log_deck_signal_impressions where the card objects,
     players_dict and the ordering-capture map are in scope; this is the thin
-    write. Caller wraps in try/except — like log_trade_impressions, signal
-    logging must never break trade generation.
+    write. features_json may be an immutable structured dict during synchronous
+    assembly; compaction freezes it to the same durable JSON before insertion.
+    All pages and diagnostic snapshots commit atomically. Required owner
+    evidence callers must withhold publication when this write fails.
     """
     if not rows:
         return
@@ -6576,7 +6578,8 @@ def save_deck_impressions(rows: list[dict]) -> None:
     inline_bytes = 0
     with engine.begin() as conn:
         for start in range(0, len(rows), DECK_IMPRESSION_INSERT_ROWS):
-            # Decode only one page at a time on the small web instance. Hashes
+            # Decode legacy JSON, or pack the live structured features without
+            # expanding/decoding shared evidence. Bound work to one page; hashes
             # share immutable nodes across pages as well as within a page.
             compacted, snapshots = compact_rows(rows[start:start + DECK_IMPRESSION_INSERT_ROWS])
             _save_deck_diagnostic_snapshots(conn, snapshots)

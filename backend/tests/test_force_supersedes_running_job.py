@@ -108,12 +108,15 @@ def _generate(client, **body):
 def _register_running_job(job_id="job-in-flight"):
     """Park a running job in the registry, exactly as _kickoff_trade_job
     would, without spawning a worker."""
+    sess = server._sessions[TOKEN]
+    preload = server._trade_job_preferences(UID, LEAGUE, sess, sess["league"])
+    outlook = ((preload["prefs"] or {}).get("team_outlook") or preload["seeded_outlook"])
     job = {
         "job_id": job_id, "key": KEY, "status": "running",
         "started_at": 0.0, "finished_at": None,
         "opponents_done": 0, "opponents_total": 1,
         "cards": [], "error": None, "fairness_threshold": 0.75,
-        "outlook_value": None, "is_pinned": False, "trade_intent": None,
+        "outlook_value": outlook, "is_pinned": False, "trade_intent": None,
     }
     with server._trade_jobs_lock:
         server._trade_jobs[job_id] = job
@@ -254,4 +257,5 @@ def test_a_superseded_job_still_reaches_a_terminal_status(live):
         job_id = _run_one_job_synchronously()
 
     with server._trade_jobs_lock:
-        assert server._trade_jobs[job_id]["status"] == "complete"
+        assert server._trade_jobs[job_id]["status"] == "error"
+        assert server._trade_jobs[job_id]["error"] == "superseded"

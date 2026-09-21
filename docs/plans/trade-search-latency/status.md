@@ -4,7 +4,7 @@
 {
   "status": "in-progress",
   "updated": "2026-09-21",
-  "summary": "Initial three-second first-action research completed; production-shaped integration and device qualification remain",
-  "evidence": "research-plan.md incorporates the sibling investigation and owner target. execution-20260921/README.md consolidates three reviewed workstreams, fresh read-only production evidence and 31 passing research tests. Production was observed at 4913ad0c; no application changes, three-second qualification or new release."
+  "summary": "First backend latency increment implemented; exact-head release gates running; broader three-second qualification remains",
+  "evidence": "release-20260921/README.md records atomic admission, stale-work fencing, structured evidence and committed first30 publication. Local full-worker2354offer parity verified; first durable median12.974→8.754s. Production baseline4913ad0c remains until verified deployment. No three-second or device qualification."
 }
 ```

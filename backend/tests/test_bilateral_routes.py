@@ -155,6 +155,9 @@ def test_queued_generation_switch_supersedes_old_job_and_starts_new_model(owner_
 
 
 def test_replenishment_regenerates_old_model_instead_of_announcing_cached_cards(enabled, monkeypatch):
+    _, _, session, _, league = enabled
+    prefs = server._trade_job_preferences(ME, LEAGUE, session, league)
+    outlook = (prefs["prefs"] or {}).get("team_outlook") or prefs["seeded_outlook"]
     key = server._trade_job_key(ME, LEAGUE, "1qb_ppr")
     old = {"job_id": "old", "key": key, "status": "complete", "is_pinned": False,
            "owner_model": bo.ARM_OWNER, "finished_at": time.monotonic(),
@@ -168,7 +171,9 @@ def test_replenishment_regenerates_old_model_instead_of_announcing_cached_cards(
     seen = []
     def kickoff(**kwargs):
         seen.append(kwargs)
-        server._trade_jobs["new"] = {**old, "job_id": "new", "owner_model": bo.ARM_OWNER_BILATERAL, "cards": []}
+        server._trade_jobs["new"] = {**old, "job_id": "new", "owner_model": bo.ARM_OWNER_BILATERAL,
+            "fairness_threshold": kwargs["fairness_threshold"], "outlook_value": outlook,
+            "safety_policy": server._trade_safety_signature(), "cards": []}
         return "new"
     monkeypatch.setattr(server, "_kickoff_trade_job", kickoff)
     assert server._replenish_deck_for(ME, LEAGUE) == (0, 0)

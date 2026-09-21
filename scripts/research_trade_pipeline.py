@@ -132,6 +132,12 @@ class ObservedJob(dict):
         if key == "status" and value == "complete":
             self.complete_ms = self.timeline.elapsed_ms()
 
+    def update(self, *args, **kwargs):
+        # dict.update bypasses a subclass's __setitem__. Observe the worker's
+        # terminal helper as well as direct per-batch publication assignments.
+        for key, value in dict(*args, **kwargs).items():
+            self[key] = value
+
 
 def forbid_network(*_args, **_kwargs):
     raise RuntimeError("offline pipeline replay forbids network")

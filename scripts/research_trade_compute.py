@@ -199,10 +199,26 @@ def compact_structured_rows(rows):
     """Prototype existing compactor with detached structured feature roots.
 
     No alternate hash/packing algorithm: narrowly replace the module's JSON
-    reader so the unchanged production compactor can consume in-memory features.
-    Every output is still a JSON string ready for the existing transaction.
+    reader so both the original and structured-aware production compactors can
+    consume in-memory features. Already-packed/plain roots retain this research
+    adapter's canonical output contract; production's legacy JSON formatting is
+    intentionally unchanged. Every output is a JSON string ready for storage.
     """
     from backend import deck_diagnostics as dd
+    # The original compactor returned these dicts untouched, and this adapter
+    # canonically serialized them below. The structured-aware compactor now
+    # serializes them itself using legacy formatting. Supply the original
+    # canonical representation up front to keep repeat runs byte-idempotent,
+    # without adding a decode/encode round trip to unpacked diagnostic roots.
+    rows = [
+        {**row, "features_json": dd.dumps(row["features_json"])}
+        if isinstance(row.get("features_json"), dict) and not any(
+            isinstance(row["features_json"].get(key), (dict, list, tuple))
+            and not dd.is_reference(row["features_json"][key])
+            for key in dd.DIAGNOSTIC_KEYS)
+        else row
+        for row in rows
+    ]
     adapter = SimpleNamespace(dumps=json.dumps, loads=lambda value:
                               dict(value) if isinstance(value, dict) else json.loads(value))
     with patch.object(dd, "json", adapter):

@@ -1,0 +1,107 @@
+{
+  "kind": "isolated_full_worker_not_production_or_device",
+  "date": "2026-09-21",
+  "baseline_commit": "c1805dc7dd720a4ff1f7bc495c8aba4e29b83e32",
+  "runtime": "Python3.14 SQLite macOS arm64",
+  "cards": 2354,
+  "impressions": 2354,
+  "ordered_public_cards_sha256": "06e5280f31fa4ee6a37f5f3c3408b2591e777641f1b097f9704d864a8fdf61ff",
+  "ordered_expanded_impression_rows_sha256": "181ae14af19c84d7c15094540e08b984a30def74cc723278a6ffdab1583477e2",
+  "parity": true,
+  "excluded_public_fields": [
+    "trade_id",
+    "impression_id",
+    "expires_at"
+  ],
+  "excluded_impression_fields": [
+    "impression_id",
+    "candidate_set_id",
+    "served_at",
+    "features_json.roster_evaluation.observed_at",
+    "features_json.owner_request.captured_at"
+  ],
+  "exclusion_reason": "Fresh random occurrence identifiers and wall-clock observation/expiry timestamps only; all valuation/package/order/source metadata retained",
+  "samples": {
+    "baseline": [
+      {
+        "status": "complete",
+        "cards": 2354,
+        "impressions": 2354,
+        "worker_wall_ms": 12982.674833008787,
+        "worker_cpu_ms": 12798.172,
+        "first_durable_cards_ms": 12974.118416022975,
+        "worker_source_sha256": "737e5c08a546e4cebab0b733e7299f8a4b1381b0856d0b4c7b8f4cea12d16f86",
+        "snapshot_sha256": "a82fe15c0717db3e73c6d0a5d8853c5f716ff716f8b0fb6967719966aeee5582",
+        "config_sha256": "4b9612166d204e1be4f50d48f261f0e6c62b42f007825be450a4c29e0a2ec03c"
+      },
+      {
+        "status": "complete",
+        "cards": 2354,
+        "impressions": 2354,
+        "worker_wall_ms": 13067.862791009247,
+        "worker_cpu_ms": 12786.238,
+        "first_durable_cards_ms": 13059.577166015515,
+        "worker_source_sha256": "737e5c08a546e4cebab0b733e7299f8a4b1381b0856d0b4c7b8f4cea12d16f86",
+        "snapshot_sha256": "a82fe15c0717db3e73c6d0a5d8853c5f716ff716f8b0fb6967719966aeee5582",
+        "config_sha256": "4b9612166d204e1be4f50d48f261f0e6c62b42f007825be450a4c29e0a2ec03c"
+      },
+      {
+        "status": "complete",
+        "cards": 2354,
+        "impressions": 2354,
+        "worker_wall_ms": 12947.099042008631,
+        "worker_cpu_ms": 12769.297,
+        "first_durable_cards_ms": 12938.616625004215,
+        "worker_source_sha256": "737e5c08a546e4cebab0b733e7299f8a4b1381b0856d0b4c7b8f4cea12d16f86",
+        "snapshot_sha256": "a82fe15c0717db3e73c6d0a5d8853c5f716ff716f8b0fb6967719966aeee5582",
+        "config_sha256": "4b9612166d204e1be4f50d48f261f0e6c62b42f007825be450a4c29e0a2ec03c"
+      }
+    ],
+    "after": [
+      {
+        "status": "complete",
+        "cards": 2354,
+        "impressions": 2354,
+        "worker_wall_ms": 11332.610833022045,
+        "worker_cpu_ms": 11160.965,
+        "first_durable_cards_ms": 8756.664832995739,
+        "worker_source_sha256": "ddfef6499c68e4dfb3e519452378b1e7162c346a40d2f72059cc5fff1274a544",
+        "snapshot_sha256": "a82fe15c0717db3e73c6d0a5d8853c5f716ff716f8b0fb6967719966aeee5582",
+        "config_sha256": "4b9612166d204e1be4f50d48f261f0e6c62b42f007825be450a4c29e0a2ec03c"
+      },
+      {
+        "status": "complete",
+        "cards": 2354,
+        "impressions": 2354,
+        "worker_wall_ms": 11265.669707994675,
+        "worker_cpu_ms": 11078.521,
+        "first_durable_cards_ms": 8658.158832986373,
+        "worker_source_sha256": "ddfef6499c68e4dfb3e519452378b1e7162c346a40d2f72059cc5fff1274a544",
+        "snapshot_sha256": "a82fe15c0717db3e73c6d0a5d8853c5f716ff716f8b0fb6967719966aeee5582",
+        "config_sha256": "4b9612166d204e1be4f50d48f261f0e6c62b42f007825be450a4c29e0a2ec03c"
+      },
+      {
+        "status": "complete",
+        "cards": 2354,
+        "impressions": 2354,
+        "worker_wall_ms": 11345.579916989664,
+        "worker_cpu_ms": 11151.507,
+        "first_durable_cards_ms": 8754.256291984348,
+        "worker_source_sha256": "ddfef6499c68e4dfb3e519452378b1e7162c346a40d2f72059cc5fff1274a544",
+        "snapshot_sha256": "a82fe15c0717db3e73c6d0a5d8853c5f716ff716f8b0fb6967719966aeee5582",
+        "config_sha256": "4b9612166d204e1be4f50d48f261f0e6c62b42f007825be450a4c29e0a2ec03c"
+      }
+    ]
+  },
+  "baseline_median_worker_ms": 12982.674833008787,
+  "baseline_median_first_durable_ms": 12974.118416022975,
+  "after_median_worker_ms": 11332.610833022045,
+  "after_median_first_durable_ms": 8754.256291984348,
+  "limitations": [
+    "Historical reconstructed input, not complete provider/history/pick metadata",
+    "Three sequential runs per variant; no production/device/p95 inference",
+    "Local3.14 differs from production3.12; SQLite notPostgres",
+    "Precomputedcachehit, HTTP/network/poll/render notincluded",
+    "Productionbudget/order/finalchecks unchanged; initial30delivery is notcap"
+  ]
+}

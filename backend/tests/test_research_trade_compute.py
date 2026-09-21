@@ -149,6 +149,19 @@ def test_structured_scope_and_existing_reference_contract():
     assert extra == []
 
 
+def test_research_structured_plain_roots_keep_canonical_contract():
+    raw = [{"user_id": "u", "deck_job_id": "j", "served_at": "now",
+            "features_json": {"z": 3, "a": [1, 2]}}]
+    before = copy.deepcopy(raw)
+    compact, snapshots = compact_structured_rows(raw)
+    assert compact == [{**raw[0], "features_json": '{"a":[1,2],"z":3}'}]
+    assert snapshots == []
+    assert raw == before
+    repeated, extra = compact_structured_rows(intern_features(compact))
+    assert repeated == compact
+    assert extra == []
+
+
 def test_storage_comparison_checks_all_expanded_values():
     structured = intern_features(fixture_rows(7))
     baseline = storage_sample(structured, page_size=3)

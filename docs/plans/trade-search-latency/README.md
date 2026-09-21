@@ -1,5 +1,7 @@
 # Find a Trade latency investigation
 
+September 21 implementation: [first backend release evidence](release-20260921/README.md). Exact-head CI and deployment are recorded there separately from the earlier research. The broader three-second program remains in progress.
+
 September 21 continuation: [revised first-action research plan](research-plan.md) and [initial research results](execution-20260921/README.md). The September 19 investigation below is historical; its original pre-release status is retained. Current work prioritizes three seconds to the first actionable tile with 20–30 initial offers and complete search coverage, not a promise that this has already shipped. Three reviewed research workstreams and 31 passing research tests are complete; production-shaped integration and device qualification remain.
 
 2026-09-19. Status: performance changes prepared locally; not released. The approximately three-second production target is **not yet demonstrated**.

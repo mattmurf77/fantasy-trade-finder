@@ -1817,7 +1817,15 @@ Only `features_json` keys `owner_request`, `owner_experiment`, `owner_generation
 and `roster_evaluation` use `{"$deck_diagnostic_v1":"<snapshot_id>"}` references.
 The roots live separately; repeated dictionary/list subtrees of at least 1 KiB
 are shared within a single user/job. IDs hash the canonical original JSON and
-user/job scope. Snapshot and impression pages commit in one transaction. Legacy
+user/job scope. Snapshot and impression pages within each save invocation commit
+in one transaction. Incremental owner publication (2026-09-21) invokes the writer
+for the first 30 impressions and then bounded 100-row batches; an earlier committed
+prefix remains durable if a later batch fails. Global `card_index` is assigned
+against the full final inventory, not restarted at each batch. A published card's
+impression identity and exact terms do not change as the snapshot grows. In-process
+structured feature dictionaries can reach compaction without an eager JSON
+round-trip; the stored column is still JSON text with the same expanded values.
+No schema, ownership, retention or valuation contract changes. Legacy
 inline JSON remains readable. `database.load_deck_diagnostics(impression_id,
 user_id)` resolves exact frozen detail for its owner, with
 `diagnostic_status=expired_or_missing` when a referenced node has expired.

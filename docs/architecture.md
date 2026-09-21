@@ -1,5 +1,30 @@
 # Architecture
 
+## First-action trade job publication (2026-09-21)
+
+Ordinary trade requests atomically claim or join equivalent process-local jobs.
+Input revocation tokens are captured before preference/context reads and retained
+by jobs; invalidation fences in-flight work as well as removing completed cache
+pointers. Weak token indexing avoids a permanent account epoch ledger. Request
+signatures compare resolved preferences and captured settings; they are not full
+roster/market dependency versions. Expensive input reads and thread startup stay
+outside the registry lock. A terminal transition cannot revive a timed-out or
+superseded job.
+
+Owner generation still completes global ranking and final eligibility checks
+before first publication. One impression-assembly invocation preserves the full
+candidate context and global ordinal sequence. It commits the first 30 rows and
+then bounded 100-row batches; each successful commit can extend the cumulative
+public snapshot with stable identities. A failed later commit cannot expose its
+rows, erase earlier durable evidence, or claim successful full completion.
+Publication checks liveness again after commit. A revocation racing with a write
+can leave durable unshown evidence, but must never authorize publication.
+
+Legacy clients retain complete cumulative access; no mobile paging contract or
+candidate/output cap is introduced. Prepared results still use the existing
+process-local lifetime. Persistent inventory, expanded nightly preparation and
+mobile cursor delivery remain future work. See [release evidence](plans/trade-search-latency/release-20260921/).
+
 ## Preference-led bilateral construction
 
 `trade_gen_bilateral.py` constructs matched focal asset pairs from personal board
@@ -450,7 +475,12 @@ Compaction caches subtree identities within each page and traverses identical
 parents once. Hashes remain based on complete original JSON, so older and newer
 packed representations expand to the same evidence. Impression assembly can
 serialize a read-only projection of captured owner inputs directly; callers
-requesting a detached snapshot still receive a deep copy.
+requesting a detached snapshot still receive a deep copy. The incremental owner
+path passes structured feature roots synchronously to the compactor, retaining
+actual immutable shared objects until JSON is emitted. Legacy string inputs remain
+supported. Every save invocation atomically commits its impression and snapshot
+rows; incremental publication uses multiple such commits, not one deck-wide
+transaction. Stored expanded evidence and non-feature columns remain unchanged.
 The existing cleanup loop expires debug nodes only, with visible failure logs.
 See [data lifecycle](data-dictionary.md#deck-diagnostic-storage-2026-09-15).
 
