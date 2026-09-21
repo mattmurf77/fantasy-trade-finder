@@ -1,0 +1,373 @@
+{
+  "checked_at": "2026-09-21T05:21:48.588936+00:00",
+  "service": {
+    "type": "web_service",
+    "branch": "main",
+    "autoDeploy": "no",
+    "suspended": "not_suspended",
+    "details": {
+      "plan": "standard",
+      "region": "oregon",
+      "numInstances": 1,
+      "runtime": "python"
+    },
+    "start_command": "gunicorn run:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120"
+  },
+  "deploys": [
+    {
+      "status": "live",
+      "finishedAt": "2026-09-20T16:04:09.931781Z",
+      "commit": "4913ad0c68af5e75f864c46cff692ca5f9bf842b"
+    },
+    {
+      "status": "deactivated",
+      "finishedAt": "2026-09-20T15:17:51.223222Z",
+      "commit": "659a633251f6ec19f913f0308fdd2d9e7d32b6b2"
+    }
+  ],
+  "databases": [
+    {
+      "name": "fantasy-trade-finder-db",
+      "plan": "basic_256mb",
+      "region": "oregon",
+      "version": "18",
+      "diskSizeGB": 5,
+      "status": "available"
+    }
+  ],
+  "metrics": {
+    "web:cpu": [
+      {
+        "unit": "cpu",
+        "values": [
+          {
+            "timestamp": "2026-09-20T17:33:00Z",
+            "value": 0.0002424
+          },
+          {
+            "timestamp": "2026-09-20T17:33:30Z",
+            "value": 0.0002132
+          },
+          {
+            "timestamp": "2026-09-20T17:34:00Z",
+            "value": 0.00020733333
+          },
+          {
+            "timestamp": "2026-09-20T17:34:30Z",
+            "value": 0.0044809
+          },
+          {
+            "timestamp": "2026-09-20T17:35:00Z",
+            "value": 0.7155073
+          },
+          {
+            "timestamp": "2026-09-20T17:35:30Z",
+            "value": 0.43679985
+          },
+          {
+            "timestamp": "2026-09-20T17:36:00Z",
+            "value": 0.20598343
+          },
+          {
+            "timestamp": "2026-09-20T17:36:30Z",
+            "value": 0.00021053334
+          },
+          {
+            "timestamp": "2026-09-20T17:37:00Z",
+            "value": 0.00019753333
+          }
+        ]
+      }
+    ],
+    "web:memory": [
+      {
+        "unit": "bytes",
+        "values": [
+          {
+            "timestamp": "2026-09-20T17:33:00Z",
+            "value": 110948350
+          },
+          {
+            "timestamp": "2026-09-20T17:33:30Z",
+            "value": 110948350
+          },
+          {
+            "timestamp": "2026-09-20T17:34:00Z",
+            "value": 110948350
+          },
+          {
+            "timestamp": "2026-09-20T17:34:30Z",
+            "value": 124825600
+          },
+          {
+            "timestamp": "2026-09-20T17:35:00Z",
+            "value": 445407230
+          },
+          {
+            "timestamp": "2026-09-20T17:35:30Z",
+            "value": 466776060
+          },
+          {
+            "timestamp": "2026-09-20T17:36:00Z",
+            "value": 475414530
+          },
+          {
+            "timestamp": "2026-09-20T17:36:30Z",
+            "value": 475414530
+          },
+          {
+            "timestamp": "2026-09-20T17:37:00Z",
+            "value": 475414530
+          }
+        ]
+      }
+    ],
+    "database:cpu": [
+      {
+        "unit": "cpu",
+        "values": [
+          {
+            "timestamp": "2026-09-20T17:33:00Z",
+            "value": 0.0011798666
+          },
+          {
+            "timestamp": "2026-09-20T17:33:30Z",
+            "value": 0.011839
+          },
+          {
+            "timestamp": "2026-09-20T17:34:00Z",
+            "value": 0.0055939
+          },
+          {
+            "timestamp": "2026-09-20T17:34:30Z",
+            "value": 0.009726967
+          },
+          {
+            "timestamp": "2026-09-20T17:35:00Z",
+            "value": 0.013825634
+          },
+          {
+            "timestamp": "2026-09-20T17:35:30Z",
+            "value": 0.044032365
+          },
+          {
+            "timestamp": "2026-09-20T17:36:00Z",
+            "value": 0.04897177
+          },
+          {
+            "timestamp": "2026-09-20T17:36:30Z",
+            "value": 0.0096416
+          },
+          {
+            "timestamp": "2026-09-20T17:37:00Z",
+            "value": 0.032167565
+          }
+        ]
+      }
+    ],
+    "database:memory": [
+      {
+        "unit": "bytes",
+        "values": [
+          {
+            "timestamp": "2026-09-20T17:33:00Z",
+            "value": 110223360
+          },
+          {
+            "timestamp": "2026-09-20T17:33:30Z",
+            "value": 110223360
+          },
+          {
+            "timestamp": "2026-09-20T17:34:00Z",
+            "value": 110223360
+          },
+          {
+            "timestamp": "2026-09-20T17:34:30Z",
+            "value": 110223360
+          },
+          {
+            "timestamp": "2026-09-20T17:35:00Z",
+            "value": 119943170
+          },
+          {
+            "timestamp": "2026-09-20T17:35:30Z",
+            "value": 134656000
+          },
+          {
+            "timestamp": "2026-09-20T17:36:00Z",
+            "value": 127754240
+          },
+          {
+            "timestamp": "2026-09-20T17:36:30Z",
+            "value": 127750140
+          },
+          {
+            "timestamp": "2026-09-20T17:37:00Z",
+            "value": 128376830
+          }
+        ]
+      }
+    ]
+  },
+  "transaction_read_only": true,
+  "completed_by_day_source": [
+    {
+      "day": "2026-09-14",
+      "source": "interactive_or_pregen",
+      "jobs": 7,
+      "min_ms": "19783",
+      "median_ms": 41864.0,
+      "max_ms": "75442",
+      "cards": "7107"
+    },
+    {
+      "day": "2026-09-16",
+      "source": "interactive_or_pregen",
+      "jobs": 1,
+      "min_ms": "46670",
+      "median_ms": 46670.0,
+      "max_ms": "46670",
+      "cards": "1612"
+    },
+    {
+      "day": "2026-09-16",
+      "source": "replenish",
+      "jobs": 4,
+      "min_ms": "20589",
+      "median_ms": 24040.0,
+      "max_ms": "28076",
+      "cards": "4117"
+    },
+    {
+      "day": "2026-09-17",
+      "source": "interactive_or_pregen",
+      "jobs": 5,
+      "min_ms": "38359",
+      "median_ms": 45995.0,
+      "max_ms": "50459",
+      "cards": "8427"
+    },
+    {
+      "day": "2026-09-17",
+      "source": "replenish",
+      "jobs": 9,
+      "min_ms": "14170",
+      "median_ms": 17389.0,
+      "max_ms": "29095",
+      "cards": "7251"
+    },
+    {
+      "day": "2026-09-18",
+      "source": "replenish",
+      "jobs": 6,
+      "min_ms": "16091",
+      "median_ms": 19821.0,
+      "max_ms": "23721",
+      "cards": "4219"
+    },
+    {
+      "day": "2026-09-19",
+      "source": "interactive_or_pregen",
+      "jobs": 3,
+      "min_ms": "43792",
+      "median_ms": 46465.0,
+      "max_ms": "47988",
+      "cards": "5138"
+    },
+    {
+      "day": "2026-09-19",
+      "source": "replenish",
+      "jobs": 3,
+      "min_ms": "10223",
+      "median_ms": 14531.0,
+      "max_ms": "18958",
+      "cards": "1390"
+    },
+    {
+      "day": "2026-09-20",
+      "source": "interactive_or_pregen",
+      "jobs": 4,
+      "min_ms": "12423",
+      "median_ms": 39562.5,
+      "max_ms": "66316",
+      "cards": "5803"
+    },
+    {
+      "day": "2026-09-21",
+      "source": "interactive_or_pregen",
+      "jobs": 6,
+      "min_ms": "39742",
+      "median_ms": 60314.0,
+      "max_ms": "75248",
+      "cards": "11017"
+    }
+  ],
+  "bilateral_runs": [
+    {
+      "served_arm": "owner_v2_bilateral",
+      "jobs": 7,
+      "min_ms": 10321,
+      "max_ms": 25255,
+      "cards": 15924
+    }
+  ],
+  "db_stats": [
+    {
+      "numbackends": 6,
+      "xact_commit": 219516,
+      "xact_rollback": 43868,
+      "blks_read": 6165914,
+      "blks_hit": 101455015,
+      "temp_files": 26,
+      "temp_bytes": 420271693,
+      "deadlocks": 0,
+      "stats_reset": null
+    }
+  ],
+  "table_sizes": [
+    {
+      "relname": "user_events",
+      "n_live_tup": 34984,
+      "n_dead_tup": 423,
+      "last_autovacuum": "2026-09-20 10:23:54.261799+00:00",
+      "last_autoanalyze": "2026-09-19 06:01:05.389189+00:00"
+    },
+    {
+      "relname": "deck_impressions",
+      "n_live_tup": 116137,
+      "n_dead_tup": 600,
+      "last_autovacuum": "2026-09-21 02:50:31.175152+00:00",
+      "last_autoanalyze": "2026-09-21 02:50:48.374394+00:00"
+    },
+    {
+      "relname": "bakeoff_runs",
+      "n_live_tup": 43,
+      "n_dead_tup": 0,
+      "last_autovacuum": null,
+      "last_autoanalyze": null
+    },
+    {
+      "relname": "deck_diagnostic_snapshots",
+      "n_live_tup": 176355,
+      "n_dead_tup": 765,
+      "last_autovacuum": "2026-09-20 01:56:37.479741+00:00",
+      "last_autoanalyze": "2026-09-21 02:50:58.368792+00:00"
+    }
+  ],
+  "relevant_config": {
+    "owner_bilateral_enabled": 1.0,
+    "bakeoff_owner_only": 1.0,
+    "bakeoff_deck_limit": 0.0,
+    "bakeoff_group_size": 0.0,
+    "owner_pool_size": 16.0,
+    "owner_pair_budget": 4096.0,
+    "owner_total_budget": 60000.0
+  },
+  "replenishment_enabled": true,
+  "limits": [
+    "Read-only observation; no production experiments",
+    "Historical metrics are30-second resolution and do not isolate thread CPU or per-query waits",
+    "Database statistics are cumulative, not attribution to the latest search",
+    "No client tap/parse/render measurements"
+  ]
+}

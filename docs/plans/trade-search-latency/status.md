@@ -3,8 +3,8 @@
 ```project-status
 {
   "status": "in-progress",
-  "updated": "2026-09-19",
-  "summary": "Production latency isolated; behavior-preserving CPU optimizations under verification",
-  "evidence": "README.md records 18 interactive completions at median 43.06 seconds, full-pipeline bottlenecks and local before/after profiling. No release or three-second production qualification yet."
+  "updated": "2026-09-21",
+  "summary": "First backend latency increment implemented; exact-head release gates running; broader three-second qualification remains",
+  "evidence": "release-20260921/README.md records atomic admission, stale-work fencing, structured evidence and committed first30 publication. Local full-worker2354offer parity verified; first durable median12.974→8.754s. Production baseline4913ad0c remains until verified deployment. No three-second or device qualification."
 }
 ```

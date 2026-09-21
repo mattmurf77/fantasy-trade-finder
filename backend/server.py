@@ -36,6 +36,7 @@ import threading
 import time
 import traceback
 import uuid
+import weakref
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -2259,6 +2260,9 @@ _player_sync_lock = threading.Lock()  # serialises concurrent player DB syncs
 _trade_jobs: dict[str, dict] = {}                     # job_id → state
 _trade_jobs_by_key: dict[tuple, str] = {}             # (uid,lid,fmt) → job_id
 _trade_jobs_lock = threading.Lock()
+# Tokens live only while an admission or retained job holds them. Weak indexing
+# prevents a permanent per-account epoch ledger in this process-local cache.
+_trade_input_epochs = weakref.WeakValueDictionary()
 _PREGEN_TTL_SECONDS  = 1800   # 30 min — fresh cache window
 _JOB_HARD_TIMEOUT    = 60     # seconds — past this a stuck job is marked error
 _JOB_RETENTION       = 4 * 3600  # keep finished jobs around for ~4hr cleanup
@@ -2973,6 +2977,111 @@ def _trade_job_key(user_id: str, league_id: str, scoring_format: str) -> tuple:
     return (user_id, league_id, scoring_format)
 
 
+class _TradeInputEpoch:
+    def __init__(self):
+        self.revoked = False
+
+    def __deepcopy__(self, memo):
+        # Public snapshots copy jobs, but must retain their revocation fence.
+        return self
+
+
+def _capture_trade_input_epochs(user_id, league_id):
+    """Capture BEFORE input reads; caller must retain these through admission."""
+    with _trade_jobs_lock:
+        tokens = []
+        for scope in ((user_id, None), (user_id, league_id)):
+            token = _trade_input_epochs.get(scope)
+            if token is None:
+                token = _TradeInputEpoch()
+                _trade_input_epochs[scope] = token
+            tokens.append(token)
+        return tuple(tokens)
+
+
+def _trade_job_revoked(job):
+    """Read under the job lock, including when examining a copied snapshot."""
+    return bool(job is None or job.get("superseded")
+                or any(token.revoked for token in job.get("input_epochs", ())))
+
+
+def _revoke_trade_job_locked(job, reason="inputs_changed"):
+    """Fence future publication without deleting durable offers or identities."""
+    job["superseded"] = True
+    job["superseded_at"] = time.monotonic()
+    job["cards"] = []
+    if job.get("status") == "running":
+        job.update(status="error", error=reason, finished_at=time.monotonic())
+
+
+def _finish_trade_job(job_id, error=None):
+    """Return elapsed ms only for a new successful terminal transition.
+
+    The worker must not resurrect a timed-out or invalidated job. Error paths
+    keep already committed cards unless an explicit revocation cleared them.
+    """
+    with _trade_jobs_lock:
+        job = _trade_jobs.get(job_id)
+        if not _job_live(job):
+            if job is not None and job.get("status") == "running":
+                _revoke_trade_job_locked(job, "superseded")
+            return None
+        now = time.monotonic()
+        job.update(status="error" if error is not None else "complete",
+                   error=error, finished_at=now)
+        if error is None:
+            return int((now - job.get("started_at", now)) * 1000)
+        return None
+
+
+def _trade_job_preferences(user_id, league_id, sess, league):
+    """Resolve the same declared/seeded outlook for warm-up and user searches."""
+    prefs = load_league_preference(user_id=user_id, league_id=league_id)
+    outlook = (prefs or {}).get("team_outlook")
+    seeded = None
+    if not outlook:
+        seeded, _ = _infer_user_outlook(user_id, league_id, sess, league)
+    return {"prefs": prefs, "seeded_outlook": seeded}
+
+
+def _trade_request_signature(prefs_preload):
+    """Local request/config identity, not a complete provider/market version."""
+    return hashlib.sha256(json.dumps({"preferences": prefs_preload,
+        "config": dict(_trade_service_mod._cfg), "flags": flags_dict()},
+        sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
+
+
+def _trade_running_matches(job, fairness_threshold, outlook_value,
+                           trade_intent=None, presentation_capture=None,
+                           request_signature=None):
+    if presentation_capture is None:
+        presentation_capture = _capture_trade_presentation()
+    return bool(_trade_running_policy_matches(job, presentation_capture)
+        and job.get("fairness_threshold") == fairness_threshold
+        and (job.get("outlook_value") or None) == (outlook_value or None)
+        and (job.get("trade_intent") or None) == (trade_intent or None)
+        and (request_signature is None or "request_signature" not in job
+             or job["request_signature"] == request_signature))
+
+
+def _trade_running_policy_matches(job, presentation_capture):
+    """Preserve user intent/fairness, never work under an obsolete policy."""
+    if not (_job_live(job) and _trade_presentation_matches(job, presentation_capture)
+            and _trade_owner_model_matches(job) and _trade_significance_matches(job)):
+        return False
+    key = job.get("key") or ()
+    expected_safety = (_trade_safety_signature((False, False))
+                       if len(key) > 1 and key[1] == "league_demo"
+                       else _trade_safety_signature())
+    # The worker stamps this after preparation; queued jobs already carry
+    # the admission-time model/presentation/significance captures above.
+    return "safety_policy" not in job or job["safety_policy"] == expected_safety
+
+
+def _start_trade_job_thread(*, target, args, kwargs):
+    threading.Thread(target=target, args=args, kwargs=kwargs, daemon=True).start()
+
+
 def _force_supersede_enabled() -> bool:
     """Does `force: true` supersede an already-RUNNING job?
 
@@ -3000,7 +3109,7 @@ def _job_live(j: dict | None) -> bool:
     corpus with rows nobody saw.
     """
     return bool(j is not None and j["status"] == "running"
-                and not j.get("superseded"))
+                and not _trade_job_revoked(j))
 
 
 def _job_superseded(job_id: str) -> bool:
@@ -3011,7 +3120,9 @@ def _job_superseded(job_id: str) -> bool:
     check and the write — bounded, and it fails toward writing, which is the
     pre-fix behaviour."""
     with _trade_jobs_lock:
-        return bool((_trade_jobs.get(job_id) or {}).get("superseded"))
+        job = _trade_jobs.get(job_id)
+        return bool(_trade_job_revoked(job)
+                    or (job is not None and job.get("status") == "error"))
 
 
 def _trade_owner_model_matches(job: dict) -> bool:
@@ -3032,6 +3143,21 @@ def _trade_job_public_view(job: dict) -> dict:
         "cards":           job.get("cards") or [],
         "error":           job.get("error"),
     }
+    def revocation_error():
+        # A status request copies the registry before doing its disposition
+        # read. Invalidation can happen during that I/O. Tokens survive the
+        # copy; consult the retained job too for explicit force supersession.
+        with _trade_jobs_lock:
+            current = _trade_jobs.get(job["job_id"])
+            if (_trade_job_revoked(job)
+                    or (current is not None and _trade_job_revoked(current))):
+                return (current or job).get("error") or "inputs_changed"
+        return None
+
+    revoked = revocation_error()
+    if revoked:
+        out.update(cards=[], status="error", error=revoked)
+        return out
     # A caller may keep polling an old job ID after a runtime rollout. Do
     # not serve its pre-rule snapshot or re-label old impressions as newly
     # evaluated. A fresh /generate request regenerates under the new policy.
@@ -3064,6 +3190,13 @@ def _trade_job_public_view(job: dict) -> dict:
     if out["cards"]:
         user_id, league_id, _format = job["key"]
         out["cards"] = _project_trade_dispositions(out["cards"], user_id, league_id)
+    revoked = revocation_error()
+    if revoked:
+        out.update(cards=[], status="error", error=revoked)
+    elif not _trade_owner_model_matches(job):
+        out.update(cards=[], status="error", error="owner_model_changed")
+    elif not _trade_significance_matches(job):
+        out.update(cards=[], status="error", error="significance_policy_changed")
     return out
 
 
@@ -3260,10 +3393,14 @@ def _trade_presentation_matches(job, captured):
 
 
 def _trade_job_is_fresh(job: dict, fairness_threshold: float, outlook_value,
-                        trade_intent: str | None = None, presentation_capture=None) -> bool:
+                        trade_intent: str | None = None, presentation_capture=None,
+                        request_signature=None) -> bool:
     """True iff this job's result can be returned as-is to a new caller —
     i.e. it's complete, recent, and was generated for the same parameters."""
-    if job.get("status") != "complete":
+    if job.get("status") != "complete" or _trade_job_revoked(job):
+        return False
+    if (request_signature is not None and "request_signature" in job
+            and job["request_signature"] != request_signature):
         return False
     if not _trade_owner_model_matches(job):
         return False
@@ -3282,8 +3419,7 @@ def _trade_job_is_fresh(job: dict, fairness_threshold: float, outlook_value,
         return False
     if (time.monotonic() - (job.get("finished_at") or 0)) > _PREGEN_TTL_SECONDS:
         return False
-    # Allow ±0.01 wiggle on threshold — frontend may round
-    if abs((job.get("fairness_threshold") or 0) - fairness_threshold) > 0.01:
+    if job.get("fairness_threshold") != fairness_threshold:
         return False
     if (job.get("outlook_value") or None) != (outlook_value or None):
         return False
@@ -4841,6 +4977,11 @@ def _log_deck_signal_impressions(
     roster_results: dict | None = None,
     presentation: dict | None = None,  # captured records/version, NOT a telemetry enable gate
     significance_results: dict | None = None,
+    structured_features: bool = False,
+    publication_batch_size: int | None = None,
+    initial_publication_batch_size: int | None = None,
+    on_batch_committed=None,
+    should_continue=None,
 ) -> dict[int, str]:
     """Write one deck_impressions row per card (final served order) and
     return {id(card): impression_id} so the caller can stamp the ids into
@@ -4858,7 +4999,23 @@ def _log_deck_signal_impressions(
     the policy chose from, D-scope-6), appends ghost rows (is_ghost=1,
     card_index = would-have-been rank, never in imp_by_card so they can
     never reach a snapshot), and stamps policy_version / candidate_set_id /
-    candidate_set_size / assets_json on every row."""
+    candidate_set_size / assets_json on every row.
+
+    Optional publication batches retain the full-job context and global ranks.
+    Each batch callback receives only non-ghost cards with committed evidence;
+    the default remains one atomic save. Structured features preserve captured
+    immutable evidence references until synchronous database compaction.
+    """
+    for size in (publication_batch_size, initial_publication_batch_size):
+        if size is not None and (type(size) is not int or size < 1):
+            raise ValueError("publication batch sizes must be positive integers")
+    if initial_publication_batch_size is not None and publication_batch_size is None:
+        raise ValueError("initial publication batch requires a continuation batch size")
+    def check_live():
+        if should_continue is not None and not should_continue():
+            raise RuntimeError("trade_job_not_live")
+
+    check_live()
     ghost_cards = ghost_cards or []
     if not cards and not ghost_cards:
         return {}
@@ -4921,11 +5078,29 @@ def _log_deck_signal_impressions(
     served_at = datetime.now(timezone.utc).isoformat()
     imp_by_card: dict[int, str] = {}
     rows: list[dict] = []
+    batch_cards = []
+    batch_impressions = {}
+    batch_limit = initial_publication_batch_size or publication_batch_size
+
+    def flush_batch():
+        nonlocal batch_limit, rows, batch_cards, batch_impressions
+        if not rows:
+            return
+        check_live()
+        save_deck_impressions(rows)
+        imp_by_card.update(batch_impressions)
+        if on_batch_committed is not None and batch_cards:
+            on_batch_committed(list(batch_cards), dict(batch_impressions))
+        rows = []
+        batch_cards = []
+        batch_impressions = {}
+        batch_limit = publication_batch_size
     # Served rows keep true served positions (existing card_index contract);
     # ghost rows append after with their would-have-been rank + is_ghost=1.
     entries = [(pos, card, False) for pos, card in enumerate(cards)]
     entries += [(pos, card, True) for pos, card in ghost_cards]
     for pos, card, is_ghost in entries:
+        check_live()
         give = list(getattr(card, "give_player_ids", None) or [])
         recv = list(getattr(card, "receive_player_ids", None) or [])
         target = getattr(card, "target_user_id", None)
@@ -5102,7 +5277,8 @@ def _log_deck_signal_impressions(
         if not is_ghost:
             # Ghosts never enter imp_by_card — the caller stamps snapshot
             # cards from this map, so a ghost id can never reach a client.
-            imp_by_card[id(card)] = impression_id
+            batch_cards.append(card)
+            batch_impressions[id(card)] = impression_id
         row = {
             "impression_id": impression_id,
             "user_id":       user_id,
@@ -5110,7 +5286,7 @@ def _log_deck_signal_impressions(
             "deck_job_id":   job_id,
             "card_index":    pos,
             "trade_hash":    _deck_trade_hash(give, recv, target),
-            "features_json": json.dumps(features),
+            "features_json": features if structured_features else json.dumps(features),
             "propensity":    float(prop_by_card.get(id(card), 1.0)),
             "base_score":    base,
             "final_score":   float(final_by_card.get(id(card), base)),
@@ -5248,9 +5424,11 @@ def _log_deck_signal_impressions(
                 row["trade_concept_id"] = _trade_policy.trade_concept_id(
                     league_id=league_id, viewer_user_id=user_id, partner_user_id=target,
                     viewer_gives=give, viewer_receives=recv)
-            row["features_json"] = json.dumps(features, default=str)
+            row["features_json"] = features if structured_features else json.dumps(features, default=str)
         rows.append(row)
-    save_deck_impressions(rows)
+        if batch_limit is not None and len(rows) >= batch_limit:
+            flush_batch()
+    flush_batch()
     return imp_by_card
 
 
@@ -8360,16 +8538,17 @@ def _run_trade_job(
         if owner_serve:
             for card in served_final:
                 card.preserve_server_order = True
-        snapshot = []
-        for card in served_final:
-            row = trade_card_to_dict(card, players_dict)
-            row["real_opponent"] = card.target_user_id in real_user_ids
-            row["outlook"] = outlook_value
-            snapshot.append(row)
-        with _trade_jobs_lock:
-            job = _trade_jobs.get(job_id)
-            if _job_live(job) and not owner_serve:
-                job["cards"] = snapshot
+        else:
+            snapshot = []
+            for card in served_final:
+                row = trade_card_to_dict(card, players_dict)
+                row["real_opponent"] = card.target_user_id in real_user_ids
+                row["outlook"] = outlook_value
+                snapshot.append(row)
+            with _trade_jobs_lock:
+                job = _trade_jobs.get(job_id)
+                if _job_live(job):
+                    job["cards"] = snapshot
 
         # G6 R-9 — per-rule kill counters + tripwire, on the POST-GHOST
         # served count (lld §5 amendment). Flag off ⇒ no line at all.
@@ -8410,11 +8589,63 @@ def _run_trade_job(
             _j = _trade_jobs.get(job_id)
             job_source = (_j or {}).get("source")
 
-        # A forced regeneration superseded this job while it was running. It
-        # is about to finish, but nobody will ever see these cards, so logging
-        # impressions for them would poison the deck-signal corpus with rows
-        # that had zero chance of a view. Skip the whole block.
+        # Owner publication happens only after the logger commits each batch.
+        # All ranking, final policy and disposition work above is complete;
+        # the first 30 are a delivery prefix, never a search/output limit.
+        # Keep the legacy cumulative snapshot shape for existing clients.
         owner_impression_error = False
+        owner_published_cards = []
+        owner_snapshot = []
+
+        def _owner_publication_is_live_locked(job):
+            if not _job_live(job):
+                return False
+            if not _trade_owner_model_matches(job):
+                _revoke_trade_job_locked(job, "owner_model_changed")
+                return False
+            if not _trade_significance_matches(job):
+                _revoke_trade_job_locked(job, "significance_policy_changed")
+                return False
+            return True
+
+        def _owner_publication_is_live():
+            with _trade_jobs_lock:
+                return _owner_publication_is_live_locked(_trade_jobs.get(job_id))
+
+        def _publish_owner_batch(batch_cards, committed_impressions):
+            start = len(owner_published_cards)
+            if ([id(c) for c in batch_cards] !=
+                    [id(c) for c in served_final[start:start + len(batch_cards)]]):
+                raise ValueError("owner_publication_order_changed")
+            if any(not committed_impressions.get(id(c)) for c in batch_cards):
+                raise ValueError("owner_impression_incomplete")
+            batch_snapshot = []
+            for card in batch_cards:
+                row = trade_card_to_dict(card, players_dict)
+                row["real_opponent"] = card.target_user_id in real_user_ids
+                row["outlook"] = outlook_value
+                row["impression_id"] = committed_impressions[id(card)]
+                batch_snapshot.append(row)
+            with _trade_jobs_lock:
+                job = _trade_jobs.get(job_id)
+                if not _owner_publication_is_live_locked(job):
+                    raise RuntimeError("trade_job_not_live")
+                owner_published_cards.extend(batch_cards)
+                owner_snapshot.extend(batch_snapshot)
+                # A detached list prevents the next append from mutating a
+                # snapshot a polling request is already copying/serializing.
+                job["cards"] = list(owner_snapshot)
+                job["final_checks_pending"] = False
+                for card in batch_cards:
+                    if getattr(card, "owner_evaluation", None) is not None:
+                        card.owner_published = True
+                if start == 0:
+                    started_at = job.get("started_at")
+                    first_ms = int((time.monotonic() - started_at) * 1000) if started_at else 0
+            if start == 0:
+                log.info("trade-job %s first durable owner batch: cards=%d elapsed_ms=%d",
+                         job_id, len(batch_cards), first_ms)
+
         try:
             if (league_id != "league_demo" and (_deck_signal_v2_enabled() or owner_on)
                     and not _job_superseded(job_id)):
@@ -8443,11 +8674,26 @@ def _run_trade_job(
                     policy_variant  = policy_variant,
                     presentation    = presentation,
                     significance_results = significance_results,
+                    **({
+                        "structured_features": True,
+                        "initial_publication_batch_size": 30,
+                        "publication_batch_size": 100,
+                        "on_batch_committed": _publish_owner_batch,
+                        "should_continue": _owner_publication_is_live,
+                    } if owner_serve else {}),
                     **telemetry_kw,
                 )
                 if owner_serve and any(not imp_by_card.get(id(c)) for c in served_final):
                     raise ValueError("owner_impression_incomplete")
-                if imp_by_card or owner_serve:
+                if owner_serve:
+                    if len(owner_published_cards) != len(served_final):
+                        raise ValueError("owner_publication_incomplete")
+                    # An honestly empty inventory has no batch callback.
+                    with _trade_jobs_lock:
+                        j = _trade_jobs.get(job_id)
+                        if _job_live(j):
+                            j["final_checks_pending"] = False
+                elif imp_by_card:
                     snapshot = []
                     for c in served_final:
                         d = trade_card_to_dict(c, players_dict)
@@ -8464,17 +8710,16 @@ def _run_trade_job(
                             for c in served_final:
                                 if getattr(c, "owner_evaluation", None) is not None:
                                     c.owner_published = True
-                            if owner_serve:
-                                j["final_checks_pending"] = False
         except Exception as sig_err:
             log.warning("deck signal-v2 impression logging failed%s: %s",
-                        " (trial withheld)" if owner_serve else " (non-fatal)", sig_err)
+                        " (uncommitted trial cards withheld)" if owner_serve else " (non-fatal)", sig_err)
             if owner_serve:
                 owner_impression_error = True
                 with _trade_jobs_lock:
                     j = _trade_jobs.get(job_id)
                     if _job_live(j):
-                        j["cards"] = []
+                        # Earlier committed offers retain their exact IDs and
+                        # terms; only the failed/unwritten suffix is withheld.
                         j["final_checks_pending"] = False
 
         # trade.bakeoff — ONE bakeoff_runs row per bake-off job: arm order,
@@ -8484,8 +8729,15 @@ def _run_trade_job(
         # whole job is measuring generation cost and empty-arm rates, which a
         # superseded run measures just as well. Never allowed to fail the job.
         if significance_diag and (owner_impression_error or _job_superseded(job_id)):
-            significance_diag["final_served"] = 0
+            retained = owner_published_cards if not _job_superseded(job_id) else []
+            significance_diag["final_served"] = len(retained)
             significance_diag["final_served_per_arm"] = {}
+            if bakeoff_run is not None:
+                for card in retained:
+                    credit = bakeoff_run.attribution_for(card)
+                    arm = credit[0] if credit else "injected"
+                    counts = significance_diag["final_served_per_arm"]
+                    counts[arm] = counts.get(arm, 0) + 1
             significance_diag["withheld"] = ("impression_unavailable" if owner_impression_error
                                                else "superseded")
         if bakeoff_run is not None:
@@ -8506,26 +8758,22 @@ def _run_trade_job(
             try:
                 if significance_diag:
                     owner_selected_run["significance"] = significance_diag
-                _log_owner_selected_run(job_id, owner_context, owner_selected_run, len(served_final))
+                selected_served_count = len(served_final)
+                if owner_serve:
+                    selected_served_count = (0 if _job_superseded(job_id)
+                                             else len(owner_published_cards))
+                _log_owner_selected_run(job_id, owner_context, owner_selected_run, selected_served_count)
             except Exception as owner_log_err:
                 log.warning("owner selected run logging failed: %s", owner_log_err)
 
         if owner_impression_error:
             raise ValueError("owner_impression_unavailable")
 
-        # Mark complete. Final card snapshot was already published by the
-        # last on_opponent_done invocation (or the likes-you republish above).
-        gen_ms = None
-        with _trade_jobs_lock:
-            j = _trade_jobs.get(job_id)
-            if j is not None:
-                # Superseded jobs still transition to "complete" — a client
-                # that already holds this job_id keeps polling to a terminal
-                # state exactly as before, it just never receives new cards.
-                j["status"]      = "complete"
-                j["finished_at"] = time.monotonic()
-                if j.get("started_at") is not None:
-                    gen_ms = int((j["finished_at"] - j["started_at"]) * 1000)
+        # A timeout, input invalidation or superseding search wins over a
+        # late worker. Completion and telemetry cannot revive that job.
+        gen_ms = _finish_trade_job(job_id)
+        if gen_ms is None:
+            return
 
         # FR-20 (analytics P0, LLD §6.4b): trades_generated — post-engine,
         # once per completed job (never per /status poll). Worker thread, so
@@ -8563,42 +8811,28 @@ def _run_trade_job(
 
     except Exception as e:
         log.exception("trade-job %s failed", job_id)
-        with _trade_jobs_lock:
-            j = _trade_jobs.get(job_id)
-            if j is not None:
-                j["status"]      = "error"
-                j["error"]       = str(e)
-                j["finished_at"] = time.monotonic()
+        _finish_trade_job(job_id, error=str(e))
 
 
 def _invalidate_trade_jobs(*, user_id: str, league_id: str | None = None) -> int:
-    """Drop cached trade jobs so the next /api/trades/generate kicks off
-    a fresh run. Two scopes:
-      - league_id=None: drop all of this user's jobs (used after /api/rank3
-        — user ELOs just changed, so trades for any league are stale).
-      - league_id=...: drop only that league's job (used after a league
-        preferences POST — only this league's outlook changed).
+    """Revoke captured inputs, including admissions not yet registered.
 
-    Doesn't touch in-flight 'running' jobs — those will publish their
-    final result and be flushed by the next call. We only remove the
-    `_trade_jobs_by_key` index entry so the next request creates a new
-    job instead of reusing the stale one.
+    Rankings affect all this user's leagues; league preferences/tags affect
+    one. Selected jobs are fenced too even though they have no cache pointer.
+    Durable offer IDs and the session's action store are never replaced here.
     """
     dropped = 0
     with _trade_jobs_lock:
-        for key in list(_trade_jobs_by_key.keys()):
-            uid, lid, _fmt = key
-            if uid != user_id:
+        token = _trade_input_epochs.pop((user_id, league_id), None)
+        if token is not None:
+            token.revoked = True
+        for job in _trade_jobs.values():
+            key = job.get("key") or ()
+            if len(key) != 3 or key[0] != user_id or (league_id is not None and key[1] != league_id):
                 continue
-            if league_id is not None and lid != league_id:
-                continue
-            jid = _trade_jobs_by_key.get(key)
-            job = _trade_jobs.get(jid) if jid else None
-            # Only drop the index pointer for completed/errored jobs;
-            # leave running jobs alone so concurrent /generate calls don't
-            # wastefully spawn duplicates while the worker is still going.
-            if job and job.get("status") != "running":
-                _trade_jobs_by_key.pop(key, None)
+            _revoke_trade_job_locked(job)
+            if _trade_jobs_by_key.get(key) == job.get("job_id"):
+                _trade_jobs_by_key.pop(key)
                 dropped += 1
     return dropped
 
@@ -8621,10 +8855,16 @@ def _kickoff_trade_job(
     session_context: Mapping | None = None,
     presentation_capture=None,
     presentation_exempt: bool = False,
+    force_fresh: bool = False,
+    preserve_running: bool = False,
+    input_epochs=None,
 ) -> str:
-    """Register a new job in _trade_jobs and start its worker thread.
-    Returns the job_id. Caller is responsible for any pre-existing-job
-    deduplication; this always creates a fresh one.
+    """Atomically claim/reuse a job, then start its worker outside all locks.
+
+    Request input reads and execution capture happen before the claim. Epoch
+    revocation during those reads fails closed without scheduling stale work.
+    Background callers may preserve an active interactive request, but cannot
+    mistake it for a matching prepared result.
 
     F10 additions (both default to the historical behavior):
       source      — provenance marker stored on the job dict (e.g.
@@ -8644,6 +8884,8 @@ def _kickoff_trade_job(
                     read on its own thread, handed to the worker so it does
                     not read them a second time. See `_run_trade_job`.
     """
+    if input_epochs is None:
+        input_epochs = _capture_trade_input_epochs(user_id, league_id)
     if presentation_capture is None:
         presentation_capture = _capture_trade_presentation()
     significance_capture = _capture_trade_significance()
@@ -8653,11 +8895,12 @@ def _kickoff_trade_job(
     def _run_leased_job(*args, **kwargs):
         with _job_write_lease.active() as active:
             if active:
+                with _trade_jobs_lock:
+                    if not _job_live(_trade_jobs.get(job_id)):
+                        return
                 _run_trade_job(*args, **kwargs)
             else:
-                with _trade_jobs_lock:
-                    _trade_jobs[job_id].update(status="error", error="account_deleted",
-                                               finished_at=time.monotonic())
+                _finish_trade_job(job_id, error="account_deleted")
 
     # Capture before scheduling: session/init may reuse this token for another
     # league while this job waits to run. Request callers supply their view;
@@ -8666,9 +8909,17 @@ def _kickoff_trade_job(
     capture_error = None
     try:
         with _sessions_lock:
-            execution_context = _capture_trade_execution(
-                session_context if session_context is not None else _sessions.get(sess_token),
-                user_id, league_id, scoring_format)
+            base_session = session_context if session_context is not None else _sessions.get(sess_token)
+            base_session = dict(base_session) if base_session is not None else None
+        execution_context = _capture_trade_execution(base_session, user_id, league_id, scoring_format)
+        if prefs_preload is None:
+            try:
+                prefs_preload = _trade_job_preferences(
+                    user_id, league_id, base_session, execution_context.league)
+            except Exception:
+                # Preserve the worker's existing fail-soft input loaders, but
+                # do not reuse an unresolved request as a cache hit.
+                pass
     except Exception as exc:
         # Preserve the job error response for expired/incomplete state rather
         # than turning a failure formerly caught by the worker into HTTP 500.
@@ -8676,6 +8927,10 @@ def _kickoff_trade_job(
     pinned_give = list(pinned_give or [])
     pinned_receive = list(pinned_receive or [])
     prefs_preload = copy.deepcopy(prefs_preload)
+    outlook_value = (((prefs_preload or {}).get("prefs") or {}).get("team_outlook")
+                     or (prefs_preload or {}).get("seeded_outlook"))
+    request_signature = _trade_request_signature(prefs_preload) if prefs_preload is not None else None
+    force_supersedes = force_fresh and _force_supersede_enabled()
     job_id = uuid.uuid4().hex
     # Pinned flows (give OR receive) and single-opponent scope (#156 Specific
     # Team) bypass the shared per-key cache — they answer a specific
@@ -8692,10 +8947,12 @@ def _kickoff_trade_job(
         "cards":              [],
         "error":              None,
         "fairness_threshold": fairness_threshold,
-        "outlook_value":      None,    # populated when the worker reads prefs
+        "outlook_value":      outlook_value,
         "is_pinned":          is_pinned,
         "trade_intent":       trade_intent,
         "presentation_capture": presentation_capture,
+        "input_epochs":       input_epochs,
+        "request_signature":  request_signature,
     }
     if source:
         job["source"] = source
@@ -8707,17 +8964,33 @@ def _kickoff_trade_job(
         job["final_checks_pending"] = True
     if presentation_exempt:
         job["presentation_exempt"] = True
+    shared = not is_pinned and not (presentation_capture[0] and presentation_exempt)
     with _trade_jobs_lock:
+        if _trade_job_revoked(job):
+            job.update(status="error", error="inputs_changed", finished_at=time.monotonic())
+            _trade_jobs[job_id] = job
+            return job_id
+        existing = _trade_jobs.get(_trade_jobs_by_key.get(job["key"])) if shared else None
+        if existing is not None:
+            if (not force_fresh and request_signature is not None
+                    and _trade_job_is_fresh(existing, fairness_threshold, outlook_value,
+                        trade_intent, presentation_capture, request_signature)):
+                return existing["job_id"]
+            if _job_live(existing):
+                if preserve_running and _trade_running_policy_matches(existing, presentation_capture):
+                    return existing["job_id"]
+                if (request_signature is not None and not force_supersedes
+                        and _trade_running_matches(existing, fairness_threshold, outlook_value,
+                            trade_intent, presentation_capture, request_signature)):
+                    return existing["job_id"]
+                _revoke_trade_job_locked(existing, "superseded")
         _trade_jobs[job_id] = job
-        if not is_pinned and not (presentation_capture[0] and presentation_exempt):
+        if shared:
             # Pin into the per-key index so future generate calls dedupe.
             _trade_jobs_by_key[job["key"]] = job_id
 
     if capture_error is not None:
-        with _trade_jobs_lock:
-            job["status"] = "error"
-            job["error"] = capture_error
-            job["finished_at"] = time.monotonic()
+        _finish_trade_job(job_id, error=capture_error)
         return job_id
 
     if synchronous:
@@ -8732,19 +9005,22 @@ def _kickoff_trade_job(
                        significance_capture=significance_capture)
         return job_id
 
-    threading.Thread(
-        target=_run_leased_job,
-        args=(job_id, sess_token, league_id, fairness_threshold,
-              pinned_give or [], pinned_receive or [], opponent_user_id,
-              pinned_give_mode),
-        kwargs={"trade_intent": trade_intent,
-                "prefs_preload": prefs_preload,
-                "execution_context": execution_context,
-                "presentation_capture": presentation_capture,
-                "presentation_exempt": presentation_exempt,
-                "significance_capture": significance_capture},
-        daemon=True,
-    ).start()
+    try:
+        _start_trade_job_thread(
+            target=_run_leased_job,
+            args=(job_id, sess_token, league_id, fairness_threshold,
+                  pinned_give or [], pinned_receive or [], opponent_user_id,
+                  pinned_give_mode),
+            kwargs={"trade_intent": trade_intent,
+                    "prefs_preload": prefs_preload,
+                    "execution_context": execution_context,
+                    "presentation_capture": presentation_capture,
+                    "presentation_exempt": presentation_exempt,
+                    "significance_capture": significance_capture},
+        )
+    except Exception:
+        log.exception("trade-job thread start failed")
+        _finish_trade_job(job_id, error="worker_start_failed")
     return job_id
 def player_to_dict(p) -> dict:
     d = {
@@ -10968,6 +11244,8 @@ def save_tiers_route():
                 cleared_pids=cleared_pids,
             )
 
+        _invalidate_trade_jobs(user_id=g_user_id)
+
         # Persist the full tier override dict for THIS format so it survives
         # session rebuilds. The other format's overrides are untouched.
         try:
@@ -11153,6 +11431,7 @@ def save_anchor_route():
         player = service.apply_anchor(player_id, target_elo)
         if player is None:
             return jsonify({"error": f"Unknown player_id: {player_id}"}), 404
+        _invalidate_trade_jobs(user_id=g_user_id)
 
         # Persist the override dict for THIS format (same path as tiers/save)
         # so the anchor survives session rebuilds.
@@ -11507,6 +11786,7 @@ def reorder_rankings():
 
     try:
         service.apply_reorder(position=position, ordered_ids=ordered_ids)
+        _invalidate_trade_jobs(user_id=g_user_id)
         # Tracking plan v2 §S3 — ranking_reorder into user_events. Sole
         # writer since the analytics P0 cutover (the legacy wrapped_events
         # hook that fired here is gone; LLD §6.4).
@@ -11727,6 +12007,7 @@ def rankings_import_apply():
         full_order = imported + [pid for pid in current_ids if pid not in seen]
         if len(full_order) >= 2:
             service.apply_reorder(position=None, ordered_ids=full_order)
+            _invalidate_trade_jobs(user_id=g_user_id)
 
         try:
             record_event(
@@ -13953,19 +14234,18 @@ def generate_trades():
     # generate), hand it THESE values in `prefs_preload`. Identical by
     # construction is stronger than identical by re-derivation. A failed read
     # leaves the preload None and the worker loads for itself, as before.
+    input_epochs = _capture_trade_input_epochs(g_user_id, league_id)
     prefs_preload = None
     try:
-        prefs = load_league_preference(user_id=g_user_id, league_id=league_id)
-        outlook_value = (prefs or {}).get("team_outlook")
-        seeded_outlook = None
-        if not outlook_value:
-            seeded, _sig = _infer_user_outlook(g_user_id, league_id, sess, g_league)
-            if seeded:
-                outlook_value = seeded
-                seeded_outlook = seeded
-        prefs_preload = {"prefs": prefs, "seeded_outlook": seeded_outlook}
+        prefs_preload = _trade_job_preferences(g_user_id, league_id, sess, g_league)
+        outlook_value = ((prefs_preload["prefs"] or {}).get("team_outlook")
+                         or prefs_preload["seeded_outlook"])
     except Exception:
         outlook_value = None
+    request_signature = _trade_request_signature(prefs_preload) if prefs_preload is not None else None
+    force_supersedes = force_fresh and _force_supersede_enabled()
+    if not _any_pinned:
+        sess["trade_fairness_threshold"] = fairness_threshold
 
     sess_token = request.headers.get("X-Session-Token", "")
     key        = _trade_job_key(g_user_id, league_id, fmt)
@@ -13989,14 +14269,16 @@ def generate_trades():
     reuse_snapshot = None
     with _trade_jobs_lock:
         existing_id = (_trade_jobs_by_key.get(key)
-                       if not _any_pinned and not presentation_uncached else None)
+                       if not _any_pinned and not presentation_uncached
+                       and not any(token.revoked for token in input_epochs) else None)
         existing    = _trade_jobs.get(existing_id) if existing_id else None
 
         if existing and not _any_pinned:
             # Cache hit: complete + fresh + same params → return instantly.
-            if not force_fresh and _trade_job_is_fresh(existing, fairness_threshold, outlook_value, trade_intent,
-                                                      presentation_capture=presentation_capture):
-                reuse_snapshot = copy.deepcopy(existing)
+            if request_signature is not None and not force_fresh and _trade_job_is_fresh(existing, fairness_threshold, outlook_value, trade_intent,
+                                                      presentation_capture=presentation_capture,
+                                                      request_signature=request_signature):
+                reuse_snapshot = dict(existing)
             # Share in-flight work only for matching fairness and shape.
             # A warm-up must never answer a differently configured search.
             #
@@ -14009,33 +14291,25 @@ def generate_trades():
             # and it is the same reason a board change that alters values
             # (e.g. an override released by a newer vote) could be invisible.
             # Supersede the running job and fall through to spawn a fresh one.
-            elif (existing.get("status") == "running"
-                  and abs((existing.get("fairness_threshold") or 0) - fairness_threshold) <= 0.01
-                  and (existing.get("trade_intent") or None) == trade_intent
-                  and _trade_presentation_matches(existing, presentation_capture)
-                  and _trade_owner_model_matches(existing)
-                  and _trade_significance_matches(existing)):
-                if not (force_fresh and _force_supersede_enabled()):
-                    reuse_snapshot = copy.deepcopy(existing)
+            elif request_signature is not None and _trade_running_matches(existing, fairness_threshold, outlook_value,
+                    trade_intent, presentation_capture, request_signature):
+                if not force_supersedes:
+                    reuse_snapshot = dict(existing)
                 else:
-                    existing["superseded"]    = True
-                    existing["superseded_at"] = time.monotonic()
+                    _revoke_trade_job_locked(existing, "superseded")
                     log.info("trade-job %s superseded by force=true (key=%s)",
                              existing_id, key)
             # Otherwise: stale or errored → drop the index entry and fall
             # through to spawn a new job.
             if reuse_snapshot is None:
-                if (existing.get("status") == "running"
-                        and (not _trade_significance_matches(existing)
-                             or not _trade_owner_model_matches(existing)
-                             or abs((existing.get("fairness_threshold") or 0) - fairness_threshold) > 0.01
-                             or (existing.get("trade_intent") or None) != trade_intent)):
-                    existing["superseded"] = True
-                    existing["superseded_at"] = time.monotonic()
+                if existing.get("status") == "running":
+                    _revoke_trade_job_locked(existing, "superseded")
                 _trade_jobs_by_key.pop(key, None)
 
     if reuse_snapshot is not None:
-        return jsonify(_trade_job_public_view(reuse_snapshot))
+        # Published card lists are replaced, never mutated in place. Capture
+        # their reference under the lock and do the expensive copy outside it.
+        return jsonify(_trade_job_public_view(copy.deepcopy(reuse_snapshot)))
 
     # Kick off a fresh job. No locks held during the worker spawn so we
     # don't accidentally serialize parallel users.
@@ -14055,10 +14329,12 @@ def generate_trades():
         session_context    = sess,
         presentation_capture = presentation_capture,
         presentation_exempt = presentation_exempt,
+        force_fresh        = force_fresh,
+        input_epochs       = input_epochs,
     )
     with _trade_jobs_lock:
-        snapshot = copy.deepcopy(_trade_jobs[job_id])
-    return jsonify(_trade_job_public_view(snapshot))
+        snapshot = dict(_trade_jobs[job_id])
+    return jsonify(_trade_job_public_view(copy.deepcopy(snapshot)))
 
 
 @app.route("/api/trades/asset-ideas", methods=["POST"])
@@ -22157,27 +22433,27 @@ def session_init():
                 or not isinstance(pregen_fairness, (int, float))
                 or not 0.5 <= pregen_fairness <= 1.0):
             pregen_fairness = 0.5
+        session_payload["trade_fairness_threshold"] = pregen_fairness
+        with _sessions_lock:
+            stored_session = _sessions.get(token)
+            if stored_session and stored_session.get("user_id") == user_id:
+                stored_session["trade_fairness_threshold"] = pregen_fairness
+        pregen_epochs = _capture_trade_input_epochs(user_id, league_id)
+        pregen_prefs = _trade_job_preferences(user_id, league_id, session_payload, new_league)
+        pregen_outlook = ((pregen_prefs["prefs"] or {}).get("team_outlook")
+                          or pregen_prefs["seeded_outlook"])
+        pregen_signature = _trade_request_signature(pregen_prefs)
         pregen_key = _trade_job_key(user_id, league_id, active_format)
         presentation_capture = _capture_trade_presentation()
         with _trade_jobs_lock:
             existing_id = _trade_jobs_by_key.get(pregen_key)
             existing    = _trade_jobs.get(existing_id) if existing_id else None
-            should_kickoff = (
-                existing is None
-                or existing.get("status") not in ("running", "complete")
-                or not _trade_presentation_matches(existing, presentation_capture)
-                or not _trade_owner_model_matches(existing)
-                or not _trade_significance_matches(existing)
-                # Foreground warm-up must not replace an active user search.
-                # Explicit generate requests handle parameter mismatches.
-                or (existing.get("status") == "complete" and (
-                    abs((existing.get("fairness_threshold") or 0.5) - pregen_fairness) > 0.01
-                    or bool(existing.get("trade_intent"))
-                    or (time.monotonic() - (existing.get("finished_at") or 0)) > _PREGEN_TTL_SECONDS))
-            )
-            if should_kickoff and existing and existing.get("status") == "running":
-                existing["superseded"] = True
-                existing["superseded_at"] = time.monotonic()
+            # Warm-up preserves an active request's fairness/intent, but
+            # obsolete policy/model work must be replaced, not left running.
+            should_kickoff = not (existing and (_trade_running_policy_matches(existing, presentation_capture)
+                or _trade_job_is_fresh(existing, pregen_fairness, pregen_outlook,
+                    presentation_capture=presentation_capture,
+                    request_signature=pregen_signature)))
         if should_kickoff:
             opp_total = sum(1 for m in members if m.user_id != user_id and m.elo_ratings)
             _kickoff_trade_job(
@@ -22190,6 +22466,9 @@ def session_init():
                 opponents_total    = opp_total,
                 session_context    = session_payload,
                 presentation_capture = presentation_capture,
+                prefs_preload      = pregen_prefs,
+                input_epochs       = pregen_epochs,
+                preserve_running   = True,
             )
             log.info("session/init: kicked off pre-gen trade job for league=%s", league_id)
     except Exception as pregen_err:
@@ -22879,7 +23158,9 @@ def _build_replenish_session(user_id: str, league_id: str) -> str | None:
         # League membership — mirrors session_init's v2 construction: real
         # members carry the consensus seed verbatim (has_rankings stays
         # False); _run_trade_job overwrites with saved member_rankings.
-        default_pool, default_seed = _get_universal_pool("1qb_ppr")
+        fmt = get_league_scoring(league_id)
+        platform = (get_league_draft_context(league_id) or {}).get("platform") or "unknown"
+        default_pool, default_seed = _get_universal_pool(fmt)
         players_dict = {p.id: p for p in default_pool}
         members: list[LeagueMember] = []
         for m in members_rows:
@@ -22898,7 +23179,7 @@ def _build_replenish_session(user_id: str, league_id: str) -> str | None:
             raise RuntimeError("no opposing rosters stored for league")
 
         league = League(league_id=league_id, name="League",
-                        platform="sleeper", members=members)
+                        platform=platform, members=members)
         user_roster = [str(x) for x in user_row.get("player_ids", [])
                        if str(x) in players_dict]
         if not user_roster:
@@ -22912,12 +23193,7 @@ def _build_replenish_session(user_id: str, league_id: str) -> str | None:
         except Exception as err:
             log.warning("replenish: could not restore trade dispositions: %s", err)
 
-        try:
-            fmt = get_league_scoring(league_id)
-        except Exception:
-            fmt = DEFAULT_SCORING
-        fmt_pool, _ = _get_universal_pool(fmt)
-        tsvc = TradeService(players={p.id: p for p in fmt_pool},
+        tsvc = TradeService(players=players_dict,
                             past_decision_keys=past_decision_keys,
                             dismissed_keys=past_pass_keys)   # QA-B F2
         tsvc.add_league(league)
@@ -22976,6 +23252,25 @@ def _replenish_deck_for(user_id: str, league_id: str) -> tuple[int, int] | None:
         fmt = DEFAULT_SCORING
     key = _trade_job_key(user_id, league_id, fmt)
     presentation_capture = _capture_trade_presentation()
+    input_epochs = _capture_trade_input_epochs(user_id, league_id)
+    token = (_find_live_session_token(user_id, league_id)
+             or _build_replenish_session(user_id, league_id))
+    if not token:
+        return None
+    with _sessions_lock:
+        session = _sessions.get(token)
+    if not session:
+        return None
+    # The client stores fairness locally and sends it on session/init. Keep
+    # that value when available; headless sessions use the native default.
+    fairness = session.get("trade_fairness_threshold", 0.5)
+    try:
+        prefs_preload = _trade_job_preferences(user_id, league_id, session, session["league"])
+    except Exception:
+        return None
+    outlook = ((prefs_preload["prefs"] or {}).get("team_outlook")
+               or prefs_preload["seeded_outlook"])
+    request_signature = _trade_request_signature(prefs_preload)
 
     # Prior deck snapshot BEFORE generation appends a new impression batch.
     try:
@@ -22987,28 +23282,25 @@ def _replenish_deck_for(user_id: str, league_id: str) -> tuple[int, int] | None:
     with _trade_jobs_lock:
         jid = _trade_jobs_by_key.get(key)
         job = _trade_jobs.get(jid) if jid else None
-        if (job and job.get("status") == "complete"
-                and not job.get("is_pinned")
-                and _trade_presentation_matches(job, presentation_capture)
-                and _trade_owner_model_matches(job)
-                and _trade_significance_matches(job)
-                and (time.monotonic() - (job.get("finished_at") or 0))
-                    <= _PREGEN_TTL_SECONDS):
+        if (job and not any(epoch.revoked for epoch in input_epochs)
+                and _trade_job_is_fresh(job, fairness, outlook,
+                    presentation_capture=presentation_capture, request_signature=request_signature)):
             cards = list(job.get("cards") or [])   # cached deck still fresh
 
     if cards is None:
-        token = (_find_live_session_token(user_id, league_id)
-                 or _build_replenish_session(user_id, league_id))
-        if not token:
-            return None
         job_id = _kickoff_trade_job(
             sess_token     = token,
             user_id        = user_id,
             league_id      = league_id,
             scoring_format = fmt,
+            fairness_threshold = fairness,
             source         = "replenish",
             synchronous    = True,
             presentation_capture = presentation_capture,
+            session_context = session,
+            prefs_preload = prefs_preload,
+            input_epochs = input_epochs,
+            preserve_running = True,
         )
         with _trade_jobs_lock:
             job = _trade_jobs.get(job_id) or {}
@@ -23016,7 +23308,8 @@ def _replenish_deck_for(user_id: str, league_id: str) -> tuple[int, int] | None:
                 log.warning("replenish: job failed for %s/%s: %s",
                             user_id, league_id, job.get("error"))
                 return None
-            if not _trade_owner_model_matches(job):
+            if not _trade_job_is_fresh(job, fairness, outlook,
+                    presentation_capture=presentation_capture, request_signature=request_signature):
                 return None
             cards = list(job.get("cards") or [])
 

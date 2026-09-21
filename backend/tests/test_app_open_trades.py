@@ -18,7 +18,9 @@ def test_startup_uses_native_fairness(harness, monkeypatch, value, expected):
 def test_startup_retries_error_and_reuses_only_matching_threshold(harness, monkeypatch, status, threshold, kicks):
     client, _ = harness
     key = server._trade_job_key(USER_ID, NON_SLEEPER_LEAGUE, "1qb_ppr")
-    job = dict(job_id="warm", status=status, finished_at=time.monotonic(), fairness_threshold=threshold,
+    monkeypatch.setattr(server, "_trade_job_preferences", lambda *args: {"prefs": None, "seeded_outlook": None})
+    job = dict(job_id="warm", key=key, status=status, finished_at=time.monotonic(), fairness_threshold=threshold,
+               outlook_value=None, safety_policy=server._trade_safety_signature(),
                presentation_capture=server._capture_trade_presentation(),
                significance_capture=server._capture_trade_significance())
     monkeypatch.setattr(server, "_trade_jobs", {"warm": job})

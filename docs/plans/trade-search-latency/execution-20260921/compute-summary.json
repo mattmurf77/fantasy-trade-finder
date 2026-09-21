@@ -1,0 +1,299 @@
+{
+  "environment": {
+    "python": "3.14.4",
+    "platform": "macOS-26.5.1-arm64-arm-64bit-Mach-O",
+    "machine": "arm64",
+    "logical_cpus": 8,
+    "hash_seed": "0",
+    "samples_per_variant": 2,
+    "process_peak_rss_bytes": 488718336
+  },
+  "measurements": [
+    {
+      "variant": "baseline",
+      "generation_seconds": 6.156256791000487,
+      "validation_seconds": 1.7798192500195,
+      "cards": 2843,
+      "evaluated": 53172,
+      "candidate_calls": 53172,
+      "candidate_proofs_sha256": "75b369b1830922758656d6dafcef8e5d9301f25ca1fa7053076e4abdb30f4fc6",
+      "inventory_and_order_sha256": "642fb3ca2016ba3eb6b6cafbc2858ee59fd05fc0fd47270bfc0f7cf81701e360",
+      "report_sha256": "662390152209a717ff9697c67cf9fea803702dc48f4d0599cd3f45fcc02dd333",
+      "validation_proofs_sha256": "ef52fe56f6bb523c4f71d1f6f40c9443a83d84bad2681cd110058e8ff5a50550",
+      "validation_eligible": 2843,
+      "rejections": {
+        "counterparty_no_benefit": 560,
+        "known_preference_harm": 45,
+        "market_floor": 44907,
+        "market_overpay": 1388,
+        "previous_disposition": 22,
+        "tanking_favored_young_asset": 246,
+        "tanking_rb_without_long_term_exception": 1022,
+        "unnecessary_compensation": 980,
+        "viewer_intent_unfulfilled": 892,
+        "viewer_no_benefit": 267
+      },
+      "package_cache": {}
+    },
+    {
+      "variant": "exact_package_cache",
+      "generation_seconds": 6.15985433399328,
+      "validation_seconds": 1.7245220830081962,
+      "cards": 2843,
+      "evaluated": 53172,
+      "candidate_calls": 53172,
+      "candidate_proofs_sha256": "75b369b1830922758656d6dafcef8e5d9301f25ca1fa7053076e4abdb30f4fc6",
+      "inventory_and_order_sha256": "642fb3ca2016ba3eb6b6cafbc2858ee59fd05fc0fd47270bfc0f7cf81701e360",
+      "report_sha256": "662390152209a717ff9697c67cf9fea803702dc48f4d0599cd3f45fcc02dd333",
+      "validation_proofs_sha256": "ef52fe56f6bb523c4f71d1f6f40c9443a83d84bad2681cd110058e8ff5a50550",
+      "validation_eligible": 2843,
+      "rejections": {
+        "counterparty_no_benefit": 560,
+        "known_preference_harm": 45,
+        "market_floor": 44907,
+        "market_overpay": 1388,
+        "previous_disposition": 22,
+        "tanking_favored_young_asset": 246,
+        "tanking_rb_without_long_term_exception": 1022,
+        "unnecessary_compensation": 980,
+        "viewer_intent_unfulfilled": 892,
+        "viewer_no_benefit": 267
+      },
+      "package_cache": {
+        "misses": 52523,
+        "hits": 43980
+      }
+    },
+    {
+      "variant": "exact_package_cache",
+      "generation_seconds": 6.461050666985102,
+      "validation_seconds": 1.8820276249898598,
+      "cards": 2843,
+      "evaluated": 53172,
+      "candidate_calls": 53172,
+      "candidate_proofs_sha256": "75b369b1830922758656d6dafcef8e5d9301f25ca1fa7053076e4abdb30f4fc6",
+      "inventory_and_order_sha256": "642fb3ca2016ba3eb6b6cafbc2858ee59fd05fc0fd47270bfc0f7cf81701e360",
+      "report_sha256": "662390152209a717ff9697c67cf9fea803702dc48f4d0599cd3f45fcc02dd333",
+      "validation_proofs_sha256": "ef52fe56f6bb523c4f71d1f6f40c9443a83d84bad2681cd110058e8ff5a50550",
+      "validation_eligible": 2843,
+      "rejections": {
+        "counterparty_no_benefit": 560,
+        "known_preference_harm": 45,
+        "market_floor": 44907,
+        "market_overpay": 1388,
+        "previous_disposition": 22,
+        "tanking_favored_young_asset": 246,
+        "tanking_rb_without_long_term_exception": 1022,
+        "unnecessary_compensation": 980,
+        "viewer_intent_unfulfilled": 892,
+        "viewer_no_benefit": 267
+      },
+      "package_cache": {
+        "misses": 52523,
+        "hits": 43980
+      }
+    },
+    {
+      "variant": "baseline",
+      "generation_seconds": 6.36065741701168,
+      "validation_seconds": 1.7601820410054643,
+      "cards": 2843,
+      "evaluated": 53172,
+      "candidate_calls": 53172,
+      "candidate_proofs_sha256": "75b369b1830922758656d6dafcef8e5d9301f25ca1fa7053076e4abdb30f4fc6",
+      "inventory_and_order_sha256": "642fb3ca2016ba3eb6b6cafbc2858ee59fd05fc0fd47270bfc0f7cf81701e360",
+      "report_sha256": "662390152209a717ff9697c67cf9fea803702dc48f4d0599cd3f45fcc02dd333",
+      "validation_proofs_sha256": "ef52fe56f6bb523c4f71d1f6f40c9443a83d84bad2681cd110058e8ff5a50550",
+      "validation_eligible": 2843,
+      "rejections": {
+        "counterparty_no_benefit": 560,
+        "known_preference_harm": 45,
+        "market_floor": 44907,
+        "market_overpay": 1388,
+        "previous_disposition": 22,
+        "tanking_favored_young_asset": 246,
+        "tanking_rb_without_long_term_exception": 1022,
+        "unnecessary_compensation": 980,
+        "viewer_intent_unfulfilled": 892,
+        "viewer_no_benefit": 267
+      },
+      "package_cache": {}
+    }
+  ],
+  "limitations": [
+    "Local frozen input; not production, route, network or client latency",
+    "Candidate proof hashing adds equal measurement work to both compute variants",
+    "Structured storage experiment assumes source immutable sharing; no DB timing"
+  ],
+  "snapshot_sha256": "a82fe15c0717db3e73c6d0a5d8853c5f716ff716f8b0fb6967719966aeee5582",
+  "config_sha256": "4b9612166d204e1be4f50d48f261f0e6c62b42f007825be450a4c29e0a2ec03c",
+  "profiled": {
+    "variant": "baseline",
+    "generation_seconds": 10.428943792008795,
+    "validation_seconds": 1.7961934999912046,
+    "cards": 2843,
+    "evaluated": 53172,
+    "candidate_calls": 53172,
+    "candidate_proofs_sha256": "75b369b1830922758656d6dafcef8e5d9301f25ca1fa7053076e4abdb30f4fc6",
+    "inventory_and_order_sha256": "642fb3ca2016ba3eb6b6cafbc2858ee59fd05fc0fd47270bfc0f7cf81701e360",
+    "report_sha256": "662390152209a717ff9697c67cf9fea803702dc48f4d0599cd3f45fcc02dd333",
+    "validation_proofs_sha256": "ef52fe56f6bb523c4f71d1f6f40c9443a83d84bad2681cd110058e8ff5a50550",
+    "validation_eligible": 2843,
+    "rejections": {
+      "counterparty_no_benefit": 560,
+      "known_preference_harm": 45,
+      "market_floor": 44907,
+      "market_overpay": 1388,
+      "previous_disposition": 22,
+      "tanking_favored_young_asset": 246,
+      "tanking_rb_without_long_term_exception": 1022,
+      "unnecessary_compensation": 980,
+      "viewer_intent_unfulfilled": 892,
+      "viewer_no_benefit": 267
+    },
+    "package_cache": {},
+    "profile": [
+      {
+        "function": "trade_gen_bilateral.py:451:generate_bilateral_trades",
+        "primitive_calls": 1,
+        "calls": 1,
+        "self_seconds": 0.118556112,
+        "cumulative_seconds": 10.387485042
+      },
+      {
+        "function": "research_trade_compute.py:123:record",
+        "primitive_calls": 53172,
+        "calls": 53172,
+        "self_seconds": 0.126586211,
+        "cumulative_seconds": 8.296854100000001
+      },
+      {
+        "function": "trade_gen_bilateral.py:303:evaluate",
+        "primitive_calls": 53172,
+        "calls": 53172,
+        "self_seconds": 0.06987882200000001,
+        "cumulative_seconds": 7.8683202
+      },
+      {
+        "function": "trade_gen_bilateral.py:244:_core",
+        "primitive_calls": 59240,
+        "calls": 59240,
+        "self_seconds": 0.097939416,
+        "cumulative_seconds": 7.195038448
+      },
+      {
+        "function": "trade_gen_owner.py:343:evaluate",
+        "primitive_calls": 53172,
+        "calls": 53172,
+        "self_seconds": 0.49906461700000004,
+        "cumulative_seconds": 7.083172635
+      },
+      {
+        "function": "trade_gen_bilateral.py:167:_owner",
+        "primitive_calls": 13710,
+        "calls": 13710,
+        "self_seconds": 0.201957411,
+        "cumulative_seconds": 3.161226462
+      },
+      {
+        "function": "trade_gen_owner.py:267:_owner",
+        "primitive_calls": 13710,
+        "calls": 13710,
+        "self_seconds": 0.177767169,
+        "cumulative_seconds": 2.2985622070000002
+      },
+      {
+        "function": "trade_gen_owner.py:264:_package",
+        "primitive_calls": 80570,
+        "calls": 80570,
+        "self_seconds": 0.052131361,
+        "cumulative_seconds": 1.9761991410000002
+      },
+      {
+        "function": "trade_service.py:2265:price_consensus_package",
+        "primitive_calls": 80570,
+        "calls": 80570,
+        "self_seconds": 0.19555566000000002,
+        "cumulative_seconds": 1.9240677800000001
+      },
+      {
+        "function": "trade_gen_owner.py:243:_lineup",
+        "primitive_calls": 14872,
+        "calls": 14872,
+        "self_seconds": 0.27709052900000003,
+        "cumulative_seconds": 1.73033312
+      },
+      {
+        "function": "trade_service.py:1678:package_value_v2",
+        "primitive_calls": 161140,
+        "calls": 161140,
+        "self_seconds": 0.160513348,
+        "cumulative_seconds": 1.593630722
+      },
+      {
+        "function": "__init__.py:185:dumps",
+        "primitive_calls": 107341,
+        "calls": 107341,
+        "self_seconds": 0.11251203500000001,
+        "cumulative_seconds": 1.5546040110000001
+      },
+      {
+        "function": "trade_gen_owner.py:348:finish",
+        "primitive_calls": 53172,
+        "calls": 53172,
+        "self_seconds": 0.020786252,
+        "cumulative_seconds": 1.541375417
+      },
+      {
+        "function": "trade_gen_bilateral.py:252:_decision",
+        "primitive_calls": 53172,
+        "calls": 53172,
+        "self_seconds": 0.10104766800000001,
+        "cumulative_seconds": 1.520589165
+      },
+      {
+        "function": "encoder.py:185:encode",
+        "primitive_calls": 107341,
+        "calls": 107341,
+        "self_seconds": 0.09239129800000001,
+        "cumulative_seconds": 1.420304183
+      },
+      {
+        "function": "trade_gen_owner.py:337:_decision",
+        "primitive_calls": 53172,
+        "calls": 53172,
+        "self_seconds": 0.058389377000000006,
+        "cumulative_seconds": 1.394393559
+      },
+      {
+        "function": "trade_gen_owner.py:100:_dump",
+        "primitive_calls": 54169,
+        "calls": 54169,
+        "self_seconds": 0.022330332,
+        "cumulative_seconds": 1.378998058
+      },
+      {
+        "function": "trade_roster.py:51:assign",
+        "primitive_calls": 14872,
+        "calls": 14872,
+        "self_seconds": 1.116955487,
+        "cumulative_seconds": 1.3498462500000001
+      },
+      {
+        "function": "trade_service.py:1787:_package_value_market",
+        "primitive_calls": 161140,
+        "calls": 161140,
+        "self_seconds": 0.540883929,
+        "cumulative_seconds": 1.3386760800000002
+      },
+      {
+        "function": "~:0:<built-in method builtins.next>",
+        "primitive_calls": 56120,
+        "calls": 56120,
+        "self_seconds": 0.053192683000000004,
+        "cumulative_seconds": 1.288277769
+      }
+    ]
+  },
+  "all_parity_checks_passed": true
+}

@@ -98,6 +98,26 @@ from historical decisions/inbound offers, which must retain original terms.
 - **Static:** `web/` served by Flask.
 - Set `ANTHROPIC_API_KEY` in Render dashboard if smart matchups should be enabled in prod.
 
+### First-action latency release (2026-09-21)
+
+This backend release changes job admission, diagnostic preparation and incremental
+owner publication, not the model selector. Do not toggle `owner_bilateral_enabled`
+or other arms as part of this performance deployment. Capture settings before and
+after, explicitly deploy the tested commit if autodeploy is disabled, and verify
+the live SHA and health. [Release evidence](plans/trade-search-latency/release-20260921/README.md)
+records the tested commit and rollback target.
+
+The `first durable owner batch` log reports server elapsed time to the first
+committed prefix, not Find-a-Trade tap-to-visible-card time. Full-worker
+`trades_generated.gen_ms` remains completion timing. Running snapshots can hold
+30 or more durable cards while evidence for remaining offers is saved. A later
+storage failure retains only the committed prefix and returns an error; do not
+count it as a successfully completed capped deck. Unchanged hard-timeout settings
+now remain terminal instead of allowing a late worker to revive the job. Ordinary
+identical requests join; input changes/force can revoke old work. No database
+cleanup, arm adjustment or new TestFlight binary is required for this compatible
+backend increment. Physical-device checks and the three-second KPI remain separate.
+
 ---
 
 ## Pre-ship simulator gate (2026-08-08)

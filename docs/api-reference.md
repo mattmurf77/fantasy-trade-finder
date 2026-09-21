@@ -370,6 +370,29 @@ Queue idempotency still suppresses repeated identical requests. A server-verifie
 
 Generate, status, current-card reads, final worker publication and replenishment counts recheck current exact passes and actionable interested sources using the captured job/card account and league. Surviving cards keep their order and frozen impression metadata. A cached card with a known source link must validate that particular source, not a newer same-package like; legacy unlinked cards use exact current evidence without invented links. Reads do not mutate prior decisions or impressions.
 
+### Incremental owner deck availability (2026-09-21)
+
+`POST /api/trades/generate` and `GET /api/trades/status` retain their cumulative
+snapshot contract. Owner searches finish final ranking and required eligibility
+checks before publication, then expose the first 30 cards only after their exact
+impressions/evidence commit. Subsequent bounded commits grow the same ordered
+snapshot. A `running` snapshot can therefore contain actionable cards with durable
+`impression_id`s; `complete` still exposes the entire remaining eligible inventory,
+never just the first 30. There is no new pagination or client capability field.
+
+A later persistence failure produces a truthful terminal error and retains only
+previously committed cards; an invalidated/superseded job may not publish additional
+cards. Existing exact-pass/interest projection still applies at every public read.
+Already recorded historical terms and decisions are not rewritten. An expired or
+changed-input search requires a fresh generate request rather than an unchecked
+fallback. No three-second response guarantee follows from this contract.
+
+Ordinary identical in-flight requests share an atomic job claim. Preference,
+fairness, intent or captured configuration differences must not reuse the old job;
+selected searches keep their separate uncached behavior. Rank/preference
+invalidation also fences already-running work. Reuse remains process-local, with
+no claim of a complete durable provider/market dependency cache.
+
 ### Trade card object
 
 Shape of each card in `/api/trades`, `/api/trades/status` snapshots, and `/api/trades/liked` (serialized by `trade_card_to_dict` in `backend/server.py`):

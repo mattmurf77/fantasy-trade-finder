@@ -15,7 +15,8 @@ MIN_SHARED_BYTES = 1024
 
 
 def dumps(value):
-    return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=True)
+    return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=True,
+                      default=str)
 
 
 def is_reference(value):
@@ -29,12 +30,49 @@ def compact_rows(rows):
     Only named debug fields change. Canonical JSON hashes preserve every value;
     a subtree is shared only if repeated and >=1 KiB. Roots live separately so
     retention can expire debug detail without deleting impressions or labels.
-    Already-normalized and malformed historical features are left untouched.
+    Already-normalized and malformed historical JSON is left untouched.
+    The synchronous writer may pass a structured features dict instead of a
+    JSON string. JSON-compatible immutable nodes remain shared until packing;
+    tuples, non-string keys and default=str values follow the former JSON
+    round trip. No source object is mutated.
     """
     counts = Counter()
     parsed = []
     identities = {}
     scope_prefixes = {}
+    normalized = {}
+    normalizing = set()
+
+    def json_ready(value):
+        # Normalize only changed nodes, once per actual source identity. This
+        # preserves captured sharing without broad content-based interning.
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        key = id(value)
+        if key in normalized:
+            return normalized[key][1]
+        if key in normalizing:
+            raise ValueError('Circular reference detected')
+        normalizing.add(key)
+        if isinstance(value, dict):
+            result = {}
+            changed = False
+            for k, child in value.items():
+                name = k if isinstance(k, str) else next(iter(json.loads(json.dumps({k: None}))))
+                item = json_ready(child)
+                result[name] = item
+                changed |= name is not k or item is not child
+            if not changed:
+                result = value
+        elif isinstance(value, (list, tuple)):
+            result = [json_ready(child) for child in value]
+            if isinstance(value, list) and all(a is b for a, b in zip(result, value)):
+                result = value
+        else:
+            result = str(value)
+        normalizing.remove(key)
+        normalized[key] = (value, result)  # retain originals against id reuse
+        return result
 
     def identity(scope, value):
         key = (scope, id(value))
@@ -48,7 +86,7 @@ def compact_rows(rows):
         return identities[key]
 
     def count(scope, value):
-        if not isinstance(value, (dict, list)) or is_reference(value):
+        if not isinstance(value, (dict, list, tuple)) or is_reference(value):
             return
         digest, size = identity(scope, value)
         if size < MIN_SHARED_BYTES:
@@ -62,10 +100,14 @@ def compact_rows(rows):
             count(scope, child)
 
     for row in rows:
-        try:
-            features = json.loads(row.get('features_json') or 'null')
-        except (ValueError, TypeError):
-            features = None
+        raw = row.get('features_json')
+        if isinstance(raw, dict):
+            features = dict(json_ready(raw))
+        else:
+            try:
+                features = json.loads(raw or 'null')
+            except (ValueError, TypeError):
+                features = None
         scope = (row['user_id'], row['deck_job_id'])
         parsed.append((row, features, scope))
         if isinstance(features, dict):
@@ -75,7 +117,7 @@ def compact_rows(rows):
     snapshots = {}
 
     def pack(scope, created_at, value, root=False):
-        if is_reference(value) or not isinstance(value, (dict, list)):
+        if is_reference(value) or not isinstance(value, (dict, list, tuple)):
             return value
         digest, size = identity(scope, value)
         shared = counts[digest] > 1
@@ -101,11 +143,13 @@ def compact_rows(rows):
         if isinstance(features, dict):
             for key in DIAGNOSTIC_KEYS:
                 value = features.get(key)
-                if isinstance(value, (dict, list)) and not is_reference(value):
+                if isinstance(value, (dict, list, tuple)) and not is_reference(value):
                     features[key] = pack(scope, row['served_at'], value, root=True)
                     changed = True
             if changed:
                 row['features_json'] = dumps(features)
+            elif isinstance(original.get('features_json'), dict):
+                row['features_json'] = json.dumps(features, default=str)
         compacted.append(row)
     return compacted, list(snapshots.values())
 

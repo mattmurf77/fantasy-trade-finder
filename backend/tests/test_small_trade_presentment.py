@@ -330,7 +330,7 @@ def test_t5_generate_completed_and_running_cache_mode_boundaries(replay, monkeyp
 
     def kickoff(**kwargs):
         calls.append(kwargs)
-        fresh = dict(job, job_id="new-presentation-job", presentation_capture=kwargs["presentation_capture"])
+        fresh = dict(before, job_id="new-presentation-job", presentation_capture=kwargs["presentation_capture"])
         monkeypatch.setitem(server._trade_jobs, fresh["job_id"], fresh)
         return fresh["job_id"]
 
@@ -343,10 +343,19 @@ def test_t5_generate_completed_and_running_cache_mode_boundaries(replay, monkeyp
     assert response.get_json()["job_id"] == ("new-presentation-job" if changed else job["job_id"])
     if changed:
         assert calls[0]["presentation_capture"][:2] == sp.mode(new)
-    assert job == before
-    # An explicit old-ID poll remains old order even after the flag flips.
+    revoked = changed and status == "running"
+    if revoked:
+        assert job["status"] == "error" and job["error"] == "superseded"
+        assert job["superseded"] and not job["cards"]
+    else:
+        assert job == before
+    # Completed snapshots retain their captured order. Replaced running work
+    # is terminal and cannot republish its old prefix through an old-ID poll.
     polled = client.get(f"/api/trades/status?job_id={job['job_id']}", headers={"X-Session-Token": TOKEN})
-    assert polled.status_code == 200 and polled.get_json()["cards"] == before["cards"]
+    assert polled.status_code == 200
+    assert polled.get_json()["cards"] == ([] if revoked else before["cards"])
+    if revoked:
+        assert polled.get_json()["status"] == "error"
 
 
 @pytest.mark.parametrize("old,new", [(None, 0), (None, 1), (0, 1), (1, 0), (1, 1)])
@@ -355,7 +364,11 @@ def test_t5_session_init_pregen_cache_mode_boundaries(init_harness, monkeypatch,
     client, _ = init_harness
     ts._cfg["simple_player_presentment"] = new
     key = server._trade_job_key(USER_ID, NON_SLEEPER_LEAGUE, "1qb_ppr")
-    job = dict(job_id="presentation-pregen", status=status, finished_at=time.monotonic())
+    monkeypatch.setattr(server, "_trade_job_preferences", lambda *args: {"prefs": None, "seeded_outlook": None})
+    job = dict(job_id="presentation-pregen", key=key, status=status, finished_at=time.monotonic(),
+               fairness_threshold=.5, outlook_value=None,
+               safety_policy=server._trade_safety_signature(),
+               significance_capture=server._capture_trade_significance())
     if old is not None:
         job["presentation_capture"] = (*sp.mode(old), "old-base")
     monkeypatch.setitem(server._trade_jobs, job["job_id"], job)
@@ -371,6 +384,9 @@ def test_t5_session_init_pregen_cache_mode_boundaries(init_harness, monkeypatch,
 @pytest.mark.parametrize("old,new", [(None, 0), (None, 1), (0, 1), (1, 0), (1, 1)])
 def test_t5_replenish_cache_mode_boundaries(replay, monkeypatch, old, new):
     _client, _svc, _engine, job, _siblings = replay
+    # Presentation is the only changed dimension: the live session carries
+    # the same explicit fairness as this completed replay job.
+    monkeypatch.setitem(server._sessions[TOKEN], "trade_fairness_threshold", .75)
     if old is not None:
         job["presentation_capture"] = (*sp.mode(old), "old-base")
     ts._cfg["simple_player_presentment"] = new
