@@ -3127,8 +3127,16 @@ def _job_superseded(job_id: str) -> bool:
 
 def _trade_owner_model_matches(job: dict) -> bool:
     key = job.get("key") or ()
-    return (len(key) < 2 or key[1] == "league_demo"
-            or job.get("owner_model", _bakeoff.ARM_OWNER) == _bakeoff.owner_arm())
+    if len(key) < 2 or key[1] == "league_demo":
+        return True
+    model = job.get("owner_model", _bakeoff.ARM_OWNER)
+    if model != _bakeoff.owner_arm():
+        return False
+    if model == _bakeoff.ARM_OWNER_BILATERAL:
+        # Pre-revision jobs have no version field and mean the incumbent,
+        # never whichever revision happens to be selected at polling time.
+        return job.get("owner_model_version", "owner-v2-bilateral-1") == _bakeoff.owner_version()
+    return True
 
 
 def _trade_job_public_view(job: dict) -> dict:
@@ -3276,7 +3284,8 @@ def _load_trade_disposition_keys(user_id: str, league_id: str):
 
 
 def _trade_safety_signature(owner_state: tuple[bool, ...] | None = None,
-                            significance_capture=None, owner_model=None):
+                            significance_capture=None, owner_model=None,
+                            owner_model_version=None):
     """Stamp captured owner permission; freshness checks read live defaults."""
     if owner_state is None:
         owner_include = _bakeoff.bakeoff_enabled() and any(
@@ -3295,6 +3304,9 @@ def _trade_safety_signature(owner_state: tuple[bool, ...] | None = None,
     ) if enabled]
     if owner_state[0]:
         signature.append("owner_model:" + (owner_model or _bakeoff.owner_arm()))
+        version = owner_model_version or _bakeoff.owner_version()
+        if version == "owner-v2-bilateral-2":
+            signature.append("owner_model_version:" + version)
     significance = (significance_capture if significance_capture is not None
                     else _capture_trade_significance())
     if significance[0]:
@@ -4976,6 +4988,7 @@ def _log_deck_signal_impressions(
     policy_variant: str | None = None,
     roster_results: dict | None = None,
     presentation: dict | None = None,  # captured records/version, NOT a telemetry enable gate
+    owner_presentment: dict | None = None,  # captured private survivor permutation
     significance_results: dict | None = None,
     structured_features: bool = False,
     publication_batch_size: int | None = None,
@@ -5215,6 +5228,13 @@ def _log_deck_signal_impressions(
             features["significance"] = significance_results[id(card)]
         if presentation is not None:
             features["presentation"] = {**presentation["records"][pos], "final_index": pos}
+        if owner_presentment is not None:
+            features["owner_presentment"] = {
+                "version": owner_presentment["version"],
+                "generator_version": owner_presentment["generator_version"],
+                "original_index": owner_presentment["occurrence_original_indices"][pos],
+                "final_index": pos,
+            }
         # F7 (deck.exploration) — wildcard provenance, frozen at serve time.
         # For wildcard rows the `propensity` column is NOT a Thompson
         # multiplier: it is exploration_rate × 1/|eligible draw pool| (the
@@ -7569,6 +7589,7 @@ def _run_trade_job(
         owner_on = _owner_enabled(league_id)
         owner_config = dict(_trade_service_mod._cfg)
         owner_model = _bakeoff.owner_arm(owner_config)
+        owner_model_version = _bakeoff.owner_version(owner_config)
         owner_serve = owner_on and _bakeoff.serve_owner()
         owner_exclusive = owner_serve and _bakeoff.owner_only()
         significance_inbound_keys = set()
@@ -7578,14 +7599,20 @@ def _run_trade_job(
         with _trade_jobs_lock:
             j = _trade_jobs.get(job_id)
             if _job_live(j):
+                if not _trade_owner_model_matches(j):
+                    _revoke_trade_job_locked(j, "owner_model_changed")
+                    raise ValueError("owner_model_changed")
                 if owner_on or owner_model == _bakeoff.ARM_OWNER_BILATERAL:
                     j["owner_model"] = owner_model
+                if _bakeoff.owner_revision_enabled(owner_config):
+                    j["owner_model_version"] = owner_model_version
                 if market_live or roster_live or owner_on or significance_capture[0]:
                     j["final_checks_pending"] = True
                 if significance_capture[0]:
                     j["significance_capture"] = significance_capture
                 safety_signature = _trade_safety_signature(
-                    (owner_on, owner_serve, owner_exclusive), significance_capture, owner_model)
+                    (owner_on, owner_serve, owner_exclusive), significance_capture, owner_model,
+                    owner_model_version)
                 if safety_signature:
                     j["safety_policy"] = safety_signature
 
@@ -8401,7 +8428,8 @@ def _run_trade_job(
 
         # Publish only evaluated cards, even with impression logging disabled
         # or an empty result. Later annotation layers do not alter packages.
-        if owner_on and owner_model != _bakeoff.owner_arm():
+        if owner_on and (owner_model != _bakeoff.owner_arm()
+                         or owner_model_version != _bakeoff.owner_version()):
             raise ValueError("owner_model_changed")
         if (market_live or roster_live or owner_on or significance_capture[0]) and not owner_serve:
             snapshot = []
@@ -8509,6 +8537,16 @@ def _run_trade_job(
         if presentation is not None:
             presentation["records"] = _simple_presentment.retain_occurrences(
                 before_disposition, presentation["records"], final_cards)
+        owner_presentment = None
+        if owner_exclusive and _bakeoff.owner_revision_enabled(owner_config):
+            from . import trade_bilateral_presentment
+            final_cards, owner_presentment = trade_bilateral_presentment.present(
+                final_cards, selected_give=pinned_give or (),
+                selected_receive=pinned_receive or (), opponent_user_id=opponent_user_id)
+            with _trade_jobs_lock:
+                job = _trade_jobs.get(job_id)
+                if _job_live(job):
+                    job["owner_presentment"] = owner_presentment
         served_final = final_cards
         ghost_cards: list = []   # [(would_be_pos, card)]
         if ghost_on:
@@ -8673,6 +8711,7 @@ def _run_trade_job(
                     policy_results  = policy_results, # personal-market policy
                     policy_variant  = policy_variant,
                     presentation    = presentation,
+                    **({"owner_presentment": owner_presentment} if owner_presentment is not None else {}),
                     significance_results = significance_results,
                     **({
                         "structured_features": True,
@@ -8744,12 +8783,14 @@ def _run_trade_job(
             try:
                 run_row = bakeoff_run.run_row(
                     job_id=job_id, user_id=g_user_id, league_id=league_id)
-                if owner_request_evidence is not None or significance_diag:
+                if owner_request_evidence is not None or significance_diag or owner_presentment is not None:
                     config_record = json.loads(run_row["config_json"])
                     if owner_request_evidence is not None:
                         config_record["owner_request"] = owner_request_evidence
                     if significance_diag:
                         config_record["significance"] = significance_diag
+                    if owner_presentment is not None:
+                        config_record["owner_presentment"] = owner_presentment
                     run_row["config_json"] = json.dumps(config_record, default=str)
                 save_bakeoff_run(run_row)
             except Exception as bo_err:
@@ -8956,9 +8997,12 @@ def _kickoff_trade_job(
     }
     if source:
         job["source"] = source
-    selected_owner = _bakeoff.owner_arm()
+    admission_owner_config = dict(_trade_service_mod._cfg)
+    selected_owner = _bakeoff.owner_arm(admission_owner_config)
     if selected_owner == _bakeoff.ARM_OWNER_BILATERAL:
         job["owner_model"] = selected_owner
+        if _bakeoff.owner_revision_enabled(admission_owner_config):
+            job["owner_model_version"] = _bakeoff.owner_version(admission_owner_config)
     if significance_capture[0]:
         job["significance_capture"] = significance_capture
         job["final_checks_pending"] = True
@@ -14753,7 +14797,8 @@ def _owner_cards_valid(cards, context):
     """
     matched = [card for card in cards if getattr(card, "owner_evaluation", None) is not None
                and card.owner_evaluation.matches(card)
-               and card.owner_evaluation.as_dict().get("generator") == _bakeoff.owner_arm(context.get("config", {}))]
+               and card.owner_evaluation.as_dict().get("generator") == _bakeoff.owner_arm(context.get("config", {}))
+               and card.owner_evaluation.as_dict().get("generator_version") == _bakeoff.owner_version(context.get("config", {}))]
     finals = _bakeoff.owner_evaluator(context.get("config", {}))(matched, **context) if matched else []
     if len(finals) != len(matched):
         raise ValueError("owner final evaluation occurrence count mismatch")
@@ -14830,6 +14875,8 @@ def _owner_selected_assignment(context, surface, *, serve, exclusive=False):
     if not canonical["config"].get("owner_bilateral_enabled"):
         # Adding a dark selector must not reshuffle established v1 request units.
         canonical["config"].pop("owner_bilateral_enabled", None)
+    if not canonical["config"].get("owner_bilateral_revision_enabled"):
+        canonical["config"].pop("owner_bilateral_revision_enabled", None)
     for key in ("user_roster", "pinned_give_players", "pinned_receive_players", "acquire_positions",
                 "trade_away_positions", "avoid_positions", "swap_positions"):
         if canonical.get(key) is not None:
@@ -14960,7 +15007,8 @@ def _owner_selected_ideas(*, context, surface, legacy, trade_service, sess, serv
         selected_receive_ids=context.get("pinned_receive_players") or (),
         user_sources=context.get("user_sources"))
     retained = {id(c) for c in cards}
-    if _bakeoff.owner_arm(context["config"]) != _bakeoff.owner_arm():
+    if (_bakeoff.owner_arm(context["config"]) != _bakeoff.owner_arm()
+            or _bakeoff.owner_version(context["config"]) != _bakeoff.owner_version()):
         raise ValueError("owner_model_changed")
     run_id = uuid.uuid4().hex
     for card in cards:
@@ -14987,6 +15035,11 @@ def _owner_selected_ideas(*, context, surface, legacy, trade_service, sess, serv
         owner_cards=len(owner_cards), control_cards=sum(map(len, legacy_groups.values())),
         error=error, report=report, total_ms=int((time.monotonic() - started) * 1000),
         significance=significance_diag), len(cards))
+    # Persistence can overlap a model change. Keep committed historical proof,
+    # but do not publish a stale version after that durable boundary.
+    if (_bakeoff.owner_arm(context["config"]) != _bakeoff.owner_arm()
+            or _bakeoff.owner_version(context["config"]) != _bakeoff.owner_version()):
+        raise ValueError("owner_model_changed")
     for card in cards:
         if getattr(card, "owner_evaluation", None) is not None:
             card.owner_published = True
@@ -15293,6 +15346,23 @@ def trade_job_status():
     return jsonify(_trade_job_public_view(snapshot))
 
 
+def _pending_owner_cards(cards, config, exemptions):
+    selected_owner = _bakeoff.owner_arm(config)
+    selected_version = _bakeoff.owner_version(config)
+    return [card for card in cards
+             if card.league_id == "league_demo"
+             or exemptions.get(_significance_card_key(card), (None,))[0] == "inbound" or (
+                 getattr(card, "owner_evaluation", None) is None
+                 and not (selected_owner == _bakeoff.ARM_OWNER_BILATERAL
+                          and _owner_enabled(card.league_id) and _bakeoff.serve_owner() and _bakeoff.owner_only()))
+             or (getattr(card, "owner_evaluation", None) is not None
+                 and card.owner_evaluation.as_dict().get("generator") == selected_owner
+                 and card.owner_evaluation.as_dict().get("generator_version") == selected_version
+                 and (selected_owner != _bakeoff.ARM_OWNER_BILATERAL
+                      or (card.owner_evaluation.matches(card)
+                          and getattr(card, "owner_published", False))))]
+
+
 @app.route("/api/trades")
 @_gate_unverified_read
 def get_trades():
@@ -15303,23 +15373,10 @@ def get_trades():
     g_user_id     = sess["user_id"]
     g_players     = sess["players"]
     league_id = request.args.get("league_id") or None
-    cards     = trade_service.get_pending_trades(
-        user_id   = g_user_id,
-        league_id = league_id,
-    )
-    selected_owner = _bakeoff.owner_arm()
+    cards = trade_service.get_pending_trades(user_id=g_user_id, league_id=league_id)
+    pending_owner_config = dict(_trade_service_mod._cfg)
     pending_exemptions = _significance_exemptions_for(trade_service)
-    cards = [card for card in cards
-             if card.league_id == "league_demo"
-             or pending_exemptions.get(_significance_card_key(card), (None,))[0] == "inbound" or (
-                 getattr(card, "owner_evaluation", None) is None
-                 and not (selected_owner == _bakeoff.ARM_OWNER_BILATERAL
-                          and _owner_enabled(card.league_id) and _bakeoff.serve_owner() and _bakeoff.owner_only()))
-             or (getattr(card, "owner_evaluation", None) is not None
-                 and card.owner_evaluation.as_dict().get("generator") == selected_owner
-                 and (selected_owner != _bakeoff.ARM_OWNER_BILATERAL
-                      or (card.owner_evaluation.matches(card)
-                          and getattr(card, "owner_published", False))))]
+    cards = _pending_owner_cards(cards, pending_owner_config, pending_exemptions)
     # Pending services can contain a newly minted card ID for an old package.
     # Filter by each card's league, never by a switched session's active alias.
     allowed = set()
@@ -15358,7 +15415,16 @@ def get_trades():
                 selected_receive_ids=receive, inbound_keys={key} if context == "inbound" else ())
             significant.extend(kept)
         cards = significant
-    return jsonify([trade_card_to_dict(c, players_dict) for c in cards])
+    output = [trade_card_to_dict(c, players_dict) for c in cards]
+    # Disposition/significance reads and serialization may overlap activation
+    # or rollback. Re-filter against the final model without deleting history,
+    # reinserting earlier exclusions, or suppressing inbound/demo cards.
+    final_owner_config = dict(_trade_service_mod._cfg)
+    if ((_bakeoff.owner_arm(pending_owner_config), _bakeoff.owner_version(pending_owner_config))
+            != (_bakeoff.owner_arm(final_owner_config), _bakeoff.owner_version(final_owner_config))):
+        retained = {id(c) for c in _pending_owner_cards(cards, final_owner_config, pending_exemptions)}
+        output = [row for card, row in zip(cards, output) if id(card) in retained]
+    return jsonify(output)
 
 
 def _reconstruct_swipe_card(trade_service, body: dict, user_id: str, league_id: str):

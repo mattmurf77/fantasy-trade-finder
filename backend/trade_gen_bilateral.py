@@ -451,7 +451,12 @@ def _rank(cards):
 def generate_bilateral_trades(**kwargs):
     """Build focal bilateral matches under computational, never output, caps."""
     search = _Search(**kwargs)
-    report = {"generator": ARM, "generator_version": VERSION, "evaluated": 0,
+    return _generate_with_search(search, ranker=_rank, version=VERSION)
+
+
+def _generate_with_search(search, *, ranker, version):
+    """Shared search/serialization loop; each version owns evaluation and rank."""
+    report = {"generator": ARM, "generator_version": version, "evaluated": 0,
               "partial_search": False, "budget_exhausted": False,
               "limits": {"pool": search.pool_size, "per_pair": search.pair_budget, "total": search.total_budget},
               "max_cards_ignored": search.max_cards is not None, "market_source_snapshot": search.market_snapshot,
@@ -505,7 +510,7 @@ def generate_bilateral_trades(**kwargs):
                     survivors.append(card)
             if streams:
                 report["budget_exhausted"] = True
-        emitted = _rank(survivors)
+        emitted = ranker(survivors)
         for index, card in enumerate(emitted):
             # Presentation rank, not a probability. Detailed support lives in
             # immutable private evidence and survives final revalidation.

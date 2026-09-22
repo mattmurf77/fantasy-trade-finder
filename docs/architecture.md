@@ -1,5 +1,36 @@
 # Architecture
 
+## Bilateral revision candidate (default dark, 2026-09-22)
+
+`trade_gen_bilateral_candidate.py` exposes separately versioned constructor and
+exact-proof evaluators, reusing a narrow generation helper in the unchanged
+incumbent. It keeps support weights fixed, makes future-portfolio composition
+explicit, labels absent projected-starter evidence, and applies bounded local
+same-focal price-efficiency precedence without dropping valid alternatives.
+`bakeoff_runner.owner_*` dispatches only when both bilateral and revision selectors
+are on. The arm identifier remains `owner_v2_bilateral`; constructor version is
+`owner-v2-bilateral-2`. Incumbent version -1 remains available for rollback.
+
+`trade_bilateral_presentment.present` is a separate pure permutation of final
+organic survivors: after dispositions/validity/significance, before the first
+durable batch. Policy `bilateral-survivors-3` preserves constructor price precedence,
+both managers' support bounds and known focal BUY/SELL direction at fixed baseline
+positions. Unknown personal evidence is not conviction. All occurrences, explicit
+selections and protected source slots remain intact.
+Private per-occurrence order evidence is frozen in impression features and the
+aggregate in the run record; polling cannot rerank a published snapshot. Model
+version fences cover admission, cache, proof reuse, pending inventory and batch
+publication, plus response-time checks after selected-offer persistence and pending
+card reads/serialization. Existing expressed interests retain original terms and evidence.
+
+`eval/capture_owner_benchmark.py` performs bounded read-only request/config export;
+`eval/bilateral_revision_benchmark.py` runs immutable incumbent and candidate in
+fresh offline processes and reports independent six-dimension coverage plus raw
+diagnostics. Constructor support is never the independent grade. This is local
+candidate implementation, not an assertion of live activation or release fitness.
+See [scope](plans/bilateral-model-revision/scope.md) and
+[status](plans/bilateral-model-revision/status.md).
+
 ## Independent model evaluation (offline foundation, 2026-09-22)
 
 `backend/eval/scorecard_dimensions.py` evaluates all six dimensions independently

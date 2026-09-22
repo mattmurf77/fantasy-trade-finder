@@ -1,0 +1,49 @@
+{
+  "version": "bilateral-revision-eval-1",
+  "frozen_before_candidate_results": true,
+  "baseline_commit": "ecda17d1",
+  "baseline_version": "owner-v2-bilateral-1",
+  "candidate_version": "owner-v2-bilateral-2",
+  "rank_cuts": [1, 5, 10, 30],
+  "stages": ["native", "post_significance", "post_survivor_order"],
+  "dimensions": ["fairness", "outlook", "team_needs", "personal_ranks", "meaningful", "stud_tax"],
+  "assessments": ["A.give", "A.receive", "A.package", "B.give", "B.receive", "B.package"],
+  "critical_properties": [
+    "exact_terms_owned_and_unique",
+    "selected_assets_retained_on_intended_side",
+    "no_expired_owned_pick",
+    "survivor_membership_and_multiplicity_preserved",
+    "protected_and_explicit_positions_preserved",
+    "no_grade_or_probability_from_constructor_utility",
+    "missing_counterparty_board_stays_unknown",
+    "legal_starter_assignment_no_double_use",
+    "required_cut_cost_not_hidden",
+    "tanking_own_next_draft_pick_protected_unless_selected",
+    "focal_preference_not_rescued_by_liked_filler",
+    "increased_preference_alone_does_not_increase_cheapest_target_price",
+    "true_empty_and_error_requests_retained"
+  ],
+  "comparators": {
+    "incumbent": "immutable baseline checkout, version 1",
+    "candidate": "candidate checkout, version 2, same frozen input/config",
+    "policy": "candidate native and significance survivors before/after pure ordering"
+  },
+  "diagnostics": ["raw_market_return", "best_asset_seller_raw_return", "focal_preference", "portfolio_direction", "shape", "repetition", "legal_projected_lineup_delta", "coverage", "budget", "native_latency"],
+  "cohort_rules": {
+    "development_holdout": "Before candidate outputs, join captured leagues sharing any initiating/counterparty manager; sort component hashes, assign every third to holdout; one component is evidence-limited",
+    "diagnostic_panel": "Before candidate outputs, choose smallest full input hash within each selected-outlook/scoring-format stratum, plus all heldout and constructed cases; preserve full capture inventory and exclusion counts",
+    "repeated_request_hash": "deduplicate identical frozen input, retain count",
+    "counterfactual_copies": "sensitivity only, not independent observed contexts",
+    "synthetic": "constructed correctness probes, no observed acceptance",
+    "confidence_intervals": "no causal or outcome CI without eligible cohort and independent clusters",
+    "empty_errors": "always retain request denominator"
+  },
+  "release": {
+    "critical_regressions_allowed": 0,
+    "candidate_utility_is_quality_truth": false,
+    "empirical_thresholds_ratified": false,
+    "required_observed_coverage_available": false,
+    "offline_result_cannot_authorize_broad_promotion": true,
+    "missing_evidence_status": "evidence-limited"
+  }
+}

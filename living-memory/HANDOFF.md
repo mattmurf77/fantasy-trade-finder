@@ -1,13 +1,13 @@
 # HANDOFF
 
 ## Current state
-App-open trade preparation implemented on `codex/app-open-trades` from production 57c37c26. Server warm-up already existed but used 0.75 instead of native default 0.5; failed cached jobs prevented retries. Fixed default/persisted preference transport, error retry and compatible-running reuse; removed duplicate onboarding-gated native POST. [Scope/evidence](../docs/plans/app-open-trades/status.md).
+Bilateral revision work is isolated at `/private/tmp/fleeced-bilateral-revision-20260922`, branch `codex/bilateral-revision-20260922`, based on ecda17d1 (offline evaluator foundation). Candidate owner-v2-bilateral-2 and presentation bilateral-survivors-3 remain default-off and unshipped. [Status/evidence](../docs/plans/bilateral-model-revision/status.md).
 
 ## In flight
-Full checks and release. 116 focused backend tests, 39 native lifecycle checks, fairness/ownership guards, TypeScript and web 195/195 passed. Device checklist unrun. Native changes require a build; backend default can help installed clients. Fresh generation itself remains too slow (recent larger jobs 37–42 seconds).
+Owner renewed iteration and conditional release. Full backend6690 passed/1 skipped; mobile checks/typecheck and web195 passed. Policy3 retained69-context replay has no errors; mixed quality and missing bilateral evidence remain. Round6 agent specs cover early validated delivery, private authenticated proof reuse, and future age provenance. Parent reviews before any deployment.
 
 ## Blocked on
-No implementation blocker. Release state must be recorded before claiming live behavior.
+Latency fails: proof-only private prototype12.89s first durable versus8.68s incumbent, despite31% candidate speedup; not integrated. No production/load/device success or hosted exact-head CI yet. Owner answer pending on bilateral meaningfulness. Existing data lack actual starter projections/cuts for captured requests.
 
 ## Do not repeat
-Preserve unrelated team-overhaul checkout and legacy worktrees. No candidate/offer caps, safety bypass or removed durable evidence. No simulator. Do not equate pre-generation with measured three-second fresh generation.
+Preserve canonical Fleeced and legacy dirty checkouts. No output caps, safety bypass, erased old interests, fabricated acceptance grades or simulator. No production writes, push, deploy or TestFlight yet. All timing captures are local; all new runtime changes need fresh tests and review.

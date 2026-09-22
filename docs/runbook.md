@@ -4,6 +4,26 @@
 
 Operational procedures. Add to this as you learn things.
 
+## Bilateral revision evaluation and rollback
+
+Revision selector `owner_bilateral_revision_enabled` defaults to 0. Do not infer
+live state from a branch or this document. Before activation, review the revision
+[status](plans/bilateral-model-revision/status.md), independent comparison,
+release gates and exact-head CI. Preserve owner include/serve/exclusive and all
+unrelated arms/settings. Existing `scripts/set_knob.py` performs audited hot-reload
+changes; set the revision knob to 0 and read authenticated `/api/admin/config`
+back for deploy-free rollback to bilateral version -1. Only exactly 1 enables -2,
+and only if bilateral itself is selected. Never use direct DB writes for knobs.
+
+Offline export: `python -m backend.eval.capture_owner_benchmark --secrets
+<existing-secrets-path> --output <new-private-json>` uses the established
+read-only production engine with statement timeout and at most 100 recent run
+rows. Supply the established HTTPS API base through `FTF_API_BASE` if not locally
+configured. Output is exclusive-create mode 0600; never commit it or copy private
+boards into reports. No server imports, provider writes or app traffic generation.
+Missing fields remain missing. Fresh-process comparison commands and data-source
+hashes belong in the initiative's evaluation evidence, not an asserted live grade.
+
 
 ## Table of Contents
 

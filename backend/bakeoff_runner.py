@@ -283,7 +283,17 @@ def owner_arm(config=None) -> str:
     return ARM_OWNER_BILATERAL if value == 1.0 else ARM_OWNER
 
 
+def owner_revision_enabled(config=None) -> bool:
+    """Separate default-dark revision; never enables or replaces another arm."""
+    value = (_cfg("owner_bilateral_revision_enabled", 0.0) if config is None
+             else config.get("owner_bilateral_revision_enabled", 0.0))
+    return owner_arm(config) == ARM_OWNER_BILATERAL and value == 1.0
+
+
 def owner_generator(config=None):
+    if owner_revision_enabled(config):
+        from .trade_gen_bilateral_candidate import generate_bilateral_trades
+        return generate_bilateral_trades
     if owner_arm(config) == ARM_OWNER_BILATERAL:
         from .trade_gen_bilateral import generate_bilateral_trades
         return generate_bilateral_trades
@@ -292,6 +302,9 @@ def owner_generator(config=None):
 
 
 def owner_version(config=None) -> str:
+    if owner_revision_enabled(config):
+        from .trade_gen_bilateral_candidate import BILATERAL_GENERATOR_VERSION
+        return BILATERAL_GENERATOR_VERSION
     if owner_arm(config) == ARM_OWNER_BILATERAL:
         from .trade_gen_bilateral import BILATERAL_GENERATOR_VERSION
         return BILATERAL_GENERATOR_VERSION
@@ -300,6 +313,9 @@ def owner_version(config=None) -> str:
 
 
 def owner_evaluator(config=None):
+    if owner_revision_enabled(config):
+        from .trade_gen_bilateral_candidate import evaluate_bilateral_trades
+        return evaluate_bilateral_trades
     if owner_arm(config) == ARM_OWNER_BILATERAL:
         from .trade_gen_bilateral import evaluate_bilateral_trades
         return evaluate_bilateral_trades

@@ -1,5 +1,13 @@
 # Model revision plan — evidence-led bilateral discovery
 
+Implementation follow-through (2026-09-22): the owner approved this plan and
+requested parent-written specs, subagent implementation, independent evaluation
+and conditional release. See [revision status](../bilateral-model-revision/status.md),
+[model card](../bilateral-model-revision/model-card.md) and
+[evaluation evidence](../bilateral-model-revision/evaluation-evidence.md).
+The proposal below records the original full scope; that work must not be
+mistaken for completed representative grading, projection ingestion or live rollout.
+
 September 22, 2026. **Proposal, not implemented or deployed.** Uses the [three-model comparison](comparison-2026-09-22.md) and the [reviewed evaluation framework](scorecard-spec.md). The offline evaluator is built; representative grading, threshold ratification and production measurement are unfinished work, not completed gates.
 
 ## 1. Recommendation and decision rule

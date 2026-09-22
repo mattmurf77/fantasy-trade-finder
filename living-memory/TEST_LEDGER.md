@@ -1,3 +1,24 @@
+## 2026-09-22 — Bilateral revision, iterative evaluation (not released)
+
+Parent specifications preceded three Astra Ultra implementation lanes. Current
+isolated branch `codex/bilateral-revision-20260922`, base `ecda17d1`.
+Final source-frozen backend **6,690 passed /1 skipped in372.75s** on local
+Python3.14.4/isolated SQLite; opt-in captured2025 backtest skipped. Current
+policy/candidate/incumbent focused229 and route/overhaul56 green; four new real
+rollback-boundary tests were RED before parent fixes. Native TypeScript, all99
+structural suites/test-ID lint and195 web checks passed; no client edits.
+
+Bounded read-only capture77 distinct requests; locked comparison12 real+57
+constructed per model. Price sensitivity repaired; mixed focal/repetition/raw
+return diagnostics and six-dimensional evidence gaps prevent an acceptance claim.
+Policy3 retained replay69/69 has exact old-policy order bridge, no inventory
+changes/errors/quarantines, and a disclosed meaningfulness prefix trade-off.
+Actual-worker first durable30 regressed8.69→18.66s; private single-freeze parity
+prototype saves14% but is insufficient and unintegrated. Further equivalent
+performance work and input-evidence audit continue under renewed owner authority.
+No production write, toggle, push, hosted CI, deploy or TestFlight upload.
+[Evidence and current decision](../docs/plans/bilateral-model-revision/release-decision.md).
+
 ## 2026-09-22 — Independent model scorecard, offline foundation
 
 Three Astra Ultra workstreams plus parent integration and cross-review on isolated

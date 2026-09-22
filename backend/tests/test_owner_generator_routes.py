@@ -228,6 +228,11 @@ def worker(owner_harness, monkeypatch, *, give=(), receive=(), opponent=None, ex
            "started_at": time.monotonic(), "finished_at": None, "cards": [],
            "opponents_done": 0, "opponents_total": 2, "error": None,
            "fairness_threshold": .5, "outlook_value": None, "is_pinned": bool(give or receive)}
+    # Mirror production admission: the worker must not silently adopt a model
+    # activated after the request was queued.
+    job["owner_model"] = server._bakeoff.owner_arm()
+    if server._bakeoff.owner_revision_enabled():
+        job["owner_model_version"] = server._bakeoff.owner_version()
     monkeypatch.setitem(server._trade_jobs, job_id, job)
     server._run_trade_job(job_id, TOKEN, LEAGUE, .5, list(give), list(receive), opponent)
     assert job["status"] == ("error" if expected_error else "complete"), job
