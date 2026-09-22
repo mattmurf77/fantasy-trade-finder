@@ -4,6 +4,51 @@
 
 Source of truth: `backend/database.py`. Keep this file in sync when adding/changing tables or columns. DB: SQLite at `data/trade_finder.db` (overridable via `DATABASE_URL`). All tables defined as SQLAlchemy Core (`metadata`).
 
+## Private prepared trade inventory
+
+Additive SQLAlchemy Core tables, bootstrapped through normal metadata registration;
+no account/session is created by preparation. These are private operational and
+offer-evidence records, **not** human exposures, decisions or acceptance labels.
+Release evidence: [status](plans/prepared-trade-inventory/status.md).
+
+| Table | Grain and fields |
+|---|---|
+| `prepared_trade_inventories` | One replaceable artifact per unique `scope_key`: `inventory_id` PK; owner `user_id`, `league_id`; `schema_version`, original `created_at`/`expires_at`; `dependency_hash`, `model_hash`, `card_count`, `payload_sha256`, encoded `payload_json`; adoption lease `adoption_token`/`adoption_lease_until`, durable `adoption_prefix`, frozen `adoption_json` and its `adoption_sha256` checksum. |
+| `prepared_trade_sweeps` | One immutable idempotency/cohort binding: `sweep_id` PK, unique `idempotency_key`, `cohort_hash`, aggregate `coverage_json`, `created_at`, `updated_at`, `status`, initial `target_count`, `deleted_count`. Cohort coverage includes discovery completeness/reasons and survives restart separately from resolved target counts. |
+| `prepared_trade_targets` | One scope per sweep, unique `(sweep_id,scope_key)`: `target_id` PK, `user_id`, private `payload_json`, `status`/safe machine `reason`, `attempts`, `max_attempts`, `available_at`, `lease_token`/`lease_until`, resulting `inventory_id`, `updated_at`. |
+| `prepared_trade_participants` | Compound PK `(subject_kind,subject_id,participant_user_id)` plus owning `user_id`. Indexes every manager whose data the target/artifact consumes, including canonical coowner identity and non-app opponents. |
+| `prepared_trade_worker` | Singleton `worker_id` with `lease_token`, `lease_until`, `target_id`; serializes background preparation claims across workers and permits expired-claim recovery. |
+
+Scope includes account working-user, league, canonical league-user, scoring format
+and exact request key (including fairness). The logical payload is a checksummed,
+versioned strict-JSON envelope containing scope, participants, identity lifetime,
+dependency/model receipts, full ordered card bundle and deferred publication effects.
+The card bundle preserves explicit runtime fields, original public snapshots,
+immutable valuation proofs, source-like links, candidate-set membership and scoped
+diagnostic snapshots. No pickle/arbitrary class reconstruction or credentials.
+`payload_json` stores `prepared-zlib-base64-1:` followed by base64-encoded zlib
+(level 6) bytes. `payload_sha256` binds the original canonical UTF-8 JSON, not its
+compressed representation. Limits are 64 MiB logical JSON and 2 MiB encoded SQL
+value (including prefix). Exceeding either fails visibly without truncating offers
+or replacing the previous artifact. Decoding is bounded while inflating and rejects
+invalid base64/UTF-8, incomplete or trailing streams, and checksum mismatches.
+Legacy plain JSON remains readable only within both limits; no unknown codec is
+accepted. This compression is unrelated to HTTP content encoding.
+
+Maximum retention is 24 hours from original creation and is never extended on
+read. Original card expiry and current-source validation can reject an artifact
+earlier. A valid empty inventory is distinct from missing/error. Receipts bind
+semantic inputs rather than provider poll timestamps or replace-sync surrogate IDs;
+a receipt hash by itself does not prove source freshness. Adoption records the
+original immutable evidence using actual publication time before public exposure.
+
+Account deletion removes entire disposable inventories and targets that contain
+any resolved deleted participant/alias, in the account lifecycle transaction, and
+fences late claims. It does not rewrite or anonymize retained trade history.
+Account export includes owned private prepared inventories, targets and participant
+rows; internal adoption/worker lease tokens are excluded from exported records.
+Operational aggregate counts never imply an actual card view.
+
 ## Bilateral evidence (existing JSON columns)
 
 No table/column migration is added for `owner_v2_bilateral`. Existing private

@@ -1,4 +1,6 @@
 {
+  "trade.prepared_inventory": true,
+  "_comment_prepared_inventory": "Persistent silent preparation capability. Actual preparation/adoption ships dark behind audited model_config prepared_trade_inventory_enabled=0. No model/offer limits change. See docs/plans/prepared-trade-inventory/plan.md.",
   "outlook.season_projections": true,
   "trades.win_now": true,
   "outlook.championship_probabilities": true,

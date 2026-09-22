@@ -971,6 +971,7 @@ FLAG_KEYS: tuple[str, ...] = (
     # OFF (default) ⇒ no fan-out, no interleave, no new columns stamped, no
     # bakeoff_runs row, swipe K factors untouched — byte-identical serving.
     "trade.bakeoff",
+    "trade.prepared_inventory",  # capability; default-dark audited numeric rollout
     # ── Trade-suggestion presentation v2 (docs/plans/trade-presentation-v2/) ──
     # CLIENT-ONLY. No route reads this key; it is registered here so the
     # features-json-keys-known guard accepts it and so /api/flags serves it

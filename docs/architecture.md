@@ -1,5 +1,48 @@
 # Architecture
 
+## Persistent silent trade preparation
+
+`prepared_trade_cohort` resolves verified existing app users against fresh known
+league sources, with separate account and canonical team identities. It never
+imports unrelated leagues, creates a bearer session, or treats opponents as app
+users. Two Sleeper coowners share a roster but retain separate rankings/artifacts.
+Imported sources preserve native synthetic opponent identity and require retained
+team-binding evidence; source/auth/unknown limitations are explicit.
+Fresh Sleeper source teams retain reserve/taxi assignments separately from player
+ownership; absent availability evidence on other inputs remains explicitly unknown.
+
+`prepared_trade_runtime` supplies a private, unregistered headless ranking context
+using ordinary swipe/override replay and the existing full organic Bilateral2
+worker. Fresh Sleeper/MFL pick inputs feed existing quiet normalizers. It captures
+semantic roster/pick/board/preferences/history/player/config/model dependencies
+before and after construction. The worker's preparation sink withholds evidence
+publication and side effects; no fake user activity or notification is generated.
+
+`prepared_trade_payload` captures allowlisted runtime/public card records and the
+logger's candidate/impression/diagnostic bundle. Restore validates the entire
+binding before yielding data, preserves proof bytes and terms without reevaluation,
+and rejects mutation before publication. `prepared_trade_store` atomically saves
+strict JSON plus checksum/receipt/participant index under a durable work lease.
+The SQL value uses fixed zlib/base64 encoding, bounded to 2 MiB encoded and 64 MiB
+decoded; logical JSON hashes and card order are unchanged. Decompression is
+output-bounded and rejects corrupt/trailing streams rather than loading an
+unbounded object graph or truncating the offer inventory.
+Full inventories, including valid empty inventories, survive process restart.
+
+Normal Find revalidates current identity, source, exact request/dependencies and
+original expiry. A miss runs ordinary generation. A hit commits original evidence
+before exposing the first 30 cards, then later 100-card batches, with durable
+adoption progress and no inventory cap. Preparation and actual publication are
+different states; publication itself is not proof of a view or acceptance.
+
+Artifacts expire at most 24 hours after creation without renewal; original card
+expiry and the normal 30-minute memory-job bound also apply. Maintenance is silent,
+sequential and cooperative with interactive work, distinct from notification cron.
+Participant-aware account deletion removes disposable prepared data and fences
+late writes. Feature capability plus a default-zero audited numeric control gate
+the workflow. [Validation/status](plans/prepared-trade-inventory/status.md) records
+pending whole-system/release proof; caching alone establishes no device latency KPI.
+
 ## Bilateral revision candidate (default dark, 2026-09-22)
 
 `trade_gen_bilateral_candidate.py` exposes separately versioned constructor and

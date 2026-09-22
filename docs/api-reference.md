@@ -4,6 +4,32 @@
 
 The Flask app lives in `backend/server.py`; domain route modules such as `backend/win_now_api.py` register on that app. Same-origin from web; mobile + extension hit the deployed host. Keep this file in sync when adding/renaming/removing routes.
 
+## Silent prepared trade inventory
+
+Operator-only `/api/admin/prepared-trades` uses existing `X-Cron-Secret`
+authorization, not a user session. The implementation is locally under validation;
+[initiative status](plans/prepared-trade-inventory/status.md) records release evidence.
+
+| Method | Request | Response / semantics |
+|---|---|---|
+| POST | JSON `idempotency_key` (nonempty string, at most 200 characters), optional boolean `dry_run` (default false), optional nonempty `user_id`, `league_id` strings | 202 asynchronous discovery/progress. Dry run reads providers but creates no prepared offers. Invalid input is 400; disabled non-dry-run is 409 `prepared_inventory_disabled`. |
+| GET | Optional `sweep_id` query | 200 aggregate process or durable sweep status; missing requested sweep is 404 `not_found`. No private manager boards, credentials or target identity list. |
+| DELETE | JSON nonempty `sweep_id` | 200 `{stopped:boolean}`; missing ID is 400. Cancels outstanding preparation claims, not prior user decisions or the global adoption capability. |
+
+Durable target states distinguish pending/running, ready/empty/reused, deferred,
+unsupported/source_error/stale/error/cancelled. `target_count` is the resolved
+target denominator, not proof every known league was reachable. Persisted aggregate
+`coverage` records cohort discovery reasons/completeness separately. `unexpired_artifacts` is explicitly accompanied
+by `freshness_requires_source_revalidation:true`; TTL alone never establishes a hit.
+
+Ordinary Find retains its existing public request/status contract. Only an exact
+default organic scope can adopt; pinned/partner/intent requests retain ordinary
+generation. Binding/source/model/dependency/expiry mismatches fall back to fresh
+generation. Adoption commits original exact-offer evidence before exposing the
+first 30 cards and later 100-card batches; these are publication batches, not an
+inventory cap. Preparation emits no shown/view/like/proposal, login or notification.
+See [runbook](plans/prepared-trade-inventory/runbook.md).
+
 ### Bilateral owner identity
 
 Trade-card/selected-idea `model_arm` also admits `owner_v2_bilateral`, with
