@@ -57,6 +57,31 @@ def generate(client, view):
     return response.json
 
 
+@pytest.mark.parametrize("before_version,after_version", [("1", "2"), ("2", "1")])
+def test_same_arm_revision_and_rollback_preserve_liked_history(
+        switched_api, world, before_version, after_version):
+    world.identity = {"model_arm": "owner_v2_bilateral",
+                      "generator_version": "owner-v2-bilateral-" + before_version}
+    view, old = _setup(switched_api)
+    oid, liked = view["overhaul_id"], old["offers"][0]
+    response = switched_api.post(f"/api/overhauls/{oid}/decisions", headers=_h(), json={
+        "revision": view["revision"], "decisions": [
+            {"offer_id": liked["offer_id"], "decision": "like", "client_key": "revision-like"}]})
+    assert response.status_code == 200
+    prior = raw_offers(oid)
+    world.identity["generator_version"] = "owner-v2-bilateral-" + after_version
+    pending = switched_api.get(f"/api/overhauls/{oid}/offers", headers=_h()).json
+    assert pending["offers"] == []
+    assert raw_offers(oid) == prior
+    new = generate(switched_api, view)
+    assert new["offers"]
+    assert new["generation"]["generation_identity"] == world.identity
+    after = raw_offers(oid)
+    assert after[liked["offer_id"]] == prior[liked["offer_id"]]
+    for offer_id in prior:
+        assert after[offer_id]["evidence_json"] == prior[offer_id]["evidence_json"]
+
+
 def test_switch_hides_only_undecided_old_inventory_without_mutating_get_history(switched_api, world):
     view, old = _setup(switched_api)
     oid = view["overhaul_id"]

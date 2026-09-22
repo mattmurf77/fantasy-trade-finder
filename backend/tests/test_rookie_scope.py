@@ -22,6 +22,7 @@ the route wiring is what's under test, and a real `RankingService` where the
 merge arithmetic is.
 """
 import json
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -438,7 +439,9 @@ def client(monkeypatch):
     sess = {"verified": True,
         "user_id": UID,
         "active_format": "1qb_ppr",
-        "last_active": 0.0,
+        # A real cleanup tick may run before this fixture's first request.
+        # This test exercises rookie scope, not an already-expired session.
+        "last_active": time.time(),
         "service": svc,
         "league": League(league_id=LEAGUE_ID, name="M2",
                          platform="sleeper", members=[]),
@@ -471,6 +474,13 @@ def _get(c, path, expect=200):
     r = c.get(path, headers={"X-Session-Token": TOKEN})
     assert r.status_code == expect, r.data
     return json.loads(r.data)
+
+
+def test_route_fixture_starts_inside_session_idle_window(client):
+    """A cleanup tick before the first request must not evict this fixture."""
+    with server._sessions_lock:
+        last_active = server._sessions[TOKEN]["last_active"]
+    assert last_active > time.time() - 4 * 3600
 
 
 # ═══════════════════════════════════════════════════════════════════════════

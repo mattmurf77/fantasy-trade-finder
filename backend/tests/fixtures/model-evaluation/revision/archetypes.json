@@ -1,0 +1,53 @@
+{
+  "version": "constructed-archetypes-1",
+  "data_kind": "synthetic",
+  "captured_at": "2026-09-21T00:00:00Z",
+  "outlooks": ["jets", "rebuilder", "contender", "championship"],
+  "board_states": ["full", "sparse", "none"],
+  "base": {
+    "user_id": "A",
+    "user_roster": ["a_rb", "a_wr", "a_qb", "a_te", "pick_L_2027_1_A"],
+    "players": {
+      "a_rb": {"position": "RB", "age": 27, "team": "SYN"},
+      "a_wr": {"position": "WR", "age": 22, "team": "SYN"},
+      "a_qb": {"position": "QB", "age": 26, "team": "SYN"},
+      "a_te": {"position": "TE", "age": 30, "team": "SYN"},
+      "b_wr": {"position": "WR", "age": 23, "team": "SYN"},
+      "b_rb": {"position": "RB", "age": 29, "team": "SYN"},
+      "b_qb": {"position": "QB", "age": 27, "team": "SYN"},
+      "b_te": {"position": "TE", "age": 24, "team": "SYN"},
+      "pick_L_2027_1_A": {"position": "PICK", "age": 0, "team": "PICK"},
+      "pick_L_2027_1_B": {"position": "PICK", "age": 0, "team": "PICK"}
+    },
+    "seed_elo": {"a_rb": 1700, "a_wr": 1710, "a_qb": 1530, "a_te": 1420, "b_wr": 1650, "b_rb": 1580, "b_qb": 1540, "b_te": 1500, "pick_L_2027_1_A": 1600, "pick_L_2027_1_B": 1600},
+    "user_elo": {"a_rb": 1600, "a_wr": 1790, "a_qb": 1530, "a_te": 1370, "b_wr": 1740, "b_rb": 1510, "b_qb": 1540, "b_te": 1560},
+    "user_sources": {"a_rb": "explicit", "a_wr": "explicit", "a_qb": "explicit", "a_te": "explicit", "b_wr": "explicit", "b_rb": "explicit", "b_qb": "explicit", "b_te": "explicit"},
+    "members": [{"id": "B", "roster": ["b_wr", "b_rb", "b_qb", "b_te", "pick_L_2027_1_B"], "elo": {"a_rb": 1770, "a_wr": 1710, "a_qb": 1530, "a_te": 1470, "b_wr": 1570, "b_rb": 1610, "b_qb": 1540, "b_te": 1500}}],
+    "opponent_sources": {"B": {"a_rb": "explicit", "a_wr": "explicit", "a_qb": "explicit", "a_te": "explicit", "b_wr": "explicit", "b_rb": "explicit", "b_qb": "explicit", "b_te": "explicit"}},
+    "scoring_format": "1qb_ppr",
+    "fairness_threshold": 0.75,
+    "outlook": "jets",
+    "opponent_outlooks": {"B": "contender"},
+    "manager_preferences": {"A": {"next_draft_year": 2027}, "B": {"next_draft_year": 2027}}
+  },
+  "interventions": [
+    {"id": "target_preference_lower", "personal_elo": {"b_wr": 1670}},
+    {"id": "target_preference_higher", "personal_elo": {"b_wr": 1840}},
+    {"id": "sell_preference_lower", "personal_elo": {"a_rb": 1490}},
+    {"id": "sell_preference_higher", "personal_elo": {"a_rb": 1760}},
+    {"id": "explicit_own_next_first", "replace": {"pinned_give_players": ["pick_L_2027_1_A"]}},
+    {"id": "explicit_three_asset_give", "replace": {"pinned_give_players": ["a_rb", "a_te", "a_qb"], "exact_give": true}},
+    {"id": "explicit_target", "replace": {"pinned_receive_players": ["b_wr"]}},
+    {"id": "superflex", "replace": {"scoring_format": "sf_ppr"}},
+    {"id": "empty_invalid_pin", "replace": {"pinned_give_players": ["missing_synthetic_asset"]}}
+  ],
+  "expected_properties": {
+    "all_pairs": "Explicit outlook authority preserved; no acceptance or projection evidence invented",
+    "sparse_none": "Unknown board coverage remains explicit on both sides",
+    "target_preference": "At fixed reference prices, higher personal preference cannot increase cheapest retained price for an identical target return",
+    "selected": "Every emitted package contains all selected assets on the requested side",
+    "explicit_three_asset_give": "No implicit two-asset cap for deliberate larger selections",
+    "empty_invalid_pin": "Empty is retained in attempted-request denominator",
+    "market_stud": "Additive reference imbalance is diagnostic only; without a reviewed band no stud/fairness pass"
+  }
+}

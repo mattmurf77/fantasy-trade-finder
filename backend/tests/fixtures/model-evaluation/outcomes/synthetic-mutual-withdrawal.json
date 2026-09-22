@@ -1,0 +1,82 @@
+{
+  "evidence_class": "synthetic_contract_fixture_not_model_performance",
+  "cutoff": "2026-02-10T00:00:00Z",
+  "cohort": {
+    "cohort_id": "synthetic-cohort",
+    "eligibility_rule": "synthetic-pre-period-linked-leagues-v1",
+    "frozen_at": "2025-12-30T00:00:00Z",
+    "window_start": "2026-01-01T00:00:00Z",
+    "window_end": "2026-01-15T00:00:00Z",
+    "followup": {
+      "post_milestone_seconds": 604800,
+      "completion_seconds": 1209600,
+      "ingestion_lag_seconds": 86400
+    },
+    "members": [
+      {
+        "manager_id": "synthetic-a",
+        "league_id": "synthetic-league",
+        "cluster_id": "synthetic-cluster",
+        "assigned_at": "2025-12-31T00:00:00Z",
+        "assignment_arm": "synthetic-X",
+        "request_count": 1,
+        "observation_complete": true
+      },
+      {
+        "manager_id": "synthetic-silent-member",
+        "league_id": "synthetic-league",
+        "cluster_id": "synthetic-cluster",
+        "assigned_at": "2025-12-31T00:00:00Z",
+        "assignment_arm": "synthetic-X",
+        "request_count": 0,
+        "observation_complete": true
+      }
+    ]
+  },
+  "episodes": [
+    {
+      "episode_id": "synthetic-episode",
+      "concept_id": "synthetic-exact-concept",
+      "participants": ["synthetic-a", "synthetic-b"],
+      "generated_at": "2026-01-01T00:00:00Z",
+      "start_at": "2026-01-01T00:00:00Z",
+      "expires_at": "2026-01-15T00:00:00Z",
+      "origin": {
+        "cohort_id": "synthetic-cohort",
+        "manager_id": "synthetic-a",
+        "league_id": "synthetic-league",
+        "request_id": "synthetic-request",
+        "assignment_arm": "synthetic-X",
+        "model_id": "synthetic-constructor",
+        "model_version": "fixture-v1",
+        "selected_source": "synthetic-constructor",
+        "generating_sources": ["synthetic-constructor"]
+      },
+      "followup": {
+        "post_milestone_seconds": 604800,
+        "completion_seconds": 1209600,
+        "ingestion_lag_seconds": 86400
+      },
+      "observation": {
+        "complete_through": "2026-02-10T00:00:00Z",
+        "post_milestone_complete_through": "2026-02-10T00:00:00Z",
+        "completion_supported": false,
+        "completion_complete_through": null
+      },
+      "events": [
+        {"event_id":"view-a","concept_id":"synthetic-exact-concept","at":"2026-01-01T00:00:00Z","type":"view","actor_id":"synthetic-a","verified":true},
+        {"event_id":"like-a","concept_id":"synthetic-exact-concept","at":"2026-01-02T00:00:00Z","type":"like","actor_id":"synthetic-a"},
+        {"event_id":"view-b","concept_id":"synthetic-exact-concept","at":"2026-01-04T00:00:00Z","type":"view","actor_id":"synthetic-b","verified":true,"source":"likes-you"},
+        {"event_id":"like-b","concept_id":"synthetic-exact-concept","at":"2026-01-04T00:00:00Z","type":"like","actor_id":"synthetic-b"},
+        {"event_id":"withdraw-a","concept_id":"synthetic-exact-concept","at":"2026-01-06T00:00:00Z","type":"withdraw","actor_id":"synthetic-a"}
+      ]
+    }
+  ],
+  "expected": {
+    "historical_mutual_numerator": 1,
+    "fixed_eligible_denominator": 2,
+    "non_reversed_numerator": 0,
+    "guardrail_status": "unratified",
+    "willingness_probability": null
+  }
+}

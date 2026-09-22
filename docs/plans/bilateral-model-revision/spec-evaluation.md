@@ -1,0 +1,19 @@
+# Agent C specification — independent revision evaluation and corpus
+
+Read scope.md, the full ../model-evaluation-framework scorecard-spec.md, metrics/charter under ../../model-evaluation, and comparison/validation. Model Astra Ultra; worktree /private/tmp/fleeced-bilateral-revision-20260922. Independent evaluator must not use candidate weights/utility as its quality truth.
+
+## Ownership
+
+Own backend/eval/bilateral_revision_benchmark.py, backend/tests/test_bilateral_revision_benchmark.py, new synthetic fixtures under backend/tests/fixtures/model-evaluation/revision/, and docs/plans/bilateral-model-revision/evaluation-spec.md + evaluation-evidence.md. No generator/presentment/scorecard dimensions/outcomes edits unless parent authorizes after a real evaluator defect. No prod writes, no acceptance claims from generated counts. Parent handles credentialed read-only export; tell parent required exact tables/fields if local corpus insufficient.
+
+## Deliver
+
+1. BEFORE examining candidate outputs, freeze a machine-readable evaluation/gate spec. Reuse six independent dimensions, A/B give/receive/package, coverage/Unknown, four-layer attribution, zero/error denominators. Predeclare critical tests and comparator requirements; no post-hoc target chosen to favor candidate. Baseline is incumbent -1 at ecda17d1, not owner-v1 or changed code mislabeled baseline. Candidate -2 + policy tested separately and together.
+2. Inventory existing local private artifacts for additional independent full request snapshots using scoped discovery (/private/tmp/trade-latency-private-config.json, /private/tmp/ktc-benchmark-artifacts and known prior replay dirs). Only aggregates in output. One real request with variants remains one independent context. Request parent export if more data needed; avoid silently expanding permission or loading unrelated userdata.
+3. Build independent synthetic/archetype probes across outlook pairs, sparse/full/no boards, legal starter displacement/cuts, own-next-year picks, selected pins, complexity, significance, stud compensation and preference perturbations. Clearly label constructed data and fixture annotations synthetic; test input sensitivity and price-efficiency without adopting candidate's own score as truth. Include adverse examples and known deliberate bugs, not all green toy trades. Freeze expected properties before running candidate. Counterfactual copies are sensitivity tests, not observed acceptance.
+4. Build runner to compare immutable baseline and candidate entrypoints on same captured inputs/config in fresh isolated processes with sockets blocked; keep full inventory, report native/post-significance/post-survivor-order first1/5/10/30 and full. May compose existing scorecard_replay normalization/runner without weakening its exact snapshot/version rules. Baseline and candidate separate model/variant IDs. Report membership/quality/latency/coverage, budgets and changed directions. Handle zero output and missing contexts honestly.
+5. Where possible expose independent normalized raw market/stud diagnostics, focal preference, plan portfolio, repetition, and actual legal projected starter changes. Existing KTC/DP/Sleeper data are reference/accepted-only shape evidence; no rejection/acceptance model from positive-only labels. Framework release status stays evidence-limited if required observed evidence/ratification missing.
+
+## Review / handoff
+
+Return required capture contract early, then runnable CLI/tests and durable report. Agent code must not change release thresholds after seeing candidate. Parent will run final comparison, review failures, assign second round if needed and conditionally release only if full evidence supports it. Explicitly distinguish code defects fixable next round from missing observations that cannot be coded into existence.

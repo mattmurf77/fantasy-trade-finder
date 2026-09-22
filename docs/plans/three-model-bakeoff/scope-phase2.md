@@ -1,5 +1,10 @@
 # Feature Scope — Three-model bake-off, Phase 2: pin arm A
 
+2026-09-22 inventory amendment: `owner_bilateral_revision_enabled` is EXCLUDED
+from both legacy profiles. It dispatches between separately versioned owner
+constructors only when the bilateral owner arm is selected. Neither arm A nor
+the legacy challenger reads it; their golden output and profiles are unchanged.
+
 2026-09-20 inventory amendment: `owner_bilateral_enabled` is excluded from
 `MODEL_A_PROFILE` and `MODEL_CHALLENGER_PROFILE`. It selects which independent
 owner constructor runs outside legacy arms; pinning it cannot affect either

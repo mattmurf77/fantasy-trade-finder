@@ -1,0 +1,18 @@
+{
+  "acquire_positions": [
+    "TE",
+    "RB"
+  ],
+  "captured_at": "2026-09-19T16:43:46.299183+00:00",
+  "initiating_board_entries": 580,
+  "lineup_source": "estimated",
+  "market_source_as_of": "unavailable",
+  "opponents": 13,
+  "opponents_with_nonempty_board": 0,
+  "player_records": 580,
+  "scoring_format": "1qb_ppr",
+  "seed_universe_assets": 580,
+  "selected_outlook": "jets",
+  "source_capture_sha256": "e64f8267958dc56826e24f470d46056414cdf99dd1e0be66d7e958c276223b22",
+  "starter_slot_count": 0
+}

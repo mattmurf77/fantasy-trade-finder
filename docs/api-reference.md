@@ -7,7 +7,8 @@ The Flask app lives in `backend/server.py`; domain route modules such as `backen
 ### Bilateral owner identity
 
 Trade-card/selected-idea `model_arm` also admits `owner_v2_bilateral`, with
-`generator_version: owner-v2-bilateral-1`. Preserve server recommendation order for
+`generator_version: owner-v2-bilateral-1` (incumbent) or
+`owner-v2-bilateral-2` when the separately controlled revision is selected. Preserve server recommendation order for
 both owner models. There is no public probability, counterparty ranking/tier, or
 private support-component payload. Existing one-click disposition and impression
 IDs retain their contracts. Polling a pre-switch job can return empty cards with
@@ -390,8 +391,25 @@ fallback. No three-second response guarantee follows from this contract.
 Ordinary identical in-flight requests share an atomic job claim. Preference,
 fairness, intent or captured configuration differences must not reuse the old job;
 selected searches keep their separate uncached behavior. Rank/preference
-invalidation also fences already-running work. Reuse remains process-local, with
-no claim of a complete durable provider/market dependency cache.
+invalidation also fences already-running work. This includes existing
+in-process invalidations of a captured league member's board or league outlook,
+not only the requesting manager's changes. A revoked prepared job returns empty
+cards with `status: error, error: inputs_changed`; a new ordinary generate request
+may admit current work. Original likes/impressions and their valuation evidence
+are preserved. Unrelated users outside the captured league and another league's
+scoped preference invalidations do not revoke the job. Reuse remains process-local,
+with no claim of complete provider/roster/pick/market freshness or detection of
+out-of-process database updates.
+
+The seven explicit ranking-publication routes also fence dependent work after
+the write attempt, including failed or uncertain writes. This closes the gap
+where a newly admitted search could read the old stored board during a save.
+Ordinary initialization/replenishment is not unconditionally invalidated. A
+copied session league that disagrees with the requested league cannot start a
+new worker; absent a reusable job it returns
+`error: session league changed before trade job started`. Existing compatible
+jobs can still be adopted under the original rules, retaining their own correct
+execution context and dependency tokens, not the rejected new context.
 
 ### Trade card object
 

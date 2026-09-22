@@ -1,3 +1,91 @@
+## 2026-09-22 — Release CI fixture repair and completed projection plan
+
+PR304 first hosted Python3.12.14 run:6860pass/1skip/1failure734.50s;
+three client/web jobs green. Rookie scope fixture starts last_active0 and can
+be evicted before its first request. Added freshness regression RED1.27s,
+changed fixture timestamp to now;61 focused scope/session/scoring tests pass
+2.31s. No auth/runtime/generation changes or weakened assertions. New exact-head
+CI required before merge. Reviewed season/weekly/bye starter-impact plan complete,
+docs only. [Evidence](../docs/plans/bilateral-model-revision/release-ci-fixture-repair.md).
+
+## 2026-09-22 — Production learning release authorized, operations pending
+
+Owner explicitly requests new model/docs live despite disclosed latency and
+quality uncertainty. Scientific promotion hold is superseded as a deployment
+decision, not relabeled passed. CI/integrity/privacy/readback remain mandatory.
+Read-only12:03:42UTC Render+API preflight: live73bfa41e, one Standard instance,
+autodeploy off,270 config rows, owner-only bilateral enabled; revision selector
+absent/default0. All unrelated settings remain untouched. Hosted exact-head CI,
+merge, deploy and audited revision activation pending. No new code since validated
+2186d436, no TestFlight needed. [Contract](../docs/plans/bilateral-model-revision/production-learning-release.md).
+
+## 2026-09-22 — Round8 counterparty job freshness (not released)
+
+Parent full backend: **6,861 passed /1 optional-data skip in364.43s**, local
+Python3.14.4/isolated SQLite on frozen server0b24ad25. TypeScript/all99 mobile
+structural suites/test-ID lint/web195 pass. Nine named RED→GREEN cases; B61,
+C188 and parent72 focused groups overlap full-suite coverage. Five source/HEAD-
+guarded native/worker/off/failure runs preserve3836 revision native/3306 public
+and full persisted occurrences; incumbent2843/2354 exact; failed write0 exposure.
+First durable15.127s vs8.425s local smoke does not qualify3sec or acceptance.
+Repair covers captured-member job dependencies, league guard and seven final
+ranking-publication fences; service-backed pending/synchronous idea paths and
+provider/market/out-of-process freshness are explicit exclusions. No source-model
+semantics changed, no production write/toggle/push/deploy/TestFlight. Hosted CI
+and device/load gates unrun. [Source-bound validation](../docs/plans/bilateral-model-revision/validation-20260922-round8.md).
+
+## 2026-09-22 — Bilateral revision round7 and capture validation (not released)
+
+Stable integrated runtime: **6,800 backend passed /1 optional-data skip in351.78s**,
+Python3.14.4/isolated SQLite. TypeScript/all99 mobile structural suites/test-ID lint
+and195 web checks rerun green. Source hashes and commands in
+[validation](../docs/plans/bilateral-model-revision/validation-20260922-round7.md).
+Independent round7 review32 focused/406 combined; age capture149 group and replay
+environment44 group overlap full-suite coverage, not additional distinct tests.
+Exact3836 native and3306 served/full persisted parity; failed write zero exposure.
+Local first durable14.538s versus8.576s incumbent still blocks promotion.
+Separate43-test assignment memo prototype rejected for10.24% first-delivery
+slowdown; no cache integration. Prepared-inventory source audit identifies
+incomplete counterparty/ownership freshness, not a missing prewarm trigger.
+No GitHub push/PR, hosted CI, prod write/toggle/deploy or TestFlight.
+
+## 2026-09-22 — Bilateral revision, iterative evaluation (not released)
+
+Parent specifications preceded three Astra Ultra implementation lanes. Current
+isolated branch `codex/bilateral-revision-20260922`, base `ecda17d1`.
+Final source-frozen backend **6,690 passed /1 skipped in372.75s** on local
+Python3.14.4/isolated SQLite; opt-in captured2025 backtest skipped. Current
+policy/candidate/incumbent focused229 and route/overhaul56 green; four new real
+rollback-boundary tests were RED before parent fixes. Native TypeScript, all99
+structural suites/test-ID lint and195 web checks passed; no client edits.
+
+Bounded read-only capture77 distinct requests; locked comparison12 real+57
+constructed per model. Price sensitivity repaired; mixed focal/repetition/raw
+return diagnostics and six-dimensional evidence gaps prevent an acceptance claim.
+Policy3 retained replay69/69 has exact old-policy order bridge, no inventory
+changes/errors/quarantines, and a disclosed meaningfulness prefix trade-off.
+Actual-worker first durable30 regressed8.69→18.66s; private single-freeze parity
+prototype saves14% but is insufficient and unintegrated. Further equivalent
+performance work and input-evidence audit continue under renewed owner authority.
+No production write, toggle, push, hosted CI, deploy or TestFlight upload.
+[Evidence and current decision](../docs/plans/bilateral-model-revision/release-decision.md).
+
+## 2026-09-22 — Independent model scorecard, offline foundation
+
+Three Astra Ultra workstreams plus parent integration and cross-review on isolated
+`codex/model-evaluation-framework-20260922`, source base `73bfa41e`.
+**172 focused tests passed**; final source-frozen full backend **6,437 passed /
+1 skipped in 355.93s** (local Python 3.14.4, isolated SQLite). Earlier collection
+dependency failures and six edit-during-run outcome failures were corrected and
+superseded by the fresh green run, not waived. Failure-sensitive review controls
+and repairs are recorded in [validation](../docs/plans/model-evaluation-framework/validation.md).
+Two network-blocked common-input replays produce identical manifests/scorecards
+for 2,843 bilateral / 2,103 owner-v1 / 106 fit cards; one independent request, no
+behavioral acceptance evidence. [Comparison](../docs/plans/model-evaluation-framework/comparison-2026-09-22.md)
+and [revision plan](../docs/plans/model-evaluation-framework/model-revision-plan.md)
+remain explicit about Unknowns and unratified thresholds. No production reads/writes,
+arm toggles, source-model changes, push, hosted CI, deploy or TestFlight build.
+
 ## 2026-09-21 — First-action backend implementation, release gates in progress
 
 Owner authorized production release. Three implementation workstreams reviewed by parent; no model/budget changes or mobile source edits. Structured evidence 101 focused tests, publication 19, cache/admission final expanded set 197 (overlapping counts); parent copied-status race + observer checks 5 passed. Named callback-before-commit, missing admission/invalidation and no-post-read-revocation sabotages detected; restored implementations green. Three baseline/three updated isolated full-worker runs retain 2,354 offers/impressions and exact expanded valuation/package/order parity excluding explicitly listed occurrence IDs/clock fields. Median first durable 12.974→8.754s, worker 12.983→11.333s on local 3.14/SQLite, not phone/production. Native typecheck/all structural suites, test-ID lint and 195 web checks passed. Exploratory full suite: 6,235 passed / 23 failed / 1 skipped; resolved background policy-preservation regression and research-adapter formatting compatibility, corrected incomplete fixtures and intended supersession assertions. Eight inspect/AST failures caused by source edits during that exploratory run passed in a fresh 61-check rerun. Final source-frozen full backend and hosted exact-head CI remain release gates. Physical TestFlight/load/three-second qualification unrun. [Release evidence](../docs/plans/trade-search-latency/release-20260921/README.md).

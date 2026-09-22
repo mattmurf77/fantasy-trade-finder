@@ -4,9 +4,37 @@
 
 Operational procedures. Add to this as you learn things.
 
+## Bilateral revision evaluation and rollback
+
+Revision selector `owner_bilateral_revision_enabled` defaults to 0. Do not infer
+live state from a branch or this document. Before activation, review the revision
+[status](plans/bilateral-model-revision/status.md), independent comparison,
+release gates and exact-head CI. Preserve owner include/serve/exclusive and all
+unrelated arms/settings. Existing `scripts/set_knob.py` performs audited hot-reload
+changes; set the revision knob to 0 and read authenticated `/api/admin/config`
+back for deploy-free rollback to bilateral version -1. Only exactly 1 enables -2,
+and only if bilateral itself is selected. Never use direct DB writes for knobs.
+
+The2026-09-22 owner-authorized version-2 learning release accepts documented
+latency/quality uncertainty but still requires exact-head CI and live readback.
+Follow [its release contract](plans/bilateral-model-revision/production-learning-release.md).
+Keep existing `owner_bilateral_enabled` and owner-exclusive settings unchanged;
+only the revision selector changes. Do not apply the original initial-bilateral
+rollout's disable/re-enable sequence to this revision rollout.
+
+Offline export: `python -m backend.eval.capture_owner_benchmark --secrets
+<existing-secrets-path> --output <new-private-json>` uses the established
+read-only production engine with statement timeout and at most 100 recent run
+rows. Supply the established HTTPS API base through `FTF_API_BASE` if not locally
+configured. Output is exclusive-create mode 0600; never commit it or copy private
+boards into reports. No server imports, provider writes or app traffic generation.
+Missing fields remain missing. Fresh-process comparison commands and data-source
+hashes belong in the initiative's evaluation evidence, not an asserted live grade.
+
 
 ## Table of Contents
 
+- [Independent offline model scorecard](#independent-offline-model-scorecard)
 - [Local dev](#local-dev)
 - [Deploy (Render)](#deploy-render)
 - [Pre-ship simulator gate (2026-08-08)](#pre-ship-simulator-gate-2026-08-08)
@@ -60,6 +88,28 @@ Operational procedures. Add to this as you learn things.
 - [ESPN identity binding — one-time cohort re-sign-in (#321, 2026-08-16)](#espn-identity-binding--one-time-cohort-re-sign-in-321-2026-08-16)
 
 ---
+
+## Independent offline model scorecard
+
+Use [model-evaluation commands and contracts](model-evaluation/README.md). The
+runner consumes an explicit local frozen manifest, never the production database
+environment. The evidence reader supports only existing allowlisted local
+read-only SQLite/JSON exports. The optional constructor replay requires a fresh
+process, an exact full checkout SHA, frozen request/config and a new private
+output directory; it forces an isolated scratch database and blocks sockets.
+
+Record constructor/config/input/evaluator identities. Register empty/error
+requests; distinguish generated, projected-policy and actually viewed stages.
+Never label a common significance projection as the full live pipeline or a
+stored impression as a verified view. Grade source timestamps at capture; bind
+independent reviews to exact terms and the normalized configuration/value snapshot.
+Unknown boards/projections/pick validity never count as successful evidence.
+
+Default reports aggregate; `--private-details` explicitly discloses private rows
+locally. Do not commit input manifests or identities. Existing output directories
+are rejected to prevent silent overwrite. These commands do not deploy, toggle
+arms or approve promotion. Broad production measurement, signed thresholds and
+the real three-second device KPI remain separate gates.
 
 ## Local dev
 

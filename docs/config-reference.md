@@ -6,6 +6,24 @@ Environment variables, feature flags, and `model_config` keys. Keep in sync when
 
 ## Bilateral owner selector
 
+`owner_bilateral_revision_enabled` is a separately default-dark numeric
+`model_config` knob (DB and runtime default **0**). Exactly **1**, and only while
+`owner_bilateral_enabled=1`, chooses `owner-v2-bilateral-2` within the SAME
+`owner_v2_bilateral` arm. The new constructor keeps the incumbent support weights,
+adds same-focal efficient-term precedence and future-portfolio diagnostics; an
+exclusive organic deck applies one private survivor-order permutation after final
+removals. No inventory cap or other arm changes. It does not activate owner serving.
+This revision is **not approved live merely by adding the knob**; see the
+[revision status and evidence](plans/bilateral-model-revision/status.md).
+
+The deploy-free rollback is `scripts/set_knob.py owner_bilateral_revision_enabled 0
+--base <production-url> --source <reviewed-release-id>`, followed by authenticated
+config readback. Activation uses the same audited workflow with value 1 only after
+release approval. Admission, cache safety, exact proof validation and durable batch
+publication distinguish constructor versions, so a revision flip withholds stale
+undecided inventory. Existing likes/matches and their original terms are retained.
+The knob is excluded from legacy bakeoff profiles and never modifies their output.
+
 `owner_bilateral_enabled` is a numeric `model_config` selector, default **0** in
 both DB seeds and `trade_service._DEFAULT_CFG`. Exactly **1** selects
 `owner_v2_bilateral` / `owner-v2-bilateral-1`; 0 selects the prior `owner_v1`.

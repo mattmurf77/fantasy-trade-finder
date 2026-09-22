@@ -1,5 +1,71 @@
 # Architecture
 
+## Bilateral revision candidate (default dark, 2026-09-22)
+
+`trade_gen_bilateral_candidate.py` exposes separately versioned constructor and
+exact-proof evaluators, reusing a narrow generation helper in the unchanged
+incumbent. It keeps support weights fixed, makes future-portfolio composition
+explicit, labels absent projected-starter evidence, and applies bounded local
+same-focal price-efficiency precedence without dropping valid alternatives.
+`bakeoff_runner.owner_*` dispatches only when both bilateral and revision selectors
+are on. The arm identifier remains `owner_v2_bilateral`; constructor version is
+`owner-v2-bilateral-2`. Incumbent version -1 remains available for rollback.
+
+`trade_bilateral_presentment.present` is a separate pure permutation of final
+organic survivors: after dispositions/validity/significance, before the first
+durable batch. Policy `bilateral-survivors-3` preserves constructor price precedence,
+both managers' support bounds and known focal BUY/SELL direction at fixed baseline
+positions. Unknown personal evidence is not conviction. All occurrences, explicit
+selections and protected source slots remain intact.
+Private per-occurrence order evidence is frozen in impression features and the
+aggregate in the run record; polling cannot rerank a published snapshot. Model
+version fences cover admission, cache, proof reuse, pending inventory and batch
+publication, plus response-time checks after selected-offer persistence and pending
+card reads/serialization. Existing expressed interests retain original terms and evidence.
+
+For this revision only, `trade_input_evidence.py` detaches generator inputs and
+preserves private pool-bound age provenance. Both pool build/refresh paths retain
+source evidence beside the exact Player instances. Request capture distinguishes
+observed ages from fallback values, includes the existing `search_rank` and
+`pick_value` inputs, and hashes detached inputs and evidence together. Per-offer
+projection contains only offered assets; the complete record is kept once per
+run. This is collection-only (`used_in_model=False`), not an age-model correction
+or authorization to reuse a proof without validation. Default-off input shape
+and assignment hashes remain unchanged. Historical captures are not backfilled.
+
+`eval/capture_owner_benchmark.py` performs bounded read-only request/config export;
+`eval/bilateral_revision_benchmark.py` runs immutable incumbent and candidate in
+fresh offline processes and reports independent six-dimension coverage plus raw
+diagnostics. Constructor support is never the independent grade. This is local
+candidate implementation, not an assertion of live activation or release fitness.
+See [scope](plans/bilateral-model-revision/scope.md) and
+[status](plans/bilateral-model-revision/status.md).
+
+## Independent model evaluation (offline foundation, 2026-09-22)
+
+`backend/eval/scorecard_dimensions.py` evaluates all six dimensions independently
+for A/B give, receive and complete package. It consumes normalized frozen evidence,
+not the constructor's claimed utility. Independent contextual annotations bind to
+exact terms, snapshot and temporal provenance; absent evidence stays Unknown.
+`scorecard_outcomes.py` reconstructs valid mutual-interest history, current
+actionability and post-milestone follow-up separately, retaining fixed cohort
+denominators and quarantining ambiguous attribution/history.
+
+`scorecard_evidence.py` reads explicit local JSON/allowlisted read-only SQLite
+exports without importing the app. `scorecard_runner.py` validates manifests and
+produces aggregate reports. `scorecard_replay.py` runs the retained bilateral,
+owner-v1 and fit constructors in an isolated, network-blocked scratch process,
+with common inputs/config and explicit stage provenance. Its significance-only
+projection is not a full serving-pipeline replay. Private manifests stay outside
+the repository; default output omits personal rows and identities.
+
+These modules have **no production request-path, schema, emitter or flag wiring**.
+They do not modify live rankings, recommendations or eligibility. Initial grading
+is draft/unratified and never automatically approves release. See
+[canonical contracts](model-evaluation/README.md),
+[comparison](plans/model-evaluation-framework/comparison-2026-09-22.md) and
+[remaining model/evidence work](plans/model-evaluation-framework/model-revision-plan.md).
+
 ## First-action trade job publication (2026-09-21)
 
 Ordinary trade requests atomically claim or join equivalent process-local jobs.
@@ -420,6 +486,26 @@ mutations, DB preferences and feature/config reads are not immutable snapshots.
 This is a limited in-process prerequisite, **not** stateless request handling,
 durable jobs, full thread safety, or a separate worker. One Gunicorn worker and
 all generation/timing policies remain unchanged. See the [implementation record](plans/budget-scalability/implementation.md).
+
+Trade-job revocation epochs are captured before input reads and retained through
+admission, worker publication and copied public responses. Kickoff adds the
+captured league-member identities used by member-board and opponent-preference
+loaders, without replacing the caller's original viewer epochs. Existing global
+ranking invalidation revokes every job holding that member's global token;
+league-scoped preference invalidation revokes only the corresponding league
+token. Dependencies include selected jobs even without an organic cache pointer.
+The weak token index does not retain requests after jobs/copies expire. No new
+DB reads, model inputs or algorithm changes are introduced. Revocation withholds
+undecided job inventory without editing stored impressions, likes or original
+valuation evidence. This covers existing in-process invalidation calls, not a
+complete provider/roster/pick/market freshness receipt or out-of-process writes.
+Seven explicit server ranking-publication sites retain their early fences and
+add a final user-global fence around the original stored-board writer. This
+revokes jobs admitted between an early invalidation and publication, including
+failed/uncertain writes; ordinary initialization and database writers are not
+wrapped. Execution capture rejects a copied league whose ID differs from the
+requested league, before dependency capture or worker input reads can mix scopes.
+[Narrow dependency repair](plans/bilateral-model-revision/spec-round8-counterparty-epochs.md).
 
 ## Ownership and telemetry boundaries
 

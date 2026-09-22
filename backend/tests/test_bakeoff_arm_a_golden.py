@@ -532,6 +532,7 @@ def test_r4_bypass_is_thread_local():
 _PINNED_KNOBS = frozenset("""
 simple_player_presentment
 bakeoff_include_owner bakeoff_serve_owner bakeoff_owner_only owner_bilateral_enabled
+owner_bilateral_revision_enabled
 owner_pool_size owner_pair_budget owner_total_budget
 significance_mode significance_player_min_tier significance_allow_first_round_pick
 age_pref_mult_u23 age_pref_mult_30plus age_pref_boost_cap

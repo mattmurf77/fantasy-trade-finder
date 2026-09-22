@@ -1,0 +1,55 @@
+# Development-only exact-package conflict audit
+
+September 22, 2026. Read-only audit under [the parent specification](spec-development-conflict-audit.md). Scope: three organic examples from development contexts 16 and 41, plus four selected-search examples from context 40. No holdout exploration, constructor enumeration, provider access, model/evaluator/test edits, threshold tuning or release action.
+
+## Evidence and attribution
+
+Agent C supplied exact private request/offer linkage. Each request digest and the common captured configuration digest matched its retained result; constructor and independent-evaluator source hashes matched the recorded sources. Only the linked exact offers and bounded retained alternatives were re-evaluated with the unchanged constructors, in an isolated SQLite process with network and candidate enumeration disabled. Exact identities, original terms, boards and request/config snapshots remain in the existing private panel outside Git; none are reproduced here.
+
+All three flagged organic examples are newly retained **exact 1-for-2 packages**, not new maximum-market-focal/partner pairings. Every one has an incumbent-retained 1-for-1 offer with the same outgoing asset, incoming market headliner and counterparty. The incumbent rejects the larger exact offer as `unnecessary_compensation`. The candidate replaces that exclusion with preserved inventory and explicit companion-benefit/price-precedence diagnostics. Its support coefficients, market floor, overpay rule and one-time existing market-package/stud convention remain unchanged.
+
+| Development example | Native → survivor → policy-two rank | Policy-three rank | Audit disposition |
+|---|---:|---:|---|
+| Context 16, old final 23 | 82 → 49 → 23 | 49 | Ambiguous without actual lineup evidence or owner confirmation |
+| Context 41, old final 2 | 8 → 8 → 2 | 8 | Supported initiating-owner tradeoff; counterparty willingness unknown |
+| Context 41, old final 16 | 10 → 10 → 16 | 10 | Supported preference/market-balancing tradeoff; counterparty willingness unknown |
+
+These ranks describe the already-disclosed retained panel. They are not a new blind evaluation, an exposure measure, or proof that a manager saw or accepted an offer. Policy three preserves the constructor's category baseline; it does not cure an already-adverse constructor decision.
+
+## Context 16
+
+Both outlooks are declared: the initiating manager is a contender and the counterparty a rebuilder. Player preferences are genuinely sourced, but the pick's personal valuation is Unknown on both sides. The initiating manager's received market headliner is adversely ranked by both the raw-value and independent tier/order comparisons. The outgoing player is slightly below market in raw personal value, while the independent within-tier order comparison labels selling it adverse. That coordinate disagreement is recorded rather than treating either measure as observed intent. The counterparty strongly disfavors its outgoing player but also values the received player slightly below market; the pick remains Unknown.
+
+The initiating side loses about 31% of its package-adjusted personal value despite receiving favorable market consideration. Admission uses `declared_intent`: selected contender outlook plus positive age/usable-depth proxy. The available starter slots are estimated; fresh compatible projections, actual starter delta, availability horizon and cut-cost evidence are absent. The candidate labels these as proxy/Unknown and does not claim points gained. The opposite manager's declared rebuilding horizon and strong known sell preference explain some rationale, but do not supply missing initiating-owner lineup evidence.
+
+The extra pick is explicitly diagnosed as avoidable. Its removal leaves an eligible incumbent 1-for-1, reduces the worst market loss by about 10.5 percentage points, and preserves the main pairing. That simpler offer precedes the larger package in native order and policy two (old final ranks 17 versus 23); the price-precedence contract was not inverted. There are three retained alternatives with the exact same incoming package and none with lower raw outgoing cost. One retained same-outgoing, same-counterparty package avoids the independent adverse incoming-focal label, but transfers a substantial personal loss to the counterparty and has much lower weaker-side support; it is not an established bilateral improvement.
+
+Disposition: **ambiguous**, not a demonstrated new hard-rule violation and not verified roster improvement. Smallest resolving input: initiating-owner confirmation that this specific personal-value concession serves their declared goal, or observed legal slots plus fresh format-compatible projections, availability and required-cut cost sufficient to substantiate the claimed roster benefit. Confirming the counterparty's willingness is separately required. Do not fit a weight or hard-ban all adversely valued incoming assets from this example.
+
+## Context 41, old final rank 2
+
+The initiating owner explicitly selected championship/all-in and declared the received position desirable. Its strongly disfavored outgoing asset is a known legacy-board sell; the smaller incoming piece is personally favored and matches that declared position. The larger incoming market headliner is mildly adverse in personal value. All three player preferences are known for the initiating owner; **all counterparty preferences are Unknown**. The counterparty has no captured selected or inferred outlook; the constructor transparently falls back to an inferred rebuilding horizon, not an owner declaration.
+
+The package gives up market consideration under the unchanged stud convention while greatly improving the initiating manager's captured personal package value. Its usable-depth proxy is negative, so this is not an evidenced immediate starter gain. The companion has explicit `known_personal_target` and `declared_target` benefit diagnoses; it is not merely padding inferred from total support. The simpler retained 1-for-1 has greater counterparty support, while the larger package modestly improves the initiating side. A cheaper-outgoing same-headliner alternative is retained but is much worse for the counterparty. There is no retained alternative with the exact same incoming pair. Two retained same-outgoing alternatives remove the independent adverse incoming-focal label, but have lower counterparty support and negative plan proxies; they do not dominate this tradeoff.
+
+Disposition: **supported initiating-owner tradeoff under the captured preferences and declared goal**, not a universal requirement that every received asset exceed its market price in personal value. This does not establish bilateral acceptance: a missing counterparty board and inferred outlook cannot prove its willingness. The smallest additional input is the counterparty's actual priorities/board or exact-offer owner review; confirming the unusually strong legacy sell signal would also improve confidence. No new runtime regression is justified solely by this sample.
+
+## Context 41, old final rank 16
+
+The initiating owner has the same declared championship goal and known sell signal. Its received **maximum-market headliner is personally favored**. The adverse received piece is the smaller but independently meaningful companion; the independent evaluator includes every individually qualifying meaningful asset in its broader focal set. It is therefore a genuine adverse component, but not an adverse maximum-market headliner or a missed equal-value tie. All initiating-owner player preferences are known; all counterparty preferences are Unknown and its rebuilding horizon is inferred.
+
+Removing the companion leaves an incumbent-retained eligible 1-for-1, but raises the worst adjusted market loss by about 4.6 percentage points. The candidate's explicit justification is `improved_bilateral_market_balance`, not invented personal liking or a projected starter benefit. Existing package/stud pricing explains the adjustment; it is applied once. The initiating owner's usable-depth proxy is slightly negative. Both sides' traded players independently meet the meaningful-asset convention using available market/personal evidence, so the smaller asset is not a collection of individually insignificant filler.
+
+The simpler offer already appears earlier in policy two (old final 8 versus 16). There is no retained exact-incoming-pair alternative. Retained same-outgoing alternatives with better component-level preference labels exist, including one with higher initiating-owner support but slightly lower counterparty support and a different incoming composition. This is a real tradeoff, not demonstrated dominance; an absent limited-search alternative must not be treated as impossible.
+
+Disposition: **supported preference/market-balancing tradeoff under the current contract**, with counterparty acceptance still Unknown. The contract permits an ordinary less-preferred piece to price a desirable focal exchange. The smallest unresolved input is actual counterparty preference/goal evidence or exact-offer review, not a threshold inferred from three examples.
+
+## Selected-search sanity: context 40
+
+The four examples are separate from organic discovery. Each covers the user's exact selected outgoing anchor; none has a selected incoming pin. All remain at the same ranks through native, survivor, policy-two and policy-three stages. Their proofs use `explicit_selection`, the request's selected-search floor, and unchanged market/overpay rules. Explicitly offering an otherwise favored asset is authoritative; it must not be reclassified as an unsolicited sell recommendation. Conversely, selecting a sell anchor does not prove liking every suggested incoming asset or establish bilateral acceptance.
+
+All four larger exact packages were rejected by the incumbent's unnecessary-compensation rule. The candidate retains two companions diagnosed as avoidable and two with declared-position benefit; the simpler retained offers remain available and earlier. Three counterparties lack personal-board evidence; the fourth has known tradeoffs. Actual slots are captured as observed, but fresh projections/cut evidence remain absent. These are not automatic organic preference violations and do not justify changing explicit-selection authority from this sample.
+
+## Decision and limits
+
+No concrete breach of the implemented hard eligibility, explicit-selection, market/stud, exact-inventory or price-precedence contract was demonstrated in these seven bounded cases. Therefore this audit proposes **no new runtime change or synthetic failure assertion**. The unresolved context-16 goal/roster justification should be resolved with actual evidence or owner review before claiming quality, not converted into an LLM acceptance label. Existing framework uncertainty, measured latency and independent release gates remain in force. The evaluator's separate all-manager meaningfulness finding is outside this three-case audit and requires its own parent-authored scope; it is not waived by this result.

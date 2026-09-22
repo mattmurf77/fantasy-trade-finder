@@ -1,0 +1,942 @@
+{
+  "captured_at": "2026-09-19T16:43:46.299183+00:00",
+  "configuration_checked_at": "2026-09-22T01:36:44.936974+00:00",
+  "configuration_sha256": "95b9b8597cf0dacfa609bb665b5c79a381492b1eabba099d62b06ccd761be22c",
+  "evaluation_manifest_sha256": "1999f87270098333ede1c0a4b6e4097a4fd4db778b088f2c0006898be045b1ed",
+  "evaluation_promotion_status": "insufficient_evidence",
+  "evaluation_quarantined_offers": [],
+  "evaluation_ratification_status": "draft_unratified",
+  "evaluation_request_status_counts": {
+    "ok": 3
+  },
+  "independent_contexts": 1,
+  "limitations": [
+    "One frozen request; not a representative population or acceptance test",
+    "Counterparty boards/projections remain missing where absent",
+    "First-round eligibility in significance projection is syntactic/captured-universe only; no complete pick-ledger validity proof",
+    "Retained current implementations; original historical binaries not replayed",
+    "Only independently defined significance projection after native output, not complete serving pipeline",
+    "Native search budgets differ; no claim of equal compute or exhaustive recall"
+  ],
+  "market_source_as_of": "unavailable",
+  "models": {
+    "fit": {
+      "generation_seconds": 6.119460916961543,
+      "introduced_commit": "c6e6c3c0",
+      "native": {
+        "counts": {
+          "has_meaningful_centerpiece": 106,
+          "incoming_first": 85,
+          "incoming_pick": 96,
+          "incoming_rb": 52,
+          "outgoing_rb": 61,
+          "small_1x1_1x2_2x1": 7
+        },
+        "distinct_sent_headliners": 9,
+        "max_sent_headliner_repeats": 60,
+        "offers": 106,
+        "rates": {
+          "has_meaningful_centerpiece": 1.0,
+          "incoming_first": 0.8018867924528302,
+          "incoming_pick": 0.9056603773584906,
+          "incoming_rb": 0.49056603773584906,
+          "outgoing_rb": 0.5754716981132075,
+          "small_1x1_1x2_2x1": 0.0660377358490566
+        },
+        "shape": {
+          "1x1": 7,
+          "2x2": 3,
+          "2x3": 6,
+          "3x2": 1,
+          "3x3": 89
+        },
+        "unadjusted_market_return": {
+          "definition": "(incoming additive reference - outgoing additive reference) / outgoing additive reference",
+          "known_offers": 106,
+          "limitation": "Not stud-adjusted; neither fairness nor acceptance probability",
+          "max_fraction": 1.7346405465078214,
+          "mean_fraction": -0.017830855361391704,
+          "min_fraction": -0.2440832196691932
+        }
+      },
+      "native_first30": {
+        "counts": {
+          "has_meaningful_centerpiece": 30,
+          "incoming_first": 29,
+          "incoming_pick": 30,
+          "incoming_rb": 10,
+          "outgoing_rb": 12,
+          "small_1x1_1x2_2x1": 0
+        },
+        "distinct_sent_headliners": 4,
+        "max_sent_headliner_repeats": 12,
+        "offers": 30,
+        "rates": {
+          "has_meaningful_centerpiece": 1.0,
+          "incoming_first": 0.9666666666666667,
+          "incoming_pick": 1.0,
+          "incoming_rb": 0.3333333333333333,
+          "outgoing_rb": 0.4,
+          "small_1x1_1x2_2x1": 0.0
+        },
+        "shape": {
+          "3x3": 30
+        },
+        "unadjusted_market_return": {
+          "definition": "(incoming additive reference - outgoing additive reference) / outgoing additive reference",
+          "known_offers": 30,
+          "limitation": "Not stud-adjusted; neither fairness nor acceptance probability",
+          "max_fraction": -0.15637364602963852,
+          "mean_fraction": -0.195071930539041,
+          "min_fraction": -0.2440832196691932
+        }
+      },
+      "post_significance": {
+        "counts": {
+          "has_meaningful_centerpiece": 106,
+          "incoming_first": 85,
+          "incoming_pick": 96,
+          "incoming_rb": 52,
+          "outgoing_rb": 61,
+          "small_1x1_1x2_2x1": 7
+        },
+        "distinct_sent_headliners": 9,
+        "max_sent_headliner_repeats": 60,
+        "offers": 106,
+        "rates": {
+          "has_meaningful_centerpiece": 1.0,
+          "incoming_first": 0.8018867924528302,
+          "incoming_pick": 0.9056603773584906,
+          "incoming_rb": 0.49056603773584906,
+          "outgoing_rb": 0.5754716981132075,
+          "small_1x1_1x2_2x1": 0.0660377358490566
+        },
+        "shape": {
+          "1x1": 7,
+          "2x2": 3,
+          "2x3": 6,
+          "3x2": 1,
+          "3x3": 89
+        },
+        "unadjusted_market_return": {
+          "definition": "(incoming additive reference - outgoing additive reference) / outgoing additive reference",
+          "known_offers": 106,
+          "limitation": "Not stud-adjusted; neither fairness nor acceptance probability",
+          "max_fraction": 1.7346405465078214,
+          "mean_fraction": -0.017830855361391704,
+          "min_fraction": -0.2440832196691932
+        }
+      },
+      "post_significance_first30": {
+        "counts": {
+          "has_meaningful_centerpiece": 30,
+          "incoming_first": 29,
+          "incoming_pick": 30,
+          "incoming_rb": 10,
+          "outgoing_rb": 12,
+          "small_1x1_1x2_2x1": 0
+        },
+        "dimension_bilateral_status": {
+          "fairness": {
+            "evidence-limited": 30
+          },
+          "meaningful": {
+            "evidence-limited": 30
+          },
+          "outlook": {
+            "evidence-limited": 30
+          },
+          "personal_ranks": {
+            "evidence-limited": 30
+          },
+          "stud_tax": {
+            "evidence-limited": 30
+          },
+          "team_needs": {
+            "evidence-limited": 30
+          }
+        },
+        "distinct_sent_headliners": 4,
+        "max_sent_headliner_repeats": 12,
+        "offers": 30,
+        "personal_evidence": {
+          "A": {
+            "give": {
+              "disfavored_asset_count": {
+                "known": 30,
+                "max": 3,
+                "mean": 1.8,
+                "min": 1
+              },
+              "focal_hit_rate": {
+                "known": 30,
+                "max": 1.0,
+                "mean": 1.0,
+                "min": 1.0
+              },
+              "focal_known_value_mass_share": {
+                "known": 30,
+                "max": 1.0,
+                "mean": 0.8160178043549577,
+                "min": 0.31006676633109126
+              },
+              "known_value_mass_share": {
+                "known": 30,
+                "max": 1.0,
+                "mean": 0.6132585996136793,
+                "min": 0.31006676633109126
+              },
+              "preferred_asset_count": {
+                "known": 30,
+                "max": 0,
+                "mean": 0.0,
+                "min": 0
+              }
+            },
+            "receive": {
+              "disfavored_asset_count": {
+                "known": 30,
+                "max": 1,
+                "mean": 0.3,
+                "min": 0
+              },
+              "focal_hit_rate": {
+                "known": 30,
+                "max": 1.0,
+                "mean": 0.7833333333333333,
+                "min": 0.0
+              },
+              "focal_known_value_mass_share": {
+                "known": 30,
+                "max": 1.0,
+                "mean": 0.7608925905402205,
+                "min": 0.3102401110076727
+              },
+              "known_value_mass_share": {
+                "known": 30,
+                "max": 0.9335501196217411,
+                "mean": 0.5143534889993445,
+                "min": 0.3102401110076727
+              },
+              "preferred_asset_count": {
+                "known": 30,
+                "max": 2,
+                "mean": 0.9666666666666667,
+                "min": 0
+              }
+            }
+          },
+          "B": {
+            "give": {
+              "disfavored_asset_count": {
+                "known": 30,
+                "max": 0,
+                "mean": 0.0,
+                "min": 0
+              },
+              "focal_known_value_mass_share": {
+                "known": 30,
+                "max": 0.0,
+                "mean": 0.0,
+                "min": 0.0
+              },
+              "known_value_mass_share": {
+                "known": 30,
+                "max": 0.0,
+                "mean": 0.0,
+                "min": 0.0
+              },
+              "preferred_asset_count": {
+                "known": 30,
+                "max": 0,
+                "mean": 0.0,
+                "min": 0
+              }
+            },
+            "receive": {
+              "disfavored_asset_count": {
+                "known": 30,
+                "max": 0,
+                "mean": 0.0,
+                "min": 0
+              },
+              "focal_known_value_mass_share": {
+                "known": 30,
+                "max": 0.0,
+                "mean": 0.0,
+                "min": 0.0
+              },
+              "known_value_mass_share": {
+                "known": 30,
+                "max": 0.0,
+                "mean": 0.0,
+                "min": 0.0
+              },
+              "preferred_asset_count": {
+                "known": 30,
+                "max": 0,
+                "mean": 0.0,
+                "min": 0
+              }
+            }
+          }
+        },
+        "rates": {
+          "has_meaningful_centerpiece": 1.0,
+          "incoming_first": 0.9666666666666667,
+          "incoming_pick": 1.0,
+          "incoming_rb": 0.3333333333333333,
+          "outgoing_rb": 0.4,
+          "small_1x1_1x2_2x1": 0.0
+        },
+        "shape": {
+          "3x3": 30
+        },
+        "unadjusted_market_return": {
+          "definition": "(incoming additive reference - outgoing additive reference) / outgoing additive reference",
+          "known_offers": 30,
+          "limitation": "Not stud-adjusted; neither fairness nor acceptance probability",
+          "max_fraction": -0.15637364602963852,
+          "mean_fraction": -0.195071930539041,
+          "min_fraction": -0.2440832196691932
+        }
+      },
+      "search_diagnostics": {
+        "boarded_opponents": 0,
+        "capped_pairs": 13,
+        "emitted": 106,
+        "enumerated": 260000,
+        "killed": {
+          "K0": 0,
+          "K1": 0,
+          "K2": 5503,
+          "K3": 1070,
+          "K4": 165056,
+          "K5": 12873,
+          "K6": 7526,
+          "K7": 0,
+          "junk": 0
+        },
+        "opponents": 13,
+        "post_filtered": {
+          "c4_centerpiece": 26147,
+          "min_aggregate": 0,
+          "min_them": 0,
+          "not_interested": 0,
+          "position_prefs": 41719,
+          "r4_swiped": 0,
+          "untouchable": 0
+        },
+        "scored": 67972
+      },
+      "version": "fit-1"
+    },
+    "owner_v1": {
+      "generation_seconds": 3.3358352499781176,
+      "introduced_commit": "0e3d6b70",
+      "native": {
+        "counts": {
+          "has_meaningful_centerpiece": 1854,
+          "incoming_first": 889,
+          "incoming_pick": 933,
+          "incoming_rb": 550,
+          "outgoing_rb": 1118,
+          "small_1x1_1x2_2x1": 2103
+        },
+        "distinct_sent_headliners": 16,
+        "max_sent_headliner_repeats": 401,
+        "offers": 2103,
+        "rates": {
+          "has_meaningful_centerpiece": 0.8815977175463623,
+          "incoming_first": 0.42272943414170233,
+          "incoming_pick": 0.44365192582025675,
+          "incoming_rb": 0.26153114598193056,
+          "outgoing_rb": 0.531621493105088,
+          "small_1x1_1x2_2x1": 1.0
+        },
+        "shape": {
+          "1x1": 224,
+          "1x2": 892,
+          "2x1": 987
+        },
+        "unadjusted_market_return": {
+          "definition": "(incoming additive reference - outgoing additive reference) / outgoing additive reference",
+          "known_offers": 2103,
+          "limitation": "Not stud-adjusted; neither fairness nor acceptance probability",
+          "max_fraction": 0.18267878364518353,
+          "mean_fraction": -0.15293621655497364,
+          "min_fraction": -0.38731155085379415
+        }
+      },
+      "native_first30": {
+        "counts": {
+          "has_meaningful_centerpiece": 29,
+          "incoming_first": 8,
+          "incoming_pick": 8,
+          "incoming_rb": 26,
+          "outgoing_rb": 1,
+          "small_1x1_1x2_2x1": 30
+        },
+        "distinct_sent_headliners": 4,
+        "max_sent_headliner_repeats": 15,
+        "offers": 30,
+        "rates": {
+          "has_meaningful_centerpiece": 0.9666666666666667,
+          "incoming_first": 0.26666666666666666,
+          "incoming_pick": 0.26666666666666666,
+          "incoming_rb": 0.8666666666666667,
+          "outgoing_rb": 0.03333333333333333,
+          "small_1x1_1x2_2x1": 1.0
+        },
+        "shape": {
+          "1x1": 3,
+          "1x2": 26,
+          "2x1": 1
+        },
+        "unadjusted_market_return": {
+          "definition": "(incoming additive reference - outgoing additive reference) / outgoing additive reference",
+          "known_offers": 30,
+          "limitation": "Not stud-adjusted; neither fairness nor acceptance probability",
+          "max_fraction": 0.13969748796073947,
+          "mean_fraction": -0.03510778194007364,
+          "min_fraction": -0.2352374000622231
+        }
+      },
+      "post_significance": {
+        "counts": {
+          "has_meaningful_centerpiece": 1854,
+          "incoming_first": 889,
+          "incoming_pick": 900,
+          "incoming_rb": 494,
+          "outgoing_rb": 915,
+          "small_1x1_1x2_2x1": 1854
+        },
+        "distinct_sent_headliners": 16,
+        "max_sent_headliner_repeats": 401,
+        "offers": 1854,
+        "rates": {
+          "has_meaningful_centerpiece": 1.0,
+          "incoming_first": 0.47950377562028046,
+          "incoming_pick": 0.4854368932038835,
+          "incoming_rb": 0.2664509169363538,
+          "outgoing_rb": 0.4935275080906149,
+          "small_1x1_1x2_2x1": 1.0
+        },
+        "shape": {
+          "1x1": 123,
+          "1x2": 873,
+          "2x1": 858
+        },
+        "unadjusted_market_return": {
+          "definition": "(incoming additive reference - outgoing additive reference) / outgoing additive reference",
+          "known_offers": 1854,
+          "limitation": "Not stud-adjusted; neither fairness nor acceptance probability",
+          "max_fraction": 0.18267878364518353,
+          "mean_fraction": -0.14684078669272063,
+          "min_fraction": -0.38527464889313906
+        }
+      },
+      "post_significance_first30": {
+        "counts": {
+          "has_meaningful_centerpiece": 30,
+          "incoming_first": 9,
+          "incoming_pick": 9,
+          "incoming_rb": 26,
+          "outgoing_rb": 0,
+          "small_1x1_1x2_2x1": 30
+        },
+        "dimension_bilateral_status": {
+          "fairness": {
+            "evidence-limited": 30
+          },
+          "meaningful": {
+            "evidence-limited": 30
+          },
+          "outlook": {
+            "evidence-limited": 30
+          },
+          "personal_ranks": {
+            "evidence-limited": 30
+          },
+          "stud_tax": {
+            "evidence-limited": 30
+          },
+          "team_needs": {
+            "evidence-limited": 30
+          }
+        },
+        "distinct_sent_headliners": 3,
+        "max_sent_headliner_repeats": 16,
+        "offers": 30,
+        "personal_evidence": {
+          "A": {
+            "give": {
+              "disfavored_asset_count": {
+                "known": 30,
+                "max": 1,
+                "mean": 0.8333333333333334,
+                "min": 0
+              },
+              "focal_hit_rate": {
+                "known": 30,
+                "max": 1.0,
+                "mean": 0.8166666666666667,
+                "min": 0.0
+              },
+              "focal_known_value_mass_share": {
+                "known": 30,
+                "max": 1.0,
+                "mean": 1.0,
+                "min": 1.0
+              },
+              "known_value_mass_share": {
+                "known": 30,
+                "max": 1.0,
+                "mean": 1.0,
+                "min": 1.0
+              },
+              "preferred_asset_count": {
+                "known": 30,
+                "max": 1,
+                "mean": 0.2,
+                "min": 0
+              }
+            },
+            "receive": {
+              "disfavored_asset_count": {
+                "known": 30,
+                "max": 2,
+                "mean": 0.5333333333333333,
+                "min": 0
+              },
+              "focal_hit_rate": {
+                "known": 24,
+                "max": 1.0,
+                "mean": 0.8125,
+                "min": 0.0
+              },
+              "focal_known_value_mass_share": {
+                "known": 30,
+                "max": 1.0,
+                "mean": 0.7186501655682119,
+                "min": 0.0
+              },
+              "known_value_mass_share": {
+                "known": 30,
+                "max": 1.0,
+                "mean": 0.7504226051908269,
+                "min": 0.0950041313596446
+              },
+              "preferred_asset_count": {
+                "known": 30,
+                "max": 2,
+                "mean": 1.0333333333333334,
+                "min": 0
+              }
+            }
+          },
+          "B": {
+            "give": {
+              "disfavored_asset_count": {
+                "known": 30,
+                "max": 0,
+                "mean": 0.0,
+                "min": 0
+              },
+              "focal_known_value_mass_share": {
+                "known": 30,
+                "max": 0.0,
+                "mean": 0.0,
+                "min": 0.0
+              },
+              "known_value_mass_share": {
+                "known": 30,
+                "max": 0.0,
+                "mean": 0.0,
+                "min": 0.0
+              },
+              "preferred_asset_count": {
+                "known": 30,
+                "max": 0,
+                "mean": 0.0,
+                "min": 0
+              }
+            },
+            "receive": {
+              "disfavored_asset_count": {
+                "known": 30,
+                "max": 0,
+                "mean": 0.0,
+                "min": 0
+              },
+              "focal_known_value_mass_share": {
+                "known": 30,
+                "max": 0.0,
+                "mean": 0.0,
+                "min": 0.0
+              },
+              "known_value_mass_share": {
+                "known": 30,
+                "max": 0.0,
+                "mean": 0.0,
+                "min": 0.0
+              },
+              "preferred_asset_count": {
+                "known": 30,
+                "max": 0,
+                "mean": 0.0,
+                "min": 0
+              }
+            }
+          }
+        },
+        "rates": {
+          "has_meaningful_centerpiece": 1.0,
+          "incoming_first": 0.3,
+          "incoming_pick": 0.3,
+          "incoming_rb": 0.8666666666666667,
+          "outgoing_rb": 0.0,
+          "small_1x1_1x2_2x1": 1.0
+        },
+        "shape": {
+          "1x1": 3,
+          "1x2": 26,
+          "2x1": 1
+        },
+        "unadjusted_market_return": {
+          "definition": "(incoming additive reference - outgoing additive reference) / outgoing additive reference",
+          "known_offers": 30,
+          "limitation": "Not stud-adjusted; neither fairness nor acceptance probability",
+          "max_fraction": 0.13969748796073947,
+          "mean_fraction": -0.038635891401175425,
+          "min_fraction": -0.2352374000622231
+        }
+      },
+      "search_diagnostics": {
+        "budget_exhausted": true,
+        "emitted": 2103,
+        "evaluated": 53248,
+        "rejections": {
+          "counterparty_no_benefit": 3064,
+          "market_floor": 44980,
+          "market_overpay": 1312,
+          "previous_disposition": 22,
+          "viewer_no_benefit": 1767
+        }
+      },
+      "version": "owner-v1"
+    },
+    "owner_v2_bilateral": {
+      "generation_seconds": 5.649210750008933,
+      "introduced_commit": "4913ad0c",
+      "native": {
+        "counts": {
+          "has_meaningful_centerpiece": 2383,
+          "incoming_first": 905,
+          "incoming_pick": 1013,
+          "incoming_rb": 206,
+          "outgoing_rb": 1783,
+          "small_1x1_1x2_2x1": 2843
+        },
+        "distinct_sent_headliners": 16,
+        "max_sent_headliner_repeats": 393,
+        "offers": 2843,
+        "rates": {
+          "has_meaningful_centerpiece": 0.8381990854730919,
+          "incoming_first": 0.31832571227576506,
+          "incoming_pick": 0.3563137530777348,
+          "incoming_rb": 0.07245867041857193,
+          "outgoing_rb": 0.6271544143510376,
+          "small_1x1_1x2_2x1": 1.0
+        },
+        "shape": {
+          "1x1": 536,
+          "1x2": 693,
+          "2x1": 1614
+        },
+        "unadjusted_market_return": {
+          "definition": "(incoming additive reference - outgoing additive reference) / outgoing additive reference",
+          "known_offers": 2843,
+          "limitation": "Not stud-adjusted; neither fairness nor acceptance probability",
+          "max_fraction": 0.600188926146313,
+          "mean_fraction": -0.034111366937588775,
+          "min_fraction": -0.38731155085379415
+        }
+      },
+      "native_first30": {
+        "counts": {
+          "has_meaningful_centerpiece": 23,
+          "incoming_first": 7,
+          "incoming_pick": 7,
+          "incoming_rb": 1,
+          "outgoing_rb": 21,
+          "small_1x1_1x2_2x1": 30
+        },
+        "distinct_sent_headliners": 6,
+        "max_sent_headliner_repeats": 11,
+        "offers": 30,
+        "rates": {
+          "has_meaningful_centerpiece": 0.7666666666666667,
+          "incoming_first": 0.23333333333333334,
+          "incoming_pick": 0.23333333333333334,
+          "incoming_rb": 0.03333333333333333,
+          "outgoing_rb": 0.7,
+          "small_1x1_1x2_2x1": 1.0
+        },
+        "shape": {
+          "1x1": 16,
+          "1x2": 2,
+          "2x1": 12
+        },
+        "unadjusted_market_return": {
+          "definition": "(incoming additive reference - outgoing additive reference) / outgoing additive reference",
+          "known_offers": 30,
+          "limitation": "Not stud-adjusted; neither fairness nor acceptance probability",
+          "max_fraction": -0.14986533757012852,
+          "mean_fraction": -0.24916133505979593,
+          "min_fraction": -0.35388171201403834
+        }
+      },
+      "post_significance": {
+        "counts": {
+          "has_meaningful_centerpiece": 2383,
+          "incoming_first": 905,
+          "incoming_pick": 944,
+          "incoming_rb": 188,
+          "outgoing_rb": 1364,
+          "small_1x1_1x2_2x1": 2383
+        },
+        "distinct_sent_headliners": 16,
+        "max_sent_headliner_repeats": 393,
+        "offers": 2383,
+        "rates": {
+          "has_meaningful_centerpiece": 1.0,
+          "incoming_first": 0.37977339488040285,
+          "incoming_pick": 0.3961393201846412,
+          "incoming_rb": 0.07889215274863617,
+          "outgoing_rb": 0.5723877465379773,
+          "small_1x1_1x2_2x1": 1.0
+        },
+        "shape": {
+          "1x1": 271,
+          "1x2": 662,
+          "2x1": 1450
+        },
+        "unadjusted_market_return": {
+          "definition": "(incoming additive reference - outgoing additive reference) / outgoing additive reference",
+          "known_offers": 2383,
+          "limitation": "Not stud-adjusted; neither fairness nor acceptance probability",
+          "max_fraction": 0.600188926146313,
+          "mean_fraction": -0.02480463287142983,
+          "min_fraction": -0.3822357121706039
+        }
+      },
+      "post_significance_first30": {
+        "counts": {
+          "has_meaningful_centerpiece": 30,
+          "incoming_first": 13,
+          "incoming_pick": 13,
+          "incoming_rb": 1,
+          "outgoing_rb": 23,
+          "small_1x1_1x2_2x1": 30
+        },
+        "dimension_bilateral_status": {
+          "fairness": {
+            "evidence-limited": 30
+          },
+          "meaningful": {
+            "evidence-limited": 30
+          },
+          "outlook": {
+            "evidence-limited": 30
+          },
+          "personal_ranks": {
+            "evidence-limited": 30
+          },
+          "stud_tax": {
+            "evidence-limited": 30
+          },
+          "team_needs": {
+            "evidence-limited": 30
+          }
+        },
+        "distinct_sent_headliners": 5,
+        "max_sent_headliner_repeats": 17,
+        "offers": 30,
+        "personal_evidence": {
+          "A": {
+            "give": {
+              "disfavored_asset_count": {
+                "known": 30,
+                "max": 2,
+                "mean": 1.5666666666666667,
+                "min": 1
+              },
+              "focal_hit_rate": {
+                "known": 30,
+                "max": 1.0,
+                "mean": 0.9833333333333333,
+                "min": 0.5
+              },
+              "focal_known_value_mass_share": {
+                "known": 30,
+                "max": 1.0,
+                "mean": 1.0,
+                "min": 1.0
+              },
+              "known_value_mass_share": {
+                "known": 30,
+                "max": 1.0,
+                "mean": 1.0,
+                "min": 1.0
+              },
+              "preferred_asset_count": {
+                "known": 30,
+                "max": 0,
+                "mean": 0.0,
+                "min": 0
+              }
+            },
+            "receive": {
+              "disfavored_asset_count": {
+                "known": 30,
+                "max": 0,
+                "mean": 0.0,
+                "min": 0
+              },
+              "focal_hit_rate": {
+                "known": 17,
+                "max": 1.0,
+                "mean": 0.9705882352941176,
+                "min": 0.5
+              },
+              "focal_known_value_mass_share": {
+                "known": 30,
+                "max": 1.0,
+                "mean": 0.5666666666666667,
+                "min": 0.0
+              },
+              "known_value_mass_share": {
+                "known": 30,
+                "max": 1.0,
+                "mean": 0.5666666666666667,
+                "min": 0.0
+              },
+              "preferred_asset_count": {
+                "known": 30,
+                "max": 2,
+                "mean": 0.6,
+                "min": 0
+              }
+            }
+          },
+          "B": {
+            "give": {
+              "disfavored_asset_count": {
+                "known": 30,
+                "max": 0,
+                "mean": 0.0,
+                "min": 0
+              },
+              "focal_known_value_mass_share": {
+                "known": 30,
+                "max": 0.0,
+                "mean": 0.0,
+                "min": 0.0
+              },
+              "known_value_mass_share": {
+                "known": 30,
+                "max": 0.0,
+                "mean": 0.0,
+                "min": 0.0
+              },
+              "preferred_asset_count": {
+                "known": 30,
+                "max": 0,
+                "mean": 0.0,
+                "min": 0
+              }
+            },
+            "receive": {
+              "disfavored_asset_count": {
+                "known": 30,
+                "max": 0,
+                "mean": 0.0,
+                "min": 0
+              },
+              "focal_known_value_mass_share": {
+                "known": 30,
+                "max": 0.0,
+                "mean": 0.0,
+                "min": 0.0
+              },
+              "known_value_mass_share": {
+                "known": 30,
+                "max": 0.0,
+                "mean": 0.0,
+                "min": 0.0
+              },
+              "preferred_asset_count": {
+                "known": 30,
+                "max": 0,
+                "mean": 0.0,
+                "min": 0
+              }
+            }
+          }
+        },
+        "rates": {
+          "has_meaningful_centerpiece": 1.0,
+          "incoming_first": 0.43333333333333335,
+          "incoming_pick": 0.43333333333333335,
+          "incoming_rb": 0.03333333333333333,
+          "outgoing_rb": 0.7666666666666667,
+          "small_1x1_1x2_2x1": 1.0
+        },
+        "shape": {
+          "1x1": 10,
+          "1x2": 2,
+          "2x1": 18
+        },
+        "unadjusted_market_return": {
+          "definition": "(incoming additive reference - outgoing additive reference) / outgoing additive reference",
+          "known_offers": 30,
+          "limitation": "Not stud-adjusted; neither fairness nor acceptance probability",
+          "max_fraction": -0.15328240798513362,
+          "mean_fraction": -0.2476805160769767,
+          "min_fraction": -0.35388171201403834
+        }
+      },
+      "search_diagnostics": {
+        "budget_exhausted": false,
+        "emitted": 2843,
+        "evaluated": 53172,
+        "rejections": {
+          "counterparty_no_benefit": 560,
+          "known_preference_harm": 45,
+          "market_floor": 44907,
+          "market_overpay": 1388,
+          "previous_disposition": 22,
+          "tanking_favored_young_asset": 246,
+          "tanking_rb_without_long_term_exception": 1022,
+          "unnecessary_compensation": 980,
+          "viewer_intent_unfulfilled": 892,
+          "viewer_no_benefit": 267
+        }
+      },
+      "version": "owner-v2-bilateral-1"
+    }
+  },
+  "snapshot_sha256": "e64f8267958dc56826e24f470d46056414cdf99dd1e0be66d7e958c276223b22",
+  "source_commit": "73bfa41e358e8780b823f652cf8388ae209b977d",
+  "source_file_sha256": {
+    "backend/eval/scorecard_dimensions.py": "e788e1f24a0e36885941f27f52fc89d22c48755648df4361769e42150493627d",
+    "backend/eval/scorecard_replay.py": "c07030b93065b170c0ca7aafb0719c79e0337d23de1a91ff8d38121f67fd61e7",
+    "backend/eval/scorecard_runner.py": "1ac8d132a9d6ea8f32e038997f62e84ecc21845b9d5099eea08a07c11d2e8347",
+    "backend/tier_config.json": "a94b5918c9eae25a5986dc0179300b61df7e2d5bb4ee3374a0173b00a241bbb6",
+    "backend/trade_gen_bilateral.py": "ce4c390ee120effb4b7e4fb0833ec44cdab67f4e7a7b26f73f992e3e2346fd73",
+    "backend/trade_gen_fit.py": "cbebd9bb612c29a07c16127642a6165dec93e0180dc13e87f37cd7aba9518885",
+    "backend/trade_gen_owner.py": "326cc694bba79b50e4314c9287e1f18f6f3eb419aede7e7f0e0da47f9b72fd4a",
+    "backend/trade_service.py": "3582e99e84707a90db57c8127bf9dfc479f763674aaf9552e0886b1f92734cab"
+  }
+}

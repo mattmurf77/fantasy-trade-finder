@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "data_kind": "synthetic",
+  "offer_id": "worked-case-a",
+  "snapshot_id": "synthetic-opposite-objectives-v1",
+  "captured_at": "2026-09-21T00:00:00Z",
+  "context": "ordinary_discovery",
+  "assets": {
+    "rb": {"kind": "player", "owner_id": "tanker", "position": "RB", "market_value": 2.4},
+    "wr": {"kind": "player", "owner_id": "contender", "position": "WR", "market_value": 1.6},
+    "first": {"kind": "pick", "owner_id": "contender", "original_owner_id": "contender", "pick_round": 1, "pick_year": 2027, "market_value": 1.0,
+      "pick_validation": {"status": "valid", "provenance": {"source": "synthetic-owned-unexpired-pick-ledger", "as_of": "2026-09-21", "version": "1", "snapshot_id": "synthetic-opposite-objectives-v1"}}},
+    "a_qb": {"kind": "player", "owner_id": "tanker", "position": "QB", "market_value": 2.0},
+    "a_wr": {"kind": "player", "owner_id": "tanker", "position": "WR", "market_value": 1.8},
+    "b_qb": {"kind": "player", "owner_id": "contender", "position": "QB", "market_value": 2.0},
+    "b_rb": {"kind": "player", "owner_id": "contender", "position": "RB", "market_value": 0.7},
+    "b_wr": {"kind": "player", "owner_id": "contender", "position": "WR", "market_value": 1.9}
+  },
+  "managers": {
+    "A": {
+      "manager_id": "tanker", "give": ["rb"], "selected_outlook": "jets", "inferred_outlook": "contender", "next_draft_year": 2027,
+      "personal_board": {
+        "manager_id": "tanker", "universe_id": "fixture-universe-v1", "second_round_tier": 4,
+        "provenance": {"source": "synthetic-explicit-board-a", "as_of": "2026-09-21", "version": "1", "snapshot_id": "synthetic-opposite-objectives-v1"},
+        "entries": {"rb": {"tier": 3, "order": 1, "explicit": true}, "wr": {"tier": 1, "order": 1, "explicit": true}, "first": {"tier": 1, "order": 1, "explicit": true}}
+      },
+      "roster": ["rb", "a_qb", "a_wr"],
+      "lineup": {
+        "rules_complete": true, "roster_limit": 5, "cuts": [],
+        "provenance": {"source": "synthetic-league-rules", "as_of": "2026-09-21", "version": "1", "snapshot_id": "synthetic-opposite-objectives-v1"},
+        "slots": [{"id": "QB", "eligible_positions": ["QB"]}, {"id": "RB", "eligible_positions": ["RB"]}, {"id": "WR", "eligible_positions": ["WR"]}]
+      },
+      "projections": {
+        "units": "fantasy_points", "horizon": "synthetic_week",
+        "provenance": {"source": "synthetic-independent-projections", "as_of": "2026-09-21", "version": "1", "snapshot_id": "synthetic-opposite-objectives-v1", "fresh": true},
+        "entries": {"rb": {"points": 11, "available": true}, "a_qb": {"points": 17, "available": true}, "a_wr": {"points": 10, "available": true}, "wr": {"points": 4, "available": true}}
+      }
+    },
+    "B": {
+      "manager_id": "contender", "give": ["wr", "first"], "selected_outlook": "contender", "next_draft_year": 2027,
+      "personal_board": {
+        "manager_id": "contender", "universe_id": "fixture-universe-v1", "second_round_tier": 4,
+        "provenance": {"source": "synthetic-explicit-board-b", "as_of": "2026-09-21", "version": "1", "snapshot_id": "synthetic-opposite-objectives-v1"},
+        "entries": {"rb": {"tier": 1, "order": 1, "explicit": true}, "wr": {"tier": 3, "order": 1, "explicit": true}, "first": {"tier": 1, "order": 1, "explicit": true}}
+      },
+      "roster": ["wr", "b_qb", "b_rb", "b_wr"],
+      "lineup": {
+        "rules_complete": true, "roster_limit": 5, "cuts": [],
+        "provenance": {"source": "synthetic-league-rules", "as_of": "2026-09-21", "version": "1", "snapshot_id": "synthetic-opposite-objectives-v1"},
+        "slots": [{"id": "QB", "eligible_positions": ["QB"]}, {"id": "RB", "eligible_positions": ["RB"]}, {"id": "WR", "eligible_positions": ["WR"]}]
+      },
+      "projections": {
+        "units": "fantasy_points", "horizon": "synthetic_week",
+        "provenance": {"source": "synthetic-independent-projections", "as_of": "2026-09-21", "version": "1", "snapshot_id": "synthetic-opposite-objectives-v1", "fresh": true},
+        "entries": {"rb": {"points": 11, "available": true}, "b_qb": {"points": 19, "available": true}, "b_rb": {"points": 8, "available": true}, "b_wr": {"points": 12, "available": true}, "wr": {"points": 4, "available": true}}
+      }
+    }
+  },
+  "evidence": {
+    "market": {
+      "units": "first_equivalents", "universe_id": "fixture-universe-v1", "second_round_player_floor": 0.5,
+      "provenance": {"source": "synthetic-frozen-reference", "as_of": "2026-09-21", "version": "1", "snapshot_id": "synthetic-opposite-objectives-v1"},
+      "entries": {"rb": {"tier": 2, "order": 1}, "wr": {"tier": 2, "order": 1}, "first": {"tier": 1, "order": 1}}
+    }
+  }
+}
