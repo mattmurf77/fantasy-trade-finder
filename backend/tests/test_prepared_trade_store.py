@@ -343,14 +343,68 @@ def test_account_delete_late_failure_rolls_back_prepared_data(engine):
     assert load()["inventory_id"] == original
 
 
-def test_export_includes_owned_private_artifacts_without_live_tokens(engine):
-    save()
+def test_export_retains_owned_metadata_without_prepared_payloads_or_live_tokens(engine):
+    private_target = target()
+    private_target["binding"]["private_counterparty"] = "target-only-counterparty-secret"
+    value = claim([private_target])
+    inventory_id = save(value, cards=[{"trade_id": "synthetic-card",
+                                       "private_counterparty": "inventory-only-counterparty-secret"}])
     claim()
+    adoption(inventory_id)
+    stored_inventories = rows(engine, db.prepared_trade_inventories_table)
+    stored_targets = rows(engine, db.prepared_trade_targets_table)
+    assert "inventory-only-counterparty-secret" in store._unpack_payload(stored_inventories[0]["payload_json"])
+    assert any("target-only-counterparty-secret" in row["payload_json"] for row in stored_targets)
     exported = accounts.export_user_data(OWNER)["tables"]
     assert len(exported["prepared_trade_inventories"]) == 1
     assert len(exported["prepared_trade_targets"]) == 2
+    inventory = exported["prepared_trade_inventories"][0]
+    assert inventory["inventory_id"] == inventory_id
+    assert inventory["user_id"] == OWNER and inventory["league_id"] == scope().league_id
+    assert inventory["card_count"] == 1
+    assert inventory["payload_sha256"] == stored_inventories[0]["payload_sha256"]
+    assert inventory["dependency_hash"] == stored_inventories[0]["dependency_hash"]
+    assert all(row["user_id"] == OWNER and row["scope_key"] for row in exported["prepared_trade_targets"])
+    assert all("payload_json" not in row for row in exported["prepared_trade_inventories"])
+    assert all("payload_json" not in row for row in exported["prepared_trade_targets"])
     assert all("lease_token" not in row for row in exported["prepared_trade_targets"])
     assert all("adoption_token" not in row for row in exported["prepared_trade_inventories"])
+    assert "counterparty-secret" not in json.dumps(exported)
+    assert rows(engine, db.prepared_trade_inventories_table) == stored_inventories
+    assert rows(engine, db.prepared_trade_targets_table) == stored_targets
+
+
+def _insert_export_impression(engine, features):
+    with engine.begin() as conn:
+        conn.execute(insert(db.deck_impressions_table).values(
+            impression_id="export-impression", user_id=OWNER, league_id=scope().league_id,
+            deck_job_id="export-job", card_index=0, trade_hash="own-terms",
+            features_json=features, propensity=1.0, served_at=NOW.isoformat()))
+
+
+def test_export_strips_only_prepared_runtime_preserving_legacy_features_and_text_type(engine):
+    legacy = {"partner_user_id": PEER, "legacy": [True, None, 1, 1.5, "own-data"],
+              "nested": {"prepared_runtime": "unrelated-legacy-key"},
+              "prepared_inventory_id": "own-inventory", "deck_source": "prepared_adoption"}
+    features = dict(legacy, prepared_runtime={"proof": '{"tier":"runtime-only-counterparty-secret"}'})
+    raw = json.dumps(features, indent=2)
+    _insert_export_impression(engine, raw)
+    original = rows(engine, db.deck_impressions_table)
+    exported = accounts.export_user_data(OWNER)["tables"]["deck_impressions"][0]
+    assert type(exported["features_json"]) is str
+    assert json.loads(exported["features_json"]) == legacy
+    assert exported["impression_id"] == "export-impression" and exported["trade_hash"] == "own-terms"
+    assert "runtime-only-counterparty-secret" not in json.dumps(exported)
+    assert rows(engine, db.deck_impressions_table) == original
+
+
+@pytest.mark.parametrize("raw", [None, "", "not-json", "null", "[]", "3", '"legacy"',
+                                '{ "legacy": true, "value": 1.0 }'])
+def test_export_without_prepared_runtime_preserves_original_features_verbatim(engine, raw):
+    _insert_export_impression(engine, raw)
+    exported = accounts.export_user_data(OWNER)["tables"]["deck_impressions"][0]
+    assert exported["features_json"] == raw
+    assert type(exported["features_json"]) is type(raw)
 
 
 def adoption(inventory_id, now=NOW, **kwargs):

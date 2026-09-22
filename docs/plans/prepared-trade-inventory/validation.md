@@ -5,6 +5,15 @@ Baseline: `ff122752`; release owner remains the parent agent. See [scope](scope.
 
 ## Executed lane evidence
 
+Pre-merge privacy amendment: prepared inventory/target exports now retain only
+owned metadata (not private payloads), and impression exports remove only the new
+`prepared_runtime` recovery field. Two named privacy tests failed before repair;
+131 store/account-rights/deletion tests pass after it. Stored data is unchanged.
+Unattended replenishment retains its existing generation path rather than adopting
+as an interactive request;39 runtime/replenishment tests pass. Fresh full local
+run:7,132 passed /1 optional-data skip in434.21s before these final narrow guards;
+exact-head hosted CI remains required for the final amendment.
+
 Parent integration checks, 2026-09-22: 172 passed (runtime, independent real
 headless preparation/adoption, store, and counterparty epoch regression), followed
 by 85 passing runtime/epoch tests after failed-action and pending-read hardening.

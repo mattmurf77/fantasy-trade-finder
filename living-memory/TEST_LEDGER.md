@@ -10,6 +10,12 @@ Earlier concurrent full run:7097passed/1skip/2fixture failures; corrected fixtur
 pass focused, fresh full and exact-head hosted CI still pending. No production
 write/deployment/activation claim. [Evidence](../docs/plans/prepared-trade-inventory/validation.md).
 
+Final privacy correction demonstrated two RED→GREEN export controls;131
+store/account-rights/deletion tests pass. No stored evidence changed. Unattended
+replenishment cannot adopt as an interactive request (39 runtime/replenishment
+tests pass). Fresh full local7132passed/1optional-data skip in434.21s preceded
+these final guards; final exact-head hosted CI remains mandatory.
+
 ## 2026-09-22 — Release CI fixture repair and completed projection plan
 
 PR304 first hosted Python3.12.14 run:6860pass/1skip/1failure734.50s;

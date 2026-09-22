@@ -45,8 +45,13 @@ original immutable evidence using actual publication time before public exposure
 Account deletion removes entire disposable inventories and targets that contain
 any resolved deleted participant/alias, in the account lifecycle transaction, and
 fences late claims. It does not rewrite or anonymize retained trade history.
-Account export includes owned private prepared inventories, targets and participant
-rows; internal adoption/worker lease tokens are excluded from exported records.
+Account export includes owned prepared inventory/target metadata, counts, hashes
+and participant rows, but excludes both tables' `payload_json` and internal
+adoption/worker lease tokens. These payloads contain other managers' private
+inputs and evidence, not just the requesting user's data. Exported
+`deck_impressions.features_json` omits only the new top-level `prepared_runtime`
+recovery record; existing feature fields and the JSON-text contract are preserved.
+Stored payloads and impression evidence remain unchanged.
 Operational aggregate counts never imply an actual card view.
 
 ## Bilateral evidence (existing JSON columns)

@@ -333,6 +333,20 @@ def test_job_guard_cannot_extend_original_card_expiry():
     assert runtime._guard_expiry(cached) == now + timedelta(minutes=2)
 
 
+def test_unattended_replenishment_cannot_adopt_as_an_interactive_request(prepared, monkeypatch):
+    session = prepared[0][2]
+    monkeypatch.setattr(runtime, "try_adopt", lambda *a, **k: pytest.fail("background adoption"))
+    generated = []
+    def generate(job_id, *a, **k):
+        generated.append(job_id)
+        server._finish_trade_job(job_id)
+    monkeypatch.setattr(server, "_run_trade_job", generate)
+    job_id = server._kickoff_trade_job(sess_token=TOKEN, user_id=ME, league_id=LEAGUE,
+        scoring_format="1qb_ppr", fairness_threshold=.5, source="replenish",
+        synchronous=True, session_context=session)
+    assert generated == [job_id]
+
+
 def replace_with_empty(prepared):
     scope = prepared[2]
     previous = store.peek_inventory(scope)

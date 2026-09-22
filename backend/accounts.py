@@ -938,7 +938,8 @@ def _delete_user_data(sleeper_user_id: str,
 # (table_key, table, user column, columns to omit from the export)
 # sleeper_credentials.token_encrypted is omitted: a Fernet-encrypted
 # full-account Sleeper credential is useless to the user and dangerous in a
-# plaintext archive. Everything else is the user's own data verbatim.
+# plaintext archive. Prepared payloads also contain counterparty-private inputs;
+# export only their owned metadata, never the payload or recovery runtime.
 _EXPORT_TABLES: tuple = (
     ("users",                   "users_table",                   "sleeper_user_id", ()),
     ("swipe_decisions",         "swipe_decisions_table",         "user_id",         ()),
@@ -975,9 +976,9 @@ _EXPORT_TABLES: tuple = (
     ("draft_picks", "draft_picks_table", "assigned_by", ()),
     ("league_roster_history", "league_roster_history_table", "owner_user_id", ()),
     ("prepared_trade_inventories", "prepared_trade_inventories_table", "user_id",
-     ("adoption_token",)),
+     ("adoption_token", "payload_json")),
     ("prepared_trade_targets", "prepared_trade_targets_table", "user_id",
-     ("lease_token",)),
+     ("lease_token", "payload_json")),
     ("prepared_trade_participants", "prepared_trade_participants_table", "user_id", ()),
 )
 
@@ -993,6 +994,20 @@ def _rows_as_dicts(rows, omit: tuple = ()) -> list[dict]:
         {k: v for k, v in r._mapping.items() if k not in omit}
         for r in rows
     ]
+
+
+def _export_deck_features(raw):
+    """Remove only prepared recovery evidence; retain the existing text contract."""
+    if not isinstance(raw, str):
+        return raw
+    try:
+        features = json.loads(raw)
+    except (ValueError, TypeError):
+        return raw
+    if not isinstance(features, dict) or "prepared_runtime" not in features:
+        return raw
+    del features["prepared_runtime"]
+    return json.dumps(features)
 
 
 def export_user_data(sleeper_user_id: str,
@@ -1015,6 +1030,9 @@ def export_user_data(sleeper_user_id: str,
             tbl = getattr(db, tbl_attr)
             tables[key] = _rows_as_dicts(conn.execute(
                 select(tbl).where(tbl.c[col].in_(user_ids))).fetchall(), omit)
+            if key == "deck_impressions":
+                for row in tables[key]:
+                    row["features_json"] = _export_deck_features(row["features_json"])
 
         for name, predicate, omit in (
             ("trade_matches", db.trade_matches_table.c.user_a_id.in_(user_ids)

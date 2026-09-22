@@ -9070,7 +9070,7 @@ def _kickoff_trade_job(
                 with _trade_jobs_lock:
                     if not _job_live(_trade_jobs.get(job_id)):
                         return
-                if (not is_pinned and not trade_intent and not force_fresh
+                if (source != "replenish" and not is_pinned and not trade_intent and not force_fresh
                         and not presentation_exempt and execution_context is not None):
                     from . import prepared_trade_runtime
                     if prepared_trade_runtime.try_adopt(sys.modules[__name__], job_id=job_id,
