@@ -1,5 +1,44 @@
 # Validation — persistent prepared trade inventory
 
+## Final first-release gates and live canary
+
+PR305 tested head18045139: hosted CI35788148359 passed all four gates,
+backend **7,144 passed /1 skipped** in817.12s. Earlier final local full7132/1skip,
+subsequent focused privacy/store/deletion131, runtime/replenishment39 and independent
+export10 all passed. These supersede the historical pending-suite notes below.
+Merge4903d205 is tree-identical. Render became live22:07:49UTC.
+
+The production canary nevertheless exposed `prepared_payload:snapshot_conflict`
+across captured batches and saved zero inventories. Prepared rollout is off again;
+ordinary generation unchanged. This real-world failure is not qualified by the
+passing synthetic suites. [Release evidence](release.md) records exact rollout,
+coverage and required corrective gates. Device latency remains unverified.
+
+## Corrective capture/adoption qualification
+
+The actual logger64-card case reproduced the live `snapshot_conflict`; a real
+512-card varied-DAG case then reproduced the downstream SQL collision after30.
+Capture now reconciles equivalent expanded scoped content atomically. Adoption
+persists the frozen original graph and only the currently referenced dependency
+closure, retaining strict SQL row identity. No generator/policy/ranking change.
+
+- Parent combined cache regression: **321 passed in41.43s**.
+- Independent capture/review group: **91 passed in5.26s**;8RED/1GREEN before repair.
+- Independent store/review group: **108 passed in12.44s**; all4 capture→SQL
+  partition/restart controls failed before repair and passed afterward.
+- Actual512-offer prepare→SQL adoption now completes all512 with exact proofs,
+  terms/order and no truncation; first30 commit2.031s, full5.516s locally.
+- Web195/195; test-ID lint passed. Full backend and exact-head hosted CI are
+  renewed release gates; corrective production deployment has not occurred yet.
+
+Negative controls retain rejection of foreign scope, altered content/checksums,
+malformed dates, missing/cyclic references, partial state and changed persisted
+row bytes. Valid different observation times retain the original snapshot time;
+impressions use the original actual-adoption time. A64-collision check pins two
+graph validations per conflicted batch rather than a graph walk per collision.
+Local stress is synthetic32-opponent SQLite with provider/full receipt mocked;
+it does not establish the live three-second first-action KPI.
+
 2026-09-22. Local implementation evidence, not deployment or activation evidence.
 Baseline: `ff122752`; release owner remains the parent agent. See [scope](scope.md).
 

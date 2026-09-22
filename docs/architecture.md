@@ -19,7 +19,11 @@ before and after construction. The worker's preparation sink withholds evidence
 publication and side effects; no fake user activity or notification is generated.
 
 `prepared_trade_payload` captures allowlisted runtime/public card records and the
-logger's candidate/impression/diagnostic bundle. Restore validates the entire
+logger's candidate/impression/diagnostic bundle. Content-addressed diagnostic IDs
+bind expanded evidence, not a particular batch-local compressed representation.
+Conflicting encodings are validated as complete scoped graphs before atomic merge;
+equivalent content retains its first representation and observation timestamp.
+Restore validates the entire
 binding before yielding data, preserves proof bytes and terms without reevaluation,
 and rejects mutation before publication. `prepared_trade_store` atomically saves
 strict JSON plus checksum/receipt/participant index under a durable work lease.

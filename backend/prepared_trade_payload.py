@@ -371,10 +371,38 @@ class PreparedEvidenceCapture:
             if type(row.get("features_json")) is str:
                 row["features_json"] = _json(row["features_json"])
         compacted, nodes = compact_rows(detached)
+        incoming, conflicts = {}, []
         for node in nodes:
-            old = self._nodes.get(node["snapshot_id"])
-            _require(old is None or old == node, "snapshot_conflict")
-            self._nodes[node["snapshot_id"]] = node
+            sid = node["snapshot_id"]
+            _require(sid not in incoming, "duplicate_snapshot")
+            incoming[sid] = node
+            old = self._nodes.get(sid)
+            if old is not None and old != node:
+                # IDs bind EXPANDED scoped content. Batch-local compaction may
+                # inline a child in one batch and reference it in another.
+                # Scope must agree. Observation clocks are validated below,
+                # but are not content identity; retain the first stored time.
+                transport = {"payload_json", "created_at"}
+                _require({k: v for k, v in old.items() if k not in transport} ==
+                         {k: v for k, v in node.items() if k not in transport},
+                         "snapshot_conflict")
+                conflicts.append(sid)
+        if conflicts:
+            # Validate each whole graph once, not once per collision. Never
+            # accept a matching ID alone: both representations must have valid
+            # scoped hashes and complete, acyclic dependency closures.
+            old_expand = _snapshots(list(self._nodes.values()), self.user_id, self.job_id)
+            proposed = {**self._nodes, **incoming}
+            new_expand = _snapshots(list(proposed.values()), self.user_id, self.job_id)
+            for sid in conflicts:
+                reference = {REFERENCE_KEY: sid}
+                _require(_canonical(old_expand(reference)) == _canonical(new_expand(reference)),
+                         "snapshot_conflict")
+        # Stage everything before mutating capture state. Preserve the first
+        # authenticated representation and retain new dependencies from every
+        # batch; finish still validates the entire resulting graph.
+        self._nodes = {**self._nodes, **{sid: node for sid, node in incoming.items()
+                                       if sid not in self._nodes}}
         self._rows.extend(compacted)
 
     def finish(self, cards, public_cards, *, significance_by_trade_id=None):
