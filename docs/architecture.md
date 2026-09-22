@@ -1,5 +1,30 @@
 # Architecture
 
+## Independent model evaluation (offline foundation, 2026-09-22)
+
+`backend/eval/scorecard_dimensions.py` evaluates all six dimensions independently
+for A/B give, receive and complete package. It consumes normalized frozen evidence,
+not the constructor's claimed utility. Independent contextual annotations bind to
+exact terms, snapshot and temporal provenance; absent evidence stays Unknown.
+`scorecard_outcomes.py` reconstructs valid mutual-interest history, current
+actionability and post-milestone follow-up separately, retaining fixed cohort
+denominators and quarantining ambiguous attribution/history.
+
+`scorecard_evidence.py` reads explicit local JSON/allowlisted read-only SQLite
+exports without importing the app. `scorecard_runner.py` validates manifests and
+produces aggregate reports. `scorecard_replay.py` runs the retained bilateral,
+owner-v1 and fit constructors in an isolated, network-blocked scratch process,
+with common inputs/config and explicit stage provenance. Its significance-only
+projection is not a full serving-pipeline replay. Private manifests stay outside
+the repository; default output omits personal rows and identities.
+
+These modules have **no production request-path, schema, emitter or flag wiring**.
+They do not modify live rankings, recommendations or eligibility. Initial grading
+is draft/unratified and never automatically approves release. See
+[canonical contracts](model-evaluation/README.md),
+[comparison](plans/model-evaluation-framework/comparison-2026-09-22.md) and
+[remaining model/evidence work](plans/model-evaluation-framework/model-revision-plan.md).
+
 ## First-action trade job publication (2026-09-21)
 
 Ordinary trade requests atomically claim or join equivalent process-local jobs.

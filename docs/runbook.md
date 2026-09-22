@@ -7,6 +7,7 @@ Operational procedures. Add to this as you learn things.
 
 ## Table of Contents
 
+- [Independent offline model scorecard](#independent-offline-model-scorecard)
 - [Local dev](#local-dev)
 - [Deploy (Render)](#deploy-render)
 - [Pre-ship simulator gate (2026-08-08)](#pre-ship-simulator-gate-2026-08-08)
@@ -60,6 +61,28 @@ Operational procedures. Add to this as you learn things.
 - [ESPN identity binding — one-time cohort re-sign-in (#321, 2026-08-16)](#espn-identity-binding--one-time-cohort-re-sign-in-321-2026-08-16)
 
 ---
+
+## Independent offline model scorecard
+
+Use [model-evaluation commands and contracts](model-evaluation/README.md). The
+runner consumes an explicit local frozen manifest, never the production database
+environment. The evidence reader supports only existing allowlisted local
+read-only SQLite/JSON exports. The optional constructor replay requires a fresh
+process, an exact full checkout SHA, frozen request/config and a new private
+output directory; it forces an isolated scratch database and blocks sockets.
+
+Record constructor/config/input/evaluator identities. Register empty/error
+requests; distinguish generated, projected-policy and actually viewed stages.
+Never label a common significance projection as the full live pipeline or a
+stored impression as a verified view. Grade source timestamps at capture; bind
+independent reviews to exact terms and the normalized configuration/value snapshot.
+Unknown boards/projections/pick validity never count as successful evidence.
+
+Default reports aggregate; `--private-details` explicitly discloses private rows
+locally. Do not commit input manifests or identities. Existing output directories
+are rejected to prevent silent overwrite. These commands do not deploy, toggle
+arms or approve promotion. Broad production measurement, signed thresholds and
+the real three-second device KPI remain separate gates.
 
 ## Local dev
 

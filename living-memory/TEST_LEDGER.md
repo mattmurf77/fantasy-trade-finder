@@ -1,3 +1,19 @@
+## 2026-09-22 — Independent model scorecard, offline foundation
+
+Three Astra Ultra workstreams plus parent integration and cross-review on isolated
+`codex/model-evaluation-framework-20260922`, source base `73bfa41e`.
+**172 focused tests passed**; final source-frozen full backend **6,437 passed /
+1 skipped in 355.93s** (local Python 3.14.4, isolated SQLite). Earlier collection
+dependency failures and six edit-during-run outcome failures were corrected and
+superseded by the fresh green run, not waived. Failure-sensitive review controls
+and repairs are recorded in [validation](../docs/plans/model-evaluation-framework/validation.md).
+Two network-blocked common-input replays produce identical manifests/scorecards
+for 2,843 bilateral / 2,103 owner-v1 / 106 fit cards; one independent request, no
+behavioral acceptance evidence. [Comparison](../docs/plans/model-evaluation-framework/comparison-2026-09-22.md)
+and [revision plan](../docs/plans/model-evaluation-framework/model-revision-plan.md)
+remain explicit about Unknowns and unratified thresholds. No production reads/writes,
+arm toggles, source-model changes, push, hosted CI, deploy or TestFlight build.
+
 ## 2026-09-21 — First-action backend implementation, release gates in progress
 
 Owner authorized production release. Three implementation workstreams reviewed by parent; no model/budget changes or mobile source edits. Structured evidence 101 focused tests, publication 19, cache/admission final expanded set 197 (overlapping counts); parent copied-status race + observer checks 5 passed. Named callback-before-commit, missing admission/invalidation and no-post-read-revocation sabotages detected; restored implementations green. Three baseline/three updated isolated full-worker runs retain 2,354 offers/impressions and exact expanded valuation/package/order parity excluding explicitly listed occurrence IDs/clock fields. Median first durable 12.974→8.754s, worker 12.983→11.333s on local 3.14/SQLite, not phone/production. Native typecheck/all structural suites, test-ID lint and 195 web checks passed. Exploratory full suite: 6,235 passed / 23 failed / 1 skipped; resolved background policy-preservation regression and research-adapter formatting compatibility, corrected incomplete fixtures and intended supersession assertions. Eight inspect/AST failures caused by source edits during that exploratory run passed in a fresh 61-check rerun. Final source-frozen full backend and hosted exact-head CI remain release gates. Physical TestFlight/load/three-second qualification unrun. [Release evidence](../docs/plans/trade-search-latency/release-20260921/README.md).

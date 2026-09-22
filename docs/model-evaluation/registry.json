@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "source_commit": "73bfa41e358e8780b823f652cf8388ae209b977d",
+  "current_state_note": "Source registry, not a fresh production-status check",
+  "constructors": [
+    {"id": "owner_v2_bilateral", "module": "backend.trade_gen_bilateral", "entrypoint": "generate_bilateral_trades", "introduced_commit": "4913ad0c", "introduced_date": "2026-09-20", "priority": 1},
+    {"id": "owner_v1", "module": "backend.trade_gen_owner", "entrypoint": "generate_owner_trades", "introduced_commit": "0e3d6b70", "introduced_date": "2026-09-06", "priority": 2},
+    {"id": "fit", "module": "backend.trade_gen_fit", "entrypoint": "generate_league_suggestions", "introduced_commit": "c6e6c3c0", "introduced_date": "2026-08-20", "priority": 3},
+    {"id": "gen_v2", "module": "backend.trade_gen_v2", "priority": null},
+    {"id": "current", "module": "backend.trade_service", "priority": null},
+    {"id": "baseline", "module": "backend.bakeoff_profiles", "priority": null},
+    {"id": "challenger", "module": "backend.bakeoff_runner", "priority": null}
+  ],
+  "presentation_components": ["exact-package revalidation", "roster protection", "market policy", "significance", "composition and diversity", "history suppression", "inbound injection"],
+  "upstream_components": ["market reference", "personal board", "outlook inference", "league and ownership", "projections"],
+  "delivery_components": ["durable initial batch", "job validity", "pagination", "actual client view"],
+  "independent_evaluation": ["scorecard_dimensions", "scorecard_outcomes", "scorecard_evidence", "scorecard_runner"],
+  "ratification": "pending_independent_baseline_and_human_signoff"
+}
