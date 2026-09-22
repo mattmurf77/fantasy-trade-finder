@@ -1,3 +1,21 @@
+## 2026-09-22 — Persistent prepared trade inventory, release candidate
+
+Plan/scope preceded code. Three Astra Ultra lanes plus parent integration built
+silent full-offer preparation, verified per-account/team binding, compressed SQL
+artifacts, durable resumable sweeps, exact evidence-before-publication adoption,
+account-deletion fencing and current read guards. Model/arm settings unchanged.
+Parent172 focused tests passed; later runtime/epoch85 passed. Independent393
+affected regressions and80 store tests passed; web195/195 and test-ID lint passed.
+Earlier concurrent full run:7097passed/1skip/2fixture failures; corrected fixtures
+pass focused, fresh full and exact-head hosted CI still pending. No production
+write/deployment/activation claim. [Evidence](../docs/plans/prepared-trade-inventory/validation.md).
+
+Final privacy correction demonstrated two RED→GREEN export controls;131
+store/account-rights/deletion tests pass. No stored evidence changed. Unattended
+replenishment cannot adopt as an interactive request (39 runtime/replenishment
+tests pass). Fresh full local7132passed/1optional-data skip in434.21s preceded
+these final guards; final exact-head hosted CI remains mandatory.
+
 ## 2026-09-22 — Release CI fixture repair and completed projection plan
 
 PR304 first hosted Python3.12.14 run:6860pass/1skip/1failure734.50s;

@@ -2,6 +2,12 @@
 
 Domain terms used throughout the codebase. Add a term when new jargon appears.
 
+**Prepared trade inventory** — A private, durable snapshot of a complete generated
+offer set for one account, linked team, scoring format and default search. It is
+not a shown offer or user action. **Adoption** validates current inputs and commits
+each batch's exact offer evidence before making that batch available to the app.
+See [lifecycle and rollout](plans/prepared-trade-inventory/plan.md).
+
 **Recommendation significance** — Whether an unsolicited trade contains an
 individually meaningful player or qualifying draft pick, independent of whether
 the exchange is fair. Shared across generator arms; cheap assets cannot be

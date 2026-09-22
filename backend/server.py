@@ -2795,6 +2795,14 @@ def _cleanup_loop() -> None:
         if evicted or timed_out:
             log.info("Trade jobs swept: %d evicted, %d timed out", evicted, timed_out)
 
+        # Silent durable inventory refresh is deliberately separate from the
+        # notification-bearing daily tick and weekly replenishment.
+        try:
+            from . import prepared_trade_runtime
+            prepared_trade_runtime.tick(sys.modules[__name__])
+        except Exception:
+            log.warning("prepared inventory maintenance unavailable", exc_info=True)
+
 
 threading.Thread(target=_cleanup_loop, daemon=True).start()
 
@@ -3092,7 +3100,8 @@ def _trade_running_matches(job, fairness_threshold, outlook_value,
 def _trade_running_policy_matches(job, presentation_capture):
     """Preserve user intent/fairness, never work under an obsolete policy."""
     if not (_job_live(job) and _trade_presentation_matches(job, presentation_capture)
-            and _trade_owner_model_matches(job) and _trade_significance_matches(job)):
+            and _trade_owner_model_matches(job) and _trade_significance_matches(job)
+            and _prepared_job_matches(job)):
         return False
     key = job.get("key") or ()
     expected_safety = (_trade_safety_signature((False, False))
@@ -3164,6 +3173,18 @@ def _trade_owner_model_matches(job: dict) -> bool:
     return True
 
 
+def _prepared_job_matches(job):
+    if not job.get("prepared_inventory_id"):
+        return True
+    from . import prepared_trade_read_guard
+    guard = job.get("prepared_guard")
+    key = job.get("key") or ()
+    scope = guard.get("scope", {}) if isinstance(guard, dict) else {}
+    return (len(key) == 3 and type(scope) is dict and tuple(scope.get(k) for k in (
+        "user_id", "league_id", "scoring_format")) == tuple(key)
+        and prepared_trade_read_guard.valid(sys.modules[__name__], guard))
+
+
 def _trade_job_public_view(job: dict) -> dict:
     """Shape returned to the mobile app by /api/trades/generate + /status.
     Hides internal-only fields like the cache key. Call OUTSIDE the job lock
@@ -3176,6 +3197,9 @@ def _trade_job_public_view(job: dict) -> dict:
         "cards":           job.get("cards") or [],
         "error":           job.get("error"),
     }
+    if not _prepared_job_matches(job):
+        out.update(cards=[], status="error", error="prepared_inventory_stale")
+        return out
     def revocation_error():
         # A status request copies the registry before doing its disposition
         # read. Invalidation can happen during that I/O. Tokens survive the
@@ -3226,6 +3250,8 @@ def _trade_job_public_view(job: dict) -> dict:
     revoked = revocation_error()
     if revoked:
         out.update(cards=[], status="error", error=revoked)
+    elif not _prepared_job_matches(job):
+        out.update(cards=[], status="error", error="prepared_inventory_stale")
     elif not _trade_owner_model_matches(job):
         out.update(cards=[], status="error", error="owner_model_changed")
     elif not _trade_significance_matches(job):
@@ -3244,6 +3270,8 @@ def _project_trade_dispositions(cards, user_id: str, league_id: str):
     """
     if not cards or league_id == "league_demo":
         return cards
+    from . import prepared_trade_read_guard
+    cards = prepared_trade_read_guard.filter_cards(sys.modules[__name__], cards)
     try:
         history = load_trade_interest_history([league_id])
         own_impressions = {card.get("impression_id") for card in cards
@@ -3435,6 +3463,8 @@ def _trade_job_is_fresh(job: dict, fairness_threshold: float, outlook_value,
     """True iff this job's result can be returned as-is to a new caller —
     i.e. it's complete, recent, and was generated for the same parameters."""
     if job.get("status") != "complete" or _trade_job_revoked(job):
+        return False
+    if not _prepared_job_matches(job):
         return False
     if (request_signature is not None and "request_signature" in job
             and job["request_signature"] != request_signature):
@@ -3902,6 +3932,7 @@ def _inject_likes_you_cards_impl(
     exclusion_keys: set | None = None,   # G6 R4 #336 — dedup only (Q-G6-1)
     avoid_positions: set | None = None,  # #360 — position twin of not_interested
     significance_inbound_keys: set | None = None,
+    emit_exposure: bool = True,
 ) -> list:
     """Tier 2 work item 2.3a — surface trades the counterparty already liked.
 
@@ -4275,9 +4306,10 @@ def _inject_likes_you_cards_impl(
             # Server-fired impression. Counts only, never ids (R-19).
             # Analytics must never break deck generation.
             try:
-                record_event(user_id, "standing_offer_card_shown",
-                             league_id=league_id, source="api",
-                             props={"round": _round, "seasons": len(_seasons)})
+                if emit_exposure:
+                    record_event(user_id, "standing_offer_card_shown",
+                                 league_id=league_id, source="api",
+                                 props={"round": _round, "seasons": len(_seasons)})
             except Exception as _ev_err:
                 log.warning("record_event(standing_offer_card_shown) failed: %s",
                             _ev_err)
@@ -5020,6 +5052,7 @@ def _log_deck_signal_impressions(
     initial_publication_batch_size: int | None = None,
     on_batch_committed=None,
     should_continue=None,
+    prepare_sink=None,
 ) -> dict[int, str]:
     """Write one deck_impressions row per card (final served order) and
     return {id(card): impression_id} so the caller can stamp the ids into
@@ -5088,7 +5121,7 @@ def _log_deck_signal_impressions(
                 })
             cand_set_id = uuid.uuid4().hex
             cand_set_size = len(members)
-            save_deck_candidate_set({
+            (prepare_sink.candidate_set if prepare_sink is not None else save_deck_candidate_set)({
                 "candidate_set_id": cand_set_id,
                 "deck_job_id":      job_id,
                 "user_id":          user_id,
@@ -5101,6 +5134,8 @@ def _log_deck_signal_impressions(
                 "created_at":       datetime.now(timezone.utc).isoformat(),
             })
         except Exception as cs_err:
+            if prepare_sink is not None:
+                raise
             log.warning("candidate-set logging failed (non-fatal): %s", cs_err)
             cand_set_id, cand_set_size = None, None
 
@@ -5125,9 +5160,9 @@ def _log_deck_signal_impressions(
         if not rows:
             return
         check_live()
-        save_deck_impressions(rows)
+        (prepare_sink.impressions if prepare_sink is not None else save_deck_impressions)(rows)
         imp_by_card.update(batch_impressions)
-        if on_batch_committed is not None and batch_cards:
+        if prepare_sink is None and on_batch_committed is not None and batch_cards:
             on_batch_committed(list(batch_cards), dict(batch_impressions))
         rows = []
         batch_cards = []
@@ -5747,7 +5782,8 @@ def _build_trade_roster_context(*, sess, league, players, seed_map,
         positions = meta.get("roster_positions") or []
         slots = [s for s in positions if s not in ("BN", "IR", "TAXI")]
         capacity = sum(s not in ("IR", "TAXI") for s in positions) if positions else None
-        raw = _sleeper_get(f"https://api.sleeper.app/v1/league/{league_id}/rosters")
+        raw = (sess["prepared_roster_snapshot"] if "prepared_roster_snapshot" in sess else
+               _sleeper_get(f"https://api.sleeper.app/v1/league/{league_id}/rosters"))
     metadata = _load_sleeper_cache() or {}
     age = _players_cache_age_seconds()
     owned = {}
@@ -6351,6 +6387,7 @@ def _apply_deck_suppression(
     user_id: str,
     league_id: str,
     seed_map: dict,
+    mutation_sink=None,
 ) -> tuple[list, dict | None, set]:
     """Remove decline-window near-duplicates from a generated deck.
 
@@ -6391,7 +6428,13 @@ def _apply_deck_suppression(
                     tzinfo=timezone.utc) if datetime.fromisoformat(passed_at).tzinfo is None
                     else datetime.fromisoformat(passed_at)) + timedelta(days=window_d)
                 try:
-                    resuppress_deck_suppression(r["id"], passed_at, new_exp.isoformat())
+                    if mutation_sink is None:
+                        resuppress_deck_suppression(r["id"], passed_at, new_exp.isoformat())
+                    else:
+                        mutation_sink.append({"kind": "resuppress", "id": r["id"],
+                                              "passed_at": passed_at, "expires_at": new_exp.isoformat(),
+                                              "before": {key: r.get(key) for key in ("declined_at", "expires_at",
+                                                  "retested_at", "retest_trade_hash", "lifted_at")}})
                 except Exception as e:
                     log.warning("deck fatigue: re-suppress write failed: %s", e)
                 r["declined_at"] = passed_at
@@ -6442,7 +6485,13 @@ def _apply_deck_suppression(
             granted_rows.add(retest_row["id"])
             thash = _deck_trade_hash(give, recv, getattr(c, "target_user_id", None))
             try:
-                mark_deck_suppression_retested(retest_row["id"], thash, now_iso)
+                if mutation_sink is None:
+                    mark_deck_suppression_retested(retest_row["id"], thash, now_iso)
+                else:
+                    mutation_sink.append({"kind": "retest", "id": retest_row["id"],
+                                          "trade_id": c.trade_id, "trade_hash": thash,
+                                          "before": {key: retest_row.get(key) for key in ("declined_at", "expires_at",
+                                              "retested_at", "retest_trade_hash", "lifted_at")}})
             except Exception as e:
                 log.warning("deck fatigue: retest mark failed: %s", e)
             try:
@@ -7314,6 +7363,7 @@ class _TradeExecutionContext:
     user_roster: tuple
     players: tuple
     league_user_id: str
+    prepared_roster_snapshot: tuple | None = None
 
 
 def _capture_trade_execution(sess, user_id, league_id, scoring_format):
@@ -7361,6 +7411,7 @@ def _run_trade_job(
     presentation_capture=None,
     presentation_exempt: bool = False,
     significance_capture=None,
+    prepare_sink=None,
 ):
     """Daemon-thread entry point with context captured before thread start.
     Direct internal callers may omit context and capture at entry. All exceptions caught — a thread death
@@ -7376,6 +7427,8 @@ def _run_trade_job(
     would miss). None = not supplied (pregen from session_init, the
     replenishment cron) ⇒ the worker loads them itself, exactly as before."""
     try:
+        preparation = prepare_sink is not None
+        prepared_mutations = [] if preparation else None
         if significance_capture is None:
             significance_capture = _capture_trade_significance()
         if presentation_capture is None:
@@ -7404,6 +7457,8 @@ def _run_trade_job(
         g_players     = ctx.players
         sess = {"user_id": g_user_id, "league_user_id": ctx.league_user_id,
                 "user_roster": g_user_roster, "players": g_players}
+        if preparation and ctx.prepared_roster_snapshot is not None:
+            sess["prepared_roster_snapshot"] = copy.deepcopy(list(ctx.prepared_roster_snapshot))
         if not (service and trade_service and g_league
                 and g_user_roster and g_players):
             raise RuntimeError("session missing required state for trade gen")
@@ -7967,6 +8022,7 @@ def _run_trade_job(
                     exclusion_keys = exclusion_keys or None,   # G6 R4 #336
                     avoid_positions = set(avoid_positions) or None,   # #360
                     significance_inbound_keys = significance_inbound_keys,
+                    **({"emit_exposure": False} if preparation else {}),
                 )
                 # trade.bakeoff §3.4 Channel 2 — the injector returns the deck
                 # RE-SORTED by composite_score, which would silently destroy
@@ -8017,6 +8073,7 @@ def _run_trade_job(
                     user_id   = g_user_id,
                     league_id = league_id,
                     seed_map  = seed_map,
+                    **({"mutation_sink": prepared_mutations} if preparation else {}),
                 )
                 # trade.bakeoff §3.4 Channel 2 — the SUPPRESSION pass above
                 # stays live (it only removes cards, which shifts every arm
@@ -8275,9 +8332,10 @@ def _run_trade_job(
                         owner_cards, roster_ctx, enforce=roster_live, require_mutual=False)
                     roster_results.update(owner_roster_results)
                 try:
-                    _log_roster_rejections(roster_candidates, roster_results,
-                        job_id=job_id, user_id=g_user_id, league_id=league_id,
-                        bakeoff_run=bakeoff_run)
+                    if not preparation:
+                        _log_roster_rejections(roster_candidates, roster_results,
+                            job_id=job_id, user_id=g_user_id, league_id=league_id,
+                            bakeoff_run=bakeoff_run)
                 except Exception as roster_log_err:
                     log.warning("roster shadow log failed: %s", roster_log_err)
             except Exception as roster_err:
@@ -8364,7 +8422,7 @@ def _run_trade_job(
                 # funnel cannot read a missing second like as a rejection.
                 policy_shadow_rows.extend(
                     _mirror_skip_rows(trade_service, job_id, _pol_ctx))
-                if policy_shadow_rows:
+                if policy_shadow_rows and not preparation:
                     try:
                         save_trade_policy_shadow(policy_shadow_rows)
                     except Exception as sh_err:
@@ -8633,7 +8691,7 @@ def _run_trade_job(
         # Ghost cards are excluded — this table's contract is "every trade
         # card SHOWN to a user"; ghosts land only on the F1 spine, flagged.
         try:
-            if league_id != "league_demo":
+            if league_id != "league_demo" and not preparation:
                 log_trade_impressions(g_user_id, league_id, served_final)
         except Exception as imp_err:
             log.warning("trade impression logging failed (non-fatal): %s", imp_err)
@@ -8740,6 +8798,7 @@ def _run_trade_job(
                     presentation    = presentation,
                     **({"owner_presentment": owner_presentment} if owner_presentment is not None else {}),
                     significance_results = significance_results,
+                    **({"prepare_sink": prepare_sink} if preparation else {}),
                     **({
                         "structured_features": True,
                         "initial_publication_batch_size": 30,
@@ -8751,7 +8810,7 @@ def _run_trade_job(
                 )
                 if owner_serve and any(not imp_by_card.get(id(c)) for c in served_final):
                     raise ValueError("owner_impression_incomplete")
-                if owner_serve:
+                if owner_serve and not preparation:
                     if len(owner_published_cards) != len(served_final):
                         raise ValueError("owner_publication_incomplete")
                     # An honestly empty inventory has no batch callback.
@@ -8759,7 +8818,7 @@ def _run_trade_job(
                         j = _trade_jobs.get(job_id)
                         if _job_live(j):
                             j["final_checks_pending"] = False
-                elif imp_by_card:
+                elif imp_by_card and not preparation:
                     snapshot = []
                     for c in served_final:
                         d = trade_card_to_dict(c, players_dict)
@@ -8787,6 +8846,32 @@ def _run_trade_job(
                         # Earlier committed offers retain their exact IDs and
                         # terms; only the failed/unwritten suffix is withheld.
                         j["final_checks_pending"] = False
+
+        if preparation:
+            # Reservation is not exposure. No legacy impressions, run-as-served
+            # ledger, activity, pending-card publication or first-deck use.
+            if owner_impression_error:
+                raise ValueError("prepared_evidence_unavailable")
+            public = []
+            for card in served_final:
+                row = trade_card_to_dict(card, players_dict)
+                row.update(real_opponent=card.target_user_id in real_user_ids,
+                           outlook=outlook_value, impression_id=imp_by_card.get(id(card)))
+                public.append(row)
+            bundle = prepare_sink.finish(served_final, public,
+                significance_by_trade_id={c.trade_id: value for c in served_final
+                    if (value := _significance_exemptions_for(trade_service).get(
+                        _significance_card_key(c))) is not None})
+            with _trade_jobs_lock:
+                job = _trade_jobs.get(job_id)
+                if not _owner_publication_is_live_locked(job):
+                    raise RuntimeError("trade_job_not_live")
+                job["prepared_bundle"] = bundle
+                job["prepared_mutations"] = prepared_mutations
+                job["prepared_count"] = len(served_final)
+                job["cards"] = []
+            _finish_trade_job(job_id)
+            return
 
         # trade.bakeoff — ONE bakeoff_runs row per bake-off job: arm order,
         # per-arm card counts / generation ms / empty + forfeit counts, and
@@ -8984,6 +9069,12 @@ def _kickoff_trade_job(
             if active:
                 with _trade_jobs_lock:
                     if not _job_live(_trade_jobs.get(job_id)):
+                        return
+                if (source != "replenish" and not is_pinned and not trade_intent and not force_fresh
+                        and not presentation_exempt and execution_context is not None):
+                    from . import prepared_trade_runtime
+                    if prepared_trade_runtime.try_adopt(sys.modules[__name__], job_id=job_id,
+                            context=execution_context, fairness=fairness_threshold, prefs=prefs_preload):
                         return
                 _run_trade_job(*args, **kwargs)
             else:
@@ -13770,7 +13861,8 @@ def _inject_owned_picks(*, league_id: str, scoring_format: str, trade_service,
     return seed_map, user_roster, n_inj
 
 
-def _sync_mfl_owned_picks(league_id: str) -> int:
+def _sync_mfl_owned_picks(league_id: str, *, source_picks=None,
+                          expected_binding=None) -> int:
     """Normalize a linked MFL league's stored future picks into draft_picks.
 
     MFL gives the owned list directly (leagues.platform_future_picks, populated
@@ -13801,8 +13893,10 @@ def _sync_mfl_owned_picks(league_id: str) -> int:
     row = get_platform_league(league_id, "mfl")
     if not row:
         return 0
+    if expected_binding is not None and any(row.get(k) != v for k, v in expected_binding.items()):
+        raise ValueError("source_binding_changed")
     try:
-        picks = json.loads(row.get("platform_future_picks") or "[]")
+        picks = source_picks if source_picks is not None else json.loads(row.get("platform_future_picks") or "[]")
     except (TypeError, ValueError):
         picks = []
     if not isinstance(picks, list) or not picks:
@@ -13888,7 +13982,9 @@ def _sleeper_cached_draft_verdict(league_id: str):
 def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
                               scoring_format: str, *,
                               rosters: list | None = None,
-                              meta: dict | None = None) -> list[dict] | None:
+                              meta: dict | None = None,
+                              traded_picks: list | None = None,
+                              drafts: list | None = None) -> list[dict] | None:
     """#158 Sleeper owned-pick grid sync for one league (session-init daemon
     step, extracted so the skip conditions are unit-testable).
 
@@ -13916,7 +14012,7 @@ def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
     `/league/<id>` dict. None (every other caller, and a daemon whose own
     fetch flaked) keeps the self-fetching behavior verbatim.
     """
-    _tp = _fetch_sleeper_traded_picks(league_id)
+    _tp = traded_picks if traded_picks is not None else _fetch_sleeper_traded_picks(league_id)
     _prosters = rosters if rosters is not None else _fetch_league_rosters(league_id)
     _pmeta = meta if meta is not None else _fetch_sleeper_league_meta(league_id)
     if not _prosters or not _pmeta:
@@ -13950,7 +14046,7 @@ def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
     # current season, so one flaked read can no longer re-populate a spent
     # class for the whole league (the replace-sync made that league-wide).
     # A flake with no corroboration keeps the D-089 fail-safe: exclude nothing.
-    _drafts = _fetch_sleeper_drafts(league_id)
+    _drafts = drafts if drafts is not None else _fetch_sleeper_drafts(league_id)
     _exclude: set[int] = _draft_status_mod.completed_draft_seasons(_drafts, _cur_season)
     if not _drafts:
         _cached = _sleeper_cached_draft_verdict(league_id)
@@ -15498,10 +15594,12 @@ def get_trades():
     # or rollback. Re-filter against the final model without deleting history,
     # reinserting earlier exclusions, or suppressing inbound/demo cards.
     final_owner_config = dict(_trade_service_mod._cfg)
+    from . import prepared_trade_read_guard
+    retained = {id(c) for c in prepared_trade_read_guard.filter_cards(sys.modules[__name__], cards)}
     if ((_bakeoff.owner_arm(pending_owner_config), _bakeoff.owner_version(pending_owner_config))
             != (_bakeoff.owner_arm(final_owner_config), _bakeoff.owner_version(final_owner_config))):
-        retained = {id(c) for c in _pending_owner_cards(cards, final_owner_config, pending_exemptions)}
-        output = [row for card, row in zip(cards, output) if id(card) in retained]
+        retained &= {id(c) for c in _pending_owner_cards(cards, final_owner_config, pending_exemptions)}
+    output = [row for card, row in zip(cards, output) if id(card) in retained]
     return jsonify(output)
 
 
@@ -15579,6 +15677,8 @@ def swipe_trade():
 
     if not trade_id or not decision:
         return jsonify({"error": "trade_id and decision required"}), 400
+    if decision not in ("like", "pass"):
+        return jsonify({"error": "decision must be 'like' or 'pass'"}), 400
 
     try:
         try:
@@ -15589,7 +15689,13 @@ def swipe_trade():
             # surface the original error (legacy payloads).
             if "Unknown trade_id" not in str(ve):
                 raise
-            rebuilt = _reconstruct_swipe_card(trade_service, body, g_user_id, g_league.league_id)
+            from .prepared_trade_runtime import restore_action_card
+            rebuilt = restore_action_card(sys.modules[__name__], body=body,
+                user_id=g_user_id, league_id=g_league.league_id)
+            if rebuilt is not None:
+                trade_service._trade_cards[rebuilt.trade_id] = rebuilt
+            else:
+                rebuilt = _reconstruct_swipe_card(trade_service, body, g_user_id, g_league.league_id)
             if rebuilt is None:
                 raise
             log.info("swipe: reconstructed card %s from payload context (FB-46)", trade_id)
@@ -21570,6 +21676,38 @@ def admin_config_list():
     except Exception as e:
         log.exception("admin_config_list failed")
         return jsonify({"error": "internal_error"}), 500
+
+
+@app.route("/api/admin/prepared-trades", methods=["GET", "POST", "DELETE"])
+def admin_prepared_trades():
+    """Operator-only silent cohort preparation; never invokes daily-tick."""
+    _require_cron_auth()
+    from . import prepared_trade_runtime as runtime, prepared_trade_store as store
+    if request.method == "GET":
+        result = runtime.status(request.args.get("sweep_id"))
+        return jsonify(result or {"error": "not_found"}), 200 if result else 404
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        return jsonify({"error": "object_body_required"}), 400
+    if request.method == "DELETE":
+        sweep_id = body.get("sweep_id")
+        if not isinstance(sweep_id, str) or not sweep_id:
+            return jsonify({"error": "sweep_id_required"}), 400
+        return jsonify({"stopped": store.stop_sweep(sweep_id)})
+    key = body.get("idempotency_key")
+    if not isinstance(key, str) or not key.strip() or len(key) > 200:
+        return jsonify({"error": "idempotency_key_required"}), 400
+    if type(body.get("dry_run", False)) is not bool:
+        return jsonify({"error": "dry_run_must_be_boolean"}), 400
+    for field in ("user_id", "league_id"):
+        if field in body and (not isinstance(body[field], str) or not body[field]):
+            return jsonify({"error": "invalid_scope"}), 400
+    try:
+        result = runtime.start(sys.modules[__name__], idempotency_key=key,
+            dry_run=body.get("dry_run", False), user_id=body.get("user_id"), league_id=body.get("league_id"))
+        return jsonify(result), 202
+    except ValueError:
+        return jsonify({"error": "prepared_inventory_disabled"}), 409
 
 
 @app.route("/api/admin/config/<key>", methods=["PUT"])

@@ -63,6 +63,70 @@ engine   = create_engine(DATABASE_URL, echo=False, future=True,
                          connect_args=_connect_args)
 metadata = MetaData()
 
+# Silent prepared offers are private artifacts, not shown impressions. The
+# participant index covers every consumed manager, including non-app members.
+# Store operations live in prepared_trade_store; these additive tables are
+# bootstrapped by the ordinary metadata.create_all path on both SQL dialects.
+prepared_trade_inventories_table = Table("prepared_trade_inventories", metadata,
+    Column("inventory_id", String, primary_key=True),
+    Column("scope_key", String, nullable=False, unique=True),
+    Column("user_id", String, nullable=False, index=True),
+    Column("league_id", String, nullable=False),
+    Column("schema_version", Integer, nullable=False),
+    Column("created_at", String, nullable=False),
+    Column("expires_at", String, nullable=False, index=True),
+    Column("dependency_hash", String, nullable=False),
+    Column("model_hash", String, nullable=False),
+    Column("card_count", Integer, nullable=False),
+    Column("payload_sha256", String, nullable=False),
+    Column("payload_json", Text, nullable=False),
+    Column("adoption_token", String),
+    Column("adoption_lease_until", String),
+    Column("adoption_prefix", Integer, nullable=False, default=0),
+    Column("adoption_json", Text),
+    Column("adoption_sha256", String),
+)
+prepared_trade_sweeps_table = Table("prepared_trade_sweeps", metadata,
+    Column("sweep_id", String, primary_key=True),
+    Column("idempotency_key", String, nullable=False, unique=True),
+    Column("cohort_hash", String, nullable=False),
+    Column("coverage_json", Text, nullable=False, default="{}"),
+    Column("created_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+    Column("status", String, nullable=False),
+    Column("target_count", Integer, nullable=False),
+    Column("deleted_count", Integer, nullable=False, default=0),
+)
+prepared_trade_targets_table = Table("prepared_trade_targets", metadata,
+    Column("target_id", String, primary_key=True),
+    Column("sweep_id", String, nullable=False, index=True),
+    Column("scope_key", String, nullable=False),
+    Column("user_id", String, nullable=False, index=True),
+    Column("payload_json", Text, nullable=False),
+    Column("status", String, nullable=False, index=True),
+    Column("reason", String),
+    Column("attempts", Integer, nullable=False, default=0),
+    Column("max_attempts", Integer, nullable=False),
+    Column("available_at", String, nullable=False),
+    Column("lease_token", String),
+    Column("lease_until", String),
+    Column("inventory_id", String),
+    Column("updated_at", String, nullable=False),
+    UniqueConstraint("sweep_id", "scope_key", name="uq_prepared_trade_target"),
+)
+prepared_trade_participants_table = Table("prepared_trade_participants", metadata,
+    Column("subject_kind", String, primary_key=True),
+    Column("subject_id", String, primary_key=True),
+    Column("participant_user_id", String, primary_key=True, index=True),
+    Column("user_id", String, nullable=False, index=True),
+)
+prepared_trade_worker_table = Table("prepared_trade_worker", metadata,
+    Column("worker_id", Integer, primary_key=True),
+    Column("lease_token", String),
+    Column("lease_until", String),
+    Column("target_id", String),
+)
+
 # Win Now — immutable evidence and a durable, viewer-scoped work queue.
 # Whole normalized forecast batches are stored together so a simulation cannot
 # accidentally join player rows from different publication snapshots.
@@ -2965,6 +3029,7 @@ _MODEL_CONFIG_DEFAULTS = [
     ("bakeoff_owner_only",          0.0, "owner_v1 exclusive: 1 = only owner generation/serving with no returned-offer quotas; requires include+serve; 0 = comparison path"),
     ("owner_bilateral_enabled",     0.0, "Owner generator selector: 1 replaces owner_v1 with owner_v2_bilateral on every owner entrance; 0 restores owner_v1; include/serve/exclusive settings stay unchanged"),
     ("owner_bilateral_revision_enabled", 0.0, "Bilateral revision selector: exactly 1 selects owner-v2-bilateral-2 when bilateral is selected; 0 retains/restores owner-v2-bilateral-1; other arms and serving settings unchanged"),
+    ("prepared_trade_inventory_enabled", 0.0, "Silent durable prepared trade inventory: exactly 1 enables preparation/adoption with the registered capability; default 0, no model or offer-limit changes"),
     ("owner_pool_size",            16.0, "owner_v1 bounded candidate pool per team; computational limit, not a value gate"),
     ("owner_pair_budget",        4096.0, "owner_v1 maximum candidate evaluations per opponent"),
     ("owner_total_budget",      60000.0, "owner_v1 maximum candidate evaluations per generation"),

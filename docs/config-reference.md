@@ -4,6 +4,34 @@
 
 Environment variables, feature flags, and `model_config` keys. Keep in sync when adding any of the three (see [docs/CLAUDE.md](CLAUDE.md)).
 
+## Persistent prepared trade inventory
+
+`trade.prepared_inventory` registers the capability (true in the checked-in
+feature file). Actual background preparation **and adoption** remain default-dark:
+numeric `prepared_trade_inventory_enabled` defaults to **0** in `model_config`,
+and only exactly **1** enables them. Existing exclusive Bilateral revision 2
+selection is an additional compatibility gate, not changed by this control.
+Use audited `/api/admin/config/<key>` / `scripts/set_knob.py` and authenticated
+readback. Setting the prepared knob to 0 restores ordinary fresh generation;
+it does not delete historical decisions or change any model/offer-limit knob.
+
+Current implementation bounds are not additional rollout knobs: at most 24-hour
+original artifact retention, one background preparation claim, 300-second default
+target lease, hourly maintenance refresh intent, 64 MiB logical JSON and 2 MiB
+encoded SQL artifact limits, and 30 then 100-card publication batches. Artifacts
+use fixed zlib/base64 encoding with bounded decompression. The byte limits reject rather
+than truncates; publication batch size is not a generation cap. Source resolution
+uses a five-minute freshness bound, independent of artifact retention. Existing
+30-minute in-process job freshness and original card expiry still apply.
+
+Saved league scoring wins; database NULL retains native `1qb_ppr` with explicit
+`native_default` provenance. Background fairness uses the latest observed in-memory
+session setting when present, otherwise native 0.5. A differing actual user request
+must miss, not be silently normalized. No new provider credential or paid service
+is configured. [Status](plans/prepared-trade-inventory/status.md) and
+[runbook](plans/prepared-trade-inventory/runbook.md) distinguish implementation
+from tested/deployed/live state; no three-second device claim is implied.
+
 ## Bilateral owner selector
 
 `owner_bilateral_revision_enabled` is a separately default-dark numeric

@@ -4,6 +4,29 @@
 
 Operational procedures. Add to this as you learn things.
 
+## Silent prepared trade inventory
+
+Use the [dedicated runbook](plans/prepared-trade-inventory/runbook.md) and check its
+[validation/status](plans/prepared-trade-inventory/status.md) before any release or
+sweep. Operator-only `/api/admin/prepared-trades` supports asynchronous POST
+discovery/preparation, aggregate GET status and DELETE stop using existing cron
+authorization. Dry-run first, then a scoped canary, then the authorized all-current
+linked-team cohort. Do **not** invoke daily-tick or notification replenishment.
+
+The actual rollout knob is `prepared_trade_inventory_enabled` (default 0; exactly
+1 enables, alongside the capability and compatible model). Use the audited config
+workflow/readback; 0 is the global prep/adoption rollback. Stopping one sweep does
+not disable adoption or erase durable evidence. Keep other flags/model settings
+and all offer limits unchanged.
+
+Report resolved targets and unresolved cohort/source/binding reasons separately.
+`unexpired_artifacts` is not validated fresh-ready coverage, and an empty inventory
+is not an error. Retention is at most 24 hours with no read renewal, subject to
+current dependencies and original expiry. No prepare-time views, likes, proposals,
+login/activity or push/inbox messages are authorized. Production coverage and the
+three-second actionable-tile goal require observed release/device evidence, not
+a successful unit test or cache-hit label.
+
 ## Bilateral revision evaluation and rollback
 
 Revision selector `owner_bilateral_revision_enabled` defaults to 0. Do not infer
