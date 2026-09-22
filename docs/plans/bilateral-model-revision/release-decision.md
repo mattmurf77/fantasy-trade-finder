@@ -2,7 +2,14 @@
 
 ## Decision
 
-**Current checkpoint: do not activate or deploy this revision.** The owner authorized either release
+**Superseding owner decision, 2026-09-22:** deploy and activate this revision for
+production learning despite the disclosed latency and quality uncertainty.
+[Authorization and operations contract](production-learning-release.md).
+CI and operational verification still apply; no deployment is claimed by this
+document. The evaluation hold below remains the historical scientific assessment,
+not a model-quality pass or the current owner's deployment instruction.
+
+**Prior checkpoint: do not activate or deploy this revision.** The owner authorized either release
 after evaluation or another implementation round. Independent review triggered
 round2, which repaired preference-driven price escalation and presentation
 reordering. Measured full-worker performance then triggered a separately scoped

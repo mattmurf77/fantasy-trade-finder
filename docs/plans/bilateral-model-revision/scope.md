@@ -4,6 +4,12 @@ Date: 2026-09-22. Owner explicitly requests parent-authored agent specs, impleme
 
 ## Product contract
 
+Release authority update2026-09-22: the owner now explicitly requests production
+activation to learn from real users, after disclosure of slow first delivery and
+unproven bilateral quality. This overrides the previous conditional hold for this
+learning rollout only; it does not waive CI/privacy/operational safeguards or turn
+Unknown grades into passes. [Recorded decision](production-learning-release.md).
+
 Both managers should willingly execute the exact offer. Personal tiers/order plus outlook/needs identify focal targets and sells; reasonable market consideration prices the package. Higher conviction alone does not authorize extracting extra assets. Tankers prioritize picks and favored long-horizon WR/TE/QB, sell RBs, protect favored youth/own-next-draft picks except explicit intent. Rare personally elite/discounted-prospect RB exceptions stay. No artificially capped deck, no forced padding or quotas. Preserve small organic shapes and deliberate larger selections. Unknown counterparty preferences are not consensus conviction; dynasty proxies are not projected starts.
 
 ## Scope and boundaries

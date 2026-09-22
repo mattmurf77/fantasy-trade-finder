@@ -15,6 +15,13 @@ changes; set the revision knob to 0 and read authenticated `/api/admin/config`
 back for deploy-free rollback to bilateral version -1. Only exactly 1 enables -2,
 and only if bilateral itself is selected. Never use direct DB writes for knobs.
 
+The2026-09-22 owner-authorized version-2 learning release accepts documented
+latency/quality uncertainty but still requires exact-head CI and live readback.
+Follow [its release contract](plans/bilateral-model-revision/production-learning-release.md).
+Keep existing `owner_bilateral_enabled` and owner-exclusive settings unchanged;
+only the revision selector changes. Do not apply the original initial-bilateral
+rollout's disable/re-enable sequence to this revision rollout.
+
 Offline export: `python -m backend.eval.capture_owner_benchmark --secrets
 <existing-secrets-path> --output <new-private-json>` uses the established
 read-only production engine with statement timeout and at most 100 recent run

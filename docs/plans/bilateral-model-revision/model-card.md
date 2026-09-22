@@ -83,7 +83,9 @@ cannot satisfy them.
 ## Release and rollback
 
 Consult [status](status.md) for the actual decision; this card itself authorizes
-nothing. One audited knob restores incumbent -1, with version-fenced new-search
+nothing. The owner has now authorized a [production learning release](production-learning-release.md)
+despite unresolved latency and quality evidence; this is not a calibrated or
+validated acceptance claim. One audited knob restores incumbent -1, with version-fenced new-search
 inventory and unchanged historical interest evidence. No mobile code changes are
 part of this revision, so a new TestFlight binary is not inherently needed to
 serve it. Physical-device/load/three-second validation is still required before

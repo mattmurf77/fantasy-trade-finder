@@ -1,3 +1,14 @@
+## 2026-09-22 — Production learning release authorized, operations pending
+
+Owner explicitly requests new model/docs live despite disclosed latency and
+quality uncertainty. Scientific promotion hold is superseded as a deployment
+decision, not relabeled passed. CI/integrity/privacy/readback remain mandatory.
+Read-only12:03:42UTC Render+API preflight: live73bfa41e, one Standard instance,
+autodeploy off,270 config rows, owner-only bilateral enabled; revision selector
+absent/default0. All unrelated settings remain untouched. Hosted exact-head CI,
+merge, deploy and audited revision activation pending. No new code since validated
+2186d436, no TestFlight needed. [Contract](../docs/plans/bilateral-model-revision/production-learning-release.md).
+
 ## 2026-09-22 — Round8 counterparty job freshness (not released)
 
 Parent full backend: **6,861 passed /1 optional-data skip in364.43s**, local

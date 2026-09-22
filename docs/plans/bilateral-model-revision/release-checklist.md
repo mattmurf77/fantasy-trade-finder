@@ -1,4 +1,10 @@
-# Release decision checklist — not executed activation instructions
+# Release decision checklist
+
+2026-09-22 superseding decision: the owner explicitly authorizes the current
+revision as a production learning release despite the prior latency/quality
+hold. Follow [the accepted-risk release contract](production-learning-release.md)
+for this rollout. The scientific promotion criteria below remain unpassed;
+operational CI, privacy/integrity and deployment/config readback are not waived.
 
 Only the final decision in status/evaluation evidence may qualify an artifact.
 Local tests and descriptive raw metrics alone are not a signed six-dimensional
@@ -45,7 +51,8 @@ they did not waive the reviewed scorecard's missing-data or release gates.
 
 ## Conditional deployment workflow
 
-Do not execute while decision is failed/insufficient evidence. When qualified,
+Absent an explicit accepted-risk production-learning authorization, do not execute
+while evidence is failed/insufficient. Under the owner's recorded authorization,
 push the reviewed branch/PR, attach the PR to this task, require exact-head CI,
 merge and explicitly deploy the verified commit through the established Render
 workflow. Inspect fresh autodeploy/service state first. Read existing model
