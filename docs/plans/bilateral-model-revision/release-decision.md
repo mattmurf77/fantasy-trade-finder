@@ -184,6 +184,16 @@ development-only [focal mechanism audit](spec-focal-mechanism-audit.md) now
 separates actual target/order changes from aggregate coverage/composition effects;
 no new weights, acceptance labels or holdout tuning are authorized by that audit.
 
+The [completed focal audit](focal-mechanism-audit.md) and independent review agree:
+three development contexts show different constructor-prefix, significance and
+broader-focal-denominator effects, but no demonstrated runtime-contract violation
+or clearly dominant bilateral replacement. Unknown counterparty preferences and
+missing original decision proofs prevent a stronger claim. Do not reverse the
+meaningfulness guard or tune weights to improve these disclosed percentages.
+This does not establish that the quality loss is harmless. No further semantic
+change is justified by those three cases alone; latency and evidence gates remain
+unmet. Safe fixes and current measurements are saved at local2186d436, not released.
+
 Keep useful correctness improvements, but do not promote the whole model on this
 evidence. Use development-only traces to isolate whether focal-alignment changes
 come from constructor eligibility, construction ordering or survivor ordering.
