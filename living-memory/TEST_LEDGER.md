@@ -1,3 +1,13 @@
+## 2026-09-22 — Release CI fixture repair and completed projection plan
+
+PR304 first hosted Python3.12.14 run:6860pass/1skip/1failure734.50s;
+three client/web jobs green. Rookie scope fixture starts last_active0 and can
+be evicted before its first request. Added freshness regression RED1.27s,
+changed fixture timestamp to now;61 focused scope/session/scoring tests pass
+2.31s. No auth/runtime/generation changes or weakened assertions. New exact-head
+CI required before merge. Reviewed season/weekly/bye starter-impact plan complete,
+docs only. [Evidence](../docs/plans/bilateral-model-revision/release-ci-fixture-repair.md).
+
 ## 2026-09-22 — Production learning release authorized, operations pending
 
 Owner explicitly requests new model/docs live despite disclosed latency and
