@@ -466,7 +466,8 @@ def test_named_negative_control_checksum_removal_exposes_corruption(engine, monk
         assert load() is None
 
 
-def evidence_inventory(count=3, with_candidate=True, mutations=None):
+def evidence_inventory(count=3, with_candidate=True, mutations=None, diagnostics=None,
+                       adopt_at=NOW, snapshot_edit=None):
     """Synthetic exact JSON evidence, without importing a generator/service."""
     cards = [{"runtime": {"trade_id": f"trade-{i}"}, "public": {"trade_id": f"trade-{i}"}}
              for i in range(count)]
@@ -479,20 +480,106 @@ def evidence_inventory(count=3, with_candidate=True, mutations=None):
         "propensity": 1.0, "served_at": NOW.isoformat(), "valuation_json": '{"private":"original"}',
         "candidate_set_id": candidate["candidate_set_id"] if candidate else None,
         "candidate_set_size": count if candidate else None} for i in range(count)]
+    if diagnostics is not None:
+        for i, row in enumerate(impressions):
+            row["features_json"]["owner_request"] = diagnostics(i)
     from backend.deck_diagnostics import compact_rows
     compacted, snapshots = compact_rows(impressions)
+    if snapshot_edit is not None:
+        snapshot_edit(snapshots)
     bundle = {"cards": cards, "job_id": "prepared-job", "candidate_set": candidate,
               "impressions": compacted, "snapshots": snapshots}
     value = claim()
     inventory_id = store.save_inventory(value, payload={"inventory": bundle, "mutations": mutations or []}, dependency_receipt=RECEIPT,
         model_identity=MODEL, participants=value["participants"], created_at=NOW,
         expires_at=NOW + timedelta(hours=24), now=NOW)
-    adopted = adoption(inventory_id)
+    adopted = adoption(inventory_id, now=adopt_at)
     for i, row in enumerate(impressions):
+        row["served_at"] = adopt_at.isoformat()
         row["features_json"].pop("first_deck", None)
         row["features_json"].update(prepared_runtime=cards[i], prepared_inventory_id=inventory_id,
                                      deck_source="prepared_adoption")
     return adopted, candidate, impressions
+
+
+def test_adoption_keeps_original_diagnostic_dag_across_30_and_100_card_batches(engine):
+    from backend.deck_diagnostics import REFERENCE_KEY, compact_rows
+    shared = {"long_shared": ["unchanged diagnostic"] * 100}
+    diagnostic = lambda i: {"family": "first" if i <= 30 else "later", "shared": shared}
+    served_at = NOW + timedelta(seconds=30)
+    value, candidate, impressions = evidence_inventory(130, diagnostics=diagnostic, adopt_at=served_at)
+    original = load()["payload"]["inventory"]
+    frozen = {node["snapshot_id"]: node for node in original["snapshots"]}
+    first_sid = json.loads(original["impressions"][0]["features_json"])["owner_request"][REFERENCE_KEY]
+    later_sid = json.loads(original["impressions"][-1]["features_json"])["owner_request"][REFERENCE_KEY]
+    # The unchanged compactor actually encodes the same first root differently
+    # across these page contexts: inline child versus shared child reference.
+    _, first_nodes = compact_rows(impressions[:30])
+    _, later_nodes = compact_rows(impressions[30:])
+    first_encoding = next(n for n in first_nodes if n["snapshot_id"] == first_sid)
+    later_encoding = next(n for n in later_nodes if n["snapshot_id"] == first_sid)
+    assert first_encoding["payload_json"] != later_encoding["payload_json"]
+    store.ensure_adoption_evidence(value, candidate_set=candidate, rows=impressions[:30], now=served_at)
+    before = rows(engine, db.deck_diagnostic_snapshots_table)
+    assert later_sid not in {r["snapshot_id"] for r in before}
+    store.ensure_adoption_evidence(value, candidate_set=None, rows=impressions[30:], now=served_at)
+    persisted = rows(engine, db.deck_diagnostic_snapshots_table)
+    assert {r["snapshot_id"]: dict(r) for r in persisted} == frozen
+    assert all(r["created_at"] == NOW.isoformat() for r in persisted)
+    assert all(r["served_at"] == served_at.isoformat() for r in rows(engine, db.deck_impressions_table))
+    assert len(rows(engine, db.deck_impressions_table)) == 130
+    for row in impressions:
+        assert db.load_deck_diagnostics(row["impression_id"], OWNER) == row["features_json"]
+    assert store.ensure_adoption_evidence(value, candidate_set=candidate, rows=impressions,
+        now=served_at) == {"candidate_sets": 0, "snapshots": 0, "impressions": 0}
+
+
+@pytest.mark.parametrize("fault", ["checksum", "user_scope", "job_scope", "dangling", "cycle",
+                                  "timestamp", "duplicate", "reference_shape", "unknown_column"])
+def test_prepared_snapshot_closure_rejects_corruption_before_any_publication(engine, fault):
+    from backend.deck_diagnostics import REFERENCE_KEY
+    def damage(nodes):
+        node = nodes[-1]
+        if fault == "checksum":
+            node["payload_json"] = '{"changed":true}'
+        elif fault == "user_scope":
+            node["user_id"] = PEER
+        elif fault == "job_scope":
+            node["deck_job_id"] = "foreign-job"
+        elif fault == "dangling":
+            node["payload_json"] = json.dumps({REFERENCE_KEY: "missing"})
+        elif fault == "cycle":
+            node["payload_json"] = json.dumps({REFERENCE_KEY: node["snapshot_id"]})
+        elif fault == "timestamp":
+            node["created_at"] = "2026-09-22"
+        elif fault == "duplicate":
+            nodes.append(dict(node))
+        elif fault == "reference_shape":
+            node["payload_json"] = json.dumps({REFERENCE_KEY: node["snapshot_id"], "other": True})
+        elif fault == "unknown_column":
+            node["unrecognized"] = "no"
+    value, candidate, impressions = evidence_inventory(snapshot_edit=damage)
+    with pytest.raises(store.InvalidArtifact):
+        store.ensure_adoption_evidence(value, candidate_set=candidate, rows=impressions, now=NOW)
+    for table in (db.deck_candidate_sets_table, db.deck_diagnostic_snapshots_table, db.deck_impressions_table):
+        assert not rows(engine, table)
+
+
+def test_invalid_later_closure_preserves_only_the_committed_prefix(engine):
+    shared = {"long_shared": ["unchanged diagnostic"] * 100}
+    diagnostic = lambda i: {"family": "first" if i < 30 else "later", "shared": shared}
+    def damage(nodes):
+        for node in nodes:
+            if json.loads(node["payload_json"]).get("family") == "later":
+                node["payload_json"] = '{"changed":true}'
+    value, candidate, impressions = evidence_inventory(130, diagnostics=diagnostic, snapshot_edit=damage)
+    store.ensure_adoption_evidence(value, candidate_set=candidate, rows=impressions[:30], now=NOW)
+    tables = (db.deck_candidate_sets_table, db.deck_diagnostic_snapshots_table, db.deck_impressions_table)
+    before = [rows(engine, table) for table in tables]
+    with pytest.raises(store.InvalidArtifact, match="checksum"):
+        store.ensure_adoption_evidence(value, candidate_set=None, rows=impressions[30:], now=NOW)
+    assert [rows(engine, table) for table in tables] == before
+    assert len(before[-1]) == 30
 
 
 def test_atomic_idempotent_evidence_roundtrip_preserves_snapshots_and_private_runtime(engine):
@@ -549,6 +636,26 @@ def test_candidate_and_snapshot_dependencies_conflict_or_missing_fail_closed(eng
         conn.execute(update(db.deck_diagnostic_snapshots_table).values(payload_json='{"corrupt":true}'))
     with pytest.raises(store.InvalidArtifact, match="different content"):
         store.ensure_adoption_evidence(value, candidate_set=None, rows=impressions, now=NOW)
+
+
+@pytest.mark.parametrize("field", ["user_id", "deck_job_id", "created_at", "payload_json"])
+def test_existing_snapshot_scope_time_and_transport_remain_byte_exact(engine, field):
+    value, candidate, impressions = evidence_inventory()
+    store.ensure_adoption_evidence(value, candidate_set=candidate, rows=impressions[:1], now=NOW)
+    snapshot = rows(engine, db.deck_diagnostic_snapshots_table)[0]
+    changed = {"user_id": PEER, "deck_job_id": "foreign-job",
+               "created_at": (NOW + timedelta(seconds=1)).isoformat(),
+               "payload_json": " " + snapshot["payload_json"]}[field]
+    with engine.begin() as conn:
+        conn.execute(update(db.deck_diagnostic_snapshots_table).where(
+            db.deck_diagnostic_snapshots_table.c.snapshot_id == snapshot["snapshot_id"])
+            .values(**{field: changed}))
+    tables = (db.deck_candidate_sets_table, db.deck_diagnostic_snapshots_table, db.deck_impressions_table)
+    before = [rows(engine, table) for table in tables]
+    with pytest.raises(store.InvalidArtifact, match="different content"):
+        store.ensure_adoption_evidence(value, candidate_set=None, rows=impressions[1:], now=NOW)
+    assert [rows(engine, table) for table in tables] == before
+    assert len(before[-1]) == 1
 
 
 def test_evidence_late_page_failure_rolls_back_candidate_snapshots_and_all_rows(engine):

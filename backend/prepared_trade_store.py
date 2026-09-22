@@ -715,7 +715,7 @@ def _ensure_exact_rows(conn, table, key, records):
 
 def _adoption_rows(data, publication, inventory_id, candidate_set, rows):
     """Bind publication to reserved prepared evidence, allowing serve fields only."""
-    from .deck_diagnostics import REFERENCE_KEY, is_reference
+    from .deck_diagnostics import DIAGNOSTIC_KEYS, REFERENCE_KEY, dumps, is_reference
     payload = data["payload"]
     bundle = payload.get("inventory", payload)
     if type(bundle) is not dict or type(bundle.get("impressions")) is not list:
@@ -723,22 +723,44 @@ def _adoption_rows(data, publication, inventory_id, candidate_set, rows):
     originals = {row["impression_id"]: row for row in bundle["impressions"]}
     if len(originals) != len(bundle["impressions"]):
         raise InvalidArtifact("duplicate prepared impression ID")
-    snapshots = {row["snapshot_id"]: row for row in bundle.get("snapshots", [])}
+    snapshot_rows = bundle.get("snapshots", [])
+    if type(snapshot_rows) is not list:
+        raise InvalidArtifact("invalid prepared diagnostic snapshots")
+    snapshots = {}
+    for row in snapshot_rows:
+        normalized = _db_row(db.deck_diagnostic_snapshots_table, row)
+        if normalized["snapshot_id"] in snapshots:
+            raise InvalidArtifact("duplicate prepared diagnostic snapshot")
+        snapshots[normalized["snapshot_id"]] = normalized
     scope = data["scope"]
     job_id = bundle.get("job_id")
+    expanded, used = {}, set()
 
-    def expand(value, visiting=frozenset()):
-        if is_reference(value):
+    def expand(value, visiting=frozenset(), depth=0):
+        if depth > 80:
+            raise InvalidArtifact("prepared diagnostic depth exceeds safety bound")
+        if type(value) is dict and REFERENCE_KEY in value:
+            if not is_reference(value):
+                raise InvalidArtifact("invalid prepared diagnostic reference")
             key = value[REFERENCE_KEY]
             row = snapshots.get(key)
             if (key in visiting or row is None or row.get("user_id") != scope["user_id"]
                     or row.get("deck_job_id") != job_id):
                 raise InvalidArtifact("missing or foreign prepared diagnostic dependency")
-            return expand(_decode(row["payload_json"]), visiting | {key})
+            if key not in expanded:
+                _time(row["created_at"])
+                result = expand(_decode(row["payload_json"]), visiting | {key}, depth + 1)
+                digest = hashlib.sha256((dumps((scope["user_id"], job_id)) + "\n"
+                                         + dumps(result)).encode()).hexdigest()
+                if digest != key:
+                    raise InvalidArtifact("prepared diagnostic checksum mismatch")
+                expanded[key] = result
+            used.add(key)
+            return expanded[key]
         if type(value) is dict:
-            return {key: expand(item, visiting) for key, item in value.items()}
+            return {key: expand(item, visiting, depth + 1) for key, item in value.items()}
         if type(value) is list:
-            return [expand(item, visiting) for item in value]
+            return [expand(item, visiting, depth + 1) for item in value]
         return value
 
     expected_candidate = bundle.get("candidate_set")
@@ -765,7 +787,8 @@ def _adoption_rows(data, publication, inventory_id, candidate_set, rows):
             raise InvalidArtifact("publication timestamp differs from original adoption")
         _time(row["served_at"])
         raw = original.get("features_json")
-        features = expand(_decode(raw) if type(raw) is str else raw)
+        frozen_features = _decode(raw) if type(raw) is str else raw
+        features = expand(frozen_features)
         if type(features) is not dict or type(row.get("features_json")) is not dict:
             raise InvalidArtifact("expanded structured publication features required")
         if original.get("is_ghost") != 1:
@@ -786,8 +809,15 @@ def _adoption_rows(data, publication, inventory_id, candidate_set, rows):
                                 prepared_inventory_id=inventory_id, deck_source="prepared_adoption")
         if dependency_hash(features) != dependency_hash(row["features_json"]):
             raise InvalidArtifact("publication changed frozen evidence")
-        row["features_json"] = features
-    return detached, expected_candidate
+        # Snapshot IDs bind expanded content, not a batch-local packing shape.
+        # Recompacting 30/100-card batches could encode the same ID differently.
+        # Preserve the authenticated original DAG and its original timestamps;
+        # only the ordinary serve fields above change at actual adoption.
+        for key in DIAGNOSTIC_KEYS:
+            if key in frozen_features:
+                features[key] = frozen_features[key]
+        row["features_json"] = dumps(features)
+    return detached, expected_candidate, [row for key, row in snapshots.items() if key in used]
 
 
 def _apply_mutations(conn, data, publication, rows):
@@ -853,7 +883,6 @@ def ensure_adoption_evidence(claim: dict, *, candidate_set: dict | None,
     Caller must checkpoint and expose cards after this function commits. This
     store supports only the full original inventory/order, not subset reranking.
     """
-    from .deck_diagnostics import compact_rows
     table, stamp = db.prepared_trade_inventories_table, _iso(now)
     with db.engine.connect() as conn:
         initial = conn.execute(select(table).where(table.c.inventory_id == claim["inventory_id"])).mappings().first()
@@ -877,7 +906,7 @@ def ensure_adoption_evidence(claim: dict, *, candidate_set: dict | None,
             table.c.adoption_lease_until > stamp, table.c.expires_at > stamp).with_for_update()).mappings().first()
         if not current or dependency_hash(_decode(current["adoption_json"])) != dependency_hash(claim["publication"]):
             raise StaleWork("adoption claim or immutable publication changed")
-        bound_rows, expected_candidate = _adoption_rows(data, claim["publication"],
+        bound_rows, expected_candidate, snapshots = _adoption_rows(data, claim["publication"],
             claim["inventory_id"], candidate_set, rows)
         counts = {"candidate_sets": 0, "snapshots": 0, "impressions": 0}
         if candidate_set is not None:
@@ -889,10 +918,10 @@ def ensure_adoption_evidence(claim: dict, *, candidate_set: dict | None,
             if existing is None or dependency_hash({str(k): v for k, v in existing.items()}) != dependency_hash(
                     _db_row(db.deck_candidate_sets_table, expected_candidate)):
                 raise InvalidArtifact("candidate dependency not durably available")
-        for start in range(0, len(bound_rows), db.DECK_IMPRESSION_INSERT_ROWS):
-            compacted, snapshots = compact_rows(bound_rows[start:start + db.DECK_IMPRESSION_INSERT_ROWS])
-            counts["snapshots"] += _ensure_exact_rows(conn, db.deck_diagnostic_snapshots_table, "snapshot_id", snapshots)
-            counts["impressions"] += _ensure_exact_rows(conn, db.deck_impressions_table, "impression_id", compacted)
+        counts["snapshots"] = _ensure_exact_rows(conn, db.deck_diagnostic_snapshots_table,
+                                                "snapshot_id", snapshots)
+        counts["impressions"] = _ensure_exact_rows(conn, db.deck_impressions_table,
+                                                  "impression_id", bound_rows)
         _apply_mutations(conn, data, claim["publication"], bound_rows)
         return counts
 

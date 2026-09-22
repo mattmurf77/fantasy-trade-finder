@@ -373,3 +373,68 @@ def test_mutation_during_adoption_withholds_next_batch_but_keeps_prior_identity(
     with pytest.raises(ValueError, match="restored_card_mutated"):
         next(batches)
     assert first["public_cards"][0]["impression_id"] == "imp-0"
+
+
+def topology_rows():
+    """Same expanded root; child is shared only in the second batch."""
+    cards = make_cards(3)
+    raw = rows(cards)
+    child = {f"diagnostic-{i}": i for i in range(180)}
+    for i, row in enumerate(raw):
+        row["features_json"] = {"partner_user_id": cards[i].target_user_id,
+            "roster_evaluation": {"kind": "B" if i == 2 else "A", "shared": child}}
+    return cards, raw
+
+
+@pytest.mark.parametrize("partition", [(3,), (1, 2), (2, 1), (1, 1, 1)])
+def test_capture_preserves_expanded_diagnostics_across_batch_local_reference_topologies(partition):
+    cards, raw = topology_rows()
+    # Witness why complete packed-row equality is NOT content identity.
+    _, first = payload.compact_rows(deepcopy(raw[:1]))
+    _, later = payload.compact_rows(deepcopy(raw[1:]))
+    root = first[-1]
+    alternate = next(row for row in later if row["snapshot_id"] == root["snapshot_id"])
+    assert root["payload_json"] != alternate["payload_json"]
+    assert {k: v for k, v in root.items() if k != "payload_json"} == {
+        k: v for k, v in alternate.items() if k != "payload_json"}
+    capture = payload.PreparedEvidenceCapture(user_id="viewer", league_id=cards[0].league_id,
+                                               job_id="prepared-job")
+    start = 0
+    for size in partition:
+        capture.impressions(raw[start:start + size])
+        start += size
+    bundle = capture.finish(cards, [public(c) for c in cards])
+    inventory = restore(bundle)
+    emitted = [row for batch in inventory.batches(served_at=SERVED) for row in batch["impression_rows"]]
+    assert [r["features_json"] for r in emitted] == [r["features_json"] for r in raw]
+    assert [r["valuation_json"] for r in emitted] == [r["valuation_json"] for r in raw]
+    assert [c.owner_evaluation.snapshot_json for c in inventory.cards] == [c.owner_evaluation.snapshot_json for c in cards]
+    assert [r["impression_id"] for r in emitted] == [r["impression_id"] for r in raw]
+    assert [r["card_index"] for r in emitted] == [0, 1, 2]
+    assert all(row["created_at"] == PREPARED for row in bundle["snapshots"])
+
+
+@pytest.mark.parametrize("corrupt", ["payload", "scope", "timestamp", "missing_child", "cycle"])
+def test_semantic_snapshot_merge_rejects_corruption_without_partial_capture(monkeypatch, corrupt):
+    cards, raw = topology_rows()
+    capture = payload.PreparedEvidenceCapture(user_id="viewer", league_id=cards[0].league_id,
+                                               job_id="prepared-job")
+    capture.impressions(raw[:1])
+    before = deepcopy((capture._rows, capture._nodes))
+    existing = next(iter(capture._nodes))
+    original = payload.compact_rows
+    def broken(value):
+        compacted, nodes = original(value)
+        root = next(node for node in nodes if node["snapshot_id"] == existing)
+        if corrupt == "payload": root["payload_json"] = '{"different":"evidence"}'
+        elif corrupt == "scope": root["user_id"] = "other"
+        elif corrupt == "timestamp": root["created_at"] = "not-a-timestamp"
+        elif corrupt == "cycle": root["payload_json"] = json.dumps({payload.REFERENCE_KEY: existing})
+        elif corrupt == "missing_child":
+            referenced = json.loads(root["payload_json"])["shared"][payload.REFERENCE_KEY]
+            nodes = [node for node in nodes if node["snapshot_id"] != referenced]
+        return compacted, nodes
+    monkeypatch.setattr(payload, "compact_rows", broken)
+    with pytest.raises(ValueError):
+        capture.impressions(raw[1:])
+    assert (capture._rows, capture._nodes) == before

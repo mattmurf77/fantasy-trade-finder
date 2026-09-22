@@ -91,3 +91,43 @@ def test_capture_failure_cannot_complete_or_publish_partial_inventory(large_excl
     assert not service._trade_cards
     assert rows(engine, db.deck_impressions_table) == []
     assert rows(engine, db.trade_impressions_table) == []
+
+
+def test_real_worker_logger_merges_same_diagnostic_root_with_different_batch_packing(large_exclusive, monkeypatch):
+    _, engine, _, service, _ = large_exclusive
+    ts._cfg.update(owner_bilateral_enabled=1., owner_bilateral_revision_enabled=1.)
+    shared = {f"diagnostic-{i}": i for i in range(180)}
+    expected, sizes = {}, []
+    original = server._log_deck_signal_impressions
+    def with_varied_diagnostics(*args, **kwargs):
+        cards = kwargs["cards"]
+        assert len(cards) >= 64
+        # All first30 share one root. The second batch introduces a distinct
+        # root containing the same large child, changing only its packing.
+        evaluations = {id(card): {"kind": "B" if i == 31 else "A", "shared": shared}
+                       for i, card in enumerate(cards)}
+        expected.update({card.trade_id: evaluations[id(card)] for card in cards})
+        return original(*args, **{**kwargs, "roster_results": evaluations})
+    monkeypatch.setattr(server, "_log_deck_signal_impressions", with_varied_diagnostics)
+    class ObserveCapture(PreparedEvidenceCapture):
+        def impressions(self, batch):
+            sizes.append(len(batch))
+            return super().impressions(batch)
+    def forbidden(*a, **k):
+        pytest.fail("prepared multi-batch capture wrote user exposure")
+    for name in ("save_deck_impressions", "save_deck_candidate_set", "log_trade_impressions", "record_event"):
+        monkeypatch.setattr(server, name, forbidden)
+    job, private = prepare(large_exclusive, monkeypatch, sink_type=ObserveCapture)
+    assert job["status"] == "complete", job.get("error")
+    assert sizes == [30, 34]
+    inventory = restore_inventory(job["prepared_bundle"], user_id=ME, league_id=LEAGUE,
+                                  now=datetime.now(timezone.utc))
+    batches = list(inventory.batches(served_at=datetime.now(timezone.utc).isoformat()))
+    for batch in batches:
+        for card, row in zip(batch["cards"], batch["impression_rows"]):
+            assert row["features_json"]["roster_evaluation"] == expected[card.trade_id]
+            assert card.owner_evaluation.snapshot_json == private._trade_cards[card.trade_id].owner_evaluation.snapshot_json
+    assert len(inventory.cards) == 64 and not job["cards"] and not service._trade_cards
+    for table in (db.deck_impressions_table, db.deck_diagnostic_snapshots_table,
+                  db.deck_candidate_sets_table, db.trade_impressions_table, db.trade_decisions_table):
+        assert rows(engine, table) == []

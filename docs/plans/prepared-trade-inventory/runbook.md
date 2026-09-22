@@ -1,6 +1,6 @@
 # Runbook — silent prepared trade inventory
 
-Implementation runbook; release, live activation and initial sweep are **pending**.
+Implementation runbook; follow [release evidence](release.md) for current rollout state.
 Use [validation](validation.md) and [status](status.md), not this procedure, as evidence.
 
 ## Preconditions

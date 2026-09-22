@@ -4,12 +4,12 @@
 {
   "status": "in-progress",
   "updated": "2026-09-22",
-  "summary": "Local implementation and focused cross-review in progress. Cohort/source and payload lanes tested; parent integration, final validation and release remain pending. No production change or initial sweep is claimed.",
-  "evidence": "Plan/scope preceded implementation on ff122752. Lane B: 56 focused tests; all cases independently covered across a 53-case predecessor and three final availability regressions. Independent payload suite: 68 passed. Independent runtime review: 8 passed, including actual-receipt prepare to fresh-session adoption; local read guard: 32 passed. See validation.md for RED/GREEN controls, remaining integration/release gates and unrun physical-device checks."
+  "summary": "PR305 deployed; the initial canary failed before saving offers. Caching is off and ordinary Bilateral2 is unchanged. Cross-batch evidence repair passed focused tests; full validation and corrective deployment are in progress.",
+  "evidence": "Exact-head hosted CI35788148359 passed all four gates, backend7144/1skip. Render4903d205 live2026-09-22T22:07:49Z. Canary10e5d888d5f54d588ca930fb21e0dfbc reported prepared_payload:snapshot_conflict; zero artifacts, no new impressions/decisions/sessions, unchanged activity/ranking fingerprint. Rollout1→0 verified22:11:56UTC. See release.md for actual coverage and limitations."
 }
 ```
 
-[Validation and limitations](validation.md) · [Operator runbook](runbook.md)
+[Validation and limitations](validation.md) · [Operator runbook](runbook.md) · [Release evidence](release.md)
 
 Durable retention is at most 24 hours subject to exact current input/model/team
 validation and original card expiry. Preparation is not exposure or a user action.
