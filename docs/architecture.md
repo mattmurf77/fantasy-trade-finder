@@ -487,6 +487,26 @@ This is a limited in-process prerequisite, **not** stateless request handling,
 durable jobs, full thread safety, or a separate worker. One Gunicorn worker and
 all generation/timing policies remain unchanged. See the [implementation record](plans/budget-scalability/implementation.md).
 
+Trade-job revocation epochs are captured before input reads and retained through
+admission, worker publication and copied public responses. Kickoff adds the
+captured league-member identities used by member-board and opponent-preference
+loaders, without replacing the caller's original viewer epochs. Existing global
+ranking invalidation revokes every job holding that member's global token;
+league-scoped preference invalidation revokes only the corresponding league
+token. Dependencies include selected jobs even without an organic cache pointer.
+The weak token index does not retain requests after jobs/copies expire. No new
+DB reads, model inputs or algorithm changes are introduced. Revocation withholds
+undecided job inventory without editing stored impressions, likes or original
+valuation evidence. This covers existing in-process invalidation calls, not a
+complete provider/roster/pick/market freshness receipt or out-of-process writes.
+Seven explicit server ranking-publication sites retain their early fences and
+add a final user-global fence around the original stored-board writer. This
+revokes jobs admitted between an early invalidation and publication, including
+failed/uncertain writes; ordinary initialization and database writers are not
+wrapped. Execution capture rejects a copied league whose ID differs from the
+requested league, before dependency capture or worker input reads can mix scopes.
+[Narrow dependency repair](plans/bilateral-model-revision/spec-round8-counterparty-epochs.md).
+
 ## Ownership and telemetry boundaries
 
 Private route gates require a verified session; username discovery cannot authorize private state. `backend/session_input.py` resolves identity and roster inputs from authenticated session state plus authoritative league sources before session construction or persistence. Apple/Google proof authenticates its provider account; a new Sleeper binding separately requires Sleeper proof. Analytics commits validated events before recommendation outcome side effects, which require verified ownership of an existing impression. Authentication tokens are replaced by domain-separated analytics identifiers at both persistence entry points. Account deletion revokes durable sessions in the same transaction as private data deletion.

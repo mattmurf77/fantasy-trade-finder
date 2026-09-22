@@ -1,3 +1,18 @@
+## 2026-09-22 — Round8 counterparty job freshness (not released)
+
+Parent full backend: **6,861 passed /1 optional-data skip in364.43s**, local
+Python3.14.4/isolated SQLite on frozen server0b24ad25. TypeScript/all99 mobile
+structural suites/test-ID lint/web195 pass. Nine named RED→GREEN cases; B61,
+C188 and parent72 focused groups overlap full-suite coverage. Five source/HEAD-
+guarded native/worker/off/failure runs preserve3836 revision native/3306 public
+and full persisted occurrences; incumbent2843/2354 exact; failed write0 exposure.
+First durable15.127s vs8.425s local smoke does not qualify3sec or acceptance.
+Repair covers captured-member job dependencies, league guard and seven final
+ranking-publication fences; service-backed pending/synchronous idea paths and
+provider/market/out-of-process freshness are explicit exclusions. No source-model
+semantics changed, no production write/toggle/push/deploy/TestFlight. Hosted CI
+and device/load gates unrun. [Source-bound validation](../docs/plans/bilateral-model-revision/validation-20260922-round8.md).
+
 ## 2026-09-22 — Bilateral revision round7 and capture validation (not released)
 
 Stable integrated runtime: **6,800 backend passed /1 optional-data skip in351.78s**,

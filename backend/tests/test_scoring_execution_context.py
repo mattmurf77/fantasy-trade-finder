@@ -250,13 +250,16 @@ def test_missing_session_still_returns_a_registered_error_job(world):
     assert server._trade_job_public_view(job)['job_id'] == job_id
 
 
-def test_unregistered_league_override_keeps_existing_engine_error_job(world):
+def test_mismatched_league_override_returns_capture_error_before_generation(world, monkeypatch):
+    generate = Mock()
+    monkeypatch.setattr(TradeService, 'generate_trades', generate)
     job_id = server._kickoff_trade_job(TOKEN, USER, 'unregistered-league',
                                       FORMATS[0], synchronous=True)
     job = server._trade_jobs[job_id]
     assert job['status'] == 'error'
-    assert job['error'] == "Unknown league: 'unregistered-league'"
+    assert job['error'] == 'session league changed before trade job started'
     assert job['cards'] == []
+    generate.assert_not_called()
 
 
 def test_delayed_roster_check_retains_captured_coowner_identity(world, monkeypatch):

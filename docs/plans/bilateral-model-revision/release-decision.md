@@ -155,6 +155,35 @@ The existing app-open prepared-inventory path is being audited next. A valid
 prepared-deck result must be reported separately from cold-generation latency;
 more precomputation cannot justify stale counterparty preferences or rosters.
 
+That audit's counterparty gap is now reproduced through actual generation,
+SQLite board/outlook saves, status and repeat-admission routes: four intended
+partner-change guards fail, while four matching own-input controls pass.
+Thirteen undecided B-targeted offers remain visible after B's change in the
+tested19-card deck. These private diagnostics were not part of the6,800-test
+collection and expose a genuinely untested property, not a passing freshness
+claim. [Diagnostic evidence](prepared-inventory-regression.md).
+Parent [round8 specification](spec-round8-counterparty-epochs.md) dispatches
+the narrow existing-epoch dependency repair before any release. It does not
+claim complete provider/market freshness or introduce a new prepared cache.
+
+That scoped repair is now implemented and independently reviewed. All nine
+named pre-fix counterparty, league-capture and publication-race failures are
+green. Parent's fresh full backend suite passes **6,861/1skip in364.43s**;
+mobile TypeScript/all99 structural suites/test-ID lint and web195 pass. New
+source-bound comparisons retain all3,836 revision native/3,306 public and complete
+persisted occurrences, all2,843/2,354 incumbent occurrences, every publication
+prefix and failed-write zero exposure. Latest local first durable30 remains
+15.127s versus8.425s incumbent; this smoke is not a device/production percentile
+or controlled performance comparison with the prior checkpoint.
+[Round8 validation](validation-20260922-round8.md) is the current test evidence.
+
+The separate service-backed pending-card and synchronous selected-idea routes
+do not acquire these job epochs. Their historical-interest semantics and full
+cross-surface/provider/market freshness are not silently declared fixed. A
+development-only [focal mechanism audit](spec-focal-mechanism-audit.md) now
+separates actual target/order changes from aggregate coverage/composition effects;
+no new weights, acceptance labels or holdout tuning are authorized by that audit.
+
 Keep useful correctness improvements, but do not promote the whole model on this
 evidence. Use development-only traces to isolate whether focal-alignment changes
 come from constructor eligibility, construction ordering or survivor ordering.

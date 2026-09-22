@@ -3005,16 +3005,22 @@ class _TradeInputEpoch:
         return self
 
 
-def _capture_trade_input_epochs(user_id, league_id):
-    """Capture BEFORE input reads; caller must retain these through admission."""
+def _capture_trade_input_epochs(user_id, league_id, *, participant_ids=()):
+    """Capture before input reads, including consumed member board/preferences.
+
+    Default callers retain the original viewer-only contract. Participants are
+    exact IDs from the owned execution league, not inferred account aliases.
+    """
+    identities = dict.fromkeys((user_id, *participant_ids))
     with _trade_jobs_lock:
         tokens = []
-        for scope in ((user_id, None), (user_id, league_id)):
-            token = _trade_input_epochs.get(scope)
-            if token is None:
-                token = _TradeInputEpoch()
-                _trade_input_epochs[scope] = token
-            tokens.append(token)
+        for identity in identities:
+            for scope in ((identity, None), (identity, league_id)):
+                token = _trade_input_epochs.get(scope)
+                if token is None:
+                    token = _TradeInputEpoch()
+                    _trade_input_epochs[scope] = token
+                tokens.append(token)
         return tuple(tokens)
 
 
@@ -7322,6 +7328,8 @@ def _capture_trade_execution(sess, user_id, league_id, scoring_format):
     # Generation overwrites counters and injects member rankings/picks. Copy
     # this small graph, not the ranking history, generator/client, or card store.
     league = copy.deepcopy(league)
+    if league is not None and league.league_id != league_id:
+        raise RuntimeError("session league changed before trade job started")
     if trade_service is not None:
         # Like the card store, provenance must be shared with /api/trades on
         # the original session service. Never take it from serialized cards.
@@ -8878,7 +8886,8 @@ def _invalidate_trade_jobs(*, user_id: str, league_id: str | None = None) -> int
     """Revoke captured inputs, including admissions not yet registered.
 
     Rankings affect all this user's leagues; league preferences/tags affect
-    one. Selected jobs are fenced too even though they have no cache pointer.
+    one. Jobs consuming this member's inputs retain the same scoped token.
+    Selected jobs are fenced too even though they have no cache pointer.
     Durable offer IDs and the session's action store are never replaced here.
     """
     dropped = 0
@@ -8888,13 +8897,31 @@ def _invalidate_trade_jobs(*, user_id: str, league_id: str | None = None) -> int
             token.revoked = True
         for job in _trade_jobs.values():
             key = job.get("key") or ()
-            if len(key) != 3 or key[0] != user_id or (league_id is not None and key[1] != league_id):
+            own_scope = (len(key) == 3 and key[0] == user_id
+                         and (league_id is None or key[1] == league_id))
+            dependent = token is not None and any(
+                epoch is token for epoch in job.get("input_epochs", ()))
+            if not own_scope and not dependent:
                 continue
             _revoke_trade_job_locked(job)
             if _trade_jobs_by_key.get(key) == job.get("job_id"):
                 _trade_jobs_by_key.pop(key)
                 dropped += 1
     return dropped
+
+
+def _publish_member_rankings_for_trade_refresh(*, user_id, **kwargs):
+    """Fence jobs admitted during an explicit board publication attempt.
+
+    Keep early viewer invalidation at mutation sites. A job can still capture
+    a new member epoch and read old stored rankings before this write commits;
+    the final fence closes that gap, including failed or uncertain writes.
+    Ordinary initialization and database writers do not use this helper.
+    """
+    try:
+        return upsert_member_rankings(user_id=user_id, **kwargs)
+    finally:
+        _invalidate_trade_jobs(user_id=user_id)
 
 
 def _kickoff_trade_job(
@@ -8972,6 +8999,13 @@ def _kickoff_trade_job(
             base_session = session_context if session_context is not None else _sessions.get(sess_token)
             base_session = dict(base_session) if base_session is not None else None
         execution_context = _capture_trade_execution(base_session, user_id, league_id, scoring_format)
+        # The worker reads member rankings/outlooks for this captured league.
+        # Keep original viewer epochs: recapturing after a racing viewer edit
+        # must never replace its revoked token and revive stale preferences.
+        member_epochs = _capture_trade_input_epochs(
+            user_id, execution_context.league_id,
+            participant_ids=(m.user_id for m in getattr(execution_context.league, "members", ())))
+        input_epochs = tuple(dict.fromkeys((*input_epochs, *member_epochs)))
         if prefs_preload is None:
             try:
                 prefs_preload = _trade_job_preferences(
@@ -9706,7 +9740,7 @@ def post_rank3():
                 ]
                 _conf = _ranking_confidence(service)
                 ranking_payload = _confidence_payload(ranking_payload, _conf)
-                upsert_member_rankings(
+                _publish_member_rankings_for_trade_refresh(
                     user_id        = g_user_id,
                     league_id      = g_league.league_id,
                     rankings       = ranking_payload,
@@ -10556,7 +10590,7 @@ def copy_tiers_from_format_route():
             # format — `cross_format`, not per-player provenance.
             _conf = _ranking_confidence(to_svc, source="cross_format")
             ranking_payload = _confidence_payload(ranking_payload, _conf)
-            upsert_member_rankings(
+            _publish_member_rankings_for_trade_refresh(
                 user_id        = g_user_id,
                 league_id      = g_league.league_id,
                 rankings       = ranking_payload,
@@ -11329,7 +11363,7 @@ def save_tiers_route():
                 ]
                 _conf = _ranking_confidence(service)
                 ranking_payload = _confidence_payload(ranking_payload, _conf)
-                upsert_member_rankings(
+                _publish_member_rankings_for_trade_refresh(
                     user_id        = g_user_id,
                     league_id      = g_league.league_id,
                     rankings       = ranking_payload,
@@ -11516,7 +11550,7 @@ def save_anchor_route():
                 ]
                 _conf = _ranking_confidence(service)
                 ranking_payload = _confidence_payload(ranking_payload, _conf)
-                upsert_member_rankings(
+                _publish_member_rankings_for_trade_refresh(
                     user_id        = g_user_id,
                     league_id      = g_league.league_id,
                     rankings       = ranking_payload,
@@ -11904,7 +11938,7 @@ def reorder_rankings():
                 ]
                 _conf = _ranking_confidence(service)
                 ranking_payload = _confidence_payload(ranking_payload, _conf)
-                upsert_member_rankings(
+                _publish_member_rankings_for_trade_refresh(
                     user_id        = g_user_id,
                     league_id      = g_league.league_id,
                     rankings       = ranking_payload,
@@ -12101,7 +12135,7 @@ def rankings_import_apply():
                 _import_payload = _confidence_payload(
                     [{"player_id": rp.player.id, "elo": rp.elo}
                      for rp in all_rankings.rankings], _conf)
-                upsert_member_rankings(
+                _publish_member_rankings_for_trade_refresh(
                     user_id        = g_user_id,
                     league_id      = g_league.league_id,
                     rankings       = _import_payload,
@@ -20427,7 +20461,7 @@ def submit_rankings():
     try:
         _conf = _ranking_confidence(service)
         payload = _confidence_payload(payload, _conf)
-        upsert_member_rankings(
+        _publish_member_rankings_for_trade_refresh(
             user_id        = user_id,
             league_id      = league_id,
             rankings       = payload,

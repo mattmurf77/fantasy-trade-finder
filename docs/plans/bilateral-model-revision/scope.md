@@ -12,6 +12,18 @@ Round 1: separately versioned bilateral candidate for price-efficient support/in
 
 Analytics: existing bakeoff config/request snapshots, immutable owner proof and final impression features carry constructor/version, raw support/market/intent and private presentation provenance. No new client events in this round; actual viewed/eligible cohort gaps remain explicit release gates. Schema: no new tables/columns. Planned numeric knob `owner_bilateral_revision_enabled`, default 0, existing config registry/admin workflow; exact 1 selects candidate, 0 retains incumbent. Not a new public/client flag. Parent owns config docs and rollback binding. No production settings changed before reviewed evaluation and release gates.
 
+Round8 follows independently reproduced prepared-job freshness failures. Extend
+the existing job input epochs to consumed counterparty board/outlook identities,
+retaining original viewer epochs and all historical offer evidence. This shared
+job-boundary repair protects all models on that path without changing their
+algorithms, weights, eligible package inventory or configuration. No new reads,
+tables, flags, client/API fields, scheduler or prepared cache; existing
+`inputs_changed` response semantics cover these newly tracked dependencies.
+Full provider/market/ownership authority remains explicitly out of this narrow
+repair. Parent spec, actual-route RED/GREEN regressions, independent review,
+fresh full tests and worker parity precede acceptance. Update architecture and
+the existing API lifecycle documentation, plus initiative evidence and ledger.
+
 ## Evidence and canonical docs
 
 Each owned subsystem: hermetic pytest, named red control followed by restored green, independent cross-review. Parent: flag-off parity, final revalidation/version fences, no cap/permutation invariants, publication identity tests, frozen baseline/candidate framework comparison, full backend/web/mobile CI checks, hosted exact-head CI before release. Manual physical TestFlight checklist required to claim device latency/flow; no simulator. No client changes expected; if needed, scope/review before TestFlight build. Update architecture/config-reference/runbook and initiative evidence/ledger. API/schema/client constants/glossary/HLD/LLD N/A (no route/schema/client vocabulary change; compatibility stubs not update targets).
