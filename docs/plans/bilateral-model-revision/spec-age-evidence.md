@@ -47,3 +47,33 @@ mixed/stale objects; missing legacy evidence; strict replay; per-offer projectio
 and private-only serialization; dark-mode hashes unchanged. Use named red control
 and restored green. Document in age-evidence.md. Do not mutate files while A/C
 have a guarded measurement; coordinate first or author private patch until clear.
+
+## Parent clarifications before implementation
+
+The second build-new-then-rebind loop in `_invalidate_player_pipeline` is also
+authorized, solely to keep each rebuilt pool entry and its evidence atomic.
+A minimal dict-compatible private evidence attribute is acceptable to avoid
+changing strict generator kwargs. It must be detached at assignment capture,
+explicitly marked `used_in_model=False`, and absent from default-off contexts.
+Document and test loss/fallback on ordinary dict copying rather than asserting
+evidence survives an unsupported transformation. Keep request-level evidence
+outside the strict replay Player payload and project only exact offered assets
+for per-offer records. Generation itself must never rely on that hidden attribute.
+
+### Capture-correctness amendment
+
+Candidate-only owner contexts must detach the complete generator input tree,
+including Player objects and nested selections/preferences, before generation.
+Resolve pool-bound age evidence against the original objects BEFORE detaching,
+then retain a detached evidence payload with the cloned context. No age/pricing
+value changes; this enforces request-time consistency. Default-off still returns
+the previous plain-dict form and unchanged assignment hashes.
+
+For candidate-only assignment Player rows, also preserve `search_rank` and
+`pick_value`: fallback outlook evaluation reads them through `dynasty_value`.
+Both are existing strict Player fields; do not add id/name twice on replay or
+populate missing historical fields from today's DB. Mark this as a new capture
+contract, not evidence that previous raw requests reproduced complete historical
+execution. Add mutation-after-capture and strict round-trip tests with nondefault
+search rank and owned-pick value, demonstrating that the copied inputs and the
+assignment retain them. Record the full request cloning cost separately if large.

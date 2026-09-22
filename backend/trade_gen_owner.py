@@ -337,6 +337,10 @@ class _Search:
     def _decision(self, card, data, reason, eligible=False):
         """Freeze one exact result; alternate policies may enrich before freezing."""
         data.update(eligible=eligible, reason=reason)
+        return self._freeze_decision(card, data, reason, eligible)
+
+    def _freeze_decision(self, card, data, reason, eligible):
+        """Final serialization boundary; normal evaluators retain full evidence."""
         return OwnerDecisionContext(eligible, reason, self.league.league_id, self.user_id,
             card.target_user_id, tuple(card.give_player_ids), tuple(card.receive_player_ids), _dump(data))
 

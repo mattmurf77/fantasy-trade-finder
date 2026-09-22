@@ -15,6 +15,17 @@ support and ranges are heuristic, not acceptance probabilities or confidence int
 `model_arm` and `policy_variant` identify the actual generator; a later selector
 change must not reattribute a prior disposition, match, or valuation snapshot.
 
+The default-dark revision `owner-v2-bilateral-2` additionally captures a private
+request-level `input_evidence` envelope with schema `owner-age-evidence-1` and
+`used_in_model=False`. Each age row records validated selected age or Unknown,
+source, imputation state and available observation timestamp/basis. These fields
+sit outside strict generator `input` kwargs and Player rows. Existing Player rows
+also retain `search_rank` and `pick_value` for this revision. The request hash
+binds detached inputs and the envelope; exact-offer diagnostics project only the
+offered rows and retain the full-run join. Existing diagnostic compaction applies.
+No public fields or table migration are added; old snapshots are not repaired
+from newer data. See [capture evidence](plans/bilateral-model-revision/age-evidence.md).
+
 Overhaul generation JSON records `generation_identity` and a model-transition cache
 epoch. Version-scoped offer hashes allow new valuation occurrences without rewriting
 old proofs; a separate canonical package hash in private evidence preserves exact

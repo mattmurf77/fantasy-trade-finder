@@ -23,6 +23,16 @@ version fences cover admission, cache, proof reuse, pending inventory and batch
 publication, plus response-time checks after selected-offer persistence and pending
 card reads/serialization. Existing expressed interests retain original terms and evidence.
 
+For this revision only, `trade_input_evidence.py` detaches generator inputs and
+preserves private pool-bound age provenance. Both pool build/refresh paths retain
+source evidence beside the exact Player instances. Request capture distinguishes
+observed ages from fallback values, includes the existing `search_rank` and
+`pick_value` inputs, and hashes detached inputs and evidence together. Per-offer
+projection contains only offered assets; the complete record is kept once per
+run. This is collection-only (`used_in_model=False`), not an age-model correction
+or authorization to reuse a proof without validation. Default-off input shape
+and assignment hashes remain unchanged. Historical captures are not backfilled.
+
 `eval/capture_owner_benchmark.py` performs bounded read-only request/config export;
 `eval/bilateral_revision_benchmark.py` runs immutable incumbent and candidate in
 fresh offline processes and reports independent six-dimension coverage plus raw

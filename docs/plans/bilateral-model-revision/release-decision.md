@@ -100,7 +100,60 @@ Future age-provenance collection is also being implemented without silently
 changing age-based eligibility or current prices. These are continuing work,
 not a release or a waiver of any missing evidence.
 
+### Early-delivery experiment: rejected
+
+A completed simple-package phase reached30 durable cards in2.254s locally, with
+275 phase cards. Separate continued enumeration reproduced the full3,836 native
+cards and report exactly under fixed hash seed0. This was a private phase-only
+worker probe, not an integrated continuation or phone-level result. Across eight
+development contexts, the early first30 reduced repetition but weakened known
+counterparty preference coverage/alignment and best-asset seller market terms.
+Consequently an unconditional one-for-one first batch is **not being integrated**.
+See [early-delivery evidence](early-delivery-evidence.md); a faster stopwatch does
+not override the bilateral-quality objective.
+
+The next independent experiment preserves the full order and all decision checks,
+but tests whether unused internal rejection snapshots can be compacted. A separate
+authenticated request-local proof-boundary experiment remains private, including
+its memory/lifetime and captured-configuration provenance audit. Neither supplies
+release authorization by itself. New input capture also closes omitted-field and
+age-provenance gaps prospectively; the earlier full-suite result predates these
+latest changes and must be rerun on stable integrated source.
+
 ## Next development decision
+
+### Latest integrated checkpoint
+
+The narrow final-freeze optimization is now integrated **locally and default-off**.
+Independent cross-review and32 focused serialization controls passed; the separate
+406-test group covers constructor, presentation and serving regressions. The actual
+worker retains every3,836 native proof/report and all3,306 served occurrences with
+strict complete persisted-evidence equality against the preintegration baseline.
+Its actual failed-write control publishes/stores zero cards. No decision, budget,
+proof meaning or candidate order was removed to get the speedup.
+
+First durable30 is **14.538s**, full completion19.702s, versus incumbent
+**8.576s/11.389s** in the same-source local comparison. This is progress against
+the earlier candidate but still a material regression and not three-second
+qualification. See [integrated evidence](rejected-work-evidence.md#shared-dark-integration--verified).
+The broader authenticated-proof and detached-proof experiments remain private.
+A separate assignment-only memo preserved outputs but slowed a fresh matched
+worker from14.593s to16.087s first delivery; it is rejected, not composed into
+this checkpoint. Its cache bookkeeping cost more than the solver work avoided.
+
+Future input evidence now distinguishes genuine ages from legacy defaults and
+preserves previously omitted fallback-outlook fields. Collection does not change
+the model's existing age inputs or repair historical snapshots. Final focused
+capture group149 passes; benchmark subprocess isolation group44 passes. The new
+full suite passes **6,800 tests /1 optional-data skip in351.78s** on stable
+integrated runtime. Mobile TypeScript/all99 structural suites/test-ID lint and
+web195 checks also pass. The earlier6,690 result above is historical;
+[latest validation](validation-20260922-round7.md) records the actual source and
+remaining unexecuted hosted-CI/production-runtime/device checks.
+
+The existing app-open prepared-inventory path is being audited next. A valid
+prepared-deck result must be reported separately from cold-generation latency;
+more precomputation cannot justify stale counterparty preferences or rosters.
 
 Keep useful correctness improvements, but do not promote the whole model on this
 evidence. Use development-only traces to isolate whether focal-alignment changes

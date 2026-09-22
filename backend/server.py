@@ -1548,6 +1548,7 @@ def build_universal_pool(
     dp_vals: dict[str, float] | None = None,
     all_db_players: list | None = None,
     dp_pos: dict[str, str] | None = None,
+    input_evidence=None,
 ) -> tuple[list[Player], dict[str, float]]:
     """
     Build the universal ranking pool: every Sleeper player that has a
@@ -1615,13 +1616,19 @@ def build_universal_pool(
 
         # Build Player — prefer enriched DB record if available
         db_row = db_by_id.get(pid_str)
+        # Capture age scalars once so provenance describes the value actually
+        # used below, even if a source row changes before collection finishes.
+        raw_age = p_data.get("age")
+        db_age = db_row.get("age") if db_row else None
+        age_observed_at = db_row.get("last_synced") if db_row else None
+        selected_age = db_age or int(raw_age or 0) or 25
         if db_row:
             players.append(Player(
                 id                   = pid_str,
                 name                 = db_row.get("full_name") or full_name,
                 position             = pos,
                 team                 = db_row.get("team") or p_data.get("team") or "FA",
-                age                  = db_row.get("age") or int(p_data.get("age") or 0) or 25,
+                age                  = selected_age,
                 years_experience     = db_row.get("years_exp") or int(p_data.get("years_exp") or 0),
                 depth_chart_position = db_row.get("depth_chart_position"),
                 depth_chart_order    = db_row.get("depth_chart_order"),
@@ -1640,9 +1647,13 @@ def build_universal_pool(
                 name             = full_name,
                 position         = pos,
                 team             = p_data.get("team") or "FA",
-                age              = int(p_data.get("age") or 0) or 25,
+                age              = selected_age,
                 years_experience = int(p_data.get("years_exp") or 0),
             ))
+
+        if input_evidence is not None:
+            input_evidence.record(players[-1], raw={"age": raw_age},
+                                  enriched={"age": db_age, "last_synced": age_observed_at})
 
         # Seed Elo from DP data
         if dp_elo and normed in dp_elo:
@@ -1761,6 +1772,7 @@ def _build_universal_pools_locked() -> None:
         return
 
     from .data_loader import SCORING_FORMATS as DL_SCORING_FORMATS
+    from .trade_input_evidence import PoolInputEvidence
 
     # Read the enriched players table ONCE and reuse it across both format
     # builds, instead of re-scanning the full table inside each build.
@@ -1777,17 +1789,20 @@ def _build_universal_pools_locked() -> None:
             continue
         if fmt not in dp_values_by_format:
             continue  # fetch failed — leave unbuilt so a later access retries
+        input_evidence = PoolInputEvidence()
         players, seed = build_universal_pool(
             sleeper_cache=cache,
             dp_elo=dp_elo_by_format.get(fmt, {}),
             dp_vals=dp_values_by_format.get(fmt, {}),
             all_db_players=all_db_players,
             dp_pos=dp_pos_by_format.get(fmt),
+            input_evidence=input_evidence,
         )
         if not players:
             log.warning("  universal pool build for %s yielded no players — not caching", fmt)
             continue
-        g_universal_by_format[fmt] = {"players": players, "seed": seed}
+        g_universal_by_format[fmt] = {"players": players, "seed": seed,
+                                      "input_evidence": input_evidence}
         log.info("  universal pool built for %s: %d players", fmt, len(players))
 
     _rebind_legacy_pool_aliases()
@@ -2002,6 +2017,7 @@ def _invalidate_player_pipeline(relevant: dict) -> None:
     """
     global _sleeper_cache
     from .data_loader import SCORING_FORMATS as DL_SCORING_FORMATS
+    from .trade_input_evidence import PoolInputEvidence
 
     # 2 — in-memory cache
     _sleeper_cache = relevant
@@ -2035,15 +2051,18 @@ def _invalidate_player_pipeline(relevant: dict) -> None:
         for fmt in DL_SCORING_FORMATS:
             if fmt not in dp_values_by_format:
                 continue  # DP fetch failed for this format — keep the old pool
+            input_evidence = PoolInputEvidence()
             players, seed = build_universal_pool(
                 sleeper_cache=relevant,
                 dp_elo=dp_elo_by_format.get(fmt, {}),
                 dp_vals=dp_values_by_format.get(fmt, {}),
                 all_db_players=all_db_players,
                 dp_pos=dp_pos_by_format.get(fmt),
+                input_evidence=input_evidence,
             )
             if players:
-                new_by_format[fmt] = {"players": players, "seed": seed}
+                new_by_format[fmt] = {"players": players, "seed": seed,
+                                      "input_evidence": input_evidence}
 
         if not new_by_format:
             log.warning("players-refresh: no pool rebuilt — keeping the previous "
@@ -14768,7 +14787,7 @@ def _owner_generation_context(*, sess, service, league, players, seed_map,
     for pid in getattr(service, "_elo_overrides", {}) or {}:
         if pid in placed:
             sources[pid] = "explicit"
-    return dict(
+    context = dict(
         players=dict(players), league=owner_league, user_id=user_id,
         user_roster=list(user_roster), user_elo=dict(user_elo), seed_elo=dict(seed_map),
         scoring_format=scoring_format, fairness_threshold=fairness_threshold,
@@ -14786,6 +14805,15 @@ def _owner_generation_context(*, sess, service, league, players, seed_map,
         exclusion_keys=(_load_presentment_exclusions(user_id, league.league_id)
                         if FLAGS.trade_presentment_rules else set()),
         config=config, **selection)
+    if _bakeoff.owner_revision_enabled(config):
+        from .trade_input_evidence import detached_context, PoolInputEvidence
+        pool = (g_universal_by_format.get(scoring_format)
+                or g_universal_by_format.get("1qb_ppr") or {})
+        evidence = pool.get("input_evidence")
+        if not isinstance(evidence, PoolInputEvidence):
+            evidence = PoolInputEvidence()
+        return detached_context(context, evidence)
+    return context
 
 
 def _owner_cards_valid(cards, context):
@@ -14848,6 +14876,9 @@ def _owner_request_snapshot(assignment, card, *, detach=True):
     inputs["manager_preferences"] = {uid: prefs for uid, prefs in inputs.get("manager_preferences", {}).items()
                                       if uid in {inputs["user_id"], card.target_user_id}}
     snapshot = {**assignment, "input": inputs}
+    if "input_evidence" in assignment:
+        from .trade_input_evidence import project_evidence
+        snapshot["input_evidence"] = project_evidence(assignment["input_evidence"], assets)
     # Impression assembly serializes this frozen request immediately without
     # mutating it. Other consumers retain the detached-copy contract.
     return copy.deepcopy(snapshot) if detach else snapshot
@@ -14867,7 +14898,19 @@ def _owner_selected_assignment(context, surface, *, serve, exclusive=False):
     inputs["players"] = {pid: {"position": p.position, "age": p.age,
                                "team": p.team, "injury_status": getattr(p, "injury_status", None)}
                           for pid, p in context["players"].items()}
+    if _bakeoff.owner_revision_enabled(context["config"]):
+        for pid, player in context["players"].items():
+            inputs["players"][pid].update(search_rank=getattr(player, "search_rank", None),
+                                           pick_value=getattr(player, "pick_value", None))
+        # The durable assignment must not alias mutable generator-context
+        # boards after its request hash has been minted.
+        inputs = copy.deepcopy(inputs)
     canonical = copy.deepcopy(inputs)
+    input_evidence = None
+    if _bakeoff.owner_revision_enabled(context["config"]):
+        from .trade_input_evidence import request_evidence
+        input_evidence = request_evidence(context)
+        canonical["input_evidence"] = input_evidence
     canonical["config"] = {k: v for k, v in canonical["config"].items()
                            if not k.startswith("bakeoff_include_") and not k.startswith("bakeoff_serve_")
                            and not k.startswith("significance_")
@@ -14903,6 +14946,7 @@ def _owner_selected_assignment(context, surface, *, serve, exclusive=False):
             "assignment_probability": 0.5 if serve and not exclusive else 1.0,
             **({"exclusive": True} if exclusive else {}),
             "serve_enabled": serve, "input": inputs,
+            **({"input_evidence": input_evidence} if input_evidence is not None else {}),
             "captured_at": datetime.now(timezone.utc).isoformat(), "market_as_of": "unavailable"}
 
 

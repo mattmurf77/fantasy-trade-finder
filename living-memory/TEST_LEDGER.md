@@ -1,3 +1,18 @@
+## 2026-09-22 — Bilateral revision round7 and capture validation (not released)
+
+Stable integrated runtime: **6,800 backend passed /1 optional-data skip in351.78s**,
+Python3.14.4/isolated SQLite. TypeScript/all99 mobile structural suites/test-ID lint
+and195 web checks rerun green. Source hashes and commands in
+[validation](../docs/plans/bilateral-model-revision/validation-20260922-round7.md).
+Independent round7 review32 focused/406 combined; age capture149 group and replay
+environment44 group overlap full-suite coverage, not additional distinct tests.
+Exact3836 native and3306 served/full persisted parity; failed write zero exposure.
+Local first durable14.538s versus8.576s incumbent still blocks promotion.
+Separate43-test assignment memo prototype rejected for10.24% first-delivery
+slowdown; no cache integration. Prepared-inventory source audit identifies
+incomplete counterparty/ownership freshness, not a missing prewarm trigger.
+No GitHub push/PR, hosted CI, prod write/toggle/deploy or TestFlight.
+
 ## 2026-09-22 — Bilateral revision, iterative evaluation (not released)
 
 Parent specifications preceded three Astra Ultra implementation lanes. Current

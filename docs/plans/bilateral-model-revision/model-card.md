@@ -67,6 +67,12 @@ every surviving dominance relation after filtering. Proxy thresholds are not
 calibrated willingness probabilities. Global pick-year pricing was deliberately
 not changed without separate owner-aligned validation.
 
+Future candidate requests now preserve validated source-age/imputation evidence
+and existing fallback-outlook fields in a detached private capture. That envelope
+is explicitly collection-only: the current model still consumes the same Player
+ages, including legacy defaults. This closes a future auditing gap, not the
+age-model limitation or missing historical provenance. See [capture evidence](age-evidence.md).
+
 The offline benchmark is a common-input constructor/significance/presentation
 comparison, not a full production serving or first-action measurement. Actual
 provider completions, mutual-interest outcomes, fixed eligible windows, blinded

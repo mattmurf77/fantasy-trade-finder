@@ -44,6 +44,21 @@ exact-package review/outcome cohorts are explicit Unknowns. KTC/DP references
 and completed Sleeper trades remain reference/positive-only evidence, never
 invented rejection labels for these generated offers.
 
+Capture audit addendum: historical Player rows retained position, age, team and
+injury status, but omitted `search_rank` and `pick_value`, which fallback outlook
+inference can consume. Replays therefore use Player defaults where those fields
+are absent. The common-input constructor comparison remains a comparison under
+the same reconstructed inputs, **not an exact reproduction of each historical
+production inference**. Candidate-only future capture is being corrected;
+current source rows must not retroactively fill old evidence. No source-level
+statement that a request is "full" overrides this field-level limitation.
+
+A fresh bounded production evidence-availability read at06:40UTC found no saved
+Win Now forecast/projection records and only one recent pending match without
+paired impression links or both confirmation decisions. See
+[availability readback](input-availability-readback.md) for the exact scope and
+limitations; these counts do not estimate acceptance or provider completion.
+
 Only 88 of 968 manager-preference occurrences include next-draft/own-next/expired
 pick metadata; no request includes actual projected-points evidence. Preserving
 available slots/capacity does not turn dynasty-value proxies into real starts.

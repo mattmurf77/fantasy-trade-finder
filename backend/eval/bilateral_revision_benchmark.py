@@ -28,6 +28,14 @@ BASELINE_PREFIX = "ecda17d1"
 CUTS = (1, 5, 10, 30)
 
 
+def worker_environment():
+    """Stable hash iteration and isolated DB/import selection for every replay."""
+    env = {key: value for key, value in os.environ.items()
+           if key not in {"DATABASE_URL", "PYTHONPATH"}}
+    env.update(PYTHONHASHSEED="0", PYTHONDONTWRITEBYTECODE="1")
+    return env
+
+
 def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
                                      allow_nan=False).encode()).hexdigest()
@@ -661,7 +669,8 @@ def replay_policy(args):
         command = [sys.executable, str(Path(__file__).resolve()), "--policy-worker", "--repo", str(args.candidate_repo.resolve()),
             "--policy-replay", str(args.policy_replay.resolve()), "--request-index", str(index),
             "--policy-two", str(args.policy_two.resolve()), "--output", str(folder.resolve())]
-        process = subprocess.run(command, cwd=args.candidate_repo, capture_output=True, text=True, timeout=args.timeout)
+        process = subprocess.run(command, cwd=args.candidate_repo, env=worker_environment(),
+                                 capture_output=True, text=True, timeout=args.timeout)
         if process.returncode:
             private_json(args.output / f"error-{index}.private.json", {"stdout": process.stdout, "stderr": process.stderr})
             raise RuntimeError(f"Policy replay failed at retained request {index}; incomplete run is not a pass")
@@ -726,8 +735,7 @@ def run(args):
             folder = output / f"request-{index}-{variant}"
             command = [sys.executable, str(Path(__file__).resolve()), "--worker", "--repo", str(repo.resolve()),
                 "--request", str(request_path), "--config", str(config_path), "--output", str(folder), "--variant", variant]
-            env = {key: value for key, value in os.environ.items() if key not in {"DATABASE_URL", "PYTHONPATH"}}
-            env.update(PYTHONHASHSEED="0", PYTHONDONTWRITEBYTECODE="1")
+            env = worker_environment()
             proc = None
             try:
                 reusable = args.reuse_incumbent / f"request-{index}-incumbent/result.private.json" if args.reuse_incumbent and variant == "incumbent" else None

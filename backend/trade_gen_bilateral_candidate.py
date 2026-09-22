@@ -7,7 +7,7 @@ The incumbent remains separately callable with its original defaults and proof.
 """
 
 from collections import Counter, defaultdict
-from dataclasses import replace
+from dataclasses import dataclass, replace
 import heapq
 from time import perf_counter
 
@@ -115,13 +115,11 @@ class _Search(incumbent._Search):
                                           for p in ids) for ids in (give, receive)]}
         return result
 
-    def _decision(self, card, data, reason, eligible=False):
-        decision = super()._decision(card, data, reason, eligible)
-        data = decision.as_dict()
+    def _freeze_decision(self, card, data, reason, eligible):
         data["generator_version"] = VERSION
         if "construction" in data:
             data["construction"].update(policy="price_efficient_bilateral_portfolio", coefficients=_WEIGHTS)
-        return replace(decision, snapshot_json=owner._dump(data))
+        return super()._freeze_decision(card, data, reason, eligible)
 
     def _companion_benefits(self, team, pid, focal_value):
         """Explain the recipient's additional benefit independently of support.
@@ -188,6 +186,31 @@ class _Search(incumbent._Search):
             result = replace(result, snapshot_json=owner._dump(data))
         self._decisions[incumbent._identity(card)] = result
         return result
+
+
+@dataclass(frozen=True, slots=True)
+class _GenerationRejection:
+    """Final internal status only; never an external or served-offer proof."""
+    reason: str
+
+    @property
+    def eligible(self):
+        return False
+
+    def as_dict(self):
+        raise RuntimeError("Internal generation rejection has no diagnostic payload")
+
+    def __getattr__(self, name):
+        # A default-valued getattr must not hide a new evidence consumer.
+        raise RuntimeError(f"Internal generation rejection has no field {name!r}")
+
+
+class _GenerationSearch(_Search):
+    """Generation alone consumes rejected results as final status/reason."""
+    def _freeze_decision(self, card, data, reason, eligible):
+        if not eligible:
+            return _GenerationRejection(reason)
+        return super()._freeze_decision(card, data, reason, eligible)
 
 
 def evaluate_bilateral_trades(cards, **kwargs):
@@ -319,7 +342,7 @@ def _rank(cards):
 
 def generate_bilateral_trades(**kwargs):
     started = perf_counter()
-    search = _Search(**kwargs)
+    search = _GenerationSearch(**kwargs)
     cards, raw_report = incumbent._generate_with_search(search, ranker=_rank, version=VERSION)
     report = raw_report.as_dict()
     counts = Counter()

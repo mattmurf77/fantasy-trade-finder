@@ -36,3 +36,30 @@ Own private prototype scripts and proof-boundary-evidence.md only. Do not edit
 shared runtime or replace production proof validation before parent approval and
 independent cross-review. One complete prototype maximum this round; a concrete
 negative result is preferable to an unsafe certificate.
+
+## Parent clarification: supported runtime mutation boundary
+
+The source audit found no supported hot reload of loaded model helpers/weights,
+TIER_CONFIG or roster eligibility tables. Treat these as a documented immutable
+process/code-generation contract; this task does not add arbitrary in-process
+Python hotpatch support. Static data mutability is a limitation to record, not
+a reason to design a global dependency-injection graph. Code changes invalidate
+the process-local authority through deployment/new process, not a public digest.
+
+Privately prototype a narrow thread-local crown override at the TWO existing
+trade_service pricing reads. Only candidate generation/immediate validation enters
+it; ordinary callers and incumbent off-mode retain the live flag. A captured full
+effective config must include resolved owner limits and enclose initialization as
+well as evaluation with the existing config and market-stud contexts. Copy each
+live/default/thread-overlay config source before resolution; never traverse a
+concurrently clearing/updating mapping as if it were an atomic snapshot. Determine
+whether the existing reload implementation gives a consistent capture seam. If
+not, report that remaining legitimate race explicitly rather than ignore it.
+
+Real supported flag/config reload, request/nested Player/board mutation, mixed
+authority and registry forgery remain required falsification cases, including
+change-and-change-back. Test that other threads never inherit the private crown
+override. Arbitrary monkeypatches of process-static code are outside the declared
+supported mutation model; do not label them safely supported. Preserve all final
+live serving-policy gates. This approves private insertion of the minimal crown
+seam only, not shared runtime integration or a skipped-validation fast path.
