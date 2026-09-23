@@ -19,10 +19,20 @@ workflow/readback; 0 is the global prep/adoption rollback. Stopping one sweep do
 not disable adoption or erase durable evidence. Keep other flags/model settings
 and all offer limits unchanged.
 
+New v2 preparation uses private staging/sealed manifests and bounded pages/nodes;
+an incomplete stage is never a cache hit. Ordinary rollback is the flag-off action
+above. Before downgrading to a pre-v2 binary, purge disposable v2 private data and
+verify all child/participant rows are gone, or use a deletion-compatible bridge.
+Old binaries cannot fulfill account deletion for tables they do not know about.
+Never purge historical impressions, decisions or matches as part of cache rollback.
+
 Report resolved targets and unresolved cohort/source/binding reasons separately.
 `unexpired_artifacts` is not validated fresh-ready coverage, and an empty inventory
-is not an error. Retention is at most 24 hours with no read renewal, subject to
-current dependencies and original expiry. No prepare-time views, likes, proposals,
+is not an error. Eligibility is at most 24 hours with no read renewal, subject to
+current dependencies and original expiry. Physical deletion follows successful
+maintenance; cache-off does not disable private expiry pruning. Oversized singleton
+evidence is a target error, not a reason to drop offers or turn off telemetry.
+No prepare-time views, likes, proposals,
 login/activity or push/inbox messages are authorized. Production coverage and the
 three-second actionable-tile goal require observed release/device evidence, not
 a successful unit test or cache-hit label.

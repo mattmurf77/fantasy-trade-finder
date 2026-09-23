@@ -17,12 +17,19 @@ it does not delete historical decisions or change any model/offer-limit knob.
 
 Current implementation bounds are not additional rollout knobs: at most 24-hour
 original artifact retention, one background preparation claim, 300-second default
-target lease, hourly maintenance refresh intent, 64 MiB logical JSON and 2 MiB
-encoded SQL artifact limits, and 30 then 100-card publication batches. Artifacts
-use fixed zlib/base64 encoding with bounded decompression. The byte limits reject rather
-than truncates; publication batch size is not a generation cap. Source resolution
+target lease, hourly maintenance refresh intent, and up to30 then100-card
+publication batches (smaller when byte bounds require it). V1 retains its64 MiB
+logical /2 MiB encoded envelope limits. New v2 pages/nodes have4 MiB logical /
+768 KiB encoded limits, at most100 page records and a separate conservative2 MiB
+whole SQL statement parameter budget. All use fixed zlib/base64 and bounded
+decompression. The limits reject oversized indivisible records rather than
+truncate inventory; publication/page size is not a generation cap. Source resolution
 uses a five-minute freshness bound, independent of artifact retention. Existing
 30-minute in-process job freshness and original card expiry still apply.
+The conservative SQL budget can reject an indivisible candidate JSON row below
+the codec's roughly2 MiB ceiling (effective raw text capacity is below1 MiB after
+other fields/escaping overhead). Report that target as an error, never truncate or
+disable telemetry to obtain a hit. Cache-off leaves bounded expiry pruning enabled.
 
 Saved league scoring wins; database NULL retains native `1qb_ppr` with explicit
 `native_default` provenance. Background fairness uses the latest observed in-memory

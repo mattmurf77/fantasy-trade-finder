@@ -3,9 +3,9 @@
 ```project-status
 {
   "status": "in-progress",
-  "updated": "2026-09-22",
-  "summary": "PR305 deployed; the initial canary failed before saving offers. Caching is off and ordinary Bilateral2 is unchanged. Cross-batch evidence repair passed focused tests; full validation and corrective deployment are in progress.",
-  "evidence": "Exact-head hosted CI35788148359 passed all four gates, backend7144/1skip. Render4903d205 live2026-09-22T22:07:49Z. Canary10e5d888d5f54d588ca930fb21e0dfbc reported prepared_payload:snapshot_conflict; zero artifacts, no new impressions/decisions/sessions, unchanged activity/ranking fingerprint. Rollout1→0 verified22:11:56UTC. See release.md for actual coverage and limitations."
+  "updated": "2026-09-23",
+  "summary": "Approved chunked cache preserved all13728 offers. Revised936 telemetryON first30published1.069s locally. Prepared526 tests and PostgreSQL59 passed; feedback/admission races fixed. Production cache off; final dense/CI/canary gates remain.",
+  "evidence": "Prod2cff90c7/cache0 readback2026-09-23T02:03:21UTC. Prepared526pass85.57s; codec153; store59 eachSQLite/PG; finaldiagnostics/feedback/runtime58pass7.12s. Revised936 telemetryON: prepare23.74s/first30published1.069s/full21.90s/RSS343.7MB. Earlier13728 telemetryOFF: first30durable3.855s/full338.64s/RSS1.492GB; all native proof/order preserved. No device/prod timing claim. Final dense/full hosted gates pending; no v2 release yet."
 }
 ```
 

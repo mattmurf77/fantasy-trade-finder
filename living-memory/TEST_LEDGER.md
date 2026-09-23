@@ -181,6 +181,30 @@ Added two illustrative ranking boards and a mutual-value trade receipt. Web stru
 
 # Test Ledger — Fantasy Trade Finder
 
+## 2026-09-23 — Approved chunked prepared inventory qualification, not released
+
+Owner explicitly approved new persistent storage/lease/deletion subsystem after
+prior safety hold. Approved implementation uses bounded pages and store-minted
+pinned-root semantic attestation; all native terms/proofs/order remain unchanged.
+Prepared regression526passed85.57s; codec/legacy153passed14.54s; store+attestation+
+retirement59passedSQLite8.25s and isolated Unix-socket PostgreSQL14.54s. Parent
+diagnostics/runtime40passed1.45s. No production tests, activity, or deploy.
+
+Actual936 telemetryON full parity: prepare23.79s, first30durable1.081s,
+fulladopt22.15s, peakRSS274726912B. Actual13728 telemetryOFF fullparity701.13s:
+prepare361.35s, first30durable3.855s, fulladopt338.64s, peakRSS1492434944B,
+maxSQLbind999044B. Local backend/SQLite only; not device/prod latency. These
+precede fused-index and active-feedback repairs. Initial936 repeated-preflight
+17.06s firstcard exposed the bottleneck; initialdense preflight run interrupted.
+
+Named RED/GREEN: seven missing fused callback cases; six typed error marker
+cases; exact-root retirement absent; corrupt-prefix kept active; real first
+like/pass canceled unrelated suffix; active sweep starved hourly prune. Direct
+SQL partner board/outlook changes still revoke. Final independent admission
+roster-race correction, speed remeasurement and full/hosted release gates pending.
+Production2cff90c7 cacheOFF readback02:03:21UTC; no all-user sweep yet.
+[Plan/evidence](../docs/plans/prepared-trade-inventory/validation.md).
+
 > **Purpose:** authoritative record of what's been tested, what shipped, what was measured, and on what version of the stack. Prevents "works on my machine / claimed earlier without evidence" failure modes.
 >
 > Retention: entries dated within the last 2 months (2026-06-08 onward) plus standing sections live here; older run entries are archived in [`archive/TEST_LEDGER-pre-2026-06.md`](archive/TEST_LEDGER-pre-2026-06.md).

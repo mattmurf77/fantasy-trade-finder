@@ -18,6 +18,9 @@ Release evidence: [status](plans/prepared-trade-inventory/status.md).
 | `prepared_trade_targets` | One scope per sweep, unique `(sweep_id,scope_key)`: `target_id` PK, `user_id`, private `payload_json`, `status`/safe machine `reason`, `attempts`, `max_attempts`, `available_at`, `lease_token`/`lease_until`, resulting `inventory_id`, `updated_at`. |
 | `prepared_trade_participants` | Compound PK `(subject_kind,subject_id,participant_user_id)` plus owning `user_id`. Indexes every manager whose data the target/artifact consumes, including canonical coowner identity and non-app opponents. |
 | `prepared_trade_worker` | Singleton `worker_id` with `lease_token`, `lease_until`, `target_id`; serializes background preparation claims across workers and permits expired-claim recovery. |
+| `prepared_trade_manifests_v2` | `inventory_id` PK, indexed `scope_key` and nullable unique `active_scope_key`; owner/league, `state` staging/validating/sealed/retired, original target/generation token and timestamps; compressed `header_json`/`metadata_json` with checksums, `root_sha256`/`tree_sha256`; card/impression/ghost/node/page counts; adoption token/lease, independent card and ghost prefixes, frozen adoption JSON/checksum. Only sealed active rows are adoptable. |
+| `prepared_trade_pages_v2` | PK `(inventory_id,kind,page_index)`; kind cards/impressions/admission; contiguous original, real-card and ghost ordinal ranges; logical/encoded byte counts, compressed payload/checksum and sealed-root proof. Admission pages contain compact exact disposition/source/expiry identities, not native proof copies. Page boundaries do not alter card IDs/order or publication batches. |
+| `prepared_trade_nodes_v2` | PK `(inventory_id,snapshot_id)`; bounded compressed original diagnostic row, logical/encoded byte counts, checksum and sealed-root proof. Original scoped snapshot ID, packing and capture time survive publication unchanged. |
 
 Scope includes account working-user, league, canonical league-user, scoring format
 and exact request key (including fairness). The logical payload is a checksummed,
@@ -26,7 +29,7 @@ dependency/model receipts, full ordered card bundle and deferred publication eff
 The card bundle preserves explicit runtime fields, original public snapshots,
 immutable valuation proofs, source-like links, candidate-set membership and scoped
 diagnostic snapshots. No pickle/arbitrary class reconstruction or credentials.
-`payload_json` stores `prepared-zlib-base64-1:` followed by base64-encoded zlib
+The legacy v1 inventory `payload_json` stores `prepared-zlib-base64-1:` followed by base64-encoded zlib
 (level 6) bytes. `payload_sha256` binds the original canonical UTF-8 JSON, not its
 compressed representation. Limits are 64 MiB logical JSON and 2 MiB encoded SQL
 value (including prefix). Exceeding either fails visibly without truncating offers
@@ -35,12 +38,38 @@ invalid base64/UTF-8, incomplete or trailing streams, and checksum mismatches.
 Legacy plain JSON remains readable only within both limits; no unknown codec is
 accepted. This compression is unrelated to HTTP content encoding.
 
-Maximum retention is 24 hours from original creation and is never extended on
-read. Original card expiry and current-source validation can reject an artifact
+New preparation uses v2 sealed manifests and `prepared-page-zlib-2:` child values,
+bounded to4 MiB logical /768 KiB encoded per page/node, at most100 records per
+page. Total inventory size is not an offer-count limit. A separate conservative
+2 MiB SQL statement parameter budget covers all batched writes, including actual
+adoption evidence. Existing candidate-set JSON remains byte-exact and indivisible;
+an oversized candidate or metadata record fails explicitly. Source/identity/model
+receipts are checksummed in the bounded header; candidate/job/deferred-mutation
+metadata is separately bounded. Participant index kind `inventory_v2` is inserted
+before any private child content. Freezing the descriptor root before semantic
+validation prevents unchecked appends or changed descriptors from being blessed
+by a later root. The sealer alone adds a reserved attestation to metadata, bound
+to validated tree/header/original metadata, counts and codec/validator versions;
+the final manifest root also binds that attestation. Caller metadata cannot supply
+it. Atomic head replacement retires the prior manifest; failure leaves the previous
+active inventory intact. No private JSON can self-certify global validity.
+
+Maximum eligibility is 24 hours from original creation and is never extended on
+read. Physical pruning follows successful maintenance, including with rollout off;
+it is not an exact-time deletion guarantee. Original card expiry and current-source validation can reject an artifact
 earlier. A valid empty inventory is distinct from missing/error. Receipts bind
 semantic inputs rather than provider poll timestamps or replace-sync surrogate IDs;
 a receipt hash by itself does not prove source freshness. Adoption records the
 original immutable evidence using actual publication time before public exposure.
+
+The full dependency receipt remains mandatory for each new adoption. A separate
+in-memory active-adoption receipt excludes computed feedback ratings and action
+history, not explicit inputs: persisted member rankings/confidence, preferences,
+user ranking settings, source/model data and ranking-only comparison evidence stay
+bound. Only recognized `trade`/`disposition` swipe rows are excluded; NULL and
+unknown types remain inputs. Current pass/source-like/awaiting/match state is
+checked per publication/read instead of being held immutable. No additional
+decision, match, view or acceptance label is manufactured by either receipt.
 
 Account deletion removes entire disposable inventories and targets that contain
 any resolved deleted participant/alias, in the account lifecycle transaction, and
@@ -49,6 +78,10 @@ Account export includes owned prepared inventory/target metadata, counts, hashes
 and participant rows, but excludes both tables' `payload_json` and internal
 adoption/worker lease tokens. These payloads contain other managers' private
 inputs and evidence, not just the requesting user's data. Exported
+v2 manifests also omit `generation_token`, `adoption_token`, `header_json`,
+`metadata_json` and `adoption_json`; child pages/nodes are not exported at all.
+All v2 manifest states containing private data, including incomplete/retired work,
+are removed when any consumed participant is deleted. Exported
 `deck_impressions.features_json` omits only the new top-level `prepared_runtime`
 recovery record; existing feature fields and the JSON-text contract are preserved.
 Stored payloads and impression evidence remain unchanged.

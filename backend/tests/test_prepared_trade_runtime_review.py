@@ -15,6 +15,7 @@ from sqlalchemy import insert, update
 
 from backend import database as db, feature_flags as ff, server, trade_service as ts
 from backend import prepared_trade_runtime as runtime, prepared_trade_store as store
+from backend import prepared_trade_store_v2 as paged_store
 from backend import user_data_lifecycle as lifecycle
 from backend.tests.test_owner_generator_routes import harness, owner_harness, rows, ME, LEAGUE
 from backend.tests.test_owner_only_routes import exclusive, large_exclusive
@@ -101,14 +102,14 @@ def test_real_headless_prepare_syncs_under_all_participant_leases_and_reuses(hea
     monkeypatch.setattr(server, "_sync_sleeper_owned_picks", sync)
     monkeypatch.setattr(server, "_run_trade_job", worker)
     runtime.prepare_target(server, claim)
-    cached = store.peek_inventory(scope)
+    cached = paged_store.peek_inventory(scope).header
     assert cached and cached["card_count"] >= 64
     assert rows(engine, db.draft_picks_table)  # Actual validated-source ledger sync.
     assert store.sweep_status(sweep)["status"] == "complete"
     before_picks = rows(engine, db.draft_picks_table)
     _, second_sweep, second_claim = new_claim(target)
     runtime.prepare_target(server, second_claim)
-    after = store.peek_inventory(scope)
+    after = paged_store.peek_inventory(scope).header
     assert calls == {"sync": 2, "worker": 1}
     assert after["inventory_id"] == cached["inventory_id"]
     assert after["created_at"] == cached["created_at"] and after["expires_at"] == cached["expires_at"]
@@ -140,7 +141,8 @@ def test_real_preparation_adopts_equivalent_fresh_session_with_actual_receipt(he
     client, engine, _, original_service, _ = fixture
     scope, _, claim = new_claim(target)
     runtime.prepare_target(server, claim)
-    cached = store.peek_inventory(scope)
+    reader = paged_store.peek_inventory(scope)
+    cached = reader.header
     assert cached and cached["card_count"] >= 64
     fresh = runtime.build_session(server, deepcopy(target))
     assert runtime.dependency_receipt(server, scope, fresh, target) == cached["dependency_receipt"]
@@ -148,8 +150,9 @@ def test_real_preparation_adopts_equivalent_fresh_session_with_actual_receipt(he
     handled, job = adopt((context_fixture, None, scope, None), monkeypatch, "real-receipt-adoption")
     assert handled and job["status"] == "complete", job
     assert len(job["cards"]) == cached["card_count"]
-    assert [row["trade_id"] for row in job["cards"]] == [row["runtime"]["trade_id"]
-        for row in cached["payload"]["inventory"]["cards"]]
+    from backend.prepared_trade_payload_v2 import restore_inventory
+    original = restore_inventory(reader, user_id=ME, league_id=LEAGUE, now=datetime.now(timezone.utc))
+    assert [row["trade_id"] for row in job["cards"]] == [card.trade_id for card in original.iter_cards()]
     assert len(rows(engine, db.deck_impressions_table)) == cached["card_count"]
     assert len(fresh["trade_svc"]._trade_cards) == cached["card_count"]
     assert not original_service._trade_cards
