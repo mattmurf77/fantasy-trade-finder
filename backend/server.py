@@ -3256,8 +3256,10 @@ def _trade_job_public_view(job: dict) -> dict:
         out["board_refresh"] = board_refresh
     if out["cards"]:
         user_id, league_id, _format = job["key"]
-        out["cards"] = _project_trade_dispositions(out["cards"], user_id, league_id,
-            prepared=bool(job.get("prepared_inventory_id")))
+        if job.get("prepared_inventory_id"):
+            out["cards"] = _project_trade_dispositions(out["cards"], user_id, league_id, prepared=True)
+        else:
+            out["cards"] = _project_trade_dispositions(out["cards"], user_id, league_id)
     revoked = revocation_error()
     if revoked:
         out.update(cards=[], status="error", error=revoked)
@@ -3289,7 +3291,8 @@ def _project_trade_dispositions(cards, user_id: str, league_id: str, *, prepared
         # must recheck awaiting/matched packages without repricing the deck.
         # Read directly here: an unavailable history is not permission to
         # replay offers. Ordinary non-prepared cards retain existing behavior.
-        prepared_cards = prepared or any(hasattr(card, "_prepared_guard") for card in cards)
+        prepared_cards = (FLAGS.trade_presentment_rules and
+            (prepared or any(hasattr(card, "_prepared_guard") for card in cards)))
         exclusions = set()
         if prepared_cards:
             exclusions.update((frozenset(row["my_give"]), frozenset(row["my_receive"]))

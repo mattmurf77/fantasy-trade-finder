@@ -20,6 +20,49 @@ mobile polling and rendering. Run46.69s; no production latency claim. The only
 subsequent runtime edit recognizes typed errors in sanitized operator diagnostics.
 Final dense repetition and hosted release gates remain pending.
 
+The final dense repetition on570778f2 subsequently PASSED703.75s, all13728 native
+offers preserved. Preparation364.224327s (worker169.368429s/seal194.689049s),
+attestedopen1.609288s, first30durable2.431208s, first30published2.502433s,
+fulladoption338.260348s, maxSQLbind999044B, peakRSS1433731072B. Telemetry OFF;
+synthetic fixture's native `trade.presentment_rules` OFF. The prepared R4 projection
+still ran unconditionally in that measured revision, a subsequently corrected
+flag-off compatibility issue. This dense capacity fixture is not a replica of
+production flag state. Full original proof/order/expiry parity and zero fake
+actions passed; no dense telemetry capacity or device3sec conclusion follows.
+
+Independent final review reproduced two actual flag-off parity failures: a pending
+match and eight-day awaiting like survived native Bilateral2 construction but were
+wrongly excluded by prepared admission. The correction gates only prepared R4
+history/cuts on the same existing flag. Exact pass/source-interest checks remain
+unconditional. Positive R4 tests explicitly enable the flag. A smaller native
+telemetry-ON/presentment-ON run will qualify that final predicate under both active
+production switches; hosted CI must rerun on the final commit before merge.
+
+Both-switch-ON final936 repeats passed full parity, with variable local latency:
+unprofiled first30published3.282466s/full31.969205s/prepare25.600180s/RSS305594368B;
+instrumented repeat first30published1.175086s/full24.644787s/prepare28.941242s.
+Both retain all936 cards/candidate133496B/maxSQLbind995984B. Do not attribute the
+variance to the flag: earlier unconditional R4 already did the same empty-history
+reads. In the instrumented first prefix, all11 history projections totaled0.0095s,
+receipt calls0.0239s inclusive, evidence binding0.3296s and checkpoint0.0626s.
+This is neither a reliable3s SLO pass nor a production/phone measurement. No
+further optimization is justified by these two observations alone.
+
+Hosted570778f2 CI35811257235 ran Python3.12.14:7402 passed/1 skipped/5 failed
+in874.09s; mobile/web/test-ID passed. Four failures were the legacy race-test
+projection stub rejecting a new prepared=False keyword on ordinary jobs; keep
+the old three-argument call for non-prepared jobs (four local REDs reproduced).
+The fifth overlapped cleanup of an immediately stale synthetic session; exact
+reproduction and fixture-only correction are tracked before retry. No deployment
+or cache activation follows a failing CI run. Four legacy race cases were
+reproduced locally RED, then23 compatibility/feedback/runtime/race cases passed
+16.66s after retaining the ordinary three-argument seam. Forced janitor eviction
+reproduced401 session_expired for the zero-timestamp fixture (one RED3.66s);
+registering both interactive test sessions with current wallclock then passed
+all12 chunk/feedback cases35.65s. Authentication, runtime cleanup and event/action
+assertions are unchanged. Final PostgreSQL59 passed16.10s on current codec/store;
+the disposable server was gracefully stopped with its data/log retained.
+
 ## Current revision — implemented v2, qualification pending
 
 The owner explicitly approved the persistent chunked-storage/lifecycle subsystem
@@ -416,3 +459,16 @@ bounds: passing the small telemetry-on case is not evidence that every cohort's
 candidate singleton fits. Read-time local safety cannot detect an unobserved
 provider change. Final capacity, memory, first-action latency and all-team readiness
 must be reported from their own qualification/rollout evidence.
+
+Final compatibility follow-up found that the new prepared awaiting/matched R4
+projection ignored the existing `trade.presentment_rules` kill switch. Two
+actual flag-OFF controls reproduced the mismatch: an eight-day awaiting like and
+a pending match survived fresh Bilateral2 generation and exact full-receipt
+comparison, but cache admission rejected them. The parent gated only the new
+R4 projection on the same flag; independent exact-pass/source-like safety stays
+active. Positive R4 and matched-like controls now explicitly pin the flag ON.
+The final compatibility/feedback/runtime group passed **19 cases in 17.45 s**,
+including both actual flag-OFF inventories, flag-ON matched-like continuation,
+disabled-history-read controls and the admission input races. No runtime/test
+edits followed that freeze from Lane B. Earlier dense benchmark flags must be
+reported as measured; they are not implied to match current production settings.

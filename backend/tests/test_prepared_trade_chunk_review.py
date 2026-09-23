@@ -5,6 +5,7 @@ These small controls are not the dense-constructor memory qualification.
 """
 from copy import deepcopy
 import json
+import time
 
 import pytest
 
@@ -245,14 +246,14 @@ def test_real_first_prefix_action_does_not_revoke_unrelated_prepared_suffix(head
     cached = paged_store.peek_inventory(scope).header
     assert cached["card_count"] >= 64
     fresh = runtime.build_session(server, deepcopy(target))
-    fresh.update(verified=True, last_active=0.)
+    fresh.update(verified=True, last_active=time.time())
     monkeypatch.setitem(server._sessions, TOKEN, fresh)
     # Preparation above still used the no-activity fixture. This is now an
     # explicit synthetic human action; event transport remains isolated.
     events = []
     monkeypatch.setattr(server, "record_event", lambda *a, **k: events.append((a, k)))
     original_commit = paged_store.ensure_adoption_evidence
-    actions, attempts = [], []
+    actions, attempts, responses = [], [], []
     initial_board = rows(engine, db.member_rankings_table)
 
     def commit(*args, **kwargs):
@@ -263,9 +264,16 @@ def test_real_first_prefix_action_does_not_revoke_unrelated_prepared_suffix(head
             public = deepcopy(job["cards"][0])
             card = fresh["trade_svc"]._trade_cards[public["trade_id"]]
             original_proof = card.owner_evaluation.snapshot_json
+            # Exercise the real janitor's four-hour inactivity boundary at
+            # this exact interleaving, without waiting for its daemon tick.
+            with server._sessions_lock:
+                current = server._sessions.get(TOKEN)
+                if current is not None and current.get("last_active", 0) < time.time() - 4 * 3600:
+                    server._sessions.pop(TOKEN)
             response = client.post("/api/trades/swipe", headers={"X-Session-Token": TOKEN},
                 json={"trade_id": public["trade_id"], "impression_id": public["impression_id"],
                       "decision": decision})
+            responses.append((response.status_code, response.json))
             assert response.status_code == 200, response.json
             assert card.owner_evaluation.snapshot_json == original_proof
             actions.append(public)
@@ -278,7 +286,7 @@ def test_real_first_prefix_action_does_not_revoke_unrelated_prepared_suffix(head
     monkeypatch.setattr(paged_store, "ensure_adoption_evidence", commit)
     actual_fixture = (client, engine, fresh, fresh["trade_svc"], fresh["league"])
     handled, job = adopt((actual_fixture, None, scope, None), monkeypatch, "first-action-review")
-    assert actions and events
+    assert actions and events, responses
     assert handled and job["status"] == "complete", job
     assert len(job["cards"]) == cached["card_count"]
     assert len(rows(engine, db.deck_impressions_table)) == cached["card_count"]

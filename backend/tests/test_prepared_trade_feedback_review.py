@@ -1,9 +1,10 @@
 """Actual matched-like continuation and admission-input race controls."""
 from copy import deepcopy
+import time
 
 from sqlalchemy import insert, update
 
-from backend import database as db, prepared_trade_runtime as runtime, server
+from backend import database as db, feature_flags as ff, prepared_trade_runtime as runtime, server
 from backend import prepared_trade_store_v2 as store
 from backend.tests.test_prepared_trade_runtime_review import (
     headless, large_exclusive, exclusive, owner_harness, harness, new_claim,
@@ -13,13 +14,14 @@ from backend.tests.test_owner_generator_routes import rows, TOKEN
 
 
 def test_real_first_prefix_like_creating_match_keeps_unrelated_stream(headless, monkeypatch):
+    monkeypatch.setattr(ff, "_flags_cache", {**(ff._flags_cache or {}), "trade.presentment_rules": True})
     fixture, target = headless
     client, engine, _, _, _ = fixture
     scope, _, claim = new_claim(target)
     runtime.prepare_target(server, claim)
     cached = store.peek_inventory(scope).header
     fresh = runtime.build_session(server, deepcopy(target))
-    fresh.update(verified=True, last_active=0.)
+    fresh.update(verified=True, last_active=time.time())
     monkeypatch.setitem(server._sessions, TOKEN, fresh)
     monkeypatch.setattr(server, "record_event", lambda *a, **k: None)
     notifications = []

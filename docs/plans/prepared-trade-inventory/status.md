@@ -4,8 +4,8 @@
 {
   "status": "in-progress",
   "updated": "2026-09-23",
-  "summary": "Approved chunked cache preserved all13728 offers. Revised936 telemetryON first30published1.069s locally. Prepared526 tests and PostgreSQL59 passed; feedback/admission races fixed. Production cache off; final dense/CI/canary gates remain.",
-  "evidence": "Prod2cff90c7/cache0 readback2026-09-23T02:03:21UTC. Prepared526pass85.57s; codec153; store59 eachSQLite/PG; finaldiagnostics/feedback/runtime58pass7.12s. Revised936 telemetryON: prepare23.74s/first30published1.069s/full21.90s/RSS343.7MB. Earlier13728 telemetryOFF: first30durable3.855s/full338.64s/RSS1.492GB; all native proof/order preserved. No device/prod timing claim. Final dense/full hosted gates pending; no v2 release yet."
+  "summary": "Approved chunked cache preserves all13728 offers; local first30published2.50s dense,1.18–3.28s on936 with active switches. PR307 CI findings repaired locally; final retry pending. Production cache off until green release and canary.",
+  "evidence": "Prod2cff90c7/cache0 readback2026-09-23T02:42:12UTC. Prior CI35811257235/570778f2:7402pass1skip5fail874.09s; other3gatesgreen. Four legacy projection stub keyword failures fixed23pass16.66s; stale synthetic session reproduced401 then corrected12pass35.65s. Prepared526pass; finaldiagnostics58pass; flagcompat19pass; finalPG59pass16.10s. Full13728 parity703.75s/RSS1.434GB. All-team dryrun7resolved/6eligibleactors, discovery incomplete. No prod/device3sec claim or v2 deployment."
 }
 ```
 

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 
-from backend import database as db, server
+from backend import database as db, feature_flags as ff, server
 from backend import prepared_trade_runtime as runtime, prepared_trade_store_v2 as store
 from backend.tests.test_prepared_trade_runtime_review import (
     headless, large_exclusive, exclusive, owner_harness, harness, new_claim,
@@ -117,6 +117,7 @@ def test_active_sweep_does_not_starve_privacy_retention(monkeypatch):
 
 @pytest.mark.parametrize("kind", ["awaiting", "matched"])
 def test_prepared_projection_removes_current_awaiting_or_matched_package_only(monkeypatch, kind):
+    monkeypatch.setattr(ff, "_flags_cache", {**(ff._flags_cache or {}), "trade.presentment_rules": True})
     cards = [{"trade_id": "affected", "give": [{"id": "a"}], "receive": [{"id": "b"}]},
              {"trade_id": "unrelated", "give": [{"id": "a"}], "receive": [{"id": "c"}]}]
     history = SimpleNamespace(discovery_keys=lambda *a, **k: (set(), set()),
@@ -136,6 +137,7 @@ def test_prepared_projection_removes_current_awaiting_or_matched_package_only(mo
 
 @pytest.mark.parametrize("reader", ["load_awaiting_trades", "load_matches_for_exclusion"])
 def test_prepared_projection_history_failure_does_not_replay_affected_packages(monkeypatch, reader):
+    monkeypatch.setattr(ff, "_flags_cache", {**(ff._flags_cache or {}), "trade.presentment_rules": True})
     cards = [{"trade_id": "affected", "give": [{"id": "a"}], "receive": [{"id": "b"}]}]
     monkeypatch.setattr(server, "load_awaiting_trades", lambda *a: [])
     monkeypatch.setattr(server, "load_matches_for_exclusion", lambda *a: [])
