@@ -977,6 +977,8 @@ _EXPORT_TABLES: tuple = (
     ("league_roster_history", "league_roster_history_table", "owner_user_id", ()),
     ("prepared_trade_inventories", "prepared_trade_inventories_table", "user_id",
      ("adoption_token", "payload_json")),
+    ("prepared_trade_manifests_v2", "prepared_trade_manifests_v2_table", "user_id",
+     ("generation_token", "adoption_token", "header_json", "metadata_json", "adoption_json")),
     ("prepared_trade_targets", "prepared_trade_targets_table", "user_id",
      ("lease_token", "payload_json")),
     ("prepared_trade_participants", "prepared_trade_participants_table", "user_id", ()),

@@ -1,11 +1,11 @@
 # HANDOFF
 
-## Current State
+## Current State — 2026-09-23
 
-**Where I stopped:** isolated `/private/tmp/fleeced-bilateral-revision-20260922`, branch `codex/bilateral-revision-20260922`, base ecda17d1; round8 follows local checkpoint9e9f6970. Candidate owner-v2-bilateral-2/policy bilateral-survivors-3 remain dark/unshipped. Latest fetched origin/main73bfa41e. [Status](../docs/plans/bilateral-model-revision/status.md).
+**Where I stopped:** Owner authorized plan/build/deploy and all-user linked-team preparation, then explicitly approved the chunked storage/leases/deletion subsystem. Production remains2cff90c7/Bilateral2; cache0 verified02:03:21UTC. PR306 canary failed InvalidArtifact, causeUNKNOWN,0artifacts. [Status](../docs/plans/prepared-trade-inventory/status.md).
 
-**In flight:** owner explicitly authorizes production learning release despite disclosed speed/quality uncertainty. PR304 first hosted6860pass/1skip/1failure: rookie-scope fixture starts expired; timestamp repair RED/GREEN,61focused pass, runtime0b24ad25 unchanged. Exact-head CI retry pending. Reviewed starter-impact source/weekly/season plan complete, docs only. Preflight12:03UTC live73bfa41e, autodeploy off,270 knobs, owner-only bilateral1, revision absent/default0. [Release contract](../docs/plans/bilateral-model-revision/production-learning-release.md).
+**In flight:** PR307 attached, isolated /private/tmp/fleeced-prepared-offers-20260922.uTMpm2, codex/prepared-artifact-validation-20260922. Prior570778f2 CI35811257235:7402pass1skip5fail874s, other3gatesgreen. Legacy projection seam repaired23pass; immediately-stale synthetic session reproduced401, fixture repair12pass. No auth weakening. R4 flag parity fixed19pass. FinalPG59pass; private cluster stopped. Full13728 parity703.75s, first30published2.502s/RSS1.434GB;936active-switch repeats1.175–3.282s. Not a reliable/device3sec pass.
 
-**Blocked on:** hosted exact-head CI and live verification still required. Owner accepts current15.127s vs8.425s local speed and unproven model quality for real-user learning; not a3sec or acceptance pass. Non-job/provider freshness and sparse boards/projection/cut/outcome evidence remain. No source/provider pipeline changes in projection planning.
+**Blocked on:** No approval blocker. Final local/hosted retry, merge/exact Renderdeploy, freshcanary thenall-user sweep remain. V2 branch pushed, not merged/deployed. Freshdryrun02:43UTC:7resolvedtargets/6eligibleactors,18knownleagues, explicit provider/binding gaps; no all-team coverage claim.
 
-**Don't repeat:** preserve dirty canonical/legacy checkouts and prior liked terms. Branch pushed; no production write/toggle/deploy/TestFlight yet. No caps, smaller budgets, Unknown-as-pass, simulator or safety bypass. Scope before further runtime edits.
+**Don't repeat:** Preserve dirty canonical/legacy and unrelated evaluator414faade/b17cc379. No raw identity exports, fake production actions, model/offer caps. Ops /private/tmp/prepared-release-20260922.S7GrYs; freshsweepkeys. V2 rollback is flagoff; olderbinary needs private-table purge/deletionbridge. See release.md; source edits invalidate running model-hash benchmarks.

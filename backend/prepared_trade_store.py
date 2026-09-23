@@ -38,6 +38,78 @@ class InvalidArtifact(ValueError):
     """Unsupported, corrupt, inconsistent, or oversized prepared artifact."""
 
 
+# Only these literal diagnoses and measured, non-identifying integers may leave
+# the private store boundary. Never publish exception text, payloads or hashes.
+_SAFE_FAILURE_REASONS = {
+    "scope fields must be nonempty bounded strings": "inventory_scope_invalid",
+    "invalid inventory scope": "inventory_scope_invalid",
+    "participants must be nonempty identity strings": "inventory_participants_invalid",
+    "original lifecycle snapshot required": "inventory_lifecycle_invalid",
+    "invalid timestamp": "inventory_timestamp_invalid",
+    "timezone-aware timestamp required": "inventory_timestamp_invalid",
+    "inventory expiry must be original, future, and at most 24 hours": "inventory_expiry_invalid",
+    "explicit nonempty dependency/model receipts required": "inventory_receipts_invalid",
+    "payload must contain ordered cards list": "inventory_cards_invalid",
+    "JSON nesting exceeds safety bound": "inventory_json_depth",
+    "nonfinite JSON number": "inventory_json_nonfinite",
+    "only plain JSON types and string keys are supported": "inventory_json_type",
+    "duplicate JSON object key": "inventory_json_invalid",
+    "invalid prepared JSON": "inventory_json_invalid",
+    "invalid JSON payload size": "inventory_json_invalid",
+    "prepared payload exceeds byte limit; nothing truncated": "inventory_logical_limit",
+    "prepared logical payload exceeds byte limit": "inventory_logical_limit",
+    "prepared encoded payload exceeds SQL byte limit; nothing truncated": "inventory_encoded_limit",
+    "prepared SQL statement exceeds byte limit; nothing truncated": "inventory_sql_limit",
+    "prepared page exceeds logical byte limit": "inventory_page_logical_limit",
+    "prepared page exceeds encoded byte limit": "inventory_page_encoded_limit",
+    "prepared page exceeds structural budget": "inventory_page_structure_limit",
+    "prepared bounded range exceeds byte limit": "inventory_batch_limit",
+    "prepared node selection exceeds byte limit": "inventory_batch_limit",
+    "invalid bounded prepared encoding": "inventory_page_encoding_invalid",
+    "invalid bounded prepared compression": "inventory_page_encoding_invalid",
+    "prepared checksum mismatch": "inventory_checksum_invalid",
+    "prepared page differs from sealed root": "inventory_root_invalid",
+    "invalid sealed prepared root": "inventory_root_invalid",
+    "invalid prepared root proof": "inventory_root_invalid",
+    "caller supplied reserved prepared attestation": "inventory_attestation_invalid",
+    "missing prepared semantic attestation": "inventory_attestation_invalid",
+    "invalid prepared semantic attestation": "inventory_attestation_invalid",
+    "unsupported prepared semantic attestation": "inventory_attestation_invalid",
+    "prepared content changed during semantic validation": "inventory_validation_changed",
+    "prepared completion evidence count mismatch": "inventory_completion_invalid",
+    "prepared completion differs from metadata": "inventory_completion_invalid",
+    "prepared participant lifetime changed": "inventory_lifecycle_invalid",
+    "prepared stage changed, expired or was deleted": "inventory_lease_invalid",
+    "adoption lease expired or inventory replaced": "inventory_lease_invalid",
+    "expired, stopped, superseded, or deleted preparation claim": "inventory_lease_invalid",
+}
+_SAFE_FAILURE_METRICS = frozenset({"card_count", "logical_bytes", "encoded_bytes",
+                                  "logical_limit_bytes", "encoded_limit_bytes"})
+
+
+def safe_failure_details(exc) -> dict:
+    """Allowlisted machine diagnosis only; absent measurements remain absent."""
+    result = {"reason": "preparation_failed"}
+    if type(exc) not in (InvalidArtifact, StaleWork) or len(exc.args) != 1 or type(exc.args[0]) is not str:
+        return result
+    reason = _SAFE_FAILURE_REASONS.get(exc.args[0])
+    if reason is None:
+        return result
+    result["reason"] = reason
+    metrics = vars(exc).get("_prepared_save_diagnostics")
+    if type(metrics) is dict:
+        result.update({key: value for key, value in metrics.items()
+                       if type(key) is str and key in _SAFE_FAILURE_METRICS and type(value) is int
+                       and 0 <= value <= 2**63 - 1})
+    return result
+
+
+def _invalid_measured(message, **metrics):
+    error = InvalidArtifact(message)
+    error._prepared_save_diagnostics = metrics
+    return error
+
+
 class StaleWork(RuntimeError):
     """The original claim, account lifetime, or inventory is no longer current."""
 
@@ -83,12 +155,16 @@ def _strict(value, depth=0):
     raise InvalidArtifact("only plain JSON types and string keys are supported")
 
 
-def _encode(value) -> str:
+def _encode(value, *, _measure=None) -> str:
     _strict(value)
     result = json.dumps(value, sort_keys=True, separators=(",", ":"),
                         ensure_ascii=False, allow_nan=False)
-    if len(result.encode("utf-8")) > MAX_PAYLOAD_BYTES:
-        raise InvalidArtifact("prepared payload exceeds byte limit; nothing truncated")
+    size = len(result.encode("utf-8"))
+    measured = {"logical_bytes": size, "logical_limit_bytes": MAX_PAYLOAD_BYTES}
+    if _measure is not None:
+        _measure.update(measured)
+    if size > MAX_PAYLOAD_BYTES:
+        raise _invalid_measured("prepared payload exceeds byte limit; nothing truncated", **measured)
     return result
 
 
@@ -119,14 +195,21 @@ def dependency_hash(value) -> str:
     return hashlib.sha256(_encode(value).encode("utf-8")).hexdigest()
 
 
-def _pack_payload(raw: str) -> str:
+def _pack_payload(raw: str, *, _measure=None) -> str:
     """Fixed safe transport codec; logical JSON/checksum/schema stay unchanged."""
     encoded = raw.encode("utf-8")
+    measured = {"logical_bytes": len(encoded), "logical_limit_bytes": MAX_PAYLOAD_BYTES,
+                "encoded_limit_bytes": MAX_STORED_PAYLOAD_BYTES}
+    if _measure is not None:
+        _measure.update(measured)
     if len(encoded) > MAX_PAYLOAD_BYTES:
-        raise InvalidArtifact("prepared logical payload exceeds byte limit")
+        raise _invalid_measured("prepared logical payload exceeds byte limit", **measured)
     result = STORAGE_PREFIX + base64.b64encode(zlib.compress(encoded, level=6)).decode("ascii")
+    measured["encoded_bytes"] = len(result)
+    if _measure is not None:
+        _measure.update(measured)
     if len(result) > MAX_STORED_PAYLOAD_BYTES:
-        raise InvalidArtifact("prepared encoded payload exceeds SQL byte limit; nothing truncated")
+        raise _invalid_measured("prepared encoded payload exceeds SQL byte limit; nothing truncated", **measured)
     return result
 
 
@@ -436,9 +519,14 @@ def complete_target(claim: dict, *, status: str, reason: str | None = None,
     with _work(claim["participants"], claim["work_started"]), db.engine.begin() as conn:
         inventory_id = None
         if status == "reused":
+            from . import prepared_trade_store_v2 as paged
+            inventory_id = conn.execute(select(paged.M.c.inventory_id).where(
+                paged.M.c.active_scope_key == _scope(claim["scope"]).key,
+                paged.M.c.state == "sealed", paged.M.c.expires_at > _iso(now))).scalar_one_or_none()
             table = db.prepared_trade_inventories_table
-            inventory_id = conn.execute(select(table.c.inventory_id).where(
-                table.c.scope_key == _scope(claim["scope"]).key, table.c.expires_at > _iso(now))).scalar_one_or_none()
+            if inventory_id is None:
+                inventory_id = conn.execute(select(table.c.inventory_id).where(
+                    table.c.scope_key == _scope(claim["scope"]).key, table.c.expires_at > _iso(now))).scalar_one_or_none()
             if inventory_id is None:
                 raise StaleWork("reused inventory disappeared or expired")
         _complete(conn, claim, status, _iso(now), reason=reason, retry_at=retry_at, inventory_id=inventory_id)
@@ -461,6 +549,26 @@ def save_inventory(claim: dict, *, payload: dict, dependency_receipt: dict,
     unexpired global lease must all match. SQL failure preserves the prior
     inventory and running claim. Never creates shown rows or account records.
     """
+    measured = {"logical_limit_bytes": MAX_PAYLOAD_BYTES,
+                "encoded_limit_bytes": MAX_STORED_PAYLOAD_BYTES}
+    cards = payload
+    if type(cards) is dict and "inventory" in cards and "cards" not in cards:
+        cards = cards["inventory"]
+    if type(cards) is dict and type(cards.get("cards")) is list:
+        measured["card_count"] = len(cards["cards"])
+    try:
+        return _save_inventory(claim, payload=payload, dependency_receipt=dependency_receipt,
+            model_identity=model_identity, participants=participants, created_at=created_at,
+            expires_at=expires_at, now=now, measured=measured)
+    except InvalidArtifact as exc:
+        details = safe_failure_details(exc)
+        exc._prepared_save_diagnostics = {**measured,
+            **{key: value for key, value in details.items() if key != "reason"}}
+        raise
+
+
+def _save_inventory(claim, *, payload, dependency_receipt, model_identity,
+                    participants, created_at, expires_at, now, measured):
     scope = _scope(claim["scope"])
     participants = _participants(scope, participants)
     if participants != claim["participants"]:
@@ -475,8 +583,8 @@ def save_inventory(claim: dict, *, payload: dict, dependency_receipt: dict,
                 "participants": participants, "dependency_receipt": dependency_receipt,
                 "model_identity": model_identity, "identity_receipt": claim["identity_receipt"],
                 "card_count": _card_count(payload), "payload": payload}
-    encoded = _encode(envelope)  # Detached exact bytes before transactional writes.
-    storage_json = _pack_payload(encoded)
+    encoded = _encode(envelope, _measure=measured)  # Exact bytes before writes.
+    storage_json = _pack_payload(encoded, _measure=measured)
     envelope = _decode(encoded)
     inventory_id, stamp = uuid.uuid4().hex, _iso(current)
     table = db.prepared_trade_inventories_table
@@ -931,7 +1039,9 @@ def invalidate_inventory(scope: InventoryScope) -> int:
     with db.engine.begin() as conn:
         ids = conn.execute(select(db.prepared_trade_inventories_table.c.inventory_id).where(
             db.prepared_trade_inventories_table.c.scope_key == scope.key)).scalars().all()
-        return _drop_subjects(conn, "inventory", ids)
+        count = _drop_subjects(conn, "inventory", ids)
+    from . import prepared_trade_store_v2 as paged
+    return count + paged.invalidate_inventory(scope)
 
 
 def prune(*, now=None) -> int:
@@ -939,7 +1049,9 @@ def prune(*, now=None) -> int:
     with db.engine.begin() as conn:
         ids = conn.execute(select(db.prepared_trade_inventories_table.c.inventory_id).where(
             db.prepared_trade_inventories_table.c.expires_at <= _iso(now))).scalars().all()
-        return _drop_subjects(conn, "inventory", ids)
+        count = _drop_subjects(conn, "inventory", ids)
+    from . import prepared_trade_store_v2 as paged
+    return count + paged.prune(now=now)
 
 
 def sweep_status(sweep_id: str, *, now=None) -> dict | None:
@@ -954,6 +1066,10 @@ def sweep_status(sweep_id: str, *, now=None) -> dict | None:
         unexpired = conn.execute(select(func.count()).select_from(targets.join(inventories,
             targets.c.inventory_id == inventories.c.inventory_id)).where(
                 targets.c.sweep_id == sweep_id, inventories.c.expires_at > _iso(now))).scalar_one()
+        paged = db.prepared_trade_manifests_v2_table
+        unexpired += conn.execute(select(func.count()).select_from(targets.join(paged,
+            targets.c.inventory_id == paged.c.inventory_id)).where(targets.c.sweep_id == sweep_id,
+                paged.c.state == "sealed", paged.c.expires_at > _iso(now))).scalar_one()
         next_retry = conn.execute(select(func.min(targets.c.available_at)).where(
             targets.c.sweep_id == sweep_id, targets.c.status == "pending")).scalar_one()
         remaining = counts.get("pending", 0) + counts.get("running", 0)
@@ -1027,6 +1143,8 @@ def delete_for_users(conn, user_ids) -> dict[str, int]:
                          .values(deleted_count=sweeps.c.deleted_count + 1))
     counts = {"prepared_trade_inventories_deleted": _drop_subjects(conn, "inventory", inventory_ids),
               "prepared_trade_targets_deleted": _drop_subjects(conn, "target", target_ids)}
+    from . import prepared_trade_store_v2 as paged
+    counts["prepared_trade_inventories_v2_deleted"] = paged.delete_for_users(conn, ids)
     for sweep_id in affected_sweeps:
         _finish_sweep(conn, sweep_id, _iso())
     return counts

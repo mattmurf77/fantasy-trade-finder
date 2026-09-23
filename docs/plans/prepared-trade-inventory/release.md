@@ -79,3 +79,104 @@ test-ID lint pass. Corrective branch `codex/prepared-capture-fix-20260922`.
 first30 durable0.493/3.034s, full0.730/8.518s. Not provider/network/device latency.
 Artifacts retain original card expiry and at most24h; adopted jobs at most30min.
 64MiB decoded/2MiB stored bounds reject oversize artifacts without truncating offers.
+
+## Historical update — second canary and implementation hold
+
+This section supersedes the earlier pending-correction statements above.
+PR306 final headbc76702e passed local7183/1skip407.39s and hosted
+CI35792813386 backend7183/1skip770.45s, all four gates green. It merged22:45:43UTC
+as `2cff90c748d4bf7046579b18401c495de79551cb`, identical tested tree.
+Render `dep-dapgadlbedkc738p5k7g` became live22:47:29UTC, read back22:48:07.
+Cache0→1 at22:48:38 with all other knobs unchanged. Fresh canary
+`0ae2dca1223e427c82227609dba32bd1` failed22:50:58 with `InvalidArtifact`, zero
+artifacts. Its exact cause is unknown because the phase/reason was not logged.
+Cache1→0 read back22:51:40 and23:03:19. No full-cohort sweep has run.
+
+Through23:03, swipes6635/decisions1686/impressions123570/sessions6 and the
+user activity/ranking fingerprint stayed unchanged. Operational user_events
+varied; no blanket no-write claim. No simulated production adoption/session.
+
+Safe allowlisted diagnostics passed132 independent tests. A separate actual
+12-team/24-player dense synthetic constructor produced13728 offers,
+461530265 logical bytes /15083835 compressed-text bytes and2325421 JSON nodes.
+It failed the unchanged1000000-node whole-copy guard before saving; native proof
+strings matched and0artifacts/exposures. Uninstrumented82.51s/994459648B peakRSS;
+instrumented89.13s/1345142784B peakRSS includes8.335s streaming size measurement.
+This is a capacity finding, not proof of the production failure cause. Suggestion
+telemetry was disabled; candidate singleton capacity is not covered.
+
+[Chunked-storage plan](chunked-storage-plan.md) was written/reviewed before code.
+Safety review rejected creation of the new persistent store module as requiring
+more specific approval. No retry, split patch or indirect workaround was attempted.
+All three agents stopped. Accepted schema, codec/runtime and test drafts are
+preserved in the isolated worktree but are **not runnable/releasable**: the store
+module is absent. Three codec tests failed at fixture scope; telemetry integration
+could not import the absent store. No v2 qualification result is claimed.
+Legacy capture/snapshot tests14passed3.46s. Temporary synthetic PostgreSQL was
+initialized locally without TCP and stopped; no v2 PostgreSQL tests ran.
+
+Resume requires explicit approval of the persistent-storage/lifecycle subsystem,
+then completion, independent review, actual dense end-to-end qualification and
+full/hosted release gates. Do not deploy the partial branch. Current ordinary
+exclusive Bilateral2 generation remains unchanged; production caching is OFF.
+
+## Resumed implementation — explicit approval, 2026-09-23
+
+The owner explicitly approved the persistent-storage/lease/deletion subsystem;
+the earlier authorization hold is cleared. The v2 store was created under that
+approval, not a workaround. Initial codec/legacy114, runtime/capture40,
+SQLite storage/lifecycle23 and independent telemetry/privacy/recovery8 tests
+passed. Author16 + independent7 controls also passed on a disposable local
+PostgreSQL database, never production. These precede the admission revision.
+
+An actual936-offer three-team synthetic preparation/adoption passed exact native
+proof/order/terms parity: prepare22.36s, worker10.05s, seal12.24s, admission
+preflight12.45s, first30durable17.06s, full adoption37.84s, peakRSS270221312B,
+maxSQLbind998110B. Telemetry was off. This exposed unacceptable admission overhead;
+it is not a speed success or a controlled ordinary-generation timing comparison.
+
+The dense actual12-team/24-player constructor preserved and sealed13728 offers:
+prepare348.85s, worker160.60s, seal188.03s, maxSQLbind114252B, peakRSS1412857856B.
+Parent intentionally stopped the superseded repeated-full-preflight admission
+at389.39s before the first card. It is a successful preparation measurement, NOT
+an end-to-end adoption pass. Telemetry was off; candidate singleton capacity is
+not established. The local background cleanup logged an isolated SQLite retention
+error during that run; no production connection or simulated user action occurred.
+
+[Revised plan](chunked-storage-plan.md#measured-admission-revision--2026-09-23-before-implementation)
+and [ADR-023](../../adr/adr-023-attested-prepared-inventories.md) now move invariant
+full semantic validation to a pinned-root seal, with complete authenticated compact
+disposition admission and exact per-batch publication validation. This explicitly
+permits only an earlier valid prefix if a later stored page is corrupt. Independent
+review requires a store-minted attestation and rejects caller-controlled validation.
+Qualification and rollout gates remain open; no v2 commit/deployment yet.
+
+Production cache flag readback2026-09-23T02:03:21UTC is0.0, capabilitytrue. Only
+aggregate production candidate capacity was queried this turn: latest100 rows,
+largest425045UTF8bytes/max2541members; suggestion.telemetry=true. It fits the
+planned singleton write bound but is not evidence of dense telemetry capacity.
+
+### Attested-admission and recovery qualification
+
+The revised actual936-offer run with suggestion telemetry ON preserved every
+native term/proof/order: prepare23.79s, first30durable1.081s, fulladoption22.15s,
+candidate133496B/936members, maxSQLbind995984B, peakRSS274726912B. The actual
+13728-offer telemetry-OFF run also completed exact full parity: prepare361.35s,
+first30durable3.855s, fulladoption338.64s, maxSQLbind999044B, peakRSS1492434944B.
+These are local backend/SQLite measurements, not device or production latency.
+Background maintenance was parked only in the isolated pressure harness.
+
+The dense result exposed a duplicate compact-index scan; it was replaced by a
+bounded disposition callback in the same authenticated scan. Separate real
+Flask like/pass tests reproduced cancellation of the remaining inventory after
+the first30 cards. Active adoption now retains explicit/source inputs while
+projecting current exact passes, source interest and awaiting/matched packages.
+Admission still compares the complete original receipt. Damaged exact-root
+inventories retire without deleting their earlier valid exposure history;
+transient SQL failures remain retryable. Hourly privacy pruning now precedes
+the active-sweep early return.
+
+Revised codec/legacy153 tests passed; store+attestation+retirement59 passed each
+on SQLite and isolated Unix-socket PostgreSQL. Parent diagnostics/runtime40
+passed. Final speed remeasurement, full/hosted CI and fresh production canary
+remain required. There is no v2 commit/deployment or all-user cache coverage yet.

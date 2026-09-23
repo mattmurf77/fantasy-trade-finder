@@ -2719,6 +2719,16 @@ def _gate_unverified_read(fn):
     return _wrapper
 
 
+def _trade_job_stalled(job, now):
+    """Prepared work has durable claims; adoption advances only after commit."""
+    if job.get("status") != "running" or job.get("source") == "prepared_inventory":
+        # Private generation is fenced by its live persistent generation lease,
+        # including during capture/seal. It never becomes an interactive job.
+        return False
+    last_progress = job.get("prepared_progress_at", job.get("started_at", now))
+    return now - last_progress > _JOB_HARD_TIMEOUT
+
+
 def _cleanup_loop() -> None:
     """Background thread: evict stale sessions + stuck/old trade jobs."""
     while True:
@@ -2779,7 +2789,7 @@ def _cleanup_loop() -> None:
             to_drop = []
             for jid, job in _trade_jobs.items():
                 age = now - (job.get("finished_at") or job.get("started_at") or now)
-                if job.get("status") == "running" and (now - job.get("started_at", now)) > _JOB_HARD_TIMEOUT:
+                if _trade_job_stalled(job, now):
                     job["status"] = "error"
                     job["error"]  = "timeout"
                     job["finished_at"] = now
@@ -3246,7 +3256,10 @@ def _trade_job_public_view(job: dict) -> dict:
         out["board_refresh"] = board_refresh
     if out["cards"]:
         user_id, league_id, _format = job["key"]
-        out["cards"] = _project_trade_dispositions(out["cards"], user_id, league_id)
+        if job.get("prepared_inventory_id"):
+            out["cards"] = _project_trade_dispositions(out["cards"], user_id, league_id, prepared=True)
+        else:
+            out["cards"] = _project_trade_dispositions(out["cards"], user_id, league_id)
     revoked = revocation_error()
     if revoked:
         out.update(cards=[], status="error", error=revoked)
@@ -3259,7 +3272,7 @@ def _trade_job_public_view(job: dict) -> dict:
     return out
 
 
-def _project_trade_dispositions(cards, user_id: str, league_id: str):
+def _project_trade_dispositions(cards, user_id: str, league_id: str, *, prepared=False):
     """Read-only exact pass/source-interest cut, with no arm or floor bypass.
 
     Accept internal cards or serialized snapshots; survivors are unchanged.
@@ -3273,6 +3286,19 @@ def _project_trade_dispositions(cards, user_id: str, league_id: str):
     from . import prepared_trade_read_guard
     cards = prepared_trade_read_guard.filter_cards(sys.modules[__name__], cards)
     try:
+        # Prepared inventories continue streaming while the owner acts on an
+        # early prefix. Unlike fresh jobs' generation-time R4 snapshot, they
+        # must recheck awaiting/matched packages without repricing the deck.
+        # Read directly here: an unavailable history is not permission to
+        # replay offers. Ordinary non-prepared cards retain existing behavior.
+        prepared_cards = (FLAGS.trade_presentment_rules and
+            (prepared or any(hasattr(card, "_prepared_guard") for card in cards)))
+        exclusions = set()
+        if prepared_cards:
+            exclusions.update((frozenset(row["my_give"]), frozenset(row["my_receive"]))
+                for row in load_awaiting_trades(user_id) if row.get("league_id") == league_id)
+            exclusions.update((frozenset(row["my_give"]), frozenset(row["my_receive"]))
+                for row in load_matches_for_exclusion(user_id, league_id))
         history = load_trade_interest_history([league_id])
         own_impressions = {card.get("impression_id") for card in cards
                            if isinstance(card, dict) and card.get("likes_you")
@@ -3306,6 +3332,8 @@ def _project_trade_dispositions(cards, user_id: str, league_id: str):
                 standing = getattr(card, "standing_offer_reason", None)
                 source_id = getattr(card, "source_like_impression_id", None)
             if (give, receive) in pass_keys:
+                continue
+            if (prepared or hasattr(card, "_prepared_guard")) and (give, receive) in exclusions:
                 continue
             if interested and not standing and (give, receive, target) not in active_interest:
                 continue
@@ -8836,6 +8864,10 @@ def _run_trade_job(
                                 if getattr(c, "owner_evaluation", None) is not None:
                                     c.owner_published = True
         except Exception as sig_err:
+            if preparation:
+                # Preserve the actual private capture failure for the silent
+                # worker's allowlisted diagnostics; never log its raw text.
+                raise
             log.warning("deck signal-v2 impression logging failed%s: %s",
                         " (uncommitted trial cards withheld)" if owner_serve else " (non-fatal)", sig_err)
             if owner_serve:
@@ -8852,12 +8884,17 @@ def _run_trade_job(
             # ledger, activity, pending-card publication or first-deck use.
             if owner_impression_error:
                 raise ValueError("prepared_evidence_unavailable")
-            public = []
-            for card in served_final:
-                row = trade_card_to_dict(card, players_dict)
-                row.update(real_opponent=card.target_user_id in real_user_ids,
-                           outlook=outlook_value, impression_id=imp_by_card.get(id(card)))
-                public.append(row)
+            def prepared_public_cards():
+                for card in served_final:
+                    row = trade_card_to_dict(card, players_dict)
+                    row.update(real_opponent=card.target_user_id in real_user_ids,
+                               outlook=outlook_value, impression_id=imp_by_card.get(id(card)))
+                    yield row
+            # The paged sink consumes one projection at a time. Legacy capture
+            # keeps its established list contract for existing artifacts/tests.
+            public = prepared_public_cards()
+            if not getattr(prepare_sink, "paged", False):
+                public = list(public)
             bundle = prepare_sink.finish(served_final, public,
                 significance_by_trade_id={c.trade_id: value for c in served_final
                     if (value := _significance_exemptions_for(trade_service).get(
@@ -8963,6 +9000,14 @@ def _run_trade_job(
             log.warning("record_event(trades_generated) failed: %s", ev_err)
 
     except Exception as e:
+        if prepare_sink is not None:
+            with _trade_jobs_lock:
+                job = _trade_jobs.get(job_id)
+                if job is not None:
+                    job["prepared_failure"] = e  # Private unregistered job only.
+            log.warning("prepared trade job failed (%s)", type(e).__name__)
+            _finish_trade_job(job_id, error="preparation_failed")
+            return
         log.exception("trade-job %s failed", job_id)
         _finish_trade_job(job_id, error=str(e))
 

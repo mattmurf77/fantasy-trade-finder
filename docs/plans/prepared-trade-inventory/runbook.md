@@ -2,6 +2,9 @@
 
 Implementation runbook; follow [release evidence](release.md) for current rollout state.
 Use [validation](validation.md) and [status](status.md), not this procedure, as evidence.
+The approved [chunked-storage revision](chunked-storage-plan.md) is implemented
+locally, not yet release-qualified. Production caching remains OFF after the second
+failed canary; the v2 procedure below is not a deployment or successful-canary receipt.
 
 ## Preconditions
 
@@ -47,17 +50,86 @@ existing secure credential mechanism, never a committed command or report.
    Work is sequential and defers admission while interactive work runs; it is
    cooperative priority, not hard CPU preemption of a running constructor.
 
-Preparation stores the full eligible inventory, including a genuine empty result.
-Fixed zlib/base64 storage permits at most 64 MiB logical JSON and 2 MiB encoded SQL
-value, including its codec prefix. Both safety limits reject oversized artifacts
-rather than truncating offers; the previous valid artifact survives a failed save.
-The logical checksum remains independent of compression, and bounded decoding
-rejects corrupt/truncated/trailing streams. Do not increase the encoded limit to
-work around an oversize failure without PostgreSQL memory/statement validation:
-the former large deck-insert outage is why the whole artifact cannot be one
-unbounded JSON bind. No generated-offer cap is introduced. The artifact lasts at most 24 hours;
-read/adoption never renews that original expiry, and original card expiry can end
-usability earlier. Adopted memory jobs retain their existing 30-minute bound.
+## Storage, validation and recovery
+
+New preparation uses v2 staging manifests, ordered card/evidence/compact-admission
+pages and the original scoped diagnostic nodes. Staging is not adoptable. The
+store freezes the complete root before validating all records and dependencies,
+then checks that same root and mints a reserved, versioned semantic attestation.
+Only successful sealing atomically replaces the active scope pointer; failure
+leaves the previous valid artifact in place. Empty results are real sealed
+inventories, not failures. No offer cap, ranking change or proof reconstruction
+is introduced.
+
+The current transport limits are 4 MiB logical / 768 KiB encoded per page, at most
+100 records per page, and a conservative 2 MiB budget for each complete SQL
+execution, including all bound parameters. Capture normally targets about 1 MiB
+pages. Writes split by bytes as well as row count. Individual records, metadata,
+diagnostic closures and expanded graphs are separately bounded before copying or
+expansion; an oversized indivisible record fails, never truncates the inventory.
+Candidate-set JSON retains its original singleton format and must fit both its
+codec limit and the actual uncompressed SQL statement budget. Do not raise these
+bounds to conceal an oversize failure. The old v1 64 MiB logical / 2 MiB encoded
+whole-envelope limits remain unchanged for existing v1 artifacts; they are not
+v2 whole-inventory limits.
+
+Admission requires the recognized store-minted attestation bound to the validated
+root, original metadata/header, counts and validator identity. Missing or unknown
+attestation is a miss, not an inferred pass. It scans every root-authenticated
+compact disposition entry and checks current inputs; it does not rehydrate every
+native proof. Each publishing batch still restores full native proofs, checks
+exact admission correspondence and original diagnostic/evidence dependencies,
+then re-reads the authoritative original slice before commitment. Evidence must
+commit before checkpointing and exposing cards. A corrupt late page can leave an
+earlier independently valid prefix, but the affected batch must never publish;
+do not mix a fresh-generation suffix after commitment. Missing trailing real or
+ghost evidence must report incomplete adoption, never successful short completion.
+The first batch targets 30 real cards, subsequent batches at most 100, with
+smaller byte-bound batches allowed. Ghost evidence has its own durable cursor and
+bounded suffix batches; real-card completion alone is not full adoption completion.
+
+Every new adoption must match the full current dependency receipt. Once admitted,
+each batch instead fences explicit ranking/board/preferences and source/model
+inputs; ordinary like/pass feedback does not freeze computed Elo or action history.
+Current exact passes, source-like validity and awaiting/matched packages are
+projected before publication and on reads. Verify that an early like/pass removes
+affected offers while unrelated original offers continue, with no repricing or
+fresh suffix. Unknown swipe types remain conservative input changes. A current
+history mismatch/unavailable history is not stored corruption: do not retire a
+valid inventory for it. Typed artifact failures retire only the exact failed
+inventory/root; transient database failures do not authorize retirement.
+
+Storage/validation work renews only its still-live generation or adoption token;
+it cannot revive an expired, replaced, stopped or deleted claim. An expired
+adoption lease can be claimed again under a new token, retaining the original
+publication timestamp and exact evidence IDs. Evidence committed before a crash
+but not checkpointed is recovered by exact-content retry. Interrupted unsealed
+work may be regenerated, never adopted. V1 and v2 coexist: new generation writes
+v2, while the existing v1 adoption path remains available when no v2 inventory is
+selected. Neither path silently rewrites old proofs or behavioral history.
+
+The five-minute in-memory cleanup tick has a scoped timer boundary. Private
+preparation follows its live 300-second persistent generation claim and bounded
+same-token renewals, not the unrelated 60-second interactive total-age timeout.
+For v2 interactive adoption, only a successfully durable batch/checkpoint resets
+the 60-second stall timer; polling or reading does not. Ordinary generation keeps
+its existing timeout. No timer extends original artifact, card or read-guard expiry.
+
+Artifacts last at most 24 hours; lease renewal, reading and adoption never extend
+the original artifact or native-card expiry. Adopted memory jobs retain the
+existing 30-minute bound. Bounded transport is not bounded total process memory:
+the unchanged constructor can retain its full native inventory, and the existing
+job/service retains cumulative published cards. The current owner logger supplies
+at most 100 rows per capture callback, but its pre-compaction callback graph has no
+separate aggregate-byte cap; transport page size is not its peak-memory bound.
+Full seal validation and admission checks have real CPU and I/O cost. Measure
+complete preparation, first durable batch, full adoption and peak RSS separately;
+no three-second or existing-tier capacity guarantee follows from page sizes.
+The revised local telemetry-ON 936-offer check completed every original offer:
+first 30 durable in 1.08137s, full adoption in 22.1519s. This is not a phone or
+production three-second result, nor a dense-load capacity guarantee. See the
+[qualification measurements](validation.md) for phase/resource limits and the
+non-identical telemetry setting of the earlier comparison.
 
 Scoring uses the saved league format; database NULL means the existing native
 `1qb_ppr` default and is labeled as such. Preparation uses the latest observed
@@ -82,6 +154,23 @@ not the global adoption kill switch. For global rollback, set
 back the result. Ordinary fresh generation remains available. Do not delete
 historical likes/matches/impressions or change another model knob. Re-enable only
 after the failed invariant and final regression evidence have been reviewed.
+
+Account deletion fences/removes v2 staging, validating, sealed and retired
+inventories for every consumed participant, including their pages, nodes and
+participant indexes. Pruning also handles expired, retired and abandoned stages.
+Hourly private retention cleanup continues while caching is OFF, without provider
+discovery, refresh or new preparation. The 24-hour retention bound controls
+eligibility; physical removal occurs on the next successful maintenance pass,
+not at an exact expiry-time deadline.
+Account exports contain allowed manifest metadata only, not page/node payloads,
+source receipts, recovery metadata or lease tokens; existing impression exports
+still remove the private `prepared_runtime` recovery field.
+
+Turning caching OFF is the operational rollback. A binary downgrade to code that
+predates v2 is different: that binary does not know the new private tables and
+cannot honor their deletion obligations. Before such a downgrade, require a
+reviewed, verified v2 purge or a deletion-compatible bridge release. Disabling
+the flag alone does not make an old binary safe for retained v2 data.
 
 No live operation, production ready count, or physical-device latency is established
 by this document. Parent owns the release receipt and initial production sweep.

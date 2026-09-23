@@ -18,20 +18,39 @@ semantic roster/pick/board/preferences/history/player/config/model dependencies
 before and after construction. The worker's preparation sink withholds evidence
 publication and side effects; no fake user activity or notification is generated.
 
-`prepared_trade_payload` captures allowlisted runtime/public card records and the
-logger's candidate/impression/diagnostic bundle. Content-addressed diagnostic IDs
-bind expanded evidence, not a particular batch-local compressed representation.
-Conflicting encodings are validated as complete scoped graphs before atomic merge;
-equivalent content retains its first representation and observation timestamp.
-Restore validates the entire
-binding before yielding data, preserves proof bytes and terms without reevaluation,
-and rejects mutation before publication. `prepared_trade_store` atomically saves
-strict JSON plus checksum/receipt/participant index under a durable work lease.
-The SQL value uses fixed zlib/base64 encoding, bounded to 2 MiB encoded and 64 MiB
-decoded; logical JSON hashes and card order are unchanged. Decompression is
-output-bounded and rejects corrupt/trailing streams rather than loading an
-unbounded object graph or truncating the offer inventory.
-Full inventories, including valid empty inventories, survive process restart.
+`prepared_trade_payload_v2` incrementally captures allowlisted runtime/public
+cards and original impression/diagnostic records into bounded SQL pages through
+`prepared_trade_store_v2`. Native generation and its full inventory are unchanged;
+packaging does not construct an additional whole-inventory JSON envelope.
+Original proof/valuation strings, order, identifiers and timestamps are retained.
+Content-addressed diagnostic IDs bind expanded scoped evidence, not a batch-local
+packing shape; equivalent nodes retain the first verified representation/time.
+Bounded lexical/graph validation precedes expansion, including reference amplification.
+
+Private manifests progress staging → validating → sealed; incomplete stages are
+never adopted. Pin the descriptor root before complete semantic preflight, then
+mint a reserved store-owned attestation bound to that validation, metadata,
+scope/counts/codec and root. Dependency/model/lifecycle checks and atomic active-scope
+replacement precede readiness. Adoption requires a recognized seal, fresh current
+inputs and every authenticated compact disposition entry; it does not reparse all
+native proofs before the first tile. Per-page/node checksums and sealed-root proofs
+bind subsequent reads, with full batch semantics and exact transactional evidence
+binding before each publication. Later corruption can leave an earlier valid
+prefix, never the affected batch or a mixed fresh suffix. [ADR-023](adr/adr-023-attested-prepared-inventories.md)
+defines the trusted-writer boundary. Separate card/ghost cursors prevent
+ghost-only suffixes from falsely completing a deck. Restart retries preserve the
+original evidence IDs and first-adoption time. Full inventories, including genuine
+empty results, survive process restart without imposing an offer-count cap.
+
+The original `prepared_trade_payload`/`prepared_trade_store` remain the v1 reader,
+schema/lease helpers and exact evidence-binding authority; their 64 MiB logical /
+2 MiB stored envelope bounds are not increased. New v2 pages are bounded to
+4 MiB logical /768 KiB encoded, at most100 records, and writes also enforce a
+2 MiB conservative whole-statement parameter budget. Oversized indivisible
+candidate/source/metadata records fail explicitly; they are never silently dropped.
+Native generator and cumulative published-card memory remain separate resource
+costs; bounded packaging alone does not prove the entire workload fits or meets
+the first-action latency goal.
 
 Normal Find revalidates current identity, source, exact request/dependencies and
 original expiry. A miss runs ordinary generation. A hit commits original evidence
@@ -39,11 +58,27 @@ before exposing the first 30 cards, then later 100-card batches, with durable
 adoption progress and no inventory cap. Preparation and actual publication are
 different states; publication itself is not proof of a view or acceptance.
 
+Every new adoption still requires the full current dependency receipt. During
+that adoption, a separate active-input receipt retains explicit ranking evidence,
+all consumed managers' persisted board/preferences and source/model inputs, but
+does not freeze ordinary trade-feedback Elo or action history. Each batch checks
+that invariant before and after commitment and projects current exact passes,
+source likes and awaiting/matched packages. Acting on an early card can remove
+affected offers without repricing or stopping unrelated frozen offers. Admission
+checks current dispositions within its one complete authenticated-index scan;
+a history mismatch is a cache miss, not evidence of stored corruption.
+
 Artifacts expire at most 24 hours after creation without renewal; original card
 expiry and the normal 30-minute memory-job bound also apply. Maintenance is silent,
 sequential and cooperative with interactive work, distinct from notification cron.
+Private generation uses its persistent work lease rather than the ordinary memory
+job's60-second timer. V2 adoption resets that60-second stall timer only after durable
+batch/checkpoint progress; read polling never renews it or original artifact expiry.
 Participant-aware account deletion removes disposable prepared data and fences
-late writes. Feature capability plus a default-zero audited numeric control gate
+late writes, including staging/retired manifests and all child pages/nodes. Exports
+omit private page/node payloads and manifest metadata/tokens. Disabling caching is
+the normal operational rollback; a downgrade to pre-v2 binaries additionally
+requires verified v2 purge or a deletion-compatible bridge. Feature capability plus a default-zero audited numeric control gate
 the workflow. [Validation/status](plans/prepared-trade-inventory/status.md) records
 pending whole-system/release proof; caching alone establishes no device latency KPI.
 

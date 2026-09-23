@@ -58,3 +58,4 @@ Don't bother for routine code changes, bug fixes, or anything self-evident from 
 - [ADR-016 RevenueCat is the Purchase Layer; the Entitlements Ledger is the Truth](adr-016-revenuecat-with-server-truth-entitlements.md)
 - [ADR-017 Drain Account Work Before Deleting Its Data](adr-017-account-deletion-work-leases.md)
 - [ADR-018 External Weekly Forecasts and an Independent Win Now Season Model](adr-018-win-now-external-forecasts.md)
+- [ADR-023 Attested Prepared Inventories and Bounded Publication](adr-023-attested-prepared-inventories.md)

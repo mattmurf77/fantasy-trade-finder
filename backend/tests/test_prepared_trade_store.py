@@ -900,6 +900,123 @@ def test_encoded_size_failure_preserves_old_artifact_and_running_claim(engine, m
     assert store.sweep_status(value["sweep_id"], now=NOW)["counts"] == {"running": 1}
 
 
+@pytest.mark.parametrize("bound", ["logical", "encoded"])
+def test_size_diagnosis_reports_actual_full_payload_bytes_without_replacing_inventory(engine, monkeypatch, bound):
+    cards = [{"trade_id": str(i), "private": "\u96ea" * 300 + str(i)} for i in range(7)]
+    old = save(cards=cards)
+    stored = rows(engine, db.prepared_trade_inventories_table)[0]
+    logical_bytes = len(store._artifact_text(stored).encode("utf-8"))
+    encoded_bytes = len(stored["payload_json"].encode("utf-8"))
+    assert store.MAX_PAYLOAD_BYTES == 64 * 1024 * 1024
+    assert store.MAX_STORED_PAYLOAD_BYTES == 2 * 1024 * 1024
+    value = claim()
+    if bound == "logical":
+        monkeypatch.setattr(store, "MAX_PAYLOAD_BYTES", logical_bytes - 1)
+    else:
+        monkeypatch.setattr(store, "MAX_STORED_PAYLOAD_BYTES", encoded_bytes - 1)
+    with pytest.raises(store.InvalidArtifact, match="byte limit") as caught:
+        save(value, cards=cards)
+    details = store.safe_failure_details(caught.value)
+    assert details == {
+        "reason": f"inventory_{bound}_limit", "card_count": len(cards),
+        "logical_bytes": logical_bytes, "logical_limit_bytes": store.MAX_PAYLOAD_BYTES,
+        "encoded_limit_bytes": store.MAX_STORED_PAYLOAD_BYTES,
+        **({"encoded_bytes": encoded_bytes} if bound == "encoded" else {}),
+    }
+    assert rows(engine, db.prepared_trade_inventories_table) == [stored]
+    assert stored["inventory_id"] == old
+    assert store.sweep_status(value["sweep_id"], now=NOW)["counts"] == {"running": 1}
+    assert "private" not in json.dumps(details) and OWNER not in json.dumps(details)
+
+
+@pytest.mark.parametrize("fault,reason", [
+    ("timestamp", "inventory_timestamp_invalid"),
+    ("naive", "inventory_timestamp_invalid"),
+    ("expiry", "inventory_expiry_invalid"),
+    ("receipts", "inventory_receipts_invalid"),
+    ("cards", "inventory_cards_invalid"),
+    ("nonfinite", "inventory_json_nonfinite"),
+    ("type", "inventory_json_type"),
+    ("depth", "inventory_json_depth"),
+])
+def test_save_failure_diagnosis_distinguishes_non_size_invariants_without_payloads(engine, fault, reason):
+    value = claim()
+    args = dict(payload={"cards": [{"private": "must-not-leak"}]}, dependency_receipt=RECEIPT,
+        model_identity=MODEL, participants=value["participants"], created_at=NOW,
+        expires_at=NOW + timedelta(hours=1), now=NOW)
+    if fault == "timestamp":
+        args["created_at"] = "private-bad-clock"
+    elif fault == "naive":
+        args["created_at"] = NOW.replace(tzinfo=None)
+    elif fault == "expiry":
+        args["expires_at"] = NOW + timedelta(hours=24, seconds=1)
+    elif fault == "receipts":
+        args["dependency_receipt"] = {}
+    elif fault == "cards":
+        args["payload"]["cards"] = "private-invalid-cards"
+    elif fault == "nonfinite":
+        args["payload"]["bad"] = float("inf")
+    elif fault == "type":
+        args["payload"]["bad"] = {"private-set"}
+    elif fault == "depth":
+        nested = []
+        for _ in range(101):
+            nested = [nested]
+        args["payload"]["bad"] = nested
+    with pytest.raises(store.InvalidArtifact) as caught:
+        store.save_inventory(value, **args)
+    details = store.safe_failure_details(caught.value)
+    assert details == {"reason": reason, "logical_limit_bytes": store.MAX_PAYLOAD_BYTES,
+        "encoded_limit_bytes": store.MAX_STORED_PAYLOAD_BYTES,
+        **({"card_count": 1} if fault != "cards" else {})}
+    assert "private" not in json.dumps(details)
+    assert not rows(engine, db.prepared_trade_inventories_table)
+    assert store.sweep_status(value["sweep_id"], now=NOW)["counts"] == {"running": 1}
+
+
+@pytest.mark.parametrize("exc", [ValueError("prepared payload exceeds byte limit; nothing truncated"),
+                                store.InvalidArtifact("private unknown error"),
+                                store.InvalidArtifact({"private": "unsupported error args"})])
+def test_unknown_failure_diagnosis_never_exports_exception_text_or_metadata(exc):
+    exc._prepared_save_diagnostics = {"card_count": 12, "private": "must-not-leak"}
+    exc.reason = "inventory_logical_limit"
+    assert store.safe_failure_details(exc) == {"reason": "preparation_failed"}
+
+
+def test_failure_diagnosis_only_exports_allowlisted_nonnegative_exact_integer_metrics():
+    exc = store.InvalidArtifact("inventory expiry must be original, future, and at most 24 hours")
+    exc._prepared_save_diagnostics = {"card_count": True, "logical_bytes": 3.5,
+        "encoded_bytes": -1, "logical_limit_bytes": 2**64, "encoded_limit_bytes": 2097152,
+        "private_payload": "must-not-leak", "user_id": OWNER}
+    assert store.safe_failure_details(exc) == {"reason": "inventory_expiry_invalid",
+                                               "encoded_limit_bytes": 2097152}
+
+
+def test_failure_diagnosis_rejects_forged_metric_key_even_if_it_equals_an_allowed_name():
+    class ForgedKey(str):
+        def __hash__(self):
+            return hash("card_count")
+
+        def __eq__(self, other):
+            return other == "card_count"
+
+    exc = store.InvalidArtifact("inventory expiry must be original, future, and at most 24 hours")
+    exc._prepared_save_diagnostics = {ForgedKey("private-label"): 7,
+                                      "encoded_limit_bytes": 2097152}
+    assert store.safe_failure_details(exc) == {"reason": "inventory_expiry_invalid",
+                                               "encoded_limit_bytes": 2097152}
+
+
+def test_encode_limit_diagnosis_outside_save_has_actual_bytes_without_an_invented_card_count(monkeypatch):
+    value = {"private": "\u96ea" * 20}
+    actual = len(store._encode(value).encode("utf-8"))
+    monkeypatch.setattr(store, "MAX_PAYLOAD_BYTES", actual - 1)
+    with pytest.raises(store.InvalidArtifact) as caught:
+        store._encode(value)
+    assert store.safe_failure_details(caught.value) == {"reason": "inventory_logical_limit",
+        "logical_bytes": actual, "logical_limit_bytes": actual - 1}
+
+
 def test_small_legacy_plain_json_is_readable_with_same_checksum(engine):
     save()
     row = rows(engine, db.prepared_trade_inventories_table)[0]

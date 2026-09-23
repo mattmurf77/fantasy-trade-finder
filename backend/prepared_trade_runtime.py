@@ -5,7 +5,7 @@ start work. Operational state is aggregate-only; private records stay in SQL.
 """
 from __future__ import annotations
 
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import copy
@@ -25,11 +25,53 @@ from . import prepared_trade_read_guard as read_guard
 from .prepared_trade_cohort import discover_targets, read_league_source
 from .prepared_trade_payload import PreparedEvidenceCapture, restore_inventory, restore_runtime_card
 
-VERSION = "prepared-inventory-1"
+VERSION = "prepared-inventory-2"
 _lock = threading.Lock()
 _active = False
 _state = {"status": "idle"}
 _last_tick = 0.0
+_last_prune = 0.0
+_ARTIFACT_PHASES = frozenset({"receipt_before", "cache_lookup", "receipt_after", "inventory_save",
+                            "inventory_begin", "inventory_capture", "inventory_seal"})
+_CAPTURE_FAILURE_REASONS = {
+    "prepared_payload_v2:record_bytes": "inventory_record_limit",
+    "prepared_payload_v2:record_complexity": "inventory_record_complexity",
+    "prepared_payload_v2:json_bytes": "inventory_record_limit",
+    "prepared_payload_v2:json_complexity": "inventory_record_complexity",
+    "prepared_payload_v2:snapshot_amplification": "inventory_diagnostic_amplification",
+    "prepared_payload_v2:snapshot_cycle_or_depth": "inventory_diagnostic_depth",
+    "prepared_payload_v2:snapshot_depth": "inventory_diagnostic_depth",
+    "prepared_payload_v2:snapshot_checksum": "inventory_diagnostic_checksum",
+    "prepared_payload_v2:closure_bytes": "inventory_diagnostic_closure_limit",
+    "prepared_payload_v2:snapshot_closure_bytes": "inventory_diagnostic_closure_limit",
+    "prepared_payload_v2:batch_record_bytes": "inventory_batch_record_limit",
+    "prepared_payload_v2:admission_binding": "inventory_admission_invalid",
+    "prepared_payload_v2:admission_count": "inventory_admission_invalid",
+    "prepared_payload_v2:incomplete_evidence": "inventory_completion_invalid",
+    "prepared_payload_v2:expired_card": "inventory_card_expired",
+}
+
+
+@contextmanager
+def _artifact_phase(phase):
+    """Attach only a fixed operational stage; never disclose exception text."""
+    if type(phase) is not str or phase not in _ARTIFACT_PHASES:
+        raise ValueError("unknown_preparation_phase")
+    try:
+        yield
+    except ValueError as exc:
+        exc.prepared_phase = phase
+        raise
+
+
+def _artifact_failure_details(exc):
+    from .prepared_trade_payload_v2 import PreparedPayloadError
+    details = store.safe_failure_details(exc)
+    if type(exc) in (ValueError, PreparedPayloadError) and len(exc.args) == 1 and type(exc.args[0]) is str:
+        details["reason"] = _CAPTURE_FAILURE_REASONS.get(exc.args[0], "preparation_failed")
+    phase = getattr(exc, "prepared_phase", None)
+    details["phase"] = phase if type(phase) is str and phase in _ARTIFACT_PHASES else "unknown"
+    return details
 
 
 def utcnow():
@@ -62,6 +104,7 @@ def model_identity(server):
              "trade_service.py", "trade_significance.py", "trade_input_evidence.py",
              "ranking_service.py", "trade_breaker.py", "trade_policy.py", "pick_values.py",
              "prepared_trade_payload.py", "prepared_trade_runtime.py", "prepared_trade_store.py",
+             "prepared_trade_payload_v2.py", "prepared_trade_store_v2.py", "prepared_trade_runtime_v2.py",
              "prepared_trade_read_guard.py", "deck_diagnostics.py", "trade_roster.py")
     digest = hashlib.sha256()
     for name in paths:
@@ -171,7 +214,23 @@ def _semantic_source(source):
     return result
 
 
-def dependency_receipt(server, scope, session, target, *, exclude_job_id=None, own_mutations=(), served_at=None):
+def active_dependency_receipt(server, scope, session, target, *, exclude_job_id=None,
+                              own_mutations=(), served_at=None):
+    """Explicit/source inputs that must remain fixed during one adoption.
+
+    Admission still uses the full receipt. Ordinary trade feedback can change
+    computed Elo and history without repricing an already accepted inventory;
+    the runtime must separately project current exact dispositions/source likes
+    and awaiting/matched packages. Persisted explicit inputs remain guarded for
+    every consumed manager, even when another process performed the write.
+    """
+    return dependency_receipt(server, scope, session, target,
+        exclude_job_id=exclude_job_id, own_mutations=own_mutations,
+        served_at=served_at, _active_inputs=True)
+
+
+def dependency_receipt(server, scope, session, target, *, exclude_job_id=None,
+                       own_mutations=(), served_at=None, _active_inputs=False):
     """Conservative exact scope receipt, independent of process epoch tokens.
 
     Keep non-input login/device/activity columns out: preparing or opening the
@@ -185,6 +244,8 @@ def dependency_receipt(server, scope, session, target, *, exclude_job_id=None, o
     scoped = ("member_rankings", "league_preferences", "asset_preferences", "draft_picks",
               "recorded_picks", "trade_decisions", "trade_matches", "trade_proposals",
               "standing_offers", "deck_suppressions", "deck_fatigue_resets", "trade_block")
+    if _active_inputs:
+        scoped = tuple(name for name in scoped if name not in {"trade_decisions", "trade_matches"})
     with db.engine.connect() as conn:
         for name in scoped:
             table = getattr(db, name + "_table")
@@ -197,8 +258,13 @@ def dependency_receipt(server, scope, session, target, *, exclude_job_id=None, o
                     for key in ("id", "synced_at", "updated_at"):
                         row.pop(key, None)
                 records[name].sort(key=lambda row: json.dumps(row, sort_keys=True))
-        records["swipes"] = _rows(conn, db.swipe_decisions_table,
-            db.swipe_decisions_table.c.user_id.in_(participants))
+        swipes = db.swipe_decisions_table
+        swipe_condition = swipes.c.user_id.in_(participants)
+        if _active_inputs:
+            # NULL/unknown types are NOT assumed to be harmless feedback.
+            swipe_condition = swipe_condition & (swipes.c.decision_type.is_(None)
+                | swipes.c.decision_type.notin_(("trade", "disposition")))
+        records["swipes"] = _rows(conn, swipes, swipe_condition)
         user_cols = [db.users_table.c[k] for k in ("sleeper_user_id", "created_at",
             "ranking_method", "tiers_saved", "tier_overrides", "anchor_scale", "stud_tax_mode")]
         records["users"] = _rows(conn, db.users_table,
@@ -209,18 +275,19 @@ def dependency_receipt(server, scope, session, target, *, exclude_job_id=None, o
                 row.pop(key, None)
         # Bilateral's full constructor bypasses Thompson/taste reranking, but
         # history and fatigue still change eligibility and first-deck labels.
-        impressions = db.deck_impressions_table
-        condition = (impressions.c.league_id == lid) & (impressions.c.user_id == uid)
-        if exclude_job_id:
-            condition = condition & (impressions.c.deck_job_id != exclude_job_id)
-        impression_cols = [impressions.c[k] for k in ("impression_id", "user_id", "league_id",
-            "deck_job_id", "trade_hash", "served_at", "card_index")]
-        records["impressions"] = _rows(conn, impressions, condition, impression_cols)
-        impression_ids = [r["impression_id"] for r in records["impressions"]]
-        records["outcomes"] = _rows(conn, db.deck_outcomes_table,
-            db.deck_outcomes_table.c.impression_id.in_(impression_ids))
-        records["legacy_impressions"] = _rows(conn, db.trade_impressions_table,
-            (db.trade_impressions_table.c.league_id == lid) & (db.trade_impressions_table.c.user_id == uid))
+        if not _active_inputs:
+            impressions = db.deck_impressions_table
+            condition = (impressions.c.league_id == lid) & (impressions.c.user_id == uid)
+            if exclude_job_id:
+                condition = condition & (impressions.c.deck_job_id != exclude_job_id)
+            impression_cols = [impressions.c[k] for k in ("impression_id", "user_id", "league_id",
+                "deck_job_id", "trade_hash", "served_at", "card_index")]
+            records["impressions"] = _rows(conn, impressions, condition, impression_cols)
+            impression_ids = [r["impression_id"] for r in records["impressions"]]
+            records["outcomes"] = _rows(conn, db.deck_outcomes_table,
+                db.deck_outcomes_table.c.impression_id.in_(impression_ids))
+            records["legacy_impressions"] = _rows(conn, db.trade_impressions_table,
+                (db.trade_impressions_table.c.league_id == lid) & (db.trade_impressions_table.c.user_id == uid))
     if served_at:
         normalize_own_mutations(records["deck_suppressions"], own_mutations, served_at)
     ranking = session["services"][scope.scoring_format]
@@ -232,10 +299,11 @@ def dependency_receipt(server, scope, session, target, *, exclude_job_id=None, o
     raw_players = server._load_sleeper_cache() or {}
     availability_age = server._players_cache_age_seconds()
     from .data_loader import load_pick_slot_values
-    receipt = {"version": VERSION, "scope": scope.as_dict(),
+    receipt = {"version": VERSION + "-active-inputs-1" if _active_inputs else VERSION, "scope": scope.as_dict(),
         "source": _semantic_source(target["source"]),
         "binding": target["binding_evidence"], "records": records,
-        "ratings": {r.player.id: r.elo for r in ranking.get_rankings(position=None).rankings},
+        **({"ratings": {r.player.id: r.elo for r in ranking.get_rankings(position=None).rankings}}
+           if not _active_inputs else {}),
         "comparisons": ranking.comparison_counts(), "placements": ranking.placement_bands(),
         "overrides": dict(ranking._elo_overrides),
         "override_stamps": dict(getattr(ranking, "_elo_override_at", {})),
@@ -250,8 +318,9 @@ def dependency_receipt(server, scope, session, target, *, exclude_job_id=None, o
                 for k in ("fantasy_positions", "injury_status")} for p in players}},
         "ranking_config": dict(server._ranking_service_mod._cfg),
         "rank_confidence": server._ranking_confidence(ranking),
-        "dispositions": server._load_trade_disposition_keys(uid, lid),
-        "presentment_exclusions": server._load_presentment_exclusions(uid, lid),
+        **({"dispositions": server._load_trade_disposition_keys(uid, lid),
+            "presentment_exclusions": server._load_presentment_exclusions(uid, lid)}
+           if not _active_inputs else {}),
         "live_standing_offers": server.load_standing_offers(league_id=lid),
         "suppression_active": {str(r["id"]): _unexpired(r.get("expires_at"))
             for r in records["deck_suppressions"]},
@@ -306,6 +375,8 @@ def _fairness(server, user_id, league_id):
 
 
 def prepare_target(server, claim):
+    from . import prepared_trade_store_v2 as paged_store
+    from .prepared_trade_payload_v2 import PagedPreparedEvidenceCapture
     scope = store.InventoryScope(**claim["scope"])
     if not supported(server, scope.league_id):
         raise ValueError("unsupported_policy_or_disabled")
@@ -319,11 +390,13 @@ def prepare_target(server, claim):
                 raise ValueError("account_deleted")
         sync_source_picks(server, target)
         session = build_session(server, target)
-        before = dependency_receipt(server, scope, session, target)
+        with _artifact_phase("receipt_before"):
+            before = dependency_receipt(server, scope, session, target)
         identity = model_identity(server)
-        cached = store.load_inventory(scope, dependency_receipt=before,
-                                      model_identity=identity, now=utcnow())
-        if cached is not None:
+        with _artifact_phase("cache_lookup"):
+            cached = paged_store.peek_inventory(scope, now=utcnow())
+        if (cached is not None and store.dependency_hash(cached.header["dependency_receipt"]) == store.dependency_hash(before)
+                and store.dependency_hash(cached.header["model_identity"]) == store.dependency_hash(identity)):
             store.complete_target(claim, status="reused", now=utcnow())
             return
         if _interactive_busy(server):
@@ -331,7 +404,6 @@ def prepare_target(server, claim):
                                   retry_at=utcnow() + timedelta(seconds=30), now=utcnow())
             return
         job_id = uuid.uuid4().hex
-        sink = PreparedEvidenceCapture(user_id=scope.user_id, league_id=scope.league_id, job_id=job_id)
         prefs = server._trade_job_preferences(scope.user_id, scope.league_id, session, session["league"])
         context = server._capture_trade_execution(session, scope.user_id, scope.league_id, scope.scoring_format)
         if target["platform"] == "sleeper":
@@ -350,26 +422,48 @@ def prepare_target(server, claim):
             "final_checks_pending": True, "fairness_threshold": fairness}
         with server._trade_jobs_lock:
             server._trade_jobs[job_id] = job  # Never register a shared/user cache pointer.
+        stage, sealed = None, False
         try:
-            server._run_trade_job(job_id, "", scope.league_id, fairness, [],
-                prefs_preload=prefs, execution_context=context, prepare_sink=sink)
-            if job["status"] != "complete" or "prepared_bundle" not in job:
-                raise ValueError(job.get("error") or "preparation_incomplete")
+            now = utcnow()
+            with _artifact_phase("inventory_begin"):
+                stage = paged_store.begin_inventory(claim, dependency_receipt=before,
+                    model_identity=identity, participants=participants, created_at=now,
+                    expires_at=now + timedelta(hours=24), now=now)
+            sink = PagedPreparedEvidenceCapture(stage=stage, user_id=scope.user_id,
+                                                league_id=scope.league_id, job_id=job_id)
+            with _artifact_phase("inventory_capture"):
+                server._run_trade_job(job_id, "", scope.league_id, fairness, [],
+                    prefs_preload=prefs, execution_context=context, prepare_sink=sink)
+                if job["status"] != "complete" or "prepared_bundle" not in job:
+                    if isinstance(job.get("prepared_failure"), Exception):
+                        raise job["prepared_failure"]
+                    raise ValueError(job.get("error") or "preparation_incomplete")
             fresh = refresh_target(server, scope)
             after_session = build_session(server, fresh)
-            if dependency_receipt(server, scope, after_session, fresh) != before:
+            with _artifact_phase("receipt_after"):
+                after = dependency_receipt(server, scope, after_session, fresh)
+            if store.dependency_hash(after) != store.dependency_hash(before):
                 raise ValueError("inputs_changed")
-            if not supported(server, scope.league_id) or identity != model_identity(server):
+            if (not supported(server, scope.league_id)
+                    or store.dependency_hash(identity) != store.dependency_hash(model_identity(server))):
                 raise ValueError("model_changed")
-            payload = {"inventory": job["prepared_bundle"], "generation_job_id": job_id,
+            completion = job["prepared_bundle"]
+            metadata = {**completion, "generation_job_id": job_id,
                 "mutations": job["prepared_mutations"], "target": target,
                 "job_fields": {k: job[k] for k in ("first_deck", "board_refresh", "suppression_note",
                     "outlook_value", "safety_policy", "owner_model", "owner_model_version") if k in job}}
-            now = utcnow()
-            store.save_inventory(claim, payload=payload, dependency_receipt=before,
-                model_identity=identity, participants=participants, created_at=now,
-                expires_at=now + timedelta(hours=24))
+            with _artifact_phase("inventory_save"):
+                paged_store.finish_metadata(stage, metadata=metadata, now=utcnow())
+            with _artifact_phase("inventory_seal"):
+                paged_store.seal_inventory(stage, completion=completion,
+                    dependency_receipt=before, model_identity=identity)
+            sealed = True
         finally:
+            if stage is not None and not sealed:
+                try:
+                    paged_store.abort_inventory(stage, now=utcnow())
+                except Exception:
+                    server.log.warning("prepared staging cleanup deferred to retention")
             with server._trade_jobs_lock:
                 server._trade_jobs.pop(job_id, None)
 
@@ -431,6 +525,11 @@ def try_adopt(server, *, job_id, context, fairness, prefs):
     """
     if not supported(server, context.league_id):
         return False
+    from .prepared_trade_runtime_v2 import try_adopt as try_adopt_paged
+    paged_result = try_adopt_paged(server, job_id=job_id, context=context,
+                                  fairness=fairness, prefs=prefs)
+    if paged_result is not None:
+        return paged_result
     scope = scope_for(context.user_id, context.league_id, context.league_user_id,
                       context.scoring_format, fairness)
     claim = None
@@ -688,6 +787,11 @@ def start(server, *, idempotency_key, dry_run=False, user_id=None, league_id=Non
                         "player_pool_unavailable", "unsupported_policy_or_disabled",
                         "source_pick_sync_unavailable", "source_pick_sync_disabled",
                         "source_binding_changed"} else "preparation_failed"
+                    if isinstance(exc, store.InvalidArtifact) or _artifact_failure_details(exc)["reason"] != "preparation_failed":
+                        details = _artifact_failure_details(exc)
+                        reason = details["reason"]
+                        server.log.warning("prepared inventory artifact rejected: %s",
+                                           json.dumps(details, sort_keys=True))
                     server.log.warning("prepared inventory target failed: %s (%s)", reason, type(exc).__name__)
                     transient = reason in {"inputs_changed", "source_or_binding_unavailable", "source_pick_sync_unavailable"}
                     store.complete_target(claim, status="stale" if reason == "inputs_changed" else "error",
@@ -709,8 +813,15 @@ def start(server, *, idempotency_key, dry_run=False, user_id=None, league_id=Non
 
 def tick(server):
     """Existing maintenance loop calls this: silent hourly refresh/resume."""
-    global _last_tick
-    if not enabled(server) or _active:
+    global _last_tick, _last_prune
+    current = time.monotonic()
+    if current - _last_prune >= 3600:
+        # The rollout kill switch stops creation/adoption, not privacy cleanup.
+        store.prune(now=utcnow())
+        _last_prune = current
+    if _active:
+        return
+    if not enabled(server):
         return
     pending = store.resumable_sweeps(now=utcnow())
     if pending:
@@ -719,5 +830,4 @@ def tick(server):
     if time.monotonic() - _last_tick < 3600:
         return
     _last_tick = time.monotonic()
-    store.prune(now=utcnow())
     start(server, idempotency_key="scheduled-" + utcnow().strftime("%Y%m%d%H"))

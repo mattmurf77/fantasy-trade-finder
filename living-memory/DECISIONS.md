@@ -1,5 +1,14 @@
 # Decisions — Fantasy Trade Finder
 
+## D-194 — Full prepared-inventory semantics are validated at seal, each publishing batch is revalidated
+
+2026-09-23. Owner-approved persistent cache implementation retains all offers and
+silent preparation. Measured all-proof admission defeated the latency objective;
+use a trusted, pinned-root semantic seal plus authenticated compact disposition
+index and exact per-batch evidence-before-publication. Later corruption may retain
+only an earlier valid prefix. [ADR-023](../docs/adr/adr-023-attested-prepared-inventories.md)
+defines the trust boundary, lifecycle and rollback tradeoffs; release evidence is separate.
+
 ## D-193 — Preference-led bilateral support replaces viewer-first owner ordering
 
 2026-09-20. Owner authorized implementation and a live replacement trial. Personal
