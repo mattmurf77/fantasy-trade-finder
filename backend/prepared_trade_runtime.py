@@ -92,7 +92,8 @@ def supported(server, league_id):
     cfg = server._trade_service_mod._cfg
     return (enabled(server) and league_id != "league_demo" and
             server._owner_enabled(league_id) and server._bakeoff.owner_only() and
-            server._bakeoff.serve_owner() and server._bakeoff.owner_revision_enabled(cfg))
+            server._bakeoff.serve_owner() and server._bakeoff.owner_revision_enabled(cfg)
+            and not server._value_core_enabled())
 
 
 def model_identity(server):

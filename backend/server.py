@@ -3382,6 +3382,7 @@ def _trade_safety_signature(owner_state: tuple[bool, ...] | None = None,
         ("owner_include", owner_state[0]),
         ("owner_serve", owner_state[1]),
         ("owner_only", len(owner_state) > 2 and owner_state[2]),
+        ("value_core", _value_core_enabled()),
     ) if enabled]
     if owner_state[0]:
         signature.append("owner_model:" + (owner_model or _bakeoff.owner_arm()))
@@ -5081,6 +5082,7 @@ def _log_deck_signal_impressions(
     on_batch_committed=None,
     should_continue=None,
     prepare_sink=None,
+    value_core_evidence: dict | None = None,  # {id(card): evidence} — lld.md §7.3
 ) -> dict[int, str]:
     """Write one deck_impressions row per card (final served order) and
     return {id(card): impression_id} so the caller can stamp the ids into
@@ -5533,6 +5535,21 @@ def _log_deck_signal_impressions(
                     league_id=league_id, viewer_user_id=user_id, partner_user_id=target,
                     viewer_gives=give, viewer_receives=recv)
             row["features_json"] = features if structured_features else json.dumps(features, default=str)
+        if value_core_evidence is not None:
+            # Every row, every key: save_deck_impressions compiles its INSERT from the FIRST
+            # row's keys (the executemany rule documented at :5429-5433).
+            _vc = value_core_evidence.get(id(card))
+            row["model_arm"] = "value_core"
+            row["arm_rank"] = pos
+            row["policy_variant"] = "value_core"
+            row["policy_version"] = (_vc or {}).get("generator_version", "value-core-1")
+            row["fairness_threshold"] = ((_vc or {}).get("core") or {}).get("ratio_floor")
+            row["valuation_json"] = json.dumps(_vc, sort_keys=True) if _vc is not None else None
+            row["trade_concept_id"] = _trade_policy.trade_concept_id(
+                league_id=league_id, viewer_user_id=user_id, partner_user_id=target,
+                viewer_gives=give, viewer_receives=recv)
+            row["source_like_impression_id"] = None
+            row.setdefault("assets_json", json.dumps({"give": give, "receive": recv}))
         rows.append(row)
         if batch_limit is not None and len(rows) >= batch_limit:
             flush_batch()
@@ -7424,6 +7441,147 @@ def _capture_trade_execution(sess, user_id, league_id, scoring_format):
     )
 
 
+# ── Value-core engine (docs/plans/value-core-engine/) ────────────────────────
+def _value_core_enabled() -> bool:
+    return bool(getattr(FLAGS, "trade_value_core", False))
+
+
+def _value_core_live(*, league_id: str, user_id: str, league_user_id: str | None,
+                     trade_intent: str | None, preparation: bool) -> bool:
+    """Does THIS job run the value core? Flag off => False before any other read."""
+    if not _value_core_enabled():
+        return False
+    if league_id == "league_demo" or trade_intent or preparation:
+        return False
+    if float(_trade_service_mod._cfg.get("vc_testers_only", 1.0)) >= 1.0:
+        allow = _load_tester_allowlist()          # experiments.load_tester_allowlist (server.py:26591)
+        return str(user_id) in allow or (league_user_id is not None and str(league_user_id) in allow)
+    return True
+
+
+def _value_core_standings(league_id: str, platform: str | None) -> tuple[dict, int]:
+    """({league_user_id: Standing}, completed_weeks). Sleeper only; fail-soft to ({}, 0)."""
+    from .value_core.types import Standing
+    if (platform or "sleeper") != "sleeper":
+        return {}, 0
+    try:
+        from . import outlook as outlook_pkg
+        state = outlook_pkg.build_league_state(league_id, platform="sleeper",
+                                               fetch=_outlook_sleeper_fetch())
+    except Exception as err:
+        log.warning("value-core: standings unavailable league=%s: %s", league_id, err)
+        return {}, 0
+    return ({str(t.user_id): Standing(int(t.wins), int(t.losses), int(t.ties), float(t.points_for))
+             for t in state.teams if t.user_id}, int(state.completed_weeks or 0))
+
+
+def _run_value_core_job(*, job_id, ctx, service, trade_service, g_user_id, g_league, g_user_roster,
+                        players_dict, seed_map, elo_map_rt, confidence_counts, placement_bands,
+                        untouchable_ids, not_interested_ids, explicit_outlook, opponent_outlooks,
+                        real_user_ids, outlook_value, pinned_give, pinned_give_mode,
+                        pinned_receive, opponent_user_id, fairness_threshold, job_draft_picks):
+    """Serve one value-core deck and finish the job. Exceptions propagate to
+    _run_trade_job's outer handler (job -> error). No legacy fallback (PRD Q1)."""
+    from .value_core import adapter as vc_adapter, pipeline as vc_pipeline, windows as vc_windows
+    started = time.monotonic()
+    league_id, fmt, viewer = ctx.league_id, ctx.scoring_format, str(ctx.league_user_id)
+    cfg = dict(_trade_service_mod._cfg)
+    core_cfg, rank_cfg = vc_adapter.core_config_from(cfg), vc_adapter.rank_config_from(cfg)
+    opponents = [m for m in g_league.members if m.user_id not in {g_user_id, ctx.league_user_id}]
+    platform = getattr(g_league, "platform", None)
+    standings, completed_weeks = _value_core_standings(league_id, platform)
+    try:
+        slots = _league_lineup_slots(league_id)
+    except Exception:
+        slots = None
+    try:
+        max_players = _sleeper_roster_limit(league_id) if (platform or "sleeper") == "sleeper" else None
+    except Exception:
+        max_players = None
+    totals, grand = {}, 0.0
+    for pk in job_draft_picks():
+        owner, pv = pk.get("owner_user_id"), pk.get("pick_value") or 0.0
+        if owner:
+            totals[str(owner)] = totals.get(str(owner), 0.0) + pv
+        grand += pv
+    pick_shares = {u: t / grand for u, t in totals.items()} if grand > 0 else {}
+    rosters = {viewer: list(g_user_roster), **{str(m.user_id): list(m.roster) for m in opponents}}
+    declared = {viewer: explicit_outlook, **{str(k): v for k, v in (opponent_outlooks or {}).items()}}
+    windows = vc_windows.infer_windows(
+        team_rosters=rosters, players=players_dict, pick_shares=pick_shares, standings=standings,
+        completed_weeks=completed_weeks, declared=declared,
+        standings_weight=vc_adapter.standings_weight_from(cfg))
+    viewer_name = next((m.username for m in g_league.members if m.user_id == ctx.league_user_id), "You")
+    snapshot = vc_adapter.build_snapshot(
+        league_id=league_id, scoring_format=fmt, viewer_team_id=viewer, viewer_name=viewer_name,
+        viewer_roster=g_user_roster, opponents=opponents, players=players_dict, seed_elo=seed_map,
+        lineup_slots=slots, max_players=max_players, windows=windows)
+    request = vc_adapter.build_request(
+        snapshot=snapshot, user_elo=elo_map_rt, seed_elo=seed_map, confidence=confidence_counts,
+        placements=placement_bands, untouchable_ids=untouchable_ids,
+        not_interested_ids=not_interested_ids, pinned_give=pinned_give or (),
+        pinned_give_mode=pinned_give_mode, pinned_receive=pinned_receive or (),
+        partner_team_id=opponent_user_id, fairness_threshold=fairness_threshold)
+    result = vc_pipeline.run(snapshot, request, core_cfg, rank_cfg)
+    cards, evidence = vc_adapter.to_trade_cards(
+        result, snapshot, request, league_id=league_id, proposing_user_id=g_user_id,
+        core_cfg=core_cfg, rank_cfg=rank_cfg)
+    for card in cards:
+        trade_service._trade_cards[card.trade_id] = card
+    served = _project_trade_dispositions(cards, g_user_id, league_id)
+    with _trade_jobs_lock:
+        job_source = (_trade_jobs.get(job_id) or {}).get("source")
+    try:
+        log_trade_impressions(g_user_id, league_id, served)
+    except Exception as imp_err:
+        log.warning("value-core: trade impression logging failed (non-fatal): %s", imp_err)
+    imp_by_card = {}
+    if not _job_superseded(job_id):
+        try:
+            imp_by_card = _log_deck_signal_impressions(
+                user_id=g_user_id, league_id=league_id, job_id=job_id, cards=served,
+                players_dict=players_dict, scoring_format=fmt, source=job_source, seed_map=seed_map,
+                capture={"propensity": {}, "final_key": {id(c): evidence[id(c)]["effective"]
+                                                          for c in served}},
+                value_core_evidence=evidence)
+        except Exception as sig_err:
+            log.warning("value-core: deck impression logging failed (non-fatal): %s", sig_err)
+    snapshot_rows = []
+    for card in served:
+        row = trade_card_to_dict(card, players_dict)
+        row["real_opponent"] = card.target_user_id in real_user_ids
+        row["outlook"] = outlook_value
+        if imp_by_card.get(id(card)):
+            row["impression_id"] = imp_by_card[id(card)]
+        snapshot_rows.append(row)
+    diag = result.core
+    total_ms = int((time.monotonic() - started) * 1000)
+    with _trade_jobs_lock:
+        j = _trade_jobs.get(job_id)
+        if _job_live(j):
+            j["cards"] = snapshot_rows
+            j["final_checks_pending"] = False
+            j["opponents_done"] = j["opponents_total"] = len(opponents)
+            j["value_core"] = {"fair": diag.fair, "served": len(served),
+                               "core_ms": diag.elapsed_ms, "total_ms": total_ms,
+                               "truncated_partners": diag.truncated_partners,
+                               "budget_exhausted": diag.budget_exhausted}
+    log.info("trade-job %s value_core: partners=%d packages=%d checked=%d fair=%d served=%d "
+             "truncated=%d budget_exhausted=%s core_ms=%d total_ms=%d", job_id, diag.partners,
+             diag.packages_viewer, diag.pairs_checked, diag.fair, len(served),
+             diag.truncated_partners, diag.budget_exhausted, diag.elapsed_ms, total_ms)
+    gen_ms = _finish_trade_job(job_id)
+    if gen_ms is None:
+        return
+    try:
+        props = {"count": len(served), "gen_ms": gen_ms, "engine_version": "value_core", "lanes": {}}
+        if job_source:
+            props["deck_source"] = job_source
+        record_event(g_user_id, "trades_generated", league_id=league_id, source="api", props=props)
+    except Exception as ev_err:
+        log.warning("value-core: record_event(trades_generated) failed: %s", ev_err)
+
+
 def _run_trade_job(
     job_id: str,
     sess_token: str,
@@ -7766,6 +7924,22 @@ def _run_trade_job(
             except Exception as pick_inj_err:
                 log.warning("trade-job: owned-pick injection failed (continuing): %s",
                             pick_inj_err)
+
+        if _value_core_live(league_id=league_id, user_id=g_user_id,
+                            league_user_id=ctx.league_user_id,
+                            trade_intent=trade_intent, preparation=preparation):
+            _run_value_core_job(
+                job_id=job_id, ctx=ctx, service=service, trade_service=trade_service,
+                g_user_id=g_user_id, g_league=g_league, g_user_roster=g_user_roster,
+                players_dict=players_dict, seed_map=seed_map, elo_map_rt=elo_map_rt,
+                confidence_counts=confidence_counts, placement_bands=placement_bands,
+                untouchable_ids=untouchable_ids, not_interested_ids=not_interested_ids,
+                explicit_outlook=explicit_outlook, opponent_outlooks=opponent_outlooks,
+                real_user_ids=real_user_ids, outlook_value=outlook_value,
+                pinned_give=pinned_give, pinned_give_mode=pinned_give_mode,
+                pinned_receive=pinned_receive, opponent_user_id=opponent_user_id,
+                fairness_threshold=fairness_threshold, job_draft_picks=_job_draft_picks)
+            return
 
         # F7 (flag deck.exploration) — over-generate per opponent so the
         # wildcard draw has gate-passing candidates from OUTSIDE the served
@@ -15089,6 +15263,7 @@ def _owner_selected_assignment(context, surface, *, serve, exclusive=False):
     canonical["config"] = {k: v for k, v in canonical["config"].items()
                            if not k.startswith("bakeoff_include_") and not k.startswith("bakeoff_serve_")
                            and not k.startswith("significance_")
+                           and not k.startswith("vc_")                 # value core: never reshuffle owner units
                            and k != "bakeoff_owner_only"}
     if not canonical["config"].get("owner_bilateral_enabled"):
         # Adding a dark selector must not reshuffle established v1 request units.
