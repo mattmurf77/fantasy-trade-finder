@@ -47,6 +47,7 @@
 - [Request scoring views and captured job ownership (2026-09-04, budget scalability)](#request-scoring-views-and-captured-job-ownership-2026-09-04-budget-scalability)
 - [Win Now snapshot and request isolation](#win-now-snapshot-and-request-isolation)
 - [Exact source interest and durable pass state](#exact-source-interest-and-durable-pass-state)
+- [Value-core engine seams (2026-09-30, trade.value_core)](#value-core-engine-seams-2026-09-30-tradevalue_core)
 
 ---
 
@@ -826,3 +827,18 @@ Already dispatched native storage cannot be canceled by a later guard.
 [Native references](../mobile/src/state/README.md), [PRD](../docs/feedback/items/420-win-now-loading/prd.md).
 
 Implementation checkpoint 2026-09-04: immutable whole forecast batches and league/model revisions identify baselines; viewer-scoped job/scenario IDs retain objective, constraints and expiry. A stable exchange asset key groups history without replacing evaluated evidence. Clients cancel by viewer/league/objective/parameter epoch and preserve server order; expired results are not recommendations. Probabilities are fractions and deltas display absolute pp. Budget uses fixed baseline roster value. Like/pass writes only the season decision store. Routes, schema and shared bounds are in the [API](../docs/api-reference.md#season-projections-and-win-now), [data dictionary](../docs/data-dictionary.md#win-now-evidence-tables) and [invariants](../docs/cross-client-invariants.md#win-now-objective-and-evidence-semantics); parent integration review and local mechanical verification are complete. The explicit platform-only pick read in `win_now_service.build_context` is sanctioned in the existing ADR-010 containment test.
+
+---
+
+## Value-core engine seams (2026-09-30, trade.value_core)
+
+`backend/value_core/` ([plan folder](../docs/plans/value-core-engine/), [ADR-024](../docs/adr/adr-024-value-core-engine.md), [architecture](../docs/architecture.md#value-core-trade-engine)) is a second deck engine that lives beside the legacy stack. These rules keep the two separable and keep the flag-off path provably unchanged:
+
+- **Leaf package.** Nothing under `backend/value_core/`, and none of the three value-core eval tools, imports `backend.server`. App imports are fixed per module ([plan LLD §1](../docs/plans/value-core-engine/lld.md#1-module-map)): `core` → `power_rankings`; `windows` → `trade_service.infer_team_outlook` / `_c`; `ranking` → `power_rankings.optimal_starters`; `adapter` → `trade_service`, `ranking_service`. `types.py` is stdlib-only and is the shared contract; changing it goes through the plan's change control. `__init__.py` has no imports, and `pipeline.run` imports `core` / `ranking` / `deck` inside the function.
+- **Lazy import; flag off never loads it.** `server.py` imports `backend.value_core.*` only inside `_run_value_core_job`. With `trade.value_core` off the package never enters `sys.modules`, which a test pins by purging it and running a full job.
+- **One branch point.** The only serving seam is `if _value_core_live(...): _run_value_core_job(...); return` in `_run_trade_job`, right after owned-pick injection and before the bake-off block. `_value_core_live` returns False on the flag read, before any other work. Everything else the flag touches is a no-op when off: a filtered `("value_core", …)` tuple in `_trade_safety_signature`; a `value_core_evidence=None` kwarg on `_log_deck_signal_impressions`; `and not _value_core_enabled()` in `prepared_trade_runtime.supported`; a `vc_` prefix exclusion in `_owner_selected_assignment`'s request-hash config filter (without it, merely seeding the `vc_*` rows would reshuffle owner experiment units while the flag is off). Add nothing else to the legacy path: a value-core need goes inside `_run_value_core_job` or the package.
+- **Evidence on every row, every key.** Each served value-core card gets a `deck_impressions` row whose `valuation_json` is the schema-v1 evidence ([data dictionary](../docs/data-dictionary.md#value-core-rows-flag-tradevalue_core)). The stamp block sets the same keys on every row, because `save_deck_impressions` compiles its INSERT from the first row's keys. The adapter builds the evidence with the card and the logger copies it; nothing recomputes it at log time. Bump `schema_version` on any key change.
+- **No silent fallback.** Exceptions in the value-core job propagate to `_run_trade_job`'s outer handler and fail the job. Never catch one and re-run the legacy engine: a deck, and its measurements, come from exactly one engine. The only swallowed errors are fail-soft inputs (standings → none; a window-inference exception → `DEFAULT_WINDOW`, visible as `source: "default"`) and the non-fatal impression and event writes the legacy path also tolerates.
+- **Knobs stay out of `_DEFAULT_CFG`.** The twelve `vc_*` keys are seeded only in `database._MODEL_CONFIG_DEFAULTS` and read from the job's captured `dict(trade_service._cfg)`, falling back to the dataclass defaults, so the arm-A golden inventory never moves.
+
+Anchors at `3bb981ed`, before the integration edits shift them: branch after the owned-pick injection ending near `server.py:7768`; safety tuple after `server.py:3384`; impression stamp before `rows.append(row)` near `server.py:5536`; owner request-hash filter at `server.py:15089`. <!-- verify after WP3 merge: line refs -->

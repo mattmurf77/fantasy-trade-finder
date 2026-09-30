@@ -82,6 +82,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [Runtime tuning](#runtime-tuning)
 - [Presentment-rules tripwire (`trade.presentment_rules`, G6 2026-08-16)](#presentment-rules-tripwire-tradepresentment_rules-g6-2026-08-16)
 - [Negative-results memory (`trade.negmem`, 2026-08-22)](#negative-results-memory-tradenegmem-2026-08-22)
+- [Value-core bench (freeze / run / recall / blind grade)](#value-core-bench-freeze--run--recall--blind-grade)
 - [Debug log](#debug-log)
 - [Verified-session grace monitoring (account-auth P1)](#verified-session-grace-monitoring-account-auth-p1)
 - [Common failure modes](#common-failure-modes)
@@ -310,6 +311,7 @@ The trade engine is selected by flags in `config/features.json` (reload via `POS
 - `trade_engine.v2` — Tier 1/2 scorer in `backend/trade_service.py`
 - Tier 2 features toggle independently within v2: `trade.marginal_value`, `trade.outlook_blend`, `trade.likes_you`, `trade.fuzzy_match`, `trade.thompson_deck`, `trade.deck_diversity`
 - `trade.three_team` — 3-team cycle cards (Tier 3)
+- `trade.value_core` — the value-core engine (`backend/value_core/`). For the jobs it serves it replaces everything above, so flipping `trade_engine.*` does not change a value-core deck; its own kill steps are in [Value-core bench](#value-core-bench-freeze--run--recall--blind-grade)
 
 **Kill-switch order** (bad cards / latency / errors after a trade-engine change):
 
@@ -415,6 +417,66 @@ the [TestFlight checklist](plans/negative-results-memory/testflight-checklist.md
 whenever `m2` reads `killed (…)` or `degraded` — the M2 queries never ran. Always read that
 counter together with the `m2` annotation. Likewise `likes_net` is pre-clamp and
 readout-only: `n_decayed + likes_net` does not reconstruct the gross evidence.
+
+## Value-core bench (freeze / run / recall / blind grade)
+
+Feature docs: [`plans/value-core-engine/`](plans/value-core-engine/) · [ADR-024](adr/adr-024-value-core-engine.md) · flag and knobs in [config-reference](config-reference.md#flags--value-core-trade-engine-2026-09-30-ships-off). The bench is how the value core earns wider serving. Four operator-run CLIs, run from the repo root, none wired to the server.
+
+**Private outputs (all four tools).** Every output path must not exist yet; the tools refuse to overwrite. Files are written mode `0600`. Stdout carries aggregate numbers only, never user ids. Frozen files, result dirs, card sets and grade keys hold real rosters and boards: never commit them, never paste their contents into a report, and keep them outside the repo or in a gitignored scratch dir.
+
+**1. Freeze the bench** (prod read-only; credentials from `secrets.local.env`):
+
+```bash
+python -m backend.eval.value_core_bench freeze --secrets secrets.local.env \
+  --league <ID> [--league <ID> ...] --output <PRIVATE>.json
+```
+
+It connects through `prod_analytics._connect_readonly` and asserts `SHOW transaction_read_only` returns `on` before any read, raising otherwise. It reads `leagues`, `league_members`, `draft_picks` (platform picks, top 6 per owner), `member_rankings`, `players`, `player_value_history` and `league_preferences`. Sleeper leagues also get lineup slots, roster capacity and standings from the Sleeper public API. Other platforms get the default lineup, no roster-size rule and no standings. A league with no `league_members` rows cannot be benched: check the printed summary counts (`leagues, teams, assets, boards, standings_leagues`).
+
+**2. Run variants and read the verdict:**
+
+```bash
+python -m backend.eval.value_core_bench run --frozen <PRIVATE>.json --output <NEW_DIR> \
+  [--variant NAME=overrides.json ...] [--seats all|boarded]
+```
+
+A variant file holds `{"core": {...}, "rank": {...}, "standings_weight": x}` overrides on top of the defaults. For every league and seat the tool runs the pipeline and computes the guardrails on the first 30 cards. It writes `results.json` and one `cards-<variant>.json` blind-grade card set per variant, then prints one line per variant: the four pooled numbers, the worst-seat appearances and the verdict.
+
+| Guardrail | Definition | Target |
+|---|---|---|
+| Insult rate | share of cards where the other side loses more than 20% of the raw market value it gives up | < 3%, pooled |
+| Real-piece-back share | best incoming asset starts in the viewer's post-trade lineup or is worth at least a Late 1st | ≥ 70%, pooled |
+| Median value given | median of (get − give) ÷ give | ≥ −10%, pooled |
+| Max appearances | most cards any one asset appears in, first 30 | ≤ 3 on every seat with a card |
+
+`PASS` needs all four. On a `FAIL`, tune in a new variant file and re-run; do not move a live `vc_*` knob to try a variant. Per-seat rows in `results.json` carry the pass flags and the core diagnostics (`truncated_partners`, `budget_exhausted`, reject counts per rule), which show which rule or cap is responsible.
+
+**3. Real-trade recall** (committed fixtures, no network):
+
+```bash
+python -m backend.eval.value_core_recall --fixtures backend/tests/fixtures --output <NEW_DIR> \
+  [--variant NAME=overrides.json]
+```
+
+It rebuilds the in-season two-team trades in the committed Sleeper fixtures (FFV3 2022–2025, Lakeview 2024–2025) from the week-before rosters and dated DP values. It reports exact and close recall@10, the share of real trades that are in the fair pool, why the rest failed, and a band calibration: `recommended_band` is the band that would admit 80% of the real trades. This is a baseline, not a gate. The fixtures carry no ages and only the traded picks, so outlook is neutral here. Do not change `vc_band` from this number without the operator.
+
+**4. Blind grade:**
+
+```bash
+# incumbent's actually served cards (prod read-only)
+python -m backend.eval.blind_grade served --secrets secrets.local.env --user <ID> --league <ID> [...] --output served.json
+python -m backend.eval.blind_grade export --cards A.json --cards B.json [...] --per-variant 40 --seed 7 --output <NEW_DIR>
+python -m backend.eval.blind_grade import --sheet <NEW_DIR>/grade-sheet.csv --key <NEW_DIR>/key.private.json
+```
+
+`export` samples 40 cards per variant, merges identical trades, shuffles, and writes `grade-sheet.csv` plus `key.private.json`. The sheet names no variant, and its reasons column is blank by default (`show_reasons=False`), because engine-specific phrasing would reveal the source. Give graders the CSV only, never the key. Grades are integers 1–5 (blank = ungraded). Tags are `;`-separated from `same_guy_again`, `too_small`, `never_accept`, `wrong_my_window`, `wrong_their_window`, `junk_filler`, `overpay`. `import` rejects anything else and names the card, then writes `summary.json` next to the sheet: per-variant mean, share graded 4 or more, and tag counts. Target: mean ≥ 4.0 and clearly above the incumbent.
+
+**Kill switch.** There is no automatic fallback: a value-core failure fails that job visibly (`status: "error"`) and is logged.
+
+1. **Stop it:** set `trade.value_core` to `false` (a `config/features.json` change, or an `FTF_FLAGS` override), then `POST /api/feature-flags/reload`. The safety signature changes, so the next `/api/trades/generate` runs the legacy engine and no cached value-core deck is reused.
+2. **Narrow it (deploy-free):** `vc_testers_only` → `1` with `scripts/set_knob.py` or `PUT /api/admin/config/vc_testers_only` (`X-Cron-Secret`). Serving returns to the tester allowlist only.
+
+**Reading the job log.** Each value-core job logs one INFO line: `trade-job <id> value_core: partners=… packages=… checked=… fair=… served=… truncated=… budget_exhausted=… core_ms=… total_ms=…`. `budget_exhausted=True` means the 8 s core budget stopped enumeration and a partial pool was ranked and served. `truncated` counts partners that hit the per-partner keep cap or the check cap. A standings failure logs `value-core: standings unavailable league=…` and the job continues with windows from roster age and picks only.
 
 ## Debug log
 
