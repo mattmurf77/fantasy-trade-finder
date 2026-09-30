@@ -232,6 +232,8 @@
   "trade.roster_evaluation": false,
   "trade.roster_protection": false,
   "trade.mutual_benefit_v1": false,
+  "_comment_value_core": "2026-09-30 value-core engine rebuild (docs/plans/value-core-engine/). ON = organic/pinned/opponent-scoped trade jobs for allowlisted testers (model_config vc_testers_only=1) or everyone (vc_testers_only=0) are served by backend/value_core/: consensus-fair 1-3 x 1-3 packages ranked by value/outlook/rank with a per-asset cap of 3 in the first 30. Intent-mode jobs, the demo league and prepared inventories stay legacy. OFF (default) = backend/value_core is never imported and every path is byte-identical. Rollback: flip false + POST /api/feature-flags/reload.",
+  "trade.value_core": false,
   "trade.avoid_positions": false,
   "trade.standing_offers": true,
   "outlook.season_projections": true,

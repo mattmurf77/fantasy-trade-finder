@@ -3187,6 +3187,18 @@ _MODEL_CONFIG_DEFAULTS = [
     ("policy_confidence_band_med",       0.33, "policy: trade confidence at/above which a card's confidence_band reads 'medium' (below it reads 'low')"),
     ("policy_shadow_log_cap",           40.0,  "policy: max trade_policy_shadow rows written per deck job — bounds a pathological league without hiding the treatment's rejections"),
     ("simple_player_presentment",       0.0,  "presentation: 1 enables bounded simple-player ordering after live policy; 0 preserves the existing order"),
+    ("vc_band",                   0.10, "value core: fairness band half-width on the premium-adjusted market ratio (kept iff 1/(1+b) <= ratio <= 1+b)"),
+    ("vc_stud_premium",           0.15, "value core: consolidation premium at an elite headliner; scales with (headliner/elite)^2"),
+    ("vc_untouchable_min_ratio",  1.08, "value core: an untouchable is offered only when the adjusted return is at least this"),
+    ("vc_max_assets_per_side",   14.0,  "value core: top-N eligible assets per team used to build 1-3 asset packages (pins always added)"),
+    ("vc_max_per_partner",      200.0,  "value core: fair trades kept per partner, biggest headliner first"),
+    ("vc_w_value",                1.0,  "value core ranking: weight of the value score"),
+    ("vc_w_outlook",              1.0,  "value core ranking: weight of the outlook (both windows) score"),
+    ("vc_w_rank",                 1.0,  "value core ranking: weight of the viewer-rankings score"),
+    ("vc_repeat_penalty",         0.15, "value core ranking: priority points subtracted per prior appearance of a card's most-shown asset (partner at half rate)"),
+    ("vc_player_cap",             3.0,  "value core ranking: max cards any one asset may appear in within the first 30"),
+    ("vc_standings_weight",       0.30, "value core windows: full weight of the points-for index; ramps linearly from week 0 to week 8"),
+    ("vc_testers_only",           1.0,  "value core rollout: 1 = serve only the tester allowlist while trade.value_core is on; 0 = everyone"),
 ]
 
 
