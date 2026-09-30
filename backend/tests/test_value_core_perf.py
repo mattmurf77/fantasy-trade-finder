@@ -69,3 +69,17 @@ def test_package_count_bound():
     assert diag.packages_viewer <= 833            # C(17,1) + C(17,2) + C(17,3)
     # every package over the 17 candidates that holds at least one pin: 833 - (14 + 91 + 364)
     assert diag.packages_viewer == 833 - 469
+
+
+def test_pool_spreads_across_give_headliners():
+    """Lead change 2026-09-30: the check cap and the per-partner cap round-robin over
+    headliners. Before it, 92% of this pool gave away one of the viewer's top-3 assets
+    and only 8 give assets reached the first 30 cards."""
+    s = fourteen_team_league()
+    trades, _ = find_fair_trades(s, Request("T00"), CoreConfig())
+    own = sorted((a for a in s.teams["T00"].asset_ids if s.assets[a].market >= 450),
+                 key=lambda a: (-s.assets[a].market, a))
+    top3 = set(own[:3])
+    share_top3 = sum(1 for t in trades if top3 & set(t.give)) / len(trades)
+    assert share_top3 <= 0.5
+    assert len({t.give[0] for t in trades}) == CoreConfig().max_assets_per_side

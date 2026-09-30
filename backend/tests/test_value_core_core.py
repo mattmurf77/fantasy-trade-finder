@@ -225,13 +225,15 @@ def test_fairness_threshold_only_tightens():
     assert effective_band(0.10, None) == 0.10
 
 
-def test_per_partner_cap_keeps_biggest_headliners():
+def test_per_partner_cap_spreads_headliner_pairs():
     v = [A("a1", "WR", 3000), A("a2", "WR", 3000), A("a3", "WR", 2000), A("a4", "WR", 2000)]
     p = [A("b1", "WR", 3050), A("b2", "WR", 3050), A("b3", "WR", 2050), A("b4", "WR", 2050)]
     s = snap({"V": v + BODIES("V"), "P": p + BODIES("P")})
     trades, diag = run(s, CoreConfig(max_per_partner=2))
     assert len(trades) == 2
     assert diag.fair > 2
+    # round-robin over (give headliner, receive headliner): no pair repeats until every pair has one
+    assert len({(t.give[0], t.receive[0]) for t in trades}) == 2
     for t in trades:
         assert max(s.assets[t.give[0]].market, s.assets[t.receive[0]].market) >= 3000
     assert diag.truncated_partners == 1

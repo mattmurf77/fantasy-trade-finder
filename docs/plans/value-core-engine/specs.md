@@ -246,7 +246,8 @@ class PipelineResult:
 
 **The public signatures in lld.md** (§4.1, §5.1, §5.2, §5.6, §6, §7.1, §8) are part of the contract too. Change them only through the lead.
 
-**Changes to date:** none.
+**Changes to date:**
+- 2026-09-30 — lld §4.5 cap order (not `types.py`), lead-initiated at WP1 review: enumeration and the per-partner cap round-robin over headliners instead of biggest-first. `test_per_partner_cap_keeps_biggest_headliners` became `test_per_partner_cap_spreads_headliner_pairs`, and `test_value_core_perf.py::test_pool_spreads_across_give_headliners` was added. Reason: the biggest-first caps acted as a hidden ranking (92% of the pool gave away a top-3 asset).
 
 ## 4. Sequencing
 
@@ -324,7 +325,7 @@ def snap(teams, *, slots=SLOTS, max_players=None, other=None, windows=None):
 | `test_roster_size_uses_droppable_bench` | `max_players=10`; V: `a1` WR 1600, `a2` RB 1500 + bodies · P: `b1` WR 3300 + bodies (7 players, other_players=3) | trade `(("a1","a2"), ("b1",))` kept with `drops_needed == (0, 1)`. Re-run with P's bodies at market 500 (not droppable): absent, `rejected["roster_size"] >= 1` |
 | `test_lineup_blocks_losing_only_qb` | no `BODIES`; slots `("QB","WR")`; V: `vq` QB 3000, `vw` WR 300 · P: `pw` WR 3100, `pw2` WR 300, `pq` QB 300 | `(("vq",), ("pw",))` absent (`rejected["lineup"] >= 1`). Add V `vq2` QB 300: present |
 | `test_fairness_threshold_only_tightens` | V `a1` 3000 · P `b1` 3150 | `fairness_threshold=0.97`: absent (band 0.03). `0.5`: present. `effective_band(0.10, 0.5) == 0.10`; `effective_band(0.10, 0.99) == 0.02` |
-| `test_per_partner_cap_keeps_biggest_headliners` | V: 4 WRs 3000/3000/2000/2000 · P: 4 WRs 3050/3050/2050/2050; `max_per_partner=2` | 2 trades kept, both with headliner market ≥ 3000; `diag.truncated_partners == 1` |
+| `test_per_partner_cap_spreads_headliner_pairs` | V: 4 WRs 3000/3000/2000/2000 · P: 4 WRs 3050/3050/2050/2050; `max_per_partner=2` | 2 trades kept with distinct (give, receive) headliner pairs, both with headliner market ≥ 3000; `diag.truncated_partners == 1` |
 | `test_check_cap_and_budget` | synthetic 2-team league, 14 assets per side | `max_checks_per_partner=50` gives `pairs_checked <= 50` and `truncated_partners == 1`; `time_budget_s=0.0` gives `budget_exhausted is True` |
 | `test_deterministic` | any fixture | two calls return equal lists in equal order |
 | `test_evaluate_trade_agrees_with_find` | the stud fixture | for every kept trade, `evaluate_trade(...).ok` and an equal `adjusted_ratio`; for the 4200+4200 package, `ok is False`, `reason == "band"`, `trade is not None` |

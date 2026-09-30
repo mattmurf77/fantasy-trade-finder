@@ -201,7 +201,7 @@ packages(cands):                                           # sizes 1..3
 
 V = packages(candidates(viewer, exclude=∅, must=request.pinned_give_ids))
 V = [g for g in V if pinned_give satisfied]   # "any": g∩pins≠∅ ; "all": pins ⊆ g ; no pins: all
-V sorted by (-total, ids)
+V sorted by (-total, ids), then round-robin interleaved by headliner (g.ids[0])   # lead change 2026-09-30
 for partner in partners (deterministic order):
     if budget exceeded: diag.budget_exhausted = True; break
     P = packages(candidates(partner, exclude=request.not_interested_ids, must=request.pinned_receive_ids))
@@ -218,13 +218,13 @@ for partner in partners (deterministic order):
             if ok: fair.append(FairTrade(...))
     if len(fair) > cfg.max_per_partner:
         fair.sort(key=(-market(H), len(give)+len(receive), abs(log(adjusted_ratio)), give, receive))
-        fair = fair[:cfg.max_per_partner]; truncated = True
+        fair = round_robin(fair, group=(give[0], receive[0]))[:cfg.max_per_partner]; truncated = True
     diag.truncated_partners += int(truncated)          # at most once per partner, either cap
     out.extend(fair)
 out.sort(key=(partner_team_id, -market(H), n_assets, abs(log(adjusted_ratio)), give, receive))
 ```
 
-**Cap order and the value-only principle.** When the per-partner cap binds, the core keeps the **biggest-headliner** trades first. This is the only selection the core ever makes, and it uses no preference signal: it favors real pieces over small swaps, which is consistent with the "real-piece-back" guardrail. The diagnostics record every truncation.
+**Cap order and the value-only principle (revised by the lead, 2026-09-30).** Both caps spread across headliners instead of favoring the biggest. The viewer's packages are enumerated round-robin by headliner, so the check cap can't be spent entirely on the viewer's top assets. When the per-partner cap binds, it keeps trades round-robin over (give headliner, receive headliner) pairs, each pair in the order above. Neither step uses a preference signal. The original rule, biggest headliner first, made 92% of a 14-team pool give away one of the viewer's top 3 assets, and only 8 give assets reached the first 30 cards. With the revised rule the share is 12% and 14 give assets reach the first 30. `test_pool_spreads_across_give_headliners` pins this. The diagnostics record every truncation.
 
 ### 4.6 Complexity caps and pruning
 

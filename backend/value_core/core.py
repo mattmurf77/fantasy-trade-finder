@@ -215,6 +215,22 @@ def _packages(ctx: _Ctx, cands: list[str]) -> list[_Package]:
     return out
 
 
+def _interleave(items: list, group_key) -> list:
+    """Round-robin over groups, keeping each group's own order: the first item of every
+    group (groups in order of first appearance), then every second item, and so on.
+    Spreads a capped budget across headliners instead of spending it on the biggest one;
+    it uses no preference signal, so the core stays value-only."""
+    seen: dict = {}
+    ranked = []
+    for pos, item in enumerate(items):
+        k = group_key(item)
+        n = seen.get(k, 0)
+        seen[k] = n + 1
+        ranked.append((n, pos, item))
+    ranked.sort(key=lambda x: (x[0], x[1]))
+    return [item for _, _, item in ranked]
+
+
 def evaluate_trade(snapshot: LeagueSnapshot, request: Request, cfg: CoreConfig, *,
                    partner_team_id: str, give: Sequence[str],
                    receive: Sequence[str]) -> TradeVerdict:
@@ -286,6 +302,7 @@ def find_fair_trades(snapshot: LeagueSnapshot, request: Request, cfg: CoreConfig
     elif pins:
         V = [g for g in V if not pins.isdisjoint(g.ids)]
     V.sort(key=lambda g: (-g.total, g.ids))
+    V = _interleave(V, lambda g: g.ids[0])   # the check cap must not starve smaller headliners
     diag.packages_viewer = len(V)
 
     # widest raw receive/give window any premium allows (lld 4.5)
@@ -336,7 +353,7 @@ def find_fair_trades(snapshot: LeagueSnapshot, request: Request, cfg: CoreConfig
         diag.fair += len(fair)
         if len(fair) > cfg.max_per_partner:
             fair.sort(key=cap_key)
-            del fair[cfg.max_per_partner:]
+            fair = _interleave(fair, lambda t: (t.give[0], t.receive[0]))[:cfg.max_per_partner]
             truncated = True
         diag.truncated_partners += int(truncated)
         out.extend(fair)
