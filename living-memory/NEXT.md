@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-09-30 — Value-core engine: operator decisions, push for CI, bench on real leagues](#2026-09-30--value-core-engine-operator-decisions-push-for-ci-bench-on-real-leagues)
 - [2026-09-08 — Feedback batch #422–#428: ship on go, run the checklist on 1.17.3, then the four follow-up candidates](#2026-09-08--feedback-batch-422428-ship-on-go-run-the-checklist-on-1173-then-the-four-follow-up-candidates)
 - [2026-09-07 — Owner-only: ship the paged insert, restore budgets, then slim per-row evidence](#2026-09-07--owner-only-ship-the-paged-insert-restore-budgets-then-slim-per-row-evidence)
 - [2026-09-07 — Team overhaul: PR review, operator D1/D9 confirmation, TestFlight checklist, then flag flip](#2026-09-07--team-overhaul-pr-review-operator-d1d9-confirmation-testflight-checklist-then-flag-flip)
@@ -47,6 +48,14 @@
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## 2026-09-30 — Value-core engine: operator decisions, push for CI, bench on real leagues
+
+Built on `feat/value-core-engine` ([D-195](DECISIONS.md), [plan folder](../docs/plans/value-core-engine/)); flag `trade.value_core` off.
+
+1. **Operator decisions before any flag flip** — PRD Q1–Q6 (no-fallback on error, likes-you/standing offers excluded, intents stay legacy, window inputs), the scope §3 structural-guard waiver, and the two findings from integration: the per-asset guardrail should count headliners or allow 4 (the ≤3-appearances cap is infeasible for most seats), and what to do about real trades sitting far outside the ±10% band (recall baseline). *Why now:* nothing ships until these are answered.
+2. **Push the branch, get exact-head CI green on Python 3.12** (local runs are 3.14). *Why now:* CI is the pre-ship gate.
+3. **Freeze the five bench leagues and run the bench + blind-grade export** (`python3 -m backend.eval.value_core_bench freeze …`, prod read-only; runbook § Value-core bench). *Why now:* the plan's Gate 1/Gate 2 need the operator's blind grades against today's engine.
 
 ## 2026-09-08 — Feedback batch #422–#428 SHIPPED: run the checklist on 1.17.3, then the follow-up candidates
 

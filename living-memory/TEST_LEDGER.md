@@ -1,3 +1,23 @@
+## 2026-09-30 — Value-core engine built on a branch (flag off)
+
+Full gates (scope/PRD/HLD/LLD/specs in `docs/plans/value-core-engine/`). Five parallel build packages merged
+into `feat/value-core-engine`, lead-reviewed. Local Python 3.14 (no 3.12 here; CI is the 3.12 gate, not yet run).
+- Baseline at contract commit `315ff1e8`: 7413 passed, 1 skipped.
+- Integration branch full suite: **7522 passed, 1 skipped** (527 s); 109 new value-core tests, incl. e2e with the real engine.
+- **Flag-off identity:** `bakeoff_harness.run_capture` (default, consolidate intent, sf_tep) with `PYTHONHASHSEED=0`
+  is identical to `3bb981ed` after stripping ids/timestamps; the base is itself deterministic. With the flag off
+  `backend.value_core` is never imported (fresh-interpreter check).
+- Latency, 14-team fixture, `pipeline.run` x10: p50 1.54 s, p95 1.77 s (target p95 < 8 s).
+- Synthetic bench smoke (not the verdict): insult 0.6%, real piece back 94.2%, median value given +7.6%,
+  worst-seat appearances 4 → FAIL on the ≤3 cap only; the cap is infeasible once the viewer's ≤14 tradeable
+  assets spend their allowances (0 cap-respecting cards left when it breaks).
+- Real-trade recall (committed FFV3/Lakeview fixtures, point-in-time DP values): 64 cases / 128 orientations;
+  exact@10 0%, close@10 18%, in-pool 1.6%; rejects floor 96, band 28, filler 2; |log ratio| p50 0.32, p80 0.65.
+  Band left at ±10% pending the operator.
+- Lead fix at review: core caps round-robin over headliners (pool share giving a top-3 asset 92% → 12%).
+Evidence delta: unit + e2e tests and the WP3 [code-walk](../docs/plans/value-core-engine/code-walk.md); no mobile change,
+so no TestFlight checklist is due until the flag is flipped.
+
 ## 2026-09-22 — Persistent prepared trade inventory, release candidate
 
 Plan/scope preceded code. Three Astra Ultra lanes plus parent integration built
