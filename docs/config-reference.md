@@ -1574,7 +1574,7 @@ Twelve Float keys, seeded in `database._MODEL_CONFIG_DEFAULTS` and tunable live 
 | `vc_stud_premium` | 0.15 | [0.0, 0.50] | `CoreConfig.stud_premium` | Premium credited to the side that gets the trade's single best asset with fewer pieces, at an elite headliner (`firsts_4plus` tier floor). Scales as `(headliner / elite)²`: about 0.9% for a Mid 1st |
 | `vc_untouchable_min_ratio` | 1.08 | [1.0, 2.0] | `CoreConfig.untouchable_min_ratio` | A give side containing an untouchable is kept only when the adjusted return is at least this |
 | `vc_max_assets_per_side` | 14 | int [4, 20] | `CoreConfig.max_assets_per_side` | Top-N eligible assets per team used to build 1–3 asset packages (pins are always added) |
-| `vc_max_per_partner` | 200 | int [10, 1000] | `CoreConfig.max_per_partner` | Fair trades kept per partner, biggest headliner first |
+| `vc_max_per_partner` | 200 | int [10, 1000] | `CoreConfig.max_per_partner` | Fair trades kept per partner, round-robin over (give headliner, receive headliner) pairs so no single asset dominates the pool |
 | `vc_w_value` | 1.0 | ≥ 0 | `RankConfig.w_value` | Weight of the value score |
 | `vc_w_outlook` | 1.0 | ≥ 0 | `RankConfig.w_outlook` | Weight of the outlook score (both teams' windows) |
 | `vc_w_rank` | 1.0 | ≥ 0 | `RankConfig.w_rank` | Weight of the rank score (viewer's board vs market). All three weights at 0 ⇒ treated as (1, 1, 1) |
