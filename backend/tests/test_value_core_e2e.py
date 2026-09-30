@@ -35,9 +35,37 @@ def test_pipeline_on_synthetic_league():
     assert len(seats) == 12
     varied = [s for s in seats if s["pool"] >= 90]
     assert varied, "the synthetic league should give some seat a fair pool of >= 90 cards"
-    for seat in varied:
-        assert seat["max_asset_appearances"] <= 3, seat["team"]
-    assert elapsed < 20.0
+    # 2 runs x 12 seats = 24 decks; about 1.25 s each locally. A loose CI bound, not the latency
+    # target (p95 < 8 s per deck is measured by the integration checklist, specs.md section 6).
+    assert elapsed < 60.0
+
+
+def test_deck_cap_breaks_only_when_nothing_else_fits():
+    """Lead change 2026-09-30 (replaces "max_asset_appearances <= 3 whenever pool >= 90").
+    A big pool does not make the cap feasible: the viewer has at most vc_max_assets_per_side
+    tradeable assets, and multi-piece gives spend several of their 3-appearance allowances
+    at once. On this league 7 of 12 seats run out around card 25-29. The real invariant:
+    inside the first 30, a card may exceed the cap only when no cap-respecting card is left."""
+    from backend.value_core import pipeline
+    from backend.value_core.types import TOP_WINDOW, RankConfig
+    league = value_core_bench.synthetic_league(7)["leagues"][0]
+    cap = RankConfig().player_cap
+    for team in league["teams"]:
+        seat = team["team_id"]
+        snapshot, board = value_core_bench.snapshot_for_seat(league, seat, standings_weight=0.3)
+        entries = pipeline.run(snapshot, Request(viewer_team_id=seat, board=board),
+                               CoreConfig(), RankConfig()).entries
+        shown, placed = {}, set()
+        for entry in entries[:TOP_WINDOW]:
+            ids = entry.scored.trade.give + entry.scored.trade.receive
+            if any(shown.get(a, 0) >= cap for a in ids):
+                left = [e for e in entries if e.scored.trade.key not in placed
+                        and not any(shown.get(a, 0) >= cap
+                                    for a in e.scored.trade.give + e.scored.trade.receive)]
+                assert not left, (seat, entry.position, len(left))
+            placed.add(entry.scored.trade.key)
+            for a in ids:
+                shown[a] = shown.get(a, 0) + 1
 
 
 def test_run_trade_job_flag_on_real_engine():

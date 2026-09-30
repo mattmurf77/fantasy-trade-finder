@@ -3191,7 +3191,7 @@ _MODEL_CONFIG_DEFAULTS = [
     ("vc_stud_premium",           0.15, "value core: consolidation premium at an elite headliner; scales with (headliner/elite)^2"),
     ("vc_untouchable_min_ratio",  1.08, "value core: an untouchable is offered only when the adjusted return is at least this"),
     ("vc_max_assets_per_side",   14.0,  "value core: top-N eligible assets per team used to build 1-3 asset packages (pins always added)"),
-    ("vc_max_per_partner",      200.0,  "value core: fair trades kept per partner, biggest headliner first"),
+    ("vc_max_per_partner",      200.0,  "value core: fair trades kept per partner, round-robin over (give, receive) headliner pairs"),
     ("vc_w_value",                1.0,  "value core ranking: weight of the value score"),
     ("vc_w_outlook",              1.0,  "value core ranking: weight of the outlook (both windows) score"),
     ("vc_w_rank",                 1.0,  "value core ranking: weight of the viewer-rankings score"),

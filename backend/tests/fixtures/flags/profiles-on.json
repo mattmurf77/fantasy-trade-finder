@@ -227,6 +227,7 @@
   "trade.roster_evaluation": false,
   "trade.roster_protection": false,
   "trade.mutual_benefit_v1": false,
+  "trade.value_core": false,
   "trade.avoid_positions": false,
   "trade.standing_offers": true,
   "outlook.season_projections": true,
