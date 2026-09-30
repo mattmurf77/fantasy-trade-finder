@@ -562,6 +562,49 @@ exposing an unmeasured owner draft. Run-ledger writes remain best-effort and are
 not proof of exposure. The separate client `deck.signal_v2` flag must be enabled
 for the trial readout's viewed denominator.
 
+### Value-core rows (flag `trade.value_core`)
+
+A job served by the value core writes one row per served card through the same `_log_deck_signal_impressions` → `save_deck_impressions` path. It writes them whenever the value core serves, independent of `deck.signal_v2` (client view events still need that flag). No new table or column. Every row of such a job carries every key below, because `save_deck_impressions` compiles its INSERT from the first row's keys.
+
+| Column | Value on a value-core row |
+|---|---|
+| `model_arm` | `value_core`. **Not a bake-off arm**: the value core replaces the legacy stack for its job, so no other generator's cards share the deck |
+| `policy_variant` | `value_core` |
+| `policy_version` | `value-core-1` (the engine version) |
+| `arm_rank` | the served position, equal to `card_index` |
+| `base_score` | the card's priority (its `composite_score`) |
+| `final_score` | the effective priority after repeat penalties, as used by deck assembly |
+| `propensity` | `1.0`: the order is deterministic |
+| `fairness_threshold` | the ratio floor actually applied, `1 / (1 + band)` for the effective band |
+| `valuation_json` | the value-core evidence, schema v1 below |
+| `trade_concept_id` | the canonical, perspective-independent package id (same function as policy rows) |
+| `source_like_impression_id` | `null`: the value core never injects likes-you cards |
+| `assets_json` | `{"give": [asset ids], "receive": [asset ids]}` |
+
+`valuation_json` for `generator = "value_core"` is a **generator-specific schema**, like the owner-v1 one: dispatch on `generator`, never on `schema_version` alone. Written with `json.dumps(..., sort_keys=True)`:
+
+```
+{schema_version: 1, generator: "value_core", generator_version: "value-core-1",
+ deck_position,            # 0-based position in the assembled deck, before already-passed trades are removed
+ weights:  {value, outlook, rank, repeat_penalty, player_cap},
+ scores:   {value, outlook, rank, priority},                  # each in [0, 1]
+ effective,                # priority minus repeat penalties
+ market:   {give, receive, adjusted_ratio, premium, premium_side},   # raw market sums; premium_side "give"|"receive"|null
+ core:     {band, ratio_floor, ratio_ceiling, stud_premium, untouchable_min_ratio,
+            uses_untouchable, drops_needed: [viewer, partner], budget_exhausted},
+ windows:  {viewer:  {window, score, source, pf_index, standings_weight},
+            partner: {…same…}},   # window contender|rebuilder|middle; source declared|inferred|default
+ detail:   {value:   {delta_ln, s_delta, best_in_id, best_in_market, best_in_starter, s_piece},
+            outlook: {scale, viewer: {window, lineup_gain, future_gain, score}, partner: {…same…}},
+            rank:    {has_board, gap_rel, top_asset, top_side, rank_delta}},
+ assets:   [{id, side, market, personal, n}]}                 # personal/n null without a board entry
+```
+
+- `core.band` is the **effective** band, after the client's fairness preference tightened it (if it did).
+- `drops_needed` counts the sub-floor bench players each team would have to drop to stay within roster capacity.
+- `pf_index` is null when standings were unavailable (non-Sleeper league, or the standings read failed). `source: "default"` marks a team whose window inference raised.
+- `detail` floats are rounded to 4 decimals. The schema version bumps on any key change.
+
 ### Legacy F1 columns
 
 TikTok-discovery **F1 signal spine** (flag `deck.signal_v2`, `docs/plans/tiktok-discovery/prds/F1-signal-foundation.md`). One row per card in the **final served deck order**, written once per completed generation job by `server._log_deck_signal_impressions` (→ `save_deck_impressions`), **only when the flag is on**. Additive: `trade_impressions` keeps writing unchanged. Demo league excluded. The row's `impression_id` is returned per card in `/api/trades/generate` + `/status` snapshots and echoed back by flag-on clients so `deck_outcomes` rows join to it.
@@ -646,7 +689,7 @@ Scope block: `docs/plans/personal-market-policy/scope.md`. All four are NULL whi
 |---|---|---|
 | `valuation_json` | text, nullable | The frozen **serve-time** valuation snapshot (`trade_policy.build_valuation_snapshot`, `schema_version: 1`). |
 | `trade_concept_id` | str, nullable | Canonical, **perspective-independent** id for the package. |
-| `policy_variant` | str, nullable | `legacy` / `personal_market_v1` — which eligibility/ranking/deck POLICY governed the job. |
+| `policy_variant` | str, nullable | `legacy` / `personal_market_v1` / `value_core` — which eligibility/ranking/deck POLICY governed the job. |
 | `source_like_impression_id` | str, nullable | The counterparty's impression, set **only** on a card injected because they had already liked the mirror. |
 
 **`valuation_json` is an audit/replay record, not a replacement for the scalar columns beside it.** `fairness_score`, `base_score` and friends stay exactly where they are. What this adds is the half they cannot answer: the raw *and* effective values each manager's **own** board put on each side, the confidence behind them, the floors that applied, and a per-asset breakdown. `member_rankings` is replace-in-place, so without this the values behind a served card become unrecoverable the moment either manager re-ranks. Written for **served, shadow and ghost** rows alike.
@@ -1354,7 +1397,7 @@ The envelope columns (`event_id` … `experiments`) are nullable and only popula
 **event_type taxonomy** (registry: `backend/analytics_taxonomy.py` — client and server namespaces are disjoint, asserted at import):
 - Session: `signup`, `login`, `logout`, `app_open`
 - Ranking: `trio_swipe`, `tier_save` (streak event since the P0 cutover; `props.via` ∈ `tiers`/`quickset`), `ranking_complete_first_time`, `ranking_method_changed`, `ranking_reorder` (streak event since #152), `anchor_answered` (streak event since #152), `quickset_completed` (`position, players_placed, duration_ms, skipped` — fires per `via:'quickset'`-tagged tier commit, NOT per completed position; dark until the 2026-08-24 mobile fix first sent the tag, and current clients pass neither `duration_ms` nor `skipped` → null; see the [2026-08-24 addendum](business/analytics/2026-08-24-quickset-via-gap.md)), `quickrank_completed` (`position, players_ranked, duration_ms, skipped`), `swipe` (cutover twin of the legacy wrapped writer: `count, scoring_format`). Streak-qualifying set = `_RANK_STREAK_EVENTS` in `backend/database.py`: `trio_swipe`, `tier_save`, `ranking_complete_first_time`, `anchor_answered`, `ranking_reorder` — also the event set the "Ranks" leaderboard counts.
-- Trade: `match_viewed`, `match_swiped`, `trade_proposed`, `counter_sent`, `trade_accepted`, `trade_declined`, `trade_ratified`, `trade_match` (cutover twin: `match_id, partner_id, give, receive`), `trades_generated` (`count, gen_ms, engine_version, lanes`), `calc_trade_evaluated` (`verdict, asset_count, mode` — WAT north-star input; fires for pre-auth `device:` identities too), **`sleeper_send_succeeded`** (P0-7, 2026-08-11 — `give_n, receive_n, pick_n, from_deck, transaction_id`; `source:"api"`, `league_id` set; fired by `_record_send_success` on a successful `POST /api/trades/propose`. **Server-fired only** — it is the north-star SEND leg (`WAT_LIVE`, funnel stage 8, `FEATURE_VERTICALS["send_in_sleeper"]`) and a client-forgeable success would sit next to `trade_ratified`. The counterparty's user id deliberately never rides in props. Its two siblings `sleeper_send_attempted` / `sleeper_send_failed` are **client**-fired and, like every client event, are documented via `analytics_taxonomy.py` + the [P0-7 addendum](business/analytics/2026-08-11-p0-7-addendum.md) rather than in this list — the same treatment `guide_*` and `draft_room_*` got)
+- Trade: `match_viewed`, `match_swiped`, `trade_proposed`, `counter_sent`, `trade_accepted`, `trade_declined`, `trade_ratified`, `trade_match` (cutover twin: `match_id, partner_id, give, receive`), `trades_generated` (`count, gen_ms, engine_version, lanes`; `engine_version` ∈ `v1` / `v2` / `v3` / `value_core`, and a value-core job sends `lanes: {}`), `calc_trade_evaluated` (`verdict, asset_count, mode` — WAT north-star input; fires for pre-auth `device:` identities too), **`sleeper_send_succeeded`** (P0-7, 2026-08-11 — `give_n, receive_n, pick_n, from_deck, transaction_id`; `source:"api"`, `league_id` set; fired by `_record_send_success` on a successful `POST /api/trades/propose`. **Server-fired only** — it is the north-star SEND leg (`WAT_LIVE`, funnel stage 8, `FEATURE_VERTICALS["send_in_sleeper"]`) and a client-forgeable success would sit next to `trade_ratified`. The counterparty's user id deliberately never rides in props. Its two siblings `sleeper_send_attempted` / `sleeper_send_failed` are **client**-fired and, like every client event, are documented via `analytics_taxonomy.py` + the [P0-7 addendum](business/analytics/2026-08-11-p0-7-addendum.md) rather than in this list — the same treatment `guide_*` and `draft_room_*` got)
 - Engagement: `push_sent`, `push_opened`, `notif_pref_changed`, `league_synced`, `wrapped_viewed`, `feedback_submitted`, `asset_pref_added`, `asset_pref_removed`
 - API observability (flag `obs.api_events`, `backend/api_observability.py`): `api_call` (one outbound external HTTP call) and `api_request` (one inbound `/api/*` request). Written under the constant `user_id = 'system:api'` (never a real user; the session user rides in `props.user` on inbound rows), `platform = 'server'`, `screen` = `{service}.{endpoint}` / route pattern. Prop specs: `OBS_EVENT_PROPS` in `backend/analytics_taxonomy.py`. Successes are 1-in-N sampled (`props.sample_n`); errors always full. Aged out after `FTF_OBS_RETENTION_DAYS` (default 30) — the only `user_events` rows with a retention purge.
 - Client-fired (via `POST /api/events` only, allowlisted in `ALLOWED_CLIENT_EVENTS` in `backend/analytics_taxonomy.py`): see [cross-client-invariants.md](cross-client-invariants.md) — the allowlist is a cross-client contract.

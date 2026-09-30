@@ -94,6 +94,7 @@ in its featured-offer ordering. See [release evidence](plans/owner-v2-bilateral/
 - [Flags — Compressed-board trade generation (2026-08-15 field bug — LIVE)](#flags-compressed-board-trade-generation-2026-08-15-field-bug-live)
 - [Flags — Trade generation pipeline v2 (matchmaking research — ships dark)](#flags-trade-generation-pipeline-v2-matchmaking-research-ships-dark)
 - [Flags — Trade presentment rules (G6 2026-08-16 — ships ON)](#flags-trade-presentment-rules-g6-2026-08-16-ships-on)
+- [Flags — Value-core trade engine (2026-09-30, ships **OFF**)](#flags--value-core-trade-engine-2026-09-30-ships-off)
 - [Flags — Send in Sleeper (flagged beta)](#flags-send-in-sleeper-flagged-beta)
 - [Flags — Team overhaul (ships dark)](#flags-team-overhaul-ships-dark)
 - [Flags — Account auth (account-auth plan P2 — ships dark)](#flags-account-auth-account-auth-plan-p2-ships-dark)
@@ -146,6 +147,7 @@ in its featured-offer ordering. See [release evidence](plans/owner-v2-bilateral/
   - [Mock-draft CPU drafters (draft-extensions W2) — `mock_draft_service._DEFAULT_CFG`](#mock-draft-cpu-drafters-draft-extensions-w2-mock_draft_service_default_cfg)
   - [Counterparty breaker (flag `trade.breaker`) — `trade_service._DEFAULT_CFG`, DB-seeded](#counterparty-breaker-flag-tradebreaker--trade_service_default_cfg-db-seeded)
   - [Negative-results memory (flag `trade.negmem`) — `trade_service._DEFAULT_CFG`, DB-seeded](#negative-results-memory-flag-tradenegmem--trade_service_default_cfg-db-seeded)
+  - [Value core (flag `trade.value_core`) — `backend/value_core/adapter.py`, DB-seeded](#value-core-flag-tradevalue_core--backendvalue_coreadapterpy-db-seeded)
   - [Personal-market policy (flags `trade.valuation_telemetry` / `trade.personal_market_policy_v1`) — `trade_service._DEFAULT_CFG`, DB-seeded](#personal-market-policy-flags-tradevaluation_telemetry--tradepersonal_market_policy_v1--trade_service_default_cfg-db-seeded)
 - [Offline eval harness (F8, `backend/eval/` — operator tooling, unflagged)](#offline-eval-harness-f8-backendeval-operator-tooling-unflagged)
 
@@ -339,6 +341,26 @@ earlier pre-deploy reads landed on exactly 30 only because every batch was a ful
 | Flag | Default | Gates |
 |---|---|---|
 | `trade.presentment_rules` | **true** (ships ON — operator decision Q-G6-3; feedback #304 #336 #339 #340 #341, specs in [feedback/items/304-positional-need-filter/](feedback/items/304-positional-need-filter/)) | Backend-only, no client surface. ON ⇒ two new layers on the **v1 generation path** (`trade_gen.v2` carries its own gate stack): **construction rules** run inside every generator (v3 loop, v3 sweetener re-validation, v2 `_consider`, consensus `_emit`) so killed candidates refill from the enumeration — R1 `overpay_ok` (#340: raw-consensus gap ≥ `max_overpay_min_value` AND ≥ `max_overpay_frac` of the larger side kills, BOTH directions, **independent of the client fairness toggle**), R2 `pos_net_ok` (#341: per-position signed net |recv−give| ≤ `pos_net_cap` over QB/RB/WR/TE, picks uncounted), R3 `pick_gap_ok` (#339: for gap ≥ `pick_gap_min_value`, a heavier-side pick inside the two-sided band [`pick_gap_frac`·gap, gap/`pick_gap_frac`] — "the pick IS the gap" — kills; a pick far larger than the gap passes), R5 `need_gate_ok` (#304: window-scaled need gate on the primary received player, **untargeted discovery decks only** — pinned/opponent-scoped/explicit-acquire jobs bypass via a server-derived flag, never client-passable); and **eligibility**: R4 (#336) windowless awaiting-like + pending/accepted-match exclusion at `_dedup_and_sort` (streaming snapshots included) and the likes-you injector (dedup only — Q21 keeps the quality rules off that surface; the D-055 floor is its quality gate; `declined`/retracted regenerate). Never relaxed by the #189 relaxed pass. Per-job per-rule kill counters + the `presentment-tripwire` WARNING ([runbook](runbook.md)) ship with it. Per-rule deploy-free kill switches are the knobs below; this flag is the one-line group revert and R4's only switch. OFF ⇒ every generation path byte-identical to pre-G6 (pinned by test). |
+
+## Flags — Value-core trade engine (2026-09-30, ships **OFF**)
+
+Scope block: [value-core-engine/scope.md](plans/value-core-engine/scope.md) · [PRD](plans/value-core-engine/prd.md) · [HLD](plans/value-core-engine/hld.md) · [LLD](plans/value-core-engine/lld.md) · [ADR-024](adr/adr-024-value-core-engine.md). Module: `backend/value_core/`.
+
+| Flag | Default | Gates |
+|---|---|---|
+| `trade.value_core` | **false** | ON ⇒ a trade job that `server._value_core_live` admits is served by `backend/value_core/` instead of the legacy stack: every 1–3 × 1–3 package pair that is fair on consensus market value (the value-only core), ranked by three scores (value, outlook, rank) and assembled so no asset appears in more than 3 of the first 30 cards. Served: organic, pinned (give/receive) and opponent-scoped (`opponent_user_id`) jobs. Always legacy: jobs with a `trade_intent` (`trades.intent_modes`), the demo league, preparation jobs, `/api/trades/asset-ideas`, `/api/trades/fair-packages` and the manual calculator. While ON, `prepared_trade_runtime.supported()` is false, so no prepared inventory is prepared or adopted. OFF ⇒ `backend.value_core` is never imported and every path is byte-identical. |
+
+**Who is served while ON** is the `model_config` knob `vc_testers_only` (default **1**). At `1`, only an account id or league identity on the tester allowlist (`experiments.load_tester_allowlist`, `config/tester_allowlist.json`) gets value-core decks; everyone else keeps the legacy deck. At `0`, every eligible job is served by the value core. Knobs: [Value core](#value-core-flag-tradevalue_core--backendvalue_coreadapterpy-db-seeded).
+
+**Cache identity.** While ON, `_trade_safety_signature` carries a `("value_core", True)` entry; while OFF the entry is filtered out. A flip therefore makes every cached or running job of the other engine stale, and the next generate runs the engine the flag now selects. A `vc_*` knob change alters the request signature (it hashes the whole config), so the next generate is fresh too. The owner experiment's request hash ignores `vc_*` keys, so seeding or tuning them never reshuffles owner assignment units.
+
+**No silent fallback.** An exception inside a value-core job fails that job (`status: "error"`); the client shows its existing error state and a retry regenerates. The two engines never mix in one deck.
+
+**Rollback**, bluntest first:
+1. **Stop it:** `trade.value_core` → `false` (a `config/features.json` change, or an `FTF_FLAGS` override), then `POST /api/feature-flags/reload`. The next `/api/trades/generate` runs the legacy engine.
+2. **Narrow it (deploy-free):** `vc_testers_only` → `1` via `scripts/set_knob.py` / `PUT /api/admin/config/vc_testers_only` returns serving to the tester allowlist.
+
+**Graduation** (operator decision; all four required): the bench guardrails pass on every frozen bench league; the operator's blind grade averages ≥ 4.0; that grade beats the incumbent's served cards on the same bench; two weeks of tester-only serving show no rise in trade-job errors. Procedure: [runbook § Value-core bench](runbook.md#value-core-bench-freeze--run--recall--blind-grade).
 
 ## Flags — Send in Sleeper (flagged beta)
 
@@ -1539,6 +1561,38 @@ Six keys, consumed **only** by `backend/negmem.py` and its four generation seams
 
 Every operator change goes through `scripts/set_knob.py` so it lands in `model_config_changes`, **and lands at a bake-off round boundary** (GR3). Observability: `backend/scripts/negmem_readout.py` prints the resolved knobs alongside every cell; `scripts/negmem-stamp-rate.sql` and `scripts/negmem-gr4-joint.sql` are the two tripwire queries.
 
+
+---
+
+### Value core (flag `trade.value_core`) — `backend/value_core/adapter.py`, DB-seeded
+
+Twelve Float keys, seeded in `database._MODEL_CONFIG_DEFAULTS` and tunable live via `PUT /api/admin/config/<key>` (use `scripts/set_knob.py` so the change lands in `model_config_changes`). **None is in `trade_service._DEFAULT_CFG`**, which keeps the arm-A golden inventory untouched. The value-core job reads them from its captured config snapshot (`dict(trade_service._cfg)`); a missing key falls back to the dataclass default in `backend/value_core/types.py`. The adapter clamps every value to the range below rather than rejecting it. All are inert while `trade.value_core` is off.
+
+| Key | Default | Clamp | Read as | Role |
+|---|---:|---|---|---|
+| `vc_band` | 0.10 | [0.01, 0.50] | `CoreConfig.band` | Half-width of the fairness band on the premium-adjusted market ratio: a trade is kept iff `1/(1+b) ≤ ratio ≤ 1+b`. The client fairness preference can only tighten it — `min(b, max(0.02, 1 − fairness_threshold))` — never loosen it |
+| `vc_stud_premium` | 0.15 | [0.0, 0.50] | `CoreConfig.stud_premium` | Premium credited to the side that gets the trade's single best asset with fewer pieces, at an elite headliner (`firsts_4plus` tier floor). Scales as `(headliner / elite)²`: about 0.9% for a Mid 1st |
+| `vc_untouchable_min_ratio` | 1.08 | [1.0, 2.0] | `CoreConfig.untouchable_min_ratio` | A give side containing an untouchable is kept only when the adjusted return is at least this |
+| `vc_max_assets_per_side` | 14 | int [4, 20] | `CoreConfig.max_assets_per_side` | Top-N eligible assets per team used to build 1–3 asset packages (pins are always added) |
+| `vc_max_per_partner` | 200 | int [10, 1000] | `CoreConfig.max_per_partner` | Fair trades kept per partner, biggest headliner first |
+| `vc_w_value` | 1.0 | ≥ 0 | `RankConfig.w_value` | Weight of the value score |
+| `vc_w_outlook` | 1.0 | ≥ 0 | `RankConfig.w_outlook` | Weight of the outlook score (both teams' windows) |
+| `vc_w_rank` | 1.0 | ≥ 0 | `RankConfig.w_rank` | Weight of the rank score (viewer's board vs market). All three weights at 0 ⇒ treated as (1, 1, 1) |
+| `vc_repeat_penalty` | 0.15 | [0.0, 1.0] | `RankConfig.repeat_penalty` | Priority points subtracted per prior appearance of a card's most-shown asset; a repeated partner costs half |
+| `vc_player_cap` | 3 | int [1, 30] | `RankConfig.player_cap` | Max cards any one asset may appear in within the first 30 |
+| `vc_standings_weight` | 0.30 | [0.0, 1.0] | `windows.infer_windows(standings_weight=)` | Full weight of the points-for index in each team's window score. Ramps linearly from 0 at week 0 to full at week 8 (about 0.11 at week 3). Sleeper leagues only |
+| `vc_testers_only` | 1.0 | `≥ 1` = testers only; lower = everyone | `server._value_core_live` | **Rollout lever.** 1 = serve only the tester allowlist while the flag is on; 0 = every eligible job |
+
+**Existing keys reused read-only, not duplicated:**
+
+| Key | Where it lands |
+|---|---|
+| `asset_floor_abs` (450) | `CoreConfig.asset_floor_abs` — no asset below it enters a package |
+| `filler_min_frac` (0.25) | `CoreConfig.filler_min_frac` — every piece must be worth at least this share of the **trade's** headliner (stricter than `filler_ok`'s per-side headliner) |
+| `shrink_pseudocount`, `user_elo_shrink`, `placement_tier_clamp` | the viewer's board shrink toward consensus (w = n/(n+4)), via `trade_service._shrink_user_elo` |
+| `infer_contender_cut` / `infer_rebuilder_cut` | the window cuts in `windows.infer_windows`, via `trade_service._c` |
+
+**Code constants, not knobs:** `core.TIME_BUDGET_S = 8.0` (enumeration stops and the partial pool is ranked and served), `core.MAX_CHECKS_PER_PARTNER = 40_000`, `core.MAX_PACKAGE_SIZE = 3`, `windows.STANDINGS_RAMP_WEEKS = 8`, `deck.PARTNER_PENALTY_FACTOR = 0.5`, `adapter.DEFAULT_LINEUP`.
 
 ---
 
