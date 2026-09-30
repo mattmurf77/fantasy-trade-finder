@@ -1,4 +1,4 @@
-"""Value-core eval bench: freeze bench leagues, run engine variants, score four guardrails.
+"""Value-core eval bench: freeze bench leagues, run engine variants, score five guardrails.
 
 Implements docs/plans/value-core-engine/lld.md section 8.1-8.2. Operator tooling:
 unflagged, no app wiring.
@@ -455,11 +455,12 @@ def _rates(metrics: Sequence[dict]) -> tuple[float | None, float | None, float |
             statistics.median(m["given"] for m in metrics))
 
 
-def _passes(insult, real_piece, median_given, appearances) -> dict:
+def _passes(insult, real_piece, median_given, appearances, near_duplicates) -> dict:
     return {"insult": insult is not None and insult < TARGETS["insult_rate_max"],
             "real_piece": real_piece is not None and real_piece >= TARGETS["real_piece_min"],
             "median_given": median_given is not None and median_given >= TARGETS["median_given_min"],
-            "appearances": appearances <= TARGETS["max_appearances"]}
+            "appearances": appearances <= TARGETS["max_appearances"],
+            "near_duplicates": near_duplicates == 0}
 
 
 def _r4(x: float | None) -> float | None:
@@ -468,20 +469,34 @@ def _r4(x: float | None) -> float | None:
 
 def guardrails(entries: Sequence[DeckEntry], snapshot: LeagueSnapshot, *, top: int = TOP_WINDOW
                ) -> dict:
-    """The four guardrails (lld.md section 8.2) on the first `top` entries."""
+    """The five guardrails (lld.md section 8.2) on the first `top` entries."""
+    from backend.value_core.deck import acquisition_key, idea_key
     metrics = _card_metrics(entries, snapshot, top)
     insult, real_piece, median_given = _rates(metrics)
     counts = Counter(a for m in metrics for a in m["assets"])
     most, appearances = (min(counts.items(), key=lambda kv: (-kv[1], kv[0]))
                          if counts else (None, 0))
+    trades = [e.scored.trade for e in list(entries)[:top]]
+    ideas = Counter(idea_key(t, snapshot) for t in trades)
+    acquisitions = Counter(acquisition_key(t, snapshot) for t in trades)
+    per_partner = Counter(t.partner_team_id for t in trades)
+    near_duplicates = sum(c - 1 for c in ideas.values())
+    acquired = Counter(a for t in trades for a in t.receive)
+    most_acquired, acquired_appearances = (min(acquired.items(), key=lambda kv: (-kv[1], kv[0]))
+                                           if acquired else (None, 0))
     return {"cards": len(metrics),
             "insult_rate": _r4(insult),
             "real_piece_back_share": _r4(real_piece),
             "median_value_given": _r4(median_given),
-            "max_asset_appearances": appearances,
+            "max_acquired_appearances": acquired_appearances,
+            "most_acquired_asset": most_acquired,
+            "max_asset_appearances": appearances,          # both sides; reported, not a guardrail
             "most_repeated_asset": most,
             "partners": len({m["partner"] for m in metrics}),
-            "pass": _passes(insult, real_piece, median_given, appearances)}
+            "max_partner_cards": max(per_partner.values(), default=0),
+            "near_duplicates": near_duplicates,
+            "acquisition_repeats": sum(c - 1 for c in acquisitions.values()),
+            "pass": _passes(insult, real_piece, median_given, acquired_appearances, near_duplicates)}
 
 
 def _card(entry: DeckEntry, snapshot: LeagueSnapshot, league_name: str, seat: str) -> dict:
@@ -540,12 +555,15 @@ def run(frozen: Mapping, *, variants: Mapping[str, Mapping], seats: str = "all",
                              for e in result.entries[:TOP_WINDOW])
 
         insult, real_piece, median_given = _rates(pooled)
-        worst = max((s["max_asset_appearances"] for s in seat_rows if s["cards"]), default=0)
-        passes = _passes(insult, real_piece, median_given, worst)
+        worst = max((s["max_acquired_appearances"] for s in seat_rows if s["cards"]), default=0)
+        worst_dups = max((s["near_duplicates"] for s in seat_rows if s["cards"]), default=0)
+        worst_acq = max((s["acquisition_repeats"] for s in seat_rows if s["cards"]), default=0)
+        passes = _passes(insult, real_piece, median_given, worst, worst_dups)
         results[name] = {"overrides": overrides, "cards": len(pooled),
                          "insult_rate": _r4(insult), "real_piece_back_share": _r4(real_piece),
                          "median_value_given": _r4(median_given),
-                         "worst_seat_appearances": worst, "pass": passes,
+                         "worst_seat_acquired_appearances": worst, "worst_seat_near_duplicates": worst_dups,
+                         "worst_seat_acquisition_repeats": worst_acq, "pass": passes,
                          "verdict": "PASS" if all(passes.values()) else "FAIL",
                          "seats": seat_rows}
         card_sets[name] = {"variant": name, "source": "value_core_bench", "cards": cards}
@@ -558,12 +576,15 @@ def _pct(x: float | None) -> str:
 
 def markdown_table(results: Mapping) -> str:
     lines = ["| variant | cards | insult rate | real-piece share | median value given "
-             "| worst-seat appearances | verdict |",
-             "|---|---:|---:|---:|---:|---:|---|"]
+             "| worst-seat acquired-asset appearances | worst-seat near-duplicates "
+             "| worst-seat repeat acquisitions "
+             "| verdict |",
+             "|---|---:|---:|---:|---:|---:|---:|---:|---|"]
     for name, v in results["variants"].items():
         lines.append(f"| {name} | {v['cards']} | {_pct(v['insult_rate'])} "
                      f"| {_pct(v['real_piece_back_share'])} | {_pct(v['median_value_given'])} "
-                     f"| {v['worst_seat_appearances']} | {v['verdict']} |")
+                     f"| {v['worst_seat_acquired_appearances']} | {v['worst_seat_near_duplicates']} "
+                     f"| {v['worst_seat_acquisition_repeats']} | {v['verdict']} |")
     lines.append("")
     lines.extend(f"verdict {name}: {v['verdict']}" for name, v in results["variants"].items())
     return "\n".join(lines)

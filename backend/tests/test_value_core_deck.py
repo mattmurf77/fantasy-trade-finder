@@ -1,5 +1,6 @@
-"""value-core WP2: greedy deck assembly with repeat penalties and the per-asset cap
-(lld.md 5.6, specs.md 5.2). ScoredTrade objects are built by hand with chosen priorities.
+"""value-core deck assembly: one card per trade idea, acquisitions in rounds, partner and
+per-asset caps in the first 30, repeat penalties (lld.md 5.6, specs.md 5.2).
+ScoredTrade objects are built by hand with chosen priorities.
 """
 import random
 from collections import Counter
@@ -7,7 +8,8 @@ from collections import Counter
 import pytest
 
 from backend.value_core import ranking
-from backend.value_core.deck import PARTNER_PENALTY_FACTOR, assemble_deck
+from backend.value_core.deck import (PARTNER_PENALTY_FACTOR, acquisition_key, assemble_deck,
+                                     idea_key, partner_cap)
 from backend.value_core.types import *   # in tests only
 
 
@@ -44,8 +46,9 @@ def ST(partner, give, receive, priority):
 
 
 def snap_for(scored):
+    """Ids starting with "pk" are picks; everything else is a WR."""
     ids = sorted({a for s in scored for a in s.trade.give + s.trade.receive})
-    return snap({"V": [A(i, "WR", 1000) for i in ids]})
+    return snap({"V": [A(i, "PICK" if i.startswith("pk") else "WR", 1000) for i in ids]})
 
 
 def deck(scored, cfg=RankConfig()):
@@ -83,32 +86,45 @@ def test_cap_relaxes_when_only_capped_remain():
     assert [e.scored for e in out] == trades
 
 
-def _naive(scored, cfg):
-    """O(n^2) reference greedy: at each position take the best eligible card by
-    (effective desc, key asc); if none is eligible before TOP_WINDOW, relax the cap."""
-    shown, shown_partner = Counter(), Counter()
-    assets = lambda i: scored[i].trade.give + scored[i].trade.receive
+def _naive(scored, cfg, snapshot):
+    """O(n^2) reference: keep the best version of each trade idea, then at each position take
+    the best eligible card by (acquisition round, effective desc, key asc); if none is
+    eligible before TOP_WINDOW, relax the caps for that position."""
+    best = {}
+    for s in scored:
+        k = idea_key(s.trade, snapshot)
+        if k not in best or (-s.scores.priority, s.trade.key) < (-best[k].scores.priority, best[k].trade.key):
+            best[k] = s
+    ideas = list(best.values())
+    p_cap = partner_cap(len({s.trade.partner_team_id for s in ideas}))
+    shown, shown_partner, shown_acq = Counter(), Counter(), Counter()
+    assets = lambda i: ideas[i].trade.give + ideas[i].trade.receive
+    partner = lambda i: ideas[i].trade.partner_team_id
 
     def eff(i):
-        return (scored[i].scores.priority - cfg.repeat_penalty * max(shown[a] for a in assets(i))
-                - PARTNER_PENALTY_FACTOR * cfg.repeat_penalty * shown_partner[scored[i].trade.partner_team_id])
+        return (ideas[i].scores.priority - cfg.repeat_penalty * max(shown[a] for a in assets(i))
+                - PARTNER_PENALTY_FACTOR * cfg.repeat_penalty * shown_partner[partner(i)])
 
-    remaining, order = list(range(len(scored))), []
+    remaining, order = list(range(len(ideas))), []
     while remaining:
         pos = len(order)
         eligible = [i for i in remaining
-                    if pos >= TOP_WINDOW or all(shown[a] < cfg.player_cap for a in assets(i))]
-        best = min(eligible or remaining, key=lambda i: (-eff(i), scored[i].trade.key, i))
-        order.append(best)
-        remaining.remove(best)
-        for a in assets(best):
+                    if pos >= TOP_WINDOW or (shown_partner[partner(i)] < p_cap
+                                             and all(shown[a] < cfg.player_cap for a in assets(i)))]
+        pick = min(eligible or remaining,
+                   key=lambda i: (shown_acq[acquisition_key(ideas[i].trade, snapshot)], -eff(i),
+                                  ideas[i].trade.key, i))
+        order.append(pick)
+        remaining.remove(pick)
+        for a in assets(pick):
             shown[a] += 1
-        shown_partner[scored[best].trade.partner_team_id] += 1
-    return [scored[i].trade.key for i in order]
+        shown_partner[partner(pick)] += 1
+        shown_acq[acquisition_key(ideas[pick].trade, snapshot)] += 1
+    return [ideas[i].trade.key for i in order]
 
 
 def test_lazy_equals_naive():
-    pool_assets = [f"a{i}" for i in range(8)]
+    pool_assets = [f"a{i}" for i in range(6)] + ["pk1", "pk2"]
     partners = ["P1", "P2", "P3", "P4"]
     for seed in range(30):
         rng = random.Random(seed)
@@ -121,7 +137,7 @@ def test_lazy_equals_naive():
                 seen.add(s.trade.key)
                 scored.append(s)
         out = deck(scored)
-        assert [e.scored.trade.key for e in out] == _naive(scored, RankConfig()), f"seed {seed}"
+        assert [e.scored.trade.key for e in out] == _naive(scored, RankConfig(), snap_for(scored)), f"seed {seed}"
 
 
 def test_reasons_attached():
@@ -138,3 +154,46 @@ def test_reasons_attached():
     for e in out:
         assert e.reasons == ranking.card_reasons(e.scored, s, req)
         assert 1 <= len(e.reasons) <= 3
+
+
+def test_minor_piece_swaps_are_one_idea():
+    """Same partner, same headliners, different throw-ins: only the best version is shown."""
+    best = ST("P", ["x"], ["y", "m1"], 0.80)
+    worse = ST("P", ["x"], ["y", "m2"], 0.79)
+    give_filler = ST("P", ["x", "m3"], ["y"], 0.78)
+    other = ST("Q", ["z"], ["w"], 0.50)
+    out = deck([best, worse, give_filler, other])
+    assert [e.scored for e in out] == [best, other]
+
+
+def test_pick_years_are_one_idea_and_one_acquisition():
+    """A partner's picks are interchangeable for variety: 2026 1st vs 2027 1st for the same
+    player is one idea, and pick-headlined returns from one partner count as one acquisition."""
+    y26 = ST("P", ["x"], ["pk2026_1"], 0.90)
+    y27 = ST("P", ["x"], ["pk2027_1"], 0.89)          # same idea as y26: dropped
+    other_give = ST("P", ["z"], ["pk2027_2"], 0.88)   # new idea, but the same acquisition ("a pick from P")
+    q1 = ST("Q", ["g1"], ["q1"], 0.40)
+    q2 = ST("R", ["g2"], ["r1"], 0.30)
+    out = deck([y26, y27, other_give, q1, q2])
+    assert [e.scored for e in out] == [y26, q1, q2, other_give]
+
+
+def test_each_acquisition_once_before_any_repeat():
+    """Round 1 shows every (partner, acquired headliner) once; repeats wait for round 2."""
+    a1 = ST("P", ["x1"], ["y"], 0.95)
+    a2 = ST("P", ["x2"], ["y"], 0.94)                 # acquires y from P again
+    rest = [ST(f"Q{i}", [f"g{i}"], [f"r{i}"], 0.30 - 0.01 * i) for i in range(5)]
+    out = deck([a1, a2] + rest)
+    assert [e.scored for e in out] == [a1] + rest + [a2]
+
+
+def test_partner_cap_in_first_30():
+    """One partner with 40 strong, distinct acquisitions cannot take over the first 30."""
+    heavy = [ST("P", [f"x{i}"], [f"y{i}"], 0.99 - 0.001 * i) for i in range(40)]
+    light = [ST(f"Q{j}", [f"g{j}_{i}"], [f"r{j}_{i}"], 0.40 - 0.001 * i)
+             for j in range(10) for i in range(5)]
+    out = deck(heavy + light)
+    cap = partner_cap(11)
+    assert cap == 4
+    assert sum(e.scored.trade.partner_team_id == "P" for e in out[:TOP_WINDOW]) == cap
+    assert len(out) == 90   # nothing dropped: every card is a distinct idea

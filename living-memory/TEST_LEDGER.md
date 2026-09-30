@@ -15,6 +15,11 @@ into `feat/value-core-engine`, lead-reviewed. Local Python 3.14 (no 3.12 here; C
   exact@10 0%, close@10 18%, in-pool 1.6%; rejects floor 96, band 28, filler 2; |log ratio| p50 0.32, p80 0.65.
   Band left at ±10% pending the operator.
 - Lead fix at review: core caps round-robin over headliners (pool share giving a top-3 asset 92% → 12%).
+- Deck variety rules (operator request, same day): one card per trade idea (same partner + headliners; picks
+  collapse by year/round), acquisitions in rounds, partner cap in the first 30. Synthetic first-30, before → after:
+  near-duplicates median 1.5/max 5 → 0, repeat acquisitions median 8/max 11 → 0, distinct acquisitions 22 → 30,
+  pick repeats from one partner max 9 → 0; insult 0.6%, real piece 92%, median given +7.7%; p50 1.3 s.
+  The appearances guardrail now counts acquired assets only. Full suite after: **7527 passed, 1 skipped**.
 Evidence delta: unit + e2e tests and the WP3 [code-walk](../docs/plans/value-core-engine/code-walk.md); no mobile change,
 so no TestFlight checklist is due until the flag is flipped.
 

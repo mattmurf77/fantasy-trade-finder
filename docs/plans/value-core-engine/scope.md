@@ -61,7 +61,7 @@ Companion docs: [prd.md](prd.md) · [hld.md](hld.md) · [lld.md](lld.md) · [spe
      - `basis` is normalised client-side: `mobile/src/api/trades.ts:183`.
   3. **Swipes on value-core cards resolve.** Cards are registered in `trade_service._trade_cards` (the lookup is at `server.py:16617`) and reconstruct from echoed context (`server.py:15660`).
 - [x] **Manual TestFlight checklist** (operator runs it with the flag on and `vc_testers_only = 1`):
-  1. Open **Trades** for La Resistance. Expected: the deck loads in under 10 s, and no player appears in more than 3 of the first 30 cards. The prod baseline was one player in 27 of 30.
+  1. Open **Trades** for La Resistance. Expected: the deck loads in under 10 s. In the first 30 cards no trade idea repeats (the same partner and headliners with only minor pieces or pick years swapped), no acquisition is shown twice (the same player, or "a pick", from the same partner), and no partner has more than its share (4 of 30 in a 12-team league). The prod baseline was one player in 27 of 30.
   2. Scroll the first 10 cards. Expected: each card shows 1–3 reason lines in the value · outlook · ranking style, e.g. "Fair on value", "Fits their rebuild", "You rank X 12 spots above market". The value bar shows "give" and "get" totals.
   3. Like one card, then pass one with the reason "I'm giving up too much". Expected: no error toast. Reopen Trades and confirm the passed card does not return.
   4. On one card, open **Send in Sleeper** without sending. Expected: the package pre-fills exactly as on the card.
@@ -80,7 +80,7 @@ Companion docs: [prd.md](prd.md) · [hld.md](hld.md) · [lld.md](lld.md) · [spe
 | `docs/architecture.md` | **updated (WP5)** | New section before "Data flow" (`architecture.md:258`), plus a row in the Components/Backend table (`:376`). |
 | `living-memory/HLD.md` | **updated (WP5)** | Major Components row (`HLD.md:80-99`), plus a "Flow C′ — value-core deck" paragraph under Key Flows (`:140`). |
 | `docs/cross-client-invariants.md` | **n/a.** No constant, enum or color shared with clients changes. `basis` values stay within the existing `"consensus"`/`"divergence"` set. | — |
-| `docs/glossary.md` | **updated (WP5)** | New terms: value core, fair pool, fairness band (value core), stud premium, irreducible trade, priority, value score, outlook score, rank score, repeat penalty, bench guardrails, blind grade. |
+| `docs/glossary.md` | **updated (WP5)** | New terms: value core, fair pool, fairness band (value core), stud premium, irreducible trade, priority, value score, outlook score, rank score, repeat penalty, trade idea, acquisition round, bench guardrails, blind grade. |
 | ADR or `DECISIONS.md` entry | **ADR by WP5; DECISIONS entry by the lead at integration** | `docs/adr/adr-024-value-core-engine.md` records the choices: value-only core plus a separate 3-weight ranking; the new deck bypasses the stacked legacy gates; no silent fallback. `living-memory/DECISIONS.md` gets **D-195** (grep for max+1 first). It records the operator's 2026-09-30 rebuild decision and that, while the flag is on, it supersedes D-193's ordering for value-core decks. |
 | `docs/data-dictionary.md` | **updated (WP5)** | `## deck_impressions` (`data-dictionary.md:490`): the value-core `valuation_json` v1 shape and the `model_arm`/`policy_variant`/`policy_version` values. The `trades_generated` props line (`:1357`): add `engine_version = "value_core"`. |
 | `docs/runbook.md` | **updated (WP5)** | New section "Value-core bench (freeze / run / recall / blind grade)". |

@@ -248,6 +248,7 @@ class PipelineResult:
 
 **Changes to date:**
 - 2026-09-30 — lld §4.5 cap order (not `types.py`), lead-initiated at WP1 review: enumeration and the per-partner cap round-robin over headliners instead of biggest-first. `test_per_partner_cap_keeps_biggest_headliners` became `test_per_partner_cap_spreads_headliner_pairs`, and `test_value_core_perf.py::test_pool_spreads_across_give_headliners` was added. Reason: the biggest-first caps acted as a hidden ranking (92% of the pool gave away a top-3 asset).
+- 2026-09-30 — lld §5.6 deck variety rules + §8.2 guardrails (not `types.py`), operator request: *"I don't want to see the same iteration of a trade with a trade partner with only minor pieces swapped out... or the same trade partner with different years' draft picks"*. `deck.py` gained `idea_key`, `acquisition_key` and `partner_cap`: one card per trade idea (lower-priority versions are dropped), acquisitions shown in rounds, and a partner cap beside the per-asset cap in the first 30. The bench appearances guardrail now counts acquired assets only (`max_acquired_appearances`), and `near_duplicates` = 0 is a new guardrail. Deck tests: `test_minor_piece_swaps_are_one_idea`, `test_pick_years_are_one_idea_and_one_acquisition`, `test_each_acquisition_once_before_any_repeat` and `test_partner_cap_in_first_30` were added, and `test_lazy_equals_naive`'s reference implements all three rules. Bench tests: `test_guardrails_count_near_duplicates_and_repeat_acquisitions` was added. On the 12-seat synthetic league (first 30 cards, before → after): near-duplicates median 1.5 / max 5 → 0; repeat acquisitions median 8 / max 11 → 0; distinct acquisitions 22 → 30; the deck shrank from about 2,200 to about 1,050 ideas.
 
 ## 4. Sequencing
 
@@ -357,8 +358,8 @@ Also run `python3 -c "import backend.value_core.core"`.
 **Acceptance criteria.**
 1. The public names and constants are exactly as in lld §5.1, §5.2 and §5.6.
 2. Score formulas follow §5.3, `detail` keys follow §5.4, and reason templates follow §5.5, **character for character**.
-3. `assemble_deck` returns every input trade exactly once; nothing is dropped.
-4. No asset appears in more than `player_cap` of the first `TOP_WINDOW` entries whenever the pool allows it.
+3. `assemble_deck` returns one card per trade idea (lld §5.6 `idea_key`), its highest-priority version, and no trade twice. The idea's other versions are dropped; nothing else is.
+4. Every acquisition (`acquisition_key`) is shown once before any is shown twice. In the first `TOP_WINDOW` entries, no asset appears in more than `player_cap` cards and no partner takes more than `partner_cap(n)`, whenever the pool allows it.
 5. The output is deterministic.
 6. No logging or I/O. The only config reads are the two outlook cuts, through `_c`.
 
@@ -395,12 +396,16 @@ Also run `python3 -c "import backend.value_core.core"`.
 
 | Test | Fixture | Asserts |
 |---|---|---|
-| `test_cap_in_first_30_nothing_dropped` | 100 trades containing `stud` (priorities 0.99 → 0.90, distinct partners and other assets) plus 100 without (0.50 → 0.40) | at most 3 of the first 30 contain `stud`; `len == 200`; same set of keys as the input |
+| `test_cap_in_first_30_nothing_dropped` | 100 trades containing `stud` (priorities 0.99 → 0.90, distinct partners and other assets) plus 100 without (0.50 → 0.40); every trade a distinct idea | at most 3 of the first 30 contain `stud`; `len == 200`; same set of keys as the input |
 | `test_repeat_penalty_order` | t1 (x, A, 0.80), t2 (x, B, 0.78), t3 (y, C, 0.70); penalty 0.15 | order t1, t3, t2; t2's `effective == approx(0.63)` |
 | `test_partner_half_penalty` | t1 (x, A, 0.80), t2 (y, A, 0.78), t3 (z, B, 0.72) | order t1, t3, t2 (0.78 − 0.075 = 0.705 < 0.72) |
 | `test_cap_relaxes_when_only_capped_remain` | 5 trades all containing x | all 5 returned at positions 0..4 |
-| `test_lazy_equals_naive` | 30 seeded random pools of 60 trades over 8 assets and 4 partners | the key order equals a naive O(n²) reference greedy written in the test |
+| `test_lazy_equals_naive` | 30 seeded random pools of 60 trades over 8 assets (6 players, 2 picks) and 4 partners | the key order equals a naive O(n²) reference written in the test that implements all three rules: best version per idea, acquisition rounds, partner and asset caps |
 | `test_reasons_attached` | any | every entry's `reasons` equals `ranking.card_reasons(...)` for its trade |
+| `test_minor_piece_swaps_are_one_idea` | P: x → (y, m1) 0.80, x → (y, m2) 0.79, (x, m3) → y 0.78; Q: z → w 0.50 | only the best P version is shown: order `[best, other]` |
+| `test_pick_years_are_one_idea_and_one_acquisition` | P: x → 2026 1st 0.90, x → 2027 1st 0.89, z → 2027 2nd 0.88; Q and R one trade each (0.40, 0.30) | the 2027-1st version is dropped; `z → 2027 2nd` is a new idea but the same acquisition ("a pick from P"), so it waits for round 2: order y26, q1, q2, other_give |
+| `test_each_acquisition_once_before_any_repeat` | P: x1 → y 0.95, x2 → y 0.94; five one-card partners at 0.30 → 0.26 | the second y-from-P card comes last, after every round-1 card |
+| `test_partner_cap_in_first_30` | P: 40 strong distinct trades (0.99 →); ten more partners with 5 trades each (0.40 →) | `partner_cap(11) == 4`; P has exactly 4 of the first 30; `len == 90` (nothing dropped: every card is a distinct idea) |
 
 **Isolated verification.**
 ```
@@ -496,7 +501,7 @@ python3 -m pytest backend/tests/test_value_core_adapter.py backend/tests/test_va
 
 **Acceptance criteria.**
 1. `freeze` only reads prod through the read-only connection, and asserts `transaction_read_only = on`. It refuses to overwrite and writes 0600. Its stdout carries no user ids.
-2. `run` computes the four guardrails exactly as in lld §8.2, and writes `results.json` and `cards-<variant>.json` into a new 0600 directory.
+2. `run` computes the five guardrails exactly as in lld §8.2, and writes `results.json` and `cards-<variant>.json` into a new 0600 directory.
 3. `value_core_recall` builds cases only from the committed fixtures, and reports exact and close recall@10, the in-pool rate, reject reasons and the band calibration.
 4. `blind_grade export` hides the source (no variant name appears anywhere in the CSV), dedupes identical trades across variants, and writes a private key. `import` validates the grades and tags.
 5. No test touches the network or prod.
@@ -505,11 +510,12 @@ python3 -m pytest backend/tests/test_value_core_adapter.py backend/tests/test_va
 
 | Test | Asserts |
 |---|---|
-| `test_guardrails_exact_numbers` | Hand-built 4 entries: (g 1000, r 1000, starter); (g 1000, r 1300, best_in 1600); (g 1200, r 1000, no starter, best_in 1000); (g 1000, r 950, starter). Asset `x` sits in the first three. Results: `insult_rate == 0.25`, `real_piece_back_share == 0.75`, `median_value_given == approx(-0.025)`, `max_asset_appearances == 3`, `pass["insult"] is False` |
+| `test_guardrails_exact_numbers` | Hand-built 4 entries: (g 1000, r 1000, starter); (g 1000, r 1300, best_in 1600); (g 1200, r 1000, no starter, best_in 1000); (g 1000, r 950, starter). Asset `x` is given in the first three. Results: `insult_rate == 0.25`, `real_piece_back_share == 0.75`, `median_value_given == approx(-0.025)`, `max_asset_appearances == 3` (reported only), `max_acquired_appearances == 1`, `near_duplicates == 0`, `acquisition_repeats == 0`, `max_partner_cards == 3`, `pass["insult"] is False` and every other pass flag true |
+| `test_guardrails_count_near_duplicates_and_repeat_acquisitions` | P: x → (b1, m1), x → (b1, m2) (a near-duplicate: same headliners, throw-ins differ), z → b1 (a repeat acquisition); Q: y → c1 → `near_duplicates == 1`, `acquisition_repeats == 2`, `pass["near_duplicates"] is False` |
 | `test_guardrails_top_window_only` | 40 entries → only the first 30 are counted (`cards == 30`) |
 | `test_synthetic_league_valid_and_deterministic` | `synthetic_league(7)` equals `synthetic_league(7)`; 12 teams; every team's `asset_ids` exist in `assets`; the schema keys match lld §8.1 |
 | `test_snapshot_for_seat_shrinks_board` | frozen board Elo 1700, seed 1600, n = 4 → personal `elo_to_value(1650)` |
-| `test_run_verdict_with_stub_engine` | a stub engine returning entries where one asset appears 4 times in the first 30 → `verdict == "FAIL"`; a clean stub → `"PASS"` |
+| `test_run_verdict_with_stub_engine` | a stub engine returning entries where one received asset appears 4 times in the first 30 → `worst_seat_acquired_appearances == 4`, `verdict == "FAIL"`; a clean stub → `"PASS"` |
 | `test_league_record_pure_transform` | canned rows → the record has the exact keys and values: `max_players` = slots + reserve + taxi; top 6 picks per owner; boards joined by `user_id` |
 | `test_assert_read_only` | a fake connection returning `"off"` raises `ValueError`; `"on"` passes |
 | `test_outputs_private_and_fresh` | the output directory already exists → error; the written files have mode `0o600` |
@@ -537,7 +543,8 @@ python3 -m pytest backend/tests/test_value_core_adapter.py backend/tests/test_va
 
 | Test | Asserts |
 |---|---|
-| `test_pipeline_on_synthetic_league` | `value_core_bench.run(synthetic_league frozen, variants={"default": {}})` with the real engine. Every seat whose fair pool has ≥ 90 cards has `max_asset_appearances <= 3`: that is enough variety that the cap never has to relax, and the seed is fixed, so the result is deterministic. Two runs give equal results. Total elapsed < 20 s |
+| `test_pipeline_on_synthetic_league` | `value_core_bench.run(synthetic_league frozen, variants={"default": {}})` with the real engine, twice. The two results are equal once `elapsed_ms` is stripped; there are 12 seats and at least one has a fair pool of ≥ 90 cards. Total elapsed < 60 s (a loose CI bound; latency is checked in §6) |
+| `test_deck_cap_breaks_only_when_nothing_else_fits` | for every seat of `synthetic_league(7)`, a card inside the first 30 may exceed `player_cap` only when no cap-respecting card is left. A big pool does not make the cap feasible: the viewer has at most `vc_max_assets_per_side` tradeable assets, and multi-piece gives spend several appearances at once |
 | `test_run_trade_job_flag_on_real_engine` | `bakeoff_harness.run_capture` with patches: `_value_core_enabled → True`, `vc_testers_only = 0`, `_league_lineup_slots → ["QB"]`, `_sleeper_roster_limit → None`, `_value_core_standings → ({}, 0)`. The job completes with ≥ 1 card, where the harness fair pair `rb1 ↔ rb3 + wr3` is present. Every card's `trade_id` starts `vc_`. Every `deck_impressions` row has `model_arm == "value_core"`, and its `valuation_json` has `scores` and `weights` |
 | `test_evaluate_trade_matches_pool_on_synthetic` | for 50 pool trades, `core.evaluate_trade` agrees |
 
@@ -590,7 +597,7 @@ Run on `feat/value-core-engine` after all five packages have merged, from the wo
    - If any key differs between base and branch, stop: that is a flag-off regression.
 5. **Flag-on smoke on a fixture league.**
    - `python3 -m backend.eval.value_core_bench run --frozen <tmp>/synthetic.json --output <tmp>/run1`, where `synthetic.json` is written from `value_core_bench.synthetic_league(7)` by a one-line script.
-   - Check that the verdict line prints and that `worst_seat_appearances <= 3`.
+   - Check that the verdict line prints, that `worst_seat_acquired_appearances <= 3` and that `worst_seat_near_duplicates == 0`.
    - Record the pooled numbers in TEST_LEDGER. Synthetic numbers are a smoke check, **not** the bench verdict.
 6. **Latency.** Time `pipeline.run` on the 14-team perf fixture from WP1. Record p50/p95 over 10 runs; the target is p95 < 8 s locally.
 7. **Recall baseline.** Run `python3 -m backend.eval.value_core_recall --fixtures backend/tests/fixtures --output <tmp>/recall`. Record the case count, exact and close recall@10, the in-pool rate and `recommended_band`. Do **not** change `vc_band` without the operator.

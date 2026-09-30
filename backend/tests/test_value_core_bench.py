@@ -76,12 +76,30 @@ def test_guardrails_exact_numbers():
     assert g["insult_rate"] == 0.25                      # (1300 - 1000) / 1300 > 0.20
     assert g["real_piece_back_share"] == 0.75
     assert g["median_value_given"] == pytest.approx(-0.025)
-    assert g["max_asset_appearances"] == 3
+    assert g["max_asset_appearances"] == 3               # "x" given three times: reported only
+    assert g["max_acquired_appearances"] == 1
     assert g["most_repeated_asset"] == "x"
     assert g["partners"] == 2
     assert g["cards"] == 4
     assert g["pass"] == {"insult": False, "real_piece": True, "median_given": True,
-                         "appearances": True}
+                         "appearances": True, "near_duplicates": True}
+    assert g["near_duplicates"] == 0 and g["acquisition_repeats"] == 0
+    assert g["max_partner_cards"] == 3
+
+
+def test_guardrails_count_near_duplicates_and_repeat_acquisitions():
+    """Same partner + same headliners (throw-ins differ) is a near-duplicate; acquiring the
+    same headliner from the same partner twice is a repeat acquisition."""
+    entries = [
+        _entry(0, ["x"], ["b1", "m1"], 1000, 1000, starter=True, best_in=1000),
+        _entry(1, ["x"], ["b1", "m2"], 1000, 1000, starter=True, best_in=1000),   # near-duplicate
+        _entry(2, ["z"], ["b1"], 1000, 1000, starter=True, best_in=1000),          # repeat acquisition
+        _entry(3, ["y"], ["c1"], 1000, 1000, starter=True, best_in=1000, partner="Q"),
+    ]
+    g = bench.guardrails(entries, _snapshot())
+    assert g["near_duplicates"] == 1
+    assert g["acquisition_repeats"] == 2
+    assert g["pass"]["near_duplicates"] is False
 
 
 def test_guardrails_top_window_only():
@@ -171,8 +189,8 @@ def _stub_engine(*, repeat, seen=None):
         partner = snapshot.teams[partner_id]
         entries = []
         for i in range(30):
-            give = (viewer.asset_ids[0] if repeat and i < 4 else viewer.asset_ids[i],)
-            entries.append(_entry(i, give, (partner.asset_ids[i],), 1000, 1000,
+            receive = (partner.asset_ids[0] if repeat and i < 4 else partner.asset_ids[i],)
+            entries.append(_entry(i, (viewer.asset_ids[i],), receive, 1000, 1000,
                                   starter=True, best_in=1000, partner=partner_id))
         return PipelineResult(entries, CoreDiagnostics(partners=1, fair=30), 5)
     return engine
@@ -198,7 +216,7 @@ def test_run_verdict_with_stub_engine(vc_stubs):
     frozen = _tiny_frozen()
     dirty = bench.run(frozen, variants={"default": {}}, engine=_stub_engine(repeat=True))
     v = dirty["variants"]["default"]
-    assert v["worst_seat_appearances"] == 4
+    assert v["worst_seat_acquired_appearances"] == 4
     assert v["pass"]["appearances"] is False
     assert v["verdict"] == "FAIL"
 
@@ -209,7 +227,7 @@ def test_run_verdict_with_stub_engine(vc_stubs):
     v = clean["variants"]["tight"]
     assert v["verdict"] == "PASS"
     assert (v["cards"], v["insult_rate"], v["real_piece_back_share"],
-            v["median_value_given"], v["worst_seat_appearances"]) == (60, 0.0, 1.0, 0.0, 1)
+            v["median_value_given"], v["worst_seat_acquired_appearances"]) == (60, 0.0, 1.0, 0.0, 1)
     assert [s["team"] for s in v["seats"]] == ["Team A", "Team B"]
     assert all(s["core"]["fair"] == 30 and s["pool"] == 30 for s in v["seats"])
     assert {r.viewer_team_id for r, _, _ in seen} == {"user_a", "user_b"}

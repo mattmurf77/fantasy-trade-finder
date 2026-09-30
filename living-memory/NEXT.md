@@ -53,7 +53,7 @@
 
 Built on `feat/value-core-engine` ([D-195](DECISIONS.md), [plan folder](../docs/plans/value-core-engine/)); flag `trade.value_core` off.
 
-1. **Operator decisions before any flag flip** — PRD Q1–Q6 (no-fallback on error, likes-you/standing offers excluded, intents stay legacy, window inputs), the scope §3 structural-guard waiver, and the two findings from integration: the per-asset guardrail should count headliners or allow 4 (the ≤3-appearances cap is infeasible for most seats), and what to do about real trades sitting far outside the ±10% band (recall baseline). *Why now:* nothing ships until these are answered.
+1. **Operator decisions before any flag flip** — PRD Q1–Q6 (no-fallback on error, likes-you/standing offers excluded, intents stay legacy, window inputs), the scope §3 structural-guard waiver, and what to do about real trades sitting far outside the ±10% band (recall baseline). (The per-asset guardrail question is settled: operator prioritized partner/acquisition variety, so the guardrail counts acquired assets and the deck drops near-duplicates.) *Why now:* nothing ships until these are answered.
 2. **Push the branch, get exact-head CI green on Python 3.12** (local runs are 3.14). *Why now:* CI is the pre-ship gate.
 3. **Freeze the five bench leagues and run the bench + blind-grade export** (`python3 -m backend.eval.value_core_bench freeze …`, prod read-only; runbook § Value-core bench). *Why now:* the plan's Gate 1/Gate 2 need the operator's blind grades against today's engine.
 

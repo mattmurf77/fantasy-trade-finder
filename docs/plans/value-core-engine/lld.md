@@ -68,7 +68,7 @@ All dataclasses live in `backend/value_core/types.py`, written verbatim from [sp
 | `vc_w_outlook` | 1.0 | ≥ 0 | `RankConfig.w_outlook` | Weight of the outlook score |
 | `vc_w_rank` | 1.0 | ≥ 0 | `RankConfig.w_rank` | Weight of the rank score. If all three weights are 0, they become (1, 1, 1). |
 | `vc_repeat_penalty` | 0.15 | [0.0, 1.0] | `RankConfig.repeat_penalty` | Priority points subtracted per prior appearance of the card's most-shown asset. Partner repeats cost half. |
-| `vc_player_cap` | 3 | int [1, 30] | `RankConfig.player_cap` | Max cards any one asset may appear in within the first `TOP_WINDOW` (30) |
+| `vc_player_cap` | 3 | int [1, 30] | `RankConfig.player_cap` | Max cards any one asset, on either side, may appear in within the first `TOP_WINDOW` (30). The bench guardrail (§8.2) counts acquired assets only. |
 | `vc_standings_weight` | 0.30 | [0.0, 1.0] | `windows.infer_windows(standings_weight=)` | Full weight of the points-for index in the window score; ramps linearly from week 0 to week 8 |
 | `vc_testers_only` | 1.0 | ≥ 1 means on | `server._value_core_live` | 1 = serve only the tester allowlist while the flag is on |
 
@@ -81,7 +81,7 @@ All dataclasses live in `backend/value_core/types.py`, written verbatim from [sp
 **Code constants.** Not knobs; each is named in its module:
 - `core.py`: `TIME_BUDGET_S = 8.0`, `MAX_CHECKS_PER_PARTNER = 40_000`, `MAX_PACKAGE_SIZE = 3`, `PREMIUM_EXPONENT = 2.0`, `RATIO_TOL = 1e-9`
 - `ranking.py`: `DELTA_SATURATION = math.log(1.25)`, `RANK_GAP_SATURATION = 0.30`, `SIDE_THRESHOLD = 0.60`, `FAIR_PCT = 3`, `RANK_SPOTS_MIN = 5`, `YOUTH_WEIGHTS`
-- `deck.py`: `PARTNER_PENALTY_FACTOR = 0.5`
+- `deck.py`: `PARTNER_PENALTY_FACTOR = 0.5`, `PICK_IDEA = "PICK"`
 - `windows.py`: `STANDINGS_RAMP_WEEKS = 8`
 - `adapter.py`: `DEFAULT_LINEUP`
 
@@ -405,40 +405,66 @@ The order is fixed: value, then outlook, then rank. The piece line only fills a 
 
 ```python
 PARTNER_PENALTY_FACTOR = 0.5
+PICK_IDEA = "PICK"
 
+
+def idea_key(trade: FairTrade, snapshot: LeagueSnapshot) -> tuple[str, str, str]:
+    """(partner, give headliner, receive headliner), picks collapsed to "PICK". Trades that
+    share it differ only in minor pieces or pick years: the same trade idea."""
+
+def acquisition_key(trade: FairTrade, snapshot: LeagueSnapshot) -> tuple[str, str]:
+    """(partner, acquired headliner), picks collapsed to "PICK"."""
+
+def partner_cap(n_partners: int) -> int:
+    """Most cards one partner may take in the first TOP_WINDOW: a fair share plus one,
+    never below 2. 11 partners -> 4; 5 -> 7; 1 -> 31 (no effect)."""
+    return max(2, ceil(TOP_WINDOW / max(1, n_partners)) + 1)
 
 def assemble_deck(scored: Sequence[ScoredTrade], cfg: RankConfig, *,
                   snapshot: LeagueSnapshot, request: Request) -> list[DeckEntry]:
-    """Order ALL scored trades (nothing dropped). Greedy by effective priority:
+    """Order the scored trades, one card per trade idea (lower-priority versions of an idea
+    are dropped). Greedy by (acquisition round, effective priority):
         effective = priority - cfg.repeat_penalty * max(shown[a] for a in give+receive)
                              - PARTNER_PENALTY_FACTOR * cfg.repeat_penalty * shown_partner[partner]
-    Hard cap: while position < TOP_WINDOW, a card containing any asset with
-    shown[a] >= cfg.player_cap is ineligible (deferred). Deferred cards re-enter when
-    position reaches TOP_WINDOW, or earlier if nothing eligible remains (cap relaxed for
+    While position < TOP_WINDOW a card is deferred if any of its assets has
+    shown[a] >= cfg.player_cap or its partner has partner_cap(n) cards. Deferred cards
+    re-enter at position TOP_WINDOW, or earlier if nothing eligible remains (caps relaxed for
     that position only). DeckEntry.reasons = ranking.card_reasons(...)."""
 ```
 
-**Algorithm: lazy greedy.** It is exact because effective scores only fall as the `shown` counters grow.
+A headliner is the first asset on a side (each side is sorted by market, descending). An asset whose `kind` is `"pick"` counts as `PICK_IDEA` in both keys, whatever its year or round.
+
+**Variety rules (operator request, 2026-09-30:** *"I don't want to see the same iteration of a trade with a trade partner with only minor pieces swapped out... or the same trade partner with different years' draft picks"*). Three rules, applied before and during the greedy order:
+1. **One card per trade idea.** Trades that share an `idea_key` are one idea. Only the highest-priority version is kept (ties broken by trade key); the other versions are dropped from the deck. This is the only place the ranking layer removes a trade.
+2. **Acquisitions in rounds.** A card's round is how many earlier cards share its `acquisition_key`. The greedy key is (round, −effective, trade key), so every acquisition is shown once before any is shown a second time.
+3. **Caps in the first 30.** A partner may take at most `partner_cap(n)` of the first `TOP_WINDOW` cards, where `n` is the number of partners among the kept ideas, and no asset may appear in more than `cfg.player_cap` of them. A card that breaks either cap is deferred. The caps relax for one position only when nothing eligible is left.
+
+The repeat penalty (`vc_repeat_penalty`, partner at half rate) is unchanged and orders cards within a round.
+
+**Algorithm: lazy greedy.** It is exact because a card's (round, −effective) key only grows as cards are shown: the round counters and the `shown` counters only rise.
 ```
-heap = [(-priority, key, i)]                      # key = (partner, give, receive) for determinism
+ideas = best version per idea_key                 # by (-priority, key); the rest are dropped
+entry(i) = (shown_acq[acq(i)], -eff(i), key(i), i)  # key = (partner, give, receive) for determinism
+heap = [(0, -priority, key, i)]
 deferred = []
 while heap or deferred:
     if not heap:                                  # only capped cards left before position 30
-        heap = [(-eff(i), key(i), i) for i in deferred]; heapify; deferred = []; relax_once = True
-    _, _, i = heappop(heap)
+        heap = [entry(i) for i in deferred]; heapify; deferred = []; relax_once = True
+    i = heappop(heap)[3]
     pos = len(out)
-    if pos < TOP_WINDOW and not relax_once and any(shown[a] >= cap for a in assets(i)):
+    if pos < TOP_WINDOW and not relax_once and capped(i):   # partner cap or any asset cap
         deferred.append(i); continue
-    e = eff(i)
-    if heap and e < -heap[0][0] - 1e-12:          # stale bound: re-queue with the fresh value
-        heappush(heap, (-e, key(i), i)); continue
-    out.append(DeckEntry(pos, scored[i], round(e, 6), card_reasons(...)))
-    shown[a] += 1 for a in assets(i); shown_partner[partner(i)] += 1; relax_once = False
+    fresh = entry(i)
+    if heap and fresh[:3] > heap[0][:3]:          # stale bound: re-queue with the fresh key
+        heappush(heap, fresh); continue
+    out.append(DeckEntry(pos, ideas[i], round(-fresh[1], 6), card_reasons(...)))
+    shown[a] += 1 for a in assets(i); shown_partner[partner(i)] += 1
+    shown_acq[acq(i)] += 1; relax_once = False
     if len(out) == TOP_WINDOW and deferred:
-        for j in deferred: heappush(heap, (-eff(j), key(j), j)); deferred = []
+        for j in deferred: heappush(heap, entry(j)); deferred = []
 ```
 
-**Complexity.** O(P log P · r), where r is the average number of re-queues, which is small because penalties are bounded. A property test compares the result against an O(P²) naive greedy (WP2).
+**Complexity.** O(P log P · r), where r is the average number of re-queues, which is small because penalties are bounded. A property test compares the result against an O(P²) naive greedy that implements all three rules (WP2).
 
 ---
 
@@ -646,10 +672,14 @@ def main(argv: Sequence[str] | None = None) -> int
 - `insult_rate` = the share of entries with `(r − g)/r > 0.20`.
 - `real_piece_back_share` = the share with `detail.value.best_in_starter` or `best_in_market ≥ snapshot.first_round_value`.
 - `median_value_given` = the median of `(r − g)/g`.
-- `max_asset_appearances` is taken from a Counter over every asset id; `most_repeated_asset` is reported alongside it.
+- `max_acquired_appearances` is taken from a Counter over the **acquired** (received) asset ids; `most_acquired_asset` is reported alongside it. This is the appearances guardrail (≤ `max_appearances`, 3).
+- `max_asset_appearances` counts every asset id, both sides, with `most_repeated_asset` alongside. It is reported, not a guardrail: giving the same asset in several cards is expected.
+- `near_duplicates` = the cards that repeat an earlier card's trade idea (§5.6 `idea_key`): the sum over ideas of (count − 1). A guardrail: it must be 0.
+- `acquisition_repeats` = the same sum over `acquisition_key`. Reported, not a guardrail.
+- `max_partner_cards` = the most cards any one partner has. Reported.
 - `partners` = the number of distinct partners.
 - `cards` = the entries evaluated.
-- `pass` = `{insult, real_piece, median_given, appearances}` booleans against `TARGETS`.
+- `pass` = `{insult, real_piece, median_given, appearances, near_duplicates}` booleans against `TARGETS` (`near_duplicates` passes at exactly 0).
 
 **`run`.**
 - For each variant, the overrides are `{"core": {...}, "rank": {...}, "standings_weight": x}` on top of the defaults.
@@ -658,8 +688,8 @@ def main(argv: Sequence[str] | None = None) -> int
   2. Run `engine(...)`, which defaults to `pipeline.run`.
   3. Compute the guardrails.
 - The returned summary has three parts:
-  - **Pooled per variant:** the pooled rates over all first-30 cards, and `worst_seat_appearances`.
-  - **`verdict`:** `PASS` iff the pooled insult rate < 0.03, the pooled real-piece share ≥ 0.70, the pooled median ≥ −0.10, and every seat with at least 1 card has appearances ≤ 3.
+  - **Pooled per variant:** the pooled rates over all first-30 cards, plus the worst seat's numbers: `worst_seat_acquired_appearances`, `worst_seat_near_duplicates` and `worst_seat_acquisition_repeats` (each the maximum over seats with at least 1 card).
+  - **`verdict`:** `PASS` iff the pooled insult rate < 0.03, the pooled real-piece share ≥ 0.70, the pooled median ≥ −0.10, and every seat with at least 1 card has acquired-asset appearances ≤ 3 and 0 near-duplicates.
   - **Per seat:** league name, team name, pass flags and core diagnostics.
 
 **CLI.**
@@ -670,7 +700,7 @@ python -m backend.eval.value_core_bench run --frozen PRIVATE.json --output NEW_D
 `run` writes into `NEW_DIR`, which must not already exist, and writes every file with mode 0600:
 - `results.json`;
 - `cards-<variant>.json`, which is a blind-grade card set (§8.4) of the first 30 cards per seat;
-- a markdown table printed to stdout: per variant, the four pooled numbers, the worst-seat appearances and the verdict.
+- a markdown table printed to stdout: per variant, the card count, the three pooled rates, the worst-seat acquired-asset appearances, near-duplicates and repeat acquisitions, and the verdict.
 
 ### 8.3 Real-trade recall: `backend/eval/value_core_recall.py`
 

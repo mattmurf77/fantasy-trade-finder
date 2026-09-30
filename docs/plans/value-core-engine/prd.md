@@ -31,11 +31,11 @@ The old engines stay in the code, one switch away, until the new one beats them 
    - Untouchables move only for an above-market return.
    - No junk filler, using the operator's two floors: a rosterable absolute floor and a percentage of the headliner.
 3. **G3 — Ranking that is three numbers.** The priority of a card is w_value·value + w_outlook·outlook + w_rank·rankings. The weights start equal. The whole ranking layer is 5 settings.
-4. **G4 — A varied deck.** No player appears in more than 3 of the first 30 cards. Nothing is filtered at the ranking layer: weak trades sink, they don't vanish.
+4. **G4 — A varied deck.** One card per trade idea: versions of a trade with the same partner and the same headliners, where only minor pieces or pick years differ, collapse to the best one. Every acquisition is shown once before any is shown twice. In the first 30 cards no partner takes more than its share and no player appears more than 3 times. Nothing else is filtered at the ranking layer: weak trades sink, they don't vanish.
 5. **G5 — Every card says why.** The card reasons come from the three scores, e.g. "Fair on value · Fits their rebuild · You rank Chase 12 spots above market".
 6. **G6 — A measuring stick before any rollout.**
    - A frozen bench of the operator's connected leagues.
-   - Four automatic guardrails.
+   - Five automatic guardrails.
    - A real-trade recall check.
    - A blind-grade export and import.
 7. **G7 — Reversible.** A default-off flag, tester-only first, no client release, no schema change.
@@ -56,7 +56,7 @@ The old engines stay in the code, one switch away, until the new one beats them 
 
 ## 5. User-visible behavior (flag on, user in the tester allowlist)
 
-- **The deck opens with cards from many different partners and players.** No single player appears more than 3 times in the first 30. The partner is pushed down too, at half the player rate.
+- **The deck opens with cards from many different partners and players.** No trade idea repeats with only minor pieces or pick years swapped, and no acquisition is shown twice until every other one has been shown once. In the first 30, no single player appears more than 3 times and no partner takes more than its share (4 of 30 in a 12-team league). A repeated partner is pushed down too, at half the player rate.
 - **Every card is fair on consensus value.** The adjusted ratio sits within ±10% by default. When one side gets the single best asset with fewer pieces, the other side must add a premium. That premium is up to 15% for an elite asset and near zero for mid-tier ones, which matches the operator's "tier-1 commands a huge premium, mid-tier barely any" (`docs/plans/trade-logic-interview-2026-07-17.md`).
 - **Cards that bring back a real piece rise.** A real piece is a player who would start in your lineup, or a 1st-round-value asset. Bench swaps sink.
 - **Cards that fit both teams' windows rise.**
@@ -83,7 +83,10 @@ The old engines stay in the code, one switch away, until the new one beats them 
 | Insult rate | share of cards where the other side loses more than 20% of raw market value: (get − give)/get > 0.20 | **< 3%** |
 | Real-piece-back share | share of cards whose best incoming asset starts in the viewer's post-trade lineup or is worth ≥ the first_1 tier floor (Late 1st, about 1,492 value) | **≥ 70%** |
 | Median value given | median of (get − give)/give | **≥ −10%** |
-| Max appearances | most cards any one asset appears in | **≤ 3** on every seat |
+| Max acquired appearances | most cards any one acquired (received) asset appears in | **≤ 3** on every seat |
+| Near-duplicates | cards that repeat an earlier card's trade idea (same partner and headliners; minor pieces or pick years differ) | **0** on every seat |
+
+The bench also reports, without gating on them, repeat acquisitions (the same headliner, or a pick, from the same partner), the most cards from one partner, and the most cards any asset appears in on either side.
 
 **Blind grade.**
 - The operator grades 40 shuffled cards per engine variant, with the source hidden: "would I send this?" on a 1–5 scale, with optional reason tags.

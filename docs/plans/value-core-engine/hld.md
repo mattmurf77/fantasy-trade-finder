@@ -14,7 +14,7 @@ POST /api/trades/generate     │                                               
   → _run_trade_job ───────────┼─▶ ones (band + stud premium), hard rules → unranked pool of FairTrade        │
       prelude (unchanged)     │  windows.py    each team's window: infer_team_outlook + points-for term (ramped)       │
       ─ capture ctx           │  ranking.py    value / outlook / rank scores in [0,1] → priority; card reasons          │
-      ─ boards, prefs,        │  deck.py       greedy order with repeat penalty; ≤3 per asset in first 30               │
+      ─ boards, prefs,        │  deck.py       one card per trade idea; acquisitions in rounds; partner/asset caps     │
         untouchables          │  pipeline.py   core → ranking → deck (one call)                                        │
       ─ owned-pick injection  │  adapter.py    app objects → LeagueSnapshot/Request; DeckEntry → TradeCard + evidence  │
       ─ ★ value-core branch ──┼─▶ (only module that imports app code; never imports server.py)                    │
@@ -22,12 +22,12 @@ POST /api/trades/generate     │                                               
       legacy stack (untouched when branch not taken)
 
 backend/eval/ (new files, operator tooling, not wired to the server)
-  value_core_bench.py   freeze bench leagues (prod read-only + Sleeper public) · run variants · 4 guardrails
+  value_core_bench.py   freeze bench leagues (prod read-only + Sleeper public) · run variants · 5 guardrails
   value_core_recall.py  historical-trade recall + fairness-band calibration from committed fixtures
   blind_grade.py        40-per-variant shuffled grade sheet · importer · served-deck card sets
 ```
 
-**Two cleanly separated jobs.** `core.py` sees only consensus market values, rosters, roster rules, untouchables and pins. It knows nothing about the viewer's board or anyone's window. `ranking.py` and `deck.py` never drop a trade: they only order what the core admitted.
+**Two cleanly separated jobs.** `core.py` sees only consensus market values, rosters, roster rules, untouchables and pins. It knows nothing about the viewer's board or anyone's window. `ranking.py` never drops a trade. `deck.py` orders what the core admitted and drops only the lower-priority versions of a trade idea (same partner and headliners, only minor pieces or pick years differ).
 
 ## 2. Request → card data flow
 
@@ -79,7 +79,7 @@ backend/eval/ (new files, operator tooling, not wired to the server)
 | Lineup math | `_starter_impact` (`server.py:1195`), which is server-bound | **Reused:** `power_rankings.optimal_starters` / `optimal_starter_slots` (`power_rankings.py:99`, `:120`). These are the pure greedy lineup fill `_starter_impact`'s callers rely on; importing server-bound code is not feasible. |
 | Windows | `infer_team_outlook` (`trade_service.py:3999`), age plus picks | **Reused,** plus a points-for term with a week ramp (the operator's standings decision). Declared outlooks win. |
 | Board shrink | `_shrink_user_elo` (`trade_service.py:1878`) | **Reused as is:** n/(n+4) plus the D-085 placement clamp |
-| Ordering | Thompson, diversity, fatigue, taste, value model, first session, presentment, policy order | **Replaced** by the 3-weight priority and a greedy repeat-penalty assembly |
+| Ordering | Thompson, diversity, fatigue, taste, value model, first session, presentment, policy order | **Replaced** by the 3-weight priority and a greedy assembly: one card per trade idea, acquisitions in rounds, repeat penalty, partner and asset caps in the first 30 |
 | Card payload | `TradeCard` → `trade_card_to_dict` | **Reused,** additive only; no client change |
 | Impressions | `deck_impressions` with arm/policy columns | **Reused.** The evidence goes into `valuation_json`, following the owner-row convention at `server.py:5496-5535` |
 
@@ -130,7 +130,7 @@ backend/eval/ (new files, operator tooling, not wired to the server)
   - Tables read: `leagues`, `league_members`, `draft_picks`, `member_rankings`, `players`, `player_value_history`.
   - Sleeper public API: lineup slots, capacity and standings (parsed by the reused `SleeperLeagueState`).
   - Output is one private (0600) JSON of every bench league.
-- **Run.** For every league and every seat, build the snapshot and request, then run the pipeline. Compute the 4 guardrails on the first 30 cards, and write a card set per variant for blind grading.
+- **Run.** For every league and every seat, build the snapshot and request, then run the pipeline. Compute the 5 guardrails on the first 30 cards, and write a card set per variant for blind grading.
 - **Recall.** Historical in-season trades from the committed Sleeper fixtures:
   - weekly rosters from `outlook-calibration/*.json`;
   - trades from `outlook-hypotheses/*.json`;

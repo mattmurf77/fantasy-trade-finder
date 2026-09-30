@@ -42,9 +42,13 @@ rebuild the suggestion engine rather than keep tuning the stack.
    window.
 2. **A separate three-weight ranking.** Every fair trade gets a value, an outlook
    and a rank score in [0, 1]. Priority is their weighted mean, equal weights by
-   default: five ranking knobs in all. A greedy assembly with a repeat penalty
-   keeps any asset to 3 of the first 30 cards. The ranking orders and never
-   drops a trade. Card reasons come from the three scores.
+   default: five ranking knobs in all. The ranking orders and never drops a
+   trade. A greedy deck assembly keeps one card per trade idea (versions with
+   the same partner and headliners, differing only in minor pieces or pick
+   years, collapse to the best one), shows every acquisition once before any
+   repeats, and caps each partner at its share and each asset at 3 of the
+   first 30 cards, with a repeat penalty ordering the rest. Card reasons come
+   from the three scores.
 3. **One branch point that bypasses the legacy stack.** `_run_trade_job` keeps
    its prelude, then hands eligible jobs to the value core and returns. For
    those jobs no legacy gate, arm or ordering layer runs, so no deck mixes the
@@ -55,7 +59,7 @@ rebuild the suggestion engine rather than keep tuning the stack.
    single-source.
 5. **A flag plus a tester lever.** `trade.value_core` defaults off. While it is
    on, `vc_testers_only` (default 1) limits serving to the tester allowlist. The
-   engine earns wider serving on a fixed bench — four guardrails, real-trade
+   engine earns wider serving on a fixed bench — five guardrails, real-trade
    recall and the operator's blind grade — before `vc_testers_only` goes to 0.
 
 Each served card's evidence (scores, weights, windows, market, per-asset values)

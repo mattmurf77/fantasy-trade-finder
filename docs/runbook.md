@@ -440,16 +440,17 @@ python -m backend.eval.value_core_bench run --frozen <PRIVATE>.json --output <NE
   [--variant NAME=overrides.json ...] [--seats all|boarded]
 ```
 
-A variant file holds `{"core": {...}, "rank": {...}, "standings_weight": x}` overrides on top of the defaults. For every league and seat the tool runs the pipeline and computes the guardrails on the first 30 cards. It writes `results.json` and one `cards-<variant>.json` blind-grade card set per variant, then prints one line per variant: the four pooled numbers, the worst-seat appearances and the verdict.
+A variant file holds `{"core": {...}, "rank": {...}, "standings_weight": x}` overrides on top of the defaults. For every league and seat the tool runs the pipeline and computes the guardrails on the first 30 cards. It writes `results.json` and one `cards-<variant>.json` blind-grade card set per variant, then prints a markdown table with one row per variant (the card count, the three pooled rates, the worst seat's acquired-asset appearances, near-duplicates and repeat acquisitions, and the verdict), followed by one `verdict <variant>: PASS|FAIL` line per variant.
 
 | Guardrail | Definition | Target |
 |---|---|---|
 | Insult rate | share of cards where the other side loses more than 20% of the raw market value it gives up | < 3%, pooled |
 | Real-piece-back share | best incoming asset starts in the viewer's post-trade lineup or is worth at least a Late 1st | ≥ 70%, pooled |
 | Median value given | median of (get − give) ÷ give | ≥ −10%, pooled |
-| Max appearances | most cards any one asset appears in, first 30 | ≤ 3 on every seat with a card |
+| Max acquired appearances | most cards any one acquired (received) asset appears in, first 30 | ≤ 3 on every seat with a card |
+| Near-duplicates | first-30 cards that repeat an earlier card's trade idea (same partner and headliners; only minor pieces or pick years differ) | 0 on every seat with a card |
 
-`PASS` needs all four. On a `FAIL`, tune in a new variant file and re-run; do not move a live `vc_*` knob to try a variant. Per-seat rows in `results.json` carry the pass flags and the core diagnostics (`truncated_partners`, `budget_exhausted`, reject counts per rule), which show which rule or cap is responsible.
+`PASS` needs all five. Repeat acquisitions (the same headliner, or a pick, from the same partner), `max_partner_cards` and `max_asset_appearances` (both sides) are reported per seat but not gated. On a `FAIL`, tune in a new variant file and re-run; do not move a live `vc_*` knob to try a variant. Per-seat rows in `results.json` carry the pass flags and the core diagnostics (`truncated_partners`, `budget_exhausted`, reject counts per rule), which show which rule or cap is responsible.
 
 **3. Real-trade recall** (committed fixtures, no network):
 

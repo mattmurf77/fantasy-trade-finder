@@ -7,11 +7,12 @@ competitors". Stop patching v2/v3/owner/bilateral (~315 knobs, ~15 stacked gates
 uncorrelated with likes, D-180). New `backend/value_core/`: the core enumerates 1–3 × 1–3 packages and keeps
 only those inside a consensus fairness band (stud premium on consolidation; hard rules: legal rosters,
 untouchables above market, no filler, no reducible pieces). The ranking layer scores each fair trade on value,
-outlook (both teams' windows) and the viewer's rankings; priority is their weighted mean; the deck caps any
-asset at 3 of the first 30. Behind `trade.value_core` (default off) with a testers-only lever and no silent
-fallback; the legacy engine stays one switch away until the new one beats it on the bench (blind grades +
-guardrails + real-trade recall). Flag-on decks supersede the D-193 ordering. Supersedes the 2026-09-29 in-place
-plan's fix order (`docs/plans/trade-suggestion-quality/plan.md`); its bench leagues and prod-read authorization carry over.
+outlook (both teams' windows) and the viewer's rankings; priority is their weighted mean; the deck keeps one
+card per trade idea, rounds acquisitions, and caps partners (and any asset at 3) in the first 30. Behind
+`trade.value_core` (default off) with a testers-only lever and no silent fallback; the legacy engine stays one
+switch away until the new one beats it on the bench (blind grades + guardrails + real-trade recall). Flag-on
+decks supersede the D-193 ordering. Supersedes the 2026-09-29 in-place plan's fix order
+(`docs/plans/trade-suggestion-quality/plan.md`); its bench leagues and prod-read authorization carry over.
 [Plan folder](../docs/plans/value-core-engine/), [ADR-024](../docs/adr/adr-024-value-core-engine.md).
 
 ## D-194 — Full prepared-inventory semantics are validated at seal, each publishing batch is revalidated
