@@ -354,7 +354,7 @@ Scope block: [value-core-engine/scope.md](plans/value-core-engine/scope.md) · [
 
 **Cache identity.** While ON, `_trade_safety_signature` carries a `("value_core", True)` entry; while OFF the entry is filtered out. A flip therefore makes every cached or running job of the other engine stale, and the next generate runs the engine the flag now selects. A `vc_*` knob change alters the request signature (it hashes the whole config), so the next generate is fresh too. The owner experiment's request hash ignores `vc_*` keys, so seeding or tuning them never reshuffles owner assignment units.
 
-**No silent fallback.** An exception inside a value-core job fails that job (`status: "error"`); the client shows its existing error state and a retry regenerates. The two engines never mix in one deck.
+**Logged fallback.** If building a value-core deck throws before anything is served, the server logs `value-core: deck build failed … falling back to the legacy engine` and finishes that job with the legacy engine. The two engines never mix in one deck: nothing is stored or logged before the fallback point.
 
 **Rollback**, bluntest first:
 1. **Stop it:** `trade.value_core` → `false` (a `config/features.json` change, or an `FTF_FLAGS` override), then `POST /api/feature-flags/reload`. The next `/api/trades/generate` runs the legacy engine.

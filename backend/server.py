@@ -7480,52 +7480,59 @@ def _run_value_core_job(*, job_id, ctx, service, trade_service, g_user_id, g_lea
                         untouchable_ids, not_interested_ids, explicit_outlook, opponent_outlooks,
                         real_user_ids, outlook_value, pinned_give, pinned_give_mode,
                         pinned_receive, opponent_user_id, fairness_threshold, job_draft_picks):
-    """Serve one value-core deck and finish the job. Exceptions propagate to
-    _run_trade_job's outer handler (job -> error). No legacy fallback (PRD Q1)."""
-    from .value_core import adapter as vc_adapter, pipeline as vc_pipeline, windows as vc_windows
-    started = time.monotonic()
-    league_id, fmt, viewer = ctx.league_id, ctx.scoring_format, str(ctx.league_user_id)
-    cfg = dict(_trade_service_mod._cfg)
-    core_cfg, rank_cfg = vc_adapter.core_config_from(cfg), vc_adapter.rank_config_from(cfg)
-    opponents = [m for m in g_league.members if m.user_id not in {g_user_id, ctx.league_user_id}]
-    platform = getattr(g_league, "platform", None)
-    standings, completed_weeks = _value_core_standings(league_id, platform)
+    """Serve one value-core deck and finish the job; return True. If building the deck
+    fails before anything is served, log it and return False so _run_trade_job falls back
+    to the legacy engine for this job (PRD Q1, operator 2026-10-01). No side effects precede
+    the fallback point."""
     try:
-        slots = _league_lineup_slots(league_id)
-    except Exception:
-        slots = None
-    try:
-        max_players = _sleeper_roster_limit(league_id) if (platform or "sleeper") == "sleeper" else None
-    except Exception:
-        max_players = None
-    totals, grand = {}, 0.0
-    for pk in job_draft_picks():
-        owner, pv = pk.get("owner_user_id"), pk.get("pick_value") or 0.0
-        if owner:
-            totals[str(owner)] = totals.get(str(owner), 0.0) + pv
-        grand += pv
-    pick_shares = {u: t / grand for u, t in totals.items()} if grand > 0 else {}
-    rosters = {viewer: list(g_user_roster), **{str(m.user_id): list(m.roster) for m in opponents}}
-    declared = {viewer: explicit_outlook, **{str(k): v for k, v in (opponent_outlooks or {}).items()}}
-    windows = vc_windows.infer_windows(
-        team_rosters=rosters, players=players_dict, pick_shares=pick_shares, standings=standings,
-        completed_weeks=completed_weeks, declared=declared,
-        standings_weight=vc_adapter.standings_weight_from(cfg))
-    viewer_name = next((m.username for m in g_league.members if m.user_id == ctx.league_user_id), "You")
-    snapshot = vc_adapter.build_snapshot(
-        league_id=league_id, scoring_format=fmt, viewer_team_id=viewer, viewer_name=viewer_name,
-        viewer_roster=g_user_roster, opponents=opponents, players=players_dict, seed_elo=seed_map,
-        lineup_slots=slots, max_players=max_players, windows=windows)
-    request = vc_adapter.build_request(
-        snapshot=snapshot, user_elo=elo_map_rt, seed_elo=seed_map, confidence=confidence_counts,
-        placements=placement_bands, untouchable_ids=untouchable_ids,
-        not_interested_ids=not_interested_ids, pinned_give=pinned_give or (),
-        pinned_give_mode=pinned_give_mode, pinned_receive=pinned_receive or (),
-        partner_team_id=opponent_user_id, fairness_threshold=fairness_threshold)
-    result = vc_pipeline.run(snapshot, request, core_cfg, rank_cfg)
-    cards, evidence = vc_adapter.to_trade_cards(
-        result, snapshot, request, league_id=league_id, proposing_user_id=g_user_id,
-        core_cfg=core_cfg, rank_cfg=rank_cfg)
+        from .value_core import adapter as vc_adapter, pipeline as vc_pipeline, windows as vc_windows
+        started = time.monotonic()
+        league_id, fmt, viewer = ctx.league_id, ctx.scoring_format, str(ctx.league_user_id)
+        cfg = dict(_trade_service_mod._cfg)
+        core_cfg, rank_cfg = vc_adapter.core_config_from(cfg), vc_adapter.rank_config_from(cfg)
+        opponents = [m for m in g_league.members if m.user_id not in {g_user_id, ctx.league_user_id}]
+        platform = getattr(g_league, "platform", None)
+        standings, completed_weeks = _value_core_standings(league_id, platform)
+        try:
+            slots = _league_lineup_slots(league_id)
+        except Exception:
+            slots = None
+        try:
+            max_players = _sleeper_roster_limit(league_id) if (platform or "sleeper") == "sleeper" else None
+        except Exception:
+            max_players = None
+        totals, grand = {}, 0.0
+        for pk in job_draft_picks():
+            owner, pv = pk.get("owner_user_id"), pk.get("pick_value") or 0.0
+            if owner:
+                totals[str(owner)] = totals.get(str(owner), 0.0) + pv
+            grand += pv
+        pick_shares = {u: t / grand for u, t in totals.items()} if grand > 0 else {}
+        rosters = {viewer: list(g_user_roster), **{str(m.user_id): list(m.roster) for m in opponents}}
+        declared = {viewer: explicit_outlook, **{str(k): v for k, v in (opponent_outlooks or {}).items()}}
+        windows = vc_windows.infer_windows(
+            team_rosters=rosters, players=players_dict, pick_shares=pick_shares, standings=standings,
+            completed_weeks=completed_weeks, declared=declared,
+            standings_weight=vc_adapter.standings_weight_from(cfg))
+        viewer_name = next((m.username for m in g_league.members if m.user_id == ctx.league_user_id), "You")
+        snapshot = vc_adapter.build_snapshot(
+            league_id=league_id, scoring_format=fmt, viewer_team_id=viewer, viewer_name=viewer_name,
+            viewer_roster=g_user_roster, opponents=opponents, players=players_dict, seed_elo=seed_map,
+            lineup_slots=slots, max_players=max_players, windows=windows)
+        request = vc_adapter.build_request(
+            snapshot=snapshot, user_elo=elo_map_rt, seed_elo=seed_map, confidence=confidence_counts,
+            placements=placement_bands, untouchable_ids=untouchable_ids,
+            not_interested_ids=not_interested_ids, pinned_give=pinned_give or (),
+            pinned_give_mode=pinned_give_mode, pinned_receive=pinned_receive or (),
+            partner_team_id=opponent_user_id, fairness_threshold=fairness_threshold)
+        result = vc_pipeline.run(snapshot, request, core_cfg, rank_cfg)
+        cards, evidence = vc_adapter.to_trade_cards(
+            result, snapshot, request, league_id=league_id, proposing_user_id=g_user_id,
+            core_cfg=core_cfg, rank_cfg=rank_cfg)
+    except Exception as vc_err:
+        log.exception("value-core: deck build failed for job %s; falling back to the legacy engine: %s",
+                      job_id, vc_err)
+        return False
     for card in cards:
         trade_service._trade_cards[card.trade_id] = card
     served = _project_trade_dispositions(cards, g_user_id, league_id)
@@ -7572,7 +7579,7 @@ def _run_value_core_job(*, job_id, ctx, service, trade_service, g_user_id, g_lea
              diag.truncated_partners, diag.budget_exhausted, diag.elapsed_ms, total_ms)
     gen_ms = _finish_trade_job(job_id)
     if gen_ms is None:
-        return
+        return True
     try:
         props = {"count": len(served), "gen_ms": gen_ms, "engine_version": "value_core", "lanes": {}}
         if job_source:
@@ -7580,6 +7587,7 @@ def _run_value_core_job(*, job_id, ctx, service, trade_service, g_user_id, g_lea
         record_event(g_user_id, "trades_generated", league_id=league_id, source="api", props=props)
     except Exception as ev_err:
         log.warning("value-core: record_event(trades_generated) failed: %s", ev_err)
+    return True
 
 
 def _run_trade_job(
@@ -7928,7 +7936,7 @@ def _run_trade_job(
         if _value_core_live(league_id=league_id, user_id=g_user_id,
                             league_user_id=ctx.league_user_id,
                             trade_intent=trade_intent, preparation=preparation):
-            _run_value_core_job(
+            if _run_value_core_job(
                 job_id=job_id, ctx=ctx, service=service, trade_service=trade_service,
                 g_user_id=g_user_id, g_league=g_league, g_user_roster=g_user_roster,
                 players_dict=players_dict, seed_map=seed_map, elo_map_rt=elo_map_rt,
@@ -7938,8 +7946,9 @@ def _run_trade_job(
                 real_user_ids=real_user_ids, outlook_value=outlook_value,
                 pinned_give=pinned_give, pinned_give_mode=pinned_give_mode,
                 pinned_receive=pinned_receive, opponent_user_id=opponent_user_id,
-                fairness_threshold=fairness_threshold, job_draft_picks=_job_draft_picks)
-            return
+                fairness_threshold=fairness_threshold, job_draft_picks=_job_draft_picks):
+                return
+            # value core failed before serving anything: this job continues on the legacy engine
 
         # F7 (flag deck.exploration) — over-generate per opponent so the
         # wildcard draw has gate-passing candidates from OUTSIDE the served

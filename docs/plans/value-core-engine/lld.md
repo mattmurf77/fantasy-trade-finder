@@ -867,8 +867,10 @@ def _run_value_core_job(*, job_id, ctx, service, trade_service, g_user_id, g_lea
                         untouchable_ids, not_interested_ids, explicit_outlook, opponent_outlooks,
                         real_user_ids, outlook_value, pinned_give, pinned_give_mode,
                         pinned_receive, opponent_user_id, fairness_threshold, job_draft_picks):
-    """Serve one value-core deck and finish the job. Exceptions propagate to
-    _run_trade_job's outer handler (job -> error). No legacy fallback (PRD Q1)."""
+    """Serve one value-core deck and finish the job; return True. If building the deck
+    fails before anything is served (everything through adapter.to_trade_cards sits in
+    one try), log it and return False: _run_trade_job then finishes the same job with the
+    legacy engine (PRD Q1, operator 2026-10-01)."""
     from .value_core import adapter as vc_adapter, pipeline as vc_pipeline, windows as vc_windows
     started = time.monotonic()
     league_id, fmt, viewer = ctx.league_id, ctx.scoring_format, str(ctx.league_user_id)

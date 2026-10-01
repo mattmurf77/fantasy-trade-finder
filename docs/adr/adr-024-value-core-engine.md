@@ -54,9 +54,11 @@ rebuild the suggestion engine rather than keep tuning the stack.
    those jobs no legacy gate, arm or ordering layer runs, so no deck mixes the
    two engines. The package is a leaf that never imports `server`, and the
    server imports it lazily, so with the flag off it is never loaded.
-4. **No silent fallback.** A value-core exception fails the job visibly. The job
-   is not quietly re-served by the legacy engine, so every measurement stays
-   single-source.
+4. **A logged fallback, never a mixed deck.** If building the value-core deck
+   throws before anything is served, the error is logged and that job is finished
+   by the legacy engine (operator decision, 2026-10-01). Nothing is stored or logged
+   before that point, so a deck and its impression rows still come from exactly one
+   engine.
 5. **A flag plus a tester lever.** `trade.value_core` defaults off. While it is
    on, `vc_testers_only` (default 1) limits serving to the tester allowlist. The
    engine earns wider serving on a fixed bench — five guardrails, real-trade

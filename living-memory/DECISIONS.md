@@ -9,7 +9,8 @@ only those inside a consensus fairness band (stud premium on consolidation; hard
 untouchables above market, no filler, no reducible pieces). The ranking layer scores each fair trade on value,
 outlook (both teams' windows) and the viewer's rankings; priority is their weighted mean; the deck keeps one
 card per trade idea, rounds acquisitions, and caps partners (and any asset at 3) in the first 30. Behind
-`trade.value_core` (default off) with a testers-only lever and no silent fallback; the legacy engine stays one
+`trade.value_core` (default off) with a testers-only lever and a logged legacy fallback on build errors (operator,
+2026-10-01; a deck never mixes engines); intents and likes-you stay on the legacy engine; the legacy engine stays one
 switch away until the new one beats it on the bench (blind grades + guardrails + real-trade recall). Flag-on
 decks supersede the D-193 ordering. Supersedes the 2026-09-29 in-place plan's fix order
 (`docs/plans/trade-suggestion-quality/plan.md`); its bench leagues and prod-read authorization carry over.

@@ -154,7 +154,7 @@ When the flag is on and the job qualifies (not the demo league, no trade intent,
 3. `value_core.pipeline.run`: the core builds the fair pool; ranking scores value, outlook and rank into a priority; the deck step keeps one card per trade idea (same partner and headliners, differing only in minor pieces or pick years), shows every acquisition once before any repeats, caps partners and assets in the first 30, and orders the rest with the repeat penalty.
 4. Cards become ordinary `TradeCard`s (`vc_` ids, `basis: "consensus"`, `preserve_server_order`). Exact passes are removed, one `deck_impressions` row per card stores the evidence, the snapshot publishes, and `trades_generated` fires with `engine_version = "value_core"`.
 
-None of the legacy stack runs for that job, and a failure fails the job with no legacy fallback. With the flag off, or for any job that does not qualify, Flow C runs unchanged. [ADR-024](../docs/adr/adr-024-value-core-engine.md).
+None of the legacy stack runs for that job unless building the value-core deck throws first; then the error is logged and the same job runs Flow C. With the flag off, or for any job that does not qualify, Flow C runs unchanged. [ADR-024](../docs/adr/adr-024-value-core-engine.md).
 
 ### Flow D — Real-league trade matching
 1. Both users like mirrored trade cards (A-likes-trade-X, B-likes-same-trade-X-from-other-side).

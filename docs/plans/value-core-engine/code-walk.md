@@ -84,7 +84,7 @@ The flag-off code changes are five, and each is a no-op when the flag is off:
        Setting every key on every row keeps the `executemany` first-row-keys rule (`backend/server.py:5429-5433`). Rows are saved at `backend/server.py:5193`.
    - **Publish.** The snapshot rows are `trade_card_to_dict` plus `real_opponent`, `outlook` and `impression_id` (`:7550-7556`). Under the job lock, if the job is still live: `cards`, `final_checks_pending = False`, the opponent counters and a `value_core` diagnostics dict (`:7558-7568`). One summary `log.info` line follows (`:7569`).
    - **Finish.** `_finish_trade_job(job_id)` (`:7573`). A superseded or timed-out job returns `None` and fires no event (`:7574-7575`). Otherwise `record_event(..., "trades_generated", props={"engine_version": "value_core", ...})` fires (`:7577-7580`).
-5. **Errors.** Any exception inside the helper propagates to `_run_trade_job`'s outer handler (`backend/server.py:9176`, `:9185-9186`), and the job ends in `error`. There is no legacy fallback (PRD Q1). The only swallowed failures are standings, lineup slots and roster capacity (degrade to defaults), plus the three logging calls (non-fatal, `:7536`, `:7547`, `:7581`).
+5. **Errors (revised 2026-10-01, PRD Q1 answered).** Everything from the lazy import through `adapter.to_trade_cards` sits in one `try` in `_run_value_core_job`. An exception there is logged and the helper returns `False` before any card is stored or logged, so `_run_trade_job` continues on the legacy engine for the same job (`if _run_value_core_job(...): return`). Exceptions after that point are the non-fatal logging calls below. The only swallowed failures are standings, lineup slots and roster capacity (degrade to defaults), plus the three logging calls (non-fatal, `:7536`, `:7547`, `:7581`).
 
 ## 3. Clients render value-core cards with no change
 
@@ -132,7 +132,7 @@ The flag-off code changes are five, and each is a no-op when the flag is off:
 | Safety-signature entry | `::test_safety_signature_entry` |
 | Owner hash ignores `vc_*` | `::test_owner_request_hash_ignores_vc_keys` |
 | Standings fail-soft | `::test_standings_failure_non_fatal` |
-| No fallback on error | `::test_pipeline_error_fails_job_no_fallback` |
+| Logged legacy fallback on a build error | `::test_pipeline_error_falls_back_to_legacy`, `::test_fallback_matches_flag_off_output` |
 | `engine_version = "value_core"` | `::test_trades_generated_engine_version` |
 | Card shape, evidence schema v1, payload | `backend/tests/test_value_core_adapter.py` (14 tests) |
 

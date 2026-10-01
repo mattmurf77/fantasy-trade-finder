@@ -118,11 +118,11 @@ The bench also reports, without gating on them, repeat acquisitions (the same he
 
 ## 8. Open questions (lead to take to the operator before build)
 
-- **Q1 — Failure behavior.** v1 fails the job if the value core throws: the client shows the existing error state and a retry regenerates. Should it instead fall back to the legacy engine for that job, logged and marked in `trades_generated`? The spec says no, to keep measurement clean.
-- **Q2 — Likes-you and standing offers.** These cards come from other managers' likes. Should they be merged into value-core decks, pinned on top as the legacy deck does? v1 leaves them out. That lowers match surfacing but keeps the deck single-source.
+- **Q1 — Failure behavior. Answered 2026-10-01: fall back.** If the value core throws before anything is served, the error is logged and the legacy engine finishes that job. The deck still comes from one engine.
+- **Q2 — Likes-you and standing offers. Answered 2026-10-01: they stay on the legacy engine.** Value-core decks leave them out.
 - **Q3 — Starter-strength in the window.** Should the window use the #372 starter-value index? It needs `trade.outlook_composite` on, or a direct call to `starter_value_signal`. v1 uses age, picks and points-for only, as the operator named.
 - **Q4 — Blind-grade graders.** The 2026-09-30 note in the superseded plan says 1–2 testers will blind-grade alongside the operator. The export supports several sheets, one per grader. Who are they?
-- **Q5 — Trade intent.** Should value-core v1 also serve intent-mode decks by mapping Consolidate, Tier up and Tier down to shape constraints? v1 hands them to the legacy engine.
+- **Q5 — Trade intent. Answered 2026-10-01: intent-mode decks stay on the legacy engine.**
 - **Q6 — Bush League** has never been served a card. The freeze reads DB state directly, so it does not depend on served decks. But if the league has no `league_members` rows it cannot be benched. That needs checking at freeze time.
 
 ## 9. Risks

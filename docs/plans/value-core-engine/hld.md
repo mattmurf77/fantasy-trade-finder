@@ -105,7 +105,7 @@ backend/eval/ (new files, operator tooling, not wired to the server)
 | Lineup slots unknown | Default template `["QB","RB","RB","WR","WR","TE","FLEX","FLEX"]` plus `SUPER_FLEX` for `sf_tep`. This mirrors `_league_lineup_slots`' platform default (`server.py:18023`). |
 | Roster limit unknown (non-Sleeper) | The size rule is skipped (`max_players = None`); the lineup rule still applies |
 | Core time budget (8 s) hit | Enumeration stops. The partial pool is ranked and served. `budget_exhausted` is logged in the job and the evidence. |
-| Exception anywhere in the value-core job | It propagates to `_run_trade_job`'s outer handler (`server.py:9002`), which marks the job `error`. **No silent legacy fallback** (PRD Q1). |
+| Exception while building the value-core deck | Logged; `_run_value_core_job` returns `False` before anything is served, and the same job is finished by the legacy engine (PRD Q1, operator 2026-10-01). A deck never mixes engines. |
 | Impression write fails | Warn. The deck is still published, without impression ids. This matches the legacy non-fatal behavior at `server.py:8725`. |
 | Job superseded or timed out mid-run | `_finish_trade_job` returns None, and no event is fired. This is the existing contract (`server.py:3060`). |
 

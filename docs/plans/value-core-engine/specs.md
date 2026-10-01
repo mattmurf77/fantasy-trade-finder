@@ -485,7 +485,8 @@ def vc_stubs(monkeypatch):
 | `test_safety_signature_entry` | `"value_core" in _trade_safety_signature()` iff the flag is on |
 | `test_owner_request_hash_ignores_vc_keys` | build the same owner context twice, once with 12 extra `vc_*` keys in `context["config"]` → `_owner_selected_assignment(...)["request_hash"]` is identical |
 | `test_standings_failure_non_fatal` | `outlook.build_league_state` raises → `_value_core_standings(...) == ({}, 0)` and a warning is logged |
-| `test_pipeline_error_fails_job_no_fallback` | `pipeline.run` raises → `job["status"] == "error"`; no legacy cards in `job["cards"]` |
+| `test_pipeline_error_falls_back_to_legacy` | `pipeline.run` raises → the error is logged, `job["status"] == "complete"`, cards come from the legacy engine (no `vc_` ids, no `value_core` impression rows). Revised 2026-10-01 (PRD Q1) |
+| `test_fallback_matches_flag_off_output` | the fallback capture equals the flag-off capture, except for the `safety_policy` job key the flag adds |
 | `test_trades_generated_engine_version` | patch `server.record_event` → called once with `props["engine_version"] == "value_core"` |
 
 **Isolated verification.**

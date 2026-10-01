@@ -285,16 +285,38 @@ def test_standings_failure_non_fatal(monkeypatch, caplog):
     assert (standings["u1"].wins, standings["u1"].points_for) == (3, 512.4)
 
 
-def test_pipeline_error_fails_job_no_fallback(vc_stubs, monkeypatch):
+def test_pipeline_error_falls_back_to_legacy(vc_stubs, monkeypatch, caplog):
+    """PRD Q1 (operator 2026-10-01): a value-core failure before anything is served is logged
+    and the same job is finished by the legacy engine."""
     from backend.value_core import pipeline
 
     def broken(*a, **k):
         raise RuntimeError("value core exploded")
 
     monkeypatch.setattr(pipeline, "run", broken)
-    capture, job, _eng = H.run_capture(extra_patches=_vc_on())
-    assert job["status"] == "error" and "value core exploded" in (job["error"] or "")
-    assert job["cards"] == [] and capture["impressions"] == []
+    with caplog.at_level("ERROR"):
+        capture, job, _eng = H.run_capture(extra_patches=_vc_on())
+    assert job["status"] == "complete" and not job.get("error")
+    assert job["cards"] and not any(c["trade_id"].startswith("vc_") for c in job["cards"])
+    assert "value_core" not in job
+    assert all(r.get("model_arm") != "value_core" for r in capture["impressions"])
+    assert any("falling back to the legacy engine" in r.getMessage() for r in caplog.records)
+
+
+def test_fallback_matches_flag_off_output(vc_stubs, monkeypatch):
+    """The fallback runs the untouched legacy path: the same canonical capture as flag off,
+    except that the job records the value_core flag in its safety signature."""
+    from backend.value_core import pipeline
+
+    def broken(*a, **k):
+        raise RuntimeError("x")
+
+    monkeypatch.setattr(pipeline, "run", broken)
+    fell_back, _job, _ = H.run_capture(extra_patches=_vc_on())
+    flag_off, _job2, _ = H.run_capture()
+    assert set(fell_back["job_keys"]) - set(flag_off["job_keys"]) == {"safety_policy"}
+    strip = lambda c: {k: v for k, v in c.items() if k != "job_keys"}
+    assert strip(fell_back) == strip(flag_off)
 
 
 def test_trades_generated_engine_version(vc_stubs):

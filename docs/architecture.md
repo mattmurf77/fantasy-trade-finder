@@ -311,8 +311,8 @@ roster capacity, infers windows, runs the pipeline, registers the cards, removes
 exact passes (`_project_trade_dispositions`), writes `trade_impressions` and one
 `deck_impressions` row per card with the evidence in `valuation_json`, publishes
 the snapshot and fires `trades_generated` with `engine_version = "value_core"`.
-Errors propagate to `_run_trade_job`'s outer handler and fail the job; there is
-no legacy fallback.
+If building the deck throws before anything is served, the error is logged and the
+same job continues on the legacy engine; a deck never mixes the two engines.
 
 **Leaf rules.** Nothing in `backend/value_core/` imports `backend.server`. The
 server imports the package lazily inside `_run_value_core_job`, so with the flag
