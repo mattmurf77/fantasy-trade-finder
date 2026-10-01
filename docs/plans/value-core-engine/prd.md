@@ -57,7 +57,7 @@ The old engines stay in the code, one switch away, until the new one beats them 
 ## 5. User-visible behavior (flag on, user in the tester allowlist)
 
 - **The deck opens with cards from many different partners and players.** No trade idea repeats with only minor pieces or pick years swapped, and no acquisition is shown twice until every other one has been shown once. In the first 30, no single player appears more than 3 times and no partner takes more than its share (4 of 30 in a 12-team league). A repeated partner is pushed down too, at half the player rate.
-- **Every card is fair on consensus value.** The adjusted ratio sits within ±10% by default. When one side gets the single best asset with fewer pieces, the other side must add a premium. That premium is up to 15% for an elite asset and near zero for mid-tier ones, which matches the operator's "tier-1 commands a huge premium, mid-tier barely any" (`docs/plans/trade-logic-interview-2026-07-17.md`).
+- **Every card is fair on consensus value.** The adjusted ratio sits within ±20% by default (operator decision 2026-10-01; it was ±10%). When one side gets the single best asset with fewer pieces, the other side must add a premium. That premium is up to 15% for an elite asset and near zero for mid-tier ones, which matches the operator's "tier-1 commands a huge premium, mid-tier barely any" (`docs/plans/trade-logic-interview-2026-07-17.md`).
 - **Cards that bring back a real piece rise.** A real piece is a player who would start in your lineup, or a 1st-round-value asset. Bench swaps sink.
 - **Cards that fit both teams' windows rise.**
   - A contender is rewarded for improving its starting lineup.

@@ -32,8 +32,13 @@ def snap(teams, *, slots=SLOTS, max_players=None, other=None, windows=None):
         RosterRules(tuple(slots), max_players), first_round_value=1492.0, elite_value=8457.0)
 
 
+# These tests pin the original ±10% band: they test the band mechanics, not the default
+# (vc_band defaults to 0.20 since the operator's 2026-10-01 decision).
+CFG10 = CoreConfig(band=0.10)
+
+
 def run(s, cfg=None, viewer="V", **req):
-    return find_fair_trades(s, Request(viewer, **req), cfg or CoreConfig())
+    return find_fair_trades(s, Request(viewer, **req), cfg or CFG10)
 
 
 def pairs(trades):
@@ -121,7 +126,7 @@ def test_relative_filler_vs_trade_headliner():
     trades, diag = run(s)
     assert (("a1", "a4"), ("b3",)) not in pairs(trades)
     assert diag.rejected["filler"] >= 1
-    verdict = evaluate_trade(s, Request("V"), CoreConfig(), partner_team_id="P",
+    verdict = evaluate_trade(s, Request("V"), CFG10, partner_team_id="P",
                              give=["a1", "a4"], receive=["b3"])
     assert verdict.reason == "filler"
     assert verdict.trade.adjusted_ratio == pytest.approx(1.068, abs=1e-3)
@@ -241,11 +246,11 @@ def test_per_partner_cap_spreads_headliner_pairs():
 
 def test_check_cap_and_budget():
     s = two_team()
-    _, diag = find_fair_trades(s, Request("V"), CoreConfig(), max_checks_per_partner=50)
+    _, diag = find_fair_trades(s, Request("V"), CFG10, max_checks_per_partner=50)
     assert diag.pairs_checked <= 50
     assert diag.truncated_partners == 1
 
-    _, diag = find_fair_trades(s, Request("V"), CoreConfig(), time_budget_s=0.0)
+    _, diag = find_fair_trades(s, Request("V"), CFG10, time_budget_s=0.0)
     assert diag.budget_exhausted is True
 
 
@@ -279,7 +284,7 @@ def test_diagnostics_account_for_every_check():
 
 def test_evaluate_trade_agrees_with_find():
     s = stud(4600, 4400)
-    req, cfg = Request("V"), CoreConfig()
+    req, cfg = Request("V"), CFG10
     trades, _ = find_fair_trades(s, req, cfg)
     assert trades
     for t in trades:
@@ -306,7 +311,7 @@ def test_evaluate_trade_matches_find_on_every_package_pair():
     s = snap({"V": v + BODIES("V"), "P": p + BODIES("P")}, max_players=13)
     req = Request("V", untouchable_ids=frozenset({"v2"}), pinned_give_ids=frozenset(),
                   fairness_threshold=0.93)
-    cfg = CoreConfig()
+    cfg = CFG10
     trades, diag = find_fair_trades(s, req, cfg)
     assert trades and diag.truncated_partners == 0
     kept = {(t.give, t.receive): t for t in trades}
@@ -325,7 +330,7 @@ def test_evaluate_trade_matches_find_on_every_package_pair():
 
 def test_evaluate_trade_rejects_foreign_ids():
     s = snap({"V": [A("a1", "WR", 3000)] + BODIES("V"), "P": [A("b1", "WR", 3100)] + BODIES("P")})
-    req, cfg = Request("V"), CoreConfig()
+    req, cfg = Request("V"), CFG10
     with pytest.raises(ValueError):
         evaluate_trade(s, req, cfg, partner_team_id="P", give=["b1"], receive=["b1"])
     with pytest.raises(ValueError):
@@ -341,7 +346,7 @@ def test_evaluate_trade_rejects_foreign_ids():
 def test_evaluate_trade_floor_and_unpriced():
     s = snap({"V": [A("a1", "WR", 3000), A("z0", "WR", 0)] + BODIES("V"),
               "P": [A("b1", "WR", 3100)] + BODIES("P")})
-    req, cfg = Request("V"), CoreConfig()
+    req, cfg = Request("V"), CFG10
     verdict = evaluate_trade(s, req, cfg, partner_team_id="P", give=["a1", "Vwr1"], receive=["b1"])
     assert (verdict.ok, verdict.reason) == (False, "floor")
     assert verdict.trade is not None
@@ -352,7 +357,7 @@ def test_evaluate_trade_floor_and_unpriced():
 def test_unknown_viewer_raises():
     s = snap({"V": [A("a1", "WR", 3000)] + BODIES("V"), "P": [A("b1", "WR", 3100)] + BODIES("P")})
     with pytest.raises(ValueError):
-        find_fair_trades(s, Request("nobody"), CoreConfig())
+        find_fair_trades(s, Request("nobody"), CFG10)
     with pytest.raises(ValueError):
-        evaluate_trade(s, Request("nobody"), CoreConfig(), partner_team_id="P",
+        evaluate_trade(s, Request("nobody"), CFG10, partner_team_id="P",
                        give=["a1"], receive=["b1"])

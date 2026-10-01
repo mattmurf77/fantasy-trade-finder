@@ -152,7 +152,7 @@ class Request:
 
 @dataclass(frozen=True)
 class CoreConfig:
-    band: float = 0.10
+    band: float = 0.20
     stud_premium: float = 0.15
     untouchable_min_ratio: float = 1.08
     max_assets_per_side: int = 14
@@ -247,6 +247,7 @@ class PipelineResult:
 **The public signatures in lld.md** (§4.1, §5.1, §5.2, §5.6, §6, §7.1, §8) are part of the contract too. Change them only through the lead.
 
 **Changes to date:**
+- 2026-10-01 — `types.py` `CoreConfig.band` default 0.10 → 0.20 (and the `vc_band` seed), lead-applied on the operator's decision that real trades should steer the band significantly. Evidence: ±20% covers 38% of real FFV3/Lakeview trades (±10%: 20%; ±25%: 39%); synthetic insult rate 1.1% (±25%: 2.8%, ±30%: 29%). `test_value_core_core.py` pins `CFG10 = CoreConfig(band=0.10)` because it tests band mechanics.
 - 2026-09-30 — lld §4.5 cap order (not `types.py`), lead-initiated at WP1 review: enumeration and the per-partner cap round-robin over headliners instead of biggest-first. `test_per_partner_cap_keeps_biggest_headliners` became `test_per_partner_cap_spreads_headliner_pairs`, and `test_value_core_perf.py::test_pool_spreads_across_give_headliners` was added. Reason: the biggest-first caps acted as a hidden ranking (92% of the pool gave away a top-3 asset).
 - 2026-09-30 — lld §5.6 deck variety rules + §8.2 guardrails (not `types.py`), operator request: *"I don't want to see the same iteration of a trade with a trade partner with only minor pieces swapped out... or the same trade partner with different years' draft picks"*. `deck.py` gained `idea_key`, `acquisition_key` and `partner_cap`: one card per trade idea (lower-priority versions are dropped), acquisitions shown in rounds, and a partner cap beside the per-asset cap in the first 30. The bench appearances guardrail now counts acquired assets only (`max_acquired_appearances`), and `near_duplicates` = 0 is a new guardrail. Deck tests: `test_minor_piece_swaps_are_one_idea`, `test_pick_years_are_one_idea_and_one_acquisition`, `test_each_acquisition_once_before_any_repeat` and `test_partner_cap_in_first_30` were added, and `test_lazy_equals_naive`'s reference implements all three rules. Bench tests: `test_guardrails_count_near_duplicates_and_repeat_acquisitions` was added. On the 12-seat synthetic league (first 30 cards, before → after): near-duplicates median 1.5 / max 5 → 0; repeat acquisitions median 8 / max 11 → 0; distinct acquisitions 22 → 30; the deck shrank from about 2,200 to about 1,050 ideas.
 

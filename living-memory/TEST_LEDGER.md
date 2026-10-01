@@ -20,6 +20,11 @@ into `feat/value-core-engine`, lead-reviewed. Local Python 3.14 (no 3.12 here; C
   near-duplicates median 1.5/max 5 → 0, repeat acquisitions median 8/max 11 → 0, distinct acquisitions 22 → 30,
   pick repeats from one partner max 9 → 0; insult 0.6%, real piece 92%, median given +7.7%; p50 1.3 s.
   The appearances guardrail now counts acquired assets only. Full suite after: **7527 passed, 1 skipped**.
+- 2026-10-01 operator answers: logged legacy fallback on deck-build errors (tests: fallback serves legacy cards;
+  capture equals flag-off except `safety_policy`); default band ±10% → ±20%. Band evidence: real-trade coverage
+  ±10% 20% / ±15% 33% / ±20% 38% / ±25% 39% / ±30% 44% / ±40% 52%; synthetic insult rate 0.6% / 0.8% / 1.1% / 2.8% /
+  28.9% / 45.6%; recall in-pool 0.8% → 2.3% at ±20% (floor rule rejects most real trades: sub-450 throw-ins).
+  Real-league freeze blocked: production reads denied by the session permission classifier after one lookup.
 Evidence delta: unit + e2e tests and the WP3 [code-walk](../docs/plans/value-core-engine/code-walk.md); no mobile change,
 so no TestFlight checklist is due until the flag is flipped.
 

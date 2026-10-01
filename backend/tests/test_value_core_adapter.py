@@ -240,8 +240,8 @@ def test_evidence_schema_v1():
                         "detail", "assets"}
     assert json.loads(json.dumps(doc, sort_keys=True)) == doc
     assert (doc["schema_version"], doc["generator"], doc["generator_version"]) == (1, "value_core", "value-core-1")
-    assert doc["core"]["ratio_floor"] == pytest.approx(1 / 1.1, abs=1e-4)
-    assert doc["core"]["ratio_ceiling"] == pytest.approx(1.1)
+    assert doc["core"]["ratio_floor"] == pytest.approx(1 / 1.2, abs=1e-4)   # default band 0.20
+    assert doc["core"]["ratio_ceiling"] == pytest.approx(1.2)
     assert doc["core"]["budget_exhausted"] is True and doc["core"]["drops_needed"] == [0, 1]
     assert doc["weights"] == {"value": 1.0, "outlook": 1.0, "rank": 1.0,
                               "repeat_penalty": 0.15, "player_cap": 3}

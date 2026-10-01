@@ -264,7 +264,7 @@ inputs:
 
 1. **Core (`core.py`), value only.** For the viewer against each partner it
    enumerates every 1–3 × 1–3 package pair and keeps the pairs inside one
-   fairness band on consensus market value (`vc_band`, ±10%). When the trade's
+   fairness band on consensus market value (`vc_band`, ±20%). When the trade's
    single best asset sits on the side with fewer pieces, that side is credited a
    stud premium of `vc_stud_premium × (headliner/elite)²`. Hard rules, in order:
    asset floor, band, junk filler (relative to the trade's headliner),

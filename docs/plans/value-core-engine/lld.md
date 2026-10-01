@@ -59,7 +59,7 @@ All dataclasses live in `backend/value_core/types.py`, written verbatim from [sp
 
 | Key | Default | Clamp (adapter) | Maps to | Meaning |
 |---|---:|---|---|---|
-| `vc_band` | 0.10 | [0.01, 0.50] | `CoreConfig.band` | Half-width of the fairness band on the premium-adjusted ratio. A trade is kept iff 1/(1+band) ≤ ratio ≤ 1+band. |
+| `vc_band` | 0.20 | [0.01, 0.50] | `CoreConfig.band` | Half-width of the fairness band on the premium-adjusted ratio. A trade is kept iff 1/(1+band) ≤ ratio ≤ 1+band. 0.10 until the operator's 2026-10-01 decision (see the specs §3.1 change log). |
 | `vc_stud_premium` | 0.15 | [0.0, 0.50] | `CoreConfig.stud_premium` | Premium at an elite headliner; scales as (headliner/elite)² |
 | `vc_untouchable_min_ratio` | 1.08 | [1.0, 2.0] | `CoreConfig.untouchable_min_ratio` | A give package containing an untouchable needs adjusted ratio ≥ this |
 | `vc_max_assets_per_side` | 14 | int [4, 20] | `CoreConfig.max_assets_per_side` | Top-N eligible assets per team used to build packages (pins always added) |
@@ -570,7 +570,7 @@ It returns the cards in `entries` order, plus `{id(card): evidence(entry, ...)}`
   "effective": 0.4548,
   "market": {"give": 5120.0, "receive": 5480.0, "adjusted_ratio": 1.0703,
              "premium": 0.0, "premium_side": null},
-  "core": {"band": 0.10, "ratio_floor": 0.9091, "ratio_ceiling": 1.10, "stud_premium": 0.15,
+  "core": {"band": 0.20, "ratio_floor": 0.8333, "ratio_ceiling": 1.20, "stud_premium": 0.15,
            "untouchable_min_ratio": 1.08, "uses_untouchable": false, "drops_needed": [0, 1],
            "budget_exhausted": false},
   "windows": {"viewer":  {"window": "contender", "score": 0.21, "source": "inferred",
@@ -1058,7 +1058,7 @@ The mirror test `test_seed_ui_test_db.py:107` ignores `_`-prefixed keys. The com
 
 Append these 12 rows before the closing `]` of `_MODEL_CONFIG_DEFAULTS` (`database.py:3190`):
 ```python
-    ("vc_band",                   0.10, "value core: fairness band half-width on the premium-adjusted market ratio (kept iff 1/(1+b) <= ratio <= 1+b)"),
+    ("vc_band",                   0.20, "value core: fairness band half-width on the premium-adjusted market ratio (kept iff 1/(1+b) <= ratio <= 1+b)"),
     ("vc_stud_premium",           0.15, "value core: consolidation premium at an elite headliner; scales with (headliner/elite)^2"),
     ("vc_untouchable_min_ratio",  1.08, "value core: an untouchable is offered only when the adjusted return is at least this"),
     ("vc_max_assets_per_side",   14.0,  "value core: top-N eligible assets per team used to build 1-3 asset packages (pins always added)"),

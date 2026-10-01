@@ -47,7 +47,7 @@ from backend.trade_service import LeagueMember
 REPO = Path(__file__).resolve().parents[2]
 
 VC_DEFAULTS = {
-    "vc_band": 0.10, "vc_stud_premium": 0.15, "vc_untouchable_min_ratio": 1.08,
+    "vc_band": 0.20, "vc_stud_premium": 0.15, "vc_untouchable_min_ratio": 1.08,
     "vc_max_assets_per_side": 14.0, "vc_max_per_partner": 200.0, "vc_w_value": 1.0,
     "vc_w_outlook": 1.0, "vc_w_rank": 1.0, "vc_repeat_penalty": 0.15, "vc_player_cap": 3.0,
     "vc_standings_weight": 0.30, "vc_testers_only": 1.0,

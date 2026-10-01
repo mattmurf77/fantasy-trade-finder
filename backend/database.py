@@ -3187,7 +3187,7 @@ _MODEL_CONFIG_DEFAULTS = [
     ("policy_confidence_band_med",       0.33, "policy: trade confidence at/above which a card's confidence_band reads 'medium' (below it reads 'low')"),
     ("policy_shadow_log_cap",           40.0,  "policy: max trade_policy_shadow rows written per deck job — bounds a pathological league without hiding the treatment's rejections"),
     ("simple_player_presentment",       0.0,  "presentation: 1 enables bounded simple-player ordering after live policy; 0 preserves the existing order"),
-    ("vc_band",                   0.10, "value core: fairness band half-width on the premium-adjusted market ratio (kept iff 1/(1+b) <= ratio <= 1+b)"),
+    ("vc_band",                   0.20, "value core: fairness band half-width on the premium-adjusted market ratio (kept iff 1/(1+b) <= ratio <= 1+b)"),
     ("vc_stud_premium",           0.15, "value core: consolidation premium at an elite headliner; scales with (headliner/elite)^2"),
     ("vc_untouchable_min_ratio",  1.08, "value core: an untouchable is offered only when the adjusted return is at least this"),
     ("vc_max_assets_per_side",   14.0,  "value core: top-N eligible assets per team used to build 1-3 asset packages (pins always added)"),

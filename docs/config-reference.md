@@ -1570,7 +1570,7 @@ Twelve Float keys, seeded in `database._MODEL_CONFIG_DEFAULTS` and tunable live 
 
 | Key | Default | Clamp | Read as | Role |
 |---|---:|---|---|---|
-| `vc_band` | 0.10 | [0.01, 0.50] | `CoreConfig.band` | Half-width of the fairness band on the premium-adjusted market ratio: a trade is kept iff `1/(1+b) ≤ ratio ≤ 1+b`. The client fairness preference can only tighten it — `min(b, max(0.02, 1 − fairness_threshold))` — never loosen it |
+| `vc_band` | 0.20 | [0.01, 0.50] | `CoreConfig.band` | Half-width of the fairness band on the premium-adjusted market ratio: a trade is kept iff `1/(1+b) ≤ ratio ≤ 1+b`. The client fairness preference can only tighten it — `min(b, max(0.02, 1 − fairness_threshold))` — never loosen it. Set to 0.20 by the operator's 2026-10-01 decision: it covers 38% of real league trades (vs 20% at 0.10) with a synthetic insult rate of 1.1%; 0.25 adds almost no coverage and 0.30 pushes insults to 29%. |
 | `vc_stud_premium` | 0.15 | [0.0, 0.50] | `CoreConfig.stud_premium` | Premium credited to the side that gets the trade's single best asset with fewer pieces, at an elite headliner (`firsts_4plus` tier floor). Scales as `(headliner / elite)²`: about 0.9% for a Mid 1st |
 | `vc_untouchable_min_ratio` | 1.08 | [1.0, 2.0] | `CoreConfig.untouchable_min_ratio` | A give side containing an untouchable is kept only when the adjusted return is at least this |
 | `vc_max_assets_per_side` | 14 | int [4, 20] | `CoreConfig.max_assets_per_side` | Top-N eligible assets per team used to build 1–3 asset packages (pins are always added) |

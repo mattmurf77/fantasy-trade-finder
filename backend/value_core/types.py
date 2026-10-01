@@ -104,7 +104,7 @@ class Request:
 
 @dataclass(frozen=True)
 class CoreConfig:
-    band: float = 0.10
+    band: float = 0.20
     stud_premium: float = 0.15
     untouchable_min_ratio: float = 1.08
     max_assets_per_side: int = 14

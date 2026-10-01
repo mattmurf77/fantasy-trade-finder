@@ -33,7 +33,8 @@ rebuild the suggestion engine rather than keep tuning the stack.
 
 1. **A value-only core.** For the viewer against each partner, enumerate every
    1–3 × 1–3 package and keep those inside one fairness band on consensus market
-   value (`vc_band`, ±10%). When one side gets the trade's single best asset with
+   value (`vc_band`, ±20%, widened from ±10% on 2026-10-01 because real league
+   trades sit far wider). When one side gets the trade's single best asset with
    fewer pieces, credit it one competitor-sized stud premium,
    `vc_stud_premium × (headliner/elite)²` (up to 15%). A few legible hard rules
    replace the gate stack: asset floor, junk filler relative to the trade's

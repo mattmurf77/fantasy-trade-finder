@@ -45,8 +45,10 @@ def test_deck_cap_breaks_only_when_nothing_else_fits():
     A big pool does not make the cap feasible: the viewer has at most vc_max_assets_per_side
     tradeable assets, and multi-piece gives spend several of their 3-appearance allowances
     at once. On this league 7 of 12 seats run out around card 25-29. The real invariant:
-    inside the first 30, a card may exceed the cap only when no cap-respecting card is left."""
+    inside the first 30, a card may break a cap (per asset, or per partner since the deck
+    variety rules) only when no card that respects both caps is left."""
     from backend.value_core import pipeline
+    from backend.value_core.deck import partner_cap
     from backend.value_core.types import TOP_WINDOW, RankConfig
     league = value_core_bench.synthetic_league(7)["leagues"][0]
     cap = RankConfig().player_cap
@@ -55,17 +57,23 @@ def test_deck_cap_breaks_only_when_nothing_else_fits():
         snapshot, board = value_core_bench.snapshot_for_seat(league, seat, standings_weight=0.3)
         entries = pipeline.run(snapshot, Request(viewer_team_id=seat, board=board),
                                CoreConfig(), RankConfig()).entries
-        shown, placed = {}, set()
+        p_cap = partner_cap(len({e.scored.trade.partner_team_id for e in entries}))
+        shown, shown_partner, placed = {}, {}, set()
+
+        def breaks_cap(e):
+            t = e.scored.trade
+            return (shown_partner.get(t.partner_team_id, 0) >= p_cap
+                    or any(shown.get(a, 0) >= cap for a in t.give + t.receive))
+
         for entry in entries[:TOP_WINDOW]:
-            ids = entry.scored.trade.give + entry.scored.trade.receive
-            if any(shown.get(a, 0) >= cap for a in ids):
-                left = [e for e in entries if e.scored.trade.key not in placed
-                        and not any(shown.get(a, 0) >= cap
-                                    for a in e.scored.trade.give + e.scored.trade.receive)]
+            if breaks_cap(entry):
+                left = [e for e in entries if e.scored.trade.key not in placed and not breaks_cap(e)]
                 assert not left, (seat, entry.position, len(left))
             placed.add(entry.scored.trade.key)
-            for a in ids:
+            for a in entry.scored.trade.give + entry.scored.trade.receive:
                 shown[a] = shown.get(a, 0) + 1
+            pid = entry.scored.trade.partner_team_id
+            shown_partner[pid] = shown_partner.get(pid, 0) + 1
 
 
 def test_run_trade_job_flag_on_real_engine():
