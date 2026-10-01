@@ -1,19 +1,20 @@
 # HANDOFF
 
-## Current State — 2026-09-30 (value-core engine workstream)
+## Current State — 2026-10-01 (value-core engine workstream)
 
-**Where I stopped:** From-scratch trade engine ([D-195](DECISIONS.md)) built and integrated on `feat/value-core-engine`
-(worktree `.claude/worktrees/value-core-engine`), not pushed, flag `trade.value_core` off. Full local suite green
-(TEST_LEDGER 2026-09-30); flag-off output identical to `3bb981ed`.
+**Where I stopped:** From-scratch trade engine ([D-195](DECISIONS.md)) built on `feat/value-core-engine`
+(worktree `.claude/worktrees/value-core-engine`), pushed; **draft PR #308 for CI only**, flag `trade.value_core` off.
+Since 09-30: deck variety rules (one card per trade idea, acquisitions in rounds, partner cap), logged legacy fallback,
+default band ±20%. Full local suite 7528 passed / 1 skipped; flag-off output identical to `3bb981ed`.
 
-**In flight:** package worktrees `value-core-wp1..wp5` (branches `feat/value-core-wp1..5`) are merged into the
+**In flight:** CI on PR #308. Package worktrees `value-core-wp1..wp5` (branches `feat/value-core-wp1..5`) are merged into the
 integration branch but NOT into `origin/main` — keep them until the branch lands, then sweep via the recovery ledger.
 
-**Blocked on:** operator — push/CI approval, PRD Q1–Q6, the per-asset guardrail definition, the fairness-band question
-raised by the recall baseline, and running `freeze` on the five bench leagues (prod read).
+**Blocked on:** the real-league freeze — operator approved it, but production reads were denied by the session's permission
+classifier after one lookup (league ids found; command in NEXT.md). Needs the operator to run it or allow prod reads.
 
-**Don't repeat:** don't change `vc_band` without the operator; don't count the e2e "≤3 appearances" as achievable —
-see the cap-feasibility note in `backend/tests/test_value_core_e2e.py`.
+**Don't repeat:** don't widen `vc_band` past 0.25 without new evidence (synthetic insults jump to 29% at 0.30); the e2e cap
+invariant must include the partner cap; don't merge PR #308 before the bench + blind grades.
 
 ## Current State — 2026-09-23
 

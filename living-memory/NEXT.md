@@ -52,10 +52,12 @@
 ## 2026-09-30 — Value-core engine: operator decisions, push for CI, bench on real leagues
 
 Built on `feat/value-core-engine` ([D-195](DECISIONS.md), [plan folder](../docs/plans/value-core-engine/)); flag `trade.value_core` off.
+Draft PR #308 open for CI only (do not merge). Operator answered on 2026-10-01: fallback yes; intents and likes-you stay legacy; band ±20%.
 
-1. **Operator decisions before any flag flip** — PRD Q1–Q6 (no-fallback on error, likes-you/standing offers excluded, intents stay legacy, window inputs), the scope §3 structural-guard waiver, and what to do about real trades sitting far outside the ±10% band (recall baseline). (The per-asset guardrail question is settled: operator prioritized partner/acquisition variety, so the guardrail counts acquired assets and the deck drops near-duplicates.) *Why now:* nothing ships until these are answered.
-2. **Push the branch, get exact-head CI green on Python 3.12** (local runs are 3.14). *Why now:* CI is the pre-ship gate.
-3. **Freeze the five bench leagues and run the bench + blind-grade export** (`python3 -m backend.eval.value_core_bench freeze …`, prod read-only; runbook § Value-core bench). *Why now:* the plan's Gate 1/Gate 2 need the operator's blind grades against today's engine.
+1. **Freeze the five bench leagues (prod read; operator-approved, but the session permission classifier blocked prod reads).**
+   Run from the worktree: `python3 -m backend.eval.value_core_bench freeze --secrets ../../../secrets.local.env --league 1312076055586050048 --league 1312140920132497408 --league 1312146456701829120 --league 1338231586314780672 --league 11896 --output <private>.json` (Lakeview, FFV3, La Resistance, Bush League — confirm 1338… is the current season — and Newton ESPN). Then `value_core_bench run` and `blind_grade export` (runbook § Value-core bench). *Why now:* Gate 1/Gate 2 need the real-league bench and the operator's blind grades.
+2. **CI green on PR #308 (Python 3.12).** *Why now:* the pre-ship gate; local runs are 3.14.
+3. **Open:** PRD Q3 (starter strength in the window), Q4 (blind-grade testers), Q6 (Bush League has members rows?).
 
 ## 2026-09-08 — Feedback batch #422–#428 SHIPPED: run the checklist on 1.17.3, then the follow-up candidates
 
