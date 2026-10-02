@@ -26932,6 +26932,202 @@ def delete_test_user_route(user_id: str):
         return jsonify({"error": "internal_error"}), 500
 
 
+# ─── Calibration / blind grading (docs/plans/blind-grading/) ───────────────
+# Tester-only value-core Gate 2: grade value-core vs current-engine cards
+# without knowing which made them. All logic is in backend/blind_grading.py;
+# these routes gate, gather the league facts only the server has, and map
+# GradingError. They never touch trade_service, impressions or swipes.
+
+from . import blind_grading as _blind_grading
+
+
+def _calibration_allowed(sess) -> bool:
+    """THE Calibration audience predicate (operator 2026-10-02: testers only).
+    Session user id OR league user id on the tester allowlist — the
+    _value_core_live rule above. Opening Calibration to everyone is
+    `return True` here (plus grading.blind on for them; prd.md FR-2)."""
+    allow = _load_tester_allowlist()
+    league_uid = sess.get("league_user_id")
+    return (str(sess.get("user_id") or "") in allow
+            or (league_uid is not None and str(league_uid) in allow))
+
+
+def _grading_flag_for_caller(sess) -> bool:
+    """grading.blind as THIS caller's app resolves it: the global map, overlaid
+    by running-experiment client_config.flags for the caller's device unit
+    (X-Device-Id, sent by mobile/src/api/grading.ts) and account unit — the
+    per-unit resolution /api/feature-flags performs (feature_flags_route) and
+    the merge mobile/src/api/flags.ts applies. Fail closed: any resolution
+    error reads as False."""
+    if is_enabled("grading.blind"):
+        return True
+    try:
+        from . import experiments as _exp
+        device_id = (request.headers.get("X-Device-Id") or "").strip()
+        units = [f"device:{device_id}" if device_id else None,
+                 str(sess.get("user_id") or "") or None]
+        for unit in units:
+            if not unit:
+                continue
+            _, configs = _exp.resolve_for_unit(unit, None)
+            if any(((cfg or {}).get("flags") or {}).get("grading.blind") is True
+                   for cfg in configs.values()):
+                return True
+    except Exception:
+        return False
+    return False
+
+
+def _grading_gate(fn):
+    """OUTERMOST decorator (directly under @app.route): 404 before the verified
+    gates or any session work unless the caller resolves grading.blind true
+    AND passes _calibration_allowed — no existence signal (the
+    _test_users_denied posture)."""
+    @functools.wraps(fn)
+    def _wrapper(*args, **kwargs):
+        sess = _get_session(request.headers.get("X-Session-Token", ""))
+        if (sess is None or not _grading_flag_for_caller(sess)
+                or not _calibration_allowed(sess)):
+            return jsonify({"error": "not_found"}), 404
+        return fn(*args, **kwargs)
+    return _wrapper
+
+
+def _grading_error(err):
+    return jsonify({"error": err.code, **err.detail}), err.status
+
+
+def _grading_server_inputs(sess, league_id: str):
+    """League facts mirroring _run_value_core_job; every source fail-soft."""
+    g_league = sess.get("league")
+    platform = getattr(g_league, "platform", None)
+    standings, completed_weeks = _value_core_standings(league_id, platform)
+    try:
+        slots = _league_lineup_slots(league_id)
+    except Exception:
+        slots = None
+    try:
+        max_players = (_sleeper_roster_limit(league_id)
+                       if (platform or "sleeper") == "sleeper" else None)
+    except Exception:
+        max_players = None
+    untouchable, not_interested = set(), set()
+    if FLAGS.trade_preference_lists:
+        try:
+            ap = load_asset_preferences(user_id=sess["user_id"], league_id=league_id)
+            untouchable = set(ap.get("untouchables", []))
+            not_interested = set(ap.get("not_interested", []))
+        except Exception as err:
+            log.warning("blind-grading: asset prefs load failed: %s", err)
+    return _blind_grading.ServerInputs(
+        lineup_slots=tuple(slots) if slots else None, max_players=max_players,
+        standings=standings, completed_weeks=int(completed_weeks or 0),
+        untouchable_ids=frozenset(map(str, untouchable)),
+        not_interested_ids=frozenset(map(str, not_interested)))
+
+
+def _build_grading_session(sess: dict, league_id: str, session_id: str) -> None:
+    """Background half of POST /api/grading/sessions (specs.md §3.3): the
+    Sleeper reads behind ServerInputs and the value-core build both leave the
+    request thread. build_session never raises; it ends the session 'open' or
+    'failed'."""
+    _blind_grading.build_session(session_id=session_id,
+                                 server=_grading_server_inputs(sess, league_id))
+
+
+@app.route("/api/grading/sessions", methods=["POST"])
+@_grading_gate
+@_gate_unverified_write
+def grading_create_session_route():
+    sess = _require_initialized_session()
+    body = request.get_json(silent=True)
+    league_id = str(body.get("league_id") or "").strip() if isinstance(body, dict) else ""
+    if not league_id:
+        return jsonify({"error": "invalid_body", "message": "league_id is required"}), 400
+    g_league = sess.get("league")
+    if g_league is None or str(g_league.league_id) != league_id:
+        return jsonify({"error": "league_not_active"}), 400
+    user_id = str(sess["user_id"])
+    try:
+        current = _blind_grading.current_session(user_id=user_id, league_id=league_id)["session"]
+        if current is not None and current["status"] in ("building", "open"):   # resume: no network
+            return jsonify({"session": current, "resumed": True}), 200
+        out = _blind_grading.start_session(
+            user_id=user_id, league_user_id=_league_user_id(sess), league_id=league_id)
+    except _blind_grading.GradingError as err:
+        return _grading_error(err)
+    session_id = out["session"]["session_id"]
+    if out.get("needs_build"):
+        # One synchronous gunicorn worker (render.yaml): a 2–12 s inline build
+        # would stall every user's request, so the slow half runs here instead.
+        threading.Thread(target=_build_grading_session, args=(dict(sess), league_id, session_id),
+                         name="grading-build", daemon=True).start()
+    log.info("blind-grading: session %s league=%s resumed=%s", session_id, league_id,
+             out["resumed"])
+    return jsonify({"session": out["session"], "resumed": out["resumed"]}), (200 if out["resumed"] else 202)
+
+
+@app.route("/api/grading/sessions/current")
+@_grading_gate
+@_gate_unverified_read
+def grading_current_session_route():
+    sess = _require_session()
+    league_id = (request.args.get("league_id") or "").strip()
+    if not league_id:
+        return jsonify({"error": "invalid_body", "message": "league_id is required"}), 400
+    return jsonify(_blind_grading.current_session(user_id=str(sess["user_id"]),
+                                                  league_id=league_id))
+
+
+@app.route("/api/grading/sessions/<session_id>/next")
+@_grading_gate
+@_gate_unverified_read
+def grading_next_card_route(session_id: str):
+    sess = _require_session()
+    try:
+        return jsonify(_blind_grading.next_card(user_id=str(sess["user_id"]),
+                                                session_id=session_id))
+    except _blind_grading.GradingError as err:
+        return _grading_error(err)
+
+
+@app.route("/api/grading/cards/<card_id>", methods=["POST"])
+@_grading_gate
+@_gate_unverified_write
+def grading_answer_card_route(card_id: str):
+    sess = _require_session()
+    try:
+        return jsonify(_blind_grading.answer_card(user_id=str(sess["user_id"]), card_id=card_id,
+                                                  body=request.get_json(silent=True)))
+    except _blind_grading.GradingError as err:
+        return _grading_error(err)
+
+
+@app.route("/api/grading/sessions/<session_id>/results")
+@_grading_gate
+@_gate_unverified_read
+def grading_results_route(session_id: str):
+    sess = _require_session()
+    try:
+        return jsonify(_blind_grading.results(user_id=str(sess["user_id"]),
+                                              session_id=session_id))
+    except _blind_grading.GradingError as err:
+        return _grading_error(err)
+
+
+@app.route("/api/admin/grading/report")
+def admin_grading_report_route():
+    """Cron-secret only and deliberately NOT flag- or audience-gated (prd.md D4):
+    results stay readable after calibration_rollout is stopped."""
+    _require_cron_auth()
+    try:
+        return jsonify(_blind_grading.report(
+            since=(request.args.get("since") or None),
+            include_open=request.args.get("include_open") == "1"))
+    except _blind_grading.GradingError as err:
+        return _grading_error(err)
+
+
 # ─── Account auth — Apple/Google identity anchors + in-app deletion ────────
 # Account-auth plan P2 (docs/plans/account-auth-plan-2026-07-11.md §3-P2).
 # Thin wrappers over backend/accounts.py. The sign-in surface is gated on

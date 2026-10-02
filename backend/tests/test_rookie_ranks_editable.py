@@ -245,16 +245,18 @@ def test_draft_tab_flag_is_registered_and_defaults_off():
     assert feature_flags.DEFAULT_FLAGS["draft.tab"] is False
 
 
-def test_draft_tab_flag_is_mirrored_and_ships_on():
+def test_draft_tab_flag_is_mirrored_and_ships_off():
     """The 4-touch rule: the two flag files never disagree, or `is_enabled`
-    and the release fixture diverge. Operator: "right now it should be on for
-    all"."""
+    and the release fixture diverge. Operator, 2026-10-02: the Calibration
+    tab (grading.blind, testers only; docs/plans/blind-grading/) takes the
+    third slot and the Draft tab leaves the bar for everyone — code kept,
+    flip back on next draft season."""
     features = json.loads((REPO / "config/features.json").read_text())
     release = json.loads(
         (REPO / "backend/tests/fixtures/flags/release.json").read_text())
     assert "draft.tab" in features
     assert features["draft.tab"] == release["draft.tab"]
-    assert features["draft.tab"] is True
+    assert features["draft.tab"] is False
 
 
 def test_draft_tab_flag_is_documented_as_the_seasonal_switch():

@@ -1170,6 +1170,8 @@ FLAG_KEYS: tuple[str, ...] = (
     # and roster gates. Remains dark until point coverage and intent qualify.
     "trade.mutual_benefit_v1",
     "trade.value_core",
+    # docs/plans/blind-grading/ — Calibration tab + /api/grading/*; ships false, reaches testers only via the calibration_rollout overlay
+    "grading.blind",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}
