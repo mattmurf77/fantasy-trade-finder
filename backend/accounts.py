@@ -655,6 +655,7 @@ _ADDITIONAL_PRIVATE_TABLES = (
     "trade_pass_reasons", "standing_offers", "league_board_history",
     "rank_set_adoptions", "accuracy_scores", "mock_drafts", "receipts_grades",
     "trade_proposals", "trade_policy_shadow", "deck_diagnostic_snapshots",
+    "grading_sessions", "grading_cards",
 )
 
 
