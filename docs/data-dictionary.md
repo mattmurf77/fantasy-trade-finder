@@ -196,6 +196,10 @@ counterparty board disclosure or client analytics event is added.
 - [`model_config_changes`](#model_config_changes)
 - [`wrapped_events` — **FROZEN (analytics P0 cutover)**](#wrapped_events-frozen-analytics-p0-cutover)
 - [`user_events`](#user_events)
+- [Blind grading tables](#blind-grading-tables) — Calibration, value-core Gate 2
+  - [`grading_sessions`](#grading_sessions)
+  - [`grading_cards`](#grading_cards)
+  - [`tab_selected` values (`user_events`)](#tab_selected-values-user_events)
 - [Experiment engine tables (analytics platform P3)](#experiment-engine-tables-analytics-platform-p3)
   - [`experiment_layers`](#experiment_layers)
   - [`experiments`](#experiments)
@@ -1863,6 +1867,58 @@ Run ledger — the observability surface for a job with no UI. **TWO rows per in
 | `batch_cap` / `cap_hit` | int | The cap in force and whether it bound |
 | `remaining_resolvable` | int | Backlog that can reach a terminal row today (retry-pending excluded) |
 | `grader_version` | str | |
+
+---
+
+## Blind grading tables
+
+**Calibration** — in-app blind grading, value-core Gate 2 ([plans/blind-grading/](plans/blind-grading/), [lld.md §3](plans/blind-grading/lld.md#3-schema)). Written **only** by `backend/blind_grading.py` through the `database.py` grading helpers (`insert_grading_session`, `answer_grading_card`); read by that module's `results` / `report` and by nothing else. No engine module imports them, and nothing in generation, ordering, impressions or swipes reads a `grading_*` table — grading leaves `deck_impressions`, `trade_impressions`, `trade_decisions`, `swipe_decisions` and `trade_service._trade_cards` untouched. Both tables are new, so `metadata.create_all` in `init_db()` creates them on SQLite and Postgres; there is no `migration_cols` entry because no existing table gains a column. No FKs, per house style — joins carry an explicit onclause.
+
+**`user_id` is the ACCOUNT id (`sess["user_id"]`) on both tables**, denormalized onto cards so account deletion and data export cover them with no join: both names sit in `accounts._ADDITIONAL_PRIVATE_TABLES`, so `accounts.delete_user_data` deletes a user's rows from both and the export includes them (`test_account_deletion_coverage.py` is parametrised over them). The export therefore shows `arms_json` to a grader who downloads their own data mid-session — an accepted residual; brief graders.
+
+**Hidden columns.** `grading_sessions.counts_json` / `source_json` and `grading_cards.arms_json` record which engine produced what. **Nothing serializes them before a session completes:** `load_next_grading_card` returns `{card_id, position, trade_json}` only; `session_view` exposes just `progress {answered, total}`; the only readers of `arms_json` are `blind_grading.results()` (completed sessions, per-arm aggregates, never per card) and `blind_grading.report()` (`X-Cron-Secret`). Adding a reader is a blinding change and goes through the plan's change control ([specs.md §3.3](plans/blind-grading/specs.md#33-change-control)).
+
+### `grading_sessions`
+
+One row per grading session: one grader, one league, up to 40 cards. A session with zero cards is never created.
+
+| Column | Type | Notes |
+|---|---|---|
+| `session_id` | str PK | Random 18-digit decimal string (`blind_grading.new_id`). Decimal on purpose: the mobile `api_request_failed` route normaliser folds digit runs to `:id`, so a failed grading call never puts a random id into analytics |
+| `user_id` | str, not null | Account id |
+| `league_id` | str, not null | |
+| `status` | str, not null | `building` \| `open` \| `completed` \| `failed`. `building` while the background thread runs the value core (`build_session`); `open` once the cards are written; `completed` when every card is answered or skipped; `failed` when the build refused — `error_json` says why. A `failed` row is never resumed: the next `POST /api/grading/sessions` starts a new session |
+| `seed` | str, not null | Decimal of a 63-bit `secrets.randbits` int, as a String because Postgres `INTEGER` is 32-bit. Drives `random.Random(seed).shuffle` once, at build; never returned |
+| `created_at` | str, not null | ISO UTC |
+| `completed_at` | str | ISO UTC; NULL until completed |
+| `counts_json` | text (JSON), not null | **Hidden.** `{total, current, value_core, shared, current_candidates, current_dropped_stale, current_dropped_unknown, value_core_pool}` — filled by `build_session` (a placeholder before that) |
+| `source_json` | text (JSON), not null | **Hidden provenance.** `{version: "blind-grading-1", seat, scoring_format, current: {deck_job_id, served_at}, value_core: {engine_version, core, rank, standings_weight, completed_weeks, lineup_slots, max_players, pool, elapsed_ms, budget_exhausted}}` once built. While `building`, holds the current-arm trades `start_session` selected, for the background half to merge |
+| `error_json` | text (JSON) | `failed` only: `{"code": "value_core_too_few", "usable": N, "min_cards": 10}` or `{"code": "value_core_failed"}`; NULL otherwise. Surfaces as `SessionView.error` |
+
+Index: `ix_grading_sessions_user_league` (`user_id`, `league_id`, `status`) — the resume lookup.
+
+### `grading_cards`
+
+One row per card in a session, in shuffled order.
+
+| Column | Type | Notes |
+|---|---|---|
+| `card_id` | str PK | Random 18-digit decimal string. Not a trade id, so an answer can never reach `/api/trades/swipe` |
+| `session_id` | str, not null | Soft ref to `grading_sessions` |
+| `user_id` | str, not null | = the session's `user_id` (account id), for deletion / export coverage |
+| `position` | int, not null | 1-based, assigned **after** the shuffle. `UniqueConstraint(session_id, position)` = `uq_grading_card_position` |
+| `arms_json` | text (JSON), not null | **HIDDEN** `{arm: provenance}`, arm ∈ `current` \| `value_core`: `current` → `{impression_id, card_index, model_arm}`; `value_core` → `{deck_position, reasons}`. A trade both engines produced has **both** keys — one card, credited to both arms (a **shared card**) |
+| `trade_json` | text (JSON), not null | The neutral payload, served verbatim as `card.trade`: `{partner_name, give: [...], receive: [...]}`, each asset exactly `{id, name, position, nfl_team, age, value}`, sides sorted by (−value, name, id). The only producer is `blind_grading.neutral_trade`, which is never given an arm; values come from one consensus catalog (players `elo_to_value(consensus_elo)` from `player_value_history`, picks `draft_picks.pool_value`) |
+| `grade` | int | 1..5; NULL = unanswered or skipped |
+| `skipped` | int, not null, server default `0` | `1` ⇒ `grade IS NULL` and `tags_json = '[]'` |
+| `tags_json` | text (JSON), not null, server default `[]` | De-duplicated subset of the seven tags in `blind_grading.TAGS` ([cross-client-invariants § Calibration tags and scale](cross-client-invariants.md#calibration-tags-and-scale)), in `TAGS` order |
+| `graded_at` | str | ISO UTC of the latest answer — a re-grade overwrites |
+
+Index: `ix_grading_cards_session` (`session_id`). Invariants: `grade IS NOT NULL ⇒ skipped = 0`; a session is `completed` ⇔ every card has `grade IS NOT NULL OR skipped = 1`, flipped in the same transaction as the last answer (`answer_grading_card`); an answer against a non-`open` session is rejected (409 `session_completed`), never written.
+
+### `tab_selected` values (`user_events`)
+
+Calibration adds **no** event (scope waiver, plan D9); the tables above are the record and the admin report is the readout. The existing client event `tab_selected {tab, from_tab, refocus, intercepted}` (NON_INTENT) gains the value **`calibration`** in `tab` and `from_tab`, from `trackTab('calibration', …)`; `tab` is a free string, so the taxonomy is unchanged. **`draft` / `from_tab: "draft"` stop arriving while `draft.tab` is false** (off since 2026-10-02): a dashboard reading `tab = 'draft'` reads zero from that date — a real behavior change, not data loss. `screen_viewed` / `screen_left` gain the `screen` value `CalibrationHome`.
 
 ---
 

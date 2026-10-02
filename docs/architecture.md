@@ -351,6 +351,103 @@ Contracts: [API](api-reference.md#value-core-cards-flag-tradevalue_core),
 [ADR-024](adr/adr-024-value-core-engine.md). Design:
 [HLD](plans/value-core-engine/hld.md), [LLD](plans/value-core-engine/lld.md).
 
+## Calibration (blind grading)
+
+`backend/blind_grading.py` (flag `grading.blind`, default off and never on
+globally; testers only, through the `calibration_rollout` experiment overlay
+plus the tester allowlist) is value-core **Gate 2** as an app feature: does the
+plain value core grade as well as today's engine, when the grader cannot tell
+which engine made a card? Users see **Calibration**, a bottom tab in the Draft
+tab's third slot; code, routes and storage say `grading`. Design:
+[plans/blind-grading/](plans/blind-grading/).
+
+Three backend layers, each with one job:
+
+1. **Routes (`server.py`, one section).** `_grading_gate` is the outermost
+   decorator on the five `/api/grading/*` user routes and answers 404 unless
+   the caller both resolves `grading.blind` true (`_grading_flag_for_caller`:
+   the global map overlaid by running-experiment configs for the caller's
+   `device:<X-Device-Id>` and account units — the per-unit resolution
+   `/api/feature-flags` performs, so server and client agree by construction;
+   fail closed) and passes `_calibration_allowed` (THE audience predicate:
+   tester allowlist on the session user id or league user id). It runs before
+   the verified gates, so a non-tester gets the same 404 as a flag-off caller.
+   The routes then gather the league facts only the server owns — Sleeper
+   standings (`_value_core_standings`), lineup slots, roster limit, the
+   caller's untouchable / not-interested lists — into a frozen `ServerInputs`,
+   and map `GradingError` to `{"error": code, …}`. They never call
+   `trade_service`, log an impression, record an event or register a
+   `TradeCard`. `GET /api/admin/grading/report` is `X-Cron-Secret` only and
+   not gated, so the readout survives the kill.
+2. **The service (`blind_grading.py`).** Owns arm sourcing, merge, shuffle,
+   the one neutral formatter, validation and scoring. Imports `database` at
+   module level and `eval.value_core_bench`, `value_core.*` and
+   `trade_service` lazily inside functions; **never** imports `server` or
+   `tools`. A session is built in two halves because production runs one
+   synchronous gunicorn worker: `start_session` (request thread, fast —
+   resume an open or building session, check the league is synced, select
+   the current-engine arm from `deck_impressions`, insert a `building` row;
+   POST answers 202) and `build_session` (daemon thread — run the value core,
+   merge, shuffle, write cards, flip to `open`; any failure flips to `failed`
+   with `error_json` and never raises).
+3. **`database.py`.** The two tables `grading_sessions` / `grading_cards`
+   and their helpers ([data dictionary](data-dictionary.md#blind-grading-tables)).
+
+**Arms.** The *current* arm is the deck the grader was actually served: the
+caller's newest `deck_impressions` job with qualifying rows (not a ghost,
+`model_arm` set and not `value_core`, no likes-you injection, no intent, with
+`assets_json`), first 20 by `card_index`, standing offers and cards whose
+assets have since moved dropped; missing, older than 7 days or under 10 usable
+cards ⇒ 409 `needs_fresh_deck`. The *value-core* arm is the first 20 entries
+of `value_core.pipeline.run` with `CoreConfig()` / `RankConfig()` defaults for
+the same seat, built from the same DB reads the bench uses —
+`value_core_bench.read_league_inputs` (the DB half of `_freeze_league`, on the
+app's own engine; the one place server-path code imports from `backend/eval/`)
+→ `league_record` → `snapshot_for_seat` — with standings, lineup slots and
+roster limit overridden from `ServerInputs`. Fewer than 10 ⇒ `failed` with
+`value_core_too_few`; an exception ⇒ logged, `failed` with `value_core_failed`.
+
+**Blinding, by construction.** Cards from both arms are merged by
+(partner, give set, receive set) — a trade both engines produced is one card
+credited to both — then shuffled with a per-session secret seed, numbered, and
+formatted by `neutral_trade(partner_id, give, receive, catalog)`, the only
+producer of `trade_json`, which is never passed an arm. One consensus catalog
+prices every asset (players `elo_to_value(consensus_elo)`, picks
+`pool_value`), so a value never hints at its engine. Arm membership lives only
+in `grading_cards.arms_json`, read by `results` (completed sessions,
+aggregates) and `report` and by nothing else; before completion a response
+carries only `progress {answered, total}` and the neutral card. On mobile a
+dedicated `GradingCard` renders the neutral fields and only `GradingResults`
+names an arm, pinned by `mobile/tests/check-blind-grading.js` *(verify after
+P1/P2/P3 merge)*.
+
+**Mobile.** `TabNav` reads `grading.blind` **once at mount** from the merged
+flag map (never `useFlag`), like `draft.tab`, and renders the third slot as
+`Calibration` if true, else `Draft` if `draft.tab`, else nothing — the bar
+never exceeds five tabs. `CalibrationStackNav` → `CalibrationHome` →
+`CalibrationScreen` (no own `FeedbackFAB`; RootNav's global mount covers tab
+screens). `mobile/src/api/grading.ts` sends `X-Device-Id` on every call. After
+POST the screen polls `…/current` every 1.5 s while `building` (cap 60 s),
+renders `failed` by `error.code` with a Start-over button, and treats any 404
+as "Calibration isn't turned on for this account" — which is also what a stale
+tab shows between the kill and the next launch.
+
+**Isolation.** Grading writes only its two tables. It never touches
+`trade_service._trade_cards`, `deck_impressions`, `trade_impressions`,
+`trade_decisions`, `swipe_decisions`, any `/api/trades/*` route or
+`RankingService`; card ids are not trade ids, so an answer cannot reach the
+swipe route. Kill = stop `calibration_rollout`: routes 404 within the 60 s
+experiment cache, the tab goes at the next launch, the data and the report
+stay.
+
+Contracts: [API](api-reference.md#calibration--blind-grading-apigrading-flag-gradingblind-resolved-per-caller-tester-allowlist),
+[tables](data-dictionary.md#blind-grading-tables),
+[configuration](config-reference.md#flags--value-core-trade-engine-2026-09-30-ships-off),
+[tags and scale](cross-client-invariants.md#calibration-tags-and-scale),
+[operator procedure](runbook.md#gate-2--calibration-in-app-blind-grading).
+Design: [HLD](plans/blind-grading/hld.md), [LLD](plans/blind-grading/lld.md),
+[build specs](plans/blind-grading/specs.md).
+
 ## Data flow
 
 ```mermaid
@@ -511,6 +608,7 @@ Contested and orphaned slots are withheld from priced reads by a **row filter** 
 | `bakeoff_runner.py` + `bakeoff_profiles.py` | new (2026-08-18); **arm D added 2026-08-19 (D-095)** | **Bake-off (flag `trade.bakeoff` — default OFF)**, [plan](plans/three-model-bakeoff/PLAN.md) / [scope](plans/three-model-bakeoff/scope-phase3.md). `_run_trade_job` fans ONE organic job out into three generations run **sequentially on the existing daemon thread** (the config seam `trade_service._cfg_override` is a `threading.local()`, so sibling threads would each need their own context): arm `baseline` = the live engine inside `_cfg_override(MODEL_A_PROFILE)` + the arm-A R4 bypass (`bakeoff_profiles.py`, owned by Phase 2 / `feat/bakeoff-arm-a`); arm `current` = the live engine, no override; arm `challenger` = the **landability challenger** (arm D, D-095), the SAME live engine inside `_cfg_override(MODEL_CHALLENGER_PROFILE)` with **no** R4 bypass — shrink neither board, consensus both-ways at a 0.75 floor with 1-for-2 enumeration, R5 off, compressed tier ladder; on the default roster since 2026-08-19 (`bakeoff_include_challenger`), generated and logged but **never served** while `bakeoff_serve_interleaved` is 0; arm `gen_v2` = `trade_gen_v2.generate_league_suggestions` called directly — **independently of the `trade_gen.v2` flag**, which gates the *normal serving path* and stays false. The three ranked lists merge by **team-draft interleaving** (arm rotation randomised per deck, seeded `league_id` + ISO week; first picker credited on a duplicate; a short arm forfeits and the forfeit is counted), and every served card is attributed on `deck_impressions.model_arm` / `.arm_rank` with one `bakeoff_runs` row per job. A leaf like `suggestion_telemetry.py`: imports flags / `trade_service` / `trade_gen_v2` only, never `server.py`; `server.py` calls it from four seams (the fan-out, the re-ranker bypass predicate, the impression stamp, the swipe Elo freeze). **Measurement hygiene is enforced here, not by convention** — `elo_freeze_mult()` zeroes `trade_k_like`/`trade_k_pass` so arms cannot teach the shared board between decks, and `bypass_rerankers()` is the single predicate that stops F2/F3/F5/F6/F7/F9 + A6 diversity reordering an interleaved deck (a bake-off run with those live measures deck position, not model quality) |
 | `value_core/` (package) | new (2026-09-30) | **Value-core trade engine (flag `trade.value_core` — default OFF)**, [scope](plans/value-core-engine/scope.md) / [HLD](plans/value-core-engine/hld.md) / [LLD](plans/value-core-engine/lld.md) / [ADR-024](adr/adr-024-value-core-engine.md). Leaf package that never imports `server`: `types.py` (shared contract), `core.py` (value-only fair pool + hard rules), `windows.py` / `ranking.py` / `deck.py` (team windows, three scores, card reasons, variety-capped assembly), `pipeline.py` (one call), `adapter.py` (app objects ↔ contract ↔ `TradeCard` + evidence). Imported lazily by `server._run_value_core_job` only. See [Value-core trade engine](#value-core-trade-engine) |
 | `eval/value_core_bench.py` + `eval/value_core_recall.py` + `eval/blind_grade.py` | new (2026-09-30) | Value-core **operator tooling**, not wired to the server: bench freeze (prod read-only, asserted) / run / five guardrails; historical-trade recall + band calibration from committed fixtures; blind-grade export and import. Outputs are private (mode 0600, new paths only). [Runbook](runbook.md#value-core-bench-freeze--run--recall--blind-grade) |
+| `blind_grading.py` | new (2026-10-02) | **Calibration — in-app blind grading, value-core Gate 2 (flag `grading.blind` — ships false, never global; testers via the `calibration_rollout` overlay + tester allowlist)**, [scope](plans/blind-grading/scope.md) / [PRD](plans/blind-grading/prd.md) / [HLD](plans/blind-grading/hld.md) / [LLD](plans/blind-grading/lld.md) / [specs](plans/blind-grading/specs.md). Leaf service: imports `database` at module level, `eval.value_core_bench` / `value_core.*` / `trade_service` lazily, never `server` or `tools`. Owns arm sourcing (current arm from the caller's served `deck_impressions`; value-core arm from `read_league_inputs` → `league_record` → `snapshot_for_seat` → `pipeline.run` with default config), merge by (partner, give set, receive set), the secret-seed shuffle, **`neutral_trade` — the only producer of `trade_json`**, answer validation (`TAGS`, 1–5 or skip) and scoring (`summarize` / `arm_summaries`, the `blind_grade._score` arithmetic). Two-phase build: `start_session` (request thread, 202 + `building`) and `build_session` (daemon thread; `open` or `failed`, never raises). Routes in `server.py` only gate (`_grading_gate` → 404) and gather `ServerInputs`; `GET /api/admin/grading/report` is the lead's readout. Writes only `grading_sessions` / `grading_cards`. [§ Calibration](#calibration-blind-grading) |
 
 ### Backend support files
 

@@ -83,6 +83,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [Presentment-rules tripwire (`trade.presentment_rules`, G6 2026-08-16)](#presentment-rules-tripwire-tradepresentment_rules-g6-2026-08-16)
 - [Negative-results memory (`trade.negmem`, 2026-08-22)](#negative-results-memory-tradenegmem-2026-08-22)
 - [Value-core bench (freeze / run / recall / blind grade)](#value-core-bench-freeze--run--recall--blind-grade)
+  - [Gate 2 — Calibration (in-app blind grading)](#gate-2--calibration-in-app-blind-grading)
 - [Debug log](#debug-log)
 - [Verified-session grace monitoring (account-auth P1)](#verified-session-grace-monitoring-account-auth-p1)
 - [Common failure modes](#common-failure-modes)
@@ -478,6 +479,85 @@ python -m backend.eval.blind_grade import --sheet <NEW_DIR>/grade-sheet.csv --ke
 2. **Narrow it (deploy-free):** `vc_testers_only` → `1` with `scripts/set_knob.py` or `PUT /api/admin/config/vc_testers_only` (`X-Cron-Secret`). Serving returns to the tester allowlist only.
 
 **Reading the job log.** Each value-core job logs one INFO line: `trade-job <id> value_core: partners=… packages=… checked=… fair=… served=… truncated=… budget_exhausted=… core_ms=… total_ms=…`. `budget_exhausted=True` means the 8 s core budget stopped enumeration and a partial pool was ranked and served. `truncated` counts partners that hit the per-partner keep cap or the check cap. A standings failure logs `value-core: standings unavailable league=…` and the job continues with windows from roster age and picks only.
+
+### Gate 2 — Calibration (in-app blind grading)
+
+Feature docs: [`plans/blind-grading/`](plans/blind-grading/) · flag row in [config-reference](config-reference.md#flags--value-core-trade-engine-2026-09-30-ships-off) · routes in [api-reference](api-reference.md#calibration--blind-grading-apigrading-flag-gradingblind-resolved-per-caller-tester-allowlist) · tables in the [data dictionary](data-dictionary.md#blind-grading-tables). Step 4 above is the operator's CSV; Calibration asks the same question inside the app, of testers, against the deck they were actually served. `grading.blind` ships false and **is never flipped true globally**: testers receive it per unit through the `calibration_rollout` experiment overlay, and the server additionally requires the tester allowlist on every call. Four production writes, each held for operator approval: the allowlist edit, then create, launch and (later) stop the experiment.
+
+`CRON_SECRET` lives in `secrets.local.env` — read it from there, never paste it into chat.
+
+```bash
+export CRON_SECRET="$(grep -E '^CRON_SECRET=' secrets.local.env | cut -d= -f2-)"
+export FTF_PROD=https://fantasy-trade-finder.onrender.com
+```
+
+**1. Allowlist the graders (deploy).** Add each grader's **account id** (`sess["user_id"]`) to `config/tester_allowlist.json` and deploy. This is the `is_tester_allowlist` source `experiments.load_tester_allowlist()` reads (∪ `FTF_TESTER_ALLOWLIST`), and the same list `server._calibration_allowed` checks on every grading call. Keep `trade.value_core` **false** while grading: an allowlisted grader being served value-core decks would fail the 7-day freshness rule, because the current arm reads only legacy-attributed rows.
+
+**2. Create `calibration_rollout`.** Pick a layer with free buckets first — `GET /api/admin/experiments` lists what is running; `onboarding` and `growth` are occupied, so `ranking` or `engine` are the candidates, and a 400 `layer overlap` on create means the layer is full. Field-by-field reasons: [lld.md §8.2](plans/blind-grading/lld.md#82-the-calibration_rollout-overlay). **Account unit**, because the server resolves the overlay from `sess["user_id"]` alone (mobile also sends `X-Device-Id`, so a device unit would resolve too). Targeting is **only** `is_tester_allowlist`: the server passes no header attributes, so a platform or app-version predicate would resolve differently on the server than in `/api/feature-flags`.
+
+```bash
+curl -sS -X POST "$FTF_PROD/api/admin/experiments" \
+  -H "X-Cron-Secret: $CRON_SECRET" -H 'Content-Type: application/json' \
+  -d '{
+    "key": "calibration_rollout",
+    "layer": "<FREE_LAYER>",
+    "unit_type": "account",
+    "bucket_start": 0,
+    "bucket_end": 10000,
+    "targeting": { "is_tester_allowlist": true },
+    "variants": [
+      { "name": "control",   "weight_bp": 0 },
+      { "name": "treatment", "weight_bp": 10000,
+        "client_config": { "flags": { "grading.blind": true } } }
+    ],
+    "primary_metric": "activation_rate",
+    "exposure_surface": "calibration_tab",
+    "hypothesis": "No hypothesis under test. Allowlist-targeted rollout so graders get the Calibration tab (value-core Gate 2) while every other unit keeps grading.blind false."
+  }'
+```
+
+`activation_rate` is a required field from the metric catalog, carried and not claimed: this is an allowlist rollout, not a powered test, and no readout is drawn from it. Full-range buckets on purpose — targeting narrows, bucketing must never drop a tester.
+
+**3. Launch it** (expect the underpowered gate; override deliberately):
+
+```bash
+curl -sS -X POST "$FTF_PROD/api/admin/experiments/calibration_rollout/transition" \
+  -H "X-Cron-Secret: $CRON_SECRET" -H 'Content-Type: application/json' \
+  -d '{ "version": 1, "to": "running",
+        "reason": "allowlist rollout for Gate 2 grading, not a powered test",
+        "override_underpowered": true }'
+```
+
+**4. Verify the overlay.** With a grader's session token, `configs.calibration_rollout.flags["grading.blind"]` is `true`; with a non-tester's session (or no token) the key is absent. The base `flags["grading.blind"]` stays `false` in both cases — correct, not a bug: the overlay lives in `configs` and `mobile/src/api/flags.ts` merges it over the base map.
+
+```bash
+curl -s "$FTF_PROD/api/feature-flags" -H "X-Session-Token: <GRADER_TOKEN>" | python3 -m json.tool
+```
+
+On the device: force-quit and relaunch. Tab presence is decided once at mount from the cached map, which the background refetch then replaces, so the first launch after the overlay starts may still show the old bar — relaunch once more. Expected bar: **Rank · Acquire · Calibration · Matches · League**. Open **Acquire** for the league first (the current arm is the organic deck served in the last 7 days), then Calibration › Start. A `needs_fresh_deck` message with an **Open Acquire** button means no fresh organic deck exists for that league.
+
+**5. Read the report** once the graders are done. Completed sessions only by default:
+
+```bash
+curl -s -H "X-Cron-Secret: $CRON_SECRET" "$FTF_PROD/api/admin/grading/report" | python3 -m json.tool
+# filters: ?since=2026-10-02   ?include_open=1
+```
+
+Read `overall.arms.value_core.mean` against `overall.arms.current.mean` (`overall.delta_mean` = value core − current), the per-arm `share_ge_4` (the share the grader would actually send) and `tag_counts` (why cards lose), and `by_grader[*].delta_mean` to see whether the verdict holds per grader or only in aggregate. Wait for **≥ 40 graded cards per arm** (about two complete sessions) before reading anything. The parent plan's bar is a value-core mean ≥ 4.0, clearly above the incumbent; the report computes no pass/fail — the verdict is the lead's and the operator's, recorded in `living-memory/DECISIONS.md`. `overall.shared` is how often both engines proposed the same trade; shared cards count for both arms and narrow the gap. Each `sessions[]` row carries its hidden `source` (deck job, engine version, config) and `counts` for audit. This route is cron-secret only and **not** flag- or audience-gated, so it stays readable after step 6.
+
+**6. Stop it** when Gate 2 is read. Deploy-free, and the only kill needed — the global flag was never on:
+
+```bash
+curl -sS -X POST "$FTF_PROD/api/admin/experiments/calibration_rollout/transition" \
+  -H "X-Cron-Secret: $CRON_SECRET" -H 'Content-Type: application/json' \
+  -d '{ "version": 1, "to": "stopped", "reason": "Gate 2 read" }'
+```
+
+Every `/api/grading/*` user route 404s within the 60 s experiment cache (`_CACHE_TTL_S`); a stale tab shows "Calibration isn't turned on for this account" until the next launch, when it disappears. The tables and the report remain. Don't stop it by setting `grading.blind` false (it already is), and don't empty `config/tester_allowlist.json`, which other surfaces share (`POST /api/test-users`, `vc_testers_only`).
+
+**Local dev.** `grading.blind` is a plain flag locally: `FTF_FLAGS='{"grading.blind": true}'` plus `FTF_TESTER_ALLOWLIST=<your session user_id>` makes the routes answer with no experiment. Two prerequisites, or creation fails: run `POST /api/cron/value-snapshot` (`X-Cron-Secret`) first so `player_value_history` has today's rows — with no consensus values every market is 0 and the value core returns too few trades, which surfaces as a `failed` session with `error.code = "value_core_too_few"`; and open Acquire for the league so a legacy deck with `model_arm` set exists (`deck.signal_v2`, `suggestion.telemetry` and `trade.bakeoff` on, as in `config/features.json`).
+
+**Draft tab rollback.** `draft.tab` went false on 2026-10-02 so Calibration could take the third slot; the Draft tab's code is intact. To bring it back for everyone: `draft.tab` → `true` in `config/features.json` and the flags fixtures that mirror it (`test_rookie_ranks_editable.py` pins the mirror), deploy or `POST /api/feature-flags/reload`; it returns at each user's next launch, except for a tester who still has Calibration, which keeps the slot. The Draft Room is reachable throughout via League › Rookie draft (`draft.room`) and the Acquire mode strip's Draft chip.
 
 ## Debug log
 
