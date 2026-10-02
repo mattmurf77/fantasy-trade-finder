@@ -13,6 +13,7 @@
     "test:any-partner": "node tests/check-any-partner.js",
     "test:avoid-positions": "node tests/check-avoid-positions.js",
     "test:awaiting-dismiss": "node tests/check-awaiting-dismiss.js",
+    "test:blind-grading": "node tests/check-blind-grading.js",
     "test:breaker-card": "node tests/check-breaker-card.js",
     "test:calc-merged-behavior": "node tests/check-calc-merged-behavior.js",
     "test:calc-merged-layout": "node tests/check-calc-merged-layout.js",
