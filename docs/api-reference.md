@@ -104,6 +104,7 @@ the operator reaches it by running the server locally.
 - [Monetization foundation (docs/plans/monetization/00-platform-foundation.md — always mounted, behavior flag-aware)](#monetization-foundation-docsplansmonetization00-platform-foundationmd-always-mounted-behavior-flag-aware)
 - [Test support (`FTF_TEST_MODE=1` only — never mounted in normal operation)](#test-support-ftf_test_mode1-only-never-mounted-in-normal-operation)
 - [Test users (QA — flag `testing.stage_users`, ships dark)](#test-users-qa-flag-testingstage_users-ships-dark)
+- [Calibration — blind grading (`/api/grading/*`; flag `grading.blind` resolved per caller, tester allowlist)](#calibration--blind-grading-apigrading-flag-gradingblind-resolved-per-caller-tester-allowlist)
 
 ---
 
@@ -959,6 +960,7 @@ All routes in this section require the `X-Cron-Secret` header (see `CRON_SECRET`
 | POST | `/api/admin/entitlements/bulk-grant` | Same body with `users: [...]` → `{granted, failed}` per-user (e.g. comp all TestFlight testers 90 days). **Auth: X-Cron-Secret** |
 | DELETE | `/api/admin/entitlements/<id>` | Revoke — flips `status='revoked'`, audit-preserving. **Auth: X-Cron-Secret** |
 | GET | `/api/admin/entitlements?user=…` | All entitlement rows any status for support. **Auth: X-Cron-Secret** |
+| GET | `/api/admin/grading/report?since=YYYY-MM-DD&include_open=1` | **Calibration (blind grading) readout** — how the lead reads value-core Gate 2 ([§ Calibration](#calibration--blind-grading-apigrading-flag-gradingblind-resolved-per-caller-tester-allowlist)). Aggregates `grading_sessions` / `grading_cards` per arm (`current` vs `value_core`: `cards`, `n`, `skipped`, `mean`, `share_ge_4`, `tag_counts`) three ways — `overall` (+ `sessions`, `graders`, `cards`, `shared`), `by_grader[]` (per account id) and `sessions[]` (each with its hidden `counts` and `source` provenance: deck job, engine version, config, pool size, elapsed ms) — plus `delta_mean = value_core.mean − current.mean` (4 dp; `null` when either mean is null), `target_mean: 4.0`, `version: "blind-grading-1"`, `generated_at` and the echoed `filters`. `since` (optional) filters on `created_at`; by default only `completed` sessions are counted and `include_open=1` adds the rest. **Deliberately NOT gated by `grading.blind` or the tester allowlist** — results stay readable after `calibration_rollout` is stopped. 400 `invalid_since` for a `since` that is not `YYYY-MM-DD`. **Auth: X-Cron-Secret** |
 
 ## Misc
 
@@ -1092,6 +1094,59 @@ With `trade.roster_protection`, final generated cards may include `roster_evalua
 ### Recommendation outcome admission
 
 `POST /api/events` continues to accept anonymous analytics, but only verified users can label owned impressions. No recommendation write occurs until body/batch limits, envelope validation, rate limiting, property scrubbing and successful analytics commit. The callback receives only rows actually inserted (`INSERT ... RETURNING`), including under concurrent duplicate event IDs. `deck_card_viewed` accepts optional `dwell_ms`; storage requires an integer from 0 through 3,600,000. A valid impression has at most one view and 32 of each other allowed action. Missing/foreign impressions, unverified sessions, invalid values and rejected batches create no outcome. Verified users share their rate bucket across device IDs.
+
+---
+
+## Calibration — blind grading (`/api/grading/*`; flag `grading.blind` resolved per caller, tester allowlist)
+
+Value-core **Gate 2** as an app feature ([plans/blind-grading/](plans/blind-grading/)): a tester grades trade cards from today's engine and from the value core without knowing which engine made each card, and the lead reads the per-arm totals from the admin report above. Users see **Calibration**; code, routes and storage say `grading`. All logic lives in `backend/blind_grading.py` and the two `grading_*` tables ([data-dictionary § Blind grading tables](data-dictionary.md#blind-grading-tables)); the routes in `backend/server.py` only gate, gather the league facts the server owns (Sleeper standings, lineup slots, roster limit, the caller's untouchable / not-interested lists) into a frozen `ServerInputs`, and map `GradingError` to `{"error": <code>, …}`. Grading never calls `trade_service`, logs an impression, records a swipe or event, registers a `TradeCard` or touches Elo.
+
+**Auth:** `X-Session-Token`. The mobile client also sends `X-Device-Id` on every call (best effort, exactly as it does for `/api/feature-flags`).
+
+**The gate (`_grading_gate`) runs first — the outermost decorator, ahead of the verified-session gates and any session work.** Either condition failing ⇒ **404 `{"error":"not_found"}`** with no existence signal (the `/api/test-users` posture):
+
+1. **The caller resolves `grading.blind` true** (`_grading_flag_for_caller`): the global flag, OR a running-experiment overlay (`experiments.resolve_for_unit`) for `device:<X-Device-Id>` or the session's account unit sets `client_config.flags["grading.blind"] = true`. This is the same per-unit resolution and overlay-wins merge that `/api/feature-flags` and `mobile/src/api/flags.ts` perform, so server and client agree by construction. The flag ships false globally and reaches testers only through the `calibration_rollout` overlay ([config-reference](config-reference.md#flags--value-core-trade-engine-2026-09-30-ships-off)); any resolution error reads as false (fail closed).
+2. **`_calibration_allowed(sess)`** — THE audience predicate: the session `user_id` or league user id is in `experiments.load_tester_allowlist()` (`FTF_TESTER_ALLOWLIST` ∪ `config/tester_allowlist.json`). Opening Calibration to everyone is `return True` here plus the flag.
+
+After the gate: 403 `verification_required` for unverified sessions (`_gate_unverified_read` / `_gate_unverified_write`); 401 if the token expires mid-request. Stopping `calibration_rollout` therefore kills every route in this table within the 60 s experiment cache; the admin report is deliberately not gated.
+
+**Ids** are random 18-digit decimal strings (`blind_grading.new_id`) — never trade ids, so an answer can never reach `/api/trades/swipe`, and the client's `api_request_failed` route normaliser folds them to `:id`. **Times** are ISO-8601 UTC.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/grading/sessions` | `{league_id}` — must equal the session's active league. **202** `{session: SessionView, resumed: false}` for a new session, `status: "building"`: the request thread (`blind_grading.start_session`) checks the league is synced, selects the **current-engine arm** and inserts the row; a daemon thread then gathers `ServerInputs` and runs `build_session` (the value core, merge, shuffle, card writes) and flips the status to `open`, so the client polls `…/current` until the status leaves `building`. **200** `{session, resumed: true}` when a `building` or `open` session for this user and league already exists — no network, no rebuild. A `failed` session is never resumed: POST starts a fresh one. The current arm is the caller's newest `deck_impressions` job with at least one qualifying row (not a ghost; `model_arm` set and not `value_core`; no `source_like_impression_id`; no `trade_intent`; `assets_json` present), first 20 by `card_index`, standing offers dropped, then cards whose partner left or whose assets are no longer held (stale) or are unknown to the catalog dropped. Errors: 400 `invalid_body` (`"league_id is required"`); 400 `league_not_active`; 409 `session_not_initialized` (existing — the client retries); 409 `league_not_synced` (no `leagues` / `league_members` rows, or the caller's seat is not a member); 409 `needs_fresh_deck` `{reason: "missing"\|"stale"\|"too_few", usable, min_cards: 10, max_age_days: 7}` — no qualifying deck, one older than 7 days, or fewer than 10 usable cards. **Value-core failures are not HTTP errors here:** too few value-core cards or an exception surface as `status: "failed"` with `error` on the SessionView (below) |
+| GET | `/api/grading/sessions/current?league_id=<id>` | `{session: SessionView}` or `{session: null}` — the newest `building`, `open` or `failed` session for the league (so the client can show a build failure), never a `completed` one. 400 `invalid_body` without `league_id` |
+| GET | `/api/grading/sessions/<session_id>/next` | The lowest-`position` card with no answer: `{done: false, session_id, progress: {answered, total}, card: {card_id, position, trade: NeutralTrade}}`; `{done: true, session_id, progress}` once every card is answered or skipped. `position` is 1-based in the shuffled order. 404 `not_found` for an unknown session or another user's |
+| POST | `/api/grading/cards/<card_id>` | `{grade: 1–5, tags?: [...]}` or `{skip: true}`. `tags` are optional, from the fixed seven ([cross-client-invariants § Calibration tags and scale](cross-client-invariants.md#calibration-tags-and-scale)), de-duplicated, and must be absent or empty with `skip`. Re-answering overwrites. → `{card_id, session_id, session_status: "open"\|"completed", progress}`; the last answer completes the session in the same transaction. 400 `invalid_body` `{message}` (not a JSON object; both or neither of `grade` / `skip`; a grade that is a bool, not an int, or outside 1..5; `skip` not exactly `true`; an unknown tag; tags with `skip`); 404 `not_found` (unknown or foreign card); 409 `session_completed` |
+| GET | `/api/grading/sessions/<session_id>/results` | Completed sessions only: `{session_id, league_id, completed_at, total, shared, target_mean: 4.0, arms: {current: ArmSummary, value_core: ArmSummary}}`. A shared card counts in both arms, so `current.cards + value_core.cards == total + shared`. 404 `not_found`; 409 `session_incomplete` `{progress}` for a session that is not yet completed |
+
+**Shared shapes.**
+
+```jsonc
+// SessionView
+{"session_id": "418273645512093847", "league_id": "1312140920132497408",
+ "status": "open",                      // "building" | "open" | "completed" | "failed"
+ "created_at": "2026-10-02T15:04:05.123456+00:00", "completed_at": null,
+ "progress": {"answered": 0, "total": 37},   // total is 0 while building or failed
+ "error": null}                         // failed only: {"code":"value_core_too_few","usable":4,"min_cards":10} | {"code":"value_core_failed"}
+
+// NeutralTrade — the ONLY card payload; produced by blind_grading.neutral_trade
+{"partner_name": "Jared",
+ "give":    [{"id": "4046", "name": "Patrick Mahomes", "position": "QB",
+              "nfl_team": "KC", "age": 31, "value": 6123}],
+ "receive": [{"id": "9509", "name": "Bijan Robinson", "position": "RB",
+              "nfl_team": "ATL", "age": 24, "value": 7710},
+             {"id": "1312140920132497408_2027_1_4", "name": "2027 1st (from Kim)",
+              "position": "PICK", "nfl_team": null, "age": null, "value": 2117}]}
+// Asset keys are EXACTLY {id, name, position, nfl_team, age, value}; value is int | null.
+// Each side is sorted by (-value, name, id).
+
+// ArmSummary
+{"cards": 20, "n": 18, "skipped": 2, "mean": 3.1111, "share_ge_4": 0.3889,
+ "tag_counts": {"overpay": 4, "wrong_for_my_window": 2}}   // mean / share_ge_4 are null when n == 0
+```
+
+**The blinding rule.** Every `trade` a grader sees comes from one formatter, `blind_grading.neutral_trade(partner_id, give, receive, catalog)`, which is never passed an arm, a provenance record, a reason or an engine object. Its keys are exactly `{partner_name, give, receive}`; each asset's keys are exactly `{id, name, position, nfl_team, age, value}`, with `value` from one consensus catalog shared by both arms (players: `elo_to_value(player_value_history.consensus_elo)`; picks: `draft_picks.pool_value`, labelled like `2027 1st (from Kim)` — never the legacy card's stud-taxed values and never a value-core score); each side is sorted by `(-value, name, id)` whatever order the engine used. A trade both engines produced is **one** card credited to both arms. Order is a per-session secret shuffle (the seed is stored, never returned), and arm membership lives only in `grading_cards.arms_json`, which nothing serializes except `results` (completed sessions, aggregates only) and the admin report. Before `results`, no response carries an arm name, reason, score, impression id, deck job id, trade id or per-arm count — `test_blind_grading_e2e.py::test_no_response_reveals_an_arm_until_results` deep-scans every body for exactly that *(verify after P1/P2/P3 merge)*.
 
 ---
 
